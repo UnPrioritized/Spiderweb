@@ -289,7 +289,7 @@ class ToolPicker:
 
     def state(self):
         return {"draw_tool_shown": self.last, "draw_tool_pins": list(self.pins), "tool": self.app.tool.get(),
-                "draw_tool": self.app.draw_tool}
+                "draw_tool": self.app.draw_tool, "lasso_mode": self.app.lasso_mode.get()}
 
     def restore(self, win):
         if isinstance(win.get("draw_tool_shown"), str) and win["draw_tool_shown"] in self.label:
@@ -301,7 +301,9 @@ class ToolPicker:
                 self.pins += [k for k in self.group if k not in self.pins]
         # the tool in use, and the one a double right-click goes back to (the tool's own effects: App.__init__)
         tool = win.get("tool") if isinstance(win.get("tool"), str) else None
-        if tool in self.label or tool in ("select", "slice"):
+        if win.get("lasso_mode") in ("free", "poly"):
+            self.app.lasso_mode.set(win["lasso_mode"])
+        if tool in self.label or tool in ("select", "slice", "lasso"):
             self.app.tool.set(tool)
         if isinstance(win.get("draw_tool"), str) and win["draw_tool"] in self.label:
             self.app.draw_tool = win["draw_tool"]

@@ -25,6 +25,7 @@ from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merg
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
+from notes.lasso import lasso_notes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
@@ -926,6 +927,47 @@ class JoinSplit:
                                    pieces=trn("n.pieces", n, n=n)) +
                            (trn("join_split.slice_partly_too", skipped, n=skipped) if skipped else "") +
                            (trn("join_split.slice_merged_too", merges, n=merges) if merges else ""))
+
+    def lasso_cut(self, loop):
+        """The Lasso tool's closed loop (beat, key points) cut: every pasted-notes shape it takes notes in is cut in
+        two along it (notes/lasso.py), each note across it cut there; the inside pieces end up selected, one undo
+        step. With Select boxes kept: only the shapes they selected, only inside the boxes. Text, merged shapes,
+        Hz bass: say how (turn into plain notes first, as Slice). A shape wholly inside: not cut, selected."""
+        boxes = self.roll.kept_box() or None
+        targets = sorted(self.sels) if boxes else range(len(self.shapes))
+        done, whole, others = {}, [], 0
+        for i in targets:
+            sh = self.shapes[i]
+            if (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
+                    and not sh.get("text") and not sh.get("hz")):
+                notes, tracks = self.all_rows(sh)
+                got, _ = lasso_notes(sh, notes, tracks, loop, self.ppq, boxes)
+                if got:
+                    got[1]["_inside"] = True
+                    done[i] = got
+                elif len(notes) and touches(notes, loop, self.ppq, boxes):
+                    whole.append(i)  # (all of it inside)
+            elif (sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz"))
+                  and "picture" not in sh and touches(self.notes_of(sh), loop, self.ppq, boxes)):
+                others += 1
+        if not done:
+            if whole:
+                self.select_many(whole, whole[0])
+                self.status.config(text=trn("join_split.lasso_whole", len(whole), n=len(whole)))
+            else:
+                self.status.config(text=tr("join_split.lasso_others" if others else "join_split.lasso_nothing"))
+            return False
+        inside = [self.shapes[i] for i in whole]
+        picked = self.put_pieces(done, set(done), tr("join_split.lasso"), pick=lambda p: p.pop("_inside", False))
+        for p in (p for parts in done.values() for p in parts):
+            p.pop("_inside", None)
+        picked += [k for k, s in enumerate(self.shapes) if any(s is w for w in inside)]  # (wholly inside ones too)
+        self.select_many(picked, picked[0])
+        self.shapes_changed()
+        n = len(done)
+        self.status.config(text=trn("join_split.lasso_cut", n, n=n) +
+                           (trn("join_split.lasso_others_too", others, n=others) if others else ""))
+        return True
 
     def put_pieces(self, done, plain, name, pick=None):
         """Cut shapes replaced by their pieces (done: shape number -> pieces; plain: pasted notes, kept as they

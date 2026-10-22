@@ -530,6 +530,7 @@ class RollDrawing:
         self.draw_above_marks()
         self.draw_select_box()
         self.draw_slice()
+        self.draw_lasso()
         self.draw_copy_path()
         self.draw_sustain_stops()
         if self._frame_key is None:

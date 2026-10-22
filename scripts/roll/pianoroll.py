@@ -39,6 +39,7 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
                               RULER_TOP, VEL_TOP, bind_double_right, black_bands, box_kind, boxes_side, boxes_upright,
                               cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box, mouse_trail,
                               note_name, ruler_boxes)
+from roll.roll_lasso import LassoDrawing
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
@@ -46,7 +47,7 @@ EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                PathEditing, SustainStops, tk.Canvas):
+                PathEditing, SustainStops, LassoDrawing, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -1049,6 +1050,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             app.set_playhead(self.event_pt(e)[0])
             self.drag = ("seek", playing, e.x, e.state, kept)
             return
+        if app.tool.get() == "lasso":  # (a loop drawn / a waiting loop's point grabbed: roll_lasso)
+            self.lasso_press(e, kept)
+            return
         if not self.draft and self.path_press(e):  # Copy along a path's window open: B placed, or its point grabbed
             return
         if self.stop_press(e):  # a sustained shape's stop line held (the Select tool)
@@ -1256,6 +1260,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         elif kind == "slice":
             self.drag = ("slice", self.drag[1], self.slice_pt(e), *self.drag[3:])
             self.draw_slice()
+        elif kind.startswith("lasso"):
+            self.lasso_drag(e)
         elif kind == "textsel":
             self.text_drag(e)
         elif kind == "seek":
@@ -1473,6 +1479,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.path_release(e)
             self.drag = None
             return
+        if kind.startswith("lasso"):
+            self.lasso_release(e)
+            return
         if kind == "slice":  # (a click without dragging cuts nothing)
             _, a, b, x, y = self.drag
             self.drag = None
@@ -1616,6 +1625,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             # double-click acts on the shape under the mouse when it was pressed, and only once)
         if self.draft and self.draft["kind"] == "poly":
             self.finish_poly()
+        elif self.app.tool.get() == "lasso":
+            self.lasso_double()
         elif self.stop_double(e):  # the Sustain window open: a stop added on its shape
             pass
         elif self.app.tool.get() == "select" and self.text_at(e.x, e.y) is not None:
@@ -1669,6 +1680,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def on_motion(self, e):
         self.app.show_position(self.position_text(e))
         self.tempo_hover(e)
+        if not self.drag and self.lasso_motion(e):  # (a Polygonal loop's next line follows the mouse)
+            return
         if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):
             self.set_cursor("fleur")  # (Copy along a path: B follows the mouse, or a point of its path is under it)
             return
@@ -1759,6 +1772,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.app.select(None)
             return
         if self.holding():
+            return
+        if self.lasso_right(e):  # a waiting lasso loop's point: removed
             return
         if not self.draft and self.path_right(e):  # Copy along a path: a point removed / the added one dropped
             return
@@ -1890,6 +1905,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         On a selected curve: an anchor there, like a click with the Curve tool. Not while the left button holds
         something (a held point's number would change)."""
         self._panning = False
+        if (self._pan and not self._panned and abs(e.x - self._pan[0]) <= 3 and abs(e.y - self._pan[1]) <= 3
+                and not self.drag and self.lasso_middle(e)):  # (a waiting lasso loop: a point added there)
+            return
         sh = self.point_shape()
         if (not self._pan or self._panned or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
                 or self.drag or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom")
@@ -1997,6 +2015,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if self.app.held_scrub:  # (a number box's label held: Delete, Esc, tool keys wait; Ctrl keys: their own rules)
             return None if e.state & CTRL else "break"
         if self.app.box_drawn():  # (Esc, tool keys, Delete...: nothing until the Select box is let go, user)
+            return "break"
+        if self.lasso_key(e):  # (Enter cuts, Esc throws the loop away, Backspace = a Polygonal loop's last point)
             return "break"
         k = e.keysym.lower()
         if k == "escape":

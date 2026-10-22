@@ -104,7 +104,8 @@ VEL_KEYS = ("vel0", "vel1")
 PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1440, 1920, 2048, 2880,
         3840, 4096, 5760, 7680, 8192, 11520, 12288, 15360, 16384, 23040, 24576, 30720, 32768, 36864,
         46080, 49152, 65535]
-TOOLS = [("select", tr("app.select"), "v"), ("slice", tr("app.slice"), "k")]
+TOOLS = [("select", tr("app.select"), "v"), ("slice", tr("app.slice"), "k"), ("lasso", tr("app.lasso"), "j")]
+LASSO_MODES = [("free", tr("app.lasso_free")), ("poly", tr("app.lasso_poly"))]  # (the Lasso button's ▾)
 # in the drawing tools' list (tool_picker.py), in this order
 DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), ("free", tr("app.freehand"), "f"),
               ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
@@ -343,6 +344,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._normal_geometry = None
 
         self.tool = tk.StringVar(value="select")  # (each tool's tip shows when it's picked, see help.py)
+        self.lasso_mode = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points)
         self.tips = Tips(self)
         self.updates = Updates(self)
         self.help_window = None
@@ -485,7 +487,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             b = ttk.Radiobutton(bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
                                 style="Toolbutton")
             b.pack(side="left", padx=1)
-            Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"])
+            Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"] if key in TOOL_TOPICS else tr("app.lasso_tip"))
+            if key == "lasso":  # (its ▾: Lasso / Polygonal; picking one picks the tool too)
+                from window.tool_picker import SIZE, _arrow_inside, _picture
+                self._lasso_arrow = _picture(max(SIZE, round(SIZE * self.scale)), look.rgb(look.ICON), _arrow_inside)
+                mb = ttk.Menubutton(bar, image=self._lasso_arrow, style="Toolbutton", takefocus=False)  # (the
+                # drawing tools' arrow)
+                menu = tk.Menu(mb, tearoff=False)
+                for mode, name in LASSO_MODES:
+                    menu.add_radiobutton(label=name, value=mode, variable=self.lasso_mode,
+                                         command=lambda: self.tool.set("lasso"))
+                mb["menu"] = menu
+                mb.pack(side="left", padx=(0, 1))
+                Tooltip(mb, tr("app.lasso_tip"))
         line = ttk.Separator(bar, orient="vertical")
         line.pack(side="left", fill="y", padx=(3, 3), pady=2)
         # the drawing tool picked last + the list; its pinned tools' buttons go in the bar too (fit_toolbar)
@@ -2213,8 +2227,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tool.set(self.draw_tool if self.tool.get() == "select" else "select")
 
     def on_tool_change(self):
-        if self.tool.get() not in ("select", "slice"):  # (Slice isn't one to go back to, user)
+        if self.tool.get() not in ("select", "slice", "lasso"):  # (Slice / Lasso aren't ones to go back to, user)
             self.draw_tool = self.tool.get()
+        if self.tool.get() != "lasso":
+            self.roll.drop_lasso()  # (a loop waiting for Enter goes with the tool)
         if self.tool.get() != "hz":
             self.hz_start = None  # (a spot waiting for its first note: the Hz bass window stops offering it)
         if self.hz_window:
