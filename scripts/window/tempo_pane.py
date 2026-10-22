@@ -1715,9 +1715,9 @@ class TempoPane(tk.Canvas):
                 at = round(at / sb) * sb
         self.put_copies(clip, self.tick_beat(at, skip=self.app.tempo["points"]), tr("tempo.step_paste"))
 
-    def put_copies(self, clip, at, name, push=True):
+    def put_copies(self, clip, at, name, push=True, stay=False):
         """clip's items placed from beat at, replacing what's in its boxes there (push: its own undo step). A clip
-        of catch-up lines only leaves the points alone."""
+        of catch-up lines only leaves the points alone. stay: its first point always stays (lay_points)."""
         tempo = self.app.tempo
         spans = joined([(at + a, at + b) for a, b in clip.get("spans") or [(0.0, clip["length"])]])
         one = 1.0 / max(1, self.app.ppq)
@@ -1735,7 +1735,7 @@ class TempoPane(tk.Canvas):
         kept = [it for it in tempo["catch"] if not any(lo - 1e-9 <= it[0] <= hi + 1e-9 for lo, hi in spans)]
         tempo["catch"][:] = sorted(kept + new_c, key=lambda it: it[0])
         if new_p:
-            new_p = self.lay_points(tempo["points"], new_p, spans, self.base())
+            new_p = self.lay_points(tempo["points"], new_p, spans, self.base(), stay)
         self.bands, self.sel, self.part = [(lo, hi) for lo, hi in spans if hi > lo], new_p + new_c, None
         self.app.tempo_changed()
 
@@ -1748,7 +1748,7 @@ class TempoPane(tk.Canvas):
         new = [[b, bpm, "hold", "", "lin", False, list(BEND)] for b, bpm in tempos]
         if how == "replace":
             clip = {"length": length, "points": new, "catch": [], "spans": [(0.0, length)]}
-            self.put_copies(clip, at, tr("project.paste_from_domino"), push)
+            self.put_copies(clip, at, tr("project.paste_from_domino"), push, stay=True)
             return
         if push:
             self.app.push_undo(name=tr("project.paste_from_domino"))
@@ -1767,12 +1767,13 @@ class TempoPane(tk.Canvas):
         self.app.tempo_changed()
 
     @staticmethod
-    def lay_points(pts, new, spans, base):
+    def lay_points(pts, new, spans, base, stay=False):
         """new put among pts (in place) over the stretches spans, replacing what's inside: pts cut at each edge
         (split_at), the first point on a start (what arrives there) and the last on an end (what the part after
         leaves from) stay, new's parts leave from / arrive at them. A one-beat span: new's points replace the
         tempo leaving that beat (a jump's arriving point stays). Same-BPM / loose arriving points go (drop_loose).
-        Returns the new points kept."""
+        stay: new's first point stays even when it's the first of all and the same as the BPM box (a Domino paste's
+        start tempo: else a later BPM box change took it over, user 2026-10-22). Returns the new points kept."""
         had = ids(pts)
         if pts:
             for lo, hi in spans:
@@ -1814,7 +1815,7 @@ class TempoPane(tk.Canvas):
                     or (i > 0 and pts[i - 1][0] == p[0]):
                 continue
             prev = pts[i - 1] if i > 0 else None
-            if (prev is None and p[1] == clamp_bpm(base) and not keeps(p)) or \
+            if (prev is None and p[1] == clamp_bpm(base) and not keeps(p) and not (stay and p is new[0])) or \
                     (prev is not None and prev[2] == "hold" and prev[1] == p[1] and keeps(prev) == keeps(p)):
                 del pts[i]
         alive = ids(pts)

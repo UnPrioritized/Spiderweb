@@ -1099,7 +1099,7 @@ class ProjectFiles:
             messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
             return
         self.busy(tr("project.pasting_from_domino"))  # (millions of notes take a few seconds)
-        cond, shift, sh = {}, 0, None
+        cond, shift, sh, from_bar = {}, 0, None, False
         try:
             raw = get_from_clipboard()
             notes, their_ppq = read_notes(raw, 255, cond) if raw else (None, None)
@@ -1111,6 +1111,8 @@ class ProjectFiles:
             if notes is not None and (len(notes) or tempos):
                 if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
                     shift = int(notes[:, 0].min()) if len(notes) else tempos[0][0]
+                    if tempos and tempos[0][0] < shift:  # (tempo changes before it: from the copy's start, as with
+                        shift, from_bar = 0, True       # "From the bar line", none lost; user 2026-10-22)
                     notes[:, 0] -= shift
             if notes is not None and len(notes):
                 sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults,
@@ -1164,7 +1166,8 @@ class ProjectFiles:
             self.busy(None)
         n = len(notes)
         note = (tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq) if their_ppq and their_ppq != self.ppq
-                else "") + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
+                else "") + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "") + (
+            tr("project.pasted_from_copy_start") if from_bar else "")
         if sh is None:
             self.status.config(text=trn("project.pasted_tempo_from_domino", len(tempos), n=len(tempos)) + note)
         else:
