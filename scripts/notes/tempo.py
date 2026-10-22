@@ -36,6 +36,7 @@ import re
 import numpy as np
 
 from files.mathexpr import fmt, formula
+from notes.meter import DEFAULT as DEFAULT_SIG, clean_keysigs, clean_sigs
 
 MIN_BPM = 60_000_000 / 0xFFFFFF  # ~3.58: the slowest a MIDI file holds (24-bit microseconds per beat)
 MAX_BPM = 60_000_000.0  # 1 microsecond per beat (faster = 0, which breaks the file; Domino writes that past it)
@@ -54,7 +55,7 @@ SLOWEST = 16_777_211  # the slowest Domino-safe tempo (us per beat; a file holds
 
 
 def empty():
-    return {"points": [], "catch": [], "every": EVERY, "bars": True}
+    return {"points": [], "catch": [], "every": EVERY, "bars": True, "sigs": [list(DEFAULT_SIG)], "keysigs": []}
 
 
 def has_tempo(tempo):
@@ -138,6 +139,8 @@ def clean_tempo(data):
             catch_set(item, 5, [float(x) for x in bend])
         out["catch"].append(item)
     out["catch"].sort(key=lambda c: c[0])
+    out["sigs"] = clean_sigs(data.get("sigs"))
+    out["keysigs"] = clean_keysigs(data.get("keysigs"))
     return out
 
 

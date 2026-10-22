@@ -19,6 +19,7 @@ import json
 
 import numpy as np
 
+from notes.meter import sigs_of
 from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, base_us, beat_tick, domino_safe,
                          file_segments, has_tempo, layout)
 
@@ -53,6 +54,11 @@ def bar_lengths(ppq):
         if 4 * ppq % d == 0:
             out.update(range(4 * ppq // d, 255 * 4 * ppq // d + 1, 4 * ppq // d))
     return np.array(sorted(out), np.int64)
+
+
+def file_sigs(tempo, ppq):
+    """The Conductor pane's time signatures as a file's: [(tick, top, bottom power)]."""
+    return [(round(b * ppq), top, bottom.bit_length() - 1) for b, top, bottom in sigs_of(tempo)]
 
 
 def bar_line(sigs, tick, ppq, after=False):
@@ -186,7 +192,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     "dense": where notes in a Keep timing part are closer than one tick at its tempo (it stays faster there)}.
     ticks = every tick that must keep its time (note starts / ends, CC messages); starts = the note starts; hz =
     (starts, ends) of the Hz basses' notes. Spiderweb's own ticks, the project's PPQ."""
-    out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": [(0, beats, 2)],
+    out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": file_sigs(tempo, ppq),
            "map": lambda t: np.asarray(t, np.int64), "jumps": [], "hz": [], "dense": []}
     if not has_tempo(tempo):
         return out
@@ -253,6 +259,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
 
     if keeps:
         out["map"] = to_file
+        out["sigs"] = [(int(to_file(t)), top, p) for t, top, p in out["sigs"]]
     if fit_bars and keeps:
         out["sigs"] = _signatures(keeps, gaps, bar, beats, ppq, to_file)
     # warnings

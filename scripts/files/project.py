@@ -31,6 +31,7 @@ from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.tempo import clamp_bpm, clean_tempo, has_tempo
+from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, file_plan
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
@@ -205,7 +206,7 @@ class ProjectFiles:
     def project_data(self):
         return {
             "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
-            "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(), "beats": self.pvar["beats"].get(),
+            "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
             "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
             "domino_start": self.domino_start(),
@@ -296,7 +297,7 @@ class ProjectFiles:
         def table(key):
             return data[key] if isinstance(data.get(key), dict) else {}
 
-        boxes = {key: str(data[key]) for key in ("ppq", "bpm", "beats") if isinstance(data.get(key), (int, float, str))
+        boxes = {key: str(data[key]) for key in ("ppq", "bpm") if isinstance(data.get(key), (int, float, str))
                  and not isinstance(data[key], bool)}
         out = text("output")
         if out is not None and out.strip():
@@ -326,6 +327,8 @@ class ProjectFiles:
         pg = get(lambda: clean_polygon(data.get("polygon_defaults")))
         playhead = get(lambda: float(data.get("playhead", 0)))
         tempo = clean_tempo(data.get("tempo"))
+        if not isinstance(table("tempo").get("sigs"), list):  # (saved before time signatures: its Beats per bar)
+            tempo["sigs"] = clean_sigs(None, beats=get(lambda: int(float(data.get("beats", 4)))))
 
         was = project_json(self.project_data()), self.undo_stack[:], self.redo_stack[:], self._redo_kept
         self._opening = True  # (each box set would make the notes again: once, below)
@@ -1075,8 +1078,9 @@ class ProjectFiles:
         if self.sels:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
         heard = (int(notes[:, 0].min()) / ppq, int(notes[:, 1].max()) / ppq) if len(notes) else (0, 0)
-        if has_tempo(self.tempo) and len(notes):  # (the tempo line comes too: Keep timing worked out on the
-            # whole song up to the copy's last note, so it lines up with Export MIDI)
+        if (has_tempo(self.tempo) or sigs_of(self.tempo) != [DEFAULT_SIG]) and len(notes):
+            # (the tempo line + time signatures come too: Keep timing worked out on the whole song up to the copy's
+            # last note, so it lines up with Export MIDI)
             upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
             plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)[2]
             notes, cc = timed_ticks(plan, notes, cc)

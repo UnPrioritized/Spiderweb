@@ -20,6 +20,7 @@ from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
                             peak, shifts, speed_of, track)
 from notes.engine import tagged_notes
+from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
 from roll.roll_shared import note_name
 from window import big_ask, look
@@ -795,7 +796,7 @@ class PathWindow(ToolWindow):
         bar, b, t = self.bar_beat_tick(beat)
         bar, b, t, p = {"bar": (v, b, t, p), "beat": (bar, v, t, p), "tick": (bar, b, v, p),
                         "key": (bar, b, t, v)}[key]
-        beat = ((bar - 1) * self.app.beats + (b - 1)) + t / ppq
+        beat = from_bar_beat_tick(sigs_of(self.app.tempo), bar, b, t, ppq)
         base = self.frame()[0]
         if abs(beat - base[0]) > FAR or abs(p - base[1]) > FAR:
             bad(e)
@@ -811,10 +812,7 @@ class PathWindow(ToolWindow):
     def bar_beat_tick(self, beat):
         """beat -> (bar, beat in it, tick in it) as the status line shows them (bar and beat from 1); before the
         song's start: bar 0 and less."""
-        ppq, beats = self.app.ppq, self.app.beats
-        ticks = round(beat * ppq)
-        bar, rest = divmod(ticks, ppq * beats)
-        return bar + 1, rest // ppq + 1, rest % ppq
+        return bar_beat_tick(sigs_of(self.app.tempo), round(beat * self.app.ppq), self.app.ppq)
 
     def show(self):
         """The window shows self.cfg (only what differs is changed)."""

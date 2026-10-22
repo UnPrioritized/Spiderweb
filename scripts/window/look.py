@@ -241,6 +241,7 @@ TEMPO_BAD_BG = pick("#fadcdc", "#553636")
 TEMPO_KEEP, TEMPO_KEEP_BG = pick("#8a4fc8", "#c39cf0"), pick("#ece2f8", "#3e3550")  # Keep timing parts
 TEMPO_LIMIT = pick("#e89a9a", "#9a5050")  # the slowest / fastest tempo a MIDI file holds (faint red)
 TEMPO_BASE = pick("#8fa6c8", "#7a7a80")  # the project's BPM across the pane
+SIG_MARK = pick("#5a5a5a", "#b8b8bc")  # the Conductor pane's time / key signature marks (short lines from the top)
 RANGE_BAR, RANGE_BAR_HOT = pick("#4a90e2"), pick("#1f5fb0", "#7ab4ff")  # Range…: notes per gate, the one pointed at
 RANGE_NONE = pick("#e0503c")  # gates with none
 PAT_BORDER = pick("#c0c0c0", "#5c5c5f")  # Pattern window: round the drawing

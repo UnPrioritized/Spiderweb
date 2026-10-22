@@ -16,11 +16,11 @@ from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
 CH10_OFF = "ch10_off"  # (an undo step's mark: made by unticking "Use channel 10", App.on_use_ch10)
-BOXES = "boxes"  # (an undo step's mark (BOXES, BPM, beats per bar, project file): before it, App.new_project)
+BOXES = "boxes"  # (an undo step's mark (BOXES, BPM, project file): before it, App.new_project)
 
 
 def boxes_mark(step):
-    """An undo step's (BOXES, BPM, beats per bar) mark, or None."""
+    """An undo step's (BOXES, BPM, project file) mark, or None."""
     last = step[2][-1] if step[2] else None
     return last if type(last) is tuple and last[:1] == (BOXES,) else None
 
@@ -434,7 +434,7 @@ class HistoryPanel:
         self.roll.cancel_draft()
         now, sel_now = undo_state(self.shapes), self.sel_state()
         ch10 = None
-        boxes = was_boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get(), self.project_file)
+        boxes = was_boxes = (self.pvar["bpm"].get(), self.project_file)
         for _ in range(min(count, len(src))):
             state, name, picked, hz = src.pop()
             got = boxes_mark((state, name, picked))
@@ -459,9 +459,8 @@ class HistoryPanel:
         if ch10 is not None:
             self.use_ch10.set(ch10)
         if boxes != was_boxes:
-            self.project_file = boxes[2] if len(boxes) > 2 else self.project_file
+            self.project_file = boxes[1] if len(boxes) > 1 else self.project_file
             self.pvar["bpm"].set(boxes[0])
-            self.pvar["beats"].set(boxes[1])
         state, picked = now, sel_now
         self._redo_kept = self._trimmed = None
         self.shapes = load_state(state)

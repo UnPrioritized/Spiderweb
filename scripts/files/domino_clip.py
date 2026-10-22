@@ -382,7 +382,7 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
         events = tempo_items(tempo, sigs or [(0, beats, 2)])[0]
     else:
         events = (item(2008, item(1001, struct.pack("<I", 0)) + item(2001, item(0, struct.pack("<f", bpm))))
-                  + time_signature(beats))
+                  + b"".join(time_signature(top, t, 2 ** p) for t, top, p in sorted(sigs or [(0, beats, 2)])))
     track_head(0, b"Conductor", len(events), True)
     feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]))))
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0

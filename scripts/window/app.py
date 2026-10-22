@@ -85,6 +85,7 @@ from files.share import LONG_LINE, FIND, ShareError, made_by, read_shapes, shape
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
 from notes.tempo import drop_loose, empty as empty_tempo
+from notes.meter import DEFAULT as DEFAULT_SIG, first_bar_beats, sigs_of, where
 from roll.roll_shared import cached_path
 from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
@@ -314,7 +315,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.held_scrub = None  # that Scrub (shortcuts / Delete wait, Ctrl+Z cancels it)
         self._trimmed = None  # the oldest steps the 300 limit dropped for the last step (add_undo_step)
         self.rendered_pts = []  # each shape's first point when rendered was made
-        self.ppq, self.beats = 960, 4
+        self.ppq = 960
         self.undo_stack, self.redo_stack = [], []
         self._redo_kept = None  # (push_undo)
         self._edit_key = None
@@ -383,7 +384,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.pvar = {
             "ppq": tk.StringVar(value="960"),
             "bpm": tk.StringVar(value="120"),
-            "beats": tk.StringVar(value="4"),
             "output": tk.StringVar(value=os.path.join(OUTPUT_DIR, "spiderweb.mid")),
         }
         self.fvars = {k: tk.StringVar() for k in VEL_KEYS}
@@ -679,8 +679,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         box.pack(fill="x")
         box.columnconfigure(1, weight=1)
         r = 0
-        boxes = []  # BPM and Beats per bar: made as wide as the dropdowns below, so all four line up
-        for label, key in ((tr("app.ppq"), "ppq"), (tr("app.bpm"), "bpm"), (tr("app.beats_per_bar"), "beats")):
+        boxes = []  # BPM: made as wide as the dropdowns below, so they line up (Beats per bar: the Conductor pane's
+        for label, key in ((tr("app.ppq"), "ppq"), (tr("app.bpm"), "bpm")):  # time signatures, user 2026-10-22)
             lb = ttk.Label(box, text=label)
             lb.grid(row=r, column=0, sticky="w", pady=1)
             if key == "ppq":
@@ -704,8 +704,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 e.pack(fill="both", expand=True)
                 watch_bad(e)
                 boxes.append(e)
-                Scrub(self, [(e, self.pvar[key], None)], (1, 10, 0.1) if key == "bpm" else (1, 1, 1),
-                      *((4, 100000) if key == "bpm" else (1, 32)), label=lb)
+                Scrub(self, [(e, self.pvar[key], None)], (1, 10, 0.1), 4, 100000, label=lb)
             r += 1
         ttk.Label(box, text=tr("app.keys")).grid(row=r, column=0, sticky="w", pady=1)
         kf = ttk.Frame(box)
@@ -1090,7 +1089,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self._opening:  # (a project being opened: done once its boxes are all filled in, load_file)
             return
         before = (self.ppq, self.keys)
-        for key, lo, hi in (("ppq", 1, 65535), ("beats", 1, 32)):
+        for key, lo, hi in (("ppq", 1, 65535),):
             if key == "ppq" and typed and not ppq_done and self.typing_in(self.ppq_box):
                 continue  # (still being typed: taken on Enter / leaving it)
             try:
@@ -1245,11 +1244,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 raise ValueError
         except ValueError:
             raise ValueError(tr("app.bpm_must_be_a_number_at"))
-        try:
-            beats = calc_int(self.pvar["beats"].get(), 1, 32)
-        except ValueError:
-            raise ValueError(tr("app.beats_per_bar_must_be_a"))
-        return ppq, bpm, beats
+        return ppq, bpm, self.beats
+
+    @property
+    def beats(self):
+        """The first bar's length in beats (what Beats per bar was; bar lines: the time signatures, notes/meter)."""
+        v = first_bar_beats(getattr(self, "tempo", None))
+        return int(v) if v == int(v) else v
 
     # ------------------------------------------------------------ shapes
 
@@ -1681,14 +1682,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def new_project(self):
         """The Project tab's New: a new MIDI. The shapes and the tempo line go (their Select boxes / picks too); PPQ,
-        keys, the output file, channel settings and the Domino start stay; BPM and Beats per bar go back to MIDI's
-        120 and 4/4 (user). Asked first; one undo step, which brings the boxes back too (history._restore)."""
-        boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get(), self.project_file)
+        keys, the output file, channel settings and the Domino start stay; BPM and the time signature go back to
+        MIDI's 120 and 4/4 (user). Asked first; one undo step, which brings the boxes back too (history._restore)."""
+        boxes = (self.pvar["bpm"].get(), self.project_file)
         try:
-            usual = calc(boxes[0]) == 120 and calc_int(boxes[1], 1, 32) == 4
+            usual = calc(boxes[0]) == 120
         except ValueError:
             usual = False
-        if not self.shapes and not self.tempo["points"] and not self.tempo["catch"] and usual and not boxes[2]:
+        plain = not any(self.tempo.get(k) for k in ("points", "catch", "keysigs")) and sigs_of(self.tempo) == [DEFAULT_SIG]
+        if not self.shapes and plain and usual and not boxes[1]:
             return
         if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.new_ask"), icon="warning", parent=self):
             return
@@ -1702,8 +1704,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_pane.forget()
         self.roll.box_kept = None
         self.select(None)
-        self.pvar["bpm"].set("120")  # (each one remakes what hangs on it: on_project_change)
-        self.pvar["beats"].set("4")
+        self.pvar["bpm"].set("120")  # (remakes what hangs on it: on_project_change)
         self.tempo_changed()
         self.shapes_changed()
         self.sync_history()
@@ -2391,9 +2392,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._tempo_play_job = self.after(80 if self.tempo_pane.drag else 0, self.play_tempo)
 
     def bar_text(self, beat):
-        """A beat as "bar 3 beat 2" (bar and beat counted from 1, beat may have a fraction)."""
-        bar = int(beat // self.beats)
-        return tr("tempo.where", bar=bar + 1, beat=fmt(round(beat - bar * self.beats + 1, 3)))
+        """A beat as "bar 3 beat 2" (bar and beat counted from 1 by the time signatures, beat may have a
+        fraction; beats are the signature's own: 6/8 counts eighths)."""
+        bar, into, _, (top, bottom) = where(sigs_of(self.tempo), beat)
+        return tr("tempo.where", bar=bar + 1, beat=fmt(round(into * bottom / 4 + 1, 3)))
 
     def toggle_velocity(self, tip=True):
         if self.show_velocity.get():

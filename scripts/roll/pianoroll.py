@@ -17,6 +17,7 @@ from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
 from notes.engine import cached_arrays, make_shape, shape_key
+from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
 from notes.paths import KEYS
@@ -2063,10 +2064,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     def time_text(self, x):
         """bar:beat:tick at canvas x (the velocity pane shares the roll's x axis)"""
-        ppq, beats = self.app.ppq, self.app.beats
-        ticks = max(0, self.x2t(x) * ppq)
-        bar, rest = int(ticks // (ppq * beats)) + 1, ticks % (ppq * beats)
-        return tr("pianoroll.tick", bar=bar, rest=int(rest // ppq) + 1, rest2=int(rest % ppq), ticks=int(ticks))
+        ppq = self.app.ppq
+        ticks = int(max(0, self.x2t(x) * ppq))
+        bar, beat, tick = bar_beat_tick(sigs_of(self.app.tempo), ticks, ppq)
+        return tr("pianoroll.tick", bar=bar, rest=beat, rest2=tick, ticks=ticks)
 
     def position_text(self, e):
         if self.sx is None or e.x < self.kb_w or e.y < self.ruler_h:

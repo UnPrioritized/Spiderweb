@@ -12,6 +12,7 @@ from notes.hzbass import (HZ_DEFAULTS, all_tones, auto_state, bend_range, can_sl
                           funnel_box, left_edge, links, pitch, slide_knob, slide_part)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
                               ruler_boxes)
+from notes.meter import bar_lines, beat_lines, sigs_of
 from window import look
 from window.hz_layers import layer_colour
 from window.widgets import StatusLine
@@ -230,21 +231,21 @@ class HzView:
             if k % 12 in BLACK:
                 c.create_rectangle(kb, y, w, y + self.sy, fill=look.HZ_ROW_BLACK, outline="")
             c.create_line(kb, y + self.sy, w, y + self.sy, fill=look.HZ_OCTAVE_LINE if k % 12 == 0 else look.HZ_ROW_LINE)
-        beats, sb = self.app.beats, self.snap_beats()
-        bar_step = float(beats)
-        while bar_step * self.sx < 8:  # zoomed far out: bars, then every 2nd, 4th... bar
-            bar_step *= 2
+        sb, sigs = self.snap_beats(), sigs_of(self.app.tempo)
         lo, hi = max(0.0, self.beat_at(kb)), self.beat_at(w)
         # (columns: the snap's lines, then every beat and bar over them, as on the main piano roll: a 3/16 or 1/6
-        # snap left most beat / bar lines out)
-        for step, colour in ((sb, look.HZ_GRID), (1.0, look.HZ_GRID_BEAT), (bar_step, look.HZ_GRID_BAR)):
-            if not step or step * self.sx < 8:
-                continue
-            n = math.floor(lo / step)
-            while n * step <= hi:
-                x = self.x_of(n * step)
-                c.create_line(x, rh, x, h, fill=colour)
+        # snap left most beat / bar lines out; beats and bars by the time signatures, zoomed far out every 2nd,
+        # 4th... bar)
+        if sb and sb * self.sx >= 8:
+            n = math.floor(lo / sb)
+            while n * sb <= hi:
+                x = self.x_of(n * sb)
+                c.create_line(x, rh, x, h, fill=look.HZ_GRID)
                 n += 1
+        for b in beat_lines(sigs, lo, hi, 8 / self.sx):
+            c.create_line(self.x_of(b), rh, self.x_of(b), h, fill=look.HZ_GRID_BEAT)
+        for b, _ in bar_lines(sigs, lo, hi, 8 / self.sx):
+            c.create_line(self.x_of(b), rh, self.x_of(b), h, fill=look.HZ_GRID_BAR)
         sh = self.target()
         if sh is not None and not self.grow.get():  # the shape ends here: what's after it isn't used
             x = max(kb, self.x_of(shape_length(sh)))
@@ -297,16 +298,12 @@ class HzView:
                               font=look.font(7, "bold" if k % 12 == 0 else "normal", fit=True))
         c.create_line(kb, 0, kb, h, fill=look.HZ_EDGE)
         c.create_rectangle(0, 0, w, rh, fill=look.HZ_RULER, outline="")  # bar numbers
-        every = 1  # (zoomed far out: every 2nd, 4th... bar number, so they don't run into each other)
-        while every * beats * self.sx < 40 * s:
-            every *= 2
-        n, marks = max(0, math.floor(self.beat_at(kb) / beats / every) * every), []
-        while n * beats <= self.beat_at(w):
-            x = self.x_of(n * beats)
-            if x >= kb:
-                marks.append((x, str(n + 1)))
-            n += every
+        # (by the time signatures; zoomed far out every 2nd, 4th... bar number, so they don't run into each other)
+        marks = [(self.x_of(b), str(n + 1)) for b, n in bar_lines(sigs_of(self.app.tempo), max(0.0, self.beat_at(kb)),
+                                                                  self.beat_at(w), 40 * s / self.sx)]
         for x, label in marks:
+            if x < kb:
+                continue
             c.create_text(x + 3, rh / 2, text=label, anchor="w", fill=look.LABEL, font=look.font(8, fit=True))
         for x0, x1 in sorted(sorted((self.x_of(a[0]), self.x_of(a[2]))) for a in bands):  # the bar numbers black
             x0, x1 = max(x0, kb), min(x1, w)  # under a band, the numbers white there (like the main piano roll)

@@ -20,6 +20,7 @@ from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funne
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained
+from notes.meter import bar_lines, beat_lines, sigs_of
 from notes.tempo import bpm_text, ruler_marks, short_bpm
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, GHOST_COLOR, PIANO_88, PREVIEW_LIMIT,
                               SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
@@ -408,7 +409,7 @@ class RollDrawing:
             self._grid_key = self._frame_key = None
             return
         frame_key = (w, h, self.kb_w, self.ruler_h, self.sx, self.sy, self.view_t, self.view_top, self.scale,
-                     self.app.keys, self.app.edo(), self.app.beats)
+                     self.app.keys, self.app.edo(), json.dumps(sigs_of(self.app.tempo)))
         if frame_key != self._frame_key:
             self.delete("frame", "playhead")
             self._frame_key = None
@@ -923,19 +924,9 @@ class RollDrawing:
                 if abs(b - round(b)) > 1e-9:
                     cols.append((round(self.t2x(b)), look.GRID_SNAP))
                 i += 1
-        beats = self.app.beats
-        if self.sx >= 5:
-            for b in range(max(0, math.ceil(b_lo)), math.floor(b_hi) + 1):
-                if b % beats:
-                    cols.append((round(self.t2x(b)), look.GRID_BEAT))
-        step = beats
-        while step * self.sx < 6:
-            step *= 2
-        b = math.floor(b_lo / step) * step
-        while b <= b_hi:
-            if b >= 0:
-                cols.append((round(self.t2x(b)), look.GRID_BAR))
-            b += step
+        sigs = sigs_of(self.app.tempo)  # (bars and beats by the time signatures: 6/8 = a line each eighth)
+        cols += [(round(self.t2x(b)), look.GRID_BEAT) for b in beat_lines(sigs, max(0.0, b_lo), b_hi, 5 / self.sx)]
+        cols += [(round(self.t2x(b)), look.GRID_BAR) for b, _ in bar_lines(sigs, max(0.0, b_lo), b_hi, 6 / self.sx)]
         return [c for c in cols if int(self.kb_w) <= c[0] < w]
 
     def draw_grid(self, w, h, rows, cols):
@@ -1765,7 +1756,7 @@ class RollDrawing:
                 tip += "\n" + trn("tempo.more_changes", len(tips) - TIP_MARKS, n=f"{len(tips) - TIP_MARKS:,}")
             self.tempo_tips.append((max(kb, x - 4 * s), max(right, x + 4 * s), tip))
             if ux is not None:  # (how long the tempo moves)
-                x1 = min(w, ux + at if ux + at < (nxt if nxt is not None else math.inf) else nxt - 3 * s)
+                x1 = min(w, ux + at if nxt is None or ux + at < nxt else nxt - 3 * s)
                 x0 = max(kb - 2, (right + 3 * s) if text else x + 1)
                 if x1 > x0:
                     self.create_line(x0, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
@@ -1774,18 +1765,9 @@ class RollDrawing:
         self.tag_raise("playhead")
 
     def ruler_marks(self, w):
-        """(x, bar number) of each number on the ruler, from the keyboard to w."""
-        beats, marks = self.app.beats, []
-        step = beats
-        while step * self.sx < 40:
-            step *= 2
-        b = math.floor(max(0.0, self.x2t(self.kb_w)) / step) * step
-        while b <= self.x2t(w):
-            x = self.t2x(b)
-            if x >= self.kb_w:
-                marks.append((x, str(int(b // beats) + 1)))
-            b += step
-        return marks
+        """(x, bar number) of each number on the ruler, from the keyboard to w (by the time signatures)."""
+        lines = bar_lines(sigs_of(self.app.tempo), max(0.0, self.x2t(self.kb_w)), self.x2t(w), 40 / self.sx)
+        return [(self.t2x(b), str(n + 1)) for b, n in lines if self.t2x(b) >= self.kb_w]
 
     def draw_ruler_pick(self, boxes):
         """The ruler black under the Select boxes that hold every key (a drag along the ruler: like many MIDI
