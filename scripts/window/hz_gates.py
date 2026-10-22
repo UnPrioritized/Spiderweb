@@ -671,6 +671,7 @@ class HzGates:
             if more:
                 new["hz"] = self.layers.with_more(new["hz"], more)
                 fit_length(new)
+            new["hz"] = app.hz_retimed(new, new["hz"])  # (made now: for the tempo heard under it, user 2026-10-23)
             if not app.confirm_big([new]):
                 return self.call_off(before, before_fx)
             # (the sound set before the first note: back if that note is undone, hunt: the line drawn was lost)
@@ -712,6 +713,8 @@ class HzGates:
                         new["before_hz"]["range"] = True
                 if self.grow.get():
                     fit_length(new)
+                if not sh.get("hz"):  # (made now: for the tempo heard under it, user 2026-10-23)
+                    new["hz"] = app.hz_retimed(new, new["hz"])
                 if not app.confirm_big([new]):
                     return self.call_off(before, before_fx)
             if push:

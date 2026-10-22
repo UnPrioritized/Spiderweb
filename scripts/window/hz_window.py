@@ -367,10 +367,10 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.redraw()
 
     def show_stale(self):
-        """The red "BPM changed" text and Update button instead of the shape's name, while the shape shown was made
-        for another BPM than the project's now (its tone is off: the red line shows it)."""
-        hz, bpm = ((self.target() or {}).get("hz") or {}), self.app.current_bpm()
-        stale = bool(hz) and bpm is not None and abs(hz["bpm"] - bpm) > 1e-9
+        """The red "Tempo changed" text and Update button instead of the shape's name, while the shape shown was
+        made for another tempo than the one heard under it now (its tone is off: the red line shows it)."""
+        sh = self.target()
+        stale = bool((sh or {}).get("hz")) and self.app.hz_out_of_tune(sh)
         if stale == self.stale_shown:
             return
         self.stale_shown = stale

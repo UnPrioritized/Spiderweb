@@ -15,7 +15,9 @@ from window.drawer import Drawer, clean_name, library_lists, library_names, load
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
-from notes.hzbass import AUTO, all_tones, auto_picks, each_layer, hz_gate, layers_of, shortest_gate
+from notes.hzbass import (AUTO, all_tones, auto_picks, clean_tempo_steps, each_layer, hz_gate, layers_of, left_edge,
+                          right_edge, shortest_gate, sound_span)
+from notes.tempo_file import heard_tempo
 from window.hz_window import open_hz
 from window.panel_nested import nested_on
 from window.panel_ripples import ripples_on
@@ -667,6 +669,59 @@ class CustomPanel:
             return None
         return bpm if 4 <= bpm <= 100000 else None
 
+    def hz_tempo_now(self, sh, hz=None):
+        """(BPM at its left edge, tempo line or None) heard under a Hz bass shape now (user 2026-10-23: it follows
+        the Conductor pane's tempo where it sits; tempo_file.heard_tempo = what plays, Keep timing parts at the tempo
+        heard before them), over its box and its notes' falls (hz: its settings, default sh["hz"]); None while the
+        BPM box holds no number. New shapes' settings (no place): the BPM box's."""
+        base = self.current_bpm()
+        if base is None or sh is self.custom_defaults or not sh.get("pts") and sh.get("kind") != "funnel":
+            return None if base is None else (base, None)
+        left, hz = left_edge(sh), hz or sh.get("hz") or {}
+        end = max([right_edge(sh)] + [left + sound_span(l) for l in layers_of(hz) if l.get("tones")])
+        ppq = self.ppq
+        runs = heard_tempo(self.tempo, base, ppq, int(end * ppq) + 2)
+        if not runs:
+            return base, None
+        own = round(60_000_000 / base)
+
+        def bpm_of(us):  # (the BPM box's number where it's that tempo: an old Hz bass made at it matches exactly)
+            return base if us == own else 60_000_000 / us
+        a, e = left * ppq, end * ppq
+        first = [us for t, us in runs if t <= a + 1e-9][-1:] or [runs[0][1]]
+        steps = clean_tempo_steps([[0.0, bpm_of(first[0])]] + [[round(t / ppq - left, 9), bpm_of(us)]
+                                                              for t, us in runs if a + 1e-9 < t < e - 1e-9])
+        return (steps[0][1], steps) if steps else (bpm_of(first[0]), None)
+
+    def hz_retimed(self, sh, hz):
+        """hz made for the tempo heard under sh now (its "bpm" and "tempo"; a steady one: "bpm" alone)."""
+        now = self.hz_tempo_now(sh, hz)
+        if now is None:
+            return hz
+        out = {k: v for k, v in hz.items() if k != "tempo"}
+        out["bpm"] = float(now[0])
+        if now[1]:
+            out["tempo"] = now[1]
+        return out
+
+    def hz_out_of_tune(self, sh):
+        """True when the tempo under a Hz bass shape isn't the one it was made for (tempo edited, or moved onto
+        another): it's out of tune until updated (not remade by itself, user)."""
+        hz = sh.get("hz")
+        now = self.hz_tempo_now(sh) if hz else None
+        if now is None:
+            return False
+        was = hz.get("tempo") or [[0.0, hz["bpm"]]]
+        line = now[1] or [[0.0, now[0]]]
+        if len(was) != len(line):
+            return True
+        return any(abs(a[0] - b[0]) > 0.5 / self.ppq or abs(a[1] - b[1]) > 1e-9 * b[1] for a, b in zip(was, line))
+
+    def hz_slowest(self, sh):
+        """The slowest tempo under a Hz bass shape now (its shortest gates are there), or None."""
+        now = self.hz_tempo_now(sh) if sh.get("hz") else None
+        return None if now is None else min([now[0]] + [v for _, v in now[1] or ()])
+
     def sync_hz(self, tgts, spam, placed):
         """The Hz bass row shows tgts' settings, and the warnings (short gates, BPM changed). Returns True if Hz
         bass is on (and the fill is a spam one)."""
@@ -684,10 +739,9 @@ class CustomPanel:
         merged = placed and any(self.merge_part(t, parts) for t in tgts)
         self.hz_check.config(state="normal" if spam and not new_off and not tool_made and not merged else "disabled")
         self.hz_check_tip.text = tr("panel_custom.hz_tip") + (tr("panel_custom.hz_not_merged") if merged else "")
-        bpm = self.current_bpm()
-        self.hz_stale_on = on and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9
-                                                          for t in tgts)
-        self.hz_short_on = on and shortest_gate(dict(hz, bpm=bpm or hz["bpm"]), self.ppq) < HZ_SHORT
+        self.hz_stale_on = on and any(t.get("hz") and self.hz_out_of_tune(t) for t in tgts if t is not self.custom_defaults)
+        slow = self.hz_slowest(tgts[0]) if on else None
+        self.hz_short_on = on and shortest_gate(dict(hz, bpm=slow or hz["bpm"]), self.ppq) < HZ_SHORT
         if self.hz_short_on:
             text = tr("panel_custom.hz_short_fixed" if hz.get("fixed") else "panel_custom.hz_short").strip()
             self.hz_info.config(text=text)
@@ -760,8 +814,9 @@ class CustomPanel:
                         rest["range"] = rest.pop("range_kept")
                 return rest
             rest = {k: v for k, v in t.items() if k not in ("hz",) + no_pattern}
-            # (a new one: Auto gates, user)
-            new = dict(rest, hz=dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz), gate=hz_gate(hz, bpm))
+            # (a new one: Auto gates, user; made for the tempo heard under it now)
+            made = self.hz_retimed(t, dict(t.get("hz") or {"auto": AUTO}, bpm=float(bpm), **hz))
+            new = dict(rest, hz=made, gate=hz_gate(made, made["bpm"]))
             if not t.get("hz"):  # (switched on: what it had is kept; a Range doesn't work with Hz bass, user)
                 new["before_hz"] = {"gate": t["gate"]}
                 new.pop("gate_flip", None)  # (no gate aware flip on a Hz bass: hidden it couldn't be switched off)
@@ -825,17 +880,16 @@ class CustomPanel:
         self.schedule_autosave()
 
     def update_hz(self):
-        """The "Update Hz bass" button: every target's gate worked out again for the BPM now."""
-        bpm = self.current_bpm()
+        """The "Update Hz bass" button: every target made again for the tempo heard under it now."""
         tgts = [t for t in self.hz_targets() if t.get("hz")]
-        if bpm is None or not tgts:
+        if self.current_bpm() is None or not tgts:
             return
         if any(t is not self.custom_defaults for t in tgts):
             self.push_undo(name=tr("panel_custom.hz_update"))
         for t in tgts:
-            t["hz"] = dict(t["hz"], bpm=float(bpm))
+            t["hz"] = self.hz_retimed(t, t["hz"])
             if t is not self.custom_defaults:
-                t["gate"] = hz_gate(t["hz"], bpm)
+                t["gate"] = hz_gate(t["hz"], t["hz"]["bpm"])
         self.shapes_changed()
         self.sync_hz_panels()
         if self.hz_window:

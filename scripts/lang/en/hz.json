@@ -51,7 +51,7 @@
  "hz.hint_none_short": "Select a Hz bass, or drag with the Hz bass tool (H) to start one.",
  "hz.hint_new": "New Hz bass starting at beat {beat}: click to place its first note.",
  "hz.shape": "{name}",
- "hz.stale": "BPM changed: this Hz bass is out of tune.",
+ "hz.stale": "Tempo changed: this Hz bass is out of tune.",
  "hz.clash": "{n} notes on another channel",
  "hz.clash_one": "1 note on another channel",
  "hz.cc_shared": "CC also changes {n} other shapes",

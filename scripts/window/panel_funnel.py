@@ -192,9 +192,9 @@ class FunnelPanel:
         self._loading = False
         for w in (self.funnel_hz_check, self.funnel_hz_notes):
             w.config(state="normal" if placed else "disabled")
-        bpm = self.current_bpm()
-        stale = bool(hz) and bpm is not None and any(t.get("hz") and abs(t["hz"]["bpm"] - bpm) > 1e-9 for t in tgts)
-        short = bool(hz) and shortest_gate(dict(hz, bpm=bpm or hz["bpm"]), self.ppq) < HZ_SHORT
+        stale = bool(hz) and any(t.get("hz") and self.hz_out_of_tune(t) for t in tgts)
+        slow = self.hz_slowest(tgts[0]) if hz else None
+        short = bool(hz) and shortest_gate(dict(hz, bpm=slow or hz["bpm"]), self.ppq) < HZ_SHORT
         if short:
             self.funnel_hz_info.config(text=tr("panel_custom.hz_short_fixed" if hz.get("fixed")
                                                else "panel_custom.hz_short").strip())

@@ -900,16 +900,18 @@ class ProjectFiles:
                                                          for ms in cc.values()])  # (CC: give way, user)
         if upto is not None:
             ticks, loose = ticks[ticks <= upto], loose[loose <= upto]
-        hz = [i for i, sh in enumerate(self.shapes) if sh.get("hz")]
-        on = np.isin(notes[:, 5], hz) if hz else None
         if has_tempo(self.tempo):  # (a long Keep timing part of many notes takes a moment)
             self.busy(tr("project.tempo_working"))
         try:
-            plan = file_plan(self.tempo, bpm, ppq, beats, ticks, notes[:, 0],
-                             None if on is None else (notes[on, 0], notes[on, 1]), loose)
+            plan = file_plan(self.tempo, bpm, ppq, beats, ticks, notes[:, 0], None, loose)
         finally:
             if has_tempo(self.tempo):
                 self.busy(None)
+        # (a Hz bass follows the tempo it was made for, user 2026-10-23: the warning = one made for another tempo
+        # than it's under now, from its first note going out)
+        stale = [i for i, sh in enumerate(self.shapes) if sh.get("hz") and self.hz_out_of_tune(sh)]
+        on = notes[np.isin(notes[:, 5], stale), 0] if stale else ()
+        plan["hz"] = [int(on.min()) / ppq] if len(on) else []
         if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
             notes, cc = timed_ticks(plan, notes, cc)
         return notes, cc, plan

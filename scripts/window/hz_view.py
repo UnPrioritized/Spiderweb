@@ -352,8 +352,10 @@ class HzView:
         a slide goes on to the next note."""
         c, app, kb = self.canvas, self.app, self.kb_w
         width = max(2, round(2 * self.s))
-        bpm = float(app.current_bpm() or 120)
         hz = self.line_hz()
+        sh = self.target()  # (what's heard: at the tempo under it NOW, so a Hz bass made for another shows off)
+        now = app.hz_tempo_now(sh, hz) if sh is not None and sh.get("hz") else None
+        bpm = (now[1] or now[0]) if now else float(app.current_bpm() or 120)
         knobs = dict(hz, _memo={})  # (each slide's Glide curve: what the MOD tab needs worked out once)
         red = self.slide_red()
         most = bend_range(hz)

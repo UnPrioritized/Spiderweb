@@ -2385,6 +2385,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_box.sync()
         self.tempo_pane.request_redraw()
         self.roll.draw_tempo_marks(self.roll.kept_box() or [])  # (the ruler's marks; shown with the pane hidden too)
+        if not self.tempo_pane.drag and any(sh.get("hz") for sh in self.shapes):
+            # (a Hz bass now under another tempo than it was made for: its "Tempo changed" warning, user 2026-10-23)
+            self.sync_hz_panels()
+            if self.hz_window:
+                self.hz_window.show_stale()
+                self.hz_window.redraw()
         self.schedule_autosave()
         if self.player.running:  # (playing: on at the new tempo; while a drag goes on, once the mouse rests)
             if getattr(self, "_tempo_play_job", None):
