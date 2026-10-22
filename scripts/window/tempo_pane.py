@@ -1559,11 +1559,48 @@ class TempoPane(tk.Canvas):
                 catch_set(item, k, None if v is None else max(0.0, v + at))
             catch_set(item, 5, catch_get(c, 5))
             new_c.append(item)
-        for key, new in (("points", new_p), ("catch", new_c)):
-            kept = [it for it in tempo[key] if not any(lo - 1e-9 <= it[0] <= hi + 1e-9 for lo, hi in spans)]
-            tempo[key][:] = sorted(kept + new, key=lambda it: it[0])
+        kept = [it for it in tempo["catch"] if not any(lo - 1e-9 <= it[0] <= hi + 1e-9 for lo, hi in spans)]
+        tempo["catch"][:] = sorted(kept + new_c, key=lambda it: it[0])
+        new_p = self.edges_pasted(tempo["points"], new_p, spans)
         self.bands, self.sel, self.part = [(lo, hi) for lo, hi in spans if hi > lo], new_p + new_c, None
         self.app.tempo_changed()
+
+    @staticmethod
+    def edges_pasted(pts, new, spans):
+        """The pasted points new put among pts (in place), replacing what's inside each box (span). AT ITS EDGES
+        (user 2026-10-22: a part's start on the copy's right edge bent the part after the paste; the point a line
+        before the paste arrives at went, flattening it): there, the point already arriving at the start stays and
+        the pasted part leaves from it (a jump when they differ); at the end the pasted part arrives and the point
+        the part after it starts from stays, with its own curve. Points the same BPM as the one after them on
+        their beat go (drop_loose). Returns the pasted points kept."""
+        def on(p, b):
+            return abs(p[0] - b) < 1e-9
+
+        drop = set()
+        for lo, hi in spans:
+            if hi - lo < 1e-9:
+                continue
+            first = [p for p in new if on(p, lo)]
+            last = [p for p in new if on(p, hi)]
+            drop |= {id(p) for p in first[:-1] + last[1:]}  # (the copy's own edge pairs: only what's inside counts)
+        new = [p for p in new if id(p) not in drop]
+        rank = {}
+        keep = []
+        for p in pts:
+            inside = [(lo, hi) for lo, hi in spans if lo - 1e-9 <= p[0] <= hi + 1e-9]
+            if not inside:
+                keep.append(p)
+                continue
+            lo, hi = inside[0]
+            if hi - lo >= 1e-9 and on(p, lo) and p is [q for q in pts if on(q, lo)][0]:
+                keep.append(p)  # (arriving at the paste's start: before the pasted part leaves)
+                rank[id(p)] = 0
+            elif hi - lo >= 1e-9 and on(p, hi) and p is [q for q in pts if on(q, hi)][-1]:
+                keep.append(p)  # (the part after the paste leaves from here: after the pasted arrival)
+                rank[id(p)] = 2
+        pts[:] = sorted(keep + new, key=lambda it: (it[0], rank.get(id(it), 1)))
+        drop_loose(pts)
+        return [p for p in new if any(p is q for q in pts)]
 
     def forget(self):
         """Hidden / another project opened: the Select box, picks and a catch-up being added go, Delete and Esc
