@@ -670,6 +670,17 @@ class TempoPane(tk.Canvas):
             return ("catch", lines[0])
         return None
 
+    def select_all(self):
+        """Ctrl+A while this pane was clicked last: every point and catch-up line, in one Select box over them
+        (user 2026-10-22: Delete then clears the whole line)."""
+        tempo = self.app.tempo
+        items = tempo["points"] + tempo["catch"]
+        if self.drag or self.placing:
+            return
+        lo, hi = min((it[0] for it in items), default=0), max((it[0] for it in items), default=0)
+        self.bands = [(lo, hi)] if hi - lo > 1e-9 else []
+        self.set_sel(items)
+
     def set_sel(self, items, part=None):
         self.sel, self.part = list(items), part
         self.box.sync()
@@ -1564,7 +1575,10 @@ class TempoPane(tk.Canvas):
         self.picked()
         if self.drag:
             return True
-        if self.bands and self.sel:  # (the boxes' stretch emptied, the tempo round it as it was: like a cut)
+        tempo = self.app.tempo
+        if self.sel and len(self.sel) == len(tempo["points"]) + len(tempo["catch"]):  # (all, e.g. Ctrl+A: nothing
+            self.delete_items(list(self.sel), tr("tempo.step_delete_many"))           # left round them to keep)
+        elif self.bands and self.sel:  # (the boxes' stretch emptied, the tempo round it as it was: like a cut)
             self.empty_spans(self.bands, tr("tempo.step_delete_many"))
         elif self.sel:
             self.delete_items(list(self.sel))

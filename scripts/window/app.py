@@ -1616,6 +1616,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.roll.request_redraw()
 
     def select_all(self):
+        """Ctrl+A: every shape; the Tempo pane clicked last: its whole line."""
+        if getattr(self, "key_pane", None) is self.tempo_pane:
+            return self.tempo_pane.select_all()
         if self.shapes:
             self.select_many(range(len(self.shapes)), self.sel if self.sel is not None else len(self.shapes) - 1)
 
