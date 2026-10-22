@@ -2376,9 +2376,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.tempo_pane.delete("all")
         self.schedule_autosave()
 
-    def tempo_changed(self):
-        """The tempo line changed (an edit, undo, a project opened, the project's BPM): the pane and its bar show
-        it."""
+    def tempo_changed(self, restoring=False):
+        """The tempo line changed (an edit, undo, a project opened): the pane and its bar show it. restoring: an undo
+        / redo half way (its own syncing does the Hz bass warnings once everything is back: hunt, a redraw half way
+        moved the synth window's preset name)."""
         if not hasattr(self, "tempo_box"):
             return
         if not self.tempo_pane.drag:  # (a jump's first point nothing glides into: gone; a drag: when let go)
@@ -2386,7 +2387,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_box.sync()
         self.tempo_pane.request_redraw()
         self.roll.draw_tempo_marks(self.roll.kept_box() or [])  # (the ruler's marks; shown with the pane hidden too)
-        if not self.tempo_pane.drag and any(sh.get("hz") for sh in self.shapes):
+        if not restoring and not self.tempo_pane.drag and any(sh.get("hz") for sh in self.shapes):
             # (a Hz bass now under another tempo than it was made for: its "Tempo changed" warning, user 2026-10-23)
             self.sync_hz_panels()
             if self.hz_window:

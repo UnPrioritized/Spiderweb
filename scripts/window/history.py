@@ -485,7 +485,7 @@ class HistoryPanel:
             self.tempo = clean_tempo(json.loads(picked[8]))
             if len(picked) > 9 and isinstance(picked[9], str) and picked[9].startswith("{"):
                 self.tempo_pane.restore_pick(picked[9])  # (its Select box and what was picked, user)
-            self.tempo_changed()
+            self.tempo_changed(restoring=True)  # (Hz bass warnings: sync_panel / the Hz window's after_restore below)
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()
