@@ -7,7 +7,7 @@ import math
 
 from files.lang import tr
 from notes.lasso import tidy_loop
-from roll.roll_shared import ALT, LONG_STROKE, SHIFT, shown_points
+from roll.roll_shared import ALT, CTRL, LONG_STROKE, SHIFT, shown_points
 from window import look
 
 CLOSE_PX = 8  # a Polygonal click this near the first point closes the loop
@@ -22,6 +22,17 @@ class LassoDrawing:
         """The mouse as (beat, key), free (no grid: the cut goes exactly along it), down to under key 0."""
         y = min(max(e.y, self.ruler_h), self.winfo_height())
         return [max(0.0, self.x2t(e.x)), min(max(self.y2p(y), -0.5), self.app.keys - 0.5)]
+
+    def lasso_snap(self, pt, e, angle=True):
+        """A clicked / dragged point (not freehand): its time on the snap grid (user 2026-10-23, B), Ctrl = free,
+        Shift = 45° from the last point (angle; the angle wins over the grid). Keys stay free (only where it crosses
+        a row's middle counts)."""
+        if angle and e.state & SHIFT:
+            return self.lasso_angle(pt, e)
+        sb = self.app.snap_beats()
+        if e.state & CTRL or not sb:
+            return pt
+        return [max(0.0, round(pt[0] / sb) * sb), pt[1]]
 
     def lasso_angle(self, pt, e):
         """Shift held: pt moved onto the nearest 45° line from the last point, on screen."""
@@ -58,11 +69,12 @@ class LassoDrawing:
         if las and las["mode"] == "poly":
             if len(las["pts"]) >= 3 and math.dist(self.to_xy(las["pts"][0]), (e.x, e.y)) <= CLOSE_PX * self.scale:
                 return self.lasso_close()
-            las["pts"].append(self.lasso_angle(pt, e))
+            las["pts"].append(self.lasso_snap(pt, e))
             self.drag = ("lasso_poly", e.x, e.y)
         else:
             mode = "poly" if self.app.lasso_mode.get() == "poly" else "free"
-            self.lasso = {"pts": [pt], "mode": mode, "closed": False, "hover": None}
+            first = self.lasso_snap(pt, e, angle=False) if mode == "poly" else pt
+            self.lasso = {"pts": [first], "mode": mode, "closed": False, "hover": None}
             self.drag = ("lasso_poly", e.x, e.y) if mode == "poly" else ("lasso_free",)
             self.app.status.show(tr("pianoroll.lasso_" + ("poly" if mode == "poly" else "draw")))
         self.draw_lasso()
@@ -71,7 +83,7 @@ class LassoDrawing:
         las, kind = self.lasso, self.drag[0]
         pt = self.lasso_pt(e)
         if kind == "lasso_point":
-            las["pts"][self.drag[1]] = pt
+            las["pts"][self.drag[1]] = self.lasso_snap(pt, e, angle=False)
         elif kind == "lasso_free" and e.state & ALT:  # (Alt: a straight line to the mouse)
             las["hover"] = pt
         elif kind == "lasso_free" or kind == "lasso_poly" and e.state & ALT:  # (Polygonal: Alt-drag = freehand)
@@ -82,7 +94,7 @@ class LassoDrawing:
             if math.hypot(e.x - x, e.y - y) >= FREE_PX * self.scale:
                 las["pts"].append(pt)
         else:
-            las["hover"] = self.lasso_angle(pt, e)
+            las["hover"] = self.lasso_snap(pt, e)
         self.draw_lasso()
 
     def lasso_release(self, e):
@@ -98,7 +110,7 @@ class LassoDrawing:
         las = self.lasso
         if not las or las["closed"] or las["mode"] != "poly":
             return False
-        las["hover"] = self.lasso_angle(self.lasso_pt(e), e)
+        las["hover"] = self.lasso_snap(self.lasso_pt(e), e)
         self.draw_lasso()
         return True
 
@@ -201,7 +213,7 @@ class LassoDrawing:
                 best = (d, i)
         if best[0] > POINT_PX * self.scale:
             return False
-        pts.insert(best[1] + 1, self.lasso_pt(e))
+        pts.insert(best[1] + 1, self.lasso_snap(self.lasso_pt(e), e, angle=False))
         self.draw_lasso()
         return True
 

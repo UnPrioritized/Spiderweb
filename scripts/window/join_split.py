@@ -25,7 +25,7 @@ from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merg
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
-from notes.lasso import lasso_notes, touches
+from notes.lasso import inside_point, lasso_notes, path_middle, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
@@ -951,6 +951,13 @@ class JoinSplit:
         done, whole = {}, []
         for i in targets:
             sh = new[i] if drawn and i in new else self.shapes[i]
+            if self.lasso_line(sh):  # (lines: cut where it crosses them, staying lines, like Slice; E2)
+                got = self.lasso_line_pieces(sh, loop, boxes)
+                if got is True:
+                    whole.append(i)
+                elif got:
+                    done[i] = got
+                continue
             if not self.lasso_pasted(sh):
                 continue
             notes, tracks = self.all_rows(sh)
@@ -972,7 +979,8 @@ class JoinSplit:
         if drawn:
             self.put_plain(new)
         inside = [self.shapes[i] for i in whole]
-        picked = self.put_pieces(done, set(done), None, pick=lambda p: p.pop("_inside", False)) if done else []
+        pasted = {i for i in done if not self.lasso_line(self.shapes[i])}  # (lines' pieces get their velocities)
+        picked = self.put_pieces(done, pasted, None, pick=lambda p: p.pop("_inside", False)) if done else []
         for p in (p for parts in done.values() for p in parts):
             p.pop("_inside", None)
         picked += [k for k, s in enumerate(self.shapes) if any(s is w for w in inside)]  # (wholly inside ones too)
@@ -988,10 +996,44 @@ class JoinSplit:
         return (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
                 and not sh.get("text") and not sh.get("hz"))
 
+    def lasso_line(self, sh):
+        """A line the lasso cuts as a line (Slice's way): line kinds without note tool pages / glue; not masks."""
+        return sh["kind"] in LINE_KINDS and not tooled(sh) and not is_mask(sh)
+
     def lasso_drawn(self, sh):
         """A shape the lasso turns into plain notes before cutting it (Turn into plain notes' kinds)."""
-        return not self.lasso_pasted(sh) and ("notes" not in sh or sh.get("merge")) and "picture" not in sh \
-            and not is_mask(sh)
+        return not self.lasso_pasted(sh) and not self.lasso_line(sh) and ("notes" not in sh or sh.get("merge")) \
+            and "picture" not in sh and not is_mask(sh)
+
+    def lasso_line_pieces(self, sh, loop, boxes):
+        """A line cut where the loop crosses it (inside the kept boxes): its pieces, those inside the loop marked
+        "_inside"; True = wholly inside (not cut); None = the loop doesn't take it in."""
+        roll = self.roll
+        path = np.asarray(cached_path(sh), float).reshape(-1, 2)
+
+        def boxed(pt):
+            return boxes is None or any(min(b[0], b[2]) <= pt[0] <= max(b[0], b[2])
+                                        and min(b[1], b[3]) <= pt[1] <= max(b[1], b[3]) for b in boxes)
+        edges = [(loop[k], loop[(k + 1) % len(loop)]) for k in range(len(loop))]
+        hits = [(pt, [b[0] - a[0], b[1] - a[1]]) for a, b in edges for pt, _ in crossings(path, a, b) if boxed(pt)]
+        if not hits:
+            mid = path_middle(path)
+            return True if inside_point(loop, mid) and boxed(mid) else None
+        pieces = [sh]
+        for pt, way in hits:
+            at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
+            k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))  # (the piece it's on)
+            got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": way})  # (its mark along the loop there)
+            if got:
+                pieces[k:k + 1] = got
+        if len(pieces) == 1:  # (only too near an end to cut)
+            mid = path_middle(path)
+            return True if inside_point(loop, mid) and boxed(mid) else None
+        for p in pieces:
+            mid = path_middle(np.asarray(cached_path(p), float).reshape(-1, 2))
+            if inside_point(loop, mid) and boxed(mid):
+                p["_inside"] = True
+        return pieces if any(p.get("_inside") for p in pieces) else None
 
     def put_pieces(self, done, plain, name, pick=None):
         """Cut shapes replaced by their pieces (done: shape number -> pieces; plain: pasted notes, kept as they

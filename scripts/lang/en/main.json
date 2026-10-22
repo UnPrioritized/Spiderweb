@@ -244,7 +244,7 @@
  "app.lasso_free": "Lasso (drag)",
  "app.lasso_poly": "Polygonal (click points)",
  "pianoroll.lasso_draw": "Drag round the notes; let go to close the loop. Hold Alt for straight lines",
- "pianoroll.lasso_poly": "Click points; click the first point, double-click or press Enter to close. Backspace = last point off, Shift = 45°, Alt-drag = freehand",
+ "pianoroll.lasso_poly": "Click points (on the snap grid; Ctrl = free); click the first point, double-click, right-click or press Enter to close. Backspace = last point off, Shift = 45°, Alt-drag = freehand",
  "pianoroll.lasso_ready": "Enter = cut along the loop, Esc = throw it away. Drag its points; middle-click the loop = add a point, right-click a point = remove it",
  "app.circle": "Circle",
  "app.polygon": "Polygon",

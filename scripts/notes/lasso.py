@@ -131,6 +131,29 @@ def touches(notes, loop, ppq, boxes=None):
     return bool(lasso_pieces(notes, loop, ppq, boxes)[3].any())
 
 
+def inside_point(loop, pt):
+    """True when the loop goes round pt (beat, key): nonzero winding, as the notes' rule (a figure-8: both halves)."""
+    pts = np.asarray(loop, float)
+    x0, y0 = pts[:, 0], pts[:, 1]
+    x1, y1 = np.roll(x0, -1), np.roll(y0, -1)
+    on = (np.minimum(y0, y1) <= pt[1]) & (pt[1] < np.maximum(y0, y1))
+    x = x0[on] + (pt[1] - y0[on]) * (x1[on] - x0[on]) / (y1[on] - y0[on])
+    return int(np.sum(np.where(y1[on] > y0[on], 1, -1)[x < pt[0]])) != 0
+
+
+def path_middle(path):
+    """The point half way along a polyline ((N, 2) points)."""
+    p = np.asarray(path, float).reshape(-1, 2)
+    if len(p) < 2:
+        return p[0]
+    d = np.hypot(*np.diff(p, axis=0).T)
+    run = np.concatenate([[0.0], np.cumsum(d)])
+    half = run[-1] / 2
+    j = min(int(np.searchsorted(run, half, "right")) - 1, len(d) - 1)
+    t = (half - run[j]) / d[j] if d[j] > 0 else 0.0
+    return p[j] + (p[j + 1] - p[j]) * t
+
+
 def tidy_loop(pts):
     """A loop's points with repeats in a row dropped (and a last point on the first), or None when it closes
     nothing (fewer than 3 points or no area)."""
