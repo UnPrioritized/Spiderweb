@@ -1755,6 +1755,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if how == "replace":
             clip = {"length": length, "points": new, "catch": [], "spans": [(0.0, length)]}
             self.put_copies(clip, at, tr("project.paste_from_domino"), push, stay=True)
+            # (nothing picked, no Select box: a whole song pasted looked all selected, user 2026-10-23; the pasted
+            # notes are what's selected)
+            self.bands, self.sel, self.part = [], [], None
+            self.request_redraw()
             return
         if push:
             self.app.push_undo(name=tr("project.paste_from_domino"))
@@ -1768,8 +1772,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             p[0] = pts[on[0]][0]  # (on that beat exactly: a pair)
             pts.insert(on[0] + 1, p)
         drop_loose(pts)
-        alive = ids(pts)
-        self.bands, self.sel, self.part = [], [p for p in new if id(p) in alive], None
+        self.bands, self.sel, self.part = [], [], None  # (nothing picked: the pasted notes are what's selected)
         self.app.tempo_changed()
 
     @staticmethod
