@@ -885,6 +885,9 @@ class ProjectFiles:
             note += tr("project.tempo_hz", where=self.bar_text(plan["hz"][0]))
         if plan["dense"]:
             note += tr("project.tempo_dense", where=self.bar_text(plan["dense"][0]))
+        if plan.get("gave"):  # (a heads-up only, user 2026-10-23)
+            n = len(plan["gave"])
+            note += trn("project.tempo_cc_gave", n, n=n, where=self.bar_text(plan["gave"][0]))
         return note
 
     def tempo_timed(self, ppq, bpm, beats, cc, notes=None, upto=None):
@@ -1155,7 +1158,7 @@ class ProjectFiles:
         warn = ""
         if plan:  # (the tempo warnings as Export to Domino gives them; places only inside what was copied)
             lo, hi = heard
-            inside = {k: [b for b in plan[k] if lo <= b <= hi] for k in ("jumps", "hz", "dense")}
+            inside = {k: [b for b in plan[k] if lo <= b <= hi] for k in ("jumps", "hz", "dense", "gave")}
             warn = self.tempo_notes(dict(plan, **inside))
             if conductor and tempo_items(plan["events"])[1]:
                 warn += tr("project.dms_tempo_slow")

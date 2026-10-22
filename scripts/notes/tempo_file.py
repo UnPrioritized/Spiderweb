@@ -179,7 +179,7 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None):
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
-    gaps, dense = [], []
+    gaps, dense, gave = [], [], []
     for a, e, u in keeps:
         inside = ticks[(ticks > a) & (ticks < e)]
         marks = [np.array([a, e], np.int64), inside]
@@ -205,13 +205,14 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None):
             if not len(drop):
                 break
             lo = np.setdiff1d(lo, drop)
+            gave += (np.unique(drop) / ppq).tolist()
         dense += (n[:-1][close & note[:-1] & note[1:]] / ppq).tolist()
         # rounded on a running total, so the part keeps the drawn tempo on average (gap by gap, regular spam
         # rounded the same way every time: 60 BPM came out 48)
         k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
         k = np.clip(k, _least(total), total)
         gaps.append([n, total, k, drawn])
-    return lay, segs, bad, keeps, gaps, dense
+    return lay, segs, bad, keeps, gaps, dense, sorted(gave)
 
 
 def dense_spots(tempo, base, ppq, beats, ticks):
@@ -226,13 +227,14 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=())
     """What a MIDI file gets: {"events": [(tick, us)] tick 0 first, "bad": beats of catch-up lines that can't work,
     "sigs": [(tick, top, bottom power)] time signatures, "map": Spiderweb tick(s) -> file tick(s), "jumps": beats of
     the first note starting inside each jump, "hz": beats of Hz bass notes where the heard tempo isn't the project's,
-    "dense": where notes in a Keep timing part are closer than one tick at its tempo (it stays faster there)}.
+    "dense": where notes in a Keep timing part are closer than one tick at its tempo (it stays faster there),
+    "gave": beats of the CC messages (loose) that gave way, a tick or less off their time}.
     ticks = every tick that must keep its time (note starts / ends); loose = ticks keeping it where they have room
     (CC messages: keep_gaps); starts = the note starts; hz =
     (starts, ends) of the Hz basses' notes. Spiderweb's own ticks, the project's PPQ."""
     out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": file_sigs(tempo, ppq),
            "keys": file_keys(tempo, ppq),
-           "map": lambda t: np.asarray(t, np.int64), "jumps": [], "hz": [], "dense": []}
+           "map": lambda t: np.asarray(t, np.int64), "jumps": [], "hz": [], "dense": [], "gave": []}
     if not has_tempo(tempo):
         return out
     start_u = base_us(base)
@@ -241,7 +243,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=())
     loose = np.asarray(loose, np.int64).ravel()
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
     bars = bar_ticks(tempo, ppq, upto)
-    lay, segs, out["bad"], keeps, gaps, out["dense"] = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose)
+    lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"] = keep_gaps(tempo, base, ppq, beats, ticks, bars,
+                                                                             loose)
     end = segs[-1][1]
     every = tempo.get("every", EVERY)
     fit_bars = tempo.get("bars", True)
