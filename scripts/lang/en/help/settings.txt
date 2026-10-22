@@ -1,4 +1,4 @@
-The ⚙ button at the top right of the toolbar opens Settings: how Spiderweb itself looks and sounds. These settings are kept for every project (in settings.ini in the user folder), not saved with a project, and Ctrl+Z doesn't take them back.
+Help → Settings… (the menu bar at the top) opens Settings: how Spiderweb itself looks and sounds. These settings are kept for every project (in settings.ini in the user folder), not saved with a project, and Ctrl+Z doesn't take them back.
 
 General tab: how often to look for a new version (and Check now), tips on or off, and Show all tips again. Overlapping shapes keep their colours (Multi channel: a shape that overlaps an earlier one moves whole to the next row of channels, so its colours stay the same). Plain notes made with Turn into plain notes or Turn into plain shapes follow it too: with it off, one that overlaps another takes the next free channels instead. (Experimental) Domino 256 keys: Copy, Paste and Export to Domino keep notes above key 127; only the 256 keys mod of Domino can open them.
 
