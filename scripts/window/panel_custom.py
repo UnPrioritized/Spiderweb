@@ -752,7 +752,13 @@ class CustomPanel:
         at = np.array(cuts)
         size = np.diff(np.append(at, max(end - left, at[-1])))
         off = np.abs(np.log2(tempo_at(hz, at) / tempo_at({"tempo": line, "bpm": now[0]}, at))) * 1200
-        return bool(np.any((off > HZ_TUNED_CENTS) & (size > max(2.0 / self.ppq, HZ_SLIVER))))
+        bad = off > HZ_TUNED_CENTS
+        if not bad.any():
+            return False
+        # (steps off in a row count together: a glide's steps are each shorter than a sliver)
+        run = np.cumsum(np.where(bad, size, 0.0))
+        run -= np.maximum.accumulate(np.where(bad, 0.0, run))
+        return bool(run.max() > max(2.0 / self.ppq, HZ_SLIVER))
 
     def hz_slowest(self, sh):
         """The slowest tempo under a Hz bass shape now (its shortest gates are there), or None."""
