@@ -2232,8 +2232,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
-            if self.box_drawn() or not while_held and (self.roll.holding() or self.vel.edit or self.held_scrub):
-                return "break"  # (a velocity line held: its shapes mustn't change under it either)
+            if self.box_drawn() or not while_held and (self.roll.holding() or self.vel.edit or self.held_scrub
+                                                       or getattr(self, "tempo_pane", None) is not None
+                                                       and self.tempo_pane.drag):
+                return "break"  # (a velocity line / something in the Tempo pane held: nothing changes under it)
             fn()
             return "break"
         return handler

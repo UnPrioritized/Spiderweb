@@ -28,8 +28,10 @@ measured 2026-10-21, Domino keeps a tempo as a 32-bit BPM, f32(6e7 / us), and sa
 values lost 1 us each save)."""
 
 import bisect
+import copy
 import json
 import math
+import re
 
 import numpy as np
 
@@ -94,7 +96,8 @@ def clean_tempo(data):
         if seen.get(key, 0) >= 2:
             continue
         seen[key] = seen.get(key, 0) + 1
-        out["points"].append([b, clamp_bpm(v), kind, text[:200], scale, keep, bend])
+        # (formulas up to 4000 letters: a part cut by a paste writes its formula again, longer each time)
+        out["points"].append([b, clamp_bpm(v), kind, text[:4000], scale, keep, bend])
     out["points"].sort(key=lambda p: p[0])  # (stable: a pair keeps its order)
     for i in range(len(out["points"]) - 1):  # (a pair on exactly one beat, not a hair apart)
         p, q = out["points"][i:i + 2]
@@ -689,6 +692,77 @@ def step_shares(a, b, starts, every):
 def to_jump(pts, i):
     """Point i's part ends where a jump's two points share a beat."""
     return i + 2 < len(pts) and pts[i + 2][0] == pts[i + 1][0]
+
+
+def split_at(pts, b, base):
+    """A point put on beat b (in place) so the tempo line looks exactly the same (user 2026-10-22: a paste / cut
+    must leave the tempo around it as it was): the part there cut in two (hold / line / S-curve exact, an S-curve
+    becoming its two bent halves; a formula part's formula written again for each piece), before the first point
+    the project's BPM held, after the last one its BPM. Nothing when a point is on b already. Returns the point on
+    b (the last one there). (Curved parts change every "every" ticks from their own start: each piece starts
+    its steps again.)"""
+    on = [p for p in pts if abs(p[0] - b) < 1e-9]
+    if on:
+        return on[-1]
+    i = bisect.bisect_left([p[0] for p in pts], b) - 1
+    if i < 0:  # (before the first point: the project's BPM)
+        new = [float(b), clamp_bpm(base), "hold", "", "lin", False, list(BEND)]
+        pts.insert(0, new)
+        return new
+    p = pts[i]
+    if i + 1 >= len(pts):  # (after the last point: it holds)
+        new = [float(b), p[1]] + copy.deepcopy(p[2:])
+        pts.insert(i + 1, new)
+        return new
+    if p[2] == "s":  # (its two halves: a bent line, then the same bend mirrored)
+        cx, cy = bend_of(p)
+        q = pts[i + 1]
+        mid = [(p[0] + q[0]) / 2, float(_along(p, q, 0.5)), "line", "", p[4], keeps(p), [1 - cx, 1 - cy]]
+        p[2], p[6:] = "line", [[cx, cy]]
+        pts.insert(i + 1, mid)
+        if abs(mid[0] - b) < 1e-9:
+            return mid
+        if mid[0] < b:
+            i, p = i + 1, mid
+    q = pts[i + 1]
+    f = (b - p[0]) / (q[0] - p[0])
+    new = [float(b), p[1]] + copy.deepcopy(p[2:])
+    if p[2] == "line":
+        cx, cy = bend_of(p)
+        a = 1 - 2 * cx
+        s = f if abs(a) < 1e-9 else (-2 * cx + math.sqrt(max(4 * cx * cx + 4 * a * f, 0))) / (2 * a)
+        s = min(1.0, max(0.0, s))
+        y = 2 * s * (1 - s) * cy + s * s  # (the curve's own place there: B(s) = (f, y))
+        new[1] = float(_along(p, q, y))
+        lx, ly = s * cx, s * cy  # (de Casteljau: the left piece's control point, then the right one's)
+        rx, ry = (1 - s) * cx + s, (1 - s) * cy + s
+        p[6:] = [[_unit(lx / f if f > 0 else 0.5), _unit(ly / y if y > 0 else 0.5)]]
+        new[6] = [_unit((rx - f) / (1 - f) if f < 1 else 0.5), _unit((ry - y) / (1 - y) if y < 1 else 0.5)]
+    elif p[2] == "formula":
+        ff = float(_apply(formula_fn(p[3]), np.array([f]))[0])
+        new[1] = float(_along(p, q, ff))
+        x = re.compile(r"\bx\b")
+        text = "(" + (p[3] or FORMULA) + ")"
+        # (each piece: the same curve read again, scaled to its own start and end BPM: the part's BPM is
+        # start + (end - start) * F, so the left piece is F(f x) / F(f), the right (F(f + (1 - f) x) - F(f)) /
+        # (1 - F(f)); a piece that can't be scaled (F(f) = 0 / 1) keeps the formula, close)
+        if abs(ff) > 1e-12:
+            p[3] = f"({x.sub(f'({f!r}*x)', text)}) / ({ff!r})"
+        if abs(1 - ff) > 1e-12:
+            new[3] = f"(({x.sub(f'({f!r}+{1 - f!r}*x)', text)}) - ({ff!r})) / ({1 - ff!r})"
+    pts.insert(i + 1, new)
+    return new
+
+
+def _unit(v):
+    return min(1.0, max(0.0, float(v)))
+
+
+def _along(p, q, c):
+    """The BPM c of the way from p's to q's on p's part's BPM change (linear / doubling)."""
+    if p[4] == "exp":
+        return clamp_bpm(2 ** (math.log2(p[1]) + (math.log2(q[1]) - math.log2(p[1])) * c))
+    return clamp_bpm(p[1] + (q[1] - p[1]) * c)
 
 
 def part_bpm(tempo, i, f):
