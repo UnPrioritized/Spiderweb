@@ -228,17 +228,6 @@ def tempo_changes(hz, b0, b1):
     return at[max(bisect.bisect_right(at, b0 + 1e-9), 1):bisect.bisect_left(at, b1 - 1e-9)]
 
 
-def tempo_step(hz, beat):
-    """(start, end) in beats from the left edge of the tempo step of a Hz bass's tempo line holding beat (-inf / inf
-    before the first change and after the last; steady: both)."""
-    steps = hz.get("tempo")
-    if not steps:
-        return -math.inf, math.inf
-    at = _line(steps)[1]
-    i = bisect.bisect_right(at, beat + 1e-9)
-    return (at[i - 1] if i > 1 else -math.inf), (at[i] if i < len(at) else math.inf)
-
-
 def shifted_tempo(steps, d):
     """A tempo line for the left edge moved d beats to the LEFT (d < 0: to the right), each step on the same song
     beat; before the old start: its first BPM. None when it's steady there."""

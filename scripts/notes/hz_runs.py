@@ -10,7 +10,7 @@ import numpy as np
 
 from notes.hz_settings import (ADSR_KNOBS, FILTER_KNOBS, FILTER_START, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE,
                                NEUTRAL, VIBRATO, VIBRATO_RATE, bend_range, clean_tempo_steps, hz_of, tempo_at,
-                               tempo_changes, tempo_step)
+                               tempo_changes)
 from notes.hz_lines import adsr_line, filter_line, note_bend
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
@@ -196,52 +196,28 @@ def threshold(hz, n=None):
     return (n or {}).get("auto", hz["auto"])
 
 
-HOLD_WAVES = 8  # Auto gates under a changing tempo: a tempo held for this many waves = holding (whole ticks when
-# close enough), shorter steps = a glide moving (mixed gates; user 2026-10-23: a glide's steps never go fixed)
-
-
-def held_whole(hz, ppq, key, beat, limit):
-    """Auto gates (threshold limit, cents) at beat from the left edge, for key's tone, under a Hz bass's tempo line:
-    True = whole ticks: the tempo there holds for HOLD_WAVES waves or more, and they're at most limit off."""
-    gate = ppq * tempo_at(hz, beat) / 60.0 / hz_of(key, hz["cents"])
-    if limit is None or off_cents(gate) > limit + 1e-9:
-        return False
-    a, b = tempo_step(hz, beat)
-    return (b - a) * ppq >= HOLD_WAVES * gate
-
-
-def auto_state(hz, ppq, n, beat=None):
+def auto_state(hz, ppq, n):
     """For tone n held still with Auto gates or gates of its own: (how far fixed gates would be off, in cents; the
-    threshold, None for its own gates; True when it gets fixed gates), at beat (default its start). None when
-    neither. A tempo changing under it with Auto: + its parts [[from, to, fixed], ...], one per tempo, each
-    deciding by itself (held_whole)."""
+    threshold, None for its own gates; True when it gets fixed gates). None when neither."""
     limit, own = threshold(hz, n), own_gate(n)
     if own is not None:
         limit = None
     elif limit is None:
         return None
-    t0, t1 = n["t"], n["t"] + n["len"]
-    at = t0 if beat is None else min(max(beat, t0), t1)
-    off = off_cents(ppq * tempo_at(hz, at) / 60.0 / hz_of(pitch(n), hz["cents"]))
-    cuts = tempo_changes(hz, t0, t1) if own is None else []
-    if not cuts:
-        return off, limit, own if own is not None else off <= limit + 1e-9
-    parts = [[a, b, held_whole(hz, ppq, pitch(n), a, limit)] for a, b in zip([t0] + cuts, cuts + [t1])]
-    return off, limit, next(p for p in parts if at < p[1] - 1e-9 or p is parts[-1])[2], parts
+    off = off_cents(ppq * tempo_at(hz, n["t"]) / 60.0 / hz_of(pitch(n), hz["cents"]))
+    if own is None and tempo_changes(hz, n["t"], n["t"] + n["len"]):  # (the tempo moves under it: mixed, user B)
+        return off, limit, False
+    return off, limit, own if own is not None else off <= limit + 1e-9
 
 
 def auto_picks(hz, ppq):
-    """Which tones get fixed gates with Auto gates (True / False each, or per tempo part; for a Hz bass without
-    placed tones: per tempo step), or None when the gates aren't Auto. A threshold change that leaves these the
-    same leaves the notes the same."""
+    """Which tones get fixed gates with Auto gates (True / False each; one for a Hz bass without placed tones), or
+    None when the gates aren't Auto. A threshold change that leaves these the same leaves the notes the same."""
     if hz.get("auto") is None:
         return None
     if not hz.get("tones"):
-        if hz.get("tempo"):
-            return tuple(held_whole(hz, ppq, hz["key"], b, hz["auto"]) for b, _ in hz["tempo"])
         return (off_cents(ppq * hz["bpm"] / 60.0 / hz_of(hz["key"], hz["cents"])) <= hz["auto"] + 1e-9,)
-    return tuple(tuple(p[2] for p in got[3]) if len(got) > 3 else got[2]
-                 for got in (auto_state(hz, ppq, n) for n in hz["tones"]))
+    return tuple(auto_state(hz, ppq, n)[2] for n in hz["tones"])
 
 
 def tone_runs(hz, left, ppq, keys=None):
@@ -346,15 +322,9 @@ def tone_runs(hz, left, ppq, keys=None):
         s = r[0] if r is not None and abs(r[1] - placed) < 1e-6 else placed if lead is None else lead
         if b > a and s < e:
             cuts = tempo_changes(hz, s / ppq - left, e / ppq - left) if moving else []
-            if cuts:  # (the tempo changes under it: each tempo its own gate; Fixed / its own fixed = whole ticks
-                # each; Auto = whole ticks where the tempo holds and they're close enough, mixed in a glide)
-                own_w, limit = own_gate(n), threshold(hz, n)
-
-                def whole_at(lo):
-                    if own_w is not None or hz.get("fixed"):
-                        return own_w if own_w is not None else True
-                    return held_whole(hz, ppq, pitch(n), lo / ppq - left, limit)
-                gate = wave(hz, ppq, pitch(n), whole=whole_at(s), bpm=bpm(s))
+            if cuts:  # (the tempo moves under it: Auto = mixed gates, Fixed / its own fixed = whole ticks each)
+                whole = own_gate(n) if own_gate(n) is not None else bool(hz.get("fixed"))
+                gate = wave(hz, ppq, pitch(n), whole=whole, bpm=bpm(s))
             else:
                 gate = wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n), bpm=bpm(s))
             if gate == math.floor(gate) and s != placed:  # (whole-tick waves: on the next whole tick)
@@ -362,7 +332,7 @@ def tone_runs(hz, left, ppq, keys=None):
             if cuts:  # (each stretch of one tempo its own gate; the wave playing at a change finishes first)
                 parts, t = [], s
                 for lo, hi in zip([s] + [(left + c) * ppq for c in cuts], [(left + c) * ppq for c in cuts] + [e]):
-                    g = wave(hz, ppq, pitch(n), whole=whole_at(lo), bpm=bpm(lo))
+                    g = wave(hz, ppq, pitch(n), whole=whole, bpm=bpm(lo))
                     k = max(0, int(math.ceil((hi - t) / g - 1e-9)))
                     parts.append((t + g * np.arange(k), g))
                     t += g * k
