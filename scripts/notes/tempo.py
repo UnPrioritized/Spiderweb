@@ -819,9 +819,45 @@ def domino_safe(u):
     return np.trunc(6e7 / bpm).astype(np.int64) == u
 
 
+_WINDOW = 256  # (one value: candidates checked this many at a time, not one by one; same order, same answer)
+
+
+def _first_safe(cands):
+    """The first Domino-safe value in cands (in 1..0xFFFFFF), or None."""
+    cands = cands[(cands >= 1) & (cands <= 0xFFFFFF)]
+    ok = np.nonzero(domino_safe(cands))[0]
+    return int(cands[ok[0]]) if len(ok) else None
+
+
+def _nearest1(x):
+    """nearest_safe of one value: k = 0, then the nearer side, then the other, k = 1, 2..."""
+    u = int(np.rint(x))
+    s = 1 if x >= u else -1
+    for k0 in range(0, SAFE_REACH, _WINDOW):
+        k = np.arange(max(k0, 1), min(k0 + _WINDOW, SAFE_REACH))
+        cands = np.column_stack([u + s * k, u - s * k]).ravel()
+        if k0 == 0:
+            cands = np.concatenate([[u], cands])
+        got = _first_safe(cands)
+        if got is not None:
+            return got
+    return u
+
+
+def _next1(u, way):
+    """next_safe of one value."""
+    for k0 in range(1, SAFE_REACH, _WINDOW):
+        got = _first_safe(u + way * np.arange(k0, min(k0 + _WINDOW, SAFE_REACH)))
+        if got is not None:
+            return got
+    return u
+
+
 def nearest_safe(x):
     """The Domino-safe whole microseconds nearest x (array of floats), kept in 1..0xFFFFFF."""
     x = np.clip(np.asarray(x, float), 1, 0xFFFFFF)
+    if x.size == 1 and x.ndim == 1:  # (one at a time in _fit_blocks: thousands of blocks)
+        return np.array([_nearest1(float(x[0]))], np.int64)
     u = np.rint(x).astype(np.int64)
     out = np.where(domino_safe(u), u, 0)
     left = out == 0
@@ -843,6 +879,8 @@ def nearest_safe(x):
 def next_safe(u, way):
     """The next Domino-safe value past u (array) going way (+1 / -1); u itself where there's none in reach."""
     u = np.asarray(u, np.int64)
+    if len(u) == 1:
+        return np.array([_next1(int(u[0]), way)], np.int64)
     out = u.copy()
     left = np.ones(len(u), bool)
     for k in range(1, SAFE_REACH):
@@ -950,12 +988,19 @@ PAIR_REACH = 48  # Domino-safe values tried on each side of a flat catch-up's te
 def _safe_side(start, way):
     """Up to PAIR_REACH Domino-safe values from start (included when safe) going way (+1 / -1)."""
     out, u = [], int(start) - way
-    while len(out) < PAIR_REACH:
-        nxt = int(next_safe(np.array([u]), way)[0])
-        if nxt == u or not 1 <= nxt <= 0xFFFFFF:
-            break
-        out.append(nxt)
-        u = nxt
+    while len(out) < PAIR_REACH:  # (a window of candidates at a time; a gap of SAFE_REACH or more ends it)
+        cands = u + way * np.arange(1, 2 * _WINDOW + 1)
+        cands = cands[(cands >= 1) & (cands <= 0xFFFFFF)]
+        safe = cands[domino_safe(cands)] if len(cands) else cands
+        if not len(safe):
+            nxt = _next1(u, way)
+            if nxt == u:
+                break
+            out.append(nxt)
+            u = nxt
+            continue
+        out += safe[:PAIR_REACH - len(out)].tolist()
+        u = out[-1]
     return out
 
 
@@ -964,21 +1009,23 @@ def _flat_pair(n, target):
     tempo changes); the pair nearest the average first. None if no such pair is near."""
     q = target / n
     downs, ups = _safe_side(math.floor(q), -1), _safe_side(math.ceil(q), 1)
-    best = None
-    for a in downs:
-        for b in ups:
-            if b == a:
-                if a * n == target:
-                    return np.full(n, a, np.int64)
-                continue
-            k, rest = divmod(n * b - target, b - a)  # (k ticks of a, the rest of b)
-            if rest == 0 and 0 <= k <= n:
-                far = (q - a) + (b - q)
-                if best is None or far < best[0]:
-                    best = (far, a, b, k)
-    if best is None:
+    if not downs or not ups:
         return None
-    _, a, b, k = best
+    # (every pair at once, in the order a then b; n * b < 2^63: values < 2^24, blocks far under 2^39 ticks)
+    a = np.repeat(np.array(downs, np.int64), len(ups))
+    b = np.tile(np.array(ups, np.int64), len(downs))
+    same = b == a
+    hit = np.nonzero(same & (a * n == target))[0]
+    if len(hit):
+        return np.full(n, int(a[hit[0]]), np.int64)
+    gap = np.where(same, 1, b - a)
+    k, rest = (n * b - target) // gap, (n * b - target) % gap  # (k ticks of a, the rest of b)
+    ok = np.nonzero(~same & (rest == 0) & (k >= 0) & (k <= n))[0]
+    if not len(ok):
+        return None
+    far = (q - a[ok].astype(float)) + (b[ok].astype(float) - q)
+    i = ok[int(np.argmin(far))]  # (the first of the nearest, as before)
+    a, b, k = int(a[i]), int(b[i]), int(k[i])
     return np.concatenate([np.full(k, a, np.int64), np.full(n - k, b, np.int64)])
 
 
