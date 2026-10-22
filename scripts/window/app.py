@@ -608,6 +608,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         self._toolbar_rows = rows
         self.tool_bar.grid(row=0, column=0, sticky="w")
+        # one row: Help + Settings centred like the buttons beside them (the tool buttons make the row 2 px taller:
+        # at the top they sat a pixel above Play, user); wrapped: at the top, by the first line of tools
+        self.corner.grid(sticky="e" if rows == 1 else "ne")
         if rows == 1:
             # (columnspan / pady set again: grid keeps the two-row ones, which put it over the gear's column)
             self.option_bar.grid(row=0, column=1, columnspan=1, sticky="e", pady=0)
