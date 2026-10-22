@@ -715,6 +715,8 @@ class HzGates:
                     fit_length(new)
                 if not sh.get("hz"):  # (made now: for the tempo heard under it, user 2026-10-23)
                     new["hz"] = app.hz_retimed(new, new["hz"])
+                else:  # (notes reaching new ground: made for the tempo there, the rest as it was, hunt 2026-10-23)
+                    new["hz"] = app.hz_reached(sh, new)
                 if not app.confirm_big([new]):
                     return self.call_off(before, before_fx)
             if push:

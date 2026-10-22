@@ -1083,6 +1083,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         except ValueError:
             return False
 
+    def hz_tuned_before_ppq(self, typed, ppq_done):
+        """The Hz bass shapes in tune with the tempo under them, when the PPQ box now holds another PPQ (they're made
+        for the new one's tempo steps too: a PPQ change keeps the tone by itself)."""
+        if typed and not ppq_done and self.typing_in(self.ppq_box):
+            return []
+        try:
+            if calc_int(self.pvar["ppq"].get(), 1, 65535) == self.ppq:
+                return []
+        except ValueError:
+            return []
+        return [sh for sh in self.shapes if sh.get("hz") and not self.hz_out_of_tune(sh)]
+
     def on_project_change(self, typed=False, ppq_done=False):
         """typed: a key in the PPQ / BPM / Beats per bar box. The notes are remade only for a new PPQ or Keys (BPM
         and beats per bar change no notes: Hz bass keeps its own BPM; remaking them made typing lag). A PPQ typed
@@ -1090,6 +1102,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self._opening:  # (a project being opened: done once its boxes are all filled in, load_file)
             return
         before = (self.ppq, self.keys)
+        tuned = self.hz_tuned_before_ppq(typed, ppq_done)
         for key, lo, hi in (("ppq", 1, 65535),):
             if key == "ppq" and typed and not ppq_done and self.typing_in(self.ppq_box):
                 continue  # (still being typed: taken on Enter / leaving it)
@@ -1119,6 +1132,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.hz_window.redraw()
             self.schedule_autosave()
             return
+        if self.ppq != before[0]:
+            for sh in tuned:  # (a glide's steps come at other spots at a new PPQ: still in tune, hunt 2026-10-23)
+                sh["hz"] = self.hz_retimed(sh, sh["hz"])
         set_key_top(self.keys)
         self.sync_edo()
         self.roll.clamp_view()

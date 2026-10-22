@@ -1,6 +1,7 @@
 """Hz bass settings: every limit and starting value, and the checks that clean saved settings (hzbass.py's
 docstring says what each setting does)."""
 
+import bisect
 import math
 
 import numpy as np
@@ -193,21 +194,38 @@ def clean_tempo_steps(steps):
     return out if len(out) > 1 and out[0][0] == 0 else None
 
 
+_LINES = {}  # id(tempo line) -> (the line, its beats, its BPMs, as lists and arrays): read once, not per wave
+
+
+def _line(steps):
+    got = _LINES.get(id(steps))
+    if got is None or got[0] is not steps or len(got[1]) != len(steps):
+        if len(_LINES) > 64:
+            _LINES.clear()
+        at, vals = [b for b, _ in steps], [v for _, v in steps]
+        got = _LINES[id(steps)] = (steps, at, vals, np.array(at), np.array(vals))
+    return got
+
+
 def tempo_at(hz, beats):
     """The BPM a Hz bass was made for at beats from its left edge (a number or an array): its tempo line (held
     before the first step and after the last), else its one BPM."""
     steps = hz.get("tempo")
     if not steps:
         return hz["bpm"] if np.isscalar(beats) else np.full(np.shape(beats), float(hz["bpm"]))
-    at = np.array([b for b, _ in steps])
-    vals = np.array([v for _, v in steps])
-    i = np.maximum(np.searchsorted(at, np.asarray(beats, float) + 1e-9, "right") - 1, 0)
-    return float(vals[i]) if np.isscalar(beats) else vals[i]
+    _, at, vals, at_a, vals_a = _line(steps)
+    if np.isscalar(beats):
+        return float(vals[max(bisect.bisect_right(at, beats + 1e-9) - 1, 0)])
+    return vals_a[np.maximum(np.searchsorted(at_a, np.asarray(beats, float) + 1e-9, "right") - 1, 0)]
 
 
 def tempo_changes(hz, b0, b1):
     """The beats (from the left edge) inside b0..b1 where a Hz bass's tempo line changes, in order ([] = steady)."""
-    return [b for b, _ in (hz.get("tempo") or ())[1:] if b0 + 1e-9 < b < b1 - 1e-9]
+    steps = hz.get("tempo")
+    if not steps:
+        return []
+    at = _line(steps)[1]
+    return at[max(bisect.bisect_right(at, b0 + 1e-9), 1):bisect.bisect_left(at, b1 - 1e-9)]
 
 
 def shifted_tempo(steps, d):
