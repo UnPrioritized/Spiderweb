@@ -33,7 +33,7 @@ from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHI
                               grab_while_panning,
                               set_cursor)
 from window import look
-from window.widgets import ShortLabel, Tooltip, unit_word
+from window.widgets import Scrub, ShortLabel, Tooltip, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
 NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
@@ -86,6 +86,8 @@ class TempoBox(ttk.Frame):
         unit_word(ttk.Label(bar), self.every_var, "unit.ticks").pack(side="left", padx=(2, 0))
         for w in (lb, self.every_box):
             Tooltip(w, tr("tempo.every_tip"))
+        # drag the word / Up, Down / the wheel (user 2026-10-22), like every number box
+        Scrub(app, [(self.every_box, self.every_var, self.typed_every)], (1, 10, 1), 1, 65535, label=lb)
         ttk.Label(bar, text=tr("tempo.bpm_snap")).pack(side="left", padx=(10, 0))
         self.snap = ttk.Combobox(bar, state="readonly", width=5,
                                  values=[tr("tempo.off") if s == 0 else fmt(s) for s in BPM_SNAPS])
