@@ -61,7 +61,6 @@ ALIGN_CHOICES = [
 END_CHOICES = [(value, tr("panel_custom.ends_" + value)) for value in ENDS]
 EDGE_CHOICES = [(None, tr("panel_custom.edge_band")), ("sideways", tr("panel_custom.edge_sideways"))]
 HZ_TUNED_CENTS = 1.0  # Hz bass: off by more than this from the tempo it was made for = "Tempo changed"
-HZ_SLIVER = 1 / 64  # ... except for a stretch this short (beats; or 2 ticks): a jump moved by a PPQ change
 HZ_SHORT = 40  # Hz bass: a gate under this many ticks wobbles between its two sizes (orange: a higher PPQ fixes it)
 HZ_WRAP = 222  # its lines under the Hz bass row start further right than the panel's other notes: wrapped sooner
 
@@ -679,16 +678,17 @@ class CustomPanel:
         left = left_edge(sh)
         return left, max([right_edge(sh)] + [left + sound_span(l) for l in layers_of(hz) if l.get("tones")])
 
-    def hz_tempo_now(self, sh, hz=None):
+    def hz_tempo_now(self, sh, hz=None, ppq=None):
         """(BPM at its left edge, tempo line or None) heard under a Hz bass shape now (user 2026-10-23: it follows
         the Conductor pane's tempo where it sits; tempo_file.heard_tempo = what plays, Keep timing parts at the tempo
         heard before them), over its box and its notes' falls (hz: its settings, default sh["hz"]); None while the
-        BPM box holds no number. New shapes' settings (no place): the BPM box's."""
+        BPM box holds no number. New shapes' settings (no place): the BPM box's. ppq: read at that PPQ (default the
+        project's; a glide's steps fall elsewhere at another)."""
         base = self.current_bpm()
         if base is None or sh is self.custom_defaults or not sh.get("pts") and sh.get("kind") != "funnel":
             return None if base is None else (base, None)
         left, end = self.hz_span(sh, hz or sh.get("hz") or {})
-        ppq = self.ppq
+        ppq = ppq or self.ppq
         runs = heard_tempo(self.tempo, base, ppq, int(end * ppq) + 2)
         if not runs:
             return base, None
@@ -707,17 +707,18 @@ class CustomPanel:
         now = self.hz_tempo_now(sh, hz)
         if now is None:
             return hz
-        out = {k: v for k, v in hz.items() if k != "tempo"}
+        out = {k: v for k, v in hz.items() if k not in ("tempo", "tempo_ppq")}
         out["bpm"] = float(now[0])
         if now[1]:
-            out["tempo"] = now[1]
+            out["tempo"], out["tempo_ppq"] = now[1], self.ppq
         return out
 
     def hz_reached(self, old, new):
         """new's Hz settings after a Hz window edit of old: where its notes now sound past where old's did, made for
         the tempo heard there; where old's did, the tempo it was made for (so a tempo edit there still warns)."""
         hz = new["hz"]
-        now = self.hz_tempo_now(new, hz)
+        ppq = hz.get("tempo_ppq") or self.ppq  # (all of it read at the PPQ its line was made at)
+        now = self.hz_tempo_now(new, hz, ppq)
         if now is None or not old.get("hz"):
             return hz
         ol, oe = self.hz_span(old, old["hz"])
@@ -729,22 +730,24 @@ class CustomPanel:
         at = sorted({0.0, max(a, 0.0), e, *(b for b, _ in hz.get("tempo") or () if a < b < e),
                      *(b for b, _ in now[1] or () if not a <= b < e)})
         steps = [[round(b, 9), float(tempo_at(hz if a - 1e-9 <= b < e - 1e-9 else heard, b))] for b in at if b >= 0]
-        out = {k: v for k, v in hz.items() if k != "tempo"}
+        out = {k: v for k, v in hz.items() if k not in ("tempo", "tempo_ppq")}
         line = clean_tempo_steps(steps)
         out["bpm"] = line[0][1] if line else steps[0][1]
         if line:
-            out["tempo"] = line
+            out["tempo"], out["tempo_ppq"] = line, ppq
         return out
 
     def hz_out_of_tune(self, sh):
         """True when the tempo under a Hz bass shape isn't the one it was made for (tempo edited, or moved onto
         another): it's out of tune until updated (not remade by itself, user)."""
         hz = sh.get("hz")
-        now = self.hz_tempo_now(sh) if hz else None
+        # (the tempo read at the PPQ its line was made at: at another, a glide's steps and a jump's tick fall
+        # elsewhere, which is no tempo change, hunt 2026-10-23)
+        now = self.hz_tempo_now(sh, hz, hz.get("tempo_ppq")) if hz else None
         if now is None:
             return False
-        # (compared BY SOUND where it plays now, hunt 2026-10-23: a PPQ change cuts a glide into other steps and
-        # moves a jump by under a tick, notes deleted past a jump leave its steps behind; none of that warns)
+        # (compared BY SOUND where it plays now: steps left past its notes don't count, nor a step ending on another
+        # spot by a hair after a move)
         left, end = self.hz_span(sh, hz)
         line = now[1] or [[0.0, now[0]]]
         cuts = sorted({0.0, *(b for b, _ in hz.get("tempo") or () if 0 < b < end - left),
@@ -752,13 +755,7 @@ class CustomPanel:
         at = np.array(cuts)
         size = np.diff(np.append(at, max(end - left, at[-1])))
         off = np.abs(np.log2(tempo_at(hz, at) / tempo_at({"tempo": line, "bpm": now[0]}, at))) * 1200
-        bad = off > HZ_TUNED_CENTS
-        if not bad.any():
-            return False
-        # (steps off in a row count together: a glide's steps are each shorter than a sliver)
-        run = np.cumsum(np.where(bad, size, 0.0))
-        run -= np.maximum.accumulate(np.where(bad, 0.0, run))
-        return bool(run.max() > max(2.0 / self.ppq, HZ_SLIVER))
+        return bool(np.any((off > HZ_TUNED_CENTS) & (size > 1e-6)))
 
     def hz_slowest(self, sh):
         """The slowest tempo under a Hz bass shape now (its shortest gates are there), or None."""

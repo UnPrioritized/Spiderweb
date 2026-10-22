@@ -1100,6 +1100,8 @@ def clean_hz(hz):
     steps = clean_tempo_steps(hz.get("tempo"))
     if steps:  # (made under a changing tempo: "bpm" = the one at its left edge)
         out["tempo"], out["bpm"] = steps, steps[0][1]
+        if isinstance(hz.get("tempo_ppq"), int) and 1 <= hz["tempo_ppq"] <= 65535:  # (the PPQ it was read at)
+            out["tempo_ppq"] = hz["tempo_ppq"]
     if hz.get("fixed") is True:
         out["fixed"] = True
     else:
