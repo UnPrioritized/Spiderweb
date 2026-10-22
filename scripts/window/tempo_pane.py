@@ -188,8 +188,16 @@ class TempoBox(ttk.Frame):
             self.tool_vars[key].set(True)
         self.pick_tool(key)
 
-    def pick_tool_hint(self):
-        self.hint.config(text=tr("tempo.hint_" + ("draw" if self.tool.get() in DRAWS else self.tool.get())))
+    def tool_hint_key(self):
+        return "tempo.hint_" + ("draw" if self.tool.get() in DRAWS else self.tool.get())
+
+    def pick_tool_hint(self, spot=None):
+        """The hint line: what can be done where the mouse is (spot: "on_point", "numbers"...), else on empty
+        space with the tool picked."""
+        key = "tempo.hint_" + spot if spot else self.tool_hint_key()
+        if spot is None or getattr(self, "_hint_key", None) != key:  # (each mouse move: only when it changes)
+            self._hint_key = key
+            self.hint.config(text=tr(key))
 
     # ------------------------------------------------------------ the bar follows what's picked
 
@@ -440,6 +448,7 @@ class TempoPane(tk.Canvas):
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
+        self.bind("<Leave>", lambda e: self.drag or self.placing or self.box.pick_tool_hint())
         bind_double_right(self, self.on_right, self.on_double_right)
         self.menu_wait = None  # a right-click on empty space: its menu, waiting to see if it's a double click
         self.bind("<ButtonPress-2>", self.start_pan)
@@ -1399,22 +1408,32 @@ class TempoPane(tk.Canvas):
         if self.placing and self.placing["step"] == 2:  # (the teal area shown up to the mouse before the press)
             self.placing["hover"] = self.snap_beat(roll.x2t(e.x), e)
             self.request_redraw()
+        # the pointer + the hint line: only what can be done right here (user 2026-10-22: the whole list was a wall
+        # of text)
+        hint = None
+        handle = self.handle_at(e.x, e.y)
         if e.x < roll.kb_w:
-            want = "sb_v_double_arrow"
+            want, hint = "sb_v_double_arrow", "numbers"
         elif self.placing:
-            want = "sb_h_double_arrow"
-        elif self.point_at(e.x, e.y) is not None or self.handle_at(e.x, e.y) is not None:
-            want = "fleur"
-        elif self.catch_at(e.x) is not None or self.start_at(e.x) is not None or self.end_at(e.x) is not None:
-            want = "sb_h_double_arrow"
+            want = "sb_h_double_arrow"  # (the catch-up being added keeps its own hint)
+        elif self.point_at(e.x, e.y) is not None:
+            want, hint = "fleur", "on_point"
+        elif handle is not None:
+            want, hint = "fleur", "on_handle" if handle[0] == "part" else "on_catch_handle"
+        elif self.catch_at(e.x) is not None:
+            want, hint = "sb_h_double_arrow", "on_catch"
+        elif self.start_at(e.x) is not None or self.end_at(e.x) is not None:
+            want, hint = "sb_h_double_arrow", "on_edge"
         elif self.box.tool.get() != "select":
             want = PENCIL_CURSOR
         elif self.band and self.band[0] <= roll.x2t(e.x) <= self.band[1]:
-            want = "sb_h_double_arrow"  # (moves what the box picked, in time)
+            want, hint = "sb_h_double_arrow", "on_band"  # (moves what the box picked, in time)
         else:
             want = SELECT_CURSOR
         if not self.drag:
             set_cursor(self, want)
+            if not self.placing and (hint or getattr(self.box, "_hint_key", None) != self.box.tool_hint_key()):
+                self.box.pick_tool_hint(hint)
 
     def show_position(self, e):
         roll = self.app.roll
