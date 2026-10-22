@@ -2,6 +2,6 @@ Tick Velocity pane (top) to show or hide it. The pane under the piano roll shows
 
 Formula: drag it like Linear; a pattern (Wave, Zigzag, Bounce or one you saved) swings the velocity up and down around the line. Pick the pattern, its Loops and height (in velocity steps) next to the tool buttons: changing them changes the line you just drew, until Enter or a click elsewhere.
 
-Linear / Curve: drag it, then drag its end squares to move the ends (Ctrl = level with the other end) or a curve's round handle to bend it. Ctrl while drawing = flat. Hold Shift to snap the ends to the grid and, with a shape selected, onto its first / last note. Enter, Esc or a click outside the pane = done (Esc or Ctrl+Z while the mouse is still held throws the line away).
+Linear / Curve: drag it, then drag its end squares to move the ends (Ctrl = level with the other end) or a curve's round handle to bend it. Ctrl while drawing = flat. Lines are drawn on whole ticks. Moving an end square afterwards snaps it onto a nearby note start (hold Shift for whole ticks only). Enter, Esc or a click outside the pane = done (Esc or Ctrl+Z while the mouse is still held throws the line away).
 
 The velocities move and stretch with the shape. Typing a start / end velocity in the panel goes back to a straight ramp. Drag the bar above the pane to resize it.

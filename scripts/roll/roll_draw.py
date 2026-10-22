@@ -973,6 +973,13 @@ class RollDrawing:
         lo, hi = (min(max(v, -1 << 62), 1 << 62) for v in (math.ceil(t_lo - longest), math.floor(t_hi)))
         return int(np.searchsorted(starts, lo, "left")), int(np.searchsorted(starts, hi, "right"))
 
+    def starting_in(self, t_lo, t_hi):
+        """The sorted_notes() rows (an array view) whose notes start inside ticks t_lo..t_hi."""
+        notes = self.sorted_notes()
+        starts = self._note_index[3]
+        lo, hi = (min(max(v, -1 << 62), 1 << 62) for v in (math.ceil(t_lo), math.floor(t_hi)))
+        return notes[int(np.searchsorted(starts, lo, "left")):int(np.searchsorted(starts, hi, "right"))]
+
     def paint_order(self, fast):
         """The compiled loops' painting order of the notes (fastloops.paint_order: s, e, key, colour, first,
         longest) + the number of unselected owners, kept until the notes, selection or picture colours change; None

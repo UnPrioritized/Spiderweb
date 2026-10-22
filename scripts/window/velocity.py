@@ -209,17 +209,15 @@ class VelocityPane(tk.Canvas):
         pt = self.event_pt(e)
         cv = self.live_curve()
         which = self.near_handle(cv, e) if cv else None
-        ends = self.snap_spots()
         if which:
-            self.edit = {"handle": cv, "which": which, "drawn": None, "preview": None, "owners": {}, "trail": [],
-                         "ends": ends}
+            self.edit = {"handle": cv, "which": which, "drawn": None, "preview": None, "owners": {}, "trail": []}
             return
         self.curve = None
         tool = self.app.vel_tool.get()
         if tool != "pencil":
-            pt = [self.snap_time(pt[0], e, ends), pt[1]]
+            pt = [self.snap_time(pt[0], e), pt[1]]
         self.edit = {"start": pt, "last": pt, "drawn": None, "preview": None, "owners": {}, "trail": [self.trail_pt(e)],
-                     "kind": tool, "ends": ends}
+                     "kind": tool}
         if tool == "pencil":
             self.extend(pt)
         else:
@@ -248,7 +246,7 @@ class VelocityPane(tk.Canvas):
                 c = [2 * mx - (a[0] + b[0]) / 2, 2 * pt[1] - (a[1] + b[1]) / 2]
             else:  # an end moved: the bend keeps its place (a line stays straight)
                 other = b if ed["which"] == "a" else a
-                pt = [self.snap_time(pt[0], e, ed["ends"]), other[1] if e.state & CTRL else pt[1]]
+                pt = [self.snap_time(pt[0], e, notes=True), other[1] if e.state & CTRL else pt[1]]
                 if abs(pt[0] - other[0]) < 1e-9:
                     return
                 a, b = (pt, b) if ed["which"] == "a" else (a, pt)
@@ -260,7 +258,7 @@ class VelocityPane(tk.Canvas):
             self.extend(pt)
         else:
             a = ed["start"]
-            pt = [self.snap_time(pt[0], e, ed["ends"]), pt[1]]
+            pt = [self.snap_time(pt[0], e), pt[1]]
             if ed["kind"] == "curve":
                 self.draw_curve(a, pt, [(a[0] + pt[0]) / 2, a[1]])  # starts flat, like an ease-in
             else:
@@ -268,26 +266,22 @@ class VelocityPane(tk.Canvas):
                     pt = [pt[0], a[1]]
                 self.draw_curve(a, pt, [(a[0] + pt[0]) / 2, (a[1] + pt[1]) / 2])  # a straight line (+ a pattern)
 
-    def snap_spots(self):
-        """Times (beats) the drag's ends snap onto: the first and last note of the selected shapes."""
-        sels = self.app.sels
-        if not sels:
-            return []
-        notes = self.app.rendered
-        starts = notes[np.isin(notes[:, 5], list(sels)), 0]
-        return sorted({int(starts.min()), int(starts.max())}) if len(starts) else []
-
-    def snap_time(self, b, e, ends):
-        """b snapped: onto the selected shapes' first / last note when it's close on screen, else to the grid.
-        Only while Shift is held (free by default)."""
-        if not e.state & SHIFT:
-            return b
-        roll, ppq = self.app.roll, self.app.ppq
-        near = [t / ppq for t in ends if abs(roll.t2x(t / ppq) - roll.t2x(b)) <= 10 * self.scale]
-        if near:
-            return min(near, key=lambda t: abs(t - b))
-        sb = self.app.snap_beats()
-        return max(0.0, round(b / sb) * sb) if sb else b
+    def snap_time(self, b, e, notes=False):
+        """b on a whole tick, no grid (user 2026-10-22: like many MIDI programs, never a fraction of a tick). notes
+        (a line's end moved afterwards): onto the nearest note start within 10 px (only notes it can change), Shift
+        = ticks only. Starts only: a note's velocity lives at its start."""
+        ppq = self.app.ppq
+        t = max(0.0, round(b * ppq) / ppq)
+        if not notes or e.state & SHIFT:
+            return t
+        roll, r = self.app.roll, 10 * self.scale / self.app.roll.sx
+        rows = roll.starting_in((b - r) * ppq, (b + r) * ppq)
+        if self.app.sels:
+            rows = rows[np.isin(rows[:, 5], list(self.app.sels))]
+        if not len(rows):
+            return t
+        s = rows[:, 0]
+        return float(s[np.abs(s - b * ppq).argmin()]) / ppq
 
     def extend(self, pt):
         """Add the stretch from the last mouse point to pt to the drag (later stretches win)."""
