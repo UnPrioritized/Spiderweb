@@ -677,7 +677,8 @@ class TempoPane(tk.Canvas):
         it has none (held / formula / the last part / both ends one BPM) or a working catch-up hides the line
         there (user: it was left hanging in the air)."""
         pts = self.app.tempo["points"]
-        if i is None or i + 1 >= len(pts) or pts[i][2] not in ("line", "s") or pts[i][1] == pts[i + 1][1]:
+        if (i is None or i + 1 >= len(pts) or pts[i][2] not in ("line", "s") or pts[i][1] == pts[i + 1][1]
+                or pts[i + 1][0] <= pts[i][0]):  # (where a glide arrives: no part of its own)
             return None
         p, q = pts[i], pts[i + 1]
         cx, cy = bend_of(p)
@@ -841,8 +842,13 @@ class TempoPane(tk.Canvas):
         made already: a new point). With Select only in time (user, like the ruler); the Select box goes along and
         its left side snaps, else the grabbed one does."""
         band = tuple(self.band) if self.band else None
+        pts = self.app.tempo["points"]
+        held = [s for s in self.sel if self.is_point(s)]
         self.drag = {"kind": "move", "grab": item, "x": e.x, "y": e.y, "pushed": pushed,
                      "orig": [(s, s[0], s[1] if self.is_point(s) else None) for s in self.sel],
+                     # (the other point of a jump goes along in time, keeping its BPM: user 2026-10-22)
+                     "mates": [(p, p[0]) for p in pts if not self.is_sel(p) and
+                               any(p is not s and p[0] == s[0] for s in held)],
                      # (hand-set catch-up edges go along when many move; one line dragged alone leaves them)
                      "starts": [(s, k, s[k]) for s in self.sel if not self.is_point(s) and (band or len(self.sel) > 1)
                                 for k in (3, 4) if catch_get(s, k) is not None],
@@ -947,6 +953,8 @@ class TempoPane(tk.Canvas):
                 s[0] = max(b + shift, 0.0 if v is not None else one)
                 if v is not None:
                     s[1] = clamp_bpm(v + dv) if dv else v
+            for s, b in d.get("mates", ()):
+                s[0] = max(b + shift, 0.0)
             for s, k, a in d["starts"]:  # (a catch-up's edges set by hand go along)
                 s[k] = max(0.0, a + shift)
             for s, b, v in d["orig"]:  # (a line dragged alone past its own hand-set edge: that edge automatic
@@ -959,9 +967,16 @@ class TempoPane(tk.Canvas):
                 tempo[key].sort(key=lambda it: it[0])
 
         place(db)
-        for key in ("points", "catch"):  # (two on one beat: the time stays where it last worked)
+        for key in ("points", "catch"):  # (two on one beat: the time stays where it last worked; points: a jump's
+            # two may share exactly one beat, never three; moved onto another, the one coming from the left
+            # arrives there: the list's order, the sort keeps it)
             beats = [it[0] for it in tempo[key]]
-            if any(beats[k + 1] - beats[k] < one / 2 for k in range(len(beats) - 1)):
+            near = [beats[k + 1] - beats[k] < one / 2 for k in range(len(beats) - 1)]
+            if key == "points":  # (a hair apart = one beat exactly: a float off by a hair)
+                for k, n in enumerate(near):
+                    if n:
+                        tempo[key][k + 1][0] = beats[k + 1] = beats[k]
+            if any(n and (key == "catch" or (k > 0 and near[k - 1])) for k, n in enumerate(near)):
                 place(d["db"])
                 break
         else:
@@ -1079,14 +1094,30 @@ class TempoPane(tk.Canvas):
         self.drag = None
         self.open_typing(i)
 
-    def add_point(self, b, v):
-        """A new point (picked); its part keeps the curve of the part it was put in. None when one is there."""
+    def glide_end(self, b):
+        """The lone point on beat b where a curved part arrives (a second point may go on its beat: a jump), or
+        None."""
         pts = self.app.tempo["points"]
-        if any(abs(p[0] - b) < 1e-9 for p in pts):
+        on = [i for i, p in enumerate(pts) if abs(p[0] - b) < 1e-9]
+        if len(on) != 1 or on[0] == 0:
+            return None
+        p, q = pts[on[0] - 1], pts[on[0]]
+        return q if p[2] != "hold" and p[1] != q[1] else None
+
+    def add_point(self, b, v):
+        """A new point (picked); its part keeps the curve of the part it was put in. On the beat of a point where a
+        curve arrives: a second point there, the tempo from there on (user 2026-10-22: a jump right where a glide
+        ends). None when one is there."""
+        pts = self.app.tempo["points"]
+        end = self.glide_end(b)
+        if end is not None and abs(end[1] - clamp_bpm(v)) < 1e-9:
+            return None
+        if end is None and any(abs(p[0] - b) < 1e-9 for p in pts):
             return None
         self.app.push_undo(name=tr("tempo.step_add"))
-        at = sum(1 for p in pts if p[0] < b)
-        item = [float(b), clamp_bpm(v), *part_kind(pts[at - 1] if at > 0 else None, self.box.draw_scale)]
+        at = sum(1 for p in pts if p[0] < b + (1e-9 if end is not None else 0))
+        item = [float(end[0] if end is not None else b), clamp_bpm(v),
+                *part_kind(pts[at - 1] if at > 0 else None, self.box.draw_scale)]
         pts.insert(at, item)
         self.sel, self.part = [item], None
         self.app.tempo_changed()
@@ -1107,12 +1138,22 @@ class TempoPane(tk.Canvas):
         after_kind = part_kind(before[-1] if before else None, self.box.draw_scale)
         kind = DRAWS[self.box.tool.get()]
         text = self.box.draw_formula if kind == "formula" else ""
-        keep = [p for p in pts if p[0] < b0 - 1e-9 or p[0] > b1 + 1e-9]
         held = [p for p in pts if p[0] <= b0 + 1e-9]
         first = [float(b0), clamp_bpm(v0), kind, text, self.box.draw_scale, bool(held) and keeps(held[-1]),
                  list(BEND)]
         last = [float(b1), clamp_bpm(v1), *after_kind]
-        pts[:] = sorted(keep + [first, last], key=lambda p: p[0])
+        # (user 2026-10-22: drawn from where a glide arrives = a jump there, that point kept; drawn up to a jump =
+        # it arrives there, the tempo after the jump kept)
+        end = self.glide_end(b0)
+        arrive = [end] if end is not None and abs(end[1] - first[1]) > 1e-9 else []
+        if arrive:
+            first[0] = end[0]
+        at_b1 = [p for p in pts if abs(p[0] - b1) < 1e-9]
+        leave = at_b1[1:] if len(at_b1) == 2 else []
+        if leave:
+            last[0] = leave[0][0]
+        pts[:] = ([p for p in pts if p[0] < b0 - 1e-9] + arrive + [first, last] + leave +
+                  [p for p in pts if p[0] > b1 + 1e-9])
         self.sel, self.part = [], first
         self.app.tempo_changed()
 

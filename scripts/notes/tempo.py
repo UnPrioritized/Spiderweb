@@ -1,6 +1,8 @@
 """The project's tempo line (the Tempo pane, window/tempo_pane.py) and the tempo changes it writes into a MIDI file.
 
-The line is made of points, each an exact BPM at a beat. Each part between two points has a curve (hold, straight,
+The line is made of points, each an exact BPM at a beat; two on one beat (user 2026-10-22) = a jump: the first is
+where the part before arrives, the second the tempo from there (the first never reaches the file: it holds for no
+tick). Each part between two points has a curve (hold, straight,
 S-curve, ease out, ease in, or a formula of x from 0 to 1) and a BPM change: linear (default: a straight part from
 60 to 240 passes 150 halfway) or exponential (straight on the pane's doubling scale: passes 120). Before the first
 point the tempo is the project's BPM, after the last one it holds the last point's. A curved part writes a new
@@ -62,11 +64,12 @@ def clamp_bpm(v):
 
 
 def clean_tempo(data):
-    """A tempo line from a file / undo step -> a safe one (broken points left out, sorted, one point per beat)."""
+    """A tempo line from a file / undo step -> a safe one (broken points left out, sorted, at most two points per
+    beat: where a curve arrives, then the tempo from there; user 2026-10-22)."""
     out = empty()
     if not isinstance(data, dict):
         return out
-    seen = set()
+    seen = {}
     for p in data.get("points", []) if isinstance(data.get("points"), list) else []:
         if not isinstance(p, list):  # (broken by hand: that point left out, the rest kept)
             continue
@@ -88,11 +91,15 @@ def clean_tempo(data):
         if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
             continue
         key = round(b, 9)
-        if key in seen:
+        if seen.get(key, 0) >= 2:
             continue
-        seen.add(key)
+        seen[key] = seen.get(key, 0) + 1
         out["points"].append([b, clamp_bpm(v), kind, text[:200], scale, keep, bend])
-    out["points"].sort(key=lambda p: p[0])
+    out["points"].sort(key=lambda p: p[0])  # (stable: a pair keeps its order)
+    for i in range(len(out["points"]) - 1):  # (a pair on exactly one beat, not a hair apart)
+        p, q = out["points"][i:i + 2]
+        if round(p[0], 9) == round(q[0], 9):
+            q[0] = p[0]
     every = data.get("every", EVERY)
     out["every"] = every if isinstance(every, int) and not isinstance(every, bool) and 1 <= every <= 65535 else EVERY
     out["bars"] = data.get("bars", True) is not False
@@ -892,7 +899,9 @@ def ruler_marks(tempo, base, ppq):
     out = []
     for i, p in enumerate(pts):
         b = p[0]
-        before = float(shown_bpm(tempo, base, [b - 1e-9 * max(1.0, b)], worked)[0]) if b > 0 else None
+        if i + 1 < len(pts) and pts[i + 1][0] == b:  # (where a curve arrives: the next one on its beat says it)
+            continue
+        before =float(shown_bpm(tempo, base, [b - 1e-9 * max(1.0, b)], worked)[0]) if b > 0 else None
         then = None
         if p[2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != p[1]:
             cut = [x for x in lines if b < x < pts[i + 1][0]]  # (a catch-up line cuts the part short)
