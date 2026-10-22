@@ -1288,12 +1288,18 @@ class TempoPane(tk.Canvas):
         self.app.tempo_changed()
 
     def delete_picked(self):
-        """The Delete key while this pane was clicked last: the picked points / catch-up lines go (the Select box
-        stays, empty, like the piano roll's). Always takes the key (user's pick in the hunt: never the piano
-        roll's shapes, which may be off screen); nothing while the mouse holds something here."""
+        """The Delete key while this pane was clicked last: the picked points / catch-up lines go, and the Select
+        box with them (user 2026-10-22: it stayed, empty; Ctrl+Z brings both back). Always takes the key (user's
+        pick in the hunt: never the piano roll's shapes, which may be off screen); nothing while the mouse holds
+        something here."""
         self.picked()
-        if self.sel and not self.drag:
+        if self.drag:
+            return True
+        if self.sel:
             self.delete_items(list(self.sel))
+        if self.band:
+            self.band = None
+            self.request_redraw()
         return True
 
     # ------------------------------------------------------------ copy / paste (user 2026-10-21, like Domino)
