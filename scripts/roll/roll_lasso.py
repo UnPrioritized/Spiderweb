@@ -127,7 +127,9 @@ class LassoDrawing:
                 if not self.drag:
                     loop = las["pts"]
                     self.drop_lasso()
-                    self.app.lasso_cut(loop)
+                    if self.app.lasso_cut(loop) is None:  # (asked to turn shapes into plain notes, No: it stays)
+                        self.lasso = las
+                        self.draw_lasso()
             elif las["mode"] == "poly":
                 self.lasso_close()
         elif k == "backspace" and not las["closed"] and las["mode"] == "poly" and not self.drag:

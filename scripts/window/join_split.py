@@ -931,49 +931,75 @@ class JoinSplit:
     def lasso_cut(self, loop):
         """The Lasso tool's closed loop (beat, key points) cut: every pasted-notes shape it takes notes in is cut in
         two along it (notes/lasso.py), each note across it cut there; the inside pieces end up selected, one undo
-        step. With Select boxes kept: only the shapes they selected, only inside the boxes. Text, merged shapes,
-        Hz bass: say how (turn into plain notes first, as Slice). A shape wholly inside: not cut, selected."""
+        step. With Select boxes kept: only the shapes they selected, only inside the boxes. Any other shape it
+        takes notes in (drawn shapes, text, merged, Hz bass; not pictures / masks): asked once, then turned into
+        plain notes and cut in the same undo step (user 2026-10-23: a lasso doing nothing surprised more). A shape
+        wholly inside: not cut, selected. -> True when done, False when there was nothing to cut, None when the
+        question was answered No (the loop stays)."""
+        self.commit_typing()
+        if self.notes_late:  # (notes still catching up with a drag: made now)
+            self.shapes_changed(now=True)
         boxes = self.roll.kept_box() or None
         targets = sorted(self.sels) if boxes else range(len(self.shapes))
-        done, whole, others = {}, [], 0
+        drawn = [i for i in targets if self.lasso_drawn(self.shapes[i])
+                 and touches(self.notes_of(self.shapes[i]), loop, self.ppq, boxes)]
+        if drawn:
+            if not messagebox.askokcancel(tr("join_split.lasso"), trn("join_split.lasso_ask_plain", len(drawn),
+                                                                     n=len(drawn)), icon="question", parent=self):
+                return None
+            new = self.plain_copies(drawn)
+        done, whole = {}, []
         for i in targets:
-            sh = self.shapes[i]
-            if (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
-                    and not sh.get("text") and not sh.get("hz")):
-                notes, tracks = self.all_rows(sh)
-                got, _ = lasso_notes(sh, notes, tracks, loop, self.ppq, boxes)
-                if got:
-                    got[1]["_inside"] = True
-                    done[i] = got
-                elif len(notes) and touches(notes, loop, self.ppq, boxes):
-                    whole.append(i)  # (all of it inside)
-            elif (sh["kind"] in ("custom", "funnel") and ("notes" in sh or sh.get("text") or sh.get("hz"))
-                  and "picture" not in sh and touches(self.notes_of(sh), loop, self.ppq, boxes)):
-                others += 1
-        if not done:
+            sh = new[i] if drawn and i in new else self.shapes[i]
+            if not self.lasso_pasted(sh):
+                continue
+            notes, tracks = self.all_rows(sh)
+            got, _ = lasso_notes(sh, notes, tracks, loop, self.ppq, boxes)
+            if got:
+                got[1]["_inside"] = True
+                done[i] = got
+            elif len(notes) and touches(notes, loop, self.ppq, boxes):
+                whole.append(i)  # (all of it inside)
+        if not done and not drawn:
             if whole:
                 self.select_many(whole, whole[0])
                 self.status.config(text=trn("join_split.lasso_whole", len(whole), n=len(whole)))
             else:
-                self.status.config(text=tr("join_split.lasso_others" if others else "join_split.lasso_nothing"))
+                self.status.config(text=tr("join_split.lasso_nothing"))
             return False
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("join_split.lasso"))
+        if drawn:
+            self.put_plain(new)
         inside = [self.shapes[i] for i in whole]
-        picked = self.put_pieces(done, set(done), tr("join_split.lasso"), pick=lambda p: p.pop("_inside", False))
+        picked = self.put_pieces(done, set(done), None, pick=lambda p: p.pop("_inside", False)) if done else []
         for p in (p for parts in done.values() for p in parts):
             p.pop("_inside", None)
         picked += [k for k, s in enumerate(self.shapes) if any(s is w for w in inside)]  # (wholly inside ones too)
-        self.select_many(picked, picked[0])
+        self.select_many(picked, picked[0] if picked else None)
         self.shapes_changed()
         n = len(done)
-        self.status.config(text=trn("join_split.lasso_cut", n, n=n) +
-                           (trn("join_split.lasso_others_too", others, n=others) if others else ""))
+        self.status.config(text=trn("join_split.lasso_cut", n, n=n) if done else
+                           trn("join_split.lasso_whole", len(whole), n=len(whole)))
         return True
+
+    def lasso_pasted(self, sh):
+        """Pasted notes the lasso cuts as they are."""
+        return (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
+                and not sh.get("text") and not sh.get("hz"))
+
+    def lasso_drawn(self, sh):
+        """A shape the lasso turns into plain notes before cutting it (Turn into plain notes' kinds)."""
+        return not self.lasso_pasted(sh) and ("notes" not in sh or sh.get("merge")) and "picture" not in sh \
+            and not is_mask(sh)
 
     def put_pieces(self, done, plain, name, pick=None):
         """Cut shapes replaced by their pieces (done: shape number -> pieces; plain: pasted notes, kept as they
-        are), one undo step -> the pieces' new numbers (pick(piece): only those it says yes to)."""
+        are), one undo step (name None: the caller's step) -> the pieces' new numbers (pick(piece): only those it says
+        yes to)."""
         self.roll.cancel_draft()
-        self.push_undo(name=name)
+        if name is not None:
+            self.push_undo(name=name)
         self.unlink_groups(done)
         for parts in done.values():
             for p in parts:
