@@ -1460,10 +1460,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if key == self._dense[0] or not self.winfo_ismapped():  # (hidden: its next drawing asks again)
             return
         notes = app.rendered
-        # (CC messages keep their time too, as in the export: one a tick after a note counted only there, user)
-        cc = app.cc_messages(app.ppq, self.base())
-        ticks = np.concatenate([notes[:, 0], notes[:, 1]] + [np.array([m[0] for m in ms], np.int64)
-                                                            for ms in cc.values()])
+        # (notes only: CC messages too close give way in the export, never keep the tempo faster)
+        ticks = np.concatenate([notes[:, 0], notes[:, 1]]) if len(notes) else np.zeros(0, np.int64)
         try:
             spots = sorted(dense_spots(app.tempo, self.base(), app.ppq, app.beats, ticks))
         except MemoryError:

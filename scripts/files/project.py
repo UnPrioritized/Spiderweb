@@ -892,17 +892,18 @@ class ProjectFiles:
         parts moved to the ticks that keep their time (notes/tempo_file.py). notes: the ones going out (default:
         every note); upto: only the ticks up to there count (Copy to Domino: the song up to the copy's end)."""
         notes = self.rendered if notes is None else notes
-        ticks = np.concatenate([notes[:, 0], notes[:, 1]]
-                               + [np.array([m[0] for m in ms], np.int64) for ms in cc.values()])
+        ticks = np.concatenate([notes[:, 0], notes[:, 1]])
+        loose = np.concatenate([np.zeros(0, np.int64)] + [np.array([m[0] for m in ms], np.int64)
+                                                         for ms in cc.values()])  # (CC: give way, user)
         if upto is not None:
-            ticks = ticks[ticks <= upto]
+            ticks, loose = ticks[ticks <= upto], loose[loose <= upto]
         hz = [i for i, sh in enumerate(self.shapes) if sh.get("hz")]
         on = np.isin(notes[:, 5], hz) if hz else None
         if has_tempo(self.tempo):  # (a long Keep timing part of many notes takes a moment)
             self.busy(tr("project.tempo_working"))
         try:
             plan = file_plan(self.tempo, bpm, ppq, beats, ticks, notes[:, 0],
-                             None if on is None else (notes[on, 0], notes[on, 1]))
+                             None if on is None else (notes[on, 0], notes[on, 1]), loose)
         finally:
             if has_tempo(self.tempo):
                 self.busy(None)

@@ -161,13 +161,17 @@ def _spans_off(segs, keeps, start_u):
     return np.array(lo, np.int64), np.array(hi, np.int64)
 
 
-def keep_gaps(tempo, base, ppq, beats, ticks, bars=None):
+def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None):
     """The Keep timing parts' gaps between anchors: (layout, segs, bad catch-ups, keeps [(a, e, us)], gaps [[n,
     total, file ticks, drawn]], dense = beats of EVERY gap whose two notes are under a tick apart at the part's
-    tempo (it stays faster there)). ticks = the ticks keeping their time (int64 array)."""
+    tempo (it stays faster there)). ticks = the ticks keeping their time (int64 array); loose = ticks keeping
+    their time only where they have room (CC messages, user 2026-10-23: never the tempo staying faster for one):
+    one under a tick from another is no anchor (file_plan's map puts it between its neighbours)."""
     lay = layout(tempo, base, ppq)
-    segs, bad = file_segments(tempo, base, ppq, int(ticks.max()) + 1 if len(ticks) else 0)
-    last_tick = int(ticks.max()) if len(ticks) else 0
+    loose = np.zeros(0, np.int64) if loose is None else np.setdiff1d(loose, ticks)
+    every_tick = np.concatenate([ticks, loose])
+    segs, bad = file_segments(tempo, base, ppq, int(every_tick.max()) + 1 if len(every_tick) else 0)
+    last_tick = int(every_tick.max()) if len(every_tick) else 0
     # a part on to the song's end stops at the last note (not a tick past it: no gap there to count)
     keeps = [(a, last_tick if e is None else e, u) for _, a, e, u in lay["keeps"]]
     keeps = [(a, e, u) for a, e, u in keeps if e > a]
@@ -181,15 +185,27 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None):
         marks = [np.array([a, e], np.int64), inside]
         if fit_bars:
             marks.append(bars[(bars > a) & (bars < e)])
-        n = np.unique(np.concatenate(marks))
         drawn = _per_tick(segs, a, e)
         sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
-        d = np.diff(n)
-        total = d * u
-        exact = total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)  # (file ticks each gap needs at the drawn tempo)
-        real = np.isin(n, ticks)
-        close = real[:-1] & real[1:] & (exact < 1)  # (two notes under a tick apart at that tempo)
-        dense += (n[:-1][close] / ppq).tolist()
+        lo = loose[(loose > a) & (loose < e)]
+        while True:
+            n = np.unique(np.concatenate(marks + [lo]))
+            d = np.diff(n)
+            total = d * u
+            exact = total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)  # (file ticks each gap needs at the tempo)
+            note = np.isin(n, ticks)
+            real = note | np.isin(n, lo)
+            close = real[:-1] & real[1:] & (exact < 1)  # (two under a tick apart at that tempo)
+            if not len(lo):
+                break
+            # a loose one too close gives way (the later of the two when both are)
+            j = np.flatnonzero(close)
+            drop = np.where(~note[j + 1], n[j + 1], np.where(~note[j], n[j], -1))
+            drop = drop[drop >= 0]
+            if not len(drop):
+                break
+            lo = np.setdiff1d(lo, drop)
+        dense += (n[:-1][close & note[:-1] & note[1:]] / ppq).tolist()
         # rounded on a running total, so the part keeps the drawn tempo on average (gap by gap, regular spam
         # rounded the same way every time: 60 BPM came out 48)
         k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
@@ -206,12 +222,13 @@ def dense_spots(tempo, base, ppq, beats, ticks):
     return keep_gaps(tempo, base, ppq, beats, np.asarray(ticks, np.int64).ravel())[5]
 
 
-def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
+def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=()):
     """What a MIDI file gets: {"events": [(tick, us)] tick 0 first, "bad": beats of catch-up lines that can't work,
     "sigs": [(tick, top, bottom power)] time signatures, "map": Spiderweb tick(s) -> file tick(s), "jumps": beats of
     the first note starting inside each jump, "hz": beats of Hz bass notes where the heard tempo isn't the project's,
     "dense": where notes in a Keep timing part are closer than one tick at its tempo (it stays faster there)}.
-    ticks = every tick that must keep its time (note starts / ends, CC messages); starts = the note starts; hz =
+    ticks = every tick that must keep its time (note starts / ends); loose = ticks keeping it where they have room
+    (CC messages: keep_gaps); starts = the note starts; hz =
     (starts, ends) of the Hz basses' notes. Spiderweb's own ticks, the project's PPQ."""
     out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": file_sigs(tempo, ppq),
            "keys": file_keys(tempo, ppq),
@@ -221,9 +238,10 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     start_u = base_us(base)
     out["events"] = [(0, start_u)]
     ticks = np.asarray(ticks, np.int64).ravel()
-    upto = max([int(ticks.max()) if len(ticks) else 0] + [beat_tick(p[0], ppq) for p in tempo["points"]])
+    loose = np.asarray(loose, np.int64).ravel()
+    upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
     bars = bar_ticks(tempo, ppq, upto)
-    lay, segs, out["bad"], keeps, gaps, out["dense"] = keep_gaps(tempo, base, ppq, beats, ticks, bars)
+    lay, segs, out["bad"], keeps, gaps, out["dense"] = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose)
     end = segs[-1][1]
     every = tempo.get("every", EVERY)
     fit_bars = tempo.get("bars", True)
@@ -277,9 +295,19 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     bp_n, bp_f = np.array(bp_n, np.int64), np.array(bp_f, np.int64)
 
     def to_file(t):
+        # between two anchors: the same share of the way (a CC message that gave way, keep_gaps), never onto the
+        # anchor before when there's room (one a tick after a note stays after it)
         t = np.asarray(t, np.int64)
         i = np.searchsorted(bp_n, t, "right") - 1
-        return bp_f[i] + (t - bp_n[i])
+        out = bp_f[i] + (t - bp_n[i])
+        j = np.minimum(i + 1, len(bp_n) - 1)
+        d, fd = bp_n[j] - bp_n[i], bp_f[j] - bp_f[i]
+        mid = (j > i) & (t > bp_n[i]) & (d > 0) & (fd != d)
+        if np.any(mid):
+            share = bp_f[i] + np.rint((t - bp_n[i]) * fd / np.maximum(d, 1)).astype(np.int64)
+            share = np.where((share == bp_f[i]) & (fd >= 2), bp_f[i] + 1, share)
+            out = np.where(mid, share, out)
+        return out
 
     if keeps:
         out["map"] = to_file
