@@ -54,6 +54,7 @@ from window.panel_nested import NestedPanel
 from window.panel_tiles import TilesPanel
 from window.panel_ripples import RipplesPanel
 from window.panel_freehand import FreehandPanel
+from window.panel_lasso import LassoPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_pattern import PatternPanel
 from window.panel_polygon import PolygonPanel
@@ -105,7 +106,8 @@ PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1
         3840, 4096, 5760, 7680, 8192, 11520, 12288, 15360, 16384, 23040, 24576, 30720, 32768, 36864,
         46080, 49152, 65535]
 TOOLS = [("select", tr("app.select"), "v"), ("slice", tr("app.slice"), "k"), ("lasso", tr("app.lasso"), "j")]
-LASSO_MODES = [("free", tr("app.lasso_free")), ("poly", tr("app.lasso_poly"))]  # (the Lasso button's ▾)
+LASSO_MODES = [("free", tr("app.lasso_free")), ("poly", tr("app.lasso_poly")),
+               ("magnet", tr("app.lasso_magnet"))]  # (the Lasso button's ▾)
 # in the drawing tools' list (tool_picker.py), in this order
 DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), ("free", tr("app.freehand"), "f"),
               ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
@@ -221,7 +223,7 @@ def cc_texts(shapes, mode):
                                    for sh in shapes))
 
 
-class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
+class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         super().__init__()
@@ -344,8 +346,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._normal_geometry = None
 
         self.tool = tk.StringVar(value="select")  # (each tool's tip shows when it's picked, see help.py)
-        self.lasso_mode = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points)
+        self.lasso_mode = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points) /
+        #                                               "magnet" (clings to the notes)
         self.lasso_mode.trace_add("write", lambda *_: hasattr(self, "roll") and self.roll.drop_lasso(unfinished=True))
+        self.lasso_mode.trace_add("write", lambda *_: hasattr(self, "lasso_box") and self.sync_lasso())
+        self.lasso_width = tk.IntVar(value=10)  # Magnetic: how far from the mouse it looks for a note corner (px)
         # (another mode picked: a loop not closed yet goes, the next press starts one of the new kind; hunt)
         self.tips = Tips(self)
         self.updates = Updates(self)
@@ -569,6 +574,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._build_project(side)
         self._build_history(side)
         self._build_shape_list(side)
+        self._build_lasso(side)
         self._build_shape_settings(side)
         self.settings.bind("<Configure>", lambda e: self.after_idle(self.fit_side), add="+")
 
@@ -2243,6 +2249,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         #                                                       pointer it had was skipped)
         self.tool_picker.tool_changed()
         self.sync_freehand()
+        self.sync_lasso()
         self.sync_text()
         self.sync_custom()
         self.sync_funnel()

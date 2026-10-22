@@ -250,7 +250,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         same (user 2026-10-22: only while the mouse is at or past the edge)."""
         self.box_timer = None
         kind = self.drag[0] if self.drag else None
-        moving = kind == "move" and self.box_moving or kind in ("lasso_free", "lasso_poly", "lasso_point")
+        moving = kind == "move" and self.box_moving or kind is not None and kind.startswith("lasso")
         if kind != "box" and not moving or self.sx is None:
             return
         mx, my, state = self.box_mouse
@@ -354,7 +354,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
         return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
-                                                     "sustop", "lasso_free", "lasso_poly", "lasso_point")
+                                                     "sustop", "lasso_free", "lasso_poly", "lasso_point",
+                                                     "lasso_magnet")
 
     @staticmethod
     def reach(shapes):

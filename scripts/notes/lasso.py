@@ -3,6 +3,7 @@ cuts pasted notes where it goes (holes / bites, it needn't go all the way across
 loop crosses is cut there, EVERY SLIVER KEPT (no note lost), and the pieces go to two shapes, inside and outside.
 Inside = the loop going round it (a figure-8: both halves inside, user); the row's middle decides, like the Slice
 tool's line."""
+import heapq
 import math
 
 import numpy as np
@@ -214,6 +215,136 @@ def smooth_loop(xy):
     pts = [list(c[3 * k]) for k in range(n)]
     hd = [[list(c[3 * k - 1] if k else c[-2]), list(c[3 * k + 1]), k == 0 or k in sharp] for k in range(n)]
     return pts, hd
+
+
+# ---------------------------------------------------------------- Magnetic (user 2026-10-22, planned-features.md)
+# The loop clings to the notes it can cut: it runs BETWEEN key rows (along notes' tops / bottoms) and up / down only
+# on a note's start or end, so it never cuts a note. Found as the cheapest way along that grid, a step along a
+# note's edge costing its length on screen, one through empty space OPEN times that (so it hugs the notes).
+
+OPEN = 4.0  # a step through empty space costs this many times one along a note's edge
+THROUGH = 1000.0  # (cutting through a note: only when there's no other way in reach)
+PAD_PX = 40  # the path may go this far round past its two ends (screen pixels)
+MOST_NODES = 60000  # a bigger grid (very many notes in reach) = a straight line instead
+
+
+def magnet_rows(notes, ppq):
+    """The notes the loop clings to, (start, end, key) ticks -> {key: (starts, ends)} sorted, in beats."""
+    out = {}
+    if not len(notes):
+        return out
+    notes = np.asarray(notes, np.int64)
+    order = np.argsort(notes[:, 2], kind="stable")
+    keys = notes[order, 2]
+    cut = np.flatnonzero(np.diff(keys)) + 1
+    for part in np.split(order, cut):
+        s, e = notes[part, 0], notes[part, 1]
+        ok = e > s
+        out[int(notes[part[0], 2])] = (np.sort(s[ok]) / ppq, np.sort(e[ok]) / ppq)
+    return out
+
+
+def magnet_spot(rows, pt, sx, sy, width):
+    """Where the loop goes for the mouse at pt (beat, key): the nearest note corner (a start / end on a row's top or
+    bottom) within width screen pixels, else the mouse's time on the nearest line between key rows."""
+    level = round(pt[1] - 0.5) + 0.5
+    best = None
+    dk = width / sy
+    for k in range(math.floor(pt[1] - dk - 1), math.ceil(pt[1] + dk + 1) + 1):
+        got = rows.get(k)
+        if not got:
+            continue
+        t0, t1 = pt[0] - width / sx, pt[0] + width / sx
+        for arr in got:
+            for x in arr[np.searchsorted(arr, t0):np.searchsorted(arr, t1, "right")]:
+                for y in (k - 0.5, k + 0.5):
+                    d = math.hypot((x - pt[0]) * sx, (y - pt[1]) * sy)
+                    if d <= width and (best is None or d < best[0]):
+                        best = (d, [float(x), y])
+    return best[1] if best else [max(0.0, pt[0]), level]
+
+
+def _row_flags(rows, r, xs):
+    """Row r against the columns xs: (each gap between columns covered by a note, each column strictly inside a
+    note, each column on a note's start / end)."""
+    got = rows.get(r)
+    n = len(xs)
+    if not got:
+        return np.zeros(n - 1, bool), np.zeros(n, bool), np.zeros(n, bool)
+    s, e = got
+    mid = (xs[:-1] + xs[1:]) / 2
+    cover = np.searchsorted(s, mid, "right") - np.searchsorted(e, mid, "right") > 0
+    inside = np.searchsorted(s, xs, "left") - np.searchsorted(e, xs, "right") > 0
+    on = np.zeros(n, bool)
+    for arr in (s, e):
+        i = np.minimum(np.searchsorted(arr, xs), len(arr) - 1)
+        on |= arr[i] == xs
+    return cover, inside, on
+
+
+def magnetic_path(rows, a, b, sx, sy):
+    """The way from a to b (beat, key; keys on lines between rows, k + 0.5) clinging to the notes: points where it
+    turns, a first, b last; None when there'd be too much to look through."""
+    if a == b:
+        return [list(a)]
+    lo, hi = math.floor(min(a[1], b[1])) - 3, math.floor(max(a[1], b[1])) + 3
+    levels = np.arange(lo, hi + 1) + 0.5
+    t0, t1 = min(a[0], b[0]) - PAD_PX / sx, max(a[0], b[0]) + PAD_PX / sx
+    cols = [np.array([a[0], b[0], t0, t1])]
+    for r in range(lo, hi + 2):
+        got = rows.get(r)
+        if got:
+            for arr in got:
+                cols.append(arr[np.searchsorted(arr, t0):np.searchsorted(arr, t1, "right")])
+    xs = np.unique(np.concatenate(cols))
+    C, L = len(xs), len(levels)
+    if C * L > MOST_NODES:
+        return None
+    flags = {r: _row_flags(rows, r, xs) for r in range(lo, hi + 2)}  # (row r sits between levels r - 0.5, r + 0.5)
+    dx = np.diff(xs) * sx
+    hcost = [(dx * np.where(flags[lo + j][0] | flags[lo + j + 1][0], 1.0, OPEN)).tolist() for j in range(L)]
+    vcost = [(sy * np.where(flags[lo + j + 1][1], THROUGH, np.where(flags[lo + j + 1][2], 1.0, OPEN))).tolist()
+             for j in range(L - 1)]
+    start = int(np.searchsorted(xs, a[0])) + C * int(round(a[1] - levels[0]))
+    goal = int(np.searchsorted(xs, b[0])) + C * int(round(b[1] - levels[0]))
+    dist, came = {start: 0.0}, {}
+    heap = [(0.0, start)]
+    while heap:
+        d, node = heapq.heappop(heap)
+        if node == goal:
+            break
+        if d > dist[node]:
+            continue
+        j, i = divmod(node, C)
+        steps = []
+        if i > 0:
+            steps.append((node - 1, hcost[j][i - 1]))
+        if i < C - 1:
+            steps.append((node + 1, hcost[j][i]))
+        if j > 0:
+            steps.append((node - C, vcost[j - 1][i]))
+        if j < L - 1:
+            steps.append((node + C, vcost[j][i]))
+        for nxt, c in steps:
+            nd = d + c
+            if nd < dist.get(nxt, math.inf):
+                dist[nxt] = nd
+                came[nxt] = node
+                heapq.heappush(heap, (nd, nxt))
+    if goal not in dist:
+        return None
+    path = [goal]
+    while path[-1] != start:
+        path.append(came[path[-1]])
+    pts = [[float(xs[n % C]), float(levels[n // C])] for n in reversed(path)]
+    out = [pts[0]]  # (only where it turns)
+    for k in range(1, len(pts) - 1):
+        p, q, r = out[-1], pts[k], pts[k + 1]
+        if not (p[0] == q[0] == r[0] or p[1] == q[1] == r[1]):
+            out.append(q)
+    out.append(pts[-1])
+    out[0], out[-1] = list(a), list(b)
+    return out
 
 
 def tidy_loop(pts):

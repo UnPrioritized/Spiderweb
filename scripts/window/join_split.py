@@ -991,6 +991,15 @@ class JoinSplit:
                            trn("join_split.lasso_whole", len(whole), n=len(whole)))
         return True
 
+    def lasso_magnet_notes(self):
+        """The notes a Magnetic lasso clings to: those it can cut as they are (pasted notes, lines; with Select boxes
+        kept: only what they selected), (start, end, key) ticks."""
+        targets = sorted(self.sels) if self.roll.kept_box() else range(len(self.shapes))
+        got = [np.asarray(self.notes_of(self.shapes[i]))[:, :3] for i in targets
+               if self.lasso_pasted(self.shapes[i]) or self.lasso_line(self.shapes[i])]
+        got = [n for n in got if len(n)]
+        return np.concatenate(got).astype(np.int64) if got else np.zeros((0, 3), np.int64)
+
     def lasso_pasted(self, sh):
         """Pasted notes the lasso cuts as they are."""
         return (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
