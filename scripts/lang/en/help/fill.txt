@@ -60,9 +60,9 @@ With "Each key row by itself" (Left to right only), every row instead runs the w
 
 Low to high or Top to bottom (keys): each key gets its own gate. "Fit to the shape's edges" stretches or trims each row's first and last note so the notes reach exactly to the shape's edges, with no blank and nothing sticking out.
 
-Hz bass (Spam and Outline spam): spam so fast that the repeats sound like a tone. Tick it, then press Notes… to place the tones in the Hz bass window (one tone, or several, chords and slides; see Hz bass). The gate is worked out from the tone, the BPM and the PPQ. Every key is in step, so more keys make the tone thicker, not different.
+Hz bass (Spam and Outline spam): spam so fast that the repeats sound like a tone. Tick it, then press Notes… to place the tones in the Hz bass window (one tone, or several, chords and slides; see Hz bass). The gate is worked out from the tone, the tempo under the shape and the PPQ. Every key is in step, so more keys make the tone thicker, not different.
 
-A gate Range is switched off while Hz bass is on. If the BPM changes later, the panel says the tone is off now and shows an "Update Hz bass" button.
+A gate Range is switched off while Hz bass is on. If the tempo under it changes later, the panel says the tone is off now and shows an "Update Hz bass" button.
 
 Gaps: where the outline isn't closed (red dots in the drawer), Fill and Spam close it with straight lines, shown dashed, and the buttons turn orange. Loose ends that nearly touch (within 1/64 beat and 1 key) are joined to each other first. Every open part left is closed from its end back to its start.
 

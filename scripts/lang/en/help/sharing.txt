@@ -1,6 +1,6 @@
 Shapes can be shared as one line of text that starts with SPIDERWEB1:. Paste it anywhere as text to share it; whoever copies it can paste it into their own Spiderweb.
 
-On the piano roll, Ctrl+C copies the selected shapes and also puts that line on the clipboard (with a curve or stroke of a live shape picked, it copies only that, with no line). Only the shapes go along, not the PPQ, BPM or other settings, so they look the same in any project.
+On the piano roll, Ctrl+C copies the selected shapes and also puts that line on the clipboard (with a curve or stroke of a live shape picked, it copies only that, with no line). Only the shapes go along, not the PPQ, tempo or other settings, so they look the same in any project.
 
 Ctrl+V (or a Select double-click on empty space) pastes whichever you copied last, a shared line or shapes in Spiderweb: at the play line (or where you double-click), with the same spacing between the shapes.
 

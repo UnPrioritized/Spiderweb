@@ -6,6 +6,18 @@ What's new:
 
 • Lasso tool (J): draw a loop round notes and press Enter to cut out what's inside, a bite or a hole, and select it. Drag round, click points (Polygonal) or let it cling to the notes without cutting any (Magnetic). The loop waits for Enter, so you can drag its points and bend it with curve handles first. The drawer has it too, for cutting strokes. See Help → Lasso.
 
+• Conductor pane (View → Conductor pane): draw the tempo as a line under the piano roll, with jumps, glides, curves and formulas, and copy and paste it. Catch-up runs fast after a stop until the music is back on time. Keep timing changes the tempo while the music sounds the same, and Fit bar lines keeps the bar lines on the bars you hear. The ruler shows every tempo change. See Help → Conductor pane.
+
+• Time and key signatures: right-click in the Conductor pane. Bar lines and numbers follow them everywhere. They replace the Beats per bar box, and the start tempo is now the Conductor pane's point at bar 1 (no BPM box; old projects get that point by themselves).
+
+• A Hz bass stays in tune where the tempo changes under it. When the tempo there changes later, it says so in orange, with an Update button.
+
+• Paste from Domino brings the Conductor track's tempo and signatures, and keeps the notes' CC, pitch bend and program changes: Copy / Export to Domino give them back exactly. Copy to Domino carries the tempo and signatures too.
+
+• Menu bar: File, Edit, Shape, Tools, View and Help. File → New starts a new MIDI, Save writes into the file you opened, and the title bar shows the file's name (with * while there are unsaved changes).
+
+• A pasted shape as big as a whole song no longer covers the piano roll: click between its notes to drop the selection or place the play line. Esc drops the selection.
+
 • Hz bass MIDI CC lines: Cutoff, Expression, Channel volume, Pan and Pitch wheel, under a "MIDI CC" row in the Effects pane. They make no notes: they go into the MIDI as messages, and the player changes the sound with them. The synth window's Filter box (MIDI CC) draws the Cutoff line like a synth's filter, and the MOD tab can move its knobs. Voice box → CC → Own channel per note gives every note its own channel and its own lines (an Arpeggio's steps play on the held note's channel). The live keys play them too. The Hz bass window says in orange when the lines also change other shapes. See Help → Hz bass MIDI CC lines.
 
 • The mouse wheel changes a number box, dropdown or knob only after you click it, everywhere in Spiderweb. Scrolling a panel or the synth window past them no longer changes them by accident.

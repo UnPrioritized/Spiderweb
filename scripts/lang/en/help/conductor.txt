@@ -1,0 +1,80 @@
+Tick Conductor pane (top, or View) to show or hide it. The pane under the piano roll (below the velocity pane) holds what the MIDI's conductor track holds: the tempo line, time signatures and key signatures. Drag the bar above it to resize it.
+
+With no tempo points the song plays at 120 BPM, the MIDI standard. The tempo at the start is the point at bar 1: click there with the Line tool and type its BPM in the box below the tools. Projects saved with another BPM open with a point at bar 1 at that BPM.
+
+## Drawing the tempo
+
+Unlike many MIDI programs, the tempo here is a line you draw, like velocities: points where the BPM is set, and parts between them that hold, glide or curve.
+
+Line: click to add a point, drag to draw a line (it replaces the points in between). The new line keeps squares at its ends and a round handle in the middle until Enter, Esc or a click elsewhere: drag a square to move that end, the handle to bend the line. Ctrl+Z takes the whole line away.
+[clip:conductor-line]
+
+Formula: drawn like Line, but the part follows the formula in the box next to it (x goes from 0 at its first point to 1 at the next).
+
+Points and line ends snap onto note starts and ends nearby and onto other tempo points; otherwise they sit on whole ticks. Hold Shift for whole ticks only. BPM snap rounds the BPM (Off for any BPM).
+
+A click on a point where a curved part arrives makes a jump: the curve arrives there, and the tempo goes on from the second point at the same moment.
+
+Double right-click switches between Select and the last drawing tool.
+
+## Picking and changing
+
+Select: click a point, catch-up or part to pick it (the play line goes there too). Drag on empty space for a Select box over that whole time; Ctrl+drag adds another box. Drag inside the box to move what it picked, in time and BPM; Ctrl+drag copies it. Ctrl+A picks everything.
+
+Drag a point to move it. Double-click a point to type its BPM, or use the BPM box below the tools (drag its word like any number box). Delete removes the picked ones. Right-click gives a menu (right-click never deletes).
+
+A picked part shows its settings below the tools:
+
+• Part curve: Hold, then jump / Line / S-curve / Formula. Drag the round handle to bend a line; right-click it for an S-curve, double-click for straight again.
+
+• The dropdown beside it: Linear adds the same BPM every beat; Exponential grows by the same share every beat, good for huge spikes.
+
+• Keep timing: see below.
+
+Ctrl+C copies the picked stretch, Ctrl+X cuts it, Ctrl+V pastes it at the play line (a Select double-click on empty space pastes there). A paste replaces only that stretch; the tempo after it stays as it was. These keys work on the pane while it was the last thing you clicked.
+
+Interval: curved parts change the tempo every this many ticks (24 like many MIDI programs; 1 = every tick). The pane draws the steps the file will have.
+
+Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with every step up, so huge spikes and very slow stops fit on one screen. Fit shows the whole line. The wheel over the numbers on the left zooms, Shift+wheel or a drag there scrolls.
+
+The ruler above the piano roll shows each tempo change ("120 → 60", "60 ↗ 180"); rest the mouse on one for the exact BPMs. The number in the pane's top row is the exact tempo at the play line.
+[clip:conductor-ruler]
+
+## Catch-up
+
+A catch-up makes up for time: after a slow (or fast) stretch, the tempo runs faster (or slower) until the music is back where it would have been at the tempo heard before it.
+
+Right-click → Add catch-up BPM here, then two drags: first over the time it counts (the yellow area), then from there to where the catch-up should stop (the teal area). With a Select box kept, the box is the yellow area at once. Esc or right-click cancels.
+[clip:conductor-catch]
+
+Above: 120 BPM, a stop at 60 for one beat, then the catch-up runs at 140 BPM until the music is back on time when the line returns to 120.
+
+Drag the catch-up line to change how long the slow part holds, and the edges of the yellow and teal areas to change them (right-click an edge to set it back to automatic). Shapes: Flat, Fast, then slow, Slow, then fast, Up and down, or Formula; the first two have a round handle to bend them.
+
+The line below the tools says the BPM the catch-up needs. In red it can't work: the slow part is already too long, so move the line before the bar it names.
+
+## Keep timing
+
+Tick Keep timing on a picked part: its notes keep the time they had at the tempo heard just before it. The new tempo only changes how fast the piano roll scrolls in other programs; the music sounds the same. The export moves the notes in ticks to make it exact. The part after the last point can be picked too (to the song's end).
+[clip:conductor-keep]
+
+The purple area is a Keep timing part, and the dotted line is the tempo the notes keep.
+
+Notes closer than one tick at the slower tempo can't stay exact: there the tempo stays faster, and the pane shows an orange dashed line. A higher PPQ helps.
+
+Fit bar lines (top row, on at first): when Keep timing moves notes, the export adds time signatures so the bar lines in MIDI programs still sit on the bars you hear.
+
+## Time and key signatures
+
+Right-click in the pane → Add time signature here… or Add key signature here…. Each starts on the bar line at or before the click and shows as a short line from the pane's top edge ("3/4", "Ab Maj"). Right-click one to change or remove it (the first time signature can only be changed). The ruler shows them next to the bar number: "5 (3/4, Ab Maj)".
+[clip:conductor-signatures]
+
+Bar lines, bar numbers and the Bar snap follow the time signatures everywhere, the Hz bass window too. A time signature always starts a new bar: one left in the middle of a bar moves back to that bar's start.
+
+## Export and Domino
+
+Export MIDI, Copy to Domino and Export to Domino write the tempo line and the signatures, using only tempo values Domino keeps exactly. Copy to Domino puts them first: pick the Conductor track in Domino before pasting. Built-in playback follows the tempo line too.
+
+Paste from Domino brings in the tempo and signatures of the copied Conductor track. When the pane already has its own, Spiderweb asks: Replace that stretch, Add among them, or Notes only.
+
+A Hz bass stays in tune where the tempo changes under it. When the tempo under it changes later, the Hz bass window and the panel say so in orange: press Update Hz bass.

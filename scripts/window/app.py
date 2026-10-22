@@ -2399,7 +2399,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._tempo_height = self.tempo_box.winfo_height()
         return self._tempo_height
 
-    def toggle_tempo(self):
+    def toggle_tempo(self, tip=True):
         shown = list(map(str, self.panes.panes()))
         if self.show_tempo.get():
             if str(self.tempo_box) not in shown:
@@ -2408,6 +2408,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.update_idletasks()
             self.tempo_box.sync()
             self.tempo_pane.redraw()
+            if tip:
+                self.tips.show("conductor")
         else:
             self.tempo_height()
             self.tempo_pane.close_typing(True)

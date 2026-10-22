@@ -8,7 +8,7 @@ To change the keys it repeats later, drag the top or bottom side of its box on t
 
 The notes count from the shape's start: drag its left side and every note moves with it, keeping its length (nothing is stretched). Moving only the end leaves the notes where they are.
 
-With short gates the tone wobbles (Alternating) or is off (Fixed): an orange line in the panel says so. A higher PPQ fixes it. After the BPM changes, the tone is off: an orange line says so, and Update Hz bass makes it right again.
+With short gates the tone wobbles (Alternating) or is off (Fixed): an orange line in the panel says so. A higher PPQ fixes it. The tone follows the tempo under the shape, glides and jumps too (Conductor pane). When that tempo changes later, or the shape moves onto another tempo, the tone is off: an orange line says so, and Update Hz bass makes it right again.
 
 Any custom shape with Spam or Outline spam can have Hz bass too: tick Hz bass in the panel for one tone, or press Notes… to place notes for it. The shape keeps its length (notes past its end aren't used) unless Shape length follows the notes is ticked in the window's Hz settings….
 

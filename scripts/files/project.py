@@ -686,7 +686,7 @@ class ProjectFiles:
         def tempo():
             if win.get("tempo") is True:  # (after the velocity pane: it goes under it)
                 self.show_tempo.set(True)
-                self.toggle_tempo()
+                self.toggle_tempo(tip=False)
         kept(tempo)
 
     def schedule_autosave(self):
