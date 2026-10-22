@@ -36,8 +36,22 @@ def clean_sigs(data, beats=None):
     if 0 not in out:
         first = [0.0, int(beats), 4] if _num(beats) and TOPS[0] <= int(beats) <= TOPS[1] else list(DEFAULT)
         out[0] = first
-    sigs = [out[k] for k in sorted(out)]
-    return [s for i, s in enumerate(sigs) if i == 0 or s[1:] != sigs[i - 1][1:]]  # (the same again: nothing)
+    # (the same again stays: a mark like Domino's, hunt 2026-10-23: Change never deletes other marks)
+    return [out[k] for k in sorted(out)]
+
+
+def on_bars(sigs):
+    """Time signatures, in order, each moved back to the start of the bar it lands in (Domino's rule, user
+    2026-10-23: changing bar 3's 3/4 to 5/4 moved the 4/4 from bar 5 back to bar 4's start); two on one bar line:
+    the later one."""
+    out = []
+    for s in sorted(sigs, key=lambda s: s[0]):
+        b = round(bar_line(out, s[0]), 9) if out else s[0]
+        if out and abs(out[-1][0] - b) < 1e-9:
+            out[-1] = [b, *s[1:]]
+        else:
+            out.append([b, *s[1:]])
+    return out
 
 
 def clean_keysigs(data):

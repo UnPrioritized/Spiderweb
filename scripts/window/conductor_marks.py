@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr, trn
-from notes.meter import BOTTOMS, TOPS, at_beat, bar_line, key_name, sig_text, sigs_of
+from notes.meter import BOTTOMS, TOPS, at_beat, bar_line, key_name, on_bars, sig_text, sigs_of
 from window import look
 
 MARK_LEN = 10  # px (x the window's scale): a mark's line down from the pane's top edge
@@ -183,7 +183,7 @@ class ConductorMarks:
             sigs.append([round(at, 9), top, bottom])
         # (other marks always stay, a repeat of the one before too: changing bar 1 there and back deleted the later
         # ones, hunt 2026-10-23)
-        tempo["sigs"] = sorted(sigs, key=lambda s: s[0])
+        tempo["sigs"] = on_bars(sigs)  # (later ones now mid-bar: back to their bar's start, like Domino)
         self.keys_on_bars()
         self.app.meter_changed()
 
@@ -233,18 +233,19 @@ class ConductorMarks:
                 old = [m for m in old if not at - 1e-9 <= m[0] <= end + 1e-9 or key == "sigs" and m[0] == 0]
             for b, *rest in sorted(new, key=lambda m: m[0]):
                 pos = round(bar_line(cur, at + b), 9)
+                if not any(abs(m[0] - pos) < 1e-9 for m in old) and \
+                        (at_beat(old, pos) or [None])[1:] == rest:  # (a repeat of the one before: not added)
+                    continue
                 old = sorted([m for m in old if abs(m[0] - pos) >= 1e-9] + [[pos, *rest]], key=lambda m: m[0])
                 if key == "sigs":
                     cur = old
-            if how == "replace" and back is not None:
-                pos = round(bar_line(cur, end, after=True), 9)
-                if not any(abs(m[0] - pos) < 1e-9 for m in old) and (at_beat(old, pos) or [None])[1:] != back[1:]:
-                    old = sorted(old + [[pos, *back[1:]]], key=lambda m: m[0])
-                    if key == "sigs":
-                        cur = old
-            tempo[key] = [m for i, m in enumerate(old) if i == 0 or m[1:] != old[i - 1][1:]]
-            if key == "sigs":
-                cur = tempo[key]
+            if how == "replace" and back is not None and not any(abs(m[0] - end) < 1e-9 for m in old) \
+                    and (at_beat(old, end) or [None])[1:] != back[1:]:
+                old = sorted(old + [[round(end, 9), *back[1:]]], key=lambda m: m[0])
+            if key == "sigs":  # (mid-bar = back to its bar's start, Domino's rule)
+                old = on_bars(old)
+                cur = old
+            tempo[key] = old
             n += len(new)
         if n:
             self.keys_on_bars()
@@ -272,6 +273,7 @@ class ConductorMarks:
             return
         self.app.push_undo(name=tr("conductor.step_remove_time" if row == 0 else "conductor.step_remove_key"))
         tempo[key] = [m for m in marks if m is not mark]
-        if row == 0:  # (key signatures back on bar lines; others stay, a repeat too: hunt 2026-10-23)
+        if row == 0:  # (later ones now mid-bar back to their bar's start, like Domino; key signatures too)
+            tempo[key] = on_bars(tempo[key])
             self.keys_on_bars()
         self.app.meter_changed()
