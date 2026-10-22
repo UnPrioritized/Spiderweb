@@ -70,7 +70,7 @@ from notes.between import (copied as between_copied, keep_pushes, push_sizes, sy
                            whole_groups)
 from window.app_pictures import Pictures
 from window.app_playback import Playback
-from window.history import CH10_OFF, HistoryPanel
+from window.history import BOXES, CH10_OFF, HistoryPanel
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import painting_order
 from files import errors, speed
@@ -789,9 +789,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             Tooltip(b, tr(tip))
         btns = ttk.Frame(box)
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        ttk.Button(btns, text=tr("app.open"), command=self.open_project).pack(side="left")
-        ttk.Button(btns, text=tr("app.save"), command=self.save_project).pack(side="left", padx=4)
-        ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(side="right")
+        for c, (text, command) in enumerate((("app.new", self.new_project), ("app.open", self.open_project),
+                                             ("app.save", self.save_project), ("app.export_midi", self.generate))):
+            b = ttk.Button(btns, text=tr(text), command=command, width=1)  # (4 equal ones fill the row)
+            b.grid(row=0, column=c, sticky="ew", padx=(0 if c in (0, 3) else 2, 0 if c == 3 else 2))
+            btns.columnconfigure(c, weight=1, uniform="b")
+            if text == "app.new":
+                Tooltip(b, tr("app.new_tip"))
 
     def _build_shape_list(self, side):
         box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)
@@ -1650,6 +1654,34 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes.clear()
         self.select(None)
         self.shapes_changed()
+
+    def new_project(self):
+        """The Project tab's New: a new MIDI. The shapes and the tempo line go (their Select boxes / picks too); PPQ,
+        keys, the output file, channel settings and the Domino start stay; BPM and Beats per bar go back to MIDI's
+        120 and 4/4 (user). Asked first; one undo step, which brings the boxes back too (history._restore)."""
+        boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get())
+        try:
+            usual = calc(boxes[0]) == 120 and calc_int(boxes[1], 1, 32) == 4
+        except ValueError:
+            usual = False
+        if not self.shapes and not self.tempo["points"] and not self.tempo["catch"] and usual:
+            return
+        if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.new_ask"), icon="warning", parent=self):
+            return
+        self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes
+        self.push_undo(name=tr("app.new"))
+        state, name, sel, hz = self.undo_stack[-1]
+        self.undo_stack[-1] = (state, name, tuple(sel) + ((BOXES,) + boxes,), hz)  # (the step's mark: _restore)
+        self.shapes.clear()
+        self.tempo = empty_tempo()
+        self.tempo_pane.forget()
+        self.roll.box_kept = None
+        self.select(None)
+        self.pvar["bpm"].set("120")  # (each one remakes what hangs on it: on_project_change)
+        self.pvar["beats"].set("4")
+        self.tempo_changed()
+        self.shapes_changed()
+        self.sync_history()
 
     def duplicate(self):
         if not self.sels:

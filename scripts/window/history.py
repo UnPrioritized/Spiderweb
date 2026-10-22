@@ -16,6 +16,13 @@ from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
 CH10_OFF = "ch10_off"  # (an undo step's mark: made by unticking "Use channel 10", App.on_use_ch10)
+BOXES = "boxes"  # (an undo step's mark (BOXES, BPM, beats per bar): the Project boxes before it, App.new_project)
+
+
+def boxes_mark(step):
+    """An undo step's (BOXES, BPM, beats per bar) mark, or None."""
+    last = step[2][-1] if step[2] else None
+    return last if type(last) is tuple and last[:1] == (BOXES,) else None
 
 
 def _big_texts(sh):
@@ -165,7 +172,8 @@ class HistoryPanel:
         doesn't show in the History (before: the shapes as JSON / undo_state now, before the next change)."""
         before = as_state(before, self.shapes)
         if (self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack
-                and self.step_tempo(self.undo_stack[-1]) == json.dumps(self.tempo)):
+                and self.step_tempo(self.undo_stack[-1]) == json.dumps(self.tempo)
+                and not boxes_mark(self.undo_stack[-1])):  # (New with nothing to clear still set the boxes)
             kept = getattr(self, "_redo_kept", None)
             if kept and kept[1] == len(self.undo_stack):
                 self.redo_stack[:] = kept[0]  # (the steps undone before it are back)
@@ -425,8 +433,16 @@ class HistoryPanel:
         self.roll.cancel_draft()
         now, sel_now = undo_state(self.shapes), self.sel_state()
         ch10 = None
+        boxes = was_boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get())
         for _ in range(min(count, len(src))):
             state, name, picked, hz = src.pop()
+            got = boxes_mark((state, name, picked))
+            if got:  # (the boxes swap: this side gets the ones now, the boxes get the step's)
+                picked = tuple(picked[:-1])
+                dst.append((now, name, tuple(sel_now) + ((BOXES,) + boxes,), hz))
+                boxes = got[1:]
+                now, sel_now = state, picked
+                continue
             # (CH10_OFF last: unticking "Use channel 10" made it: undo ticks it; on the redo side (CH10_OFF, the tick
             # when it was undone): redo puts that back (ticked again by hand after the step = stays ticked))
             last = picked[-1]
@@ -441,6 +457,9 @@ class HistoryPanel:
             now, sel_now = state, picked
         if ch10 is not None:
             self.use_ch10.set(ch10)
+        if boxes != was_boxes:
+            self.pvar["bpm"].set(boxes[0])
+            self.pvar["beats"].set(boxes[1])
         state, picked = now, sel_now
         self._redo_kept = self._trimmed = None
         self.shapes = load_state(state)
