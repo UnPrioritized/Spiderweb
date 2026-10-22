@@ -14,6 +14,7 @@ tracks together. The start dropdown (DOMINO_STARTS) picks whether the empty lead
 the bar line) comes along, both ways.
 """
 
+import math
 import os
 import struct
 import zlib
@@ -446,10 +447,12 @@ def note_run(body, i):
     return got, i
 
 
-def read_notes(raw, top=127):
+def read_notes(raw, top=127, conductor=None):
     """Clipboard bytes -> (notes, ppq): (tick, gate, key, velocity, track) rows of every track's notes, ticks
-    counted from the start of the copied stretch, track = which copied track (0 = the first); ppq = the PPQ it was
-    copied at (None if missing). Keys above top left out (255: Domino's 256 keys mod). ValueError if raw isn't
+    counted from the start of the copied stretch, track = which copied track (0 = the first; a Conductor track
+    isn't counted); ppq = the PPQ it was copied at (None if missing). Keys above top left out (255: Domino's 256
+    keys mod). conductor = a dict: filled with "tempo" [(tick, BPM)] (a Conductor track's tempos, in tick order,
+    one per tick: the last) and "length" (the copied stretch's ticks, 0 if missing). ValueError if raw isn't
     Domino's data."""
     if not raw.startswith(MAGIC) or len(raw) < len(MAGIC) + 4:
         raise ValueError(tr("domino_clip.not_domino_s_data"))
@@ -457,16 +460,31 @@ def read_notes(raw, top=127):
         data = zlib.decompress(raw[len(MAGIC) + 4:])
     except zlib.error:
         raise ValueError(tr("domino_clip.domino_s_data_is_damaged")) from None
-    runs, odd, ppq, track = [], [], None, -1
+    runs, odd, ppq, track, tempo, length = [], [], None, -1, {}, 0
     for tag, body in items(data):
         if tag == 1002 and len(body) == 2:
             ppq = struct.unpack("<H", body)[0]
         if tag != 1003:
             continue
         track += 1
-        i = 0
+        i, cond = 0, False
         while i + 6 <= len(body):
             t, n = struct.unpack_from("<HI", body, i)
+            if t == 1003 and n == 1 and i + 7 <= len(body) and body[i + 6] == 1 and not cond:
+                cond = True  # (Domino's Conductor track: tempos, no notes; the next track is the first)
+                track -= 1
+            elif t in (2008, 2009) and i + 6 + n <= len(body):
+                f = dict(items(body[i + 6:i + 6 + n]))
+                at = int.from_bytes(f[1001], "little") if len(f.get(1001, b"")) == 4 else None
+                if t == 2009 and at is not None:
+                    length = max(length, at)
+                bpm = dict(items(f.get(2001, b""))).get(0, b"")
+                if t == 2008 and cond and at is not None and len(bpm) == 4:
+                    v = struct.unpack("<f", bpm)[0]
+                    if math.isfinite(v) and v > 0:
+                        tempo[at] = v
+                i += 6 + n
+                continue
             if t == 2001 and n == NOTE.itemsize - 6:  # notes in the usual layout: all of them at once
                 got, i = note_run(body, i)
                 runs += [(r, track) for r in got]
@@ -481,6 +499,8 @@ def read_notes(raw, top=127):
                     odd.append((int.from_bytes(f[1001], "little"), int.from_bytes(f[2003], "little"),
                                 f[2001][0], vel[0], track))
             i += 6 + n
+    if conductor is not None:
+        conductor.update(tempo=sorted(tempo.items()), length=length)
     rows = np.concatenate([np.column_stack([r["tick"], r["gate"], r["key"], r["vel"],
                                             np.full(len(r), k)]).astype(np.int64) for r, k in runs]
                           + [np.array(odd, np.int64).reshape(-1, 5)])

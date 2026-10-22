@@ -47,6 +47,50 @@ def ids(items):
     return {id(it) for it in items}
 
 
+def ask_domino(parent, n, notes):
+    """Paste from Domino with tempo changes while the Tempo pane has points: "replace" (that stretch), "add" (among
+    the points), "notes" (notes only; offered only when notes come too) or None (nothing pasted)."""
+    win = tk.Toplevel(parent)
+    win.withdraw()
+    win.title(tr("tempo.domino_title"))
+    win.resizable(False, False)
+    win.transient(parent.winfo_toplevel())
+    body = ttk.Frame(win, padding=(14, 14, 14, 8))
+    body.pack(fill="both", expand=True)
+    ttk.Label(body, image="::tk::icons::question").grid(row=0, column=0, sticky="n", padx=(0, 12))
+    text = trn("tempo.domino_ask", n, n=n) + "\n\n" + tr("tempo.domino_how") + (
+        "\n" + tr("tempo.domino_how_notes") if notes else "")
+    ttk.Label(body, text=text, wraplength=440, justify="left").grid(row=0, column=1, sticky="w")
+    btns = ttk.Frame(win, padding=(14, 4, 14, 12))
+    btns.pack(fill="x")
+    answer = [None]
+
+    def close(how):
+        answer[0] = how
+        win.destroy()
+    ttk.Button(btns, text=tr("tempo.domino_cancel"), command=lambda: close(None)).pack(side="right")
+    if notes:
+        ttk.Button(btns, text=tr("tempo.domino_notes"), command=lambda: close("notes")).pack(side="right", padx=(0, 6))
+    ttk.Button(btns, text=tr("tempo.domino_add"), command=lambda: close("add")).pack(side="right", padx=(0, 6))
+    first = ttk.Button(btns, text=tr("tempo.domino_replace"), command=lambda: close("replace"))
+    first.pack(side="right", padx=(0, 6))
+    win.bind("<Return>", lambda e: e.widget.invoke() if isinstance(e.widget, ttk.Button) else close("replace"))
+    win.bind("<Escape>", lambda e: close(None))
+    win.protocol("WM_DELETE_WINDOW", lambda: close(None))
+    win.update_idletasks()
+    top = parent.winfo_toplevel()
+    x = top.winfo_rootx() + (top.winfo_width() - win.winfo_reqwidth()) // 2
+    y = top.winfo_rooty() + (top.winfo_height() - win.winfo_reqheight()) // 3
+    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+    from window.widgets import remember_place
+    remember_place(win, "domino_tempo")
+    win.deiconify()
+    win.grab_set()
+    first.focus_set()
+    win.wait_window()
+    return answer[0]
+
+
 def joined(spans):
     """Select boxes (first, last beat) sorted, the ones touching or overlapping joined into one (a jump on the
     edge two boxes share was lost, hunt 2026-10-22)."""
@@ -1672,6 +1716,33 @@ class TempoPane(tk.Canvas):
         if new_p:
             new_p = self.lay_points(tempo["points"], new_p, spans, self.base())
         self.bands, self.sel, self.part = [(lo, hi) for lo, hi in spans if hi > lo], new_p + new_c, None
+        self.app.tempo_changed()
+
+    def put_domino(self, tempos, at, length, how, push):
+        """Tempo changes pasted from Domino ([(beat from the paste's start, BPM)], each held to the next, as in
+        Domino) from beat at (project.paste_from_domino). how: "replace" = like a paste of the stretch at ..
+        at + length (the tempo round it as it was: back on its end, like Copy to Domino's own copy), "add" = put
+        in among the points, each held to the next point (what was there leaving that beat replaced, what
+        arrives kept). push: its own undo step (no notes pasted with it)."""
+        new = [[b, bpm, "hold", "", "lin", False, list(BEND)] for b, bpm in tempos]
+        if how == "replace":
+            clip = {"length": length, "points": new, "catch": [], "spans": [(0.0, length)]}
+            self.put_copies(clip, at, tr("project.paste_from_domino"), push)
+            return
+        if push:
+            self.app.push_undo(name=tr("project.paste_from_domino"))
+        pts, base = self.app.tempo["points"], self.base()
+        for p in new:
+            p[0] += at
+            split_at(pts, p[0], base)
+            on = [i for i, q in enumerate(pts) if abs(q[0] - p[0]) < 1e-9]
+            if len(on) == 2:
+                del pts[on[1]]
+            p[0] = pts[on[0]][0]  # (on that beat exactly: a pair)
+            pts.insert(on[0] + 1, p)
+        drop_loose(pts)
+        alive = ids(pts)
+        self.bands, self.sel, self.part = [], [p for p in new if id(p) in alive], None
         self.app.tempo_changed()
 
     @staticmethod

@@ -241,6 +241,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.clipboard = None
         self.tempo_clip = None  # the Tempo pane's copy (tempo_pane.copy): its own, never the Windows clipboard
         self.seen_clip = None  # the Windows clipboard's copy count at Spiderweb's last copy (shared_clip)
+        self.own_domino_copy = None  # ... and at its last Copy to Domino (paste_from_domino)
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
         self.out = MidiOut(self.make_live)

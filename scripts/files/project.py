@@ -28,7 +28,7 @@ from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
-from notes.tempo import clean_tempo, has_tempo
+from notes.tempo import clamp_bpm, clean_tempo, has_tempo
 from notes.tempo_file import bar_line, file_plan
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
@@ -44,6 +44,7 @@ from files.snap import clean_snap
 from files.unzip import allowance
 from files.update_check import version_tuple
 from window.big_ask import ask as ask_big, ask_drums
+from window.tempo_pane import ask_domino
 
 AUTOSAVE = os.path.join(USER, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -984,7 +985,8 @@ class ProjectFiles:
         if not copied:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
-        what = ((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
+        self.own_domino_copy = clipboard.copy_count()  # (pasted straight back: its tempo isn't asked about)
+        what =((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
                 trn("project.all_notes", len(notes), n=len(notes)))
         where = (tr("project.the_conductor_track") if plan else
                  tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks))
@@ -1025,21 +1027,29 @@ class ProjectFiles:
         """Ctrl+V (app.paste, when they were copied last): the notes copied in Domino as one shape (custom.py's pasted notes), placed like Domino
         pastes: the start of what was copied (or its first note, see domino_start) on the play line (snapped to the
         grid), or at beat `at` (a Select double-click: the mouse, snapped already). Every track's notes go into
-        the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ)."""
+        the one shape; controllers and other events are left out. Ticks are taken as they are (same PPQ).
+        A copy holding Domino's Conductor track brings its tempo changes into the Tempo pane too, from the same
+        place (each held to the next, as in Domino; user 2026-10-22): an empty pane takes them as they are; else
+        asked (ask_domino): replace that stretch / add among the points / notes only. Not when it's Spiderweb's
+        own Copy to Domino coming back (its tempo is the pane's already)."""
         if not clipboard.RAW:
             messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
             return
         self.busy(tr("project.pasting_from_domino"))  # (millions of notes take a few seconds)
+        cond, shift, sh = {}, 0, None
         try:
             raw = get_from_clipboard()
-            notes, their_ppq = read_notes(raw, 255) if raw else (None, None)
+            notes, their_ppq = read_notes(raw, 255, cond) if raw else (None, None)
+            tempos = [] if clipboard.copy_count() == self.own_domino_copy else cond.get("tempo", [])
             high = 0
             if notes is not None and not (self.domino256.get() and self.keys > 128):  # (the mod's keys above 127)
                 high = int((notes[:, 2] > 127).sum())
                 notes = notes[notes[:, 2] <= 127]
-            if notes is not None and len(notes):
+            if notes is not None and (len(notes) or tempos):
                 if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
-                    notes[:, 0] -= notes[:, 0].min()
+                    shift = int(notes[:, 0].min()) if len(notes) else tempos[0][0]
+                    notes[:, 0] -= shift
+            if notes is not None and len(notes):
                 sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults,
                                   **notes_shape(notes, self.ppq, tr("project.pasted_notes"))})
         except ValueError as e:
@@ -1053,13 +1063,29 @@ class ProjectFiles:
         if raw is None:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
-        if notes is None or not len(notes):
+        if notes is None or not (len(notes) or tempos):
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_from_domino_on_the") if notes is None else
                                  tr("project.what_was_copied_in_domino_has"))
             return
-        if not self.confirm_big([sh]):
+        if sh is not None and not self.confirm_big([sh]):
             return
+        how = None
+        if tempos:  # (from the paste's start, beats; one before it = what's in effect there, on its start)
+            before = [(t, v) for t, v in tempos if t <= shift][-1:]
+            tempos = [(0, v) for _, v in before] + [(t - shift, v) for t, v in tempos if t > shift]
+            tempos = [(t / self.ppq, clamp_bpm(float(f"{v:.7g}"))) for k, (t, v) in enumerate(tempos)
+                      if k == 0 or v != tempos[k - 1][1]]  # (Domino's 32-bit BPM: 133.33, not 133.330002)
+            how = "replace" if not self.tempo["points"] else ask_domino(self, len(tempos), sh is not None)
+            if how is None:
+                return
+            if how == "notes":
+                if sh is None:
+                    return
+                tempos = []
+        ends = [int((notes[:, 0] + notes[:, 1]).max())] if len(notes) else []
+        length = max([(cond.get("length", 0) - shift) / self.ppq, 1 / self.ppq] + [e / self.ppq for e in ends]
+                     + [b for b, _ in tempos])  # (the stretch Replace takes: the copy's, past its notes / tempo)
         if at is None:
             at, sb = self.playhead, self.snap_beats()
             if sb:
@@ -1067,12 +1093,20 @@ class ProjectFiles:
         self.roll.cancel_draft()
         self.busy(tr("project.pasting_from_domino"))
         try:
-            self.add_copies([sh], at, tr("project.paste_from_domino"))
+            if sh is not None:
+                self.add_copies([sh], at, tr("project.paste_from_domino"))
+            if tempos:
+                self.tempo_pane.put_domino(tempos, at, length, how, sh is None)
         finally:
             self.busy(None)
         n = len(notes)
         note = (tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq) if their_ppq and their_ppq != self.ppq
                 else "") + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
-        self.status.config(text=tr("project.pasted_one_note_from_domino", note=note) if n == 1 else
-                           tr("project.pasted_note_from_domino_as_one", n=n, note=note))
+        if sh is None:
+            self.status.config(text=trn("project.pasted_tempo_from_domino", len(tempos), n=len(tempos)) + note)
+        else:
+            tempo = trn("project.pasted_tempo_too", len(tempos), n=len(tempos)) if tempos else (
+                tr("project.pasted_tempo_left_out") if how == "notes" else "")
+            self.status.config(text=(tr("project.pasted_one_note_from_domino", note=note) if n == 1 else
+                                     tr("project.pasted_note_from_domino_as_one", n=n, note=note)) + tempo)
         self.tips.show("domino", wait=True)
