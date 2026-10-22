@@ -10,7 +10,7 @@ import numpy as np
 
 from notes.hz_settings import (ADSR_KNOBS, FILTER_KNOBS, FILTER_START, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE,
                                NEUTRAL, VIBRATO, VIBRATO_RATE, bend_range, clean_tempo_steps, hz_of, tempo_at,
-                               tempo_changes)
+                               tempo_changes, tempo_key, keyed_tempo)
 from notes.hz_lines import adsr_line, filter_line, note_bend
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
@@ -474,8 +474,9 @@ def vibrato_keys(hz, beat, tone, before=None):
 
 @functools.lru_cache(maxsize=16)
 def _heard(hz_json, left, ppq, bpm):
-    hz = dict(json.loads(hz_json), _memo={})
-    played = {"bpm": bpm[0][1], "tempo": [list(p) for p in bpm]} if isinstance(bpm, tuple) else {"bpm": bpm}
+    hz = dict(hz_of_text(hz_json), _memo={})
+    played = {"bpm": keyed_tempo(bpm[1])[0][1], "tempo": keyed_tempo(bpm[1])} if isinstance(bpm, tuple) \
+        else {"bpm": bpm}
     out, runs = [], list(tone_runs(hz, left, ppq))
     after = follows(hz, [(s[0], e[-1], w[0], w[1]) for s, e, w in runs])
     lasts = {}
@@ -506,14 +507,41 @@ def heard(hz, left, ppq, bpm):
     The pitch is counted from the shape's own tuning (hz["cents"]), so a key's exact tone is that key. bpm: the
     tempo it's played at, a number or a tempo line [[beat from the left edge, BPM], ...] (clean_tempo_steps)."""
     if isinstance(bpm, (list, tuple)):
-        steps = clean_tempo_steps([list(p) for p in bpm])
-        bpm = tuple(tuple(p) for p in steps) if steps else float(bpm[0][1])
-    return _heard(json.dumps(live(hz, left), sort_keys=True), left, ppq, bpm if isinstance(bpm, tuple) else float(bpm))
+        steps = bpm if _cleaned(bpm) else clean_tempo_steps([list(p) for p in bpm])
+        bpm = ("tempo", tempo_key(steps)) if steps else float(bpm[0][1])
+    return _heard(hz_text(live(hz, left)), left, ppq, bpm if isinstance(bpm, tuple) else float(bpm))
+
+
+def hz_text(hz):
+    """hz as the text a remembered result is found by; its tempo line (thousands of steps under a glide) as a key,
+    not written out every redraw (hz_of_text gives it back)."""
+    return json.dumps(dict(hz, tempo=tempo_key(hz["tempo"])) if hz.get("tempo") else hz, sort_keys=True)
+
+
+def hz_of_text(text):
+    hz = json.loads(text)
+    if isinstance(hz.get("tempo"), int):
+        hz["tempo"] = keyed_tempo(hz["tempo"])
+    return hz
+
+
+_CLEAN = {}  # id(tempo line) -> the line, once found clean (clean_tempo_steps): the same line every redraw
+
+
+def _cleaned(steps):
+    if _CLEAN.get(id(steps)) is steps:
+        return True
+    if not isinstance(steps, list) or clean_tempo_steps([list(p) for p in steps]) != steps:
+        return False
+    if len(_CLEAN) > 16:
+        _CLEAN.clear()
+    _CLEAN[id(steps)] = steps
+    return True
 
 
 @functools.lru_cache(maxsize=16)
 def repeat_squares(hz_json, left, ppq):
-    hz = dict(json.loads(hz_json), _memo={})
+    hz = dict(hz_of_text(hz_json), _memo={})
     got = [s for s, _, _ in tone_runs(hz, left, ppq)]
     if not got:
         return np.zeros((0, 2), np.int64)

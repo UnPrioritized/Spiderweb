@@ -194,7 +194,8 @@ def clean_tempo_steps(steps):
     return out if len(out) > 1 and out[0][0] == 0 else None
 
 
-_LINES = {}  # id(tempo line) -> (the line, its beats, its BPMs, as lists and arrays): read once, not per wave
+_LINES = {}  # id(tempo line) -> (the line, its beats, its BPMs, as lists and arrays, its key): read once, not per wave
+_KEYED = {}  # tempo_key -> the line
 
 
 def _line(steps):
@@ -203,8 +204,23 @@ def _line(steps):
         if len(_LINES) > 64:
             _LINES.clear()
         at, vals = [b for b, _ in steps], [v for _, v in steps]
-        got = _LINES[id(steps)] = (steps, at, vals, np.array(at), np.array(vals))
+        got = _LINES[id(steps)] = (steps, at, vals, np.array(at), np.array(vals), hash((tuple(at), tuple(vals))))
     return got
+
+
+def tempo_key(steps):
+    """A short number standing for a tempo line's content (a remembered result's key, instead of writing out
+    thousands of steps every redraw); keyed_tempo gives the line back."""
+    key = _line(steps)[5]
+    if key not in _KEYED:
+        if len(_KEYED) > 64:
+            _KEYED.clear()
+        _KEYED[key] = steps
+    return key
+
+
+def keyed_tempo(key):
+    return _KEYED[key]
 
 
 def tempo_at(hz, beats):
@@ -213,7 +229,7 @@ def tempo_at(hz, beats):
     steps = hz.get("tempo")
     if not steps:
         return hz["bpm"] if np.isscalar(beats) else np.full(np.shape(beats), float(hz["bpm"]))
-    _, at, vals, at_a, vals_a = _line(steps)
+    _, at, vals, at_a, vals_a, _ = _line(steps)
     if np.isscalar(beats):
         return float(vals[max(bisect.bisect_right(at, beats + 1e-9) - 1, 0)])
     return vals_a[np.maximum(np.searchsorted(at_a, np.asarray(beats, float) + 1e-9, "right") - 1, 0)]

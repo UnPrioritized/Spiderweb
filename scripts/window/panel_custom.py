@@ -1,6 +1,7 @@
 """The side panel's custom shape settings (which shape, how it's filled) and the drawer window."""
 
 import copy
+import json
 import math
 import tkinter as tk
 
@@ -689,6 +690,15 @@ class CustomPanel:
             return None if base is None else (base, None)
         left, end = self.hz_span(sh, hz or sh.get("hz") or {})
         ppq = ppq or self.ppq
+        key = (json.dumps(self.tempo), base, ppq, left, end)
+        memo = self.__dict__.setdefault("_hz_now", {})  # (every redraw of the Hz window asks: thousands of steps
+        if key not in memo:                              # under a glide, worked out once)
+            if len(memo) > 32:
+                memo.clear()
+            memo[key] = self._hz_tempo_now(base, left, end, ppq)
+        return memo[key]
+
+    def _hz_tempo_now(self, base, left, end, ppq):
         runs = heard_tempo(self.tempo, base, ppq, int(end * ppq) + 2)
         if not runs:
             return base, None
@@ -710,7 +720,7 @@ class CustomPanel:
         out = {k: v for k, v in hz.items() if k not in ("tempo", "tempo_ppq")}
         out["bpm"] = float(now[0])
         if now[1]:
-            out["tempo"], out["tempo_ppq"] = now[1], self.ppq
+            out["tempo"], out["tempo_ppq"] = [list(p) for p in now[1]], self.ppq  # (a copy: now is remembered)
         return out
 
     def hz_reached(self, old, new):

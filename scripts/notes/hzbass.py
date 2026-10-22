@@ -137,7 +137,7 @@ from notes.hz_grid import *  # noqa: F401,F403
 
 @functools.lru_cache(maxsize=16)
 def _key_grid(hz_json, left, ppq, lo, n):
-    return KeyGrid(json.loads(hz_json), left, ppq, lo, n)
+    return KeyGrid(hz_of_text(hz_json), left, ppq, lo, n)
 
 
 HZ_KINDS = ("custom", "funnel")  # the shapes that can be a Hz bass (a funnel: the whole of it, both sides of the wall)
@@ -186,7 +186,7 @@ def squares(sh, ppq):
     """The repeats of a shape with placed tones: an array of (start, end) ticks in order, none overlapping. When
     it has effects: a KeyGrid (each key has its own)."""
     hz = {k: v for k, v in live(sh["hz"], left_edge(sh)).items() if k not in LENGTH_KEYS}  # (made after: note_lengths)
-    hz_json = json.dumps(hz, sort_keys=True)
+    hz_json = hz_text(hz)
     if has_fx(hz):
         lo, hi = key_range(sh)
         return _key_grid(hz_json, left_edge(sh), ppq, lo, hi - lo + 1)
@@ -199,7 +199,7 @@ LENGTH_KEYS = ("length", "own_length", "stick")
 @functools.lru_cache(maxsize=16)
 def _waves(hz_json, left, ppq):
     """repeat_squares' repeats (start ticks) and how long the wave each came from is (ticks): a chord's from its own tone."""
-    hz = dict(json.loads(hz_json), _memo={})
+    hz = dict(hz_of_text(hz_json), _memo={})
     runs = tone_runs(hz, left, ppq)
     if not runs:
         return np.zeros(0, np.int64), np.zeros(0)
@@ -237,7 +237,7 @@ def wave_ticks(sh, ppq, starts, keys):
                 out[rows] = got
         return out  # (a key with no repeats of its own: NaN, as made)
     hz = {k: v for k, v in live(sh["hz"], left_edge(sh)).items() if k not in LENGTH_KEYS}
-    ws, wl = _waves(json.dumps(hz, sort_keys=True), left_edge(sh), ppq)
+    ws, wl = _waves(hz_text(hz), left_edge(sh), ppq)
     if not len(ws):
         return None
     return wl[np.maximum(np.searchsorted(ws, starts, "right") - 1, 0)]
