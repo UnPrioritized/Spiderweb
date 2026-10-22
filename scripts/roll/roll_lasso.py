@@ -373,17 +373,26 @@ class LassoDrawing:
         if len(xy) >= 4:
             self.create_line(*xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="lasso")
         r = 3 * s
-        if las["closed"]:
-            for i, h in enumerate(self.lasso_hd()):
-                for side in (0, 1):
-                    if h and h[side] != las["pts"][i]:
-                        (ax, ay), (hx, hy) = self.to_xy(las["pts"][i]), self.to_xy(h[side])
-                        self.create_line(ax, ay, hx, hy, fill=look.CUT, width=max(1, round(s)), tags="lasso")
-                        self.create_oval(hx - r, hy - r, hx + r, hy + r, fill=look.HANDLE_FILL, outline=look.CUT,
-                                         tags="lasso")
+        hd = self.lasso_hd() if las["closed"] else []
+        lines = [(self.to_xy(las["pts"][i]), self.to_xy(h[side])) for i, h in enumerate(hd) if h
+                 for side in (0, 1) if h[side] != las["pts"][i]]
+        # (handles like the Curve tool's / funnel's: blue lines on a white edge, solid dots, round points)
+        for width, edge in ((max(3, round(3.5 * s)), True), (max(1, round(1.5 * s)), False)):
+            for (ax, ay), (hx, hy) in lines:
+                self.create_line(ax, ay, hx, hy, fill=look.HANDLE_FILL if edge else look.HANDLE, width=width,
+                                 tags="lasso")
+        q = 4.5 * s
+        for _, (hx, hy) in lines:
+            self.create_oval(hx - q, hy - q, hx + q, hy + q, fill=look.HANDLE, outline=look.HANDLE_FILL,
+                             width=max(1, round(s)), tags="lasso")
         shown = (shown_points(len(las["pts"]), len(las["pts"]) <= LONG_STROKE) if las["closed"]
                  else range(len(las["pts"])) if las["mode"] == "poly" else (0,))
         for i in shown:
             x, y = self.to_xy(las["pts"][i])
+            if hd and hd[i]:  # (a point with handles: round, like a curve's anchor)
+                q = 5.5 * s
+                self.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=look.CUT,
+                                 width=max(2, round(2 * s)), tags="lasso")
+                continue
             self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.CUT if las["closed"] else "",
                                   outline=look.CUT, tags="lasso")
