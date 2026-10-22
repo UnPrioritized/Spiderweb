@@ -370,7 +370,8 @@ class LassoDrawing:
         if las["closed"]:
             xy += xy[:2]
         s = self.scale
-        if len(xy) >= 4:
+        if len(xy) >= 4:  # (on a white edge, like the handles: it shows on notes and in the dark look; user 10-23)
+            self.create_line(*xy, fill=look.HANDLE_FILL, width=max(3, round(4 * s)), tags="lasso")
             self.create_line(*xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="lasso")
         r = 3 * s
         hd = self.lasso_hd() if las["closed"] else []
