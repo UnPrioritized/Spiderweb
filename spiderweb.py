@@ -84,6 +84,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     engine.py        shapes -> notes, overlap handling, channel assignment
     paths.py         lines / polylines / freehand / curves -> notes
     custom.py        custom shapes: outlines, fill, spam, outline spam
+    passengers.py    pasted notes' CCs and other Domino events riding along (kept, placed, as MIDI messages)
     shrink.py        the outline gate's even band: a custom shape shrunk inward
     faces.py         the areas a custom shape's lines close in, and how many lines deep each is (what Fill fills)
     text.py          text: letters laid out in a font -> a custom shape, threshold, grow

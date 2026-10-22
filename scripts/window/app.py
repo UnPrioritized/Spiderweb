@@ -178,7 +178,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (merged shapes and Nested / Tiles / Ripples fills take channels by colour number, not by which colour starts
     # first: a flipped or moved copy keeps its colours, user; pasted notes by track: a pasted song's channels stay
     # in their order, user 2026-10-22)
-    voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz"))} if mode == "auto" else {}
+    voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz")) or "cc" in sh} \
+        if mode == "auto" else {}  # (pasted notes' passengers: each track's on its slot)
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],

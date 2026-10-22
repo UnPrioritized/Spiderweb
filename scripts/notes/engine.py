@@ -50,6 +50,7 @@ from notes.custom import ROUND, frame_upright, notes_resampled, pack_notes, path
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
+from notes.passengers import check_cc
 from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved_by, piece_knives,
                           piece_notes, run_origins, source, spotted_notes, steps_kept, whole_made)
@@ -308,6 +309,8 @@ def clean_shape(sh):
                 out["flip_colours"] = True
             if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
                 out["paste"] = sh["paste"]
+            if isinstance(sh.get("cc"), str) and check_cc(sh["cc"]):  # its tracks' CCs etc. (passengers.py)
+                out["cc"] = sh["cc"]
             um = clean_unmerge(sh["unmerge"], clean_shape) if isinstance(sh.get("unmerge"), dict) else None
             if um:  # a Gate sensitive merge kept as separate shapes: the shape its notes were, for Split (merge.py)
                 out["unmerge"] = um
@@ -1627,7 +1630,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     keep: with "auto" a shape clashing with an earlier one moves whole to the next row of channels, its colours kept
     (assign_slots shape_of; an Add between group and a paste's pieces move as one shape).
     voice_slots: {shape's number: None} to be told, with "auto", which slot each of its tracks got: filled in as
-    {track: slot} (a Hz bass with its own channel per note: each voice's CC lines go on its slot, hz_cc).
+    {track: slot} (a Hz bass with its own channel per note: each voice's CC lines go on its slot, hz_cc; pasted
+    notes with passengers: each track's events on its slot, passengers.py).
     busy: per shape None, or {track (None: every track): (start, end) ticks}: with "auto" its tracks also count as
     sounding then on every key (a Hz bass's CC lines: their whole time, run-on too, hz_cc.cc_spans).
     """
@@ -1711,12 +1715,14 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     paste_first[u] = min(paste_first.get(u, s0), s0)
                 if ordered[len(unit_of)]:  # (pasted notes: the whole paste's tracks in track order, below)
                     paste_ordered.add(pid)
+                if voice_slots is not None and len(unit_of) in voice_slots:  # (its passengers' tracks)
+                    told[len(unit_of)] = (ids, us)
                 unit_of.append(np.asarray(us, np.int64)[which])
                 if b:  # (a gate flipped piece: the whole paste's tracks by where they start unflipped, below)
                     paste_back.add(pid)
                 continue
             if voice_slots is not None and len(unit_of) in voice_slots:
-                told[len(unit_of)] = (ids, len(units))
+                told[len(unit_of)] = (ids, list(range(len(units), len(units) + len(ids))))
             if spans:
                 for k, t in enumerate(ids.tolist()):
                     span = spans.get(t, spans.get(None))
@@ -1776,8 +1782,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                                            np.int64),
                                   use10)
         slot_of = [pin if u is None else unit_slots[u] for u, pin in zip(unit_of, pinned)]
-        for i, (ids, base) in told.items():
-            voice_slots[i] = dict(zip(ids.tolist(), unit_slots[base:base + len(ids)].tolist()))
+        for i, (ids, us) in told.items():
+            voice_slots[i] = dict(zip(ids.tolist(), unit_slots[us].tolist()))
         count = int(unit_slots.max()) + 1 if len(units) else 0
         if rounds and any(r is not None for r in rounds):
             slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15, teams, stay)

@@ -276,7 +276,8 @@ def cc_list(messages, use10, ports=0):
         ch = slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
         if ports:  # (the port its notes are on: _Ons.batch)
             ch |= slot // (16 if use10 else len(CHANNELS)) % ports << 24
-        out += [(t, s | ch | a << 8 | b << 16) for t, s, a, b in events]
+        out += [(e[0], e[1] | ch | e[2] << 8 | e[3] << 16) for e in events
+                if e[1] is not None]  # (a pasted Domino event without a MIDI message: none)
     out.sort(key=lambda e: e[0])
     return out
 

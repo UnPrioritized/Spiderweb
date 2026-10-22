@@ -54,18 +54,22 @@ def cc_track(notes, ch, events):
     status, data 1, data 2)], status without the channel): on a shared tick the note-offs first, then the messages
     (in their order), then the note-ons (a note starts with the values set on its tick)."""
     n = len(notes)
-    ev = np.asarray(events, np.int64).reshape(-1, 4)
+    # (pasted notes' passengers: Domino's own events have no MIDI message (status None), left out)
+    ev = np.asarray([e[:4] for e in events if e[1] is not None], np.int64).reshape(-1, 4)
     tick = np.concatenate([notes[:, 1], ev[:, 0], notes[:, 0]])
     kind = np.repeat(np.arange(3), [n, len(ev), n])
     order = np.lexsort((kind, tick))  # (stable: alike ones keep their order)
     status = np.concatenate([np.full(n, 0x80 | ch), ev[:, 1] | ch, np.full(n, 0x90 | ch)])
     one = np.concatenate([notes[:, 2], ev[:, 2], notes[:, 2]])
     two = np.concatenate([np.zeros(n, np.int64), ev[:, 3], notes[:, 3]])
-    return [_encode(tick[order], status[order], one[order], two[order], 0)]
+    status = status[order]
+    short = (status & 0xE0) == 0xC0  # (program change, channel pressure: one data byte)
+    return [_encode(tick[order], status, one[order], two[order], 0, short if short.any() else None)]
 
 
-def _encode(tick, status, key, vel, last):
-    """Events (3-byte messages) in time order as bytes, delta times from last (the tick before the first)."""
+def _encode(tick, status, key, vel, last, short=None):
+    """Events (3-byte messages) in time order as bytes, delta times from last (the tick before the first). short:
+    True for the events with one data byte (program change, channel pressure: vel left out)."""
     delta = np.diff(tick, prepend=last)
     if len(delta) and delta.max() > MAX_DELTA:
         # a silence too long for one step: empty text events (FF 01 00, 3 bytes like a note's) every MAX_DELTA
@@ -77,6 +81,10 @@ def _encode(tick, status, key, vel, last):
         delta[filler] = MAX_DELTA
         delta[last] -= fill * MAX_DELTA
         status[filler], key[filler], vel[filler] = 0xFF, 0x01, 0x00
+        if short is not None:
+            short = np.repeat(short, fill + 1) & ~filler
+    if short is not None:
+        return _encode_short(delta, status, key, vel, short)
     # variable-length delta times: 7 bits per byte, every byte but the last with the top bit set
     size = np.ones(len(delta), np.int64)
     for bits in (7, 14, 21):
@@ -90,6 +98,25 @@ def _encode(tick, status, key, vel, last):
     out[at + size] = status
     out[at + size + 1] = key
     out[at + size + 2] = vel
+    return out
+
+
+def _encode_short(delta, status, key, vel, short):
+    """_encode's bytes when some events have one data byte (short); delta = the delta times, fillers in."""
+    width = np.where(short, 2, 3)
+    size = np.ones(len(delta), np.int64)
+    for bits in (7, 14, 21):
+        size += delta >= 1 << bits
+    at = np.cumsum(size + width) - (size + width)
+    out = np.zeros(int((size + width).sum()), np.uint8)
+    for k in range(int(size.max())):
+        has = size > k
+        left = size[has] - 1 - k
+        out[at[has] + k] = (delta[has] >> (7 * left)) & 0x7F | np.where(left > 0, 0x80, 0)
+    out[at + size] = status
+    out[at + size + 1] = key
+    full = ~short
+    out[at[full] + size[full] + 2] = vel[full]
     return out
 
 

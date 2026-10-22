@@ -13,11 +13,12 @@ from tkinter import filedialog, messagebox
 import numpy as np
 
 from files.lang import tr, trn
-from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape
+from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, slot_ports)
 from notes.hzbass import clean_hz
 from notes.hz_cc import slot_events
+from notes.passengers import midi_messages, pack_cc, placed
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -901,8 +902,27 @@ class ProjectFiles:
 
     def cc_messages(self, ppq, bpm, only=None):
         """The Hz basses' CC lines as MIDI messages on the slots (tracks) their notes are on: {slot: [(tick, status,
-        data 1, data 2)]} (hz_cc.slot_events; only = the shapes' numbers to take, None: all)."""
-        return slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
+        data 1, data 2)]} (hz_cc.slot_events; only = the shapes' numbers to take, None: all). Pasted notes' passengers
+        too (Multi channel only: each track's on the slot its notes got), each as its MIDI messages with a 5th part:
+        (tag, body) = Domino's event to write back as it was (on the last of its messages; status None when it has
+        no MIDI message), False = a MIDI-only message (passengers.midi_messages)."""
+        out = slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
+        added = set()
+        for i, sh in enumerate(self.shapes):
+            slots = self.voice_slots.get(i) if "cc" in sh and (only is None or i in only) else None
+            if not slots:
+                continue
+            for t, track, tag, body in placed(sh, unpack_notes(sh["notes"]), ppq):
+                slot = slots.get(track)
+                if slot is None:  # (a track without notes here: no channel to go on)
+                    continue
+                msgs = midi_messages(tag, body) or [(None, 0, 0)]
+                out.setdefault(int(slot), []).extend(
+                    (t, s, a, b, (tag, body) if k == len(msgs) - 1 else False) for k, (s, a, b) in enumerate(msgs))
+                added.add(int(slot))
+        for slot in added:
+            out[slot].sort(key=lambda e: e[0])
+        return out
 
     def write_out(self, path, busy, write):
         """write() makes the file at path (its folder made first), with the busy text key showing. False when it
@@ -1099,10 +1119,10 @@ class ProjectFiles:
             messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
             return
         self.busy(tr("project.pasting_from_domino"))  # (millions of notes take a few seconds)
-        cond, shift, sh, from_bar = {}, 0, None, False
+        cond, shift, sh, from_bar, rides = {}, 0, None, False, []
         try:
             raw = get_from_clipboard()
-            notes, their_ppq = read_notes(raw, 255, cond) if raw else (None, None)
+            notes, their_ppq = read_notes(raw, 255, cond, rides) if raw else (None, None)
             tempos = [] if clipboard.copy_count() == self.own_domino_copy else cond.get("tempo", [])
             high = 0
             if notes is not None and not (self.domino256.get() and self.keys > 128):  # (the mod's keys above 127)
@@ -1115,8 +1135,11 @@ class ProjectFiles:
                         shift, from_bar = 0, True       # "From the bar line", none lost; user 2026-10-22)
                     notes[:, 0] -= shift
             if notes is not None and len(notes):
-                sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults,
-                                  **notes_shape(notes, self.ppq, tr("project.pasted_notes"))})
+                made = notes_shape(notes, self.ppq, tr("project.pasted_notes"))
+                if rides:  # (the tracks' CCs and other events ride along: passengers.py; ticks from the first note)
+                    t0 = int(notes[:, 0].min()) + shift
+                    made["cc"] = pack_cc([(t - t0, k, tag, body) for t, k, tag, body in rides])
+                sh = clean_shape({**SHAPE_DEFAULTS, **self.defaults, **made})
         except ValueError as e:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_read_the_notes_on", e=e))
             return

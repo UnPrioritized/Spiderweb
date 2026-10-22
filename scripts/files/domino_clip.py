@@ -74,6 +74,7 @@ DOMINO_STARTS = [  # (saved value, dropdown text): where copied / pasted notes s
 ]
 
 
+POSITION = struct.pack("<HI", 1001, 4)  # (an event's first item: its tick, u32)
 GATE_MAX = 65535  # Domino's longest gate: anything done to a longer note snaps it back to this
 
 
@@ -270,16 +271,21 @@ def cc_item(tick, status, one, two):
 
 def with_cc(rows, events, first=0):
     """A track's note items (NOTE rows in time order) with its control items (cc_item) put in among them by tick,
-    before the notes on their tick: byte pieces. Ticks from first (a message before it: on it)."""
+    before the notes on their tick: byte pieces. Ticks from first (a message before it: on it). An event with a
+    5th part (tag, body) = a pasted passenger written back exactly as Domino had it; False = a MIDI-only message
+    (passengers.midi_messages' bank select before a program change), not written."""
     starts = rows["tick"].astype(np.int64)
     out, at = [], 0
-    for tick, status, one, two in events:
-        tick = max(0, tick - first)
+    for e in events:
+        raw = e[4] if len(e) > 4 else None  # (a pasted passenger: Domino's own event as it was; False: MIDI only)
+        if raw is False:
+            continue
+        tick = max(0, e[0] - first)
         i = int(np.searchsorted(starts, tick, "left"))
         if i > at:
             out.append(rows[at:i].view(np.uint8))
             at = i
-        out.append(cc_item(tick, status, one, two))
+        out.append(item(raw[0], POSITION + struct.pack("<I", tick) + raw[1]) if raw else cc_item(tick, *e[1:4]))
     out.append(rows[at:].view(np.uint8))
     return out
 
@@ -447,13 +453,14 @@ def note_run(body, i):
     return got, i
 
 
-def read_notes(raw, top=127, conductor=None):
+def read_notes(raw, top=127, conductor=None, passengers=None):
     """Clipboard bytes -> (notes, ppq): (tick, gate, key, velocity, track) rows of every track's notes, ticks
     counted from the start of the copied stretch, track = which copied track (0 = the first; a Conductor track
     isn't counted); ppq = the PPQ it was copied at (None if missing). Keys above top left out (255: Domino's 256
     keys mod). conductor = a dict: filled with "tempo" [(tick, BPM)] (a Conductor track's tempos, in tick order,
-    one per tick: the last) and "length" (the copied stretch's ticks, 0 if missing). ValueError if raw isn't
-    Domino's data."""
+    one per tick: the last) and "length" (the copied stretch's ticks, 0 if missing). passengers = a list: every
+    other event of the note tracks added as (tick, track, tag, the event's bytes after its position), in their
+    order (notes/passengers.py). ValueError if raw isn't Domino's data."""
     if not raw.startswith(MAGIC) or len(raw) < len(MAGIC) + 4:
         raise ValueError(tr("domino_clip.not_domino_s_data"))
     try:
@@ -492,13 +499,16 @@ def read_notes(raw, top=127, conductor=None):
                     continue
             if i + 6 + n > len(body):
                 break
-            if t == 2001:  # a note in some other layout; anything else (controllers, settings) is skipped
+            if t == 2001:  # a note in some other layout
                 f = dict(items(body[i + 6:i + 6 + n]))
                 if len(f.get(1001, b"")) == 4 and len(f.get(2001, b"")) == 1 and len(f.get(2003, b"")) == 4:
                     vel = f.get(2002, b"")[:1] or bytes([100])
                     odd.append((int.from_bytes(f[1001], "little"), int.from_bytes(f[2003], "little"),
                                 f[2001][0], vel[0], track))
-            i += 6 + n
+            elif t > 2001 and passengers is not None and not cond and n >= 10 and \
+                    body[i + 6:i + 12] == POSITION:  # any other event of a note track (CC...): kept as it is
+                passengers.append((int.from_bytes(body[i + 12:i + 16], "little"), track, t, body[i + 16:i + 6 + n]))
+            i += 6 + n  # (a track's settings are skipped)
     if conductor is not None:
         conductor.update(tempo=sorted(tempo.items()), length=length)
     rows = np.concatenate([np.column_stack([r["tick"], r["gate"], r["key"], r["vel"],
