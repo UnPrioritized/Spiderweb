@@ -363,6 +363,8 @@ class ProjectFiles:
         self.roll.cancel_draft()
         self.shapes = shapes
         self.tempo = tempo
+        # (only an autosave has them: the project file it belonged to, and whether it had unsaved changes)
+        self._file_extra = (data.get("project_file"), data.get("unsaved"))
         if hasattr(self, "tempo_pane"):  # (the old project's Select box / picks / catch-up being added go)
             self.tempo_pane.forget()
         self.tempo_changed()
@@ -487,6 +489,7 @@ class ProjectFiles:
                               "places": getattr(self, "window_places", {}),
                               **self.tips.state(), **self.updates.state(), **self.tool_picker.state()}
             save_app_settings(data["window"])  # (sound / updates / tips go to user/settings.ini instead)
+            data["project_file"], data["unsaved"] = self.project_file, self.is_dirty()  # (put back at start)
         # pictures in the project's folder (or one inside it) are saved relative to it: they move together
         data["shapes"] = paths_for_file(data["shapes"], os.path.dirname(os.path.abspath(path)), True)
         write_text(path, project_json(data))
@@ -668,6 +671,7 @@ class ProjectFiles:
         kept(tempo)
 
     def schedule_autosave(self):
+        self.sync_window_title()
         if self._autosave_job:
             self.after_cancel(self._autosave_job)
         self._autosave_job = self.after(1500, self.autosave)
@@ -716,8 +720,57 @@ class ProjectFiles:
             return
         if self.load_file(path):
             self._saved_shapes = self.saved_key()
+            self.project_file = None if self.own_file(path) else os.path.normpath(path)
+            self.mark_saved()
             self.sync_panel()
             self.tell_load_notes()
+
+    def own_file(self, path):
+        """The autosave (or its backup): never Save's file, Save asks for a name instead (user)."""
+        same = lambda a, b: os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+        return same(path, self.autosave_path) or same(path, backup_path(self.autosave_path))
+
+    def reattach_file(self):
+        """At start: the project file the autosave's work belonged to comes back (user 2026-10-22), unsaved or not
+        as it was."""
+        name, unsaved = getattr(self, "_file_extra", (None, None))
+        self.project_file = name if isinstance(name, str) and name and not self.own_file(name) else None
+        self._saved_shapes = None if unsaved is not False or not self.project_file else self.saved_key()
+        self._saved_mark = None
+        if unsaved is False and self.project_file:
+            self.mark_saved()
+        self.sync_window_title()
+
+    def file_key(self):
+        """What a save keeps besides the shapes and the tempo line that changes the notes (the * in the title;
+        zoom, scrolling and the play line don't count, user)."""
+        return (tuple(v.get() for k, v in sorted(self.pvar.items())), self.keys_var.get(), self.edo31.get(),
+                self.channel_mode.get(), str(self.channel_split), self.use_ch10.get(), self.ch10_order.get(),
+                self.new_rounds.get(), self.pad_rounds.get())
+
+    def is_dirty(self):
+        """Changed since the last save / open: another newest undo step (undo back to it = saved again) or other
+        Project boxes."""
+        mark = self._saved_mark
+        top = self.undo_stack[-1] if getattr(self, "undo_stack", None) else None
+        return mark is None or mark[0] is not top or mark[1] != self.file_key()
+
+    def mark_saved(self):
+        self._saved_mark = (self.undo_stack[-1] if self.undo_stack else None, self.file_key())
+        self.sync_window_title()
+
+    def sync_window_title(self):
+        """The window's title: "song.json - Spiderweb 1.6.2", a * while unsaved, "Unsaved project" with no file."""
+        if not hasattr(self, "pvar"):
+            return
+        if self.project_file:
+            title = tr("app.title_file", name=os.path.basename(self.project_file),
+                       star=tr("app.title_star") if self.is_dirty() else "", VERSION=VERSION)
+        else:
+            title = tr("app.title_unsaved", VERSION=VERSION)
+        if title != self._title:
+            self._title = title
+            self.title(title)
 
     def saved_key(self):
         """What Open project compares with the last save / open: the shapes and the tempo line."""
@@ -732,12 +785,16 @@ class ProjectFiles:
                                            icon="warning", default="yes", parent=self)
         return answer is False or answer is True and self.save_project()
 
-    def save_project(self):
-        """True if it was saved."""
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        path = filedialog.asksaveasfilename(title=tr("project.save_project"), initialdir=OUTPUT_DIR,
-                                            defaultextension=".json",
-                                            filetypes=[(tr("project.spiderweb_project"), "*.json")])
+    def save_project(self, ask=False):
+        """Into the project file opened / saved last; none yet (or ask: Save as…) = asks where. True if saved."""
+        path = self.project_file
+        if ask or not path:
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            path = filedialog.asksaveasfilename(title=tr("project.save_project"),
+                                                initialdir=os.path.dirname(path) if path else OUTPUT_DIR,
+                                                initialfile=os.path.basename(path) if path else "",
+                                                defaultextension=".json",
+                                                filetypes=[(tr("project.spiderweb_project"), "*.json")])
         if not path:
             return False
         try:
@@ -746,7 +803,13 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
             return False
         self._saved_shapes = self.saved_key()
+        self.project_file = None if self.own_file(path) else os.path.normpath(path)
+        self.mark_saved()
+        self.schedule_autosave()  # (it remembers the file and that it's saved)
         return True
+
+    def save_project_as(self):
+        return self.save_project(ask=True)
 
     def browse_output(self):
         cur = self.pvar["output"].get()

@@ -6,6 +6,7 @@ Draw lines, polylines, freehand strokes, curves, arcs and text on a piano roll a
 Files (the scripts live in scripts/, one subfolder per group):
   window/            the main window and its side panel
     app.py           main window: toolbar, side panel, shapes
+    menubar.py       the menu bar (File, Edit, Shape, Tools, View, Help)
     app_playback.py  playing the notes, right-drag listening, MIDI out + Built-in BASSMIDI's settings
     app_pictures.py  placed pictures (Image to notes): placing, editing, notes made again
     panel_custom.py  the panel's custom shape settings, opening the drawer

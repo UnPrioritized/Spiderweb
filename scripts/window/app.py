@@ -71,6 +71,7 @@ from notes.between import (copied as between_copied, keep_pushes, push_sizes, sy
 from window.app_pictures import Pictures
 from window.app_playback import Playback
 from window.history import BOXES, CH10_OFF, HistoryPanel
+from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import painting_order
 from files import errors, speed
@@ -317,6 +318,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._autosave_job = None
         self._autosave_failed = False  # (told once until it works again: ProjectFiles.autosave)
         self._saved_shapes = None  # the shapes as last saved in / opened from a project file (json)
+        self.project_file = None  # the project file Save writes into (None: asks), shown in the title
+        self._saved_mark = None  # (the newest undo step, file_key()) when last saved / opened; None = unsaved
+        self._title = None
         self.big_skip = set()  # big_ask actions ticked "Don't ask again until Spiderweb is closed"
         self._notes_cache = {}
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
@@ -392,6 +396,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._build()
         self.restore_window()
         self.load_autosave()
+        self.reattach_file()  # (the project file the work belonged to; the title)
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
         self.updates.start()  # (What's new after an update; asks about / looks for updates)
@@ -424,7 +429,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.tk.call("bind", "all", seq, 'if {"%K" in {F4 space}} {tk::WinMenuKey %W %N}')
         self.bind_all("<F1>",lambda e: None if self.in_drawer(e) else self.open_help())
         for keys, fn in ((UNDO_KEYS, lambda e: self.key_undo(e)), (REDO_KEYS, lambda e: self.key_undo(e, True)),
-                         (("<Control-s>",), lambda e: self.save_project())):
+                         (("<Control-s>",), lambda e: self.save_project()),
+                         (("<Control-Shift-s>", "<Control-Shift-S>"), lambda e: self.save_project_as())):
             for key in keys:
                 self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn(e))
         self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True, while_held=True))  # (pop-ups: not the main playback)
@@ -434,7 +440,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # Delete, with its mid-drag / velocity line rules (the roll handles its own key itself)
         self.bind_all("<Delete>", lambda e: None if e.widget is self.roll else
                       self.hotkey(lambda: self.roll.on_key(e), main_only=True, while_held=True)(e))
-        for keys, fn in (("Control-c Control-C", self.copy_selected),
+        for keys, fn in (("Control-n Control-N", self.new_project), ("Control-o Control-O", self.open_project),
+                         ("Control-e Control-E", self.generate),  # (the File menu's keys, user 2026-10-22)
+                         ("Control-c Control-C", self.copy_selected),
                          ("Control-Shift-c Control-Shift-C", self.copy_to_domino),
                          ("Control-g Control-G", self.join_selected),
                          ("Control-Shift-g Control-Shift-G", self.split_selected),
@@ -462,6 +470,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def _build(self):
         # the toolbar: the tools, then the view settings and buttons on the right (on a second row when the window
         # is too narrow for both, see fit_toolbar)
+        build_menu(self)
         top = self.toolbar = ttk.Frame(self, padding=(6, 4))
         top.pack(fill="x")
         top.columnconfigure(1, weight=1)
@@ -789,13 +798,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             Tooltip(b, tr(tip))
         btns = ttk.Frame(box)
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        for c, (text, command) in enumerate((("app.new", self.new_project), ("app.open", self.open_project),
-                                             ("app.save", self.save_project), ("app.export_midi", self.generate))):
-            b = ttk.Button(btns, text=tr(text), command=command, width=1)  # (4 equal ones fill the row)
-            b.grid(row=0, column=c, sticky="ew", padx=(0 if c in (0, 3) else 2, 0 if c == 3 else 2))
-            btns.columnconfigure(c, weight=1, uniform="b")
-            if text == "app.new":
-                Tooltip(b, tr("app.new_tip"))
+        # (New / Open… / Save… are in the File menu: the row got too crammed, user 2026-10-22)
+        ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(fill="x")
 
     def _build_shape_list(self, side):
         box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)
@@ -1615,6 +1619,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_freehand()
         self.roll.request_redraw()
 
+    def delete_picked(self):
+        """The Edit menu's Delete: the Tempo pane's picks if it was clicked last, else the selected shapes."""
+        if getattr(self, "key_pane", None) is self.tempo_pane:
+            return self.tempo_pane.delete_picked()
+        self.delete_selected()
+
     def select_all(self):
         """Ctrl+A: every shape; the Tempo pane clicked last: its whole line."""
         if getattr(self, "key_pane", None) is self.tempo_pane:
@@ -1662,12 +1672,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The Project tab's New: a new MIDI. The shapes and the tempo line go (their Select boxes / picks too); PPQ,
         keys, the output file, channel settings and the Domino start stay; BPM and Beats per bar go back to MIDI's
         120 and 4/4 (user). Asked first; one undo step, which brings the boxes back too (history._restore)."""
-        boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get())
+        boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get(), self.project_file)
         try:
             usual = calc(boxes[0]) == 120 and calc_int(boxes[1], 1, 32) == 4
         except ValueError:
             usual = False
-        if not self.shapes and not self.tempo["points"] and not self.tempo["catch"] and usual:
+        if not self.shapes and not self.tempo["points"] and not self.tempo["catch"] and usual and not boxes[2]:
             return
         if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.new_ask"), icon="warning", parent=self):
             return
@@ -1676,6 +1686,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         state, name, sel, hz = self.undo_stack[-1]
         self.undo_stack[-1] = (state, name, tuple(sel) + ((BOXES,) + boxes,), hz)  # (the step's mark: _restore)
         self.shapes.clear()
+        self.project_file = None  # (Save asks for a name again; Ctrl+Z brings the file back)
         self.tempo = empty_tempo()
         self.tempo_pane.forget()
         self.roll.box_kept = None

@@ -8,6 +8,6 @@ Draw lines, curves and shapes on the piano roll; every key they cross gets notes
 
 4. Set PPQ, BPM and the output file under Project, then Export MIDI.
 
-Your work is saved on its own (autosave) and comes back next time. Save… keeps a copy as a project file.
+Your work is saved on its own (autosave) and comes back next time. File → Save keeps it as a project file.
 
 The first time you use a tool or feature, a small tip explains it. You can turn tips off or show them all again in this Help window (bottom).

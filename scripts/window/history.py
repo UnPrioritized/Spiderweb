@@ -16,7 +16,7 @@ from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
 CH10_OFF = "ch10_off"  # (an undo step's mark: made by unticking "Use channel 10", App.on_use_ch10)
-BOXES = "boxes"  # (an undo step's mark (BOXES, BPM, beats per bar): the Project boxes before it, App.new_project)
+BOXES = "boxes"  # (an undo step's mark (BOXES, BPM, beats per bar, project file): before it, App.new_project)
 
 
 def boxes_mark(step):
@@ -128,6 +128,7 @@ class HistoryPanel:
 
     def sync_history(self, force=False):
         """Refresh the list if the steps changed (cheap to call often)."""
+        self.sync_window_title()  # (the * for unsaved changes follows the steps)
         if not hasattr(self, "history_list") or not self.show_history.get() or self._history_jumping:
             return
         names, now = self.history_rows()
@@ -433,7 +434,7 @@ class HistoryPanel:
         self.roll.cancel_draft()
         now, sel_now = undo_state(self.shapes), self.sel_state()
         ch10 = None
-        boxes = was_boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get())
+        boxes = was_boxes = (self.pvar["bpm"].get(), self.pvar["beats"].get(), self.project_file)
         for _ in range(min(count, len(src))):
             state, name, picked, hz = src.pop()
             got = boxes_mark((state, name, picked))
@@ -458,6 +459,7 @@ class HistoryPanel:
         if ch10 is not None:
             self.use_ch10.set(ch10)
         if boxes != was_boxes:
+            self.project_file = boxes[2] if len(boxes) > 2 else self.project_file
             self.pvar["bpm"].set(boxes[0])
             self.pvar["beats"].set(boxes[1])
         state, picked = now, sel_now

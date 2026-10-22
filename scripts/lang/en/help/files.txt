@@ -1,10 +1,10 @@
 Everything is saved on its own (autosave.json in the user folder next to Spiderweb) and comes back next time; each time Spiderweb starts, the previous session is kept as autosave-backup.json. If the autosave ever can't be opened, it's kept aside and the backup opens instead (Spiderweb tells you).
 
-Save… (Ctrl+S) / Open… keep and open project files (.json). Opening one replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first.
+The File menu (top left) holds New (Ctrl+N), Open… (Ctrl+O), Save (Ctrl+S) and Save as… (Ctrl+Shift+S) for project files (.json). Save writes into the file you opened or saved last; the first time, it asks for a name. The title bar shows the file's name, with a * while there are changes it doesn't have yet (zooming and scrolling don't count). Opening a file replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first. New starts a new MIDI: every shape and the tempo line go, BPM goes back to 120 and Beats per bar to 4 (Ctrl+Z brings them back).
 
 Shapes are stored in beats, so changing PPQ doesn't move them.
 
-Export MIDI writes the file set under Output file, with the PPQ, BPM and beats per bar from Project. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).
+Export MIDI (Ctrl+E) writes the file set under Output file, with the PPQ, BPM and beats per bar from Project. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).
 
 Keys (under Project) set to 256: the piano roll goes up to key 255 instead of 127, and the MIDI file keeps those keys. That's for players that support 256 keys (handy for tunings like 31-EDO, which need more keys per octave). Many MIDI programs can't read keys above 127, and playback here skips them (unless 31-EDO Audio is on).
 
