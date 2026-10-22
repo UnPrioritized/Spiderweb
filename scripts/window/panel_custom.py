@@ -17,6 +17,7 @@ from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import (AUTO, all_tones, auto_picks, clean_tempo_steps, each_layer, hz_gate, layers_of, left_edge,
                           right_edge, shortest_gate, sound_span)
+from notes.tempo import base_us
 from notes.tempo_file import heard_tempo
 from window.hz_window import open_hz
 from window.panel_nested import nested_on
@@ -715,7 +716,9 @@ class CustomPanel:
         line = now[1] or [[0.0, now[0]]]
         if len(was) != len(line):
             return True
-        return any(abs(a[0] - b[0]) > 0.5 / self.ppq or abs(a[1] - b[1]) > 1e-9 * b[1] for a, b in zip(was, line))
+        # (alike = the same tempo in the MIDI file, Domino-safe whole microseconds a beat: an old project's 133.33
+        # BPM box became a 133.33 point, written and heard as 450012 us = 133.3298)
+        return any(abs(a[0] - b[0]) > 0.5 / self.ppq or base_us(a[1]) != base_us(b[1]) for a, b in zip(was, line))
 
     def hz_slowest(self, sh):
         """The slowest tempo under a Hz bass shape now (its shortest gates are there), or None."""

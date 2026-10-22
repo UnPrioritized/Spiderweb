@@ -679,8 +679,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         box.pack(fill="x")
         box.columnconfigure(1, weight=1)
         r = 0
-        boxes = []  # BPM: made as wide as the dropdowns below, so they line up (Beats per bar: the Conductor pane's
-        for label, key in ((tr("app.ppq"), "ppq"), (tr("app.bpm"), "bpm")):  # time signatures, user 2026-10-22)
+        boxes = []  # (BPM box gone, user 2026-10-23: the tempo = the Conductor pane's, 120 before its first point;
+        # Beats per bar: the pane's time signatures, user 2026-10-22)
+        for label, key in ((tr("app.ppq"), "ppq"),):
             lb = ttk.Label(box, text=label)
             lb.grid(row=r, column=0, sticky="w", pady=1)
             if key == "ppq":

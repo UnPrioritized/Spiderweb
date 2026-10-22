@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox
 import numpy as np
 
 from files.lang import tr, trn
+from files.mathexpr import calc
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, slot_ports)
@@ -297,8 +298,10 @@ class ProjectFiles:
         def table(key):
             return data[key] if isinstance(data.get(key), dict) else {}
 
-        boxes = {key: str(data[key]) for key in ("ppq", "bpm") if isinstance(data.get(key), (int, float, str))
+        boxes = {key: str(data[key]) for key in ("ppq",) if isinstance(data.get(key), (int, float, str))
                  and not isinstance(data[key], bool)}
+        boxes["bpm"] = "120"  # (no BPM box, user 2026-10-23: before the tempo line's first point = MIDI's 120)
+        old_bpm = get(lambda: calc(str(data["bpm"]))) if isinstance(data.get("bpm"), (int, float, str)) else None
         out = text("output")
         if out is not None and out.strip():
             folder = os.path.dirname(os.path.abspath(out))
@@ -329,6 +332,10 @@ class ProjectFiles:
         tempo = clean_tempo(data.get("tempo"))
         if not isinstance(table("tempo").get("sigs"), list):  # (saved before time signatures: its Beats per bar)
             tempo["sigs"] = clean_sigs(None, beats=get(lambda: int(float(data.get("beats", 4)))))
+        if (isinstance(old_bpm, (int, float)) and 4 <= old_bpm <= 100000 and old_bpm != 120
+                and not (tempo["points"] and tempo["points"][0][0] <= 1e-9)):
+            # (saved with the BPM box: its BPM a point on beat 0, so it plays as it did, user 2026-10-23)
+            tempo["points"].insert(0, [0.0, clamp_bpm(float(old_bpm)), "hold", "", "lin", False, [0.5, 0.5]])
 
         was = project_json(self.project_data()), self.undo_stack[:], self.redo_stack[:], self._redo_kept
         self._opening = True  # (each box set would make the notes again: once, below)
