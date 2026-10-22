@@ -1,5 +1,6 @@
 """Piano roll: painting the grid, notes, shapes, handles, keyboard and ruler."""
 
+import bisect
 import json
 import math
 import time
@@ -25,6 +26,7 @@ from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO
 from roll.tiles import Tiles, see_through
 from window import look
 
+TIP_MARKS = 10  # a ruler tempo mark's tip lists at most this many changes, then "+N more"
 HANDLE_COLOR = look.HANDLE
 STROKE_POINT_COLOR = look.STROKE_POINT
 PART_COLOR = look.PART
@@ -1652,7 +1654,7 @@ class RollDrawing:
             return []
         out = []
         for b, kind, v in ruler_marks(self.app.tempo, pane.base(), self.app.ppq):
-            x = self.t2x(b)
+            x = b * self.sx  # (from the song's start: scrolling only slides them)
             if kind == "catch":
                 tip = tr("tempo.mark_catch", bpm=bpm_text(v)) if v is not None else tr("tempo.not_possible")
                 out.append((x, tr("tempo.catch"), tip, look.TEMPO_CATCH if v is not None else look.ERROR))
@@ -1668,6 +1670,27 @@ class RollDrawing:
                 full.append(f"{bpm_text(at)} {way} {bpm_text(then)}" if not full else f"{way} {bpm_text(then)}")
             out.append((x, " ".join(short), (" ".join(full) or bpm_text(at)) + " BPM", look.RULER_TEMPO))
         return sorted(out, key=lambda m: m[0])
+
+    def tempo_shown(self, key, measure):
+        """The ruler's tempo marks laid out from the song's start: [[x, text, [tip lines], colour, text's right end]];
+        a change landing on the text before isn't shown (its tip joins that one's); one landing on a mark with no
+        text takes its place. Kept while only the view scrolls."""
+        if getattr(self, "_tempo_laid", (None,))[0] == key:
+            return self._tempo_laid[1]
+        s = self.scale
+        shown, end = [], -math.inf
+        for x, text, tip, colour in self.tempo_layout():
+            tips = [tip]
+            if shown and x < end:
+                if shown[-1][1]:  # (on the text before: joins its tip)
+                    shown[-1][2].append(tip)
+                    continue
+                tips = shown.pop()[2] + tips  # (on a mark with no text: this one, saying more, takes its place)
+            right = x + 3 * s + measure(text) if text else x
+            shown.append([x, text, tips, colour, right])
+            end = right + 4 * s if text else x + 2 * s
+        self._tempo_laid = (key, shown)
+        return shown
 
     def draw_tempo_marks(self, boxes):
         """The tempo changes above the bar numbers: a light line on the exact tick, its text right of it, then a
@@ -1689,29 +1712,35 @@ class RollDrawing:
         if getattr(self, "_tempo_font", (None,))[0] != font:
             self._tempo_font = (font, tkfont.Font(font=font))
         measure = self._tempo_font[1].measure
-        shown, end = [], -math.inf  # [x, text, tip, colour, text's right end]
-        for x, text, tip, colour in self.tempo_layout():
-            if shown and x < end:
-                if shown[-1][1]:  # (on the text before: joins its tip)
-                    shown[-1][2] += "\n" + tip
-                    continue
-                tip = shown.pop()[2] + "\n" + tip  # (on a mark with no text: this one, saying more, takes its place)
-            right = x + 3 * s + measure(text) if text else x
-            shown.append([x, text, tip, colour, right])
-            end = right + 4 * s if text else x + 2 * s
-        y, tags = 8 * s, ("frame", "tempomark")
-        for i, (x, text, tip, colour, right) in enumerate(shown):
+        shown = self.tempo_shown(key[:3] + (self.sx, s, font), measure)
+        at = self.t2x(0)  # (the layout is from the song's start: scrolling slides it, hunt 2026-10-22: 0.12 s a
+        y, tags = 8 * s, ("frame", "tempomark")  # step at 2000 points laid out again)
+        first = max(0, bisect.bisect_left([m[4] for m in shown], kb - at) - 1)  # (skip what's far left)
+        for i in range(first, len(shown)):
+            u, text, tips, colour, right = shown[i]
+            x, right = u + at, right + at
             if x > w:
                 break
-            nxt = shown[i + 1][0] if i + 1 < len(shown) else None
+            nxt = shown[i + 1][0] + at if i + 1 < len(shown) else None
             if right < kb and (nxt is None or nxt < kb):
                 continue
-            if any(x0 <= x < x1 for x0, x1 in bands):
-                colour = look.RULER_PICK_TEXT
-            if x >= kb - 1:
-                self.create_line(x, 0, x, top, fill=colour, tags=tags)  # (on the exact tick, down to the bar line)
-            if text:
+            pick = lambda px: any(x0 <= px < x1 for x0, x1 in bands)  # noqa: E731
+            if x >= kb - 1:  # (on the exact tick, down to the bar line)
+                self.create_line(x, 0, x, top, fill=look.RULER_PICK_TEXT if pick(x) else colour, tags=tags)
+            if text and any(x0 < right and x1 > x for x0, x1 in bands):
+                # (part under a ruler band: each letter white where it is, hunt 2026-10-22: all white past the band
+                # couldn't be read; letter by letter = Tk has no clipped text)
+                left = x + 3 * s
+                for k, ch in enumerate(text):
+                    cx = left + measure(text[:k])
+                    mid = cx + measure(ch) / 2
+                    self.create_text(cx, y, text=ch, anchor="w", font=font, tags=tags,
+                                     fill=look.RULER_PICK_TEXT if pick(mid) else colour)
+            elif text:
                 self.create_text(x + 3 * s, y, text=text, anchor="w", fill=colour, font=font, tags=tags)
+            tip = "\n".join(tips[:TIP_MARKS])
+            if len(tips) > TIP_MARKS:  # (zoomed far out: a short tip, hunt 2026-10-22: 478 lines)
+                tip += "\n" + trn("tempo.more_changes", len(tips) - TIP_MARKS, n=f"{len(tips) - TIP_MARKS:,}")
             self.tempo_tips.append((max(kb, x - 4 * s), max(right, x + 4 * s), tip))
             if nxt is not None:  # (how long this tempo lasts)
                 x0, x1 = max(kb - 2, (right + 3 * s) if text else x + 1), min(w, nxt - 3 * s)

@@ -100,6 +100,7 @@ def clean_tempo(data):
         p, q = out["points"][i:i + 2]
         if round(p[0], 9) == round(q[0], 9):
             q[0] = p[0]
+    drop_loose(out["points"])
     every = data.get("every", EVERY)
     out["every"] = every if isinstance(every, int) and not isinstance(every, bool) and 1 <= every <= 65535 else EVERY
     out["bars"] = data.get("bars", True) is not False
@@ -135,6 +136,25 @@ def clean_tempo(data):
         out["catch"].append(item)
     out["catch"].sort(key=lambda c: c[0])
     return out
+
+
+def drop_loose(pts):
+    """A jump's first point (where a glide arrives) taken out, in place, when no curved part arrives at it any more
+    (held / deleted / dragged after a held part) or it is the same BPM as the second: it played nothing and
+    couldn't be used (user 2026-10-22). True when one went."""
+    gone = False
+    i = 0
+    while i + 1 < len(pts):
+        p, q = pts[i], pts[i + 1]
+        if p[0] == q[0]:
+            before = pts[i - 1] if i > 0 else None
+            glides = before is not None and before[2] != "hold" and before[1] != p[1] and before[0] < p[0]
+            if not glides or p[1] == q[1]:
+                del pts[i]
+                gone = True
+                continue
+        i += 1
+    return gone
 
 
 def catch_set(c, k, v):
@@ -318,8 +338,8 @@ def drawn_bpm(tempo, base, beats):
     idx = np.searchsorted(pb, beats, "right") - 1  # the point at or before each beat (-1: before the first)
     has = idx >= 0
     out[has] = vs[idx[has]]
-    for i in range(len(pts) - 1):
-        kind = pts[i][2]
+    for i in np.unique(idx[has & (idx < len(pts) - 1)]).tolist():  # (only the parts asked about: a song with
+        kind = pts[i][2]  # thousands of points read part by part was slow, hunt 2026-10-22)
         if kind == "hold" or pts[i][1] == pts[i + 1][1] or pb[i + 1] <= pb[i]:
             continue
         on = idx == i
@@ -935,11 +955,13 @@ def ruler_marks(tempo, base, ppq):
     worked = plans(tempo, base, ppq)
     pts, lines = tempo["points"], [st["line"] for st, _ in worked]
     out = []
+    pb = np.array([p[0] for p in pts], float)
+    befores = shown_bpm(tempo, base, pb - 1e-9 * np.maximum(1.0, pb), worked).tolist()  # (all in one go)
     for i, p in enumerate(pts):
         b = p[0]
         if i + 1 < len(pts) and pts[i + 1][0] == b:  # (where a curve arrives: the next one on its beat says it)
             continue
-        before =float(shown_bpm(tempo, base, [b - 1e-9 * max(1.0, b)], worked)[0]) if b > 0 else None
+        before = befores[i] if b > 0 else None
         then = None
         if p[2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != p[1]:
             cut = [x for x in lines if b < x < pts[i + 1][0]]  # (a catch-up line cuts the part short)
@@ -960,15 +982,21 @@ def bpm_at(tempo, base, ppq, tick):
     draws there); the project's BPM without a tempo line."""
     if not has_tempo(tempo):
         return float(base)
-    key = (json.dumps(tempo), base, ppq)
-    got = _at.get(key)
-    if got is None:  # (the play line moves every frame while playing: worked out once per tempo line)
-        runs = _runs(file_segments(tempo, base, ppq)[0])
-        if len(_at) > 4:
-            _at.clear()
-        got = _at[key] = ([t for t, _ in runs], [u for _, u in runs])
-    ticks, us = got
-    return 60_000_000 / us[max(0, bisect.bisect_right(ticks, tick) - 1)]
+    key = (json.dumps(tempo), base, ppq, tick)
+    if key in _at:  # (the play line resting / redrawn: once)
+        return _at[key]
+    u = None
+    for st, plan in plans(tempo, base, ppq):  # (only that tick worked out, not the whole song: hunt 2026-10-22,
+        ra, rb = beat_tick(st["line"], ppq), beat_tick(st["end"], ppq) if st["end"] is not None else None
+        if plan["ok"] and ra <= tick < rb:  # thousands of points took seconds per edit)
+            u = plan["fit"] if isinstance(plan["fit"], int) else int(plan["fit"][tick - ra])
+            break
+    if u is None:
+        a, _, got = _segments(tempo, base, base_us(base), ppq, tick, tick + 1)[0]
+        u = got if isinstance(got, int) else int(got[tick - a])
+    _at.clear()
+    _at[key] = out = 60_000_000 / u
+    return out
 
 
 _at = {}

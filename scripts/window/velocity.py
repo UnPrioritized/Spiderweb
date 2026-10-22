@@ -321,16 +321,12 @@ class VelocityPane(tk.Canvas):
     def on_release(self, e):
         if self.band_drag:
             self.band_drag = False
-            roll = self.app.roll
-            d = roll.drag
-            if d and d[0] == "move" and roll.time_only and not d[4]:  # (inside the box, not moved: the play line
-                roll.drag = None                                      # stays, unlike a click on the ruler's band)
-                if roll.box_timer:
-                    roll.after_cancel(roll.box_timer)
-                    roll.box_timer = None
-                self.app.settle_history()
-            else:
-                roll.on_release(SimpleNamespace(x=e.x, y=0, state=e.state))
+            # (a click, inside the band or not: the play line there, as the Tempo pane's; user 2026-10-22)
+            roll, ev = self.app.roll, SimpleNamespace(x=e.x, y=0, state=e.state)
+            if roll.drag and roll.drag[0] == "seek":  # (not dragged into a band: a click)
+                self.app.stop_play()  # (playing: on from there, the let-go below)
+                self.app.set_playhead(roll.event_pt(ev)[0])
+            roll.on_release(ev)
             self.request_redraw()
             return
         ed, self.edit = self.edit, None

@@ -986,7 +986,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     def pane_press(self, x, state):
         """A Select press in the velocity pane (user 2026-10-21): as on the ruler (its black band = moves what it
         selected in time; a drag elsewhere = a band over every key; a click elsewhere drops the band and what it
-        selected), but the play line stays put. The pane hands its moves and let-go on with y = 0."""
+        selected); a CLICK also moves the play line there (user 2026-10-22, like the Tempo pane's Select click; the
+        pane does it on let-go, a drag leaves it). The pane hands its moves and let-go on with y = 0."""
         if self.sx is None or self.draft:
             return
         self.app.commit_typing()
@@ -997,7 +998,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if self.ruler_band(e, kept):
             self.band_press(e, kept)
         else:
-            self.drag = ("seek", False, x, state, kept)
+            self.drag = ("seek", self.app.player.running, x, state, kept)
 
     def on_press(self, e):
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)

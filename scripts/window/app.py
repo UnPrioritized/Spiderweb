@@ -82,7 +82,7 @@ from files.clipboard import RAW, copy_count, get_text, put_text
 from files.share import LONG_LINE, FIND, ShareError, made_by, read_shapes, shapes_line, unpack
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
-from notes.tempo import empty as empty_tempo
+from notes.tempo import drop_loose, empty as empty_tempo
 from roll.roll_shared import cached_path
 from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
@@ -2315,6 +2315,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         it."""
         if not hasattr(self, "tempo_box"):
             return
+        if not self.tempo_pane.drag:  # (a jump's first point nothing glides into: gone; a drag: when let go)
+            drop_loose(self.tempo["points"])
         self.tempo_box.sync()
         self.tempo_pane.request_redraw()
         self.roll.draw_tempo_marks(self.roll.kept_box() or [])  # (the ruler's marks; shown with the pane hidden too)

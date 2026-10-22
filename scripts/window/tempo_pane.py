@@ -25,7 +25,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
-                         bpm_text, clamp_bpm, curve, formula_fn,
+                         bpm_text, clamp_bpm, curve, drop_loose, formula_fn,
                          catch_get, catch_set, keeps, layout,
                          plans, shown_bpm, step_edges)
 from roll.zoombar import add_zoom_bars
@@ -61,8 +61,8 @@ class TempoBox(ttk.Frame):
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 4))
         # the exact BPM at the play line (user 2026-10-22; a set width: playing doesn't push the tools about)
-        # (always 2 decimals so "BPM" stays put, user)
-        self.play_bpm = ttk.Label(bar, text="", width=14, foreground=look.INFO)
+        # (always 2 decimals, room for the fastest a file holds: "60,000,000.00"; the tools after it never move)
+        self.play_bpm = ttk.Label(bar, text="", width=len(f"{60_000_000:,.2f}") + 1, foreground=look.INFO)
         self.play_bpm.pack(side="left", padx=(0, 4))
         Tooltip(self.play_bpm, tr("tempo.play_bpm_tip"))
         self.tool = tk.StringVar(value="point")  # select / point / line / formula
@@ -349,7 +349,8 @@ class TempoBox(ttk.Frame):
             p = self.app.tempo["points"][pick[1]]
             if self.keep_var.get() != keeps(p):
                 self.app.push_undo(name=tr("tempo.step_keep"))
-                p[5:] = [self.keep_var.get()]
+                p.extend([False] * (6 - len(p)))
+                p[5] = self.keep_var.get()  # (only the tick: the bend after it stays, hunt 2026-10-22)
                 self.app.tempo_changed()
         self.app.roll.focus_set()
 
@@ -968,19 +969,37 @@ class TempoPane(tk.Canvas):
             for key in ("points", "catch"):
                 tempo[key].sort(key=lambda it: it[0])
 
+        moved = {id(s) for s, _, _ in d["orig"]} | {id(s) for s, _ in d.get("mates", ())}
+
+        def clash():
+            """Two on one beat where something moved: the time stays where it last worked. Points: a jump's two
+            may share exactly one beat, never three; one moved onto another (from the left: it arrives there, the
+            list's order the sort keeps) lands exactly on its beat. Points not moved are never touched (hunt
+            2026-10-22: two a hair apart got joined, three stopped every drag)."""
+            for key in ("points", "catch"):
+                its = tempo[key]
+                k = 0
+                while k < len(its):  # (each run of items within half a tick of the one before)
+                    m = k
+                    while m + 1 < len(its) and its[m + 1][0] - its[m][0] < one / 2:
+                        m += 1
+                    run = its[k:m + 1]
+                    k = m + 1
+                    if len(run) < 2 or not any(id(it) in moved for it in run):
+                        continue
+                    if key == "catch" or len(run) > 2:
+                        return True
+                    a, b = run
+                    if id(b) in moved and id(a) not in moved:
+                        b[0] = a[0]
+                    elif id(a) in moved and id(b) not in moved:
+                        a[0] = b[0]
+            return False
+
         place(db)
-        for key in ("points", "catch"):  # (two on one beat: the time stays where it last worked; points: a jump's
-            # two may share exactly one beat, never three; moved onto another, the one coming from the left
-            # arrives there: the list's order, the sort keeps it)
-            beats = [it[0] for it in tempo[key]]
-            near = [beats[k + 1] - beats[k] < one / 2 for k in range(len(beats) - 1)]
-            if key == "points":  # (a hair apart = one beat exactly: a float off by a hair)
-                for k, n in enumerate(near):
-                    if n:
-                        tempo[key][k + 1][0] = beats[k + 1] = beats[k]
-            if any(n and (key == "catch" or (k > 0 and near[k - 1])) for k, n in enumerate(near)):
-                place(d["db"])
-                break
+        if clash():
+            place(d["db"])
+            clash()  # (the old spot's own exact beat again)
         else:
             d["db"] = db
         if d["band"]:
@@ -1008,6 +1027,8 @@ class TempoPane(tk.Canvas):
         d, self.drag = self.drag, None
         if not d:
             return
+        if drop_loose(self.app.tempo["points"]):  # (a jump's first point the drag left with nothing gliding in)
+            self.app.tempo_changed()
         if d["kind"] == "box":
             if d["span"] is None:  # a click: the part there (or nothing), the play line there (user 2026-10-21)
                 part = self.part_at(self.app.roll.x2t(e.x))
@@ -1147,6 +1168,9 @@ class TempoPane(tk.Canvas):
         # (user 2026-10-22: drawn from where a glide arrives = a jump there, that point kept; drawn up to a jump =
         # it arrives there, the tempo after the jump kept)
         end = self.glide_end(b0)
+        at_b0 = [p for p in pts if abs(p[0] - b0) < 1e-9]
+        if len(at_b0) == 2:  # (drawn from a jump: its arrival stays, the line replaces its second point; hunt)
+            end = at_b0[0]
         arrive = [end] if end is not None and abs(end[1] - first[1]) > 1e-9 else []
         if arrive:
             first[0] = end[0]
@@ -1729,7 +1753,7 @@ class TempoPane(tk.Canvas):
         if not self.box.winfo_ismapped():  # (playing: every frame; worked out only while it shows)
             return
         v = bpm_at(app.tempo, self.base(), app.ppq, math.floor(app.playhead * app.ppq + 1e-9))
-        text = tr("tempo.play_bpm", bpm=f"{v:,.2f}")
+        text = f"{v:,.2f}"  # (no "BPM": Domino shows the bare number, user 2026-10-22)
         if self.box.play_bpm.cget("text") != text:
             self.box.play_bpm.config(text=text)
 
