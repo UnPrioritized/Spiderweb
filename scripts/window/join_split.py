@@ -25,7 +25,7 @@ from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merg
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
-from notes.lasso import inside_point, lasso_notes, path_middle, touches
+from notes.lasso import inside_point, lasso_notes, loop_crossings, path_middle, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
@@ -220,14 +220,8 @@ class JoinSplit:
     def can_join(self):
         return self.join_problem() is None
 
-    def join_selected(self):
-        self.commit_typing()  # (a typed number: to the shapes before they're replaced)
-        problem = self.join_problem()
-        if problem:  # (the shortcut: say why)
-            self.status.config(text=problem)
-            return
-        if self.roll.sx is None:
-            return
+    def join_fn(self):
+        """Join's way of making one shape of several: joined(shapes) -> the new shape or None."""
         roll = self.roll
 
         def touch(p, q):
@@ -240,7 +234,26 @@ class JoinSplit:
                 join_velocity(new, shapes, [span(sh) for sh in shapes], span(new))  # (each keeps its velocities)
                 new["end_dot"] = last_note(shapes, new)[0]
             return new
+        return joined
 
+    def joined_shape(self, olds):
+        """Pieces of one shape that meet joined back into one piece (as Join does), or None when they can't be."""
+        joined = self.join_fn()
+        new = joined(olds)
+        if new is None:
+            return None
+        again = rejoined(olds, new, joined)
+        return None if again == CANT or not again else again
+
+    def join_selected(self):
+        self.commit_typing()  # (a typed number: to the shapes before they're replaced)
+        problem = self.join_problem()
+        if problem:  # (the shortcut: say why)
+            self.status.config(text=problem)
+            return
+        if self.roll.sx is None:
+            return
+        joined = self.join_fn()
         order = sorted(self.sels)
         olds = [self.shapes[i] for i in order]
         new = joined(olds)
@@ -850,9 +863,8 @@ class JoinSplit:
         done, out, skipped, plain, missed, merges, flat = {}, {}, 0, set(), 0, 0, False
         for i in targets:
             sh = self.shapes[i]
-            if (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
-                    and not sh.get("text") and not sh.get("hz")):
-                # pasted notes: by time, each row the line crosses (slice.slice_notes); pieces = new pasted notes
+            if self.lasso_pasted(sh):
+                # pasted notes (not masks: never cut, hunt 10-23): by time, each row the line crosses (slice.slice_notes); pieces = new pasted notes
                 pieces, crossed = [sh], False
                 for sa, sb, box in cuts:
                     nxt = []
@@ -941,14 +953,18 @@ class JoinSplit:
             self.shapes_changed(now=True)
         boxes = self.roll.kept_box() or None
         targets = sorted(self.sels) if boxes else range(len(self.shapes))
-        drawn = [i for i in targets if self.lasso_drawn(self.shapes[i])
-                 and touches(self.notes_of(self.shapes[i]), loop, self.ppq, boxes)]
+        drawn, whole = [], []  # (a drawn shape wholly inside: just selected, not asked about; hunt 10-23)
+        for i in targets:
+            if self.lasso_drawn(self.shapes[i]):
+                got = takes(self.notes_of(self.shapes[i]), loop, self.ppq, boxes)
+                if got:
+                    (drawn if got == "cut" else whole).append(i)
         if drawn:
             if not messagebox.askokcancel(tr("join_split.lasso"), trn("join_split.lasso_ask_plain", len(drawn),
                                                                      n=len(drawn)), icon="question", parent=self):
                 return None
             new = self.plain_copies(drawn)
-        done, whole = {}, []
+        done = {}
         for i in targets:
             sh = new[i] if drawn and i in new else self.shapes[i]
             if self.lasso_line(sh):  # (lines: cut where it crosses them, staying lines, like Slice; E2)
@@ -1001,9 +1017,9 @@ class JoinSplit:
         return np.concatenate(got).astype(np.int64) if got else np.zeros((0, 3), np.int64)
 
     def lasso_pasted(self, sh):
-        """Pasted notes the lasso cuts as they are."""
+        """Pasted notes the lasso (and Slice) cut as they are: not masks (never cut, hunt 10-23)."""
         return (sh["kind"] == "custom" and "notes" in sh and "picture" not in sh and "merge" not in sh
-                and not sh.get("text") and not sh.get("hz"))
+                and not sh.get("text") and not sh.get("hz") and not is_mask(sh))
 
     def lasso_line(self, sh):
         """A line the lasso cuts as a line (Slice's way): line kinds without note tool pages / glue; not masks."""
@@ -1023,8 +1039,12 @@ class JoinSplit:
         def boxed(pt):
             return boxes is None or any(min(b[0], b[2]) <= pt[0] <= max(b[0], b[2])
                                         and min(b[1], b[3]) <= pt[1] <= max(b[1], b[3]) for b in boxes)
-        edges = [(loop[k], loop[(k + 1) % len(loop)]) for k in range(len(loop))]
-        hits = [(pt, [b[0] - a[0], b[1] - a[1]]) for a, b in edges for pt, _ in crossings(path, a, b) if boxed(pt)]
+        hits = [(pt, way) for pt, way in loop_crossings(path, loop) if boxed(pt)]
+        for b in boxes or ():  # (the kept boxes' edges inside the loop cut it too, like the notes; hunt 10-23)
+            b0, b1, p0, p1 = min(b[0], b[2]), max(b[0], b[2]), min(b[1], b[3]), max(b[1], b[3])
+            for a, c in (([b0, p0], [b1, p0]), ([b1, p0], [b1, p1]), ([b1, p1], [b0, p1]), ([b0, p1], [b0, p0])):
+                hits += [(pt, [c[0] - a[0], c[1] - a[1]]) for pt, _ in crossings(path, a, c)
+                         if inside_point(loop, pt)]
         if not hits:
             mid = path_middle(path)
             return True if inside_point(loop, mid) and boxed(mid) else None
@@ -1042,6 +1062,15 @@ class JoinSplit:
             mid = path_middle(np.asarray(cached_path(p), float).reshape(-1, 2))
             if inside_point(loop, mid) and boxed(mid):
                 p["_inside"] = True
+        closed = len(path) > 2 and np.hypot(*(path[0] - path[-1])) < 1e-9
+        if closed and len(pieces) >= 3 and bool(pieces[0].get("_inside")) == bool(pieces[-1].get("_inside")):
+            # (a closed line's last and first pieces meet at its start: one piece, hunt 10-23)
+            side = bool(pieces[0].get("_inside"))
+            got = self.joined_shape([{k: v for k, v in q.items() if k != "_inside"} for q in (pieces[-1], pieces[0])])
+            if got is not None:
+                if side:
+                    got["_inside"] = True
+                pieces = [got] + pieces[1:-1]
         return pieces if any(p.get("_inside") for p in pieces) else None
 
     def put_pieces(self, done, plain, name, pick=None):
@@ -1072,9 +1101,10 @@ class JoinSplit:
         return picked
 
     def all_rows(self, sh):
-        """A pasted-notes shape's notes and tracks for the Slice tool, rows moved past the top key too (they're hidden
-        but kept: a slice mustn't lose them). Without its Sustain / Gate subtract: the pieces keep those as settings."""
-        sh = {k: v for k, v in sh.items() if k not in ("sustain", "subtract")}
+        """A pasted-notes shape's notes and tracks for the Slice / Lasso tools, rows moved past the top key too (they're
+        hidden but kept: a slice mustn't lose them). As they sound, Sustain / Gate subtract done: the pieces sound
+        exactly as before and don't keep those settings (user 2026-10-23: a cut turns them into plain notes;
+        slice._halves)."""
         (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
         if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
             return self.notes_tracks(sh)

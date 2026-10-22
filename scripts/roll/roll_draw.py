@@ -858,7 +858,8 @@ class RollDrawing:
         if self.sx is None:
             return
         x, w = self.t2x(self.app.playhead), self.winfo_width()
-        busy = self.drag or self.draft or self.follow or self.app.vel.edit
+        busy = (self.drag or self.draft or self.follow or self.app.vel.edit
+                or self.lasso and not self.lasso["closed"])  # (a lasso loop being clicked: like a polyline, hunt)
         if self.app.player.running and not busy and (x > w - 6 * self.scale or (start and x < self.kb_w)):
             self.view_t = self.app.playhead
             self.clamp_view()

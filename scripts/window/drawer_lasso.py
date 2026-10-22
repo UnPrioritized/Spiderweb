@@ -5,7 +5,7 @@ ones too), the pieces inside picked, so Delete takes them away."""
 
 from files.lang import tr
 from notes.custom import stroke_points
-from notes.lasso import inside_point, lasso_stroke, path_middle
+from notes.lasso import in_or_on, lasso_stroke, path_middle
 from roll.roll_lasso import LassoDrawing
 from window import look
 
@@ -26,6 +26,9 @@ class DrawerLasso(LassoDrawing):
     def lasso_snap(self, pt, e, angle=True):
         """A clicked / dragged point: it sticks to points and lines, else the grid, like drawing (Shift = free)."""
         return self.event_pt(e)
+
+    def lasso_kept_in(self, pt):
+        return pt  # (drawing past the board is fine)
 
     def lasso_mode_now(self):
         return self.lasso_kind.get()
@@ -63,8 +66,7 @@ class DrawerLasso(LassoDrawing):
         picked = self.movable()
         idx = set(picked or [i for i in range(len(self.strokes)) if self.pickable(i)])
         slack = 1.5 * self.scale / self.px()
-        whole = {i for i in idx
-                 if any(inside_point(lp, path_middle(stroke_points(self.strokes[i]))) for lp in loops)}
+        whole = {i for i in idx if in_or_on(loops, path_middle(stroke_points(self.strokes[i])))}
         self.cut_strokes(None, picked, "drawer.lasso_nothing",
                          cutter=lambda i, st: lasso_stroke(st, loops, slack) if i in idx else None, whole=whole)
         return True

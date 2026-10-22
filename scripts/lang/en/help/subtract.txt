@@ -34,7 +34,7 @@ Gate subtract comes last, after everything else that makes the notes: the outlin
 
 Flipping the shape sideways swaps the two sides: a note end becomes a note start, so a flipped copy is the mirror image of the original, gaps included. Switching Gate aware flip on or off swaps them too. A graph turns round with the shape when it runs across that way.
 
-Slicing and splitting keep it on every piece, and a graph across the shape is cut so every note keeps its gap. With "Only notes that touch", notes that touched a note now in the other piece keep their gap, even when the pieces are moved apart. Join, Turn into live shape and Gate sensitive merge keep it when all the shapes have the same settings. An Add between group gets it step by step when both ends have it, and a step can have its own.
+Slicing and splitting keep it on every piece, and a graph across the shape is cut so every note keeps its gap. Pasted notes cut by Slice or the Lasso become plain notes as they sound: their gaps stay, but Gate subtract is no longer a setting on the pieces. With "Only notes that touch", notes that touched a note now in the other piece keep their gap, even when the pieces are moved apart. Join, Turn into live shape and Gate sensitive merge keep it when all the shapes have the same settings. An Add between group gets it step by step when both ends have it, and a step can have its own.
 
 Turn into plain notes, Apply mask copies and mask areas are made without it.
 

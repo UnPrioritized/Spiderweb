@@ -450,13 +450,18 @@ def _halves(sh, parts, ppq):
     mirrored = bool(colours_back(sh))  # (a gate flipped paste: the pieces keep its colours' channels)
     from notes.passengers import shared_out
     rides = shared_out(sh, parts, ppq) if "cc" in sh else [None] * len(parts)  # (its CCs by time per track)
+    from notes.sustain import is_sustained
+    held = is_sustained(sh) or sh.get("held") is True  # (Sustain done in its notes: they keep their overlaps)
     out = []
     for n, cc in zip(parts, rides):
         half = {k: copy.deepcopy(v) for k, v in sh.items()
                 if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours", "unmerge",
-                              "leftover_of", "cc")}
-        # (pages / glue / a velocity line / a gate aware flip: in its notes; a merge's notes cut: no Split back)
+                              "leftover_of", "cc", "sustain", "subtract")}
+        # (pages / glue / a velocity line / a gate aware flip / Sustain / Gate subtract: in its notes, as they sound
+        # (user 2026-10-23); a merge's notes cut: no Split back)
         half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)
+        if held:
+            half["held"] = True
         if cc:
             half["cc"] = cc
         if "unmerge" in sh:  # (no Split back any more: not called "Merged notes", hunt)

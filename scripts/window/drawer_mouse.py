@@ -504,7 +504,11 @@ class DrawerMouse:
         if not self.drag:
             return
         if self.lasso_holding():
-            return self.lasso_drag(e)
+            was = self.stuck
+            self.lasso_drag(e)
+            if self.stuck != was:  # (where its point sticks: the mark follows, hunt 10-23)
+                self.redraw()
+            return
         if self.drag[0] == "areas":
             return self.area_drag(e)
         if self.drag[0] == "erasebox":
@@ -602,8 +606,9 @@ class DrawerMouse:
     def on_release(self, e, second=False):
         """second: the click that finishes a stroke started with a click (see follow)."""
         if self.lasso_holding():
-            self.stuck = None
-            return self.lasso_release(e)
+            was, self.stuck = self.stuck, None
+            self.lasso_release(e)
+            return self.redraw() if was else None
         self.stuck = self.stuck2 = None  # (the mark goes; hovering shows it again)
         self.guide = []
         if self.drag and (self.tool.get() == "select" or self.drag[0] in ("points", "pen")):
@@ -674,8 +679,10 @@ class DrawerMouse:
             was = self.stuck
             if not self.lasso_motion(e) and not (self.lasso and self.lasso["closed"]):
                 self.event_pt(e)
-                if self.stuck != was:
-                    self.redraw()
+            elif self.lasso and self.lasso["closed"]:
+                self.stuck = None
+            if self.stuck != was:  # (where a click would stick: the mark follows, hunt 10-23)
+                self.redraw()
             return
         cursor = "fleur" if self.draft is None and (self.curve_handle_at(e.x, e.y) is not None or (
             self.chosen() and self.in_boxes(e.x, e.y))) else "crosshair"

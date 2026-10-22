@@ -268,6 +268,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if moving:  # (the mouse stays put: the box goes on to where it now points in the song)
             self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
             self.on_drag(SimpleNamespace(x=mx, y=my, state=state))
+            if kind.startswith("lasso"):  # (its drag redraws only the loop: the notes / grid / ruler too)
+                self.request_redraw()
             return
         mx, my = (self.view_t - t) * self.sx, (self.view_top - top) * self.sy
         _, b, p, cx, cy, *rest = self.drag
@@ -1762,6 +1764,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         point / box held or a Select box being drawn: the drag goes on)."""
         if self.holding() or e.state & 0x100:
             return
+        if self.lasso_right_used:  # (the click before worked on a lasso loop: this one is a click of its own, so
+            self._right_paired = False  # two quick right-clicks on a loop point never lose the loop; hunt 10-23)
+            return self.on_right(e)
         self.drop_menu_wait()
         self.app.toggle_select_tool()
 
@@ -1782,9 +1787,11 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if box and not self.kept_box():
                 self.app.select(None)
             return
+        self.lasso_right_used = False
         if self.holding():
             return
         if self.lasso_right(e):  # a waiting lasso loop's point: removed
+            self.lasso_right_used = True
             return
         if not self.draft and self.path_right(e):  # Copy along a path: a point removed / the added one dropped
             return
@@ -1989,6 +1996,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             return self.app.vel.follow_mouse()
         if self.sx is not None and self.holding():
             return self.on_drag(e)
+        if self.sx is not None and not self.drag and self.lasso and not self.lasso["closed"]:  # (an open loop's next
+            return self.lasso_motion(SimpleNamespace(x=e.x, y=e.y, state=0))  # line: its end on the mouse; hunt)
         if self.sx is None or not (self.draft or self.follow):
             return
         if self.drag and self.drag[0] in ("create", "place", "segment", "arcdrag", "wall"):

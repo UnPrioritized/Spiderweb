@@ -12,7 +12,7 @@ from files.lang import tr
 from window import look
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.snap_picker import SIZE, png_bytes, near_segment
-from window.widgets import Tooltip
+from window.widgets import Tooltip, good
 
 FIRST = "line"  # the tool the button shows on the very first start
 ROW_BG, HOVER_BG, PICKED_BG = look.TOOL_ROW, look.TOOL_HOVER, look.TOOL_PICKED
@@ -306,6 +306,8 @@ class ToolPicker:
             self.app.lasso_mode.set(win["lasso_mode"])
         if isinstance(win.get("lasso_width"), int) and 1 <= win["lasso_width"] <= 256:
             self.app.lasso_width.set(str(win["lasso_width"]))
+            if hasattr(self.app, "lasso_width_entry"):  # (its last good value: a wrong one typed goes back to it)
+                good(self.app.lasso_width_entry)
         if tool in self.label or tool in ("select", "slice", "lasso"):
             self.app.tool.set(tool)
         if isinstance(win.get("draw_tool"), str) and win["draw_tool"] in self.label:

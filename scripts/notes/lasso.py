@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-from notes.bezier import fit, seg_point, split
+from notes.bezier import fit, seg_point, segments, split
 from notes.slice import EPS, _halves
 
 FIT_PX = 2.0  # a freehand loop smoothed on closing stays this near the drawn line (screen pixels)
@@ -138,6 +138,17 @@ def touches(notes, loop, ppq, boxes=None):
     return bool(lasso_pieces(notes, loop, ppq, boxes)[3].any())
 
 
+def takes(notes, loop, ppq, boxes=None):
+    """What the loop does to these notes (start, end, key, ...): "cut" (some inside, some not), "whole" (all of them
+    inside) or None (none inside)."""
+    notes = np.asarray(notes, np.int64)
+    whose, _, _, inside = lasso_pieces(notes, loop, ppq, boxes)
+    if not inside.any():
+        return None
+    out = (~inside).any() or len(np.unique(whose)) < len(notes)  # (notes on rows it doesn't reach: outside)
+    return "cut" if out else "whole"
+
+
 def inside_point(loop, pt):
     """True when the loop goes round pt (beat, key): nonzero winding, as the notes' rule (a figure-8: both halves)."""
     pts = np.asarray(loop, float)
@@ -146,6 +157,44 @@ def inside_point(loop, pt):
     on = (np.minimum(y0, y1) <= pt[1]) & (pt[1] < np.maximum(y0, y1))
     x = x0[on] + (pt[1] - y0[on]) * (x1[on] - x0[on]) / (y1[on] - y0[on])
     return int(np.sum(np.where(y1[on] > y0[on], 1, -1)[x < pt[0]])) != 0
+
+
+def loop_crossings(path, loop):
+    """Where the polyline path ((N, 2) points) crosses the closed loop: [(point, the loop's way there)], every loop
+    edge at once (one edge at a time took seconds with hundreds of lines and a curved loop; hunt 10-23). A crossing on
+    a loop point counts once."""
+    p = np.asarray(path, float).reshape(-1, 2)
+    lp = np.asarray(loop, float).reshape(-1, 2)
+    if len(p) < 2 or len(lp) < 2:
+        return []
+    lo, hi = np.minimum(p[:-1], p[1:]), np.maximum(p[:-1], p[1:])
+    l_lo, l_hi = lp.min(0), lp.max(0)
+    near = np.flatnonzero((hi[:, 0] >= l_lo[0]) & (lo[:, 0] <= l_hi[0]) & (hi[:, 1] >= l_lo[1]) & (lo[:, 1] <= l_hi[1]))
+    if not len(near):
+        return []
+    a = lp
+    d = np.roll(lp, -1, axis=0) - lp
+    out = []
+    for c0 in range(0, len(near), 256):
+        j = near[c0:c0 + 256]
+        q, r = p[j][:, None, :], (p[j + 1] - p[j])[:, None, :]
+        den = r[..., 0] * d[None, :, 1] - r[..., 1] * d[None, :, 0]
+        ok = np.abs(den) > EPS
+        den = np.where(ok, den, 1)
+        w = a[None] - q
+        t = (w[..., 0] * d[None, :, 1] - w[..., 1] * d[None, :, 0]) / den  # (along the path's piece)
+        s = (w[..., 0] * r[..., 1] - w[..., 1] * r[..., 0]) / den  # (along the loop's edge)
+        last = (j == len(p) - 2)[:, None]
+        hit = ok & (t >= -EPS) & ((t < 1 - EPS) | last & (t <= 1 + EPS)) & (s >= -EPS) & (s < 1 - EPS)
+        for pi, ei in zip(*np.nonzero(hit)):
+            pt = p[j[pi]] + (p[j[pi] + 1] - p[j[pi]]) * min(1.0, max(0.0, t[pi, ei]))
+            out.append((j[pi] + t[pi, ei], pt, d[ei]))
+    out.sort(key=lambda h: h[0])
+    got = []
+    for _, pt, way in out:
+        if not got or np.hypot(*(pt - got[-1][0])) > 1e-7:
+            got.append((pt, [float(way[0]), float(way[1])]))
+    return got
 
 
 def path_middle(path):
@@ -197,8 +246,10 @@ def split_piece(pts, hd, i, t):
         hd.insert(i + 1, None)
         return i + 1
     flat = split([list(p) for p in c], 0, t)  # [a, a', d, m, e, c', b]
-    hd[i] = [list(hd[i][0]) if hd[i] else list(pts[i]), flat[1], hd[i][2] if hd[i] else True]
-    hd[j] = [flat[5], list(hd[j][1]) if hd[j] else list(pts[j]), hd[j][2] if hd[j] else True]
+    if hd[i]:  # (a point without handles keeps none: its side of the piece is straight from it either way)
+        hd[i] = [list(hd[i][0]), flat[1], hd[i][2]]
+    if hd[j]:
+        hd[j] = [flat[5], list(hd[j][1]), hd[j][2]]
     pts.insert(i + 1, flat[3])
     hd.insert(i + 1, [flat[2], flat[4], False])
     return i + 1
@@ -255,9 +306,9 @@ def magnet_spot(rows, pt, sx, sy, width):
         got = rows.get(k)
         if not got:
             continue
-        t0, t1 = pt[0] - width / sx, pt[0] + width / sx
-        for arr in got:
-            for x in arr[np.searchsorted(arr, t0):np.searchsorted(arr, t1, "right")]:
+        for arr in got:  # (on a row the nearest start / end on each side of the mouse is all that can win: a big
+            i = int(np.searchsorted(arr, pt[0]))  # Width over millions of notes went one by one; hunt 10-23)
+            for x in arr[max(0, i - 1):i + 1]:
                 for y in (k - 0.5, k + 0.5):
                     d = math.hypot((x - pt[0]) * sx, (y - pt[1]) * sy)
                     if d <= width and (best is None or d < best[0]):
@@ -381,21 +432,28 @@ def lasso_stroke(st, loops, slack=0.0):
     closed = is_closed(poly)
     edges = [(np.asarray(lp[k], float), np.asarray(lp[(k + 1) % len(lp)], float)) for lp in loops
              for k in range(len(lp))]
+
+    def status(pt):
+        return in_or_on(loops, pt)
     if st["kind"] == "curve" and exact(st):
+        segs = segments(st["pts"])
         us = []
         for a, b in edges:
             length = math.dist(a, b)
             if length > EPS:
                 far = 1e-6 + slack / length
                 us += [u for u, _, s in curve_cuts(st["pts"], a, b) if -far <= s <= 1 + far]
+        us = _real_cuts(us, lambda u: seg_point(*segs[min(int(u), len(segs) - 1)], u - min(int(u), len(segs) - 1)),
+                        len(segs), closed, status)
         pieces = curve_pieces(st, us) if us else [st]
-        if closed and len(pieces) > 1:
+        if closed and len(pieces) > 1 and not any(u <= 1e-9 for u in us):  # (a cut on its start: no join)
             pieces = [joined_curve(pieces[-1], pieces[0])] + pieces[1:-1]
     else:
         path = st["pts"] if st["kind"] == "poly" and exact(st) else poly
         at = [j + t for a, b in edges if math.dist(a, b) > EPS for _, _, j, t in _crossings(path, a, b, False)]
+        at = _real_cuts(at, lambda u: _path_at(path, u), len(path) - 1, closed, status)
         parts = _split_path(path, at) if at else [path]
-        if closed and len(parts) > 1:
+        if closed and len(parts) > 1 and not any(u <= 1e-9 for u in at):
             parts = [parts[-1] + parts[0][1:]] + parts[1:-1]
         if st["kind"] == "arc" and exact(st):
             pieces = [{"kind": "arc", "pts": [list(p[0]), list(p[len(p) // 2]), list(p[-1])], "k": st.get("k", 1.0)}
@@ -411,10 +469,52 @@ def lasso_stroke(st, loops, slack=0.0):
     for p in pieces:
         p = dict({k: copy.deepcopy(st[k]) for k in ("role", "colour", "layer") if k in st}, **p)
         p["pts"] = [[float(u), float(v)] for u, v in p["pts"]]
-        mid = path_middle(stroke_points(p))
-        p["_inside"] = any(inside_point(lp, mid) for lp in loops)
+        p["_inside"] = status(path_middle(stroke_points(p)))
         out.append(p)
     return out
+
+
+def in_or_on(loops, pt, eps=1e-7):
+    """pt (u, v) inside one of the closed loops or lying on one (a stroke along the loop counts as inside: a square
+    lassoed by its corners, hunt 10-23)."""
+    for lp in loops:
+        if inside_point(lp, pt):
+            return True
+        a = np.asarray(lp, float).reshape(-1, 2)
+        d = np.roll(a, -1, axis=0) - a
+        L = (d * d).sum(1)
+        u = np.clip(((pt[0] - a[:, 0]) * d[:, 0] + (pt[1] - a[:, 1]) * d[:, 1]) / np.where(L > 0, L, 1), 0, 1)
+        if np.hypot(a[:, 0] + d[:, 0] * u - pt[0], a[:, 1] + d[:, 1] * u - pt[1]).min() <= eps:
+            return True
+    return False
+
+
+def _path_at(path, u):
+    """The point at u (piece number + how far along it) on a polyline."""
+    j = min(int(u), len(path) - 2)
+    t = u - j
+    return [path[j][0] + (path[j + 1][0] - path[j][0]) * t, path[j][1] + (path[j + 1][1] - path[j][1]) * t]
+
+
+def _real_cuts(cands, at, end, closed, status):
+    """Of the places a stroke meets a loop (u from 0 to end along it), those where it really goes from inside to
+    outside or back (status(at(u)) differs on the two sides): not where it only touches or runs along the loop (hunt
+    10-23). A closed stroke's start and end are one place."""
+    c = sorted({min(end, max(0.0, round(x, 12))) for x in cands})
+    if closed:
+        c = sorted({0.0 if x >= end - 1e-9 else x for x in c})
+    real = []
+    for k, x in enumerate(c):
+        if not closed and (x <= 1e-9 or x >= end - 1e-9):
+            continue  # (an open stroke's own ends)
+        prev = c[k - 1] if k else (c[-1] - end if closed else 0.0)
+        nxt = c[k + 1] if k + 1 < len(c) else (c[0] + end if closed else end)
+        a, b = (prev + x) / 2, (x + nxt) / 2
+        if closed:
+            a, b = a % end, b % end
+        if status(at(a)) != status(at(b)):
+            real.append(x)
+    return real
 
 
 def tidy_loop(pts):

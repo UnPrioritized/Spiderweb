@@ -11,7 +11,7 @@ from files.lang import tr
 from notes.bezier import seg_point
 from notes.lasso import (curved_loop, magnet_rows, magnet_spot, magnetic_path, seg_controls, smooth_loop, split_piece,
                          tidy_loop)
-from roll.roll_shared import ALT, CTRL, LONG_STROKE, SHIFT, shown_points
+from roll.roll_shared import ALT, CTRL, SHIFT
 from window import look
 
 CLOSE_PX = 8  # a Polygonal click this near the first point closes the loop
@@ -24,6 +24,7 @@ MOST_WIDTH = 256  # Magnetic Width (pixels), like a pen tool's
 
 
 class LassoDrawing:
+    lasso_right_used = False  # the last right-click worked on the loop (a quick next one isn't a double right-click)
     lasso_mouse = None  # (x, y) of the mouse last seen with the Magnetic lasso: its Width circle
     lasso = None  # {"pts": [[beat, key], ...], "mode": "free" / "poly", "closed", "hover": [beat, key] or None,
     #                "hd": each point's handles [in, out, corner] or None, once closed}
@@ -102,13 +103,18 @@ class LassoDrawing:
         a = round(math.atan2(y - y0, x - x0) / (math.pi / 4)) * math.pi / 4
         d = math.hypot(x - x0, y - y0)
         x, y = x0 + d * math.cos(a), y0 + d * math.sin(a)
-        return self.lasso_back(x, y)
+        return self.lasso_kept_in(self.lasso_back(x, y))
+
+    def lasso_kept_in(self, pt):
+        """A point kept on the piano roll: beat 0 at least, keys from under key 0 to over the top one (hunt 10-23: a
+        45° point went under the keyboard)."""
+        return [max(0.0, pt[0]), min(max(pt[1], -0.5), self.app.keys - 0.5)]
 
     def lasso_point_at(self, x, y):
         """The waiting loop's point (number) near the mouse, or None."""
         pts = self.lasso["pts"]
         best = None
-        for i in shown_points(len(pts), len(pts) <= LONG_STROKE):
+        for i in range(len(pts)):  # (every point of a waiting loop: its handles all show too; hunt 10-23)
             px, py = self.to_xy(pts[i])
             d = math.hypot(px - x, py - y)
             if d <= POINT_PX * self.scale and (best is None or d < best[0]):
@@ -208,8 +214,10 @@ class LassoDrawing:
             las["live"] = []
 
     def magnet_close(self):
-        """A Magnetic loop closed: the clinging line from its last point back to the first."""
+        """A Magnetic loop closed: the line shown to the mouse kept (as a click does; hunt 10-23: Enter dropped it and
+        the loop could vanish), then the clinging line from there back to the first point."""
         las = self.lasso
+        self.fasten(las.get("live"))
         path = magnetic_path(las["rows"], las["pts"][-1], las["pts"][0], self.sx, self.sy) or []
         las["pts"] += [list(p) for p in path[1:-1]]
         las["live"] = []
@@ -340,8 +348,11 @@ class LassoDrawing:
             return True
         if not las:
             return False
-        if k == "escape":
-            self.drop_lasso()
+        if k == "escape":  # (a point / handle held: back where it was first, like Ctrl+Z; Esc calls off what's
+            if self.drag and self.drag[0] == "lasso_point":  # going on first, hunt 10-23)
+                self.lasso_undo()
+            else:
+                self.drop_lasso()
         elif k in ("return", "kp_enter"):
             self.lasso_enter()
         elif k == "backspace" and not las["closed"] and las["mode"] != "free" and not self.drag:
@@ -438,6 +449,8 @@ class LassoDrawing:
         las = self.lasso
         if not las or not las["closed"]:
             return False
+        if self.lasso_point_at(e.x, e.y) is not None:  # (on a point: nothing, like a funnel's; hunt 10-23)
+            return True
         pts, hd = las["pts"], self.lasso_hd()
         best = None
         for i in range(len(pts)):
@@ -509,7 +522,7 @@ class LassoDrawing:
         for _, (hx, hy) in lines:
             c.create_oval(hx - q, hy - q, hx + q, hy + q, fill=look.HANDLE, outline=look.HANDLE_FILL,
                              width=max(1, round(s)), tags="lasso")
-        shown = (shown_points(len(las["pts"]), len(las["pts"]) <= LONG_STROKE) if las["closed"]
+        shown = (range(len(las["pts"])) if las["closed"]
                  else range(len(las["pts"])) if las["mode"] == "poly"
                  else [0] + [m - 1 for m in las["marks"][1:]] if las["mode"] == "magnet" else (0,))
         for i in shown:

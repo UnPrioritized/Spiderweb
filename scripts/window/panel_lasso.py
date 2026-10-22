@@ -34,13 +34,14 @@ class LassoPanel:
         ttk.Label(w, text=tr("panel_lasso.width_hint"), foreground=look.HINT).pack(side="left")
         for x in (lb, e):
             Tooltip(x, tr("panel_lasso.width_tip"))
+        good(e)  # (a wrong first value goes back to this one, not left red; hunt 10-23; tool_picker's restore too)
         self._lasso_shown = None
 
     def lasso_px(self):
         """The Magnetic Width (1-256 px; the box half typed: the last good one)."""
         try:
             self._lasso_px = min(256, max(1, int(round(float(self.lasso_width.get())))))
-        except (TclError, ValueError):
+        except (TclError, ValueError, OverflowError):  # (half typed, "inf", 1e999: the last good one)
             pass
         return getattr(self, "_lasso_px", 10)
 
@@ -82,7 +83,7 @@ class LassoPanel:
             value = calc(str(self.lasso_width_entry.get()))
             if not 1 <= value <= 256:
                 raise ValueError
-        except ValueError:
+        except (ValueError, OverflowError, ZeroDivisionError):
             bad(self.lasso_width_entry)
             return
         good(self.lasso_width_entry)
