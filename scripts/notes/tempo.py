@@ -401,11 +401,13 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
         if held:
             bpm = float(drawn_bpm(tempo, base, [a / ppq])[0])
             out.append((a, b, base_u if bpm == base else int(nearest_safe([6e7 / bpm])[0])))
-        else:  # (a new value every "every" ticks from the part's first tick, at the start of each)
+        else:  # (a new value every "every" ticks from the part's first tick; the first step the start point's
+            # BPM, the last the end point's: step_shares)
             every = tempo.get("every", EVERY)
+            part = (edges[k], edges[k + 1])
             if every >= BLOCKS_FROM:  # (one entry per step, not per tick: long songs at a high PPQ stay quick)
                 starts = np.arange(edges[k] + (a - edges[k]) // every * every, b, every)
-                bpm = drawn_bpm(tempo, base, starts / ppq)
+                bpm = part_bpm(tempo, i, step_shares(*part, starts, every))
                 us = nearest_safe(6e7 / bpm)
                 us[bpm == base] = base_u
                 for s, u in zip(starts.tolist(), us.tolist()):
@@ -416,7 +418,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
                         out.append((lo, hi, u))
                 continue
             ticks = np.arange(a, b)
-            bpm = drawn_bpm(tempo, base, (edges[k] + (ticks - edges[k]) // every * every) / ppq)
+            bpm = part_bpm(tempo, i, step_shares(*part, edges[k] + (ticks - edges[k]) // every * every, every))
             us = nearest_safe(6e7 / bpm)
             us[bpm == base] = base_u  # (the project's own tempo, exactly as the file starts)
             out.append((a, b, us))
@@ -637,28 +639,52 @@ def plans(tempo, base, ppq):
 
 
 def step_edges(tempo, worked, ppq):
-    """[(first tick, end tick)] of every curved stretch: curved parts and curved catch-ups, which change every
-    "every" ticks from their first tick (as the file has them)."""
+    """[(first tick, end tick, first beat, end beat)] of every curved stretch: curved parts (their points' beats)
+    and curved catch-ups (None, None), which change every "every" ticks from their first tick (as the file has
+    them)."""
     pts = tempo["points"]
     first = _first_ticks([p[0] for p in pts], ppq)
-    out = [(first[i], first[i + 1]) for i in range(len(pts) - 1)
+    out = [(first[i], first[i + 1], pts[i][0], pts[i + 1][0]) for i in range(len(pts) - 1)
            if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]]
-    return out + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq)) for st, plan in worked
+    return out + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), None, None) for st, plan in worked
                   if plan["ok"] and st["shape"] != "flat"]
 
 
+def step_shares(a, b, starts, every):
+    """How far along its curved part (ticks a..b) each step starting at tick `starts` reads the line: spread from
+    0 (the start point's BPM) to 1 (the end point's, exactly; user 2026-10-22: a glide ending at a jump never
+    reached its BPM when each step read the line at its own start)."""
+    n = -(-(b - a) // every)
+    j = (np.asarray(starts) - a) // every
+    return j / (n - 1) if n > 1 else 0.0 * j
+
+
+def part_bpm(tempo, i, f):
+    """Point i's part's BPM f of the way (0..1) to the next point: its own curve, so the end is the next point's
+    BPM even where a jump's second point shares that beat."""
+    p, q = tempo["points"][i], tempo["points"][i + 1]
+    c = curve(p[2], p[3], np.asarray(f, float), bend_of(p))
+    if p[4] == "exp":
+        out = 2 ** (math.log2(p[1]) + (math.log2(q[1]) - math.log2(p[1])) * c)
+    else:
+        out = p[1] + (q[1] - p[1]) * c
+    return np.clip(out, MIN_BPM, MAX_BPM)
+
+
 def stepped(tempo, beats, ppq, edges):
-    """beats moved back to the start of their interval step inside the curved stretches (step_edges): the value
-    the file has there."""
+    """beats moved to where their interval step reads the line inside the curved stretches (step_edges): the
+    value the file has there."""
     beats = np.asarray(beats, float)
     every = tempo.get("every", EVERY)
-    if every <= 1:
-        return beats
     out = beats.copy()
     tick = np.floor(beats * ppq + 1e-9)
-    for a, b in edges:
+    for a, b, b0, b1 in edges:
         on = (tick >= a) & (tick < b)
-        out[on] = (a + (tick[on] - a) // every * every) / ppq
+        starts = a + (tick[on] - a) // every * every
+        if b0 is not None:  # (the last step a hair before its end beat: a jump's second point is ON that beat)
+            out[on] = np.minimum(b0 + (b1 - b0) * step_shares(a, b, starts, every), b1 - 1e-9 * max(1.0, b1))
+        elif every > 1:  # (a catch-up: its own steps from their starts)
+            out[on] = starts / ppq
     return out
 
 

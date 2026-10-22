@@ -1552,7 +1552,7 @@ class TempoPane(tk.Canvas):
         ppq, every = self.app.ppq, tempo.get("every", EVERY)
         if every > 1 and every / ppq * roll.sx >= 3:  # (the interval's steps, upright too, while wide enough to see)
             t0, t1 = roll.x2t(kb) * ppq, roll.x2t(w + 2) * ppq
-            for a, b in step_edges(tempo, worked, ppq):
+            for a, b, *_ in step_edges(tempo, worked, ppq):
                 k0 = max(1, math.ceil((t0 - a) / every))
                 for t in range(a + k0 * every, min(b, int(t1) + 1), every):
                     jumps.add(t / ppq)
