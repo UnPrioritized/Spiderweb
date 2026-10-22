@@ -132,10 +132,18 @@ class Playback:
         per_shape = {i: self.cc_messages(ppq, bpm, {i}) for i, sh in enumerate(self.shapes)
                      if has_cc(sh.get("hz") or {})}
         per_shape = {i: got for i, got in per_shape.items() if got}
-        if not per_shape:
+        # (pasted notes' CCs too, hunt 2026-10-22: as the files have them; their channels are kept for them already)
+        pasted = self.cc_messages(ppq, bpm, {i for i, sh in enumerate(self.shapes) if "cc" in sh}) \
+            if any("cc" in sh for sh in self.shapes) else {}
+        if not per_shape and not any(pasted.values()):
             return self.rendered, {}, 0
         ports = LIVE_PORTS if (device or self.out.name) == BUILTIN else 0
-        rendered, msgs = cc_apart(self.rendered, per_shape, self.picture_use10, ports)
+        rendered, msgs = cc_apart(self.rendered, per_shape, self.picture_use10, ports) if per_shape else \
+            (self.rendered, {})
+        for s, ms in pasted.items():
+            if ms:
+                msgs.setdefault(s, []).extend(ms)
+                msgs[s].sort(key=lambda e: e[0])
         return rendered, msgs, ports
 
     def _play_tick(self):

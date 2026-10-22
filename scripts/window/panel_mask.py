@@ -10,7 +10,7 @@ from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.sustain import is_sustained
-from notes.passengers import carried
+from notes.passengers import carried, track_map
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
                         is_solid, loops_of, mask_units, new_group_id, slot_pal, slot_rule, tidy_groups, unit_of,
                         unmasked, worked_now)
@@ -261,7 +261,15 @@ class MaskPanel:
         self.status.config(text=tr("mask.apply_done", shapes=trn("n.shapes", len(picked), n=len(picked)),
                                    notes=trn("n.notes", count, n=count)))
 
-    def copied(self, got, picture, multi=None):
+    def track_slots_in(self, got):
+        """For passengers.carried: shape o -> {its track: the slot its notes have in got}, by start + key."""
+        def slots_of(o):
+            mine = got[got[:, 5] == o]
+            notes, tracks = self.notes_tracks(self.shapes[o])
+            return track_map(notes, tracks if tracks is not None else np.zeros(len(notes), np.int64), mine)
+        return slots_of
+
+    def copied(self, got, picture, multi=None, slots_of=None):
         """Shown rows (rendered's columns) -> one "Masked notes" shape, or None. Each note keeps its colour: copied
         from a picture = its channel slot for good, painted in the picture's colours; in Multi channel its slot while
         it stays where it's made (on the shapes it came from, which would push it onto other channels), moved away =
@@ -290,7 +298,7 @@ class MaskPanel:
         sh = clean_shape(new)
         if multi and not picture:
             sh["own_slots"] = [float(v) for v in sh["pts"][0]]
-            cc = carried(self.shapes, self.voice_slots, got, self.ppq)  # (pasted notes' CCs come along: tracks = slots)
+            cc = carried(self.shapes, slots_of or self.track_slots_in(got), got, self.ppq)  # (pasted notes' CCs too)
             if cc:
                 sh["cc"] = cc
         return sh

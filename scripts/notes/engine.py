@@ -1717,6 +1717,11 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     paste_ordered.add(pid)
                 if voice_slots is not None and len(unit_of) in voice_slots:  # (its passengers' tracks)
                     told[len(unit_of)] = (ids, us)
+                for k, t in enumerate(ids.tolist() if spans else ()):  # (its CCs' time: the whole paste's track)
+                    span = spans.get(t)
+                    if span:
+                        had = extra.get(us[k], span)
+                        extra[us[k]] = (min(had[0], span[0]), max(had[1], span[1]))
                 unit_of.append(np.asarray(us, np.int64)[which])
                 if b:  # (a gate flipped piece: the whole paste's tracks by where they start unflipped, below)
                     paste_back.add(pid)

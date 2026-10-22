@@ -18,7 +18,8 @@ from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, c
                           merges_unmade, slot_ports)
 from notes.hzbass import clean_hz
 from notes.hz_cc import slot_events
-from notes.passengers import NO_USUAL, STAY, USUAL, midi_messages, pack_cc, placed, unpack_cc
+from notes.passengers import STAY, USUAL, midi_messages, pack_cc, placed, unpack_cc
+from notes.mask import as_used, slot_rule
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -243,16 +244,20 @@ class ProjectFiles:
             return False
         wholes = data["wholes"] if isinstance(data.get("wholes"), list) else []
 
+        cc_lost = [0]  # (pasted notes kept whose CCs couldn't be read: said, hunt 2026-10-22)
+
         def read():
             out = []
+            cc_lost[0] = 0
             with allowance(size):  # (pasted notes made to unpack far bigger than the file: left out)
-                for sh in data.get("shapes", []):
+                for raw in data.get("shapes", []):
                     try:
-                        sh = clean_shape(unpack_wholes(sh, wholes)) if isinstance(sh, dict) else None
+                        sh = clean_shape(unpack_wholes(raw, wholes)) if isinstance(raw, dict) else None
                     except Exception:  # (damaged, or written in a way this Spiderweb doesn't know)
                         sh = None
                     if sh:
                         out.append(sh)
+                        cc_lost[0] += isinstance(raw.get("cc"), str) and "cc" not in sh
             return out
         try:
             with merges_unmade():  # (merged shapes' notes made only once the count is OK'd: they can be millions)
@@ -275,7 +280,9 @@ class ProjectFiles:
         lost = len(data.get("shapes", [])) - len(shapes)
         if lost:
             self.load_notes.append(trn("project.shapes_left_out", lost, n=lost))
-        self.load_lost = bool(newer or lost)  # (the autosave as it was is worth keeping aside)
+        if cc_lost[0]:
+            self.load_notes.append(trn("project.cc_lost", cc_lost[0], n=cc_lost[0]))
+        self.load_lost = bool(newer or lost or cc_lost[0])  # (the autosave as it was is worth keeping aside)
 
         def get(fn):  # one setting read from the file: None if it's broken
             try:
@@ -913,11 +920,16 @@ class ProjectFiles:
         for i, sh in enumerate(self.shapes):
             slots = self.voice_slots.get(i) if "cc" in sh and (only is None or i in only) else None
             if slots is None and auto and "cc" in sh and sh.get("own_slots") and (only is None or i in only):
-                slots = {k: k for k in {e[1] for e in unpack_cc(sh["cc"])}}  # (a copy whose tracks ARE its slots)
+                # (a copy whose tracks ARE its slots, made with the channel rule of then: moved like its notes, hunt)
+                ks = sorted({e[1] for e in unpack_cc(sh["cc"])})
+                slots = dict(zip(ks, as_used(ks, slot_rule(sh), self.picture_use10).tolist()))
             if not slots:
                 continue
-            group = groups.setdefault(sh.get("paste") or ("one", i), ([], {}))  # (pieces of one paste together)
-            group[0].append(i)
+            paste = sh.get("paste")
+            if (paste or ("one", i)) not in groups:  # (every piece of one paste counts as it, CCs or not: hunt)
+                groups[paste or ("one", i)] = ([j for j, s in enumerate(self.shapes) if s.get("paste") == paste]
+                                               if paste else [i], {})
+            group = groups[paste or ("one", i)]
             for t, track, tag, body in placed(sh, unpack_notes(sh["notes"]), ppq):
                 slot = slots.get(track)
                 if slot is None:  # (a track without notes here: no channel to go on)
@@ -931,17 +943,19 @@ class ProjectFiles:
                     if k is not None and t >= group[1].get((int(slot), k), (-1,))[0]:
                         group[1][int(slot), k] = (t, b if s == 0xB0 else a | b << 7)
         for us, last in groups.values():
-            self.cc_put_back(us, last, out)
+            self.cc_put_back(us, last, out, only)
         for slot in added:
             out[slot].sort(key=lambda e: e[0])
         return out
 
-    def cc_put_back(self, us, last, out):
+    def cc_put_back(self, us, last, out, only=None):
         """At the end of pasted shapes us (one paste, its pieces) on each of their slots, every CC they left changed
-        set back to its usual value (the pitch bend to its middle), only when other notes use that channel after it
-        (user 2026-10-22: the channel is reused later; alone, a round trip stays exactly as it was). last = {(slot,
-        CC number / "bend"): (tick, value)}."""
+        set back to its usual value (the pitch bend to its middle), only when other notes going out (only: these
+        shapes' numbers, None: all) use that channel after it (user 2026-10-22: the channel is reused later; alone, a
+        round trip stays exactly as it was). last = {(slot, CC number / "bend"): (tick, value)}."""
         r = self.rendered
+        if only is not None:  # (a copy of some shapes: only what's in it counts, hunt)
+            r = r[np.isin(r[:, 5], sorted(set(only) | set(us)))]
         for (slot, k), (_, v) in sorted(last.items(), key=lambda e: str(e[0])):
             on = r[r[:, 4] == slot]
             ours = np.isin(on[:, 5], us)
@@ -953,8 +967,8 @@ class ProjectFiles:
             if k == "bend":
                 if v != 8192:
                     out[slot].append((end, 0xE0, 0, 64))
-            elif k not in NO_USUAL + STAY and v != USUAL.get(k, 0):
-                out[slot].append((end, 0xB0, k, USUAL.get(k, 0)))
+            elif k not in STAY and k in USUAL and v != USUAL[k]:
+                out[slot].append((end, 0xB0, k, USUAL[k]))
 
     def cc_note(self, cc, midi=False, shapes=None):
         """The export message's line about pasted notes' CCs (passengers.py): not written outside Multi channel;
@@ -1075,12 +1089,18 @@ class ProjectFiles:
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
             return
         span = conductor = None
+        # (CCs before the first note: the copy starts at the earliest, so a lead-in keeps its timing, hunt 2026-10-22)
+        early = min([int(notes[:, 0].min())] + [ms[0][0] for ms in cc.values() if ms])
         if plan:  # (bar lines from the file's time signatures; only "from the bar line" takes them along)
             bar = self.domino_start() == "bar"
-            lo, hi = int(notes[:, 0].min()), int(notes[:, 1].max())
+            lo, hi = early, int(notes[:, 1].max())
             first = bar_line(plan["sigs"], lo, ppq) if bar else lo
             span = first, max((bar_line(plan["sigs"], hi, ppq, True) if bar else hi) - first, 1)
             conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1])[0]
+        elif early < int(notes[:, 0].min()):
+            first, length = clip_span(notes, beats * ppq, self.domino_start())
+            start = early if self.domino_start() == "note" else early // (beats * ppq) * beats * ppq
+            span = start, length + first - start
         first = span[0] if span else clip_span(notes, beats * ppq, self.domino_start())[0]
         if int(notes[:, 1].max()) - first > LONGEST:  # (pasting it back would say "damaged")
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_to_copy_for_domino", longest=LONGEST))
@@ -1176,8 +1196,9 @@ class ProjectFiles:
             if notes is not None and (len(notes) or tempos):
                 if self.domino_start() == "note":  # the first note on the play line, without the copy's empty lead
                     shift = int(notes[:, 0].min()) if len(notes) else tempos[0][0]
-                    if tempos and tempos[0][0] < shift:  # (tempo changes before it: from the copy's start, as with
-                        shift, from_bar = 0, True       # "From the bar line", none lost; user 2026-10-22)
+                    if (tempos and tempos[0][0] < shift  # (tempo changes / CCs before it: from the copy's start,
+                            or rides and min(r[0] for r in rides) < shift):  # as with "From the bar line", none
+                        shift, from_bar = 0, True                            # lost; user 2026-10-22)
                     notes[:, 0] -= shift
             if notes is not None and len(notes):
                 made = notes_shape(notes, self.ppq, tr("project.pasted_notes"))

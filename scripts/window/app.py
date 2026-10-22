@@ -33,6 +33,7 @@ from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes import hz_cc
 from notes.hz_cc import cc_spans
+from notes.passengers import spans as passenger_spans
 from notes.hzbass import fit_length, has_cc, own_channels
 from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
                         slot_pal, slot_rule, tidy_groups)
@@ -200,9 +201,12 @@ def cc_busy(shapes, ppq, mode):
     """all_notes' busy: per shape None, or {track: (start, end)} the times its CC lines are sent (hz_cc.cc_spans at the
     Hz bass's own BPM, as its notes): Multi channel keeps its channel for them, on every key, so no other shape
     takes it while its lines (run-on too) change it (user 2026-10-21: either split). None otherwise."""
-    if mode != "auto" or not any(sends_cc(sh) for sh in shapes):
+    if mode != "auto" or not any(sends_cc(sh) or "cc" in sh for sh in shapes):
         return None
-    return [cc_spans(sh, ppq, float(sh["hz"]["bpm"])) or None if sends_cc(sh) else None for sh in shapes]
+    # (pasted notes' CCs too: each track's channel held from its first event to its last, hunt 2026-10-22: a volume
+    # change after a track's last note changed the shape that took its channel next)
+    return [cc_spans(sh, ppq, float(sh["hz"]["bpm"])) or None if sends_cc(sh) else
+            passenger_spans(sh, ppq) or None if "cc" in sh else None for sh in shapes]
 
 
 def cc_texts(shapes, mode):

@@ -16,6 +16,7 @@ from notes.between import group_of, turns as between_turns
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
+from notes.passengers import pack_cc, unpack_cc
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.mask import SKIP10, is_mask, same_mask
@@ -67,8 +68,13 @@ def without10(sh, use10):
     if use10 and len(rows) and not on10:
         rows = rows.copy()
         t = rows[:, 4]
-        rows[:, 4] = t // 16 * 15 + np.array([SKIP10.index(c) if c != 9 else 0 for c in range(16)])[t % 16]
+        back = lambda t: t // 16 * 15 + np.array([SKIP10.index(c) if c != 9 else 0 for c in range(16)])[t % 16]
+        rows[:, 4] = back(t)
         sh["notes"] = pack_notes(rows)
+        if "cc" in sh:  # (its CCs' tracks the same way, hunt 2026-10-22)
+            ev = unpack_cc(sh["cc"])
+            ks = back(np.array([e[1] for e in ev], np.int64)).tolist()
+            sh["cc"] = pack_cc([(e[0], k, e[2], e[3]) for e, k in zip(ev, ks)])
     sh["slots10"] = on10  # (asked before renumbering: channel 11 becomes slot 9 there, user 2026-10-20)
     return sh
 
@@ -629,11 +635,13 @@ class JoinSplit:
             if len(rows):  # (a shape with no notes stays as it is)
                 if own or not auto:
                     rows = multi_slots(rows, slots)
+                laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
+                cc_slots = {i: laid(i)} if "cc" in sh else {}
                 if moved:
                     rows = moved(rows)
                     if not len(rows):  # (none of them wanted: merge leftovers)
                         continue
-                new[i] = without10(self.copied(rows, False, True), use10)
+                new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)
                 new[i]["made"] = "plain"
                 new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
         return new
