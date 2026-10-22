@@ -16,7 +16,7 @@ from files.system import free_memory
 
 BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
 # memory each note takes while it's done (measured: 20 M notes in the window ~6 GB in all, copying 4 M notes
-# 0.57 GB; 10 M notes, 1-300 tracks: Generate MIDI 20-32 bytes a note, 51 on one track without the speed-ups,
+# 0.57 GB; 10 M notes, 1-300 tracks: Export MIDI 20-32 bytes a note, 51 on one track without the speed-ups,
 # Export to Domino 36-43)
 PER_NOTE = {"notes": 300, "open": 300, "midi": 55, "domino": 150, "dms": 45}
 DRUM_TRACK = 10  # Copy to Domino: asked when the copy fills this many tracks (ask_drums)
@@ -67,7 +67,7 @@ def ask_shapes(app, count):
 
 def ask_drums(app, tracks):
     """Copy to Domino with DRUM_TRACK tracks or more (user, 2026-10-04): they fill the highlighted track and the
-    ones below it, so the 10th may be one on channel 10, which most players play as drums (Generate MIDI skips that
+    ones below it, so the 10th may be one on channel 10, which most players play as drums (Export MIDI skips that
     channel, but which track the user pastes into is up to them). True = go ahead."""
     if tracks < DRUM_TRACK or "drums" in app.big_skip:
         return True

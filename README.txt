@@ -70,7 +70,7 @@ and mouse shortcuts.
   Right-drag       listen to the notes under the mouse
   Wheel            scroll (Ctrl+wheel = zoom, middle-drag = scroll)
   Ctrl+Z / Ctrl+Y  undo / redo
-  Generate MIDI    (Project, on the right) writes the .mid file
+  Export MIDI    (Project, on the right) writes the .mid file
 
 
 Good to know

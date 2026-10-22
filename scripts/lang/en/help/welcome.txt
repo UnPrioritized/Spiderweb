@@ -6,7 +6,7 @@ Draw lines, curves and shapes on the piano roll; every key they cross gets notes
 
 3. Space plays it. Right-drag listens to the notes under the mouse.
 
-4. Set PPQ, BPM and the output file under Project, then Generate MIDI.
+4. Set PPQ, BPM and the output file under Project, then Export MIDI.
 
 Your work is saved on its own (autosave) and comes back next time. Save… keeps a copy as a project file.
 

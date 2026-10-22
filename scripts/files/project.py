@@ -860,7 +860,7 @@ class ProjectFiles:
 
     def export_dms(self):
         """Export to Domino: every note in a .dms file (Domino's own song file, PPQ up to 65535) next to the MIDI
-        file the Output file box names, with the same name. Asked before replacing, like Generate MIDI."""
+        file the Output file box names, with the same name. Asked before replacing, like Export MIDI."""
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
@@ -874,7 +874,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=min(self.keys, 128) - 1))
             return
-        # (worked out with every note, as Generate MIDI does, so the files line up tick for tick; then the keys
+        # (worked out with every note, as Export MIDI does, so the files line up tick for tick; then the keys
         # Domino can't hold left out)
         notes, cc, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm))
         if high and not mod:
@@ -936,7 +936,7 @@ class ProjectFiles:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
         heard = (int(notes[:, 0].min()) / ppq, int(notes[:, 1].max()) / ppq) if len(notes) else (0, 0)
         if has_tempo(self.tempo) and len(notes):  # (the tempo line comes too: Keep timing worked out on the
-            # whole song up to the copy's last note, so it lines up with Generate MIDI)
+            # whole song up to the copy's last note, so it lines up with Export MIDI)
             upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
             plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)[2]
             notes, cc = timed_ticks(plan, notes, cc)

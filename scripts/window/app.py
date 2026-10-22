@@ -791,7 +791,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         ttk.Button(btns, text=tr("app.open"), command=self.open_project).pack(side="left")
         ttk.Button(btns, text=tr("app.save"), command=self.save_project).pack(side="left", padx=4)
-        ttk.Button(btns, text=tr("app.generate_midi"), command=self.generate).pack(side="right")
+        ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(side="right")
 
     def _build_shape_list(self, side):
         box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)

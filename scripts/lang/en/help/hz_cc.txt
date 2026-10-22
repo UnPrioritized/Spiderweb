@@ -40,7 +40,7 @@ With the Arpeggio on, each step plays on the channel of the note you hold, like 
 
 A Hz bass with no notes placed plays across its shape as one note: its lines run over the whole shape.
 
-Past 15 channels, every track of the MIDI file gets a port (A, B, C…), up to 240 channels. In Domino, give ports B, C… a device in the MIDI-OUT settings, or those tracks stay silent. Generate MIDI and Export to Domino remind you when a file has them.
+Past 15 channels, every track of the MIDI file gets a port (A, B, C…), up to 240 channels. In Domino, give ports B, C… a device in the MIDI-OUT settings, or those tracks stay silent. Export MIDI and Export to Domino remind you when a file has them.
 
 ## Live keys
 
