@@ -347,7 +347,7 @@
  "tempo.hint_on_catch_handle": "Drag: bend the catch-up · Double-click: its own curve again",
  "tempo.hint_on_catch": "Drag: move the catch-up line · Right-click: menu · Delete: the picked ones",
  "tempo.hint_on_edge": "Drag: change the time the catch-up counts (yellow) / where it stops (teal) · Right-click: menu",
- "tempo.hint_on_band": "Drag: move what the box picked in time · Ctrl+drag: copy · Click: the play line here · Delete",
+ "tempo.hint_on_band": "Drag: move what the box picked (time and BPM) · Ctrl+drag: copy · Click: the play line here · Delete",
  "tempo.hint_numbers": "Wheel: zoom · Shift+wheel or drag: scroll",
  "tempo.fit": "Fit",
  "tempo.fit_tip": "Zoom up or down to show the whole tempo line",

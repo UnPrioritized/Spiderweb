@@ -106,13 +106,17 @@ class TempoBox(ttk.Frame):
         tall = max(self.every_box.winfo_reqheight(), self.snap.winfo_reqheight())
         ttk.Frame(row2, width=1, height=tall).pack(side="left")  # (keeps its height when nothing's picked)
         self.point_row = row = ttk.Frame(row2)
-        ttk.Label(row, text=tr("tempo.bpm")).pack(side="left")
+        lb = ttk.Label(row, text=tr("tempo.bpm"))
+        lb.pack(side="left")
         self.bpm_var = tk.StringVar()
         self.bpm_box = ttk.Entry(row, textvariable=self.bpm_var, width=10)
         self.bpm_box.pack(side="left", padx=(4, 0))
         self.bpm_box.bind("<Return>", lambda e: (self.typed_bpm(), app.roll.focus_set()))
         self.bpm_box.bind("<FocusOut>", lambda e: self.left_box(self.typed_bpm))
         self.bpm_box.bind("<FocusIn>", lambda e: self.typing_for())
+        # drag the word / Up, Down / the wheel (user 2026-10-22), like every number box; several BPMs: from the first
+        sc = Scrub(app, [(self.bpm_box, self.bpm_var, self.scrubbed_bpm)], (1, 10, 0.01), MIN_BPM, MAX_BPM, label=lb)
+        sc.read = lambda text: calc(str(text).replace(",", ""))  # (blank: the first one's number itself)
         self.part_row = row = ttk.Frame(row2)
         ttk.Label(row, text=tr("tempo.curve")).pack(side="left")
         self.curve = ttk.Combobox(row, state="readonly", width=20, values=[tr("tempo.curve_" + k) for k in CURVES])
@@ -204,8 +208,7 @@ class TempoBox(ttk.Frame):
         formula = False
         if kind == "point":
             if self.focus_get() is not self.bpm_box:
-                vals = {tempo["points"][i][1] for i in pick[1]}
-                self.bpm_var.set(bpm_text(vals.pop()) if len(vals) == 1 else "")
+                self.sync_bpm([tempo["points"][i] for i in pick[1]])
         elif kind == "part":
             p = tempo["points"][pick[1]]
             last = pick[1] == len(tempo["points"]) - 1  # (after the last point: it holds on, only Keep timing)
@@ -316,8 +319,15 @@ class TempoBox(ttk.Frame):
             self.app.tempo_changed()
         self.sync_bpm(pts)
 
+    def scrubbed_bpm(self):
+        """The BPM word dragged (or Up / Down / the wheel): to what's picked now, unless the box is being typed in."""
+        if self.focus_get() is not self.bpm_box:
+            self._typed_for = None
+        self.typed_bpm()
+
     def sync_bpm(self, pts):
         vals = {p[1] for p in pts}
+        self.bpm_box.blank_from = pts[0][1] if len(vals) > 1 else None  # (dragging the word: from the first one's)
         self.bpm_var.set(bpm_text(vals.pop()) if len(vals) == 1 else "")
 
     def picked_curve(self):
@@ -881,7 +891,7 @@ class TempoPane(tk.Canvas):
 
     def start_move(self, e, item, pushed):
         """Hold the picked items, item the one under the mouse (None: the Select box grabbed; pushed: the step is
-        made already: a new point). With Select only in time (user, like the ruler); the Select box goes along and
+        made already: a new point). Time and BPM, Select too (user 2026-10-22); the Select box goes along and
         first one's left side snaps, else the grabbed one does."""
         band = list(self.bands) or None
         pts = self.app.tempo["points"]
@@ -1004,7 +1014,14 @@ class TempoPane(tk.Canvas):
         held = [s for s, _, _ in d["orig"]] + [s for s, _ in d.get("mates", ())]
         db = (self.move_beat(at, e, held) if d["grab"] is not None else self.snap_beat(at, e)) - d["ref"]
         db = max([db] + [-b for _, b, _ in d["orig"]] + [-lo for lo, _ in d["band"] or ()])  # (not before 0)
-        dv = 0.0 if d["v0"] is None or d["time_only"] else self.snap_bpm(self.y2b(e.y), e) - d["v0"]
+        # (BPM too, Select as well, user 2026-10-22: was time only; the box: by the BPM moved under the mouse)
+        if d["v0"] is not None:
+            dv = self.snap_bpm(self.y2b(e.y), e) - d["v0"]
+        else:
+            dv = self.snap_bpm(self.y2b(e.y), e) - self.snap_bpm(self.y2b(d["y"]), e)
+        vs = [v for _, _, v in d["orig"] if v is not None]
+        if vs and dv:  # (stops at the slowest / fastest a file holds: the gaps between them kept)
+            dv = min(max(dv, MIN_BPM - min(vs)), MAX_BPM - max(vs))
 
         def place(shift):
             for s, b, v in d["orig"]:
@@ -1563,7 +1580,7 @@ class TempoPane(tk.Canvas):
         elif self.box.tool.get() != "select":
             want = PENCIL_CURSOR
         elif self.in_band(e.x):
-            want, hint = "sb_h_double_arrow", "on_band"  # (moves what the box picked, in time)
+            want, hint = "fleur", "on_band"  # (moves what the box picked: time and BPM)
         else:
             want = SELECT_CURSOR
         if hint is None and not self.placing and self.live_line() is not None:
