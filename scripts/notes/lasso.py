@@ -3,6 +3,7 @@ cuts pasted notes where it goes (holes / bites, it needn't go all the way across
 loop crosses is cut there, EVERY SLIVER KEPT (no note lost), and the pieces go to two shapes, inside and outside.
 Inside = the loop going round it (a figure-8: both halves inside, user); the row's middle decides, like the Slice
 tool's line."""
+import copy
 import heapq
 import math
 
@@ -344,6 +345,75 @@ def magnetic_path(rows, a, b, sx, sy):
             out.append(q)
     out.append(pts[-1])
     out[0], out[-1] = list(a), list(b)
+    return out
+
+
+def _split_path(path, at):
+    """A polyline cut at these places along it (piece number + how far along it) -> its pieces."""
+    path = [[float(u), float(v)] for u, v in path]
+    at = sorted({round(x, 12) for x in at if 1e-9 < x < len(path) - 1 - 1e-9})
+    pieces, cur, k = [], [path[0]], 0
+    for j in range(len(path) - 1):
+        while k < len(at) and at[k] < j + 1 - 1e-12:
+            t = at[k] - j
+            p = [path[j][0] + (path[j + 1][0] - path[j][0]) * t, path[j][1] + (path[j + 1][1] - path[j][1]) * t]
+            if math.dist(p, cur[-1]) > EPS:
+                cur.append(p)
+            if len(cur) >= 2:
+                pieces.append(cur)
+            cur = [p]
+            k += 1
+        cur.append(path[j + 1])
+    if len(cur) >= 2:
+        pieces.append(cur)
+    return pieces
+
+
+def lasso_stroke(st, loops, slack=0.0):
+    """The drawer's Lasso: one stroke cut wherever the closed loops cross it (closed strokes too: a loop goes in and
+    out) -> its pieces (keeping role, colour and layer; curves, arcs, polylines as themselves, like Slice), each
+    marked "_inside" when it's inside a loop; None when it isn't cut. slack: as slice_stroke's."""
+    from notes.custom import stroke_points
+    from notes.slice import _crossings, curve_cuts, curve_pieces, exact, is_closed, joined_curve
+    poly = stroke_points(st)
+    if len(poly) < 2:
+        return None
+    closed = is_closed(poly)
+    edges = [(np.asarray(lp[k], float), np.asarray(lp[(k + 1) % len(lp)], float)) for lp in loops
+             for k in range(len(lp))]
+    if st["kind"] == "curve" and exact(st):
+        us = []
+        for a, b in edges:
+            length = math.dist(a, b)
+            if length > EPS:
+                far = 1e-6 + slack / length
+                us += [u for u, _, s in curve_cuts(st["pts"], a, b) if -far <= s <= 1 + far]
+        pieces = curve_pieces(st, us) if us else [st]
+        if closed and len(pieces) > 1:
+            pieces = [joined_curve(pieces[-1], pieces[0])] + pieces[1:-1]
+    else:
+        path = st["pts"] if st["kind"] == "poly" and exact(st) else poly
+        at = [j + t for a, b in edges if math.dist(a, b) > EPS for _, _, j, t in _crossings(path, a, b, False)]
+        parts = _split_path(path, at) if at else [path]
+        if closed and len(parts) > 1:
+            parts = [parts[-1] + parts[0][1:]] + parts[1:-1]
+        if st["kind"] == "arc" and exact(st):
+            pieces = [{"kind": "arc", "pts": [list(p[0]), list(p[len(p) // 2]), list(p[-1])], "k": st.get("k", 1.0)}
+                      if len(p) > 2 else {"kind": "poly", "pts": [list(q) for q in p]} for p in parts]
+        else:
+            keep = {k: st[k] for k in ("free", "k") if k in st and st["kind"] == "poly" and exact(st)}
+            pieces = [dict(keep, kind="poly", pts=[list(q) for q in p]) for p in parts]
+    pieces = [p for p in pieces if len(p["pts"]) >= 2
+              and np.ptp(np.asarray(stroke_points(p), float).reshape(-1, 2), axis=0).max() > 1e-9]
+    if len(pieces) < 2:
+        return None
+    out = []
+    for p in pieces:
+        p = dict({k: copy.deepcopy(st[k]) for k in ("role", "colour", "layer") if k in st}, **p)
+        p["pts"] = [[float(u), float(v)] for u, v in p["pts"]]
+        mid = path_middle(stroke_points(p))
+        p["_inside"] = any(inside_point(lp, mid) for lp in loops)
+        out.append(p)
     return out
 
 

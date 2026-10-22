@@ -42,6 +42,7 @@ TOPIC_LIST = [
     ("hz_bass", "Tools"),
     ("picture", "Tools"),
     ("slice", "Tools"),
+    ("lasso", "Tools"),
     ("live", "Shapes and settings"),
     ("turn_live", "Shapes and settings"),
     ("fill", "Shapes and settings"),
@@ -106,6 +107,7 @@ TOPIC_LIST = [
     ("drawer_circle", "Custom shape drawer"),
     ("drawer_areas", "Custom shape drawer"),
     ("drawer_slice", "Custom shape drawer"),
+    ("drawer_lasso", "Custom shape drawer"),
     ("shortcuts", "Reference"),
 ]
 TOPICS = []
@@ -151,7 +153,9 @@ SEE = {
     "hz_voice": ["hz_osc", "hz_slides", "hz_live"],
     "hz_fx": ["hz_osc", "hz_effects", "hz_envelope", "hz_live"],
     "picture": ["channels", "files", "selecting"],
-    "slice": ["join", "selecting", "fill"],
+    "slice": ["lasso", "join", "selecting", "fill"],
+    "lasso": ["slice", "selecting", "curves_pen", "drawer_lasso"],
+    "drawer_lasso": ["drawer_slice", "drawer", "lasso"],
     "live": ["turn_live", "fill", "curves_pen", "straighten", "drawer", "join"],
     "turn_live": ["live", "fill", "join", "channels"],
     "fill": ["custom", "nested_tiles", "ripples", "drawer", "live", "turn_live", "hz_bass"],
@@ -202,14 +206,14 @@ SEE = {
     "drawer_circle": ["drawer", "drawer_square"],
     "drawer_erase": ["drawer", "drawer_select"],
     "drawer_areas": ["drawer", "drawer_select", "fill", "channels"],
-    "drawer_slice": ["drawer", "drawer_erase", "slice"],
+    "drawer_slice": ["drawer", "drawer_erase", "slice", "drawer_lasso"],
     "shortcuts": ["selecting", "view", "numbers", "curves_pen"],
 }
 # the tip for each tool (Circle / Polygon share one)
 TOOL_TOPICS = {"select": "select", "line": "line", "poly": "poly", "free": "free", "curve": "curve", "arc": "arc",
                "custom": "custom", "circle": "box", "polygon": "box", "funnel": "funnel",
-               "text": "text", "hz": "hz_bass", "slice": "slice", "picture": "picture"}
+               "text": "text", "hz": "hz_bass", "slice": "slice", "lasso": "lasso", "picture": "picture"}
 DRAWER_TOOL_TOPICS = {"select": "drawer_select", "line": "drawer_line", "poly": "drawer_poly", "free": "drawer_free",
                       "curve": "drawer_curve", "arc": "drawer_arc", "square": "drawer_square",
                       "circle": "drawer_circle", "erase": "drawer_erase",
-                      "areas": "drawer_areas", "slice": "drawer_slice"}
+                      "areas": "drawer_areas", "slice": "drawer_slice", "lasso": "drawer_lasso"}

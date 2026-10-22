@@ -28,6 +28,7 @@ from roll.roll_shared import grab_while_panning
 from window import look
 from window.help import open_help
 from window.drawer_areas import AREA_FRAME, BOARD, OFF_BOARD, DrawerAreas
+from window.drawer_lasso import DrawerLasso
 from window.drawer_mouse import CTRL, MOD_KEYS, SHIFT, STICK_RANK, DrawerMouse
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers
@@ -42,7 +43,8 @@ BUILT_IN = {
     "Triangle": [{"kind": "poly", "pts": [[0, 0], [1, 0], [0.5, 1], [0, 0]]}],
 }
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
-TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("erase", tr("drawer.eraser"), "e"), ("line", tr("drawer.line"), "l"),
+TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("lasso", tr("drawer.lasso"), "j"),
+         ("erase", tr("drawer.eraser"), "e"), ("line", tr("drawer.line"), "l"),
          ("poly", tr("drawer.polyline"), "p"), ("free", tr("drawer.freehand"), "f"), ("curve", tr("drawer.curve"), "c"),
          ("arc", tr("drawer.arc"), "a"), ("square", tr("drawer.square"), "s"), ("circle", tr("drawer.circle"), "o"),
          ("areas", tr("drawer.areas"), "b")]
@@ -320,7 +322,7 @@ def clean_name(name):
 
 # ---------------------------------------------------------------- window
 
-class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel):
+class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -364,6 +366,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         self._pan = None
         self._panned = False  # the middle button moved further than a click's 3 px (pan_to)
         self.tool = tk.StringVar(value="poly")
+        self.lasso_kind = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points)
+        self.lasso_kind.trace_add("write", lambda *_: self.drop_lasso(unfinished=True))
         self.grid_n = tk.StringVar(value="16")
         self.mirror = tk.StringVar(value=tr("drawer.mirror_off"))  # (its shown name: mirror_mode)
         self.name = tk.StringVar()
@@ -380,6 +384,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
 
     def on_tool(self):
         self.hover = None
+        if self.tool.get() != "lasso":
+            self.drop_lasso()  # (a loop waiting for Enter goes with the tool)
         if self.tool.get() == "areas":
             if not self.area_bar.winfo_manager():
                 self.area_bar.pack(fill="x", pady=(8, 0), before=self.layers_box)
@@ -397,6 +403,15 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                                 style="Toolbutton")
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[DRAWER_TOOL_TOPICS[key]]["tip"])
+            if key == "lasso":  # (its ▾: Lasso / Polygonal; picking one picks the tool too)
+                mb = ttk.Menubutton(bar, text="▾", style="Toolbutton", takefocus=False)
+                menu = tk.Menu(mb, tearoff=0)
+                for mode in ("free", "poly"):
+                    menu.add_radiobutton(label=tr("app.lasso_" + mode), value=mode, variable=self.lasso_kind,
+                                         command=lambda: self.tool.set("lasso"))
+                mb["menu"] = menu
+                mb.pack(side="left", padx=(0, 1))
+                Tooltip(mb, BY_ID[DRAWER_TOOL_TOPICS[key]]["tip"])
         bar = ttk.Frame(self, padding=(6, 0, 6, 4))
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("drawer.grid")).pack(side="left", padx=(0, 4))
@@ -530,7 +545,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                 return None
             if (self.knife or self.erasing()) and fn not in (self.undo, self.redo):  # (flip / turn / copy / paste
                 return "break"  # wait while a Slice line / eraser box is held; undo / redo drop it)
-            if self.holding() and fn not in (self.undo, self.redo, self.cut):  # (strokes held: flip / turn / copy /
+            if (self.holding() or self.lasso_holding()) and fn not in (self.undo, self.redo, self.cut):  # (strokes held: flip / turn / copy /
                 return "break"  # paste wait too, like the piano roll; Ctrl+X = Delete's own rule)
             fn()
             return "break"
@@ -796,6 +811,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         """A middle click (without dragging) near the selected curve: a new anchor there (any tool)."""
         if (self._pan and not self._panned and abs(e.x - self._pan[0]) <= 3 and abs(e.y - self._pan[1]) <= 3
                 and not self.draft):
+            if self.lasso_middle(e):  # (a waiting lasso loop: a point added there)
+                return
             self.add_curve_anchor(e, near=12 * self.scale)
 
     def show_position(self, e):
@@ -809,6 +826,10 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
             return
         if k in MOD_KEYS:
             return self.mod_changed(e, True)
+        if self.lasso_key(e):  # (Enter cuts / closes, Esc throws the loop away, Backspace = last point)
+            return "break"
+        if self.lasso_holding() and k in ("delete", "backspace"):  # (the loop held: strokes stay)
+            return "break"
         if k == "escape":
             self.cancel_draft()
         elif k == "return":
@@ -886,10 +907,12 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                 knives.append((list(fn(*a)), list(fn(*b)), copies))
         self.cut_strokes(knives, [], "drawer.split_nothing")
 
-    def cut_strokes(self, knives, picked, nothing):
+    def cut_strokes(self, knives, picked, nothing, cutter=None, whole=None):
         """Cuts by knives [(a, b, the strokes it may cut)]; picked = the strokes picked before: the uncut ones stay
         picked, the pieces aren't (user: a click then picks ONE piece to delete, and the next cut isn't held to
-        them). nothing: the text key said when nothing was cut."""
+        them). nothing: the text key said when nothing was cut. The Lasso (drawer_lasso): cutter(i, stroke) -> its
+        pieces marked "_inside" or None instead of knives; then the pieces inside and the uncut strokes in whole
+        (wholly inside) end up picked."""
         before = self.snap()
         self.keep_names()  # (the pieces after a cut stroke shift the numbers: names stay as they are)
         taken = set(self.layer_names())
@@ -897,9 +920,9 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         # hair off the curve itself)
         out, cut = [], set()
         for i, st in enumerate(self.strokes):
-            pieces = [st]
+            pieces = (cutter(i, st) or [st]) if cutter else [st]
             # (each knife judged on the stroke as it was: a closed one only by a knife all the way through it)
-            for ka, kb, idx in [k for k in knives if i in k[2] and slice_stroke(st, k[0], k[1], slack)]:
+            for ka, kb, idx in [k for k in knives or () if i in k[2] and slice_stroke(st, k[0], k[1], slack)]:
                 pieces = [q for p in pieces for q in (slice_stroke(p, ka, kb, slack) or [p])]
             if len(pieces) > 1:
                 lay = self.layer(i)
@@ -919,6 +942,10 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
             out.append(pieces)
         if not cut:
             self.load_snap(before)
+            if whole:  # (the Lasso round whole strokes: they're picked, nothing cut)
+                self.sel, self.picks, self.boxes = None, set(whole), []
+                self.redraw()
+                return self.pos_label.config(text=tr("drawer.lasso_whole"))
             self.pos_label.config(text=tr(nothing))
             return self.redraw()
         self.push_undo(before)
@@ -926,7 +953,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         self.strokes, new_idx, k = [], set(), 0
         for i, pieces in enumerate(out):
             for p in pieces:
-                if i in picked and i not in cut:
+                inside = p.pop("_inside", False)
+                if (inside or i in (whole or ()) and i not in cut) if cutter else (i in picked and i not in cut):
                     new_idx.add(k)
                 self.strokes.append(p)
                 k += 1
@@ -936,6 +964,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                          link["ways"], link["at"], ids)
         self.sel, self.picks, self.boxes = None, new_idx, []
         self.changed()
+        if cutter:
+            self.pos_label.config(text=tr("drawer.lasso_cut"))
 
     # ------------------------------------------------------------ mirror
 
@@ -1276,6 +1306,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
         return (mode in ("h", "both")) & (u > 0.5) | (mode in ("v", "both")) & (v < 0.5)
 
     def cancel_draft(self):
+        self.drop_lasso(unfinished=True)  # (a loop half drawn goes; a waiting one stays)
         self.let_go()  # (a stroke held by Esc / a tool key: moved is moved, like letting go)
         if self.knife:  # (a Slice line dropped: nothing cut)
             self.knife = self.drag = None
@@ -1319,14 +1350,18 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
     def undo(self):
         if self.erasing():  # (nothing while an eraser box is held)
             return
+        if self.lasso_undo():  # (a lasso loop: its last edit back, else it goes; nothing else undone)
+            return
         if self.draft or self.knife:
             return self.cancel_draft()
         self.drop_drag()
         self.restore(self.undo_stack, self.redo_stack)
 
     def redo(self):
-        if self.erasing():
+        if self.erasing() or self.lasso_holding():
             return
+        if self.lasso:  # (a lasso loop: only its own edits come back)
+            return self.lasso_redo()
         if self.draft or self.knife:
             return self.cancel_draft()
         self.drop_drag()
@@ -1765,6 +1800,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLayers, ScrollingSide, tk.Toplevel)
                 c.create_line(x - q, y + q, x + q, y - q, fill=STICK_COLOR, width=lw)
             else:
                 c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill="", outline=STICK_COLOR, width=lw)
+        self.draw_lasso()  # (the Lasso tool's loop: drawer_lasso)
         hidden = len(self.strokes) - len(shown_idx)
         if not self.strokes:
             text = tr("drawer.nothing_drawn_yet")

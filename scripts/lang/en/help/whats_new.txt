@@ -4,6 +4,8 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
+• Lasso tool (J): draw a loop round notes and press Enter to cut out what's inside, a bite or a hole, and select it. Drag round, click points (Polygonal) or let it cling to the notes without cutting any (Magnetic). The loop waits for Enter, so you can drag its points and bend it with curve handles first. The drawer has it too, for cutting strokes. See Help → Lasso.
+
 • Hz bass MIDI CC lines: Cutoff, Expression, Channel volume, Pan and Pitch wheel, under a "MIDI CC" row in the Effects pane. They make no notes: they go into the MIDI as messages, and the player changes the sound with them. The synth window's Filter box (MIDI CC) draws the Cutoff line like a synth's filter, and the MOD tab can move its knobs. Voice box → CC → Own channel per note gives every note its own channel and its own lines (an Arpeggio's steps play on the held note's channel). The live keys play them too. The Hz bass window says in orange when the lines also change other shapes. See Help → Hz bass MIDI CC lines.
 
 • The mouse wheel changes a number box, dropdown or knob only after you click it, everywhere in Spiderweb. Scrolling a panel or the synth window past them no longer changes them by accident.

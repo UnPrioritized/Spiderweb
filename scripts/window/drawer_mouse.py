@@ -52,6 +52,8 @@ class DrawerMouse:
             self.on_release(e, second=True)
             return
         tool = self.tool.get()
+        if tool == "lasso":  # (a loop drawn / a waiting loop's point grabbed: drawer_lasso)
+            return self.lasso_press(e, None)
         if tool == "select":
             return self.select_press(e)
         if tool == "areas":
@@ -501,6 +503,8 @@ class DrawerMouse:
         self.show_position(e)
         if not self.drag:
             return
+        if self.lasso_holding():
+            return self.lasso_drag(e)
         if self.drag[0] == "areas":
             return self.area_drag(e)
         if self.drag[0] == "erasebox":
@@ -597,6 +601,9 @@ class DrawerMouse:
 
     def on_release(self, e, second=False):
         """second: the click that finishes a stroke started with a click (see follow)."""
+        if self.lasso_holding():
+            self.stuck = None
+            return self.lasso_release(e)
         self.stuck = self.stuck2 = None  # (the mark goes; hovering shows it again)
         self.guide = []
         if self.drag and (self.tool.get() == "select" or self.drag[0] in ("points", "pen")):
@@ -652,13 +659,24 @@ class DrawerMouse:
             self.cancel_draft()
 
     def on_double(self, e):
-        if self.draft and self.tool.get() == "poly":
+        if self.tool.get() == "lasso":  # (closes a Polygonal loop)
+            self.lasso_double()
+        elif self.draft and self.tool.get() == "poly":
             self.finish_poly()
         else:
             self.on_press(e)
 
     def on_motion(self, e):
         self.show_position(e)
+        if self.tool.get() == "lasso":  # (a Polygonal loop's next line follows the mouse; where it'd stick: the mark)
+            if str(self.canvas.cget("cursor")) != "crosshair":
+                self.canvas.config(cursor="crosshair")
+            was = self.stuck
+            if not self.lasso_motion(e) and not (self.lasso and self.lasso["closed"]):
+                self.event_pt(e)
+                if self.stuck != was:
+                    self.redraw()
+            return
         cursor = "fleur" if self.draft is None and (self.curve_handle_at(e.x, e.y) is not None or (
             self.chosen() and self.in_boxes(e.x, e.y))) else "crosshair"
         if str(self.canvas.cget("cursor")) != cursor:
@@ -721,6 +739,8 @@ class DrawerMouse:
         self.canvas.focus_set()  # (keys go to the drawing now, not the shape list)
         if self.holding():  # (the left button holds a stroke: nothing, its menu would work on it mid-move)
             return
+        if self.tool.get() == "lasso" and (self.lasso_right(e) or self.lasso_holding()):  # (an open loop closes,
+            return  # a waiting loop's point: handles off, then gone)
         if self.erasing() or self.knife:  # an eraser box / Slice line being dragged: dropped (like Esc)
             return self.cancel_draft()
         if self.draft or self.follow:

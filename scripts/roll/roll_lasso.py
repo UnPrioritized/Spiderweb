@@ -35,6 +35,33 @@ class LassoDrawing:
         y = min(max(e.y, self.ruler_h), self.winfo_height())
         return [max(0.0, self.x2t(x)), min(max(self.y2p(y), -0.5), self.app.keys - 0.5)]
 
+    # (what the drawer's lasso does its own way: window/drawer_lasso.py overrides these)
+
+    def lasso_canvas(self):
+        return self
+
+    def lasso_back(self, x, y):
+        """A screen spot as a loop point."""
+        return [self.x2t(x), self.y2p(y)]
+
+    def lasso_mode_now(self):
+        return self.app.lasso_mode.get()
+
+    def lasso_magnet_on(self):
+        """The Magnetic lasso picked (its Width circle, [ ] keys)."""
+        return self.app.tool.get() == "lasso" and self.app.lasso_mode.get() == "magnet"
+
+    def lasso_say(self, kind):
+        """The status line's hint: kind = draw / poly / magnet / ready."""
+        self.app.status.show(tr("pianoroll.lasso_" + kind))
+
+    def lasso_do_cut(self, line):
+        """The loop cuts (JoinSplit.lasso_cut): None = it stays (a question answered No)."""
+        return self.app.lasso_cut(line)
+
+    def lasso_synced(self):
+        self.app.sync_lasso()  # (the panel's Cut / Cancel)
+
     def lasso_hd(self):
         """The loop's handles, one per point (a loop set from outside without them gets none)."""
         las = self.lasso
@@ -75,7 +102,7 @@ class LassoDrawing:
         a = round(math.atan2(y - y0, x - x0) / (math.pi / 4)) * math.pi / 4
         d = math.hypot(x - x0, y - y0)
         x, y = x0 + d * math.cos(a), y0 + d * math.sin(a)
-        return [max(0.0, self.x2t(x)), self.y2p(y)]
+        return self.lasso_back(x, y)
 
     def lasso_point_at(self, x, y):
         """The waiting loop's point (number) near the mouse, or None."""
@@ -130,7 +157,7 @@ class LassoDrawing:
             las["pts"].append(self.lasso_snap(pt, e))
             self.drag = ("lasso_poly", e.x, e.y)
         else:
-            mode = self.app.lasso_mode.get()
+            mode = self.lasso_mode_now()
             mode = mode if mode in ("poly", "magnet") else "free"
             first = self.lasso_snap(pt, e, angle=False) if mode == "poly" else pt
             self.lasso = {"pts": [first], "mode": mode, "closed": False, "hover": None}
@@ -140,7 +167,7 @@ class LassoDrawing:
                 self.lasso.update(pts=[magnet_spot(rows, pt, self.sx, self.sy, self.magnet_width())], rows=rows,
                                   live=[], marks=[1])
                 self.drag = ("lasso_magnet",)
-            self.app.status.show(tr("pianoroll.lasso_" + {"poly": "poly", "magnet": "magnet"}.get(mode, "draw")))
+            self.lasso_say({"poly": "poly", "magnet": "magnet"}.get(mode, "draw"))
         self.draw_lasso()
 
     def magnet_width(self):
@@ -211,7 +238,7 @@ class LassoDrawing:
                 (ax, ay), (hx, hy), (ox, oy) = self.to_xy(pts[i]), self.to_xy(pt), self.to_xy(h[1 - side])
                 d, length = math.hypot(hx - ax, hy - ay), math.hypot(ox - ax, oy - ay)
                 if d > 0 and length > 0:
-                    h[1 - side] = [self.x2t(ax - (hx - ax) / d * length), self.y2p(ay - (hy - ay) / d * length)]
+                    h[1 - side] = self.lasso_back(ax - (hx - ax) / d * length, ay - (hy - ay) / d * length)
 
     def lasso_drag(self, e):
         las, kind = self.lasso, self.drag[0]
@@ -269,7 +296,7 @@ class LassoDrawing:
         """The mouse moving with no button: a Polygonal loop's next line follows it, a Magnetic one's clinging line.
         True when it's the lasso's."""
         las = self.lasso
-        if self.app.tool.get() == "lasso" and self.app.lasso_mode.get() == "magnet":
+        if self.lasso_magnet_on():
             self.lasso_mouse = (e.x, e.y)  # (the Width circle follows the mouse)
             if not las:
                 self.draw_lasso()
@@ -293,11 +320,11 @@ class LassoDrawing:
             hd = [None] * len(pts)
             if las["mode"] == "free" and len(pts) > 3:
                 xy, hd = smooth_loop([self.to_xy(p) for p in pts])
-                back = lambda p: [self.x2t(p[0]), self.y2p(p[1])]
+                back = lambda p: self.lasso_back(*p)
                 pts = [back(p) for p in xy]
                 hd = [[back(h[0]), back(h[1]), h[2]] for h in hd]
             las.update(pts=pts, hd=hd, closed=True, hover=None)
-            self.app.status.show(tr("pianoroll.lasso_ready"))
+            self.lasso_say("ready")
         self.drag = None
         self.draw_lasso()
 
@@ -305,8 +332,8 @@ class LassoDrawing:
         """Enter / Esc / Backspace while there's a loop. True when the key was the lasso's."""
         las = self.lasso
         k = e.keysym.lower()
-        if k in ("bracketleft", "bracketright") and self.app.tool.get() == "lasso" \
-                and self.app.lasso_mode.get() == "magnet":  # (Magnetic Width smaller / bigger, like a pen tool's)
+        if k in ("bracketleft", "bracketright") and self.lasso_magnet_on():  # (Magnetic Width smaller / bigger,
+            #                                                                         like a pen tool's)
             self.app.lasso_width.set(min(MOST_WIDTH, max(1, self.app.lasso_px() + (1 if k == "bracketright" else -1))))
             self.draw_lasso()
             return True
@@ -336,7 +363,7 @@ class LassoDrawing:
         if not las or self.drag:  # (the loop stays shown while it asks about plain notes, user; No = it stays)
             return
         if las["closed"]:
-            if self.app.lasso_cut(self.lasso_line()) is not None:
+            if self.lasso_do_cut(self.lasso_line()) is not None:
                 self.drop_lasso()
         elif las["mode"] == "magnet":
             self.magnet_close()
@@ -450,14 +477,15 @@ class LassoDrawing:
 
     def draw_lasso(self):
         """The loop: dashed in the cut colour; a waiting one with its points and handles."""
-        self.delete("lasso")
-        self.app.sync_lasso()  # (the panel's Cut / Cancel)
+        c = self.lasso_canvas()
+        c.delete("lasso")
+        self.lasso_synced()
         las = self.lasso
         s = self.scale
-        if (self.lasso_mouse and self.app.tool.get() == "lasso" and self.app.lasso_mode.get() == "magnet"
-                and not (las and las["closed"])):  # (Magnetic: its Width as a circle round the mouse)
+        if self.lasso_mouse and self.lasso_magnet_on() and not (las and las["closed"]):  # (Magnetic: its Width
+            #                                                                                 as a circle round the mouse)
             (x, y), w = self.lasso_mouse, self.magnet_width()
-            self.create_oval(x - w, y - w, x + w, y + w, outline=look.CUT, width=max(1, round(s)), tags="lasso")
+            c.create_oval(x - w, y - w, x + w, y + w, outline=look.CUT, width=max(1, round(s)), tags="lasso")
         if not las:
             return
         pts = self.lasso_line() + ([las["hover"]] if las["hover"] else []) + las.get("live", [])
@@ -465,8 +493,8 @@ class LassoDrawing:
         if las["closed"]:
             xy += xy[:2]
         if len(xy) >= 4:  # (on a white edge, like the handles: it shows on notes and in the dark look; user 10-23)
-            self.create_line(*xy, fill=look.HANDLE_FILL, width=max(3, round(4 * s)), tags="lasso")
-            self.create_line(*xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="lasso")
+            c.create_line(*xy, fill=look.HANDLE_FILL, width=max(3, round(4 * s)), tags="lasso")
+            c.create_line(*xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="lasso")
         r = 3 * s
         hd = self.lasso_hd() if las["closed"] else []
         lines = [(self.to_xy(las["pts"][i]), self.to_xy(h[side])) for i, h in enumerate(hd) if h
@@ -474,11 +502,11 @@ class LassoDrawing:
         # (handles like the Curve tool's / funnel's: blue lines on a white edge, solid dots, round points)
         for width, edge in ((max(3, round(3.5 * s)), True), (max(1, round(1.5 * s)), False)):
             for (ax, ay), (hx, hy) in lines:
-                self.create_line(ax, ay, hx, hy, fill=look.HANDLE_FILL if edge else look.HANDLE, width=width,
+                c.create_line(ax, ay, hx, hy, fill=look.HANDLE_FILL if edge else look.HANDLE, width=width,
                                  tags="lasso")
         q = 4.5 * s
         for _, (hx, hy) in lines:
-            self.create_oval(hx - q, hy - q, hx + q, hy + q, fill=look.HANDLE, outline=look.HANDLE_FILL,
+            c.create_oval(hx - q, hy - q, hx + q, hy + q, fill=look.HANDLE, outline=look.HANDLE_FILL,
                              width=max(1, round(s)), tags="lasso")
         shown = (shown_points(len(las["pts"]), len(las["pts"]) <= LONG_STROKE) if las["closed"]
                  else range(len(las["pts"])) if las["mode"] == "poly"
@@ -487,8 +515,8 @@ class LassoDrawing:
             x, y = self.to_xy(las["pts"][i])
             if hd and hd[i]:  # (a point with handles: round, like a curve's anchor)
                 q = 5.5 * s
-                self.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=look.CUT,
+                c.create_oval(x - q, y - q, x + q, y + q, fill=look.HANDLE_FILL, outline=look.CUT,
                                  width=max(2, round(2 * s)), tags="lasso")
                 continue
-            self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.CUT if las["closed"] else "",
+            c.create_rectangle(x - r, y - r, x + r, y + r, fill=look.CUT if las["closed"] else "",
                                   outline=look.CUT, tags="lasso")

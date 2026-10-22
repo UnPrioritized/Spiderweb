@@ -1,0 +1,9 @@
+Draw a loop round part of your drawing and press Enter: every stroke the loop crosses is cut there, and the parts inside the loop are picked, so Delete takes them away. Esc throws the loop away. A stroke wholly inside the loop isn't cut, just picked.
+
+The ▾ next to the Lasso button picks Lasso (drag round and let go: the loop closes straight back to the start and is smoothed into curves; Alt = straight lines) or Polygonal (click its corners; they stick to points and lines like when drawing, Shift = free; click the first point, double-click, right-click or press Enter to close; Backspace = last point off).
+
+Closed strokes are cut too wherever the loop goes in and out of them. With strokes picked (Select tool), only those are cut; otherwise every stroke the loop crosses. Hidden and locked layers are never cut. With Mirror on, the mirrored loop cuts too.
+
+While the loop waits you can drag its points, Alt-drag a point for curve handles, middle-click the loop to add a point and right-click a point to remove it. Ctrl+Z undoes those changes one at a time, then throws the loop away.
+
+The pieces stay where they were, in the same layer and group. Curves, arcs and polylines stay curves, arcs and polylines; circles, freehand strokes and strokes with a Formula become polylines. Ctrl+Z undoes a cut.
