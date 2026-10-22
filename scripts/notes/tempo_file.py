@@ -308,7 +308,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=())
         mid = (j > i) & (t > bp_n[i]) & (d > 0) & (fd != d)
         if np.any(mid):
             share = bp_f[i] + np.rint((t - bp_n[i]) * fd / np.maximum(d, 1)).astype(np.int64)
-            share = np.where((share == bp_f[i]) & (fd >= 2), bp_f[i] + 1, share)
+            # (on the note before = written before its note-on: a tick on, the next anchor's tick when that's all
+            # the room there is (hunt 2026-10-23))
+            share = np.where(share == bp_f[i], bp_f[i] + np.minimum(fd, 1), share)
             out = np.where(mid, share, out)
         return out
 

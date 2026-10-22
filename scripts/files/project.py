@@ -1041,12 +1041,12 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
-        tempo, sigs, keys = None, plan["sigs"], plan["keys"]
-        if has_tempo(self.tempo):  # (changes past the song's end make no sound: left out, Domino's ticks stop)
-            last = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms]) + beats * ppq
-            tempo = [e for e in plan["events"] if e[0] <= min(last, LONGEST)]
-            sigs = [s for s in sigs if s[0] <= min(last, LONGEST)]
-            keys = [k for k in keys if k[0] <= min(last, LONGEST)]
+        # (changes past the song's end make no sound: left out, Domino's ticks stop; signatures too without a tempo
+        # line: one far past the song failed the export, hunt 2026-10-23)
+        last = min(max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms]) + beats * ppq, LONGEST)
+        tempo = [e for e in plan["events"] if e[0] <= last] if has_tempo(self.tempo) else None
+        sigs = [s for s in plan["sigs"] if s[0] <= last]
+        keys = [k for k in plan["keys"] if k[0] <= last]
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
                                pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys))):
@@ -1240,18 +1240,25 @@ class ProjectFiles:
             tempos = [(0, v) for _, v in before] + [(t - shift, v) for t, v in tempos if t > shift]
             tempos = [(t / self.ppq, clamp_bpm(float(f"{v:.7g}"))) for k, (t, v) in enumerate(tempos)
                       if k == 0 or v != tempos[k - 1][1]]  # (Domino's 32-bit BPM: 133.33, not 133.330002)
-            how = "replace" if not self.tempo["points"] else ask_domino(self, len(tempos), sh is not None)
+        own = clipboard.copy_count() == self.own_domino_copy  # (Spiderweb's own copy: its signatures are ours)
+        sigs, keys = ([], []) if own else [  # (beats from the paste's start; the one in effect there on it)
+            [(max(0, t - shift) / self.ppq, *rest) for k, (t, *rest) in enumerate(rows)
+             if t > shift or k + 1 == len(rows) or rows[k + 1][0] > shift] for rows in (cond.get("sigs", []),
+                                                                                       cond.get("keys", []))]
+        if tempos or sigs or keys:
+            # asked when the pane has its own points OR signatures (hunt 2026-10-23: a paste replaced the user's
+            # signatures without a word)
+            marks = sigs_of(self.tempo) != [list(DEFAULT_SIG)] or bool(self.tempo.get("keysigs"))
+            if self.tempo["points"] or marks:
+                how = ask_domino(self, len(tempos), sh is not None, marks=not (tempos and self.tempo["points"]))
+            else:
+                how = "replace"
             if how is None:
                 return
             if how == "notes":
                 if sh is None:
                     return
                 tempos = []
-        own = clipboard.copy_count() == self.own_domino_copy  # (Spiderweb's own copy: its signatures are ours)
-        sigs, keys = ([], []) if own else [  # (beats from the paste's start; the one in effect there on it)
-            [(max(0, t - shift) / self.ppq, *rest) for k, (t, *rest) in enumerate(rows)
-             if t > shift or k + 1 == len(rows) or rows[k + 1][0] > shift] for rows in (cond.get("sigs", []),
-                                                                                       cond.get("keys", []))]
         ends = [int((notes[:, 0] + notes[:, 1]).max())] if len(notes) else []
         length = max([(cond.get("length", 0) - shift) / self.ppq, 1 / self.ppq] + [e / self.ppq for e in ends]
                      + [b for b, _ in tempos])  # (the stretch Replace takes: the copy's, past its notes / tempo)
@@ -1264,8 +1271,8 @@ class ProjectFiles:
         try:
             if sh is not None:
                 self.add_copies([sh], at, tr("project.paste_from_domino"))
-            if tempos:
-                self.tempo_pane.put_domino(tempos, at, length, how, sh is None)
+            if tempos:  # (no points of its own: straight in, whatever was picked for the signatures)
+                self.tempo_pane.put_domino(tempos, at, length, how if self.tempo["points"] else "replace", sh is None)
             if how != "notes" and (sigs or keys):  # (time / key signatures along, in the same undo step)
                 self.tempo_pane.put_domino_sigs(sigs, keys, at, length, how or "replace")
         finally:

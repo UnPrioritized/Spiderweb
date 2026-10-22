@@ -233,6 +233,10 @@ class HzView:
             c.create_line(kb, y + self.sy, w, y + self.sy, fill=look.HZ_OCTAVE_LINE if k % 12 == 0 else look.HZ_ROW_LINE)
         sb, sigs = self.snap_beats(), sigs_of(self.app.tempo)
         lo, hi = max(0.0, self.beat_at(kb)), self.beat_at(w)
+        # bars and beats where the SONG's are (hunt 2026-10-23: counted from the shape's start, a time signature
+        # change showed up late; user picked the song's bar numbers too)
+        left = self.song_left()
+        song_lo, song_hi = max(0.0, lo + left), hi + left
         # (columns: the snap's lines, then every beat and bar over them, as on the main piano roll: a 3/16 or 1/6
         # snap left most beat / bar lines out; beats and bars by the time signatures, zoomed far out every 2nd,
         # 4th... bar)
@@ -242,10 +246,10 @@ class HzView:
                 x = self.x_of(n * sb)
                 c.create_line(x, rh, x, h, fill=look.HZ_GRID)
                 n += 1
-        for b in beat_lines(sigs, lo, hi, 8 / self.sx):
-            c.create_line(self.x_of(b), rh, self.x_of(b), h, fill=look.HZ_GRID_BEAT)
-        for b, _ in bar_lines(sigs, lo, hi, 8 / self.sx):
-            c.create_line(self.x_of(b), rh, self.x_of(b), h, fill=look.HZ_GRID_BAR)
+        for b in beat_lines(sigs, song_lo, song_hi, 8 / self.sx):
+            c.create_line(self.x_of(b - left), rh, self.x_of(b - left), h, fill=look.HZ_GRID_BEAT)
+        for b, _ in bar_lines(sigs, song_lo, song_hi, 8 / self.sx):
+            c.create_line(self.x_of(b - left), rh, self.x_of(b - left), h, fill=look.HZ_GRID_BAR)
         sh = self.target()
         if sh is not None and not self.grow.get():  # the shape ends here: what's after it isn't used
             x = max(kb, self.x_of(shape_length(sh)))
@@ -299,8 +303,7 @@ class HzView:
         c.create_line(kb, 0, kb, h, fill=look.HZ_EDGE)
         c.create_rectangle(0, 0, w, rh, fill=look.HZ_RULER, outline="")  # bar numbers
         # (by the time signatures; zoomed far out every 2nd, 4th... bar number, so they don't run into each other)
-        marks = [(self.x_of(b), str(n + 1)) for b, n in bar_lines(sigs_of(self.app.tempo), max(0.0, self.beat_at(kb)),
-                                                                  self.beat_at(w), 40 * s / self.sx)]
+        marks = [(self.x_of(b - left), str(n + 1)) for b, n in bar_lines(sigs, song_lo, song_hi, 40 * s / self.sx)]
         for x, label in marks:
             if x < kb:
                 continue
@@ -330,6 +333,11 @@ class HzView:
         self.preview.shown = None
         self.draw_preview()
 
+    def song_left(self):
+        """The song beat this window's beat 0 is at (the shape's left edge; no shape: where a new one would go)."""
+        sh = self.target()
+        return left_edge(sh) if sh is not None else self.app.hz_start or 0.0
+
     def tune_rows(self):
         """True when the rows are tall enough to see and change a note's tune."""
         return self.sy >= TUNE_ROW * self.s
@@ -344,7 +352,6 @@ class HzView:
         a slide goes on to the next note."""
         c, app, kb = self.canvas, self.app, self.kb_w
         width = max(2, round(2 * self.s))
-        sh = self.target()
         bpm = float(app.current_bpm() or 120)
         hz = self.line_hz()
         knobs = dict(hz, _memo={})  # (each slide's Glide curve: what the MOD tab needs worked out once)
@@ -360,7 +367,7 @@ class HzView:
                 pts = [(self.x_of(t), self.pitch_y(k0 + (k1 - k0) * slide_part((t - f0) / (f1 - f0), s, knob)))
                        for t in beats]
                 c.create_line(*[v for p in pts for v in p], fill=red, dash=(3, 3))
-        left = left_edge(sh) if sh is not None else app.hz_start or 0.0
+        left = self.song_left()
         lo, hi = self.beat_at(kb), self.beat_at(w)
         for n in self.tones:  # Auto gates: the threshold around each note's tone, green = fixed, orange = mixed (a
             got = auto_state(hz, app.ppq, n)  # note's own gates: the thinnest band)

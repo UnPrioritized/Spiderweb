@@ -48,9 +48,10 @@ def ids(items):
     return {id(it) for it in items}
 
 
-def ask_domino(parent, n, notes):
+def ask_domino(parent, n, notes, marks=False):
     """Paste from Domino with tempo changes while the Tempo pane has points: "replace" (that stretch), "add" (among
-    the points), "notes" (notes only; offered only when notes come too) or None (nothing pasted)."""
+    the points), "notes" (notes only; offered only when notes come too) or None (nothing pasted). marks: asked
+    about time / key signatures too (the pane holds the user's own)."""
     win = tk.Toplevel(parent)
     win.withdraw()
     win.title(tr("tempo.domino_title"))
@@ -59,7 +60,8 @@ def ask_domino(parent, n, notes):
     body = ttk.Frame(win, padding=(14, 14, 14, 8))
     body.pack(fill="both", expand=True)
     ttk.Label(body, image="::tk::icons::question").grid(row=0, column=0, sticky="n", padx=(0, 12))
-    text = trn("tempo.domino_ask", n, n=n) + "\n\n" + tr("tempo.domino_how") + (
+    text = (tr("tempo.domino_ask_marks") if marks else trn("tempo.domino_ask", n, n=n)) + "\n\n" + tr(
+        "tempo.domino_how") + (
         "\n" + tr("tempo.domino_how_notes") if notes else "")
     ttk.Label(body, text=text, wraplength=440, justify="left").grid(row=0, column=1, sticky="w")
     btns = ttk.Frame(win, padding=(14, 4, 14, 12))

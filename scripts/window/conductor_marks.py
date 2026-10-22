@@ -66,13 +66,22 @@ def ask_time_sig(parent, top, bottom):
                                                                                                           column=2)
         e.focus_set()
         e.selection_range(0, "end")
+        hint = ttk.Label(f, text="", foreground=look.WARN)
+        hint.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
         def get():
             try:
                 n = int(t.get().strip())
             except ValueError:
-                return None
-            return (n, int(b.get())) if TOPS[0] <= n <= TOPS[1] else None
+                n = None
+            if n is not None and TOPS[0] <= n <= TOPS[1]:
+                return n, int(b.get())
+            # (says why OK did nothing, hunt 2026-10-23; the box back to its last good number, like number boxes)
+            hint.config(text=tr("conductor.top_range", lo=TOPS[0], hi=TOPS[1]))
+            t.set(str(top))
+            e.focus_set()
+            e.selection_range(0, "end")
+            return None
         return get
     return _dialog(parent, tr("conductor.time_sig_title"), body)
 
@@ -143,7 +152,7 @@ class ConductorMarks:
                 if mark[0] > 0:
                     menu.add_command(label=tr("conductor.remove_time"), command=lambda: self.remove_sig(mark, 0))
             else:
-                menu.add_command(label=tr("conductor.change_key"), command=lambda: self.edit_key_sig(mark[0]))
+                menu.add_command(label=tr("conductor.change_key"), command=lambda: self.edit_key_sig(mark[0], mark))
                 menu.add_command(label=tr("conductor.remove_key"), command=lambda: self.remove_sig(mark, 1))
             return True
         menu.add_command(label=tr("conductor.add_time"), command=lambda: self.edit_time_sig(max(0.0, beat)))
@@ -172,24 +181,28 @@ class ConductorMarks:
             same[0][1:] = [top, bottom]
         else:
             sigs.append([round(at, 9), top, bottom])
-        sigs.sort(key=lambda s: s[0])
-        tempo["sigs"] = [s for i, s in enumerate(sigs) if i == 0 or s[1:] != sigs[i - 1][1:]]
+        # (other marks always stay, a repeat of the one before too: changing bar 1 there and back deleted the later
+        # ones, hunt 2026-10-23)
+        tempo["sigs"] = sorted(sigs, key=lambda s: s[0])
+        self.keys_on_bars()
         self.app.meter_changed()
 
-    def edit_key_sig(self, beat):
-        """Add / change the key signature on the bar line at or before beat."""
+    def edit_key_sig(self, beat, mark=None):
+        """Add / change the key signature on the bar line at or before beat. mark: the one clicked (Change...): that
+        one is changed, moved onto its bar line (hunt 2026-10-23: one left mid-bar got a second mark instead)."""
         tempo = self.app.tempo
         at = bar_line(sigs_of(tempo), beat)
-        now = at_beat(tempo.get("keysigs") or [], at)
+        now = mark if mark is not None else at_beat(tempo.get("keysigs") or [], at)
         got = ask_key_sig(self, now[1] if now else 0, now[2] if now else False)
         if got is not None:
-            self.set_key_sig(at, *got)
+            self.set_key_sig(at, *got, was=mark)
 
-    def set_key_sig(self, at, sharps, minor):
+    def set_key_sig(self, at, sharps, minor, was=None):
         tempo = self.app.tempo
-        keys = [list(k) for k in tempo.get("keysigs") or ()]
+        keys = [list(k) for k in tempo.get("keysigs") or () if k is not was]
         same = [k for k in keys if abs(k[0] - at) < 1e-9]
-        if same and same[0][1:] == [sharps, minor]:
+        if (same and same[0][1:] == [sharps, minor] or not same and was is not None and
+                abs(was[0] - at) < 1e-9 and was[1:] == [sharps, minor]):
             return
         self.app.push_undo(name=tr("conductor.step_key"))
         if same:
@@ -201,36 +214,55 @@ class ConductorMarks:
 
     def put_domino_sigs(self, sigs, keys, at, length, how):
         """Paste from Domino's time / key signatures ([(beat from the paste's start, top, bottom)], [(beat, sharps,
-        minor)]) at beat at, in the same undo step as the paste. "replace": the project's inside the pasted stretch
-        go, and what was in effect at its end comes back there when it differs (Domino ADDS a pasted Conductor's
-        items, so this is what the song looks like after); "add": among them (one on the same beat: replaced).
-        The first time signature stays on beat 0. How many were put."""
+        minor)]) from beat at, in the same undo step as the paste. Each goes on the project's BAR LINE at or before
+        its spot (hunt 2026-10-23: one at a mid-bar play line cut the bar before short; Domino only has them on bar
+        lines), the time signatures one by one (each moves the bar lines after it). "replace": the project's inside
+        the pasted stretch go, and what was in effect at its end comes back on the next bar line when it differs
+        (Domino ADDS a pasted Conductor's items, so this is what the song looks like after); "add": among them (one
+        on the same beat: replaced). The first time signature stays on beat 0. How many were put."""
         tempo = self.app.tempo
         end = at + length
+        cur = [list(m) for m in sigs_of(tempo)]
         n = 0
         for key, new in (("sigs", sigs), ("keysigs", keys)):
             if not new:
                 continue
-            old = [list(m) for m in (sigs_of(tempo) if key == "sigs" else tempo.get(key) or [])]
-            put = [[round(at + b, 9), *rest] for b, *rest in new]
+            old = cur if key == "sigs" else [list(m) for m in tempo.get(key) or []]
+            back = at_beat(old, end)
             if how == "replace":
-                back = at_beat(old, end)
                 old = [m for m in old if not at - 1e-9 <= m[0] <= end + 1e-9 or key == "sigs" and m[0] == 0]
-                if back is not None and not any(abs(m[0] - end) < 1e-9 for m in put):
-                    old.append([round(end, 9), *back[1:]])
-            beats = {round(m[0], 9) for m in put}
-            got = sorted([m for m in old if round(m[0], 9) not in beats] + put, key=lambda m: m[0])
+            for b, *rest in sorted(new, key=lambda m: m[0]):
+                pos = round(bar_line(cur, at + b), 9)
+                old = sorted([m for m in old if abs(m[0] - pos) >= 1e-9] + [[pos, *rest]], key=lambda m: m[0])
+                if key == "sigs":
+                    cur = old
+            if how == "replace" and back is not None:
+                pos = round(bar_line(cur, end, after=True), 9)
+                if not any(abs(m[0] - pos) < 1e-9 for m in old) and (at_beat(old, pos) or [None])[1:] != back[1:]:
+                    old = sorted(old + [[pos, *back[1:]]], key=lambda m: m[0])
+                    if key == "sigs":
+                        cur = old
+            tempo[key] = [m for i, m in enumerate(old) if i == 0 or m[1:] != old[i - 1][1:]]
             if key == "sigs":
-                if got[0][0] > 0:  # (pasted later than beat 0: the first stays)
-                    got.insert(0, list(sigs_of(tempo)[0]))
-                got = [m for i, m in enumerate(got) if i == 0 or m[1:] != got[i - 1][1:]]
-            else:
-                got = [m for i, m in enumerate(got) if i == 0 or m[1:] != got[i - 1][1:]]
-            tempo[key] = got
+                cur = tempo[key]
             n += len(new)
         if n:
+            self.keys_on_bars()
             self.app.meter_changed()
         return n
+
+    def keys_on_bars(self):
+        """Every key signature onto the bar line at or before it (after the time signatures changed: user 2026-10-23,
+        never one left mid-bar; files put it on its bar's start anyway). Two on one bar line: the later one."""
+        tempo = self.app.tempo
+        keys = tempo.get("keysigs")
+        if not keys:
+            return
+        sigs = sigs_of(tempo)
+        on = {}
+        for k in keys:
+            on[round(bar_line(sigs, k[0]), 9)] = k[1:]
+        tempo["keysigs"] = [[b, *rest] for b, rest in sorted(on.items())]
 
     def remove_sig(self, mark, row):
         tempo = self.app.tempo
@@ -240,7 +272,6 @@ class ConductorMarks:
             return
         self.app.push_undo(name=tr("conductor.step_remove_time" if row == 0 else "conductor.step_remove_key"))
         tempo[key] = [m for m in marks if m is not mark]
-        if row == 0:  # (the same on both sides now: one)
-            sigs = tempo["sigs"]
-            tempo["sigs"] = [s for i, s in enumerate(sigs) if i == 0 or s[1:] != sigs[i - 1][1:]]
+        if row == 0:  # (key signatures back on bar lines; others stay, a repeat too: hunt 2026-10-23)
+            self.keys_on_bars()
         self.app.meter_changed()
