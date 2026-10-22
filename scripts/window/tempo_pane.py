@@ -170,6 +170,7 @@ class TempoBox(ttk.Frame):
         self.tool.set(key)
         if self.tool.get() != "select":
             self.last_pencil = self.tool.get()
+        self.pane.confirm()  # (the line just drawn: done)
         self.pane.placing = None  # (adding a catch-up: called off)
         self.pick_tool_hint()
         self.pane.drag = None
@@ -430,6 +431,7 @@ class TempoPane(tk.Canvas):
         self.part = None  # a picked part: its first point's list
         self.placing = None  # adding a catch-up: {"step": 1} (drag the yellow area) / {"step": 2, "a", "b", "hover"}
         self.bands = []  # the kept Select boxes [(first, last beat)]: the pane's whole height (Ctrl+drag adds one)
+        self.live = None  # the line just drawn, its ends still movable: {"base", "ends", "first", "seen"}
         self.drag = None
         self._pan = None
         self._redraw_pending = False
@@ -779,10 +781,10 @@ class TempoPane(tk.Canvas):
                 return min(near, key=lambda pb: abs(pb - b))
         return max(0.0, round(b * ppq) / ppq)
 
-    def move_beat(self, b, e, skip=()):
+    def move_beat(self, b, e, skip=(), beats=None):
         """A point / line / catch-up edge moved afterwards: onto the nearest note start or end within 10 px (user
-        2026-10-22: tempo changes belong there) or tempo point (not one in skip, the ones moving), else a whole
-        tick; Shift = ticks only."""
+        2026-10-22: tempo changes belong there) or tempo point (not one in skip, the ones moving; beats: these
+        beats instead), else a whole tick; Shift = ticks only."""
         roll, ppq = self.app.roll, max(1, self.app.ppq)
         if e.state & SHIFT or roll.sx is None:
             return max(0.0, round(b * ppq) / ppq)
@@ -792,10 +794,11 @@ class TempoPane(tk.Canvas):
         rows = roll.sorted_notes()[first:end]
         near = np.concatenate([rows[:, 0], rows[:, 1]]).astype(float)
         near = near[(near >= lo) & (near <= hi)] / ppq
-        own = [p[0] for p in self.app.tempo["points"] if abs(p[0] - b) <= r and not any(p is s for s in skip)]
-        near = np.concatenate([near, np.array(own, float)])
+        if beats is None:
+            beats = [p[0] for p in self.app.tempo["points"] if not any(p is s for s in skip)]
+        near = np.concatenate([near, np.array([pb for pb in beats if abs(pb - b) <= r], float)])
         if not len(near):
-            return self.tick_beat(b, skip)
+            return max(0.0, round(b * ppq) / ppq)
         return float(near[np.abs(near - b).argmin()])
 
     def snap_bpm(self, v, e):
@@ -826,6 +829,12 @@ class TempoPane(tk.Canvas):
             return
         tool = self.box.tool.get()
         self.picked()  # (what's picked still there)
+        k = self.live_end_at(e.x, e.y)
+        if k is not None:  # the live line's end square: moves that end
+            self.drag = {"kind": "live_end", "end": k}
+            return
+        if self.handle_at(e.x, e.y) is None:  # (its bend handle keeps it live; anything else: done with it)
+            self.confirm()
         if tool == "select" and e.state & CTRL and self.in_band(e.x):
             self.start_move(e, None, pushed=False)  # (Ctrl+drag inside the Select box: copies, like Domino)
             self.drag["copy"] = True
@@ -933,6 +942,10 @@ class TempoPane(tk.Canvas):
                                                                             any(s is o for o in d["before"]))]
             self.box.sync()
             return self.request_redraw()
+        if d["kind"] == "live_end":
+            if self.live_line() is not None:
+                self.live_end_to(d["end"], e)
+            return self.show_position(e)
         if d["kind"] == "draw":
             d["b1"], d["v1"] = self.tick_beat(roll.x2t(e.x)), self.snap_bpm(self.y2b(e.y), e)
             d["moved"] = d.get("moved") or abs(e.x - d["x"]) >= 3 or abs(e.y - d["y"]) >= 3  # (less: a click)
@@ -948,7 +961,11 @@ class TempoPane(tk.Canvas):
                     return
                 self.app.push_undo(name=tr("tempo.step_bend" if d["handle"][0] == "part" else "tempo.step_catch_bend"))
                 d["pushed"] = True
+            live = self.live_line()
             self.bend_to(d, e)
+            kind, i = d["handle"]
+            if live is not None and kind == "part" and self.app.tempo["points"][i] is live["first"]:
+                self.live_seen()  # (the live line's own bend: it stays live)
             self.app.tempo_changed()
             return self.show_position(e)
         if d["kind"] in ("start", "end"):  # a catch-up's yellow left edge / teal right edge
@@ -1075,8 +1092,11 @@ class TempoPane(tk.Canvas):
         d, self.drag = self.drag, None
         if not d:
             return
+        live = self.live_line()
         if drop_loose(self.app.tempo["points"]):  # (a jump's first point the drag left with nothing gliding in)
             self.app.tempo_changed()
+        if live is not None and d["kind"] in ("live_end", "bend"):
+            self.live_seen()
         if d["kind"] == "box":
             if d["span"] is None:  # a click: the part there (or nothing), the play line there (user 2026-10-21)
                 part = self.part_at(self.app.roll.x2t(e.x))
@@ -1207,14 +1227,28 @@ class TempoPane(tk.Canvas):
             return
         pts = self.app.tempo["points"]
         self.app.push_undo(name=tr("tempo.step_draw"))
+        base = copy.deepcopy(pts)
+        kind = DRAWS[self.box.tool.get()]
+        first = self.lay_part(b0, v0, b1, v1, kind, self.box.draw_formula if kind == "formula" else "")
+        # LIVE until Enter / Esc / a click elsewhere (user 2026-10-22, like the velocity pane): its end squares
+        # move it, laid again over the points as they were before it (shrunk: the covered ones come back)
+        self.live = {"base": base, "ends": [[b0, v0], [b1, v1]], "first": first}
+        self.live_seen()
+
+    def lay_part(self, b0, v0, b1, v1, kind, text, like=None):
+        """A part from (b0, v0) to (b1, v1) over the points there (they're replaced), picked; like: a first point
+        whose curve / formula / scale / keep / bend it takes. Returns its first point."""
+        if b1 < b0:
+            b0, v0, b1, v1 = b1, v1, b0, v0
+        pts = self.app.tempo["points"]
         before = [p for p in pts if p[0] <= b1 + 1e-9]
         # (the part after keeps its curve)
         after_kind = part_kind(before[-1] if before else None, self.box.draw_scale)
-        kind = DRAWS[self.box.tool.get()]
-        text = self.box.draw_formula if kind == "formula" else ""
         held = [p for p in pts if p[0] <= b0 + 1e-9]
         first = [float(b0), clamp_bpm(v0), kind, text, self.box.draw_scale, bool(held) and keeps(held[-1]),
                  list(BEND)]
+        if like is not None:
+            first[2:] = copy.deepcopy(like[2:])
         last = [float(b1), clamp_bpm(v1), *after_kind]
         # (user 2026-10-22: drawn from where a glide arrives = a jump there, that point kept; drawn up to a jump =
         # it arrives there, the tempo after the jump kept)
@@ -1233,6 +1267,57 @@ class TempoPane(tk.Canvas):
                   [p for p in pts if p[0] > b1 + 1e-9])
         self.sel, self.part = [], first
         self.app.tempo_changed()
+        return first
+
+    # ------------------------------------------------------------ the line just drawn, live (user 2026-10-22)
+
+    def live_line(self):
+        """The line just drawn while it can still change (nothing else changed the tempo since), else None."""
+        lv = self.live
+        if lv is not None and json.dumps(self.app.tempo) != lv["seen"]:
+            self.live = lv = None
+        return lv
+
+    def live_seen(self):
+        """The live line's own change done: the tempo as it is now is still its."""
+        if self.live is not None:
+            self.live["seen"] = json.dumps(self.app.tempo)
+
+    def live_end_at(self, x, y):
+        """0 / 1 when the mouse is on the live line's start / end square, else None."""
+        lv = self.live_line()
+        if lv is None:
+            return None
+        roll, r = self.app.roll, 7 * self.scale
+        for k, (b, v) in enumerate(lv["ends"]):
+            if abs(roll.t2x(b) - x) <= r and abs(float(self.b2y(v)) - y) <= r:
+                return k
+        return None
+
+    def live_end_to(self, k, e):
+        """The live line's end k dragged to the mouse: onto a note's start / end or a tempo point near it (Shift:
+        whole ticks), BPM snapped; laid again over the points as they were before it, in the same undo step."""
+        lv = self.live
+        b = self.move_beat(self.app.roll.x2t(e.x), e, beats=[p[0] for p in lv["base"]])
+        ends = [list(p) for p in lv["ends"]]
+        ends[k] = [b, self.snap_bpm(self.y2b(e.y), e)]
+        if abs(ends[0][0] - ends[1][0]) < 0.5 / max(1, self.app.ppq):
+            return
+        lv["ends"] = ends
+        old = lv["first"]
+        self.app.tempo["points"][:] = copy.deepcopy(lv["base"])
+        (b0, v0), (b1, v1) = ends
+        lv["first"] = self.lay_part(b0, v0, b1, v1, old[2], old[3], like=old)
+        self.live_seen()
+
+    def confirm(self):
+        """Done with the live line (Enter, Esc, a click elsewhere): its squares go. True if there was one."""
+        if self.live_line() is None:
+            self.live = None
+            return False
+        self.live = None
+        self.request_redraw()
+        return True
 
     def add_catch(self, b):
         cs = self.app.tempo["catch"]
@@ -1425,7 +1510,7 @@ class TempoPane(tk.Canvas):
     def forget(self):
         """Hidden / another project opened: the Select box, picks and a catch-up being added go, Delete and Esc
         are the piano roll's again."""
-        self.placing, self.drag, self.bands, self.sel, self.part = None, None, [], [], None
+        self.placing, self.drag, self.bands, self.sel, self.part, self.live = None, None, [], [], None, None
         self.box.pick_tool_hint()
         if getattr(self.app, "key_pane", None) is self:
             self.app.key_pane = None
@@ -1465,6 +1550,8 @@ class TempoPane(tk.Canvas):
             want, hint = "sb_v_double_arrow", "numbers"
         elif self.placing:
             want = "sb_h_double_arrow"  # (the catch-up being added keeps its own hint)
+        elif self.live_end_at(e.x, e.y) is not None:
+            want, hint = "fleur", "on_live_end"
         elif self.point_at(e.x, e.y) is not None:
             want, hint = "fleur", "on_point"
         elif handle is not None:
@@ -1479,6 +1566,8 @@ class TempoPane(tk.Canvas):
             want, hint = "sb_h_double_arrow", "on_band"  # (moves what the box picked, in time)
         else:
             want = SELECT_CURSOR
+        if hint is None and not self.placing and self.live_line() is not None:
+            hint = "live"  # (the line just drawn: how to change / finish it)
         if not self.drag:
             set_cursor(self, want)
             if not self.placing and (hint or getattr(self.box, "_hint_key", None) != self.box.tool_hint_key()):
@@ -1766,6 +1855,11 @@ class TempoPane(tk.Canvas):
             x, y, r = roll.t2x(at[0]), float(self.b2y(at[1])), 5 * self.scale
             self.create_oval(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.TEMPO_PICKED,
                              width=lw + 1)
+        live = self.live_line()
+        for b, v in live["ends"] if live is not None else ():  # the live line's end squares (velocity pane's look)
+            x, y, r = roll.t2x(b), float(self.b2y(v)), 5 * self.scale
+            self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.TEMPO_PICKED,
+                                  width=lw + 1)
         # the numbers on the left
         self.create_rectangle(0, 0, kb, h, fill=look.RULER_BG, outline="")
         self.create_line(kb - 1, 0, kb - 1, h, fill=look.ROLL_EDGE)

@@ -453,6 +453,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (the Formula tool's settings change the line just drawn: clicking them keeps it)
         self.bind("<ButtonPress>", lambda e: e.widget is self.vel or str(e.widget).startswith(str(self.vel_formula_bar))
                   or self.vel.confirm(), add="+")
+        # (the Tempo pane's line just drawn the same, user 2026-10-22; a press in the pane decides itself)
+        self.bind("<ButtonPress>", lambda e: e.widget is self.tempo_pane or self.tempo_pane.confirm(), add="+")
 
     # ------------------------------------------------------------ layout
 

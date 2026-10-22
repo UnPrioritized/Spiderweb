@@ -342,6 +342,8 @@
  "tempo.hint_select": "Click: pick a part, the play line there · Drag: Select box · Double right-click: the pencil",
  "tempo.hint_on_point": "Drag: move · Double-click: type its BPM · Right-click: menu · Delete: the picked ones",
  "tempo.hint_on_handle": "Drag: bend · Double-click: straight again · Right-click: S-curve",
+ "tempo.hint_on_live_end": "Drag: move this end (onto notes nearby; Shift = whole ticks) · Enter or a click elsewhere: done",
+ "tempo.hint_live": "The new line: drag its end squares or its bend · Enter, Esc or a click elsewhere: done · Ctrl+Z: remove it",
  "tempo.hint_on_catch_handle": "Drag: bend the catch-up · Double-click: its own curve again",
  "tempo.hint_on_catch": "Drag: move the catch-up line · Right-click: menu · Delete: the picked ones",
  "tempo.hint_on_edge": "Drag: change the time the catch-up counts (yellow) / where it stops (teal) · Right-click: menu",

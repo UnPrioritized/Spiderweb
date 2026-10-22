@@ -1991,15 +1991,15 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             pane = getattr(self.app, "key_pane", None)
             if pane is not None and pane.placing:  # (the Tempo pane adding a catch-up: called off)
                 return pane.cancel_placing()
-            if self.app.vel.confirm():  # (done with a velocity line / curve, like Enter)
-                return
+            if self.app.vel.confirm() | self.app.tempo_pane.confirm():  # (done with a velocity / tempo line, like
+                return                                                    # Enter)
             self.drop_hz_keys()
             self.cancel_draft()
             self.app.set_parts(())
             self.app.set_stroke(None)
         elif k in ("return", "kp_enter"):
-            if not self.app.vel.confirm():  # Enter = done with a velocity line / curve
-                self.finish_poly()
+            if not (self.app.vel.confirm() | self.app.tempo_pane.confirm()):  # Enter = done with a velocity /
+                self.finish_poly()                                             # tempo line
         elif k == "delete":
             sh = self.app.selected()
             pane = getattr(self.app, "key_pane", None)
