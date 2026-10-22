@@ -376,9 +376,11 @@ class HzView:
             if got is None or n["t"] > hi or n["t"] + n["len"] < lo:
                 continue
             y, half = self.pitch_y(pitch(n)), max(2.5 * self.s, (got[1] or 0.0) / 100.0 * self.sy)  # (always seen)
-            fill, edge = BAND_FIXED if got[2] else BAND_MIXED
-            c.create_rectangle(self.x_of(n["t"]), y - half, self.x_of(n["t"] + n["len"]), y + half, fill=fill,
-                               outline=edge if half >= 3 * self.s else "")
+            # (the tempo changing under it: each tempo's part its own colour)
+            for a, b, fixed in got[3] if len(got) > 3 else [(n["t"], n["t"] + n["len"], got[2])]:
+                fill, edge = BAND_FIXED if fixed else BAND_MIXED
+                c.create_rectangle(self.x_of(a), y - half, self.x_of(b), y + half, fill=fill,
+                                   outline=edge if half >= 3 * self.s else "")
         runs = []
         for a, b, keys, mean in heard(hz, left, app.ppq, bpm):
             see = (b >= lo) & (a <= hi)
@@ -519,7 +521,7 @@ class HzView:
         held = self.drag["kind"] if self.drag else hit and hit[0]
         if held in ("in", "out", "bend") and self.slides_off():
             text += "     " + tr("hz.arp_slides")
-        got = (auto_state(sh["hz"], self.app.ppq, self.tones[hit[1]])
+        got = (auto_state(sh["hz"], self.app.ppq, self.tones[hit[1]], self.beat_at(e.x))  # (the part under it)
                if hit and hit[0] not in ("in", "out", "bend") and sh is not None and sh.get("hz") else None)
         if got and got[1] is None:  # the note's own gates
             text += "     " + tr("hz.own_fixed" if got[2] else "hz.own_mixed", off=f"{got[0]:.2f}")

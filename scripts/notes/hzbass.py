@@ -342,18 +342,21 @@ def right_edge(sh):
 def even_squares(sh, ppq):
     """A Hz bass without placed tones made under a changing tempo (hz["tempo"]): its one grid's squares ((start, end)
     whole ticks, chop_grid) over the shape, each wave at the tempo where it starts (the one playing at a change
-    finishes first), counted from tick 0 at the tempo at its left edge. Mixed gates unless Fixed (Auto: the tempo
-    moves, user). None when the tempo doesn't change over the shape (one gate: chop_even as before)."""
+    finishes first), counted from tick 0 at the tempo at its left edge. Fixed = whole ticks; Auto = whole ticks
+    where the tempo holds and they're close enough, mixed in a glide (held_whole). None when the tempo doesn't change
+    over the shape (one gate: chop_even as before)."""
     hz, left, right = sh["hz"], left_edge(sh), right_edge(sh)
     cuts = tempo_changes(hz, 0.0, right - left)
     if not cuts:
         return None
-    whole = bool(hz.get("fixed"))
-    g = wave(hz, ppq, hz["key"], whole=whole, bpm=tempo_at(hz, 0.0))
+
+    def whole_at(beat):
+        return bool(hz.get("fixed")) or held_whole(hz, ppq, hz["key"], beat, hz.get("auto"))
+    g = wave(hz, ppq, hz["key"], whole=whole_at(0.0), bpm=tempo_at(hz, 0.0))
     t = math.floor(left * ppq / g) * g
     parts = []
     for lo, hi in zip([left] + [left + c for c in cuts], [left + c for c in cuts] + [right]):
-        g = wave(hz, ppq, hz["key"], whole=whole, bpm=tempo_at(hz, lo - left))
+        g = wave(hz, ppq, hz["key"], whole=whole_at(lo - left), bpm=tempo_at(hz, lo - left))
         k = max(0, int(math.ceil((hi * ppq - t) / g - 1e-9)))
         parts.append(t + g * np.arange(k))
         t += g * k
