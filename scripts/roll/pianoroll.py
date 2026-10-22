@@ -285,13 +285,13 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
     ruler_boxes = staticmethod(ruler_boxes)  # (roll_shared: the Hz window's too)
 
     def ruler_band(self, e, kept, vel=False):
-        """The mouse on the ruler's black band (black_bands of the kept boxes; vel: the velocity pane, where the
-        ones made there count too): a drag there moves what they selected along in time (also when they selected
-        nothing: only the band moves, like Domino)."""
+        """The mouse on the ruler's black band (black_bands of the kept boxes; vel: the velocity pane's own bands
+        instead, kept apart, user 2026-10-22): a drag there moves what they selected along in time (also when they
+        selected nothing: only the band moves, like Domino)."""
         if e.y >= self.ruler_h or e.x < self.kb_w or self.sx is None:
             return False
-        return any(min(self.t2x(a[0]), self.t2x(a[2])) <= e.x <= max(self.t2x(a[0]), self.t2x(a[2]))
-                   for a in (self.ruler_boxes if vel else black_bands)(kept))
+        own = [a for a in self.ruler_boxes(kept) if box_kind(a) == "vel"] if vel else black_bands(kept)
+        return any(min(self.t2x(a[0]), self.t2x(a[2])) <= e.x <= max(self.t2x(a[0]), self.t2x(a[2])) for a in own)
 
     def on_kept_box(self, kept, e):
         """Where the mouse is on the kept Select boxes (boxes_side), or None. With Ctrl only inside counts (a drag

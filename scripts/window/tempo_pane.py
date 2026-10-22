@@ -866,7 +866,7 @@ class TempoPane(tk.Canvas):
                      # (hand-set catch-up edges go along when many move; one line dragged alone leaves them)
                      "starts": [(s, k, s[k]) for s in self.sel if not self.is_point(s) and (band or len(self.sel) > 1)
                                 for k in (3, 4) if catch_get(s, k) is not None],
-                     "press": self.app.roll.x2t(e.x), "band": band, "ref": self.bands_reach()[0] if band else item[0],
+                     "press": self.app.roll.x2t(e.x), "band": band, "ref": item[0] if item is not None else self.bands_reach()[0],
                      "time_only": self.box.tool.get() == "select",
                      "v0": item[1] if item is not None and self.is_point(item) else None, "db": 0.0}
 
@@ -961,7 +961,10 @@ class TempoPane(tk.Canvas):
         """The held items moved by the mouse: all by the same beats (and BPM); the grabbed one snaps."""
         roll, tempo = self.app.roll, self.app.tempo
         one = 1.0 / max(1, self.app.ppq)
-        db = self.snap_beat(d["ref"] + roll.x2t(e.x) - d["press"], e) - d["ref"]
+        # (a grabbed point / line goes to the mouse itself, user 2026-10-22: with Shift pressed later it sat off
+        # the pencil by where the snapped press was; the box keeps its distance)
+        at = roll.x2t(e.x) if d["grab"] is not None else d["ref"] + roll.x2t(e.x) - d["press"]
+        db = self.snap_beat(at, e) - d["ref"]
         db = max([db] + [-b for _, b, _ in d["orig"]] + [-lo for lo, _ in d["band"] or ()])  # (not before 0)
         dv = 0.0 if d["v0"] is None or d["time_only"] else self.snap_bpm(self.y2b(e.y), e) - d["v0"]
 

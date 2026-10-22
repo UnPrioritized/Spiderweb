@@ -16,7 +16,7 @@ from notes.fx import with_velocity
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
 from roll.roll_shared import (CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
-                              cached_path, draw_boxes, fade, grab_while_panning, ruler_boxes, set_cursor,
+                              box_kind, cached_path, draw_boxes, fade, grab_while_panning, ruler_boxes, set_cursor,
                               slot_colours)
 from window import look
 
@@ -539,13 +539,14 @@ class VelocityPane(tk.Canvas):
         self.draw_playhead()
 
     def draw_bands(self, h, kb):
-        """The piano roll's boxes over every key (made here or along its ruler): the pane's whole height."""
+        """The boxes made here (the piano roll keeps them, over every key): the pane's whole height. The ruler's own
+        bands don't show here (user 2026-10-22: kept apart)."""
         roll = self.app.roll
         if roll.drag and roll.drag[0] == "box" and roll.box_ruler:
             boxes = roll.box_more + [b for b in (roll.box_area(),) if b]
         else:
             boxes = roll.kept_box() or []
-        rects = [(roll.t2x(a[0]), 1, roll.t2x(a[2]), h - 2) for a in ruler_boxes(boxes)]
+        rects = [(roll.t2x(a[0]), 1, roll.t2x(a[2]), h - 2) for a in ruler_boxes(boxes) if box_kind(a) == "vel"]
         if rects:
             draw_boxes(self, rects, kb, 0, self.scale, tags="band")
 
