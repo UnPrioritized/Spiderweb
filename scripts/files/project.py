@@ -18,7 +18,7 @@ from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, c
                           merges_unmade, slot_ports)
 from notes.hzbass import clean_hz
 from notes.hz_cc import slot_events
-from notes.passengers import midi_messages, pack_cc, placed, unpack_cc
+from notes.passengers import NO_USUAL, STAY, USUAL, midi_messages, pack_cc, placed, unpack_cc
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -858,7 +858,7 @@ class ProjectFiles:
             note += tr("project.it_has_keys_above_127_256")
         if slot_ports(int(self.rendered[:, 4].max()) + 1, cc, self.picture_use10):  # (as write_midi decides)
             note += tr("project.ports_midi")
-        note += self.tempo_notes(plan)
+        note += self.tempo_notes(plan) + self.cc_note(cc, True)
         messagebox.showinfo(tr("project.spiderweb"),
                             tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
                                                                                n=len(self.rendered)),
@@ -909,12 +909,15 @@ class ProjectFiles:
         out = slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
         added = set()
         auto = self.channel_mode.get() == "auto"
+        groups = {}  # (a paste (or a shape alone) -> ([its shapes], latest values: cc_put_back))
         for i, sh in enumerate(self.shapes):
             slots = self.voice_slots.get(i) if "cc" in sh and (only is None or i in only) else None
             if slots is None and auto and "cc" in sh and sh.get("own_slots") and (only is None or i in only):
                 slots = {k: k for k in {e[1] for e in unpack_cc(sh["cc"])}}  # (a copy whose tracks ARE its slots)
             if not slots:
                 continue
+            group = groups.setdefault(sh.get("paste") or ("one", i), ([], {}))  # (pieces of one paste together)
+            group[0].append(i)
             for t, track, tag, body in placed(sh, unpack_notes(sh["notes"]), ppq):
                 slot = slots.get(track)
                 if slot is None:  # (a track without notes here: no channel to go on)
@@ -923,9 +926,46 @@ class ProjectFiles:
                 out.setdefault(int(slot), []).extend(
                     (t, s, a, b, (tag, body) if k == len(msgs) - 1 else False) for k, (s, a, b) in enumerate(msgs))
                 added.add(int(slot))
+                for s, a, b in msgs:  # (each CC's / the bend's latest value on the slot: (tick, value))
+                    k = a if s == 0xB0 else "bend" if s == 0xE0 else None
+                    if k is not None and t >= group[1].get((int(slot), k), (-1,))[0]:
+                        group[1][int(slot), k] = (t, b if s == 0xB0 else a | b << 7)
+        for us, last in groups.values():
+            self.cc_put_back(us, last, out)
         for slot in added:
             out[slot].sort(key=lambda e: e[0])
         return out
+
+    def cc_put_back(self, us, last, out):
+        """At the end of pasted shapes us (one paste, its pieces) on each of their slots, every CC they left changed
+        set back to its usual value (the pitch bend to its middle), only when other notes use that channel after it
+        (user 2026-10-22: the channel is reused later; alone, a round trip stays exactly as it was). last = {(slot,
+        CC number / "bend"): (tick, value)}."""
+        r = self.rendered
+        for (slot, k), (_, v) in sorted(last.items(), key=lambda e: str(e[0])):
+            on = r[r[:, 4] == slot]
+            ours = np.isin(on[:, 5], us)
+            if not ours.any():
+                continue
+            end = int(on[ours, 1].max())
+            if not (~ours & (on[:, 0] >= end)).any():
+                continue
+            if k == "bend":
+                if v != 8192:
+                    out[slot].append((end, 0xE0, 0, 64))
+            elif k not in NO_USUAL + STAY and v != USUAL.get(k, 0):
+                out[slot].append((end, 0xB0, k, USUAL.get(k, 0)))
+
+    def cc_note(self, cc, midi=False, shapes=None):
+        """The export message's line about pasted notes' CCs (passengers.py): not written outside Multi channel;
+        midi: Domino's own events (no MIDI message) left out of the MIDI file. shapes: the ones going out."""
+        mine = [sh for sh in (self.shapes if shapes is None else shapes) if "cc" in sh]
+        if not mine:
+            return ""
+        if self.channel_mode.get() != "auto":
+            return tr("project.cc_single_channel")
+        own = sum(1 for ms in cc.values() for e in ms if e[1] is None) if midi else 0
+        return trn("project.cc_left_out_midi", own, n=own) if own else ""
 
     def write_out(self, path, busy, write):
         """write() makes the file at path (its folder made first), with the busy text key showing. False when it
@@ -998,7 +1038,7 @@ class ProjectFiles:
                 + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else "")
                 + (tr("project.ports_dms") if ports else ""))
         slow = tempo_items(tempo)[1] if tempo else 0
-        warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "")
+        warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "") + self.cc_note(cc)
         (messagebox.showwarning if long or ports or warn else messagebox.showinfo)(tr("project.spiderweb"),
                                                                                     text + warn)
 
@@ -1081,7 +1121,9 @@ class ProjectFiles:
         text = (tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
                 + (tr("project.copied_keys_256") if mod else
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
-                + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else ""))
+                + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else "")
+                + (tr("project.cc_not_written") if self.cc_note({}, shapes=[self.shapes[i] for i in self.sels]
+                                                                 if self.sels else None) else ""))
         self.status.config(text=text)
         warn = ""
         if plan:  # (the tempo warnings as Export to Domino gives them; places only inside what was copied)
@@ -1193,7 +1235,8 @@ class ProjectFiles:
         n = len(notes)
         note = (tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq) if their_ppq and their_ppq != self.ppq
                 else "") + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "") + (
-            tr("project.pasted_from_copy_start") if from_bar else "")
+            tr("project.pasted_from_copy_start") if from_bar else "") + (
+            tr("project.cc_not_written") if sh is not None and "cc" in sh and self.channel_mode.get() != "auto" else "")
         if sh is None:
             self.status.config(text=trn("project.pasted_tempo_from_domino", len(tempos), n=len(tempos)) + note)
         else:

@@ -802,6 +802,8 @@ class BetweenGroups:
                     label = tr("sustain.list", name=label)
                 if subtracts(sh):  # (its gates made shorter: subtract.py)
                     label = tr("subtract.list", name=label)
+                if "cc" in sh:  # (pasted notes carrying CCs: passengers.py, user 2026-10-22)
+                    label = tr("app.with_cc_list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
                           shape_label=label, counts=counts[i], uses=uses)
             self.listbox.insert("end", text)
