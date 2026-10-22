@@ -199,6 +199,39 @@ class ConductorMarks:
         tempo["keysigs"] = sorted(keys, key=lambda k: k[0])
         self.app.meter_changed()
 
+    def put_domino_sigs(self, sigs, keys, at, length, how):
+        """Paste from Domino's time / key signatures ([(beat from the paste's start, top, bottom)], [(beat, sharps,
+        minor)]) at beat at, in the same undo step as the paste. "replace": the project's inside the pasted stretch
+        go, and what was in effect at its end comes back there when it differs (Domino ADDS a pasted Conductor's
+        items, so this is what the song looks like after); "add": among them (one on the same beat: replaced).
+        The first time signature stays on beat 0. How many were put."""
+        tempo = self.app.tempo
+        end = at + length
+        n = 0
+        for key, new in (("sigs", sigs), ("keysigs", keys)):
+            if not new:
+                continue
+            old = [list(m) for m in (sigs_of(tempo) if key == "sigs" else tempo.get(key) or [])]
+            put = [[round(at + b, 9), *rest] for b, *rest in new]
+            if how == "replace":
+                back = at_beat(old, end)
+                old = [m for m in old if not at - 1e-9 <= m[0] <= end + 1e-9 or key == "sigs" and m[0] == 0]
+                if back is not None and not any(abs(m[0] - end) < 1e-9 for m in put):
+                    old.append([round(end, 9), *back[1:]])
+            beats = {round(m[0], 9) for m in put}
+            got = sorted([m for m in old if round(m[0], 9) not in beats] + put, key=lambda m: m[0])
+            if key == "sigs":
+                if got[0][0] > 0:  # (pasted later than beat 0: the first stays)
+                    got.insert(0, list(sigs_of(tempo)[0]))
+                got = [m for i, m in enumerate(got) if i == 0 or m[1:] != got[i - 1][1:]]
+            else:
+                got = [m for i, m in enumerate(got) if i == 0 or m[1:] != got[i - 1][1:]]
+            tempo[key] = got
+            n += len(new)
+        if n:
+            self.app.meter_changed()
+        return n
+
     def remove_sig(self, mark, row):
         tempo = self.app.tempo
         key = "sigs" if row == 0 else "keysigs"

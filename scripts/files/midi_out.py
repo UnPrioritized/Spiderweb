@@ -153,15 +153,16 @@ def track_slots(notes, pad=True):
     return np.arange(int(notes[:, 4].max()) + 1) if pad else np.unique(np.asarray(notes[:, 4], np.int64))
 
 
-def tempo_track(bpm, beats, tempo=None, sigs=None):
+def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
     """The first track: the tempo (or the Tempo pane's changes, [(tick, microseconds per beat)] from
     tempo_file.file_plan, tick 0 first) and the time signature (or sigs = [(tick, top, bottom power)], tick 0
-    first)."""
+    first) and key signatures (keys = [(tick, sharps -7..7, minor)], FF 59)."""
     head = bytearray()
     tempo = tempo or [(0, round(60_000_000 / bpm))]
     sigs = sigs or [(0, beats, 2)]
     events = sorted([(t, 1, bytes([0xFF, 0x58, 4, n, d, 24, 8])) for t, n, d in sigs]
-                    + [(t, 0, b"\xFF\x51\x03" + int(us).to_bytes(3, "big")) for t, us in tempo])
+                    + [(t, 0, b"\xFF\x51\x03" + int(us).to_bytes(3, "big")) for t, us in tempo]
+                    + [(t, 2, bytes([0xFF, 0x59, 2, sf & 0xFF, int(mi)])) for t, sf, mi in keys or ()])
     last = 0
     for tick, _, data in events:
         delta = tick - last
@@ -174,13 +175,13 @@ def tempo_track(bpm, beats, tempo=None, sigs=None):
     return head
 
 
-def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None):
+def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
     (use10: channel 10 used too, slot_track_channel; pad: track_slots). Nothing marks channel 10 as not drums
     (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
     the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events); with them past one round of
     channels every track starts with its port (FF 21: engine.slot_ports). tempo, sigs: tempo_track's."""
-    head = tempo_track(bpm, beats, tempo, sigs)
+    head = tempo_track(bpm, beats, tempo, sigs, keys)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0

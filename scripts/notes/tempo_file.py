@@ -19,7 +19,7 @@ import json
 
 import numpy as np
 
-from notes.meter import sigs_of
+from notes.meter import bar_line as meter_bar_line, sigs_of
 from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, base_us, beat_tick, domino_safe,
                          file_segments, has_tempo, layout)
 
@@ -59,6 +59,15 @@ def bar_lengths(ppq):
 def file_sigs(tempo, ppq):
     """The Conductor pane's time signatures as a file's: [(tick, top, bottom power)]."""
     return [(round(b * ppq), top, bottom.bit_length() - 1) for b, top, bottom in sigs_of(tempo)]
+
+
+def file_keys(tempo, ppq):
+    """The Conductor pane's key signatures as a file's: [(tick, sharps, minor)], each on its bar's first tick (a
+    MIDI file has them at a bar's start; one left off a bar line by a time signature removed since goes back)."""
+    sigs, out = sigs_of(tempo), {}
+    for b, sf, mi in (tempo or {}).get("keysigs") or ():
+        out[round(meter_bar_line(sigs, b) * ppq)] = (sf, mi)  # (two in one bar: the last wins, as many programs do)
+    return [(t, *k) for t, k in sorted(out.items())]
 
 
 def bar_line(sigs, tick, ppq, after=False):
@@ -193,6 +202,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     ticks = every tick that must keep its time (note starts / ends, CC messages); starts = the note starts; hz =
     (starts, ends) of the Hz basses' notes. Spiderweb's own ticks, the project's PPQ."""
     out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": file_sigs(tempo, ppq),
+           "keys": file_keys(tempo, ppq),
            "map": lambda t: np.asarray(t, np.int64), "jumps": [], "hz": [], "dense": []}
     if not has_tempo(tempo):
         return out
@@ -260,6 +270,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None):
     if keeps:
         out["map"] = to_file
         out["sigs"] = [(int(to_file(t)), top, p) for t, top, p in out["sigs"]]
+        out["keys"] = [(int(to_file(t)), sf, mi) for t, sf, mi in out["keys"]]
     if fit_bars and keeps:
         out["sigs"] = _signatures(keeps, gaps, bar, beats, ppq, to_file)
     # warnings

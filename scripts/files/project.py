@@ -859,7 +859,7 @@ class ProjectFiles:
         notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc)
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
-                                                 self.pad_tracks(), cc, plan["events"], plan["sigs"])):
+                                                 self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"])):
             return
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
@@ -1037,14 +1037,15 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
-        tempo, sigs = None, plan["sigs"]
+        tempo, sigs, keys = None, plan["sigs"], plan["keys"]
         if has_tempo(self.tempo):  # (changes past the song's end make no sound: left out, Domino's ticks stop)
             last = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms]) + beats * ppq
             tempo = [e for e in plan["events"] if e[0] <= min(last, LONGEST)]
             sigs = [s for s in sigs if s[0] <= min(last, LONGEST)]
+            keys = [k for k in keys if k[0] <= min(last, LONGEST)]
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
-                               pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs))):
+                               pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys))):
             return
         tracks = len(track_slots(notes, self.pad_tracks()))
         ports = slot_ports(int(notes[:, 4].max()) + 1, cc, self.picture_use10)  # (as dms_data decides)
@@ -1078,7 +1079,7 @@ class ProjectFiles:
         if self.sels:
             notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
         heard = (int(notes[:, 0].min()) / ppq, int(notes[:, 1].max()) / ppq) if len(notes) else (0, 0)
-        if (has_tempo(self.tempo) or sigs_of(self.tempo) != [DEFAULT_SIG]) and len(notes):
+        if (has_tempo(self.tempo) or sigs_of(self.tempo) != [DEFAULT_SIG] or self.tempo.get("keysigs"))                 and len(notes):
             # (the tempo line + time signatures come too: Keep timing worked out on the whole song up to the copy's
             # last note, so it lines up with Export MIDI)
             upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
@@ -1100,7 +1101,8 @@ class ProjectFiles:
             lo, hi = early, int(notes[:, 1].max())
             first = bar_line(plan["sigs"], lo, ppq) if bar else lo
             span = first, max((bar_line(plan["sigs"], hi, ppq, True) if bar else hi) - first, 1)
-            conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1])[0]
+            conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1],
+                                    plan["keys"] if bar else ())[0]
         elif early < int(notes[:, 0].min()):
             first, length = clip_span(notes, beats * ppq, self.domino_start())
             start = early if self.domino_start() == "note" else early // (beats * ppq) * beats * ppq
@@ -1241,6 +1243,11 @@ class ProjectFiles:
                 if sh is None:
                     return
                 tempos = []
+        own = clipboard.copy_count() == self.own_domino_copy  # (Spiderweb's own copy: its signatures are ours)
+        sigs, keys = ([], []) if own else [  # (beats from the paste's start; the one in effect there on it)
+            [(max(0, t - shift) / self.ppq, *rest) for k, (t, *rest) in enumerate(rows)
+             if t > shift or k + 1 == len(rows) or rows[k + 1][0] > shift] for rows in (cond.get("sigs", []),
+                                                                                       cond.get("keys", []))]
         ends = [int((notes[:, 0] + notes[:, 1]).max())] if len(notes) else []
         length = max([(cond.get("length", 0) - shift) / self.ppq, 1 / self.ppq] + [e / self.ppq for e in ends]
                      + [b for b, _ in tempos])  # (the stretch Replace takes: the copy's, past its notes / tempo)
@@ -1255,6 +1262,8 @@ class ProjectFiles:
                 self.add_copies([sh], at, tr("project.paste_from_domino"))
             if tempos:
                 self.tempo_pane.put_domino(tempos, at, length, how, sh is None)
+            if how != "notes" and (sigs or keys):  # (time / key signatures along, in the same undo step)
+                self.tempo_pane.put_domino_sigs(sigs, keys, at, length, how or "replace")
         finally:
             self.busy(None)
         n = len(notes)

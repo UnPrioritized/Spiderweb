@@ -290,6 +290,23 @@ def with_cc(rows, events, first=0):
     return out
 
 
+def key_code(sharps, minor):
+    """A key signature as Domino's key code (DMS_SPEC 6.7): sharps n = n, flats n = 8 + n, + 16 when minor."""
+    return (sharps if sharps >= 0 else 8 - sharps) + (16 if minor else 0)
+
+
+def key_of_code(code):
+    """Domino's key code -> (sharps -7..7, minor), or None when it's none of them."""
+    n, minor = code & 15, bool(code & 16)
+    if code > 31 or n == 8:
+        return None
+    return (n if n < 8 else -(n - 8)), minor
+
+
+def key_signature(sharps, minor, tick=0):
+    return item(2016, item(1001, struct.pack("<I", tick)) + item(2001, bytes([key_code(sharps, minor)])))
+
+
 def time_signature(beats, tick=0, bottom=4):
     """A Conductor track's time signature: beats / 4 at tick 0 as the MIDI export writes it (bottom = the real
     note value, not its power of two)."""
@@ -319,9 +336,9 @@ def _f32_step(f, n):
     return np.array([bits], np.int32).view(np.float32)[0]
 
 
-def tempo_items(tempo, sigs=(), first=0, end=None):
-    """(Conductor item bytes, slow): tempo [(tick, us)] and time signatures [(tick, top, bottom power)] as Domino's
-    tempo / time signature items, by tick (tempo first on a tick). first..end: only that stretch, ticks counted
+def tempo_items(tempo, sigs=(), first=0, end=None, keys=()):
+    """(Conductor item bytes, slow): tempo [(tick, us)], time signatures [(tick, top, bottom power)] and key
+    signatures [(tick, sharps, minor)] as Domino's items, by tick (tempo, then time, then key signature on a tick). first..end: only that stretch, ticks counted
     from first, with what is in effect at first put on tick 0, and what is in effect at end put on end when it
     changed (user 2026-10-22: Domino ADDS a pasted Conductor's items, so without it the song after the paste
     would stay at the copy's last tempo). slow = how many tempos can't come back exact."""
@@ -343,11 +360,13 @@ def tempo_items(tempo, sigs=(), first=0, end=None):
                                           + item(2001, item(0, struct.pack("<f", bpm))))))
     for tick, top, power in take(sigs):
         out.append((tick - first, 1, time_signature(top, tick - first, 2 ** power)))
+    for tick, sharps, minor in take(keys):
+        out.append((tick - first, 2, key_signature(sharps, minor, tick - first)))
     out.sort(key=lambda r: r[:2])
     return b"".join(r[2] for r in out), slow
 
 
-def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None):
+def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None, keys=None):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
     (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad:
@@ -360,10 +379,10 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None,
     messages} (hz_cc.slot_events): control items on its track. tempo = [(tick, us)] + sigs = [(tick, top, bottom
     power)] (the Tempo pane's, tempo_file.file_plan): the Conductor track's instead of one BPM."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs)
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys)
 
 
-def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None):
+def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None, keys=None):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
@@ -379,12 +398,14 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
 
     feed(SONG_START + item(1002, struct.pack("<H", ppq)) + DMS_SONG_REST)
     if tempo:
-        events = tempo_items(tempo, sigs or [(0, beats, 2)])[0]
+        events = tempo_items(tempo, sigs or [(0, beats, 2)], keys=keys or ())[0]
     else:
         events = (item(2008, item(1001, struct.pack("<I", 0)) + item(2001, item(0, struct.pack("<f", bpm))))
-                  + b"".join(time_signature(top, t, 2 ** p) for t, top, p in sorted(sigs or [(0, beats, 2)])))
+                  + b"".join(time_signature(top, t, 2 ** p) for t, top, p in sorted(sigs or [(0, beats, 2)]))
+                  + b"".join(key_signature(sf, mi, t) for t, sf, mi in sorted(keys or ())))
     track_head(0, b"Conductor", len(events), True)
-    feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]))))
+    feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]
+                                              + [r[0] for r in (keys or [])]))))
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     order, cuts = track_orders(notes, count, z.pool)
     ports = slot_ports(count, cc, use10)  # (Output port A, B, ... as the MIDI export's)
@@ -467,7 +488,7 @@ def read_notes(raw, top=127, conductor=None, passengers=None):
         data = zlib.decompress(raw[len(MAGIC) + 4:])
     except zlib.error:
         raise ValueError(tr("domino_clip.domino_s_data_is_damaged")) from None
-    runs, odd, ppq, track, tempo, length = [], [], None, -1, {}, 0
+    runs, odd, ppq, track, tempo, length, sigs, keys = [], [], None, -1, {}, 0, {}, {}
     for tag, body in items(data):
         if tag == 1002 and len(body) == 2:
             ppq = struct.unpack("<H", body)[0]
@@ -492,6 +513,16 @@ def read_notes(raw, top=127, conductor=None, passengers=None):
                         tempo[at] = v
                 i += 6 + n
                 continue
+            if t in (2015, 2016) and cond and i + 6 + n <= len(body):  # (time / key signatures)
+                f = dict(items(body[i + 6:i + 6 + n]))
+                at = int.from_bytes(f[1001], "little") if len(f.get(1001, b"")) == 4 else None
+                a, b = f.get(2001, b"")[:1], f.get(2002, b"")[:1]
+                if at is not None and t == 2015 and a and b:
+                    sigs[at] = (a[0], b[0])
+                elif at is not None and t == 2016 and a:
+                    keys[at] = key_of_code(a[0])
+                i += 6 + n
+                continue
             if t == 2001 and n == NOTE.itemsize - 6:  # notes in the usual layout: all of them at once
                 got, i = note_run(body, i)
                 runs += [(r, track) for r in got]
@@ -510,7 +541,10 @@ def read_notes(raw, top=127, conductor=None, passengers=None):
                 passengers.append((int.from_bytes(body[i + 12:i + 16], "little"), track, t, body[i + 16:i + 6 + n]))
             i += 6 + n  # (a track's settings are skipped)
     if conductor is not None:
-        conductor.update(tempo=sorted(tempo.items()), length=length)
+        conductor.update(tempo=sorted(tempo.items()), length=length,
+                         sigs=[(t, *s) for t, s in sorted(sigs.items()) if s[1] in (1, 2, 4, 8, 16, 32, 64, 128)
+                               and s[0] >= 1],
+                         keys=[(t, *k) for t, k in sorted(keys.items()) if k is not None])
     rows = np.concatenate([np.column_stack([r["tick"], r["gate"], r["key"], r["vel"],
                                             np.full(len(r), k)]).astype(np.int64) for r, k in runs]
                           + [np.array(odd, np.int64).reshape(-1, 5)])
