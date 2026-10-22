@@ -35,8 +35,9 @@ from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
-                              RULER_TOP, bind_double_right, boxes_side, boxes_upright, cached_path, cached_strokes,
-                              grab_while_panning, grid_span, line_touches_box, mouse_trail, note_name, ruler_boxes)
+                              RULER_TOP, VEL_TOP, bind_double_right, black_bands, box_kind, boxes_side, boxes_upright,
+                              cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box, mouse_trail,
+                              note_name, ruler_boxes)
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
@@ -63,6 +64,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.box_moving = None   # the kept Select boxes (box_upright) when a move started: they go along
         self.box_in = False      # ... and that move was pressed inside them
         self.box_ruler = False   # the Select box is dragged along the ruler: every key (ruler_box)
+        self.box_vel = False     # ... in the velocity pane (pane_press): its band top VEL_TOP, the ruler stays plain
         self.box_resume = False  # ... and it was playing when the ruler was pressed
         self.time_only = False   # a move started on the ruler's black band: only in time
         self.box_drop = False    # a Ctrl+drag box with the ruler's bands kept: they go once it's a box
@@ -193,7 +195,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             # many MIDI programs; none while they round to the same line)
             s0, s1 = (tick if sh else step or tick for sh in (self.box_shift0, self.box_shift))
             b0, b1 = sorted((round(self.x2t(x) / s0) * s0, round(self.x2t(cx) / s1) * s1))
-            return (b0, RULER_TOP, b1, -0.5) if b1 - b0 > 1e-9 else None
+            return (b0, VEL_TOP if self.box_vel else RULER_TOP, b1, -0.5) if b1 - b0 > 1e-9 else None
         b0, b1 = grid_span(self.x2t(x), self.x2t(cx), tick if self.box_shift0 else step or tick,
                            tick if self.box_shift else step or tick)
         top = self.app.keys - 1
@@ -223,6 +225,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.box_drop, self.box_more = False, []
             self.app.select(None)
             self.drag = self.drag[:5] + (set(), None)
+        pane = getattr(self.app, "tempo_pane", None)
+        if pane is not None and pane.bands and self.box_area():  # (one place's boxes at a time, user 2026-10-22)
+            pane.bands = []
+            pane.request_redraw()
         self.draw_select_box()
 
     def box_pick(self):
@@ -268,8 +274,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         MIDI programs (Ctrl adds to the boxes kept, Shift = whole ticks; a click still moves the play line)."""
         app = self.app
         _, playing, x, state, kept = self.drag
-        ctrl = state & CTRL and not (kept and not self.ruler_boxes(kept))  # (Select boxes kept: they go, with
-        self.box_more = list(kept or []) if ctrl else []                     # what they selected, user)
+        own = "vel" if self.box_vel else "ruler"  # (boxes kept from elsewhere: they go, with what they selected,
+        ctrl = state & CTRL and all(box_kind(a) == own for a in kept or ())  # user; also with Ctrl, 2026-10-22)
+        self.box_more = list(kept or []) if ctrl else []
         if not ctrl:
             app.select(None)
         self.box_ruler, self.box_resume, self.box_shift0 = True, playing, bool(state & SHIFT)
@@ -277,13 +284,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
 
     ruler_boxes = staticmethod(ruler_boxes)  # (roll_shared: the Hz window's too)
 
-    def ruler_band(self, e, kept):
-        """The mouse on the ruler's black band (ruler_boxes of the kept boxes): a drag there moves what they selected
-        along in time (also when they selected nothing: only the band moves, like Domino)."""
+    def ruler_band(self, e, kept, vel=False):
+        """The mouse on the ruler's black band (black_bands of the kept boxes; vel: the velocity pane, where the
+        ones made there count too): a drag there moves what they selected along in time (also when they selected
+        nothing: only the band moves, like Domino)."""
         if e.y >= self.ruler_h or e.x < self.kb_w or self.sx is None:
             return False
         return any(min(self.t2x(a[0]), self.t2x(a[2])) <= e.x <= max(self.t2x(a[0]), self.t2x(a[2]))
-                   for a in self.ruler_boxes(kept))
+                   for a in (self.ruler_boxes if vel else black_bands)(kept))
 
     def on_kept_box(self, kept, e):
         """Where the mouse is on the kept Select boxes (boxes_side), or None. With Ctrl only inside counts (a drag
@@ -580,12 +588,12 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             reach = self.reach([self.app.shapes[j] for j in self.app.sels]) if band and turned else None
             if reach:
                 step = self.app.snap_beats() or 1 / self.app.ppq
-                new.append((max(0.0, math.floor(reach[0] / step + 1e-9) * step), RULER_TOP,
+                new.append((max(0.0, math.floor(reach[0] / step + 1e-9) * step), top,
                             max(math.ceil(reach[3] / step - 1e-9) * step, step), -0.5))
                 continue
             pts = [fn(b, p) for b in (b0, b1) for p in ((self.app.keys - 0.5, -0.5) if band else (top, bottom))]
             bs, ps = [b for b, _ in pts], [p for _, p in pts]
-            new.append((min(bs), RULER_TOP, max(bs), -0.5) if band else
+            new.append((min(bs), top, max(bs), -0.5) if band else
                        (min(bs), math.ceil(max(ps) - 0.5 - 1e-9) + 0.5, max(bs), math.floor(min(ps) + 0.5 + 1e-9) - 0.5))
         self.box_kept = (new, set(self.app.sels))
 
@@ -965,7 +973,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """A press starts afresh: the kept Select boxes (returned) and what the last drag left behind."""
         kept, self.box_kept, self.box_moving, self.dup = self.kept_box(), None, None, None
         self.grabbed = self.cycle = self.cycled = self.area_pick = None
-        self.box_in = self.box_ruler = self.box_resume = self.time_only = self.box_drop = False
+        self.box_in = self.box_ruler = self.box_resume = self.time_only = self.box_drop = self.box_vel = False
         self.room = self.limit = self.grid_later = None
         return kept
 
@@ -993,9 +1001,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self.app.commit_typing()
         self.drop_menu_wait()
         kept = self.press_reset()
+        self.box_vel = True  # (its band: the ruler stays plain, user 2026-10-22)
         e = SimpleNamespace(x=x, y=0, state=state)
         self.press_beat = self.event_pt(e, snap=False)[0]
-        if self.ruler_band(e, kept):
+        if self.ruler_band(e, kept, vel=True):
             self.band_press(e, kept)
         else:
             self.drag = ("seek", self.app.player.running, x, state, kept)

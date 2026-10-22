@@ -453,7 +453,8 @@ class VelocityPane(tk.Canvas):
             return
         if self.app.vel_tool.get() == "select":
             want = "sb_h_double_arrow" if roll.sx is not None and roll.ruler_band(
-                SimpleNamespace(x=e.x, y=0), roll.kept_box()) else SELECT_CURSOR  # (on the box: moves in time)
+                SimpleNamespace(x=e.x, y=0), roll.kept_box(), vel=True) else SELECT_CURSOR  # (on the box: moves
+            # in time)
         else:
             cv = None if self.edit else self.live_curve()
             want = "fleur" if cv and self.near_handle(cv, e) else PENCIL_CURSOR

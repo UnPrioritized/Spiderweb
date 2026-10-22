@@ -116,6 +116,7 @@ BOX_STILL = 4  # a Select box moved less than this many pixels from where it sta
 BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often
 RULER_TOP = 1000.5  # the top of a Select box made along the ruler (every key; no box dragged on a piano roll gets
 #                     this high, so the two kinds stay apart: ruler_boxes; both piano rolls)
+VEL_TOP = 2000.5  # the same made in the velocity pane: the ruler isn't black under it (user 2026-10-22)
 # px per beat: how far the wheel / bars / buttons zoom time (both rolls). Low enough for Fit view on any song (at
 # 0.05 a very long one went past it, and "-" then zoomed in)
 MIN_SX, MAX_SX = 1e-5, 100000.0
@@ -226,6 +227,17 @@ def ruler_boxes(boxes):
     """The Select boxes made along the ruler (top RULER_TOP: every key): the ruler is black under them. They and
     boxes dragged on the piano roll are never kept together (user): starting one kind drops the other."""
     return [a for a in boxes or () if a[1] >= RULER_TOP - 0.5]
+
+
+def black_bands(boxes):
+    """The ruler_boxes made along the ruler itself (not in the velocity pane): the ruler is black only under them."""
+    return [a for a in ruler_boxes(boxes) if a[1] < VEL_TOP - 0.5]
+
+
+def box_kind(a):
+    """"vel" (made in the velocity pane), "ruler" (along the ruler) or "box" (dragged on the piano roll). Making a
+    box of one kind drops the kept ones of the others, Ctrl too (user 2026-10-22)."""
+    return "vel" if a[1] >= VEL_TOP - 0.5 else "ruler" if a[1] >= RULER_TOP - 0.5 else "box"
 
 
 def boxes_upright(areas):

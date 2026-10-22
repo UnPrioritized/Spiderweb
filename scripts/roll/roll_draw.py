@@ -22,7 +22,7 @@ from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_kniv
 from notes.sustain import is_sustained
 from notes.tempo import bpm_text, ruler_marks, short_bpm
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, GHOST_COLOR, PIANO_88, PREVIEW_LIMIT,
-                              SELECTED_COLOR, SLOT_COLORS, draw_boxes, fade, note_name, slot_colours)
+                              SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
 from window import look
 
@@ -1700,7 +1700,7 @@ class RollDrawing:
         if self.sx is None:
             return
         w, top, s, kb = self.winfo_width(), self.ruler_h, self.scale, self.kb_w
-        bands = tuple(sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in self.ruler_boxes(boxes)))
+        bands = tuple(sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in black_bands(boxes)))
         pane = getattr(self.app, "tempo_pane", None)
         key = (json.dumps(self.app.tempo), pane and pane.base(), self.app.ppq, w, top, kb, self.sx,
                self.view_t, s, bands)
@@ -1766,18 +1766,30 @@ class RollDrawing:
 
     def draw_ruler_pick(self, boxes):
         """The ruler black under the Select boxes that hold every key (a drag along the ruler: like many MIDI
-        programs), its numbers white there."""
-        w, top = self.winfo_width(), self.ruler_h
-        for x0, x1 in sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in self.ruler_boxes(boxes)):
+        programs), its numbers white there: each letter by where it is (user 2026-10-22: a band starting right of a
+        bar line hid its number; Tk has no clipped text)."""
+        w, top, tags = self.winfo_width(), self.ruler_h, ("selbox", "rulerpick")
+        bands = []
+        for x0, x1 in sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in black_bands(boxes)):
             x0, x1 = max(x0, self.kb_w), min(x1, w)
-            if x0 >= x1:
-                continue
-            self.create_rectangle(x0, 0, x1, top, fill=look.RULER_PICK, outline="", tags=("selbox", "rulerpick"))
+            if x0 < x1:
+                bands.append((x0, x1))
+                self.create_rectangle(x0, 0, x1, top, fill=look.RULER_PICK, outline="", tags=tags)
+        if bands:
+            font = look.font(8, fit=True)
+            measure = tkfont.Font(font=font).measure
+            pick = lambda px: any(x0 <= px < x1 for x0, x1 in bands)  # noqa: E731
             for x, label in self.ruler_marks(w):
-                if x0 <= x < x1:
-                    self.create_line(x, top - 6, x, top, fill=look.RULER_PICK_TEXT, tags=("selbox", "rulerpick"))
-                    self.create_text(x + 3, self.bar_y(), text=label, anchor="w", fill=look.RULER_PICK_TEXT,
-                                     font=look.font(8, fit=True), tags=("selbox", "rulerpick"))
+                left, right = x + 3, x + 3 + measure(label)
+                if not any(x0 < right and x1 > x for x0, x1 in bands):
+                    continue
+                if pick(x):
+                    self.create_line(x, top - 6, x, top, fill=look.RULER_PICK_TEXT, tags=tags)
+                for k, ch in enumerate(label):
+                    cx = left + measure(label[:k])
+                    if any(x0 < cx + measure(ch) and x1 > cx for x0, x1 in bands):
+                        self.create_text(cx, self.bar_y(), text=ch, anchor="w", font=font, tags=tags,
+                                         fill=look.RULER_PICK_TEXT if pick(cx + measure(ch) / 2) else look.RULER_TEXT)
         self.draw_tempo_marks(boxes)
         self.tag_raise("tempomark")
         self.tag_raise("playhead")
