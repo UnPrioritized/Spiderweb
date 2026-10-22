@@ -305,7 +305,7 @@ class ToolPicker:
         if win.get("lasso_mode") in ("free", "poly", "magnet"):
             self.app.lasso_mode.set(win["lasso_mode"])
         if isinstance(win.get("lasso_width"), int) and 1 <= win["lasso_width"] <= 256:
-            self.app.lasso_width.set(win["lasso_width"])
+            self.app.lasso_width.set(str(win["lasso_width"]))
         if tool in self.label or tool in ("select", "slice", "lasso"):
             self.app.tool.set(tool)
         if isinstance(win.get("draw_tool"), str) and win["draw_tool"] in self.label:

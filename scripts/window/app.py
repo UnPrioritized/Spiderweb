@@ -350,7 +350,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         #                                               "magnet" (clings to the notes)
         self.lasso_mode.trace_add("write", lambda *_: hasattr(self, "roll") and self.roll.drop_lasso(unfinished=True))
         self.lasso_mode.trace_add("write", lambda *_: hasattr(self, "lasso_box") and self.sync_lasso())
-        self.lasso_width = tk.IntVar(value=10)  # Magnetic: how far from the mouse it looks for a note corner (px)
+        self.lasso_width = tk.StringVar(value="10")  # Magnetic: how far from the mouse it looks for a note corner
+        #                                              (px; text like every number box: lasso_px reads it)
         # (another mode picked: a loop not closed yet goes, the next press starts one of the new kind; hunt)
         self.tips = Tips(self)
         self.updates = Updates(self)

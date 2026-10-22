@@ -334,7 +334,8 @@ class LassoDrawing:
         k = e.keysym.lower()
         if k in ("bracketleft", "bracketright") and self.lasso_magnet_on():  # (Magnetic Width smaller / bigger,
             #                                                                         like a pen tool's)
-            self.app.lasso_width.set(min(MOST_WIDTH, max(1, self.app.lasso_px() + (1 if k == "bracketright" else -1))))
+            self.app.lasso_width.set(str(min(MOST_WIDTH, max(1, self.app.lasso_px() + (1 if k == "bracketright"
+                                                                                       else -1)))))
             self.draw_lasso()
             return True
         if not las:

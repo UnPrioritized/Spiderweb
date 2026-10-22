@@ -30,7 +30,7 @@ class LassoPanel:
         e.pack(side="left", padx=(5, 3))
         e.bind("<Return>", lambda ev: self.on_lasso_width())
         leave_box(self, e, self.lasso_width, self.on_lasso_width)
-        Scrub(self, [(e, self.lasso_width, self.on_lasso_width)], (1, 10, 1), 1, 256, label=lb)
+        self.lasso_scrub = Scrub(self, [(e, self.lasso_width, self.on_lasso_width)], (1, 10, 1), 1, 256, label=lb)
         ttk.Label(w, text=tr("panel_lasso.width_hint"), foreground=look.HINT).pack(side="left")
         for x in (lb, e):
             Tooltip(x, tr("panel_lasso.width_tip"))
@@ -39,7 +39,7 @@ class LassoPanel:
     def lasso_px(self):
         """The Magnetic Width (1-256 px; the box half typed: the last good one)."""
         try:
-            self._lasso_px = min(256, max(1, int(self.lasso_width.get())))
+            self._lasso_px = min(256, max(1, int(round(float(self.lasso_width.get())))))
         except (TclError, ValueError):
             pass
         return getattr(self, "_lasso_px", 10)
@@ -86,5 +86,5 @@ class LassoPanel:
             bad(self.lasso_width_entry)
             return
         good(self.lasso_width_entry)
-        self.lasso_width.set(int(round(value)))
+        self.lasso_width.set(str(int(round(value))))
         self.roll.draw_lasso()
