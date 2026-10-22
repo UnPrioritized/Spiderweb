@@ -1,9 +1,12 @@
 """The menu bar along the top of the main window (user 2026-10-22: File / Edit / Shape / Tools / View / Help, like
 many MIDI programs). Every item is also a key, a button or a right-click item somewhere: the menu is one more way
-in, it doesn't replace them. Items that need a selection are greyed out while nothing is selected."""
+in, it doesn't replace them. Items that need a selection are greyed out while nothing is selected.
+The dark look draws its own bar (a row of menu buttons): the system's menu bar can't be coloured (user: a light bar
+"absolutely bothers me"); the light look keeps the system's."""
 import tkinter as tk
 
 from files.lang import tr
+from window import look
 from window.chop_window import open_chop, quick_chop
 from window.claw_window import open_claw
 from window.path_window import open_path
@@ -12,15 +15,27 @@ from window.strum_window import open_strum
 
 def build_menu(app):
     from window.settings_window import open_settings
-    bar = tk.Menu(app)
-    menus = []
+    own = look.DARK
+    if own:
+        bar = tk.Frame(app)
+        bar.pack(side="top", fill="x")
+    else:
+        bar = tk.Menu(app)
+    menus = app.menus = []  # [(label, menu)]
 
     def menu(key, sync=None):
-        m = tk.Menu(bar, tearoff=False)
-        bar.add_cascade(label=tr(key), menu=m)
+        if own:  # (a menu button's menu must be its child)
+            b = tk.Menubutton(bar, text=tr(key), relief="flat", borderwidth=0, padx=7, pady=3,
+                              activebackground=look.BUTTON_HOT)
+            b.pack(side="left")
+            m = tk.Menu(b, tearoff=False)
+            b.config(menu=m)
+        else:
+            m = tk.Menu(bar, tearoff=False)
+            bar.add_cascade(label=tr(key), menu=m)
         if sync:
             m.config(postcommand=lambda: sync(m))
-        menus.append(m)
+        menus.append((tr(key), m))
         return m
 
     def add(m, key, keys, command, **kw):
@@ -110,6 +125,6 @@ def build_menu(app):
     h.add_separator()
     add(h, "menu.settings", "", lambda: open_settings(app))
 
-    app.config(menu=bar)
-    app.menubar = bar
+    if not own:
+        app.config(menu=bar)
     return menus

@@ -799,7 +799,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         btns = ttk.Frame(box)
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         # (New / Open… / Save… are in the File menu: the row got too crammed, user 2026-10-22)
-        ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(fill="x")
+        ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(side="right")  # (under Export)
 
     def _build_shape_list(self, side):
         box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)
