@@ -296,6 +296,8 @@
  "tempo.tempo": "Tempo",
  "tempo.play_bpm_tip": "The exact tempo (BPM) at the play line, as the MIDI file holds it.",
  "tempo.mark_catch": "Catch-up: {bpm} BPM",
+ "tempo.mark_steps": "{bpm} BPM in {n} steps",
+ "tempo.mark_steps_one": "{bpm} BPM in 1 step",
  "tempo.more_changes": "+{n} more changes",
  "tempo.more_changes_one": "+1 more change",
  "tempo.bpm_snap": "BPM snap",

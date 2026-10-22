@@ -1017,13 +1017,21 @@ def short_bpm(v):
     return f"{v:,.0f}" if v >= 10000 else fmt(round(v, 1))
 
 
-def ruler_marks(tempo, base, ppq):
-    """The tempo changes the piano roll's ruler marks (user 2026-10-22): [(beat, "point", (before, at, then))] for
-    each point (before = the BPM just before it, None at beat 0; then = where its part goes, None when it holds)
-    and [(beat, "catch", BPM or None when it can't work)] for each catch-up line."""
+STAIR_STEP = 0.1  # (a held step at most 10 % of the BPM before it = part of stairs, user 2026-10-22)
+STAIR_MIN = 3  # (steps in a row that make stairs)
+
+
+def ruler_marks(tempo, base, ppq, bar=4):
+    """The tempo changes the piano roll's ruler marks (user 2026-10-22): [(beat, "point", (before, at, then), until)]
+    for each point (before = the BPM just before it, None at beat 0; then = where its part goes, None when it holds)
+    and [(beat, "catch", BPM or None when it can't work, until)] for each catch-up line. until = the beat the ruler's
+    faint line runs to (a glide's / catch-up's end, math.inf = on to the edge), None for a jump (the tempo just
+    stays). STAIRS (user 2026-10-22: a pasted ramp read as jumps) = STAIR_MIN+ held steps in a row going one way,
+    each at most STAIR_STEP of the BPM and within a bar of the one before: ONE mark (before, first BPM, last BPM),
+    a line to the last step, [(beat, before, at)] of every step as its 5th item (the tip)."""
     if not has_tempo(tempo):
         return []
-    key = (json.dumps(tempo), base, ppq)
+    key = (json.dumps(tempo), base, ppq, bar)
     if key in _marks:
         return _marks[key]
     worked = plans(tempo, base, ppq)
@@ -1031,21 +1039,62 @@ def ruler_marks(tempo, base, ppq):
     out = []
     pb = np.array([p[0] for p in pts], float)
     befores = shown_bpm(tempo, base, pb - 1e-9 * np.maximum(1.0, pb), worked).tolist()  # (all in one go)
+    marks = []  # [index, before, at, then, until]
     for i, p in enumerate(pts):
         b = p[0]
         if i + 1 < len(pts) and pts[i + 1][0] == b:  # (where a curve arrives: the next one on its beat says it)
             continue
         before = befores[i] if b > 0 else None
-        then = None
+        then = until = None
         if p[2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != p[1]:
             cut = [x for x in lines if b < x < pts[i + 1][0]]  # (a catch-up line cuts the part short)
             then = float(drawn_bpm(tempo, base, [min(cut)])[0]) if cut else float(pts[i + 1][1])
-        out.append((b, "point", (before, float(p[1]), then)))
-    out += [(st["line"], "catch", plan["bpm"] if plan["ok"] else None) for st, plan in worked]
+            until = min(cut) if cut else pts[i + 1][0]
+        marks.append([i, before, float(p[1]), then, until])
+    k = 0
+    while k < len(marks):
+        run = _stairs(marks, k, pts, lines, bar)
+        i, before, at, then, until = marks[k]
+        if len(run) >= STAIR_MIN:
+            last = marks[k + len(run) - 1]
+            steps = [(pts[m[0]][0], m[1], m[2]) for m in run]
+            out.append((pts[i][0], "point", (before, at, last[2]), pts[last[0]][0], steps))
+            k += len(run)
+            continue
+        out.append((pts[i][0], "point", (before, at, then), until))
+        k += 1
+    out += [(st["line"], "catch", plan["bpm"] if plan["ok"] else None,
+             st["end"] if st["end"] is not None else math.inf) for st, plan in worked]
     if len(_marks) > 4:
         _marks.clear()
     _marks[key] = out
     return out
+
+
+def _stairs(marks, k, pts, lines, bar):
+    """The marks from k on that make stairs (held steps in a row, one way, small, within a bar of each other, no
+    catch-up line between them); fewer than STAIR_MIN = not stairs."""
+    run, way = [], 0
+    for m in marks[k:]:
+        i, before, at = m[0], m[1], m[2]
+        if before is None or pts[i][2] != "hold" or m[3] is not None:
+            break
+        if i == 0 or pts[i - 1][2] != "hold":  # (a glide arrives here: not a step)
+            break
+        if abs(at - before) > STAIR_STEP * before:
+            break
+        d = (at > before) - (at < before)
+        if d and way and d != way:
+            break
+        if run:
+            a, b = pts[run[-1][0]][0], pts[i][0]
+            if b - a > bar or any(a < x <= b for x in lines):
+                break
+        way = way or d
+        run.append(m)
+    while run and run[-1][1] == run[-1][2]:  # (no change at the end: not part of the climb)
+        run.pop()
+    return run if sum(m[1] != m[2] for m in run) >= STAIR_MIN else run[:0]
 
 
 _marks = {}

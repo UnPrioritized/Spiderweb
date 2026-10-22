@@ -1653,20 +1653,30 @@ class RollDrawing:
         return self.ruler_h - 9 * self.scale
 
     def tempo_layout(self):
-        """[(x, text, tip, colour)] of the tempo changes on the ruler (user 2026-10-22): a mark at each Tempo pane
-        point / catch-up line (off screen too: their room is worked out from the song's start, so scrolling never
-        moves them), the text BPMs to one decimal (tip: the full ones)."""
+        """[(x, text, [tip lines], colour, x the faint line runs to or None)] of the tempo changes on the ruler (user
+        2026-10-22): a mark at each Tempo pane point / catch-up line / run of stairs (off screen too: their room is
+        worked out from the song's start, so scrolling never moves them), the text BPMs to one decimal (tip: the
+        full ones); a line only where the tempo moves over a stretch (glides, catch-ups, stairs), none after a jump."""
         pane = getattr(self.app, "tempo_pane", None)
         if pane is None:
             return []
         out = []
-        for b, kind, v in ruler_marks(self.app.tempo, pane.base(), self.app.ppq):
+        for b, kind, v, until, *steps in ruler_marks(self.app.tempo, pane.base(), self.app.ppq, self.app.beats):
             x = b * self.sx  # (from the song's start: scrolling only slides them)
+            ux = None if until is None else until * self.sx
             if kind == "catch":
                 tip = tr("tempo.mark_catch", bpm=bpm_text(v)) if v is not None else tr("tempo.not_possible")
-                out.append((x, tr("tempo.catch"), tip, look.TEMPO_CATCH if v is not None else look.ERROR))
+                out.append((x, tr("tempo.catch"), [tip], look.TEMPO_CATCH if v is not None else look.ERROR, ux))
                 continue
             before, at, then = v
+            if steps:  # (stairs: before -> first step, then the climb; tip = the whole, then each step)
+                steps, way = steps[0], "↗" if then > before else "↘"
+                text = f"{short_bpm(before)} {way} {short_bpm(then)}"
+                tips = [trn("tempo.mark_steps", len(steps), bpm=f"{bpm_text(before)} {way} {bpm_text(then)}",
+                            n=f"{len(steps):,}")]
+                tips += [f"{bpm_text(a)} → {bpm_text(c)} BPM" for _, a, c in steps]
+                out.append((x, text, tips, look.RULER_TEMPO, ux))
+                continue
             short, full = [], []
             if before is not None and abs(before - at) > 1e-6 * at:
                 short.append(f"{short_bpm(before)} → {short_bpm(at)}")
@@ -1675,33 +1685,38 @@ class RollDrawing:
                 way = "↗" if then > at else "↘"
                 short.append(f"{short_bpm(at)} {way} {short_bpm(then)}" if not short else f"{way} {short_bpm(then)}")
                 full.append(f"{bpm_text(at)} {way} {bpm_text(then)}" if not full else f"{way} {bpm_text(then)}")
-            out.append((x, " ".join(short), (" ".join(full) or bpm_text(at)) + " BPM", look.RULER_TEMPO))
+            out.append((x, " ".join(short), [(" ".join(full) or bpm_text(at)) + " BPM"], look.RULER_TEMPO, ux))
         return sorted(out, key=lambda m: m[0])
 
     def tempo_shown(self, key, measure):
-        """The ruler's tempo marks laid out from the song's start: [[x, text, [tip lines], colour, text's right end]];
-        a change landing on the text before isn't shown (its tip joins that one's); one landing on a mark with no
-        text takes its place. Kept while only the view scrolls."""
+        """The ruler's tempo marks laid out from the song's start: [[x, text, [tip lines], colour, text's right end,
+        x its faint line runs to or None]]; a change landing on the text before isn't shown (its tip joins that
+        one's, the line runs on to the later end); one landing on a mark with no text takes its place. Kept while
+        only the view scrolls."""
         if getattr(self, "_tempo_laid", (None,))[0] == key:
             return self._tempo_laid[1]
         s = self.scale
+        later = lambda a, b: b if a is None else a if b is None else max(a, b)  # noqa: E731
         shown, end = [], -math.inf
-        for x, text, tip, colour in self.tempo_layout():
-            tips = [tip]
+        for x, text, tip, colour, ux in self.tempo_layout():
+            tips = list(tip)
             if shown and x < end:
                 if shown[-1][1]:  # (on the text before: joins its tip)
-                    shown[-1][2].append(tip)
+                    shown[-1][2].extend(tip)
+                    shown[-1][5] = later(shown[-1][5], ux)
                     continue
-                tips = shown.pop()[2] + tips  # (on a mark with no text: this one, saying more, takes its place)
+                gone = shown.pop()  # (on a mark with no text: this one, saying more, takes its place)
+                tips, ux = gone[2] + tips, later(gone[5], ux)
             right = x + 3 * s + measure(text) if text else x
-            shown.append([x, text, tips, colour, right])
+            shown.append([x, text, tips, colour, right, ux])
             end = right + 4 * s if text else x + 2 * s
         self._tempo_laid = (key, shown)
         return shown
 
     def draw_tempo_marks(self, boxes):
         """The tempo changes above the bar numbers: a light line on the exact tick, its text right of it, then a
-        fainter line on to the next change (user's mock-up; none after the last). A change landing on the one
+        fainter line while the tempo moves (a glide / catch-up / stairs; user 2026-10-22: none after a jump, it just
+        stays) up to its end or the next change. A change landing on the one
         before's text isn't drawn (zoomed out: its BPMs join that one's tip). Ones scrolled past the keyboard slide
         under it. White over a ruler band. Kept while nothing they show changed."""
         if self.sx is None:
@@ -1724,7 +1739,7 @@ class RollDrawing:
         y, tags = 8 * s, ("frame", "tempomark")  # step at 2000 points laid out again)
         first = max(0, bisect.bisect_left([m[4] for m in shown], kb - at) - 1)  # (skip what's far left)
         for i in range(first, len(shown)):
-            u, text, tips, colour, right = shown[i]
+            u, text, tips, colour, right, ux = shown[i]
             x, right = u + at, right + at
             if x > w:
                 break
@@ -1749,8 +1764,9 @@ class RollDrawing:
             if len(tips) > TIP_MARKS:  # (zoomed far out: a short tip, hunt 2026-10-22: 478 lines)
                 tip += "\n" + trn("tempo.more_changes", len(tips) - TIP_MARKS, n=f"{len(tips) - TIP_MARKS:,}")
             self.tempo_tips.append((max(kb, x - 4 * s), max(right, x + 4 * s), tip))
-            if nxt is not None:  # (how long this tempo lasts)
-                x0, x1 = max(kb - 2, (right + 3 * s) if text else x + 1), min(w, nxt - 3 * s)
+            if ux is not None:  # (how long the tempo moves)
+                x1 = min(w, ux + at if ux + at < (nxt if nxt is not None else math.inf) else nxt - 3 * s)
+                x0 = max(kb - 2, (right + 3 * s) if text else x + 1)
                 if x1 > x0:
                     self.create_line(x0, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
         if shown:  # the keyboard's corner covers what slid past it
