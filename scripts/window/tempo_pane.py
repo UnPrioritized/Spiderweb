@@ -65,15 +65,16 @@ class TempoBox(ttk.Frame):
         self.play_bpm = ttk.Label(bar, text="", width=len(f"{60_000_000:,.2f}") + 1, foreground=look.INFO)
         self.play_bpm.pack(side="left", padx=(0, 4))
         Tooltip(self.play_bpm, tr("tempo.play_bpm_tip"))
-        self.tool = tk.StringVar(value="point")  # select / point / line / formula
-        self.last_pencil = "point"  # (double right-click: Select <-> this)
+        # (one always down, user 2026-10-22, like many MIDI programs: Line's click = a point, no pencil-only mode)
+        self.tool = tk.StringVar(value="line")  # select / line / formula
+        self.last_pencil = "line"  # (double right-click: Select <-> this)
         self.tool_vars = {}
         for key, label in (("select", tr("app.select")), (None, None), ("line", tr("tempo.line_tool")),
                            ("formula", tr("app.formula"))):
             if key is None:
                 ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
                 continue
-            var = self.tool_vars[key] = tk.BooleanVar(value=False)
+            var = self.tool_vars[key] = tk.BooleanVar(value=key == "line")
             ttk.Checkbutton(bar, text=label, variable=var, style="Toolbutton", takefocus=False,
                             command=lambda k=key: self.pick_tool(k)).pack(side="left", padx=1)
         lb = ttk.Label(bar, text=tr("tempo.every"))
@@ -154,7 +155,7 @@ class TempoBox(ttk.Frame):
         lb.pack(side="right", padx=(6, 4))
         for w in (lb, self.graph):
             Tooltip(w, tr("tempo.graph_tip"))
-        self.hint = ShortLabel(row2, least=8, text=tr("tempo.hint_point"), foreground=look.HINT, font=look.font(8))
+        self.hint = ShortLabel(row2, least=8, text=tr("tempo.hint_draw"), foreground=look.HINT, font=look.font(8))
         self.hint.pack(side="left", fill="x", expand=True, padx=(2, 0))
         holder = tk.Frame(self)
         holder.pack(fill="both", expand=True)
@@ -163,12 +164,10 @@ class TempoBox(ttk.Frame):
         self._shown = None
 
     def pick_tool(self, key):
-        """A tool button pressed: at most one is down; none down = the pencil's plain points."""
-        on = self.tool_vars[key].get()
+        """A tool button pressed: it's the one down (pressed again: stays down)."""
         for k, var in self.tool_vars.items():
-            if k != key:
-                var.set(False)
-        self.tool.set(key if on else "point")
+            var.set(k == key)
+        self.tool.set(key)
         if self.tool.get() != "select":
             self.last_pencil = self.tool.get()
         self.pane.placing = None  # (adding a catch-up: called off)
@@ -179,14 +178,8 @@ class TempoBox(ttk.Frame):
         self.app.roll.focus_set()
 
     def toggle_select(self):
-        """Double right-click on the pane: Select <-> the pencil used last (plain points, Line or Formula)."""
-        key = self.last_pencil if self.tool.get() == "select" else "select"
-        if key == "point":
-            self.tool_vars["select"].set(False)
-            key = "select"
-        else:
-            self.tool_vars[key].set(True)
-        self.pick_tool(key)
+        """Double right-click on the pane: Select <-> the pencil used last (Line or Formula)."""
+        self.pick_tool(self.last_pencil if self.tool.get() == "select" else "select")
 
     def tool_hint_key(self):
         return "tempo.hint_" + ("draw" if self.tool.get() in DRAWS else self.tool.get())
@@ -769,10 +762,41 @@ class TempoPane(tk.Canvas):
         self.app.tempo_changed()
 
     def snap_beat(self, b, e):
+        """On the grid (Shift: free): the Select box's move, the catch-up being added, a click's play line."""
         if e.state & SHIFT:
             return max(0.0, b)
         sb = self.app.snap_beats()
         return max(0.0, round(b / sb) * sb) if sb else max(0.0, b)
+
+    def tick_beat(self, b, skip=()):
+        """b on a whole tick: where drawing puts things (user 2026-10-22: no grid, like many MIDI programs); within
+        6 px of a tempo point (not one in skip): its exact beat, so a jump's second point can be put there."""
+        ppq, roll = max(1, self.app.ppq), self.app.roll
+        if roll.sx:
+            r = 6 * self.scale / roll.sx
+            near = [p[0] for p in self.app.tempo["points"] if abs(p[0] - b) <= r and not any(p is s for s in skip)]
+            if near:
+                return min(near, key=lambda pb: abs(pb - b))
+        return max(0.0, round(b * ppq) / ppq)
+
+    def move_beat(self, b, e, skip=()):
+        """A point / line / catch-up edge moved afterwards: onto the nearest note start or end within 10 px (user
+        2026-10-22: tempo changes belong there) or tempo point (not one in skip, the ones moving), else a whole
+        tick; Shift = ticks only."""
+        roll, ppq = self.app.roll, max(1, self.app.ppq)
+        if e.state & SHIFT or roll.sx is None:
+            return max(0.0, round(b * ppq) / ppq)
+        r = 10 * self.scale / roll.sx
+        lo, hi = (b - r) * ppq, (b + r) * ppq
+        first, end = roll.visible_range(lo, hi)
+        rows = roll.sorted_notes()[first:end]
+        near = np.concatenate([rows[:, 0], rows[:, 1]]).astype(float)
+        near = near[(near >= lo) & (near <= hi)] / ppq
+        own = [p[0] for p in self.app.tempo["points"] if abs(p[0] - b) <= r and not any(p is s for s in skip)]
+        near = np.concatenate([near, np.array(own, float)])
+        if not len(near):
+            return self.tick_beat(b, skip)
+        return float(near[np.abs(near - b).argmin()])
 
     def snap_bpm(self, v, e):
         step = self.box.bpm_snap()
@@ -831,7 +855,7 @@ class TempoPane(tk.Canvas):
                 self.set_sel([tempo["catch"][j]])
                 self.drag = {"kind": kind, "item": tempo["catch"][j], "x": e.x, "pushed": False}
                 return
-        b, v = self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e)
+        b, v = self.tick_beat(roll.x2t(e.x)), self.snap_bpm(self.y2b(e.y), e)
         if tool == "select":
             beat = roll.x2t(e.x)
             if self.in_band(e.x) and not e.state & CTRL:
@@ -842,14 +866,9 @@ class TempoPane(tk.Canvas):
                          "span": None, "before": list(self.sel), "ctrl": ctrl, "more": more}
             self.request_redraw()
             return
-        self.bands = []
-        if tool == "point":
-            item = self.add_point(b, v)
-            if item is not None:
-                self.start_move(e, item, pushed=True)
-        else:
-            self.drag = {"kind": "draw", "b0": b, "v0": v, "b1": b, "v1": v, "x": e.x, "y": e.y}
-            self.request_redraw()
+        self.bands = []  # (Line / Formula: a click = a point, a drag = a part; let go: draw_part)
+        self.drag = {"kind": "draw", "b0": b, "v0": v, "b1": b, "v1": v, "x": e.x, "y": e.y}
+        self.request_redraw()
 
     def start_move(self, e, item, pushed):
         """Hold the picked items, item the one under the mouse (None: the Select box grabbed; pushed: the step is
@@ -915,7 +934,8 @@ class TempoPane(tk.Canvas):
             self.box.sync()
             return self.request_redraw()
         if d["kind"] == "draw":
-            d["b1"], d["v1"] = self.snap_beat(roll.x2t(e.x), e), self.snap_bpm(self.y2b(e.y), e)
+            d["b1"], d["v1"] = self.tick_beat(roll.x2t(e.x)), self.snap_bpm(self.y2b(e.y), e)
+            d["moved"] = d.get("moved") or abs(e.x - d["x"]) >= 3 or abs(e.y - d["y"]) >= 3  # (less: a click)
             self.show_position(e)
             return self.request_redraw()
         if d["kind"] == "catch1":
@@ -938,7 +958,7 @@ class TempoPane(tk.Canvas):
                 self.app.push_undo(name=tr("tempo.step_catch_" + d["kind"]))
                 d["pushed"] = True
             c, tick = d["item"], 1.0 / max(1, self.app.ppq)
-            b = self.snap_beat(roll.x2t(e.x), e)
+            b = self.move_beat(roll.x2t(e.x), e)
             catch_set(c, 3, min(b, c[0] - tick)) if d["kind"] == "start" else catch_set(c, 4, max(b, c[0] + tick))
             self.app.tempo_changed()
             return self.show_position(e)
@@ -964,7 +984,8 @@ class TempoPane(tk.Canvas):
         # (a grabbed point / line goes to the mouse itself, user 2026-10-22: with Shift pressed later it sat off
         # the pencil by where the snapped press was; the box keeps its distance)
         at = roll.x2t(e.x) if d["grab"] is not None else d["ref"] + roll.x2t(e.x) - d["press"]
-        db = self.snap_beat(at, e) - d["ref"]
+        held = [s for s, _, _ in d["orig"]] + [s for s, _ in d.get("mates", ())]
+        db = (self.move_beat(at, e, held) if d["grab"] is not None else self.snap_beat(at, e)) - d["ref"]
         db = max([db] + [-b for _, b, _ in d["orig"]] + [-lo for lo, _ in d["band"] or ()])  # (not before 0)
         dv = 0.0 if d["v0"] is None or d["time_only"] else self.snap_bpm(self.y2b(e.y), e) - d["v0"]
 
@@ -1180,7 +1201,8 @@ class TempoPane(tk.Canvas):
         b0, v0, b1, v1 = d["b0"], d["v0"], d["b1"], d["v1"]
         if b1 < b0:
             b0, v0, b1, v1 = b1, v1, b0, v0
-        if b1 - b0 < 0.5 / max(1, self.app.ppq):
+        if not d.get("moved") or b1 - b0 < 0.5 / max(1, self.app.ppq):  # (a click: a point, user 2026-10-22)
+            b0, v0 = d["b0"], d["v0"]
             self.add_point(b0, v0)
             return
         pts = self.app.tempo["points"]
