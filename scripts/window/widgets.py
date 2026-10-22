@@ -18,6 +18,16 @@ TALL = 120  # px: a widget taller than this gets its tooltip under the mouse ins
 SMALLEST_FIT = 7  # points: a squeezed dropdown's text never gets smaller than this
 
 
+def no_focus(root):
+    """Ticks / buttons / radio buttons under root never take the keyboard (user 2026-10-22: a clicked Tempo pane
+    tick kept the focus and Space ticked it off instead of playing)."""
+    for w in root.winfo_children():
+        if w.winfo_class() in ("TCheckbutton", "TButton", "TRadiobutton", "Checkbutton", "Button", "Radiobutton",
+                               "TMenubutton", "Menubutton"):
+            w.configure(takefocus=False)
+        no_focus(w)
+
+
 def fit_dropdowns(root):
     """Every dropdown fits its longest choice (measured in its own font, so wide letters count right) the first
     time it shows, and again if its choices changed: it only ever GROWS, so English looks as it was. Dropdowns

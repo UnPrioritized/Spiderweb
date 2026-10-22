@@ -95,7 +95,7 @@ from window.tempo_pane import TempoBox
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
-                            fit_dropdowns, good, grid_shown, set_glide, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
+                            fit_dropdowns, good, grid_shown, no_focus, set_glide, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -541,8 +541,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # b = self.gear = ttk.Button(corner, text="⚙", width=3, command=lambda: open_settings(self), takefocus=False)
         # b.pack(side="left")
         # Tooltip(b, tr("settings.button_tip"))
+        no_focus(top)
 
-        self.status = StatusLine(self, text="", padding=(6, 2), font=look.font(9))
+        self.status =StatusLine(self, text="", padding=(6, 2), font=look.font(9))
         self.status.pack(side="bottom", fill="x")
         # (Built-in BASSMIDI's red "Overloaded" while it can't keep up: the status line's right end, placed only
         # then (show_overload), so nothing moves, user 2026-10-18)
@@ -588,6 +589,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.vel.pack(fill="both", expand=True)  # the pane itself is added when it's turned on (off at first)
         self.tempo_box = TempoBox(self.panes, self, s)  # (under the velocity pane when both are on)
         self.tempo_pane = self.tempo_box.pane
+        no_focus(self.vel_box)  # (Space plays there too, never ticks a tick)
+        no_focus(self.tempo_box)
 
     def show_vel_formula(self):
         self.vel_hint.config(text=tr("velocity.select_hint" if self.vel_tool.get() == "select"
