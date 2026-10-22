@@ -9,7 +9,8 @@ import math
 import numpy as np
 
 from notes.hz_settings import (ADSR_KNOBS, FILTER_KNOBS, FILTER_START, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE,
-                               NEUTRAL, VIBRATO, VIBRATO_RATE, bend_range, hz_of)
+                               NEUTRAL, VIBRATO, VIBRATO_RATE, bend_range, clean_tempo_steps, hz_of, tempo_at,
+                               tempo_changes)
 from notes.hz_lines import adsr_line, filter_line, note_bend
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
@@ -156,11 +157,12 @@ def slide_knob(hz, a):
     return glide_of(hz, a, "curve") if glide_of(hz, a, "glide") > 0 else None
 
 
-def wave(hz, ppq, key, limit=None, whole=None):
+def wave(hz, ppq, key, limit=None, whole=None, bpm=None):
     """The gate, in ticks, of one wave of key's tone (hz = the shape's settings: cents, bpm, fixed). limit = Auto
     gates' threshold in cents for a tone held still: whole ticks when that's at most this far off. whole = True /
-    False: whole ticks or not, whatever the rest says (a tone's own gates, own_gate)."""
-    gate = ppq * hz["bpm"] / 60.0 / hz_of(key, hz["cents"])
+    False: whole ticks or not, whatever the rest says (a tone's own gates, own_gate). bpm: the tempo there (its
+    tempo line's, tempo_at), else hz["bpm"]."""
+    gate = ppq * (hz["bpm"] if bpm is None else bpm) / 60.0 / hz_of(key, hz["cents"])
     if whole is None:
         whole = hz.get("fixed") or (limit is not None and off_cents(gate) <= limit + 1e-9)
     return max(1.0, math.floor(gate + 0.5) if whole else gate)
@@ -202,7 +204,9 @@ def auto_state(hz, ppq, n):
         limit = None
     elif limit is None:
         return None
-    off = off_cents(ppq * hz["bpm"] / 60.0 / hz_of(pitch(n), hz["cents"]))
+    off = off_cents(ppq * tempo_at(hz, n["t"]) / 60.0 / hz_of(pitch(n), hz["cents"]))
+    if own is None and tempo_changes(hz, n["t"], n["t"] + n["len"]):  # (the tempo moves under it: mixed, user B)
+        return off, limit, False
     return off, limit, own if own is not None else off <= limit + 1e-9
 
 
@@ -243,7 +247,11 @@ def tone_runs(hz, left, ppq, keys=None):
         outs.setdefault(a["id"], []).append(i)
     pitched = "pitch" in (hz.get("fx") or {})
     most = bend_range(hz)
-    bend = pitched or keys is not None or any(n.get("bend") for n in tones)
+    moving = bool(hz.get("tempo"))  # (made under a changing tempo: each wave at the tempo where it starts)
+    bend = pitched or keys is not None or any(n.get("bend") for n in tones) or moving
+
+    def bpm(t):  # (the tempo at tick t; None = hz["bpm"], as without a tempo line)
+        return tempo_at(hz, t / ppq - left) if moving else None
     own, made = {}, {}
 
     def own_bend(n, beat):  # (keys tone n's own bend line moves it at beat, a number)
@@ -297,7 +305,7 @@ def tone_runs(hz, left, ppq, keys=None):
                 part, after, t = [], [], s if t is None else t
                 while t < e:
                     part.append(t)
-                    t += wave(hz, ppq, pitch(n) + (k0 - pitch(n)) * glide_left((t - s) / (e - s), curve))
+                    t += wave(hz, ppq, pitch(n) + (k0 - pitch(n)) * glide_left((t - s) / (e - s), curve), bpm=bpm(t))
                     after.append(t)
                 if part:
                     got = run(part, after, (n, None))
@@ -313,11 +321,27 @@ def tone_runs(hz, left, ppq, keys=None):
         r = reach.get(me)
         s = r[0] if r is not None and abs(r[1] - placed) < 1e-6 else placed if lead is None else lead
         if b > a and s < e:
-            gate = wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n))
+            cuts = tempo_changes(hz, s / ppq - left, e / ppq - left) if moving else []
+            if cuts:  # (the tempo moves under it: Auto = mixed gates, Fixed / its own fixed = whole ticks each)
+                whole = own_gate(n) if own_gate(n) is not None else bool(hz.get("fixed"))
+                gate = wave(hz, ppq, pitch(n), whole=whole, bpm=bpm(s))
+            else:
+                gate = wave(hz, ppq, pitch(n), threshold(hz, n), own_gate(n), bpm=bpm(s))
             if gate == math.floor(gate) and s != placed:  # (whole-tick waves: on the next whole tick)
                 s = math.ceil(s - 1e-9)
-            starts = s + gate * np.arange(max(1, int(math.ceil((e - s) / gate))))
-            got = run(starts, starts + gate, (n, None))
+            if cuts:  # (each stretch of one tempo its own gate; the wave playing at a change finishes first)
+                parts, t = [], s
+                for lo, hi in zip([s] + [(left + c) * ppq for c in cuts], [(left + c) * ppq for c in cuts] + [e]):
+                    g = wave(hz, ppq, pitch(n), whole=whole, bpm=bpm(lo))
+                    k = max(0, int(math.ceil((hi - t) / g - 1e-9)))
+                    parts.append((t + g * np.arange(k), g))
+                    t += g * k
+                starts = np.concatenate([p for p, _ in parts])
+                nexts = np.concatenate([p + g for p, g in parts])
+            else:
+                starts = s + gate * np.arange(max(1, int(math.ceil((e - s) / gate))))
+                nexts = starts + gate
+            got = run(starts, nexts, (n, None))
             own.setdefault(id(n), []).append(got)
             held[me] = (got[0], got[1], s, gate, e)
         elif s != placed:  # (what reached it goes past its end: no held part)
@@ -342,7 +366,7 @@ def tone_runs(hz, left, ppq, keys=None):
                 part, after = [], []
                 while t < end:
                     part.append(t)
-                    t += wave(hz, ppq, k0 + (k1 - k0) * slide_part((t - s0) / (e1 - s0), link, knob))
+                    t += wave(hz, ppq, k0 + (k1 - k0) * slide_part((t - s0) / (e1 - s0), link, knob), bpm=bpm(t))
                     after.append(t)
                 if part:
                     got = run(part, after, (n, c))
@@ -451,6 +475,7 @@ def vibrato_keys(hz, beat, tone, before=None):
 @functools.lru_cache(maxsize=16)
 def _heard(hz_json, left, ppq, bpm):
     hz = dict(json.loads(hz_json), _memo={})
+    played = {"bpm": bpm[0][1], "tempo": [list(p) for p in bpm]} if isinstance(bpm, tuple) else {"bpm": bpm}
     out, runs = [], list(tone_runs(hz, left, ppq))
     after = follows(hz, [(s[0], e[-1], w[0], w[1]) for s, e, w in runs])
     lasts = {}
@@ -462,7 +487,8 @@ def _heard(hz_json, left, ppq, bpm):
         mean = nexts - starts  # (the wave as made: with mixed gates the whole-tick ones come to this on average)
         starts, nexts = _whole(starts), _whole(nexts)
         gates = np.maximum(nexts - starts, 1)  # (whole ticks: what the PPQ lets the wave be)
-        keys, mean = (69.0 + 12.0 * np.log2(ppq * bpm / 60.0 / 440.0 / g) - hz["cents"] / 100.0 + wobble
+        now = tempo_at(played, starts / ppq - left)  # (the tempo each repeat is played at)
+        keys, mean = (69.0 + 12.0 * np.log2(ppq * now / 60.0 / 440.0 / g) - hz["cents"] / 100.0 + wobble
                       for g in (gates, mean))
         ends = np.minimum(nexts, limits)
         keep = ends > starts
@@ -477,8 +503,12 @@ def heard(hz, left, ppq, bpm):
     repeats. A repeat lasts a whole number of ticks, so its pitch is a little off the wanted one: the lower the
     PPQ, the more. Alternating ("mixed") gates take turns so that the average is the wanted tone; fixed gates are all the same, so
     there the average is each repeat's own pitch.
-    The pitch is counted from the shape's own tuning (hz["cents"]), so a key's exact tone is that key."""
-    return _heard(json.dumps(live(hz, left), sort_keys=True), left, ppq, float(bpm))
+    The pitch is counted from the shape's own tuning (hz["cents"]), so a key's exact tone is that key. bpm: the
+    tempo it's played at, a number or a tempo line [[beat from the left edge, BPM], ...] (clean_tempo_steps)."""
+    if isinstance(bpm, (list, tuple)):
+        steps = clean_tempo_steps([list(p) for p in bpm])
+        bpm = tuple(tuple(p) for p in steps) if steps else float(bpm[0][1])
+    return _heard(json.dumps(live(hz, left), sort_keys=True), left, ppq, bpm if isinstance(bpm, tuple) else float(bpm))
 
 
 @functools.lru_cache(maxsize=16)

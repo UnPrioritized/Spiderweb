@@ -176,6 +176,51 @@ def hz_gate(hz, bpm):
     return max(1e-6, float(f"{bpm / (60.0 * hz_of(hz['key'], hz['cents'])):.12g}"))  # (12 digits: as saved)
 
 
+def clean_tempo_steps(steps):
+    """hz["tempo"] checked: the tempo heard under the Hz bass when it was made (user 2026-10-23: it follows the
+    Conductor pane's tempo where it sits), [[beat from the shape's left edge, BPM], ...] from beat 0 on, each a
+    change, held to the next. None when no good or steady (one BPM: hz["bpm"] alone, as before)."""
+    out = []
+    for p in steps if isinstance(steps, list) else ():
+        try:
+            b, v = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not (math.isfinite(b) and math.isfinite(v) and b >= 0 and v > 0) or (out and b <= out[-1][0]):
+            return None
+        if not out or v != out[-1][1]:
+            out.append([b, v])
+    return out if len(out) > 1 and out[0][0] == 0 else None
+
+
+def tempo_at(hz, beats):
+    """The BPM a Hz bass was made for at beats from its left edge (a number or an array): its tempo line (held
+    before the first step and after the last), else its one BPM."""
+    steps = hz.get("tempo")
+    if not steps:
+        return hz["bpm"] if np.isscalar(beats) else np.full(np.shape(beats), float(hz["bpm"]))
+    at = np.array([b for b, _ in steps])
+    vals = np.array([v for _, v in steps])
+    i = np.maximum(np.searchsorted(at, np.asarray(beats, float) + 1e-9, "right") - 1, 0)
+    return float(vals[i]) if np.isscalar(beats) else vals[i]
+
+
+def tempo_changes(hz, b0, b1):
+    """The beats (from the left edge) inside b0..b1 where a Hz bass's tempo line changes, in order ([] = steady)."""
+    return [b for b, _ in (hz.get("tempo") or ())[1:] if b0 + 1e-9 < b < b1 - 1e-9]
+
+
+def shifted_tempo(steps, d):
+    """A tempo line for the left edge moved d beats to the LEFT (d < 0: to the right), each step on the same song
+    beat; before the old start: its first BPM. None when it's steady there."""
+    if not steps:
+        return None
+    moved = [[b + d, v] for b, v in steps]
+    out = [[0.0, [v for b, v in moved if b <= 1e-9][-1] if moved[0][0] <= 1e-9 else moved[0][1]]]
+    out += [[b, v] for b, v in moved if b > 1e-9]
+    return clean_tempo_steps(out)
+
+
 def clean_point(p):
     """A line's point checked: [beat, value] or [beat, value, bend of the line from it to the next] (bend -BEND..BEND,
     or "hold"), None if it's no good."""
@@ -1034,6 +1079,9 @@ def clean_hz(hz):
         return None
     if not (0 <= out["key"] <= 255 and abs(out["cents"]) <= 1200 and out["bpm"] > 0):
         return None
+    steps = clean_tempo_steps(hz.get("tempo"))
+    if steps:  # (made under a changing tempo: "bpm" = the one at its left edge)
+        out["tempo"], out["bpm"] = steps, steps[0][1]
     if hz.get("fixed") is True:
         out["fixed"] = True
     else:

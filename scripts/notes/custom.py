@@ -22,8 +22,8 @@ from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
-from notes.hzbass import (HZ_DEFAULTS, KeyGrid, heard_layers, left_edge, off_cents, own_channels, shifted_hz, squares,
-                          threshold)  # (Hz bass: hzbass.py)
+from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
+                          shifted_hz, squares, threshold)  # (Hz bass: hzbass.py)
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
                           near_lines as shrink_near, proportion as shrink_proportion,
                           segments as shrink_segments)  # (the outline gate's even band)
@@ -2131,6 +2131,9 @@ def spam_gate(sh, ppq):
     if sh.get("hz"):
         if sh["hz"].get("tones"):
             return squares(sh, ppq)
+        got = even_squares(sh, ppq) if sh["hz"].get("tempo") else None
+        if got is not None:  # (made under a changing tempo: the waves follow it)
+            return got
         gate = max(1.0, float(sh["gate"] * ppq))
         limit = threshold(sh["hz"])
         whole = sh["hz"].get("fixed") or (limit is not None and off_cents(gate) <= limit + 1e-9)

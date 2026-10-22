@@ -119,6 +119,7 @@ name of theirs can be taken from here."""
 
 import functools
 import json
+import math
 
 import numpy as np
 
@@ -326,6 +327,43 @@ def left_edge(sh):
     return left
 
 
+def right_edge(sh):
+    """The beat a custom shape's box ends at (a funnel: its last beat)."""
+    if sh["kind"] == "funnel":
+        return funnel_box(sh)[1]
+    (b0, _), (b1, _), (b2, _) = sh["pts"]
+    right = max(b0, b1, b2, b1 + b2 - b0)
+    tx = sh.get("text")
+    if tx and tx.get("grow", 0.0) > 0:
+        right += tx["grow"] * tx.get("k", 1.0)
+    return right
+
+
+def even_squares(sh, ppq):
+    """A Hz bass without placed tones made under a changing tempo (hz["tempo"]): its one grid's squares ((start, end)
+    whole ticks, chop_grid) over the shape, each wave at the tempo where it starts (the one playing at a change
+    finishes first), counted from tick 0 at the tempo at its left edge. Mixed gates unless Fixed (Auto: the tempo
+    moves, user). None when the tempo doesn't change over the shape (one gate: chop_even as before)."""
+    hz, left, right = sh["hz"], left_edge(sh), right_edge(sh)
+    cuts = tempo_changes(hz, 0.0, right - left)
+    if not cuts:
+        return None
+    whole = bool(hz.get("fixed"))
+    g = wave(hz, ppq, hz["key"], whole=whole, bpm=tempo_at(hz, 0.0))
+    t = math.floor(left * ppq / g) * g
+    parts = []
+    for lo, hi in zip([left] + [left + c for c in cuts], [left + c for c in cuts] + [right]):
+        g = wave(hz, ppq, hz["key"], whole=whole, bpm=tempo_at(hz, lo - left))
+        k = max(0, int(math.ceil((hi * ppq - t) / g - 1e-9)))
+        parts.append(t + g * np.arange(k))
+        t += g * k
+    starts = np.floor(np.append(np.concatenate(parts), t) + 0.5).astype(np.int64)
+    out = np.column_stack([starts[:-1], starts[1:]])
+    out = out[out[:, 1] > out[:, 0]]
+    out.setflags(write=False)
+    return out
+
+
 def shifted_hz(hz, d):
     """hz for the shape's left edge moved d beats to the LEFT (d < 0: to the right), so every tone and effect point
     stays on the same beat in the song. Tones then before the edge are left out (one reaching past it starts at it);
@@ -367,6 +405,13 @@ def shifted_hz(hz, d):
         hz["mod"].pop("phase", None)
         if abs(phase) > 1e-12:
             hz["mod"]["phase"] = phase
+    if hz.get("tempo"):  # (the tempo it was made for, on the same song beats too)
+        steps = shifted_tempo(hz["tempo"], d)
+        hz["bpm"] = steps[0][1] if steps else tempo_at(hz, -d)
+        if steps:
+            hz["tempo"] = steps
+        else:
+            del hz["tempo"]
     return hz
 
 
