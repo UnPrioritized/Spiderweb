@@ -33,7 +33,7 @@ import numpy as np
 
 from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, CC_TARGETS, RING_MOST, WHEEL_KEYS, cc_midi, fx_at, glide_tones, has_cc,
                           funnel_box, heard_layers, key_range, left_edge, legato_links, links, live, own_channels,
-                          rack_tail, sound_span, without_cc)
+                          rack_tail, sound_span, tempo_at, without_cc)
 
 STEPS = 96  # values a beat at most
 LEAD = 0.05  # seconds the first values come before the first note
@@ -79,6 +79,12 @@ def cc_fall(hz):
     return fall
 
 
+def per_second(hz, beat, bpm=None):
+    """Beats a second at a beat from the Hz bass's left edge: the tempo it was made for there (its tempo line, D),
+    else bpm (the caller's), else its one BPM."""
+    return (tempo_at(hz, beat) if hz.get("tempo") or bpm is None else bpm) / 60.0
+
+
 def voices(hz, left):
     """Own channel per note: (each heard layer as played (live: the Arpeggio's notes) without its CC lines, [(layer
     number, voice, tones of one note and what joins it)] in time order). Voices count from 0; each is one track.
@@ -89,7 +95,6 @@ def voices(hz, left):
     fall = own["fall"] if isinstance(own, dict) else cc_fall(hz)
     ring = own.get("ring", auto_ring) if isinstance(own, dict) else ring_of(hz)
     hz = without_cc(hz)
-    per_beat = float(hz["bpm"]) / 60.0  # (beats a second)
     played, groups = [], []
     for li, layer in enumerate(heard_layers(hz)):
         layer = live(layer, left)
@@ -113,10 +118,11 @@ def voices(hz, left):
         for n in tones:
             joined.setdefault(root(n["id"]), []).append(n)
         for g in joined.values():
-            start = min(n["t"] for n in g) - LEAD * per_beat
+            first = min(n["t"] for n in g)
+            start = first - LEAD * per_second(hz, first)
             g_hz = dict(layer, tones=g)
             end = max(sound_span(g_hz), max(n["t"] + n["len"] for n in g) + fall + rack_tail(g_hz))
-            groups.append((start, end + ring * per_beat + 1.0 / STEPS, li, g))
+            groups.append((start, end + ring * per_second(hz, end) + 1.0 / STEPS, li, g))
     groups.sort(key=lambda g: g[0])
     busy, out = [], []  # (each voice: the beat it's free again)
     for start, end, li, g in groups:
@@ -173,9 +179,9 @@ def cc_events(sh, ppq, bpm, layers=None):
     if voice:
         tones.sort(key=lambda n: n["t"])
         layers = [dict(l, tones=tones) if l.get("fx") else l for l in layers if l.get("tones") or l.get("fx")]
-    per_beat = bpm / 60.0  # (beats a second)
-    first = left + min(n["t"] for n in tones) - LEAD * per_beat  # (song beats)
-    end = left + max(sound_span(l) for l in layers) + ring_of(hz) * per_beat
+    lo, hi = min(n["t"] for n in tones), max(sound_span(l) for l in layers)
+    first = left + lo - LEAD * per_second(hz, lo, bpm)  # (song beats)
+    end = left + hi + ring_of(hz) * per_second(hz, hi, bpm)
     step = max(1, ppq // STEPS)
     t0 = max(0, math.floor(first * ppq))
     ticks = np.arange(t0, max(t0, math.ceil(end * ppq)) + 1, step, dtype=np.int64)

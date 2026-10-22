@@ -370,6 +370,28 @@ def heard_tempo(tempo, base, ppq, end=0):
 _heard = {}
 
 
+def seconds_at(runs, ppq, ticks):
+    """Ticks (a number or an array) -> seconds from tick 0 under a tempo [(tick, us)] (heard_tempo; first on 0)."""
+    at = np.array([t for t, _ in runs], float)
+    us = np.array([u for _, u in runs], float)
+    sec = np.concatenate([[0.0], np.cumsum(np.diff(at) * us[:-1])]) / (ppq * 1e6)
+    t = np.asarray(ticks, float)
+    i = np.maximum(np.searchsorted(at, t, "right") - 1, 0)
+    out = sec[i] + (t - at[i]) * us[i] / (ppq * 1e6)
+    return float(out) if np.isscalar(ticks) else out
+
+
+def ticks_at(runs, ppq, seconds):
+    """seconds_at the other way: seconds (a number or an array) -> ticks (not rounded)."""
+    at = np.array([t for t, _ in runs], float)
+    us = np.array([u for _, u in runs], float)
+    sec = np.concatenate([[0.0], np.cumsum(np.diff(at) * us[:-1])]) / (ppq * 1e6)
+    s = np.asarray(seconds, float)
+    i = np.maximum(np.searchsorted(sec, s, "right") - 1, 0)
+    out = at[i] + (s - sec[i]) * (ppq * 1e6) / us[i]
+    return float(out) if np.isscalar(seconds) else out
+
+
 NUDGE = 0.05  # bar compensation: a gap's ticks change by at most this share (or one tick), so its tempo a hair
 
 

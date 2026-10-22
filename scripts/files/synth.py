@@ -172,11 +172,17 @@ def cc_events(messages):
     return np.array(out, EVENT) if out else np.zeros(0, EVENT)
 
 
-def events(notes, ppq, bpm, chans=None, cc=None, exact=False):
+def events(notes, ppq, bpm, chans=None, cc=None, exact=False, tempo=None):
     """The notes (rows start, end, key, velocity, ... in ticks) as BASSMIDI's event list: one channel (chans: each
     note's channel, never 10's; exact: chans are the stream's channels as they are, past 16 too), program 0, one
-    tempo. At the same tick a note's end comes before the next start. Keys above 127 are left out. cc = BASSMIDI
-    events (cc_events) put among them: on a shared tick after the notes' ends, before their starts."""
+    tempo (tempo: the Conductor pane's as heard, [(tick, us)] from tick 0, tempo_file.heard_tempo: each change on
+    its tick, before anything else there). At the same tick a note's end comes before the next start. Keys above
+    127 are left out. cc = BASSMIDI events (cc_events) put among them: on a shared tick after the notes' ends, before
+    their starts."""
+    if tempo:
+        changes = np.array([(_EV_TEMPO, int(u), 0, int(t), 0) for t, u in tempo[1:]], EVENT)
+        cc = changes if cc is None or not len(cc) else np.concatenate([changes, cc])
+        bpm = 60e6 / tempo[0][1]
     notes = np.asarray(notes)
     keep = notes[:, 2] <= 127 if len(notes) else np.zeros(0, bool)
     notes = notes[keep] if len(notes) else notes.reshape(0, 4)

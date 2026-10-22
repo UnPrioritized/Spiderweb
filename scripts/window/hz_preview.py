@@ -25,6 +25,7 @@ from files.synth import cc_events as synth_cc
 from notes.hz_cc import cc_events, cc_key, voice_events
 from notes.engine import CHANNELS, CLASH
 from notes.hzbass import all_tones, left_edge, own_channels
+from notes.tempo_file import heard_tempo, seconds_at, ticks_at
 
 CHUNK = 2.0  # seconds of sound made in one piece
 AHEAD = 60.0  # seconds made ahead of the play line (or the view's left edge)
@@ -79,7 +80,7 @@ class Preview:
         self.synth = None
         self.notes = None  # the notes the sound is made of (the main window's remembered array: same = unchanged)
         self.shape = None  # (id of the shape, its left edge): where the window's beats start
-        self.ev, self.ppq, self.bpm = None, 0, 0.0
+        self.ev, self.ppq, self.bpm, self.tempo = None, 0, 0.0, None
         self.span = (0, 0)  # frames with sound in them: first note .. where the ring after the last note ends
         self.last = 0  # the frame the last note ends at
         self.ends = {}  # piece -> the frame the ring died away at in it
@@ -175,14 +176,22 @@ class Preview:
     # ------------------------------------------------------------ the notes
 
     def frames(self, ticks):
+        if self.tempo:  # (the Conductor pane's tempo as heard, user 2026-10-23)
+            return seconds_at(self.tempo, self.ppq, ticks) * RATE
         return ticks / self.ppq * 60.0 / self.bpm * RATE
 
     def beat_of(self, frame):
         """Song frame -> the window's beat (counted from the shape's left edge)."""
-        return frame / RATE * self.bpm / 60.0 - (self.shape[1] if self.shape else 0.0)
+        left = self.shape[1] if self.shape else 0.0
+        if self.tempo:
+            return ticks_at(self.tempo, self.ppq, frame / RATE) / self.ppq - left
+        return frame / RATE * self.bpm / 60.0 - left
 
     def frame_of(self, beat):
-        return ((self.shape[1] if self.shape else 0.0) + beat) * 60.0 / self.bpm * RATE
+        song = (self.shape[1] if self.shape else 0.0) + beat
+        if self.tempo:
+            return seconds_at(self.tempo, self.ppq, song * self.ppq) * RATE
+        return song * 60.0 / self.bpm * RATE
 
     def look(self):
         """Takes in changed notes: only the stretch that changed is made again. Not while the main window leaves
@@ -205,10 +214,12 @@ class Preview:
                          else (None, None))
         multi = self.app.channel_mode.get() == "auto"
         shape = (id(sh), left_edge(sh), multi, cc_key(sh.get("hz"))) if sh is not None else None
-        if notes is self.notes and (ppq, bpm) == (self.ppq, self.bpm) and shape == self.shape:
+        end = int(notes[:, 1].max()) + 1 if notes is not None and len(notes) else 0
+        tempo = heard_tempo(self.app.tempo, bpm, ppq, end)  # (None: one tempo, the BPM box's)
+        if notes is self.notes and (ppq, bpm, tempo) == (self.ppq, self.bpm, self.tempo) and shape == self.shape:
             return
-        old, same_time = self.ev, (ppq, bpm) == (self.ppq, self.bpm)
-        self.notes, self.ppq, self.bpm, self.shape = notes, ppq, bpm, shape
+        old, same_time = self.ev, (ppq, bpm, tempo) == (self.ppq, self.bpm, self.tempo)
+        self.notes, self.ppq, self.bpm, self.shape, self.tempo = notes, ppq, bpm, shape, tempo
         voiced = multi and sh is not None and own_channels(sh.get("hz")) and tracks is not None
         if voiced:  # (own channel per note: each voice on its own channel, port after port, with its own lines)
             place = np.array([p * 16 + c for p in range(STREAM_PORTS) for c in CHANNELS], np.int64)
@@ -222,7 +233,7 @@ class Preview:
             used = (sorted({c + (c >= 9) for c in np.minimum(np.unique(chans), 14).tolist()}) if chans is not None
                     else [0])
             cc = synth_cc([(t, s, a, b, c) for t, s, a, b in cc_events(sh, ppq, bpm) for c in used]) if sh else None
-        ev = events(notes, ppq, bpm, chans, cc, voiced) if notes is not None and len(notes) else None
+        ev = events(notes, ppq, bpm, chans, cc, voiced, tempo) if notes is not None and len(notes) else None
         if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
             self.ev, self.span, self.last = None, (0, 0), 0
             self.clear()
