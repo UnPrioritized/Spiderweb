@@ -105,17 +105,127 @@ def midi_messages(tag, body):
     return []
 
 
+def with_value(body, v):
+    """A control event's body with its value (the first f32 of its value list) set to v."""
+    out, i = bytearray(body), 0
+    while i + 6 <= len(out):
+        tag, n = struct.unpack_from("<HI", out, i)
+        if tag == 2003 and n >= 10:
+            struct.pack_into("<f", out, i + 12, float(v))
+            break
+        i += 6 + n
+    return bytes(out)
+
+
+def _ccm(tag, body):
+    """A control event's CCM number (0-127 = that CC), else None."""
+    f = _fields(body).get(2001, b"") if tag == CONTROL else b""
+    return struct.unpack("<H", f)[0] if len(f) == 2 else None
+
+
+# what a MIDI player starts a channel at (GM; Domino keeps CCs as is, pitch bend from its middle)
+USUAL = {7: 100, 10: 64, 11: 127, 91: 40, PITCH_BEND: 0}
+STAY = (0, 32)  # (bank select: stays at the start with the program change on a flip)
+NO_USUAL = (6, 38, 96, 97, 98, 99, 100, 101) + tuple(range(120, 128))  # (data entry, RPN / NRPN, mode messages)
+
+
 def placed(sh, rows, ppq):
     """The shape's passengers where its box is now: [(tick, track, tag, body)] in time order. rows = its unpacked
-    notes (their last end = the box's length, as custom.block_notes)."""
+    notes (their last end = the box's length, as custom.block_notes). The box's time side carries them: moved /
+    stretched along it; flipped sideways (that side runs back) = mirrored by the user's rule (mirrored); a turned
+    or slanted box spreads them over the time it covers, the way its time side runs (user: turns leave them)."""
     events = unpack_cc(sh["cc"])
     if not events or not len(rows):
         return []
-    (b0, _), (b1, _), (b2, _) = sh["pts"]
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     t_all = float(rows[:, 1].max())
     u = np.array([e[0] for e in events], float) / t_all
-    beats = b0 + u * (b1 - b0)
+    ub = b1 - b0
+    if abs(b2 - b0) > 1e-9 or abs(p1 - p0) > 1e-9:  # (turned / slanted: over the box's whole time, its way)
+        corners = [b0, b1, b2, b1 + b2 - b0]
+        lo, hi = min(corners), max(corners)
+        b0, ub = (lo, hi - lo) if ub >= 0 else (hi, lo - hi)
+    if ub < 0:
+        return mirrored(events, u, b0, ub, ppq)
+    beats = b0 + u * ub
     ticks = np.maximum(np.rint(beats * ppq), 0).astype(np.int64).tolist()
     out = [(t, e[1], e[2], e[3]) for t, e in zip(ticks, events)]
     out.sort(key=lambda e: e[0])  # (stable: a tick's events keep their order)
     return out
+
+
+def shared_out(sh, parts, ppq):
+    """A pasted shape cut into parts ((start, length, key, velocity, track) tick rows as they sound now, slice.py):
+    each part's passengers packed (or None), ticks from its first note. By time per track (user 2026-10-22): an
+    event goes to the part playing that track there (its latest note start at or before it), else the part where
+    the track starts first; a track no part has: the first part."""
+    from notes.custom import unpack_notes
+    events = placed(sh, unpack_notes(sh["notes"]), ppq)
+    mine = [[] for _ in parts]
+    starts = {}
+    for p, n in enumerate(parts):
+        for k in np.unique(n[:, 4]).tolist():
+            starts.setdefault(k, []).append((p, np.sort(n[n[:, 4] == k, 0])))
+    for t, k, tag, body in events:
+        best = None
+        for p, s in starts.get(k, ()):
+            i = int(np.searchsorted(s, t, "right"))
+            key = (1, int(s[i - 1])) if i else (0, -int(s[0]))  # (playing there wins, the latest start; else the first)
+            if best is None or key > best[0]:
+                best = (key, p)
+        mine[best[1] if best else 0].append((t, k, tag, body))
+    return [pack_cc([(t - int(n[:, 0].min()), k, tag, b) for t, k, tag, b in got]) if got else None
+            for got, n in zip(mine, parts)]
+
+
+def carried(shapes, voice_slots, got, ppq):
+    """Rendered rows (start, end, pitch, velocity, slot, owner) copied into a new notes shape whose tracks are their
+    slots (Multi channel: Apply mask, Gate sensitive merge, Turn into plain notes): the passengers of the pasted
+    shapes they came from (user: kept with their notes), each on the slot its track had, those inside the time the
+    copy holds notes of that slot, at their own ticks. Packed, ticks from the copy's first note; None if none."""
+    from notes.custom import unpack_notes
+    got = np.asarray(got, np.int64)
+    if not len(got):
+        return None
+    out, t0 = [], int(got[:, 0].min())
+    for o in np.unique(got[:, 5]).tolist():
+        sh, slots = shapes[o], (voice_slots or {}).get(o)
+        if "cc" not in sh or not slots:
+            continue
+        mine = got[got[:, 5] == o]
+        span = {s: (int(mine[mine[:, 4] == s, 0].min()), int(mine[mine[:, 4] == s, 1].max()))
+                for s in np.unique(mine[:, 4]).tolist()}
+        for t, k, tag, body in placed(sh, unpack_notes(sh["notes"]), ppq):
+            s = slots.get(k)
+            if s in span and span[s][0] <= t <= span[s][1]:
+                out.append((t - t0, s, tag, body))
+    out.sort(key=lambda e: e[0])
+    return pack_cc(out) if out else None
+
+
+def mirrored(events, u, b0, ub, ppq):
+    """placed for a box flipped sideways (user 2026-10-22): each control's values mirrored as STRETCHES (a value
+    held from its event to the next one runs the other way, so it now starts where that stretch ends; the value
+    held to the shape's end starts at its start; the value before the first event, the usual one, comes after
+    where the first one was); program changes and bank select stay at the start, in their order; anything else
+    simply mirrored."""
+    tick = lambda uu: max(0, int(round((b0 + uu * ub) * ppq)))
+    end_u = max(1.0, float(u.max()))
+    start = tick(end_u)  # (the shape's start: the far end before the flip)
+    first, out, runs = [], [], {}
+    for k, e in enumerate(events):
+        ccm = _ccm(e[2], e[3])
+        if e[2] == PROGRAM or ccm in STAY:
+            first.append((start, e[1], e[2], e[3]))
+        elif ccm is not None:
+            runs.setdefault((e[1], ccm), []).append(k)
+        else:
+            out.append((tick(u[k]), e[1], e[2], e[3]))
+    for (track, ccm), ks in runs.items():
+        ks.sort(key=lambda k: u[k])
+        for j, k in enumerate(ks):  # (its value now from where the stretch it held ended)
+            out.append((tick(u[ks[j + 1]]) if j + 1 < len(ks) else start, track, events[k][2], events[k][3]))
+        if ccm not in NO_USUAL:  # (before it: the usual value, from where the first one was)
+            out.append((tick(u[ks[0]]), track, events[ks[0]][2], with_value(events[ks[0]][3], USUAL.get(ccm, 0))))
+    out.sort(key=lambda e: e[0])
+    return first + out

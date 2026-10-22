@@ -10,6 +10,7 @@ from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.sustain import is_sustained
+from notes.passengers import carried
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
                         is_solid, loops_of, mask_units, new_group_id, slot_pal, slot_rule, tidy_groups, unit_of,
                         unmasked, worked_now)
@@ -289,6 +290,9 @@ class MaskPanel:
         sh = clean_shape(new)
         if multi and not picture:
             sh["own_slots"] = [float(v) for v in sh["pts"][0]]
+            cc = carried(self.shapes, self.voice_slots, got, self.ppq)  # (pasted notes' CCs come along: tracks = slots)
+            if cc:
+                sh["cc"] = cc
         return sh
 
     def can_combine(self):

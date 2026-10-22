@@ -18,7 +18,7 @@ from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, c
                           merges_unmade, slot_ports)
 from notes.hzbass import clean_hz
 from notes.hz_cc import slot_events
-from notes.passengers import midi_messages, pack_cc, placed
+from notes.passengers import midi_messages, pack_cc, placed, unpack_cc
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -908,8 +908,11 @@ class ProjectFiles:
         no MIDI message), False = a MIDI-only message (passengers.midi_messages)."""
         out = slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
         added = set()
+        auto = self.channel_mode.get() == "auto"
         for i, sh in enumerate(self.shapes):
             slots = self.voice_slots.get(i) if "cc" in sh and (only is None or i in only) else None
+            if slots is None and auto and "cc" in sh and sh.get("own_slots") and (only is None or i in only):
+                slots = {k: k for k in {e[1] for e in unpack_cc(sh["cc"])}}  # (a copy whose tracks ARE its slots)
             if not slots:
                 continue
             for t, track, tag, body in placed(sh, unpack_notes(sh["notes"]), ppq):

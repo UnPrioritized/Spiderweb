@@ -448,13 +448,17 @@ def _halves(sh, parts, ppq):
     paste = sh.get("paste") or uuid.uuid4().hex[:12]  # (its tracks keep their channels across the pieces: render)
     from notes.gateflip import colours_back
     mirrored = bool(colours_back(sh))  # (a gate flipped paste: the pieces keep its colours' channels)
+    from notes.passengers import shared_out
+    rides = shared_out(sh, parts, ppq) if "cc" in sh else [None] * len(parts)  # (its CCs by time per track)
     out = []
-    for n in parts:
+    for n, cc in zip(parts, rides):
         half = {k: copy.deepcopy(v) for k, v in sh.items()
                 if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours", "unmerge",
-                              "leftover_of")}
+                              "leftover_of", "cc")}
         # (pages / glue / a velocity line / a gate aware flip: in its notes; a merge's notes cut: no Split back)
         half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)
+        if cc:
+            half["cc"] = cc
         if "unmerge" in sh:  # (no Split back any more: not called "Merged notes", hunt)
             from files.lang import tr
             half["name"] = tr("join_split.plain_name", name=sh.get("name") or "")
