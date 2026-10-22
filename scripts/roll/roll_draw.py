@@ -20,7 +20,7 @@ from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funne
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained
-from notes.meter import bar_lines, beat_lines, sigs_of
+from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, ruler_marks, short_bpm
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, GHOST_COLOR, PIANO_88, PREVIEW_LIMIT,
                               SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
@@ -1765,9 +1765,25 @@ class RollDrawing:
         self.tag_raise("playhead")
 
     def ruler_marks(self, w):
-        """(x, bar number) of each number on the ruler, from the keyboard to w (by the time signatures)."""
-        lines = bar_lines(sigs_of(self.app.tempo), max(0.0, self.x2t(self.kb_w)), self.x2t(w), 40 / self.sx)
-        return [(self.t2x(b), str(n + 1)) for b, n in lines if self.t2x(b) >= self.kb_w]
+        """(x, label) of each bar number on the ruler, from the keyboard to w (by the time signatures); where a
+        time / key signature starts its name follows: "5 (3/4, Ab Maj)" (user 2026-10-22, like many MIDI programs).
+        A number that would run into the label before is left out."""
+        tempo = self.app.tempo
+        sigs, keys = sigs_of(tempo), tempo.get("keysigs") or []
+        lines = bar_lines(sigs, max(0.0, self.x2t(self.kb_w)), self.x2t(w), 40 / self.sx)
+        times = {round(s[0], 6): sig_text(s) for s in sigs}
+        names = {round(k[0], 6): key_name(k[1], k[2]) for k in keys}
+        measure = tkfont.Font(font=look.font(8, fit=True)).measure
+        out, end = [], -math.inf
+        for b, n in lines:
+            x = self.t2x(b)
+            extra = [t for t in (times.get(round(b, 6)), names.get(round(b, 6))) if t]
+            label = f"{n + 1} ({', '.join(extra)})" if extra else str(n + 1)
+            if x < self.kb_w or x < end:
+                continue
+            out.append((x, label))
+            end = x + 3 + measure(label) + 4
+        return out
 
     def draw_ruler_pick(self, boxes):
         """The ruler black under the Select boxes that hold every key (a drag along the ruler: like many MIDI

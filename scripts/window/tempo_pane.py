@@ -35,6 +35,7 @@ from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHI
                               grab_while_panning,
                               set_cursor)
 from window import look
+from window.conductor_marks import ConductorMarks
 from window.widgets import Scrub, ShortLabel, Tooltip, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
@@ -492,7 +493,7 @@ class TempoBox(ttk.Frame):
         self.app.tempo_changed()
 
 
-class TempoPane(tk.Canvas):
+class TempoPane(ConductorMarks, tk.Canvas):
     def __init__(self, parent, box, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0)
         self.box, self.app, self.scale = box, app, scale
@@ -1503,6 +1504,7 @@ class TempoPane(tk.Canvas):
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
         on_edge = item is None and (self.start_at(e.x) is not None or self.end_at(e.x) is not None)
+        on_edge = on_edge or item is None and self.sig_mark_at(e.x, e.y) is not None  # (a signature's mark)
         if item is None and not on_edge and not self.in_band(e.x):  # (empty space: the menu waits to see if it's
             self.drop_menu_wait()                                    # a double right-click, user)
             self.menu_wait = self.after(DOUBLE_MS, lambda: self.right_menu(e, None))
@@ -1534,7 +1536,10 @@ class TempoPane(tk.Canvas):
         self.menu_wait = None
         tempo = self.app.tempo
         menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
+        on_mark = item is None and self.sig_menu_items(menu, e)  # (time / key signatures: Add here, or the mark's)
+        if not on_mark:
+            menu.add_separator()
+            menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
         for k, at, key in ((3, self.start_at, "tempo.catch_auto"), (4, self.end_at, "tempo.catch_end_auto")):
             n = at(e.x) if item is None else None
             if n is not None and catch_get(tempo["catch"][n], k) is not None:  # (an edge set by hand)
@@ -2106,6 +2111,7 @@ class TempoPane(tk.Canvas):
         for v, strong in self.labels():
             y = round(float(self.b2y(v)))
             self.create_line(kb, y, w, y, fill=look.CHART_GRID_STRONG if strong else look.CHART_GRID)
+        self.draw_sig_marks()
         for v, past in ((MIN_BPM, h), (MAX_BPM, 0)):  # (the slowest / fastest a file holds: past them faint red)
             y = round(float(self.b2y(v)))
             if 0 <= y <= h:

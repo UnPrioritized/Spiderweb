@@ -2391,6 +2391,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.after_cancel(self._tempo_play_job)
             self._tempo_play_job = self.after(80 if self.tempo_pane.drag else 0, self.play_tempo)
 
+    def meter_changed(self):
+        """A time / key signature added, changed or removed: the bar lines everywhere follow."""
+        self.tempo_changed()
+        self.roll.request_redraw()
+        self.vel.request_redraw()
+        if self.hz_window and hasattr(self.hz_window, "redraw"):
+            self.hz_window.redraw()
+
     def bar_text(self, beat):
         """A beat as "bar 3 beat 2" (bar and beat counted from 1 by the time signatures, beat may have a
         fraction; beats are the signature's own: 6/8 counts eighths)."""
