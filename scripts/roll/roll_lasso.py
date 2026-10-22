@@ -176,12 +176,31 @@ class LassoDrawing:
             if self.lasso["hover"]:
                 self.lasso["pts"].append(self.lasso["hover"])
             self.lasso_close()
-        elif drag[0] == "lasso_point" and drag[3] == "pull":  # (pulled out barely: no handles)
+        elif drag[0] == "lasso_point":
             i = drag[1]
             h = self.lasso_hd()[i]
-            if h and math.dist(self.to_xy(h[1]), self.to_xy(self.lasso["pts"][i])) < PULL_PX * self.scale:
-                self.lasso_hd()[i] = None
+            if drag[3] == "pull" and h and math.dist(self.to_xy(h[1]),
+                                                     self.to_xy(self.lasso["pts"][i])) < PULL_PX * self.scale:
+                self.lasso_hd()[i] = None  # (pulled out barely: no handles)
+            if self.lasso_saved() != drag[2]:
+                self.lasso_edited(drag[2])
         self.draw_lasso()
+
+    def lasso_edited(self, saved):
+        """A waiting loop changed (saved = how it was before): one step of its own undo (user 2026-10-23: Ctrl+Z
+        took the whole loop away, handles too)."""
+        self.lasso.setdefault("past", []).append(saved)
+        self.lasso["future"] = []
+
+    def lasso_redo(self):
+        """Ctrl+Y while there's a loop: a waiting loop's edit taken back by Ctrl+Z comes back. True when one did."""
+        las = self.lasso
+        if not las or not las["closed"] or self.drag or not las.get("future"):
+            return False
+        las.setdefault("past", []).append(self.lasso_saved())
+        las["pts"], las["hd"] = las["future"].pop()
+        self.draw_lasso()
+        return True
 
     def lasso_motion(self, e):
         """The mouse moving with no button: a Polygonal loop's next line follows it. True when it's the lasso's."""
@@ -244,16 +263,22 @@ class LassoDrawing:
         self.lasso_close()
         return True
 
-    def lasso_undo(self):
+    def lasso_undo(self, whole=False):
         """Ctrl+Z / Undo / a History click while there's a loop: it acts on the loop, nothing else is undone (like a
         shape half drawn; hunt 2026-10-23, user saw an earlier change undone and half a loop left). A waiting loop's
-        point / handle held = back where it was pressed; any other loop (being drawn, open, waiting) = gone. True
-        when it did."""
-        if not self.lasso:
+        point / handle held = back where it was pressed; a waiting loop's last edit (points, handles) taken back
+        one at a time (user 2026-10-23), with none left (or whole: a History click) = gone; a loop being drawn /
+        open = gone. True when it did."""
+        las = self.lasso
+        if not las:
             return False
         if self.drag and self.drag[0] == "lasso_point":
-            self.lasso["pts"], self.lasso["hd"] = self.drag[2]
+            las["pts"], las["hd"] = self.drag[2]
             self.drag = None
+            self.draw_lasso()
+        elif not whole and las["closed"] and las.get("past"):
+            las.setdefault("future", []).append(self.lasso_saved())
+            las["pts"], las["hd"] = las["past"].pop()
             self.draw_lasso()
         else:
             self.drop_lasso()
@@ -280,6 +305,8 @@ class LassoDrawing:
         i = hit[0] if hit else self.lasso_point_at(e.x, e.y)
         if i is None:
             return False
+        if hd[i] or len(las["pts"]) > 3:
+            self.lasso_edited(self.lasso_saved())
         if hd[i]:
             hd[i] = None
         elif len(las["pts"]) > 3:
@@ -311,6 +338,7 @@ class LassoDrawing:
         if best[0] > POINT_PX * self.scale:
             return False
         _, i, t, curved = best
+        self.lasso_edited(self.lasso_saved())
         if curved:
             split_piece(pts, hd, i, min(max(t, 1e-6), 1 - 1e-6))
         else:
