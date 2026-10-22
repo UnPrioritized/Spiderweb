@@ -176,14 +176,15 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     got = [(n, as_used(t, r, use10 or all16)) for (n, t), r in zip(got, rules)]
     # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all"; in order: "order")
     # (merged shapes and Nested / Tiles / Ripples fills take channels by colour number, not by which colour starts
-    # first: a flipped or moved copy keeps its colours, user)
+    # first: a flipped or moved copy keeps its colours, user; pasted notes by track: a pasted song's channels stay
+    # in their order, user 2026-10-22)
     voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz"))} if mode == "auto" else {}
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes],
-                             [bool(sh.get("merge")) or has_pattern(sh) for sh in shapes], laps, keep,
+                             [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh for sh in shapes], laps, keep,
                              [r and not has_colours(sh, turns=True) for sh, r in zip(shapes, took)], voice_slots,
                              busy)
     return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}

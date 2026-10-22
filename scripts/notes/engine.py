@@ -1638,7 +1638,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     teams = teams or [None] * len(note_lists)
     back = back or [False] * len(note_lists)
     ordered = ordered or [False] * len(note_lists)
-    firsts, paste_back, paste_first = {}, set(), {}  # (unit -> the tick it counts as starting at: assign_slots first)
+    firsts, paste_back, paste_first, paste_ordered = {}, set(), {}, set()  # (unit -> the tick it counts as starting at: assign_slots first)
     made = {}
 
     def whole_starts(i):
@@ -1709,6 +1709,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     units[u] = np.concatenate([units[u], lst[which == k]])
                     s0 = int(starts[which == k].min())
                     paste_first[u] = min(paste_first.get(u, s0), s0)
+                if ordered[len(unit_of)]:  # (pasted notes: the whole paste's tracks in track order, below)
+                    paste_ordered.add(pid)
                 unit_of.append(np.asarray(us, np.int64)[which])
                 if b:  # (a gate flipped piece: the whole paste's tracks by where they start unflipped, below)
                     paste_back.add(pid)
@@ -1743,6 +1745,11 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             for u in paste_units[pid]:
                 if u in paste_first:
                     firsts[u] = paste_first[u]
+        for pid in paste_ordered:  # (one start for all: ties go by unit, made in track order)
+            us = [u for u in paste_units[pid] if u in paste_first]
+            s0 = min((paste_first[u] for u in us), default=0)
+            for u in us:
+                firsts[u] = s0
         forced += [us for us in team_units.values() if len(us) > 1]
         forced += [(p, u) for p, team in solid_teams for t, u in team_unit.items() if t[0] == team[0] and t != team]
         for p, team in solid_teams:  # (its own turn's shapes: its channel, as when it was one of them)
