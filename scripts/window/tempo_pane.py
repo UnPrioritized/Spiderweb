@@ -681,6 +681,13 @@ class TempoPane(tk.Canvas):
         self.bands = [(lo, hi)] if hi - lo > 1e-9 else []
         self.set_sel(items)
 
+    def drop_picks(self):
+        """Esc while this pane was clicked last: nothing picked, the Select boxes gone (user 2026-10-22)."""
+        if self.drag:
+            return
+        self.bands = []
+        self.set_sel([])
+
     def set_sel(self, items, part=None):
         self.sel, self.part = list(items), part
         self.box.sync()

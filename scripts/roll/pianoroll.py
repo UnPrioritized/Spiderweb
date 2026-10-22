@@ -924,7 +924,10 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         for i in () if lines_only else order:
             sh = self.app.shapes[i]
             if "notes" in sh and self.inside_strokes(cached_strokes(sh), self.x2t(x), self.y2p(y)):
-                return i  # pasted notes: anywhere in their box
+                if not self.big_on_screen(sh):
+                    return i  # pasted notes: anywhere in their box
+                if self.note_owner(x, y, among=[i]) == i:
+                    return i  # (big: only on / near its notes, its gaps are empty space, user 2026-10-22)
             if sh["kind"] == "custom" and sh["fill"] in ("fill", "spam"):
                 b, p = self.x2t(x), self.y2p(y)
                 test = fill_test(sh)
@@ -935,6 +938,14 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                     piece_knives(sh) or [], self.x2t(x), self.y2p(y)):
                 return i
         return None
+
+    def big_on_screen(self, sh):
+        """A shape's box wider or taller than half the piano roll's view (pasted notes as big as a whole song: a
+        click in its gaps couldn't deselect or place the play line, user 2026-10-22)."""
+        pts = np.concatenate([np.asarray(s, float).reshape(-1, 2) for s in cached_strokes(sh)])
+        w = abs(self.t2x(pts[:, 0].max()) - self.t2x(pts[:, 0].min()))
+        h = abs(self.p2y(pts[:, 1].max()) - self.p2y(pts[:, 1].min()))
+        return w > (self.winfo_width() - self.kb_w) / 2 or h > (self.winfo_height() - self.ruler_h) / 2
 
     def notes_near(self, x, y):
         """The notes under the mouse, a few pixels either side (short notes), and the tick there; None while the
@@ -1993,10 +2004,18 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 return pane.cancel_placing()
             if self.app.vel.confirm() | self.app.tempo_pane.confirm():  # (done with a velocity / tempo line, like
                 return                                                    # Enter)
-            self.drop_hz_keys()
+            busy = (self.draft is not None or self.drag is not None or self.typing is not None or self.app.parts
+                    or self.app.stroke is not None)
+            busy = self.drop_hz_keys() or busy
             self.cancel_draft()
             self.app.set_parts(())
             self.app.set_stroke(None)
+            if not busy:  # nothing to call off: Esc deselects (user 2026-10-22); the Tempo pane clicked last: its picks
+                if pane is self.app.tempo_pane:
+                    pane.drop_picks()
+                elif self.app.sels:
+                    self.box_kept = None
+                    self.app.select(None)
         elif k in ("return", "kp_enter"):
             if not (self.app.vel.confirm() | self.app.tempo_pane.confirm()):  # Enter = done with a velocity /
                 self.finish_poly()                                             # tempo line

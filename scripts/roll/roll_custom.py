@@ -62,6 +62,8 @@ class CustomBox:
             if math.hypot(x - ax - u * dx, y - ay - u * dy) <= 7 * s:
                 return ("side", side)
         inside = self.inside_box(corners, x, y)
+        if inside and "notes" in sh and self.big_on_screen(sh) and self.note_owner(x, y, [self.app.sel]) is None:
+            return None  # (big pasted notes: their gaps are empty space, hit_shape)
         if not inside:
             mids = [((corners[i][0] + corners[(i + 1) % 4][0]) / 2, (corners[i][1] + corners[(i + 1) % 4][1]) / 2)
                     for i in range(4)]
