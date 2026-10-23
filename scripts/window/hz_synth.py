@@ -62,7 +62,8 @@ LOOK = {"bg": PIC, "grid": GRID, "outside": "#1b1f24", "notes": "#34507e", "hint
 # the computer keyboard's letters playing the keys from C up (like many music programs: the middle row = white keys,
 # the row above = black ones); Z / X = an octave down / up
 LETTERS = ("a", "w", "s", "e", "d", "f", "t", "g", "y", "h", "u", "j", "k", "o", "l", "p", "semicolon")
-NO_LETTERS = 0x4 | (0x20000 if sys.platform == "win32" else 0x8)  # (Ctrl or Alt held: a shortcut, not a key)
+NO_LETTERS = 0x4 | (0x20000 if sys.platform == "win32" else 0x18 if sys.platform == "darwin" else 0x8)  # (Ctrl or
+# Alt held: a shortcut, not a key; Mac: Command or Option, untested)
 WIDE, TALL = 1200, 820  # the window's biggest size when it opens (about a big synth's own; user: it grew past the screen)
 LETTER_CHECK_MS = 100  # while a letter is held: how often we ask if it's still down (its let-go can get lost)
 

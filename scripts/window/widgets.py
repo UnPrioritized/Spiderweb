@@ -710,6 +710,30 @@ def linux_wheel(root):
     return True
 
 
+_BUTTON_23 = re.compile(r"((?:Button|ButtonPress|ButtonRelease)-|<|B)([23])(?=[->])")
+
+
+def mac_buttons():
+    """(Mac, untested) Tk 8.6 on macOS calls the right button 2 and the middle one 3 (the other way round from
+    Windows, Linux and Tk 8.7+): every binding made after this has them swapped, so right-click menus and middle-drag
+    panning work as written. Nothing elsewhere."""
+    if sys.platform != "darwin" or tk.TkVersion >= 8.7 or getattr(tk.Misc, "_mac_swapped", False):
+        return
+    plain = tk.Misc._bind
+
+    def _bind(self, what, sequence, func, add, needcleanup=1):
+        if isinstance(sequence, str):
+            sequence = _BUTTON_23.sub(lambda m: m[1] + ("3" if m[2] == "2" else "2"), sequence)
+        return plain(self, what, sequence, func, add, needcleanup)
+    tk.Misc._bind = _bind
+    tk.Misc._mac_swapped = True
+
+
+def wheel_unit():
+    """How much a Tk wheel event's delta is per wheel step: 120, but Tk 8.6 on macOS counts 1 (untested there)."""
+    return 1 if sys.platform == "darwin" and tk.TkVersion < 8.7 else 120
+
+
 class ScrollingSide:
     """A window's side panel that scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise it's
     stretched to the window's height (the main window, the drawer)."""

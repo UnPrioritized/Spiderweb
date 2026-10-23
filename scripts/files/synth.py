@@ -1,7 +1,8 @@
 """The built-in synth (the Hz bass preview): BASS + BASSMIDI by Un4seen Developments through ctypes.
 
 The DLLs sit in scripts/bass/x64 and x86 (the one matching this Python is used; the .exe carries the 64-bit ones
-inside); Linux's .so files in scripts/bass/linux-x64 (64-bit PCs only). They are free for non-commercial use only (README). Nothing here needs a MIDI-out device.
+inside); Linux's .so files in scripts/bass/linux-x64 (64-bit PCs only), macOS's .dylib files (Intel + Apple chips in
+one) in scripts/bass/mac (untested). They are free for non-commercial use only (README). Nothing here needs a MIDI-out device.
 
 Sound is made ahead of time, not live: render() turns a stretch of the notes into sound (48 kHz stereo floats) and
 can run in several threads at once, each on its own core (the DLL lets go of Python while it works). Speed depends
@@ -26,7 +27,7 @@ import numpy as np
 
 from files import errors, sfz
 from files.about import HERE
-from files.system import WINDOWS
+from files.system import MAC, WINDOWS
 
 RATE = 48000  # frames a second
 PREROLL = 1.0  # seconds rendered before a stretch and thrown away. Measured: joined stretches differ from one long
@@ -105,15 +106,17 @@ def load_dlls():
         return _dlls
     arch = "x64" if struct.calcsize("P") == 8 else "x86"
     folder = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "bass",
-                          arch if WINDOWS else "linux-" + arch)
+                          arch if WINDOWS else "mac" if MAC else "linux-" + arch)
+    ending = ".dylib" if MAC else ".so"
     try:
         if WINDOWS:
             bass = ctypes.WinDLL(os.path.join(folder, "bass.dll"))
             midi = ctypes.WinDLL(os.path.join(folder, "bassmidi.dll"))
             _pin(os.path.join(folder, "bass.dll"), os.path.join(folder, "bassmidi.dll"))
-        else:  # (Linux, a Linux user says it works: libbassmidi.so needs libbass.so's names, so that one is shared first)
-            bass = ctypes.CDLL(os.path.join(folder, "libbass.so"), mode=ctypes.RTLD_GLOBAL)
-            midi = ctypes.CDLL(os.path.join(folder, "libbassmidi.so"))
+        else:  # (Linux, a Linux user says it works: libbassmidi.so needs libbass.so's names, so that one is shared
+            # first; Mac the same way, untested)
+            bass = ctypes.CDLL(os.path.join(folder, "libbass" + ending), mode=ctypes.RTLD_GLOBAL)
+            midi = ctypes.CDLL(os.path.join(folder, "libbassmidi" + ending))
     except (AttributeError, OSError) as e:
         raise SynthError("synth.no_dll", err=e) from None
     u, i, p, f = ctypes.c_uint, ctypes.c_int, ctypes.c_void_p, ctypes.c_float

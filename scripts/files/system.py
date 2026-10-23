@@ -1,11 +1,12 @@
-"""What Spiderweb asks the operating system, each in one small function: the Windows way, the Linux way (untested
-until a Linux user reports) or a harmless answer when neither works."""
+"""What Spiderweb asks the operating system, each in one small function: the Windows way, the Linux way (a Linux
+user reports it works), the macOS way (untested) or a harmless answer when none works."""
 
 import ctypes
 import sys
 
 WINDOWS = sys.platform == "win32"
-ALT = 0x20000 if WINDOWS else 0x8  # Alt held, in a Tk event's state (Linux: Mod1)
+MAC = sys.platform == "darwin"
+ALT = 0x20000 if WINDOWS else 0x10 if MAC else 0x8  # Alt held, in a Tk event's state (Linux: Mod1; Mac: Option)
 
 try:
     from ctypes import wintypes  # Windows' C types (import it from here, never from ctypes)
@@ -67,6 +68,15 @@ def free_memory():
             return st.ullAvailPhys if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)) else None
         except (AttributeError, OSError):
             return None
+    if MAC:  # (untested) vm_stat's free + inactive + speculative pages, the page size on its first line
+        try:
+            text = _ask(["vm_stat"])
+            page = int(text.split("page size of")[1].split()[0])
+            pages = {k.strip(): v.strip().rstrip(".") for k, v in
+                     (line.split(":", 1) for line in text.splitlines()[1:] if ":" in line)}
+            return page * sum(int(pages.get(k, 0)) for k in ("Pages free", "Pages inactive", "Pages speculative"))
+        except (OSError, ValueError, IndexError):
+            return None
     try:  # Linux: MemAvailable = what can be used without swapping (in kB)
         with open("/proc/meminfo", encoding="ascii") as f:
             for line in f:
@@ -85,6 +95,11 @@ def total_memory():
         try:
             return st.ullTotalPhys if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)) else None
         except (AttributeError, OSError):
+            return None
+    if MAC:  # (untested)
+        try:
+            return int(_ask(["sysctl", "-n", "hw.memsize"]))
+        except (OSError, ValueError):
             return None
     try:
         with open("/proc/meminfo", encoding="ascii") as f:
@@ -105,6 +120,11 @@ def cpu_name():
                 return str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).strip()
         except OSError:
             return ""
+    if MAC:  # (untested)
+        try:
+            return _ask(["sysctl", "-n", "machdep.cpu.brand_string"]).strip()
+        except OSError:
+            return ""
     try:
         with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -115,15 +135,29 @@ def cpu_name():
     return ""
 
 
+def _ask(command):
+    """(Mac) What a small system program prints. OSError when it can't run or fails."""
+    import subprocess
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=5, check=True).stdout
+    except (subprocess.SubprocessError, UnicodeDecodeError) as e:
+        raise OSError(e) from None
+
+
 def dark_system():
-    """True when the system's apps are set to dark (Windows: Settings → Colours); False when light or unknown (the
-    other systems for now)."""
+    """True when the system's apps are set to dark (Windows: Settings → Colours; Mac: Appearance); False when light
+    or unknown (Linux for now)."""
     if WINDOWS:
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                                 r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
                 return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+        except OSError:
+            pass
+    elif MAC:  # (untested: "Dark" only while dark; light = the setting is missing and the program fails)
+        try:
+            return _ask(["defaults", "read", "-g", "AppleInterfaceStyle"]).strip() == "Dark"
         except OSError:
             pass
     return False
@@ -140,6 +174,8 @@ def open_path(path, text=False):
                 subprocess.Popen(["notepad.exe", path])
             else:
                 os.startfile(path)
+        elif MAC:  # (untested; -t = TextEdit)
+            subprocess.Popen(["open", "-t", path] if text else ["open", path])
         else:  # (Linux: the desktop's own opener)
             subprocess.Popen(["xdg-open", path])
         return True

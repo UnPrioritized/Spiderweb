@@ -97,7 +97,7 @@ from window.tempo_pane import TempoBox
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
-                            fit_dropdowns, good, grid_shown, no_focus, set_glide, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
+                            fit_dropdowns, good, grid_shown, mac_buttons, no_focus, set_glide, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -226,6 +226,7 @@ def cc_texts(shapes, mode):
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
+        mac_buttons()  # (Mac's Tk 8.6: right / middle button swapped back, before any binding)
         super().__init__()
         errors.install(self)
         look.apply(self)  # (the dark look, before any widget is made)

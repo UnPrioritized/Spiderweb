@@ -104,6 +104,8 @@ mouse shortcuts.
 
 You need:
 - **Windows or Linux.** A Linux user reports it works; copying notes to and from Domino works on Windows only.
+  macOS is untested: start it with `python3 spiderweb.py` (Python from python.org, not Apple's: its Tk is old). If
+  macOS blocks the sound files, run `xattr -d com.apple.quarantine scripts/bass/mac/*.dylib` once.
 - **Python 3.10 or newer** ([python.org](https://www.python.org); tested with 3.14; Tkinter comes with it).
 - **NumPy** (fast maths for millions of notes).
 
@@ -148,7 +150,7 @@ are the idea of the Tumour Generator in [Mapping Tools](https://github.com/OliBo
 written anew here for the piano roll.
 
 The Hz bass preview and the Built-in BASSMIDI playback use **BASS and BASSMIDI** by Un4seen Developments
-([un4seen.com](https://www.un4seen.com); the DLLs and Linux .so files in `scripts/bass`, the DLLs also inside the
+([un4seen.com](https://www.un4seen.com); the DLLs, Linux .so and macOS .dylib files in `scripts/bass`, the DLLs also inside the
 .exe). They are **not** covered by Spiderweb's MIT License: they are free for non-commercial use only. Anyone selling
 or otherwise making money from a copy of Spiderweb needs a BASS licence from Un4seen.
 

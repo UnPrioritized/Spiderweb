@@ -29,7 +29,7 @@ from roll.roll_shared import ALT, grab_while_panning
 from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
-from window.widgets import ListTip, LocalUndo, Scrub, Tooltip, bad, good, remember_place
+from window.widgets import ListTip, LocalUndo, Scrub, Tooltip, bad, good, remember_place, wheel_unit
 
 PATTERNS_FILE = os.path.join(USER, "patterns.json")
 OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -742,7 +742,7 @@ class FormulaDialog(tk.Toplevel):
             return
         s, x0, ym, length = self.view
         fit_s = self.fit_view(self.shown_loop())[0]
-        f = 1.2 ** (e.delta / 120)
+        f = 1.2 ** (e.delta / wheel_unit())
         f = max(fit_s / 20, min(fit_s * 200, s * f)) / s
         self.own_view = True
         self.view = (s * f, e.x - (e.x - x0) * f, e.y - (e.y - ym) * f, length)
