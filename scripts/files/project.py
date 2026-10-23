@@ -16,8 +16,9 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
-                          merges_unmade, slot_ports)
+                          merges_unmade, one_voice, shape_notes_tracks, slot_ports)
 from notes.hzbass import clean_hz
+from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
 from notes.passengers import STAY, USUAL, event_kind, midi_messages, pack_cc, placed, unpack_cc
@@ -879,8 +880,8 @@ class ProjectFiles:
             note += tr("project.ports_midi")
         note += self.tempo_notes(plan) + self.cc_note(cc, True)
         messagebox.showinfo(tr("project.spiderweb"),
-                            tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(self.rendered),
-                                                                               n=len(self.rendered)),
+                            tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(notes),
+                                                                               n=len(notes)),  # (as written)
                                tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
 
     def tempo_notes(self, plan):
@@ -929,8 +930,14 @@ class ProjectFiles:
         if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
             moved, cc = timed_ticks(plan, notes, cc)
             if parts:
-                moved = finer_notes(self.shapes, fine, notes, moved, parts, self.tempo, bpm, ppq, self.keys,
-                                    plan["events"])
+                mode = self.channel_mode.get()
+
+                def made(i, p):  # (shape i's notes + tracks as the piano roll makes them, all_notes: at PPQ p)
+                    sh = self.shapes[i] if mode == "auto" else one_voice(self.shapes[i])
+                    if self.rounds_apart() and has_colours(sh):
+                        sh = dict(sh, _rounds=True)
+                    return shape_notes_tracks(sh, p, self.keys)
+                moved = finer_notes(fine, notes, moved, parts, self.tempo, bpm, ppq, plan["events"], made, mode)
             notes = moved
         return notes, cc, plan
 
