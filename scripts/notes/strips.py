@@ -26,10 +26,10 @@ def clean_strips(s):
 
 
 def can_strip(sh):
-    """Shapes Separate strips works on: pasted notes, not notes whose tracks are their channels (Apply mask / Turn
-    into plain notes copies, images)."""
-    return ("notes" in sh and not sh.get("own_slots") and not sh.get("made") and "picture" not in sh
-            and "picture_notes" not in sh)
+    """Shapes Separate strips works on: notes shapes (pasted, and the frozen ones: Merged notes, Turn into plain
+    notes, Apply mask copies; user 2026-10-23: the song's merged copy said "1 strip"), not images (their tracks are
+    the picture's colours)."""
+    return "notes" in sh and "picture" not in sh and "picture_notes" not in sh
 
 
 def has_strips(sh):
