@@ -85,7 +85,7 @@ class SynthMod:
         self.mod_pick = None  # the source whose rings show (None: the picked macro's)
         self.mod_dials, self.mod_vars, self.mod_boxes, self.mod_text = {}, {}, {}, {}  # (by (source, knob))
         self.mod_picks, self.mod_pics, self.mod_boxes_of, self.mod_pic_for = {}, {}, {}, {}
-        rows = [ttk.Frame(page, style="Synth.TFrame") for _ in range(2)]
+        rows = self.mod_lines = [ttk.Frame(page, style="Synth.TFrame") for _ in range(2)]
         for i, row in enumerate(rows):
             row.pack(fill="x", anchor="w", pady=(0, 8))
         for i, src in enumerate(MOD_LFOS + MOD_ENVS):

@@ -105,10 +105,33 @@ class SynthMacros:
             self.macro_boxes.append(e)
             self.macro_names.append(name)
             self.macro_counts.append(count)
-        ttk.Label(box.body, text=tr("hz.synth_macro_hint"), style="Synth.Box.Dim.TLabel",
-                  wraplength=round(260 * s)).grid(row=0, column=MACROS, sticky="w", padx=(6, 0))
+        self.macro_hint = ttk.Label(box.body, text=tr("hz.synth_macro_hint"), style="Synth.Box.Dim.TLabel",
+                                    wraplength=round(260 * s))
+        self.macro_hint.grid(row=0, column=MACROS, sticky="w", padx=(6, 0))
+        self.macro_under = False  # (the hint moved under the macros: a narrow window)
+        box.bind("<Configure>", lambda e: self.fit_macros(e.width), add="+")
         for key, k in self.dials.items():
             k.ring_drag = lambda dy, fine, done, key=key: self.ring_drag(key, dy, fine, done)
+
+    def macro_least(self):
+        """The strip's least width: the macros + the sources' names, the hint under them."""
+        cells = [w for w in self.macro_box.body.grid_slaves(row=0) if w is not self.macro_hint]
+        return sum(w.winfo_reqwidth() for w in cells) + round(130 * self.s)  # (+ the cells' and the box's padding)
+
+    def fit_macros(self, width):
+        """A strip too narrow for the macros, the hint and the sources' names in one row: the hint goes under them
+        (wrapped to the room), so nothing runs off the window's edge."""
+        s = self.s
+        under = width < self.macro_least() + round(266 * s)  # (the hint's one-row width: never its wrapped one)
+        if under != self.macro_under:
+            self.macro_under = under
+            if under:
+                self.macro_hint.grid(row=1, column=0, columnspan=MACROS + 2, sticky="w", padx=(4, 0), pady=(4, 0))
+            else:
+                self.macro_hint.grid(row=0, column=MACROS, columnspan=1, sticky="w", padx=(6, 0), pady=0)
+        wrap = max(round(200 * s), width - round(40 * s)) if under else round(260 * s)
+        if int(str(self.macro_hint.cget("wraplength")) or 0) != wrap:
+            self.macro_hint.config(wraplength=wrap)
 
     # ------------------------------------------------------------ what the macros do
 

@@ -37,7 +37,7 @@ from window.hz_presets import PresetBar
 from window.hz_rack import SynthRack
 from window.synth_look import (BG, DIM, EDGE, GRID, MID, PANEL, PIC, TEXT, WARN, BigTab, bright, dark_title, mix,
                                styles)
-from window.widgets import Tooltip, remember_place
+from window.widgets import ShortLabel, Tooltip, remember_place, set_least
 
 BLACK = (1, 3, 6, 8, 10)
 KEY_HELD = "#7aa7f0"
@@ -167,7 +167,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         self.meter_asked, self.meter_poll = None, None  # ... being counted for (in the background), looking for it
         styles(self)
         self.configure(background=BG)
-        top = tk.Frame(self, background=BG)  # the big tabs, the preset bar, the note meter
+        top = self.top_row = tk.Frame(self, background=BG)  # the big tabs, the preset bar, the note meter
         top.pack(fill="x", padx=round(8 * s), pady=(round(8 * s), 0))
         self.page = tk.StringVar(value="knobs")
         self.tab_buttons = {}
@@ -190,8 +190,8 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         bottom.pack(side="bottom", fill="x")
         self.says = ttk.Label(bottom, text="", style="Synth.Dim.TLabel")
         self.says.pack(side="right", padx=(10, 0))
-        self.status = ttk.Label(bottom, text="", style="Synth.Dim.TLabel")
-        self.status.pack(side="left", fill="x")
+        self.status = ShortLabel(bottom, text="", style="Synth.Dim.TLabel")  # (too long: "…" + the whole in a tip)
+        self.status.pack(side="left", fill="x", expand=True)
         self.piano = tk.Canvas(self, background=BG, highlightthickness=0, height=round(70 * s))
         self.piano.pack(side="bottom", fill="x", padx=round(8 * s), pady=(round(4 * s), 0))
         self.knobs_box = ttk.Frame(self, style="Synth.TFrame")  # (the Knobs tab: scrolls when the boxes don't fit,
@@ -251,7 +251,9 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         self.update_idletasks()  # (a synth's size (user: it grew past the screen): as the knobs need, at most
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()  # WIDE x TALL and the screen less its taskbar;
         w = min(max(round(1000 * s), self.knobs.winfo_reqwidth()), round(WIDE * s), sw - 40)  # the boxes in more
-        self.lay_boxes(w - 20)  # rows then, and the Knobs tab scrolls)
+        w = min(max(w, self.least_width()), sw - 40)  # rows then, and the Knobs tab scrolls)
+        self.fit_least()
+        self.lay_boxes(w - 20)
         self.update_idletasks()
         tw, th = (max(f(b) for b in self.tab_buttons.values()) for f in (tk.Misc.winfo_reqwidth, tk.Misc.winfo_reqheight))
         for b in self.tab_buttons.values():  # (the big tabs all one size: the biggest one's, user)
@@ -289,6 +291,7 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         if not self.winfo_exists() or c.winfo_width() < 50:
             return
         self.knobs.update_idletasks()  # (a box that just grew, e.g. a Mode's knobs shown: its new width first)
+        self.fit_least()
         self.lay_boxes(c.winfo_width() - 20)
         need, have = self.knobs.winfo_reqheight(), c.winfo_height()
         c.itemconfigure(self.knobs_win, width=c.winfo_width(), height=max(need, have))
@@ -299,6 +302,24 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         elif self.knobs_bar.winfo_ismapped():
             self.knobs_bar.pack_forget()
             c.yview_moveto(0)
+
+    def least_width(self):
+        """The window's least width (user 2026-10-23: narrow windows cut boxes off, as the Hz window's least = its
+        widest piece; a real synth's window doesn't shrink past its panels either): the top row, the widest Knobs
+        box (rows wrap, one box can't), the MOD tab's rows, the macros' strip with its hint under it."""
+        s = self.s
+        edge = round(20 * s) + self.knobs_bar.winfo_reqwidth()  # (the tabs' padding + a scrollbar)
+        return max(self.top_row.winfo_reqwidth() + round(16 * s),
+                   max(b.winfo_reqwidth() for b in self.boxes.values()) + round(10 * s) + edge,
+                   max(r.winfo_reqwidth() for r in self.mod_lines) + edge,
+                   self.macro_least() + round(20 * s))
+
+    def fit_least(self):
+        """set_least with least_width, only when it changed (a box grew: a Mode's knobs shown)."""
+        least = self.least_width()
+        if least != getattr(self, "_least", None):
+            self._least = least
+            set_least(self, least, round(260 * self.s))
 
     def fit_mod(self):
         """The MOD tab: a scrollbar when its boxes + the links list's least room are taller than the window (user
