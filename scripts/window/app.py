@@ -95,7 +95,7 @@ from window import palettes
 from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.tempo_pane import TempoBox
-from window.track_list import TrackList
+from window.track_list import TrackList, build_strip
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
@@ -649,8 +649,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # the track list: Tab swaps it with the piano roll and its panes, in the same place (toggle_tracks)
         self.track_box = tk.Frame(self)
         inner = tk.Frame(self.track_box)
-        inner.pack(fill="both", expand=True)
         self.track_list = TrackList(inner, self, s)
+        build_strip(self, self.track_box, self.track_list).pack(fill="x")
+        inner.pack(fill="both", expand=True)
         add_zoom_bars(inner, self.track_list, up="tracks")
 
     def tracks_shown(self):

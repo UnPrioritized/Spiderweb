@@ -10,17 +10,21 @@ ruler and play line are canvas items. Each track's notes fill its row from its o
 import math
 import tkinter as tk
 import tkinter.font as tkfont
+from tkinter import ttk
 
 import numpy as np
 
 from files.lang import tr, trn
+from files.mathexpr import calc
 from files.midi_out import track_slots
+from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import slot_track_channel
-from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of
+from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from roll.roll_shared import MAX_SX, MIN_SX, SLOT_COLORS, grab_while_panning, slot_colours
 from window import look
-from window.widgets import Tooltip
+from window.snap_picker import SnapPicker
+from window.widgets import Scrub, Tooltip, bad, good, remember_place
 
 NAME_W = 150    # the names' column (x scale)
 RULER_H = 28    # the ruler: signatures on top, bar numbers under them
@@ -29,6 +33,7 @@ ROW_LEAST, ROW_MOST = 8, 160
 PAD = 3         # free pixels above / below a row's notes
 COLUMN = 28     # bar numbers closer than this many pixels: several bars per column (2, 4, 8...)
 TIP_SHAPES = 8  # shapes named in a row's tip at most
+FAINT = 25      # % the tracks shown behind the current one are drawn at, at first (0 = hidden)
 
 
 def hex_rgb(colour):
@@ -47,6 +52,11 @@ class TrackList(tk.Canvas):
         self.view_t, self.sx = 0.0, None  # beat at the picture's left edge, pixels per beat (None: fitted when shown)
         self.top = 0       # pixels the track rows are scrolled up
         self.current = None  # the highlighted track's slot (None: the Conductor row / nothing)
+        self.behind = set()  # slots shown faintly behind it on the piano roll ("Show multiple tracks")
+        self.faint = FAINT
+        self.faint_var = tk.StringVar(value=str(FAINT))
+        self.snap = tk.StringVar(value="bar")  # the track list's own snap (like Domino's; Bar at first)
+        self.picker = None  # the "Show multiple tracks" window while open
         self.bars = ()     # its scrollbars (zoombar.add_zoom_bars)
         self._made = None  # (rendered, pad, use10) the tracks below were worked out for
         self._slots = np.zeros(0, np.int64)  # the tracks: their slots, in order
@@ -85,7 +95,69 @@ class TrackList(tk.Canvas):
             self._made = (n, pad, use10)
             if self.current is not None and (self.current >= size or row_of[self.current] < 0):
                 self.current = None  # (its track is gone)
+            self.behind = {s for s in self.behind if s < size and row_of[s] >= 0}
         return self._slots
+
+    # ------------------------------------------------------------ settings (autosaved, no undo step)
+
+    def state(self):
+        return {"faint": self.faint, "snap": self.snap.get()}
+
+    def set_state(self, data):
+        if not isinstance(data, dict):
+            return
+        if type(data.get("faint")) is int and 0 <= data["faint"] <= 100:
+            self.faint = data["faint"]
+            self.faint_var.set(str(self.faint))
+        if isinstance(data.get("snap"), str):
+            self.snap.set(clean_snap(data["snap"]))
+
+    def on_faint(self, e):
+        """The Faint % box typed / stepped: the tracks behind drawn again that faint (0 = not drawn)."""
+        try:
+            v = int(round(float(calc(self.faint_var.get()))))
+            if not 0 <= v <= 100:
+                raise ValueError
+        except (ValueError, ZeroDivisionError, OverflowError):
+            return bad(e)
+        if str(v) != self.faint_var.get():
+            self.faint_var.set(str(v))
+        good(e)
+        if v != self.faint:
+            self.faint = v
+            self.app.schedule_autosave()
+            self.app.roll.request_redraw()
+
+    def snapped(self, beat):
+        """beat on the track list's snap: Bar = the nearest bar line (by the time signatures), a note length = its
+        steps from the bar's start, Off = as it is."""
+        snap, sigs = self.snap.get(), sigs_of(self.app.tempo)
+        if snap == "off":
+            return beat
+        if snap == "bar":
+            return min(bar_line(sigs, beat), bar_line(sigs, beat, after=True), key=lambda b: abs(b - beat))
+        step = snap_beats(snap, self.app.beats)
+        if not step:
+            return beat
+        at = where(sigs, beat)[2]
+        return max(0.0, at + round((beat - at) / step) * step)
+
+    def toggle_behind(self, slot):
+        self.behind ^= {slot}
+        self.shown_changed()
+
+    def shown_changed(self):
+        """Which tracks show changed: the list, the picker and the piano roll (when it shows one track) again."""
+        self.request_redraw()
+        if self.picker:
+            self.picker.fill()
+        self.app.roll.request_redraw()
+
+    def open_picker(self):
+        if self.picker:
+            self.picker.lift()
+            return
+        self.picker = BehindWindow(self)
 
     def name_of(self, row):
         return tr("tracks.name", n=row + 1)
@@ -217,17 +289,18 @@ class TrackList(tk.Canvas):
     def on_press(self, e):
         self.focus_set()
         self.tip.use()
-        if e.y < self.ruler_h:  # the play line, on the nearest bar line
+        if e.y < self.ruler_h:  # the play line, on the track list's snap (Shift: free)
             if e.x >= self.name_w and self.sx:
-                beat, sigs = max(0.0, self.x2t(e.x)), sigs_of(self.app.tempo)
-                self.app.set_playhead(min(bar_line(sigs, beat), bar_line(sigs, beat, after=True),
-                                          key=lambda b: abs(b - beat)))
+                beat = max(0.0, self.x2t(e.x))
+                self.app.set_playhead(beat if e.state & 0x1 else self.snapped(beat))
             return
         row = self.row_at(e.y)
         if row is None:
             return
+        if e.state & 0x4 and row >= 0:  # Ctrl+click: shown behind the current track or not
+            return self.toggle_behind(int(self.tracks()[row]))
         self.current = None if row < 0 else int(self.tracks()[row])
-        self.request_redraw()
+        self.shown_changed()
 
     def on_motion(self, e):
         row = self.row_at(e.y)
@@ -261,6 +334,8 @@ class TrackList(tk.Canvas):
         """The notes changed (App.shapes_changed): drawn again while shown."""
         if self.winfo_ismapped():
             self.request_redraw()
+        if self.picker:
+            self.picker.fill()
 
     def request_redraw(self):
         if self._job is None:
@@ -426,16 +501,20 @@ class TrackList(tk.Canvas):
             if self.row_h >= 12 * s:
                 colour = look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT
                 ch = self.channel_of(slot)
-                room = x1 - 16 * s - measure(ch) - 8 * s
+                room = x1 - 26 * s - measure(ch) - 8 * s
                 name = cut_text(self.name_of(row), room, measure)
                 mid = (ya + yb) / 2
                 if mid > top:
-                    self.create_text(8 * s, mid, text=name, anchor="w", fill=colour, font=font)
+                    if slot in self.behind:  # (shown behind the current track: a dot in its colour)
+                        r = 3.5 * s
+                        self.create_oval(10 * s - r, mid - r, 10 * s + r, mid + r, fill=self.colour_of(slot),
+                                         outline=colour)
+                    self.create_text(18 * s, mid, text=name, anchor="w", fill=colour, font=font)
                     self.create_text(x1 - 8 * s, mid, text=ch, anchor="e",
                                      fill=look.TRACK_PICK_TEXT if picked else look.HINT, font=font)
             self.create_line(0, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
         self.create_rectangle(0, y0, x1, top, fill=look.TRACK_NAME_BG, outline="")  # (rows scrolled under it)
-        self.create_text(8 * s, y0 + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
+        self.create_text(18 * s, y0 + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
                          font=font)
         self.create_line(0, top, x1, top, fill=look.ROLL_EDGE)
         self.create_line(x1, 0, x1, h, fill=look.ROLL_EDGE)
@@ -459,6 +538,96 @@ class TrackList(tk.Canvas):
         if self.name_w <= x <= self.winfo_width():
             self.create_line(x, 0, x, self.winfo_height(), fill=look.PLAY_LINE, width=max(1, round(self.scale)),
                              tags="playhead")
+
+
+def build_strip(app, parent, tl):
+    """The strip above the track list: Show multiple tracks… + Faint [n] %, the track list's own snap."""
+    strip = ttk.Frame(parent, padding=(2, 2))
+    b = ttk.Button(strip, text=tr("tracks.show_multiple"), command=tl.open_picker)
+    b.pack(side="left")
+    Tooltip(b, tr("tracks.show_multiple_tip"))
+    lb = ttk.Label(strip, text=tr("tracks.faint"))
+    lb.pack(side="left", padx=(10, 4))
+    e = ttk.Entry(strip, textvariable=tl.faint_var, width=4, justify="center")
+    e.pack(side="left")
+    pc = ttk.Label(strip, text="%")
+    pc.pack(side="left", padx=(2, 0))
+    e.bind("<Return>", lambda ev: (tl.on_faint(e), "break")[1])
+    e.bind("<FocusOut>", lambda ev: tl.on_faint(e))
+    Scrub(app, [(e, tl.faint_var, lambda: tl.on_faint(e))], (5, 20, 1), 0, 100, label=lb, drag_box=True,
+          no_undo=True)
+    for w in (lb, e, pc):
+        Tooltip(w, tr("tracks.faint_tip"))
+    good(e)
+    ttk.Separator(strip, orient="vertical").pack(side="left", fill="y", padx=10)
+    ttk.Label(strip, text=tr("app.snap")).pack(side="left", padx=(0, 4))
+    SnapPicker(app, strip, tl.snap, tip=tr("tracks.snap_tip")).button.pack(side="left")
+    tl.snap.trace_add("write", lambda *_: app.schedule_autosave())
+    return strip
+
+
+class BehindWindow(tk.Toplevel):
+    """Show multiple tracks: which tracks the piano roll shows faintly behind the current one (Ctrl+click a row in
+    the track list does the same). Not modal: changes show at once."""
+
+    def __init__(self, tl):
+        app = tl.app
+        super().__init__(app)
+        self.tl = tl
+        self.title(tr("tracks.picker_title"))
+        self.transient(app)
+        box = ttk.Frame(self, padding=8)
+        box.pack(fill="both", expand=True)
+        ttk.Label(box, text=tr("tracks.picker_hint"), foreground=look.HINT, wraplength=round(260 * app.scale),
+                  justify="left").pack(anchor="w", pady=(0, 6))
+        row = ttk.Frame(box)
+        row.pack(fill="both", expand=True)
+        self.list = tk.Listbox(row, selectmode="multiple", exportselection=False, activestyle="none", height=14,
+                               width=26)
+        sb = ttk.Scrollbar(row, orient="vertical", command=self.list.yview)
+        self.list.config(yscrollcommand=sb.set)
+        self.list.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        self.list.bind("<<ListboxSelect>>", lambda e: self.picked())
+        btns = ttk.Frame(box)
+        btns.pack(fill="x", pady=(8, 0))
+        ttk.Button(btns, text=tr("tracks.picker_all"), command=lambda: self.set_all(True)).pack(side="left")
+        ttk.Button(btns, text=tr("tracks.picker_none"), command=lambda: self.set_all(False)).pack(side="left",
+                                                                                                 padx=(4, 0))
+        ttk.Button(btns, text=tr("tracks.picker_close"), command=self.close).pack(side="right")
+        self.bind("<Escape>", lambda e: self.close())
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.slots = []
+        self.fill()
+        remember_place(self, "tracks_picker")
+
+    def fill(self):
+        """The rows again (the tracks / the current one changed), the picked ones selected."""
+        tl, lb = self.tl, self.list
+        slots = [int(s) for s in tl.tracks()]
+        top = lb.yview()[0]
+        lb.delete(0, "end")
+        for row, slot in enumerate(slots):
+            text = f"{tl.name_of(row)}  ·  {tl.channel_of(slot)}"
+            lb.insert("end", tr("tracks.picker_current", name=text) if slot == tl.current else text)
+            if slot == tl.current:
+                lb.itemconfig(row, foreground=look.HINT)
+            if slot in tl.behind:
+                lb.selection_set(row)
+        self.slots = slots
+        lb.yview_moveto(top)
+
+    def picked(self):
+        self.tl.behind = {self.slots[i] for i in self.list.curselection() if i < len(self.slots)}
+        self.tl.shown_changed()
+
+    def set_all(self, on):
+        self.tl.behind = set(self.slots) if on else set()
+        self.tl.shown_changed()
+
+    def close(self):
+        self.tl.picker = None
+        self.destroy()
 
 
 def cut_text(text, room, measure):
