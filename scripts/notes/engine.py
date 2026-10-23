@@ -41,6 +41,7 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
                          reshaped_notes as merge_reshaped, turned_notes as merge_turned, with_rounds as merge_rounds)
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
+from notes.trim import apply_trim
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
@@ -788,6 +789,8 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
         return with_claw(notes, tracks, step["cfg"], ppq)
     if tool == "strum":
         return with_strum(notes, tracks, step["cfg"], ppq)
+    if tool == "trim":
+        return _after(apply_trim, notes, tracks, step["cfg"], ppq)
     if tool == "vel":  # (over the shape's time, like its velocity line)
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
         return velocities(notes, step["pts"], float(t.min()), float(t.max())), tracks
