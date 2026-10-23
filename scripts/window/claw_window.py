@@ -122,6 +122,8 @@ class ClawWindow(ToolWindow):
                                                                                 padx=(5, 0))
         self.cut_row = cut.grid_slaves(row=1)  # (only shown while "shorten" is ticked, user)
         self.update_idletasks()  # (as wide as the widest mode, so the window keeps its width)
+        pb, pf = self.typed_rows["period"]  # (typed Period's ▾ under the dropdowns' ones)
+        self.period_back.pack_configure(padx=(4 + max(0, pb.winfo_reqwidth() - pf.winfo_reqwidth()), 0))
         box.columnconfigure(1, minsize=max(f.winfo_reqwidth() for f in (*self.boxes.values(), cut)) - round(80 * s))
 
         row = ttk.Frame(box)
@@ -219,6 +221,7 @@ class ClawWindow(ToolWindow):
         b.pack(side="left", padx=(4, 0))
         b["menu"] = self.choice_menu(b, key, self.menus[key][1], None)
         Tooltip(b, tr("claw.tip_back_to_list"))
+        return b
 
     def typed(self):
         return list(self.claw.get("typed") or [])
@@ -245,12 +248,12 @@ class ClawWindow(ToolWindow):
         f = ttk.Frame(holder)
         self.period_label = lb
         var = self.vars["period"] = tk.StringVar()
-        e = self.entries["period"] = ttk.Entry(f, textvariable=var, width=6)
+        e = self.entries["period"] = ttk.Entry(f, textvariable=var, width=5)  # (no wider than the dropdowns)
         e.pack(side="left")
         e.bind("<Return>", lambda ev: (self.on_entry("period"), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_entry("period"))
         unit_word(ttk.Label(f, foreground=look.HINT), var, "unit.beats").pack(side="left", padx=(4, 0))
-        self.back_button(f, "period")
+        self.period_back = self.back_button(f, "period")
         sc = self.period_scrub = Scrub(self.app, [(e, var, lambda: self.on_entry("period", False))],
                                        lambda: (0.25, 1, 1 / self.app.ppq), None, MAX_PERIOD,
                                        text=lambda v: f"{v:.9f}".rstrip("0").rstrip("."))

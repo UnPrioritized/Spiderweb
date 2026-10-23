@@ -1422,11 +1422,18 @@ def unit_text(text, many, one=None):
 
 def unit_word(label, var, many, one=None):
     """A unit word beside a number box (label: a ttk.Label): unit_text, following the box as it's typed. Returns
-    the label."""
+    the label. It always takes the room of its longer word, so what comes after it never moves (user 2026-10-23:
+    "1 beat" / "beats" moved the Claw machine's ▾)."""
+    f = tkfont.Font(root=label, font=str(label.cget("font")) or ttk.Style(label).lookup(
+        label.cget("style") or label.winfo_class(), "font") or "TkDefaultFont")
+    widths = {t: f.measure(t) for t in (unit_text("2", many, one), unit_text("1", many, one))}
+    shown = [None]
+
     def put(*_):
         text = unit_text(var.get(), many, one)
-        if label.winfo_exists() and label.cget("text") != text:
-            label.config(text=text)
+        if label.winfo_exists() and shown[0] != text:
+            shown[0] = text
+            label.config(text=text, padding=(0, 0, max(widths.values()) - widths.get(text, 0), 0))
     trace = var.trace_add("write", put)
     label.bind("<Destroy>", lambda e: var.trace_remove("write", trace) if e.widget is label else None, add="+")
     put()
