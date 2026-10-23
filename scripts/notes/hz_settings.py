@@ -905,8 +905,10 @@ def clean_boost(b):
 
 def boosted(src):
     """The effects of a layer its CC boost sends (hz["boost"]): heard lines only (not switched off; a Volume line
-    full all along does nothing)."""
+    full all along does nothing), on notes placed (none: the shape's plain notes have no effects to boost)."""
     boost, fx, off = src.get("boost") or {}, src.get("fx") or {}, src.get("off") or ()
+    if not src.get("tones"):
+        return []
     return [n for n in BOOST_FX if boost.get(n) and n in fx and n not in off
             and not (n == "volume" and "volume" not in (src.get("loop") or {}) and all(p[1] == 1.0 for p in fx[n]))]
 

@@ -34,7 +34,7 @@ import numpy as np
 from notes.hzbass import (BOOST_FX, CC_DB, CC_FX, CC_NUMBER, CC_START, CC_TARGETS, RING_MOST, TREMOLO, TREMOLO_DEPTH,
                           WHEEL_KEYS, boosted, cc_midi, fx_at, glide_tones, has_cc, funnel_box, heard_layers, key_range,
                           left_edge, legato_links, links, live, note_span, own_channels, rack_tail, setting_at,
-                          sound_span, tempo_at, without_cc)
+                          sound_span, tails, tempo_at, timed_line, without_cc)
 
 STEPS = 96  # values a beat at most
 LEAD = 0.05  # seconds the first values come before the first note
@@ -81,9 +81,10 @@ def cc_fall(hz):
 
 
 def per_second(hz, beat, bpm=None):
-    """Beats a second at a beat from the Hz bass's left edge: the tempo it was made for there (its tempo line, D),
-    else bpm (the caller's), else its one BPM."""
-    return (tempo_at(hz, beat) if hz.get("tempo") or bpm is None else bpm) / 60.0
+    """Beats a second at a beat from the Hz bass's left edge: the tempo it was made for there (its tempo line, D,
+    else its one BPM: the run-on's seconds at the tempo it plays at, as App.cc_busy counts them; hunt 2026-10-23),
+    else bpm (the caller's)."""
+    return (tempo_at(hz, beat) if hz.get("tempo") or hz.get("bpm") or bpm is None else bpm) / 60.0
 
 
 def voices(hz, left):
@@ -174,6 +175,7 @@ def cc_events(sh, ppq, bpm, layers=None):
     tones = [n for l in layers for n in l.get("tones") or ()]
     if not tones and voice:
         return []
+    own = layers  # (each layer with its own notes: the CC boost goes by them; none placed = no boost)
     if not tones:  # (no notes placed: the shape plays across its box, so the lines run over it, as one note)
         tones = [whole_tone(sh)]
         layers = [dict(l, tones=tones) for l in layers]
@@ -189,17 +191,17 @@ def cc_events(sh, ppq, bpm, layers=None):
     beats = ticks / ppq - left
     out = []
     used = []
-    boost = next((l for l in layers if boosted(l)), None)
+    boost = any(boosted(l) for l in own)
     for name in CC_FX:
         src = next((l for l in layers if name in (l.get("fx") or {})), None)
-        if src is None and not (name == "cc_expression" and boost is not None):
+        if src is None and not (name == "cc_expression" and boost):
             continue
         used.append(name)
         if name == "cc_wheel":
             out += [(t0, *m) for m in bend_range(WHEEL_KEYS)]
         v = fx_at(src, name, beats) if src is not None else np.ones(len(beats))
-        if name == "cc_expression" and boost is not None:  # (louder / quieter by the boost: dB added, like two faders)
-            v = np.where(v > 0, v + boost_db(hz, boost, beats, bpm) / CC_DB, 0.0)
+        if name == "cc_expression" and boost:  # (louder / quieter by the boost: dB added, like two faders)
+            v = np.where(v > 0, v + boost_db(hz, own, beats, bpm) / CC_DB, 0.0)
         vals = cc_midi(name, v)
         keep = np.ones(len(vals), bool)
         keep[1:] = vals[1:] != vals[:-1]
@@ -214,39 +216,74 @@ def cc_events(sh, ppq, bpm, layers=None):
     return out
 
 
-def boost_db(hz, src, beats, bpm=None):
-    """The CC boost (layer src's hz["boost"], user 2026-10-23) at beats (an array from the left edge) in dB: its
-    Tremolo and Volume as the notes have them, read from the newest note (one channel: like the lines), each times
-    its boost. The Tremolo waves on after the notes (through the run-on); the Volume never gets quieter faster than
-    the sound rings out by itself (CC_DB over the run-on, ring_of), so a note's ring isn't cut dead where its line
-    drops (user: "notes just dead stop")."""
+def boost_db(hz, layers, beats, bpm=None):
+    """The CC boost (each layer's hz["boost"], user 2026-10-23) at beats (an array from the left edge) in dB, for
+    `layers` = the heard layers as played, each with its own notes (one voice's with Own channel per note), each
+    effect times its boost:
+    - Tremolo: the first layer boosting it, read from its newest note as its notes have it (one channel: like the
+      lines); it waves on after the notes, through the run-on;
+    - Volume: the LOUDEST note sounding (its own envelope, its fall after the note included; a layer not boosting
+      its Volume counts as full while its notes sound), so no note is turned down by another's envelope (hunt
+      2026-10-23). Where nothing sounds it fades from where the sound stopped by CC_DB over the run-on (ring_of),
+      so a note's ring isn't cut dead (user: "notes just dead stop")."""
     beats = np.asarray(beats, float)
-    boost, lfo = src.get("boost") or {}, src.get("lfo") or {}
     db = np.zeros(len(beats))
-    names = boosted(src)
-    if not len(beats) or not names:
+    layers = [l for l in layers if l.get("tones")]
+    if not len(beats) or not layers:
         return db
-    if "tremolo" in names:
+    src = next((l for l in layers if "tremolo" in boosted(l)), None)
+    if src is not None:
+        lfo = src.get("lfo") or {}
         rate = fx_at(src, "tremolo", beats) * TREMOLO  # (times a beat; turns counted from the newest note's start)
         turns = np.concatenate([[0.0], np.cumsum(0.5 * (rate[1:] + rate[:-1]) * np.diff(beats))])
-        span = note_span(src, beats)
-        s0 = beats if span is None else np.asarray(span[0], float)
+        s0 = np.asarray(note_span(src, beats)[0], float)
         turns = turns - np.interp(s0, beats, turns)
-        since = beats - s0
-        depth = lfo.get("tremolo_depth", TREMOLO_DEPTH)
-        depth = setting_at(src, "tremolo_depth", depth, beats)
-        wait, rise = lfo.get("tremolo_wait", 0.0), lfo.get("tremolo_rise", 0.0)
-        come = np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0 else (since >= wait - 1e-9).astype(float)
+        depth = setting_at(src, "tremolo_depth", lfo.get("tremolo_depth", TREMOLO_DEPTH), beats)
+        tones = src["tones"]
+        if timed_line(src, "tremolo_in", beats[:1], tones[0]) is not None:  # (Delay / Rise moved by the MOD tab:
+            come = np.zeros(len(beats))  # each note as the notes have it, timed_line)
+            heads = {}
+            for n in tones:
+                heads.setdefault(float(note_span(src, 0.0, n)[0]), n)
+            for start, n in heads.items():
+                at = s0 == start
+                if at.any():
+                    come[at] = timed_line(src, "tremolo_in", beats[at], n)
+        else:
+            since, wait, rise = beats - s0, lfo.get("tremolo_wait", 0.0), lfo.get("tremolo_rise", 0.0)
+            come = np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0 else (since >= wait - 1e-9).astype(float)
         f = 1.0 - depth * come * (1.0 - np.cos(2.0 * np.pi * turns)) / 2.0
-        db += boost["tremolo"] * 20.0 * np.log10(np.maximum(f, 1e-6))
-    if "volume" in names:
-        level = 20.0 * np.log10(np.maximum(fx_at(src, "volume", beats), 1e-6))
-        ring = ring_of(hz)
-        if ring > 0:  # (falls no faster than CC_DB a run-on: the highest of what came before, fading, and now)
-            sec = np.concatenate([[0.0], np.cumsum(np.diff(beats) / per_second(hz, beats[1:], bpm))])
-            fade = CC_DB / ring * sec
-            level = np.maximum.accumulate(level + fade) - fade
-        db += boost["volume"] * np.maximum(level, -CC_DB * 2)
+        db += src["boost"]["tremolo"] * 20.0 * np.log10(np.maximum(f, 1e-6))
+    if any("volume" in boosted(l) for l in layers):
+        held = np.full(len(beats), -np.inf)  # (the loudest note held; ... the loudest fall after a note)
+        fall = np.full(len(beats), -np.inf)
+        for l in layers:
+            amount = l["boost"]["volume"] if "volume" in boosted(l) else 0.0
+            falls = tails(l)
+            for n in l["tones"]:
+                end = n["t"] + n["len"]
+                a = int(np.searchsorted(beats, n["t"], "left"))
+                m = int(np.searchsorted(beats, end, "right"))
+                b = int(np.searchsorted(beats, end + falls.get(n["id"], 0.0), "right"))
+                if b > a:
+                    v = amount * 20.0 * np.log10(np.maximum(fx_at(l, "volume", beats[a:b], n), 1e-6)) if amount else 0.0
+                    v = np.broadcast_to(v, (b - a,))
+                    held[a:m] = np.maximum(held[a:m], v[:m - a])
+                    fall[m:b] = np.maximum(fall[m:b], v[m - a:])
+        on = np.isfinite(held)
+        if on.any():
+            first = int(np.argmax(on))
+            last = np.maximum.accumulate(np.where(on, np.arange(len(beats)), -1))
+            before = last < 0
+            last = np.where(before, first, last)
+            ring = ring_of(hz)
+            if ring > 0:  # (after a note: where it was let go, fading by CC_DB over the run-on, or its fall if slower)
+                sec = np.concatenate([[0.0], np.cumsum(np.diff(beats) / per_second(hz, beats[1:], bpm))])
+                hold = held[last] - CC_DB / ring * np.maximum(0.0, sec - sec[last])
+            else:
+                hold = np.where(before, held[first], -np.inf)
+            level = np.where(on, np.maximum(held, fall), np.maximum(fall, hold))
+            db += np.maximum(level, -CC_DB * 2)
     return db
 
 
