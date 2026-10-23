@@ -4,11 +4,11 @@ The Conductor row on top has a line at each tempo change: the faster the tempo, 
 
 Spiderweb picks the tracks itself (see Channels), so the list only shows them: use it to check which shapes land on which track before you export. Rest the mouse on a track's name to see its channel, how many notes it has and which shapes they come from. Long names end in "…" and show whole there.
 
-Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar under the list to zoom in time, drag an end of the bar on its right to make the rows taller or shorter. Ctrl+wheel zooms in time, Ctrl+Shift+wheel changes the rows' height, Shift+wheel scrolls sideways. Zoomed far out, each column holds 2, 4, 8... bars, so the bar numbers never run into each other.
+Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar under the list to zoom in time, drag an end of the bar on its right to make the rows taller or shorter. Ctrl+wheel zooms in time, Ctrl+Shift+wheel changes the rows' height, Shift+wheel scrolls sideways. Zoomed far out, each column holds 2, 4, 8... bars, so the bar numbers never run into each other. The track list remembers its zoom and where you were, also after Spiderweb restarts.
 
 ## Highlighting a track
 
-Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you click the Conductor row in the track list (nothing highlighted shows every track again). Hidden notes still play and still go into the files.
+Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you click the Conductor row in the track list (nothing highlighted shows every track again). Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, and Ctrl+A leaves them out. Hidden notes still play and still go into the files.
 
 ## Multiple tracks
 
