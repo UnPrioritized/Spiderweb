@@ -618,11 +618,11 @@ def worked_now(shapes, notes, ppq, nkeys, notes_of):
     return units, shown
 
 
-def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
+def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None, faint=True):
     """The notes as the piano roll draws them with the masks: (rows, covered shapes). Rows of the shapes a mask
-    covers come twice: all of them as ghosts (velocity -1, painted faint), then the parts that show over them
-    (start, end trimmed; every mask's own, they may overlap), taken from pattern (rendered without the masks' own
-    notes; None = rendered). No masks = rendered itself."""
+    covers come twice: all of them as ghosts (velocity -1, painted faint; faint False = left out: the toolbar's
+    0 %), then the parts that show over them (start, end trimmed; every mask's own, they may overlap), taken from
+    pattern (rendered without the masks' own notes; None = rendered). No masks = rendered itself."""
     units = mask_units(shapes)
     _room[0] = max(16, 2 * sum(map(len, units)))
     if not units or not len(rendered):
@@ -650,6 +650,8 @@ def mask_view(rendered, shapes, ppq, nkeys, notes_of, pattern=None):
     if not covered:
         return rendered, set()
     under = np.isin(owner, list(covered))
+    if not faint:
+        return np.concatenate([rendered[~under]] + parts), covered
     ghosts = rendered[under].copy()
     ghosts[:, 3] = -1
     return np.concatenate([rendered[~under], ghosts] + parts), covered

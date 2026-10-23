@@ -200,7 +200,6 @@ STROKE = pick("#c0392b", "#dcdce0")  # the drawer's strokes, its Empty cross (da
 ABOVE_EDGE = pick("#ffffff")  # round that arrow
 ORIGIN, ORIGIN_PICKED = pick("#efc0c0", "#7a5656"), pick("#e89a9a", "#a86a6a")  # a line as drawn under its tumours
 DRAFT_LINE = pick("#0a8f0a", "#3fcf3f")  # the shape being drawn
-GHOST_NOTE = pick(("#f0f0f0", "#dadada"), ("#454548", "#505054"))  # a masked shape's notes the mask hides (mask.py)
 MASK_LINE, MASK_LINE_PICKED = pick("#008c8c", "#3fc9c9"), pick("#00b3b3", "#7ae6e6")  # a mask's dashed line
 MASK_GROUPS = [  # a mask group's dashed line, (line, picked) (mask.GROUP_COLOURS; never red or the plain mask's teal)
     (pick("#d97a00", "#f0a040"), pick("#ff9a20", "#ffc580")),  # orange

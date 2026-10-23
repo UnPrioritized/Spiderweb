@@ -22,7 +22,7 @@ from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_kniv
 from notes.sustain import is_sustained
 from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, ruler_marks, short_bpm
-from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, GHOST_COLOR, PIANO_88, PREVIEW_LIMIT,
+from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
 from window import look
@@ -35,11 +35,9 @@ PART_COLOR = look.PART
 TWIN_COLOR = look.TWIN
 # Note colours: number = colour * 32 + velocity // 4 (low velocity = paler fill, the outline stays); colours = the
 # slot colours, then selected (unused: a selected shape's notes keep their colours, user; a red line goes round
-# them, draw_ring), then the shape being drawn, then the ghosts of notes a mask hides (velocity -1 in app.drawn,
-# painted as GHOST_CODE)
-SELECTED, DRAFT, GHOST = len(SLOT_COLORS), len(SLOT_COLORS) + 1, len(SLOT_COLORS) + 2
-GHOST_CODE = GHOST * 32 + 31
-NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR, GHOST_COLOR]
+# them, draw_ring), then the shape being drawn. Ghosts of notes a mask hides (velocity -1 in app.drawn): ghost_code
+SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
+NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
                for level in range(32)]
 RING_COLOR = look.RING
 RING_RGB = np.frombuffer(bytes.fromhex(RING_COLOR[1:]), np.uint8)
@@ -190,13 +188,22 @@ NOTE_RGB = np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair] fo
 # placed pictures' notes: 16 more colour groups after these, the picture's own colours (no paler shades: the colour IS
 # the picture; the outline a darker shade of it). note_tables() adds them for the colours in use.
 PICTURE_GROUP = len(NOTE_COLORS) // 32
+# then the ghosts (notes a mask hides): one more group per group above, its full colour (fill + outline) faded toward
+# the background to GHOST_FADE[0] % (the toolbar's box by Mask preview; 0 = not drawn at all: mask_view)
+GHOST_BASE = PICTURE_GROUP + 16
+GHOST_FADE = [20]
 _tables = {}
+
+
+def ghost_code(group):
+    """The colour number a ghost of a note in this colour group is painted with."""
+    return (GHOST_BASE + group) * 32 + 31
 
 
 def note_tables(pal):
     """(NOTE_COLORS, NOTE_RGB) with the picture colours pal ("RRGGBB" list or None) added as groups
-    PICTURE_GROUP.. (grey where there's none)."""
-    key = tuple(pal or ())
+    PICTURE_GROUP.. (grey where there's none), then every group's ghost colours (GHOST_BASE..)."""
+    key = tuple(pal or ()), GHOST_FADE[0]
     got = _tables.get(key)
     if got is None:
         extra = []
@@ -205,6 +212,8 @@ def note_tables(pal):
             rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
             dark = "#%02x%02x%02x" % tuple(int(c * 0.6) for c in rgb)
             extra += [("#" + h.lower(), dark)] * 32
+        away = 1 - GHOST_FADE[0] / 100
+        extra += [(fade(f, away), fade(b, away)) for f, b in (NOTE_COLORS + extra)[31::32] for _ in range(32)]
         colors = NOTE_COLORS + extra
         rgb = np.concatenate([NOTE_RGB, np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
                                                   for pair in extra], np.uint8)])
@@ -304,7 +313,7 @@ def painting_order(fast, rendered, start, sels, pics, keys, use10):
     rank[~sel] = np.arange(others)
     rank[sel] = np.arange(others, owners)
     made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), start, rank, owners,
-                            pics if pics.any() else np.zeros(0, bool), slot_colours(use10), PICTURE_GROUP, GHOST_CODE)
+                            pics if pics.any() else np.zeros(0, bool), slot_colours(use10), PICTURE_GROUP, GHOST_BASE)
     return made, others
 
 
@@ -1101,7 +1110,7 @@ class RollDrawing:
             vel = notes[on, 3]
             code = color * 32 + np.clip(vel, 0, 127) // 4
             return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
-                    np.where(vel < 0, GHOST_CODE, code) if len(vel) and vel.min() < 0 else code)
+                    np.where(vel < 0, ghost_code(color), code) if len(vel) and vel.min() < 0 else code)
 
         if main is None:
             lo, hi = self.visible_range(t_lo, t_hi)

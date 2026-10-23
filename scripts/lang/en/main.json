@@ -118,6 +118,7 @@
  "mask.tick_tip": "While ticked, whatever you draw becomes a mask: a preview that shows the shapes under it only inside it (the rest faint). Nothing is cut: the shapes under it stay whole and still sound. Works with Live shape too (paint with the mask).",
  "mask.preview": "Mask preview",
  "mask.preview_tip": "Ticked: masks preview their cut, the parts of the shapes under them outside the mask drawn faint. Unticked: the shapes under masks are drawn whole, only the masks' dashed lines show. Nothing changes in the sound or the file either way, and Apply mask works the same.",
+ "mask.fade_tip": "How much of the hidden parts still shows, in their own colours: 0 % = not drawn at all, 100 % = as solid as the other notes. Only changes what you see.",
  "mask.label":"Mask: {label}",
  "mask.panel_tick": "Mask",
  "mask.panel_tip": "A mask shows the shapes under it only inside it; the rest is drawn faint. The shapes under it don't change and still sound. Untick to make it a normal shape again.",

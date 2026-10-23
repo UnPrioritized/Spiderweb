@@ -182,7 +182,7 @@ def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
         c = cols[notes[i, 4] % nslots]
         if len(pics) and pics[min(max(notes[i, 5], 0), len(pics) - 1)]:
             c = picgroup + min(notes[i, 4], 15)
-        color[o] = ghost if notes[i, 3] < 0 else c * 32 + min(notes[i, 3], 127) // 4
+        color[o] = (ghost + c) * 32 + 31 if notes[i, 3] < 0 else c * 32 + min(notes[i, 3], 127) // 4
     return s, e, key, color, first, longest
 
 

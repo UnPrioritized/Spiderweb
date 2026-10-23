@@ -51,6 +51,7 @@ from files.unzip import allowance
 from files.update_check import version_tuple
 from window.big_ask import ask as ask_big, ask_drums
 from window.tempo_pane import ask_domino
+from roll.roll_draw import GHOST_FADE
 
 AUTOSAVE = os.path.join(USER, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -502,7 +503,7 @@ class ProjectFiles:
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "domino_256": self.domino256.get(), "keep_colours": self.keep_colours.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
-                              "mask_preview": self.mask_preview.get(),
+                              "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
                               "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "path_window": self.path_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_loud_height": self.hz_loud_h,"hz_preview": self.hz_preview, "hz_tools": self.hz_window.tools_state() if self.hz_window else self.hz_tools,
                               "hz_view": self.hz_window.view_state() if self.hz_window else self.hz_view,
@@ -625,6 +626,10 @@ class ProjectFiles:
             self.live.set(win.get("live") is True)
             self.mask.set(win.get("mask") is True)
             self.mask_preview.set(win.get("mask_preview") is not False)
+            fade = win.get("mask_fade")
+            if type(fade) is int and 0 <= fade <= 100:
+                GHOST_FADE[0] = fade
+                self.mask_fade_var.set(str(fade))
             got = clean_mask(win.get("mask_defaults")) or MASK_DEFAULTS
             self.mask_defaults = dict(MASK_DEFAULTS, **{k: got[k] for k in THICKNESS})
             self.show_lines.set(win.get("show_lines") is not False)

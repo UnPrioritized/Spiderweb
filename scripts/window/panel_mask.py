@@ -155,6 +155,53 @@ class MaskPanel:
             else:
                 self.mask_mode_row.pack_forget()
 
+    def build_mask_fade(self, bar):
+        """The toolbar's [n] % box right of Mask preview: how much of the hidden parts shows (0 = none, 100 = as
+        solid as the notes). An app setting (autosaved, no undo step), greyed while Mask preview is off."""
+        box = ttk.Frame(bar)
+        e = self.mask_fade_entry = ttk.Entry(box, textvariable=self.mask_fade_var, width=4, justify="right")
+        e.pack(side="left")
+        lb = ttk.Label(box, text="%")
+        lb.pack(side="left", padx=(2, 0))
+        e.bind("<Return>", lambda ev: (self.on_mask_fade(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_mask_fade())
+        Scrub(self, [(e, self.mask_fade_var, self.on_mask_fade)], (5, 20, 1), 0, 100, label=lb, drag_box=True,
+              no_undo=True)
+        for w in (e, lb):
+            Tooltip(w, tr("mask.fade_tip"))
+        good(e)
+        self.sync_mask_fade()
+        return box
+
+    def sync_mask_fade(self):
+        e = getattr(self, "mask_fade_entry", None)
+        if e is not None:
+            e.state(["!disabled"] if self.mask_preview.get() else ["disabled"])
+
+    def on_mask_fade(self):
+        """The % box typed / stepped: the hidden parts drawn again that faint (0 = not drawn: the notes made again)."""
+        from roll import roll_draw
+        e = self.mask_fade_entry
+        try:
+            v = int(round(float(calc(self.mask_fade_var.get()))))
+            if not 0 <= v <= 100:
+                raise ValueError
+        except (ValueError, ZeroDivisionError, OverflowError):
+            return bad(e)
+        if str(v) != self.mask_fade_var.get():
+            self.mask_fade_var.set(str(v))
+        good(e)
+        was = roll_draw.GHOST_FADE[0]
+        if v == was:
+            return
+        roll_draw.GHOST_FADE[0] = v
+        self.schedule_autosave()
+        if (was == 0) != (v == 0) and any(map(is_mask, self.shapes)):
+            return self.shapes_changed()  # (0: the hidden parts left out of what's drawn, mask_view)
+        roll = self.roll
+        roll._note_pic = roll._carry = roll._draft_base = None  # (pictures painted with the old colours)
+        roll.request_redraw()
+
     def mask_indices(self):
         return [i for i in sorted(self.sels) if i < len(self.shapes) and is_mask(self.shapes[i])]
 

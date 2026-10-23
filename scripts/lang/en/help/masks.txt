@@ -5,7 +5,7 @@ Nothing is cut: the shapes under it stay whole and still sound and export, so yo
 
 Any drawing tool makes a mask, Live shape too, but Hz bass never does (paint with the mask like a brush). To turn a shape you already drew into a mask, select it and tick Mask in the side panel; untick it to make it a normal shape again. A mask's line is always shown, dashed.
 
-Mask preview (the tick next to Mask on the toolbar): untick it to see the shapes under masks whole again, without the faint parts; only the masks' dashed lines stay. It only changes what you see.
+Mask preview (the tick next to Mask on the toolbar): untick it to see the shapes under masks whole again, without the faint parts; only the masks' dashed lines stay. The % box beside it sets how faint the hidden parts are, in their own colours: 0 % hides them completely, 100 % draws them as solid as the other notes. Both only change what you see.
 
 A mask covers every shape it touches, never other masks. To use a mask's notes as the pattern, untick Mask on it.
 

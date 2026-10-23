@@ -76,7 +76,7 @@ from window.app_playback import Playback
 from window.history import BOXES, CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
-from roll.roll_draw import painting_order
+from roll.roll_draw import GHOST_FADE, painting_order
 from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player
@@ -382,6 +382,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.live = tk.BooleanVar(value=False)  # drawing tools draw into one custom shape (roll_live.py)
         self.mask = tk.BooleanVar(value=False)  # what's drawn becomes a mask (mask.py)
         self.mask_preview = tk.BooleanVar(value=True)  # masks hide what's outside them (off = the pattern drawn whole)
+        self.mask_fade_var = tk.StringVar(value="20")  # ... how much of it still shows, % (roll_draw.GHOST_FADE)
         self.mask_defaults = dict(MASK_DEFAULTS)  # a new mask's settings: the last ones set in the panel
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
         self.snap = tk.StringVar(value=DEFAULT_SNAP)
@@ -454,8 +455,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
         self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw()))
-        self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), any(map(is_mask, self.shapes)) and
-                                                         self.shapes_changed()))
+        self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), self.sync_mask_fade(),
+                                                         any(map(is_mask, self.shapes)) and self.shapes_changed()))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
         self.hz_snap.trace_add("write", lambda *_: (self.hz_window and self.hz_window.redraw(),
                                                     self.schedule_autosave()))
@@ -548,6 +549,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         b = ttk.Checkbutton(bar, text=tr("mask.preview"), variable=self.mask_preview)
         b.pack(side="left", padx=(4, 0))
         Tooltip(b, tr("mask.preview_tip"))
+        fade = self.build_mask_fade(bar)
+        fade.pack(side="left", padx=(2, 0))
+        self._tools_together += ((b, fade),)  # (wrapped: the % box stays by its tick)
         bar = self.option_bar = ttk.Frame(top)
         self._toolbar_rows = self._toolbar_wrap = None
         top.bind("<Configure>", lambda e: self.fit_toolbar())
@@ -1447,7 +1451,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                      self.notes_tracks, quiet=True)[2]
         if self.mask_preview.get():
             self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
-                                                      self.pattern)
+                                                      self.pattern, GHOST_FADE[0] > 0)
         else:  # (toolbar "Preview" off: the pattern drawn whole, only the masks' dashed lines; user)
             self.drawn, self.mask_covered = self.rendered, set()
         if self.strips_window:  # (its strips each in a colour of its own while it shows them)
