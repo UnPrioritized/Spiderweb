@@ -1847,8 +1847,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if sc["tick"] is None:
             if abs(e.x - sc["x"]) < 4 and abs(e.y - sc["y"]) < 4:
                 return
-            self.app.stop_play()
-            sc["tick"] = self.scrub_tick(e)
+            sc["tick"] = self.scrub_tick(e)  # (playing goes on: both heard, like Domino, user 2026-10-23)
         tick = self.scrub_tick(e)
         if not self.app.scrub(sc["tick"], tick):
             self._scrub = None

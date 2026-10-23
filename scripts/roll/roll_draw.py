@@ -886,8 +886,9 @@ class RollDrawing:
         if self.sx is None:
             return
         x, w = self.t2x(self.app.playhead), self.winfo_width()
-        busy = (self.drag or self.draft or self.follow or self.app.vel.edit
-                or self.lasso and not self.lasso["closed"])  # (a lasso loop being clicked: like a polyline, hunt)
+        busy = (self.drag or self.draft or self.follow or self.app.vel.edit or self.scrub_t is not None
+                or self.lasso and not self.lasso["closed"])  # (a lasso loop being clicked: like a polyline, hunt;
+        # right-drag listening: the notes stay under the mouse)
         if self.play_follow is None:
             self.play_follow = PlayFollow(self.app)
         free = self.play_follow.free((self.view_t, self.sx), start)
