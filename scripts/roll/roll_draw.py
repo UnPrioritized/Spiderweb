@@ -28,6 +28,7 @@ from roll.tiles import Tiles, see_through
 from window import look
 
 TIP_MARKS = 10  # a ruler tempo mark's tip lists at most this many changes, then "+N more"
+TICK_FROM, TICK_FULL = 8, 16  # px per tick: a line each tick shows faintly from here, full colour from here
 HANDLE_COLOR = look.HANDLE
 STROKE_POINT_COLOR = look.STROKE_POINT
 PART_COLOR = look.PART
@@ -929,6 +930,13 @@ class RollDrawing:
         sigs = sigs_of(self.app.tempo)  # (bars and beats by the time signatures: 6/8 = a line each eighth)
         cols += [(round(self.t2x(b)), look.GRID_BEAT) for b in beat_lines(sigs, max(0.0, b_lo), b_hi, 5 / self.sx)]
         cols += [(round(self.t2x(b)), look.GRID_BAR) for b, _ in bar_lines(sigs, max(0.0, b_lo), b_hi, 6 / self.sx)]
+        ppq = self.app.ppq
+        tick_px = self.sx / ppq
+        if tick_px >= TICK_FROM:  # zoomed far in: a line each tick, fading in (first: a snap / beat / bar line wins)
+            by = 0.4 + 0.6 * min(1.0, (tick_px - TICK_FROM) / (TICK_FULL - TICK_FROM))
+            color, taken = fade(look.GRID_TICK, 1 - by), {x for x, _ in cols}
+            ticks = (round(self.t2x(i / ppq)) for i in range(max(0, math.ceil(b_lo * ppq)), math.floor(b_hi * ppq) + 1))
+            cols = [(x, color) for x in ticks if x not in taken] + cols
         return [c for c in cols if int(self.kb_w) <= c[0] < w]
 
     def draw_grid(self, w, h, rows, cols):
