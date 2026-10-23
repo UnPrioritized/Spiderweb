@@ -21,6 +21,7 @@ from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import slot_track_channel
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
+from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import MAX_SX, MIN_SX, SLOT_COLORS, grab_while_panning, slot_colours
 from window import look
 from window.snap_picker import SnapPicker
@@ -107,7 +108,7 @@ class TrackList(tk.Canvas):
         if not isinstance(data, dict):
             return
         if type(data.get("faint")) is int and 0 <= data["faint"] <= 100:
-            self.faint = data["faint"]
+            self.faint = TRACK_FADE[0] = data["faint"]
             self.faint_var.set(str(self.faint))
         if isinstance(data.get("snap"), str):
             self.snap.set(clean_snap(data["snap"]))
@@ -124,9 +125,14 @@ class TrackList(tk.Canvas):
             self.faint_var.set(str(v))
         good(e)
         if v != self.faint:
-            self.faint = v
+            was, self.faint = self.faint, v
+            TRACK_FADE[0] = v
             self.app.schedule_autosave()
-            self.app.roll.request_redraw()
+            if (was == 0) != (v == 0):  # (0: the tracks behind left out)
+                self.app.track_view()
+            roll = self.app.roll
+            roll._note_pic = roll._carry = roll._draft_base = None  # (pictures painted with the old colours)
+            roll.request_redraw()
 
     def snapped(self, beat):
         """beat on the track list's snap: Bar = the nearest bar line (by the time signatures), a note length = its
@@ -151,7 +157,26 @@ class TrackList(tk.Canvas):
         self.request_redraw()
         if self.picker:
             self.picker.fill()
+        self.app.track_view()
         self.app.roll.request_redraw()
+
+    def filtered(self, drawn, back):
+        """(the notes the piano roll paints, the owner number given to the faint ones or None): with a track
+        highlighted only its notes, the tracks picked behind it as faint copies (velocity -2, owner back), the
+        rest left out; nothing highlighted = drawn as it is."""
+        self.tracks()
+        if self.current is None or not len(drawn):
+            return drawn, None
+        slot = drawn[:, 4]
+        out = [drawn[slot == self.current]]
+        behind = sorted(self.behind - {self.current}) if self.faint > 0 else []
+        if behind:
+            faint = drawn[np.isin(slot, behind)].copy()
+            if len(faint):
+                faint[:, 3], faint[:, 5] = -2, back
+                out.insert(0, faint)
+                return np.concatenate(out), back
+        return out[0], None
 
     def open_picker(self):
         if self.picker:

@@ -654,6 +654,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         inner.pack(fill="both", expand=True)
         add_zoom_bars(inner, self.track_list, up="tracks")
 
+    def track_view(self):
+        """What the piano roll paints (self.drawn) with a track highlighted in the track list: its notes, the tracks
+        picked behind it faint (velocity -2, owner behind_owner: painted first), every other track hidden (user
+        2026-10-23, like Domino). Nothing highlighted: everything."""
+        if getattr(self, "drawn_all", None) is None:
+            return
+        self.drawn, self.behind_owner = self.track_list.filtered(self.drawn_all, len(self.shapes))
+        self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
+            self.picture_owners_all, False)  # (the tracks behind: their own channel colours)
+
     def tracks_shown(self):
         return bool(self.track_box.winfo_manager())
 
@@ -1497,6 +1507,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
         self.picture_owners = np.array([picture_like(sh) for sh in self.shapes], bool)
         self.picture_pal = self.slots_pal()
+        self.drawn_all, self.picture_owners_all = self.drawn, self.picture_owners
+        self.track_view()
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
         if self.channel_mode.get() == "auto" and len(self.rendered):
@@ -1595,7 +1607,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
                 if fast:
                     pics = np.array([picture_like(sh) for sh in shapes], bool)
-                    order = ((sels, pics.tobytes(), len(pics), bool(got[1])),
+                    order = ((sels, pics.tobytes(), len(pics), bool(got[1]), None),
                              painting_order(fast, rendered, start, sels, pics, key[2], got[1]))
                 job["drawn"] = (start, order)
                 job["got"] = got

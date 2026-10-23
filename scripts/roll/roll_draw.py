@@ -192,18 +192,21 @@ PICTURE_GROUP = len(NOTE_COLORS) // 32
 # the background to GHOST_FADE[0] % (the toolbar's box by Mask preview; 0 = not drawn at all: mask_view)
 GHOST_BASE = PICTURE_GROUP + 16
 GHOST_FADE = [20]
+# (shade 30 of each ghost group: tracks shown behind the highlighted one, velocity -2, faded to TRACK_FADE[0] %:
+# the track list's Faint box)
+TRACK_FADE = [25]
 _tables = {}
 
 
-def ghost_code(group):
-    """The colour number a ghost of a note in this colour group is painted with."""
-    return (GHOST_BASE + group) * 32 + 31
+def ghost_code(group, track=False):
+    """The colour number a ghost of a note in this colour group is painted with (track: a track behind)."""
+    return (GHOST_BASE + group) * 32 + (30 if track else 31)
 
 
 def note_tables(pal):
     """(NOTE_COLORS, NOTE_RGB) with the picture colours pal ("RRGGBB" list or None) added as groups
     PICTURE_GROUP.. (grey where there's none), then every group's ghost colours (GHOST_BASE..)."""
-    key = tuple(pal or ()), GHOST_FADE[0]
+    key = tuple(pal or ()), GHOST_FADE[0], TRACK_FADE[0]
     got = _tables.get(key)
     if got is None:
         extra = []
@@ -212,8 +215,9 @@ def note_tables(pal):
             rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
             dark = "#%02x%02x%02x" % tuple(int(c * 0.6) for c in rgb)
             extra += [("#" + h.lower(), dark)] * 32
-        away = 1 - GHOST_FADE[0] / 100
-        extra += [(fade(f, away), fade(b, away)) for f, b in (NOTE_COLORS + extra)[31::32] for _ in range(32)]
+        away, behind = 1 - GHOST_FADE[0] / 100, 1 - TRACK_FADE[0] / 100
+        extra += [(fade(f, a), fade(b, a)) for f, b in (NOTE_COLORS + extra)[31::32]
+                  for a in [away] * 30 + [behind, away]]
         colors = NOTE_COLORS + extra
         rgb = np.concatenate([NOTE_RGB, np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
                                                   for pair in extra], np.uint8)])
@@ -300,8 +304,9 @@ def covered_ends(e, nxt, room):
     return np.where(nxt_e >= e, np.minimum(e, nxt_s + room), e)
 
 
-def painting_order(fast, rendered, start, sels, pics, keys, use10):
+def painting_order(fast, rendered, start, sels, pics, keys, use10, back=None):
     """RollDrawing.paint_order's work (start = the notes' rows by start; use10: channel 10 used, slot_colours).
+    back: the owner number of the tracks shown behind the highlighted one (App.track_view), painted first.
     Touches no Tk: also done in a background thread for notes made there (App.notes_rested)."""
     if not (len(rendered) and rendered[:, 2].min() >= 0 and rendered[:, 2].max() < keys and rendered[:, 5].min() >= 0):
         return None
@@ -310,7 +315,10 @@ def painting_order(fast, rendered, start, sels, pics, keys, use10):
     sel[[s for s in sels if 0 <= s < owners]] = True
     rank = np.empty(owners, np.int64)  # shapes in their order, the selected ones last
     others = owners - int(sel.sum())
-    rank[~sel] = np.arange(others)
+    unsel = np.flatnonzero(~sel)
+    if back is not None and back < owners and not sel[back]:
+        unsel = np.concatenate([[back], unsel[unsel != back]])
+    rank[unsel] = np.arange(others)
     rank[sel] = np.arange(others, owners)
     made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), start, rank, owners,
                             pics if pics.any() else np.zeros(0, bool), slot_colours(use10), PICTURE_GROUP, GHOST_BASE)
@@ -419,7 +427,7 @@ class RollDrawing:
             self._grid_key = self._frame_key = None
             return
         frame_key = (w, h, self.kb_w, self.ruler_h, self.sx, self.sy, self.view_t, self.view_top, self.scale,
-                     self.app.keys, self.app.edo(), json.dumps(sigs_of(self.app.tempo)))
+                     self.app.keys, self.app.edo(), json.dumps(sigs_of(self.app.tempo)), self.track_mark())
         if frame_key != self._frame_key:
             self.delete("frame", "playhead")
             self._frame_key = None
@@ -1000,11 +1008,12 @@ class RollDrawing:
         app = self.app
         rendered = app.drawn
         pics = np.asarray(getattr(app, "picture_owners", ()), bool)
-        key = (frozenset(app.sels), pics.tobytes(), len(pics), bool(app.picture_use10))
+        back = getattr(app, "behind_owner", None)
+        key = (frozenset(app.sels), pics.tobytes(), len(pics), bool(app.picture_use10), back)
         got = self._paint_order
         if got is not None and got[0] is rendered and got[1] == key:
             return got[2]
-        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys, app.picture_use10)
+        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys, app.picture_use10, back)
         self._paint_order = (rendered, key, made)
         return made
 
@@ -1106,14 +1115,20 @@ class RollDrawing:
                     mine = np.isin(owner, sels)
                     if mine.any():
                         last = np.concatenate([np.nonzero(~mine)[0], np.nonzero(mine)[0]])
-                        on, color = on[last], color[last]
+                        on, color, owner = on[last], color[last], owner[last]
+                back = getattr(app, "behind_owner", None)
+                if back is not None:  # (tracks shown behind the highlighted one: painted first, under it)
+                    mine = owner == back
+                    if mine.any():
+                        first = np.concatenate([np.nonzero(mine)[0], np.nonzero(~mine)[0]])
+                        on, color = on[first], color[first]
             elif order:
                 color = np.zeros(0, np.int64)
             # low velocity = paler fill (outline stays); 32 shades is plenty. Velocity -1 = a ghost (mask.py)
             vel = notes[on, 3]
             code = color * 32 + np.clip(vel, 0, 127) // 4
             return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
-                    np.where(vel < 0, ghost_code(color), code) if len(vel) and vel.min() < 0 else code)
+                    np.where(vel < 0, ghost_code(color) - (vel < -1), code) if len(vel) and vel.min() < 0 else code)
 
         if main is None:
             lo, hi = self.visible_range(t_lo, t_hi)
@@ -1660,6 +1675,18 @@ class RollDrawing:
             self.create_text(x + 3, self.bar_y(), text=label, anchor="w", fill=look.RULER_TEXT,
                              font=look.font(8, fit=True), tags="frame")
         self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")
+        mark = self.track_mark()
+        if mark:  # (only one track shows: its name in the corner, so hidden notes never look lost)
+            self.create_text(kb / 2, top / 2, text=mark, fill=look.TRACK_PICK, font=look.font(8, "bold", fit=True),
+                             tags=("frame", "trackmark"))
+
+    def track_mark(self):
+        """The corner's text while the track list highlights a track ("Track 3"), else ""."""
+        tl = getattr(self.app, "track_list", None)
+        if tl is None or tl.current is None:
+            return ""
+        rows = tl._row_of
+        return tl.name_of(int(rows[tl.current])) if tl.current < len(rows) and rows[tl.current] >= 0 else ""
 
     def bar_y(self):
         """The bar numbers' middle: the ruler's bottom half, by their ticks (the tempo changes go above them)."""
@@ -1784,6 +1811,7 @@ class RollDrawing:
                     self.create_line(x0, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
         if shown:  # the keyboard's corner covers what slid past it
             self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags=tags)
+            self.tag_raise("trackmark")
         self.tag_raise("playhead")
 
     def ruler_marks(self, w):
