@@ -763,7 +763,9 @@ class ProjectFiles:
     def attach_midi(self, lm):
         """Load MIDI's end: a NEW project (user 2026-10-23: always one) with the file's PPQ (and 256 keys for a 256
         keys MIDI), its notes drawn under the shapes. Not an undo step: like Open, the old project was asked about
-        first (may_replace)."""
+        first (may_replace). The view keeps its zoom and goes to the song's start (user 2026-10-24: not Fit view)."""
+        r = self.roll
+        zoom = r.sx, r.sy, r.view_top
         data = self.project_data()
         data.update(shapes=[], view=None, playhead=0.0, ppq=str(lm.ppq), bpm="120")
         data.pop("tempo", None)
@@ -777,10 +779,17 @@ class ProjectFiles:
         self._saved_mark = None
         if hasattr(self, "track_list"):
             self.track_list.forget()
+            self.track_list.view_t = 0.0
+            self.track_list.request_redraw()
         self.sync_window_title()
         self.sync_panel()
-        self.roll.fit_view()
-        self.roll.request_redraw()
+        if zoom[0] is not None:
+            r.sx, r.sy, r.view_top = zoom
+            r.view_t = 0.0
+            r.clamp_view()
+        else:
+            r.fit_view()
+        r.request_redraw()
         self.schedule_autosave()
 
     def own_file(self, path):

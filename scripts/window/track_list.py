@@ -9,6 +9,8 @@ ruler and play line are canvas items. Each track's notes fill its row from its o
 
 import json
 import math
+import threading
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
@@ -24,6 +26,7 @@ from notes.engine import BEATS_FAR, slot_track_channel
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text
 from notes.tempo_file import heard_tempo
+from roll import roll_loaded as RL
 from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import (COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow, grab_while_panning,
                               slot_colours)
@@ -38,6 +41,8 @@ PAD = 3         # free pixels above / below a row's notes
 COLUMN = 28     # bar numbers closer than this many pixels: several bars per column (2, 4, 8...)
 TIP_SHAPES = 8  # shapes named in a row's tip at most
 FAINT = 25      # % the tracks shown behind the current one are drawn at, at first (0 = hidden)
+ROWS_INLINE_S = 0.12  # a loaded MIDI's rows read exactly in the redraw itself for this long at most (the picture is
+# made again only after zooming or scrolling far: a slower one then beats rows changing look)
 
 
 def hex_rgb(colour):
@@ -78,6 +83,7 @@ class TrackList(tk.Canvas):
         self._ids = []  # id() of the shapes when the tracks were worked out (their notes' owner numbers)
         self._sheet = None  # paint's picture: {"key", "x", "y" (its first pixel), "w", "h", "photo"}
         self._tempo_sheet = None  # (key, photo) of the Conductor row's, as wide
+        self._row_place, self._row_masks, self._row_job = None, {}, None  # a loaded MIDI's exact rows (where, them)
         self._heard = None  # (key, heard()'s answer) for the tempo line it was worked out for
         self._tip_memo = (None, "")  # (row, notes, shape count) -> row_tip's text
         self._fonts = {}  # font -> (tk font, its measuring function: measurer)
@@ -785,9 +791,11 @@ class TrackList(tk.Canvas):
         img[hit] = np.broadcast_to(per_row[:, None, :], img.shape)[hit]
 
     def paint_loaded_rows(self, img, rows, cx, cy):
-        """A loaded MIDI's tracks' rows from the loading pass's small pictures (each track's keys x up to
-        loaded.PIC_COLS columns: reading 100 M - 2 B notes per redraw is out of the question), laid out like
-        paint_notes' (the track's own lowest .. highest key over the row's height)."""
+        """A loaded MIDI's tracks' rows, laid out like paint_notes' (the track's own lowest .. highest key over the
+        row's height). EXACT (user 2026-10-24: the small pictures looked blocky): each row read from the file like
+        the piano roll's exact pictures (roll_loaded.exact_tab, this track alone), at once while that's quick
+        (ROWS_INLINE_S), the rest on a background thread (the sheet painted again when they come); meanwhile the
+        loading pass's small picture (keys x up to loaded.PIC_COLS columns)."""
         lm = self.app.loaded
         if lm is None or not self.lead:
             return
@@ -795,22 +803,29 @@ class TrackList(tk.Canvas):
         first, last = max(0, cy // self.row_h), min(self.lead - 1, (cy + ah) // self.row_h)
         pad = round(PAD * self.scale)
         inner = max(1, self.row_h - 2 * pad - 1)
-        tpp = lm.ppq / self.sx  # (ticks a pixel)
-        ta = (np.arange(aw) + cx) * tpp
+        ax, bx = self.sx / lm.ppq, -float(cx)  # (pixel c of img = tick t * ax + bx)
+        place = (id(lm), self.sx, cx, aw)
+        if self._row_place != place:
+            self._row_place, self._row_masks = place, {}
+            if self._row_job is not None:
+                self._row_job.stop = True
+                self._row_job = None
+        rate = getattr(lm, "draw_rate", None) or RL.RATE[lm.mode]
+        until = time.perf_counter() + ROWS_INLINE_S
+        waiting = []
         for r in range(first, last + 1):
             t = lm.tracks[r]
-            if not t.notes or not t.pic_cols:
+            if not t.notes:
                 continue
-            step = lm.G * t.pic_pf
-            c0 = np.floor((ta - t.pic_glo * lm.G) / step).astype(np.int64)
-            c1 = np.maximum(np.ceil((ta + tpp - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
-            on = np.flatnonzero((c1 > 0) & (c0 < t.pic_cols))
-            if not len(on):
-                continue
-            bits = np.unpackbits(t.pic, axis=1, count=t.pic_cols).astype(bool)
-            a = np.clip(c0[on], 0, t.pic_cols - 1)
-            got = (np.logical_or.reduceat(bits[:, :int(np.clip(c1[on[-1]], 1, t.pic_cols))], a, axis=1)
-                   if tpp >= step else bits[:, a])  # (keys klo.. x the columns on)
+            got = self._row_masks.get(r)
+            if got is None and time.perf_counter() + RL.view_bytes(lm, (r,), ax, bx, aw) / rate <= until:
+                got = self._row_masks[r] = row_mask(lm, r, ax, bx, aw)
+            if got is None or got is False:  # (False: unreadable, the small picture stays)
+                if got is None:
+                    waiting.append(r)
+                got = small_mask(lm, t, cx, aw, self.sx)
+                if got is None:
+                    continue
             span = t.khi - t.klo + 1
             thick = max(1, inner // span)
             used = min(inner, span * thick)
@@ -818,11 +833,31 @@ class TrackList(tk.Canvas):
             ys = np.arange(max(0, y0), min(ah, y0 + used))
             if not len(ys):
                 continue
-            key_row = (ys - y0) * span // used  # (0 = the highest key)
-            mask = np.zeros((len(ys), aw), bool)
-            mask[:, on] = got[span - 1 - key_row]
+            # (each pixel row = the keys it covers, top key first: any of them sounding)
+            top = got[::-1][:(ys[-1] + 1 - y0) * span // used]
+            k0 = (ys - y0) * span // used
+            mask = np.logical_or.reduceat(top, k0, axis=0) if span > used else top[k0]
             colour = hex_rgb(look.TRACK_MUTED if -1 - r in self.muted else self.colour_of(-1 - r))
             img[ys[0]:ys[-1] + 1][mask] = colour
+        if waiting and (self._row_job is None or self._row_job.place != place):
+            if self._row_job is not None:
+                self._row_job.stop = True
+            job = self._row_job = RowJob(lm, place, waiting, ax, bx, aw)
+            threading.Thread(target=job.run, daemon=True, name="track rows").start()
+            self.after(RL.POLL_MS, self._poll_rows)
+
+    def _poll_rows(self):
+        job = self._row_job
+        if job is None:
+            return
+        if not job.done:
+            self.after(RL.POLL_MS, self._poll_rows)
+            return
+        self._row_job = None
+        if job.place == self._row_place and not job.stop:
+            self._row_masks.update(job.masks)
+            self._sheet = None
+            self.request_redraw()
 
     def draw_ruler(self, w, lines):
         s, top = self.scale, self.ruler_h
@@ -1020,6 +1055,54 @@ class TrackList(tk.Canvas):
         if self.name_w <= x <= self.winfo_width():
             self.create_line(x, 0, x, self.winfo_height(), fill=look.PLAY_LINE, width=max(1, round(self.scale)),
                              tags="playhead")
+
+
+def row_mask(lm, r, ax, bx, W):
+    """A loaded track's notes exactly: its keys klo..khi x W pixels, True where a note sounds (False: unreadable)."""
+    t = lm.tracks[r]
+    try:
+        tab, _ = RL.exact_tab(lm, ax, bx, W, t.klo, t.khi - t.klo + 1, tracks=(r,))
+    except Exception:  # (a file that changed / went: the small picture stays)
+        RL.write_log_now()
+        return False
+    return False if tab is None else tab >= 0
+
+
+def small_mask(lm, t, cx, aw, sx):
+    """The same from the loading pass's small picture (keys klo.. x up to PIC_COLS columns), or None."""
+    if not t.pic_cols:
+        return None
+    tpp = lm.ppq / sx  # (ticks a pixel)
+    ta = (np.arange(aw) + cx) * tpp
+    step = lm.G * t.pic_pf
+    c0 = np.floor((ta - t.pic_glo * lm.G) / step).astype(np.int64)
+    c1 = np.maximum(np.ceil((ta + tpp - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
+    on = np.flatnonzero((c1 > 0) & (c0 < t.pic_cols))
+    if not len(on):
+        return None
+    bits = np.unpackbits(t.pic, axis=1, count=t.pic_cols).astype(bool)
+    a = np.clip(c0[on], 0, t.pic_cols - 1)
+    got = (np.logical_or.reduceat(bits[:, :int(np.clip(c1[on[-1]], 1, t.pic_cols))], a, axis=1)
+           if tpp >= step else bits[:, a])
+    out = np.zeros((t.khi - t.klo + 1, aw), bool)
+    out[t.pic_klo - t.klo:t.pic_klo - t.klo + len(got), on] = got
+    return out
+
+
+class RowJob:
+    """A loaded MIDI's rows read exactly on a background thread (stop = give up)."""
+
+    def __init__(self, lm, place, rows, ax, bx, W):
+        self.lm, self.place, self.rows, self.ax, self.bx, self.W = lm, place, rows, ax, bx, W
+        self.stop = self.done = False
+        self.masks = {}
+
+    def run(self):
+        for r in self.rows:
+            if self.stop:
+                break
+            self.masks[r] = row_mask(self.lm, r, self.ax, self.bx, self.W)
+        self.done = True
 
 
 def shape_ids(shapes, owners):

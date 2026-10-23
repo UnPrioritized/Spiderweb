@@ -737,8 +737,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.panes.pack(**place)
             self.snap_picker.use(self.snap, tr("snap.tip"))
             self.roll.focus_set()
-            self.roll.request_redraw()
+            r = self.roll
+            x = r.t2x(self.playhead) if r.sx else None
+            if (self.playhead != getattr(self, "_list_playhead", self.playhead) and x is not None
+                    and (x < r.kb_w or x > r.winfo_width() - 6 * r.scale)):  # (moved in the list, off screen here:
+                r.view_t = self.playhead  # the piano roll shows it, user 2026-10-24)
+                r.clamp_view()
+            r.request_redraw()
         else:
+            self._list_playhead = self.playhead
             self.tips.show("tracks")
             self.panes.pack_forget()
             self.track_box.pack(**place)
