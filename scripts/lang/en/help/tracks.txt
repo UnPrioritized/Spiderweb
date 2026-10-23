@@ -1,21 +1,27 @@
-Press Tab to swap the piano roll for the track list, and Tab again to go back. It shows the tracks your MIDI will have: one row per track, in the same order as Export MIDI and Export to Domino write them, each with a small picture of its notes in its channel's colour. The Conductor row on top marks every tempo change and time or key signature.
+Press Tab to swap the piano roll for the track list, and Tab again to go back. It shows the tracks your MIDI will have: one row per track, in the same order as Export MIDI and Export to Domino write them, each with a small picture of its notes in its channel's colour.
+
+The Conductor row on top shows the tempo as bars, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the bars use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures.
 
 Spiderweb picks the tracks itself (see Channels), so the list only shows them: use it to check which shapes land on which track before you export. Rest the mouse on a track's name to see its channel, how many notes it has and which shapes they come from. Long names end in "…" and show whole there.
 
 Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar under the list to zoom in time, drag an end of the bar on its right to make the rows taller or shorter. Ctrl+wheel zooms in time, Ctrl+Shift+wheel changes the rows' height, Shift+wheel scrolls sideways. Zoomed far out, each column holds 2, 4, 8... bars, so the bar numbers never run into each other.
 
-Click a track to highlight it. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you click the Conductor row in the track list (nothing highlighted shows every track again). Hidden notes still play and still go into the files.
+## Highlighting a track
 
-## Show multiple tracks
+Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you click the Conductor row in the track list (nothing highlighted shows every track again). Hidden notes still play and still go into the files.
 
-Show multiple tracks… picks the tracks the piano roll shows faintly behind the highlighted one. Ctrl+click a row does the same. Those rows get a dot in their colour. Faint sets how strongly they show (0 % hides them).
+## Multiple tracks
+
+The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour.
+
+In the track list: Ctrl+click a track to pick it or not, Ctrl+drag over tracks to pick every track you cross, Shift+click a track to highlight it alone (nothing picked, Multiple tracks off). Picked tracks get a dot in their colour. Show multiple tracks… (above the list, or Pick tracks… in the ▾ list) opens the list of tracks: click a track to pick it or not, drag to do the same to every track you cross. Faint sets how strongly they show (0 % hides them).
 
 ## Mute
 
-Click a track's speaker to mute it: it isn't played until you click it again, and its picture turns grey. Muting only changes what you hear: Export MIDI and Export to Domino still write the track.
+Click a track's speaker to mute it: it isn't played until you click it again, and its picture turns grey. Right-click a speaker to hear only that track; right-click it again to hear every track. Muting only changes what you hear: Export MIDI and Export to Domino still write the track.
 
 ## Snap
 
-The track list has its own snap (Bar at first). It's where a click on the track list's bar numbers puts the play line. Hold Shift for no snap.
+The track list has its own snap (Bar at first). It's where a click puts the play line. Clicking the bar numbers with Shift held puts it exactly where you click.
 
 Shortcuts like Delete or Ctrl+A do nothing while the track list shows, so nothing changes out of sight. Space still plays.
