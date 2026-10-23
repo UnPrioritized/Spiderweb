@@ -95,6 +95,7 @@ from window import palettes
 from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.tempo_pane import TempoBox
+from window.track_list import TrackList
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
@@ -476,6 +477,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             for key in keys:
                 self.bind_all(key, lambda e, fn=fn: None if self.in_drawer(e) else fn(e))
         self.bind_all("<space>", self.hotkey(self.toggle_play, main_only=True, while_held=True))  # (pop-ups: not the main playback)
+        # Tab: the piano roll <-> the track list (on the main window only: typing boxes keep Tab for the next box)
+        self.bind("<Tab>", self.hotkey(self.toggle_tracks, main_only=True))
         for k in ("<Control-x>", "<Control-X>"):  # (main window only: Ctrl+X in Help / pop-ups cut the shapes behind)
             self.bind_all(k, self.hotkey(self.cut_selected, main_only=True))
         # Delete pressed while a toolbar / panel button has the keyboard (Ctrl+A works there): the piano roll's own
@@ -643,6 +646,31 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_pane = self.tempo_box.pane
         no_focus(self.vel_box)  # (Space plays there too, never ticks a tick)
         no_focus(self.tempo_box)
+        # the track list: Tab swaps it with the piano roll and its panes, in the same place (toggle_tracks)
+        self.track_box = tk.Frame(self)
+        inner = tk.Frame(self.track_box)
+        inner.pack(fill="both", expand=True)
+        self.track_list = TrackList(inner, self, s)
+        add_zoom_bars(inner, self.track_list, up="tracks")
+
+    def tracks_shown(self):
+        return bool(self.track_box.winfo_manager())
+
+    def toggle_tracks(self):
+        """Tab: the piano roll <-> the track list (user 2026-10-23, like Domino's)."""
+        if self.roll.draft is not None or self.roll.follow is not None:
+            return
+        place = dict(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
+        if self.tracks_shown():
+            self.track_box.pack_forget()
+            self.panes.pack(**place)
+            self.roll.focus_set()
+            self.roll.request_redraw()
+        else:
+            self.panes.pack_forget()
+            self.track_box.pack(**place)
+            self.track_list.focus_set()
+            self.track_list.request_redraw()
 
     def show_vel_formula(self):
         self.vel_hint.config(text=tr("velocity.select_hint" if self.vel_tool.get() == "select"
@@ -1479,6 +1507,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.strips_window.show()
         self.sync_list_selection()
         self.roll.request_redraw()
+        self.track_list.changed()
         self.update_status()
         self.schedule_autosave()
         self.sync_history()
@@ -2378,6 +2407,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return None
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
+            if self.tracks_shown() and fn not in (self.toggle_tracks, self.toggle_play, self.generate,
+                                                   self.new_project, self.open_project):
+                return "break"  # (the track list shows: shortcuts never change shapes out of sight)
             if self.box_drawn() or not while_held and (self.roll.holding() or self.vel.edit or self.held_scrub
                                                        or getattr(self, "tempo_pane", None) is not None
                                                        and self.tempo_pane.drag):

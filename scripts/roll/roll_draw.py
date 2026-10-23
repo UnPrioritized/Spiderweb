@@ -865,6 +865,9 @@ class RollDrawing:
         """Move the play line; while playing, turn the page when it gets near the right edge
         (start: also jump to it if it's off screen). Not while the mouse holds something or a shape is being drawn
         (user: what's held jumped a page): the line goes on off screen, the page turns once it's let go."""
+        tracks = getattr(self.app, "track_list", None)
+        if tracks is not None:  # (the track list's own line and pages)
+            tracks.show_playhead()
         if self.sx is None:
             return
         x, w = self.t2x(self.app.playhead), self.winfo_width()

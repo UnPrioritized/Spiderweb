@@ -177,6 +177,14 @@ RULER_TEMPO_LINE = pick("#d2d2d2", "#5a5a5e")  # their line on to the next chang
 RULER_PICK, RULER_PICK_TEXT =pick("#141414", "#e2e2e4"), pick("#ffffff", "#2f2f31")  # the ruler under a Select box
 #                                                                                       over every key (dark: turned)
 PLAY_LINE = pick("#0a50e0", "#d6e8ff")  # (dark: pale blue, the bright notes' blue hid a stronger one, user)
+# The track list (window/track_list.py): rows in two stripes like many MIDI programs, the highlighted track's row,
+# below the last track, the line under each row, bar lines, the Conductor row's marks, the names' column
+TRACK_ROW, TRACK_ROW_ALT = pick("#ffffff", "#3c3c3f"), pick("#eef3fb", "#38383b")
+TRACK_PICKED, TRACK_EMPTY = pick("#d6e4fa", "#444a56"), pick("#f0f0f0", "#2f2f31")
+TRACK_LINE, TRACK_BAR = pick("#dfe6f2", "#333336"), pick("#c4ccd8", "#55555a")
+TRACK_CONDUCTOR = pick("#8a8a8a", "#a0a0a4")
+TRACK_NAME_BG, TRACK_TEXT = pick("#fafafa", "#3a3a3c"), pick("#222", "#e2e2e4")
+TRACK_PICK, TRACK_PICK_TEXT = pick("#3874d8", "#2f6fd0"), pick("#ffffff", "#ffffff")
 # The notes' (fill, edge) per channel slot in the dark look (user's pick "B warm": the light look's colours lighter
 # with a little cream; light look's in roll_shared.SLOT_COLORS), the shape being drawn
 NOTES_DARK = [("#a3bef1", "#19449b"), ("#f7a39e", "#a51610"), ("#a6f4a0", "#36842b"), ("#f5e1a0", "#9c7b18"),
