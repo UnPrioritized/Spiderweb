@@ -39,7 +39,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.hzbass import (BEND, CC_FX, ENVELOPES, FROM_MODES, FX, FX_START, HEIGHT_FROM, LOOP_SHAPES, NOTE_FX, OFF_PITCH,
+from notes.hzbass import (BEND, BOOST_FX, CC_FX, ENVELOPES, FROM_MODES, FX, FX_START, HEIGHT_FROM, LOOP_SHAPES, NOTE_FX, OFF_PITCH,
                           PITCH, TREMOLO, VIBRATO, WHEEL_KEYS, bend_of, bent_part, cc_db, cc_midi, chains, clean_extra,
                           group_count, height_times, legato_links, line_at, loop_off, loop_on, loop_shape, sound_span,
                           sustained, tones_span)
@@ -1417,6 +1417,13 @@ class FxPane:
         win.extra = clean_extra(dict(win.extra, height_from=where))
         win.commit_fx(before)
 
+    def set_boost(self, name, value):
+        """An effect's CC boost (hz["boost"], the synth window's CC boost knob) set, one undo step."""
+        win = self.win
+        before = self.state()
+        win.extra = clean_extra(dict(win.extra, boost=dict(win.extra.get("boost") or {}, **{name: value})))
+        win.commit_fx(before)
+
     def on_menu(self, e):
         if self.drag:  # (the left button holds something: nothing, like the notes; the menu would take its let-go)
             return "break"
@@ -1464,6 +1471,10 @@ class FxPane:
                 self.is_off = tk.BooleanVar(self.win, value=target in self.win.off)
                 menu.add_checkbutton(label=tr("hz.fx_bypass"), variable=self.is_off,
                                      command=lambda: self.switch(target))
+            if target in BOOST_FX and target in self.win.fxl:  # (the synth window's CC boost knob: off / all of it)
+                self.is_boosted = tk.BooleanVar(self.win, value=bool((self.win.extra.get("boost") or {}).get(target)))
+                menu.add_checkbutton(label=tr("hz.fx_boost"), variable=self.is_boosted,
+                                     command=lambda: self.set_boost(target, 1.0 if self.is_boosted.get() else 0.0))
             if target in ("height", "height_rand"):  # (the key row that stays put while the height changes)
                 grows = tk.Menu(menu, tearoff=0)
                 self.height_from = tk.StringVar(self.win, value=self.win.extra.get("height_from") or "middle")

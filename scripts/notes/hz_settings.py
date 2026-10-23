@@ -886,9 +886,34 @@ def clean_filter(f):
     return out
 
 
+# "Boost with CC" (user 2026-10-23): the Tremolo / Volume box's CC boost knob = an Expression line (CC 11) made from
+# that effect ON TOP of its notes (hz_cc.boost_db): hz["boost"] = {effect: how much of it, 0..1}
+BOOST_FX = ("tremolo", "volume")
+
+
+def clean_boost(b):
+    """hz["boost"] checked: {effect of BOOST_FX: 0..1} for those boosted, else None."""
+    if not isinstance(b, dict):
+        return None
+    out = {}
+    for name in BOOST_FX:
+        v = b.get(name)
+        if not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v > 0:
+            out[name] = min(1.0, float(v))
+    return out or None
+
+
+def boosted(src):
+    """The effects of a layer its CC boost sends (hz["boost"]): heard lines only (not switched off; a Volume line
+    full all along does nothing)."""
+    boost, fx, off = src.get("boost") or {}, src.get("fx") or {}, src.get("off") or ()
+    return [n for n in BOOST_FX if boost.get(n) and n in fx and n not in off
+            and not (n == "volume" and "volume" not in (src.get("loop") or {}) and all(p[1] == 1.0 for p in fx[n]))]
+
+
 CLEAN_EXTRA = {"voice": clean_voice, "mode": clean_mode, "rack": clean_rack, "arp": clean_arp, "bypass": clean_bypass,
                "kept": clean_kept, "macro": clean_macro, "osc2": clean_osc2, "mod": clean_mod, "trace": clean_trace,
-               "own_length": clean_length, "height_from": clean_height_from, "filter": clean_filter}
+               "own_length": clean_length, "height_from": clean_height_from, "filter": clean_filter, "boost": clean_boost}
 EXTRAS = tuple(CLEAN_EXTRA)  # the synth window's own settings (not lines), each checked by its CLEAN_EXTRA
 
 
@@ -913,10 +938,11 @@ def without_cc(hz):
     def strip(src):
         links = (src.get("mod") or {}).get("links") or ()
         if (not any(n in CC_FX for n in src.get("fx") or ()) and not any(l.get("to") in CC_TARGETS for l in links)
-                and "filter" not in src):
+                and "filter" not in src and "boost" not in src):
             return src
         out = dict(src)
         out.pop("filter", None)  # (the Filter box's knobs: only the Cutoff line's)
+        out.pop("boost", None)  # (the CC boost: only the Expression line's)
         for key in ("fx", "loop", "from", "sustain", "amount"):
             if isinstance(src.get(key), dict):
                 out[key] = {k: v for k, v in src[key].items() if k not in CC_FX}
@@ -940,11 +966,12 @@ def without_cc(hz):
 
 def has_cc(hz):
     """True when a heard layer of the Hz bass sends CC: a CC line not switched off (Bypass), or the MOD tab moving
-    the Filter box's knobs while the box is on (live gives it its Cutoff line). Lines switched off or only in muted
-    layers send nothing, so they count as none (Own channel per note then changes nothing)."""
+    the Filter box's knobs while the box is on (live gives it its Cutoff line), or a CC boost on a heard effect.
+    Lines switched off or only in muted layers send nothing, so they count as none (Own channel per note then
+    changes nothing)."""
     for src in heard_layers(hz):
         off = src.get("off") or ()
-        if any(n in CC_FX and n not in off for n in src.get("fx") or ()) or (
+        if any(n in CC_FX and n not in off for n in src.get("fx") or ()) or boosted(src) or (
                 "filter" not in (src.get("bypass") or {}).get("boxes", ()) and any(
                     link.get("to") in CC_TARGETS for link in (src.get("mod") or {}).get("links") or ())):
             return True

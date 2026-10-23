@@ -31,9 +31,10 @@ import math
 
 import numpy as np
 
-from notes.hzbass import (CC_FX, CC_NUMBER, CC_START, CC_TARGETS, RING_MOST, WHEEL_KEYS, cc_midi, fx_at, glide_tones, has_cc,
-                          funnel_box, heard_layers, key_range, left_edge, legato_links, links, live, own_channels,
-                          rack_tail, sound_span, tempo_at, without_cc)
+from notes.hzbass import (BOOST_FX, CC_DB, CC_FX, CC_NUMBER, CC_START, CC_TARGETS, RING_MOST, TREMOLO, TREMOLO_DEPTH,
+                          WHEEL_KEYS, boosted, cc_midi, fx_at, glide_tones, has_cc, funnel_box, heard_layers, key_range,
+                          left_edge, legato_links, links, live, note_span, own_channels, rack_tail, setting_at,
+                          sound_span, tempo_at, without_cc)
 
 STEPS = 96  # values a beat at most
 LEAD = 0.05  # seconds the first values come before the first note
@@ -188,14 +189,18 @@ def cc_events(sh, ppq, bpm, layers=None):
     beats = ticks / ppq - left
     out = []
     used = []
+    boost = next((l for l in layers if boosted(l)), None)
     for name in CC_FX:
         src = next((l for l in layers if name in (l.get("fx") or {})), None)
-        if src is None:
+        if src is None and not (name == "cc_expression" and boost is not None):
             continue
         used.append(name)
         if name == "cc_wheel":
             out += [(t0, *m) for m in bend_range(WHEEL_KEYS)]
-        vals = cc_midi(name, fx_at(src, name, beats))
+        v = fx_at(src, name, beats) if src is not None else np.ones(len(beats))
+        if name == "cc_expression" and boost is not None:  # (louder / quieter by the boost: dB added, like two faders)
+            v = np.where(v > 0, v + boost_db(hz, boost, beats, bpm) / CC_DB, 0.0)
+        vals = cc_midi(name, v)
         keep = np.ones(len(vals), bool)
         keep[1:] = vals[1:] != vals[:-1]
         out += [(t, *message(name, v)) for t, v in zip(ticks[keep].tolist(), vals[keep].tolist())]
@@ -207,6 +212,42 @@ def cc_events(sh, ppq, bpm, layers=None):
             out.append((last, *message(name, CC_START[name])))
     out.sort(key=lambda e: e[0])  # (stable: a tick's messages keep their order)
     return out
+
+
+def boost_db(hz, src, beats, bpm=None):
+    """The CC boost (layer src's hz["boost"], user 2026-10-23) at beats (an array from the left edge) in dB: its
+    Tremolo and Volume as the notes have them, read from the newest note (one channel: like the lines), each times
+    its boost. The Tremolo waves on after the notes (through the run-on); the Volume never gets quieter faster than
+    the sound rings out by itself (CC_DB over the run-on, ring_of), so a note's ring isn't cut dead where its line
+    drops (user: "notes just dead stop")."""
+    beats = np.asarray(beats, float)
+    boost, lfo = src.get("boost") or {}, src.get("lfo") or {}
+    db = np.zeros(len(beats))
+    names = boosted(src)
+    if not len(beats) or not names:
+        return db
+    if "tremolo" in names:
+        rate = fx_at(src, "tremolo", beats) * TREMOLO  # (times a beat; turns counted from the newest note's start)
+        turns = np.concatenate([[0.0], np.cumsum(0.5 * (rate[1:] + rate[:-1]) * np.diff(beats))])
+        span = note_span(src, beats)
+        s0 = beats if span is None else np.asarray(span[0], float)
+        turns = turns - np.interp(s0, beats, turns)
+        since = beats - s0
+        depth = lfo.get("tremolo_depth", TREMOLO_DEPTH)
+        depth = setting_at(src, "tremolo_depth", depth, beats)
+        wait, rise = lfo.get("tremolo_wait", 0.0), lfo.get("tremolo_rise", 0.0)
+        come = np.clip((since - wait) / rise, 0.0, 1.0) if rise > 0 else (since >= wait - 1e-9).astype(float)
+        f = 1.0 - depth * come * (1.0 - np.cos(2.0 * np.pi * turns)) / 2.0
+        db += boost["tremolo"] * 20.0 * np.log10(np.maximum(f, 1e-6))
+    if "volume" in names:
+        level = 20.0 * np.log10(np.maximum(fx_at(src, "volume", beats), 1e-6))
+        ring = ring_of(hz)
+        if ring > 0:  # (falls no faster than CC_DB a run-on: the highest of what came before, fading, and now)
+            sec = np.concatenate([[0.0], np.cumsum(np.diff(beats) / per_second(hz, beats[1:], bpm))])
+            fade = CC_DB / ring * sec
+            level = np.maximum.accumulate(level + fade) - fade
+        db += boost["volume"] * np.maximum(level, -CC_DB * 2)
+    return db
 
 
 def whole_tone(sh):
@@ -234,6 +275,11 @@ def cc_key(hz):
                      + [src.get("mod") if any(l.get("to") in CC_TARGETS for l in (src.get("mod") or {}).get("links", ()))
                         else None, src.get("voice"), (src.get("solo"), src.get("mute")), src.get("filter"),
                         (src.get("bypass") or {}).get("boxes")])
+        if src.get("boost"):  # (the CC boost: what its effects do changes what it sends)
+            parts.append([src["boost"], src.get("lfo"), src.get("mod")]
+                         + [{k: v for k, v in (src.get(key) or {}).items() if k in BOOST_FX}
+                            if isinstance(src.get(key), dict) else [k for k in src.get(key) or () if k in BOOST_FX]
+                            for key in ("fx", "loop", "from", "sustain", "amount", "fit", "off")])
     parts.append([hz.get("cc_own"), ring_of(hz)])
     return json.dumps(parts, sort_keys=True)
 

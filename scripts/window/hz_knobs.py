@@ -100,7 +100,7 @@ MODE_NAMES = ("off",) + tuple(MODE_KNOBS)
 OSC2_KNOBS = (("shape", "percent"), ("octave", "osc_octave"), ("semi", "keys"), ("fine", "fine"), ("level", "percent"))
 # the boxes and their knobs: (knob, kind, value at the start / a middle-click); rows of boxes
 BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain", "percent", 1.0),
-                    ("release", "time", 0.0)),
+                    ("release", "time", 0.0), ("volume_boost", "percent", 0.0)),
          "wave": (("shape", "percent", 1.0), ("octave", "percent", 0.0))
          + tuple((key, kind, MODES[m][key.split("_", 1)[1]][2]) for m, knobs in MODE_KNOBS.items() for key, kind in knobs),
          "pitch": (("amount", "pitch", 0.0), ("time", "time", 0.25), ("bend_range", "range", PITCH)),
@@ -108,7 +108,7 @@ BOXES = {"volume": (("attack", "time", 0.0), ("decay", "time", 0.0), ("sustain",
          "vibrato": (("vibrato_rate", "vib_rate", VIBRATO_RATE), ("vibrato_depth", "percent", 0.0),
                      ("vibrato_wait", "time", 0.0), ("vibrato_delay", "time", 0.0)),
          "tremolo": (("tremolo_rate", "trem_rate", 0.0), ("tremolo_depth", "percent", TREMOLO_DEPTH),
-                     ("tremolo_wait", "time", 0.0), ("tremolo_rise", "time", 0.0)),
+                     ("tremolo_wait", "time", 0.0), ("tremolo_rise", "time", 0.0), ("tremolo_boost", "percent", 0.0)),
          "tone": (("sweep_start", "percent", 1.0), ("sweep_end", "percent", 0.0), ("sweep_time", "time", 1.0),
                   ("sweep_track", "bend", 0.0), ("wah", "percent", 0.0)),
          "filter": tuple((k if k == "cutoff" else f"filter_{k}", kind, FILTER_START[k]) for k, kind in (
@@ -504,8 +504,16 @@ def read_rack(win, was):
     return got
 
 
-READ = {"volume": read_volume, "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
-        "tremolo": read_tremolo, "tone": read_tone, "filter": read_filter, "character": read_character,
+def read_boost(read, name):
+    """A box's reading with its CC boost knob (hz["boost"]: kept as it is, whatever the lines are)."""
+    def got(win, was):
+        vals, made = read(win, was)
+        return dict(vals, **{f"{name}_boost": (win.extra.get("boost") or {}).get(name, 0.0)}), made
+    return got
+
+
+READ = {"volume": read_boost(read_volume, "volume"), "wave": read_wave, "pitch": read_pitch, "vibrato": read_vibrato,
+        "tremolo": read_boost(read_tremolo, "tremolo"), "tone": read_tone, "filter": read_filter, "character": read_character,
         "voice": read_voice,
         "arp": read_arp, "osc2": read_osc2}
 
@@ -1190,6 +1198,7 @@ class SynthKnobs:
             fx.drop("volume")
             self.fxl["volume"] = pts
             self.loops["volume"], self.froms["volume"], self.sustains["volume"] = every, "note", at
+            self.set_boost("volume", v["volume_boost"])
         elif box == "wave":
             for name in WAVES:
                 fx.drop(name)
@@ -1230,6 +1239,7 @@ class SynthKnobs:
             self.set_lfo("tremolo_wait", v["tremolo_wait"], 0.0)
             self.set_lfo("tremolo_rise", v["tremolo_rise"], 0.0)
             self.set_timing("tremolo_timing", v["tremolo_timing"])
+            self.set_boost("tremolo", v["tremolo_boost"])
         elif box == "tone":
             fx.drop("sweep")
             if v["sweep"]:
@@ -1366,6 +1376,10 @@ class SynthKnobs:
         extra = dict(self.extra)
         extra[name] = value
         self.extra = clean_extra(extra)
+
+    def set_boost(self, name, value):
+        """A box's CC boost knob into hz["boost"] (0 = left out)."""
+        self.set_extra("boost", dict(self.extra.get("boost") or {}, **{name: value}))
 
     def set_lfo(self, key, value, plain):
         """A setting of hz["lfo"] (left out when it's what the Hz bass does without one)."""
