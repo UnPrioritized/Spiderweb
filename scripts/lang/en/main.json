@@ -477,6 +477,8 @@
  "tracks.picker_none": "None",
  "tracks.picker_close": "Close",
  "tracks.picker_current": "{name} (highlighted)",
+ "tracks.mute_tip": "Mute this track while playing (the saved files keep it).",
+ "tracks.unmute_tip": "Muted: click to hear this track again.",
  "app.history": "History",
  "app.history_tip": "The History list: every change as a step; click one to go back to it.",
  "app.undo": "Undo",

@@ -135,11 +135,11 @@ class Playback:
         # (pasted notes' CCs too, hunt 2026-10-22: as the files have them; their channels are kept for them already)
         pasted = self.cc_messages(ppq, bpm, {i for i, sh in enumerate(self.shapes) if "cc" in sh}) \
             if any("cc" in sh for sh in self.shapes) else {}
+        heard = self.track_list.unmuted(self.rendered)  # (tracks muted in the track list: not played)
         if not per_shape and not any(pasted.values()):
-            return self.rendered, {}, 0
+            return heard, {}, 0
         ports = LIVE_PORTS if (device or self.out.name) == BUILTIN else 0
-        rendered, msgs = cc_apart(self.rendered, per_shape, self.picture_use10, ports) if per_shape else \
-            (self.rendered, {})
+        rendered, msgs = cc_apart(heard, per_shape, self.picture_use10, ports) if per_shape else (heard, {})
         for s, ms in pasted.items():
             if ms:
                 msgs.setdefault(s, []).extend(ms)

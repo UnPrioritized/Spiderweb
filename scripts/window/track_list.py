@@ -54,6 +54,7 @@ class TrackList(tk.Canvas):
         self.top = 0       # pixels the track rows are scrolled up
         self.current = None  # the highlighted track's slot (None: the Conductor row / nothing)
         self.behind = set()  # slots shown faintly behind it on the piano roll ("Show multiple tracks")
+        self.muted = set()   # slots not played (the speaker in their row; playback only, never the files)
         self.faint = FAINT
         self.faint_var = tk.StringVar(value=str(FAINT))
         self.snap = tk.StringVar(value="bar")  # the track list's own snap (like Domino's; Bar at first)
@@ -97,7 +98,19 @@ class TrackList(tk.Canvas):
             if self.current is not None and (self.current >= size or row_of[self.current] < 0):
                 self.current = None  # (its track is gone)
             self.behind = {s for s in self.behind if s < size and row_of[s] >= 0}
+            self.muted = {s for s in self.muted if s < size and row_of[s] >= 0}
         return self._slots
+
+    def unmuted(self, notes):
+        """notes without the muted tracks' (App.play_apart: playback only)."""
+        if not self.muted or not len(notes):
+            return notes
+        return notes[~np.isin(notes[:, 4], list(self.muted))]
+
+    def toggle_mute(self, slot):
+        self.muted ^= {slot}
+        self.request_redraw()
+        self.app.play_changed()
 
     # ------------------------------------------------------------ settings (autosaved, no undo step)
 
@@ -322,14 +335,26 @@ class TrackList(tk.Canvas):
         row = self.row_at(e.y)
         if row is None:
             return
+        if row >= 0 and self.on_speaker(e.x):  # its speaker: muted / heard
+            return self.toggle_mute(int(self.tracks()[row]))
         if e.state & 0x4 and row >= 0:  # Ctrl+click: shown behind the current track or not
             return self.toggle_behind(int(self.tracks()[row]))
         self.current = None if row < 0 else int(self.tracks()[row])
         self.shown_changed()
 
+    def speaker_x(self):
+        return self.name_w - 13 * self.scale
+
+    def on_speaker(self, x):
+        return abs(x - self.speaker_x()) <= 9 * self.scale
+
     def on_motion(self, e):
         row = self.row_at(e.y)
-        text = self.row_tip(row) if row is not None and e.x < self.name_w else ""
+        if row is not None and row >= 0 and self.on_speaker(e.x):
+            slot = int(self.tracks()[row])
+            text = tr("tracks.unmute_tip" if slot in self.muted else "tracks.mute_tip")
+        else:
+            text = self.row_tip(row) if row is not None and e.x < self.name_w else ""
         if text != self.tip.text:
             self.tip.hide()
             self.tip.text = text
@@ -453,7 +478,8 @@ class TrackList(tk.Canvas):
             flat += np.bincount(yk[on] * (aw + 1) + xa[on], minlength=size).astype(np.int32)
             flat -= np.bincount(yk[on] * (aw + 1) + xb[on] + 1, minlength=size).astype(np.int32)
         hit = np.cumsum(cover, axis=1)[:, :aw] > 0
-        colours = np.array([hex_rgb(self.colour_of(int(s))) for s in self._slots], np.uint8)
+        colours = np.array([hex_rgb(look.TRACK_MUTED if int(s) in self.muted else self.colour_of(int(s)))
+                            for s in self._slots], np.uint8)  # (muted: grey)
         ok = rows < len(self._slots)
         per_row = np.zeros((ah, 3), np.uint8)
         per_row[ok] = colours[rows[ok]]
@@ -526,7 +552,7 @@ class TrackList(tk.Canvas):
             if self.row_h >= 12 * s:
                 colour = look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT
                 ch = self.channel_of(slot)
-                room = x1 - 26 * s - measure(ch) - 8 * s
+                room = x1 - 44 * s - measure(ch) - 8 * s
                 name = cut_text(self.name_of(row), room, measure)
                 mid = (ya + yb) / 2
                 if mid > top:
@@ -535,14 +561,33 @@ class TrackList(tk.Canvas):
                         self.create_oval(10 * s - r, mid - r, 10 * s + r, mid + r, fill=self.colour_of(slot),
                                          outline=colour)
                     self.create_text(18 * s, mid, text=name, anchor="w", fill=colour, font=font)
-                    self.create_text(x1 - 8 * s, mid, text=ch, anchor="e",
+                    self.create_text(x1 - 26 * s, mid, text=ch, anchor="e",
                                      fill=look.TRACK_PICK_TEXT if picked else look.HINT, font=font)
+                    self.draw_speaker(self.speaker_x(), mid, slot in self.muted, picked)
             self.create_line(0, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
         self.create_rectangle(0, y0, x1, top, fill=look.TRACK_NAME_BG, outline="")  # (rows scrolled under it)
         self.create_text(18 * s, y0 + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
                          font=font)
         self.create_line(0, top, x1, top, fill=look.ROLL_EDGE)
         self.create_line(x1, 0, x1, h, fill=look.ROLL_EDGE)
+
+    def draw_speaker(self, cx, cy, muted, picked):
+        """A small speaker: sound waves beside it while heard, a red cross while muted."""
+        s = self.scale
+        colour = look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT
+        if muted:
+            colour = look.HINT
+        x = cx - 4 * s
+        self.create_polygon(x - 3 * s, cy - 2 * s, x, cy - 2 * s, x + 3 * s, cy - 5 * s, x + 3 * s, cy + 5 * s,
+                            x, cy + 2 * s, x - 3 * s, cy + 2 * s, fill=colour, outline="")
+        if muted:
+            a, b = x + 5 * s, x + 10 * s
+            for y0, y1 in ((cy - 2.5 * s, cy + 2.5 * s), (cy + 2.5 * s, cy - 2.5 * s)):
+                self.create_line(a, y0, b, y1, fill=look.ERROR, width=max(1, round(1.4 * s)))
+        else:
+            for r in (4 * s, 7 * s):
+                self.create_arc(x + 3 * s - r, cy - r, x + 3 * s + r, cy + r, start=-40, extent=80, style="arc",
+                                outline=colour, width=max(1, round(s)))
 
     def show_playhead(self):
         """The play line moved: while playing, the page turns near the right edge (like the piano roll)."""
