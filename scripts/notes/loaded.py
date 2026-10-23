@@ -135,6 +135,25 @@ class LoadedMidi:
         return self.tracks[number].name
 
 
+def file_tempos(lm):
+    """The file's own tempo as players read it: [(tick, us)], each a change (the same as the one before = none);
+    several on one tick (a list copied into several tracks): the last in the file wins. Remembered (the pane asks
+    at every redraw)."""
+    if getattr(lm, "_file_tempos", None) is not None:
+        return lm._file_tempos
+    got = {}
+    for t in lm.tracks:
+        for tick, data in t.metas(TEMPO):
+            if len(data) >= 3 and int.from_bytes(data[:3], "big"):
+                got[tick] = int.from_bytes(data[:3], "big")
+    out = []
+    for tick, us in sorted(got.items()):
+        if not out or out[-1][1] != us:
+            out.append((tick, us))
+    lm._file_tempos = out
+    return out
+
+
 def conductor_line(lm):
     """The file's tempos, time and key signatures as a Conductor pane line (notes/tempo.py; group C step 8): each
     tempo change a held point at its tick, its BPM exactly the file's (60,000,000 / us); a tempo the same as the one
@@ -150,14 +169,9 @@ def conductor_line(lm):
             for tick, data in t.metas(kind):
                 got[tick] = data
         return sorted(got.items())
-    line, last = empty(), None
-    for tick, data in every(TEMPO):
-        if len(data) < 3:
-            continue
-        us = int.from_bytes(data[:3], "big")
-        if us and us != last:
-            line["points"].append([round(tick / ppq, 9), 60_000_000 / us, "hold", "", "lin", False, [0.5, 0.5]])
-            last = us
+    line = empty()
+    for tick, us in file_tempos(lm):
+        line["points"].append([round(tick / ppq, 9), 60_000_000 / us, "hold", "", "lin", False, [0.5, 0.5]])
     line["sigs"] = clean_sigs([[round(tick / ppq, 9), d[0], 2 ** d[1]] for tick, d in every(TIME_SIG)
                                if len(d) >= 2 and d[1] <= 7])
     line["keysigs"] = clean_keysigs([[round(tick / ppq, 9), int.from_bytes(d[:1], "big", signed=True), d[1] == 1]

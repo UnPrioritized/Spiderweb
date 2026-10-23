@@ -429,6 +429,16 @@ def base_us(base):
     return int(nearest_safe([60_000_000 / base])[0])
 
 
+def held_us(bpm):
+    """A held part's microseconds per beat: a BPM that is exactly a file's whole microseconds (a loaded MIDI's own
+    tempo, loaded.conductor_line) keeps them as they are (user 2026-10-24: the file's values stay); any other the
+    nearest Domino-safe value (Spiderweb's own additions follow Domino)."""
+    u = round(60_000_000 / bpm)
+    if 1 <= u <= 0xFFFFFF and 60_000_000 / u == bpm:
+        return u
+    return int(nearest_safe([60_000_000 / bpm])[0])
+
+
 def _first_ticks(pb, ppq):
     """The first tick of each point's part: the smallest tick t with t / ppq >= the point's beat (as drawn_bpm
     reads it)."""
@@ -462,7 +472,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
         held = i < 0 or i == len(pts) - 1 or pts[i][2] == "hold" or pts[i][1] == pts[i + 1][1]
         if held:
             bpm = float(drawn_bpm(tempo, base, [a / ppq])[0])
-            out.append((a, b, base_u if bpm == base else int(nearest_safe([6e7 / bpm])[0])))
+            out.append((a, b, base_u if bpm == base else held_us(bpm)))
         else:  # (a new value every "every" ticks from the part's first tick; the first step the start point's
             # BPM, the last the end point's: step_shares)
             every = tempo.get("every", EVERY)

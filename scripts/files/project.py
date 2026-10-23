@@ -20,7 +20,7 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, one_voice, shape_notes_tracks, slot_ports)
 from notes.hzbass import clean_hz
-from notes.loaded import clean_link, conductor_line, retime_for, same_conductor, tempo_tracks
+from notes.loaded import clean_link, conductor_line, file_tempos, retime_for, same_conductor, tempo_tracks
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
@@ -982,6 +982,7 @@ class ProjectFiles:
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
                                  "plan": None, "step": "load.exporting"}
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
+        heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
 
         def run():
@@ -994,7 +995,7 @@ class ProjectFiles:
                         ticks, loose = lm.anchors(cancel=lambda: job["cancel"],
                                                   progress=lambda d, n: job.update(done=d, total=n))
                     job["step"] = "project.tempo_working"
-                    plan = job["plan"] = file_plan(tempo, 120, ppq, beats, ticks, ticks, None, loose)
+                    plan = job["plan"] = file_plan(tempo, 120, ppq, beats, ticks, ticks, None, loose, heard)
                     retime = retime_for(lm, tempo, plan, targets)
                     job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)

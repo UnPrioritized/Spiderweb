@@ -32,6 +32,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          catch_get, catch_set, keeps, layout,
                          plans, shown_bpm, split_at, step_edges, tempo_text)
 from notes.tempo import changed as tempo_edited
+from notes.loaded import file_tempos
 from notes.tempo_file import dense_spots
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
@@ -1483,7 +1484,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 return
             ticks = np.concatenate([ticks, lm._anchors[0]])
         try:
-            spots = sorted(dense_spots(app.tempo, self.base(), app.ppq, app.beats, ticks))
+            heard = file_tempos(lm) if lm is not None else None  # (a loaded MIDI: its notes keep their file time)
+            spots = sorted(dense_spots(app.tempo, self.base(), app.ppq, app.beats, ticks, heard))
         except MemoryError:
             spots = []
         self._dense = (key, spots)
@@ -2091,6 +2093,25 @@ class TempoPane(ConductorMarks, tk.Canvas):
                     placed.append((v, False))
         return placed
 
+    def heard_xy(self, heard, x0, x1):
+        """A loaded MIDI's own tempo [(tick, us)] from x0 to x1 as a stepped line's points."""
+        roll, ppq = self.app.roll, self.app.ppq
+        t0, t1 = roll.x2t(x0) * ppq, roll.x2t(x1) * ppq
+        i = max(0, bisect.bisect_right(heard, t0, key=lambda h: h[0]) - 1)
+        u = heard[i][1] if heard and heard[i][0] <= t0 else 500000
+        pts, x = [], x0
+        for t, v in heard[i:]:
+            if t > t1:
+                break
+            if t > t0:
+                xt = roll.t2x(t / ppq)
+                y = float(self.b2y(60_000_000 / u))
+                pts += [x, y, xt, y]
+                x = xt
+            u = v
+        y = float(self.b2y(60_000_000 / u))
+        return pts + [x, y, x1, y]
+
     def shown_points(self, x0, x1):
         """(first, end) indices of the points between x0 and x1 (they're in beat order: a loaded MIDI brings
         thousands, only the ones in view are worked through)."""
@@ -2181,9 +2202,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         dense = self.dense_now()
+        heard = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None
         for x0, x1, u, b0, b1 in keep_spans:  # (the tempo its notes keep: dashed, with the words on top)
-            y = float(self.b2y(60_000_000 / u))
-            self.create_line(x0, y, x1, y, fill=look.TEMPO_KEEP, dash=(6, 3), width=lw + 1)
+            if heard is None:
+                y = float(self.b2y(60_000_000 / u))
+                self.create_line(x0, y, x1, y, fill=look.TEMPO_KEEP, dash=(6, 3), width=lw + 1)
+            else:  # (a loaded MIDI: the file's own tempo, user 2026-10-24)
+                self.create_line(*self.heard_xy(heard, x0, x1), fill=look.TEMPO_KEEP, dash=(6, 3), width=lw + 1)
             # notes too close for its tempo (user 2026-10-22: shown while editing, not only after the export): a
             # dashed orange line on each spot (one per pixel)
             bad = bisect.bisect_left(dense, b0 - 1e-9) < bisect.bisect_right(dense, b1 + 1e-9)
