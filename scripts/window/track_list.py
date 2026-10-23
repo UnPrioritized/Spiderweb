@@ -69,6 +69,9 @@ class TrackList(tk.Canvas):
         self._job = None
         self.tip = Tooltip(self, "")
         self.bind("<Configure>", lambda e: self.request_redraw())
+        # (shown again by Tab at the same size: no <Configure>, and the redraw asked for before it was mapped did
+        # nothing: the old picture stayed, user 2026-10-23)
+        self.bind("<Map>", lambda e: self.request_redraw())
         self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<Motion>", self.on_motion)
         self.bind("<MouseWheel>", self.on_wheel)
