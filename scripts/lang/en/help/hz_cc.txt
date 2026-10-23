@@ -18,6 +18,18 @@ The synth window's Filter box (MIDI CC) draws the Cutoff line for you: Cutoff, p
 
 The MOD tab's LFOs and envelopes can move every Filter knob. Amount and the envelope's knobs only move while the line is as the box made it (not drawn by hand).
 
+## CC boost
+
+The Tremolo and Volume boxes in the synth window each have a CC boost knob. Turned up, that effect also goes out as an Expression line (CC 11), on top of what the notes do: the notes stay exactly the same, so a player that ignores CC still plays the effect as before.
+
+The notes can only make an effect louder or quieter in velocity steps, which many soundfonts barely react to. The Expression line is smooth, so a tremolo can wobble much deeper, and the Volume envelope's rise and fade are much clearer. 100 % = as deep as the effect itself, 0 = notes only.
+
+The tremolo keeps waving while the last notes ring out. The Volume never fades faster than the sound rings out by itself (the run-on, below), so the end of a note isn't cut dead.
+
+When you've drawn an Expression line too, the boost moves on top of it, like a second fader. Right-click Tremolo or Volume in the Effects pane → Boost with CC switches it on and off.
+
+With one channel, a chord's notes share one boost that follows the newest note. Voice box → CC → Own channel per note gives each note its own.
+
 ## The whole channel hears them
 
 A MIDI message changes everything on its channel, so other shapes on the same channel are changed too.
