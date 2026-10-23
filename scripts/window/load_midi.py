@@ -19,6 +19,7 @@ from window.widgets import ShortLabel, remember_place
 
 POLL_MS = 50
 WIDTH = 490  # px: the pages' width (their wrapped hint lines are 440-460 + indent)
+REOPEN_SHOW_MS = 400  # an opened project's MIDI loaded again: the window shows only after this long
 
 
 def size_text(n):
@@ -43,11 +44,85 @@ def load_midi(app):
     LoadWindow(app, mf)
 
 
+def ask_choice(parent, title, text, buttons, icon="question"):
+    """A question with named buttons [(answer, label)], the first one picked by Enter; Esc / X = the last one's
+    answer."""
+    win = tk.Toplevel(parent)
+    win.withdraw()
+    win.title(title)
+    win.resizable(False, False)
+    win.transient(parent.winfo_toplevel())
+    body = ttk.Frame(win, padding=(14, 14, 14, 8))
+    body.pack(fill="both", expand=True)
+    ttk.Label(body, image=f"::tk::icons::{icon}").grid(row=0, column=0, sticky="n", padx=(0, 12))
+    ttk.Label(body, text=text, wraplength=460, justify="left").grid(row=0, column=1, sticky="w")
+    row = ttk.Frame(win, padding=(14, 4, 14, 12))
+    row.pack(fill="x")
+    answer = [buttons[-1][0]]
+
+    def close(how):
+        answer[0] = how
+        win.destroy()
+    made = []
+    for how, label in reversed(buttons):
+        b = ttk.Button(row, text=label, command=lambda how=how: close(how))
+        b.pack(side="right", padx=(6, 0))
+        made.append(b)
+    win.bind("<Return>", lambda e: e.widget.invoke() if isinstance(e.widget, ttk.Button) else close(buttons[0][0]))
+    win.bind("<Escape>", lambda e: close(buttons[-1][0]))
+    win.protocol("WM_DELETE_WINDOW", lambda: close(buttons[-1][0]))
+    win.update_idletasks()
+    top = parent.winfo_toplevel()
+    x = top.winfo_rootx() + (top.winfo_width() - win.winfo_reqwidth()) // 2
+    y = top.winfo_rooty() + (top.winfo_height() - win.winfo_reqheight()) // 3
+    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+    remember_place(win, "load_ask")
+    win.deiconify()
+    win.grab_set()
+    made[-1].focus_set()
+    win.wait_window()
+    return answer[0]
+
+
+def find_loaded(app, pick=False):
+    """An opened project's MIDI loaded again (its link: notes.loaded.clean_link). Not where it was = asked (find
+    it / go on without it); pick = straight to the file picker. Found = loaded with the progress window, then
+    checked against the link (LoadWindow.finished)."""
+    link = app.midi_link
+    if link is None or app.loaded is not None or getattr(app, "_finding", False):
+        return
+    folder = os.path.dirname(app.project_file) if app.project_file else None
+    path = None if pick else L.located(link, folder)
+    if path is None:
+        if not pick and ask_choice(app, tr("load.title"), tr("load.link_missing", path=link["path"]),
+                                   [("find", tr("load.find")), ("keep", tr("load.keep_without"))],
+                                   icon="warning") != "find":
+            app.status.config(text=tr("load.status_without"))
+            return
+        path = filedialog.askopenfilename(
+            title=tr("load.find_title"), initialdir=folder or os.path.dirname(link["path"]) or OUTPUT_DIR,
+            initialfile=os.path.basename(link["path"]),
+            filetypes=[(tr("load.midi_files"), "*.mid *.midi *.rmi *.smf"), (tr("project.all_files"), "*.*")])
+        if not path:
+            app.status.config(text=tr("load.status_without"))
+            return
+    try:
+        mf = MidiFile(path)
+    except MidiError as e:
+        messagebox.showerror(tr("load.title"), tr(e.key, **e.info), parent=app)
+        return
+    if M_SMPTE in mf.marks:
+        messagebox.showerror(tr("load.title"), tr("load.smpte"), parent=app)
+        return
+    LoadWindow(app, mf, link=link)
+
+
 class LoadWindow(tk.Toplevel):
-    def __init__(self, app, mf):
+    def __init__(self, app, mf, link=None):
+        """link: an opened project's MIDI loaded again (no question, no summary; checked against the link)."""
         super().__init__(app)
         self.withdraw()
-        self.app, self.mf = app, mf
+        self.app, self.mf, self.link = app, mf, link
         self.title(tr("load.title"))
         self.resizable(False, False)
         self.transient(app)
@@ -58,7 +133,19 @@ class LoadWindow(tk.Toplevel):
         self.buttons.pack(fill="x")
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.bind("<Escape>", lambda e: self.cancel())
-        self.ask_page()
+        if link is None:
+            self.ask_page()
+            self.show()
+        else:  # (as it was saved; shown only when it takes a moment: a small file loads in a blink)
+            app._finding = True
+            self.bind("<Destroy>", lambda e: e.widget is self and setattr(app, "_finding", False))
+            self.start(link["mode"] == "memory" and L.can_keep(mf, free_memory()))
+            self.after(REOPEN_SHOW_MS, lambda: self.winfo_exists() and self.show())
+
+    def show(self):
+        if self.winfo_ismapped():
+            return
+        app = self.app
         self.update_idletasks()
         x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
         y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
@@ -107,16 +194,15 @@ class LoadWindow(tk.Toplevel):
             ttk.Label(self.body, text=tr("load.new_project"), foreground=look.HINT, wraplength=460,
                       justify="left").pack(anchor="w", pady=(10, 0))
         ttk.Button(self.buttons, text=tr("load.cancel"), command=self.cancel).pack(side="right")
-        go = ttk.Button(self.buttons, text=tr("load.load"), command=self.start)
+        go = ttk.Button(self.buttons, text=tr("load.load"), command=lambda: self.start(self.keep.get()))
         go.pack(side="right", padx=(0, 6))
         go.focus_set()
-        self.bind("<Return>", lambda e: self.start())
+        self.bind("<Return>", lambda e: self.start(self.keep.get()))
 
     # ------------------------------------------------------------------ 2: reading
 
-    def start(self):
+    def start(self, keep):
         self.unbind("<Return>")
-        keep = self.keep.get()
         self.clear()
         self.name_row(self.mf.path)
         self.steps = {}
@@ -143,7 +229,7 @@ class LoadWindow(tk.Toplevel):
         texts = {"wait": tr("load.step_wait"),
                  "read": tr("load.step_read", done=f"{ld.tracks_done:,}", tracks=f"{len(self.mf.tracks):,}",
                             notes=f"{ld.notes_found:,}"),
-                 "overview": tr("load.step_overview"), "done": tr("load.step_done")}
+                 "overview": tr("load.step_overview"), "done": tr("load.step_done" if self.link is None else "load.step_again")}
         for i, key in enumerate(order):
             if key == "wait" and at > 0 and took < 0.2:
                 self.steps[key].config(text="")  # (the speed-ups were ready: no line for them)
@@ -167,6 +253,8 @@ class LoadWindow(tk.Toplevel):
         ld = self.loader
         if isinstance(ld.error, Cancelled) or ld.cancelled:  # (Cancel in the last step too: the project stays, hunt)
             self.destroy()
+            if self.link is not None:
+                self.app.status.config(text=tr("load.status_without"))
             return
         if ld.error is not None:
             e = ld.error
@@ -182,8 +270,27 @@ class LoadWindow(tk.Toplevel):
             messagebox.showerror(tr("load.title"), text, parent=self.app)
             return
         lm = ld.result
-        self.app.attach_midi(lm)
-        self.summary_page(lm)
+        if self.link is None:
+            self.app.attach_midi(lm)
+            self.summary_page(lm)
+            return
+        self.destroy()
+        app, link = self.app, self.link
+        if app.midi_link is not link or app.loaded is not None:  # (another project opened meanwhile)
+            return
+        if not link["hash"] or lm.link()["hash"] == link["hash"]:  # (the same file, moved or not)
+            app.reattach_midi(lm)
+            return
+        # changed since the project was saved (saved again from another program?): never used quietly
+        answer = ask_choice(app, tr("load.title"), tr("load.link_changed", path=lm.path),
+                            [("use", tr("load.use_changed")), ("find", tr("load.find_original")),
+                             ("keep", tr("load.keep_without"))], icon="warning")
+        if answer == "use":
+            app.reattach_midi(lm)
+        elif answer == "find":
+            app.after_idle(lambda: find_loaded(app, pick=True))
+        else:
+            app.status.config(text=tr("load.status_without"))
 
     # ------------------------------------------------------------------ 3: summary
 

@@ -6,6 +6,7 @@ the whole song. "Keep in memory" keeps the tracks' bytes too (read from there in
 Loader.run() reads the file once (every track checked + fingerprinted + indexed in the same read, on several
 cores), then LoadedMidi holds the result."""
 
+import hashlib
 import os
 import threading
 import time
@@ -22,6 +23,7 @@ PIC_COLS = 1024  # a track's own picture: this many columns at most across its n
 PLAIN_MOST = 16 << 20  # bytes a file may have to load without the speed-ups (plain Python: ~1-2 MB a second)
 SPARE = 2 << 30  # "Keep in memory" only with this much memory left over (user 2026-10-23)
 TEMPO, NAME, PORT, TIME_SIG, KEY_SIG = 0x51, 0x03, 0x21, 0x58, 0x59
+PAIRING = "fifo"  # how note-ons and note-offs are paired (first on, first off: Domino, user 2026-10-23); saved
 
 
 class TrackInfo:
@@ -74,11 +76,51 @@ class LoadedMidi:
     def held_bytes(self):
         return sum(len(t.data) for t in self.tracks if t.data is not None)
 
+    def link(self):
+        """What a project file keeps to find this MIDI again and know it's the same (never its notes)."""
+        return {"path": self.path, "size": self.mf.size, "mtime": self.mf.mtime, "hash": file_hash(self.mf),
+                "mode": self.mode, "ppq": self.ppq, "pairing": PAIRING}
+
     def channel_of(self, number):
         return self.tracks[number].channel
 
     def track_name(self, number):
         return self.tracks[number].name
+
+
+def file_hash(mf):
+    """One short code for every byte of a scanned file (its tracks' hashes + the rest's): a project knows the file
+    again by it, wherever it's moved."""
+    h = hashlib.blake2b(digest_size=16)
+    for t in mf.tracks:
+        h.update(t.hash.encode())
+    h.update(str(mf.raw_hash).encode())
+    return h.hexdigest()
+
+
+def clean_link(link):
+    """A project file's "loaded" block, checked: None when it can't be used."""
+    if not isinstance(link, dict) or not isinstance(link.get("path"), str) or not link["path"]:
+        return None
+    out = {"path": link["path"], "hash": link.get("hash") if isinstance(link.get("hash"), str) else "",
+           "mode": "memory" if link.get("mode") == "memory" else "file",
+           "pairing": link.get("pairing") if isinstance(link.get("pairing"), str) else PAIRING}
+    for k in ("size", "mtime", "ppq"):
+        out[k] = link[k] if type(link.get(k)) is int else 0
+    if isinstance(link.get("rel"), str) and link["rel"]:
+        out["rel"] = link["rel"]
+    return out
+
+
+def located(link, folder):
+    """Where a project's MIDI is now: its own path, else the same name relative to the project's folder (moved
+    together), else just beside the project. None = not found."""
+    tries = [link["path"]]
+    if folder:
+        if link.get("rel"):
+            tries.append(os.path.normpath(os.path.join(folder, link["rel"])))
+        tries.append(os.path.join(folder, os.path.basename(link["path"])))
+    return next((p for p in tries if os.path.isfile(p)), None)
 
 
 def memory_need(mf):

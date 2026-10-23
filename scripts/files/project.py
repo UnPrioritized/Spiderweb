@@ -19,6 +19,7 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, one_voice, shape_notes_tracks, slot_ports)
 from notes.hzbass import clean_hz
+from notes.loaded import clean_link
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
@@ -210,8 +211,12 @@ class ProjectFiles:
     """Mixed into App."""
 
     def project_data(self):
+        link = self.loaded.link() if self.loaded is not None else self.midi_link
         return {
-            "version": 2, "app_version": VERSION,  # the file format, and the Spiderweb that saved it
+            # the file format (3: a loaded MIDI's link; older Spiderwebs say a newer one made it), and the
+            # Spiderweb that saved it
+            "version": 3 if link else 2, "app_version": VERSION,
+            **({"loaded": dict(link)} if link else {}),
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
             "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
@@ -280,7 +285,7 @@ class ProjectFiles:
         folder = os.path.dirname(os.path.abspath(path)) if path else HERE
         shapes = paths_for_file(shapes, folder, False)  # (pictures' files)
         made = version_tuple(data.get("app_version")) if isinstance(data.get("app_version"), str) else None
-        newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 2
+        newer = made and made > version_tuple(VERSION) or type(data.get("version")) is int and data["version"] > 3
         if newer:  # (what that version added is left out)
             self.load_notes.append(tr("project.made_by_a_newer_spiderweb", made=data.get("app_version") or "?",
                                       VERSION=VERSION))
@@ -341,8 +346,10 @@ class ProjectFiles:
                 and not (tempo["points"] and tempo["points"][0][0] <= 1e-9)):
             # (saved with the BPM box: its BPM a point on beat 0, so it plays as it did, user 2026-10-23)
             tempo["points"].insert(0, [0.0, clamp_bpm(float(old_bpm)), "hold", "", "lin", False, [0.5, 0.5]])
+        link = clean_link(data.get("loaded"))  # (its MIDI: loaded again by find_loaded, after this)
 
         was = project_json(self.project_data()), self.undo_stack[:], self.redo_stack[:], self._redo_kept
+        was_loaded = self.loaded
         self._opening = True  # (each box set would make the notes again: once, below)
         try:
             for key, value in boxes.items():
@@ -387,6 +394,7 @@ class ProjectFiles:
         self.roll.drop_lasso()  # (a waiting loop would cut the opened project, hunt 2026-10-23)
         self.shapes = shapes
         self.loaded = None  # (another project: its loaded MIDI goes; attach_midi puts a new one in after this)
+        self.midi_link = link
         self.roll.forget_loaded()
         self.tempo = tempo
         # (only an autosave has them: the project file it belonged to, and whether it had unsaved changes)
@@ -413,6 +421,7 @@ class ProjectFiles:
             notes = self.load_notes
             self.load_file(path, quiet=True, text=was[0])
             self.undo_stack[:], self.redo_stack[:], self._redo_kept = was[1:]
+            self.loaded = was_loaded  # (its MIDI too, as it was)
             self.load_notes = notes
             self.sync_history()
             if not isinstance(e, MemoryError):
@@ -493,7 +502,7 @@ class ProjectFiles:
             messagebox.showwarning(tr("project.spiderweb"), intro + "\n\n".join(self.load_notes) + outro,
                                    parent=self)
 
-    def write_json(self, path, window=False):
+    def write_json(self, path, window=False, midi=None):
         data = self.project_data()
         if window:  # only the autosave remembers the window
             data["window"] = {"geometry": self._normal_geometry or self.wm_geometry(),
@@ -520,7 +529,19 @@ class ProjectFiles:
             save_app_settings(data["window"])  # (sound / updates / tips go to user/settings.ini instead)
             data["project_file"], data["unsaved"] = self.project_file, self.is_dirty()  # (put back at start)
         # pictures in the project's folder (or one inside it) are saved relative to it: they move together
-        data["shapes"] = paths_for_file(data["shapes"], os.path.dirname(os.path.abspath(path)), True)
+        folder = os.path.dirname(os.path.abspath(path))
+        data["shapes"] = paths_for_file(data["shapes"], folder, True)
+        if midi is not None:  # (Save a copy for sharing: the MIDI's copy beside it)
+            data["loaded"]["path"] = midi
+        if "loaded" in data:  # (the MIDI beside / under the project is found there if both are moved)
+            data["loaded"].pop("rel", None)
+            if not window:
+                try:
+                    rel = os.path.relpath(data["loaded"]["path"], folder)
+                    if not rel.startswith(".."):
+                        data["loaded"]["rel"] = rel
+                except ValueError:  # (another drive)
+                    pass
         write_text(path, project_json(data))
 
     def fits_memory(self, shapes, ppq):
@@ -545,6 +566,7 @@ class ProjectFiles:
         if not os.path.exists(path):
             return
         if opens(path):
+            self.find_loaded_later()
             kept = ""
             try:
                 with open(path, "rb") as f:
@@ -563,6 +585,7 @@ class ProjectFiles:
         except OSError:
             kept = ""
         if os.path.exists(backup) and opens(backup):
+            self.find_loaded_later()
             what = (tr("project.opened_the_backup_instead_your_work",
                        strftime=time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(backup)))))
             what += "".join("\n\n" + note for note in self.load_notes)
@@ -759,6 +782,7 @@ class ProjectFiles:
             self.mark_saved()
             self.sync_panel()
             self.tell_load_notes()
+            self.find_loaded_later()
 
     def attach_midi(self, lm):
         """Load MIDI's end: a NEW project (user 2026-10-23: always one) with the file's PPQ (and 256 keys for a 256
@@ -769,10 +793,11 @@ class ProjectFiles:
         data = self.project_data()
         data.update(shapes=[], view=None, playhead=0.0, ppq=str(lm.ppq), bpm="120")
         data.pop("tempo", None)
+        data.pop("loaded", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
-        self.loaded = lm
+        self.loaded, self.midi_link = lm, lm.link()
         self.roll.forget_loaded()
         self.project_file = None
         self._saved_shapes = None
@@ -791,6 +816,27 @@ class ProjectFiles:
             r.fit_view()
         r.request_redraw()
         self.schedule_autosave()
+
+    def reattach_midi(self, lm):
+        """An opened project's MIDI loaded again (window/load_midi.find_loaded): drawn under its shapes as when it was
+        saved. A file of another PPQ (the changed file was picked) gives the project its PPQ (shapes are in beats)."""
+        self.loaded, self.midi_link = lm, lm.link()
+        self.roll.forget_loaded()
+        if str(lm.ppq) != self.pvar["ppq"].get():
+            self.pvar["ppq"].set(str(lm.ppq))
+        if lm.keys > 128 and self.keys == KEYS[0]:
+            self.keys_var.set(str(KEYS[1]))
+        if hasattr(self, "track_list"):
+            self.track_list.request_redraw()
+        self.sync_panel()
+        self.roll.request_redraw()
+        self.schedule_autosave()
+
+    def find_loaded_later(self):
+        """After a project with a MIDI link opened: the MIDI is loaded again (asked about when it's missing)."""
+        if self.midi_link is not None and self.loaded is None:
+            from window.load_midi import find_loaded
+            self.after(300, lambda: find_loaded(self))
 
     def own_file(self, path):
         """The autosave (or its backup): never Save's file, Save asks for a name instead (user)."""
@@ -943,9 +989,97 @@ class ProjectFiles:
         threading.Thread(target=run, daemon=True, name="export loaded midi").start()
         poll()
 
+    def save_sharing_copy(self):
+        """File → Save a copy for sharing…: the project saved where picked, its MIDI copied beside it (asked first,
+        with the size), so the two travel together; the project in use keeps its own file and MIDI."""
+        lm = self.loaded
+        if lm is None or getattr(self, "_exporting", None):
+            return
+        path = filedialog.asksaveasfilename(title=tr("load.share_title"), defaultextension=".json",
+                                            initialdir=os.path.dirname(self.project_file or "") or OUTPUT_DIR,
+                                            initialfile=os.path.basename(self.project_file or "") or "song.json",
+                                            filetypes=[(tr("project.spiderweb_project"), "*.json")])
+        if not path:
+            return
+        midi = os.path.join(os.path.dirname(os.path.abspath(path)), os.path.basename(lm.path))
+        from files.midi_copy import same_file
+        there = same_file(lm.path, midi)  # (the project goes beside its MIDI: nothing to copy)
+        if not there:
+            text = tr("load.share_ask", size=f"{lm.mf.size / 1e6:,.1f}", name=os.path.basename(midi),
+                      folder=os.path.dirname(midi))
+            if os.path.exists(midi):
+                text += "\n\n" + tr("load.share_replace", name=os.path.basename(midi))
+            if not messagebox.askyesno(tr("project.spiderweb"), text, parent=self):
+                return
+            try:
+                lm.mf.same()
+            except MidiError:
+                messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
+                return
+        job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": there, "cancel": False}
+
+        def run():
+            tmp = midi + ".tmp"
+            try:
+                with open(lm.path, "rb") as src, open(tmp, "wb") as dst:
+                    while True:
+                        if job["cancel"]:
+                            raise Cancelled()
+                        piece = src.read(16 << 20)
+                        if not piece:
+                            break
+                        dst.write(piece)
+                        job["done"] += len(piece)
+                lm.mf.same()  # (changed while it was copied: the copy isn't kept)
+                if job["done"] != lm.mf.size:
+                    raise FileChanged()
+                os.replace(tmp, midi)
+            except BaseException as e:  # (said below)
+                job["error"] = e
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            job["finished"] = True
+
+        def poll():
+            if not job["finished"]:
+                self.busy(tr("load.sharing", pct=int(100 * job["done"] / max(1, job["total"]))))
+                self.after(100, poll)
+                return
+            self._exporting = None
+            self.busy(None)
+            e = job["error"]
+            if isinstance(e, Cancelled):
+                return
+            if e is None:
+                try:
+                    self.write_json(path, midi=midi)
+                except OSError as e2:
+                    e = e2
+            if isinstance(e, FileChanged):
+                messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
+            elif isinstance(e, OSError):
+                messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
+            elif e is not None:
+                write_log(type(e), e, e.__traceback__, "(saving a copy for sharing)")
+                messagebox.showerror(tr("project.spiderweb"), tr("load.export_failed", e=e))
+            else:
+                messagebox.showinfo(tr("project.spiderweb"), tr("load.shared", path=path, name=os.path.basename(midi)),
+                                    parent=self)
+        if not there:
+            threading.Thread(target=run, daemon=True, name="copy loaded midi").start()
+        poll()
+
     def generate(self):
         if self.loaded is not None:
             return self.export_loaded()
+        if self.midi_link is not None:  # (its MIDI isn't loaded: the file holds the notes, nothing to export without it)
+            if messagebox.askyesno(tr("project.spiderweb"), tr("load.export_missing", path=self.midi_link["path"]),
+                                   parent=self):
+                from window.load_midi import find_loaded
+                find_loaded(self)
+            return
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:

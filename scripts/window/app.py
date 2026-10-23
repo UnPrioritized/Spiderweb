@@ -410,6 +410,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._used_tracks = (None, 0)  # (rendered, how many slots have notes: update_status)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         self.loaded = None  # a loaded MIDI file (Load MIDI: notes.loaded.LoadedMidi), its notes drawn under the shapes
+        self.midi_link = None  # the project's MIDI file (notes.loaded.clean_link): kept while it isn't loaded too
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
@@ -852,6 +853,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 row.grid(row=r, column=1, sticky="w", padx=5)
                 self.ppq_box = ttk.Combobox(row, textvariable=self.pvar[key], values=PPQS, width=7, height=12)
                 self.ppq_box.pack(side="left")
+                self.ppq_tip = Tooltip(self.ppq_box, "")  # (a loaded MIDI's PPQ can't change: sync_ppq_lock)
                 # a typed PPQ counts on Enter / leaving the box / a pick from the list (user: each key remade the
                 # notes and rounded the tool windows' ticks at every half-typed PPQ); a wrong one: back to the last good
                 for seq in ("<Return>", "<FocusOut>", "<<ComboboxSelected>>"):
@@ -1101,9 +1103,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             title += tr("app.more_selected", n=len(self.sels) - 1)
         self.settings.config(text=title)
 
+    def sync_ppq_lock(self):
+        """A project with a MIDI file keeps the file's PPQ (its notes are in its ticks): the box greyed, its tip says why."""
+        locked = self.midi_link is not None
+        if locked != self.ppq_box.instate(["disabled"]):
+            self.ppq_box.state(["disabled" if locked else "!disabled"])
+        self.ppq_tip.text = tr("load.ppq_locked") if locked else ""
+
     def sync_panel(self):
         sh = self.selected()
         self.sync_title()
+        self.sync_ppq_lock()
         self._loading = True
         for key, var in self.fvars.items():
             var.set(fmt(self.target()[key]))
@@ -1900,12 +1910,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         except ValueError:
             usual = False
         plain = not any(self.tempo.get(k) for k in ("points", "catch", "keysigs")) and sigs_of(self.tempo) == [DEFAULT_SIG]
-        if not self.shapes and plain and usual and not boxes[1] and self.loaded is None:
+        if not self.shapes and plain and usual and not boxes[1] and self.loaded is None and self.midi_link is None:
             return
-        ask = tr("app.new_ask") + ("\n\n" + tr("load.new_closes") if self.loaded is not None else "")
+        ask = tr("app.new_ask") + ("\n\n" + tr("load.new_closes") if self.midi_link is not None else "")
         if not messagebox.askyesno(tr("app.spiderweb_2"), ask, icon="warning", parent=self):
             return
-        if self.loaded is not None:  # (a loaded MIDI goes too; Undo brings back the shapes only)
+        if self.midi_link is not None:  # (a loaded MIDI goes too; Undo brings back the shapes only)
+            self.midi_link = None
             self.loaded = None
             self.roll.forget_loaded()
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes

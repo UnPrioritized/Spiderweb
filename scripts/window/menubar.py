@@ -9,7 +9,7 @@ from files.lang import tr
 from window import look
 from window.chop_window import open_chop, quick_chop
 from window.claw_window import open_claw
-from window.load_midi import load_midi
+from window.load_midi import find_loaded, load_midi
 from window.path_window import open_path
 from window.strum_window import open_strum
 from window.trim_window import open_trim
@@ -43,7 +43,10 @@ def build_menu(app):
     def add(m, key, keys, command, **kw):
         m.add_command(label=tr(key, **kw), accelerator=tr(keys) if keys else "", command=command)
 
-    f = menu("menu.file")
+    def sync_file(m):  # (a project's MIDI: found again only while not loaded; a copy for sharing once it is)
+        m.entryconfig(7, state="normal" if app.midi_link is not None and app.loaded is None else "disabled")
+        m.entryconfig(8, state="normal" if app.loaded is not None else "disabled")
+    f = menu("menu.file", sync_file)
     add(f, "menu.new", "menu.ctrl_n", app.new_project)
     add(f, "menu.open", "menu.ctrl_o", app.open_project)
     add(f, "menu.save", "menu.ctrl_s", app.save_project)
@@ -51,6 +54,8 @@ def build_menu(app):
     f.add_separator()
     add(f, "menu.export_midi", "menu.ctrl_e", app.generate)
     add(f, "menu.load_midi", "", lambda: load_midi(app))
+    add(f, "menu.find_loaded", "", lambda: find_loaded(app))
+    add(f, "menu.share_copy", "", app.save_sharing_copy)
     f.add_separator()
     add(f, "menu.domino_paste", "", lambda: app.paste_from_domino())
     add(f, "menu.domino_copy", "menu.ctrl_shift_c", app.copy_to_domino)
