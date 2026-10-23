@@ -3,6 +3,7 @@ part: tool_window.py)."""
 
 import random
 import tkinter as tk
+from fractions import Fraction
 from tkinter import ttk
 
 from files.lang import plural, tr
@@ -26,6 +27,16 @@ def trash_name(t):
     return tr("claw.none") if not t else f"{t[0]}/{t[1]}"
 
 
+def number_text(v):
+    """A period box's text: fmt's short one, or a fraction like "1/3" when the short one would change the value."""
+    text = fmt(v)
+    if abs(float(text) - v) > 1e-12:
+        f = Fraction(v).limit_denominator(1000)
+        if abs(f - v) < 1e-9:
+            return f"{f.numerator}/{f.denominator}"
+    return text
+
+
 class ClawWindow(ToolWindow):
     KEY, ATTR, POS, DEFAULTS = "claw", "claw_window", "claw_pos", CLAW_DEFAULTS
 
@@ -45,6 +56,7 @@ class ClawWindow(ToolWindow):
         self.shown_mode = None  # (show)
         self.menus, self.boxes, self.vars, self.entries = {}, {}, {}, {}
         self.typed_rows, self.shown_typed = {}, {}  # (rows whose dropdown can turn into typed boxes: show)
+        self.typed_texts = {}  # key -> (value, text typed for it): shown while the value is in use
         self.menu_row(box, 1, "mode", tr("claw.mode"), MODES, tr("claw.tip_mode"))
         box.columnconfigure(0, minsize=round(80 * s))
 
@@ -138,20 +150,32 @@ class ClawWindow(ToolWindow):
         e.bind("<FocusIn>", lambda ev: self.app.tips.show("numbers", parent=self, wait=True))  # (not behind it)
         Tooltip(e, tip)
 
+    def shown_text(self, key):
+        """The box's text for the value in use: what was typed for it, else number_text."""
+        v = self.claw[key]
+        typed = self.typed_texts.get(key)
+        return typed[1] if typed and typed[0] == v else number_text(v) if key == "period" else fmt(v)
+
     def on_entry(self, key, done=True):
         e, var = self.entries[key], self.vars[key]
+        text = var.get().strip()
+        if text == self.shown_text(key):  # (left unchanged: the exact value stays, not the box's shortened one)
+            good(e)
+            return
         lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100), "cut": (1, 99),
                   "dist": (-100, 100), "period": (1 / self.app.ppq, MAX_PERIOD)}[key]
         try:
-            v = float(calc(var.get()))
+            v = float(calc(text))
             if not lo - 1e-9 <= v <= hi or key in ("keep", "skip") and v != int(v):
                 raise ValueError
         except (ValueError, ZeroDivisionError):
-            e.good_text = fmt(self.claw[key])  # (back to what is in use: the knob may have moved since)
+            e.good_text = self.shown_text(key)  # (back to what is in use: the knob may have moved since)
             bad(e)
             return
         good(e)
         v = int(v) if key in ("keep", "skip") else clean_period(v) if key == "period" else v
+        if done and fmt(v) != text:
+            self.typed_texts[key] = (v, text)  # (e.g. "1/3": the box keeps showing it)
         if v != self.claw[key]:
             self.put(key, v, done)
 
@@ -231,7 +255,7 @@ class ClawWindow(ToolWindow):
                                        lambda: (0.25, 1, 1 / self.app.ppq), None, MAX_PERIOD,
                                        text=lambda v: f"{v:.9f}".rstrip("0").rstrip("."))
         # (steps from the period in use, not the box's rounded text: 1-tick steps stay whole ticks)
-        sc.read = lambda text: self.claw["period"] if text == fmt(self.claw["period"]) else calc(text)
+        sc.read = lambda text: self.claw["period"] if text == self.shown_text("period") else calc(text)
         for ev, fn in (("<ButtonPress-1>", sc.press), ("<B1-Motion>", sc.motion), ("<ButtonRelease-1>", sc.release)):
             lb.bind(ev, lambda e, fn=fn: fn(e) if self.shown_typed.get("period") else None)
         lb.bind("<Destroy>", lambda e: sc.gone(), add="+")
@@ -314,8 +338,8 @@ class ClawWindow(ToolWindow):
             if var.get() != c[key]:
                 var.set(c[key])
         for key, var in self.vars.items():
-            if var.get() != fmt(c[key]):
-                var.set(fmt(c[key]))
+            if var.get() != self.shown_text(key):
+                var.set(self.shown_text(key))
             config(self.entries[key], style="TEntry")
         if c["mode"] != self.shown_mode:
             self.shown_mode = c["mode"]
@@ -337,7 +361,7 @@ class ClawWindow(ToolWindow):
 
     def on_knob(self, value, done):
         self.claw["dist"] = value
-        self.vars["dist"].set(fmt(value))
+        self.vars["dist"].set(self.shown_text("dist"))
         self.entries["dist"].config(style="TEntry")
         self.preview(done)
         self.undo.mark("dist")
