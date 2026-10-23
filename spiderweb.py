@@ -60,6 +60,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     range_window.py  the spam gate Range's graph window
     sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
     subtract_window.py the Gate subtract window (on / off, ticks, only notes that touch)
+    strips_window.py the Separate strips window (on / off, notes between, the count, strip colours)
     merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
@@ -118,6 +119,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     copypath.py      copy along a path: the shape's notes copied from A to B (straight / curve / arc)
     sustain.py       sustain: each key row's notes held to their group's end (overlaps kept), done last
     subtract.py      gate subtract: every note ends a few ticks earlier (start kept), done after Sustain
+    strips.py        separate strips: each strip of a pasted track guessed key by key, its own channels
     tempo.py         the project's tempo line: curves, catch-ups, exact Domino-safe tempo changes for the MIDI
     tempo_file.py    the tempo line in a MIDI file: Keep timing moves notes exactly, bar lines fitted, warnings
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them

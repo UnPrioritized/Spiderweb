@@ -264,7 +264,7 @@ class HistoryPanel:
         once: the first step takes back what ALL of them tried, the next all but the first's... (each step was
         made from the shapes as they are, which hold every window's tries: undoing them all came back to one)."""
         ws = [w for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window,
-                          self.tumour_window, self.sustain_window, self.subtract_window) if w]
+                          self.tumour_window, self.sustain_window, self.subtract_window, self.strips_window) if w]
         waiting = [w for w in ws if w.pending()]
         for w in ws:
             w.settle(also=waiting[waiting.index(w) + 1:] if w in waiting else ())

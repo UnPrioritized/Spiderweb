@@ -51,6 +51,7 @@ from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask
 from notes.passengers import check_cc
+from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved_by, piece_knives,
                           piece_notes, run_origins, source, spotted_notes, steps_kept, whole_made)
@@ -311,6 +312,9 @@ def clean_shape(sh):
                 out["paste"] = sh["paste"]
             if isinstance(sh.get("cc"), str) and check_cc(sh["cc"]):  # its tracks' CCs etc. (passengers.py)
                 out["cc"] = sh["cc"]
+            st = clean_strips(sh.get("strips"))
+            if st:  # Separate strips (strips.py): each strip of a track its own channels
+                out["strips"] = st
             um = clean_unmerge(sh["unmerge"], clean_shape) if isinstance(sh.get("unmerge"), dict) else None
             if um:  # a Gate sensitive merge kept as separate shapes: the shape its notes were, for Split (merge.py)
                 out["unmerge"] = um

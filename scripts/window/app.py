@@ -39,6 +39,7 @@ from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, pi
                         slot_pal, slot_rule, tidy_groups)
 from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
+from notes.strips import gap_of, has_strips, strip_colours, strip_laps
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
@@ -159,6 +160,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     if rounds:
         laps = [np.full(len(n), tl, np.int64) if tl is not None else lap
                 for (n, _), lap, tl in zip(got, laps, team_laps)]
+    # (Separate strips: each strip of a pasted track a round of its own, the first keeping its channels; strips.py)
+    strips = [mode == "auto" and has_strips(sh) and t is not None for sh, (_, t) in zip(shapes, got)]
+    laps = [strip_laps(n, t, gap_of(sh)) if s else lap for sh, (n, t), lap, s in zip(shapes, got, laps, strips)]
     # (a mask whose own notes don't sound: none, mask.py)
     off = [silent(sh) or quiet and is_mask(sh) for sh in shapes]
     got = [(n[:0], None if t is None else t[:0]) if o else (n, t) for o, (n, t) in zip(off, got)]
@@ -191,7 +195,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
                              [colours_back(sh) for sh in shapes],
                              [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh for sh in shapes], laps, keep,
-                             [r and not has_colours(sh, turns=True) for sh, r in zip(shapes, took)], voice_slots,
+                             [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
+                             voice_slots,
                              busy)
     return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}
 
@@ -289,6 +294,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sustain_window = None  # Sustain… (sustain_window.py)
         self.subtract_window = None  # Gate subtract… (subtract_window.py)
         self.merge_window = None  # Gate sensitive merge… (merge_window.py)
+        self.strips_window = None  # Separate strips… (strips_window.py)
         self.path_pos = ""
         self.hz_window = None  # the Hz bass window (hz_window.py)
         self.image_window = None  # image to notes (image_window.py; opened by the Picture tool)
@@ -987,7 +993,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_list_selection()
         self.sync_line_fill()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.sustain_window,
-                  self.subtract_window, self.merge_window):
+                  self.subtract_window, self.merge_window, self.strips_window):
             if w:
                 w.sync()
         if self.hz_window:
@@ -1422,6 +1428,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                       self.pattern)
         else:  # (toolbar "Preview" off: the pattern drawn whole, only the masks' dashed lines; user)
             self.drawn, self.mask_covered = self.rendered, set()
+        if self.strips_window:  # (its strips each in a colour of its own while it shows them)
+            self.drawn = strip_colours(self.drawn, self.strips_window.shown_owners())
         self._mask_time = time.perf_counter() - started
         if wanted != self.colours_wanted:
             self.colours_wanted = wanted
