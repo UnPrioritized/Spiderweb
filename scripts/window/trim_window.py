@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.trim import BY, MAX_LENGTH, TRIM_DEFAULTS, clean_trim
+from notes.trim import BY, MAX_LENGTH, TRIM_DEFAULTS, clean_trim, length_ticks, longest_run
 from window import look
 from window.tool_window import ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good
@@ -53,7 +53,7 @@ class TrimWindow(ToolWindow):
         self.var = tk.StringVar()
         self.entry = ttk.Entry(row, textvariable=self.var, width=8, justify="center")
         self.entry.pack(side="left", padx=4)
-        self.entry.bind("<Return>", lambda e: (self.on_entry(), "break")[1])
+        self.entry.bind("<Return>", lambda e: (self.on_entry(enter=True), "break")[1])
         self.entry.bind("<FocusOut>", lambda e: self.on_entry())
         self.unit = ttk.Combobox(row, state="readonly", values=[tr("trim.of_each_row"), tr("trim.ticks_of_each_row")])
         self.unit.pack(side="left")
@@ -68,8 +68,9 @@ class TrimWindow(ToolWindow):
         self.slider = ttk.Scale(box, from_=0, to=100, variable=self.slider_var,
                                 length=round(SLIDER_PX * self.app.scale), command=lambda v: self.on_slider())
         self.slider.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.slider.bind("<ButtonPress-1>", self.slider_press, add="+")
-        self.slider.bind("<ButtonRelease-1>", lambda e: self.slider_release(), add="+")
+        for b in (1, 2, 3):  # (Tk's own: the middle / right button jumps there and drags too)
+            self.slider.bind(f"<ButtonPress-{b}>", self.slider_press, add="+")
+            self.slider.bind(f"<ButtonRelease-{b}>", lambda e: self.slider_release(), add="+")
         Tooltip(self.slider, tr("trim.tip_slider"))
         self.hold = Hold()
         self.pressed_at = None  # where the slider was when pressed
@@ -104,16 +105,21 @@ class TrimWindow(ToolWindow):
 
     def value(self):
         """The number in use, as the box shows it (% or ticks)."""
-        return round(self.cfg["length"] * self.app.ppq) if self.ticks() else self.cfg["keep"]
+        return length_ticks(self.cfg["length"], self.app.ppq) if self.ticks() else self.cfg["keep"]
+
+    def exact(self):
+        """Is the number in use exactly what the box shows? (Not after a PPQ change put a length between ticks.)"""
+        return not self.ticks() or abs(self.cfg["length"] * self.app.ppq - self.value()) < 1e-9
 
     def shown_text(self):
         v = self.value()
         typed = self.typed
         return typed[2] if typed and typed[:2] == (self.cfg["by"], v) else fmt(v)
 
-    def on_entry(self, done=True):
+    def on_entry(self, done=True, enter=False):
         text = self.var.get().strip()
-        if text == self.shown_text():  # (left unchanged: the exact value stays, not the box's shortened one)
+        if text == self.shown_text() and (self.exact() or not enter):  # (left unchanged: the exact value stays,
+            # not the box's shortened one; Enter on a length a PPQ change left between ticks makes it whole)
             good(self.entry)
             return
         try:
@@ -133,7 +139,7 @@ class TrimWindow(ToolWindow):
         good(self.entry)
         if done and fmt(v) != text and not plain_number(text):
             self.typed = (self.cfg["by"], v, text)  # (e.g. "100/3": the box keeps showing it; 12.3456 shows 12.346)
-        if v != self.value():
+        if v != self.value() or not self.exact():
             if self.ticks():
                 self.put("length", v / self.app.ppq, done)
             else:
@@ -144,14 +150,35 @@ class TrimWindow(ToolWindow):
     def on_unit(self):
         """% of each row / ticks of each row picked."""
         by = BY[self.unit.current()]
-        if by != self.cfg["by"]:
-            self.undo.key = None
-            self.put("by", by)
+        if by == self.cfg["by"]:
+            return
+        if by == "ticks":  # (starts at the longest row: nothing cut until a number is set, like 100 %)
+            self.cfg["length"] = max(1, self.longest()) / self.app.ppq
+        if self.at is None:  # ("+": no page yet, as the number changes nothing)
+            self.cfg["by"] = by
+            self.show()
+            return
+        self.undo.key = None
+        self.put("by", by)
+
+    def longest(self):
+        """The longest row of touching notes in the selected shapes, in ticks, before the page shown (or all their
+        pages, on "+")."""
+        most = 0
+        for i in self.targets:
+            sh = self.app.shapes[i]
+            fx = sh.get("fx") or []
+            k = len(fx) if self.at is None else self.at[i]
+            before = {key: v for key, v in sh.items() if key != "fx"}
+            if fx[:k]:
+                before["fx"] = fx[:k]
+            most = max(most, longest_run(self.app.notes_of(before)))
+        return most
 
     # ---- the slider (whole percents; greyed while counting ticks)
 
     def slider_press(self, e):
-        if self.ticks():
+        if self.ticks() or self.hold.down:  # (a second button while one is held: the first press counts)
             return
         self.knob_pressed(self.hold)  # (a step of its own; Ctrl+Z while held: back to the press)
         self.hold.down, self.hold.dead = True, False

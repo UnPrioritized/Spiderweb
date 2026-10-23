@@ -55,11 +55,24 @@ def runs(a):
     return order, run, s[first], np.maximum.reduceat(e, first)
 
 
+def longest_run(a):
+    """The longest run's length in ticks (0 without notes): "ticks of each row" starts there, cutting nothing."""
+    if not len(a):
+        return 0
+    _, _, lo, hi = runs(a)
+    return int((hi - lo).max())
+
+
+def length_ticks(length, ppq):
+    """A "ticks" trim's length (beats) as whole ticks at ppq, as the trim counts it: halves up, at least 1."""
+    return max(1, math.floor(length * ppq + 0.5))
+
+
 def kept_ticks(lo, hi, tr, ppq):
     """How many ticks of each run (first start lo .. last end hi) stay: keep % rounded, halves up (user 2026-10-23:
     7 ticks kept 4 but 5 kept 2), or the length in ticks (at least 1)."""
     if tr.get("by") == "ticks":
-        return np.minimum(hi - lo, max(1, math.floor(tr["length"] * ppq + 0.5)))
+        return np.minimum(hi - lo, length_ticks(tr["length"], ppq))
     return np.floor((hi - lo) * (tr["keep"] / 100) + 0.5 + 1e-9).astype(np.int64)
 
 
