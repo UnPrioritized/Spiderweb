@@ -7,6 +7,7 @@ bars per column (meter.bar_lines), like Domino's.
 Picture: the rows' stripes, bar lines and notes painted into one NumPy picture (speed.Photo) per redraw; names,
 ruler and play line are canvas items. Each track's notes fill its row from its own lowest to highest key."""
 
+import json
 import math
 import tkinter as tk
 import tkinter.font as tkfont
@@ -21,6 +22,8 @@ from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import slot_track_channel
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
+from notes.tempo import bpm_text
+from notes.tempo_file import heard_tempo
 from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, grab_while_panning, slot_colours
 from window import look
@@ -67,7 +70,8 @@ class TrackList(tk.Canvas):
         self._slots = np.zeros(0, np.int64)  # the tracks: their slots, in order
         self._row_of = np.zeros(0, np.int64)  # slot -> row (-1: none)
         self._lo = self._hi = np.zeros(0, np.int64)  # each slot's lowest / highest key
-        self._photo = None
+        self._photo = self._tempo_photo = None
+        self._heard = None  # (key, heard()'s answer) for the tempo line it was worked out for
         self._fonts = {}  # font -> (tk font, its measuring function: measurer)
         self._pan = None
         self._job = None
@@ -431,6 +435,8 @@ class TrackList(tk.Canvas):
         if row is not None and row >= 0 and self.on_speaker(e.x):
             slot = int(self.tracks()[row])
             text = tr("tracks.unmute_tip" if slot in self.muted else "tracks.mute_tip")
+        elif row == -1 and e.x >= self.name_w and self.sx:
+            text = self.bpm_tip(e.x)
         else:
             text = self.row_tip(row) if row is not None and e.x < self.name_w else ""
         if text != self.tip.text:
@@ -608,19 +614,84 @@ class TrackList(tk.Canvas):
         self.create_line(0, top, w, top, fill=look.ROLL_EDGE)
         self.create_rectangle(0, 0, self.name_w, top, fill=look.RULER_BG, outline="")
 
+    def heard(self):
+        """(ticks, BPMs) of the tempo as it plays (tempo_file.heard_tempo: catch-ups, Keep timing in place), the
+        song's slowest and fastest; None without a tempo line (the project's BPM all through)."""
+        app = self.app
+        pane = getattr(app, "tempo_pane", None)
+        base = pane.base() if pane is not None else 120.0
+        n = app.rendered
+        end = int(n[:, 1].max()) + 1 if len(n) else 0
+        key = (json.dumps(app.tempo), base, app.ppq, end)
+        if self._heard is not None and self._heard[0] == key:
+            return self._heard[1]
+        got = heard_tempo(app.tempo, base, app.ppq, end)
+        if got:
+            ticks = np.array([t for t, _ in got], np.int64)
+            bpm = 60_000_000 / np.array([u for _, u in got], float)
+            got = (ticks, bpm, float(bpm.min()), float(bpm.max()))
+        else:
+            got = (np.zeros(1, np.int64), np.array([float(base)]), float(base), float(base))
+        self._heard = (key, got)
+        return got
+
+    def bpm_heights(self, xs, inner):
+        """The bar height (pixels, at least 1) at each pixel column xs of the notes' part: the fastest BPM in it,
+        scaled from the song's slowest (1 px) to its fastest (inner); on the doubling scale when the fastest is more
+        than 4 x the slowest (a jump to 2000 BPM would flatten the rest)."""
+        ticks, bpm, lo, hi = self.heard()
+        ppq = self.app.ppq
+        start = (self.view_t + xs / self.sx) * ppq  # (each column's first tick)
+        at = np.clip(np.searchsorted(ticks, start, "right") - 1, 0, len(ticks) - 1)
+        val = bpm[at]
+        col = np.floor((ticks / ppq - self.view_t) * self.sx).astype(np.int64)  # (changes inside a column)
+        on = (col >= 0) & (col < len(xs))
+        if on.any():
+            most = np.full(len(xs), -np.inf)
+            np.maximum.at(most, col[on], bpm[on])
+            val = np.maximum(val, most)
+        if hi <= lo:
+            share = np.full(len(xs), 0.5)
+        elif hi > 4 * lo:
+            share = np.log2(val / lo) / np.log2(hi / lo)
+        else:
+            share = (val - lo) / (hi - lo)
+        return np.maximum(1, np.round(1 + share * (inner - 1))).astype(np.int64)
+
     def draw_conductor(self, w):
-        """The Conductor row: a short line at each tempo point and time / key signature."""
+        """The Conductor row: the tempo as bars (the song's own slowest .. fastest, user 2026-10-23: Domino's
+        1-512 BPM wouldn't fit a MIDI file's range) and a short line at each time / key signature."""
         s, y0 = self.scale, self.ruler_h
         y1 = y0 + self.row_h
-        self.create_rectangle(self.name_w, y0, w, y1, fill=look.TRACK_ROW, outline="")
+        x0 = self.name_w
+        aw = w - x0
+        if aw >= 1 and self.row_h > 4:
+            inner = self.row_h - 2 * round(PAD * s) - 1
+            tall = self.bpm_heights(np.arange(aw), inner)
+            h = self.row_h - 1
+            img = np.empty((h, aw, 3), np.uint8)
+            img[:] = hex_rgb(look.TRACK_ROW)
+            ys = np.arange(h)[:, None]
+            bottom = h - round(PAD * s)
+            img[(ys >= bottom - tall[None, :]) & (ys < bottom)] = hex_rgb(look.TRACK_TEMPO)
+            if self._tempo_photo is None or self._tempo_photo.size != (aw, h):
+                self._tempo_photo = Photo(self, aw, h)
+            self._tempo_photo.put(img)
+            self.create_image(x0, y0, image=self._tempo_photo.photo, anchor="nw")
         tempo = self.app.tempo
-        beats = {p[0] for p in tempo.get("points") or []} | {sg[0] for sg in sigs_of(tempo)[1:]} \
-            | {k[0] for k in tempo.get("keysigs") or []}
+        beats = {sg[0] for sg in sigs_of(tempo)[1:]} | {k[0] for k in tempo.get("keysigs") or []}
         for b in beats:
             x = round(self.t2x(b))
             if self.name_w <= x <= w:
-                self.create_line(x, y0 + 4 * s, x, y1 - 4 * s, fill=look.TRACK_CONDUCTOR, width=max(1, round(s)))
+                self.create_line(x, y0 + 2 * s, x, y0 + 7 * s, fill=look.TRACK_CONDUCTOR, width=max(1, round(s)))
         self.create_line(0, y1, w, y1, fill=look.ROLL_EDGE)
+
+    def bpm_tip(self, x):
+        """The Conductor row's tip at x: the BPM playing there, the song's slowest and fastest."""
+        ticks, bpm, lo, hi = self.heard()
+        tick = max(0.0, self.x2t(x)) * self.app.ppq
+        now = bpm[max(0, int(np.searchsorted(ticks, tick, "right")) - 1)]
+        return tr("tracks.bpm_tip", bpm=bpm_text(now), lo=bpm_text(lo), hi=bpm_text(hi))
 
     def draw_names(self, h):
         """The names' column: Conductor, then each track's name (cut with "…" when too long: the tip has it whole)
