@@ -18,8 +18,10 @@ import math
 
 import numpy as np
 
-PERIODS = (1, 2, 4, 8, 16)  # beats
+PERIODS = (1, 2, 4, 8, 16)  # beats (the list's choices; any other period can be typed)
 TRASHES = ((1, 4), (2, 4), (3, 4), (4, 4), None, (1, 3), (2, 3), (3, 3), None, (1, 2), (2, 2))  # None = a gap
+MAX_PERIOD = 1000  # beats (a typed period)
+MAX_SLICES = 1000  # (a typed Trash every k/n: n at most this)
 BEND = np.log(50.0)  # how much the dial bends time when turned all the way
 SHORT = 1 / 24  # beats
 MODES = ("time", "notes", "keys", "chords", "random")
@@ -47,11 +49,8 @@ def clean_claw(c):
                 out[key] = max(lo, min(hi, v if key in ("pct", "cut") else int(v)))
         except (TypeError, ValueError, OverflowError):
             pass
-    if c.get("period") in PERIODS:
-        out["period"] = c["period"]
-    t = c.get("trash")
-    if isinstance(t, (list, tuple)) and tuple(t) in TRASHES:
-        out["trash"] = list(t)
+    out["period"] = clean_period(c.get("period")) or out["period"]
+    out["trash"] = clean_trash(c.get("trash"))
     try:
         v = float(c.get("dist", 0.0))
         if math.isfinite(v):
@@ -66,6 +65,32 @@ def clean_claw(c):
             mode == "random" and out["pct"] == 100):
         return None
     return {k: out[k] for k in ("mode",) + SETTINGS[mode]}
+
+
+def clean_period(p):
+    """A period in beats (any number above 0 up to MAX_PERIOD; a whole one as an int) or None."""
+    if isinstance(p, bool):
+        return None
+    try:
+        p = float(p)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (math.isfinite(p) and 1e-6 <= p <= MAX_PERIOD):
+        return None
+    return int(p) if p == int(p) else p
+
+
+def clean_trash(t):
+    """[k, n] (whole numbers, 1 <= k <= n <= MAX_SLICES) or None."""
+    if not isinstance(t, (list, tuple)) or len(t) != 2 or any(isinstance(x, bool) for x in t):
+        return None
+    try:
+        k, n = (float(x) for x in t)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (1 <= k <= n <= MAX_SLICES and k == int(k) and n == int(n)):
+        return None
+    return [int(k), int(n)]
 
 
 def _bend(y, period, dist):

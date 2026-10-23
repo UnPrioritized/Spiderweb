@@ -18,9 +18,9 @@ Velocities drawn or typed afterwards replace theirs; a page added after that wor
 
 Mode By time works like the claw machine found in other piano rolls. Once you've clicked a dropdown (Mode, Period, Trash every), the mouse wheel over it picks the next or previous choice.
 
-Period: the claw works on this much time at a time, over and over, starting at the shape's first note.
+Period: the claw works on this much time at a time, over and over, starting at the shape's first note. Custom… at the bottom of the list turns the dropdown into a box where you type any number of beats (1.5 and 1/3 work too); drag the word Period sideways to change it (Shift = whole beats, Ctrl = 1 tick). The ▾ beside the box brings the list back.
 
-Trash every: each period is cut into equal slices and one is thrown away. 1/4 = the first quarter, 2/4 = the second quarter, and so on. Notes in that slice go, notes crossing its edges are cut there, and all later notes move earlier to close the gap, so the notes end sooner.
+Trash every: each period is cut into equal slices and one is thrown away. 1/4 = the first quarter, 2/4 = the second quarter, and so on. Notes in that slice go, notes crossing its edges are cut there, and all later notes move earlier to close the gap, so the notes end sooner. Custom… turns it into two boxes, like 2 / 5 = the second of five slices; type in them or drag them sideways.
 
 Time dist: bends time inside each period. Turned right: long notes first, then faster and faster (a bouncing ball, a drum roll before a drop). Turned left: the other way round. It works even with Trash every at (none).
 

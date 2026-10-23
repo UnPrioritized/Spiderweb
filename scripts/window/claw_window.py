@@ -7,10 +7,11 @@ from tkinter import ttk
 
 from files.lang import plural, tr
 from files.mathexpr import calc, fmt
-from notes.claw import CLAW_DEFAULTS, COUNTS, MAX_COUNT, PERIODS, TRASHES, clean_claw
+from notes.claw import (CLAW_DEFAULTS, COUNTS, MAX_COUNT, MAX_PERIOD, MAX_SLICES, PERIODS, TRASHES, clean_claw,
+                        clean_period)
 from window import look
 from window.tool_window import Knob, ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, wheel_ready, wheel_turns
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, unit_word, wheel_ready, wheel_turns
 
 MODES = [("time", tr("claw.by_time")), ("notes", tr("claw.by_notes")), ("keys", tr("claw.by_keys")),
          ("chords", tr("claw.by_chords")), ("random", tr("claw.random"))]
@@ -43,16 +44,17 @@ class ClawWindow(ToolWindow):
         s = self.app.scale
         self.shown_mode = None  # (show)
         self.menus, self.boxes, self.vars, self.entries = {}, {}, {}, {}
+        self.typed_rows, self.shown_typed = {}, {}  # (rows whose dropdown can turn into typed boxes: show)
         self.menu_row(box, 1, "mode", tr("claw.mode"), MODES, tr("claw.tip_mode"))
         box.columnconfigure(0, minsize=round(80 * s))
 
         time = self.boxes["time"] = self.mode_box(box)
         self.menu_row(time, 0, "period", tr("claw.period"), [(p, period_name(p)) for p in PERIODS],
-                      tr("claw.tip_period"))
+                      tr("claw.tip_period"), self.period_box)
         self.menu_row(time, 1, "trash", tr("claw.trash_every"),
                       [(list(t), trash_name(t)) if t else (None, "-") for t in TRASHES + (None,)] +
                       [(None, trash_name(None))],
-                      tr("claw.tip_trash"))
+                      tr("claw.tip_trash"), self.trash_box)
         ttk.Label(time, text=tr("claw.time_dist")).grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
         dial = ttk.Frame(time)
         dial.grid(row=2, column=1, sticky="w", pady=4)
@@ -139,37 +141,140 @@ class ClawWindow(ToolWindow):
     def on_entry(self, key, done=True):
         e, var = self.entries[key], self.vars[key]
         lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100), "cut": (1, 99),
-                  "dist": (-100, 100)}[key]
+                  "dist": (-100, 100), "period": (1 / self.app.ppq, MAX_PERIOD)}[key]
         try:
             v = float(calc(var.get()))
-            if not lo <= v <= hi or key in ("keep", "skip") and v != int(v):
+            if not lo - 1e-9 <= v <= hi or key in ("keep", "skip") and v != int(v):
                 raise ValueError
         except (ValueError, ZeroDivisionError):
             e.good_text = fmt(self.claw[key])  # (back to what is in use: the knob may have moved since)
             bad(e)
             return
         good(e)
-        v = int(v) if key in ("keep", "skip") else v
+        v = int(v) if key in ("keep", "skip") else clean_period(v) if key == "period" else v
         if v != self.claw[key]:
             self.put(key, v, done)
 
-    def menu_row(self, box, r, key, label, choices, tip):
-        ttk.Label(box, text=label).grid(row=r, column=0, sticky="e", padx=(0, 8), pady=2)
-        b = ttk.Menubutton(box, width=12)
-        b.grid(row=r, column=1, sticky="w", pady=2)
-        m = tk.Menu(b, tearoff=0)
-        for value, text in choices:
-            if text == "-":
-                m.add_separator()
-            else:
-                m.add_command(label=text, command=lambda v=value: self.put(key, v))
-        b["menu"] = m
+    def menu_row(self, box, r, key, label, choices, tip, typed=None):
+        """A dropdown row. typed(holder, label) (optional): makes the boxes the row turns into when "Custom…" is
+        picked (or the value isn't one of the choices); they take the dropdown's place, so the window doesn't grow
+        (user 2026-10-22)."""
+        lb = ttk.Label(box, text=label)
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=2)
+        holder = ttk.Frame(box)
+        holder.grid(row=r, column=1, sticky="w", pady=2)
+        b = ttk.Menubutton(holder, width=12)
+        b.pack(side="left")
+        b["menu"] = self.choice_menu(b, key, choices, typed)
         b._wheel = True  # (clicked: the wheel steps it, widgets.wheel_ready)
         b.bind("<ButtonPress-1>", lambda e: b.focus_set(), add="+")
         b.bind("<MouseWheel>", lambda e: (self.wheel_menu(key, 1 if e.delta < 0 else -1) if wheel_turns(b, e)
                                           else "break") if wheel_ready(b) else None)
         Tooltip(b, tip)
         self.menus[key] = (b, choices)
+        if typed:
+            self.typed_rows[key] = (b, typed(holder, lb))
+            self.shown_typed[key] = False
+
+    def choice_menu(self, parent, key, choices, typed):
+        """The dropdown's list (+ "Custom…" for a row that can be typed)."""
+        m = tk.Menu(parent, tearoff=0)
+        for value, text in choices:
+            if text == "-":
+                m.add_separator()
+            else:
+                m.add_command(label=text, command=lambda v=value: self.pick(key, v))
+        if typed:
+            m.add_separator()
+            m.add_command(label=tr("claw.custom"), command=lambda: self.go_typed(key))
+        return m
+
+    def back_button(self, f, key):
+        """The small ▾ beside typed boxes: the list again (a choice picked = the dropdown back)."""
+        b = ttk.Menubutton(f, width=0)
+        b.pack(side="left", padx=(4, 0))
+        b["menu"] = self.choice_menu(b, key, self.menus[key][1], None)
+        Tooltip(b, tr("claw.tip_back_to_list"))
+
+    def typed(self):
+        return list(self.claw.get("typed") or [])
+
+    def pick(self, key, value):
+        """A choice picked from a list: the row is a dropdown (again)."""
+        self.claw["typed"] = [k for k in self.typed() if k != key]
+        self.put(key, value)
+
+    def go_typed(self, key):
+        """"Custom…": the row's dropdown turns into boxes holding the value in use (Trash every with none: 1/4)."""
+        self.claw["typed"] = sorted(set(self.typed()) | {key})
+        if key == "trash" and not self.claw["trash"]:
+            self.put("trash", [1, 4])
+        else:
+            self.show()
+            self.undo.mark()
+        e = self.entries["period"] if key == "period" else self.trash_entries["k"]
+        e.focus_set()
+        e.select_range(0, "end")
+
+    def period_box(self, holder, lb):
+        """Period typed: [x] beats ▾. Its label drags it too (1/4 beat a step, Shift 1 beat, Ctrl 1 tick)."""
+        f = ttk.Frame(holder)
+        self.period_label = lb
+        var = self.vars["period"] = tk.StringVar()
+        e = self.entries["period"] = ttk.Entry(f, textvariable=var, width=6)
+        e.pack(side="left")
+        e.bind("<Return>", lambda ev: (self.on_entry("period"), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_entry("period"))
+        unit_word(ttk.Label(f, foreground=look.HINT), var, "unit.beats").pack(side="left", padx=(4, 0))
+        self.back_button(f, "period")
+        sc = self.period_scrub = Scrub(self.app, [(e, var, lambda: self.on_entry("period", False))],
+                                       lambda: (0.25, 1, 1 / self.app.ppq), None, MAX_PERIOD,
+                                       text=lambda v: f"{v:.9f}".rstrip("0").rstrip("."))
+        # (steps from the period in use, not the box's rounded text: 1-tick steps stay whole ticks)
+        sc.read = lambda text: self.claw["period"] if text == fmt(self.claw["period"]) else calc(text)
+        for ev, fn in (("<ButtonPress-1>", sc.press), ("<B1-Motion>", sc.motion), ("<ButtonRelease-1>", sc.release)):
+            lb.bind(ev, lambda e, fn=fn: fn(e) if self.shown_typed.get("period") else None)
+        lb.bind("<Destroy>", lambda e: sc.gone(), add="+")
+        Tooltip(e, tr("claw.tip_period_typed"))
+        return f
+
+    def trash_box(self, holder, lb):
+        """Trash every typed: [k] / [n] ▾, each box typed or dragged on its own."""
+        f = ttk.Frame(holder)
+        self.trash_vars, self.trash_entries = {}, {}
+        for which in ("k", "n"):
+            if which == "n":
+                ttk.Label(f, text="/").pack(side="left", padx=2)
+            var = self.trash_vars[which] = tk.StringVar()
+            e = self.trash_entries[which] = ttk.Entry(f, textvariable=var, width=4, justify="center")
+            e.pack(side="left")
+            e.bind("<Return>", lambda ev, w=which: (self.on_trash(w), "break")[1])
+            e.bind("<FocusOut>", lambda ev, w=which: self.on_trash(w))
+            Scrub(self.app, [(e, var, lambda w=which: self.on_trash(w, False))], (1, 10, 1), 1, MAX_SLICES,
+                  drag_box=True)
+            Tooltip(e, tr("claw.tip_trash_typed"))
+        self.back_button(f, "trash")
+        return f
+
+    def on_trash(self, which, done=True):
+        """A Trash every box typed / dragged: slice k of n (k never past n)."""
+        e, var = self.trash_entries[which], self.trash_vars[which]
+        k, n = self.claw["trash"] or [1, 4]
+        try:
+            v = float(calc(var.get()))
+            if not 1 <= v <= MAX_SLICES or v != int(v):
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            e.good_text = str(k if which == "k" else n)
+            bad(e)
+            return
+        good(e)
+        v = int(v)
+        t = [min(v, n), n] if which == "k" else [min(k, v), v]
+        if t != self.claw["trash"]:
+            self.put("trash", t, done)
+        else:
+            self.show()  # (k typed past n: back to n)
 
     def wheel_menu(self, key, d):
         """The mouse wheel over a dropdown picks the next / previous choice (stops at the ends)."""
@@ -190,6 +295,19 @@ class ClawWindow(ToolWindow):
 
         for key, (b, choices) in self.menus.items():
             config(b, text=next((t for v, t in choices if v == c[key] and t != "-"), ""))
+        for key, (b, f) in self.typed_rows.items():  # (typed: "Custom…" picked, or a value the list hasn't got)
+            typed = key in self.typed() or not any(v == c[key] and t != "-" for v, t in self.menus[key][1])
+            if typed != self.shown_typed[key]:
+                self.shown_typed[key] = typed
+                (b if typed else f).pack_forget()
+                (f if typed else b).pack(side="left")
+        t = c["trash"] or ["", ""]
+        for which, v in zip(("k", "n"), t):
+            if self.trash_vars[which].get() != str(v):
+                self.trash_vars[which].set(str(v))
+            config(self.trash_entries[which], style="TEntry")
+        self.period_scrub.lo = 1 / self.app.ppq
+        config(self.period_label, cursor="sb_h_double_arrow" if self.shown_typed["period"] else "")
         if not self.knob.drag and abs(self.knob.value - c["dist"]) > 1e-9:
             self.knob.set(c["dist"])
         for key, var in self.ticks.items():

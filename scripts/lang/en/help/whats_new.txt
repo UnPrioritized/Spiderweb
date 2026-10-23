@@ -26,6 +26,8 @@ What's new:
 
 • Gate sensitive merge has its own window: Up, Left, Right or Down, and Keep shapes separate to merge any number of shapes, each left as it is, with the moving one turned into fixed notes. Merging up or down works as one shape too. The window says which shape moves, or why it can't merge.
 
+• Claw machine: Custom… at the bottom of the Period and Trash every lists lets you type your own, like a period of 3 or 1.5 beats, or trash 2/5.
+
 • Ruler selecting: drag along the bar numbers (with any tool) to select every key in that time. Drag the black bar to move it in time, Ctrl+drag for a copy, right-click it for the selection's menu.
 
 • Select boxes stay while you draw with another tool, and a shape drawn inside one joins the selection. Right-clicking empty space no longer drops it.
