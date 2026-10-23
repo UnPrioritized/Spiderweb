@@ -27,7 +27,6 @@ from notes.tempo_file import heard_tempo
 from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, grab_while_panning, slot_colours
 from window import look
-from window.snap_picker import SnapPicker
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
 
 NAME_W = 150    # the names' column (x scale)
@@ -64,7 +63,9 @@ class TrackList(tk.Canvas):
         self.muted = set()   # slots not played (the speaker in their row; playback only, never the files)
         self.faint = FAINT
         self.faint_var = tk.StringVar(value=str(FAINT))
-        self.snap = tk.StringVar(value="bar")  # the track list's own snap (like Domino's; Bar at first)
+        # the track list's own snap (like Domino's; Bar at first), shown by the toolbar's Snap while the list shows
+        self.snap = tk.StringVar(value="bar")
+        self.snap.trace_add("write", lambda *_: app.schedule_autosave())
         self.picker = None  # the "Show multiple tracks" window while open
         self.bars = ()     # its scrollbars (zoombar.add_zoom_bars)
         self._made = None  # (rendered, pad, use10) the tracks below were worked out for
@@ -87,6 +88,7 @@ class TrackList(tk.Canvas):
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", lambda e: setattr(self, "_sweep", None))
         self.bind("<ButtonPress-3>", self.on_right)
+        self.bind("<Escape>", lambda e: self.show_all())  # (user 2026-10-23: the Conductor click alone was hidden)
         self.bind("<Motion>", self.on_motion)
         self.bind("<MouseWheel>", self.on_wheel)
         self.bind("<ButtonPress-2>", self.start_pan)
@@ -457,6 +459,12 @@ class TrackList(tk.Canvas):
             self.behind = set()
             self.onion.set(False)
         self.shown_changed()
+
+    def show_all(self):
+        """Nothing highlighted: the piano roll shows every track (Esc, the Conductor row, All tracks in the ▾ list)."""
+        if self.current is not None:
+            self.current = None
+            self.shown_changed()
 
     def on_drag(self, e):
         """Ctrl+drag after a Ctrl+click: every row the mouse crosses gets what the pressed row got."""
@@ -908,6 +916,8 @@ def build_onion(app, parent):
     menu.add_command(label=tr("tracks.onion_next"), command=lambda: tl().behind_near(1))
     menu.add_command(label=tr("tracks.onion_pick"), command=lambda: tl().open_picker())
     menu.add_command(label=tr("tracks.onion_alike"), command=lambda: tl().behind_alike())
+    menu.add_separator()
+    menu.add_command(label=tr("tracks.onion_all"), command=lambda: tl().show_all())
     more.config(menu=menu)
     Tooltip(more, tr("tracks.onion_more_tip"))
     return b, more
@@ -920,7 +930,8 @@ def sync_onion(app):
 
 
 def build_strip(app, parent, tl):
-    """The strip above the track list: Show multiple tracks… + Faint [n] %, the track list's own snap."""
+    """The strip above the track list: Show multiple tracks… + Faint [n] % (its snap is the toolbar's, user
+    2026-10-23: SnapPicker.use)."""
     strip = ttk.Frame(parent, padding=(2, 2))
     b = ttk.Button(strip, text=tr("tracks.show_multiple"), command=tl.open_picker)
     b.pack(side="left")
@@ -938,10 +949,6 @@ def build_strip(app, parent, tl):
     for w in (lb, e, pc):
         Tooltip(w, tr("tracks.faint_tip"))
     good(e)
-    ttk.Separator(strip, orient="vertical").pack(side="left", fill="y", padx=10)
-    ttk.Label(strip, text=tr("app.snap")).pack(side="left", padx=(0, 4))
-    SnapPicker(app, strip, tl.snap, tip=tr("tracks.snap_tip")).button.pack(side="left")
-    tl.snap.trace_add("write", lambda *_: app.schedule_autosave())
     return strip
 
 

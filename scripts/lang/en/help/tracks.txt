@@ -8,13 +8,13 @@ Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar
 
 ## Highlighting a track
 
-Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you click the Conductor row in the track list (nothing highlighted shows every track again). Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
+Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to all tracks: press Esc in the track list, click its Conductor row, or pick All tracks in the Multiple tracks ▾ list on the toolbar. Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
 
 When a shape you draw, paste or move lands on another track, the highlight moves to that track, so it never vanishes under the mouse (if it lands on several tracks, every track shows). When channels are handed out again (for example a shape drawn over others), the highlight stays with the music it was showing.
 
 ## Multiple tracks
 
-The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour.
+The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour. All tracks at its bottom clears the highlight.
 
 In the track list: Ctrl+click a track to pick it or not, Ctrl+drag over tracks to pick every track you cross, Shift+click a track to highlight it alone (nothing picked, Multiple tracks off). Picked tracks get a dot in their colour. Show multiple tracks… (above the list, or Pick tracks… in the ▾ list) opens the list of tracks: click a track to pick it or not, drag to do the same to every track you cross. Faint sets how strongly they show (0 % hides them).
 
@@ -24,6 +24,6 @@ Click a track's speaker to mute it: it isn't played until you click it again, an
 
 ## Snap
 
-The track list has its own snap (Bar at first). It's where a click puts the play line. Clicking the bar numbers with Shift held puts it exactly where you click.
+The track list has its own snap (Bar at first), set with the toolbar's Snap while the track list shows; Tab back and Snap shows the piano roll's again. It's where a click puts the play line. Clicking the bar numbers with Shift held puts it exactly where you click.
 
 Shortcuts like Delete or Ctrl+A do nothing while the track list shows, so nothing changes out of sight. Space still plays.

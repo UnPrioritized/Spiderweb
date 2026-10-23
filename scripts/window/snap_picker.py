@@ -130,9 +130,18 @@ class SnapPicker:
         Tooltip(self.button, tip or tr("snap.tip"))
         # (watches the snap only while the button is there: one left behind by a closed Hz bass window
         # configured its gone button, an error on the next snap change / project opened)
-        trace = var.trace_add("write", lambda *_: self.show())
-        self.button.bind("<Destroy>", lambda e: var.trace_remove("write", trace) if e.widget is self.button else None,
-                         add="+")
+        self._trace = var.trace_add("write", lambda *_: self.show())
+        self.button.bind("<Destroy>", lambda e: self.var.trace_remove("write", self._trace)
+                         if e.widget is self.button else None, add="+")
+        self.show()
+
+    def use(self, var):
+        """Show and set another snap from now on (the toolbar's: the piano roll's or the track list's)."""
+        if var is self.var:
+            return
+        self.var.trace_remove("write", self._trace)
+        self.var = var
+        self._trace = var.trace_add("write", lambda *_: self.show())
         self.show()
 
     def show(self):

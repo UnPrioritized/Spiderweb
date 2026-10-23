@@ -572,7 +572,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         top.bind("<Configure>", lambda e: self.fit_toolbar())
         snap = ttk.Label(bar, text=tr("app.snap"))
         snap.pack(side="left", padx=(0, 4))
-        snap_box = SnapPicker(self, bar, self.snap).button
+        self.snap_picker = SnapPicker(self, bar, self.snap)  # (the track list's snap while it shows: toggle_tracks)
+        snap_box = self.snap_picker.button
         snap_box.pack(side="left")
         self._toolbar_together = ((snap, snap_box),)  # (wrapped onto more lines: kept side by side)
         redraw = lambda: (self.roll.request_redraw(), self.schedule_autosave())
@@ -719,12 +720,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.tracks_shown():
             self.track_box.pack_forget()
             self.panes.pack(**place)
+            self.snap_picker.use(self.snap)
             self.roll.focus_set()
             self.roll.request_redraw()
         else:
             self.tips.show("tracks")
             self.panes.pack_forget()
             self.track_box.pack(**place)
+            self.snap_picker.use(self.track_list.snap)
             self.track_list.focus_set()
             self.track_list.request_redraw()
 
