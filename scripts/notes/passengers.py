@@ -129,6 +129,16 @@ def midi_messages(tag, body):
     return ()
 
 
+def event_kind(tag, body):
+    """What a passenger sets, so a later one of the same kind replaces it: ("cc", number), "program", "bend",
+    "pressure", or None (no MIDI message: Domino's own events)."""
+    msgs = midi_messages(tag, body)
+    if not msgs:
+        return None
+    s, a, _ = msgs[-1]
+    return ("cc", a) if s == 0xB0 else {0xC0: "program", 0xE0: "bend", 0xD0: "pressure"}.get(s)
+
+
 def with_value(body, v):
     """A control event's body with its value (the first f32 of its value list) set to v."""
     out, i = bytearray(body), 0

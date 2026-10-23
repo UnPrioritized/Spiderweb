@@ -241,6 +241,8 @@ class StripsWindow(tk.Toplevel):
     def show(self):
         """The window as the settings are: greyed when nothing to work on / off, the count and the Multi channel
         warning."""
+        if self.closed:
+            return
         if self.idx:
             self.what.pack_forget()
         elif not self.what.winfo_manager():  # (nothing to work on selected: said so, all greyed)

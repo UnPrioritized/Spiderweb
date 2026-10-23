@@ -19,7 +19,7 @@ from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, c
                           merges_unmade, slot_ports)
 from notes.hzbass import clean_hz
 from notes.hz_cc import slot_events
-from notes.passengers import STAY, USUAL, midi_messages, pack_cc, placed, unpack_cc
+from notes.passengers import STAY, USUAL, event_kind, midi_messages, pack_cc, placed, unpack_cc
 from notes.mask import as_used, slot_rule
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
@@ -947,10 +947,8 @@ class ProjectFiles:
                 groups[paste or ("one", i)] = ([j for j, s in enumerate(self.shapes) if s.get("paste") == paste]
                                                if paste else [i], {})
             group = groups[paste or ("one", i)]
-            for t, track, tag, body in placed(sh, unpack_notes(sh["notes"]), ppq):
-                slot = slots.get(track)
-                if slot is None:  # (a track without notes here: no channel to go on)
-                    continue
+
+            def add(slot, t, tag, body):
                 msgs = midi_messages(tag, body) or [(None, 0, 0)]
                 out.setdefault(int(slot), []).extend(
                     (t, s, a, b, (tag, body) if k == len(msgs) - 1 else False) for k, (s, a, b) in enumerate(msgs))
@@ -959,6 +957,31 @@ class ProjectFiles:
                     k = a if s == 0xB0 else "bend" if s == 0xE0 else None
                     if k is not None and t >= group[1].get((int(slot), k), (-1,))[0]:
                         group[1][int(slot), k] = (t, b if s == 0xB0 else a | b << 7)
+
+            events = placed(sh, unpack_notes(sh["notes"]), ppq)
+            for t, track, tag, body in events:
+                slot = slots.get(track)
+                if slot is not None:  # (a track without notes here: no channel to go on)
+                    add(slot, t, tag, body)
+            strips = self.voice_slots.get(("strips", i))
+            if strips:  # (Channel per strip: each later strip's channel gets its track's values in effect at its
+                # start, then its events while it sounds, hunt 2026-10-23)
+                for track, slot in slots.items():
+                    mine = [e for e in events if e[1] == track]
+                    for s, s0, s1 in (strips.get(int(slot)) or ())[1:]:
+                        before = {}  # (the latest of each kind before the strip starts, kept in their order)
+                        for e in mine:
+                            if e[0] >= s0:
+                                break
+                            k = event_kind(e[2], e[3])
+                            if k is not None:
+                                before.pop(k, None)
+                                before[k] = e
+                        for e in before.values():
+                            add(s, s0, e[2], e[3])
+                        for e in mine:
+                            if s0 <= e[0] <= s1:
+                                add(s, e[0], e[2], e[3])
         for us, last in groups.values():
             self.cc_put_back(us, last, out, only)
         for slot in added:

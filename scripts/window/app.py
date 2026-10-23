@@ -39,7 +39,7 @@ from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, pi
                         slot_pal, slot_rule, tidy_groups)
 from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
 from notes.sustain import is_sustained
-from notes.strips import gap_of, has_strips, strip_colours, strip_laps
+from notes.strips import gap_of, has_strips, strip_colours, strip_laps, strip_spans
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
 from notes.polygon import POLYGON_DEFAULTS
@@ -163,6 +163,18 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (Channel per strip: each strip of a pasted track a round of its own, the first keeping its channels; strips.py)
     strips = [mode == "auto" and has_strips(sh) and t is not None for sh, (_, t) in zip(shapes, got)]
     laps = [strip_laps(n, t, gap_of(sh)) if s else lap for sh, (n, t), lap, s in zip(shapes, got, laps, strips)]
+    # (pieces sliced from one paste with the same setting: their strips worked out together and given their
+    # channels as one, so a strip cut in two stays one channel, hunt 2026-10-23)
+    together = [(sh["paste"], gap_of(sh)) if s and isinstance(sh.get("paste"), str) else None
+                for sh, s in zip(shapes, strips)]
+    for key in {k for k in together if k is not None}:
+        mine = [i for i, k in enumerate(together) if k == key]
+        if len(mine) > 1:
+            joined = strip_laps(np.concatenate([got[i][0] for i in mine]),
+                                np.concatenate([np.asarray(got[i][1], np.int64) for i in mine]), key[1])
+            at = np.cumsum([0] + [len(got[i][0]) for i in mine])
+            for k, i in enumerate(mine):
+                laps[i] = joined[at[k]:at[k + 1]]
     # (a mask whose own notes don't sound: none, mask.py)
     off = [silent(sh) or quiet and is_mask(sh) for sh in shapes]
     got = [(n[:0], None if t is None else t[:0]) if o else (n, t) for o, (n, t) in zip(off, got)]
@@ -189,6 +201,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # in their order, user 2026-10-22)
     voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz")) or "cc" in sh} \
         if mode == "auto" else {}  # (pasted notes' passengers: each track's on its slot)
+    note_slots = {i: None for i, (sh, s) in enumerate(zip(shapes, strips)) if s and "cc" in sh}
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
@@ -197,7 +210,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh for sh in shapes], laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
-                             busy)
+                             busy, together, note_slots)
+    for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
+        if s is not None and len(s):
+            voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
     return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}
 
 
@@ -1209,7 +1225,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 words.append(tr("app.ch_short_order"))
             if self.rounds_apart():
                 words.append(tr("app.ch_short_rounds"))
-            if (self.rounds_apart() or self.rows_apart()) and self.pad_rounds.get():
+            if self.blocks_apart() and self.pad_rounds.get():
                 words.append(tr("app.ch_short_pad"))
         self.channels_short.config(text=", ".join(words))
         grid_shown(self.channels_rows, not folded)
@@ -1238,11 +1254,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """True if the saved MIDI / .dms gets a track for every channel up to the last one used, empty ones too
         (midi_out.track_slots); False only with the rounds tick (or Settings' "Overlapping shapes keep their
         colours", rows_apart) and "Keep empty tracks" off."""
-        return not ((self.rounds_apart() or self.rows_apart()) and not self.pad_rounds.get())
+        return not (self.blocks_apart() and not self.pad_rounds.get())
 
     def rows_apart(self):
         """True while overlapping shapes move to the next row of channels (Settings → General, Multi channel only)."""
         return self.keep_colours.get() and self.channel_mode.get() == "auto"
+
+    def blocks_apart(self):
+        """True while channels go in blocks that may leave some empty ("Keep empty tracks" shown and used): the
+        rounds tick, rows_apart, or a shape with Channel per strip (strips.py; hunt 2026-10-23)."""
+        return self.rounds_apart() or self.rows_apart() or (
+            self.channel_mode.get() == "auto" and any(has_strips(sh) for sh in self.shapes))
 
     def edo(self):
         """True while the piano roll shows 31-EDO (256 keys + its tick)."""
@@ -1396,7 +1418,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.order_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)
             else:
                 self.order_tick.pack_forget()
-        padding = self.rounds_apart() or self.rows_apart()
+        padding = self.blocks_apart()
         if padding != bool(self.pad_tick.winfo_manager()):  # (only shown with the rounds tick / rows, user)
             if padding:
                 self.pad_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), after=self.rounds_tick)
@@ -1447,6 +1469,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
         # (an Add between group is one row: between_window.py)
         self.fill_shape_list(counts, chans, most_colours(self.all16()), self.colours_used())
+        if self.strips_window:  # (its count / Multi channel line from these notes: made late, Channels changed)
+            self.strips_window.show()
         self.sync_list_selection()
         self.roll.request_redraw()
         self.update_status()
@@ -1475,7 +1499,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         mode, split = self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys, mode, split, self.all16(),
-                self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode))
+                self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode),
+                tuple(json.dumps(sh.get("strips")) for sh in self.shapes))  # (Channel per strip: not in shape_key)
 
     def cc_busy(self, mode, shapes=None):
         """all_notes' busy for these shapes (cc_busy)."""
@@ -1495,6 +1520,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if job:  # (made for another spot: it stops at its next shape, these start at once)
             job["stop"] = True
         shapes = [from_key(s) for s in key[0]]  # (the thread's own copy: the drag goes on with the real ones)
+        for sh, st in zip(shapes, key[10]):
+            if st != "null":  # (Channel per strip, left out of shape_key)
+                sh["strips"] = json.loads(st)
         for sh in shapes:
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)

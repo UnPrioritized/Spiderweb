@@ -585,8 +585,11 @@ def shape_key(sh):
     (pasted / image notes, many MB) kept as the strings themselves, so they're never written out again: comparing
     the same string is instant (App.notes_key is asked at every rest of a drag). A Hz bass with another layer
     picked is the same shape (the same notes: picking a layer makes nothing again), and so is one with other CC
-    lines (made_from)."""
+    lines (made_from), and one with another Channel per strip (strips.py: only channels change, App.notes_key keeps
+    it; hunt 2026-10-23: each gap tried kept another copy of a 2 M-note paste)."""
     sh = made_from(sh)
+    if "strips" in sh:
+        sh = {k: v for k, v in sh.items() if k != "strips"}
     if (sh.get("hz") or {}).get("layer"):
         sh = dict(sh, hz=with_layers(sh["hz"], layers_of(sh["hz"]), 0))
     texts = []
@@ -1558,14 +1561,15 @@ class PlacedSpans:
         return set(np.unique(slot[hit]).tolist())
 
 
-def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None):
+def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None, together=None):
     """render's slots with "New channels each Colours round" (user 2026-10-17: each round editable alone in other
     programs): every round of every shape with rounds, in shape order, gets step slots of its own past the ones the
     other shapes use, each note at the channel (colour) it has without the tick. -> (slots, slot count).
     The other shapes' blocks are left free of rounds, the rest are filled in order: a plain-notes shape frozen on
     round channels keeps them and the shapes around it keep theirs. A round needing more than step slots (a
     layered Hz bass's clash tracks) takes as many blocks. teams (render's): the steps of an Add between group take
-    their rounds together, like one shape. stay: per shape True if its first round keeps the slots it has without
+    their rounds together, like one shape (together: the shapes with one key alike). stay: per shape True if its
+    first round keeps the slots it has without
     the tick, only the later rounds moving (colours given by hand, custom.paint_rounds: a colour used once never
     moves, hunt)."""
     stay = stay or [False] * len(rounds)
@@ -1579,7 +1583,9 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None):
     for i, (lst, r) in enumerate(zip(note_lists, rounds)):
         if r is not None and len(lst):
             team = teams[i] if teams else None
-            owners.setdefault(i if team is None else ("team", team[0]), []).append(i)
+            own = ("team", team[0]) if team is not None else (
+                ("with", together[i]) if together and together[i] is not None else i)
+            owners.setdefault(own, []).append(i)
     out = list(slot_of)
     for mine in owners.values():
         s = np.concatenate([np.broadcast_to(np.asarray(slot_of[i], np.int64), len(rounds[i])) for i in mine])
@@ -1601,7 +1607,8 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None):
 
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
-           held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None, busy=None):
+           held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None, busy=None,
+           together=None, note_slots=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1630,7 +1637,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     ordered: per shape True if its tracks take channels in track order, all counted as starting at its first note (a
     Gate sensitive merge: track k = the slot its colour had before, merge.part_rows).
     rounds: per shape None, or each note's Colours round (custom.ROUND): with "auto" every round goes on channels of
-    its own, the same colours (in_rounds). stay: per shape True if its first round keeps its slots (in_rounds).
+    its own, the same colours (in_rounds). stay: per shape True if its first round keeps its slots (in_rounds). together: per shape None or a key: shapes
+    with one key take their rounds together, like one shape (Channel per strip on pieces of one paste, in_rounds).
     keep: with "auto" a shape clashing with an earlier one moves whole to the next row of channels, its colours kept
     (assign_slots shape_of; an Add between group and a paste's pieces move as one shape).
     voice_slots: {shape's number: None} to be told, with "auto", which slot each of its tracks got: filled in as
@@ -1638,6 +1646,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     notes with passengers: each track's events on its slot, passengers.py).
     busy: per shape None, or {track (None: every track): (start, end) ticks}: with "auto" its tracks also count as
     sounding then on every key (a Hz bass's CC lines: their whole time, run-on too, hz_cc.cc_spans).
+    note_slots: {shape's number: None} filled with each of its notes' slot (with "auto").
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -1783,8 +1792,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     shape_of[v] = key
             for p, team in solid_teams:  # (a step turned into plain notes still belongs to its group)
                 shape_of[p] = ("team", team[0])
+            # (a shape whose first round keeps its slots (stay: Channel per strip, colours given by hand) isn't loose:
+            # the others step round those, hunt 2026-10-23: a line over a strips song shared its channel)
             loose = {shape_of[v] for i, u in enumerate(unit_of) if u is not None and rounds and rounds[i] is not None
-                     for v in np.unique(np.asarray(u)).tolist()}
+                     and not (stay and stay[i]) for v in np.unique(np.asarray(u)).tolist()}
         unit_slots = mapped_slots(np.array(assign_slots(units, split, forced, [firsts.get(u) for u in
                                                                               range(len(units))], taken, shape_of,
                                                         16 if use10 in ("all", "order") else 15, loose, extra),
@@ -1795,7 +1806,9 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             voice_slots[i] = dict(zip(ids.tolist(), unit_slots[us].tolist()))
         count = int(unit_slots.max()) + 1 if len(units) else 0
         if rounds and any(r is not None for r in rounds):
-            slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15, teams, stay)
+            slot_of, count = in_rounds(note_lists, slot_of, rounds, 16 if use10 else 15, teams, stay, together)
+        for i in note_slots or ():  # (each note's slot, rounds done: Channel per strip's CCs, App.cc_messages)
+            note_slots[i] = np.broadcast_to(np.asarray(slot_of[i], np.int64), len(note_lists[i]))
     else:  # (a Hz bass layer's clashing notes too: one channel, user)
         slot_of = [0 if pin is None else pin for pin in pinned]
         count = 1 if any(p is None for p in pinned) else 0
