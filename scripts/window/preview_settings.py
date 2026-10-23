@@ -99,6 +99,13 @@ class PreviewSettings(tk.Toplevel):
         win.auto_row = auto_box(app, f, win.auto_var, win.on_auto)  # (shown with Auto gates)
         r += 1
 
+        self.fine = tk.BooleanVar(value=False)  # (made on the file's finer ticks in Keep timing parts: hz_fine.py)
+        c = self.fine_tick = ttk.Checkbutton(box, text=tr("ps.fine"), variable=self.fine, command=self.on_fine,
+                                             takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("ps.fine_tip"))
+        r += 1
+
         ttk.Label(box, text=tr("app.ppq")).grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
         ppq = ttk.Combobox(box, textvariable=app.pvar["ppq"], values=app.ppq_box["values"], width=7, height=12)
         ppq.grid(row=r, column=1, sticky="w", pady=3)  # (the project's PPQ: the same box as under Project)
@@ -277,6 +284,20 @@ class PreviewSettings(tk.Toplevel):
             good(self.ring_entry)
         self.ring_entry.config(state="disabled" if auto or not hz else "normal")
         self.ring_tick.config(state="normal" if hz else "disabled")
+
+    def show_fine(self, sh):
+        """The finer gates tick as the Hz bass shown has it (HzWindow.sync)."""
+        hz = (sh or {}).get("hz") or {}
+        self.fine.set(hz.get("fine") is True)
+        self.fine_tick.config(state="normal" if hz else "disabled")
+
+    def on_fine(self):
+        """Finer gates ticked / unticked: one undo step (off = left out)."""
+        sh = self.win.length_target()
+        if sh is None:
+            return
+        self.win.put_lengths(tr("hz.step_fine"), fine=True if self.fine.get() else None)
+        self.show_fine(sh)
 
     def on_ring_auto(self):
         """Auto ticked = the typed run-on goes; unticked = Auto's time kept as the typed one, to change."""

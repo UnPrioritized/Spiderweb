@@ -1192,6 +1192,8 @@ def clean_hz(hz):
         out["stick"] = True
     if hz.get("cc_own") is True:
         out["cc_own"] = True
+    if hz.get("fine") is True:  # (finer gates in Keep timing parts: the export only, hz_fine.py)
+        out["fine"] = True
     ring = hz.get("ring")  # (the CC lines' run-on typed, seconds; missing = Auto)
     if isinstance(ring, (int, float)) and not isinstance(ring, bool) and math.isfinite(ring):
         out["ring"] = max(0.0, min(RING_MOST, float(ring)))

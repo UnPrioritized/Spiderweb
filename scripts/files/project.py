@@ -19,6 +19,7 @@ from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, c
                           merges_unmade, slot_ports)
 from notes.hzbass import clean_hz
 from notes.hz_cc import slot_events
+from notes.hz_fine import fine_owners, finer_notes, swapped
 from notes.passengers import STAY, USUAL, event_kind, midi_messages, pack_cc, placed, unpack_cc
 from notes.mask import as_used, slot_rule
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
@@ -33,7 +34,7 @@ from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.tempo import clamp_bpm, clean_tempo, has_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
-from notes.tempo_file import bar_line, file_plan
+from notes.tempo_file import bar_line, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
@@ -903,7 +904,12 @@ class ProjectFiles:
         parts moved to the ticks that keep their time (notes/tempo_file.py). notes: the ones going out (default:
         every note); upto: only the ticks up to there count (Copy to Domino: the song up to the copy's end)."""
         notes = self.rendered if notes is None else notes
-        ticks = np.concatenate([notes[:, 0], notes[:, 1]])
+        # (Hz basses with finer gates: inside Keep timing parts drawn faster, made again on the file's ticks after
+        # the other notes lay them out, hz_fine.py)
+        fine = fine_owners(self.shapes) if len(notes) else []
+        parts = finer_parts(self.tempo, bpm, ppq, int(notes[:, 1].max())) if fine else []
+        anchors = notes[~swapped(notes, fine, parts)] if parts else notes
+        ticks = np.concatenate([anchors[:, 0], anchors[:, 1]])
         loose = np.concatenate([np.zeros(0, np.int64)] + [np.array([m[0] for m in ms], np.int64)
                                                          for ms in cc.values()])  # (CC: give way, user)
         if upto is not None:
@@ -911,7 +917,7 @@ class ProjectFiles:
         if has_tempo(self.tempo):  # (a long Keep timing part of many notes takes a moment)
             self.busy(tr("project.tempo_working"))
         try:
-            plan = file_plan(self.tempo, bpm, ppq, beats, ticks, notes[:, 0], None, loose)
+            plan = file_plan(self.tempo, bpm, ppq, beats, ticks, anchors[:, 0], None, loose)
         finally:
             if has_tempo(self.tempo):
                 self.busy(None)
@@ -921,7 +927,11 @@ class ProjectFiles:
         on = notes[np.isin(notes[:, 5], stale), 0] if stale else ()
         plan["hz"] = [int(on.min()) / ppq] if len(on) else []
         if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
-            notes, cc = timed_ticks(plan, notes, cc)
+            moved, cc = timed_ticks(plan, notes, cc)
+            if parts:
+                moved = finer_notes(self.shapes, fine, notes, moved, parts, self.tempo, bpm, ppq, self.keys,
+                                    plan["events"])
+            notes = moved
         return notes, cc, plan
 
     def cc_messages(self, ppq, bpm, only=None):
@@ -1120,8 +1130,9 @@ class ProjectFiles:
             # (the tempo line + time signatures come too: Keep timing worked out on the whole song up to the copy's
             # last note, so it lines up with Export MIDI)
             upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
-            plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)[2]
-            notes, cc = timed_ticks(plan, notes, cc)
+            timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)
+            cc = timed_ticks(plan, notes[:0], cc)[1]  # (the notes as the file has them: finer Hz basses too)
+            notes = timed[np.isin(timed[:, 5], sorted(self.sels))] if self.sels else timed
         high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
         if not mod:

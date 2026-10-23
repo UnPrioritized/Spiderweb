@@ -348,6 +348,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         self.show_length(sh, hz)
         if self.settings_window:
             self.settings_window.show_ring(sh)
+            self.settings_window.show_fine(sh)
         self.what.config(text=text)
         self.show_stale()
         self.show_clash(sh)

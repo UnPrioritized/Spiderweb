@@ -223,6 +223,30 @@ def dense_spots(tempo, base, ppq, beats, ticks):
     return keep_gaps(tempo, base, ppq, beats, np.asarray(ticks, np.int64).ravel())[5]
 
 
+FINE_MOST = 64  # a Hz bass's finer gates: made on at most this many times the project's ticks
+FINE_TICKS = 1 << 22  # ... and at most this many ticks a beat
+
+
+def finer_parts(tempo, base, ppq, last):
+    """[(first tick, end tick, times finer)] of the Keep timing parts drawn at least as fast as the tempo heard
+    before them all along (the file has more ticks a second there: a Hz bass with "Finer gates" is made on them,
+    hz_fine.py); last = the last tick a note reaches (a part on to the song's end stops there)."""
+    if not has_tempo(tempo) or not any(len(p) > 5 and p[5] is True for p in tempo.get("points", ())):
+        return []
+    segs, _ = file_segments(tempo, base, ppq, last + 1)
+    out = []
+    for _, a, e, u in layout(tempo, base, ppq)["keeps"]:
+        e = last + 1 if e is None else e
+        if e <= a:
+            continue
+        drawn = _per_tick(segs, a, min(e, segs[-1][1]))
+        if len(drawn) and drawn.max() <= u:
+            times = min(-(-u // int(drawn.min())), FINE_MOST, max(1, FINE_TICKS // ppq))
+            if times > 1:
+                out.append((a, e, int(times)))
+    return out
+
+
 def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=()):
     """What a MIDI file gets: {"events": [(tick, us)] tick 0 first, "bad": beats of catch-up lines that can't work,
     "sigs": [(tick, top, bottom power)] time signatures, "map": Spiderweb tick(s) -> file tick(s), "jumps": beats of

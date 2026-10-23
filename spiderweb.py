@@ -98,6 +98,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_runs.py       Hz bass: each tone's run of waves, Auto / fixed / mixed gates, the red line
     hz_grid.py       Hz bass: KeyGrid, every key's own repeats and loudness when effects are on
     hz_cc.py         Hz bass: the CC lines (Cutoff, Pitch wheel...) as MIDI messages on its channels
+    hz_fine.py       Hz bass: made on the file's finer ticks in Keep timing parts (the export)
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
     funnel.py        funnels: curves, note grid, gates

@@ -555,13 +555,13 @@ def made_from(sh):
     they're MIDI messages, hz_cc.py). Own channel per note stays only while it has some (own_channels), as
     {"fall": how long its lines go on after a note, "ring": their run-on} (hz_cc.voices: a voice is busy until its
     lines end, so the notes and the CC messages take the same channels). The run-on (hz["ring"]) makes no notes
-    either. The same again for what it gives back."""
+    either, nor finer gates (hz["fine"]: the export's, hz_fine.py). The same again for what it gives back."""
     hz = sh.get("hz")
     if not isinstance(hz, dict):
         return sh
     got = without_cc(hz)
-    if "ring" in got:
-        got = {k: v for k, v in got.items() if k != "ring"}
+    if "ring" in got or "fine" in got:
+        got = {k: v for k, v in got.items() if k not in ("ring", "fine")}
     if hz.get("cc_own") is True:
         got = dict(got, cc_own={"fall": cc_fall(hz), "ring": ring_of(hz)}) if own_channels(hz) else {
             k: v for k, v in got.items() if k != "cc_own"}

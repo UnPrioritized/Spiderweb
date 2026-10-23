@@ -62,6 +62,8 @@ The purple area is a Keep timing part, and the dotted line is the tempo the note
 
 Notes closer than one tick at the slower tempo can't stay exact: there the tempo stays faster, and the pane shows an orange dashed line. A higher PPQ helps.
 
+A Keep timing part drawn faster than the tempo before it gives the MIDI file more ticks a second than the piano roll has. Tick Finer gates in Keep timing parts in the Hz bass window's Settings… and that Hz bass is made on those finer ticks there, so it buzzes less, most of all on high notes. Only the exported file changes: the piano roll and playback stay on the project's ticks.
+
 Fit bar lines (top row, on at first): when Keep timing moves notes, the export adds time signatures so the bar lines in MIDI programs still sit on the bars you hear.
 
 ## Time and key signatures

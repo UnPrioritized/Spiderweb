@@ -22,6 +22,8 @@ What's new:
 
 • Hz bass CC boost: the synth window's Tremolo and Volume boxes have a CC boost knob that also sends the effect as a smooth Expression line, on top of the notes, so a tremolo wobbles far deeper. The notes stay the same for players that ignore CC.
 
+• Hz bass finer gates: in a Keep timing part drawn faster than the tempo before it, tick Finer gates in Keep timing parts (Hz bass window → Settings…) and the exported Hz bass uses the file's finer ticks there, so it buzzes less.
+
 • The mouse wheel changes a number box, dropdown or knob only after you click it, everywhere in Spiderweb. Scrolling a panel or the synth window past them no longer changes them by accident.
 
 • Gate subtract (right-click → Gate subtract…): every note gets a little shorter, so a blank space shows between notes that touched. Take it from the note end, the note start or both. The amount can change across the shape along a graph, by time, by key or along each key row. It comes last, so Strum, Claw and the other note tools work as before. Flipping sideways swaps the end and the start, so a flipped copy mirrors its gaps.
