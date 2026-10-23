@@ -1,18 +1,41 @@
-"""The Gate trim window (trim.py): each key row's runs of touching notes cut down to a share of their length, shown
-live on the piano roll (the shared part: tool_window.py). One number (Keep [n] % of each row, with a slider) and
-which end stays."""
+"""The Gate trim window (trim.py): each key row's runs of touching notes cut down to a share of their length, or to
+a number of ticks, shown live on the piano roll (the shared part: tool_window.py). One number (Keep [n] [% / ticks
+of each row], a slider for the %) and which end stays."""
 
+import math
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.trim import TRIM_DEFAULTS, clean_trim
+from notes.trim import BY, MAX_LENGTH, TRIM_DEFAULTS, clean_trim
 from window import look
 from window.tool_window import ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good
 
 SLIDER_PX = 220
+
+
+def plain_number(text):
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
+
+
+class Hold:
+    """The slider while its handle is held, as a knob would be (ToolWindow.knob_pressed / undo_key): Ctrl+Z while
+    held puts back how it was at the press, and the slider follows the mouse no more until let go."""
+
+    def __init__(self):
+        self.down = self.dead = False
+
+    def held(self):
+        return self.down
+
+    def call_off(self):
+        self.dead = True
 
 
 class TrimWindow(ToolWindow):
@@ -22,27 +45,35 @@ class TrimWindow(ToolWindow):
         return clean_trim(cfg)
 
     def build(self, box):
+        self.typed = None  # (value, text typed for it): the box keeps showing it while that value is in use
         row = ttk.Frame(box)
         row.grid(row=1, column=0, columnspan=2, sticky="w")
         label = ttk.Label(row, text=tr("trim.keep"))
         label.pack(side="left")
         self.var = tk.StringVar()
-        self.entry = ttk.Entry(row, textvariable=self.var, width=6, justify="center")
+        self.entry = ttk.Entry(row, textvariable=self.var, width=8, justify="center")
         self.entry.pack(side="left", padx=4)
         self.entry.bind("<Return>", lambda e: (self.on_entry(), "break")[1])
         self.entry.bind("<FocusOut>", lambda e: self.on_entry())
-        ttk.Label(row, text=tr("trim.of_each_row")).pack(side="left")
-        self.scrub = Scrub(self.app, [(self.entry, self.var, lambda: self.on_entry(False))], (1, 10, 0.1), 0, 100,
+        self.unit = ttk.Combobox(row, state="readonly", values=[tr("trim.of_each_row"), tr("trim.ticks_of_each_row")])
+        self.unit.pack(side="left")
+        self.unit.bind("<<ComboboxSelected>>", lambda e: self.on_unit())
+        Tooltip(self.unit, tr("trim.tip_unit"))
+        self.scrub = Scrub(self.app, [(self.entry, self.var, lambda: self.on_entry(False))], self.steps, 0, 100,
                            label=label, drag_box=True)
+        self.scrub.read = lambda text: self.value() if text == self.shown_text() else calc(text)
         for w in (label, self.entry):
             Tooltip(w, tr("trim.tip_keep"))
         self.slider_var = tk.DoubleVar(value=100.0)
         self.slider = ttk.Scale(box, from_=0, to=100, variable=self.slider_var,
                                 length=round(SLIDER_PX * self.app.scale), command=lambda v: self.on_slider())
         self.slider.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        self.slider.bind("<ButtonRelease-1>", lambda e: self.on_slider(True), add="+")
-        Tooltip(self.slider, tr("trim.tip_keep"))
-        self.sliding = False
+        self.slider.bind("<ButtonPress-1>", self.slider_press, add="+")
+        self.slider.bind("<ButtonRelease-1>", lambda e: self.slider_release(), add="+")
+        Tooltip(self.slider, tr("trim.tip_slider"))
+        self.hold = Hold()
+        self.pressed_at = None  # where the slider was when pressed
+        self.showing = False  # (show() setting the slider: its command fires too)
 
         side = ttk.Frame(box)
         side.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
@@ -63,39 +94,113 @@ class TrimWindow(ToolWindow):
         Tooltip(reset, tr("trim.tip_reset"))
         ttk.Button(buttons, text=tr("trim.accept"), command=self.accept).pack(side="right")
 
-    def on_slider(self, done=False):
-        """The slider dragged: whole percents (the box takes finer ones)."""
-        if self.sliding:
-            return
-        v = float(round(self.slider_var.get()))
-        if v != self.cfg["keep"]:
-            self.put("keep", v, done)
-        elif done:
-            self.put("keep", v, True)
+    # ---- the number: keep % (up to 3 decimals) or ticks (whole, kept in beats)
+
+    def ticks(self):
+        return self.cfg["by"] == "ticks"
+
+    def steps(self):
+        return (10, 100, 1) if self.ticks() else (1, 10, 0.1)
+
+    def value(self):
+        """The number in use, as the box shows it (% or ticks)."""
+        return round(self.cfg["length"] * self.app.ppq) if self.ticks() else self.cfg["keep"]
+
+    def shown_text(self):
+        v = self.value()
+        typed = self.typed
+        return typed[2] if typed and typed[:2] == (self.cfg["by"], v) else fmt(v)
 
     def on_entry(self, done=True):
+        text = self.var.get().strip()
+        if text == self.shown_text():  # (left unchanged: the exact value stays, not the box's shortened one)
+            good(self.entry)
+            return
         try:
-            v = float(calc(self.var.get()))
-            if not 0 <= v <= 100:
+            v = float(calc(text))
+            if self.ticks():
+                if not 1 <= v <= MAX_LENGTH * self.app.ppq or v != int(v):
+                    raise ValueError
+                v = int(v)
+            elif not 0 <= v <= 100:
                 raise ValueError
-        except (ValueError, ZeroDivisionError):
-            self.entry.good_text = fmt(self.cfg["keep"])
+            else:
+                v = round(v, 3)
+        except (ValueError, ZeroDivisionError, OverflowError):
+            self.entry.good_text = self.shown_text()
             bad(self.entry)
             return
         good(self.entry)
-        if abs(v - self.cfg["keep"]) > 1e-9:
-            self.put("keep", v, done)
+        if done and fmt(v) != text and not plain_number(text):
+            self.typed = (self.cfg["by"], v, text)  # (e.g. "100/3": the box keeps showing it; 12.3456 shows 12.346)
+        if v != self.value():
+            if self.ticks():
+                self.put("length", v / self.app.ppq, done)
+            else:
+                self.put("keep", v, done)
+        else:
+            self.show()
+
+    def on_unit(self):
+        """% of each row / ticks of each row picked."""
+        by = BY[self.unit.current()]
+        if by != self.cfg["by"]:
+            self.undo.key = None
+            self.put("by", by)
+
+    # ---- the slider (whole percents; greyed while counting ticks)
+
+    def slider_press(self, e):
+        if self.ticks():
+            return
+        self.knob_pressed(self.hold)  # (a step of its own; Ctrl+Z while held: back to the press)
+        self.hold.down, self.hold.dead = True, False
+        self.pressed_at = self.slider_var.get()
+
+    def slider_release(self):
+        held, self.hold.down = self.hold.down, False
+        if not held:
+            return
+        dead, self.hold.dead = self.hold.dead, False
+        if dead or abs(self.slider_var.get() - self.pressed_at) < 1e-9:  # (a click that didn't move it: nothing)
+            self.show()
+            if not dead and self.late:
+                self.catch_up()
+            return
+        self.put("keep", self.slider_now(), True)
+
+    def slider_now(self):
+        """The slider's whole percent (halves up, like the trim's ticks)."""
+        return float(math.floor(self.slider_var.get() + 0.5))
+
+    def on_slider(self):
+        if self.showing or self.ticks():
+            return
+        if self.hold.down:
+            if self.hold.dead:  # (Ctrl+Z while held: it stays where it was put back)
+                self.show()
+            elif self.slider_now() != self.cfg["keep"]:
+                self.put("keep", self.slider_now(), False)
+            return
+        v = self.slider_now()  # (moved without the left button: a jump, the keys: a step of its own)
+        if v != self.cfg["keep"]:
+            self.undo.key = None
+            self.put("keep", v, True)
 
     def show(self):
         """The window shows self.cfg (only what differs is changed, so dragging stays quick)."""
         c = self.cfg
-        text = fmt(c["keep"])
+        text = self.shown_text()
         if self.var.get() != text:
             self.var.set(text)
+        if self.unit.current() != BY.index(c["by"]):
+            self.unit.current(BY.index(c["by"]))
+        self.scrub.lo, self.scrub.hi = (1, None) if self.ticks() else (0, 100)
         if abs(self.slider_var.get() - c["keep"]) > 1e-9:
-            self.sliding = True  # (setting it calls its command)
+            self.showing = True  # (setting it calls its command)
             self.slider_var.set(c["keep"])
-            self.sliding = False
+            self.showing = False
+        self.slider.state(["disabled"] if self.ticks() else ["!disabled"])
         if self.side.get() != c["side"]:
             self.side.set(c["side"])
 

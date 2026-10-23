@@ -4,6 +4,8 @@ Every row is trimmed by the same share of ITS OWN length, so a long row loses mo
 
 The notes are not squeezed: the notes inside the part that stays keep their lengths, the note where the cut falls is cut there, and the rest of the row goes. For example, three touching notes of 60, 40 and 70 ticks make a row of 170 ticks; at 50 % from the left, 85 ticks stay: the 60 tick note, and 25 ticks of the 40 tick note.
 
+The dropdown after the box picks how the number counts. "% of each row" takes up to 3 decimals (12.345); the slider moves in whole percents. "ticks of each row" makes every row keep the same number of ticks (any whole number from 1 up), so a circle becomes a crescent of even thickness; a row shorter than that stays whole, and the slider is greyed.
+
 Count from: Left keeps the start of each row (the left part), Right keeps its end (the right part).
 
 A gap on a key, even of 1 tick, starts a new row, and each row is trimmed on its own. Notes of every colour on a key count together.
