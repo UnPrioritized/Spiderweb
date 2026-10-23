@@ -41,6 +41,7 @@ SOURCE_COLOURS = {"lfo3": "#60a5fa", "lfo4": "#34d399", "env2": "#fb923c", "env3
 LFO_KNOBS = (("rate", "vib_rate"),)
 ENV_KNOBS = (("attack", "time"), ("decay", "time"), ("sustain", "percent"), ("release", "time"))
 PIC_SIZE = (230, 70)
+LIST_LEAST = 110  # the links list's least height (header + about 3 rows) before the MOD tab scrolls
 MATRIX_COLOUR = "#9aa3ae"
 
 
@@ -134,7 +135,8 @@ class SynthMod:
         self.mod_list_empty.pack(side="left", padx=(10, 0))
         holder = ttk.Frame(box.body, style="Synth.Box.TFrame")
         holder.pack(fill="both", expand=True, pady=(6, 0))
-        c = self.mod_list_canvas = tk.Canvas(holder, highlightthickness=0, bd=0, background=PANEL, height=1)
+        c = self.mod_list_canvas = tk.Canvas(holder, highlightthickness=0, bd=0, background=PANEL,
+                                             height=round(LIST_LEAST * s))  # (least room; the tab scrolls past it)
         self.mod_list_bar = ttk.Scrollbar(holder, orient="vertical", command=c.yview, style="Synth.Vertical.TScrollbar")
         c.configure(yscrollcommand=self.mod_list_bar.set)
         c.pack(side="left", fill="both", expand=True)

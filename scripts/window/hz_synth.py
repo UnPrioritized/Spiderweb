@@ -209,8 +209,16 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
         self.build_knobs(self.knobs)
         self.rack_box = ttk.Frame(self, padding=(10, 4, 10, 8), style="Synth.TFrame")  # (the Effects tab)
         self.build_rack(self.rack_box)
-        self.mod_box = ttk.Frame(self, padding=(10, 4, 10, 8), style="Synth.TFrame")  # (the MOD tab)
-        self.build_mod(self.mod_box)
+        self.mod_box = ttk.Frame(self, style="Synth.TFrame")  # (the MOD tab: scrolls when too short, as the Knobs tab)
+        mc = self.mod_canvas = tk.Canvas(self.mod_box, highlightthickness=0, bd=0, bg=BG)
+        self.mod_bar = ttk.Scrollbar(self.mod_box, orient="vertical", command=mc.yview, style="Synth.Vertical.TScrollbar")
+        mc.configure(yscrollcommand=self.mod_bar.set)
+        mc.pack(side="left", fill="both", expand=True)
+        self.mod_page = ttk.Frame(mc, padding=(10, 4, 10, 8), style="Synth.TFrame")
+        self.mod_page_win = mc.create_window(0, 0, window=self.mod_page, anchor="nw")
+        mc.bind("<Configure>", lambda e: self.fit_mod())
+        self.mod_page.bind("<Configure>", lambda e: self.after_idle(self.fit_mod))
+        self.build_mod(self.mod_page)
         self.build_macros(self)  # (the macro strip: under the warning line on the OSC and FX tabs)
         self.build_mod_names(self.macro_box.body, MACROS + 1)  # (... with the MOD tab's sources, to link them)
         self.canvas = self.fx.canvas
@@ -292,19 +300,38 @@ class SynthWindow(PresetBar, SynthMod, SynthMacros, SynthRack, SynthKnobs, tk.To
             self.knobs_bar.pack_forget()
             c.yview_moveto(0)
 
+    def fit_mod(self):
+        """The MOD tab: a scrollbar when its boxes + the links list's least room are taller than the window (user
+        2026-10-23: a short window cut the list off); taller = the list gets the rest."""
+        c = self.mod_canvas
+        if not self.winfo_exists() or c.winfo_width() < 50:
+            return
+        need, have = self.mod_page.winfo_reqheight(), c.winfo_height()
+        c.itemconfigure(self.mod_page_win, width=c.winfo_width(), height=max(need, have))
+        c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, have)))
+        if need > have + 1:
+            if not self.mod_bar.winfo_ismapped():
+                self.mod_bar.pack(side="right", fill="y", before=c)
+        elif self.mod_bar.winfo_ismapped():
+            self.mod_bar.pack_forget()
+            c.yview_moveto(0)
+
     def knobs_wheel(self, e):
-        """The mouse wheel over the Knobs or the Effects tab or the MOD tab's list scrolls it when it's too tall (a
-        clicked knob / box turns instead: it keeps the wheel, widgets.wheel_ready)."""
+        """The mouse wheel over the Knobs or the Effects tab or the MOD tab (its links list first) scrolls it when
+        it's too tall (a clicked knob / box turns instead: it keeps the wheel, widgets.wheel_ready)."""
         for c, bar in self.wheel_lists():
             if str(e.widget).startswith(str(c)) and bar.winfo_ismapped():
                 c.yview_scroll(-1 if e.delta > 0 else 1, "units")
                 self.wheel_at = time.monotonic()
+                return
 
     def wheel_lists(self):
-        """(canvas, its scrollbar) of what the wheel scrolls in this window."""
+        """(canvas, its scrollbar) of what the wheel scrolls in this window: the MOD list before the MOD tab (it's
+        inside it)."""
         return [(c, bar) for c, bar in ((getattr(self, "knobs_canvas", None), getattr(self, "knobs_bar", None)),
                                         (getattr(self, "rack_canvas", None), getattr(self, "rack_bar", None)),
-                                        (getattr(self, "mod_list_canvas", None), getattr(self, "mod_list_bar", None)))
+                                        (getattr(self, "mod_list_canvas", None), getattr(self, "mod_list_bar", None)),
+                                        (getattr(self, "mod_canvas", None), getattr(self, "mod_bar", None)))
                 if c is not None]
 
     GLIDE = 0.5  # seconds: as the side panel's SIDE_GLIDE
