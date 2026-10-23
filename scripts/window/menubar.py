@@ -119,6 +119,7 @@ def build_menu(app):
         else:
             v.add_separator()
     v.add_separator()
+    add(v, "menu.track_list", "menu.tab", app.toggle_tracks)
     add(v, "app.fit_view", "", lambda: app.roll.fit_view())
 
     h = menu("menu.help")

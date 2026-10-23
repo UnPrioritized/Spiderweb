@@ -678,6 +678,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.roll.focus_set()
             self.roll.request_redraw()
         else:
+            self.tips.show("tracks")
             self.panes.pack_forget()
             self.track_box.pack(**place)
             self.track_list.focus_set()

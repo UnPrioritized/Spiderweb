@@ -8,6 +8,8 @@ What's new:
 
 • Conductor pane (View → Conductor pane): draw the tempo as a line under the piano roll, with jumps, glides, curves and formulas, and copy and paste it. Catch-up runs fast after a stop until the music is back on time. Keep timing changes the tempo while the music sounds the same, and Fit bar lines keeps the bar lines on the bars you hear. The ruler shows every tempo change. See Help → Conductor pane.
 
+• Track list (press Tab, or use the View menu): the tracks your MIDI will have, one row each with a picture of its notes, so you can see where your shapes land before you export. Click a track and press Tab to see only it on the piano roll, with other tracks you pick shown faintly behind it. Each row has a speaker to mute it while playing. See Help → Track list.
+
 • Gate trim (right-click → Gate trim…): each row of touching notes keeps a share of its length (or a number of ticks), from the left or the right, so a circle at 25 % becomes a crescent. Notes keep their lengths. See Help → Gate trim.
 
 • Time and key signatures: right-click in the Conductor pane. Bar lines and numbers follow them everywhere. They replace the Beats per bar box, and the start tempo is now the Conductor pane's point at bar 1 (no BPM box; old projects get that point by themselves).

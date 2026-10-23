@@ -16,6 +16,8 @@ Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl
 
 Number boxes: drag the name, Up / Down, wheel after a click; Shift = big steps, Ctrl = small.
 
+Tab = the piano roll ↔ the track list (see Track list).
+
 F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino (notes copied in Domino paste with Ctrl+V).
 
 The drawer and the Hz bass window have keys of their own: see their pages.
