@@ -401,6 +401,8 @@ class ProjectFiles:
         self.undo_stack.clear()
         self.redo_stack.clear()
         self._redo_kept = None
+        if not quiet and hasattr(self, "track_list"):  # (another song: every track heard and shown, hunt 2026-10-23)
+            self.track_list.forget()
         try:
             self.on_project_change()
         except Exception as e:  # (its notes couldn't be made: the project as it was, its undo steps too)

@@ -243,6 +243,10 @@ def apply(colours, app=None):
     if vel is not None:
         vel._pic = None
         vel.request_redraw()
+    tracks = getattr(app, "track_list", None)
+    if tracks is not None:  # (its tiny pictures in the channels' colours, hunt 2026-10-23)
+        tracks._sheet = None
+        tracks.request_redraw()
     for name in ("hz_window", "drawer"):  # (open windows drawing with them)
         w = getattr(app, name, None)
         try:

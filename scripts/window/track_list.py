@@ -20,7 +20,7 @@ from files.mathexpr import calc
 from files.midi_out import track_slots
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
-from notes.engine import slot_track_channel
+from notes.engine import BEATS_FAR, slot_track_channel
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text
 from notes.tempo_file import heard_tempo
@@ -56,6 +56,7 @@ class TrackList(tk.Canvas):
         self.view_t, self.sx = 0.0, None  # beat at the picture's left edge, pixels per beat (None: fitted when shown)
         self.top = 0       # pixels the track rows are scrolled up
         self.current = None  # the highlighted track's slot (None: the Conductor row / nothing)
+        self.owners = set()  # id() of the shapes with notes on it (follow: it keeps showing them when channels change)
         self.behind = set()  # slots shown faintly behind it on the piano roll ("Show multiple tracks")
         self.onion = app.onion  # ... while this is on (the main toolbar's toggle; off = one track)
         self.onion.trace_add("write", lambda *_: self.shown_changed())
@@ -73,6 +74,7 @@ class TrackList(tk.Canvas):
         self._sheet = None  # paint's picture: {"key", "x", "y" (its first pixel), "w", "h", "photo"}
         self._tempo_sheet = None  # (key, photo) of the Conductor row's, as wide
         self._heard = None  # (key, heard()'s answer) for the tempo line it was worked out for
+        self._tip_memo = (None, "")  # (row, notes, shape count) -> row_tip's text
         self._fonts = {}  # font -> (tk font, its measuring function: measurer)
         self._pan = None
         self._job = None
@@ -116,6 +118,14 @@ class TrackList(tk.Canvas):
             self.muted = {s for s in self.muted if s < size and row_of[s] >= 0}
         return self._slots
 
+    def forget(self):
+        """Another project opened: nothing muted, highlighted or picked behind, back at its start; the zoom stays
+        (user 2026-10-23: remembered)."""
+        self.current, self.behind, self.muted, self.owners = None, set(), set(), set()
+        self.view_t, self.top, self._sheet = 0.0, 0, None
+        sync_onion(self.app)
+        self.request_redraw()
+
     def unmuted(self, notes):
         """notes without the muted tracks' (App.play_apart: playback only)."""
         if not self.muted or not len(notes):
@@ -150,8 +160,9 @@ class TrackList(tk.Canvas):
             self.row_h = round(min(ROW_MOST, max(ROW_LEAST, data["row_h"])) * self.scale)
         if num(data.get("sx")) and MIN_SX <= data["sx"] <= MAX_SX:
             self.sx = float(data["sx"])
-            self.view_t = max(0.0, float(data["t"])) if num(data.get("t")) else 0.0
-            self.top = max(0, round(data["top"] * self.scale)) if num(data.get("top")) else 0
+            # (past the piano roll's far limit = a damaged file: the bar lines' loop never ended there, hunt 10-23)
+            self.view_t = min(BEATS_FAR, max(0.0, float(data["t"]))) if num(data.get("t")) else 0.0
+            self.top = min(10 ** 9, max(0, round(data["top"] * self.scale))) if num(data.get("top")) else 0
 
     def on_faint(self, e):
         """The Faint % box typed / stepped: the tracks behind drawn again that faint (0 = not drawn)."""
@@ -225,6 +236,34 @@ class TrackList(tk.Canvas):
         self.app.track_view()
         self.app.roll.request_redraw()
 
+    def follow(self, drawn, sels):
+        """After the notes were made again, with a track highlighted (hunt 2026-10-23, user picked A + C):
+        - channels handed out again (an earlier shape drawn over others): the highlight goes to the track holding
+          most of the shapes it showed, so it keeps showing the same music;
+        - selected shapes (just drawn, pasted, moved) whose notes are all on hidden tracks: the highlight goes to
+          their track; spread over several tracks = nothing highlighted (every track shows), never a shape vanishing
+          under the mouse."""
+        if self.current is None or not len(drawn):
+            return
+        was = self.current
+        known = [i for i, sh in enumerate(self.app.shapes) if id(sh) in self.owners]  # (by the shapes themselves:
+        if known:                                                                    # numbers shift on deleting)
+            on = drawn[np.isin(drawn[:, 5], known)]
+            if len(on):
+                slots, counts = np.unique(on[:, 4], return_counts=True)
+                if counts.max() > (on[:, 4] == self.current).sum():
+                    self.current = int(slots[counts.argmax()])
+        if sels:
+            mine = drawn[np.isin(drawn[:, 5], list(sels))]
+            seen = np.isin(mine[:, 4], list(self.shown_slots()))
+            lost = np.setdiff1d(np.unique(mine[:, 5]), np.unique(mine[seen, 5]))  # (none of their notes shown)
+            if len(lost):
+                slots = np.unique(mine[np.isin(mine[:, 5], lost), 4])
+                self.current = int(slots[0]) if len(slots) == 1 else None
+        if self.current != was:
+            self.request_redraw()
+            sync_onion(self.app)
+
     def shown_slots(self):
         """The tracks the piano roll shows: the highlighted one + the ones behind it while Multiple tracks is on."""
         if self.current is None:
@@ -236,6 +275,10 @@ class TrackList(tk.Canvas):
         highlighted only its notes, the tracks picked behind it as faint copies (velocity -2 - v, owner back), the
         rest left out; nothing highlighted = drawn as it is."""
         self.tracks()
+        # (the shapes it shows now: follow keeps showing them when channels are handed out again)
+        shapes = self.app.shapes
+        self.owners = set() if self.current is None or not len(drawn) else {
+            id(shapes[i]) for i in np.unique(drawn[drawn[:, 4] == self.current][:, 5]).tolist() if i < len(shapes)}
         if self.current is None or not len(drawn):
             return drawn, None
         slot = drawn[:, 4]
@@ -301,7 +344,7 @@ class TrackList(tk.Canvas):
         h = self.winfo_height() - self.area()[1]
         self.top = max(0, min(self.top, self.rows_height() - max(h, self.row_h)))
         if self.sx:  # (whole pixels: the kept picture moves by whole pixels, paint)
-            self.view_t = max(0, round(self.view_t * self.sx)) / self.sx
+            self.view_t = max(0, round(min(self.view_t, BEATS_FAR) * self.sx)) / self.sx
 
     def bar_view(self, across):
         """zoombar's: (start, end, total) of what's seen."""
@@ -473,6 +516,14 @@ class TrackList(tk.Canvas):
         """A row's whole name, channel, note count and the shapes whose notes are on it."""
         if row < 0:
             return tr("tracks.conductor_tip")
+        key = (row, self._made and id(self._made[0]), len(self.app.shapes))
+        if self._tip_memo[0] == key:  # (worked out once per row: every mouse move took 60 ms on huge tracks)
+            return self._tip_memo[1]
+        text = self.row_tip_text(row)
+        self._tip_memo = (key, text)
+        return text
+
+    def row_tip_text(self, row):
         slot = int(self.tracks()[row])
         n = self.app.rendered
         mine = n[n[:, 4] == slot] if len(n) else n
@@ -615,17 +666,32 @@ class TrackList(tk.Canvas):
         xa = np.floor(n[:, 0] / ppq * self.sx).astype(np.int64) - cx
         xb = np.ceil(n[:, 1] / ppq * self.sx).astype(np.int64) - 1 - cx
         xa, xb = np.clip(xa, 0, aw - 1), np.clip(np.maximum(xa, xb), 0, aw - 1)
-        if thick.max() > 1:  # (each pixel row of a thick line its own line: one pass for all)
-            rep = np.repeat(np.arange(len(y)), thick)
-            y = y[rep] + np.arange(len(rep)) - np.repeat(np.cumsum(thick) - thick, thick)
-            xa, xb = xa[rep], xb[rep]
-        on = (y >= 0) & (y < ah)
+        # each note's top pixel row painted once, in a picture `pad` rows taller on top (a thick line starting above
+        # the picture still reaches into it); thick lines are then grown downwards row by row (hunt 2026-10-23: a
+        # copy of every note per pixel of thickness took seconds and GBs for big one-key tracks)
+        pad = int(thick.max()) - 1
+        hh = ah + pad
+        y = y + pad
+        on = (y >= 0) & (y < hh)
         y, xa, xb = y[on], xa[on], xb[on]
-        size = ah * (aw + 1)
+        size = hh * (aw + 1)
         # (+1 where a line starts, -1 just past its end, added up along each pixel row: covered where > 0)
         cover = np.bincount(y * (aw + 1) + xa, minlength=size).astype(np.int32)
         cover -= np.bincount(y * (aw + 1) + xb + 1, minlength=size).astype(np.int32)
-        hit = np.cumsum(cover.reshape(ah, aw + 1), axis=1, dtype=np.int32)[:, :aw] > 0
+        hit = np.cumsum(cover.reshape(hh, aw + 1), axis=1, dtype=np.int32)[:, :aw] > 0
+        if pad:  # covered if a line starts at most its thickness - 1 rows up, within the same track row
+            at = np.arange(hh) - pad + cy  # (each picture row's pixel in the rows)
+            track_row = at // self.row_h
+            span = np.maximum(1, self._hi - self._lo + 1)[self._slots]  # (each track's)
+            row_thick = np.maximum(1, inner // span)
+            tk = np.ones(hh, np.int64)
+            inside = (track_row >= 0) & (track_row < len(self._slots))
+            tk[inside] = row_thick[track_row[inside]]
+            start = np.maximum(np.arange(hh) - tk + 1, track_row * self.row_h - cy + pad)  # (first row that counts)
+            ups = np.cumsum(hit, axis=0, dtype=np.int32)
+            below = np.where(start[:, None] > 0, ups[np.maximum(start - 1, 0)], 0)
+            hit = (ups - below) > 0
+        hit = hit[pad:]
         colours = np.array([hex_rgb(look.TRACK_MUTED if int(s) in self.muted else self.colour_of(int(s)))
                             for s in self._slots], np.uint8)  # (muted: grey)
         ok = rows < len(self._slots)
@@ -805,12 +871,15 @@ class TrackList(tk.Canvas):
                 self.create_arc(x + 3 * s - r, cy - r, x + 3 * s + r, cy + r, start=-40, extent=80, style="arc",
                                 outline=colour, width=max(1, round(s)))
 
-    def show_playhead(self):
-        """The play line moved: while playing, the page turns near the right edge (like the piano roll)."""
+    def show_playhead(self, start=False):
+        """The play line moved: while playing, the page turns near the right edge (like the piano roll); back to
+        a line left of the view only when playing starts (start), never while the view is dragged (hunt
+        2026-10-23: scrolled ahead while playing, it jumped back)."""
         if self.sx is None or not self.winfo_ismapped():
             return
         x = self.t2x(self.app.playhead)
-        if self.app.player.running and (x > self.winfo_width() - 6 * self.scale or x < self.name_w):
+        if self.app.player.running and self._pan is None and (
+                x > self.winfo_width() - 6 * self.scale or start and x < self.name_w):
             self.view_t = self.app.playhead
             self.request_redraw()
             return

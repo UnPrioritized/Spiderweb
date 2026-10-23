@@ -896,6 +896,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         lo, hi = (b - r) * ppq, (b + r) * ppq
         first, end = roll.visible_range(lo, hi)
         rows = roll.sorted_notes()[first:end]
+        rows = rows[rows[:, 5] < len(self.app.shapes)]  # (the track list's faint tracks: only shown)
         near = np.concatenate([rows[:, 0], rows[:, 1]]).astype(float)
         near = near[(near >= lo) & (near <= hi)] / ppq
         if beats is None:

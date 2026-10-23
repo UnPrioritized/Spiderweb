@@ -881,7 +881,7 @@ class RollDrawing:
         (user: what's held jumped a page): the line goes on off screen, the page turns once it's let go."""
         tracks = getattr(self.app, "track_list", None)
         if tracks is not None:  # (the track list's own line and pages)
-            tracks.show_playhead()
+            tracks.show_playhead(start)
         if self.sx is None:
             return
         x, w = self.t2x(self.app.playhead), self.winfo_width()

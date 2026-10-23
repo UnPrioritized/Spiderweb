@@ -175,7 +175,7 @@ class VelocityPane(tk.Canvas):
         first, end = self.app.roll.visible_range(lo, hi)
         notes = self.app.roll.sorted_notes()[first:end]
         owners = only if only is not None else self.app.sels or None
-        ok = (notes[:, 0] >= lo) & (notes[:, 0] <= hi)
+        ok = (notes[:, 0] >= lo) & (notes[:, 0] <= hi) & (notes[:, 5] < len(self.app.shapes))  # (no faint tracks)
         if owners is not None:
             ok &= np.isin(notes[:, 5], list(owners))
         rows = np.nonzero(ok)[0]
@@ -276,6 +276,7 @@ class VelocityPane(tk.Canvas):
             return t
         roll, r = self.app.roll, 10 * self.scale / self.app.roll.sx
         rows = roll.starting_in((b - r) * ppq, (b + r) * ppq)
+        rows = rows[rows[:, 5] < len(self.app.shapes)]  # (the track list's faint tracks: not editable here)
         if self.app.sels:
             rows = rows[np.isin(rows[:, 5], list(self.app.sels))]
         if not len(rows):
@@ -506,8 +507,9 @@ class VelocityPane(tk.Canvas):
             return
         # the picture shows exactly this: when nothing here changed (the piano roll moved up or down, a shape is
         # dragged and its notes catch up later), it's shown again as it is
+        # (the notes the piano roll shows: with a track highlighted in the track list, only its, hunt 2026-10-23)
         pic = None if self.edit or roll.draft_notes() is not None else (
-            self.app.rendered, (frozenset(self.app.sels), roll.sx, roll.view_t, roll.kb_w, w, h, self.top,
+            self.app.drawn, (frozenset(self.app.sels), roll.sx, roll.view_t, roll.kb_w, w, h, self.top,
                                 tuple(roll.grid_cols(w))))
         if pic and self.img is not None and self._pic and self._pic[0] is pic[0] and self._pic[1] == pic[1]:
             self.create_image(kb, 0, image=self.img, anchor="nw")
@@ -588,6 +590,9 @@ class VelocityPane(tk.Canvas):
         if preview is not None:  # velocities being drawn right now
             drawn = preview[first:end]
             vel = np.where(drawn >= 0, drawn, vel)
+        if len(vel) and vel.min() < -1:  # (the track list's faint tracks behind the highlighted one: not here)
+            mine = vel >= -1
+            notes, vel = notes[mine], vel[mine]
         cols = slot_colours(getattr(self.app, "picture_use10", False))
         slot = cols[notes[:, 4] % len(cols)]
         if sels:

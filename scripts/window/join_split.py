@@ -859,7 +859,7 @@ class JoinSplit:
         cuts = [(a, b, None)] if not boxes else [(*s, box) for s, box in ((clip_segment(a, b, box), box)
                                                                            for box in boxes) if s]
         segs = [(sa, sb) for sa, sb, _ in cuts]
-        targets = sorted(self.sels) if boxes else range(len(self.shapes))
+        targets = sorted(self.sels) if boxes else self.shown_shapes()
         done, out, skipped, plain, missed, merges, flat = {}, {}, 0, set(), 0, 0, False
         for i in targets:
             sh = self.shapes[i]
@@ -952,7 +952,7 @@ class JoinSplit:
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         boxes = self.roll.kept_box() or None
-        targets = sorted(self.sels) if boxes else range(len(self.shapes))
+        targets = sorted(self.sels) if boxes else self.shown_shapes()
         drawn, whole = [], []  # (a drawn shape wholly inside: just selected, not asked about; hunt 10-23)
         for i in targets:
             if self.lasso_drawn(self.shapes[i]):
@@ -1010,7 +1010,7 @@ class JoinSplit:
     def lasso_magnet_notes(self):
         """The notes a Magnetic lasso clings to: those it can cut as they are (pasted notes, lines; with Select boxes
         kept: only what they selected), (start, end, key) ticks."""
-        targets = sorted(self.sels) if self.roll.kept_box() else range(len(self.shapes))
+        targets = sorted(self.sels) if self.roll.kept_box() else self.shown_shapes()
         got = [np.asarray(self.notes_of(self.shapes[i]))[:, :3] for i in targets
                if self.lasso_pasted(self.shapes[i]) or self.lasso_line(self.shapes[i])]
         got = [n for n in got if len(n)]

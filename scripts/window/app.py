@@ -677,12 +677,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self._toolbar_rows = None  # (laid out again: the row count may change too)
                 self.fit_toolbar()
 
-    def track_view(self):
+    def track_view(self, follow=False):
         """What the piano roll paints (self.drawn) with a track highlighted in the track list: its notes, the tracks
         picked behind it faint (velocity -2 - v, owner behind_owner: painted first), every other track hidden (user
-        2026-10-23, like Domino). Nothing highlighted: everything."""
+        2026-10-23, like Domino). Nothing highlighted: everything. follow: the notes were just made (shapes_changed):
+        the highlight follows its music and what was just drawn / pasted / moved (track_list.follow)."""
         if getattr(self, "drawn_all", None) is None:
             return
+        if follow:
+            self.track_list.follow(self.drawn_all, self.sels)
         self.drawn, self.behind_owner = self.track_list.filtered(self.drawn_all, len(self.shapes))
         self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
             self.picture_owners_all, False)  # (the tracks behind: their own channel colours)
@@ -699,6 +702,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if self.sels & hidden:  # (a hidden shape can't stay picked: nothing changes out of sight)
                 keep = self.sels - hidden
                 self.select_many(keep, self.sel if self.sel in keep else max(keep, default=None))
+
+    def shown_shapes(self):
+        """The shape numbers the piano roll shows: all but those on tracks the track list hides (Slice / Lasso
+        cut only these, hunt 2026-10-23: nothing changes out of sight)."""
+        return [i for i in range(len(self.shapes)) if i not in self.hidden_shapes]
 
     def tracks_shown(self):
         return bool(self.track_box.winfo_manager())
@@ -1547,7 +1555,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.picture_owners = np.array([picture_like(sh) for sh in self.shapes], bool)
         self.picture_pal = self.slots_pal()
         self.drawn_all, self.picture_owners_all = self.drawn, self.picture_owners
-        self.track_view()
+        self.track_view(follow=True)
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
         if self.channel_mode.get() == "auto" and len(self.rendered):
