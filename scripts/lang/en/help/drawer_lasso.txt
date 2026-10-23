@@ -4,6 +4,20 @@ The ▾ next to the Lasso button picks Lasso (drag round and let go: the loop cl
 
 Closed strokes are cut too wherever the loop goes in and out of them. With strokes picked (Select tool), only those are cut; otherwise every stroke the loop crosses. Hidden and locked layers are never cut. With Mirror on, the mirrored loop cuts too.
 
-While the loop waits you can drag its points, Alt-drag a point for curve handles, middle-click the loop to add a point and right-click a point to remove it. Ctrl+Z undoes those changes one at a time, then throws the loop away.
+While the loop waits you can change it. Ctrl+Z undoes those changes one at a time, then throws the loop away.
+
+• Drag a point: moves it.
+
+• Alt-drag a point: pulls out curve handles, both sides alike.
+
+• Drag a handle: bends the loop; the other handle turns with it. Alt-drag a handle: only that one moves (a sharp corner).
+
+• Middle-click the loop: adds a point there.
+
+• Right-click a point: takes its handles off; right-click again to remove the point.
+
+• Enter: cuts. Esc: throws the loop away.
+
+The piano roll's Lasso works the same way; its Help page has pictures.
 
 The pieces stay where they were, in the same layer and group. Curves, arcs and polylines stay curves, arcs and polylines; circles, freehand strokes and strokes with a Formula become polylines. Ctrl+Z undoes a cut.

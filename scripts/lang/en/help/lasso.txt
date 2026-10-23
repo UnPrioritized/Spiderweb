@@ -1,17 +1,74 @@
 Pick Lasso (J) and draw a loop round the notes you want. The loop waits until you press Enter (or Cut in the side panel's Lasso box): then every shape it takes notes in is cut along it, and the part inside ends up selected, so you can move it, copy it or delete it like any shape. Esc (or Cancel) throws the loop away. A click somewhere else does nothing, so a stray click never loses your loop.
+[clip:lasso-loop]
 
 The loop doesn't have to go all the way across: it can bite into the side of a shape or cut a hole out of its middle. On each key row, a note the loop goes through is cut in two where the loop crosses the row's middle. Every piece is kept, however short, so no note is ever lost: one Ctrl+Z puts it all back.
+[clip:lasso-cut]
+
+Above: after Enter, the piece inside was dragged to the right, leaving a hole.
+
+## Three ways to draw
 
 The ▾ next to the Lasso button picks how you draw the loop:
 
-Lasso (drag): drag round the notes and let go. The loop closes straight back to where you started, and it's smoothed into a few curved points you can edit. Hold Alt while dragging to draw straight lines instead.
+Lasso (drag): drag round the notes and let go. The loop closes straight back to where you started, and it's smoothed into a few curved points you can edit.
 
-Polygonal (click points): click each corner. The points go to the snap grid in time (hold Ctrl to place them exactly; keys are always free). Shift keeps the line at 45° steps. Backspace takes the last point off. Click the first point, double-click, right-click or press Enter to close the loop. Alt-drag draws a freehand part.
+Polygonal (click points): click each corner. The points go to the snap grid in time (keys are always free). Click the first point, double-click, right-click or press Enter to close the loop.
 
-Magnetic (clings to the notes): click once, then just move the mouse round the notes. The line clings to them: it runs between key rows and goes up or down only at a note's start or end, so it never cuts a note. It drops points by itself as you go; click to place one yourself. Backspace takes back the points placed since the last one. Close it like a Polygonal loop. Width (in the side panel, or the [ and ] keys) is how far from the mouse it looks for a note's corner to cling to; the circle round the mouse shows it.
+Magnetic (clings to the notes): click once, then just move the mouse round the notes. The line clings to them: it runs between key rows and goes up or down only at a note's start or end, so it never cuts a note. It drops points by itself as you go; click to place one yourself. Close it like a Polygonal loop. Width (in the side panel) is how far from the mouse it looks for a note's corner to cling to; the circle round the mouse shows it.
+[clip:lasso-magnetic]
 
-While the loop waits you can still change it: drag its points; Alt-drag a point to pull out curve handles (like the Curve tool: drag a handle and the other turns with it, Alt-drag a handle to make a corner); middle-click the loop to add a point; right-click a point to take its handles off, and again to remove it. Ctrl+Z undoes these changes one at a time (Ctrl+Y redoes them), and once there's nothing left to undo it throws the loop away. Drawing at or past the piano roll's edge scrolls the view.
+## Changing the loop before it cuts
 
-What it cuts: pasted notes and lines (line, polyline, curve, arc, freehand) are cut as they are, and lines stay lines you can edit. Any other shape the loop takes notes in (drawn shapes, text, merged shapes, Hz bass) has to become plain notes first: the lasso asks once, then turns them into plain notes and cuts them in the same step. Answer No and the loop stays. Pictures and masks are never cut. A shape wholly inside the loop isn't cut, just selected.
+While the loop waits, its points and their curve handles work like the Curve tool's: pull handles out of a point to bend the loop round the notes, add points, take them away (see the keys below). Ctrl+Z undoes these changes one at a time (Ctrl+Y redoes them), and once there's nothing left to undo it throws the loop away. Drawing at or past the piano roll's edge scrolls the view.
+
+## Keys and mouse
+
+While drawing:
+
+• Alt (Lasso, drag): straight lines while it's held.
+
+• Alt-drag (Polygonal): a freehand part.
+
+• Ctrl (Polygonal): the point goes exactly where you click, off the snap grid.
+
+• Shift (Polygonal): the line keeps to 45° steps.
+
+• Backspace: takes the last point off (Magnetic: the points placed since the last one).
+
+• [ and ] (Magnetic): Width smaller / bigger.
+
+• Enter, double-click, right-click or a click on the first point: closes a Polygonal or Magnetic loop.
+
+While the loop waits:
+
+• Drag a point: moves it, on the snap grid in time (Ctrl: exactly).
+
+• Alt-drag a point: pulls out curve handles, both sides alike.
+
+• Drag a handle: bends the loop; the other handle turns with it.
+
+• Alt-drag a handle: only that handle moves (a sharp corner).
+
+• Middle-click the loop: adds a point there.
+
+• Right-click a point: takes its handles off; right-click again to remove the point.
+
+• Esc while holding a point: puts it back where it was.
+
+• Enter (or Cut): cuts. Esc (or Cancel): throws the loop away.
+
+## Ways to use it
+
+• Carve a block of spam: loop round a part and press Delete after Enter, for a hole or a bite out of its side.
+
+• Lift a part out: after Enter, drag the selected piece somewhere else, or copy it (Ctrl+C) and paste it at the play line (Ctrl+V).
+
+• Cut only what you mean to: draw a Select box first, so a loop that strays over other shapes leaves them alone.
+
+• Keep a pattern's notes whole: Magnetic never cuts a note, so the piece takes whole notes only.
+
+## What it cuts
+
+Pasted notes and lines (line, polyline, curve, arc, freehand) are cut as they are, and lines stay lines you can edit. Any other shape the loop takes notes in (drawn shapes, text, merged shapes, Hz bass) has to become plain notes first: the lasso asks once, then turns them into plain notes and cuts them in the same step. Answer No and the loop stays. Pictures and masks are never cut. A shape wholly inside the loop isn't cut, just selected.
 
 Only some shapes: draw a Select box (or several, with Ctrl) first, then pick Lasso. Only the shapes the boxes selected are cut, and only inside the boxes.
