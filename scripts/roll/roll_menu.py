@@ -23,6 +23,7 @@ from roll.roll_shared import SHIFT
 from window.claw_window import open_claw
 from window.path_window import open_path
 from window.strum_window import open_strum
+from window.trim_window import open_trim
 from window.chop_window import open_chop, quick_chop
 from notes.sustain import is_sustained
 from window.sustain_window import any_sustained, carry_stops, open_sustain, sustain_targets, target_indices
@@ -155,6 +156,7 @@ class ShapeMenu:
             item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app), keys=True)
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app), keys=True)
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app), keys=True)
+            item(tr("roll_menu.gate_trim"), "", lambda: open_trim(app))
             self.glue_items(item)
         self.sustain_item(m)
         if is_sustained(sh) and i in target_indices(app):  # (where on the shape: roll_sustain.py)
@@ -288,6 +290,7 @@ class ShapeMenu:
             item(tr("roll_menu.strum"), tr("roll_menu.alt_s"), lambda: open_strum(app))
             item(tr("roll_menu.chop"), tr("roll_menu.alt_u"), lambda: open_chop(app))
             item(tr("roll_menu.quick_chop"), tr("roll_menu.ctrl_u"), lambda: quick_chop(app))
+            item(tr("roll_menu.gate_trim"), "", lambda: open_trim(app))
             self.glue_items(item)
         self.sustain_item(m)
         if app.between_pair():

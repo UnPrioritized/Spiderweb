@@ -1,0 +1,13 @@
+Select one or more shapes, then right-click one: Gate trim… (also in the Tools menu). Each row of touching notes on a key is cut down to a share of its whole length. Type how much stays in the Keep box (or drag the slider), then pick which end stays. The notes change on the piano roll while you try settings. Accept keeps the change (one Ctrl+Z takes it back); X or Esc puts the notes back as they were. Reset goes back to 100 %, where it changes nothing.
+
+Every row is trimmed by the same share of ITS OWN length, so a long row loses more ticks than a short one. A filled circle at 25 % from the left becomes a crescent: the left edge stays, and the new right edge follows the same curve, closer in.
+
+The notes are not squeezed: the notes inside the part that stays keep their lengths, the note where the cut falls is cut there, and the rest of the row goes. For example, three touching notes of 60, 40 and 70 ticks make a row of 170 ticks; at 50 % from the left, 85 ticks stay: the 60 tick note, and 25 ticks of the 40 tick note.
+
+Count from: Left keeps the start of each row (the left part), Right keeps its end (the right part).
+
+A gap on a key, even of 1 tick, starts a new row, and each row is trimmed on its own. Notes of every colour on a key count together.
+
+Like the Claw machine, the trim is a page kept with the shape: moving or reshaping it trims the new notes the same way. Each time the window opens it starts a new page (+); click a tab on top to change one the shape has, or the small × beside a tab to take it off. Pages work one after another, in the order they were added, so a trim can come before or after a Chop or a Strum.
+
+For a shape that wipes away or grows in (like the moon's phases), copy it a few times and give each copy its own share: 100 %, 75 %, 50 %, 25 %.

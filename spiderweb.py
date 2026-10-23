@@ -56,6 +56,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     tool_window.py   what the Claw machine and Strum windows share (live preview, undo, the Knob dial)
     claw_window.py   the Claw machine window
     strum_window.py  the Strum window (Start / End panels of knobs, each with its number box)
+    trim_window.py   the Gate trim window (Keep n % of each row, from the left / right)
     path_window.py   the Copy along a path window (path kind, spacing, where B is)
     range_window.py  the spam gate Range's graph window
     sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
@@ -117,6 +118,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first
     claw.py          the claw machine: a shape's notes thinned out / cut / bent after they're made
     strum.py         strum: each chord's notes start one after another (and end, velocity)
+    trim.py          gate trim: each key row's runs of touching notes cut down to a share of their length
     copypath.py      copy along a path: the shape's notes copied from A to B (straight / curve / arc)
     sustain.py       sustain: each key row's notes held to their group's end (overlaps kept), done last
     subtract.py      gate subtract: every note ends a few ticks earlier (start kept), done after Sustain

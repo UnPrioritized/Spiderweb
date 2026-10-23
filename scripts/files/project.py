@@ -505,7 +505,7 @@ class ProjectFiles:
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
-                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "path_window": self.path_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_loud_height": self.hz_loud_h,"hz_preview": self.hz_preview, "hz_tools": self.hz_window.tools_state() if self.hz_window else self.hz_tools,
+                              "claw_window": self.claw_pos, "strum_window": self.strum_pos, "chop_window": self.chop_pos, "trim_window": self.trim_pos, "path_window": self.path_pos, "hz_window": self.hz_pos, "hz_fx_height": self.hz_fx_h, "hz_loud_height": self.hz_loud_h,"hz_preview": self.hz_preview, "hz_tools": self.hz_window.tools_state() if self.hz_window else self.hz_tools,
                               "hz_view": self.hz_window.view_state() if self.hz_window else self.hz_view,
                               "history_window": self.history_pos, "history_undocked": self.history_undocked,
                               "places": getattr(self, "window_places", {}),
@@ -640,6 +640,7 @@ class ProjectFiles:
         def places():
             for key, attr in (("tumour_window", "tumour_pos"), ("graph_window", "graph_pos"),
                               ("claw_window", "claw_pos"), ("strum_window", "strum_pos"), ("chop_window", "chop_pos"),
+                              ("trim_window", "trim_pos"),
                               ("path_window", "path_pos")):
                 pos = win.get(key)
                 if isinstance(pos, str) and re.fullmatch(r"\+-?\d+\+-?\d+", pos):

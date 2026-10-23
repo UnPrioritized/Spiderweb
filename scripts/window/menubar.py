@@ -11,6 +11,7 @@ from window.chop_window import open_chop, quick_chop
 from window.claw_window import open_claw
 from window.path_window import open_path
 from window.strum_window import open_strum
+from window.trim_window import open_trim
 
 
 def build_menu(app):
@@ -91,15 +92,16 @@ def build_menu(app):
 
     def sync_tools(m):
         tools = bool(app.note_tool_sels())
-        for i in range(4):
+        for i in range(5):
             m.entryconfig(i, state="normal" if tools else "disabled")
-        m.entryconfig(5, state="normal" if tools else "disabled")
-        m.entryconfig(6, state="normal" if app.tumour_targets() else "disabled")
+        m.entryconfig(6, state="normal" if tools else "disabled")
+        m.entryconfig(7, state="normal" if app.tumour_targets() else "disabled")
     t = menu("menu.tools", sync_tools)
     add(t, "roll_menu.claw_machine", "roll_menu.alt_w", lambda: open_claw(app))
     add(t, "roll_menu.strum", "roll_menu.alt_s", lambda: open_strum(app))
     add(t, "roll_menu.chop", "roll_menu.alt_u", lambda: open_chop(app))
     add(t, "roll_menu.quick_chop", "roll_menu.ctrl_u", lambda: quick_chop(app))
+    add(t, "roll_menu.gate_trim", "", lambda: open_trim(app))
     t.add_separator()
     add(t, "roll_menu.copy_path", "", lambda: open_path(app))
     add(t, "roll_menu.tumours", "", app.open_tumours)

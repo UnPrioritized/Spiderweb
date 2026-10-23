@@ -304,6 +304,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.claw_pos = ""  # where the claw machine window was last ("+x+y", remembered in the autosave)
         self.strum_window = None
         self.strum_pos = ""  # (the same for the strum window)
+        self.trim_window = None
+        self.trim_pos = ""  # (and the Gate trim window)
         self.chop_window = None
         self.chop_pos = ""  # (and the chop window)
         self.path_window = None  # Copy along a path (path_window.py)
@@ -1012,8 +1014,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_funnel()
         self.sync_list_selection()
         self.sync_line_fill()
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.sustain_window,
-                  self.subtract_window, self.merge_window, self.strips_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
+                  self.sustain_window, self.subtract_window, self.merge_window, self.strips_window):
             if w:
                 w.sync()
         if self.hz_window:
@@ -1202,8 +1204,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_funnel()
         self.sync_tumour()
         self.sync_text()
-        for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window, self.sustain_window,
-                  self.subtract_window, self.merge_window):
+        for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
+                  self.sustain_window, self.subtract_window, self.merge_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
         if self.image_window and self.keys != before[1]:

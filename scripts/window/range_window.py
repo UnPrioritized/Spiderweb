@@ -235,7 +235,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
             if t.get("fill") not in SPAM_FILLS:
                 continue
             bare = {k: v for k, v in t.items() if k != "fx"}
-            fx = [st for st in t.get("fx") or () if st["tool"] not in ("strum", "claw")]
+            fx = [st for st in t.get("fx") or () if st["tool"] not in ("strum", "claw", "trim")]
             if any(st["tool"] == "chop" for st in fx):
                 bare["fx"] = fx
             notes = self.app.notes_of(bare)

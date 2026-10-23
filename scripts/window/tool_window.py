@@ -19,7 +19,7 @@ from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, placed, wheel_ready, wheel_turns
 
 NEW = "new"  # the "+" tab
-TOOL_WINDOWS = ("claw_window", "strum_window", "chop_window", "path_window")  # (the app's open note tool windows)
+TOOL_WINDOWS = ("claw_window", "strum_window", "chop_window", "trim_window", "path_window")  # (the app's open note tool windows)
 TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
 
 ORANGE = look.KNOB_ORANGE

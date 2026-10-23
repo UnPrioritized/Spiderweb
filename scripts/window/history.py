@@ -263,7 +263,7 @@ class HistoryPanel:
         """The windows trying changes out (note tools, tumours, sustain) keep them as their own steps. Several at
         once: the first step takes back what ALL of them tried, the next all but the first's... (each step was
         made from the shapes as they are, which hold every window's tries: undoing them all came back to one)."""
-        ws = [w for w in (self.claw_window, self.strum_window, self.chop_window, self.path_window,
+        ws = [w for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
                           self.tumour_window, self.sustain_window, self.subtract_window, self.strips_window) if w]
         waiting = [w for w in ws if w.pending()]
         for w in ws:
