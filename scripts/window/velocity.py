@@ -15,7 +15,7 @@ from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.fx import with_velocity
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
-from roll.roll_shared import (CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
+from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
                               box_kind, cached_path, draw_boxes, fade, grab_while_panning, ruler_boxes, set_cursor,
                               slot_colours)
 from window import look
@@ -472,11 +472,14 @@ class VelocityPane(tk.Canvas):
             self.follow_mouse()
 
     def on_wheel(self, e):
-        """Wheel scrolls sideways, Ctrl+wheel zooms time (same as the piano roll)."""
+        """Wheel scrolls sideways, Ctrl+wheel = the next / previous track, Ctrl+Shift / Ctrl+Alt zoom time (same as
+        the piano roll)."""
         roll = self.app.roll
         if roll.sx is None:
             return
         up = e.delta > 0
+        if e.state & CTRL and not e.state & (SHIFT | ALT):
+            return self.app.track_list.step_track(-1 if up else 1)
         if e.state & CTRL:
             b = roll.x2t(e.x)
             roll.sx = min(100000.0, max(0.05, roll.sx * (1.25 if up else 0.8)))

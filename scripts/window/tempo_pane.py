@@ -35,7 +35,7 @@ from notes.tempo import changed as tempo_edited
 from notes.loaded import file_tempos
 from notes.tempo_file import dense_spots
 from roll.zoombar import add_zoom_bars
-from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
+from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
                               set_cursor)
 from window import look
@@ -1984,6 +1984,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 if hi - lo > self.least_span() or not up:
                     self.set_view(at - (at - lo) * f, at + (hi - at) * f)
             return self.request_redraw()
+        if e.state & CTRL and not e.state & (SHIFT | ALT):  # (the next / previous track, as the piano roll)
+            return self.app.track_list.step_track(-1 if up else 1)
         if e.state & CTRL:
             b = roll.x2t(e.x)
             roll.sx = min(100000.0, max(0.05, roll.sx * (1.25 if up else 0.8)))

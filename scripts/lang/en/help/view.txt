@@ -1,4 +1,4 @@
-Wheel = scroll up / down, Shift+wheel = sideways. Ctrl+wheel = zoom both ways, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch. Middle-drag scrolls. Fit view shows everything. The zoom and scroll are remembered.
+Wheel = scroll up / down, Shift+wheel = sideways. Ctrl+Alt+wheel = zoom both ways, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch. Ctrl+wheel = the next / previous track (shown alone, its name on the status line; down goes to the next one). Middle-drag scrolls. Fit view shows everything. The zoom and scroll are remembered.
 
 Scrollbars (under and right of the piano roll): drag the bar to scroll, drag one of its two ends to zoom, click beside it to go one screen that way. The − and + buttons at the end of each scrollbar zoom out / in. The bar under the piano roll reaches 8 bars past the last note.
 

@@ -6,7 +6,7 @@ Mouse: right-click a shape = its menu, empty space = deselect. Right-click a cur
 
 Select: click a selected shape again = the next shape under it. Ctrl+drag after a box = another box; Ctrl+drag inside the box = move a copy.
 
-Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = zoom, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch.
+Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = next / previous track, Ctrl+Alt+wheel = zoom, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch.
 
 Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo / redo (see History), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one curve, Ctrl+Shift+G split into separate shapes, Ctrl+R turn into live shape, Alt+W claw machine, Alt+S strum, Alt+U chop, Ctrl+U quick chop, Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
 

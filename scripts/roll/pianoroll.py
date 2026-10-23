@@ -2017,8 +2017,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         up = e.delta > 0
         f = 1.25 if up else 0.8
-        zoom_time = e.state & CTRL and not e.state & ALT
-        zoom_pitch = (e.state & CTRL and not e.state & SHIFT) or e.state & ALT
+        if e.state & CTRL and not e.state & (SHIFT | ALT):  # Ctrl: the next / previous track (Domino's, user 2026-10-24)
+            return self.app.track_list.step_track(-1 if up else 1)
+        # Ctrl+Shift: zoom time, Alt: keys, Ctrl+Alt: both
+        zoom_time = e.state & CTRL and bool(e.state & SHIFT) != bool(e.state & ALT)
+        zoom_pitch = e.state & ALT
         if zoom_time:
             self.zoom_x(f, e.x)
         if zoom_pitch:

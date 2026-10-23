@@ -530,6 +530,25 @@ class TrackList(tk.Canvas):
             self.onion.set(False)
         self.shown_changed()
 
+    def step_track(self, way):
+        """Ctrl+wheel on the piano roll / its panes (like Domino, user 2026-10-24): the next (way 1, wheel down) or
+        previous track highlighted, empty ones too; stops at the first / last; nothing highlighted = the first
+        (down) / last (up). The status line names it."""
+        rows = self.tracks()
+        if not len(rows):
+            return
+        slots = [int(s) for s in rows]
+        if self.current in slots:
+            row = min(max(slots.index(self.current) + way, 0), len(slots) - 1)
+        else:
+            row = 0 if way > 0 else len(slots) - 1
+        if slots[row] != self.current:
+            self.current = slots[row]
+            self.shown_changed()
+        ch = self.channel_of(slots[row])
+        self.app.status.config(text=tr("tracks.stepped", name=self.name_of(row), ch=ch) if ch
+                               else self.name_of(row))
+
     def show_all(self):
         """Nothing highlighted: the piano roll shows every track (Esc, the Conductor row, All tracks in the ▾ list)."""
         if self.current is not None:
