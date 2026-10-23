@@ -1036,7 +1036,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         if self.ruler_band(e, kept, vel=True):
             self.band_press(e, kept)
         else:
-            self.drag = ("seek", self.app.player.running, x, state, kept)
+            self.drag = ("seek", False, x, state, kept)
 
     def on_press(self, e):
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
@@ -1061,10 +1061,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             self.band_press(e, kept)
             return
         if e.y < self.ruler_h:  # the bar numbers: move the play line (dragged sideways: a Select box, ruler_box)
-            playing = app.player.running
-            app.stop_play()
-            app.set_playhead(self.event_pt(e)[0])
-            self.drag = ("seek", playing, e.x, e.state, kept)
+            if not app.player.running:  # (playing: the play line stays, user 2026-10-23; a drag is still a box)
+                app.set_playhead(self.event_pt(e)[0])
+            self.drag = ("seek", False, e.x, e.state, kept)
             return
         if app.tool.get() == "lasso":  # (a loop drawn / a waiting loop's point grabbed: roll_lasso)
             self.lasso_press(e, kept)
@@ -1536,11 +1535,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
             if self.drag[1]:
                 self.app.start_play(keep=True)  # it was playing: carry on from the new spot
         elif kind == "move" and self.time_only and not self.drag[4]:  # the ruler's black band clicked: the play line
-            playing = self.app.player.running
-            self.app.stop_play()
-            self.app.set_playhead(self.event_pt(e)[0])
-            if playing:
-                self.app.start_play(keep=True)
+            if not self.app.player.running:  # (playing: it stays, user 2026-10-23)
+                self.app.set_playhead(self.event_pt(e)[0])
         elif kind == "box" and not self.box_area() and not e.state & CTRL and self.area_pick is not None:
             i, alone = self.area_pick  # (a click in a mask's area picks the mask; it again: the next under it)
             nxt = self.next_at(e.x, e.y, i) if alone else None
@@ -1548,11 +1544,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
                 self.cycled = (i, e.x, e.y)
             self.app.select(i if nxt is None else nxt)
         elif kind == "box" and not self.box_area() and not e.state & CTRL:
-            playing = self.app.player.running
-            self.app.stop_play()
-            self.app.set_playhead(self.event_pt(e)[0])
-            if playing or self.box_resume:  # (box_resume: the ruler pressed while playing)
-                self.app.start_play(keep=True)
+            if not self.app.player.running:  # (a click on empty space: the play line there; playing: it stays,
+                self.app.set_playhead(self.event_pt(e)[0])  # user 2026-10-23)
         elif kind == "box" and not self.box_area() and self.box_resume:  # (a short Ctrl+drag on the ruler: plays on)
             self.app.start_play(keep=True)
         elif (kind == "move" and not self.drag[4] and not self.dup and self.cycle is not None

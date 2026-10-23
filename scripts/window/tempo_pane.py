@@ -1265,13 +1265,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.move_line(e)
 
     def move_line(self, e):
-        """A Select click: the play line to the click (snapped like the piano roll's), playing on from there."""
+        """A Select click: the play line to the click (snapped like the piano roll's); playing: it stays (user
+        2026-10-23)."""
         app = self.app
-        playing = app.player.running
-        app.stop_play()
-        app.set_playhead(self.snap_beat(app.roll.x2t(e.x), e))
-        if playing:
-            app.start_play(keep=True)
+        if not app.player.running:
+            app.set_playhead(self.snap_beat(app.roll.x2t(e.x), e))
 
     def end_drag(self):
         """Ctrl+Z while dragging: let go first (the step made at the first move takes it back). True when it only

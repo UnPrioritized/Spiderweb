@@ -462,8 +462,9 @@ class TrackList(tk.Canvas):
     def on_press(self, e):
         self.focus_set()
         self.tip.use()
+        playing = self.app.player.running  # (playing: the play line stays, user 2026-10-23)
         if e.y < self.ruler_h:  # the play line, on the track list's snap (Shift: free)
-            if e.x >= self.name_w and self.sx:
+            if e.x >= self.name_w and self.sx and not playing:
                 beat = max(0.0, self.x2t(e.x))
                 self.app.set_playhead(beat if e.state & 0x1 else self.snapped(beat))
             return
@@ -478,7 +479,7 @@ class TrackList(tk.Canvas):
             self.toggle_behind(slot)
             self._sweep = (slot in self.behind, row)
             return
-        if e.x >= self.name_w and self.sx:  # (like many MIDI programs: the play line there too, snapped)
+        if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
             beat = max(0.0, self.x2t(e.x))
             self.app.set_playhead(self.snapped(beat))
         self.current = None if row < 0 else int(self.tracks()[row])
