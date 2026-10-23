@@ -463,6 +463,9 @@
  "tracks.conductor_tip": "Conductor: the tempo, time signatures and key signatures (a mark at each change).\nClick it to show every track on the piano roll again.",
  "tracks.notes_one": "{n} note",
  "tracks.notes": "{n} notes",
+ "tracks.channels_one": "{n} channel",
+ "tracks.channels": "{n} channels",
+ "tracks.from_file": "From the loaded MIDI file",
  "tracks.shapes": "From: {names}",
  "tracks.more_shapes_one": "and {n} more shape",
  "tracks.more_shapes": "and {n} more shapes",
@@ -1808,5 +1811,9 @@
  "load.sum_orphan_one": "{n} note-off has no note to end. It stays in the file as it is.",
  "load.sum_256": "This MIDI uses keys above 127, so the project uses 256 keys.",
  "load.sum_resynced": "The length written in track {tracks} was wrong. Spiderweb found where the next track starts, so nothing is skipped. Exporting keeps the file's bytes exactly as they are.",
+ "load.export_only_file": "Shapes drawn on top of a loaded MIDI and tempo changes aren't added to the exported file yet (they come in a later version).\n\nExport the loaded MIDI exactly as it was loaded?",
+ "load.exporting": "Exporting the loaded MIDI… {pct} %",
+ "load.exported": "Saved the loaded MIDI exactly as it was loaded ({notes}):\n{path}",
+ "load.export_failed": "Exporting the loaded MIDI failed: {e}\nNothing was saved.",
  "load.sum_damaged": "Track {tracks} is damaged: its notes are shown up to where the damage starts. Exporting keeps its bytes exactly as they are."
 }

@@ -6,6 +6,7 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -44,6 +45,7 @@ from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, track
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
 from files.errors import write_log
+from files.midi_read import MidiError
 from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
@@ -875,7 +877,56 @@ class ProjectFiles:
         if path:
             self.pvar["output"].set(os.path.normpath(path))
 
+    def export_loaded(self):
+        """Export MIDI with a loaded MIDI: the file written out exactly as it was loaded (midi_copy: every byte
+        copied and checked). Shapes on top / tempo changes come in later steps of Load MIDI: asked first. In the
+        background (a 17 GB file takes a minute), the status line says how far."""
+        lm = self.loaded
+        if getattr(self, "_exporting", None):
+            return
+        if (len(self.rendered) or has_tempo(self.tempo)) and not messagebox.askyesno(
+                tr("project.spiderweb"), tr("load.export_only_file"), icon="warning", parent=self):
+            return
+        path = output_path(self.pvar["output"].get())
+        if os.path.exists(path) and not messagebox.askyesno(
+                tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
+                                                  basename=os.path.basename(path)), icon="warning", default="no"):
+            return
+        from files.midi_copy import copy_through
+        job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False}
+
+        def run():
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n))
+            except BaseException as e:  # (said below)
+                job["error"] = e
+            job["finished"] = True
+
+        def poll():
+            if not job["finished"]:
+                self.busy(tr("load.exporting", pct=int(100 * job["done"] / max(1, job["total"]))))
+                self.after(100, poll)
+                return
+            self._exporting = None
+            self.busy(None)
+            e = job["error"]
+            if e is None:
+                messagebox.showinfo(tr("project.spiderweb"), tr("load.exported", path=path,
+                                                                notes=trn("n.notes", lm.notes, n=lm.notes)))
+            elif isinstance(e, MidiError):
+                messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info))
+            elif isinstance(e, OSError):
+                messagebox.showerror(tr("project.spiderweb"), couldnt_save(e))
+            else:
+                write_log(type(e), e, e.__traceback__, "(exporting a loaded MIDI)")
+                messagebox.showerror(tr("project.spiderweb"), tr("load.export_failed", e=e))
+        threading.Thread(target=run, daemon=True, name="export loaded midi").start()
+        poll()
+
     def generate(self):
+        if self.loaded is not None:
+            return self.export_loaded()
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:

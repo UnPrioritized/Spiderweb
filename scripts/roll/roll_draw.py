@@ -439,7 +439,7 @@ class RollDrawing:
         # the picture below shows exactly this: when nothing here changed (e.g. dragging a shape whose notes catch up
         # later), it's shown again as it is instead of being painted again
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
-                 id(app.loaded), getattr(self, "loaded_version", 0))
+                 self.loaded_mark())
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
@@ -1701,8 +1701,8 @@ class RollDrawing:
         tl = getattr(self.app, "track_list", None)
         if tl is None or tl.current is None:
             return ""
-        rows = tl._row_of
-        return tl.name_of(int(rows[tl.current])) if tl.current < len(rows) and rows[tl.current] >= 0 else ""
+        row = tl.row_of_id(tl.current)
+        return "" if row is None else tl.name_of(row)
 
     def bar_y(self):
         """The bar numbers' middle: the ruler's bottom half, by their ticks (the tempo changes go above them)."""

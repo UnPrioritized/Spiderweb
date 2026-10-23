@@ -15,7 +15,7 @@ import numpy as np
 
 from files import midi_index, speed
 from files.midi_index import C_SIZE, C_STOP, C_TICK, C_RUN, QS
-from roll.roll_draw import note_tables
+from roll.roll_draw import GHOST_BASE, TRACK_FADE, note_tables
 from roll.roll_shared import COLOURS_16
 
 REST_MS = 150  # the view resting this long = the exact picture is made
@@ -23,6 +23,7 @@ POLL_MS = 30  # how often a running job is looked at
 SPANS = 1 << 15  # spans painted at a time (cover's buffer)
 SHADE = 25  # the overview's shade (no velocity there): a note of velocity 100's
 EXACT_FROM = 2  # grid buckets per pixel or fewer = the exact picture is worth making
+PICKED_BYTES = 64 << 20  # tracks picked in the track list: read exactly when they hold this little in the view
 
 
 class LoadedNotes:
@@ -43,17 +44,27 @@ class LoadedNotes:
         ax = self.sx / lm.ppq
         bx = self.kb_w - self.view_t * self.sx - kb  # (pixel c of the table = screen x kb + c)
         pal = getattr(self.app, "picture_pal", None)
-        key = (id(lm), W, kb, top, h, round(ax, 12), round(bx, 6), p_lo, p_hi, tuple(pal or ()))
-        return lm, key, (ax, bx, W, p_lo, p_hi, kb, top)
+        order, faint = shown_tracks(self.app, lm)
+        key = (id(lm), W, kb, top, h, round(ax, 12), round(bx, 6), p_lo, p_hi, tuple(pal or ()), order,
+               frozenset(faint), TRACK_FADE[0])
+        return lm, key, (ax, bx, W, p_lo, p_hi, kb, top, order, faint)
+
+    def loaded_mark(self):
+        """What the loaded notes' part of the picture depends on besides the view (roll_draw.redraw's key)."""
+        lm = self.app.loaded
+        if lm is None:
+            return None
+        order, faint = shown_tracks(self.app, lm)
+        return id(lm), getattr(self, "loaded_version", 0), order, faint, TRACK_FADE[0]
 
     def paint_loaded(self, img, region):
         """The loaded notes into img, the picture of region = (x0, y0, x1, y1) of the screen (paint_region)."""
         got = self.loaded_view(region)
         if got is None:
             return
-        lm, key, (ax, bx, W, p_lo, p_hi, kb, top) = got
+        lm, key, (ax, bx, W, p_lo, p_hi, kb, top, order, faint) = got
         nk = p_hi - p_lo + 1
-        if nk < 1:
+        if nk < 1 or order == ():
             return
         exact = getattr(self, "_loaded_exact", None)
         if exact is not None and exact[0] == key:
@@ -61,10 +72,14 @@ class LoadedNotes:
         else:
             over = getattr(self, "_loaded_over", None)
             if over is None or over[0] != key:
-                over = self._loaded_over = (key, *overview_tab(lm, ax, bx, W, p_lo, nk))
+                made = (overview_tab(lm, ax, bx, W, p_lo, nk) if order is None else
+                        pictures_tab(lm, order, faint, ax, bx, W, p_lo, nk))
+                over = self._loaded_over = (key, *made)
             tab, marks = over[1], over[2]
-            if 1 / ax < lm.G * EXACT_FROM:  # (zoomed in: the exact picture, once the view rests)
-                self.want_exact(lm, key, (ax, bx, W, p_lo, nk))
+            # (zoomed in: the exact picture, once the view rests; with tracks picked in the track list also zoomed
+            # out unless they hold a lot there: their own small pictures are coarse)
+            if 1 / ax < lm.G * EXACT_FROM or order is not None and view_bytes(lm, order, ax, bx, W) <= PICKED_BYTES:
+                self.want_exact(lm, key, (ax, bx, W, p_lo, nk, order, faint))
         x0, y0, x1, y1 = region
         keys = np.arange(p_lo, p_hi + 1)
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
@@ -125,10 +140,78 @@ class LoadedNotes:
         self.loaded_version = getattr(self, "loaded_version", 0) + 1
 
 
-def colours(group_shade=None):
-    """[channel, velocity // 4] -> colour number (roll_draw's NOTE_COLORS: channel colour group x 32 + shade)."""
+def colours(faint=False):
+    """[channel, velocity // 4] -> colour number (roll_draw's NOTE_COLORS: channel colour group x 32 + shade;
+    faint: a track shown behind the highlighted one, roll_draw.ghost_code's shades)."""
     groups = COLOURS_16[np.arange(16)]
+    if faint:
+        return (GHOST_BASE + groups[:, None]) * 32 + np.minimum(30, np.arange(32))[None, :]
     return groups[:, None] * 32 + np.arange(32)[None, :]
+
+
+def shown_tracks(app, lm):
+    """(order, faint) of the loaded tracks the piano roll shows: order None = every track (nothing highlighted in
+    the track list), else the track numbers drawn, the highlighted one first (on top), then the ones picked behind
+    it (faint: drawn faint), () = none of the loaded tracks."""
+    tl = getattr(app, "track_list", None)
+    if tl is None or tl.current is None:
+        return None, frozenset()
+    shown = tl.shown_slots()
+    faint = sorted((-s - 1 for s in shown if s < 0 and s != tl.current), reverse=True)
+    order = ([-tl.current - 1] if tl.current < 0 else []) + faint
+    order = tuple(n for n in order if n < len(lm.tracks))
+    return order, frozenset(n for n in faint if n < len(lm.tracks))
+
+
+def view_bytes(lm, order, ax, bx, W):
+    """About how many bytes these tracks hold in the view (checkpoint to checkpoint)."""
+    t0 = int(np.floor((-0.5 - bx) / ax))
+    t1 = int(np.ceil((W + 0.5 - bx) / ax))
+    n = 0
+    for k in order:
+        t = lm.tracks[k]
+        if not t.notes or not len(t.cp_off) or t.end <= t0 or t.first > t1:
+            continue
+        j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
+        j2 = int(np.searchsorted(t.cp_tick, t1, "right"))
+        n += (int(t.cp_off[j2]) if j2 < len(t.cp_off) else t.limit) - int(t.cp_off[j])
+    return n
+
+
+def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk):
+    """(tab, marks) from the tracks' own small pictures (the loading pass's: each track's keys x up to PIC_COLS
+    columns), order = top first, a pixel taken by the first that has a note there."""
+    tab = np.full((nk, W), -1, np.int64)
+    tpp = 1 / ax
+    c = np.arange(W)
+    ta = (c - 0.5 - bx) * tpp
+    for n in order:
+        t = lm.tracks[n]
+        if not t.notes or not t.pic_cols:
+            continue
+        kk0, kk1 = max(t.pic_klo, k_lo), min(t.pic_klo + t.pic.shape[0] - 1, k_lo + nk - 1)
+        if kk1 < kk0:
+            continue
+        bits = np.unpackbits(t.pic, axis=1, count=t.pic_cols).astype(bool)[kk0 - t.pic_klo:kk1 - t.pic_klo + 1]
+        step = lm.G * t.pic_pf  # (ticks a picture column)
+        c0 = np.floor((ta - t.pic_glo * lm.G) / step).astype(np.int64)
+        c1 = np.maximum(np.ceil((ta + tpp - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
+        on = (c1 > 0) & (c0 < t.pic_cols)
+        if not on.any():
+            continue
+        idx = np.flatnonzero(on)
+        a = np.clip(c0[idx], 0, t.pic_cols - 1)
+        if tpp >= step:  # (several columns a pixel: any of them)
+            got = np.logical_or.reduceat(bits[:, :int(np.clip(c1[idx[-1]], 1, t.pic_cols))], a, axis=1)
+        else:
+            got = bits[:, a]
+        code = COLOURS_16[t.channel or 0] + (GHOST_BASE if n in faint else 0)
+        code = code * 32 + (min(30, SHADE) if n in faint else SHADE)
+        part = tab[kk0 - k_lo:kk1 - k_lo + 1]
+        sub = part[:, idx]
+        sub[(sub < 0) & got] = code
+        part[:, idx] = sub
+    return tab, np.zeros((nk, W), np.uint8)
 
 
 def overview_tab(lm, ax, bx, W, k_lo, nk):
@@ -201,7 +284,9 @@ class ExactJob:
     def run(self):
         began = time.perf_counter()
         try:
-            self.tab, self.marks = exact_tab(self.lm, *self.geo, stop=lambda: self.stop)
+            ax, bx, W, k_lo, nk, order, faint = self.geo
+            self.tab, self.marks = exact_tab(self.lm, ax, bx, W, k_lo, nk, stop=lambda: self.stop, tracks=order,
+                                             faint=faint)
         except Exception:  # (a file that changed / went: the overview stays; told when exporting)
             from files.errors import write_log
             import sys
@@ -225,7 +310,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     cnt_q, first_q, vel_q = np.zeros(QS, np.int64), np.zeros(QS, np.int64), np.zeros(QS, np.int64)
     sq, sa, sb, sv = (np.zeros(SPANS, np.int64) for _ in range(4))
     st = np.zeros(C_SIZE, np.int64)
-    normal = colours()
+    normal, behind = colours(), colours(True)
     order = tracks if tracks is not None else range(len(lm.tracks) - 1, -1, -1)
     f = None if lm.mode == "memory" else open(lm.path, "rb")
     buf = None
@@ -265,7 +350,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
                 b = buf[:size]
             st[:] = 0
             st[C_TICK], st[C_RUN] = t.cp_tick[j], t.cp_run[j]
-            colour = normal
+            colour = behind if n in faint else normal
             p = cover(b, 0, len(b), st, cnt_q, first_q, vel_q, t1, -1, ax, bx, W, k_lo, colour, tab, nx, filled,
                       marks, sq, sa, sb, sv)
             close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)

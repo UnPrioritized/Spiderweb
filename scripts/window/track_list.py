@@ -25,7 +25,7 @@ from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text
 from notes.tempo_file import heard_tempo
 from roll.roll_draw import TRACK_FADE
-from roll.roll_shared import (MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow, grab_while_panning,
+from roll.roll_shared import (COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow, grab_while_panning,
                               slot_colours)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
@@ -71,6 +71,8 @@ class TrackList(tk.Canvas):
         self.bars = ()     # its scrollbars (zoombar.add_zoom_bars)
         self._made = None  # (rendered, pad, use10) the tracks below were worked out for
         self._slots = np.zeros(0, np.int64)  # the tracks: their slots, in order
+        self._all = self._slots  # every row's track: a loaded MIDI's (-1 - its number) first, then the slots
+        self.lead = 0  # rows of a loaded MIDI's tracks (Load MIDI) before Spiderweb's own
         self._row_of = np.zeros(0, np.int64)  # slot -> row (-1: none)
         self._ranges = None  # (each slot's lowest keys, highest keys): key_ranges, worked out when drawn
         self._ids = []  # id() of the shapes when the tracks were worked out (their notes' owner numbers)
@@ -104,9 +106,9 @@ class TrackList(tk.Canvas):
     def tracks(self):
         """The slots written as tracks, in order (worked out again only when the notes change)."""
         app = self.app
-        n, pad, use10 = app.rendered, app.pad_tracks(), app.picture_use10
+        n, pad, use10, lm = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded
         made = self._made
-        if made is None or made[0] is not n or made[1:] != (pad, use10):
+        if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm)):
             slots = track_slots(n, pad).astype(np.int64)
             size = int(slots.max()) + 1 if len(slots) else 0
             row_of = np.full(size, -1, np.int64)
@@ -118,6 +120,8 @@ class TrackList(tk.Canvas):
                 old, ids = made[0], self._ids
 
                 def keep(s):
+                    if s < 0:  # (a loaded MIDI's track: never handed out again)
+                        return s
                     had = {ids[i] for i in np.unique(old[old[:, 4] == s, 5]).tolist() if i < len(ids)}
                     if not any(id(sh) in had for sh in shapes):  # (an empty track, or shapes made anew by undo:
                         return s                                   # kept on its number, like the highlight)
@@ -126,12 +130,28 @@ class TrackList(tk.Canvas):
                 self.behind = {s for s in map(keep, self.behind) if s is not None}
             self._ids = [id(sh) for sh in shapes]
             self._slots, self._row_of, self._ranges = slots, row_of, None
-            self._made = (n, pad, use10)
-            if self.current is not None and (self.current >= size or row_of[self.current] < 0):
+            # a loaded MIDI's tracks first (Load MIDI: their numbers -1, -2, ...), Spiderweb's own after them (the
+            # export adds them as new tracks after the file's)
+            self.lead = len(lm.tracks) if lm is not None else 0
+            self._all = np.concatenate([-1 - np.arange(self.lead, dtype=np.int64), slots])
+            self._made = (n, pad, use10, id(lm))
+
+            def there(s):
+                return -s - 1 < self.lead if s < 0 else s < size and row_of[s] >= 0
+            if self.current is not None and not there(self.current):
                 self.current = None  # (its track is gone)
-            self.behind = {s for s in self.behind if s < size and row_of[s] >= 0}
-            self.muted = {s for s in self.muted if s < size and row_of[s] >= 0}
-        return self._slots
+            self.behind = {s for s in self.behind if there(s)}
+            self.muted = {s for s in self.muted if there(s)}
+        return self._all
+
+    def row_of_id(self, s):
+        """The row of track s (a slot, or a loaded MIDI's track as -1 - its number); None = not listed."""
+        self.tracks()
+        if s is None:
+            return None
+        if s < 0:
+            return -s - 1 if -s - 1 < self.lead else None
+        return self.lead + int(self._row_of[s]) if s < len(self._row_of) and self._row_of[s] >= 0 else None
 
     def key_ranges(self):
         """(lowest, highest) key of each slot's notes (-1 / 1 << 30 for none), only when the list is drawn (hunt
@@ -277,7 +297,8 @@ class TrackList(tk.Canvas):
         if self.current is None or not len(drawn):
             return
         was = self.current
-        got = moved_to(self.app.shapes, drawn[:, 5], slots, self.owners, self.current)
+        got = (moved_to(self.app.shapes, drawn[:, 5], slots, self.owners, self.current) if self.current >= 0
+               else None)  # (a loaded MIDI's track keeps its place)
         if got is not None:
             self.current = got
         if sels:
@@ -330,16 +351,28 @@ class TrackList(tk.Canvas):
         self.picker = BehindWindow(self)
 
     def name_of(self, row):
+        """A loaded MIDI's track: the name it has in the file, else "Track n" (like Spiderweb's own)."""
+        if row < self.lead:
+            name = self.app.loaded.tracks[row].name
+            if name:
+                return name
         return tr("tracks.name", n=row + 1)
 
     def channel_of(self, slot):
+        if slot < 0:  # (a loaded MIDI's track: its main channel; none without notes)
+            ch = self.app.loaded.tracks[-slot - 1].channel
+            return "" if ch is None else tr("tracks.channel", ch=ch + 1)
         return tr("tracks.channel", ch=slot_track_channel(slot, self.app.picture_use10)[1] + 1)
 
     def colour_of(self, slot):
         """The track's notes' colour: its channel's, as on the piano roll (the light look's darker edge colour shows
         better on thin lines; the dark look's fill colour)."""
-        table = slot_colours(self.app.picture_use10)
-        fill, edge = SLOT_COLORS[table[slot % len(table)]]
+        if slot < 0:
+            ch = self.app.loaded.tracks[-slot - 1].channel
+            fill, edge = SLOT_COLORS[COLOURS_16[ch or 0]]
+        else:
+            table = slot_colours(self.app.picture_use10)
+            fill, edge = SLOT_COLORS[table[slot % len(table)]]
         return fill if look.DARK else edge
 
     # ------------------------------------------------------------ view
@@ -358,6 +391,9 @@ class TrackList(tk.Canvas):
         """The last note's end in beats (at least 4 bars)."""
         n = self.app.rendered
         end = int(n[:, 1].max()) / self.app.ppq if len(n) else 0.0
+        lm = self.app.loaded
+        if lm is not None:
+            end = max(end, lm.end / lm.ppq)
         return max(end, 16.0)
 
     def fit(self):
@@ -561,6 +597,15 @@ class TrackList(tk.Canvas):
 
     def row_tip_text(self, row):
         slot = int(self.tracks()[row])
+        if slot < 0:  # (a loaded MIDI's track)
+            t = self.app.loaded.tracks[-slot - 1]
+            lines = ["  ·  ".join(x for x in (self.name_of(row), self.channel_of(slot)) if x),
+                     trn("tracks.notes", t.notes, n=f"{t.notes:,}")]
+            used = int((t.chn > 0).sum())
+            if used > 1:
+                lines.append(trn("tracks.channels", used, n=used))
+            lines.append(tr("tracks.from_file"))
+            return "\n".join(lines)
         n = self.app.rendered
         mine = n[n[:, 4] == slot] if len(n) else n
         lines = [f"{self.name_of(row)}  ·  {self.channel_of(slot)}",
@@ -639,7 +684,7 @@ class TrackList(tk.Canvas):
         if aw < 1 or ah < 1:
             return
         ox = self.left_px()
-        key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._slots), self.current,
+        key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._all), self.current,
                frozenset(self.muted), json.dumps(sigs_of(self.app.tempo)), aw, ah, self.app.ppq)
         sh = self._sheet
         if sh is None or sh["key"] != key or not (sh["x"] <= ox and ox + aw <= sh["x"] + sh["w"]
@@ -657,13 +702,14 @@ class TrackList(tk.Canvas):
 
     def paint_sheet(self, cx, cy, cw, ch):
         """paint's picture: cw x ch pixels from pixel cx of the song (sideways) and cy of the rows (down)."""
-        rh, slots = self.row_h, self._slots
+        rh, slots = self.row_h, self._all
         rows = (np.arange(ch) + cy) // rh  # (each pixel row's track row)
         base = np.array([hex_rgb(look.TRACK_ROW), hex_rgb(look.TRACK_ROW_ALT), hex_rgb(look.TRACK_PICKED),
                          hex_rgb(look.TRACK_EMPTY)], np.uint8)
         kind = np.where(rows >= len(slots), 3, rows % 2)
-        if self.current is not None and self.current < len(self._row_of) and self._row_of[self.current] >= 0:
-            kind[rows == self._row_of[self.current]] = 2
+        at = self.row_of_id(self.current)
+        if at is not None:
+            kind[rows == at] = 2
         img = np.empty((ch, cw, 3), np.uint8)
         img[:] = base[kind][:, None, :]
         edge = ((np.arange(ch) + cy) % rh == rh - 1) & (rows < len(slots))  # (a faint line under each row)
@@ -674,6 +720,7 @@ class TrackList(tk.Canvas):
         xs = xs[(xs >= 0) & (xs < cw)]
         img[:, xs] = hex_rgb(look.TRACK_BAR)
         img[rows >= len(slots)] = base[3]
+        self.paint_loaded_rows(img, rows, cx, cy)
         self.paint_notes(img, rows, cx, cy)
         return img
 
@@ -687,7 +734,7 @@ class TrackList(tk.Canvas):
             return
         first, last = cy // self.row_h, (cy + ah) // self.row_h
         lo_t, hi_t = cx / self.sx * ppq, (cx + aw) / self.sx * ppq
-        row = self._row_of[n[:, 4]]
+        row = self._row_of[n[:, 4]] + self.lead
         keep = (row >= first) & (row <= last) & (n[:, 1] > lo_t) & (n[:, 0] < hi_t)
         if not keep.any():
             return
@@ -719,10 +766,11 @@ class TrackList(tk.Canvas):
         if pad:  # covered if a line starts at most its thickness - 1 rows up, within the same track row
             at = np.arange(hh) - pad + cy  # (each picture row's pixel in the rows)
             track_row = at // self.row_h
-            span = np.maximum(1, highs - lows + 1)[self._slots]  # (each track's)
+            span = np.concatenate([np.ones(self.lead, np.int64),
+                                   np.maximum(1, highs - lows + 1)[self._slots]])  # (each track row's)
             row_thick = np.maximum(1, inner // span)
             tk = np.ones(hh, np.int64)
-            inside = (track_row >= 0) & (track_row < len(self._slots))
+            inside = (track_row >= 0) & (track_row < len(self._all))
             tk[inside] = row_thick[track_row[inside]]
             start = np.maximum(np.arange(hh) - tk + 1, track_row * self.row_h - cy + pad)  # (first row that counts)
             ups = np.cumsum(hit, axis=0, dtype=np.int32)
@@ -730,11 +778,51 @@ class TrackList(tk.Canvas):
             hit = (ups - below) > 0
         hit = hit[pad:]
         colours = np.array([hex_rgb(look.TRACK_MUTED if int(s) in self.muted else self.colour_of(int(s)))
-                            for s in self._slots], np.uint8)  # (muted: grey)
-        ok = rows < len(self._slots)
+                            for s in self._all], np.uint8)  # (muted: grey)
+        ok = rows < len(self._all)
         per_row = np.zeros((ah, 3), np.uint8)
         per_row[ok] = colours[rows[ok]]
         img[hit] = np.broadcast_to(per_row[:, None, :], img.shape)[hit]
+
+    def paint_loaded_rows(self, img, rows, cx, cy):
+        """A loaded MIDI's tracks' rows from the loading pass's small pictures (each track's keys x up to
+        loaded.PIC_COLS columns: reading 100 M - 2 B notes per redraw is out of the question), laid out like
+        paint_notes' (the track's own lowest .. highest key over the row's height)."""
+        lm = self.app.loaded
+        if lm is None or not self.lead:
+            return
+        ah, aw = img.shape[:2]
+        first, last = max(0, cy // self.row_h), min(self.lead - 1, (cy + ah) // self.row_h)
+        pad = round(PAD * self.scale)
+        inner = max(1, self.row_h - 2 * pad - 1)
+        tpp = lm.ppq / self.sx  # (ticks a pixel)
+        ta = (np.arange(aw) + cx) * tpp
+        for r in range(first, last + 1):
+            t = lm.tracks[r]
+            if not t.notes or not t.pic_cols:
+                continue
+            step = lm.G * t.pic_pf
+            c0 = np.floor((ta - t.pic_glo * lm.G) / step).astype(np.int64)
+            c1 = np.maximum(np.ceil((ta + tpp - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
+            on = np.flatnonzero((c1 > 0) & (c0 < t.pic_cols))
+            if not len(on):
+                continue
+            bits = np.unpackbits(t.pic, axis=1, count=t.pic_cols).astype(bool)
+            a = np.clip(c0[on], 0, t.pic_cols - 1)
+            got = (np.logical_or.reduceat(bits[:, :int(np.clip(c1[on[-1]], 1, t.pic_cols))], a, axis=1)
+                   if tpp >= step else bits[:, a])  # (keys klo.. x the columns on)
+            span = t.khi - t.klo + 1
+            thick = max(1, inner // span)
+            used = min(inner, span * thick)
+            y0 = r * self.row_h - cy + pad + (inner - used) // 2  # (the row's top key's first pixel row)
+            ys = np.arange(max(0, y0), min(ah, y0 + used))
+            if not len(ys):
+                continue
+            key_row = (ys - y0) * span // used  # (0 = the highest key)
+            mask = np.zeros((len(ys), aw), bool)
+            mask[:, on] = got[span - 1 - key_row]
+            colour = hex_rgb(look.TRACK_MUTED if -1 - r in self.muted else self.colour_of(-1 - r))
+            img[ys[0]:ys[-1] + 1][mask] = colour
 
     def draw_ruler(self, w, lines):
         s, top = self.scale, self.ruler_h
@@ -858,7 +946,7 @@ class TrackList(tk.Canvas):
         self.create_rectangle(0, y0, x1, h, fill=look.TRACK_NAME_BG, outline="")
         top = self.area()[1]
         first = self.top // self.row_h
-        slots = self._slots
+        slots = self._all
         for row in range(first, len(slots)):
             ya = top + row * self.row_h - self.top
             if ya > h:
