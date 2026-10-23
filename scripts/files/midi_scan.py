@@ -14,7 +14,8 @@ import numpy as np
 ST_TICK, ST_RUN, ST_EOT, ST_FLAGS, ST_AFTER, ST_META = range(6)
 ST_SIZE = 6
 # flags
-BAD = 1  # unreadable from here on (running status before any status, a system message, a gap past 8 bytes)
+BAD = 1  # unreadable from here on (running status before any status, a system message, a gap past 8 bytes,
+#   ticks past MOST_TICK)
 CUT = 2  # the track ends in the middle of an event
 NO_EOT = 4  # no End of Track (set by the reader once the track is done)
 LONG_GAP = 8  # a gap (or length) written in more than 4 bytes
@@ -22,14 +23,16 @@ RUN_AFTER_META = 16  # running status right after a meta / sysex event (programs
 AFTER_EOT = 32  # bytes after End of Track
 ODD_TEMPO = 64  # a tempo event that isn't 3 bytes long
 HIGH_DATA = 128  # a data byte over 127 (keys 128-255 of 256 keys MIDIs)
+MOST_TICK = 1 << 48  # a track reaching a later tick is damaged (BAD)
 # cnt: counts of each kind
 C_EVENTS, C_ON, C_OFF, C_ON0, C_POLY, C_CC, C_PROG, C_PRESS, C_BEND, C_TEMPO, C_META, C_SYSEX, C_CHANNELS = range(13)
 C_SIZE = 13
 
 
-def walk(b, p, end, final, st, cnt):
-    """Reads the whole events in b[p:end] (one track's bytes; final = the track ends at end). Returns where it
-    stopped: at end, or at the start of an event not wholly in b yet (call again with more)."""
+def walk(b, p, end, final, rest, st, cnt):
+    """Reads the whole events in b[p:end] (one track's bytes; final = the track ends at end; rest = how many more
+    bytes the track has after end). Returns where it stopped: at end, or at the start of an event not wholly in b
+    yet (call again with more). An event that can't end inside the track = CUT at once (never waited for)."""
     tick = st[ST_TICK]
     run = st[ST_RUN]
     flags = st[ST_FLAGS]
@@ -47,6 +50,7 @@ def walk(b, p, end, final, st, cnt):
         d = 0
         n = 0
         whole = True
+        beyond = False  # (an event running past the track's end)
         while True:
             if q >= end:
                 whole = False
@@ -85,6 +89,7 @@ def walk(b, p, end, final, st, cnt):
                 need = 1 if hi == 0xC or hi == 0xD else 2
                 if q + need > end:
                     whole = False
+                    beyond = q + need > end + rest
                 else:  # (a data byte over 127 = 256 keys black MIDIs' keys: read as data, like they do)
                     if b[q] >= 128 or (need == 2 and b[q + 1] >= 128):
                         flags |= HIGH_DATA
@@ -140,6 +145,7 @@ def walk(b, p, end, final, st, cnt):
                         break
                     if whole and q + ln > end:
                         whole = False
+                        beyond = q + ln > end + rest
                     if whole:
                         if m > 4:
                             flags |= LONG_GAP
@@ -160,11 +166,15 @@ def walk(b, p, end, final, st, cnt):
                 p = end
                 break
         if not whole:
-            if final:
+            if final or beyond:
                 flags |= CUT
                 p = end
             break
         tick += d
+        if tick > MOST_TICK:  # (a damaged file's gaps adding up past any song)
+            flags |= BAD
+            p = end
+            break
         cnt[C_EVENTS] += 1
         p = q
     st[ST_TICK] = tick

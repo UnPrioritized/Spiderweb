@@ -11,7 +11,7 @@ import shutil
 import numpy as np
 
 from files import midi_scan, safefile, speed
-from files.midi_read import BIGGEST_EVENT, PIECE, Cancelled, MidiError
+from files.midi_read import BIGGEST_EVENT, PIECE, Cancelled, FileChanged, MidiError
 
 ROOM_SPARE = 64 << 20  # free disk space wanted on top of the file's size
 HELD_TRACK = 64 << 20  # a track written event by event up to this size is made in memory (else counted first)
@@ -33,8 +33,8 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None):
     bytes in all); cancel() True = Cancelled (dst untouched)."""
     if not mf.scanned:
         raise ValueError("scan() the file first")
-    if same_file(mf.path, dst):
-        raise MidiError("midi.same_file")
+    if same_file(mf.path, dst) or same_file(mf.path, dst + ".tmp"):  # (safefile's temp file: writing it would
+        raise MidiError("midi.same_file")  # empty the source, then delete it)
     folder = os.path.dirname(os.path.abspath(dst))
     try:
         free = shutil.disk_usage(folder).free
@@ -66,13 +66,19 @@ class _Work:
 
     def pieces(self):
         mf = self.mf
+        self.watch = mf.watch()
+        rest = hashlib.blake2b(digest_size=16)  # (everything but the tracks' events, as read: = mf.raw_hash)
         with open(mf.path, "rb") as f:
             for kind, *what in mf.pieces:
                 if kind == "raw":
                     start, size = what
-                    yield from self.raw(f, start, size)
+                    for piece in self.raw(f, start, size):
+                        rest.update(piece)
+                        yield piece
                     continue
                 t = what[0]
+                head = self.read_exact(f, t.head, 8)
+                rest.update(head)
                 if self.walk and t.whole:
                     h = hashlib.blake2b(digest_size=16)
                     if t.size <= HELD_TRACK:  # (written into memory once: its length known)
@@ -86,7 +92,6 @@ class _Work:
                         self.written += 8
                         yield from self.rewritten(f, t, h)
                 else:  # (a damaged track is only ever copied, its length as the file has it)
-                    head = self.read_exact(f, t.head, 8)
                     yield head
                     self.written += 8
                     h = hashlib.blake2b(digest_size=16)
@@ -95,14 +100,16 @@ class _Work:
                         yield piece
                 if h.hexdigest() != t.hash:
                     raise MidiError("midi.check_failed", track=t.number + 1)
+        if rest.hexdigest() != mf.raw_hash:  # (the header etc. changed since it was read)
+            raise FileChanged()
         mf.same()
 
     def read_exact(self, f, start, size):
-        self.mf.same()
+        self.watch.read(size)
         f.seek(start)
         got = f.read(size)
         if len(got) != size:
-            raise MidiError("midi.changed")
+            raise FileChanged()
         return got
 
     def raw(self, f, start, size):
@@ -128,9 +135,10 @@ class _Work:
             yield p
 
     def out_for(self, n):
-        """The write buffer for n bytes read (kept: made anew only when bigger is needed). An event grows by 9 at
-        most (a 1-byte gap -> up to 10 bytes, + a status byte), and the smallest event is 2 bytes: 6x."""
-        need = 6 * n + 64
+        """The write buffer for n bytes read (kept: made anew only when bigger is needed). Any one event read fits:
+        it grows by 10 at most (a 1-byte gap -> up to 10 bytes, + a status byte); a full buffer = written out and
+        the rewrite goes on where it stopped."""
+        need = n + 64
         if self.out is None or len(self.out) < need:
             self.out = bytearray(need)
         return self.out
@@ -142,8 +150,9 @@ class _Work:
         out = self.out_for(min(len(buf), t.size))
         st = np.zeros(midi_scan.RW_SIZE, np.int64)
         table = np.zeros(1, np.int64)
-        reader = self.mf.pieces_of(f, t.start, t.size, buf)
+        reader = self.mf.pieces_of(f, t.start, t.size, buf, self.watch)
         filled, final = next(reader)
+        taken = 0
         while True:
             if loops:
                 view, oview = np.frombuffer(buf, np.uint8, filled), np.frombuffer(out, np.uint8)
@@ -155,13 +164,15 @@ class _Work:
                 yield bytes(out[:o])
             if report:
                 self.step(used)
-            if used == 0 and not final:  # (an event bigger than the buffer)
-                if len(buf) >= BIGGEST_EVENT:
+            taken += used
+            if final and used >= filled:
+                return
+            if used == 0 and o == 0:  # (an event bigger than the buffer: it ends inside the track, a whole one)
+                grow = min(len(buf), t.size - taken - len(buf))
+                if final or len(buf) >= BIGGEST_EVENT or grow <= 0:
                     raise MidiError("midi.check_failed", track=t.number + 1)
-                buf.extend(bytes(len(buf)))
+                buf.extend(bytes(grow))
                 out = self.out_for(len(buf))
-            elif final and used < filled:
-                raise MidiError("midi.check_failed", track=t.number + 1)
             try:
                 filled, final = reader.send(used)
             except StopIteration:

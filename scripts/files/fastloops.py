@@ -1642,5 +1642,5 @@ def warm():
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
     smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
     u8 = np.zeros(1, np.uint8)
-    midi_walk(u8, 0, 0, True, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
+    midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
     midi_rewrite(u8, 0, 0, True, i1, False, u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64))

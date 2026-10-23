@@ -10,7 +10,6 @@ import hashlib
 import os
 import struct
 import threading
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -20,6 +19,8 @@ from files.midi_scan import (AFTER_EOT, BAD, C_SIZE, CUT, NO_EOT, ST_AFTER, ST_E
 PIECE = 16 << 20  # bytes read at a time
 BIGGEST_EVENT = 1 << 30  # one meta / sysex event bigger than this = the track can't be read
 SCAN_WORKERS = 8  # tracks read side by side
+JOB_BYTES = 4 << 20  # small tracks read together in jobs of about this many bytes
+JOB_TRACK = 4096  # what one track costs on top of its bytes (when grouping)
 # file-level marks (MidiFile.marks)
 M_RMID = "rmid"  # a RIFF MIDI (.rmi)
 M_SMPTE = "smpte"  # time in frames, not ticks per beat
@@ -75,6 +76,7 @@ class MidiFile:
         self.tracks = []
         self.pieces = []  # [("raw", start, size) / ("track", Track)] in file order
         self.scanned = False
+        self.raw_hash = None  # (scan(): one hash of the header, track heads and other bytes)
         try:
             stat = os.stat(self.path)
         except OSError as e:
@@ -118,6 +120,8 @@ class MidiFile:
         while pos + 8 <= top:
             f.seek(pos)
             h = f.read(8)
+            if len(h) < 8:  # (the file got shorter while it was read)
+                raise FileChanged()
             kind, size = h[:4], struct.unpack(">I", h[4:8])[0]
             if not all(65 <= c <= 90 or 97 <= c <= 122 or 48 <= c <= 57 or c == 32 for c in kind):
                 self.marks.add(M_JUNK)  # (no chunk here: the rest is kept as it is)
@@ -150,6 +154,8 @@ class MidiFile:
         while pos + 8 <= self.size:
             f.seek(pos)
             h = f.read(8)
+            if len(h) < 8:
+                raise FileChanged()
             size = struct.unpack("<I", h[4:8])[0]
             if h[:4] == b"data":
                 return pos + 8, min(self.size, pos + 8 + size)
@@ -167,13 +173,19 @@ class MidiFile:
         if stat.st_size != self.size or stat.st_mtime_ns != self.mtime:
             raise FileChanged()
 
-    def pieces_of(self, f, start, size, buf):
+    def watch(self):
+        """A checker for one job of reading: the file's size + time asked at its first read and then once every
+        PIECE bytes read (not at every small track: tens of thousands of them made reading slow)."""
+        return _Watch(self)
+
+    def pieces_of(self, f, start, size, buf, watch=None):
         """(bytes read, final) one PIECE (or buf's size) at a time from start, size bytes in all, into buf's
         front after what's left there (yields how much is filled; the caller says how much it used via send)."""
         done, keep = 0, 0
+        watch = watch or self.watch()
         while True:
-            self.same()
             want = min(len(buf) - keep, size - done)
+            watch.read(want)
             f.seek(start + done)
             got = f.readinto(memoryview(buf)[keep:keep + want]) if want else 0
             if got != want:
@@ -199,57 +211,56 @@ class MidiFile:
             if stop.is_set() or (cancel and cancel()):
                 stop.set()
                 raise Cancelled()
-            with lock:
-                done[0] += n
-                now = done[0]
-            if progress:
-                progress(now, total)
+            if n:
+                with lock:
+                    done[0] += n
+                    now = done[0]
+                if progress:
+                    progress(now, total)
 
-        def one(t):
+        def one(job):
+            watch = self.watch()
             with open(self.path, "rb") as f:
-                self._scan_track(f, t, walk, bool(loops), step)
+                for t in job:
+                    step(0)  # (Cancel / another job's error: no track started after it)
+                    self._scan_track(f, t, walk, bool(loops), step, watch)
 
-        order = sorted(self.tracks, key=lambda t: -t.size)
-        n = 1 if not loops else min(workers or SCAN_WORKERS, os.cpu_count() or 1, len(order))
+        jobs = scan_jobs(self.tracks)
+        n = 1 if not loops else min(workers or SCAN_WORKERS, os.cpu_count() or 1, len(jobs))
         if n <= 1:
-            for t in order:
-                one(t)
+            for job in jobs:
+                one(job)
         else:
-            with ThreadPoolExecutor(n, thread_name_prefix="midi scan") as pool:
-                jobs = [pool.submit(one, t) for t in order]
-                try:
-                    for job in jobs:
-                        job.result()
-                except BaseException:
-                    stop.set()  # (the others stop at their next piece)
-                    raise
+            _side_by_side(jobs, one, n, stop)
+        self.raw_hash = self._hash_raw()
         self.same()
         self.scanned = True
         return self
 
-    def _scan_track(self, f, t, walk, compiled, step):
+    def _scan_track(self, f, t, walk, compiled, step, watch):
         st = np.zeros(ST_SIZE, np.int64)
         cnt = np.zeros(C_SIZE, np.int64)
         h = hashlib.blake2b(digest_size=16)
         buf = bytearray(max(1, min(PIECE, t.size)))
-        reader = self.pieces_of(f, t.start, t.size, buf)
+        reader = self.pieces_of(f, t.start, t.size, buf, watch)
         filled, final = next(reader) if t.size else (0, True)
         hashed, taken = 0, 0  # (bytes of buf already in the hash; bytes of the track read so far)
         while True:
             view = np.frombuffer(buf, np.uint8, filled) if compiled else memoryview(buf)[:filled]
             with memoryview(buf) as m:
                 h.update(m[hashed:filled])
-            used = walk(view, 0, filled, final, st, cnt)
+            used = walk(view, 0, filled, final, t.size - taken - filled, st, cnt)
             del view  # (buf may grow next)
-            if used == 0 and not final and not st[ST_FLAGS] & BAD:  # (an event bigger than the buffer)
-                if len(buf) >= BIGGEST_EVENT:
+            if used == 0 and not final and not st[ST_FLAGS] & BAD:  # (an event bigger than the buffer: it ends
+                grow = min(len(buf), t.size - taken - len(buf))  # inside the track, so it fits in what's left)
+                if len(buf) >= BIGGEST_EVENT or grow <= 0:
                     st[ST_FLAGS] |= BAD
                 else:
-                    buf.extend(bytes(len(buf)))
-            if st[ST_FLAGS] & BAD:  # (unreadable from here: the rest is only hashed)
+                    buf.extend(bytes(grow))
+            if st[ST_FLAGS] & (BAD | CUT) and not final:  # (unreadable from here: the rest is only hashed)
                 reader.close()
                 step(t.size - taken)
-                h = self._hash_track(f, t)
+                h = self._hash_track(f, t, buf)
                 break
             taken += used
             step(used)
@@ -268,25 +279,46 @@ class MidiFile:
         t.after = int(st[ST_AFTER])
         t.hash = h.hexdigest()
 
-    def _hash_track(self, f, t):
+    def _hash_track(self, f, t, buf):
+        """The whole track's hash, read again through buf (a damaged track: its reading stopped part way)."""
         h = hashlib.blake2b(digest_size=16)
         done = 0
-        while done < t.size:
-            self.same()
-            f.seek(t.start + done)
-            piece = f.read(min(PIECE, t.size - done))
-            if not piece:
-                raise FileChanged()
-            h.update(piece)
-            done += len(piece)
+        with memoryview(buf) as m:
+            while done < t.size:
+                self.same()
+                f.seek(t.start + done)
+                got = f.readinto(m[:min(len(buf), t.size - done)])
+                if not got:
+                    raise FileChanged()
+                h.update(m[:got])
+                done += got
         return h
+
+    def _hash_raw(self):
+        """One hash of every byte that isn't a track's events (header, track heads, other chunks, junk)."""
+        h = hashlib.blake2b(digest_size=16)
+        watch = self.watch()
+        with open(self.path, "rb") as f:
+            for kind, *what in self.pieces:
+                start, size = (what[0].head, 8) if kind == "track" else what
+                done = 0
+                while done < size:
+                    watch.read(min(PIECE, size - done))
+                    f.seek(start + done)
+                    piece = f.read(min(PIECE, size - done))
+                    if not piece:
+                        raise FileChanged()
+                    h.update(piece)
+                    done += len(piece)
+        return h.hexdigest()
 
     # ------------------------------------------------------------------ summary
 
     def fingerprint(self):
-        """What a project keeps to know the file again: path, size, time, each track's hash."""
+        """What a project keeps to know the file again: path, size, time, each track's hash + one hash of all the
+        rest (header etc.)."""
         return {"path": self.path, "size": self.size, "mtime": self.mtime,
-                "tracks": [t.hash for t in self.tracks]}
+                "tracks": [t.hash for t in self.tracks], "rest": self.raw_hash}
 
     def counts(self):
         """All tracks' counts added (midi_scan.C_*; channels = the channels used, as bits)."""
@@ -302,6 +334,64 @@ class MidiFile:
     def damaged(self):
         """Tracks that can't be read to their end (BAD / CUT)."""
         return [t for t in self.tracks if t.flags & (BAD | CUT)]
+
+
+class _Watch:
+    def __init__(self, mf):
+        self.mf, self.since = mf, PIECE
+
+    def read(self, n):
+        self.since += n
+        if self.since >= PIECE:
+            self.since = 0
+            self.mf.same()
+
+
+def scan_jobs(tracks):
+    """Tracks in jobs for side-by-side reading: each big one alone (biggest first), small ones together up to
+    JOB_BYTES a job (one open file and one size check per job, not per track)."""
+    jobs, small, size = [], [], 0
+    for t in sorted(tracks, key=lambda t: -t.size):
+        if t.size >= JOB_BYTES:
+            jobs.append([t])
+            continue
+        small.append(t)
+        size += t.size + JOB_TRACK
+        if size >= JOB_BYTES:
+            jobs.append(small)
+            small, size = [], 0
+    if small:
+        jobs.append(small)
+    return jobs
+
+
+def _side_by_side(jobs, one, n, stop):
+    """one(job) for every job on n DAEMON threads (closing Spiderweb never waits for them). The first error stops
+    the rest (each stops at its next piece) and is raised here once the running ones have stopped."""
+    lock, errors, left = threading.Lock(), [], list(reversed(jobs))
+
+    def work():
+        while True:
+            with lock:
+                if not left or stop.is_set():
+                    return
+                job = left.pop()
+            try:
+                one(job)
+            except BaseException as e:
+                stop.set()
+                with lock:
+                    errors.append(e)
+                return
+
+    threads = [threading.Thread(target=work, daemon=True, name="midi scan") for _ in range(n)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    if errors:
+        cancelled = [e for e in errors if not isinstance(e, Cancelled)]
+        raise (cancelled or errors)[0]
 
 
 def flag_names(flags):
