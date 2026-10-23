@@ -438,7 +438,8 @@ class RollDrawing:
         rows, cols = self.grid_parts(w, h)
         # the picture below shows exactly this: when nothing here changed (e.g. dragging a shape whose notes catch up
         # later), it's shown again as it is instead of being painted again
-        fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h)
+        fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
+                 id(app.loaded), getattr(self, "loaded_version", 0))
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
@@ -474,6 +475,7 @@ class RollDrawing:
             else:
                 rects = self.note_rects(w, h) if app.show_notes.get() else None
                 if rects is not None and (len(rects[0]) > w * h // 2000 or self._panning or scrolled
+                                          or app.loaded is not None
                                           or ((rects[0] == rects[2]) | (rects[1] == rects[3])).any()):
                     # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly).
                     # Panning / scrolling (scrollbar, wheel): always (the picture is moved along, ~12 ms a move;
@@ -1378,6 +1380,8 @@ class RollDrawing:
                     line[x * 3:x * 3 + 3] = px(c)
             patterns[color] = bytes(line)
         img = np.frombuffer(b"".join(patterns[c] for c in row_color), np.uint8).reshape(ih, iw, 3).copy()
+        if getattr(self.app, "loaded", None) is not None and self.app.show_notes.get():
+            self.paint_loaded(img, region)  # (a loaded MIDI's notes: under Spiderweb's own)
         self.paint_rects(img, rects, region, ring)
         return img
 

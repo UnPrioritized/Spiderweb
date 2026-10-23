@@ -7,6 +7,7 @@ Files (the scripts live in scripts/, one subfolder per group):
   window/            the main window and its side panel
     app.py           main window: toolbar, side panel, shapes
     menubar.py       the menu bar (File, Edit, Shape, Tools, View, Help)
+    load_midi.py     Load MIDI: the window (how to hold the notes, reading with each step, the summary)
     app_playback.py  playing the notes, right-drag listening, MIDI out + Built-in BASSMIDI's settings
     app_pictures.py  placed pictures (Image to notes): placing, editing, notes made again
     panel_custom.py  the panel's custom shape settings, opening the drawer
@@ -71,6 +72,7 @@ Files (the scripts live in scripts/, one subfolder per group):
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
+    roll_loaded.py   a loaded MIDI's notes on the piano roll (overview at once, exact in the background)
     roll_curve.py    editing curves (anchors + handles, symmetric halves)
     roll_custom.py   the selected custom shape's box (resize, turn, skew)
     roll_funnel.py   editing funnels (curve starts, bends, extra lines, highlighted lines / curves)
@@ -124,6 +126,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     subtract.py      gate subtract: every note ends a few ticks earlier (start kept), done after Sustain
     strips.py        separate strips: each strip of a pasted track guessed key by key, its own channels
     tempo.py         the project's tempo line: curves, catch-ups, exact Domino-safe tempo changes for the MIDI
+    loaded.py        a loaded MIDI file (Load MIDI): the loading pass's results, run on several cores
     tempo_file.py    the tempo line in a MIDI file: Keep timing moves notes exactly, bar lines fitted, warnings
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
@@ -145,6 +148,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     midi_read.py     reading any MIDI file safely (Load MIDI): layout, every track checked, fingerprint
     midi_scan.py     the byte loops reading / writing MIDI tracks (compiled by fastloops.py)
     midi_copy.py     writing a loaded MIDI file out again, unchanged bytes copied, checked while writing
+    midi_index.py    Load MIDI's loops: notes paired, the index to read a track anywhere, the overview, painting
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)

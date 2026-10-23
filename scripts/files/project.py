@@ -384,6 +384,8 @@ class ProjectFiles:
         self.roll.cancel_draft()
         self.roll.drop_lasso()  # (a waiting loop would cut the opened project, hunt 2026-10-23)
         self.shapes = shapes
+        self.loaded = None  # (another project: its loaded MIDI goes; attach_midi puts a new one in after this)
+        self.roll.forget_loaded()
         self.tempo = tempo
         # (only an autosave has them: the project file it belonged to, and whether it had unsaved changes)
         self._file_extra = (data.get("project_file"), data.get("unsaved"))
@@ -755,6 +757,29 @@ class ProjectFiles:
             self.mark_saved()
             self.sync_panel()
             self.tell_load_notes()
+
+    def attach_midi(self, lm):
+        """Load MIDI's end: a NEW project (user 2026-10-23: always one) with the file's PPQ (and 256 keys for a 256
+        keys MIDI), its notes drawn under the shapes. Not an undo step: like Open, the old project was asked about
+        first (may_replace)."""
+        data = self.project_data()
+        data.update(shapes=[], view=None, playhead=0.0, ppq=str(lm.ppq), bpm="120")
+        data.pop("tempo", None)
+        if lm.keys > 128:
+            data["keys"] = KEYS[1]
+        self.load_file(None, quiet=True, text=json.dumps(data))
+        self.loaded = lm
+        self.roll.forget_loaded()
+        self.project_file = None
+        self._saved_shapes = None
+        self._saved_mark = None
+        if hasattr(self, "track_list"):
+            self.track_list.forget()
+        self.sync_window_title()
+        self.sync_panel()
+        self.roll.fit_view()
+        self.roll.request_redraw()
+        self.schedule_autosave()
 
     def own_file(self, path):
         """The autosave (or its backup): never Save's file, Save asks for a name instead (user)."""

@@ -10,9 +10,10 @@ rewrite  writes a track again event by event, its ticks moved through a table: a
 import numpy as np
 
 # walk(): st = [tick, running status (0 = none), End of Track seen, flags, bytes after End of Track, last meta /
-# sysex (1 = the event before was one)]
-ST_TICK, ST_RUN, ST_EOT, ST_FLAGS, ST_AFTER, ST_META = range(6)
-ST_SIZE = 6
+# sysex (1 = the event before was one), where the last call's good events end (BAD / CUT: the bytes from there on
+# aren't events)]
+ST_TICK, ST_RUN, ST_EOT, ST_FLAGS, ST_AFTER, ST_META, ST_GOOD = range(7)
+ST_SIZE = 7
 # flags
 BAD = 1  # unreadable from here on (running status before any status, a system message, a gap past 8 bytes,
 #   ticks past MOST_TICK)
@@ -37,7 +38,9 @@ def walk(b, p, end, final, rest, st, cnt):
     run = st[ST_RUN]
     flags = st[ST_FLAGS]
     meta = st[ST_META]
+    good = p
     while True:
+        good = p
         if st[ST_EOT]:  # (whatever comes after End of Track is kept as it is, never read)
             if end > p:
                 st[ST_AFTER] += end - p
@@ -181,6 +184,7 @@ def walk(b, p, end, final, rest, st, cnt):
     st[ST_RUN] = run
     st[ST_FLAGS] = flags
     st[ST_META] = meta
+    st[ST_GOOD] = good if flags & (BAD | CUT) else p
     return p
 
 

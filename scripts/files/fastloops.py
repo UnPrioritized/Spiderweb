@@ -27,6 +27,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
                  never waits for Python); the same maths within float rounding
   midi_walk      midi_scan.walk (Load MIDI: a track's events read + checked), the very same function compiled
   midi_rewrite   midi_scan.rewrite (a track written again with its ticks moved), the very same function compiled
+  midi_index, midi_close, midi_grid, midi_halve   midi_index's functions (Load MIDI's pass: notes paired, the index
+                 to read a track from anywhere, the overview picture), the very same functions compiled
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
 
@@ -39,7 +41,7 @@ from numba import carray, cfunc, njit, types
 from numba.core import caching
 from numba.typed import List
 
-from files import midi_scan
+from files import midi_index as _index, midi_scan
 from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX,
                          LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP)
 
@@ -1602,6 +1604,36 @@ def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0,
 # midi_scan.py and checks that file)
 midi_walk = njit(cache=CACHE, nogil=True)(midi_scan.walk)
 midi_rewrite = njit(cache=CACHE, nogil=True)(midi_scan.rewrite)
+midi_index = njit(cache=CACHE, nogil=True)(_index.index)
+midi_close = njit(cache=CACHE, nogil=True)(_index.close)
+midi_grid = njit(cache=CACHE, nogil=True)(_index.grid)
+midi_halve = njit(cache=CACHE, nogil=True)(_index.halve)
+midi_cover = njit(cache=CACHE, nogil=True)(_index.cover)
+
+
+@njit(cache=CACHE, nogil=True)
+def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
+    """roll_loaded.loaded_pixels (a loaded MIDI's key x pixel table painted like notes), the same pixels."""
+    ih, iw = img.shape[0], img.shape[1]
+    for kk in range(tab.shape[0]):
+        a, b = row0[kk], row1[kk]
+        ya, yb = max(a, y0), min(b, y0 + ih)
+        if yb <= ya:
+            continue
+        solid = b - 1 - a < 2
+        for c in range(c0, c1):
+            code = tab[kk, c]
+            if code < 0:
+                continue
+            x = c + kb - x0
+            if x < 0 or x >= iw:
+                continue
+            m = marks[kk, c] != 0
+            for y in range(ya, yb):
+                e = 1 if (solid or y == a or y == b - 1 or m) else 0
+                img[y - y0, x, 0] = rgb[code, e, 0]
+                img[y - y0, x, 1] = rgb[code, e, 1]
+                img[y - y0, x, 2] = rgb[code, e, 2]
 
 
 def warm():
@@ -1644,3 +1676,16 @@ def warm():
     u8 = np.zeros(1, np.uint8)
     midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
     midi_rewrite(u8, 0, 0, True, i1, False, u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64))
+    q, z = np.zeros(_index.QS, np.int64), np.zeros(4, np.int64)
+    ix, cov, i32 = _index.new_state(), np.zeros((128, 8), np.int32), np.zeros((128, 8), np.int32)
+    midi_index(u8, 0, 0, 0, 60, ix, q, q.copy(), q.copy(), q.copy(), q.copy(), z, z.copy(), z.copy(), z.copy(), z.copy(),
+               z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), cov, np.zeros(16, np.int64), z.copy(),
+               z.copy(), z.copy(), np.zeros((4, _index.META_KEEP), np.uint8))
+    midi_close(ix, 60, q, q.copy(), q.copy(), z, z.copy(), z.copy(), z.copy(), z.copy(), cov)
+    midi_grid(cov, 0, 1, 0, 0, i32, i32.copy(), 0, np.zeros((1, 2), np.uint8), 1)
+    midi_halve(i32, i32.copy(), np.zeros((128, 4), np.int32), np.zeros((128, 4), np.int32))
+    t2, m2 = np.full((1, 2), -1, np.int64), np.zeros((1, 2), np.uint8)
+    midi_cover(u8, 0, 0, np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,
+               np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
+               z.copy(), z.copy())
+    loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))

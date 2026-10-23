@@ -14,7 +14,8 @@ import threading
 import numpy as np
 
 from files import midi_scan, speed
-from files.midi_scan import (AFTER_EOT, BAD, C_SIZE, CUT, NO_EOT, ST_AFTER, ST_EOT, ST_FLAGS, ST_SIZE, ST_TICK)
+from files.midi_scan import (AFTER_EOT, BAD, C_SIZE, CUT, NO_EOT, ST_AFTER, ST_EOT, ST_FLAGS, ST_GOOD, ST_SIZE,
+                             ST_TICK)
 
 PIECE = 16 << 20  # bytes read at a time
 BIGGEST_EVENT = 1 << 30  # one meta / sysex event bigger than this = the track can't be read
@@ -29,6 +30,7 @@ M_COUNT = "count"  # the header's track count differs from the tracks found
 M_CUT = "cut"  # the last chunk runs past the file's end
 M_JUNK = "junk"  # bytes that aren't a chunk (kept as they are)
 M_LONG_HEAD = "long_head"  # a header longer than 6 bytes
+M_RESYNC = "resync"  # a track's length was wrong: the next track found by its "MTrk" (MidiFile.resynced)
 
 
 class MidiError(Exception):
@@ -74,6 +76,7 @@ class MidiFile:
         self.path = os.path.abspath(path)
         self.marks = set()
         self.tracks = []
+        self.resynced = []  # (numbers of the tracks whose length was wrong: M_RESYNC)
         self.pieces = []  # [("raw", start, size) / ("track", Track)] in file order
         self.scanned = False
         self.raw_hash = None  # (scan(): one hash of the header, track heads and other bytes)
@@ -124,18 +127,26 @@ class MidiFile:
                 raise FileChanged()
             kind, size = h[:4], struct.unpack(">I", h[4:8])[0]
             if not all(65 <= c <= 90 or 97 <= c <= 122 or 48 <= c <= 57 or c == 32 for c in kind):
+                if self._resync(f, top):  # (the track before had a wrong length: on from the next "MTrk")
+                    t = self.tracks[-1]
+                    raw_from, pos = t.start + t.size, t.start + t.size
+                    continue
                 self.marks.add(M_JUNK)  # (no chunk here: the rest is kept as it is)
                 break
             if kind == b"MTrk":
                 if pos > raw_from:
                     self.pieces.append(("raw", raw_from, pos - raw_from))
                 have = min(size, top - pos - 8)
-                if have < size:
-                    self.marks.add(M_CUT)
                 t = Track(len(self.tracks), pos, pos + 8, have, size)
                 self.tracks.append(t)
                 self.pieces.append(("track", t))
                 raw_from = pos + 8 + have
+                if have < size and self._resync(f, top):
+                    t = self.tracks[-1]
+                    raw_from, pos = t.start + t.size, t.start + t.size
+                    continue
+                if have < size:
+                    self.marks.add(M_CUT)
             pos += 8 + size
             if pos > top:
                 break
@@ -147,6 +158,45 @@ class MidiFile:
             self.marks.add(M_COUNT)
         if not self.tracks:
             raise MidiError("midi.no_tracks")
+
+    def _resync(self, f, top):
+        """No chunk where the last track's length says the next one starts, or that length runs past the file's
+        end: the length is wrong. The next "MTrk" after the track's own start is taken as the next track (user
+        2026-10-23: find it and warn); the track before keeps the bytes up to it (only ever copied, its length as
+        the file has it). True = found."""
+        if not self.tracks:
+            return False
+        t = self.tracks[-1]
+        at = t.start
+        tail = b""
+        while at < top:
+            f.seek(at)
+            block = f.read(min(PIECE, top - at))
+            if not block:
+                raise FileChanged()
+            hay = tail + block
+            i = hay.find(b"MTrk")
+            while i >= 0:
+                x = at - len(tail) + i
+                if x + 8 <= top:
+                    size = struct.unpack(">I", hay[i + 4:i + 8])[0] if i + 8 <= len(hay) else None
+                    if size is None:
+                        f.seek(x + 4)
+                        size = struct.unpack(">I", f.read(4))[0]
+                    t.size = x - t.start
+                    self.marks.add(M_RESYNC)
+                    self.resynced.append(t.number)
+                    have = min(size, top - x - 8)
+                    n = Track(len(self.tracks), x, x + 8, have, size)
+                    self.tracks.append(n)
+                    self.pieces.append(("track", n))
+                    if have < size and not self._resync(f, top):
+                        self.marks.add(M_CUT)
+                    return True
+                i = hay.find(b"MTrk", i + 1)
+            tail = hay[-3:]
+            at += len(block)
+        return False
 
     def _rmid(self, f):
         """The SMF inside a RIFF MIDI's "data" chunk: (start, end)."""
@@ -198,10 +248,13 @@ class MidiFile:
             if done >= size and not keep:
                 return
 
-    def scan(self, progress=None, cancel=None, workers=None):
+    def scan(self, progress=None, cancel=None, workers=None, each=None):
         """Reads every track: its events checked + counted (Track.flags / counts / last_tick), its hash. Tracks are
         read side by side on several cores (biggest first) when the compiled loops are there. progress(bytes done,
-        bytes in all) after each piece and cancel() (True = Cancelled) are called FROM THOSE THREADS."""
+        bytes in all) after each piece and cancel() (True = Cancelled) are called FROM THOSE THREADS.
+        each(track) = something more done in the same read (Load MIDI's pass): an object whose .piece(bytes, used,
+        at) gets every piece's checked whole events (bytes[:used], the track's byte at the piece's start) and
+        .done() the end (also called on those threads)."""
         loops = speed.loops()
         walk = loops.midi_walk if loops else midi_scan.walk
         total = sum(t.size for t in self.tracks)
@@ -223,7 +276,7 @@ class MidiFile:
             with open(self.path, "rb") as f:
                 for t in job:
                     step(0)  # (Cancel / another job's error: no track started after it)
-                    self._scan_track(f, t, walk, bool(loops), step, watch)
+                    self._scan_track(f, t, walk, bool(loops), step, watch, each and each(t))
 
         jobs = scan_jobs(self.tracks)
         n = 1 if not loops else min(workers or SCAN_WORKERS, os.cpu_count() or 1, len(jobs))
@@ -237,7 +290,7 @@ class MidiFile:
         self.scanned = True
         return self
 
-    def _scan_track(self, f, t, walk, compiled, step, watch):
+    def _scan_track(self, f, t, walk, compiled, step, watch, more=None):
         st = np.zeros(ST_SIZE, np.int64)
         cnt = np.zeros(C_SIZE, np.int64)
         h = hashlib.blake2b(digest_size=16)
@@ -250,6 +303,8 @@ class MidiFile:
             with memoryview(buf) as m:
                 h.update(m[hashed:filled])
             used = walk(view, 0, filled, final, t.size - taken - filled, st, cnt)
+            if more is not None and min(used, st[ST_GOOD]) > 0:  # (a damaged track: its good part only)
+                more.piece(view, int(min(used, st[ST_GOOD])), taken)
             del view  # (buf may grow next)
             if used == 0 and not final and not st[ST_FLAGS] & BAD:  # (an event bigger than the buffer: it ends
                 grow = min(len(buf), t.size - taken - len(buf))  # inside the track, so it fits in what's left)
@@ -278,6 +333,8 @@ class MidiFile:
         t.last_tick = int(st[ST_TICK])
         t.after = int(st[ST_AFTER])
         t.hash = h.hexdigest()
+        if more is not None:
+            more.done()
 
     def _hash_track(self, f, t, buf):
         """The whole track's hash, read again through buf (a damaged track: its reading stopped part way)."""

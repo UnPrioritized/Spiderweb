@@ -40,13 +40,14 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
                               cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box, mouse_trail,
                               note_name, ruler_boxes)
 from roll.roll_lasso import LassoDrawing
+from roll.roll_loaded import LoadedNotes
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
 
 EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle: its notes stay on that key
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
-class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
+class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, LassoDrawing, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
@@ -622,6 +623,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         notes = self.app.rendered
         if len(notes):  # (and the notes: pages / gates can put them far past the drawings, user)
             bs += [notes[:, 0].min() / self.app.ppq, notes[:, 1].max() / self.app.ppq]
+        lm = self.app.loaded
+        if lm is not None and lm.notes:  # (a loaded MIDI's first and last note too)
+            bs += [lm.first / lm.ppq, lm.end / lm.ppq]
         lo, hi = (float(min(bs)), float(max(bs))) if bs else (0, 4 * self.app.beats)
         span = max(hi - lo, 1)
         self.sx = (w - self.kb_w) / (span * 1.06)

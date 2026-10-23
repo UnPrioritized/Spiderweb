@@ -409,6 +409,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.channels_folded = tk.BooleanVar(value=False)  # Project's Channels rows folded to one grey line (autosave)
         self._used_tracks = (None, 0)  # (rendered, how many slots have notes: update_status)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
+        self.loaded = None  # a loaded MIDI file (Load MIDI: notes.loaded.LoadedMidi), its notes drawn under the shapes
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
@@ -1882,10 +1883,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         except ValueError:
             usual = False
         plain = not any(self.tempo.get(k) for k in ("points", "catch", "keysigs")) and sigs_of(self.tempo) == [DEFAULT_SIG]
-        if not self.shapes and plain and usual and not boxes[1]:
+        if not self.shapes and plain and usual and not boxes[1] and self.loaded is None:
             return
         if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.new_ask"), icon="warning", parent=self):
             return
+        if self.loaded is not None:  # (a loaded MIDI goes too; Undo brings back the shapes only)
+            self.loaded = None
+            self.roll.forget_loaded()
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes
         self.roll.drop_lasso()  # (a waiting loop would cut the new one)
         self.push_undo(name=tr("app.new"))

@@ -109,7 +109,7 @@ def _forget_saved():
     except OSError:
         return
     for name in names:
-        if name.startswith(("fastloops.", "midi_scan.")) and name.endswith((".nbi", ".nbc")):
+        if name.startswith(("fastloops.", "midi_scan.", "midi_index.")) and name.endswith((".nbi", ".nbc")):
             try:
                 os.remove(os.path.join(folder, name))
             except OSError:

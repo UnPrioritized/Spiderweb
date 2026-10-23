@@ -1,0 +1,225 @@
+"""File → Load MIDI… (user 2026-10-23): a MIDI file opened as a NEW project, its notes drawn under Spiderweb's own
+shapes (notes/loaded.py: the file stays the boss, its notes are never copied into shapes). One window walks through
+it: how to hold the notes (asked BEFORE reading), the reading with each step and Cancel, then a summary.
+The project is replaced only once the reading is done; Cancel / an error leave it as it was."""
+
+import os
+import threading
+import time
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+from files.lang import tr, trn
+from files.midi_read import Cancelled, FileChanged, MidiError, MidiFile, M_SMPTE
+from files.project import OUTPUT_DIR
+from files.system import free_memory
+from notes import loaded as L
+from window import look
+from window.widgets import remember_place
+
+POLL_MS = 50
+
+
+def size_text(n):
+    return tr("load.gb", n=f"{n / 1e9:.1f}") if n >= 1e9 else tr("load.mb", n=f"{max(n, 1e5) / 1e6:.1f}")
+
+
+def load_midi(app):
+    """The File menu's Load MIDI…."""
+    path = filedialog.askopenfilename(title=tr("load.pick"), initialdir=OUTPUT_DIR,
+                                      filetypes=[(tr("load.midi_files"), "*.mid *.midi *.rmi *.smf"),
+                                                 (tr("project.all_files"), "*.*")])
+    if not path or not app.may_replace(os.path.basename(path)):
+        return
+    try:
+        mf = MidiFile(path)
+    except MidiError as e:
+        messagebox.showerror(tr("load.title"), tr(e.key, **e.info), parent=app)
+        return
+    if M_SMPTE in mf.marks:  # (time in frames: Spiderweb works in beats)
+        messagebox.showerror(tr("load.title"), tr("load.smpte"), parent=app)
+        return
+    LoadWindow(app, mf)
+
+
+class LoadWindow(tk.Toplevel):
+    def __init__(self, app, mf):
+        super().__init__(app)
+        self.withdraw()
+        self.app, self.mf = app, mf
+        self.title(tr("load.title"))
+        self.resizable(False, False)
+        self.transient(app)
+        self.loader = self.thread = None
+        self.body = ttk.Frame(self, padding=(16, 14, 16, 8))
+        self.body.pack(fill="both", expand=True)
+        self.buttons = ttk.Frame(self, padding=(16, 0, 16, 12))
+        self.buttons.pack(fill="x")
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.bind("<Escape>", lambda e: self.cancel())
+        self.ask_page()
+        self.update_idletasks()
+        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
+        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        remember_place(self, "load_midi")
+        self.deiconify()
+        self.grab_set()
+
+    def clear(self):
+        for w in self.body.winfo_children() + self.buttons.winfo_children():
+            w.destroy()
+
+    # ------------------------------------------------------------------ 1: the question
+
+    def ask_page(self):
+        mf = self.mf
+        need, free = L.memory_need(mf), free_memory()
+        keep_ok = L.can_keep(mf, free)
+        ttk.Label(self.body, text=os.path.basename(mf.path), font=look.font(10, "bold")).pack(anchor="w")
+        ttk.Label(self.body, text=tr("load.file_info", size=size_text(mf.size),
+                                     tracks=trn("load.tracks", len(mf.tracks), n=f"{len(mf.tracks):,}"),
+                                     ppq=mf.ppq)).pack(anchor="w", pady=(2, 10))
+        ttk.Label(self.body, text=tr("load.how")).pack(anchor="w")
+        self.keep = tk.BooleanVar(self, value=keep_ok)
+        ttk.Radiobutton(self.body, text=tr("load.from_file"), variable=self.keep, value=False).pack(anchor="w",
+                                                                                                    pady=(6, 0))
+        ttk.Label(self.body, text=tr("load.from_file_info"), foreground=look.HINT, wraplength=440,
+                  justify="left").pack(anchor="w", padx=(22, 0))
+        r = ttk.Radiobutton(self.body, text=tr("load.keep", size=size_text(need)), variable=self.keep, value=True)
+        r.pack(anchor="w", pady=(8, 0))
+        if keep_ok:
+            info = tr("load.keep_info", free=size_text(free))
+        else:
+            r.state(["disabled"])
+            info = (tr("load.keep_no", need=size_text(need + L.SPARE), free=size_text(free)) if free is not None
+                    else tr("load.keep_unknown"))
+        ttk.Label(self.body, text=info, foreground=look.HINT, wraplength=440, justify="left").pack(anchor="w",
+                                                                                               padx=(22, 0))
+        if self.app.shapes:
+            ttk.Label(self.body, text=tr("load.new_project"), foreground=look.HINT, wraplength=460,
+                      justify="left").pack(anchor="w", pady=(10, 0))
+        ttk.Button(self.buttons, text=tr("load.cancel"), command=self.cancel).pack(side="right")
+        go = ttk.Button(self.buttons, text=tr("load.load"), command=self.start)
+        go.pack(side="right", padx=(0, 6))
+        go.focus_set()
+        self.bind("<Return>", lambda e: self.start())
+
+    # ------------------------------------------------------------------ 2: reading
+
+    def start(self):
+        self.unbind("<Return>")
+        keep = self.keep.get()
+        self.clear()
+        ttk.Label(self.body, text=os.path.basename(self.mf.path), font=look.font(10, "bold")).pack(anchor="w")
+        self.steps = {}
+        for key in ("wait", "read", "overview", "done"):
+            row = ttk.Label(self.body, text="", width=60)
+            row.pack(anchor="w", pady=(4 if key == "wait" else 1, 0))
+            self.steps[key] = row
+        self.bar = ttk.Progressbar(self.body, length=440, maximum=1000)
+        self.bar.pack(anchor="w", pady=(10, 2))
+        self.info = ttk.Label(self.body, text="", foreground=look.HINT)
+        self.info.pack(anchor="w")
+        ttk.Button(self.buttons, text=tr("load.cancel"), command=self.cancel).pack(side="right")
+        self.loader = L.Loader(self.mf, keep)
+        self.thread = threading.Thread(target=self.loader.run, daemon=True, name="load midi")
+        self.thread.start()
+        self.poll()
+
+    def poll(self):
+        ld = self.loader
+        stage = ld.stage
+        order = ["wait", "read", "overview", "done"]
+        at = order.index(stage)
+        took = time.perf_counter() - ld.started
+        texts = {"wait": tr("load.step_wait"),
+                 "read": tr("load.step_read", done=f"{ld.tracks_done:,}", tracks=f"{len(self.mf.tracks):,}",
+                            notes=f"{ld.notes_found:,}"),
+                 "overview": tr("load.step_overview"), "done": tr("load.step_done")}
+        for i, key in enumerate(order):
+            if key == "wait" and at > 0 and took < 0.2:
+                self.steps[key].config(text="")  # (the speed-ups were ready: no line for them)
+                continue
+            mark = "✓ " if i < at else ("▶ " if i == at else "   ")
+            self.steps[key].config(text=mark + texts[key], foreground=look.DARK_TEXT if i <= at else look.HINT)
+        if stage == "read" and ld.total:
+            share = ld.done / ld.total
+            self.bar.config(value=int(1000 * share))
+            speed = ld.done / max(took, 1e-3)
+            left = (ld.total - ld.done) / speed if speed and share > 0.02 else None
+            self.info.config(text=tr("load.speed", mb=f"{speed / 1e6:,.0f}", done=size_text(ld.done),
+                                     total=size_text(ld.total))
+                             + ("  " + tr("load.left", s=f"{left:.0f}") if left is not None and left >= 2 else ""))
+        if stage != "done":
+            self.after(POLL_MS, self.poll)
+            return
+        self.finished()
+
+    def finished(self):
+        ld = self.loader
+        if isinstance(ld.error, Cancelled):
+            self.destroy()
+            return
+        if ld.error is not None:
+            e = ld.error
+            if isinstance(e, MemoryError):
+                text = tr("load.out_of_memory")
+            elif isinstance(e, MidiError):
+                text = tr(e.key, **e.info)
+            else:
+                from files.errors import write_log
+                write_log(type(e), e, e.__traceback__, "(Load MIDI)")
+                text = tr("load.failed", e=e)
+            self.destroy()
+            messagebox.showerror(tr("load.title"), text, parent=self.app)
+            return
+        lm = ld.result
+        self.app.attach_midi(lm)
+        self.summary_page(lm)
+
+    # ------------------------------------------------------------------ 3: summary
+
+    def summary_page(self, lm):
+        self.clear()
+        c = lm.counts()
+        ttk.Label(self.body, text=os.path.basename(lm.path), font=look.font(10, "bold")).pack(anchor="w")
+        lines = [tr("load.sum_time", s=f"{c['seconds']:.2f}" if c['seconds'] < 1 else f"{c['seconds']:.1f}"),
+                 trn("load.sum_notes", c["notes"], n=f"{c['notes']:,}"),
+                 tr("load.sum_tracks", tracks=f"{c['tracks']:,}", notes=f"{c['with_notes']:,}"),
+                 trn("load.sum_channels", c["channels"], n=c["channels"]),
+                 trn("load.sum_tempos", c["tempos"], n=f"{c['tempos']:,}")]
+        if lm.mode == "memory":
+            lines.append(tr("load.sum_memory", size=size_text(lm.held_bytes() + lm.index_bytes())))
+        else:
+            lines.append(tr("load.sum_index", size=size_text(lm.index_bytes())))
+        notes = []
+        if c["zero"]:
+            notes.append(trn("load.sum_zero", c["zero"], n=f"{c['zero']:,}"))
+        if c["hang"]:
+            notes.append(trn("load.sum_hang", c["hang"], n=f"{c['hang']:,}"))
+        if c["orphan"]:
+            notes.append(trn("load.sum_orphan", c["orphan"], n=f"{c['orphan']:,}"))
+        if c["keys_256"]:
+            notes.append(tr("load.sum_256"))
+        if c["resynced"]:
+            notes.append(tr("load.sum_resynced", tracks=", ".join(str(n + 1) for n in c["resynced"][:10])))
+        if c["damaged"]:
+            notes.append(tr("load.sum_damaged", tracks=", ".join(str(n + 1) for n in c["damaged"][:10])))
+        for t in lines:
+            ttk.Label(self.body, text=t).pack(anchor="w", pady=(2, 0))
+        for t in notes:
+            ttk.Label(self.body, text=t, foreground=look.WARN, wraplength=460, justify="left").pack(anchor="w",
+                                                                                                 pady=(6, 0))
+        ok = ttk.Button(self.buttons, text=tr("load.ok"), command=self.destroy)
+        ok.pack(side="right")
+        ok.focus_set()
+        self.bind("<Return>", lambda e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def cancel(self):
+        if self.loader is None:
+            self.destroy()
+            return
+        self.loader.cancelled = True  # (poll sees it end and closes the window)

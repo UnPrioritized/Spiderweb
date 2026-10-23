@@ -9,6 +9,7 @@ from files.lang import tr
 from window import look
 from window.chop_window import open_chop, quick_chop
 from window.claw_window import open_claw
+from window.load_midi import load_midi
 from window.path_window import open_path
 from window.strum_window import open_strum
 from window.trim_window import open_trim
@@ -49,6 +50,7 @@ def build_menu(app):
     add(f, "menu.save_as", "menu.ctrl_shift_s", app.save_project_as)
     f.add_separator()
     add(f, "menu.export_midi", "menu.ctrl_e", app.generate)
+    add(f, "menu.load_midi", "", lambda: load_midi(app))
     f.add_separator()
     add(f, "menu.domino_paste", "", lambda: app.paste_from_domino())
     add(f, "menu.domino_copy", "menu.ctrl_shift_c", app.copy_to_domino)
