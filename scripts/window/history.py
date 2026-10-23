@@ -11,7 +11,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
-from notes.tempo import clean_tempo
+from notes.tempo import changed as tempo_edited, clean_tempo, tempo_text
 from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
@@ -175,8 +175,9 @@ class HistoryPanel:
         """The last step changed nothing (e.g. a click on a shape without dragging it): it's taken out, so it
         doesn't show in the History (before: the shapes as JSON / undo_state now, before the next change)."""
         before = as_state(before, self.shapes)
+        tempo_edited()
         if (self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack
-                and self.step_tempo(self.undo_stack[-1]) == json.dumps(self.tempo)
+                and self.step_tempo(self.undo_stack[-1]) == tempo_text(self.tempo)
                 and not boxes_mark(self.undo_stack[-1])):  # (New with nothing to clear still set the boxes)
             kept = getattr(self, "_redo_kept", None)
             if kept and kept[1] == len(self.undo_stack):
@@ -333,14 +334,15 @@ class HistoryPanel:
         the shapes."""
         boxes = self.roll.kept_box()
         pane = getattr(self, "tempo_pane", None)
+        tempo_edited()  # (a step is saved as the line may change, before tempo_changed says so: read it again)
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
-                self.stroke, list(self.parts), self.part_main, self.ripple_pick, json.dumps(self.tempo),
+                self.stroke, list(self.parts), self.part_main, self.ripple_pick, tempo_text(self.tempo),
                 pane.pick_state() if pane else "{}")
 
     def step_tempo(self, step):
         """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
         sel = step[2]
-        return sel[8] if len(sel) > 8 and isinstance(sel[8], str) else json.dumps(self.tempo)
+        return sel[8] if len(sel) > 8 and isinstance(sel[8], str) else tempo_text(self.tempo)
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the

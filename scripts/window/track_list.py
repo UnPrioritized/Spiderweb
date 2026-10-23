@@ -24,7 +24,7 @@ from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import BEATS_FAR, slot_track_channel
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
-from notes.tempo import bpm_text
+from notes.tempo import bpm_text, tempo_text
 from notes.tempo_file import heard_tempo
 from roll import roll_loaded as RL
 from roll.roll_draw import TRACK_FADE
@@ -903,7 +903,7 @@ class TrackList(tk.Canvas):
         base = pane.base() if pane is not None else 120.0
         n = app.rendered
         end = int(n[:, 1].max()) + 1 if len(n) else 0
-        key = (json.dumps(app.tempo), base, app.ppq, end)
+        key = (tempo_text(app.tempo), base, app.ppq, end)
         if self._heard is not None and self._heard[0] == key:
             return self._heard[1]
         got = heard_tempo(app.tempo, base, app.ppq, end)

@@ -16,13 +16,12 @@ Warnings for the export message: notes starting inside a jump (they play off tim
 really heard isn't the project's BPM (their tone is worked out from it)."""
 
 import bisect
-import json
 
 import numpy as np
 
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
 from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, base_us, beat_tick, domino_safe,
-                         file_segments, has_tempo, layout)
+                         file_segments, has_tempo, layout, tempo_text)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
 PAIR_CACHE = 4096  # gaps up to this many ticks have their tempo pair remembered (black MIDI repeats the same gaps)
@@ -379,7 +378,7 @@ def heard_tempo(tempo, base, ppq, end=0):
     None without a tempo line."""
     if not has_tempo(tempo):
         return None
-    key = (json.dumps(tempo), base, ppq, end)
+    key = (tempo_text(tempo), base, ppq, end)
     if key in _heard:  # (Play / each tempo edit while playing: remembered until the line changes)
         return _heard[key]
     segs, _ = file_segments(tempo, base, ppq, end)

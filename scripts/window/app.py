@@ -86,7 +86,7 @@ from files.clipboard import RAW, copy_count, get_text, put_text
 from files.share import LONG_LINE, FIND, ShareError, made_by, read_shapes, shapes_line, unpack
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
-from notes.tempo import drop_loose, empty as empty_tempo
+from notes.tempo import changed as tempo_edited, drop_loose, empty as empty_tempo, watch as watch_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, first_bar_beats, sigs_of, where
 from roll.roll_shared import cached_path
 from roll.zoombar import add_zoom_bars
@@ -1433,6 +1433,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         return ppq, bpm, self.beats
 
     @property
+    def tempo(self):
+        """The Conductor pane's line (notes/tempo.py); a new one is watched (tempo.tempo_text remembers its text)."""
+        return self._tempo
+
+    @tempo.setter
+    def tempo(self, line):
+        self._tempo = line
+        watch_tempo(line)
+
+    @property
     def beats(self):
         """The first bar's length in beats (what Beats per bar was; bar lines: the time signatures, notes/meter)."""
         v = first_bar_beats(getattr(self, "tempo", None))
@@ -2592,6 +2602,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The tempo line changed (an edit, undo, a project opened): the pane and its bar show it. restoring: an undo
         / redo half way (its own syncing does the Hz bass warnings once everything is back: hunt, a redraw half way
         moved the synth window's preset name)."""
+        tempo_edited()
         if not hasattr(self, "tempo_box"):
             return
         if not self.tempo_pane.drag:  # (a jump's first point nothing glides into: gone; a drag: when let go)

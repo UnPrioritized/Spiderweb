@@ -21,7 +21,7 @@ from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained
 from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
-from notes.tempo import bpm_text, ruler_marks, short_bpm
+from notes.tempo import bpm_text, ruler_marks, short_bpm, tempo_text
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
@@ -1788,7 +1788,7 @@ class RollDrawing:
         w, top, s, kb = self.winfo_width(), self.ruler_h, self.scale, self.kb_w
         bands = tuple(sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in black_bands(boxes)))
         pane = getattr(self.app, "tempo_pane", None)
-        key = (json.dumps(self.app.tempo), pane and pane.base(), self.app.ppq, w, top, kb, self.sx,
+        key = (tempo_text(self.app.tempo), pane and pane.base(), self.app.ppq, w, top, kb, self.sx,
                self.view_t, s, bands)
         if key == self._tempo_key and self.find_withtag("tempomark"):
             return

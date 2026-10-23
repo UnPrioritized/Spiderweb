@@ -31,6 +31,7 @@ import bisect
 import copy
 import json
 import math
+import os
 import re
 
 import numpy as np
@@ -60,6 +61,41 @@ def empty():
 
 def has_tempo(tempo):
     return bool(tempo and tempo.get("points"))
+
+
+# The app's tempo line as text (the key of every remembered tempo result, and the undo steps' copy): made once per
+# change, not 14 times a redraw (13 k tempos from a loaded MIDI = 7-11 ms each). Only the line watch() was given
+# is remembered; App.tempo_changed / a new line call changed(). SPIDERWEB_TEMPO_CHECK=1 (tests) = every reuse
+# checked against the line itself (an edit that didn't say so raises).
+_text = {"tempo": None, "ver": 0, "made": -1, "text": None}
+_CHECK = bool(os.environ.get("SPIDERWEB_TEMPO_CHECK"))
+
+
+def watch(tempo):
+    _text["tempo"] = tempo
+    changed()
+
+
+def changed():
+    _text["ver"] += 1
+
+
+def tempo_text(tempo):
+    """json.dumps(tempo), remembered for the watched line until it changes (the same string each time, so undo
+    steps share it)."""
+    if tempo is not _text["tempo"] or tempo is None:
+        return json.dumps(tempo)
+    if _text["made"] != _text["ver"]:
+        text = json.dumps(tempo)
+        if text != _text["text"]:  # (the same text = the same string kept: undo steps share it)
+            _text["text"] = text
+        _text["made"] = _text["ver"]
+    elif _CHECK and json.dumps(tempo) != _text["text"]:
+        import sys
+        import traceback
+        sys.stderr.write("TEMPO STALE\n" + "".join(traceback.format_stack(limit=8)[:-1]))
+        _text["text"] = json.dumps(tempo)
+    return _text["text"]
 
 
 def clamp_bpm(v):
@@ -599,7 +635,7 @@ def layout(tempo, base, ppq):
     BPM's microseconds, "keeps": [(point index, first tick, end tick or None, heard us)], "worked": [(stretch,
     catch_plan)]}. Each stretch gets "base_u" / "base" (BPM) = the tempo heard just before it, each Keep timing
     part its heard us the same way: inside a stretch, its tempo; inside a Keep timing part, its; else the line."""
-    key = (json.dumps(tempo), base, ppq)
+    key = (tempo_text(tempo), base, ppq)
     if key in _layouts:
         return _layouts[key]
     tempo = json.loads(key[0])  # (its own copy: what's remembered never changes with the line)
@@ -1081,7 +1117,7 @@ def ruler_marks(tempo, base, ppq, bar=4):
     a line to the last step, [(beat, before, at)] of every step as its 5th item (the tip)."""
     if not has_tempo(tempo):
         return []
-    key = (json.dumps(tempo), base, ppq, bar)
+    key = (tempo_text(tempo), base, ppq, bar)
     if key in _marks:
         return _marks[key]
     worked = plans(tempo, base, ppq)
@@ -1155,7 +1191,7 @@ def bpm_at(tempo, base, ppq, tick):
     draws there); the project's BPM without a tempo line."""
     if not has_tempo(tempo):
         return float(base)
-    key = (json.dumps(tempo), base, ppq, tick)
+    key = (tempo_text(tempo), base, ppq, tick)
     if key in _at:  # (the play line resting / redrawn: once)
         return _at[key]
     u = None

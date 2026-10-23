@@ -1,7 +1,6 @@
 """The side panel's custom shape settings (which shape, how it's filled) and the drawer window."""
 
 import copy
-import json
 import math
 import tkinter as tk
 
@@ -21,6 +20,7 @@ from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
 from notes.hzbass import (AUTO, all_tones, auto_picks, clean_tempo_steps, each_layer, hz_gate, layers_of, left_edge,
                           right_edge, shortest_gate, sound_span)
 from notes.hz_settings import tempo_at
+from notes.tempo import tempo_text
 from notes.tempo_file import heard_tempo
 from window.hz_window import open_hz
 from window.panel_nested import nested_on
@@ -690,7 +690,7 @@ class CustomPanel:
             return None if base is None else (base, None)
         left, end = self.hz_span(sh, hz or sh.get("hz") or {})
         ppq = ppq or self.ppq
-        key = (json.dumps(self.tempo), base, ppq, left, end)
+        key = (tempo_text(self.tempo), base, ppq, left, end)
         memo = self.__dict__.setdefault("_hz_now", {})  # (every redraw of the Hz window asks: thousands of steps
         if key not in memo:                              # under a glide, worked out once)
             if len(memo) > 32:

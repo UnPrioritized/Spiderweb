@@ -29,7 +29,8 @@ from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
                          bpm_text, clamp_bpm, curve, drop_loose, formula_fn,
                          catch_get, catch_set, keeps, layout,
-                         plans, shown_bpm, split_at, step_edges)
+                         plans, shown_bpm, split_at, step_edges, tempo_text)
+from notes.tempo import changed as tempo_edited
 from notes.tempo_file import dense_spots
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
@@ -1402,14 +1403,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def live_line(self):
         """The line just drawn while it can still change (nothing else changed the tempo since), else None."""
         lv = self.live
-        if lv is not None and json.dumps(self.app.tempo) != lv["seen"]:
+        if lv is not None and tempo_text(self.app.tempo) != lv["seen"]:
             self.live = lv = None
         return lv
 
     def live_seen(self):
         """The live line's own change done: the tempo as it is now is still its."""
         if self.live is not None:
-            self.live["seen"] = json.dumps(self.app.tempo)
+            tempo_edited()  # (its own change may not have said so yet)
+            self.live["seen"] = tempo_text(self.app.tempo)
 
     def live_end_at(self, x, y):
         """0 / 1 when the mouse is on the live line's start / end square, else None."""
@@ -1440,7 +1442,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def dense_key(self):
         app = self.app
-        return json.dumps(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered)
+        return tempo_text(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered)
 
     def dense_now(self):
         """Beats where notes in a Keep timing part are too close for its tempo (tempo_file.dense_spots), as last
