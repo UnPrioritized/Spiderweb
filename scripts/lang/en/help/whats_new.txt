@@ -26,7 +26,7 @@ What's new:
 
 • Gate sensitive merge has its own window: Up, Left, Right or Down, and Keep shapes separate to merge any number of shapes, each left as it is, with the moving one turned into fixed notes. Merging up or down works as one shape too. The window says which shape moves, or why it can't merge.
 
-• Separate strips (Experimental): right-click pasted notes to give each strip of a colour channels of its own, for songs that repeat their colours. Spiderweb guesses where the strips are; the window shows how many it found and paints each strip in its own colour so you can check. See Help → Separate strips.
+• Channel per strip (Experimental): right-click pasted notes to give each strip of a colour channels of its own, for songs that repeat their colours. Spiderweb guesses where the strips are; the window shows how many it found and paints each strip in its own colour so you can check. See Help → Channel per strip.
 
 • Claw machine: Custom… at the bottom of the Period and Trash every lists lets you type your own, like a period of 3 or 1.5 beats, or trash 2/5.
 

@@ -1,11 +1,11 @@
-"""The Separate strips window (right-click pasted notes, "Separate strips (Experimental)…"; strips.py): each strip of
-a pasted track goes on channels of its own. "Separate strips" on / off, "Other notes between" (how many notes of
+"""The Channel per strip window (right-click pasted notes, "Channel per strip (Experimental)…"; strips.py): each strip of
+a pasted track goes on channels of its own. "Channel per strip" on / off, "Other notes between" (how many notes of
 other colours on a key make a colour coming back there its next strip; raised, two colours taking turns stop
 splitting), how many strips that makes, and "Show each strip in its own colour" (while the window is open the
 strips are painted in colours far apart round the palette, so a wrong guess shows: user 2026-10-23 picked the count +
 this over exporting to look).
 
-Works like the Gate subtract window: opening it puts Separate strips on, changes show at once, the window follows the
+Works like the Gate subtract window: opening it puts Channel per strip on, changes show at once, the window follows the
 selection, and before anything else changes there the change being tried out is kept as its own undo step (settle).
 OK keeps it (one undo step), Cancel / Esc / X puts back what changed since. Ctrl+Z / Ctrl+Y step through the changes
 made in it."""
@@ -23,7 +23,7 @@ from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, unit_text
 
 
 def target_indices(app):
-    """The selected shapes Separate strips works on (their numbers): pasted notes (strips.can_strip)."""
+    """The selected shapes Channel per strip works on (their numbers): pasted notes (strips.can_strip)."""
     return [i for i in sorted(app.sels) if i < len(app.shapes) and can_strip(app.shapes[i])]
 
 
@@ -41,7 +41,7 @@ class StripsWindow(tk.Toplevel):
         self.resizable(False, False)
         self.closed = False
         self.idx = []  # the shapes worked on (numbers in app.shapes)
-        self.ons, self.gaps = [], []  # (per shape: Separate strips on, notes between)
+        self.ons, self.gaps = [], []  # (per shape: Channel per strip on, notes between)
         self.painted = []  # (the shapes whose strips were last painted in their own colours)
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
@@ -109,7 +109,7 @@ class StripsWindow(tk.Toplevel):
         return json.dumps([t.get("strips") for t in self.tgts])
 
     def retarget(self, start=False):
-        """Work on the selected shapes (start: opened, which puts Separate strips on)."""
+        """Work on the selected shapes (start: opened, which puts Channel per strip on)."""
         self.idx = target_indices(self.app)
         self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.kept = self.now_text()  # (kept: put back by Cancel)
@@ -157,7 +157,7 @@ class StripsWindow(tk.Toplevel):
         return self.fresh() and self.now != self.before
 
     def put_back(self, saved):
-        """The shapes' Separate strips as before the change tried here, on saved (a copy of the shapes)."""
+        """The shapes' Channel per strip as before the change tried here, on saved (a copy of the shapes)."""
         for i, s in zip(self.idx, json.loads(self.kept)):
             if i < len(saved):
                 put_own(saved[i], s)
@@ -309,7 +309,7 @@ def put_own(sh, s):
 
 def open_strips(app):
     w = app.strips_window
-    if w:  # (already open: it follows the selection; the menu item puts Separate strips on)
+    if w:  # (already open: it follows the selection; the menu item puts Channel per strip on)
         w.sync()
         if w.idx and not all(w.ons):
             w.on_var.set(True)

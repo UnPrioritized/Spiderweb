@@ -60,7 +60,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     range_window.py  the spam gate Range's graph window
     sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
     subtract_window.py the Gate subtract window (on / off, ticks, only notes that touch)
-    strips_window.py the Separate strips window (on / off, notes between, the count, strip colours)
+    strips_window.py the Channel per strip window (on / off, notes between, the count, strip colours)
     merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it

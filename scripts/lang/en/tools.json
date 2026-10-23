@@ -823,11 +823,11 @@
  "sustain.from_tip": "Moves the stops later by this much, so they needn't line up with the shape's start.",
  "sustain.list": "{name} (Sustained)",
  "gate_flip.list": "{name} (Gates flipped)",
- "strips.menu": "Separate strips (Experimental)…",
- "strips.title": "Separate strips",
- "strips.step": "Separate strips",
+ "strips.menu": "Channel per strip (Experimental)…",
+ "strips.title": "Channel per strip",
+ "strips.step": "Channel per strip",
  "strips.nothing": "Select pasted notes to work on.",
- "strips.on": "Separate strips (Experimental)",
+ "strips.on": "Channel per strip (Experimental)",
  "strips.on_tip": "Each pasted track (colour) normally stays on one channel. With this on, Spiderweb guesses where each strip of a colour starts and gives every strip channels of its own, so you can edit each strip by itself in other programs.\nThe colours stay the same on the piano roll. It's a guess: look at the count and the strip colours below to check it.",
  "strips.gap": "Other notes between:",
  "strips.notes": "notes",
@@ -887,5 +887,6 @@
  "subtract.row_first": "each row's first note",
  "subtract.row_last": "row's last note",
  "subtract.at": "{at} % across: {ticks} off",
- "subtract.list": "{name} (Subtracted)"
+ "subtract.list": "{name} (Subtracted)",
+ "strips.list": "{name} (Ch. per strip)"
 }

@@ -355,7 +355,7 @@ class ShapeMenu:
         self._subtract_var = tk.BooleanVar(value=any_subtracted(app))  # Gate subtract… (subtract_window.py), alike
         m.add_checkbutton(label=tr("subtract.menu"), variable=self._subtract_var, command=lambda: open_subtract(app),
                           state="normal" if subtract_targets(app) else "disabled")
-        if strips_targets(app):  # Separate strips… (strips_window.py): pasted notes only, else left out
+        if strips_targets(app):  # Channel per strip… (strips_window.py): pasted notes only, else left out
             self._strips_var = tk.BooleanVar(value=any_strips(app))
             m.add_checkbutton(label=tr("strips.menu"), variable=self._strips_var, command=lambda: open_strips(app))
 

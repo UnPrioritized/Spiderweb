@@ -1,6 +1,6 @@
-Experimental. Select pasted notes, then right-click them: Separate strips (Experimental)…
+Experimental. Select pasted notes (or a merged copy of them), then right-click them: Channel per strip (Experimental)…
 
-Normally each pasted track (each colour) stays on one channel, however many strips it has. When a song repeats its colours, for example 16 colours over 351 strips, every strip of one colour shares that channel. With Separate strips on, Spiderweb guesses where each strip starts and gives every strip channels of its own, so you can edit each strip by itself in other programs. The colours on the piano roll stay the same. It only works with Channels → Multi channel.
+Normally each pasted track (each colour) stays on one channel, however many strips it has. When a song repeats its colours, for example 16 colours over 351 strips, every strip of one colour shares that channel. With Channel per strip on, Spiderweb guesses where each strip starts and gives every strip channels of its own, so you can edit each strip by itself in other programs. The colours on the piano roll stay the same. It only works with Channels → Multi channel.
 
 How it guesses: it looks at each key by itself. When a colour comes back on a key after other colours played there, that's the colour's next strip.
 
@@ -14,4 +14,4 @@ When it guesses wrong: two colours taking turns on a key (fast A B A B notes, or
 
 One colour on its own is never split, since nothing comes between its strips.
 
-OK keeps the change (one Ctrl+Z takes it back); Cancel, Esc or X puts it back as it was. The menu item has a tick while it's on. Sliced pieces keep it, and each piece finds its own strips.
+OK keeps the change (one Ctrl+Z takes it back); Cancel, Esc or X puts it back as it was. The menu item has a tick while it's on, and the Shapes list says (Ch. per strip). Sliced pieces keep it, and each piece finds its own strips.

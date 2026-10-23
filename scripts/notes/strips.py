@@ -1,4 +1,4 @@
-"""Separate strips (Experimental; right-click pasted notes, window/strips_window.py; asked by a user whose pasted song
+"""Channel per strip (Experimental; right-click pasted notes, window/strips_window.py; asked by a user whose pasted song
 cycles 16 colours over 351 strips): each strip of a pasted track gets channels of its own, so each can be edited
 alone elsewhere. A guess, so it's put on per shape: one pasted track = one channel stays the default (user
 2026-10-20).
@@ -26,7 +26,7 @@ def clean_strips(s):
 
 
 def can_strip(sh):
-    """Shapes Separate strips works on: notes shapes (pasted, and the frozen ones: Merged notes, Turn into plain
+    """Shapes Channel per strip works on: notes shapes (pasted, and the frozen ones: Merged notes, Turn into plain
     notes, Apply mask copies; user 2026-10-23: the song's merged copy said "1 strip"), not images (their tracks are
     the picture's colours)."""
     return "notes" in sh and "picture" not in sh and "picture_notes" not in sh
@@ -83,7 +83,7 @@ def strip_sizes(rendered, owner):
 
 
 def strip_colours(drawn, owners):
-    """The notes as painted while the Separate strips window shows the strips (drawn: the rendered rows): each strip
+    """The notes as painted while the Channel per strip window shows the strips (drawn: the rendered rows): each strip
     of these shapes in a colour of its own, neighbours far apart round the colours (strips counted in the order they
     start), so one split wrong shows as confetti, one missed as a long block."""
     if not owners or not len(drawn):

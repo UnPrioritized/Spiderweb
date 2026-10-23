@@ -20,6 +20,7 @@ from notes import between
 from notes.areas import most_colours
 from notes.engine import cached_path
 from notes.gateflip import all_flipped
+from notes.strips import has_strips
 from notes.subtract import subtracts
 from notes.sustain import is_sustained
 from window import look
@@ -802,6 +803,8 @@ class BetweenGroups:
                     label = tr("sustain.list", name=label)
                 if subtracts(sh):  # (its gates made shorter: subtract.py)
                     label = tr("subtract.list", name=label)
+                if has_strips(sh):  # (each strip its own channels: strips.py)
+                    label = tr("strips.list", name=label)
                 if "cc" in sh:  # (pasted notes carrying CCs: passengers.py, user 2026-10-22)
                     label = tr("app.with_cc_list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,

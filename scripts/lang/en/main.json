@@ -1534,7 +1534,7 @@
  "help.gate_flip.title": "Gate aware flip",
  "help.gate_flip.tip": "Only the way the gates are laid out is flipped: each key row is laid from its right end, colours and velocities turned round with it. The drawing and every row's start and end stay where they are.",
  "help.gate_flip.words": "gate aware flip gates reverse mirror range right edge jagged colours order spam pasted notes runs",
- "help.strips.title": "Separate strips",
+ "help.strips.title": "Channel per strip",
  "help.strips.tip": "Experimental. Each strip of a pasted track (colour) gets channels of its own, so each strip can be edited by itself in other programs. Spiderweb guesses where the strips are, key by key; the colours stay the same.",
  "help.strips.words": "separate strips experimental channels per strip split strips colours repeat cycle pasted notes domino tracks guess rainbow",
  "help.subtract.title": "Gate subtract",

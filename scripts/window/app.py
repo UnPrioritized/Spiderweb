@@ -160,7 +160,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     if rounds:
         laps = [np.full(len(n), tl, np.int64) if tl is not None else lap
                 for (n, _), lap, tl in zip(got, laps, team_laps)]
-    # (Separate strips: each strip of a pasted track a round of its own, the first keeping its channels; strips.py)
+    # (Channel per strip: each strip of a pasted track a round of its own, the first keeping its channels; strips.py)
     strips = [mode == "auto" and has_strips(sh) and t is not None for sh, (_, t) in zip(shapes, got)]
     laps = [strip_laps(n, t, gap_of(sh)) if s else lap for sh, (n, t), lap, s in zip(shapes, got, laps, strips)]
     # (a mask whose own notes don't sound: none, mask.py)
@@ -294,7 +294,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sustain_window = None  # Sustain… (sustain_window.py)
         self.subtract_window = None  # Gate subtract… (subtract_window.py)
         self.merge_window = None  # Gate sensitive merge… (merge_window.py)
-        self.strips_window = None  # Separate strips… (strips_window.py)
+        self.strips_window = None  # Channel per strip… (strips_window.py)
         self.path_pos = ""
         self.hz_window = None  # the Hz bass window (hz_window.py)
         self.image_window = None  # image to notes (image_window.py; opened by the Picture tool)
