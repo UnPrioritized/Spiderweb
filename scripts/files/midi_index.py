@@ -43,10 +43,11 @@ def new_state():
     return ix
 
 
-def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, opened, pt, pn, pw, cp_off, cp_tick, cp_run, cp_ent, e_q,
-          e_cnt, e_end, e_nx, cov, chn, m_tick, m_type, m_len, m_data):
+def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, pw, cp_off, cp_tick, cp_run, cp_ent,
+          e_q, e_cnt, e_end, e_vel, e_nx, cov, chn, m_tick, m_type, m_len, m_data):
     """Reads the whole events in b[p:end] (bytes midi_scan.walk found good; b[0] = the track's byte at) into the
-    index. Returns (GO or what it needs more room for, where it stopped)."""
+    index. Returns (GO or what it needs more room for, where it stopped). q_vel / e_vel = the velocity of the note
+    that began a key's sounding (cover's colour for it, the same wherever a read starts)."""
     tick = ix[X_TICK]
     run = ix[X_RUN]
     nk = cov.shape[0]
@@ -78,6 +79,7 @@ def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, opened, pt, pn, pw, cp_
                 e_q[n] = q
                 e_cnt[n] = q_rl[q]
                 e_end[n] = -1
+                e_vel[n] = q_vel[q]
                 e_nx[n] = pw[node]
                 pw[node] = n
                 n += 1
@@ -145,6 +147,7 @@ def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, opened, pt, pn, pw, cp_
                     q_tl[qq] = node
                     q_rl[qq] += 1
                     if q_rl[qq] == 1:
+                        q_vel[qq] = v
                         q_pos[qq] = nopen
                         opened[nopen] = qq
                         ix[X_NOPEN] = nopen + 1
@@ -415,6 +418,7 @@ def cover(b, p, end, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, c
                 xb = xa + 1
             if xb <= 0 or xa >= W:
                 continue
+            ends = sb[i] <= t1 and xb <= W  # (its real end, in the table: not closed past the read stretch)
             if xa < 0:
                 xa = 0
             if xb > W:
@@ -438,7 +442,7 @@ def cover(b, p, end, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, c
                 filled[kk] += 1
                 last = x
                 x += 1
-            if last == xb - 1 and sb[i] * ax + bx + 0.5 < W:
+            if ends and last == xb - 1:
                 marks[kk, last] |= 2
         n = 0
         if not full:

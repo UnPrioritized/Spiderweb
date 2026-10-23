@@ -15,9 +15,10 @@ from files.project import OUTPUT_DIR
 from files.system import free_memory
 from notes import loaded as L
 from window import look
-from window.widgets import remember_place
+from window.widgets import ShortLabel, remember_place
 
 POLL_MS = 50
+WIDTH = 490  # px: the pages' width (their wrapped hint lines are 440-460 + indent)
 
 
 def size_text(n):
@@ -70,13 +71,19 @@ class LoadWindow(tk.Toplevel):
         for w in self.body.winfo_children() + self.buttons.winfo_children():
             w.destroy()
 
+    def name_row(self, path):
+        """Each page's first row: the file's name, cut with "…" (whole name in its tip) so a long name never
+        widens the window; every page the same width."""
+        ttk.Frame(self.body, width=WIDTH, height=0).pack(anchor="w")
+        ShortLabel(self.body, text=os.path.basename(path), font=look.font(10, "bold")).pack(anchor="w", fill="x")
+
     # ------------------------------------------------------------------ 1: the question
 
     def ask_page(self):
         mf = self.mf
         need, free = L.memory_need(mf), free_memory()
         keep_ok = L.can_keep(mf, free)
-        ttk.Label(self.body, text=os.path.basename(mf.path), font=look.font(10, "bold")).pack(anchor="w")
+        self.name_row(mf.path)
         ttk.Label(self.body, text=tr("load.file_info", size=size_text(mf.size),
                                      tracks=trn("load.tracks", len(mf.tracks), n=f"{len(mf.tracks):,}"),
                                      ppq=mf.ppq)).pack(anchor="w", pady=(2, 10))
@@ -111,7 +118,7 @@ class LoadWindow(tk.Toplevel):
         self.unbind("<Return>")
         keep = self.keep.get()
         self.clear()
-        ttk.Label(self.body, text=os.path.basename(self.mf.path), font=look.font(10, "bold")).pack(anchor="w")
+        self.name_row(self.mf.path)
         self.steps = {}
         for key in ("wait", "read", "overview", "done"):
             row = ttk.Label(self.body, text="", width=60)
@@ -183,8 +190,8 @@ class LoadWindow(tk.Toplevel):
     def summary_page(self, lm):
         self.clear()
         c = lm.counts()
-        ttk.Label(self.body, text=os.path.basename(lm.path), font=look.font(10, "bold")).pack(anchor="w")
-        lines = [tr("load.sum_time", s=f"{c['seconds']:.2f}" if c['seconds'] < 1 else f"{c['seconds']:.1f}"),
+        self.name_row(lm.path)
+        lines =[tr("load.sum_time", s=f"{c['seconds']:.2f}" if c['seconds'] < 1 else f"{c['seconds']:.1f}"),
                  trn("load.sum_notes", c["notes"], n=f"{c['notes']:,}"),
                  tr("load.sum_tracks", tracks=f"{c['tracks']:,}", notes=f"{c['with_notes']:,}"),
                  trn("load.sum_channels", c["channels"], n=c["channels"]),

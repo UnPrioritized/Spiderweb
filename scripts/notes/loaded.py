@@ -27,7 +27,7 @@ TEMPO, NAME, PORT, TIME_SIG, KEY_SIG = 0x51, 0x03, 0x21, 0x58, 0x59
 class TrackInfo:
     """What the pass found in one track."""
     __slots__ = ("number", "notes", "zero", "hang", "orphan", "long", "klo", "khi", "first", "end", "last_tick",
-                 "chn", "channel", "cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end", "m_tick",
+                 "chn", "channel", "cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end", "e_vel", "m_tick",
                  "m_type", "m_len", "m_data", "name", "pic", "pic_klo", "pic_glo", "pic_pf", "pic_cols", "data",
                  "limit", "stopped")
 
@@ -68,7 +68,7 @@ class LoadedMidi:
         n = sum(a.nbytes for c, t in self.levels for a in (c, t))
         for t in self.tracks:
             n += sum(getattr(t, k).nbytes for k in ("cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end",
-                                                    "m_tick", "m_type", "m_len", "m_data", "pic"))
+                                                    "e_vel", "m_tick", "m_type", "m_len", "m_data", "pic"))
         return n
 
     def held_bytes(self):
@@ -99,6 +99,7 @@ class _Thread:
         self.q_tl = np.full(QS, -1, np.int64)
         self.q_rl = np.zeros(QS, np.int64)
         self.q_pos = np.full(QS, -1, np.int64)
+        self.q_vel = np.zeros(QS, np.int64)
         self.opened = np.zeros(QS, np.int64)
         self.pt = np.zeros(1 << 14, np.int64)
         self.pn = np.zeros(1 << 14, np.int64)
@@ -215,6 +216,7 @@ class _TrackPass:
         self.e_q = np.zeros(256, np.int64)
         self.e_cnt = np.zeros(256, np.int64)
         self.e_end = np.zeros(256, np.int64)
+        self.e_vel = np.zeros(256, np.int64)
         self.e_nx = np.zeros(256, np.int64)
         self.m_tick = np.zeros(8, np.int64)
         self.m_type = np.zeros(8, np.int64)
@@ -232,9 +234,9 @@ class _TrackPass:
         before = ix[X_NOTES]
         p = 0
         while not ix[X_STOP]:
-            status, p = self.L._index(view, p, used, at, self.L.G, ix, th.q_hd, th.q_tl, th.q_rl, th.q_pos, th.opened,
+            status, p = self.L._index(view, p, used, at, self.L.G, ix, th.q_hd, th.q_tl, th.q_rl, th.q_pos, th.q_vel, th.opened,
                                       th.pt, th.pn, th.pw, self.cp_off, self.cp_tick, self.cp_run, self.cp_ent,
-                                      self.e_q, self.e_cnt, self.e_end, self.e_nx, th.cov, th.chn, self.m_tick,
+                                      self.e_q, self.e_cnt, self.e_end, self.e_vel, self.e_nx, th.cov, th.chn, self.m_tick,
                                       self.m_type, self.m_len, self.m_data)
             if status == GO:
                 break
@@ -255,8 +257,9 @@ class _TrackPass:
             self.cp_ent = np.concatenate([self.cp_ent, np.zeros(n + 1 - len(self.cp_ent), np.int64)])
         elif status == MORE_ENT:
             n = max(len(self.e_q) * 2, int(self.ix[X_NENT]) + QS)
-            self.e_q, self.e_cnt, self.e_end, self.e_nx = (np.concatenate([a, np.zeros(n - len(a), np.int64)])
-                                                           for a in (self.e_q, self.e_cnt, self.e_end, self.e_nx))
+            self.e_q, self.e_cnt, self.e_end, self.e_vel, self.e_nx = (
+                np.concatenate([a, np.zeros(n - len(a), np.int64)])
+                for a in (self.e_q, self.e_cnt, self.e_end, self.e_vel, self.e_nx))
         elif status == MORE_META:
             n = len(self.m_tick) * 2
             self.m_tick, self.m_type, self.m_len = (np.concatenate([a, np.zeros(n - len(a), np.int64)])
@@ -297,6 +300,7 @@ class _TrackPass:
         i.e_q = self.e_q[:nent].astype(np.int16)
         i.e_cnt = self.e_cnt[:nent].copy()
         i.e_end = self.e_end[:nent].copy()
+        i.e_vel = self.e_vel[:nent].astype(np.uint8)
         i.m_tick, i.m_type, i.m_len = self.m_tick[:nmeta].copy(), self.m_type[:nmeta].copy(), self.m_len[:nmeta].copy()
         i.m_data = self.m_data[:nmeta].copy()
         names = i.metas(NAME)
