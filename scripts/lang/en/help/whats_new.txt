@@ -34,6 +34,8 @@ What's new:
 
 • Claw machine: Custom… at the bottom of the Period and Trash every lists lets you type your own, like a period of 3 or 1.5 beats, or trash 2/5.
 
+• Masks: the % box next to Mask preview sets how faint the hidden parts are. They now show in their own colours: 0 % hides them, 100 % draws them like normal notes.
+
 • Ruler selecting: drag along the bar numbers (with any tool) to select every key in that time. Drag the black bar to move it in time, Ctrl+drag for a copy, right-click it for the selection's menu.
 
 • Select boxes stay while you draw with another tool, and a shape drawn inside one joins the selection. Right-clicking empty space no longer drops it.
