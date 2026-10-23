@@ -88,6 +88,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         self._pan = None
         self._panned = False     # the middle button moved further than a click's 3 px (pan_to)
         self._panning = False    # the middle button is held (redraw: the notes as one picture, moved along)
+        self.play_follow = None  # while playing: pages turn only when the user isn't moving the view (PlayFollow)
         self._saved_view = None
         self._tiles = None       # grid + notes as one picture when there are too many notes for canvas items
         self._note_pic = None    # what that picture shows (see redraw)

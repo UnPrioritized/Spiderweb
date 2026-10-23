@@ -123,11 +123,11 @@ class SnapPicker:
         self.menu = tk.Menu(self.button, tearoff=False)
         for snap, _ in SNAP_LIST:
             self.menu.add_radiobutton(label=self.names.get(snap, snap_text(snap)), image=self.pics[snap], compound="left",
-                                      variable=self.pick, value=snap, command=lambda s=snap: var.set(s))
+                                      variable=self.pick, value=snap, command=lambda s=snap: self.var.set(s))
         self.menu.add_radiobutton(label=tr("snap.custom"), image=self.custom_pic, compound="left",
                                   variable=self.pick, value="custom", command=self.open_custom)
         self.button.config(menu=self.menu)
-        Tooltip(self.button, tip or tr("snap.tip"))
+        self.tip = Tooltip(self.button, tip or tr("snap.tip"))
         # (watches the snap only while the button is there: one left behind by a closed Hz bass window
         # configured its gone button, an error on the next snap change / project opened)
         self._trace = var.trace_add("write", lambda *_: self.show())
@@ -135,11 +135,15 @@ class SnapPicker:
                          if e.widget is self.button else None, add="+")
         self.show()
 
-    def use(self, var):
+    def use(self, var, tip):
         """Show and set another snap from now on (the toolbar's: the piano roll's or the track list's)."""
+        self.tip.set_text(tip)
         if var is self.var:
             return
-        self.var.trace_remove("write", self._trace)
+        try:
+            self.var.trace_remove("write", self._trace)
+        except tk.TclError:  # (already gone)
+            pass
         self.var = var
         self._trace = var.trace_add("write", lambda *_: self.show())
         self.show()

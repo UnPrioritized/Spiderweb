@@ -10,6 +10,8 @@ What's new:
 
 • Track list (press Tab, or use the View menu): the tracks your MIDI will have, one row each with a picture of its notes, so you can see where your shapes land before you export. Click a track and press Tab to see only it on the piano roll; the toolbar's Multiple tracks button shows other tracks you pick faintly behind it. Each row has a speaker to mute it (right-click: solo) while playing, and the Conductor row shows the tempo. See Help → Track list.
 
+• While playing, scrolling the piano roll no longer fights you: the view waits until you stop for half a second, then jumps back to the play line.
+
 • Mask preview and its % box now show on the toolbar only while Mask is ticked or there are masks.
 
 • Gate trim (right-click → Gate trim…): each row of touching notes keeps a share of its length (or a number of ticks), from the left or the right, so a circle at 25 % becomes a crescent. Notes keep their lengths. See Help → Gate trim.

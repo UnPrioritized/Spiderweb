@@ -23,7 +23,7 @@ from notes.sustain import is_sustained
 from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, ruler_marks, short_bpm
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
-                              SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
+                              PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
 from window import look
 
@@ -877,8 +877,9 @@ class RollDrawing:
 
     def show_playhead(self, start=False):
         """Move the play line; while playing, turn the page when it gets near the right edge
-        (start: also jump to it if it's off screen). Not while the mouse holds something or a shape is being drawn
-        (user: what's held jumped a page): the line goes on off screen, the page turns once it's let go."""
+        or back to it when it's left of the view). Not while the mouse holds something or a shape is being drawn
+        (user: what's held jumped a page): the line goes on off screen, the page turns once it's let go. Not while
+        the user scrolls / zooms either (PlayFollow): once they stop, the view snaps back to the line."""
         tracks = getattr(self.app, "track_list", None)
         if tracks is not None:  # (the track list's own line and pages)
             tracks.show_playhead(start)
@@ -887,9 +888,13 @@ class RollDrawing:
         x, w = self.t2x(self.app.playhead), self.winfo_width()
         busy = (self.drag or self.draft or self.follow or self.app.vel.edit
                 or self.lasso and not self.lasso["closed"])  # (a lasso loop being clicked: like a polyline, hunt)
-        if self.app.player.running and not busy and (x > w - 6 * self.scale or (start and x < self.kb_w)):
+        if self.play_follow is None:
+            self.play_follow = PlayFollow(self.app)
+        free = self.play_follow.free((self.view_t, self.sx), start)
+        if self.app.player.running and not busy and free and (x > w - 6 * self.scale or x < self.kb_w):
             self.view_t = self.app.playhead
             self.clamp_view()
+            self.play_follow.turned((self.view_t, self.sx))
             self.request_redraw()  # the full redraw puts the line back too
             return
         self.draw_playhead()

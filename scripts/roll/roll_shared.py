@@ -4,6 +4,7 @@ caches."""
 import ctypes
 import math
 import os
+import time
 
 import numpy as np
 
@@ -16,6 +17,32 @@ from window import look
 PREVIEW_LIMIT = 200_000  # a custom shape / funnel being drawn with more notes than this previews as its outline only
 PICK = 10  # how near (screen pixels) the mouse must be to a shape's line / stroke / funnel part to pick it
 LONG_STROKE = 64  # a stroke with more points than this (freehand) shows only some of them until it's picked
+
+
+VIEW_REST = 0.5  # seconds the view must rest (scrolled / zoomed by hand) before playing turns its page again
+
+
+class PlayFollow:
+    """While playing, a view follows the play line only when the user isn't moving it (user 2026-10-23, like
+    Domino: scrolled while playing, it fought the mouse; once they stop, it snaps back to the line). Any change of
+    the view not made by free() itself counts as the user's, and a mouse button held on the view (App.view_held)."""
+
+    def __init__(self, app):
+        self.app, self.seen, self.touched = app, None, 0.0
+
+    def free(self, view, start=False):
+        """view: (where it starts, its zoom) now. True: the page may be turned to the play line now."""
+        now = time.perf_counter()
+        if start:
+            self.touched = 0.0
+        elif self.seen is not None and view != self.seen:
+            self.touched = now
+        self.seen = view
+        return not self.app.view_held and now - self.touched >= VIEW_REST
+
+    def turned(self, view):
+        """The page was turned to view (not the user's move)."""
+        self.seen = view
 
 
 def shown_points(n, picked):

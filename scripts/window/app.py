@@ -337,6 +337,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.synth = None  # the built-in synth (files/synth.py), started when the preview or Built-in BASSMIDI is first used
         self.rendered, self.slot_count, self.voice_slots = NO_NOTES, 0, {}  # (start, end, pitch, velocity, slot, owner) rows
         self.drawn, self.mask_covered = NO_NOTES, set()  # the notes as painted with the masks (mask.mask_view)
+        self.drawn_slots = NO_NOTES[:, 4]  # each of them's real track (drawn's own can be strip colours)
         self.pattern = NO_NOTES  # rendered without the masks' own notes: what masks show (= rendered but in Single)
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
@@ -475,6 +476,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for seq in ("<Alt-Key>", "<Alt-KeyRelease>"):
             self.tk.call("bind", "all", seq, 'if {"%K" in {F4 space}} {tk::WinMenuKey %W %N}')
         self.bind_all("<F1>",lambda e: None if self.in_drawer(e) else self.open_help())
+        # a left / middle button held on the piano roll, its panes, the track list or their scrollbars: playing
+        # doesn't turn their pages meanwhile (roll_shared.PlayFollow, user 2026-10-23)
+        self.view_held = False
+        self.bind_all("<ButtonPress>", self.press_anywhere, add="+")
+        self.bind_all("<ButtonRelease>", lambda e: setattr(self, "view_held", False), add="+")
         for keys, fn in ((UNDO_KEYS, lambda e: self.key_undo(e)), (REDO_KEYS, lambda e: self.key_undo(e, True)),
                          (("<Control-s>",), lambda e: self.save_project()),
                          (("<Control-Shift-s>", "<Control-Shift-S>"), lambda e: self.save_project_as())):
@@ -685,19 +691,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         the highlight follows its music and what was just drawn / pasted / moved (track_list.follow)."""
         if getattr(self, "drawn_all", None) is None:
             return
+        # (slots: each note's real track; Channel per strip paints strips in colours of their own, hunt 10-23)
+        d, slots = self.drawn_all, self.drawn_slots
         if follow:
-            self.track_list.follow(self.drawn_all, self.sels)
-        self.drawn, self.behind_owner = self.track_list.filtered(self.drawn_all, len(self.shapes))
+            self.track_list.follow(d, slots, self.sels)
+        self.drawn, self.behind_owner = self.track_list.filtered(d, slots, len(self.shapes))
         self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
             self.picture_owners_all, False)  # (the tracks behind: their own channel colours)
         # shapes whose notes are all on hidden tracks: their lines hidden too, never picked (user 2026-10-23);
         # shapes without notes stay
         hidden = set()
-        if self.track_list.current is not None and len(self.drawn_all):
-            shown = self.track_list.shown_slots()
-            d = self.drawn_all
-            owners = set(np.unique(d[:, 5]).tolist())
-            hidden = owners - set(np.unique(d[np.isin(d[:, 4], list(shown)), 5]).tolist())
+        if self.track_list.current is not None and len(d):
+            shown = list(self.track_list.shown_slots())
+            n = len(self.shapes) + 1
+            some = np.bincount(d[:, 5], minlength=n) > 0
+            seen = np.bincount(d[np.isin(slots, shown), 5], minlength=n) > 0
+            hidden = set(np.flatnonzero(some & ~seen).tolist())
         if hidden != self.hidden_shapes:
             self.hidden_shapes = hidden
             if self.sels & hidden:  # (a hidden shape can't stay picked: nothing changes out of sight)
@@ -708,6 +717,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The shape numbers the piano roll shows: all but those on tracks the track list hides (Slice / Lasso
         cut only these, hunt 2026-10-23: nothing changes out of sight)."""
         return [i for i in range(len(self.shapes)) if i not in self.hidden_shapes]
+
+    def press_anywhere(self, e):
+        w = str(e.widget)
+        self.view_held = e.num in (1, 2) and any(w == str(p) or w.startswith(str(p) + ".")
+                                                  for p in (self.panes, self.track_box))
 
     def tracks_shown(self):
         return bool(self.track_box.winfo_manager())
@@ -720,14 +734,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.tracks_shown():
             self.track_box.pack_forget()
             self.panes.pack(**place)
-            self.snap_picker.use(self.snap)
+            self.snap_picker.use(self.snap, tr("snap.tip"))
             self.roll.focus_set()
             self.roll.request_redraw()
         else:
             self.tips.show("tracks")
             self.panes.pack_forget()
             self.track_box.pack(**place)
-            self.snap_picker.use(self.track_list.snap)
+            self.snap_picker.use(self.track_list.snap, tr("tracks.snap_tip"))
             self.track_list.focus_set()
             self.track_list.request_redraw()
 
@@ -1545,6 +1559,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                       self.pattern, GHOST_FADE[0] > 0)
         else:  # (toolbar "Preview" off: the pattern drawn whole, only the masks' dashed lines; user)
             self.drawn, self.mask_covered = self.rendered, set()
+        self.drawn_slots = self.drawn[:, 4]  # (the real tracks: the track list's one-track view goes by these)
         if self.strips_window:  # (its strips each in a colour of its own while it shows them)
             self.drawn = strip_colours(self.drawn, self.strips_window.shown_owners())
         self._mask_time = time.perf_counter() - started

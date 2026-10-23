@@ -487,6 +487,7 @@
  "tracks.onion_pick": "Pick tracks…",
  "tracks.onion_alike": "Tracks of the same colour",
  "tracks.onion_all": "All tracks (nothing highlighted)",
+ "tracks.snap_tip": "The track list's snap: where a click puts the play line (Shift on the bar numbers = no snap). Tab back for the piano roll's.",
  "app.history": "History",
  "app.history_tip": "The History list: every change as a step; click one to go back to it.",
  "app.undo": "Undo",

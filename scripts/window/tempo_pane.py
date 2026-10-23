@@ -17,6 +17,7 @@ import bisect
 import copy
 import json
 import math
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -43,6 +44,7 @@ NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 
         10000000)  # numbers filled in on zoom
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
+MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 def ids(items):
     """The ids of items: "is it one of these" without going through them all each time."""
     return {id(it) for it in items}
@@ -525,6 +527,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.bind("<Leave>", lambda e: self.drag or self.placing or self.box.pick_tool_hint())
         bind_double_right(self, self.on_right, self.on_double_right)
         self.menu_wait = None  # a right-click on empty space: its menu, waiting to see if it's a double click
+        self.menu_shut = 0.0  # when the right-click menu last closed (perf_counter)
         self.bind("<ButtonPress-2>", self.start_pan)
         self.bind("<B2-Motion>", self.pan_to)
         self.bind("<MouseWheel>", self.on_wheel)
@@ -918,6 +921,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         roll, tempo = self.app.roll, self.app.tempo
         self.close_typing(True)
         if roll.sx is None or self.view is None:
+            return
+        if time.perf_counter() - self.menu_shut < MENU_CLICK_S:  # (the click that closed the right-click menu)
             return
         self.box.commit_typing()  # (a BPM / formula typed without Enter: to what it was typed for, first)
         roll.focus_set()  # (Space / Ctrl+Z keep working)
@@ -1557,6 +1562,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
             menu.tk_popup(e.x_root, e.y_root)
         finally:
             menu.grab_release()
+            # (Windows: the menu waits here until it closes; the click outside that closed it then comes to the
+            # pane too: it only closes the menu, adds no point, user 2026-10-23)
+            self.menu_shut = time.perf_counter()
 
     def auto_edge(self, c, k):
         """A catch-up's yellow start (k = 3) / teal end (k = 4) back to where Spiderweb puts it (one undo step)."""

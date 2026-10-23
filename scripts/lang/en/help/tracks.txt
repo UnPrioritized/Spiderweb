@@ -4,7 +4,7 @@ The Conductor row on top has a line at each tempo change: the faster the tempo, 
 
 Spiderweb picks the tracks itself (see Channels), so the list only shows them: use it to check which shapes land on which track before you export. Rest the mouse on a track's name to see its channel, how many notes it has and which shapes they come from. Long names end in "…" and show whole there.
 
-Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar under the list to zoom in time, drag an end of the bar on its right to make the rows taller or shorter. Ctrl+wheel zooms in time, Ctrl+Shift+wheel changes the rows' height, Shift+wheel scrolls sideways. Zoomed far out, each column holds 2, 4, 8... bars, so the bar numbers never run into each other. The track list remembers its zoom and where you were, also after Spiderweb restarts.
+Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar under the list to zoom in time, drag an end of the bar on its right to make the rows taller or shorter. Ctrl+wheel zooms in time, Ctrl+Shift+wheel changes the rows' height, Shift+wheel scrolls sideways. Zoomed far out, each column holds 2, 4, 8... bars, so the bar numbers never run into each other. The track list remembers its zoom and where you were, also after Spiderweb restarts. While playing, you can scroll freely: the list (and the piano roll) waits until you stop for half a second, then jumps back to the play line.
 
 ## Highlighting a track
 
@@ -20,10 +20,10 @@ In the track list: Ctrl+click a track to pick it or not, Ctrl+drag over tracks t
 
 ## Mute
 
-Click a track's speaker to mute it: it isn't played until you click it again, and its picture turns grey. Right-click a speaker to hear only that track; right-click it again to hear every track. Muting only changes what you hear: Export MIDI and Export to Domino still write the track.
+Click a track's speaker to mute it: it isn't played until you click it again, and its picture turns grey. Right-click a speaker to hear only that track; right-click it again to hear every track. Muting only changes what you hear: Export MIDI and Export to Domino still write the track. When an edit changes which track a shape lands on, the mute (and a track picked to show behind) goes with that music; if its music is gone, it's cleared.
 
 ## Snap
 
 The track list has its own snap (Bar at first), set with the toolbar's Snap while the track list shows; Tab back and Snap shows the piano roll's again. It's where a click puts the play line. Clicking the bar numbers with Shift held puts it exactly where you click.
 
-Shortcuts like Delete or Ctrl+A do nothing while the track list shows, so nothing changes out of sight. Space still plays.
+Shortcuts like Delete or Ctrl+A do nothing while the track list shows, so nothing changes out of sight. These still work: Space (play), Ctrl+Z / Ctrl+Y (undo / redo), Ctrl+S (save), Ctrl+N and Ctrl+O (new and open project), Ctrl+E (Export MIDI). The menus at the top work too.
