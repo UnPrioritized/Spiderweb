@@ -277,12 +277,17 @@ def boost_db(hz, layers, beats, bpm=None):
             before = last < 0
             last = np.where(before, first, last)
             ring = ring_of(hz)
-            if ring > 0:  # (after a note: where it was let go, fading by CC_DB over the run-on, or its fall if slower)
+            # (after a note: its fall (Release), but never faster than CC_DB over the run-on; no fall = kept where it
+            # was let go, so the soundfont's own ring dies away by itself; the end of a fall is kept too)
+            if ring > 0:
                 sec = np.concatenate([[0.0], np.cumsum(np.diff(beats) / per_second(hz, beats[1:], bpm))])
-                hold = held[last] - CC_DB / ring * np.maximum(0.0, sec - sec[last])
+                fading = held[last] - CC_DB / ring * np.maximum(0.0, sec - sec[last])
             else:
-                hold = np.where(before, held[first], -np.inf)
-            level = np.where(on, np.maximum(held, fall), np.maximum(fall, hold))
+                fading = np.full(len(beats), -np.inf)
+            level = np.where(on, np.maximum(held, fall), np.where(np.isfinite(fall), np.maximum(fall, fading), np.nan))
+            level[before] = held[first]
+            got = ~np.isnan(level)  # (outside a note and its fall: the value it got to, kept)
+            level = level[np.maximum.accumulate(np.where(got, np.arange(len(beats)), 0))]
             db += np.maximum(level, -CC_DB * 2)
     return db
 
