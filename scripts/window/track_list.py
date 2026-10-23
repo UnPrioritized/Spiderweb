@@ -225,6 +225,12 @@ class TrackList(tk.Canvas):
         self.app.track_view()
         self.app.roll.request_redraw()
 
+    def shown_slots(self):
+        """The tracks the piano roll shows: the highlighted one + the ones behind it while Multiple tracks is on."""
+        if self.current is None:
+            return set()
+        return {self.current} | (self.behind if self.onion.get() and self.faint > 0 else set())
+
     def filtered(self, drawn, back):
         """(the notes the piano roll paints, the owner number given to the faint ones or None): with a track
         highlighted only its notes, the tracks picked behind it as faint copies (velocity -2, owner back), the

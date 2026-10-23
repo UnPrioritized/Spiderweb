@@ -492,7 +492,10 @@ class RollDrawing:
             self.draw_ring(w, h)
             self.draw_edge_preview(w, h)
         # a line with tumours / a curve with a pattern: the line as drawn (the origin path), faint and dashed under it
+        hidden = app.hidden_shapes - app.sels  # (on tracks the track list hides: no lines either, user 2026-10-23)
         for i, sh in enumerate(app.shapes):
+            if i in hidden:
+                continue
             if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
                     and (i in app.sels or app.show_lines.get())):
                 self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
@@ -516,7 +519,7 @@ class RollDrawing:
         partners = {i for u in (mask_joined() if app.mask_preview.get() else ()) if set(u) & set(app.sels)
                     for i in u if i < len(app.shapes) and app.shapes[i].get("mask")}
         for i, sh in enumerate(app.shapes):  # (Settings → Look's Shape lines: their thickness, a selected one's a pixel more)
-            if i in app.sels:
+            if i in app.sels or i in hidden:
                 continue
             if sh.get("mask"):  # a mask: always shown, dashed (so it isn't forgotten, mask.py)
                 self.draw_path(sh, mask_colour(i, i in partners), look.LINES + (i in partners), dash=MASK_DASH)

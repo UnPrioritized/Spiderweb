@@ -803,7 +803,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         return i
 
     def masks_top_first(self):
-        return [i for i in range(len(self.app.shapes) - 1, -1, -1) if is_mask(self.app.shapes[i])]
+        hidden = self.app.hidden_shapes - self.app.sels  # (on tracks the track list hides)
+        return [i for i in range(len(self.app.shapes) - 1, -1, -1) if is_mask(self.app.shapes[i]) and i not in hidden]
 
     def mask_at(self, x, y):
         """The mask on top whose line, own notes or area is at x, y, or None."""
@@ -853,6 +854,8 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         top, w = self.app.keys - 0.5, self.winfo_width()
         out = []
         for i, sh in enumerate(self.app.shapes):
+            if i in self.app.hidden_shapes:
+                continue
             r = self.reach([sh])
             if r and r[1] >= top:
                 x = self.t2x((r[0] + r[3]) / 2)
@@ -893,7 +896,7 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         found = set()
         e = 1e-6  # (a line ending on the edge is exactly there on screen too)
         for i, sh in enumerate(self.app.shapes):
-            if among is not None and i not in among:
+            if among is not None and i not in among or i in self.app.hidden_shapes:
                 continue
             for stroke in self.pick_strokes(sh):
                 pts = np.asarray(stroke, float).reshape(-1, 2)
@@ -919,6 +922,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         """The shape whose line is near x, y (the one on top first), else the one on top whose inside it is.
         among: just these shape numbers (top first). lines_only: not by insides."""
         order = range(len(self.app.shapes) - 1, -1, -1) if among is None else among
+        hidden = self.app.hidden_shapes - self.app.sels  # (on tracks the track list hides: never picked)
+        if hidden:
+            order = [i for i in order if i not in hidden]
         for i in order:
             for stroke in self.pick_strokes(self.app.shapes[i]):  # (every piece at once: a formula line has thousands)
                 pts = np.asarray(stroke, float).reshape(-1, 2)
@@ -964,7 +970,9 @@ class PianoRoll(RollDrawing, CustomBox, CurveEditing, FunnelEditing, LiveDrawing
         ppq, near = self.app.ppq, 5 * self.scale
         t, t_lo, t_hi = (self.x2t(v) * ppq for v in (x, x - near, x + near))
         ns = self.visible_notes(t_lo, t_hi)
-        return ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)], t
+        # (the track list's faint tracks behind the highlighted one: no shape of their own, never clicked)
+        return ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)
+                  & (ns[:, 5] < len(self.app.shapes))], t
 
     def note_owners(self, x, y):
         got = self.notes_near(x, y)

@@ -269,6 +269,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes = []
         self.sel = None     # the shape the panel shows (the last one clicked)
         self.sels = set()   # every selected shape
+        self.hidden_shapes = set()  # shapes on tracks the track list hides (track_view): not drawn, not picked
         self.parts = set()  # the selected funnel's highlighted lines / curves (roll_funnel.py)
         self.stroke = None  # the selected custom shape's picked stroke (roll_live.py)
         self.part_main = None  # the highlighted part that was clicked (the others are its linked curves)
@@ -685,6 +686,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.drawn, self.behind_owner = self.track_list.filtered(self.drawn_all, len(self.shapes))
         self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
             self.picture_owners_all, False)  # (the tracks behind: their own channel colours)
+        # shapes whose notes are all on hidden tracks: their lines hidden too, never picked (user 2026-10-23);
+        # shapes without notes stay
+        hidden = set()
+        if self.track_list.current is not None and len(self.drawn_all):
+            shown = self.track_list.shown_slots()
+            d = self.drawn_all
+            owners = set(np.unique(d[:, 5]).tolist())
+            hidden = owners - set(np.unique(d[np.isin(d[:, 4], list(shown)), 5]).tolist())
+        if hidden != self.hidden_shapes:
+            self.hidden_shapes = hidden
+            if self.sels & hidden:  # (a hidden shape can't stay picked: nothing changes out of sight)
+                keep = self.sels - hidden
+                self.select_many(keep, self.sel if self.sel in keep else max(keep, default=None))
 
     def tracks_shown(self):
         return bool(self.track_box.winfo_manager())
@@ -1792,8 +1806,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Ctrl+A: every shape; the Tempo pane clicked last: its whole line."""
         if getattr(self, "key_pane", None) is self.tempo_pane:
             return self.tempo_pane.select_all()
-        if self.shapes:
-            self.select_many(range(len(self.shapes)), self.sel if self.sel is not None else len(self.shapes) - 1)
+        shown = [i for i in range(len(self.shapes)) if i not in self.hidden_shapes]  # (one track shown: its shapes)
+        if shown:
+            self.select_many(shown, self.sel if self.sel in shown else shown[-1])
 
     def on_list_select(self, _):
         rows = self.shape_rows()  # (an Add between group is one row: all its shapes)
