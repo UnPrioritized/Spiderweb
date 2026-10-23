@@ -25,6 +25,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   smooth_sor     nested.smooth_values' loop (Nested fill, Blend)
   limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
                  never waits for Python); the same maths within float rounding
+  midi_walk      midi_scan.walk (Load MIDI: a track's events read + checked), the very same function compiled
+  midi_rewrite   midi_scan.rewrite (a track written again with its ticks moved), the very same function compiled
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
 
@@ -37,6 +39,7 @@ from numba import carray, cfunc, njit, types
 from numba.core import caching
 from numba.typed import List
 
+from files import midi_scan
 from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX,
                          LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP)
 
@@ -1595,6 +1598,12 @@ def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0,
     return out
 
 
+# (Load MIDI: midi_scan's own functions compiled, so the plain ones and these can never differ; Numba keeps them by
+# midi_scan.py and checks that file)
+midi_walk = njit(cache=CACHE, nogil=True)(midi_scan.walk)
+midi_rewrite = njit(cache=CACHE, nogil=True)(midi_scan.rewrite)
+
+
 def warm():
     """Compiles (or loads) every loop with the same kinds of values the program hands them."""
     i1, f, b = np.zeros(1, np.int64), 0.0, np.zeros(1, bool)
@@ -1632,3 +1641,6 @@ def warm():
     hz_order(np.arange(300, dtype=np.int64))
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
     smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
+    u8 = np.zeros(1, np.uint8)
+    midi_walk(u8, 0, 0, True, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
+    midi_rewrite(u8, 0, 0, True, i1, False, u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64))

@@ -142,6 +142,9 @@ Files (the scripts live in scripts/, one subfolder per group):
     system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer
+    midi_read.py     reading any MIDI file safely (Load MIDI): layout, every track checked, fingerprint
+    midi_scan.py     the byte loops reading / writing MIDI tracks (compiled by fastloops.py)
+    midi_copy.py     writing a loaded MIDI file out again, unchanged bytes copied, checked while writing
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)

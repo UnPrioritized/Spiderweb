@@ -1751,5 +1751,13 @@
  "convert.fx": "Claw machine / Strum / Chop pages",
  "help.between.title": "Add between",
  "help.between.tip": "Select two open lines (lines, polylines, curves or arcs), right-click one: Add between…. In-between shapes appear, changing step by step from the first shape into the second. Change one end later and the steps follow.",
- "help.between.words": "in between steps morph blend tween transition interpolate many curves fan spread from one shape to another series copies gradually push pad stick velocity direction throw launch curved path smooth keys"
+ "help.between.words": "in between steps morph blend tween transition interpolate many curves fan spread from one shape to another series copies gradually push pad stick velocity direction throw launch curved path smooth keys",
+ "midi.cant_open": "Couldn't open the MIDI file: {why}",
+ "midi.not_midi": "This isn't a MIDI file (or its start is damaged).",
+ "midi.no_tracks": "This MIDI file has no tracks.",
+ "midi.changed": "The MIDI file was changed or moved while Spiderweb was reading it. Nothing was saved.",
+ "midi.same_file": "Spiderweb can't save over the MIDI file it's reading. Pick another name.",
+ "midi.cant_write": "Couldn't save the MIDI file: {why}",
+ "midi.no_room": "Not enough free disk space: {need} MB needed, {free} MB free.",
+ "midi.check_failed": "Track {track} didn't come out exactly as it should, so nothing was saved."
 }
