@@ -636,31 +636,28 @@ class TrackList(tk.Canvas):
         return got
 
     def bpm_heights(self, xs, inner):
-        """The bar height (pixels, at least 1) at each pixel column xs of the notes' part: the fastest BPM in it,
-        scaled from the song's slowest (1 px) to its fastest (inner); on the doubling scale when the fastest is more
-        than 4 x the slowest (a jump to 2000 BPM would flatten the rest)."""
+        """The line height (pixels) at each pixel column xs of the notes' part: a line only where the tempo changes
+        (like Domino's Conductor track, user 2026-10-23: no blocks between), the fastest of the changes in that
+        column, scaled from the song's slowest (1 px) to its fastest (inner); on the doubling scale when the fastest
+        is more than 4 x the slowest (a jump to 2000 BPM would flatten the rest). 0 = no change there."""
         ticks, bpm, lo, hi = self.heard()
-        ppq = self.app.ppq
-        start = (self.view_t + xs / self.sx) * ppq  # (each column's first tick)
-        at = np.clip(np.searchsorted(ticks, start, "right") - 1, 0, len(ticks) - 1)
-        val = bpm[at]
-        col = np.floor((ticks / ppq - self.view_t) * self.sx).astype(np.int64)  # (changes inside a column)
+        col = np.floor((ticks / self.app.ppq - self.view_t) * self.sx).astype(np.int64)
         on = (col >= 0) & (col < len(xs))
-        if on.any():
-            most = np.full(len(xs), -np.inf)
-            np.maximum.at(most, col[on], bpm[on])
-            val = np.maximum(val, most)
+        val = np.full(len(xs), -np.inf)
+        np.maximum.at(val, col[on], bpm[on])
+        has = np.isfinite(val)
         if hi <= lo:
             share = np.full(len(xs), 0.5)
         elif hi > 4 * lo:
-            share = np.log2(val / lo) / np.log2(hi / lo)
+            share = np.log2(np.where(has, val, lo) / lo) / np.log2(hi / lo)
         else:
-            share = (val - lo) / (hi - lo)
-        return np.maximum(1, np.round(1 + share * (inner - 1))).astype(np.int64)
+            share = (np.where(has, val, lo) - lo) / (hi - lo)
+        return np.where(has, np.maximum(1, np.round(1 + share * (inner - 1))), 0).astype(np.int64)
 
     def draw_conductor(self, w):
-        """The Conductor row: the tempo as bars (the song's own slowest .. fastest, user 2026-10-23: Domino's
-        1-512 BPM wouldn't fit a MIDI file's range) and a short line at each time / key signature."""
+        """The Conductor row: a line at each tempo change, as tall as its BPM (the song's own slowest .. fastest,
+        user 2026-10-23: Domino's 1-512 BPM wouldn't fit a MIDI file's range) and a short line at each time / key
+        signature."""
         s, y0 = self.scale, self.ruler_h
         y1 = y0 + self.row_h
         x0 = self.name_w

@@ -1,6 +1,6 @@
 Press Tab to swap the piano roll for the track list, and Tab again to go back. It shows the tracks your MIDI will have: one row per track, in the same order as Export MIDI and Export to Domino write them, each with a small picture of its notes in its channel's colour.
 
-The Conductor row on top shows the tempo as bars, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the bars use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures.
+The Conductor row on top has a line at each tempo change: the faster the tempo, the taller the line, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the heights use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures.
 
 Spiderweb picks the tracks itself (see Channels), so the list only shows them: use it to check which shapes land on which track before you export. Rest the mouse on a track's name to see its channel, how many notes it has and which shapes they come from. Long names end in "…" and show whole there.
 

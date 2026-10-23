@@ -479,7 +479,7 @@
  "tracks.picker_current": "{name} (highlighted)",
  "tracks.mute_tip": "Mute this track while playing (the saved files keep it). Right-click: only this track plays; right-click again: every track.",
  "tracks.unmute_tip": "Muted: click to hear this track again. Right-click: only this track plays; right-click again: every track.",
- "tracks.bpm_tip": "{bpm} BPM here\nThe bars go from this song's slowest ({lo} BPM) to its fastest ({hi} BPM).",
+ "tracks.bpm_tip": "{bpm} BPM here\nA line at each tempo change: the lowest = this song's slowest ({lo} BPM), the tallest = its fastest ({hi} BPM).",
  "tracks.onion": "Multiple tracks",
  "tracks.onion_tip": "On: the tracks picked in the track list show faintly behind the highlighted one on the piano roll. Off: the highlighted track alone. Works while a track is highlighted (Tab: track list).",
  "tracks.onion_more_tip": "Which tracks show behind the highlighted one",
