@@ -65,6 +65,7 @@ class TrackList(tk.Canvas):
         self._row_of = np.zeros(0, np.int64)  # slot -> row (-1: none)
         self._lo = self._hi = np.zeros(0, np.int64)  # each slot's lowest / highest key
         self._photo = None
+        self._fonts = {}  # font -> (tk font, its measuring function: measurer)
         self._pan = None
         self._job = None
         self.tip = Tooltip(self, "")
@@ -413,6 +414,20 @@ class TrackList(tk.Canvas):
         for bar in self.bars:
             bar.refresh()
 
+    def measurer(self, font):
+        """font's text width in pixels, each text measured once (asking Tk every redraw was a third of it)."""
+        got = self._fonts.get(font)
+        if got is None:
+            f, widths = tkfont.Font(font=font), {}
+
+            def measure(text):
+                w = widths.get(text)
+                if w is None:
+                    w = widths[text] = f.measure(text)
+                return w
+            got = self._fonts[font] = (f, measure)
+        return got[1]
+
     def shown_bars(self, w):
         """[(x, bar number from 0)] of the bar lines shown: zoomed out only every 2nd, 4th... bar (Domino's
         columns of several bars)."""
@@ -442,7 +457,8 @@ class TrackList(tk.Canvas):
         img[:, xs] = hex_rgb(look.TRACK_BAR)
         img[rows >= len(slots)] = base[3]
         self.paint_notes(img, rows)
-        self._photo = Photo(self, aw, ah)
+        if self._photo is None or self._photo.size != (aw, ah):  # (the same size: the picture kept, refilled)
+            self._photo = Photo(self, aw, ah)
         self._photo.put(img)
         self.create_image(x0, y0, image=self._photo.photo, anchor="nw")
 
@@ -470,17 +486,17 @@ class TrackList(tk.Canvas):
         xa = np.floor((n[:, 0] / ppq - self.view_t) * self.sx).astype(np.int64)
         xb = np.ceil((n[:, 1] / ppq - self.view_t) * self.sx).astype(np.int64) - 1
         xa, xb = np.clip(xa, 0, aw - 1), np.clip(np.maximum(xa, xb), 0, aw - 1)
-        cover = np.zeros((ah, aw + 1), np.int32)
-        for k in range(int(thick.max())):
-            yk = y + k
-            on = (thick > k) & (yk >= 0) & (yk < ah)
-            if not on.any():
-                continue
-            flat = cover.reshape(-1)
-            size = flat.size
-            flat += np.bincount(yk[on] * (aw + 1) + xa[on], minlength=size).astype(np.int32)
-            flat -= np.bincount(yk[on] * (aw + 1) + xb[on] + 1, minlength=size).astype(np.int32)
-        hit = np.cumsum(cover, axis=1)[:, :aw] > 0
+        if thick.max() > 1:  # (each pixel row of a thick line its own line: one pass for all)
+            rep = np.repeat(np.arange(len(y)), thick)
+            y = y[rep] + np.arange(len(rep)) - np.repeat(np.cumsum(thick) - thick, thick)
+            xa, xb = xa[rep], xb[rep]
+        on = (y >= 0) & (y < ah)
+        y, xa, xb = y[on], xa[on], xb[on]
+        size = ah * (aw + 1)
+        # (+1 where a line starts, -1 just past its end, added up along each pixel row: covered where > 0)
+        cover = np.bincount(y * (aw + 1) + xa, minlength=size).astype(np.int32)
+        cover -= np.bincount(y * (aw + 1) + xb + 1, minlength=size).astype(np.int32)
+        hit = np.cumsum(cover.reshape(ah, aw + 1), axis=1, dtype=np.int32)[:, :aw] > 0
         colours = np.array([hex_rgb(look.TRACK_MUTED if int(s) in self.muted else self.colour_of(int(s)))
                             for s in self._slots], np.uint8)  # (muted: grey)
         ok = rows < len(self._slots)
@@ -492,7 +508,7 @@ class TrackList(tk.Canvas):
         s, top = self.scale, self.ruler_h
         self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="")
         font = look.font(8, fit=True)
-        measure = tkfont.Font(font=font).measure
+        measure = self.measurer(font)
         end = -math.inf
         for x, n in lines:  # bar numbers in the bottom half
             if x < self.name_w or x < end:
@@ -538,7 +554,7 @@ class TrackList(tk.Canvas):
         s, x1 = self.scale, self.name_w
         y0 = self.ruler_h
         font = look.font(9)
-        measure = tkfont.Font(font=font).measure
+        measure = self.measurer(font)
         self.create_rectangle(0, y0, x1, h, fill=look.TRACK_NAME_BG, outline="")
         top = self.area()[1]
         first = self.top // self.row_h
