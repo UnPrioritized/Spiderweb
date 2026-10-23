@@ -679,7 +679,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def track_view(self):
         """What the piano roll paints (self.drawn) with a track highlighted in the track list: its notes, the tracks
-        picked behind it faint (velocity -2, owner behind_owner: painted first), every other track hidden (user
+        picked behind it faint (velocity -2 - v, owner behind_owner: painted first), every other track hidden (user
         2026-10-23, like Domino). Nothing highlighted: everything."""
         if getattr(self, "drawn_all", None) is None:
             return

@@ -424,7 +424,7 @@ class Playback:
         lo, hi = min(t_from, t_to), max(t_from, t_to)
         now = {}  # (channel, key) -> (start of the latest note there, velocity)
         near = self.roll.visible_notes(lo, hi)
-        near = near[near[:, 3] != -2]  # (the track list's faint tracks: shown only, not listened to)
+        near = near[near[:, 3] >= -1]  # (the track list's faint tracks: shown only, not listened to)
         s_, e_ = near[:, 0], near[:, 1]
         tuned = self.out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():

@@ -158,7 +158,7 @@ def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
     """The notes kept in painting order between pictures (redone when the notes or the selection change): by owner
     rank, each owner's in by_start's order (np.argsort of the starts, stable). cols = roll_shared.slot_colours. ->
     start, end, key, colour (as roll_draw.note_rects' screen() works it out; velocity -1 = ghost, a mask hides it;
-    -2 = a track the track list shows faintly behind the highlighted one),
+    -2 - velocity = a track the track list shows faintly behind the highlighted one),
     first (rank r's notes = first[r] .. first[r + 1]), the longest note."""
     nslots = len(cols)
     n = len(by_start)
@@ -183,8 +183,9 @@ def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
         c = cols[notes[i, 4] % nslots]
         if len(pics) and pics[min(max(notes[i, 5], 0), len(pics) - 1)]:
             c = picgroup + min(notes[i, 4], 15)
-        if notes[i, 3] < 0:  # (-1: a mask's ghost, shade 31; -2: a track shown behind the highlighted one, 30)
-            color[o] = (ghost + c) * 32 + (30 if notes[i, 3] < -1 else 31)
+        if notes[i, 3] < 0:  # (-1: a mask's ghost, shade 31; -2 - velocity: a track shown behind the highlighted
+            v = notes[i, 3]  # one, its velocity's shade 0..30 faded)
+            color[o] = (ghost + c) * 32 + (31 if v == -1 else min(30, (-v - 2) // 4))
         else:
             color[o] = c * 32 + min(notes[i, 3], 127) // 4
     return s, e, key, color, first, longest

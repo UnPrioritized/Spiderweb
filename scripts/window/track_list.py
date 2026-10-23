@@ -233,7 +233,7 @@ class TrackList(tk.Canvas):
 
     def filtered(self, drawn, back):
         """(the notes the piano roll paints, the owner number given to the faint ones or None): with a track
-        highlighted only its notes, the tracks picked behind it as faint copies (velocity -2, owner back), the
+        highlighted only its notes, the tracks picked behind it as faint copies (velocity -2 - v, owner back), the
         rest left out; nothing highlighted = drawn as it is."""
         self.tracks()
         if self.current is None or not len(drawn):
@@ -244,7 +244,9 @@ class TrackList(tk.Canvas):
         if behind:
             faint = drawn[np.isin(slot, behind)].copy()
             if len(faint):
-                faint[:, 3], faint[:, 5] = -2, back
+                # (-2 - velocity: painted faint in its velocity's shade; a mask's ghost (-1) stays one)
+                faint[:, 3] = np.where(faint[:, 3] > 0, -2 - faint[:, 3], faint[:, 3])
+                faint[:, 5] = back
                 out.insert(0, faint)
                 return np.concatenate(out), back
         return out[0], None

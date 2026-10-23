@@ -192,15 +192,17 @@ PICTURE_GROUP = len(NOTE_COLORS) // 32
 # the background to GHOST_FADE[0] % (the toolbar's box by Mask preview; 0 = not drawn at all: mask_view)
 GHOST_BASE = PICTURE_GROUP + 16
 GHOST_FADE = [20]
-# (shade 30 of each ghost group: tracks shown behind the highlighted one, velocity -2, faded to TRACK_FADE[0] %:
-# the track list's Faint box)
+# (shades 0..30 of each ghost group: tracks shown behind the highlighted one, velocity -2 - v, each velocity's
+# shade faded to TRACK_FADE[0] %: the track list's Faint box; user 2026-10-23: they kept their velocity look)
 TRACK_FADE = [25]
 _tables = {}
 
 
-def ghost_code(group, track=False):
-    """The colour number a ghost of a note in this colour group is painted with (track: a track behind)."""
-    return (GHOST_BASE + group) * 32 + (30 if track else 31)
+def ghost_code(group, vel=-1):
+    """The colour number a ghost of a note in this colour group is painted with (vel: its -1 mask ghost or
+    -2 - velocity of a track behind)."""
+    shade = np.where(vel == -1, 31, np.minimum(30, (-np.asarray(vel) - 2) // 4))
+    return (GHOST_BASE + group) * 32 + shade
 
 
 def note_tables(pal):
@@ -216,8 +218,9 @@ def note_tables(pal):
             dark = "#%02x%02x%02x" % tuple(int(c * 0.6) for c in rgb)
             extra += [("#" + h.lower(), dark)] * 32
         away, behind = 1 - GHOST_FADE[0] / 100, 1 - TRACK_FADE[0] / 100
-        extra += [(fade(f, a), fade(b, a)) for f, b in (NOTE_COLORS + extra)[31::32]
-                  for a in [away] * 30 + [behind, away]]
+        groups = NOTE_COLORS + extra
+        extra += [(fade(f, a), fade(b, a)) for g in range(0, len(groups), 32)
+                  for (f, b), a in zip(groups[g:g + 31] + [groups[g + 31]], [behind] * 31 + [away])]
         colors = NOTE_COLORS + extra
         rgb = np.concatenate([NOTE_RGB, np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
                                                   for pair in extra], np.uint8)])
@@ -1131,7 +1134,7 @@ class RollDrawing:
             vel = notes[on, 3]
             code = color * 32 + np.clip(vel, 0, 127) // 4
             return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
-                    np.where(vel < 0, ghost_code(color) - (vel < -1), code) if len(vel) and vel.min() < 0 else code)
+                    np.where(vel < 0, ghost_code(color, vel), code) if len(vel) and vel.min() < 0 else code)
 
         if main is None:
             lo, hi = self.visible_range(t_lo, t_hi)
