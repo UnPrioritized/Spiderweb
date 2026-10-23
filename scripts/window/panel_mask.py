@@ -159,7 +159,7 @@ class MaskPanel:
         """The toolbar's [n] % box right of Mask preview: how much of the hidden parts shows (0 = none, 100 = as
         solid as the notes). An app setting (autosaved, no undo step), greyed while Mask preview is off."""
         box = ttk.Frame(bar)
-        e = self.mask_fade_entry = ttk.Entry(box, textvariable=self.mask_fade_var, width=4, justify="right")
+        e = self.mask_fade_entry = ttk.Entry(box, textvariable=self.mask_fade_var, width=4, justify="center")
         e.pack(side="left")
         lb = ttk.Label(box, text="%")
         lb.pack(side="left", padx=(2, 0))
