@@ -95,7 +95,7 @@ from window import palettes
 from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.tempo_pane import TempoBox
-from window.track_list import TrackList, build_strip
+from window.track_list import TrackList, build_onion, build_strip, sync_onion
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
@@ -385,6 +385,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.live = tk.BooleanVar(value=False)  # drawing tools draw into one custom shape (roll_live.py)
         self.mask = tk.BooleanVar(value=False)  # what's drawn becomes a mask (mask.py)
         self.mask_preview = tk.BooleanVar(value=True)  # masks hide what's outside them (off = the pattern drawn whole)
+        self.onion = tk.BooleanVar(value=False)  # Multiple tracks: the track list's picked tracks behind the highlighted one
         self.mask_fade_var = tk.StringVar(value="20")  # ... how much of it still shows, % (roll_draw.GHOST_FADE)
         self.mask_defaults = dict(MASK_DEFAULTS)  # a new mask's settings: the last ones set in the panel
         self.draw_tool = "line"  # the drawing tool a double right-click goes back to
@@ -457,7 +458,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.live.trace_add("write", lambda *_: (self.sync_custom(), self.schedule_autosave(),
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
-        self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw()))
+        self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw(),
+                                                 self.sync_toolbar_parts()))
+        self.sync_toolbar_parts()
         self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), self.sync_mask_fade(),
                                                          any(map(is_mask, self.shapes)) and self.shapes_changed()))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
@@ -557,6 +560,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         fade = self.build_mask_fade(bar)
         fade.pack(side="left", padx=(2, 0))
         self._tools_together += ((b, fade),)  # (wrapped: the % box stays by its tick)
+        # (shown only while Mask is ticked or there are masks, user 2026-10-23: more room; sync_toolbar_parts)
+        self._mask_preview_parts, self._hidden_parts = (b, fade), set()
+        onion = self.onion_parts = build_onion(self, bar)
+        for w in onion:
+            w.pack(side="left", padx=(12 if w is onion[0] else 0, 0))
+        self._tools_together += (onion,)
         bar = self.option_bar = ttk.Frame(top)
         self._toolbar_rows = self._toolbar_wrap = None
         top.bind("<Configure>", lambda e: self.fit_toolbar())
@@ -654,6 +663,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         inner.pack(fill="both", expand=True)
         add_zoom_bars(inner, self.track_list, up="tracks")
 
+    def sync_toolbar_parts(self):
+        """Mask preview + its % box only while Mask is ticked or some shape is a mask (user 2026-10-23); the
+        Multiple tracks toggle greyed while no track is highlighted."""
+        hidden = set() if self.mask.get() or any(map(is_mask, self.shapes)) else set(self._mask_preview_parts)
+        sync_onion(self)
+        if hidden != self._hidden_parts or hidden and any(w.winfo_manager() for w in hidden):
+            self._hidden_parts = hidden
+            for w in hidden:
+                w.pack_forget()
+            if self._toolbar_wrap is not None:
+                self._toolbar_rows = None  # (laid out again: the row count may change too)
+                self.fit_toolbar()
+
     def track_view(self):
         """What the piano roll paints (self.drawn) with a track highlighted in the track list: its notes, the tracks
         picked behind it faint (velocity -2, owner behind_owner: painted first), every other track hidden (user
@@ -707,6 +729,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             def tool_groups():  # (the pinned tools' buttons right after the picker, each wrapping on its own; room
                 out = []  # kept for the picker's longest tool name and the closed Circle / Polygon group)
                 for g in self._toolbar_wrap[0].groups:
+                    if any(w in self._hidden_parts for w in g):  # (Mask preview while not needed)
+                        continue
                     out.append((g, tp.label_room() if tp.frame in g else 0))
                     if tp.frame in g:
                         out += tp.parts()
@@ -1522,6 +1546,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_list_selection()
         self.roll.request_redraw()
         self.track_list.changed()
+        self.sync_toolbar_parts()
         self.update_status()
         self.schedule_autosave()
         self.sync_history()

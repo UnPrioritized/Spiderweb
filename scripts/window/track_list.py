@@ -22,7 +22,7 @@ from files.speed import Photo
 from notes.engine import slot_track_channel
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from roll.roll_draw import TRACK_FADE
-from roll.roll_shared import MAX_SX, MIN_SX, SLOT_COLORS, grab_while_panning, slot_colours
+from roll.roll_shared import MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, grab_while_panning, slot_colours
 from window import look
 from window.snap_picker import SnapPicker
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
@@ -54,6 +54,9 @@ class TrackList(tk.Canvas):
         self.top = 0       # pixels the track rows are scrolled up
         self.current = None  # the highlighted track's slot (None: the Conductor row / nothing)
         self.behind = set()  # slots shown faintly behind it on the piano roll ("Show multiple tracks")
+        self.onion = app.onion  # ... while this is on (the main toolbar's toggle; off = one track)
+        self.onion.trace_add("write", lambda *_: self.shown_changed())
+        self._sweep = None  # a Ctrl+drag over the rows: (picked or not, the last row it reached)
         self.muted = set()   # slots not played (the speaker in their row; playback only, never the files)
         self.faint = FAINT
         self.faint_var = tk.StringVar(value=str(FAINT))
@@ -74,6 +77,9 @@ class TrackList(tk.Canvas):
         # nothing: the old picture stayed, user 2026-10-23)
         self.bind("<Map>", lambda e: self.request_redraw())
         self.bind("<ButtonPress-1>", self.on_press)
+        self.bind("<B1-Motion>", self.on_drag)
+        self.bind("<ButtonRelease-1>", lambda e: setattr(self, "_sweep", None))
+        self.bind("<ButtonPress-3>", self.on_right)
         self.bind("<Motion>", self.on_motion)
         self.bind("<MouseWheel>", self.on_wheel)
         self.bind("<ButtonPress-2>", self.start_pan)
@@ -166,14 +172,39 @@ class TrackList(tk.Canvas):
         return max(0.0, at + round((beat - at) / step) * step)
 
     def toggle_behind(self, slot):
-        self.behind ^= {slot}
-        self.shown_changed()
+        self.set_behind(self.behind ^ {slot})
+
+    def set_behind(self, slots):
+        """The tracks shown behind the highlighted one; picking some switches the main toolbar's toggle on."""
+        grew = bool(set(slots) - self.behind)
+        self.behind = set(slots)
+        if grew and not self.onion.get():
+            self.onion.set(True)  # (its trace redraws)
+        else:
+            self.shown_changed()
+
+    def behind_near(self, step):
+        """Show multiple tracks ▾ Previous / Next track: the track before / after the highlighted one."""
+        slots = [int(s) for s in self.tracks()]
+        if self.current not in slots:
+            return
+        at = slots.index(self.current) + step
+        if 0 <= at < len(slots):
+            self.set_behind({slots[at]})
+
+    def behind_alike(self):
+        """... Tracks of the same colour: every track whose notes have the highlighted one's colour (channel)."""
+        if self.current is None:
+            return
+        colour = self.colour_of(self.current)
+        self.set_behind({int(s) for s in self.tracks() if int(s) != self.current and self.colour_of(int(s)) == colour})
 
     def shown_changed(self):
         """Which tracks show changed: the list, the picker and the piano roll (when it shows one track) again."""
         self.request_redraw()
         if self.picker:
             self.picker.fill()
+        sync_onion(self.app)
         self.app.track_view()
         self.app.roll.request_redraw()
 
@@ -186,7 +217,7 @@ class TrackList(tk.Canvas):
             return drawn, None
         slot = drawn[:, 4]
         out = [drawn[slot == self.current]]
-        behind = sorted(self.behind - {self.current}) if self.faint > 0 else []
+        behind = sorted(self.behind - {self.current}) if self.faint > 0 and self.onion.get() else []
         if behind:
             faint = drawn[np.isin(slot, behind)].copy()
             if len(faint):
@@ -337,14 +368,53 @@ class TrackList(tk.Canvas):
                 self.app.set_playhead(beat if e.state & 0x1 else self.snapped(beat))
             return
         row = self.row_at(e.y)
+        self._sweep = None
         if row is None:
             return
         if row >= 0 and self.on_speaker(e.x):  # its speaker: muted / heard
             return self.toggle_mute(int(self.tracks()[row]))
-        if e.state & 0x4 and row >= 0:  # Ctrl+click: shown behind the current track or not
-            return self.toggle_behind(int(self.tracks()[row]))
+        if e.state & 0x4 and row >= 0:  # Ctrl+click: shown behind the current track or not; dragged on: every row
+            slot = int(self.tracks()[row])  # crossed the same (user 2026-10-23)
+            self.toggle_behind(slot)
+            self._sweep = (slot in self.behind, row)
+            return
+        if e.x >= self.name_w and self.sx:  # (like many MIDI programs: the play line there too, snapped)
+            beat = max(0.0, self.x2t(e.x))
+            self.app.set_playhead(self.snapped(beat))
         self.current = None if row < 0 else int(self.tracks()[row])
+        if e.state & 0x1 and row >= 0:  # Shift+click: only this track, nothing behind it
+            self.behind = set()
+            self.onion.set(False)
         self.shown_changed()
+
+    def on_drag(self, e):
+        """Ctrl+drag after a Ctrl+click: every row the mouse crosses gets what the pressed row got."""
+        if self._sweep is None:
+            return
+        on, last = self._sweep
+        row = self.row_at(min(max(e.y, self.area()[1]), self.winfo_height() - 1))
+        if row is None or row < 0:
+            row = len(self.tracks()) - 1 if e.y >= self.area()[1] else 0
+        a, b = sorted((last, row))
+        slots = {int(s) for s in self.tracks()[a:b + 1]}
+        new = self.behind | slots if on else self.behind - slots
+        self._sweep = (on, row)
+        if new != self.behind:
+            self.behind = new
+            if on:
+                self.onion.set(True)
+            self.shown_changed()
+
+    def on_right(self, e):
+        """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs)."""
+        row = self.row_at(e.y)
+        if row is None or row < 0 or not self.on_speaker(e.x):
+            return
+        slot, every = int(self.tracks()[row]), {int(s) for s in self.tracks()}
+        self.muted = set() if self.muted == every - {slot} else every - {slot}
+        self.tip.hide()
+        self.request_redraw()
+        self.app.play_changed()
 
     def speaker_x(self):
         return self.name_w - 13 * self.scale
@@ -354,6 +424,10 @@ class TrackList(tk.Canvas):
 
     def on_motion(self, e):
         row = self.row_at(e.y)
+        cursor = SELECT_CURSOR if row is not None and e.x >= self.name_w else "arrow"  # (the Select tool's, like
+        if getattr(self, "_cursor", None) != cursor:                                    # many MIDI programs)
+            self._cursor = cursor
+            self.config(cursor=cursor)
         if row is not None and row >= 0 and self.on_speaker(e.x):
             slot = int(self.tracks()[row])
             text = tr("tracks.unmute_tip" if slot in self.muted else "tracks.mute_tip")
@@ -629,6 +703,30 @@ class TrackList(tk.Canvas):
                              tags="playhead")
 
 
+def build_onion(app, parent):
+    """The main toolbar's Multiple tracks toggle + its ▾ list (user 2026-10-23, like Domino's button: on = the
+    picked tracks show faintly behind the highlighted one, off = that track alone). Greyed while no track is
+    highlighted (sync_onion)."""
+    b = ttk.Checkbutton(parent, text=tr("tracks.onion"), variable=app.onion, style="Toolbutton")
+    Tooltip(b, tr("tracks.onion_tip"))
+    more = ttk.Menubutton(parent, text="▾", style="Toolbutton", width=2)
+    menu = tk.Menu(more, tearoff=False)
+    tl = lambda: app.track_list  # noqa: E731  (made after the toolbar)
+    menu.add_command(label=tr("tracks.onion_previous"), command=lambda: tl().behind_near(-1))
+    menu.add_command(label=tr("tracks.onion_next"), command=lambda: tl().behind_near(1))
+    menu.add_command(label=tr("tracks.onion_pick"), command=lambda: tl().open_picker())
+    menu.add_command(label=tr("tracks.onion_alike"), command=lambda: tl().behind_alike())
+    more.config(menu=menu)
+    Tooltip(more, tr("tracks.onion_more_tip"))
+    return b, more
+
+
+def sync_onion(app):
+    on = getattr(app, "track_list", None) is not None and app.track_list.current is not None
+    for w in getattr(app, "onion_parts", ()):
+        w.state(["!disabled"] if on else ["disabled"])
+
+
 def build_strip(app, parent, tl):
     """The strip above the track list: Show multiple tracks… + Faint [n] %, the track list's own snap."""
     strip = ttk.Frame(parent, padding=(2, 2))
@@ -677,7 +775,11 @@ class BehindWindow(tk.Toplevel):
         self.list.config(yscrollcommand=sb.set)
         self.list.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
-        self.list.bind("<<ListboxSelect>>", lambda e: self.picked())
+        self._drag = None
+        self.list.bind("<ButtonPress-1>", self.press)
+        self.list.bind("<B1-Motion>", self.drag)
+        self.list.bind("<ButtonRelease-1>", lambda e: (setattr(self, "_drag", None), "break")[1])
+        self.list.bind("<Double-Button-1>", self.press)  # (a quick second click toggles again, not a double-click)
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(8, 0))
         ttk.Button(btns, text=tr("tracks.picker_all"), command=lambda: self.set_all(True)).pack(side="left")
@@ -706,13 +808,42 @@ class BehindWindow(tk.Toplevel):
         self.slots = slots
         lb.yview_moveto(top)
 
+    def press(self, e):
+        """A click toggles its row; dragging on gives every row the mouse crosses the same (user 2026-10-23:
+        clicking each one was tedious)."""
+        lb = self.list
+        lb.focus_set()
+        i = lb.nearest(e.y)
+        if i < 0 or i >= len(self.slots):
+            return "break"
+        on = not lb.selection_includes(i)
+        (lb.selection_set if on else lb.selection_clear)(i)
+        self._drag = (on, i)
+        self.picked()
+        return "break"
+
+    def drag(self, e):
+        if self._drag is None:
+            return "break"
+        on, last = self._drag
+        lb = self.list
+        if e.y < 0:  # (past the top / bottom: the list scrolls along)
+            lb.yview_scroll(-1, "units")
+        elif e.y > lb.winfo_height():
+            lb.yview_scroll(1, "units")
+        i = lb.nearest(e.y)
+        a, b = sorted((last, i))
+        for k in range(a, b + 1):
+            (lb.selection_set if on else lb.selection_clear)(k)
+        self._drag = (on, i)
+        self.picked()
+        return "break"
+
     def picked(self):
-        self.tl.behind = {self.slots[i] for i in self.list.curselection() if i < len(self.slots)}
-        self.tl.shown_changed()
+        self.tl.set_behind({self.slots[i] for i in self.list.curselection() if i < len(self.slots)})
 
     def set_all(self, on):
-        self.tl.behind = set(self.slots) if on else set()
-        self.tl.shown_changed()
+        self.tl.set_behind(set(self.slots) if on else set())
 
     def close(self):
         self.tl.picker = None
