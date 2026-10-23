@@ -286,7 +286,7 @@ class LoadWindow(tk.Toplevel):
                             [("use", tr("load.use_changed")), ("find", tr("load.find_original")),
                              ("keep", tr("load.keep_without"))], icon="warning")
         if answer == "use":
-            app.reattach_midi(lm)
+            app.reattach_midi(lm, retempo=True)
         elif answer == "find":
             app.after_idle(lambda: find_loaded(app, pick=True))
         else:

@@ -17,6 +17,7 @@ import bisect
 import copy
 import json
 import math
+import threading
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -653,15 +654,20 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def sel_idx(self, key):
         """Indices of the picked items in tempo[key] ("points" / "catch")."""
-        return [i for i, it in enumerate(self.app.tempo[key]) if self.is_sel(it)]
+        if not self.sel:  # (a loaded MIDI's thousands of points, nothing picked: no walk through them)
+            return []
+        self.is_sel(None)
+        got = self._sel_ids[2]
+        return [i for i, it in enumerate(self.app.tempo[key]) if id(it) in got]
 
     def picked(self):
         """What the bar shows: ("point", [indices]), ("part", i), ("catch", j) or None."""
         tempo = self.app.tempo
         had = len(self.sel)
-        alive = ids(tempo["points"] + tempo["catch"])
-        if any(id(s) not in alive for s in self.sel):
-            self.sel = [s for s in self.sel if id(s) in alive]
+        if self.sel:
+            alive = ids(tempo["points"] + tempo["catch"])
+            if any(id(s) not in alive for s in self.sel):
+                self.sel = [s for s in self.sel if id(s) in alive]
         if self.bands and len(self.sel) < had:  # (undo brought new lists back: the boxes pick what's in them again)
             self.sel = self.in_spans(self.bands)
         pts = tempo["points"]
@@ -1442,7 +1448,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def dense_key(self):
         app = self.app
-        return tempo_text(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered)
+        return tempo_text(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered), id(app.loaded)
 
     def dense_now(self):
         """Beats where notes in a Keep timing part are too close for its tempo (tempo_file.dense_spots), as last
@@ -1470,12 +1476,39 @@ class TempoPane(ConductorMarks, tk.Canvas):
         notes = app.rendered
         # (notes only: CC messages too close give way in the export, never keep the tempo faster)
         ticks = np.concatenate([notes[:, 0], notes[:, 1]]) if len(notes) else np.zeros(0, np.int64)
+        lm = app.loaded
+        if lm is not None and any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
+            if lm._anchors is None:  # (a loaded MIDI's note ticks: one read of the file, on a thread)
+                self.read_anchors(lm)
+                return
+            ticks = np.concatenate([ticks, lm._anchors[0]])
         try:
             spots = sorted(dense_spots(app.tempo, self.base(), app.ppq, app.beats, ticks))
         except MemoryError:
             spots = []
         self._dense = (key, spots)
         self.request_redraw()
+
+    def read_anchors(self, lm):
+        """The loaded MIDI's note ticks read on a thread (Keep timing's "notes too close" lines need them); the
+        lines are worked out once they're in."""
+        if getattr(lm, "_anchor_job", None) is None:
+            job = lm._anchor_job = {"done": False}
+
+            def run():
+                try:
+                    lm.anchors()
+                except Exception:  # (file changed / gone: no lines, the export says why)
+                    pass
+                job["done"] = True
+            threading.Thread(target=run, daemon=True, name="loaded note ticks").start()
+        if lm._anchor_job["done"]:
+            lm._anchor_job = None
+            if lm._anchors is None:
+                return
+            self._dense_job = self.after_idle(self.work_dense)
+        else:
+            self._dense_job = self.after(100, lambda: self.read_anchors(lm))
 
     def confirm(self):
         """Done with the live line (Enter, Esc, a click elsewhere): its squares go. True if there was one."""
@@ -2058,13 +2091,22 @@ class TempoPane(ConductorMarks, tk.Canvas):
                     placed.append((v, False))
         return placed
 
+    def shown_points(self, x0, x1):
+        """(first, end) indices of the points between x0 and x1 (they're in beat order: a loaded MIDI brings
+        thousands, only the ones in view are worked through)."""
+        pts, roll = self.app.tempo["points"], self.app.roll
+        b0, b1 = roll.x2t(x0), roll.x2t(x1)
+        return (bisect.bisect_left(pts, b0 - 1e-9, key=lambda p: p[0]),
+                bisect.bisect_right(pts, b1 + 1e-9, key=lambda p: p[0]))
+
     def line_xy(self, worked, w, kb):
         """The tempo line as (xs, beats, ys): every 2 px, plus each jump drawn exactly upright (the beat just
         before and the beat itself at the same x)."""
         roll, tempo = self.app.roll, self.app.tempo
         xs = list(np.arange(kb, w + 2, 2, dtype=float))
         beats = [roll.x2t(x) for x in xs]
-        jumps = {p[0] for p in tempo["points"]} | {st["line"] for st, _ in worked}
+        i0, i1 = self.shown_points(kb - 2, w + 4)
+        jumps = {p[0] for p in tempo["points"][i0:i1]} | {st["line"] for st, _ in worked}
         jumps |= {st["end"] for st, _ in worked if st["end"] is not None}
         ppq, every = self.app.ppq, tempo.get("every", EVERY)
         if every > 1 and every / ppq * roll.sx >= 3:  # (the interval's steps, upright too, while wide enough to see)
@@ -2186,7 +2228,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.draw_drag(lw)
         ends = {st["end"] for st, _ in worked if st["end"] is not None}
         r = 4 * self.scale
-        for p in tempo["points"]:
+        pts = tempo["points"]
+        i0, i1 = self.shown_points(kb - r, w + r)
+        for p in pts[i0:i1]:
             b, v = p[0], p[1]
             x, y = roll.t2x(b), float(self.b2y(v))
             if x < kb - r or x > w + r:

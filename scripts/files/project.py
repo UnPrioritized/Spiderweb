@@ -1,5 +1,6 @@
 """Project files: saving / opening projects, the autosave, and writing the MIDI file."""
 
+import copy
 import errno
 import json
 import math
@@ -19,7 +20,7 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, one_voice, shape_notes_tracks, slot_ports)
 from notes.hzbass import clean_hz
-from notes.loaded import clean_link
+from notes.loaded import clean_link, conductor_line, retime_for, same_conductor, tempo_tracks
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
@@ -792,7 +793,7 @@ class ProjectFiles:
         zoom = r.sx, r.sy, r.view_top
         data = self.project_data()
         data.update(shapes=[], view=None, playhead=0.0, ppq=str(lm.ppq), bpm="120")
-        data.pop("tempo", None)
+        data["tempo"] = conductor_line(lm)  # (the file's tempos + signatures, group C step 8)
         data.pop("loaded", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
@@ -817,10 +818,15 @@ class ProjectFiles:
         r.request_redraw()
         self.schedule_autosave()
 
-    def reattach_midi(self, lm):
+    def reattach_midi(self, lm, retempo=False):
         """An opened project's MIDI loaded again (window/load_midi.find_loaded): drawn under its shapes as when it was
-        saved. A file of another PPQ (the changed file was picked) gives the project its PPQ (shapes are in beats)."""
+        saved. A file of another PPQ (the changed file was picked) gives the project its PPQ (shapes are in beats);
+        retempo (the changed file picked): its tempos + signatures replace the Conductor line."""
         self.loaded, self.midi_link = lm, lm.link()
+        if retempo and not same_conductor(self.tempo, conductor_line(lm)):
+            self.tempo = conductor_line(lm)
+            self.tempo_pane.forget()
+            self.tempo_changed()
         self.roll.forget_loaded()
         if str(lm.ppq) != self.pvar["ppq"].get():
             self.pvar["ppq"].set(str(lm.ppq))
@@ -933,9 +939,12 @@ class ProjectFiles:
             self.pvar["output"].set(os.path.normpath(path))
 
     def export_loaded(self):
-        """Export MIDI with a loaded MIDI: the file written out exactly as it was loaded (midi_copy: every byte
-        copied and checked). Shapes on top / tempo changes come in later steps of Load MIDI: asked first. In the
-        background (a 17 GB file takes a minute), the status line says how far."""
+        """Export MIDI with a loaded MIDI: the file written out from itself (midi_copy: every byte copied and
+        checked). The Conductor line still the file's own = exactly as it was loaded; changed (group C step 8) =
+        the file's tempo events left out and the new list put into the track that had the first one (or each track
+        that had a list: asked when there were several), Keep timing moving every event by the file's own note
+        ticks. Shapes on top come in a later step: asked first. In the background (a 17 GB file takes a minute),
+        the status line says how far."""
         lm = self.loaded
         if getattr(self, "_exporting", None):
             return
@@ -944,29 +953,60 @@ class ProjectFiles:
         except MidiError:
             messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
             return
-        if (len(self.rendered) or has_tempo(self.tempo)) and not messagebox.askyesno(
+        retimed = not same_conductor(self.tempo, conductor_line(lm))
+        if retimed and lm.mf.damaged():  # (its tempo events can't all be read: written as they are or not at all)
+            messagebox.showerror(tr("project.spiderweb"), tr("load.tempo_damaged", tracks=", ".join(
+                str(t.number + 1) for t in lm.mf.damaged()[:10])), parent=self)
+            return
+        if len(self.rendered) and not messagebox.askyesno(
                 tr("project.spiderweb"), tr("load.export_only_file"), icon="warning", parent=self):
             return
+        targets = []
+        if retimed:
+            lists = tempo_tracks(lm)
+            targets = lists[:1] or [0]  # (no tempo in the file: the first track gets it)
+            if len(lists) > 1:  # (a list copied into several tracks, user 2026-10-23: warned + picked)
+                from window.load_midi import ask_choice
+                got = ask_choice(self, tr("project.spiderweb"), tr("load.tempo_lists", n=len(lists), tracks=", ".join(
+                    str(n + 1) for n in lists[:10]) + (", …" if len(lists) > 10 else ""), first=lists[0] + 1),
+                    [("one", tr("load.tempo_one", first=lists[0] + 1)), ("every", tr("load.tempo_every")), ("cancel", tr("load.cancel"))])
+                if got == "cancel":
+                    return
+                targets = lists if got == "every" else lists[:1]
         path = output_path(self.pvar["output"].get())
         if os.path.exists(path) and not messagebox.askyesno(
                 tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
                                                   basename=os.path.basename(path)), icon="warning", default="no"):
             return
         from files.midi_copy import copy_through
-        job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False}
+        job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
+                                 "plan": None, "step": "load.exporting"}
+        tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
+        keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
 
         def run():
             try:
+                retime = None
+                if retimed:
+                    ticks = loose = np.zeros(0, np.int64)
+                    if keeps:  # (Keep timing: every note start / end of the file keeps its time, one read first)
+                        job["step"] = "load.reading_ticks"
+                        ticks, loose = lm.anchors(cancel=lambda: job["cancel"],
+                                                  progress=lambda d, n: job.update(done=d, total=n))
+                    job["step"] = "project.tempo_working"
+                    plan = job["plan"] = file_plan(tempo, 120, ppq, beats, ticks, ticks, None, loose)
+                    retime = retime_for(lm, tempo, plan, targets)
+                    job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),
-                             cancel=lambda: job["cancel"])  # (closing Spiderweb: its temp file goes, on_close)
+                             cancel=lambda: job["cancel"], retime=retime)  # (closing Spiderweb: its temp file goes)
             except BaseException as e:  # (said below)
                 job["error"] = e
             job["finished"] = True
 
         def poll():
             if not job["finished"]:
-                self.busy(tr("load.exporting", pct=int(100 * job["done"] / max(1, job["total"]))))
+                self.busy(tr(job["step"], pct=int(100 * job["done"] / max(1, job["total"]))))
                 self.after(100, poll)
                 return
             self._exporting = None
@@ -976,6 +1016,11 @@ class ProjectFiles:
                 return
             if isinstance(e, FileChanged):
                 messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
+            elif e is None and job["plan"] is not None:
+                messagebox.showinfo(tr("project.spiderweb"), tr(
+                    "load.exported_tempo", path=path, notes=trn("n.notes", lm.notes, n=lm.notes),
+                    tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
+                    note=self.tempo_notes(job["plan"])))
             elif e is None:
                 messagebox.showinfo(tr("project.spiderweb"), tr("load.exported", path=path,
                                                                 notes=trn("n.notes", lm.notes, n=lm.notes)))

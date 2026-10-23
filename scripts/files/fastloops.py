@@ -27,6 +27,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
                  never waits for Python); the same maths within float rounding
   midi_walk      midi_scan.walk (Load MIDI: a track's events read + checked), the very same function compiled
   midi_rewrite   midi_scan.rewrite (a track written again with its ticks moved), the very same function compiled
+  midi_note_ticks  midi_scan.note_ticks (Keep timing's anchors on a loaded MIDI), the very same function compiled
   midi_index, midi_close, midi_grid, midi_halve   midi_index's functions (Load MIDI's pass: notes paired, the index
                  to read a track from anywhere, the overview picture), the very same functions compiled
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
@@ -1604,6 +1605,7 @@ def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0,
 # midi_scan.py and checks that file)
 midi_walk = njit(cache=CACHE, nogil=True)(midi_scan.walk)
 midi_rewrite = njit(cache=CACHE, nogil=True)(midi_scan.rewrite)
+midi_note_ticks = njit(cache=CACHE, nogil=True)(midi_scan.note_ticks)
 midi_index = njit(cache=CACHE, nogil=True)(_index.index)
 midi_close = njit(cache=CACHE, nogil=True)(_index.close)
 midi_grid = njit(cache=CACHE, nogil=True)(_index.grid)
@@ -1675,7 +1677,9 @@ def warm():
     smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
     u8 = np.zeros(1, np.uint8)
     midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
-    midi_rewrite(u8, 0, 0, True, i1, False, u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64))
+    midi_rewrite(u8, 0, 0, True, i1, i1.copy(), False, np.zeros(128, np.uint8), i1[:0], np.zeros(1, np.int64),
+                 u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64))
+    midi_note_ticks(u8, 0, 0, True, u8.copy(), np.zeros(midi_scan.NT_SIZE, np.int64))
     q, z = np.zeros(_index.QS, np.int64), np.zeros(4, np.int64)
     ix, cov, i32 = _index.new_state(), np.zeros((128, 8), np.int32), np.zeros((128, 8), np.int32)
     midi_index(u8, 0, 0, 0, 60, ix, q, q.copy(), q.copy(), q.copy(), q.copy(), q.copy(), z, z.copy(), z.copy(),

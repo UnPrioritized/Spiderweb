@@ -248,7 +248,8 @@ def finer_parts(tempo, base, ppq, last):
 
 def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=()):
     """What a MIDI file gets: {"events": [(tick, us)] tick 0 first, "bad": beats of catch-up lines that can't work,
-    "sigs": [(tick, top, bottom power)] time signatures, "map": Spiderweb tick(s) -> file tick(s), "jumps": beats of
+    "sigs": [(tick, top, bottom power)] time signatures, "map": Spiderweb tick(s) -> file tick(s) ("bp": the same as
+    (anchors, their file ticks) with Keep timing parts, else None), "jumps": beats of
     the first note starting inside each jump, "hz": beats of Hz bass notes where the heard tempo isn't the project's,
     "dense": where notes in a Keep timing part are closer than one tick at its tempo (it stays faster there),
     "gave": beats of the CC messages (loose) that gave way, a tick or less off their time}.
@@ -257,7 +258,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=())
     (starts, ends) of the Hz basses' notes. Spiderweb's own ticks, the project's PPQ."""
     out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": file_sigs(tempo, ppq),
            "keys": file_keys(tempo, ppq),
-           "map": lambda t: np.asarray(t, np.int64), "jumps": [], "hz": [], "dense": [], "gave": []}
+           "map": lambda t: np.asarray(t, np.int64), "bp": None, "jumps": [], "hz": [], "dense": [], "gave": []}
     if not has_tempo(tempo):
         return out
     start_u = base_us(base)
@@ -338,6 +339,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=())
         return out
 
     if keeps:
+        out["bp"] = (bp_n, bp_f)  # (the map as anchors -> file ticks: a loaded MIDI's export, midi_scan.rewrite)
         out["map"] = to_file
         out["sigs"] = [(int(to_file(t)), top, p) for t, top, p in out["sigs"]]
         out["keys"] = [(int(to_file(t)), sf, mi) for t, sf, mi in out["keys"]]

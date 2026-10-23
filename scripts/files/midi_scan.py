@@ -4,8 +4,10 @@ piece of one track at a time and stops at the last whole event, so a huge track 
 again with the rest (st carries what it needs across pieces).
 
 walk     reads events and counts them, checking each byte (a damaged file never reads past its end)
-rewrite  writes a track again event by event, its ticks moved through a table: an unchanged gap keeps its own
-         bytes, running status as in the file (an explicit status only where the one written last differs)"""
+rewrite  writes a track again event by event (ticks moved by a map, tempo events left out / put in): an
+         unchanged gap keeps its own bytes, running status as in the file (an explicit status only where the one
+         written last differs)
+note_ticks  marks the ticks with note-ons / offs and other channel events (Keep timing's anchors)"""
 
 import numpy as np
 
@@ -188,27 +190,33 @@ def walk(b, p, end, final, rest, st, cnt):
     return p
 
 
-# rewrite(): st = [tick read, running status read, tick written, running status written, End of Track seen]
-RW_TICK, RW_RUN, RW_DONE, RW_WRUN, RW_EOT = range(5)
-RW_SIZE = 5
+# rewrite(): st = [tick read, running status read, tick written, running status written, End of Track seen, next
+# event to put in (ins_t)]
+RW_TICK, RW_RUN, RW_DONE, RW_WRUN, RW_EOT, RW_INS = range(6)
+RW_SIZE = 6
 
 
-def rewrite(b, p, end, final, table, use_table, out, o, st):
-    """Writes the whole events in b[p:end] (a track walk() read without BAD) into out from o, each event's tick
-    moved to table[tick] (use_table; past the table's end: moved like its last tick). Stops at the first event not
+def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st):
+    """Writes the whole events in b[p:end] (a track walk() read without BAD) into out from o. use_map: each event's
+    tick moved through the Keep timing map (bp_n -> bp_f: tempo_file.file_plan's to_file, the very same rule:
+    anchors exactly, between two the same share of the way). drop[type] = 1: meta events of that type left
+    out (a tempo list written anew), their time carried on. ins_t / ins_at / ins_b: events put in (ticks written,
+    in order; event k = ins_b[ins_at[k]:ins_at[k + 1]]), each before the first event at or after its tick; the
+    ones past the track's end before its End of Track (which then moves later). Stops at the first event not
     wholly in b, or one that wouldn't fit in out. Returns (where it stopped in b, where it stopped in out)."""
     tick = st[RW_TICK]
     run = st[RW_RUN]
     done = st[RW_DONE]
     wrun = st[RW_WRUN]
+    k = st[RW_INS]
+    n_ins = len(ins_t)
     room = len(out)
-    last = len(table) - 1
     while p < end:
         if st[RW_EOT]:  # (bytes after End of Track: copied as they are)
-            k = min(end - p, room - o)
-            out[o:o + k] = b[p:p + k]
-            o += k
-            p += k
+            c = min(end - p, room - o)
+            out[o:o + c] = b[p:p + c]
+            o += c
+            p += c
             break
         q = p
         d = 0
@@ -227,6 +235,7 @@ def rewrite(b, p, end, final, table, use_table, out, o, st):
             whole = False
         eot = False
         explicit = False
+        mt = -1
         s = np.int64(0)
         if whole:
             s = np.int64(b[q])
@@ -244,7 +253,8 @@ def rewrite(b, p, end, final, table, use_table, out, o, st):
                     if q >= end:
                         whole = False
                     else:
-                        eot = b[q] == 0x2F
+                        mt = np.int64(b[q])
+                        eot = mt == 0x2F
                         q += 1
                 ln = 0
                 while whole:
@@ -262,10 +272,56 @@ def rewrite(b, p, end, final, table, use_table, out, o, st):
         if not whole:
             break
         t = tick + d
-        if use_table:
-            nt = table[t] if t <= last else table[last] + (t - last)
-        else:
-            nt = t
+        nt = t
+        if use_map:  # (the map: written out here, the compiled loop can't call a helper)
+            lo = 0
+            hi = len(bp_n)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if bp_n[mid] <= t:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            i = max(lo - 1, 0)
+            nt = bp_f[i] + (t - bp_n[i])
+            j = min(i + 1, len(bp_n) - 1)
+            gd = bp_n[j] - bp_n[i]
+            fd = bp_f[j] - bp_f[i]
+            if j > i and t > bp_n[i] and gd > 0 and fd != gd:
+                share = bp_f[i] + np.int64(np.rint((t - bp_n[i]) * fd / gd))
+                if share == bp_f[i]:
+                    share = bp_f[i] + min(fd, 1)
+                nt = share
+        # events put in before this one (all that are left before End of Track)
+        full = False
+        while k < n_ins and (ins_t[k] <= nt or eot):
+            size = ins_at[k + 1] - ins_at[k]
+            if o + 10 + size > room:
+                full = True
+                break
+            gap = max(ins_t[k] - done, 0)
+            nb = 1
+            x = gap >> 7
+            while x > 0:
+                nb += 1
+                x >>= 7
+            for m in range(nb - 1, -1, -1):
+                v = (gap >> (7 * m)) & 127
+                if m > 0:
+                    v |= 128
+                out[o] = v
+                o += 1
+            for m in range(ins_at[k], ins_at[k + 1]):
+                out[o] = ins_b[m]
+                o += 1
+            done += gap
+            k += 1
+        if full:
+            break
+        if mt >= 0 and mt < len(drop) and drop[mt]:  # (left out: its time goes on to the next event)
+            tick = t
+            p = q
+            continue
         dd = nt - done
         if dd < 0:
             dd = 0
@@ -275,8 +331,8 @@ def rewrite(b, p, end, final, table, use_table, out, o, st):
         if o + size > room:
             break
         if dd == d:  # (an unchanged gap keeps its own bytes: odd long ones too)
-            for k in range(p, gap_end):
-                out[o] = b[k]
+            for m in range(p, gap_end):
+                out[o] = b[m]
                 o += 1
         else:
             nb = 1
@@ -284,17 +340,17 @@ def rewrite(b, p, end, final, table, use_table, out, o, st):
             while x > 0:
                 nb += 1
                 x >>= 7
-            for k in range(nb - 1, -1, -1):
-                v = (dd >> (7 * k)) & 127
-                if k > 0:
+            for m in range(nb - 1, -1, -1):
+                v = (dd >> (7 * m)) & 127
+                if m > 0:
                     v |= 128
                 out[o] = v
                 o += 1
         if add:
             out[o] = s
             o += 1
-        for k in range(gap_end, q):
-            out[o] = b[k]
+        for m in range(gap_end, q):
+            out[o] = b[m]
             o += 1
         if s < 0xF0:
             if explicit:
@@ -309,4 +365,75 @@ def rewrite(b, p, end, final, table, use_table, out, o, st):
     st[RW_RUN] = run
     st[RW_DONE] = done
     st[RW_WRUN] = wrun
+    st[RW_INS] = k
     return p, o
+
+
+# note_ticks(): st = [tick, running status]
+NT_TICK, NT_RUN = range(2)
+NT_SIZE = 2
+NOTE_TICK, OTHER_TICK = 1, 2  # mark[tick]: a note-on / off there; another channel event (CC, bend...) there
+
+
+def note_ticks(b, p, end, final, mark, st):
+    """Marks the ticks of the whole events in b[p:end] (a track walk() read without BAD): mark[tick] |= NOTE_TICK
+    for a note-on / off, OTHER_TICK for any other channel event (ticks past mark's end: not marked). Keep timing's
+    anchors on a loaded MIDI. Returns where it stopped (an event not wholly in b: call again with more)."""
+    tick = st[NT_TICK]
+    run = st[NT_RUN]
+    top = len(mark)
+    while p < end:
+        q = p
+        d = 0
+        whole = True
+        while True:
+            if q >= end:
+                whole = False
+                break
+            c = b[q]
+            q += 1
+            d = (d << 7) | (c & 127)
+            if c < 128:
+                break
+        if whole and q >= end:
+            whole = False
+        if not whole:
+            break
+        s = np.int64(b[q])
+        if s >= 128:
+            q += 1
+        else:
+            s = run
+        if s < 0xF0:
+            q += 1 if (s >> 4) == 0xC or (s >> 4) == 0xD else 2
+            if q > end:
+                break
+            if s >= 128:
+                run = s
+            t = tick + d
+            if t < top:
+                mark[t] |= NOTE_TICK if (s >> 4) == 0x8 or (s >> 4) == 0x9 else OTHER_TICK
+        else:
+            if s == 0xFF:
+                if q >= end:
+                    break
+                q += 1
+            ln = 0
+            whole = True
+            while True:
+                if q >= end:
+                    whole = False
+                    break
+                c = b[q]
+                q += 1
+                ln = (ln << 7) | (c & 127)
+                if c < 128:
+                    break
+            q += ln
+            if not whole or q > end:
+                break
+        tick += d
+        p = q
+    st[NT_TICK] = tick
+    st[NT_RUN] = run
+    return p

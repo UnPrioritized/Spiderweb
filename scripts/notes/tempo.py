@@ -709,13 +709,22 @@ def plans(tempo, base, ppq):
 def step_edges(tempo, worked, ppq):
     """[(first tick, end tick, first beat, end beat, ends at a jump)] of every curved stretch: curved parts (their
     points' beats) and curved catch-ups (None, None, False), which change every "every" ticks from their first tick
-    (as the file has them)."""
+    (as the file has them). Remembered for the line (a loaded MIDI's thousands of points: every redraw)."""
     pts = tempo["points"]
-    first = _first_ticks([p[0] for p in pts], ppq)
-    out = [(first[i], first[i + 1], pts[i][0], pts[i + 1][0], to_jump(pts, i)) for i in range(len(pts) - 1)
-           if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]]
-    return out + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), None, None, False) for st, plan in worked
+    key = (tempo_text(tempo), ppq)
+    got = _edges.get(key)
+    if got is None:
+        first = _first_ticks([p[0] for p in pts], ppq)
+        got = [(first[i], first[i + 1], pts[i][0], pts[i + 1][0], to_jump(pts, i)) for i in range(len(pts) - 1)
+               if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]]
+        if len(_edges) > 4:
+            _edges.clear()
+        _edges[key] = got
+    return got + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), None, None, False) for st, plan in worked
                   if plan["ok"] and st["shape"] != "flat"]
+
+
+_edges = {}
 
 
 def step_shares(a, b, starts, every):

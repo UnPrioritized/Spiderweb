@@ -7,17 +7,18 @@ Loader.run() reads the file once (every track checked + fingerprinted + indexed 
 cores), then LoadedMidi holds the result."""
 
 import hashlib
+import json
 import os
 import threading
 import time
 
 import numpy as np
 
-from files import midi_index, speed
+from files import midi_index, midi_scan, speed
 from files.midi_index import (CP_LEAST, GO, GRID_MOST, MORE_CP, MORE_ENT, MORE_GRID, MORE_KEYS, MORE_META, MORE_POOL, META_KEEP,
                               QS, X_END, X_FIRST, X_GHI, X_GLO, X_HANG, X_KHI, X_KLO, X_LONG, X_NCP, X_NENT, X_NMETA,
                               X_NOTES, X_ORPHAN, X_STOP, X_TICK, X_ZERO)
-from files.midi_read import Cancelled, MidiError, MidiFile
+from files.midi_read import PIECE, Cancelled, MidiError, MidiFile
 
 PIC_COLS = 1024  # a track's own picture: this many columns at most across its notes (+ its key range)
 PLAIN_MOST = 16 << 20  # bytes a file may have to load without the speed-ups (plain Python: ~1-2 MB a second)
@@ -51,6 +52,7 @@ class LoadedMidi:
         self.end = max((t.end for t in infos if t.notes), default=0)  # the last note's end (ticks)
         self.last_tick = max((t.last_tick for t in infos), default=0)
         self.first = min((t.first for t in infos if t.notes), default=0)
+        self._anchors = None  # (anchors(): the note ticks, read once when first needed)
 
     def counts(self):
         """What the summary says."""
@@ -76,6 +78,51 @@ class LoadedMidi:
     def held_bytes(self):
         return sum(len(t.data) for t in self.tracks if t.data is not None)
 
+    def anchors(self, cancel=None, progress=None):
+        """(note ticks, other ticks): every tick a note starts / ends on, and the ticks of other channel events (CC,
+        bend...) with no note there; sorted int64 arrays (Keep timing's anchors / loose ticks, tempo_file.keep_gaps).
+        One read of every track (from memory when kept), remembered. cancel() True = Cancelled; progress(done,
+        total) in bytes."""
+        if self._anchors is not None:
+            return self._anchors
+        loops = speed.loops()
+        marks = loops.midi_note_ticks if loops else midi_scan.note_ticks
+        mark = np.zeros(self.last_tick + 1, np.uint8)
+        mf, done = self.mf, 0
+        total = sum(t.size for t in mf.tracks if t.whole)
+        buf = bytearray(PIECE)
+        with open(mf.path, "rb") as f:
+            watch = mf.watch()
+            for t, info in zip(mf.tracks, self.tracks):
+                if not t.whole:  # (damaged: tempo work is locked for the file)
+                    continue
+                st = np.zeros(midi_scan.NT_SIZE, np.int64)
+                if info.data is not None:
+                    marks(info.data, 0, len(info.data), True, mark, st)
+                    done += t.size
+                    continue
+                reader = mf.pieces_of(f, t.start, t.size, buf, watch)
+                filled, final = next(reader)
+                while True:
+                    if cancel and cancel():
+                        raise Cancelled()
+                    view = np.frombuffer(buf, np.uint8, filled) if loops else memoryview(buf)[:filled]
+                    used = marks(view, 0, filled, final, mark, st)
+                    del view
+                    done += used
+                    if progress:
+                        progress(done, total)
+                    if final and used >= filled:
+                        break
+                    try:
+                        filled, final = reader.send(used)
+                    except StopIteration:
+                        break
+        notes = np.flatnonzero(mark & midi_scan.NOTE_TICK).astype(np.int64)
+        other = np.flatnonzero(mark == midi_scan.OTHER_TICK).astype(np.int64)
+        self._anchors = notes, other
+        return self._anchors
+
     def link(self):
         """What a project file keeps to find this MIDI again and know it's the same (never its notes)."""
         return {"path": self.path, "size": self.mf.size, "mtime": self.mf.mtime, "hash": file_hash(self.mf),
@@ -86,6 +133,66 @@ class LoadedMidi:
 
     def track_name(self, number):
         return self.tracks[number].name
+
+
+def conductor_line(lm):
+    """The file's tempos, time and key signatures as a Conductor pane line (notes/tempo.py; group C step 8): each
+    tempo change a held point at its tick, its BPM exactly the file's (60,000,000 / us); a tempo the same as the one
+    before it is no new point; several on one tick (a list copied into several tracks): the last in the file wins,
+    as players read them. Before the first one: MIDI's 120."""
+    from notes.meter import clean_keysigs, clean_sigs
+    from notes.tempo import clean_tempo, empty
+    ppq = lm.ppq or 480
+
+    def every(kind):
+        got = {}
+        for t in lm.tracks:  # (file order: a later track's on the same tick wins)
+            for tick, data in t.metas(kind):
+                got[tick] = data
+        return sorted(got.items())
+    line, last = empty(), None
+    for tick, data in every(TEMPO):
+        if len(data) < 3:
+            continue
+        us = int.from_bytes(data[:3], "big")
+        if us and us != last:
+            line["points"].append([round(tick / ppq, 9), 60_000_000 / us, "hold", "", "lin", False, [0.5, 0.5]])
+            last = us
+    line["sigs"] = clean_sigs([[round(tick / ppq, 9), d[0], 2 ** d[1]] for tick, d in every(TIME_SIG)
+                               if len(d) >= 2 and d[1] <= 7])
+    line["keysigs"] = clean_keysigs([[round(tick / ppq, 9), int.from_bytes(d[:1], "big", signed=True), d[1] == 1]
+                                     for tick, d in every(KEY_SIG) if len(d) >= 2])
+    return clean_tempo(line)
+
+
+CONDUCTOR_KEYS = ("points", "catch", "sigs", "keysigs")  # (what a Conductor line changes in the file)
+
+
+def same_conductor(tempo, line, keys=CONDUCTOR_KEYS):
+    """The Conductor pane's line is still the file's own (conductor_line): its export copies the file as it is."""
+    return all(json.dumps((tempo or {}).get(k) or []) == json.dumps(line.get(k) or []) for k in keys)
+
+
+def tempo_tracks(lm, kinds=(TEMPO,)):
+    """The numbers of the tracks holding meta events of these kinds (the file's tempo list: often copied into
+    several tracks)."""
+    return [t.number for t in lm.tracks if np.isin(t.m_type, kinds).any()]
+
+
+def retime_for(lm, tempo, plan, targets):
+    """midi_copy.Retime for exporting lm with a changed Conductor line: the file's tempo events left out, the new
+    list (plan = tempo_file.file_plan's) put into each of targets (track numbers); the time / key signatures too
+    when they changed (or Keep timing moved the bars); with Keep timing every event moved by the plan's map."""
+    from files.midi_copy import Retime
+    sigs_new = not same_conductor(tempo, conductor_line(lm), ("sigs", "keysigs")) or plan["bp"] is not None
+    drop = [TEMPO] + ([TIME_SIG, KEY_SIG] if sigs_new else [])
+    events = [(t, b"\xff\x51\x03" + int(u).to_bytes(3, "big")) for t, u in plan["events"]]
+    if sigs_new:
+        events += [(t, b"\xff\x58\x04" + bytes([top, power, 24, 8])) for t, top, power in plan["sigs"]]
+        events += [(t, b"\xff\x59\x02" + int(sf).to_bytes(1, "big", signed=True) + bytes([1 if mi else 0]))
+                   for t, sf, mi in plan["keys"]]
+    events.sort(key=lambda e: e[0])  # (stable: on one tick the tempo first)
+    return Retime(plan["bp"], drop, {n: events for n in targets}, tempo_tracks(lm, tuple(drop)))
 
 
 def file_hash(mf):
