@@ -70,7 +70,8 @@ class TrackList(tk.Canvas):
         self._slots = np.zeros(0, np.int64)  # the tracks: their slots, in order
         self._row_of = np.zeros(0, np.int64)  # slot -> row (-1: none)
         self._lo = self._hi = np.zeros(0, np.int64)  # each slot's lowest / highest key
-        self._photo = self._tempo_photo = None
+        self._sheet = None  # paint's picture: {"key", "x", "y" (its first pixel), "w", "h", "photo"}
+        self._tempo_sheet = None  # (key, photo) of the Conductor row's, as wide
         self._heard = None  # (key, heard()'s answer) for the tempo line it was worked out for
         self._fonts = {}  # font -> (tk font, its measuring function: measurer)
         self._pan = None
@@ -129,16 +130,28 @@ class TrackList(tk.Canvas):
     # ------------------------------------------------------------ settings (autosaved, no undo step)
 
     def state(self):
-        return {"faint": self.faint, "snap": self.snap.get()}
+        """Kept in the autosave's window settings: Faint, the snap and the view (user 2026-10-23: zoom remembered,
+        like Domino's; never fitted again once there is one)."""
+        out = {"faint": self.faint, "snap": self.snap.get(), "row_h": round(self.row_h / self.scale, 3)}
+        if self.sx is not None:
+            out.update(sx=self.sx, t=self.view_t, top=round(self.top / self.scale))
+        return out
 
     def set_state(self, data):
         if not isinstance(data, dict):
             return
+        num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)  # noqa: E731
         if type(data.get("faint")) is int and 0 <= data["faint"] <= 100:
             self.faint = TRACK_FADE[0] = data["faint"]
             self.faint_var.set(str(self.faint))
         if isinstance(data.get("snap"), str):
             self.snap.set(clean_snap(data["snap"]))
+        if num(data.get("row_h")):
+            self.row_h = round(min(ROW_MOST, max(ROW_LEAST, data["row_h"])) * self.scale)
+        if num(data.get("sx")) and MIN_SX <= data["sx"] <= MAX_SX:
+            self.sx = float(data["sx"])
+            self.view_t = max(0.0, float(data["t"])) if num(data.get("t")) else 0.0
+            self.top = max(0, round(data["top"] * self.scale)) if num(data.get("top")) else 0
 
     def on_faint(self, e):
         """The Faint % box typed / stepped: the tracks behind drawn again that faint (0 = not drawn)."""
@@ -279,7 +292,8 @@ class TrackList(tk.Canvas):
     def clamp(self):
         h = self.winfo_height() - self.area()[1]
         self.top = max(0, min(self.top, self.rows_height() - max(h, self.row_h)))
-        self.view_t = max(0.0, self.view_t)
+        if self.sx:  # (whole pixels: the kept picture moves by whole pixels, paint)
+            self.view_t = max(0, round(self.view_t * self.sx)) / self.sx
 
     def bar_view(self, across):
         """zoombar's: (start, end, total) of what's seen."""
@@ -313,6 +327,7 @@ class TrackList(tk.Canvas):
             self.top = round(a * f)
         self.clamp()
         self.request_redraw()
+        self.app.schedule_autosave()  # (the zoom is remembered: state)
 
     def zoom_step(self, across, f, x=None):
         """Zoom in (f > 1) / out around x (time) or the middle."""
@@ -330,6 +345,7 @@ class TrackList(tk.Canvas):
             self.top = round(row * self.row_h - (self.winfo_height() - self.area()[1]) / 2)
         self.clamp()
         self.request_redraw()
+        self.app.schedule_autosave()
 
     def on_wheel(self, e):
         notch = 1 if e.delta > 0 else -1
@@ -486,7 +502,7 @@ class TrackList(tk.Canvas):
         self.clamp()
         self.delete("all")
         lines = self.shown_bars(w)
-        self.paint(w, h, lines)
+        self.paint(w, h)
         self.draw_ruler(w, lines)
         self.draw_conductor(w)
         self.draw_names(h)
@@ -515,42 +531,67 @@ class TrackList(tk.Canvas):
         lo, hi = max(0.0, self.x2t(self.name_w)), self.x2t(w)
         return [(self.t2x(b), n) for b, n in bar_lines(sigs, lo, hi, COLUMN * self.scale / self.sx)]
 
-    def paint(self, w, h, lines):
-        """The rows (stripes, the highlighted one, bar lines) and every track's notes as one picture."""
+    def left_px(self):
+        """The view's left edge in whole pixels from the song's start (clamp keeps it whole)."""
+        return int(round(self.view_t * self.sx))
+
+    def paint(self, w, h):
+        """The rows (stripes, the highlighted one, bar lines) and every track's notes as one picture, made twice
+        the view's size around it and only moved while scrolling (user 2026-10-23: dragging the view lagged at 100k
+        notes); made again when the view nears its edge or anything in it changes."""
         x0, y0 = self.area()
         aw, ah = w - x0, h - y0
         if aw < 1 or ah < 1:
             return
+        ox = self.left_px()
+        key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._slots), self.current,
+               frozenset(self.muted), json.dumps(sigs_of(self.app.tempo)), aw, ah, self.app.ppq)
+        sh = self._sheet
+        if sh is None or sh["key"] != key or not (sh["x"] <= ox and ox + aw <= sh["x"] + sh["w"]
+                                                   and sh["y"] <= self.top and self.top + ah <= sh["y"] + sh["h"]):
+            cx = max(0, ox - aw // 2)
+            if self.rows_height() <= ah:
+                cy, ch = 0, ah
+            else:
+                cy, ch = max(0, self.top - ah // 2), 2 * ah
+            img = self.paint_sheet(cx, cy, 2 * aw, ch)
+            photo = sh["photo"] if sh is not None and sh["photo"].size == (2 * aw, ch) else Photo(self, 2 * aw, ch)
+            photo.put(img)
+            sh = self._sheet = {"key": key, "x": cx, "y": cy, "w": 2 * aw, "h": ch, "photo": photo}
+        self.create_image(x0 - (ox - sh["x"]), y0 - (self.top - sh["y"]), image=sh["photo"].photo, anchor="nw")
+
+    def paint_sheet(self, cx, cy, cw, ch):
+        """paint's picture: cw x ch pixels from pixel cx of the song (sideways) and cy of the rows (down)."""
         rh, slots = self.row_h, self._slots
-        rows = (np.arange(ah) + self.top) // rh  # (each pixel row's track row)
+        rows = (np.arange(ch) + cy) // rh  # (each pixel row's track row)
         base = np.array([hex_rgb(look.TRACK_ROW), hex_rgb(look.TRACK_ROW_ALT), hex_rgb(look.TRACK_PICKED),
                          hex_rgb(look.TRACK_EMPTY)], np.uint8)
         kind = np.where(rows >= len(slots), 3, rows % 2)
         if self.current is not None and self.current < len(self._row_of) and self._row_of[self.current] >= 0:
             kind[rows == self._row_of[self.current]] = 2
-        img = np.empty((ah, aw, 3), np.uint8)
+        img = np.empty((ch, cw, 3), np.uint8)
         img[:] = base[kind][:, None, :]
-        edge = ((np.arange(ah) + self.top) % rh == rh - 1) & (rows < len(slots))  # (a faint line under each row)
+        edge = ((np.arange(ch) + cy) % rh == rh - 1) & (rows < len(slots))  # (a faint line under each row)
         img[edge] = hex_rgb(look.TRACK_LINE)
-        xs = np.array([round(x) - x0 for x, _ in lines], np.int64)
-        xs = xs[(xs >= 0) & (xs < aw)]
+        sigs = sigs_of(self.app.tempo)
+        xs = np.array([round(b * self.sx) - cx for b, _ in bar_lines(sigs, cx / self.sx, (cx + cw) / self.sx,
+                                                                     COLUMN * self.scale / self.sx)], np.int64)
+        xs = xs[(xs >= 0) & (xs < cw)]
         img[:, xs] = hex_rgb(look.TRACK_BAR)
         img[rows >= len(slots)] = base[3]
-        self.paint_notes(img, rows)
-        if self._photo is None or self._photo.size != (aw, ah):  # (the same size: the picture kept, refilled)
-            self._photo = Photo(self, aw, ah)
-        self._photo.put(img)
-        self.create_image(x0, y0, image=self._photo.photo, anchor="nw")
+        self.paint_notes(img, rows, cx, cy)
+        return img
 
-    def paint_notes(self, img, rows):
+    def paint_notes(self, img, rows, cx, cy):
         """Each track's notes as lines in its row (its own lowest .. highest key over the row's height), in its
-        channel's colour; a note shorter than a pixel still shows one."""
+        channel's colour; a note shorter than a pixel still shows one. img starts at pixel cx of the song, cy of
+        the rows."""
         n, ppq = self.app.rendered, self.app.ppq
         ah, aw = img.shape[:2]
         if not len(n) or not len(self._slots):
             return
-        first, last = self.top // self.row_h, (self.top + ah) // self.row_h
-        lo_t, hi_t = self.view_t * ppq, (self.view_t + aw / self.sx) * ppq
+        first, last = cy // self.row_h, (cy + ah) // self.row_h
+        lo_t, hi_t = cx / self.sx * ppq, (cx + aw) / self.sx * ppq
         row = self._row_of[n[:, 4]]
         keep = (row >= first) & (row <= last) & (n[:, 1] > lo_t) & (n[:, 0] < hi_t)
         if not keep.any():
@@ -562,9 +603,9 @@ class TrackList(tk.Canvas):
         span = hi - lo + 1
         thick = np.maximum(1, inner // span)  # (few keys: thicker lines)
         used = np.minimum(inner, span * thick)
-        y = row * self.row_h - self.top + round(PAD * self.scale) + (inner - used) // 2 + (hi - key) * used // span
-        xa = np.floor((n[:, 0] / ppq - self.view_t) * self.sx).astype(np.int64)
-        xb = np.ceil((n[:, 1] / ppq - self.view_t) * self.sx).astype(np.int64) - 1
+        y = row * self.row_h - cy + round(PAD * self.scale) + (inner - used) // 2 + (hi - key) * used // span
+        xa = np.floor(n[:, 0] / ppq * self.sx).astype(np.int64) - cx
+        xb = np.ceil(n[:, 1] / ppq * self.sx).astype(np.int64) - 1 - cx
         xa, xb = np.clip(xa, 0, aw - 1), np.clip(np.maximum(xa, xb), 0, aw - 1)
         if thick.max() > 1:  # (each pixel row of a thick line its own line: one pass for all)
             rep = np.repeat(np.arange(len(y)), thick)
@@ -635,13 +676,15 @@ class TrackList(tk.Canvas):
         self._heard = (key, got)
         return got
 
-    def bpm_heights(self, xs, inner):
+    def bpm_heights(self, xs, inner, cx=None):
         """The line height (pixels) at each pixel column xs of the notes' part: a line only where the tempo changes
         (like Domino's Conductor track, user 2026-10-23: no blocks between), the fastest of the changes in that
         column, scaled from the song's slowest (1 px) to its fastest (inner); on the doubling scale when the fastest
-        is more than 4 x the slowest (a jump to 2000 BPM would flatten the rest). 0 = no change there."""
+        is more than 4 x the slowest (a jump to 2000 BPM would flatten the rest). 0 = no change there. xs count from
+        pixel cx of the song (None: the view's left edge)."""
         ticks, bpm, lo, hi = self.heard()
-        col = np.floor((ticks / self.app.ppq - self.view_t) * self.sx).astype(np.int64)
+        cx = self.left_px() if cx is None else cx
+        col = np.floor(ticks / self.app.ppq * self.sx).astype(np.int64) - cx
         on = (col >= 0) & (col < len(xs))
         val = np.full(len(xs), -np.inf)
         np.maximum.at(val, col[on], bpm[on])
@@ -661,20 +704,24 @@ class TrackList(tk.Canvas):
         s, y0 = self.scale, self.ruler_h
         y1 = y0 + self.row_h
         x0 = self.name_w
-        aw = w - x0
-        if aw >= 1 and self.row_h > 4:
-            inner = self.row_h - 2 * round(PAD * s) - 1
-            tall = self.bpm_heights(np.arange(aw), inner)
-            h = self.row_h - 1
-            img = np.empty((h, aw, 3), np.uint8)
-            img[:] = hex_rgb(look.TRACK_ROW)
-            ys = np.arange(h)[:, None]
-            bottom = h - round(PAD * s)
-            img[(ys >= bottom - tall[None, :]) & (ys < bottom)] = hex_rgb(look.TRACK_TEMPO)
-            if self._tempo_photo is None or self._tempo_photo.size != (aw, h):
-                self._tempo_photo = Photo(self, aw, h)
-            self._tempo_photo.put(img)
-            self.create_image(x0, y0, image=self._tempo_photo.photo, anchor="nw")
+        sh = self._sheet
+        if sh is not None and self.row_h > 4:  # (as wide as the rows' picture, moved with it)
+            h, cx, cw = self.row_h - 1, sh["x"], sh["w"]
+            lo_hi = self.heard()[2:]
+            key = (self._heard[0], lo_hi, self.sx, h, cx, cw)
+            got = self._tempo_sheet
+            if got is None or got[0] != key:
+                inner = self.row_h - 2 * round(PAD * s) - 1
+                tall = self.bpm_heights(np.arange(cw), inner, cx)
+                img = np.empty((h, cw, 3), np.uint8)
+                img[:] = hex_rgb(look.TRACK_ROW)
+                ys = np.arange(h)[:, None]
+                bottom = h - round(PAD * s)
+                img[(ys >= bottom - tall[None, :]) & (ys < bottom)] = hex_rgb(look.TRACK_TEMPO)
+                photo = got[1] if got is not None and got[1].size == (cw, h) else Photo(self, cw, h)
+                photo.put(img)
+                got = self._tempo_sheet = (key, photo)
+            self.create_image(x0 - (self.left_px() - cx), y0, image=got[1].photo, anchor="nw")
         tempo = self.app.tempo
         beats = {sg[0] for sg in sigs_of(tempo)[1:]} | {k[0] for k in tempo.get("keysigs") or []}
         for b in beats:
