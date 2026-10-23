@@ -8,7 +8,9 @@ Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar
 
 ## Highlighting a track
 
-Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you click the Conductor row in the track list (nothing highlighted shows every track again). Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, and Ctrl+A leaves them out. Hidden notes still play and still go into the files.
+Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you click the Conductor row in the track list (nothing highlighted shows every track again). Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
+
+When a shape you draw, paste or move lands on another track, the highlight moves to that track, so it never vanishes under the mouse (if it lands on several tracks, every track shows). When channels are handed out again (for example a shape drawn over others), the highlight stays with the music it was showing.
 
 ## Multiple tracks
 
