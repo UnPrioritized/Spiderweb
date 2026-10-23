@@ -810,8 +810,11 @@ class TrackList(tk.Canvas):
             if self._row_job is not None:
                 self._row_job.stop = True
                 self._row_job = None
-        rate = getattr(lm, "draw_rate", None) or RL.RATE[lm.mode]
-        until = time.perf_counter() + ROWS_INLINE_S
+        near = range(max(0, 2 * first - last), last + (last - first) + 1)  # (rows kept: a sheet's height each way)
+        for r in [r for r in self._row_masks if r not in near]:
+            del self._row_masks[r]
+        rate = RL.rate_of(lm)
+        until = time.perf_counter() + (ROWS_INLINE_S if RL.speed.loops() else 0)
         waiting = []
         for r in range(first, last + 1):
             t = lm.tracks[r]
@@ -834,11 +837,13 @@ class TrackList(tk.Canvas):
             if not len(ys):
                 continue
             # (each pixel row = the keys it covers, top key first: any of them sounding)
-            top = got[::-1][:(ys[-1] + 1 - y0) * span // used]
+            top = got[::-1][:-(-(ys[-1] + 1 - y0) * span // used)]  # (keys up to the last pixel row's, rounded up)
             k0 = (ys - y0) * span // used
             mask = np.logical_or.reduceat(top, k0, axis=0) if span > used else top[k0]
             colour = hex_rgb(look.TRACK_MUTED if -1 - r in self.muted else self.colour_of(-1 - r))
             img[ys[0]:ys[-1] + 1][mask] = colour
+        if RL.changed(self, lm):  # (the file changed / went: said once, the small pictures stay)
+            waiting = []
         if waiting and (self._row_job is None or self._row_job.place != place):
             if self._row_job is not None:
                 self._row_job.stop = True
@@ -858,6 +863,7 @@ class TrackList(tk.Canvas):
             self._row_masks.update(job.masks)
             self._sheet = None
             self.request_redraw()
+        RL.changed(self, job.lm)
 
     def draw_ruler(self, w, lines):
         s, top = self.scale, self.ruler_h

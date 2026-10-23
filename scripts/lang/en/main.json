@@ -1778,7 +1778,7 @@
  "load.from_file": "Read them from the MIDI file",
  "load.from_file_info": "Uses little memory. Zoomed-in views read the file again, so they draw a little slower. The file must stay where it is.",
  "load.keep": "Keep them in memory ({size})",
- "load.keep_info": "Zoomed-in views draw faster. {free} of memory is free now.",
+ "load.keep_info": "Zoomed-in views draw faster. {free} of memory is free now. Export MIDI still copies from the file, so keep it where it is.",
  "load.keep_no": "Not offered: it needs {need} of free memory (with 2 GB to spare), {free} is free now.",
  "load.keep_unknown": "Not offered: this PC doesn't say how much memory is free.",
  "load.new_project": "The MIDI opens as a new project. Your shapes leave the piano roll (Undo can't bring them back).",
@@ -1815,5 +1815,9 @@
  "load.exporting": "Exporting the loaded MIDI… {pct} %",
  "load.exported": "Saved the loaded MIDI exactly as it was loaded ({notes}):\n{path}",
  "load.export_failed": "Exporting the loaded MIDI failed: {e}\nNothing was saved.",
- "load.sum_damaged": "Track {tracks} is damaged: its notes are shown up to where the damage starts. Exporting keeps its bytes exactly as they are."
+ "load.sum_damaged": "Track {tracks} is damaged: its notes are shown up to where the damage starts. Exporting keeps its bytes exactly as they are.",
+ "load.file_changed": "The loaded MIDI file was changed, moved or deleted since it was loaded. The notes already drawn stay, but no more are read from it.\n\nLoad it again with File → Load MIDI… to see it as it is now.",
+ "load.export_gone": "The loaded MIDI file was changed, moved or deleted since it was loaded, so it can't be copied. Nothing was saved.\n\nPut it back, or load it again with File → Load MIDI…:\n{path}",
+ "load.close_exporting": "The loaded MIDI is still being exported. Stop the export and close Spiderweb?\n\nNothing of the export is kept.",
+ "load.new_closes": "The loaded MIDI is closed too (Ctrl+Z won't bring it back)."
 }

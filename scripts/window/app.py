@@ -1892,7 +1892,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         plain = not any(self.tempo.get(k) for k in ("points", "catch", "keysigs")) and sigs_of(self.tempo) == [DEFAULT_SIG]
         if not self.shapes and plain and usual and not boxes[1] and self.loaded is None:
             return
-        if not messagebox.askyesno(tr("app.spiderweb_2"), tr("app.new_ask"), icon="warning", parent=self):
+        ask = tr("app.new_ask") + ("\n\n" + tr("load.new_closes") if self.loaded is not None else "")
+        if not messagebox.askyesno(tr("app.spiderweb_2"), ask, icon="warning", parent=self):
             return
         if self.loaded is not None:  # (a loaded MIDI goes too; Undo brings back the shapes only)
             self.loaded = None
@@ -2651,6 +2652,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         if self.hz_window and self.hz_window.draft is not None:  # (a path drawn there: made, as when the Hz bass
             self.hz_window.make_draft()  # window itself is closed)
+        job = getattr(self, "_exporting", None)
+        if job:  # (a loaded MIDI's export in the background: asked, stopped, its half-written file deleted; hunt)
+            if not messagebox.askyesno(tr("app.spiderweb_2"), tr("load.close_exporting"), icon="warning",
+                                       default="no", parent=self):
+                return
+            job["cancel"] = True
+            until = time.perf_counter() + 10
+            while not job["finished"] and time.perf_counter() < until:
+                self.update()
+                time.sleep(0.02)
         if not self.close_autosave():
             return
         self.stop_play()

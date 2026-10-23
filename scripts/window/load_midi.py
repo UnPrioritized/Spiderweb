@@ -165,7 +165,7 @@ class LoadWindow(tk.Toplevel):
 
     def finished(self):
         ld = self.loader
-        if isinstance(ld.error, Cancelled):
+        if isinstance(ld.error, Cancelled) or ld.cancelled:  # (Cancel in the last step too: the project stays, hunt)
             self.destroy()
             return
         if ld.error is not None:

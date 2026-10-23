@@ -1380,7 +1380,15 @@ class RollDrawing:
                     line[x * 3:x * 3 + 3] = px(c)
             patterns[color] = bytes(line)
         img = np.frombuffer(b"".join(patterns[c] for c in row_color), np.uint8).reshape(ih, iw, 3).copy()
-        if getattr(self.app, "loaded", None) is not None and self.app.show_notes.get():
+        loaded = getattr(self.app, "loaded", None) is not None and self.app.show_notes.get()
+        tl = getattr(self.app, "track_list", None)
+        if loaded and tl is not None and tl.current is not None and tl.current < 0:
+            # (a loaded track highlighted: Spiderweb's notes shown are only faint ones picked behind it, so they go
+            # under it, hunt 2026-10-24)
+            self.paint_rects(img, rects, region, ring)
+            self.paint_loaded(img, region)
+            return img
+        if loaded:
             self.paint_loaded(img, region)  # (a loaded MIDI's notes: under Spiderweb's own)
         self.paint_rects(img, rects, region, ring)
         return img

@@ -11,6 +11,7 @@ of colour numbers (roll_draw's note colours: the channel's, shaded by velocity):
   it reaches (stand_in), the OVERVIEW elsewhere: from the loading pass's grid (which track sounds highest in each
   key x 1/16 beat), a few ms at any size. Far out on a giant song (EXACT_MOST_S) the overview alone."""
 
+import math
 import threading
 import time
 
@@ -18,6 +19,7 @@ import numpy as np
 
 from files import midi_index, speed
 from files.midi_index import C_SIZE, C_STOP, C_TICK, C_RUN, QS
+from files.midi_read import MidiError
 from roll.roll_draw import GHOST_BASE, TRACK_FADE, note_tables
 from roll.roll_shared import COLOURS_16
 
@@ -31,6 +33,7 @@ STRIP_S = 0.05  # ... a strip scrolled into past one's edge (a slower frame now 
 EXACT_MOST_S = 8.0  # ... this slow at most, on the background thread; slower = the overview alone
 KEEP = 3  # exact pictures kept (newest first)
 RATE = {"memory": 1.5e9, "file": 0.8e9}  # bytes a second read + painted, until pictures have been timed
+RATE_PLAIN = 0.5e6  # ... without the speed-ups (plain Python)
 TIMED_LEAST = 4 << 20  # pictures reading fewer bytes don't time the rate (their fixed costs would)
 
 
@@ -115,18 +118,21 @@ class LoadedNotes:
             self._keep_ahead(lm, style, e, d, ax, bx, W, order, faint)
             return cut(e, rows, d, W)
         M = int(W * MARGIN)
-        rate = getattr(lm, "draw_rate", None) or RATE[lm.mode]
-        got = self._extend(lm, style, ax, bx, W, M, rate, order, faint)
+        rate = rate_of(lm)
+        now_ok = speed.loops() is not None and not changed(self, lm)  # (plain Python: never in the frame, hunt)
+        got = self._extend(lm, style, ax, bx, W, M, rate, order, faint) if now_ok else None
         if got is not None:
             e, d = got
             self._keep_ahead(lm, style, e, d, ax, bx, W, order, faint)
             return cut(e, rows, d, W)
-        if guess_bytes(lm, order, ax, bx + M, W + 2 * M) / rate <= INLINE_S:
+        if now_ok and guess_bytes(lm, order, ax, bx + M, W + 2 * M) / rate <= INLINE_S:
             e = self._make_now(lm, style, ax, bx + M, W + 2 * M, order, faint)
             if e is not None:
                 return cut(e, rows, M, W)
         slow = guess_bytes(lm, order, ax, bx, W) / rate
-        if slow <= INLINE_S:
+        if changed(self, lm):  # (the file changed / went: what's made stays, nothing more is read)
+            slow = EXACT_MOST_S if any(e.style == style for e in getattr(self, "_loaded_exact", ())) else math.inf
+        elif now_ok and slow <= INLINE_S:
             e = self._make_now(lm, style, ax, bx, W, order, faint)
             if e is not None:
                 self._want(lm, style, ax, bx, W, order, faint, rest=False)  # (the wide one next, behind)
@@ -138,7 +144,8 @@ class LoadedNotes:
             over = self._loaded_over = (key, *made)
         if slow > EXACT_MOST_S:
             return over[1], over[2]
-        self._want(lm, style, ax, bx, W, order, faint, rest=True)
+        if not changed(self, lm):
+            self._want(lm, style, ax, bx, W, order, faint, rest=True)
         old = next((e for e in getattr(self, "_loaded_exact", ()) if e.style == style), None)
         if old is None:
             return over[1], over[2]
@@ -268,6 +275,7 @@ class LoadedNotes:
             self.request_redraw()
         if job.done:
             self._loaded_job = None
+            changed(self, job.lm)
             return
         self.after(POLL_MS, self._poll_exact)
 
@@ -348,8 +356,28 @@ def guess_bytes(lm, order, ax, bx, W):
     return float(cum[g1] - cum[g0]) + float(lead[(first <= t1) & (end > t0)].sum())
 
 
+def rate_of(lm):
+    """Bytes a second exact pictures are read + painted at: as timed, else the first guess (plain Python: far
+    slower, hunt 2026-10-24: a guess made for the compiled loops froze the window for seconds a zoom step)."""
+    return getattr(lm, "draw_rate", None) or (RATE[lm.mode] if speed.loops() else RATE_PLAIN)
+
+
+def changed(widget, lm):
+    """True once the loaded file changed / went since loading (read from the file: exact_tab found it); said once
+    (hunt 2026-10-24: a file saved again elsewhere was drawn as its new notes, without a word)."""
+    if not getattr(lm, "changed", False):
+        return False
+    if not getattr(lm, "told", False):
+        lm.told = True
+        from tkinter import messagebox
+        from files.lang import tr
+        widget.after_idle(lambda: messagebox.showwarning(tr("load.title"), tr("load.file_changed"),
+                                                         parent=widget.winfo_toplevel()))
+    return True
+
+
 def learn_rate(lm, n, seconds):
-    if n >= TIMED_LEAST and seconds > 0:
+    if (n >= TIMED_LEAST or not speed.loops()) and n and seconds > 0:
         r = n / seconds
         was = getattr(lm, "draw_rate", None)
         lm.draw_rate = r if was is None else (was + r) / 2
@@ -539,7 +567,15 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     st = np.zeros(C_SIZE, np.int64)
     normal, behind = colours(), colours(True)
     order = tracks if tracks is not None else range(len(lm.tracks) - 1, -1, -1)
-    f = None if lm.mode == "memory" else open(lm.path, "rb")
+    f = None
+    if lm.mode != "memory":
+        if not still_same(lm):
+            return None, None
+        try:
+            f = open(lm.path, "rb")
+        except OSError:
+            lm.changed = True
+            return None, None
     buf = None
     try:
         for n in order:
@@ -575,6 +611,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
                 f.seek(lm.mf.tracks[n].start + start)
                 got = f.readinto(memoryview(buf)[:size])
                 if got != size:
+                    lm.changed = True
                     return None, None
                 b = buf[:size]
             st[:] = 0
@@ -588,4 +625,18 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     finally:
         if f is not None:
             f.close()
+    if f is not None and not still_same(lm):  # (changed while it was read: nothing read is trusted)
+        return None, None
     return tab, marks
+
+
+def still_same(lm):
+    """The loaded file is still the one read (size + time); False (and lm.changed) once it isn't."""
+    if getattr(lm, "changed", False):
+        return False
+    try:
+        lm.mf.same()
+    except MidiError:
+        lm.changed = True
+        return False
+    return True

@@ -45,7 +45,7 @@ from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, track
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
 from files.errors import write_log
-from files.midi_read import MidiError
+from files.midi_read import Cancelled, FileChanged, MidiError
 from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
@@ -893,6 +893,11 @@ class ProjectFiles:
         lm = self.loaded
         if getattr(self, "_exporting", None):
             return
+        try:  # (Keep in memory too: the copy is made from the file, hunt 2026-10-24)
+            lm.mf.same()
+        except MidiError:
+            messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
+            return
         if (len(self.rendered) or has_tempo(self.tempo)) and not messagebox.askyesno(
                 tr("project.spiderweb"), tr("load.export_only_file"), icon="warning", parent=self):
             return
@@ -902,12 +907,13 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)), icon="warning", default="no"):
             return
         from files.midi_copy import copy_through
-        job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False}
+        job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False}
 
         def run():
             try:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n))
+                copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),
+                             cancel=lambda: job["cancel"])  # (closing Spiderweb: its temp file goes, on_close)
             except BaseException as e:  # (said below)
                 job["error"] = e
             job["finished"] = True
@@ -920,7 +926,11 @@ class ProjectFiles:
             self._exporting = None
             self.busy(None)
             e = job["error"]
-            if e is None:
+            if isinstance(e, Cancelled):
+                return
+            if isinstance(e, FileChanged):
+                messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
+            elif e is None:
                 messagebox.showinfo(tr("project.spiderweb"), tr("load.exported", path=path,
                                                                 notes=trn("n.notes", lm.notes, n=lm.notes)))
             elif isinstance(e, MidiError):

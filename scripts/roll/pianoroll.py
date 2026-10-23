@@ -675,7 +675,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         notes = self.app.rendered
         if self._end_of is not notes:
             self._end_of, self._end = notes, (float(notes[:, 1].max()) if len(notes) else 0.0)
-        return self._end / self.app.ppq + 8 * self.app.beats
+        lm = getattr(self.app, "loaded", None)  # (a loaded MIDI's notes count too, hunt 2026-10-24)
+        end = max(self._end, float(lm.end) if lm is not None and lm.notes else 0.0)
+        return end / self.app.ppq + 8 * self.app.beats
 
     def bar_view(self, across):
         """(start, end, total) of what's seen, for a scrollbar: beats across, keys counted from the top down.
