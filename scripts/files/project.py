@@ -20,7 +20,8 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, one_voice, shape_notes_tracks, slot_ports)
 from notes.hzbass import clean_hz
-from notes.loaded import clean_link, conductor_line, file_tempos, retime_for, same_conductor, tempo_tracks
+from notes.loaded import (clean_link, conductor_line, file_tempos, retime_for, same_conductor, tempo_new,
+                          tempo_tracks)
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
@@ -36,7 +37,7 @@ from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
-from notes.tempo import clamp_bpm, clean_tempo, has_tempo
+from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text
@@ -231,8 +232,9 @@ class ProjectFiles:
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
             "free_smooth": self.free_smooth,
-            # (only when there is one: files without a tempo line stay as they were)
-            **({"tempo": self.tempo} if self.tempo["points"] or self.tempo["catch"] else {}),
+            # (whenever anything in it isn't the default: a 3/4 with no tempo point too, hunt 2026-10-24; a plain
+            # one is left out, so files without a tempo line stay as they were)
+            **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
         }
 
@@ -396,6 +398,7 @@ class ProjectFiles:
         self.shapes = shapes
         self.loaded = None  # (another project: its loaded MIDI goes; attach_midi puts a new one in after this)
         self.midi_link = link
+        self.drop_finding()
         self.roll.forget_loaded()
         self.tempo = tempo
         # (only an autosave has them: the project file it belonged to, and whether it had unsaved changes)
@@ -503,8 +506,9 @@ class ProjectFiles:
             messagebox.showwarning(tr("project.spiderweb"), intro + "\n\n".join(self.load_notes) + outro,
                                    parent=self)
 
-    def write_json(self, path, window=False, midi=None):
-        data = self.project_data()
+    def write_json(self, path, window=False, midi=None, data=None):
+        """data: the project as project_data() gave it earlier (Save a Copy for Sharing: as it was when picked)."""
+        data = self.project_data() if data is None else data
         if window:  # only the autosave remembers the window
             data["window"] = {"geometry": self._normal_geometry or self.wm_geometry(),
                               "maximized": self.wm_state() == "zoomed",
@@ -838,6 +842,12 @@ class ProjectFiles:
         self.roll.request_redraw()
         self.schedule_autosave()
 
+    def drop_finding(self):
+        """Another project / New: a MIDI still being loaded again for the one before stops (hunt 2026-10-24)."""
+        running = getattr(self, "_finding", None)
+        if running is not None and running.link is not self.midi_link:
+            running.drop()
+
     def find_loaded_later(self):
         """After a project with a MIDI link opened: the MIDI is loaded again (asked about when it's missing)."""
         if self.midi_link is not None and self.loaded is None:
@@ -893,12 +903,12 @@ class ProjectFiles:
 
     def saved_key(self):
         """What Open project compares with the last save / open: the shapes and the tempo line."""
-        return json.dumps([self.shapes, self.tempo if has_tempo(self.tempo) else None])
+        return json.dumps([self.shapes, self.tempo if self.tempo != empty_tempo() else None])
 
     def may_replace(self, name):
         """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line) aren't
         saved in a project file as they are, asks to save them first. False = don't open."""
-        if not self.shapes and not has_tempo(self.tempo) or self.saved_key() == self._saved_shapes:
+        if not self.shapes and self.tempo == empty_tempo() or self.saved_key() == self._saved_shapes:
             return True
         answer = messagebox.askyesnocancel(tr("project.open_project"), tr("project.save_before_open", name=name),
                                            icon="warning", default="yes", parent=self)
@@ -962,7 +972,7 @@ class ProjectFiles:
                 tr("project.spiderweb"), tr("load.export_only_file"), icon="warning", parent=self):
             return
         targets = []
-        if retimed:
+        if retimed and tempo_new(lm, self.tempo):  # (signatures changed alone: the tempo stays as it is, no question)
             lists = tempo_tracks(lm)
             targets = lists[:1] or [0]  # (no tempo in the file: the first track gets it)
             if len(lists) > 1:  # (a list copied into several tracks, user 2026-10-23: warned + picked)
@@ -1019,7 +1029,7 @@ class ProjectFiles:
                 messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
             elif e is None and job["plan"] is not None:
                 messagebox.showinfo(tr("project.spiderweb"), tr(
-                    "load.exported_tempo", path=path, notes=trn("n.notes", lm.notes, n=lm.notes),
+                    "load.exported_tempo" if targets else "load.exported_sigs", path=path, notes=trn("n.notes", lm.notes, n=lm.notes),
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
                     note=self.tempo_notes(job["plan"])))
             elif e is None:
@@ -1049,6 +1059,10 @@ class ProjectFiles:
             return
         midi = os.path.join(os.path.dirname(os.path.abspath(path)), os.path.basename(lm.path))
         from files.midi_copy import same_file
+        if same_file(path, lm.path) or same_file(path, midi):  # (the project would be written over the MIDI)
+            messagebox.showerror(tr("project.spiderweb"), tr("load.share_same", name=os.path.basename(path)),
+                                 parent=self)
+            return
         there = same_file(lm.path, midi)  # (the project goes beside its MIDI: nothing to copy)
         if not there:
             text = tr("load.share_ask", size=f"{lm.mf.size / 1e6:,.1f}", name=os.path.basename(midi),
@@ -1062,6 +1076,8 @@ class ProjectFiles:
             except MidiError:
                 messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
                 return
+        # (the project as it is NOW: New / Open while the copy runs must not change what's shared, hunt 2026-10-24)
+        data = json.loads(json.dumps(self.project_data()))
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": there, "cancel": False}
 
         def run():
@@ -1100,7 +1116,7 @@ class ProjectFiles:
                 return
             if e is None:
                 try:
-                    self.write_json(path, midi=midi)
+                    self.write_json(path, midi=midi, data=data)
                 except OSError as e2:
                     e = e2
             if isinstance(e, FileChanged):

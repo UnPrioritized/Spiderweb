@@ -571,6 +571,7 @@ class RollDrawing:
             self.draw_playhead(keep=True)
         self.tag_raise("rulerpick")  # (over the ruler, under the play line)
         self.tag_raise("tempomark")
+        self.tag_raise("trackmark")  # (the highlighted track's name: over the corner's patch the tempo marks bring)
         self.tag_raise("playhead")
         if self.typing:
             self.show_caret()
@@ -1700,8 +1701,17 @@ class RollDrawing:
                              font=look.font(8, fit=True), tags="frame")
         self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")
         mark = self.track_mark()
+        self.mark_full = ""
         if mark:  # (only one track shows: its name in the corner, so hidden notes never look lost)
-            self.create_text(kb / 2, top / 2, text=mark, fill=look.TRACK_PICK, font=look.font(8, "bold", fit=True),
+            font = look.font(8, "bold", fit=True)
+            measure, room = tkfont.Font(font=font).measure, kb - 6 * self.scale
+            shown = mark
+            if measure(mark) > room:  # (a long name: cut with "…", never over the ruler; the whole name in a tip)
+                while len(shown) > 1 and measure(shown + "…") > room:
+                    shown = shown[:-1]
+                shown += "…"
+                self.mark_full = mark
+            self.create_text(kb / 2, top / 2, text=shown, fill=look.TRACK_PICK, font=font,
                              tags=("frame", "trackmark"))
 
     def track_mark(self):

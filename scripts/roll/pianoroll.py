@@ -109,6 +109,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self._late_redraw = None  # request_redraw(delay)'s timer
         self._grid_key = self._frame_key = self._playhead_x = None  # what the kept canvas items show (redraw)
         self._tempo_key, self.tempo_tips = None, []  # the ruler's tempo marks (draw_tempo_marks): [(x0, x1, tip)]
+        self.mark_full = ""  # (the corner's track name when it was cut short: draw_ruler, its tip)
         self.tempo_tip = Tooltip(self, "")  # (their full BPMs while the mouse rests on one)
         self.scrub_t = None  # right-drag listening: where its own line is (beats), roll_draw.draw_playhead
         self._draft_made = None  # the shape being drawn / placed: (notes_tracks key, its notes and tracks or None
@@ -1692,6 +1693,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """The full BPMs of the ruler's tempo mark under the mouse in a tip box (none elsewhere)."""
         tip = self.tempo_tip
         text = next((t for x0, x1, t in self.tempo_tips if x0 <= e.x <= x1), "") if e.y < self.ruler_h else ""
+        if e.y < self.ruler_h and e.x < self.kb_w and self.mark_full:  # (a long track name cut in the corner)
+            text = self.mark_full
         if text != tip.text:
             tip.hide()
             tip.text = text

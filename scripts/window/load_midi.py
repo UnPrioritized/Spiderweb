@@ -89,8 +89,13 @@ def find_loaded(app, pick=False):
     it / go on without it); pick = straight to the file picker. Found = loaded with the progress window, then
     checked against the link (LoadWindow.finished)."""
     link = app.midi_link
-    if link is None or app.loaded is not None or getattr(app, "_finding", False):
+    if link is None or app.loaded is not None:
         return
+    running = getattr(app, "_finding", None)
+    if running is not None:  # (one already loading: this project's = let it be; another's = stopped, hunt 2026-10-24)
+        if running.link is link:
+            return
+        running.drop()
     folder = os.path.dirname(app.project_file) if app.project_file else None
     path = None if pick else L.located(link, folder)
     if path is None:
@@ -137,8 +142,9 @@ class LoadWindow(tk.Toplevel):
             self.ask_page()
             self.show()
         else:  # (as it was saved; shown only when it takes a moment: a small file loads in a blink)
-            app._finding = True
-            self.bind("<Destroy>", lambda e: e.widget is self and setattr(app, "_finding", False))
+            app._finding = self
+            self.bind("<Destroy>", lambda e: e.widget is self and getattr(app, "_finding", None) is self
+                      and setattr(app, "_finding", None))
             self.start(link["mode"] == "memory" and L.can_keep(mf, free_memory()))
             self.after(REOPEN_SHOW_MS, lambda: self.winfo_exists() and self.show())
 
@@ -220,7 +226,16 @@ class LoadWindow(tk.Toplevel):
         self.thread.start()
         self.poll()
 
+    def drop(self):
+        """Another project opened while this one's MIDI loads again: its reading stops, the window goes, nothing
+        said (find_loaded starts the new project's own)."""
+        if self.loader is not None:
+            self.loader.cancelled = True
+        self.destroy()
+
     def poll(self):
+        if not self.winfo_exists():  # (dropped: drop())
+            return
         ld = self.loader
         stage = ld.stage
         order = ["wait", "read", "overview", "done"]

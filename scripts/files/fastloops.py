@@ -1679,7 +1679,7 @@ def warm():
     midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
     midi_rewrite(u8, 0, 0, True, i1, i1.copy(), False, np.zeros(128, np.uint8), i1[:0], np.zeros(1, np.int64),
                  u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64))
-    midi_note_ticks(u8, 0, 0, True, u8.copy(), np.zeros(midi_scan.NT_SIZE, np.int64))
+    midi_note_ticks(u8, 0, 0, True, u8.copy(), 0, np.zeros(midi_scan.NT_SIZE, np.int64))
     q, z = np.zeros(_index.QS, np.int64), np.zeros(4, np.int64)
     ix, cov, i32 = _index.new_state(), np.zeros((128, 8), np.int32), np.zeros((128, 8), np.int32)
     midi_index(u8, 0, 0, 0, 60, ix, q, q.copy(), q.copy(), q.copy(), q.copy(), q.copy(), z, z.copy(), z.copy(),

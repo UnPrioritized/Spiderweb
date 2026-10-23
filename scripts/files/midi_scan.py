@@ -316,6 +316,7 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
                 o += 1
             done += gap
             k += 1
+            wrun = -1  # (a meta event ends running status: the next channel event writes its status, hunt 2026-10-24)
         if full:
             break
         if mt >= 0 and mt < len(drop) and drop[mt]:  # (left out: its time goes on to the next event)
@@ -375,13 +376,14 @@ NT_SIZE = 2
 NOTE_TICK, OTHER_TICK = 1, 2  # mark[tick]: a note-on / off there; another channel event (CC, bend...) there
 
 
-def note_ticks(b, p, end, final, mark, st):
-    """Marks the ticks of the whole events in b[p:end] (a track walk() read without BAD): mark[tick] |= NOTE_TICK
-    for a note-on / off, OTHER_TICK for any other channel event (ticks past mark's end: not marked). Keep timing's
-    anchors on a loaded MIDI. Returns where it stopped (an event not wholly in b: call again with more)."""
+def note_ticks(b, p, end, final, mark, base, st):
+    """Marks the ticks of the whole events in b[p:end] (a track walk() read without BAD): mark[tick - base] |=
+    NOTE_TICK for a note-on / off, OTHER_TICK for any other channel event (ticks outside base .. base + len(mark):
+    not marked; a long song is read a window of ticks at a time). Keep timing's anchors on a loaded MIDI. Returns
+    where it stopped (an event not wholly in b: call again with more)."""
     tick = st[NT_TICK]
     run = st[NT_RUN]
-    top = len(mark)
+    top = base + len(mark)
     while p < end:
         q = p
         d = 0
@@ -411,8 +413,8 @@ def note_ticks(b, p, end, final, mark, st):
             if s >= 128:
                 run = s
             t = tick + d
-            if t < top:
-                mark[t] |= NOTE_TICK if (s >> 4) == 0x8 or (s >> 4) == 0x9 else OTHER_TICK
+            if base <= t < top:
+                mark[t - base] |= NOTE_TICK if (s >> 4) == 0x8 or (s >> 4) == 0x9 else OTHER_TICK
         else:
             if s == 0xFF:
                 if q >= end:

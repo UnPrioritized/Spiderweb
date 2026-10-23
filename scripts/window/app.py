@@ -1917,6 +1917,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         if self.midi_link is not None:  # (a loaded MIDI goes too; Undo brings back the shapes only)
             self.midi_link = None
+            self.drop_finding()
             self.loaded = None
             self.roll.forget_loaded()
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes

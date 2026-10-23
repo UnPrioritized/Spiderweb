@@ -594,7 +594,7 @@
  "menu.f1": "F1",
  "menu.track_list": "Track list ↔ piano roll",
  "menu.tab": "Tab",
- "app.new_ask": "Start a new MIDI?\n\nEvery shape and the tempo line are cleared, and BPM goes back to 120 and Beats per bar to 4. PPQ, Keys, the output file and channel settings stay.\n(Ctrl+Z can bring them back.)",
+ "app.new_ask": "Start a new MIDI?\n\nEvery shape and the Conductor (tempo, time and key signatures) are cleared. PPQ, Keys, the output file and channel settings stay.\n(Ctrl+Z can bring them back.)",
  "app.export_midi": "Export MIDI",
  "app.shapes": "Shapes",
  "app.duplicate": "Duplicate",
@@ -1821,6 +1821,7 @@
  "load.tempo_every": "Every One of Them",
  "load.reading_ticks": "Reading the notes' ticks for Keep timing… {pct} %",
  "load.exported_tempo": "Saved the loaded MIDI with the Conductor's tempo ({notes}):\n{path}\n\nThe new tempo is in track {tracks}; everything else is copied from the file.{note}",
+ "load.exported_sigs": "Saved the loaded MIDI with the Conductor's time and key signatures ({notes}):\n{path}\n\nIts tempo and everything else are copied from the file.{note}",
  "load.exporting": "Exporting the loaded MIDI… {pct} %",
  "load.exported": "Saved the loaded MIDI exactly as it was loaded ({notes}):\n{path}",
  "load.export_failed": "Exporting the loaded MIDI failed: {e}\nNothing was saved.",
@@ -1843,6 +1844,7 @@
  "load.share_title": "Save a copy for sharing",
  "load.share_ask": "Copy the MIDI file ({size} MB) beside the project, so the two can be shared together?\n\n{name}\ninto {folder}",
  "load.share_replace": "A file named {name} is there already. It will be replaced.",
+ "load.share_same": "\"{name}\" is the MIDI file's own name: the project would be written over the MIDI. Pick another name for the project.",
  "load.sharing": "Copying the MIDI for sharing… {pct} %",
  "load.shared": "Saved the project and its MIDI ({name}) together:\n{path}\n\nShare both files. The project open now still uses your own files."
 }
