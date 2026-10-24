@@ -385,6 +385,7 @@
  "tempo.keep_audio": "Keep the audio",
  "tempo.keep_visual": "Keep the visual",
  "tempo.hint_heard_out": "Heard tempo: only inside the Keep timing parts (purple) · Visual tempo button: edit the rest",
+ "tempo.hint_heard_out_draw": "Heard tempo: draw from anywhere, only what lands inside the Keep timing parts (purple) is kept",
  "tempo.draw": "Draw:",
  "tempo.draw_visual": "Visual tempo",
  "tempo.draw_heard": "Heard tempo",

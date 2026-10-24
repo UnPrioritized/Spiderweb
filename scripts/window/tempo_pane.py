@@ -1178,17 +1178,21 @@ class TempoPane(ConductorMarks, tk.Canvas):
         sb = self.app.snap_beats()
         return max(0.0, round(b / sb) * sb) if sb else max(0.0, b)
 
-    def tick_beat(self, b, skip=()):
+    def tick_beat(self, b, skip=(), free=False):
         """b on a whole tick: where drawing puts things (user 2026-10-22: no grid, like many MIDI programs); within
-        6 px of a tempo point (not one in skip): its exact beat, so a jump's second point can be put there."""
+        6 px of a tempo point (not one in skip): its exact beat, so a jump's second point can be put there. free:
+        not kept inside the run being edited (Heard tempo drawing: what lands outside is cut off afterwards)."""
         ppq, roll = max(1, self.app.ppq), self.app.roll
         if roll.sx:
             r = 6 * self.scale / roll.sx
             near = [p[0] for p in self.ed()["points"] if abs(p[0] - b) <= r and not any(p is s for s in skip)]
-            near += [x for x in self.run_span() or () if abs(x - b) <= r]  # (Heard tempo: the part's ends)
+            ends = [x for _, _, a, e in self.runs() for x in (a, e) if x is not None] if free and \
+                self.box.mode == "heard" else self.run_span() or ()
+            near += [x for x in ends if abs(x - b) <= r]  # (Heard tempo: the parts' ends)
             if near:
                 return min(near, key=lambda pb: abs(pb - b))
-        return self.in_run(max(0.0, round(b * ppq) / ppq))
+        b = max(0.0, round(b * ppq) / ppq)
+        return b if free else self.in_run(b)
 
     def move_beat(self, b, e, skip=(), beats=None):
         """A point / line / catch-up edge moved afterwards: onto the nearest note start or end within 10 px (user
@@ -1242,8 +1246,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
             else:
                 self.place_catch(e)
             return
-        if self.box.mode == "heard":  # (Heard tempo: only inside the Keep timing parts; a press picks the run)
-            run = self.run_at(roll.x2t(e.x))
+        live_end = self.live_end_at(e.x, e.y)  # (a line just drawn may end outside the parts)
+        if self.box.mode == "heard" and live_end is None:  # (Heard tempo: inside the Keep timing parts; a press
+            run = self.run_at(roll.x2t(e.x))                # picks the run)
+            if run is None and self.box.tool.get() in DRAWS:  # (drawing may start anywhere: only what lands in
+                self.confirm()                                 # the parts is kept, user 2026-10-24)
+                self.bands = []
+                b, v = self.tick_beat(roll.x2t(e.x), free=True), self.snap_bpm(self.y2b(e.y), e)
+                self.drag = {"kind": "draw", "b0": b, "v0": v, "b1": b, "v1": v, "x": e.x, "y": e.y}
+                return
             if run is None:
                 return
             if run[0] is not self.run:
@@ -1253,9 +1264,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.request_redraw()
         tool = self.box.tool.get()
         self.picked()  # (what's picked still there)
-        k = self.live_end_at(e.x, e.y)
-        if k is not None:  # the live line's end square: moves that end
-            self.drag = {"kind": "live_end", "end": k}
+        if live_end is not None:  # the live line's end square: moves that end
+            self.drag = {"kind": "live_end", "end": live_end}
             return
         if self.handle_at(e.x, e.y) is None:  # (its bend handle keeps it live; anything else: done with it)
             self.confirm()
@@ -1289,7 +1299,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.set_sel([tempo["catch"][j]])
             self.drag = {"kind": kind, "item": tempo["catch"][j], "x": e.x, "pushed": False}
             return
-        b, v = self.tick_beat(roll.x2t(e.x)), self.snap_bpm(self.y2b(e.y), e)
+        b, v = self.tick_beat(roll.x2t(e.x), free=tool != "select"), self.snap_bpm(self.y2b(e.y), e)
         if tool == "select":
             beat = roll.x2t(e.x)
             if self.in_band(e.x) and not e.state & CTRL:
@@ -1384,7 +1394,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.live_end_to(d["end"], e)
             return self.show_position(e)
         if d["kind"] == "draw":
-            d["b1"], d["v1"] = self.tick_beat(roll.x2t(e.x)), self.snap_bpm(self.y2b(e.y), e)
+            d["b1"], d["v1"] = self.tick_beat(roll.x2t(e.x), free=True), self.snap_bpm(self.y2b(e.y), e)
             d["moved"] = d.get("moved") or abs(e.x - d["x"]) >= 3 or abs(e.y - d["y"]) >= 3  # (less: a click)
             self.show_position(e)
             return self.request_redraw()
@@ -1708,15 +1718,32 @@ class TempoPane(ConductorMarks, tk.Canvas):
         b0, v0, b1, v1 = d["b0"], d["v0"], d["b1"], d["v1"]
         if b1 < b0:
             b0, v0, b1, v1 = b1, v1, b0, v0
+        kind = DRAWS[self.box.tool.get()]
+        text = self.box.draw_formula if kind == "formula" else ""
         if not d.get("moved") or b1 - b0 < 0.5 / max(1, self.app.ppq):  # (a click: a point, user 2026-10-22)
             b0, v0 = d["b0"], d["v0"]
-            self.add_point(b0, v0)
+            if self.box.mode != "heard" or self.run_at(b0) is not None:  # (Heard tempo: inside the parts only)
+                self.add_point(b0, v0)
             return
+        if self.box.mode == "heard":  # (drawn anywhere: each Keep timing part it crosses keeps its own stretch,
+            # cut exactly where the part starts / ends by write_heard; the rest is dropped, user 2026-10-24)
+            got = [r[0] for r in self.runs() if r[2] < b1 - 1e-9 and (r[3] is None or r[3] > b0 + 1e-9)]
+            if not got:
+                return self.request_redraw()
+            if len(got) > 1:  # (several parts: laid in each at once, in one undo step; not live)
+                self.app.push_undo(name=tr("tempo.step_draw"))
+                for p in got:
+                    self.run, self.sel, self.part, self._ed = p, [], None, None
+                    self.lay_part(b0, v0, b1, v1, kind, text)
+                self.box.sync()
+                return
+            if got[0] is not self.run:
+                self.run, self.sel, self.part, self.bands = got[0], [], None, []
+                self.box.sync()
         pts = self.ed()["points"]
         self.app.push_undo(name=tr("tempo.step_draw"))
         base = copy.deepcopy(pts)
-        kind = DRAWS[self.box.tool.get()]
-        first = self.lay_part(b0, v0, b1, v1, kind, self.box.draw_formula if kind == "formula" else "")
+        first = self.lay_part(b0, v0, b1, v1, kind, text)
         # LIVE until Enter / Esc / a click elsewhere (user 2026-10-22, like the velocity pane): its end squares
         # move it, laid again over the points as they were before it (shrunk: the covered ones come back)
         self.live = {"base": base, "ends": [[b0, v0], [b1, v1]], "first": first}
@@ -1788,8 +1815,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """The live line's end k dragged to the mouse: onto a note's start / end or a tempo point near it (Shift:
         whole ticks), BPM snapped; laid again over the points as they were before it, in the same undo step."""
         lv = self.live
-        b = self.in_run(self.move_beat(self.app.roll.x2t(e.x), e, beats=[p[0] for p in lv["base"]] + [
-            x for x in self.run_span() or () if x != math.inf]))
+        # (Heard tempo: may go past the part's ends, cut off there afterwards, as drawn)
+        b = self.move_beat(self.app.roll.x2t(e.x), e, beats=[p[0] for p in lv["base"]] + [
+            x for x in self.run_span() or () if x != math.inf])
         ends = [list(p) for p in lv["ends"]]
         ends[k] = [b, self.snap_bpm(self.y2b(e.y), e)]
         if abs(ends[0][0] - ends[1][0]) < 0.5 / max(1, self.app.ppq):
@@ -2312,10 +2340,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "sb_v_double_arrow", "numbers"
         elif self.placing:
             want = "sb_h_double_arrow"  # (the catch-up being added keeps its own hint)
-        elif self.box.mode == "heard" and self.run_at(roll.x2t(e.x)) is None:
-            want, hint = "arrow", "heard_out"  # (faded: nothing to click outside the Keep timing parts)
         elif self.live_end_at(e.x, e.y) is not None:
             want, hint = "fleur", "on_live_end"
+        elif self.box.mode == "heard" and self.run_at(roll.x2t(e.x)) is None:
+            if self.box.tool.get() in DRAWS:  # (drawing starts anywhere: only the parts keep it)
+                want, hint = PENCIL_CURSOR, "heard_out_draw"
+            else:
+                want, hint = "arrow", "heard_out"  # (faded: nothing to click outside the Keep timing parts)
         elif self.point_at(e.x, e.y) is not None:
             want, hint = "fleur", "on_point"
         elif handle is not None:
@@ -2823,6 +2854,24 @@ class TempoPane(ConductorMarks, tk.Canvas):
             xs = [roll.t2x(b0 + (b1 - b0) * k) for k in t]
             ys = self.b2y(vals)
             self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=look.TEMPO_PICKED, width=lw + 2)
+            if self.box.mode == "heard":  # (what lands outside the Keep timing parts: faded, it's dropped)
+                bs = b0 + (b1 - b0) * t
+                inside = np.zeros(len(t), bool)
+                for _, _, a, e in self.runs():
+                    inside |= (bs >= a) & (bs <= (math.inf if e is None else e))
+                k = 0
+                while k < len(t):
+                    if inside[k]:
+                        k += 1
+                        continue
+                    j = k
+                    while j + 1 < len(t) and not inside[j + 1]:
+                        j += 1
+                    lo, hi = max(0, k - 1), min(len(t) - 1, j + 1)  # (to the edge samples: no gap)
+                    seg = np.column_stack([xs[lo:hi + 1], ys[lo:hi + 1]]).ravel().tolist()
+                    if len(seg) >= 4:
+                        self.create_line(*seg, fill=look.TEMPO_FADED, width=lw + 2)
+                    k = j + 1
 
     def show_play_bpm(self):
         app = self.app
