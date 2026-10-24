@@ -75,6 +75,7 @@ class Playback:
         self.player.ready = None
         self.player.stop()
         self.player._clock = None  # (the loaded MIDI's feeder waits for the new line, never the last play's)
+        self.player.map = None  # (its reader waits for this play's tempo: Player.start sets it)
         if self.loaded is not None:  # (first: the play line waits until its first notes are read)
             self.start_loaded(int(round(self.playhead * ppq)))
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,

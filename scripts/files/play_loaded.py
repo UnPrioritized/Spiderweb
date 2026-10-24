@@ -288,6 +288,9 @@ class LoadedPlayer:
                         continue
                     w1 = w0 + span
                     tmap = self.player._clock[2] if self.player._clock is not None else self.player.map
+                    if tmap is None:  # (started before the Player: its tempo comes a moment later)
+                        time.sleep(0.005)
+                        continue
                     if tmap.sec(w1) - tmap.sec(w0) > WINDOW_S:  # (never a long stretch at once: a quiet part's
                         # doubled windows ran into a wall and read for seconds)
                         w1 = max(w0 + 1, int(tmap.tick(tmap.sec(w0) + WINDOW_S)))

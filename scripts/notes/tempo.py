@@ -593,6 +593,8 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
     pb = [p[0] for p in pts]
     first = _first_ticks(pb, ppq)
     edges = [0] + first + [max(t1, first[-1] + 1) if first else t1]
+    # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
+    held_bpm = drawn_bpm(tempo, base, np.maximum(edges[:-1], t0) / ppq).tolist()
     for k in range(len(edges) - 1):  # (k = 0: before the first point; k = i + 1: point i's part)
         a, b = max(edges[k], t0), min(edges[k + 1], t1)
         if b <= a:
@@ -600,7 +602,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
         i = k - 1
         held = i < 0 or i == len(pts) - 1 or pts[i][2] == "hold" or pts[i][1] == pts[i + 1][1]
         if held:
-            bpm = float(drawn_bpm(tempo, base, [a / ppq])[0])
+            bpm = held_bpm[k]
             out.append((a, b, base_u if bpm == base else held_us(bpm)))
         else:  # (a new value every "every" ticks from the part's first tick; the first step the start point's
             # BPM, the last the end point's: step_shares)

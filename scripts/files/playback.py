@@ -354,6 +354,7 @@ class Player:
         self.shared = False  # (set before start: overlapping notes may share a channel, a key sounds until its last)
         self.ports = False  # (see start)
         self._clock = None
+        self.map = None  # the tempo as a TimeMap (start; None until the first start)
         self._swap = None  # new notes ready for the playing thread (_Ons)
         self._wanted = None  # new notes waiting to be put in order (notes, use10)
         self._sorting = False  # a thread is putting them in order (cleared by it under _lock as it ends)
