@@ -2724,7 +2724,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if self.box.mode != "heard":
             return {"tempo": dict(self.app.tempo, points=self.laid(self.app.tempo["points"], *args, self.base())[0])}
         lo, hi = sorted((d["b0"], d["b1"]))
-        out, tempo = {}, self.app.tempo
+        out, tempo, moved = {}, self.app.tempo, {}
         at = {id(q): k for k, q in enumerate(tempo["points"])}
         for p, members, a, e in self.runs():
             if a < hi - 1e-9 and (e is None or e > lo + 1e-9):
@@ -2732,7 +2732,17 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 base = heard_before(tempo, self.base(), self.app.ppq, at[id(members[0])], at[id(members[-1])])
                 new = self.laid(line, *args, base)[0]
                 out.update({id(m): new for m in members})
-        return {"heard": out}
+                h = heard_of(p)  # (the point after the part following the heard line's end: it moves too, as
+                if h and h.get("end") is not None and e is not None:  # write_heard does when let go, hunt 2026-10-24)
+                    on = [q for q in tempo["points"] if abs(q[0] - e) < 1e-9]
+                    if on and abs(on[-1][1] - h["end"]) <= 1e-9 * h["end"]:
+                        hl = copy.deepcopy(new)
+                        split_at(hl, e, base)
+                        moved[id(on[-1])] = clamp_bpm(next(q[1] for q in hl if abs(q[0] - e) < 1e-9))
+        if not moved:
+            return {"heard": out}
+        pts = [[q[0], moved[id(q)]] + q[2:] if id(q) in moved else q for q in tempo["points"]]
+        return {"heard": out, "tempo": dict(tempo, points=pts)}
 
     def heard_lines(self, keep_spans, w, kb, preview=None):
         """Each Keep timing piece's heard tempo as (xs, beats, ys, piece's first point index), cut to the piece:
