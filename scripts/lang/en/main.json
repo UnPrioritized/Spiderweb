@@ -579,6 +579,7 @@
  "app.voices_tip": "How many sounds Built-in BASSMIDI can ring at once (1000 to start). More = fuller in busy parts, but more work for the processor: if playback breaks up (\"Overloaded\" in red next to the Settings button), lower it.\nPast the limit, the oldest sounds are cut.",
  "app.overloaded": "Overloaded",
  "app.overloaded_n": "Overloaded: {n} voices",
+ "app.loaded_play_failed": "The loaded MIDI stopped playing because of an error, so playback was stopped.\n\nThe details are in spiderweb-error.log next to Spiderweb.",
  "app.overloaded_1": "Overloaded: 1 voice",
  "bs.title": "Built-in BASSMIDI settings",
  "bs.change_tip": "Pick another soundfont (.sf2 / .sfz). The Hz bass preview uses the same one.",

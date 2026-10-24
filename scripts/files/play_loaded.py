@@ -26,6 +26,7 @@ from collections import deque
 import numpy as np
 
 from files import midi_play, speed
+from files.synth import GROUP_BUFFER
 from files.midi_scan import C_BEND, C_CC, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS
 
 STEP_S = 0.003  # the feeder's beat
@@ -409,7 +410,7 @@ class LoadedPlayer:
                     hit[:] = False
                     behind[:] = False
             t_c, sec, tmap = clock
-            s_now = sec + now - t_c
+            s_now = sec + now - t_c + (GROUP_BUFFER if self.sinks else 0.0)  # (the group's sound comes out later)
             T = tmap.tick(s_now)
             t_late = int(tmap.tick(s_now - LATE_S))
             with self._lock:

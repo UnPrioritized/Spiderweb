@@ -201,6 +201,11 @@ class Playback:
         if not self.player.running:
             self.stop_play()
             return
+        lp = self.loaded_play
+        if lp is not None and lp.error is not None:  # (its reading failed: stop, never play on silent; user)
+            self.stop_play()
+            messagebox.showerror(tr("app.spiderweb_2"), tr("app.loaded_play_failed"), parent=self)
+            return
         self.roll.show_playhead()
         self.show_overload()
         self._play_job = self.after(15, self._play_tick)
