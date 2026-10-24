@@ -96,17 +96,15 @@ class CatchGraph(tk.Toplevel):
     # ------------------------------------------------------------ the picked catch-up
 
     def target(self):
-        """The drawn catch-up to edit (user 2026-10-24, picked A + C): the one clicked, or the only drawn one in the
-        Select box (several: "several", click one); else the one shown so far, as long as it's still there and
+        """The drawn catch-up to edit (user 2026-10-24, picked A + C): the one the bar shows (clicked, alone in the
+        Select box, at the play line), or the only drawn one in the Select box (several: "several", click one); else the one shown so far, as long as it's still there and
         drawn (clicking points / empty space keeps it; after an undo: the one on the same beat). None: none."""
         box, lines = self.box, self.app.tempo["catch"]
         if box.mode == "visual":
-            pick = box.pane.picked()
-            if pick and pick[0] == "catch":
-                c = box.pane.ed()["catch"][pick[1]]
-                if c[1] == "drawn":
-                    return c
-            elif box.pane.bands:
+            j = box.pane.bar_catch()  # (the one the bar shows: picked, alone in the Select box, at the play line)
+            if j is not None and lines[j][1] == "drawn":
+                return lines[j]
+            if j is None and box.pane.bands:
                 mine = ids(box.pane.sel)
                 inside = [c for c in lines if id(c) in mine and c[1] == "drawn"]
                 if len(inside) == 1:

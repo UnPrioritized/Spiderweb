@@ -275,7 +275,7 @@ class TempoBox(ttk.Frame):
         self.formula_box = ttk.Entry(row2, textvariable=self.formula_var, width=16)
         self.formula_box.bind("<Return>", lambda e: self.typed_formula())
         self.formula_box.bind("<FocusOut>", lambda e: self.left_box(self.typed_formula))
-        self.formula_box.bind("<FocusIn>", lambda e: self.typing_for())
+        self.formula_box.bind("<FocusIn>", lambda e: self.typing_for(formula=True))
         self._typed_for = None  # (what the BPM / Formula box's typing goes to: what was picked when it was clicked)
         self._committed = False
         self.formula_tip = Tooltip(self.formula_box, "")
@@ -338,7 +338,8 @@ class TempoBox(ttk.Frame):
         pane, tempo = self.pane, self.pane.ed()
         pick = pane.picked()
         kind = pick[0] if pick else None
-        rows = {"point": [self.point_row], "part": [self.part_row], "catch": [self.catch_row]}.get(kind, [])
+        rows = {"point": [self.point_row], "part": [self.part_row]}.get(kind, [])
+        j = pane.bar_catch()  # (the catch-up row: picked, in the Select box beside the points, or at the play line)
         formula = False
         if kind == "point":
             if self.focus_get() is not self.bpm_box:
@@ -365,23 +366,24 @@ class TempoBox(ttk.Frame):
                 self.keep_box.current(KEEP_HOW.index(keep_how(p)))
             formula = p[2] == "formula"
             text, tip = p[3] or FORMULA, tr("tempo.formula_tip")
-        elif kind == "catch":
-            c = tempo["catch"][pick[1]]
+        if j is not None:
+            rows.append(self.catch_row)
+            c = tempo["catch"][j]
             self.shape.current(SHAPES.index(c[1]))
             drawn = c[1] == "drawn"
             if drawn != bool(self.graph_button.winfo_manager()):
                 self.graph_button.pack(side="left", padx=(4, 0)) if drawn else self.graph_button.pack_forget()
             formula = c[1] == "formula"
             text, tip = c[2] or FORMULA, tr("tempo.catch_formula_tip")
-        if not formula and kind is None and self.tool.get() == "formula":  # (the Formula pencil's formula)
+        if not formula and kind is None and j is None and self.tool.get() == "formula":  # (the Formula pencil's)
             formula, text, tip = True, self.draw_formula, tr("tempo.formula_tip")
         if formula:
             if self.focus_get() is not self.formula_box:
                 self.formula_var.set(text)
             self.formula_tip.set_text(tip)
             rows.append(self.formula_box)
-        if kind == "catch":
-            res, bad = pane.catch_result(pick[1])
+        if j is not None:
+            res, bad = pane.catch_result(j)
             self.result.config(text=res, foreground=look.ERROR if bad else look.TEMPO_CATCH)
             rows.append(self.result)
         if self.focus_get() is not self.every_box:
@@ -404,11 +406,15 @@ class TempoBox(ttk.Frame):
     def bpm_snap(self):
         return BPM_SNAPS[max(0, self.snap.current())]
 
-    def typing_for(self):
-        """A box clicked: its typing goes to what's picked now, even if a pane click picks something else first."""
+    def typing_for(self, formula=False):
+        """A box clicked: its typing goes to what's picked now, even if a pane click picks something else first.
+        formula: the Formula box (not a part's: the catch-up the bar shows, bar_catch)."""
         pick = self.pane.picked()
         tempo = self.pane.ed()
-        if pick and pick[0] == "point":
+        j = self.pane.bar_catch() if formula and not (pick and pick[0] == "part") else None
+        if j is not None:
+            self._typed_for = ("catch", tempo["catch"][j])
+        elif pick and pick[0] == "point":
             self._typed_for = ("point", [tempo["points"][i] for i in pick[1]])
         elif pick:
             self._typed_for = (pick[0], tempo["points" if pick[0] == "part" else "catch"][pick[1]])
@@ -615,9 +621,9 @@ class TempoBox(ttk.Frame):
             self.app.tempo_changed()
 
     def picked_shape(self):
-        pick = self.pane.picked()
-        if pick and pick[0] == "catch":
-            c = self.pane.ed()["catch"][pick[1]]
+        j = self.pane.bar_catch()  # (picked, in the Select box or at the play line)
+        if j is not None:
+            c = self.pane.ed()["catch"][j]
             shape = SHAPES[self.shape.current()]
             if shape != c[1]:
                 self.app.push_undo(name=tr("tempo.step_catch_shape"))
@@ -648,6 +654,8 @@ class TempoBox(ttk.Frame):
     def typed_formula(self):
         got = self.target()
         text = self.formula_var.get().strip()
+        if (not got or got[0] == "point") and self.pane.bar_catch() is not None:  # (the catch-up row beside them)
+            got = ("catch", self.pane.ed()["catch"][self.pane.bar_catch()])
         if not got or got[0] not in ("part", "catch"):
             if self.tool.get() == "formula" and text != self.draw_formula:
                 if formula_fn(text) is None:
@@ -980,6 +988,27 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return ("point", points)
         if len(lines) == 1:
             return ("catch", lines[0])
+        return None
+
+    def bar_catch(self):
+        """The catch-up line whose row the bar shows (user 2026-10-24: only clicking its line was hard to find): the
+        one picked; the only one in the Select box (beside the points' BPM box); with nothing picked, the one whose
+        yellow / teal area the play line is in, while not playing (playing, the row would pop in and out). None:
+        none (the visual tempo's only)."""
+        if self.box.mode != "visual":
+            return None
+        pick = self.picked()
+        if pick and pick[0] == "catch":
+            return pick[1]
+        if pick and pick[0] == "point":
+            lines = self.sel_idx("catch")
+            return lines[0] if self.bands and len(lines) == 1 else None
+        if pick or self.app.player.running:
+            return None
+        at = self.app.playhead
+        for j, (st, _) in enumerate(plans(self.app.tempo, self.base(), self.app.ppq)):
+            if st["end"] is not None and min(st["from"], st["line"]) <= at < st["end"]:
+                return j
         return None
 
     def select_all(self):
@@ -3306,6 +3335,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         t = math.floor(app.playhead * app.ppq + 1e-9)
         v = bpm_at(app.tempo, self.base(), app.ppq, t)
+        bar = (app.player.running, self.bar_catch())  # (the play line moved into / out of a catch-up's areas)
+        if bar != getattr(self, "_bar_catch", bar):
+            self.box.sync()
+        self._bar_catch = bar
         text = f"{v:,.2f}"  # (no "BPM": Domino shows the bare number, user 2026-10-22)
         if self.box.play_bpm.cget("text") != text:
             self.box.play_bpm.config(text=text)
