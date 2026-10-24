@@ -1430,8 +1430,10 @@ def heard_marks(tempo, base, ppq, bar=4):
         inside = [q for q in line if a - 1e-9 <= q[0] <= e + 1e-9]
         if not inside:
             continue
-        got = ruler_marks({"points": inside, "catch": [], "every": tempo.get("every", EVERY)},
-                          heard_before(tempo, base, ppq, i, j), ppq, bar)
+        before = heard_before(tempo, base, ppq, i, j)
+        if abs(before - inside[0][1]) <= 1e-4 * before:  # (the file's microseconds: 180.0002 marked "180 → 180")
+            before = inside[0][1]
+        got = ruler_marks({"points": inside, "catch": [], "every": tempo.get("every", EVERY)}, before, ppq, bar)
         for b, kind, v, until, *steps in got:
             if kind == "point" and b < e - 1e-9:  # (a point on the run's end: the sound goes on from the line after)
                 out.append((b, "heard", v, None if until is None else min(until, e), *steps))
