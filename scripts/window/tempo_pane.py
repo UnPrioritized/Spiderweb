@@ -33,7 +33,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_runs, keeps,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
                          swap_part, tempo_text)
-from notes.tempo import changed as tempo_edited
+from notes.tempo import changed as tempo_edited, keep_heard
 from notes.loaded import file_tempos
 from notes.tempo_file import limit_spots
 from roll.zoombar import add_zoom_bars
@@ -147,8 +147,13 @@ class TempoBox(ttk.Frame):
         # the exact BPM at the play line (user 2026-10-22; a set width: playing doesn't push the tools about)
         # (always 2 decimals, room for the fastest a file holds: "60,000,000.00"; the tools after it never move)
         self.play_bpm = ttk.Label(bar, text="", width=len(f"{60_000_000:,.2f}") + 1, foreground=look.INFO)
-        self.play_bpm.pack(side="left", padx=(0, 4))
+        self.play_bpm.pack(side="left", padx=(0, 0))
         Tooltip(self.play_bpm, tr("tempo.play_bpm_tip"))
+        # (the tempo heard there in brackets, purple, only where it differs: inside a Keep timing part; user
+        # 2026-10-24; room kept for the longest so the bar never shifts)
+        self.play_heard = ttk.Label(bar, text="", width=len(f"({60_000_000:,.2f})") + 1, foreground=look.TEMPO_KEEP)
+        self.play_heard.pack(side="left", padx=(0, 4))
+        Tooltip(self.play_heard, tr("tempo.play_heard_tip"))
         # (one always down, user 2026-10-22, like many MIDI programs: Line's click = a point, no pencil-only mode)
         self.tool = tk.StringVar(value="line")  # select / line / formula
         self.last_pencil = "line"  # (double right-click: Select <-> this)
@@ -1462,9 +1467,12 @@ class TempoPane(ConductorMarks, tk.Canvas):
         held = [s for s, _, _ in d["orig"]] + [s for s, _ in d.get("mates", ())]
         db = (self.move_beat(at, e, held) if d["grab"] is not None else self.snap_beat(at, e)) - d["ref"]
         db = max([db] + [-b for _, b, _ in d["orig"]] + [-lo for lo, _ in d["band"] or ()])  # (not before 0)
-        # (BPM too, Select as well, user 2026-10-22: was time only; the box: by the BPM moved under the mouse)
+        # (a grabbed point / line: BPM too, Select as well, user 2026-10-22; the Select box: time only, like Domino,
+        # user 2026-10-24)
         if d["v0"] is not None:
             dv = self.snap_bpm(self.y2b(e.y), e) - d["v0"]
+        elif d["band"]:
+            dv = 0.0
         else:
             dv = self.snap_bpm(self.y2b(e.y), e) - self.snap_bpm(self.y2b(d["y"]), e)
         vs = [v for _, _, v in d["orig"] if v is not None]
@@ -2944,10 +2952,26 @@ class TempoPane(ConductorMarks, tk.Canvas):
         app = self.app
         if not self.box.winfo_ismapped():  # (playing: every frame; worked out only while it shows)
             return
-        v = bpm_at(app.tempo, self.base(), app.ppq, math.floor(app.playhead * app.ppq + 1e-9))
+        t = math.floor(app.playhead * app.ppq + 1e-9)
+        v = bpm_at(app.tempo, self.base(), app.ppq, t)
         text = f"{v:,.2f}"  # (no "BPM": Domino shows the bare number, user 2026-10-22)
         if self.box.play_bpm.cget("text") != text:
             self.box.play_bpm.config(text=text)
+        heard = self.heard_bpm_at(t)
+        heard = f"({heard:,.2f})" if heard is not None and f"{heard:,.2f}" != text else ""
+        if self.box.play_heard.cget("text") != heard:
+            self.box.play_heard.config(text=heard)
+
+    def heard_bpm_at(self, t):
+        """The tempo heard at tick t when it's inside a Keep timing part (its heard line, or the tempo heard before
+        it), else None."""
+        app = self.app
+        lay = layout(app.tempo, self.base(), app.ppq)
+        for n, (_, a, e, _) in enumerate(lay["keeps"]):
+            if a <= t and (e is None or t < e):
+                u = np.asarray(keep_heard(lay, n, t, t + 1)).ravel()[0]
+                return 60_000_000 / float(u)
+        return None
 
     def draw_playhead(self):
         self.show_play_bpm()
