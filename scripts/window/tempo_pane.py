@@ -2228,19 +2228,27 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def put_copies(self, clip, at, name, push=True, stay=False):
         """clip's items placed from beat at, replacing what's in its boxes there (push: its own undo step). A clip
         of catch-up lines only leaves the points alone. stay: its first point always stays (lay_points)."""
-        tempo = self.ed()
-        spans = joined([(at + a, at + b) for a, b in clip.get("spans") or [(0.0, clip["length"])]])
-        one = 1.0 / max(1, self.app.ppq)
         if push:
             self.app.push_undo(name=name)
+        new_p, new_c, spans, note = self.lay_copies(self.ed(), clip, at, self.ed_base(), stay)
+        if note:
+            self.app.status.config(text=tr(note))
+        self.bands, self.sel, self.part = [(lo, hi) for lo, hi in spans if hi > lo], new_p + new_c, None
+        self.app.tempo_changed()
+
+    def lay_copies(self, tempo, clip, at, base, stay=False):
+        """put_copies' work on the line tempo (in place; a throwaway copy shows a Ctrl+drag as letting go gives it,
+        hunt 2026-10-24): (the new points kept, the new catch-ups, the boxes' stretches, a status text key or
+        None). base: the line's BPM before its first point."""
+        spans = joined([(at + a, at + b) for a, b in clip.get("spans") or [(0.0, clip["length"])]])
+        one, note = 1.0 / max(1, self.app.ppq), None
         new_p = [[max(0.0, p[0] + at)] + copy.deepcopy(p[1:]) for p in clip["points"]]
         for p in new_p:  # (their heard tempo lines along)
             shift_heard(p, at)
         new_c = []
         cs = clip["catch"]
         if cs and self.box.mode == "heard":  # (catch-ups: the visual tempo's only; left out, hunt 2026-10-24)
-            cs = []
-            self.app.status.config(text=tr("tempo.paste_no_catch"))
+            cs, note = [], "tempo.paste_no_catch"
         for c in cs:
             item = [max(one, c[0] + at)] + list(c[1:3])
             for k in (3, 4):
@@ -2248,12 +2256,19 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 catch_set(item, k, None if v is None else max(0.0, v + at))
             catch_set(item, 5, catch_get(c, 5))
             new_c.append(item)
-        kept = [it for it in tempo["catch"] if not any(lo - 1e-9 <= it[0] <= hi + 1e-9 for lo, hi in spans)]
+        inside = lambda x: any(lo - 1e-9 <= x <= hi + 1e-9 for lo, hi in spans)
+        areas = [(min(st["from"], st["line"]), st["end"]) for st, c in zip(stretches(tempo, self.base()),
+                                                                          tempo["catch"])
+                 if st["end"] is not None and not inside(c[0])]
+        over = [it for it in new_c if any(lo - 1e-9 <= it[0] < hi - 1e-9 for lo, hi in areas)]
+        if over:  # (one catch-up per area, as adding one: a copy landing in another's took its job over, user's
+            new_c = [it for it in new_c if not any(it is o for o in over)]  # hunt 2026-10-24)
+            note = "tempo.paste_catch_overlap"
+        kept = [it for it in tempo["catch"] if not inside(it[0])]
         tempo["catch"][:] = sorted(kept + new_c, key=lambda it: it[0])
         if new_p:
-            new_p = self.lay_points(tempo["points"], new_p, spans, self.ed_base(), stay)
-        self.bands, self.sel, self.part = [(lo, hi) for lo, hi in spans if hi > lo], new_p + new_c, None
-        self.app.tempo_changed()
+            new_p = self.lay_points(tempo["points"], new_p, spans, base, stay)
+        return new_p, new_c, spans, note
 
     def put_domino(self, tempos, at, length, how, push):
         """Tempo changes pasted from Domino ([(beat from the paste's start, BPM)], each held to the next, as in

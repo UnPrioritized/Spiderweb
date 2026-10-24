@@ -381,6 +381,7 @@
  "tempo.keep_in_catch": "Keep timing: off inside the catch-up",
  "tempo.hint_on_keep_off": "Keep timing is off here: this part is inside a catch-up's yellow area, which counts its time",
  "tempo.paste_no_catch": "Pasted the points only: catch-ups go in the visual tempo (Draw: Visual tempo)",
+ "tempo.paste_catch_overlap": "A copied catch-up was left out: it landed inside another catch-up (one catch-up per stretch)",
  "tempo.delete_catch": "Delete catch-up",
  "tempo.catch_overlap": "Not added: that time is already inside a catch-up (one catch-up per stretch)",
  "tempo.keep_off": "Off",
