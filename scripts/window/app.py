@@ -2614,6 +2614,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The tempo line changed (an edit, undo, a project opened): the pane and its bar show it. restoring: an undo
         / redo half way (its own syncing does the Hz bass warnings once everything is back: hunt, a redraw half way
         moved the synth window's preset name)."""
+        if hasattr(self, "tempo_pane") and not restoring:
+            self.tempo_pane.write_heard()  # (Draw: Heard tempo: the edited line back into its Keep timing part)
         tempo_edited()
         if not hasattr(self, "tempo_box"):
             return

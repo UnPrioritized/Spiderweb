@@ -28,9 +28,9 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
-                         bpm_text, clamp_bpm, curve, drop_loose, formula_fn,
-                         catch_get, catch_set, heard_of, keeps, layout,
-                         plans, shown_bpm, split_at, step_edges, tempo_text)
+                         bpm_text, clamp_bpm, curve, drop_loose, end_point, formula_fn,
+                         catch_get, catch_set, heard_before, heard_line, heard_of, keep_runs, keeps, layout,
+                         plans, set_bend, shown_bpm, split_at, step_edges, swap_part, tempo_text)
 from notes.tempo import changed as tempo_edited
 from notes.loaded import file_tempos
 from notes.tempo_file import dense_spots
@@ -117,10 +117,20 @@ DRAWS = {"line": "line", "formula": "formula"}  # pencil kind -> the curve the d
 
 def part_kind(p, scale):
     """What a new point's part takes from the part it was put in (p; None: before the first point): curve,
-    formula, BPM change, Keep timing, bend (its own copy)."""
+    formula, BPM change, Keep timing, bend, heard tempo line (its own copies)."""
     if p is None:
         return ["hold", "", scale, False, list(BEND)]
-    return [p[2], p[3], p[4], keeps(p), list(bend_of(p))]
+    return [p[2], p[3], p[4], keeps(p), list(bend_of(p))] + ([copy.deepcopy(p[7])] if heard_of(p) else [])
+
+
+KEEP_HOW = ("off", "audio", "visual")  # a part's Keep timing dropdown (user's names: Keep the audio / the visual)
+
+
+def keep_how(p):
+    if not keeps(p):
+        return "off"
+    h = heard_of(p)
+    return "visual" if h and h.get("visual") else "audio"
 
 
 class TempoBox(ttk.Frame):
@@ -149,6 +159,18 @@ class TempoBox(ttk.Frame):
             var = self.tool_vars[key] = tk.BooleanVar(value=key == "line")
             ttk.Checkbutton(bar, text=label, variable=var, style="Toolbutton", takefocus=False,
                             command=lambda k=key: self.pick_tool(k)).pack(side="left", padx=1)
+        # which line the tools draw (user 2026-10-24: two buttons only; no key, Tab is the track list's)
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
+        ttk.Label(bar, text=tr("tempo.draw")).pack(side="left", padx=(0, 4))
+        self.mode = "visual"  # visual / heard
+        self.mode_vars, self.mode_btns = {}, {}
+        for key in ("visual", "heard"):
+            var = self.mode_vars[key] = tk.BooleanVar(value=key == "visual")
+            b = self.mode_btns[key] = ttk.Checkbutton(bar, text=tr("tempo.draw_" + key), variable=var,
+                                                      style="Toolbutton", takefocus=False,
+                                                      command=lambda k=key: self.set_mode(k))
+            b.pack(side="left", padx=1)
+            Tooltip(b, tr("tempo.draw_%s_tip" % key))
         lb = ttk.Label(bar, text=tr("tempo.every"))
         lb.pack(side="left", padx=(10, 0))
         self.every_var = tk.StringVar(value=str(EVERY))
@@ -198,11 +220,15 @@ class TempoBox(ttk.Frame):
         self.scale_box.pack(side="left", padx=(4, 0))
         self.scale_box.bind("<<ComboboxSelected>>", lambda e: self.picked_scale())
         Tooltip(self.scale_box, tr("tempo.scale_tip"))
-        self.keep_var = tk.BooleanVar(value=False)
-        self.keep_box = ttk.Checkbutton(row, text=tr("tempo.keep"), variable=self.keep_var, takefocus=False,
-                                        command=self.picked_keep)
-        self.keep_box.pack(side="left", padx=(8, 0))
-        Tooltip(self.keep_box, tr("tempo.keep_tip"))
+        # Keep timing: Off / Keep the audio / Keep the visual (user 2026-10-24; was a tick); switching swaps the lines
+        self.keep_label = ttk.Label(row, text=tr("tempo.keep"))
+        self.keep_label.pack(side="left", padx=(8, 0))
+        self.keep_box = ttk.Combobox(row, state="readonly", width=15,
+                                     values=[tr("tempo.keep_" + k) for k in KEEP_HOW])
+        self.keep_box.pack(side="left", padx=(4, 0))
+        self.keep_box.bind("<<ComboboxSelected>>", lambda e: self.picked_keep())
+        for w in (self.keep_label, self.keep_box):
+            Tooltip(w, tr("tempo.keep_tip"))
         self.draw_scale = "lin"  # what new drawn parts get (the last one picked)
         self.catch_row = row = ttk.Frame(row2)
         ttk.Label(row, text=tr("tempo.catch")).pack(side="left")
@@ -273,7 +299,7 @@ class TempoBox(ttk.Frame):
 
     def sync(self):
         """Show the row for what's picked, with its values (called after every change)."""
-        pane, tempo = self.pane, self.app.tempo
+        pane, tempo = self.pane, self.pane.ed()
         pick = pane.picked()
         kind = pick[0] if pick else None
         rows = {"point": [self.point_row], "part": [self.part_row], "catch": [self.catch_row]}.get(kind, [])
@@ -288,7 +314,12 @@ class TempoBox(ttk.Frame):
             self.curve.state(["disabled"] if last else ["!disabled"])
             self.scale_box.current(SCALES.index(p[4]))
             self.scale_box.state(["disabled"] if p[2] == "hold" or last else ["!disabled"])
-            self.keep_var.set(keeps(p))
+            heard = self.mode == "heard"  # (the heard line's parts: no Keep timing of their own)
+            if heard != (not self.keep_box.winfo_manager()):
+                for w in (self.keep_label, self.keep_box):
+                    w.pack_forget() if heard else w.pack(side="left", padx=(8 if w is self.keep_label else 4, 0))
+            if not heard:
+                self.keep_box.current(KEEP_HOW.index(keep_how(p)))
             formula = p[2] == "formula"
             text, tip = p[3] or FORMULA, tr("tempo.formula_tip")
         elif kind == "catch":
@@ -308,8 +339,12 @@ class TempoBox(ttk.Frame):
             self.result.config(text=res, foreground=look.ERROR if bad else look.TEMPO_CATCH)
             rows.append(self.result)
         if self.focus_get() is not self.every_box:
-            self.every_var.set(str(tempo.get("every", EVERY)))
-        self.bars_var.set(tempo.get("bars", True))
+            self.every_var.set(str(self.app.tempo.get("every", EVERY)))
+        self.bars_var.set(self.app.tempo.get("bars", True))
+        can = bool(keep_runs(self.app.tempo))  # (Heard tempo: only while some part keeps timing)
+        self.mode_btns["heard"].state(["!disabled"] if can else ["disabled"])
+        if self.mode == "heard" and not can:
+            return self.set_mode("visual")
         shown = tuple(map(str, rows))
         if shown != self._shown:  # (packed again only when it changes: no flashing while dragging)
             for w in (self.point_row, self.part_row, self.catch_row, self.formula_box, self.result):
@@ -324,7 +359,7 @@ class TempoBox(ttk.Frame):
     def typing_for(self):
         """A box clicked: its typing goes to what's picked now, even if a pane click picks something else first."""
         pick = self.pane.picked()
-        tempo = self.app.tempo
+        tempo = self.pane.ed()
         if pick and pick[0] == "point":
             self._typed_for = ("point", [tempo["points"][i] for i in pick[1]])
         elif pick:
@@ -335,7 +370,7 @@ class TempoBox(ttk.Frame):
 
     def target(self):
         """(kind, item(s)) the typing goes to, still in the line; else what's picked now."""
-        tempo = self.app.tempo
+        tempo = self.pane.ed()
         alive = ids(tempo["points"] + tempo["catch"])
         if self._typed_for:
             kind, it = self._typed_for
@@ -405,7 +440,7 @@ class TempoBox(ttk.Frame):
     def picked_curve(self):
         pick = self.pane.picked()
         if pick and pick[0] == "part":
-            p = self.app.tempo["points"][pick[1]]
+            p = self.pane.ed()["points"][pick[1]]
             kind = CURVES[self.curve.current()]
             if kind != p[2]:
                 self.app.push_undo(name=tr("tempo.step_curve"))
@@ -418,7 +453,7 @@ class TempoBox(ttk.Frame):
     def picked_scale(self):
         pick = self.pane.picked()
         if pick and pick[0] == "part":
-            p = self.app.tempo["points"][pick[1]]
+            p = self.pane.ed()["points"][pick[1]]
             scale = SCALES[self.scale_box.current()]
             self.draw_scale = scale
             if scale != p[4]:
@@ -430,12 +465,47 @@ class TempoBox(ttk.Frame):
     def picked_keep(self):
         pick = self.pane.picked()
         if pick and pick[0] == "part":
-            p = self.app.tempo["points"][pick[1]]
-            if self.keep_var.get() != keeps(p):
+            want, tempo, i = KEEP_HOW[max(0, self.keep_box.current())], self.app.tempo, pick[1]
+            p = tempo["points"][i]
+            if want != keep_how(p) and self.mode == "visual":
                 self.app.push_undo(name=tr("tempo.step_keep"))
                 p.extend([False] * (6 - len(p)))
-                p[5] = self.keep_var.get()  # (only the tick: the bend after it stays, hunt 2026-10-22)
+                base, ppq = self.pane.base(), self.app.ppq
+                if want == "off":
+                    p[5] = False  # (only the tick: the bend and heard line after it stay, hunt 2026-10-22)
+                else:
+                    on = keeps(p)
+                    p[5] = True
+                    tempo_edited()
+                    if keep_how(p) != want:  # (Keep the audio <-> Keep the visual: the two lines swap, on the
+                        # whole run the part is in: its parts share one heard line)
+                        s, t = next(r for r in keep_runs(tempo) if r[0] <= i <= r[1])
+                        swap_part(tempo, base, ppq, s, t)
+                    elif not on:  # (the tempo after it goes on from where the heard line ends, user 2026-10-24)
+                        end_point(tempo, base, ppq, i)
                 self.app.tempo_changed()
+        self.app.roll.focus_set()
+
+    def set_mode(self, key):
+        """Draw: Visual tempo / Heard tempo (user 2026-10-24): which line the tools edit; the other fades and can't
+        be clicked."""
+        for k, var in self.mode_vars.items():
+            var.set(k == key)
+        if key == "heard" and not keep_runs(self.app.tempo):
+            key = "visual"
+            self.mode_vars["visual"].set(True)
+            self.mode_vars["heard"].set(False)
+        if key != self.mode:
+            self.pane.confirm()
+            self.pane.cancel_placing()
+            self.pane.drag, self.pane.bands, self.pane.sel, self.pane.part = None, [], [], None
+            self.mode = key
+            pane = self.pane  # (the run at the play line to start with, else the first)
+            run = pane.run_at(self.app.playhead) or (pane.runs() or [None])[0] if key == "heard" else None
+            pane.run = run and run[0]
+        self.sync()
+        self.pick_tool_hint()
+        self.pane.request_redraw()
         self.app.roll.focus_set()
 
     def picked_bars(self):
@@ -463,7 +533,7 @@ class TempoBox(ttk.Frame):
     def picked_shape(self):
         pick = self.pane.picked()
         if pick and pick[0] == "catch":
-            c = self.app.tempo["catch"][pick[1]]
+            c = self.pane.ed()["catch"][pick[1]]
             shape = SHAPES[self.shape.current()]
             if shape != c[1]:
                 self.app.push_undo(name=tr("tempo.step_catch_shape"))
@@ -520,6 +590,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self._pan = None
         self._redraw_pending = False
         self._typing = None  # the BPM box over a point (double-click)
+        self.run = None  # Draw: Heard tempo: the Keep timing run whose heard line is edited (its first point)
+        self._ed = None  # (first point, its line, the line as a tempo line, the run's points) being edited
+        self._runs = (None, [])
         self.bind("<Configure>", lambda e: self.request_redraw())
         self.bind("<Map>", lambda e: self.request_redraw())
         self.bind("<ButtonPress-1>", self.on_press)
@@ -535,6 +608,117 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.bind("<B2-Motion>", self.pan_to)
         self.bind("<MouseWheel>", self.on_wheel)
         grab_while_panning(self)
+
+    # ------------------------------------------------------------ the line the tools edit (user 2026-10-24)
+
+    # Draw: Visual tempo = the project's tempo line. Draw: Heard tempo = one Keep timing run's heard line (the run
+    # under the press), handed to every tool as a tempo line of its own ({"points": the line itself, "catch": []}),
+    # so they all work the same on it; app.tempo_changed -> write_heard puts it back into the run.
+
+    def runs(self):
+        """[(first point, the run's points, first beat, end beat or None)] of the Keep timing runs."""
+        tempo = self.app.tempo
+        key = tempo_text(tempo)
+        if self._runs[0] is not key:
+            pts = tempo["points"]
+            self._runs = (key, [(pts[i], pts[i:j + 1], pts[i][0], pts[j + 1][0] if j + 1 < len(pts) else None)
+                                for i, j in keep_runs(tempo)])
+        return self._runs[1]
+
+    def run_at(self, b):
+        """The Keep timing run at beat b (its end beat counts: a line can end there), or None."""
+        return next((r for r in self.runs() if r[2] - 1e-9 <= b and (r[3] is None or b <= r[3] + 1e-9)), None)
+
+    def ed(self):
+        """The tempo line the tools edit: the project's, or (Draw: Heard tempo) the picked run's heard line; no run
+        picked = an empty one."""
+        if self.box.mode != "heard":
+            return self.app.tempo
+        got = self._ed
+        p = self.run
+        if got is not None and got[0] is p and p is not None:
+            h = heard_of(p)
+            if h is None or h["line"] is got[1]:
+                return got[2]
+        run = next((r for r in self.runs() if r[0] is p), None) if p is not None else None
+        if run is None:
+            self.run = self._ed = None
+            return {"points": [], "catch": [], "every": self.app.tempo.get("every", EVERY)}
+        line = heard_of(p)["line"] if heard_of(p) else []
+        self._ed = (p, line, {"points": line, "catch": [], "every": self.app.tempo.get("every", EVERY)},
+                    list(run[1]))
+        if any(q[0] < run[2] - 1e-9 or (run[3] is not None and q[0] > run[3] + 1e-9) or len(q) > 7 or keeps(q)
+               for q in line):
+            self.write_heard()  # (points past its ends, from before it was cut: cut off there, same line inside)
+            tempo_edited()
+        return self._ed[2]
+
+    def ed_base(self):
+        """What the edited line plays before its first point: the project's BPM / the tempo heard before the run."""
+        got = self._ed if self.box.mode == "heard" else None
+        if got is None:
+            return self.base()
+        tempo_edited()  # (its line may have changed in place just now)
+        pts = self.app.tempo["points"]
+        at = {id(q): k for k, q in enumerate(pts)}
+        ks = [at[id(q)] for q in got[3] if id(q) in at]
+        return heard_before(self.app.tempo, self.base(), self.app.ppq, ks[0], ks[-1]) if ks else self.base()
+
+    def run_span(self):
+        """(first, end beat; inf = the song's end) of the run being edited, None outside Heard tempo."""
+        got = self._ed if self.box.mode == "heard" else None
+        if got is None:
+            return None
+        pts = self.app.tempo["points"]
+        at = {id(q): k for k, q in enumerate(pts)}
+        ks = [at[id(q)] for q in got[3] if id(q) in at and keeps(q)]
+        if not ks or id(got[0]) not in at:
+            return None
+        return got[0][0], pts[ks[-1] + 1][0] if ks[-1] + 1 < len(pts) else math.inf
+
+    def in_run(self, b):
+        """b kept inside the run being edited (Heard tempo; else as it is)."""
+        span = self.run_span()
+        return b if span is None else min(max(b, span[0]), span[1])
+
+    def write_heard(self):
+        """Draw: Heard tempo: the edited heard line put back into its run: points past its ends cut off there (the
+        line the same inside), each part of the run its own copy, the "visual" mark kept (app.tempo_changed)."""
+        got = self._ed if self.box.mode == "heard" else None
+        span = self.run_span()
+        if got is None or span is None:
+            return
+        p, line, _, members = got
+        tempo_edited()
+        a, e = span
+        base = self.ed_base()
+        for q in line:  # (pasted from the drawn line: no Keep timing / line of their own)
+            q.extend([False] * (6 - len(q)))
+            q[5] = False
+            del q[7:]
+        if any(q[0] < a - 1e-9 for q in line):
+            split_at(line, a, base)
+            line[:] = [q for q in line if q[0] >= a - 1e-9]
+        if e != math.inf and any(q[0] > e + 1e-9 for q in line):
+            split_at(line, e, base)
+            line[:] = [q for q in line if q[0] <= e + 1e-9]
+        if not self.drag:  # (a drag: when let go, as the drawn line's)
+            drop_loose(line)
+        h = heard_of(p)
+        if h is None and line:
+            p.extend([False] * (6 - len(p)) + [list(BEND)] * (len(p) < 7))
+            del p[7:]
+            p.append(h := {"line": line})
+        elif h is not None and not line and not h.get("visual"):
+            del p[7:]
+            h = None
+        alive = ids(self.app.tempo["points"])
+        for q in members:
+            if q is not p and id(q) in alive and keeps(q):
+                del q[7:]
+                if h is not None:
+                    q.extend([False] * (6 - len(q)) + [list(BEND)] * (len(q) < 7))
+                    q.append(copy.deepcopy(h))
 
     # ------------------------------------------------------------ coordinates
 
@@ -628,7 +812,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def fit_view(self, redraw=True):
         """Up / down zoom to show the whole tempo line (catch-ups too) with a little room."""
         tempo, base = self.app.tempo, self.base()
-        vals = [base] + [p[1] for p in tempo["points"]]
+        vals = [base] + [p[1] for p in tempo["points"]] + [q[1] for p in tempo["points"] for q in heard_line(p)]
         vals += [pl["bpm"] for _, pl in plans(tempo, base, self.app.ppq) if pl["ok"]]
         if self.log:
             lo, hi = math.log2(min(vals)), math.log2(max(vals))
@@ -659,11 +843,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return []
         self.is_sel(None)
         got = self._sel_ids[2]
-        return [i for i, it in enumerate(self.app.tempo[key]) if id(it) in got]
+        return [i for i, it in enumerate(self.ed()[key]) if id(it) in got]
 
     def picked(self):
         """What the bar shows: ("point", [indices]), ("part", i), ("catch", j) or None."""
-        tempo = self.app.tempo
+        tempo = self.ed()
         had = len(self.sel)
         if self.sel:
             alive = ids(tempo["points"] + tempo["catch"])
@@ -687,7 +871,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def select_all(self):
         """Ctrl+A while this pane was clicked last: every point and catch-up line, in one Select box over them
         (user 2026-10-22: Delete then clears the whole line)."""
-        tempo = self.app.tempo
+        tempo = self.ed()
         items = tempo["points"] + tempo["catch"]
         if self.drag or self.placing:
             return
@@ -712,7 +896,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def point_at(self, x, y):
         roll, r = self.app.roll, 7 * self.scale
         best = None
-        for i, (b, v, *_) in enumerate(self.app.tempo["points"]):
+        for i, (b, v, *_) in enumerate(self.ed()["points"]):
             d = math.hypot(roll.t2x(b) - x, float(self.b2y(v)) - y)
             if d <= r and (best is None or d < best[0]):
                 best = (d, i)
@@ -720,7 +904,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def catch_at(self, x):
         roll = self.app.roll
-        for i, c in enumerate(self.app.tempo["catch"]):
+        for i, c in enumerate(self.ed()["catch"]):
             if abs(roll.t2x(c[0]) - x) <= 5 * self.scale:
                 return i
         return None
@@ -728,7 +912,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def start_at(self, x):
         """The catch-up whose yellow area's left edge is at x (its index), or None."""
         roll = self.app.roll
-        for j, (st, _) in enumerate(plans(self.app.tempo, self.base(), self.app.ppq)):
+        for j, (st, _) in enumerate(plans(self.ed(), self.base(), self.app.ppq)):
             if st["end"] is not None and st["from"] < st["line"] and abs(roll.t2x(st["from"]) - x) <= 4 * self.scale:
                 return j
         return None
@@ -736,7 +920,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def end_at(self, x):
         """The catch-up whose teal area's right edge is at x (its index), or None."""
         roll = self.app.roll
-        for j, (st, _) in enumerate(plans(self.app.tempo, self.base(), self.app.ppq)):
+        for j, (st, _) in enumerate(plans(self.ed(), self.base(), self.app.ppq)):
             if st["end"] is not None and abs(roll.t2x(st["end"]) - x) <= 4 * self.scale:
                 return j
         return None
@@ -769,7 +953,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def place_catch(self, e):
         """Step 2's press: the catch-up made (line where the yellow area ends), its end following the mouse."""
-        p, tempo = self.placing, self.app.tempo
+        p, tempo = self.placing, self.ed()
         tick = 1.0 / max(1, self.app.ppq)
         line = max(p["b"], tick)
         if any(abs(c[0] - line) < 1e-9 for c in tempo["catch"]):
@@ -787,7 +971,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def part_at(self, beat):
         """The part at beat: its first point's index (after the last point: the last one, for Keep timing)."""
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         for i in range(len(pts)):
             if pts[i][0] <= beat and (i == len(pts) - 1 or beat < pts[i + 1][0]):
                 return i
@@ -799,7 +983,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """(beat, BPM) of part i's round bend handle (the curve's middle; an S-curve: its first half's), None when
         it has none (held / formula / the last part / both ends one BPM) or a working catch-up hides the line
         there (user: it was left hanging in the air)."""
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         if (i is None or i + 1 >= len(pts) or pts[i][2] not in ("line", "s") or pts[i][1] == pts[i + 1][1]
                 or pts[i + 1][0] <= pts[i][0]):  # (where a glide arrives: no part of its own)
             return None
@@ -809,7 +993,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if p[2] == "s":
             x, y = x / 2, y / 2
         b = p[0] + (q[0] - p[0]) * x
-        if any(plan["ok"] and st["line"] <= b < st["end"] for st, plan in plans(self.app.tempo, self.base(),
+        if any(plan["ok"] and st["line"] <= b < st["end"] for st, plan in plans(self.ed(), self.base(),
                                                                                  self.app.ppq)):
             return None
         return b, self.along_bpm(p, q, y)
@@ -817,7 +1001,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def catch_handle_pos(self, j):
         """(beat, BPM) of catch-up j's round bend handle (fast then slow / slow then fast: its curve's middle), None
         when it has none (another shape, or it can't work)."""
-        st, plan = plans(self.app.tempo, self.base(), self.app.ppq)[j]
+        st, plan = plans(self.ed(), self.base(), self.app.ppq)[j]
         if st["shape"] not in ("ease", "rise") or not plan["ok"]:
             return None
         cx, cy = st["bend"] or CATCH_BEND
@@ -855,10 +1039,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             st = d["st"]
             fx = (self.app.roll.x2t(e.x) - st["line"]) / max(1e-12, st["end"] - st["line"])
             fy = math.log2(max(MIN_BPM, self.y2b(e.y)) / st["base"]) / d["push"] if d["push"] else 0.5
-            catch_set(self.app.tempo["catch"][i], 5, [min(1.0, max(0.0, 2 * fx - 0.5)),
+            catch_set(self.ed()["catch"][i], 5, [min(1.0, max(0.0, 2 * fx - 0.5)),
                                                       min(1.0, max(0.0, 2 * fy - 0.5))])
             return
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         p, q = pts[i], pts[i + 1]
         fx = (self.app.roll.x2t(e.x) - p[0]) / max(1e-12, q[0] - p[0])
         v = self.y2b(e.y)
@@ -868,12 +1052,12 @@ class TempoPane(ConductorMarks, tk.Canvas):
             fy = (v - p[1]) / (q[1] - p[1])
         if p[2] == "s":
             fx, fy = fx * 2, fy * 2
-        p[6:] = [[min(1.0, max(0.0, 2 * fx - 0.5)), min(1.0, max(0.0, 2 * fy - 0.5))]]
+        set_bend(p, [min(1.0, max(0.0, 2 * fx - 0.5)), min(1.0, max(0.0, 2 * fy - 0.5))])
 
     def toggle_s(self, i):
         """Right-click on the handle: the part an S-curve (the same bend, mirrored on its second half) / back to a
         line (one undo step)."""
-        p = self.app.tempo["points"][i]
+        p = self.ed()["points"][i]
         self.app.push_undo(name=tr("tempo.step_s"))
         p[2] = "line" if p[2] == "s" else "s"
         self.app.tempo_changed()
@@ -891,10 +1075,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
         ppq, roll = max(1, self.app.ppq), self.app.roll
         if roll.sx:
             r = 6 * self.scale / roll.sx
-            near = [p[0] for p in self.app.tempo["points"] if abs(p[0] - b) <= r and not any(p is s for s in skip)]
+            near = [p[0] for p in self.ed()["points"] if abs(p[0] - b) <= r and not any(p is s for s in skip)]
+            near += [x for x in self.run_span() or () if abs(x - b) <= r]  # (Heard tempo: the part's ends)
             if near:
                 return min(near, key=lambda pb: abs(pb - b))
-        return max(0.0, round(b * ppq) / ppq)
+        return self.in_run(max(0.0, round(b * ppq) / ppq))
 
     def move_beat(self, b, e, skip=(), beats=None):
         """A point / line / catch-up edge moved afterwards: onto the nearest note start or end within 10 px (user
@@ -903,6 +1088,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         roll, ppq = self.app.roll, max(1, self.app.ppq)
         if e.state & SHIFT or roll.sx is None:
             return max(0.0, round(b * ppq) / ppq)
+        if beats is None and self.run_span() is not None:  # (Heard tempo: the part's ends too)
+            beats = [p[0] for p in self.ed()["points"] if not any(p is s for s in skip)] + [
+                x for x in self.run_span() if x != math.inf]
         r = 10 * self.scale / roll.sx
         lo, hi = (b - r) * ppq, (b + r) * ppq
         first, end = roll.visible_range(lo, hi)
@@ -911,7 +1099,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         near = np.concatenate([rows[:, 0], rows[:, 1]]).astype(float)
         near = near[(near >= lo) & (near <= hi)] / ppq
         if beats is None:
-            beats = [p[0] for p in self.app.tempo["points"] if not any(p is s for s in skip)]
+            beats = [p[0] for p in self.ed()["points"] if not any(p is s for s in skip)]
         near = np.concatenate([near, np.array([pb for pb in beats if abs(pb - b) <= r], float)])
         if not len(near):
             return max(0.0, round(b * ppq) / ppq)
@@ -926,7 +1114,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     # ------------------------------------------------------------ mouse
 
     def on_press(self, e):
-        roll, tempo = self.app.roll, self.app.tempo
+        roll, tempo = self.app.roll, self.ed()
         self.close_typing(True)
         if roll.sx is None or self.view is None:
             return
@@ -945,6 +1133,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
             else:
                 self.place_catch(e)
             return
+        if self.box.mode == "heard":  # (Heard tempo: only inside the Keep timing parts; a press picks the run)
+            run = self.run_at(roll.x2t(e.x))
+            if run is None:
+                return
+            if run[0] is not self.run:
+                self.confirm()
+                self.run, self.sel, self.part, self.bands = run[0], [], None, []
+                self.box.sync()
+                self.request_redraw()
         tool = self.box.tool.get()
         self.picked()  # (what's picked still there)
         k = self.live_end_at(e.x, e.y)
@@ -1002,7 +1199,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         made already: a new point). Time and BPM, Select too (user 2026-10-22); the Select box goes along and
         first one's left side snaps, else the grabbed one does."""
         band = list(self.bands) or None
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         pid = ids(pts)
         held = [s for s in self.sel if id(s) in pid]
         held_beats = {s[0] for s in held}
@@ -1023,7 +1220,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         d["pushed"] = True
         # (let go: laid in from this like a paste, hunt 2026-10-22; the copies below only show it while dragged)
         d["clip"] = self.clip_of(spans=self.bands) if self.bands else None
-        tempo, pairs = self.app.tempo, []
+        tempo, pairs = self.ed(), []
         for s, b, v in d["orig"]:
             c = copy.deepcopy(s)
             tempo["points" if v is not None else "catch"].append(c)
@@ -1037,7 +1234,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             tempo[key].sort(key=lambda it: it[0])
 
     def is_point(self, item):
-        return any(item is p for p in self.app.tempo["points"])
+        return any(item is p for p in self.ed()["points"])
 
     def on_drag(self, e):
         if e.state & 0x200 and self._pan:  # (the middle button too: pans)
@@ -1085,7 +1282,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             live = self.live_line()
             self.bend_to(d, e)
             kind, i = d["handle"]
-            if live is not None and kind == "part" and self.app.tempo["points"][i] is live["first"]:
+            if live is not None and kind == "part" and self.ed()["points"][i] is live["first"]:
                 self.live_seen()  # (the live line's own bend: it stays live)
             self.app.tempo_changed()
             return self.show_position(e)
@@ -1117,7 +1314,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def move_to(self, d, e):
         """The held items moved by the mouse: all by the same beats (and BPM); the grabbed one snaps."""
-        roll, tempo = self.app.roll, self.app.tempo
+        roll, tempo = self.app.roll, self.ed()
         one = 1.0 / max(1, self.app.ppq)
         # (a grabbed point / line goes to the mouse itself, user 2026-10-22: with Shift pressed later it sat off
         # the pencil by where the snapped press was; the box keeps its distance)
@@ -1158,7 +1355,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             """Two on one beat where something moved: the time stays where it last worked. Points: a jump's two
             may share exactly one beat, never three; one moved onto another (from the left: it arrives there, the
             list's order the sort keeps) lands exactly on its beat. Points not moved are never touched (hunt
-            2026-10-22: two a hair apart got joined, three stopped every drag)."""
+            2026-10-22: two a hair apart got joined, three stopped every drag). Heard tempo: never out of the part."""
+            span = self.run_span()
+            if span and any(id(p) in moved and not span[0] - 1e-9 <= p[0] <= span[1] + 1e-9 for p in tempo["points"]):
+                return True
             for key in ("points", "catch"):
                 its = tempo[key]
                 k = 0
@@ -1205,12 +1405,12 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def in_span(self, span):
         """The points and catch-up lines from span[0] to span[1] (the whole height: every BPM)."""
         lo, hi = span
-        tempo = self.app.tempo
+        tempo = self.ed()
         return [it for it in tempo["points"] + tempo["catch"] if lo - 1e-9 <= it[0] <= hi + 1e-9]
 
     def in_spans(self, spans):
         """The points and catch-up lines in any of spans, each once, in the lists' order."""
-        tempo = self.app.tempo
+        tempo = self.ed()
         return [it for it in tempo["points"] + tempo["catch"]
                 if any(lo - 1e-9 <= it[0] <= hi + 1e-9 for lo, hi in spans)]
 
@@ -1223,14 +1423,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if not d:
             return
         live = self.live_line()
-        if drop_loose(self.app.tempo["points"]):  # (a jump's first point the drag left with nothing gliding in)
+        if drop_loose(self.ed()["points"]):  # (a jump's first point the drag left with nothing gliding in)
             self.app.tempo_changed()
         if live is not None and d["kind"] in ("live_end", "bend"):
             self.live_seen()
         if d["kind"] == "box":
             if d["span"] is None:  # a click: the part there (or nothing), the play line there (user 2026-10-21)
                 part = self.part_at(self.app.roll.x2t(e.x))
-                pts = self.app.tempo["points"]
+                pts = self.ed()["points"]
                 self.bands = d["more"]  # (a Ctrl+click changes nothing)
                 self.set_sel(d["before"] if d["ctrl"] else [], None if part is None else pts[part])
                 if not d["ctrl"]:
@@ -1251,7 +1451,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         elif d["kind"] == "move":
             if d.get("copies") is not None:  # (Ctrl+drag let go: the copies replace what was where they landed,
                 # as a paste does; not moved = no copies)
-                tempo, cop = self.app.tempo, ids(d["copies"])
+                tempo, cop = self.ed(), ids(d["copies"])
                 dv = next((s[1] - v for s, _, v in d["orig"] if v is not None), 0.0)
                 moved = bool(self.bands) and (abs(d["db"]) > 1e-12 or abs(dv) > 1e-12)
                 for key in ("points", "catch"):  # (the copies only showed it: laid in like a paste, hunt 2026-10-22)
@@ -1301,16 +1501,16 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if n is not None:  # (the bend handle: straight / the catch-up's own curve again)
             self.drag = None
             if n[0] == "catch":
-                c = self.app.tempo["catch"][n[1]]
+                c = self.ed()["catch"][n[1]]
                 if catch_get(c, 5) is not None:
                     self.app.push_undo(name=tr("tempo.step_catch_bend"))
                     catch_set(c, 5, None)
                     self.app.tempo_changed()
                 return
-            p = self.app.tempo["points"][n[1]]
+            p = self.ed()["points"][n[1]]
             if bend_of(p) != BEND:
                 self.app.push_undo(name=tr("tempo.step_bend"))
-                p[6:] = [list(BEND)]
+                set_bend(p, list(BEND))
                 self.app.tempo_changed()
             return
         if i is None and self.box.tool.get() == "select" and getattr(self.app, "tempo_clip", None) \
@@ -1326,7 +1526,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def glide_end(self, b):
         """The lone point on beat b where a curved part arrives (a second point may go on its beat: a jump), or
         None."""
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         on = [i for i, p in enumerate(pts) if abs(p[0] - b) < 1e-9]
         if len(on) != 1 or on[0] == 0:
             return None
@@ -1337,7 +1537,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """A new point (picked); its part keeps the curve of the part it was put in. On the beat of a point where a
         curve arrives: a second point there, the tempo from there on (user 2026-10-22: a jump right where a glide
         ends). None when one is there."""
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         end = self.glide_end(b)
         if end is not None and abs(end[1] - clamp_bpm(v)) < 1e-9:
             return None
@@ -1361,7 +1561,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             b0, v0 = d["b0"], d["v0"]
             self.add_point(b0, v0)
             return
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         self.app.push_undo(name=tr("tempo.step_draw"))
         base = copy.deepcopy(pts)
         kind = DRAWS[self.box.tool.get()]
@@ -1376,13 +1576,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
         whose curve / formula / scale / keep / bend it takes. Returns its first point."""
         if b1 < b0:
             b0, v0, b1, v1 = b1, v1, b0, v0
-        pts = self.app.tempo["points"]
+        pts = self.ed()["points"]
         before = [p for p in pts if p[0] <= b1 + 1e-9]
         # (the part after keeps its curve)
         after_kind = part_kind(before[-1] if before else None, self.box.draw_scale)
         held = [p for p in pts if p[0] <= b0 + 1e-9]
         first = [float(b0), clamp_bpm(v0), kind, text, self.box.draw_scale, bool(held) and keeps(held[-1]),
                  list(BEND)]
+        if first[5] and heard_of(held[-1]):  # (inside a Keep timing run: its heard line along)
+            first.append(copy.deepcopy(held[-1][7]))
         if like is not None:
             first[2:] = copy.deepcopy(like[2:])
         last = [float(b1), clamp_bpm(v1), *after_kind]
@@ -1410,7 +1612,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def live_line(self):
         """The line just drawn while it can still change (nothing else changed the tempo since), else None."""
         lv = self.live
-        if lv is not None and tempo_text(self.app.tempo) != lv["seen"]:
+        if lv is not None and tempo_text(self.ed()) != lv["seen"]:
             self.live = lv = None
         return lv
 
@@ -1418,7 +1620,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """The live line's own change done: the tempo as it is now is still its."""
         if self.live is not None:
             tempo_edited()  # (its own change may not have said so yet)
-            self.live["seen"] = tempo_text(self.app.tempo)
+            self.live["seen"] = tempo_text(self.ed())
 
     def live_end_at(self, x, y):
         """0 / 1 when the mouse is on the live line's start / end square, else None."""
@@ -1435,14 +1637,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """The live line's end k dragged to the mouse: onto a note's start / end or a tempo point near it (Shift:
         whole ticks), BPM snapped; laid again over the points as they were before it, in the same undo step."""
         lv = self.live
-        b = self.move_beat(self.app.roll.x2t(e.x), e, beats=[p[0] for p in lv["base"]])
+        b = self.in_run(self.move_beat(self.app.roll.x2t(e.x), e, beats=[p[0] for p in lv["base"]] + [
+            x for x in self.run_span() or () if x != math.inf]))
         ends = [list(p) for p in lv["ends"]]
         ends[k] = [b, self.snap_bpm(self.y2b(e.y), e)]
         if abs(ends[0][0] - ends[1][0]) < 0.5 / max(1, self.app.ppq):
             return
         lv["ends"] = ends
         old = lv["first"]
-        self.app.tempo["points"][:] = copy.deepcopy(lv["base"])
+        self.ed()["points"][:] = copy.deepcopy(lv["base"])
         (b0, v0), (b1, v1) = ends
         lv["first"] = self.lay_part(b0, v0, b1, v1, old[2], old[3], like=old)
         self.live_seen()
@@ -1522,7 +1725,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         return True
 
     def add_catch(self, b):
-        cs = self.app.tempo["catch"]
+        cs = self.ed()["catch"]
         b = max(float(b), 1.0 / max(1, self.app.ppq))
         if any(abs(c[0] - b) < 1e-9 for c in cs):
             return
@@ -1540,11 +1743,17 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if self.placing:  # (adding a catch-up: right-click calls it off)
             return self.cancel_placing()
         self.app.key_pane = self
+        if self.box.mode == "heard":  # (another part's heard line: that one picked first)
+            run = self.run_at(roll.x2t(e.x))
+            if run is not None and run[0] is not self.run:
+                self.confirm()
+                self.run, self.sel, self.part, self.bands = run[0], [], None, []
+                self.box.sync()
         self.picked()
         n = self.handle_at(e.x, e.y)
         if n is not None and n[0] == "part":  # (the bend handle: an S-curve / a line again, user)
             return self.toggle_s(n[1])
-        tempo = self.app.tempo
+        tempo = self.ed()
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
         on_edge = item is None and (self.start_at(e.x) is not None or self.end_at(e.x) is not None)
@@ -1578,10 +1787,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def right_menu(self, e, item):
         """The right-click menu: Add catch-up BPM here, an edge back to automatic, Delete for item."""
         self.menu_wait = None
-        tempo = self.app.tempo
+        tempo = self.ed()
         menu = tk.Menu(self, tearoff=0)
         on_mark = item is None and self.sig_menu_items(menu, e)  # (time / key signatures: Add here, or the mark's)
-        if not on_mark:
+        if not on_mark and self.box.mode == "visual":  # (catch-ups: the visual tempo's only)
             menu.add_separator()
             menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
         for k, at, key in ((3, self.start_at, "tempo.catch_auto"), (4, self.end_at, "tempo.catch_end_auto")):
@@ -1610,7 +1819,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def delete_items(self, gone, name=None):
         """These points / catch-up lines go (one undo step, name: its name instead of Delete's)."""
-        tempo = self.app.tempo
+        tempo = self.ed()
         alive = ids(tempo["points"] + tempo["catch"])
         gone = [g for g in gone if id(g) in alive]
         if not gone:
@@ -1634,7 +1843,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.picked()
         if self.drag:
             return True
-        tempo = self.app.tempo
+        tempo = self.ed()
         if self.sel and len(self.sel) == len(tempo["points"]) + len(tempo["catch"]):  # (all, e.g. Ctrl+A: nothing
             self.delete_items(list(self.sel), tr("tempo.step_delete_many"))           # left round them to keep)
         elif self.bands and self.sel:  # (the boxes' stretch emptied, the tempo round it as it was: like a cut)
@@ -1659,7 +1868,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """What Ctrl+C keeps: {"length", "points", "catch", "spans"}, beats from the copy's start. spans: boxes
         (the line cut at their edges, every catch-up inside); items: picked points / catch-up lines (their own
         first .. last beat). None when nothing's there."""
-        tempo, base = self.app.tempo, self.base()
+        tempo, base = self.ed(), self.ed_base()
         if spans:
             spans = joined(spans)
             src = copy.deepcopy(tempo["points"])
@@ -1706,7 +1915,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def copy(self):
         """Ctrl+C after clicking the pane: the Select boxes (or what's picked, or the part picked: its two
         points), each kept as its distance from the copy's start, so a paste keeps the gaps."""
-        pts, pick = self.app.tempo["points"], self.picked()
+        pts, pick = self.ed()["points"], self.picked()
         if self.bands:
             clip = self.clip_of(spans=self.bands)
         elif self.sel:
@@ -1736,7 +1945,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """Everything inside the boxes goes (one undo step); the tempo round them stays as it was: the line is cut
         at the edges, the point arriving at each start holds its BPM to the end, where the part after leaves
         from its own point (Ctrl+X / Delete with a box; cut + paste back = the same tempo)."""
-        tempo, base = self.app.tempo, self.base()
+        tempo, base = self.ed(), self.ed_base()
         spans = [(lo, hi) for lo, hi in joined(spans) if hi - lo > 1e-9]
         if not spans:
             return
@@ -1765,12 +1974,12 @@ class TempoPane(ConductorMarks, tk.Canvas):
             at, sb = self.app.playhead, self.app.snap_beats()
             if sb:
                 at = round(at / sb) * sb
-        self.put_copies(clip, self.tick_beat(at, skip=self.app.tempo["points"]), tr("tempo.step_paste"))
+        self.put_copies(clip, self.tick_beat(at, skip=self.ed()["points"]), tr("tempo.step_paste"))
 
     def put_copies(self, clip, at, name, push=True, stay=False):
         """clip's items placed from beat at, replacing what's in its boxes there (push: its own undo step). A clip
         of catch-up lines only leaves the points alone. stay: its first point always stays (lay_points)."""
-        tempo = self.app.tempo
+        tempo = self.ed()
         spans = joined([(at + a, at + b) for a, b in clip.get("spans") or [(0.0, clip["length"])]])
         one = 1.0 / max(1, self.app.ppq)
         if push:
@@ -1787,7 +1996,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         kept = [it for it in tempo["catch"] if not any(lo - 1e-9 <= it[0] <= hi + 1e-9 for lo, hi in spans)]
         tempo["catch"][:] = sorted(kept + new_c, key=lambda it: it[0])
         if new_p:
-            new_p = self.lay_points(tempo["points"], new_p, spans, self.base(), stay)
+            new_p = self.lay_points(tempo["points"], new_p, spans, self.ed_base(), stay)
         self.bands, self.sel, self.part = [(lo, hi) for lo, hi in spans if hi > lo], new_p + new_c, None
         self.app.tempo_changed()
 
@@ -1796,7 +2005,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         Domino) from beat at (project.paste_from_domino). how: "replace" = like a paste of the stretch at ..
         at + length (the tempo round it as it was: back on its end, like Copy to Domino's own copy), "add" = put
         in among the points, each held to the next point (what was there leaving that beat replaced, what
-        arrives kept). push: its own undo step (no notes pasted with it)."""
+        arrives kept). push: its own undo step (no notes pasted with it). Always into the visual tempo (user
+        2026-10-24: the heard line stays as it is)."""
+        if self.box.mode != "visual":
+            self.box.set_mode("visual")
         new = [[b, bpm, "hold", "", "lin", False, list(BEND)] for b, bpm in tempos]
         if how == "replace":
             clip = {"length": length, "points": new, "catch": [], "spans": [(0.0, length)]}
@@ -1808,7 +2020,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         if push:
             self.app.push_undo(name=tr("project.paste_from_domino"))
-        pts, base = self.app.tempo["points"], self.base()
+        pts, base = self.ed()["points"], self.base()
         for p in new:
             p[0] += at
             split_at(pts, p[0], base)
@@ -1887,15 +2099,25 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def pick_state(self):
         """What's picked, for an undo step (JSON): the Select box, the picked points / lines and part by place."""
-        tempo, part = self.app.tempo, self.picked()
+        part = self.picked()
+        run = None  # (Heard tempo: the run being edited, by its first point's place)
+        if self.box.mode == "heard" and self.run is not None:
+            run = next((k for k, p in enumerate(self.app.tempo["points"]) if p is self.run), None)
         return json.dumps({"bands": [list(s) for s in self.bands], "points": self.sel_idx("points"),
-                           "catch": self.sel_idx("catch"), "part": part[1] if part and part[0] == "part" else None})
+                           "catch": self.sel_idx("catch"), "part": part[1] if part and part[0] == "part" else None,
+                           "heard": run})
 
     def restore_pick(self, text):
-        """An undo step's pick_state back (on the tempo line it brought back)."""
+        """An undo step's pick_state back (on the tempo line it brought back; picks made on the other line than
+        the one drawn now: nothing picked)."""
         try:
             got = json.loads(text)
-            tempo = self.app.tempo
+            run, pts = got.get("heard"), self.app.tempo["points"]
+            if (run is not None) != (self.box.mode == "heard"):
+                got = {}
+            elif run is not None:
+                self.run = pts[run] if 0 <= run < len(pts) and keeps(pts[run]) else None
+            tempo = self.ed()
             self.bands = [tuple(s) for s in got.get("bands") or ([got["band"]] if got.get("band") else [])]
             self.sel = [tempo[key][i] for key in ("points", "catch") for i in got.get(key, ())
                         if 0 <= i < len(tempo[key])]
@@ -1920,6 +2142,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "sb_v_double_arrow", "numbers"
         elif self.placing:
             want = "sb_h_double_arrow"  # (the catch-up being added keeps its own hint)
+        elif self.box.mode == "heard" and self.run_at(roll.x2t(e.x)) is None:
+            want, hint = "arrow", "heard_out"  # (faded: nothing to click outside the Keep timing parts)
         elif self.live_end_at(e.x, e.y) is not None:
             want, hint = "fleur", "on_live_end"
         elif self.point_at(e.x, e.y) is not None:
@@ -2000,7 +2224,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def open_typing(self, i):
         self.close_typing(True)
-        item = self.app.tempo["points"][i]
+        item = self.ed()["points"][i]
         self.set_sel([item])
         b, v = item[:2]
         var = tk.StringVar(value=bpm_text(v))
@@ -2020,7 +2244,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         box, var, p = self._typing
         self._typing = None
-        if keep and any(p is q for q in self.app.tempo["points"]):
+        if keep and any(p is q for q in self.ed()["points"]):
             try:
                 v = calc(var.get().replace(",", ""))
                 if isinstance(v, (int, float)) and math.isfinite(v) and v > 0 and clamp_bpm(v) != p[1]:
@@ -2036,7 +2260,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def catch_result(self, j):
         """(text, can't) for catch-up line j: its BPM, or why it can't work."""
-        tempo, base = self.app.tempo, self.base()
+        tempo, base = self.ed(), self.base()
         st, plan = plans(tempo, base, self.app.ppq)[j]
         if plan["empty"]:
             return tr("tempo.catch_empty"), True
@@ -2115,21 +2339,23 @@ class TempoPane(ConductorMarks, tk.Canvas):
         y = float(self.b2y(60_000_000 / u))
         return pts + [x, y, x1, y]
 
-    def shown_points(self, x0, x1):
-        """(first, end) indices of the points between x0 and x1 (they're in beat order: a loaded MIDI brings
-        thousands, only the ones in view are worked through)."""
-        pts, roll = self.app.tempo["points"], self.app.roll
+    def shown_points(self, x0, x1, pts=None):
+        """(first, end) indices of the points (pts: these; else the project's) between x0 and x1 (they're in beat
+        order: a loaded MIDI brings thousands, only the ones in view are worked through)."""
+        pts, roll = self.app.tempo["points"] if pts is None else pts, self.app.roll
         b0, b1 = roll.x2t(x0), roll.x2t(x1)
         return (bisect.bisect_left(pts, b0 - 1e-9, key=lambda p: p[0]),
                 bisect.bisect_right(pts, b1 + 1e-9, key=lambda p: p[0]))
 
-    def line_xy(self, worked, w, kb):
-        """The tempo line as (xs, beats, ys): every 2 px, plus each jump drawn exactly upright (the beat just
-        before and the beat itself at the same x)."""
-        roll, tempo = self.app.roll, self.app.tempo
+    def line_xy(self, worked, w, kb, tempo=None, base=None):
+        """The tempo line (tempo: this one, base its BPM before the first point; else the project's) from x = kb
+        to w as (xs, beats, ys): every 2 px, plus each jump drawn exactly upright (the beat just before and the
+        beat itself at the same x)."""
+        roll = self.app.roll
+        tempo, base = (self.app.tempo, self.base()) if tempo is None else (tempo, base)
         xs = list(np.arange(kb, w + 2, 2, dtype=float))
         beats = [roll.x2t(x) for x in xs]
-        i0, i1 = self.shown_points(kb - 2, w + 4)
+        i0, i1 = self.shown_points(kb - 2, w + 4, tempo["points"])
         jumps = {p[0] for p in tempo["points"][i0:i1]} | {st["line"] for st, _ in worked}
         jumps |= {st["end"] for st, _ in worked if st["end"] is not None}
         ppq, every = self.app.ppq, tempo.get("every", EVERY)
@@ -2146,8 +2372,23 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 beats += [b - 1e-9 * max(1.0, b), b]
         order = sorted(range(len(xs)), key=lambda k: (xs[k], beats[k]))
         xs, beats = np.array(xs)[order], np.array(beats)[order]
-        vals = shown_bpm(tempo, self.base(), beats, worked, ppq)
+        vals = shown_bpm(tempo, base, beats, worked, ppq)
         return xs, beats, np.clip(self.b2y(vals), -50, self.winfo_height() + 50)
+
+    def heard_lines(self, keep_spans, w, kb):
+        """Each Keep timing piece's heard tempo as (xs, beats, ys, piece's first point index), cut to the piece:
+        its heard line (as the export plays it), or flat at the tempo heard before it."""
+        out, pts = [], self.app.tempo["points"]
+        every = self.app.tempo.get("every", EVERY)
+        for x0, x1, u, b0, b1, i in keep_spans:
+            line = {"points": heard_line(pts[i]), "catch": [], "every": every}
+            xa, xb = max(kb, math.floor(x0)), min(w, math.ceil(x1))
+            if xb - xa < 1:
+                continue
+            xs, beats, ys = self.line_xy([], xb, xa, line, 60_000_000 / u)
+            on = (beats >= b0 - 1e-9) & (beats < b1)
+            out.append((xs[on], beats[on], ys[on], i))
+        return out
 
     def redraw(self):
         self._redraw_pending = False
@@ -2181,11 +2422,21 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 if st["manual_end"] and xe >= kb:  # (its right edge drags; set by hand: a solid line)
                     self.create_line(xe, 0, xe, h, fill=look.TEMPO_CATCH, width=lw * 2)
         ppq = self.app.ppq
+        heard_mode = self.box.mode == "heard"  # (Draw: Heard tempo: the heard lines full, the drawn one faded)
         keep_spans = [(max(kb, roll.t2x(a / ppq)), w if e is None else min(w, roll.t2x(e / ppq)), u, a / ppq,
-                       math.inf if e is None else e / ppq) for _, a, e, u in layout(tempo, base, ppq)["keeps"]]
+                       math.inf if e is None else e / ppq, i) for i, a, e, u in layout(tempo, base, ppq)["keeps"]]
         keep_spans = [s for s in keep_spans if s[1] > s[0]]
         for x0, x1, *_ in keep_spans:  # Keep timing parts (purple), their notes keep the tempo heard before
             self.create_rectangle(x0, 0, x1, h, fill=look.TEMPO_KEEP_BG, outline="")
+        if heard_mode:  # (outside the Keep timing parts: faded, nothing to click there)
+            x = kb
+            for _, _, a, e in self.runs() + [(None, None, math.inf, None)]:
+                xa = min(w, roll.t2x(a)) if a != math.inf else w
+                if xa > x:
+                    self.create_rectangle(x, 0, xa, h, fill=look.TEMPO_OUT_BG, outline="", tags="heard_out")
+                x = max(x, w if e is None else roll.t2x(e))
+                if x >= w:
+                    break
         for x, c in roll.grid_cols(w):
             if x >= kb:
                 self.create_line(x, 0, x, h, fill=c)
@@ -2205,13 +2456,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         dense = self.dense_now()
-        heard = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None
-        for x0, x1, u, b0, b1 in keep_spans:  # (the tempo its notes keep: dashed, with the words on top)
-            if heard is None:
-                y = float(self.b2y(60_000_000 / u))
-                self.create_line(x0, y, x1, y, fill=look.TEMPO_KEEP, dash=(6, 3), width=lw + 1)
-            else:  # (a loaded MIDI: the file's own tempo, user 2026-10-24)
-                self.create_line(*self.heard_xy(heard, x0, x1), fill=look.TEMPO_KEEP, dash=(6, 3), width=lw + 1)
+        for x0, x1, u, b0, b1, _ in keep_spans:  # (the words on top)
             # notes too close for its tempo (user 2026-10-22: shown while editing, not only after the export): a
             # dashed orange line on each spot (one per pixel)
             bad = bisect.bisect_left(dense, b0 - 1e-9) < bisect.bisect_right(dense, b1 + 1e-9)
@@ -2223,16 +2468,52 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if x1 - x0 > 70 * self.scale:
                 self.create_text((x0 + x1) / 2, top + 8 * self.scale, text=text, fill=colour,
                                  font=look.font(8, "bold"))
-        # the line itself
+        # the line itself (faded while the heard line is drawn: user 2026-10-24)
         xs, beats, ys = self.line_xy(worked, w, kb)
-        self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=look.TEMPO_LINE, width=lw + 1)
+        self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), width=lw + 1,
+                         fill=look.TEMPO_FADED if heard_mode else look.TEMPO_LINE)
+        # the tempo the Keep timing notes are heard at (dashed; drawn with Heard tempo: solid)
+        dash = () if heard_mode else (6, 3)
+        loaded = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None
+        heard = self.heard_lines(keep_spans, w, kb)
+        for hx, hb, hy, i in heard:
+            if loaded is not None and not heard_line(tempo["points"][i]):  # (a loaded MIDI: the file's own tempo)
+                x0, x1 = max(kb, hx[0]), hx[-1]
+                self.create_line(*self.heard_xy(loaded, x0, x1), fill=look.TEMPO_KEEP, dash=dash, width=lw + 1)
+            elif len(hx) >= 2:
+                self.create_line(*np.column_stack([hx, hy]).ravel().tolist(), fill=look.TEMPO_KEEP, dash=dash,
+                                 width=lw + 1)
+        starts = {round(b0, 9): k for k, (_, _, _, b0, _, _) in enumerate(keep_spans)}
+        catches = {round(st["line"], 9) for st, _ in worked}
+        for k, (hx, hb, hy, i) in enumerate(heard):  # where the sound jumps at a part's end: a dotted upright line
+            b1 = keep_spans[k][4]
+            x = roll.t2x(b1)
+            if not len(hy) or b1 == math.inf or not kb <= x <= w or round(b1, 9) in catches:
+                continue
+            after = starts.get(round(b1, 9))
+            if after is not None:
+                nxt = next((g for g in heard if g[3] == keep_spans[after][5] and len(g[2])), None)
+                y1 = nxt[2][0] if nxt is not None else None
+            else:
+                y1 = float(self.b2y(shown_bpm(tempo, base, [b1], worked, ppq)[0]))
+            if y1 is not None and abs(y1 - hy[-1]) >= 1:
+                self.create_line(x, hy[-1], x, y1, fill=look.TEMPO_KEEP, dash=(2, 2), width=lw)
         pick = self.picked()
         if pick and pick[0] == "part":  # the picked part, thicker
-            pts = tempo["points"]
+            pts = self.ed()["points"]
             a, b = pts[pick[1]][0], pts[pick[1] + 1][0] if pick[1] + 1 < len(pts) else math.inf
-            on = (beats >= a) & (beats < b)
+            if heard_mode:  # (on the run's heard line)
+                span = self.run_span() or (0, 0)
+                a, b = max(a, span[0]), min(b, span[1])
+                got = [g for g in heard if len(g[1]) and span[0] - 1e-9 <= g[1][0] < span[1]]
+                px = np.concatenate([g[0] for g in got]) if got else np.zeros(0)
+                pb = np.concatenate([g[1] for g in got]) if got else np.zeros(0)
+                py = np.concatenate([g[2] for g in got]) if got else np.zeros(0)
+            else:
+                px, pb, py = xs, beats, ys
+            on = (pb >= a) & (pb < b)
             if on.sum() >= 2:
-                self.create_line(*np.column_stack([xs[on], ys[on]]).ravel().tolist(), fill=look.TEMPO_PICKED,
+                self.create_line(*np.column_stack([px[on], py[on]]).ravel().tolist(), fill=look.TEMPO_PICKED,
                                  width=lw + 3)
         # catch-up lines and their words
         for j, (st, plan) in enumerate(worked):
@@ -2256,17 +2537,23 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.draw_drag(lw)
         ends = {st["end"] for st, _ in worked if st["end"] is not None}
         r = 4 * self.scale
-        pts = tempo["points"]
-        i0, i1 = self.shown_points(kb - r, w + r)
-        for p in pts[i0:i1]:
-            b, v = p[0], p[1]
-            x, y = roll.t2x(b), float(self.b2y(v))
-            if x < kb - r or x > w + r:
-                continue
-            on = self.is_sel(p)
-            edge = look.TEMPO_CATCH if b in ends else look.TEMPO_LINE
-            self.create_oval(x - r, y - r, x + r, y + r, fill=look.TEMPO_PICKED if on else look.CHART_POINT,
-                             outline=edge, width=lw + 1)
+        if heard_mode:  # (every run's heard points; the run being edited's can be picked)
+            mine = self.ed()["points"]
+            groups = [(mine, look.TEMPO_KEEP)] + [(heard_line(q), look.TEMPO_KEEP) for q, *_ in self.runs()
+                                                 if q is not self.run]
+        else:
+            groups = [(tempo["points"], None)]
+        for pts, col in groups:
+            i0, i1 = self.shown_points(kb - r, w + r, pts)
+            for p in pts[i0:i1]:
+                b, v = p[0], p[1]
+                x, y = roll.t2x(b), float(self.b2y(v))
+                if x < kb - r or x > w + r:
+                    continue
+                on = self.is_sel(p)
+                edge = col or (look.TEMPO_CATCH if b in ends else look.TEMPO_LINE)
+                self.create_oval(x - r, y - r, x + r, y + r, fill=look.TEMPO_PICKED if on else look.CHART_POINT,
+                                 outline=edge, width=lw + 1)
         got = self.handles()
         if got is not None:  # the picked line's / catch-up's bend handle: round, like the velocity pane's curve
             at = got[1]

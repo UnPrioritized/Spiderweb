@@ -274,6 +274,12 @@ def bend_of(p):
     return p[6] if len(p) > 6 and p[6] else BEND
 
 
+def set_bend(p, bend):
+    """Point p's part bend set (its heard tempo line after it kept)."""
+    p.extend([False] * (6 - len(p)) + [None] * (len(p) < 7))
+    p[6] = bend
+
+
 def bent(t, bend):
     """A curve from (0, 0) to (1, 1) bent through its control point bend (0..1 each way, so it never goes past
     either end: user, like the velocity pane's curve), read at times t."""
@@ -785,6 +791,126 @@ def keep_heard(lay, n, lo, hi):
     return out
 
 
+def keep_runs(tempo):
+    """[(first, last point index)] of the Keep timing runs: parts in a row with Keep timing and one heard tempo line
+    (a part cut in two keeps reading the same line), each edited as one in the Conductor pane."""
+    pts, out = tempo["points"], []
+    for i, p in enumerate(pts):
+        if not keeps(p):
+            continue
+        if out and out[-1][1] == i - 1 and json.dumps(heard_of(pts[i - 1])) == json.dumps(heard_of(p)):
+            out[-1] = (out[-1][0], i)
+        else:
+            out.append((i, i))
+    return out
+
+
+def heard_before(tempo, base, ppq, i, j=None):
+    """The BPM heard just before the Keep timing run of points i..j (j: i alone): what its heard line plays before
+    its first point."""
+    for k, _, _, u in layout(tempo, base, ppq)["keeps"]:
+        if i <= k <= (i if j is None else j):
+            return 60_000_000 / u
+    return float(base)
+
+
+def keep_end_bpm(tempo, base, ppq, i):
+    """The BPM point i's Keep timing part's heard line arrives at on its end (its own value, not the interval's last
+    step; None: it runs to the song's end, or a catch-up ends it)."""
+    pts = tempo["points"]
+    if i + 1 >= len(pts):
+        return None
+    lay = layout(tempo, base, ppq)
+    et = beat_tick(pts[i + 1][0], ppq)
+    for k, ta, te, u in lay["keeps"]:
+        if k == i and te == et and te > ta:
+            hl = copy.deepcopy(heard_line(pts[i]))  # (before its first point: the tempo heard before the piece)
+            split_at(hl, pts[i + 1][0], 60_000_000 / u)
+            return next(q[1] for q in hl if abs(q[0] - pts[i + 1][0]) < 1e-9)
+    return None
+
+
+def end_point(tempo, base, ppq, i):
+    """Keep timing turned on (or swapped) for point i's part: the tempo after it starts at the BPM heard at its end,
+    so the sound goes on smoothly (user 2026-10-24: they put that point by hand; it can be deleted). Nothing when
+    the part runs to the song's end, the part after keeps timing too or the line is there already. True when it
+    changed something."""
+    pts = tempo["points"]
+    changed()
+    v = keep_end_bpm(tempo, base, ppq, i)
+    if v is None:
+        return False
+    v = clamp_bpm(v)
+    on = [k for k, q in enumerate(pts) if abs(q[0] - pts[i + 1][0]) < 1e-9]
+    q, p = pts[on[-1]], pts[i]
+    if keeps(q) or abs(q[1] - v) <= 1e-9 * v:
+        return False
+    if len(on) == 1 and p[2] != "hold" and p[1] != q[1]:  # (a glide arrives: it stays, the tempo jumps from there)
+        pts.insert(on[0] + 1, [q[0], v] + copy.deepcopy(q[2:]))
+    else:
+        if len(on) == 1 and p[2] != "hold":  # (a "curve" between two equal BPMs: flat, kept flat)
+            p[2] = "hold"
+        q[1] = v
+    changed()
+    return True
+
+
+def swap_part(tempo, base, ppq, i, j=None):
+    """Keep the audio <-> Keep the visual on the Keep timing run of points i..j (j: i alone; user 2026-10-24): its
+    drawn line and its heard line swap places (a flat heard line = the tempo heard just before it), the "visual"
+    mark flips, then the tempo after it starts where the new heard line ends (end_point). Returns the run's last
+    point's index."""
+    pts = tempo["points"]
+    j = i if j is None else j
+    p = pts[i]
+    a = p[0]
+    e = pts[j + 1][0] if j + 1 < len(pts) else None
+    kb = clamp_bpm(heard_before(tempo, base, ppq, i, j))
+    h = heard_of(p) or {"line": []}
+    hl = copy.deepcopy(h["line"])  # (the heard line over the part, cut at its ends: the same line)
+    split_at(hl, a, kb)
+    if e is not None:
+        split_at(hl, e, kb)
+    first = [q for q in hl if abs(q[0] - a) < 1e-9][-1]
+    inner = [q for q in hl if a + 1e-9 < q[0] and (e is None or q[0] < e - 1e-9)]
+    arrive = next((q[1] for q in hl if e is not None and abs(q[0] - e) < 1e-9), None)
+    # the drawn line over the run becomes the heard line
+    line = [[q[0], q[1], q[2], q[3], q[4], False, list(bend_of(q))] for q in pts[i:j + 1]]
+    q = pts[j]
+    if e is not None and q[2] != "hold" and q[1] != pts[j + 1][1]:
+        line.append([e, pts[j + 1][1], "hold", "", "lin", False, list(BEND)])
+    drop_loose(line)
+    if len(line) == 1 and p[2] == "hold" and abs(p[1] - kb) <= 1e-6 * kb:
+        line = []  # (flat at the tempo heard before: follows it, as without a line)
+    new = {"line": line}
+    if not h.get("visual"):
+        new["visual"] = True
+    # the heard line over the part becomes the drawn one
+    p[1], p[2:5] = first[1], copy.deepcopy(first[2:5])
+    set_bend(p, list(bend_of(first)))
+    p[5] = True
+    del p[7:]
+    if new["line"] or "visual" in new:
+        p.append(new)
+    mids = [[q[0], q[1], q[2], q[3], q[4], True, list(bend_of(q))] + ([copy.deepcopy(new)] if len(p) > 7 else [])
+            for q in inner]
+    pts[i + 1:j + 1] = mids
+    last = i + len(mids)
+    if e is not None:
+        on = [k for k, q in enumerate(pts) if abs(q[0] - e) < 1e-9]
+        lp = pts[last]
+        if lp[2] != "hold" and arrive is not None:  # (it glides into e: arrives at the heard line's BPM there)
+            if len(on) == 2:
+                pts[on[0]][1] = arrive
+            elif abs(pts[on[0]][1] - arrive) > 1e-9:
+                pts.insert(on[0], [e, arrive, "hold", "", "lin", False, list(BEND)])
+    lp = pts[last]
+    drop_loose(pts)  # (an arrival on a beat nothing glides into any more: gone, so the index found again)
+    last = next(k for k, q in enumerate(pts) if q is lp)
+    end_point(tempo, base, ppq, last)
+    return last
+
+
 def plans(tempo, base, ppq):
     """[(stretch, catch_plan)] for every catch-up line."""
     return layout(tempo, base, ppq)["worked"]
@@ -850,7 +976,10 @@ def split_at(pts, b, base):
         cx, cy = bend_of(p)
         q = pts[i + 1]
         mid = [(p[0] + q[0]) / 2, float(_along(p, q, 0.5)), "line", "", p[4], keeps(p), [1 - cx, 1 - cy]]
-        p[2], p[6:] = "line", [[cx, cy]]
+        if heard_of(p):
+            mid.append(copy.deepcopy(p[7]))
+        p[2] = "line"
+        set_bend(p, [cx, cy])
         pts.insert(i + 1, mid)
         if abs(mid[0] - b) < 1e-9:
             return mid
@@ -868,7 +997,7 @@ def split_at(pts, b, base):
         new[1] = float(_along(p, q, y))
         lx, ly = s * cx, s * cy  # (de Casteljau: the left piece's control point, then the right one's)
         rx, ry = (1 - s) * cx + s, (1 - s) * cy + s
-        p[6:] = [[_unit(lx / f if f > 0 else 0.5), _unit(ly / y if y > 0 else 0.5)]]
+        set_bend(p, [_unit(lx / f if f > 0 else 0.5), _unit(ly / y if y > 0 else 0.5)])
         new[6] = [_unit((rx - f) / (1 - f) if f < 1 else 0.5), _unit((ry - y) / (1 - y) if y < 1 else 0.5)]
     elif p[2] == "formula":
         ff = float(_apply(formula_fn(p[3]), np.array([f]))[0])
