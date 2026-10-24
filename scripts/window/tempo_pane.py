@@ -29,7 +29,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
-                         bpm_text, clamp_bpm, curve, drop_loose, end_point, formula_fn,
+                         bpm_text, clamp_bpm, curve, drawn_from, drop_loose, end_point, formula_fn,
                          catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_runs, keeps,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
                          swap_part, tempo_text)
@@ -266,6 +266,11 @@ class TempoBox(ttk.Frame):
         self.shape = ttk.Combobox(row, state="readonly", width=12, values=[tr("tempo.shape_" + k) for k in SHAPES])
         self.shape.pack(side="left", padx=(4, 0))
         self.shape.bind("<<ComboboxSelected>>", lambda e: self.picked_shape())
+        self.wheeled = False  # (Drawn picked with the mouse wheel: its window doesn't open by itself, as Speed: Custom)
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):  # (before the dropdown's own wheel step)
+            self.shape.bind(seq, lambda e: self.wheel_pick(), add="+")
+        self.graph_button = ttk.Button(row, text=tr("path.graph"), command=self.open_graph)  # (Drawn only)
+        self.graph_window = None  # the drawn catch-up's window (catch_graph.py), while open
         self.formula_var = tk.StringVar()
         self.formula_box = ttk.Entry(row2, textvariable=self.formula_var, width=16)
         self.formula_box.bind("<Return>", lambda e: self.typed_formula())
@@ -363,6 +368,9 @@ class TempoBox(ttk.Frame):
         elif kind == "catch":
             c = tempo["catch"][pick[1]]
             self.shape.current(SHAPES.index(c[1]))
+            drawn = c[1] == "drawn"
+            if drawn != bool(self.graph_button.winfo_manager()):
+                self.graph_button.pack(side="left", padx=(4, 0)) if drawn else self.graph_button.pack_forget()
             formula = c[1] == "formula"
             text, tip = c[2] or FORMULA, tr("tempo.catch_formula_tip")
         if not formula and kind is None and self.tool.get() == "formula":  # (the Formula pencil's formula)
@@ -383,6 +391,8 @@ class TempoBox(ttk.Frame):
         self.mode_btns["heard"].state(["!disabled"] if can else ["disabled"])
         if self.mode == "heard" and not can:
             return self.set_mode("visual")
+        if self.graph_window:
+            self.graph_window.sync()
         shown = tuple(map(str, rows))
         if shown != self._shown:  # (packed again only when it changes: no flashing while dragging)
             for w in (self.point_row, self.part_row, self.catch_row, self.formula_box, self.result):
@@ -611,11 +621,29 @@ class TempoBox(ttk.Frame):
             shape = SHAPES[self.shape.current()]
             if shape != c[1]:
                 self.app.push_undo(name=tr("tempo.step_catch_shape"))
+                if shape == "drawn" and catch_get(c, 6) is None:  # (starts from the shape picked before; one
+                    catch_set(c, 6, drawn_from(c[1], c[2], catch_get(c, 5)))  # drawn earlier is kept)
                 c[1] = shape
                 if shape == "formula" and not c[2]:
                     c[2] = FORMULA
                 self.app.tempo_changed()
+            wheeled, self.wheeled = self.wheeled, False
+            if shape == "drawn" and not wheeled:
+                return self.open_graph()
         self.app.roll.focus_set()
+
+    def wheel_pick(self):
+        """The wheel is about to step the Catch-up shape dropdown (its own wheel comes after this)."""
+        self.wheeled = True
+        self.after_idle(lambda: setattr(self, "wheeled", False))
+
+    def open_graph(self):
+        """A drawn catch-up's window (catch_graph.py)."""
+        from window.catch_graph import CatchGraph
+        if not self.graph_window:
+            self.graph_window = CatchGraph(self)
+        self.graph_window.lift()
+        self.graph_window.focus_set()
 
     def typed_formula(self):
         got = self.target()
@@ -2314,7 +2342,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             item = [c[0] - lo] + list(c[1:3])
             for k in (3, 4):
                 catch_set(item, k, None if catch_get(c, k) is None else catch_get(c, k) - lo)
-            catch_set(item, 5, catch_get(c, 5))
+            for k in (5, 6):
+                catch_set(item, k, catch_get(c, k))
             clip_c.append(item)
         out = [[p[0] - lo] + copy.deepcopy(p[1:]) for p in pts]
         for p in out:  # (heard tempo lines along, from the copy's start too)
@@ -2431,7 +2460,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             for k in (3, 4):
                 v = catch_get(c, k)
                 catch_set(item, k, None if v is None else max(0.0, v + at))
-            catch_set(item, 5, catch_get(c, 5))
+            for k in (5, 6):
+                catch_set(item, k, catch_get(c, k))
             new_c.append(item)
         inside = lambda x: any(lo - 1e-9 <= x <= hi + 1e-9 for lo, hi in spans)
         areas = [(min(st["from"], st["line"]), st["end"]) for st, c in zip(stretches(tempo, self.base()),

@@ -412,8 +412,8 @@ class PointDialog(tk.Toplevel):
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
         self.vars, self.boxes = {}, {}
-        for r, (key, text, v) in enumerate((("u", tr("speed_graph.copies"), gw.pts[i][0]),
-                                            ("p", tr("speed_graph.path"), gw.pts[i][1]))):
+        names = getattr(gw, "point_labels", (tr("speed_graph.copies"), tr("speed_graph.path")))  # (catch_graph's own)
+        for r, (key, text, v) in enumerate((("u", names[0], gw.pts[i][0]), ("p", names[1], gw.pts[i][1]))):
             lb = ttk.Label(box, text=text)
             lb.grid(row=r, column=0, sticky="w", pady=2)
             var = self.vars[key] = tk.StringVar(value=fmt(round(v * 100, 4)))
