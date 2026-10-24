@@ -7,6 +7,9 @@ With no tempo points the song plays at 120 BPM, the MIDI standard. The tempo at 
 Unlike many MIDI programs, the tempo here is a line you draw, like velocities: points where the BPM is set, and parts between them that hold, glide or curve.
 
 Line: a click adds a held step. Over a held tempo it holds until the next point; inside a ramp it is a short dip until the ramp's next step, then the ramp goes on as before. A click right above or below a point sets that point's BPM instead.
+[clip:conductor-click]
+
+Above, zoomed in on a ramp: one click made a dip. The ramp's steps before and after it are the same as before.
 
 Drag to draw a line. It replaces only its own stretch: the tempo before it stays as it was, a ramp after it goes on from where it was, and a held tempo after it takes the line's end BPM until the next point. While you drag, the pane already shows the result. The new line keeps squares at its ends and a round handle in the middle until Enter, Esc or a click elsewhere: drag a square to move that end, the handle to bend the line. Ctrl+Z takes the whole line away.
 [clip:conductor-line]
@@ -66,9 +69,12 @@ Keep timing lets a part show one tempo while the notes sound at another. Pick a 
 Either way the export moves the notes in ticks to make it exact. Switching between the two swaps the lines. The part after the last point can be picked too (to the song's end). Keep timing doesn't work inside a catch-up's yellow area.
 [clip:conductor-keep]
 
-The purple area is a Keep timing part, and the purple line is the heard tempo, the one the notes sound at (dashed while you draw the visual tempo).
+Above, Keep the audio: the file shows 60 BPM in the purple part, so the piano roll scrolls at half speed in other programs, but the notes still sound at 120, the dotted purple line.
 
 Draw: Visual tempo / Heard tempo (in the pane's top row) picks which line the tools draw. With Heard tempo, the tools draw the purple line, and everything outside the Keep timing parts is faded. A line drawn across several parts keeps only what lands inside them. Where the sound jumps at a part's end, a dotted upright line joins the two tempos.
+[clip:conductor-heard]
+
+Above, Keep the visual with Heard tempo picked: the file keeps showing 120 BPM (the faded line), while the music speeds up from 120 to 240 along the purple line. Spiderweb moves the notes in the file so they sound that way.
 
 Turning Keep timing on puts a point at the part's end at the heard tempo's BPM there, so the sound goes on smoothly. It follows the heard line's end until you change it.
 
