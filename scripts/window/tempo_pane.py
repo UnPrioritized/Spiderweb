@@ -1954,18 +1954,20 @@ class TempoPane(ConductorMarks, tk.Canvas):
         notes = app.rendered
         # (notes only: CC messages too close give way in the export, never keep the tempo faster)
         ticks = np.concatenate([notes[:, 0], notes[:, 1]]) if len(notes) else np.zeros(0, np.int64)
-        lm = app.loaded
+        lm, loose = app.loaded, None
         if lm is not None and any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
             if lm._anchors is None:  # (a loaded MIDI's note ticks: one read of the file, on a thread)
                 self.read_anchors(lm)
                 return
-            ticks = np.concatenate([ticks, lm._anchors[0]])
+            # (its export writes the file alone: its notes and CC messages, not the shapes, hunt 2026-10-24)
+            ticks, loose = lm._anchors
         limits = {"dense": [], "gave": [], "unfit": []}
         if any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
             try:
                 heard = file_tempos(lm) if lm is not None else None  # (a loaded MIDI: its notes keep their file time)
-                cc = app.cc_messages(app.ppq, self.base())  # (CC messages: they give way a tick, said in orange)
-                loose = np.array([m[0] for ms in cc.values() for m in ms], np.int64)
+                if loose is None:  # (CC messages: they give way a tick, said in orange)
+                    cc = app.cc_messages(app.ppq, self.base())
+                    loose = np.array([m[0] for ms in cc.values() for m in ms], np.int64)
                 limits = limit_spots(app.tempo, self.base(), app.ppq, app.beats, ticks, heard, loose)
             except MemoryError:
                 pass
