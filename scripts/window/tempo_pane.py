@@ -1010,6 +1010,19 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 got = j
         return got
 
+    def bad_why(self, x):
+        """Why the catch-up whose area (or "Not possible" text, with nothing to end on) is at x can't work
+        (tempo.catch_plan's "why"), None when it works or nothing's there."""
+        roll, b = self.app.roll, self.app.roll.x2t(x)
+        got = None
+        for st, plan in plans(self.ed(), self.base(), self.app.ppq):
+            if plan["ok"] or not plan.get("why"):
+                continue
+            if st["end"] is not None and min(st["from"], st["line"]) <= b < st["end"] or \
+                    st["end"] is None and 0 <= x - roll.t2x(st["line"]) <= 80 * self.scale:
+                got = plan["why"]
+        return got
+
     def zones(self, skip=None):
         """[(first, end beat)] of the catch-ups' yellow + teal areas (skip: leave out catch-up line skip's own)."""
         return [(min(st["from"], st["line"]), st["end"]) for j, (st, _) in
@@ -2528,6 +2541,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "sb_h_double_arrow", "on_catch"
         elif self.edge_at(e.x) is not None:  # (which one: the hint says, user 2026-10-24)
             want, hint = "sb_h_double_arrow", "on_" + self.edge_at(e.x)[0]
+        elif self.bad_why(e.x) is not None:  # (a catch-up that can't work: why, user 2026-10-24)
+            want, hint = PENCIL_CURSOR if self.box.tool.get() != "select" else SELECT_CURSOR, \
+                "why_" + self.bad_why(e.x)
         elif any(a <= roll.x2t(e.x) < b for a, b in self.keep_offs()):  # (why the part's Keep timing is off)
             want, hint = PENCIL_CURSOR if self.box.tool.get() != "select" else SELECT_CURSOR, "on_keep_off"
         elif self.limit_at(e.x, e.y) is not None:  # (a limit text / mark: what it means)
@@ -3007,10 +3023,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.create_line(x, 0, x, h, fill=col, width=lw * (3 if picked else 2))
             r = 5 * self.scale
             self.create_polygon(x - r, 0, x + r, 0, x, r * 1.4, fill=col, outline=col)
-            text = bpm_text(plan["bpm"]) + " BPM" if ok else tr("tempo.not_possible")
+            text = bpm_text(plan["bpm"]) + " BPM" if ok else tr("tempo.not_possible") + (
+                tr("tempo.why_" + plan["why"]).join((": ", "")) if plan.get("why") else "")  # (user 2026-10-24)
             xe = roll.t2x(st["end"]) if st["end"] is not None else x + 80 * self.scale
-            self.create_text((x + min(xe, w)) / 2, top + 8 * self.scale, text=text, fill=col,
-                             font=look.font(8, "bold"))
+            item = self.create_text((x + min(xe, w)) / 2, top + 8 * self.scale, text=text, fill=col,
+                                    font=look.font(8, "bold"))
+            box = self.bbox(item)
+            if box and box[0] < x + 2 * self.scale:  # (wider than its area: starts just right of the line)
+                self.itemconfig(item, anchor="w")
+                self.coords(item, x + 4 * self.scale, top + 8 * self.scale)
         self.draw_drag(lw)
         ends = {st["end"] for st, _ in worked if st["end"] is not None}
         r = 4 * self.scale

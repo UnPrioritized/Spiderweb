@@ -617,7 +617,7 @@ def catch_plan(tempo, base, st, ppq, real=None):
     it; the project's BPM when not given). real(a, b) = the time ticks a..b really take (Keep timing parts at
     their heard tempo); the drawn line when not given."""
     out = {"ok": False, "push": None, "bpm": None, "target": None, "latest": None, "empty": st["end"] is None,
-           "fit": None}
+           "fit": None, "why": "no_end"}  # (why: what stops it, for the pane's "Not possible" text; see WHY)
     if st["end"] is None:
         return out
     start_u = base_us(base)
@@ -627,25 +627,35 @@ def catch_plan(tempo, base, st, ppq, real=None):
             return _segments(tempo, base, start_u, ppq, a, b)
     s0, ln, e = (beat_tick(st[k], ppq) for k in ("from", "line", "end"))
     if e - ln <= 0:
+        out["why"] = "short"
         return out
     total = (e - s0) * base_u
     bpm = 60_000_000 / base_u
     every = tempo.get("every", EVERY)
+    why = [None]
 
     def attempt(line):
-        """(push, ticks' values) with the catch-up starting at tick line; None when it can't be written."""
+        """(push, ticks' values) with the catch-up starting at tick line; None when it can't be written (why[0]
+        says what stopped it)."""
         n, target = e - line, total - _us_sum(real(s0, line))
         if not n <= target <= n * SLOWEST:
+            why[0] = "too_fast" if target < n else "too_slow"
             return None
         push = _solve_push(st, n / ppq, target / ppq / 1e6, bpm)
         if push is None:
+            w = catch_weight(st["shape"], st["text"], (np.arange(512) + 0.5) / 512, st.get("bend"))
+            why[0] = "shape" if not np.any(w > 1e-9) or np.any(w < -1e-9) else "peak"
             return None
         t = (np.arange(n) + 0.5) / n
         ideal = 6e7 / np.clip(bpm * 2 ** (push * catch_weight(st["shape"], st["text"], t, st.get("bend"))), MIN_BPM, MAX_BPM)
         fit = _fit_blocks(ideal, target, every)  # (the file's own values: the pane says OK only when it works)
-        return None if fit is None else (push, fit, target)
+        if fit is None:
+            why[0] = "fit"
+            return None
+        return push, fit, target
 
     got = attempt(ln)
+    out["why"] = why[0]
     if got is None:
         latest = _latest_tick(real(s0, e), total, e)  # (fastest possible: right for a flat catch-up)
         if latest is not None and latest > s0 and st["shape"] != "flat":  # (others: the last line spot that works)
