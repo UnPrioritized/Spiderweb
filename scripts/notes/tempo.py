@@ -637,6 +637,10 @@ def catch_plan(tempo, base, st, ppq, real=None):
     bpm = 60_000_000 / base_u
     every = tempo.get("every", EVERY)
     why = [None]
+    w = catch_weight(st["shape"], st["text"], (np.arange(512) + 0.5) / 512, st.get("bend"))
+    if not np.any(w > 1e-9) or np.any(w < -1e-9):  # (a shape that never works: said first, not the BPM limits
+        out["why"] = "shape"                       # its advice can't fix, hunt 2026-10-24)
+        return out
 
     def attempt(line):
         """(push, ticks' values) with the catch-up starting at tick line; None when it can't be written (why[0]
@@ -647,8 +651,7 @@ def catch_plan(tempo, base, st, ppq, real=None):
             return None
         push = _solve_push(st, n / ppq, target / ppq / 1e6, bpm)
         if push is None:
-            w = catch_weight(st["shape"], st["text"], (np.arange(512) + 0.5) / 512, st.get("bend"))
-            why[0] = "shape" if not np.any(w > 1e-9) or np.any(w < -1e-9) else "peak"
+            why[0] = "peak"
             return None
         t = (np.arange(n) + 0.5) / n
         ideal = 6e7 / np.clip(bpm * 2 ** (push * catch_weight(st["shape"], st["text"], t, st.get("bend"))), MIN_BPM, MAX_BPM)

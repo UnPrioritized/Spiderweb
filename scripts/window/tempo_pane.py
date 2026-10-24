@@ -1052,6 +1052,34 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return ("start", s) if x >= self.app.roll.t2x(st["from"]) else ("end", n)
         return ("start", s) if s is not None else ("end", n) if n is not None else None
 
+    def pins(self, tempo=None, worked=None):
+        """[(beat, 3 = yellow start / 4 = teal end, catch-up line)] of the thick lines shown: an edge set by hand the
+        line went past, or with no area to show it (where the area comes back to); ALWAYS while its line is
+        dragged (user 2026-10-24)."""
+        tempo = self.ed() if tempo is None else tempo
+        worked = plans(tempo, self.base(), self.app.ppq) if worked is None else worked
+        d = self.drag if isinstance(self.drag, dict) else {}
+        held = {id(s) for s, _, v in d.get("orig", ()) if v is None}  # (catch-up lines being dragged)
+        out = []
+        for c, (st, _) in zip(tempo["catch"], worked):
+            always = id(c) in held or st["end"] is None
+            for k, waiting in ((3, st["pin"]), (4, st["pin_end"])):
+                at = catch_get(c, k) if always else waiting
+                if at is not None:
+                    out.append((at, k, c))
+        return out
+
+    def pin_at(self, x):
+        """(catch-up line, 3 / 4) of the thick line under the mouse, or None."""
+        roll = self.app.roll
+        return next(((c, k) for at, k, c in self.pins() if abs(roll.t2x(at) - x) <= 4 * self.scale), None)
+
+    def forget_pin(self, c, k):
+        """A thick line's edge forgotten: back to automatic (one undo step; hunt 2026-10-24)."""
+        self.app.push_undo(name=tr("tempo.step_catch_start" if k == 3 else "tempo.step_catch_end"))
+        catch_set(c, k, None)
+        self.app.tempo_changed()
+
     def end_at(self, x):
         """The catch-up whose teal area's right edge is at x (its index), or None."""
         roll = self.app.roll
@@ -1261,8 +1289,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if text != tip.text:
             tip.hide()
             tip.text = text
-            if text and not tip.used and not e.state & tip.BUTTONS:
-                tip.schedule()
+            if text and not e.state & tip.BUTTONS:  # (not "used" like other tips: the handle only shows after a
+                tip.schedule()                       # click on its part, hunt 2026-10-24)
 
     def snap_beat(self, b, e):
         """On the grid (Shift: free): the Select box's move, the catch-up being added, a click's play line."""
@@ -1479,7 +1507,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if not d or d["kind"] != "move" or d.get("copies") is None:
             return None
         laid = self.copies_at(d)
-        if laid is None:
+        if laid is None:  # (back on its start: no copies, the box drawn where it is, hunt 2026-10-24)
+            d.pop("laid", None)
             return None
         tempo, cop = self.ed(), ids(d["copies"])
         work = dict(tempo, **{key: [copy.deepcopy(it) for it in tempo[key] if id(it) not in cop]
@@ -1627,6 +1656,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if span and any(id(p) in moved and not span[0] - 1e-9 <= p[0] <= span[1] + 1e-9 for p in tempo["points"]):
                 return True
             zs0 = d.get("zones")
+            for c in tempo["catch"] if zs0 else ():  # (a moved line inside another's area as it was at the press,
+                # with or without an end of its own: it took that one's end over, hunt 2026-10-24)
+                if id(c) in moved and any(oid != id(c) and oid not in moved and oa + 1e-9 < c[0] < oe - 1e-9
+                                          for oid, (oa, _, oe) in zs0.items()):
+                    return True
             if zs0:  # (a catch-up's area running into another's as they were at the press, or one losing its
                 tempo_edited()  # yellow area: it stops where it last fitted, user / hunt 2026-10-24; points too)
                 after = dict(tempo, points=[list(p) for p in tempo["points"]])  # (as it'll be when let go: a
@@ -2105,6 +2139,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         tempo = self.ed()
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
+        pin = self.pin_at(e.x) if item is None else None
+        if pin is not None:  # (a thick line: forget it, hunt 2026-10-24)
+            return self.pin_menu(e, *pin)
         on_edge = item is None and self.edge_at(e.x) is not None
         on_edge = on_edge or item is None and self.sig_mark_at(e.x, e.y) is not None  # (a signature's mark)
         if item is None and not on_edge and not self.in_band(e.x):  # (empty space: the menu waits to see if it's
@@ -2147,9 +2184,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
             sep()                                                       # inside another one's area, user)
             menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
         edge = self.edge_at(e.x) if item is None else None
+        worked = plans(tempo, self.base(), self.app.ppq) if edge else []
         for k, kind, key in ((3, "start", "tempo.catch_auto"), (4, "end", "tempo.catch_end_auto")):
             n = edge[1] if edge and edge[0] == kind else None
-            if n is not None and catch_get(tempo["catch"][n], k) is not None:  # (an edge set by hand)
+            # (an edge set by hand and used: a waiting one has its own thick line's menu, hunt 2026-10-24)
+            if n is not None and worked[n][0]["manual" if k == 3 else "manual_end"]:
                 sep()
                 menu.add_command(label=tr(key), command=lambda c=tempo["catch"][n], k=k: self.auto_edge(c, k))
         if zone is not None:  # (anywhere in its yellow / teal area, user 2026-10-24: the line was hard to hit)
@@ -2167,6 +2206,16 @@ class TempoPane(ConductorMarks, tk.Canvas):
             # (Windows: the menu waits here until it closes; the click outside that closed it then comes to the
             # pane too: it only closes the menu, adds no point, user 2026-10-23)
             self.menu_shut = time.perf_counter()
+
+    def pin_menu(self, e, c, k):
+        """Right-click on a thick line (an edge set by hand, waiting): Forget this edge."""
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label=tr("tempo.forget_pin"), command=lambda: self.forget_pin(c, k))
+        try:
+            menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            menu.grab_release()
+            self.menu_shut = time.perf_counter()  # (see right_menu)
 
     def auto_edge(self, c, k):
         """A catch-up's yellow start (k = 3) / teal end (k = 4) back to where Spiderweb puts it (one undo step)."""
@@ -2364,7 +2413,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             st, c = hit
             if at < st["end"] - 1e-9:
                 at, note = st["end"], "tempo.paste_after_catch"
-            if catch_get(c, 4) is None:  # (it ended on the point the copy replaces: its end kept by hand)
+            if catch_get(c, 4) is None and clip["points"]:  # (it ended on the point the copy replaces: its end
+                # kept by hand; a copy of catch-up lines only replaces no point, hunt 2026-10-24)
                 catch_set(c, 4, st["end"])
             if at >= st["end"] - 1e-9:
                 break
@@ -2554,6 +2604,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "fleur", "on_handle" if handle[0] == "part" else "on_catch_handle"
         elif self.catch_at(e.x) is not None:
             want, hint = "sb_h_double_arrow", "on_catch"
+        elif self.pin_at(e.x) is not None:  # (a thick line: what it is, hunt 2026-10-24)
+            want, hint = "arrow", "on_pin"
         elif self.edge_at(e.x) is not None:  # (which one: the hint says, user 2026-10-24)
             want, hint = "sb_h_double_arrow", "on_" + self.edge_at(e.x)[0]
         elif self.bad_why(e.x) is not None:  # (a catch-up that can't work: why, user 2026-10-24)
@@ -3023,17 +3075,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if on.sum() >= 2:
                 self.create_line(*np.column_stack([px[on], py[on]]).ravel().tolist(), fill=look.TEMPO_PICKED,
                                  width=lw + 3)
-        d = self.drag if isinstance(self.drag, dict) else {}
-        held = {id(s) for s, _, v in d.get("orig", ()) if v is None}  # (catch-up lines being dragged)
-        for j, (st, _) in enumerate(worked):  # (an edge set by hand the line went past, or with no area to show
-            # it: where the area comes back to, thick; ALWAYS while its line is dragged, user 2026-10-24)
-            c = tempo["catch"][j] if j < len(tempo["catch"]) else None
-            always = c is not None and id(c) in held or st["end"] is None
-            start = catch_get(c, 3) if always and c is not None else st["pin"]
-            end = catch_get(c, 4) if always and c is not None else st["pin_end"]
-            for at, col in ((start, look.TEMPO_DRAWN_EDGE), (end, look.TEMPO_CATCH)):
-                if at is not None and kb <= roll.t2x(at) <= w:
-                    self.create_line(roll.t2x(at), 0, roll.t2x(at), h, fill=col, width=lw * 4, tags="catch_pin")
+        for at, k, _ in self.pins(tempo, worked):
+            if kb <= roll.t2x(at) <= w:
+                self.create_line(roll.t2x(at), 0, roll.t2x(at), h, width=lw * 4, tags="catch_pin",
+                                 fill=look.TEMPO_DRAWN_EDGE if k == 3 else look.TEMPO_CATCH)
         # catch-up lines and their words
         for j, (st, plan) in enumerate(worked):
             ok = plan["ok"]
@@ -3058,6 +3103,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if box and box[0] < x + 2 * self.scale:  # (wider than its area: starts just right of the line)
                 self.itemconfig(item, anchor="w")
                 self.coords(item, x + 4 * self.scale, top + 8 * self.scale)
+                box = self.bbox(item)
+            if box and box[2] > w - 2:  # (past the pane's right edge: left of the
+                self.itemconfig(item, anchor="e")                     # line instead, hunt 2026-10-24)
+                self.coords(item, x - 4 * self.scale, top + 8 * self.scale)
         self.draw_drag(lw)
         ends = {st["end"] for st, _ in worked if st["end"] is not None}
         r = 4 * self.scale
