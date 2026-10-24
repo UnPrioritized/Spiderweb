@@ -839,6 +839,10 @@ class TrackList(tk.Canvas):
             self.stop_rows()
         self.take_rows()
         j0, j1 = cx // TILE, (cx + aw - 1) // TILE
+        end_j = int(lm.end * ax) // TILE + 1  # (blocks from here on are past the song: empty, never read nor kept)
+        # (the picture's own blocks: never pushed out by reading ahead, hunt 2026-10-25)
+        self._shown_tiles = {(r, j) for r in range(first, last + 1) if lm.tracks[r].notes
+                             for j in range(j0, min(j1 + 1, end_j))}
         rate = RL.rate_of(lm)
         until = time.perf_counter() + (ROWS_INLINE_S if RL.speed.loops() else 0)
         waiting = []
@@ -848,10 +852,14 @@ class TrackList(tk.Canvas):
                 continue
             parts = []
             for j in range(j0, j1 + 1):
+                if j >= end_j:
+                    parts.append(np.zeros((t.khi - t.klo + 1, TILE), bool))
+                    continue
                 got = self._tiles.get((r, j))
                 if got is None:
                     if time.perf_counter() + RL.view_bytes(lm, (r,), ax, -float(j * TILE), TILE) / rate <= until:
-                        got = self.keep_tile((r, j), row_mask(lm, r, ax, -float(j * TILE), TILE))
+                        got = row_mask(lm, r, ax, -float(j * TILE), TILE)
+                        self.keep_tile((r, j), got)
                     else:
                         waiting.append((r, j))
                 else:
@@ -888,9 +896,9 @@ class TrackList(tk.Canvas):
         # each way along the song, half its height up and down) so scrolling finds them read
         half = (last - first) // 2
         ahead = [(r, j) for r in range(first, last + 1) if lm.tracks[r].notes
-                 for j in range(max(0, (cx - aw // 2) // TILE), (cx + aw + aw // 2) // TILE + 1)]
+                 for j in range(max(0, (cx - aw // 2) // TILE), min((cx + aw + aw // 2) // TILE + 1, end_j))]
         ahead += [(r, j) for r in [*range(max(0, first - half), first), *range(last + 1, min(self.lead, last + half + 1))]
-                  if lm.tracks[r].notes for j in range(j0, j1 + 1)]
+                  if lm.tracks[r].notes for j in range(j0, min(j1 + 1, end_j))]
         todo = list(dict.fromkeys(waiting + [k for k in ahead if k not in self._tiles]))
         job = self._row_job
         if todo and (job is None or waiting):  # (blocks shown blocky: read those first, now)
@@ -900,24 +908,36 @@ class TrackList(tk.Canvas):
             self.after(RL.POLL_MS, self._poll_rows)
 
     def keep_tile(self, key, mask):
-        """mask kept as block key; the oldest used go past TILES_BYTES. Returns mask."""
+        """mask kept as block key; past TILES_BYTES the oldest used go, never the picture's own (_shown_tiles).
+        Returns False when there's no room for it (a block read ahead: not kept), else True."""
+        def size(m):
+            return m.nbytes if isinstance(m, np.ndarray) else 0
         old = self._tiles.pop(key, None)
-        self._tile_bytes -= old.nbytes if isinstance(old, np.ndarray) else 0
+        self._tile_bytes -= size(old)
         self._tiles[key] = mask
-        self._tile_bytes += mask.nbytes if isinstance(mask, np.ndarray) else 0
-        while self._tile_bytes > TILES_BYTES and len(self._tiles) > 1:
-            _, gone = self._tiles.popitem(last=False)
-            self._tile_bytes -= gone.nbytes if isinstance(gone, np.ndarray) else 0
-        return mask
+        self._tile_bytes += size(mask)
+        if self._tile_bytes > TILES_BYTES:
+            shown = getattr(self, "_shown_tiles", set())
+            for k in list(self._tiles):
+                if self._tile_bytes <= TILES_BYTES:
+                    break
+                if k != key and k not in shown:
+                    self._tile_bytes -= size(self._tiles.pop(k))
+            if self._tile_bytes > TILES_BYTES and key not in shown:  # (only shown ones left: no room for it)
+                self._tile_bytes -= size(self._tiles.pop(key))
+                return False
+        return True
 
     def take_rows(self):
-        """The background reading's blocks read so far, kept. True when a block shown blocky came."""
+        """The background reading's blocks read so far, kept (no room left = the reading ahead stops). True when a
+        block shown blocky came."""
         job, came = self._row_job, False
         if job is None or job.place != self._row_place:
             return False
         while job.out:
             key, mask = job.out.popleft()
-            self.keep_tile(key, mask)
+            if not self.keep_tile(key, mask):
+                job.stop = True
             came = came or key in job.shown
         return came
 
