@@ -1178,14 +1178,44 @@ def next_safe(u, way):
     if len(u) == 1:
         return np.array([_next1(int(u[0]), way)], np.int64)
     out = u.copy()
+    # (only the ones still looking: one step at a time over the whole array took 15 s on a catch-up, hunt
+    # 2026-10-24); most find one within a few steps
+    idx = np.arange(len(u))
+    for k in range(1, 9):
+        if not len(idx):
+            return out
+        cand = u[idx] + way * k
+        ok = (cand >= 1) & (cand <= 0xFFFFFF) & domino_safe(np.clip(cand, 1, 0xFFFFFF))
+        out[idx[ok]] = cand[ok]
+        idx = idx[~ok]
+    if len(idx):  # (slow tempos: safe values far apart; walked by the BPMs a file can store instead)
+        out[idx] = _next_by_bpm(u[idx], way)
+    return out
+
+
+def _next_by_bpm(u, way):
+    """next_safe for values whose next safe value is far: a candidate c that isn't safe comes back from Domino as
+    v (6e7 / its float32 BPM, cut); no safe value lies between c and v, so when v is further on the next candidate
+    is v itself (slow tempos: thousands of whole numbers skipped at once), else c + 1. The same first one as
+    trying every whole number. u itself where none is within SAFE_REACH."""
+    u = np.asarray(u, np.int64)
+    out = u.copy()
+    c = u + way
     left = np.ones(len(u), bool)
-    for k in range(1, SAFE_REACH):
-        if not left.any():
+    while left.any():
+        i = np.flatnonzero(left)
+        ci = c[i]
+        live = (ci >= 1) & (ci <= 0xFFFFFF) & ((ci - u[i]) * way < SAFE_REACH)
+        left[i[~live]] = False
+        i, ci = i[live], ci[live]
+        if not len(i):
             break
-        cand = u + way * k
-        ok = left & (cand >= 1) & (cand <= 0xFFFFFF) & domino_safe(np.clip(cand, 1, 0xFFFFFF))
-        out[ok] = cand[ok]
-        left &= ~ok
+        v = np.trunc(6e7 / (6e7 / ci).astype(np.float32).astype(np.float64)).astype(np.int64)
+        safe = v == ci
+        out[i[safe]] = ci[safe]
+        left[i[safe]] = False
+        on = ~safe
+        c[i[on]] = np.where((v[on] - ci[on]) * way > 0, v[on], ci[on] + way)
     return out
 
 

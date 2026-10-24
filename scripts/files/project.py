@@ -39,7 +39,7 @@ from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
-from notes.tempo_file import bar_line, file_plan, finer_parts
+from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
@@ -1199,7 +1199,7 @@ class ProjectFiles:
         if plan.get("unfit"):
             note += tr("project.tempo_unfit", where=self.bar_text(plan["unfit"][0]))
         if plan.get("gave"):  # (a heads-up only, user 2026-10-23)
-            n = len(plan["gave"])
+            n = plan.get("gave_n") or len(plan["gave"])
             note += trn("project.tempo_cc_gave", n, n=n, where=self.bar_text(plan["gave"][0]))
         return note
 
@@ -1227,6 +1227,8 @@ class ProjectFiles:
                 self.busy(None)
         # (a Hz bass follows the tempo it was made for, user 2026-10-23: the warning = one made for another tempo
         # than it's under now, from its first note going out)
+        if plan["gave"]:  # (messages, not ticks: 15 tracks' CC on one tick are 15, hunt 2026-10-24)
+            plan["gave_n"] = int(np.isin(loose, np.rint(np.array(plan["gave"]) * ppq).astype(np.int64)).sum())
         stale = [i for i, sh in enumerate(self.shapes) if sh.get("hz") and self.hz_out_of_tune(sh)]
         on = notes[np.isin(notes[:, 5], stale), 0] if stale else ()
         plan["hz"] = [int(on.min()) / ppq] if len(on) else []
@@ -1440,6 +1442,10 @@ class ProjectFiles:
             # (the tempo line + time signatures come too: Keep timing worked out on the whole song up to the copy's
             # last note, so it lines up with Export MIDI)
             upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
+            # (... to the end of that bar: bar fitting spreads ticks over the whole bar, the copy's last bar came out
+            # a few ticks off from Export MIDI, hunt 2026-10-24)
+            lines = bar_ticks(self.tempo, ppq, upto)
+            upto = int(lines[np.searchsorted(lines, upto)]) if upto < lines[-1] else upto
             timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)
             cc = timed_ticks(plan, notes[:0], cc)[1]  # (the notes as the file has them: finer Hz basses too)
             notes = timed[np.isin(timed[:, 5], sorted(self.sels))] if self.sels else timed

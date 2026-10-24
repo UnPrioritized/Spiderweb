@@ -76,7 +76,7 @@ def bar_line(sigs, tick, ppq, after=False):
     sigs = sorted(sigs)
     i = max(0, [s[0] <= tick for s in sigs].count(True) - 1)
     at, top, power = sigs[i]
-    unit = top * 4 * ppq // 2 ** power
+    unit = max(1, top * 4 * ppq // 2 ** power)  # (a bar under a tick, e.g. 3/16 at PPQ 1: no crash, hunt 2026-10-24)
     line = at + (tick - at) // unit * unit
     if after and line < tick:
         line += unit
@@ -131,6 +131,72 @@ class _Pairs:
             if k <= PAIR_CACHE and len(self.known) < 65536:
                 self.known[key] = got
         return got
+
+
+def _seg_events(segs):
+    """tempo._runs for file_plan's pieces: (a, b, us), us = a number, one per tick, or (run starts, values)."""
+    ticks, vals = [], []
+    for a, b, u in segs:
+        if isinstance(u, tuple):
+            ticks.append(u[0])
+            vals.append(u[1])
+        elif isinstance(u, (int, np.integer)):
+            ticks.append(np.array([a], np.int64))
+            vals.append(np.array([u], np.int64))
+        else:
+            ticks.append(np.arange(a, b, dtype=np.int64))
+            vals.append(np.asarray(u, np.int64))
+    if not ticks:
+        return []
+    t, v = np.concatenate(ticks), np.concatenate(vals)
+    keep = np.concatenate([[True], v[1:] != v[:-1]])
+    return list(zip(t[keep].tolist(), v[keep].tolist()))
+
+
+def _quick_pairs(k, total):
+    """_flat_pair for every gap at once where its answer is the two whole values round the average (or the average
+    itself), both Domino-safe: (which gaps, a, b, ticks of a). The same answer _flat_pair gives (the nearest pair
+    first); the others go the slow way (hunt 2026-10-24: one call per gap took 10-45 s on black MIDI)."""
+    k, total = np.asarray(k, np.int64), np.asarray(total, np.int64)
+    a = total // np.maximum(k, 1)
+    exact = total % np.maximum(k, 1) == 0
+    b = np.where(exact, a, a + 1)
+    ka = np.where(exact, k, k * b - total)
+    ok = (k >= 1) & (a >= 1) & (b <= MAX_US) & (_least(total) <= k) & (k <= total)
+    ok &= domino_safe(np.clip(a, 1, MAX_US)) & domino_safe(np.clip(b, 1, MAX_US))
+    return ok, a, b, ka
+
+
+class _RunBuf:
+    """A Keep timing part's file tempo as runs (ticks, us), not one number per file tick (hunt 2026-10-24: a few
+    bars at 1,000,000 BPM took gigabytes)."""
+
+    def __init__(self, size):
+        self.lens, self.vals, self.n = np.empty(max(16, size), np.int64), np.empty(max(16, size), np.int64), 0
+
+    def room(self, more):
+        if self.n + more > len(self.lens):
+            size = max(2 * len(self.lens), self.n + more)
+            self.lens = np.concatenate([self.lens[:self.n], np.empty(size - self.n, np.int64)])
+            self.vals = np.concatenate([self.vals[:self.n], np.empty(size - self.n, np.int64)])
+
+    def add(self, length, value):
+        if length > 0:
+            self.room(1)
+            self.lens[self.n], self.vals[self.n] = length, value
+            self.n += 1
+
+    def add_array(self, got):
+        """One gap's per-tick values as runs."""
+        cut = np.flatnonzero(got[1:] != got[:-1]) + 1
+        starts = np.concatenate([[0], cut])
+        self.room(len(starts))
+        self.lens[self.n:self.n + len(starts)] = np.diff(np.append(starts, len(got)))
+        self.vals[self.n:self.n + len(starts)] = got[starts]
+        self.n += len(starts)
+
+    def runs(self):
+        return self.lens[:self.n], self.vals[:self.n]
 
 
 def _spans_off(segs, keeps, start_u):
@@ -352,14 +418,27 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     offset, at = 0, 0
     for (a, e, u), (n, total, k, drawn), heard_t in zip(keeps, gaps, times):
         file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, a)]
-        parts, last = [], None
+        last = None
         changes = np.flatnonzero(drawn[1:] != drawn[:-1]) + 1 + a  # (ticks where the drawn tempo changes)
-        for j in range(len(k)):
-            kj, tj = int(k[j]), int(total[j])
+        curved = (k > every) & (np.searchsorted(changes, n[:-1], "right") < np.searchsorted(changes, n[1:], "left"))
+        quick, qa, qb, qka = _quick_pairs(k, total)
+        quick &= ~curved
+        buf = _RunBuf(2 * len(k))
+        for j, (fast, kj, tj, aj, bj, kaj) in enumerate(zip(quick.tolist(), k.tolist(), total.tolist(),
+                                                              qa.tolist(), qb.tolist(), qka.tolist())):
+            if fast:  # (the two values round the average: as runs, never one number per tick)
+                if 0 < kaj < kj and last is not None and aj != last and bj == last:
+                    buf.add(kj - kaj, bj)  # (the run goes on from the gap before: one change fewer)
+                    buf.add(kaj, aj)
+                    last = aj
+                else:
+                    buf.add(kaj, aj)
+                    buf.add(kj - kaj, bj)
+                    last = bj if kaj < kj else aj
+                continue
             n0, n1 = int(n[j]), int(n[j + 1])
-            curved = kj > every and np.searchsorted(changes, n0, "right") < np.searchsorted(changes, n1, "left")
             got = None
-            if curved:  # (a long gap over a curve: steps every "every" ticks, as drawn)
+            if curved[j]:  # (a long gap over a curve: steps every "every" ticks, as drawn)
                 ideal = drawn[n0 - a + (np.arange(kj) * (n1 - n0)) // kj].astype(np.float64)
                 got = _fit_blocks(ideal, tj, every)
             if got is None:  # (no Domino-safe values for that many ticks: a tick more or less, rare)
@@ -374,21 +453,23 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
                     got[:tj - int(got.sum())] += 1
                 if last is not None and got[0] != last and got[-1] == last:
                     got = got[::-1]  # (the run goes on from the gap before: one change fewer)
-            parts.append(got)
-            last = got[-1]
+            buf.add_array(got)
+            last = int(got[-1])
         fa = a + offset
-        vals = np.concatenate(parts)
-        file_segs.append((fa, fa + len(vals), vals))
+        lens, vals = buf.runs()
+        starts = fa + np.concatenate([[0], np.cumsum(lens)])
+        file_segs.append((fa, int(starts[-1]), (starts[:-1], vals)))
         # (each part's heard and file clocks: a CC message that gave way goes on the file tick sounding nearest its
         # heard time, hunt 2026-10-24: the same share of ticks was up to 190 ms off where the tempo is uneven)
-        clocks.append((a, e, fa, heard_t, np.concatenate([[0], np.cumsum(vals, dtype=np.float64)])))
+        clocks.append((a, e, fa, heard_t, starts, vals,
+                       np.concatenate([[0], np.cumsum(lens * vals, dtype=np.float64)])))
         f = fa + np.concatenate([[0], np.cumsum(k)])
         bp_n += n.tolist()
         bp_f += f.tolist()
         offset = int(f[-1]) - e
         at = e
     file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, end)]
-    events = _runs(file_segs)
+    events = _seg_events(file_segs)
     if events[0][0] != 0:
         events.insert(0, (0, start_u))
     out["events"] = events
@@ -405,15 +486,15 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         mid = (j > i) & (t > bp_n[i]) & (d > 0) & (fd != d)
         if np.any(mid):
             share = bp_f[i] + np.rint((t - bp_n[i]) * fd / np.maximum(d, 1)).astype(np.int64)
-            for a, e, fa, heard_t, clock in clocks:
+            for a, e, fa, heard_t, starts, vals, clock in clocks:
                 on = mid & (t > a) & (t < e)
                 if not np.any(on):
                     continue
                 x = t[on] - a
                 want = heard_t[x] if isinstance(heard_t, np.ndarray) else x.astype(np.float64) * heard_t
-                k = np.clip(np.searchsorted(clock, want), 1, len(clock) - 1)
-                k = np.where(want - clock[k - 1] <= clock[k] - want, k - 1, k)
-                share[on] = fa + k
+                r = np.clip(np.searchsorted(clock, want, "right") - 1, 0, len(vals) - 1)
+                pos = (starts[r] - fa) + (want - clock[r]) / vals[r]  # (file ticks from the part's start)
+                share[on] = fa + np.ceil(pos - 0.5).astype(np.int64)  # (the nearer tick, the earlier on a tie)
             # (on the note before = written before its note-on: a tick on, the next anchor's tick when that's all
             # the room there is (hunt 2026-10-23))
             share = np.clip(share, bp_f[i] + np.minimum(fd, 1), bp_f[j])
