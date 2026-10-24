@@ -48,8 +48,10 @@ _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX, _MIDI_ASYNC = 0x1000, 0x2000, 0x400000
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
-_ATTRIB_VOL, _ATTRIB_BUFFER = 2, 13
-_CONFIG_UPDATEPERIOD = 1
+_ATTRIB_MIDI_QUEUED_ASYNC = 0x12010
+_ATTRIB_VOL, _ATTRIB_BUFFER, _ATTRIB_CPU = 2, 13, 7
+_CONFIG_UPDATEPERIOD, _CONFIG_UPDATETHREADS = 1, 24
+GROUP_QUEUE = 8 << 20  # bytes of messages a LiveGroup's synth holds waiting (a black MIDI wall: millions a second)
 _CONFIG_MIDI_COMPACT = 0x10400
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
 _EV_PITCHRANGE = 5
@@ -60,7 +62,7 @@ LIVE_PORTS = 6  # ... Live's: then 31-EDO's channels (playback.EDO_FIRST)
 LIVE_CHANNELS = MOST_CHANNELS
 # the control changes a Hz bass's CC lines send (hz_cc.py) as BASSMIDI's own events: Volume, Pan, Expression, Cutoff
 _EV_CC = {7: 12, 10: 13, 11: 14, 74: 25}
-_EVENTS_RAW = 0x10000
+_EVENTS_RAW, _EVENTS_CANCEL = 0x10000, 0x4000000
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
 
@@ -678,14 +680,16 @@ class Live:
     busy and the sound breaks up then (hunt 2026-10-08: editing while playing, 150 ms of 6 s missing)."""
     CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
     QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
-    def __init__(self, synth, voices, volume=1.0, nofx=False, limiter=False):
+    def __init__(self, synth, voices, volume=1.0, nofx=False, limiter=False, plain=False, drums=False):
+        """plain = one of a LiveGroup's synths: 16 channels, no 31-EDO channels, messages sent raw (send_raw).
+        drums = channel 10 plays drums (a loaded MIDI's, like players; its samples loaded here, never mid-play)."""
         if not synth.font:
             raise SynthError("synth.no_font")
         if not synth.can_play:
             raise SynthError("synth.no_device")
         bass, midi = synth.bass, synth.midi
         self.synth, self.font_path = synth, synth.font_path
-        self.handle = midi.BASS_MIDI_StreamCreate(LIVE_CHANNELS,
+        self.handle = midi.BASS_MIDI_StreamCreate(16 if plain else LIVE_CHANNELS,
                                                   _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0), RATE)
         if not self.handle:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
@@ -694,7 +698,7 @@ class Live:
         midi.BASS_MIDI_StreamSetFonts(self.handle, ctypes.byref(font), 1)
         h, at = self.handle, bass.BASS_ChannelSetAttribute
         for attr, value in ((_ATTRIB_BUFFER, 0), (_ATTRIB_MIDI_SRC, 0), (_ATTRIB_MIDI_KILL, 1),
-                            (_ATTRIB_MIDI_CPU, self.CPU), (_ATTRIB_MIDI_QUEUE_ASYNC, self.QUEUE),
+                            (_ATTRIB_MIDI_CPU, self.CPU), (_ATTRIB_MIDI_QUEUE_ASYNC, GROUP_QUEUE if plain else self.QUEUE),
                             (_ATTRIB_VOL, volume)):
             at(h, attr, float(value))
         self.set_voices(voices)
@@ -704,14 +708,15 @@ class Live:
             self.set_limiter(True)
         # channel 10 plays the piano like the others (user, 2026-10-11: "Use channel 10" is for its colour; nothing
         # in Spiderweb is meant as drums)
-        for port in range(LIVE_PORTS):  # (every port's channel 10)
-            midi.BASS_MIDI_StreamEvent(h, port * 16 + 9, _EV_DRUMS, 0)
-        midi.BASS_MIDI_StreamLoadSamples(h)  # (program 0: no wait at the first notes)
-        from files.playback import EDO_BENDS, EDO_FIRST
+        for port in range(1 if plain else LIVE_PORTS):  # (every port's channel 10)
+            midi.BASS_MIDI_StreamEvent(h, port * 16 + 9, _EV_DRUMS, 1 if drums else 0)
+        synth._load_samples(h)  # (program 0: no wait at the first notes; one stream at a time, see _load_samples)
         self._rpn = {}  # (channel past 16, CC 101 / 100: the bend range being set, send)
-        for step, bend in enumerate(EDO_BENDS):
-            ch = EDO_FIRST + step
-            self.send(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
+        if not plain:
+            from files.playback import EDO_BENDS, EDO_FIRST
+            for step, bend in enumerate(EDO_BENDS):
+                ch = EDO_FIRST + step
+                self.send(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
         if not bass.BASS_ChannelPlay(h, 0):
             err = bass.BASS_ErrorGetCode()
             self.close()
@@ -786,6 +791,39 @@ class Live:
         elif kind == 0xB0 and a == 6 and self._rpn.get((ch, 101)) == 0 and self._rpn.get((ch, 100)) == 0:
             event(self.handle, ch, _EV_PITCHRANGE, b)
 
+    def send_raw(self, at, size):
+        """size bytes of raw MIDI messages at address at (each with its status byte; channels 1-16) in one go."""
+        with self._lock:
+            if self.handle:
+                self.synth.midi.BASS_MIDI_StreamEvents(self.handle, _EVENTS_RAW, at, size)
+
+    def drop_waiting(self):
+        """Messages still waiting are thrown away and every note on its 16 channels let go (a synth far behind in a
+        black MIDI wall: what waits is too late anyway), sustain off first."""
+        raw = bytes(b for ch in range(16) for b in (0xB0 | ch, 64, 0, 0xB0 | ch, 123, 0))
+        buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
+        with self._lock:
+            if self.handle:
+                self.synth.midi.BASS_MIDI_StreamEvents(self.handle, _EVENTS_RAW | _EVENTS_CANCEL,
+                                                       ctypes.addressof(buf), len(raw))
+
+    def cpu(self):
+        """% of the time making this one's sound takes (over 100 = it can't keep up)."""
+        got = ctypes.c_float()
+        if not self.handle or not self.synth.bass.BASS_ChannelGetAttribute(self.handle, _ATTRIB_CPU,
+                                                                            ctypes.byref(got)):
+            return 0.0
+        return float(got.value)
+
+    def queued(self):
+        """Bytes of messages waiting for its sound thread (BASS_ATTRIB_MIDI_QUEUED_ASYNC): many = it's behind (a
+        full queue makes the next send wait)."""
+        got = ctypes.c_float()
+        if not self.handle or not self.synth.bass.BASS_ChannelGetAttribute(self.handle, _ATTRIB_MIDI_QUEUED_ASYNC,
+                                                                            ctypes.byref(got)):
+            return 0
+        return int(got.value)
+
     def position(self):
         """Bytes of sound made so far (8 a frame)."""
         return self.synth.bass.BASS_ChannelGetPosition(self.handle, _POS_BYTE) if self.handle else 0
@@ -813,3 +851,55 @@ class Live:
         else:
             bass.BASS_StreamFree(h)
             self.synth._give(self.font)
+
+
+def group_voices(voices, count):
+    """Each of a LiveGroup's synths' voice limit: 4x its share of the user's limit (shared out evenly, a file's
+    notes on a few of them sounded thinner than one synth; the whole limit each = 16,000 voices with 16, more
+    than this PC makes: measured 2026-10-24, ~10,000 at most), never more than the limit itself."""
+    return max(1, min(voices, voices * 4 // count))
+
+
+class LiveGroup:
+    """Several plain Live synths side by side, each made by BASS on its own thread (a loaded MIDI's playback, Load
+    MIDI group D). One BASSMIDI stream makes sound on one core and slows down with its voice count: measured
+    2026-10-24 (dev/scratch/play_measure*.py), one stream kept up with ~1 M notes a second at 1,000 voices, 16
+    side by side with 10 M at 2,000 voices in all (each ~10 % busy). Voices each: group_voices. Which synth a note goes to:
+    files/play_loaded.py (all of a channel's notes on one key always the same one)."""
+
+    def __init__(self, synth, count, voices, volume=1.0, nofx=False, limiter=False, drums=True):
+        bass = synth.bass
+        bass.BASS_GetConfig.restype = ctypes.c_uint
+        if bass.BASS_GetConfig(_CONFIG_UPDATETHREADS) < count:
+            bass.BASS_SetConfig(_CONFIG_UPDATETHREADS, count)  # (one BASS thread per synth: else all on one core)
+        self.lives = []
+        try:
+            for _ in range(count):
+                self.lives.append(Live(synth, group_voices(voices, count), volume, nofx, limiter, plain=True,
+                                       drums=drums))
+        except SynthError:
+            self.close()
+            raise
+
+    def __len__(self):
+        return len(self.lives)
+
+    def set_voices(self, voices):
+        for live in self.lives:
+            live.set_voices(group_voices(voices, len(self.lives)))
+
+    def set_limiter(self, on):
+        for live in self.lives:
+            live.set_limiter(on)
+
+    def cpu(self):
+        """The busiest synth's % (BASS_ATTRIB_CPU)."""
+        return max((live.cpu() for live in self.lives), default=0.0)
+
+    def voices_playing(self):
+        return sum(live.voices_playing() for live in self.lives)
+
+    def close(self):
+        lives, self.lives = self.lives, []
+        for live in lives:
+            live.close()

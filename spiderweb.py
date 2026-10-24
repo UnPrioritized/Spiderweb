@@ -149,6 +149,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     midi_scan.py     the byte loops reading / writing MIDI tracks (compiled by fastloops.py)
     midi_copy.py     writing a loaded MIDI file out again, unchanged bytes copied, checked while writing
     midi_index.py    Load MIDI's loops: notes paired, the index to read a track anywhere, the overview, painting
+    midi_play.py     the loops playing a loaded MIDI: tracks read up to a tick, put in order, thinned per synth
+    play_loaded.py   playing a loaded MIDI along with the shapes: read ahead from the file, sent to the synths
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)

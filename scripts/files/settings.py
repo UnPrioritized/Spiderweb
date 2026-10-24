@@ -110,6 +110,7 @@ APP_KEYS = {
     "play_voices": ("sound", "voice_limit", int),
     "play_voice_guard": ("sound", "lower_by_itself", bool),
     "play_limiter": ("sound", "omnimidi_limiter", bool),
+    "loaded_synths": ("sound", "loaded_midi_synths", int),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)
     "hz_on": ("hz_preview", "on", bool),
     "hz_voices": ("hz_preview", "voice_limit", int),

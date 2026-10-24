@@ -55,6 +55,18 @@ class BuiltinPanel(ttk.Frame):
         Tooltip(lb, tr("app.voices_tip"))
         r += 1
 
+        from window.app_playback import GROUP_MOST
+        lb = ttk.Label(box, text=tr("bs.synths"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        e = app.synths_entry = ttk.Entry(box, textvariable=app.synths_var, width=8)
+        e.grid(row=r, column=1, sticky="w", pady=3)
+        e.bind("<Return>", lambda ev: (app.on_loaded_synths(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: app.on_loaded_synths())
+        Scrub(app, [(e, app.synths_var, app.on_loaded_synths)], (1, 4, 1), 1, GROUP_MOST, label=lb, no_undo=True)
+        Tooltip(e, tr("bs.synths_tip"))
+        Tooltip(lb, tr("bs.synths_tip"))
+        r += 1
+
         c = ttk.Checkbutton(box, text=tr("bs.guard"), variable=app.play_guard, command=app.on_play_guard,
                             takefocus=False)
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
@@ -79,6 +91,9 @@ class BuiltinPanel(ttk.Frame):
         app.on_play_voices()
         if app.voices_var.get() != str(app.play_voices):
             app.voices_var.set(str(app.play_voices))
+        app.on_loaded_synths()
+        if app.synths_var.get() != str(app.loaded_synths):
+            app.synths_var.set(str(app.loaded_synths))
 
     def refresh(self):
         if not self.winfo_exists():

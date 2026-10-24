@@ -545,19 +545,24 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     return out
 
 
-def heard_tempo(tempo, base, ppq, end=0):
+def heard_tempo(tempo, base, ppq, end=0, heard=None):
     """[(tick, us)] on Spiderweb's ticks for built-in playback: what a player of the MIDI file really plays where
     (catch-ups in place, Keep timing parts at the tempo heard before them, so their notes sound when the file's do).
-    None without a tempo line."""
+    heard = a loaded MIDI's own tempo [(tick, us)]: Keep timing parts without their own heard line play at it (its
+    notes keep the time they have in the file, as keep_gaps). None without a tempo line."""
     if not has_tempo(tempo):
         return None
-    key = (tempo_text(tempo), base, ppq, end)
+    key = (tempo_text(tempo), base, ppq, end, id(heard))
     if key in _heard:  # (Play / each tempo edit while playing: remembered until the line changes)
         return _heard[key]
     segs, _ = file_segments(tempo, base, ppq, end)
     lay = layout(tempo, base, ppq)
     for n, (_, a, e, _) in enumerate(lay["keeps"]):
         e = segs[-1][1] if e is None else e
+        if heard is not None and not lay["own_line"][n]:
+            part = [(max(x, a), min(y, e), u) for x, y, u in heard_segs(heard, e) if y > a]
+            segs = _put_all(segs, a, e, part)
+            continue
         segs = _put_all(segs, a, e, lay["keep_segs"](n, a, e))  # (its heard tempo line, if any)
     if len(_heard) > 4:
         _heard.clear()

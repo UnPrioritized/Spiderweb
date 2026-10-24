@@ -396,6 +396,7 @@ class ProjectFiles:
         self.roll.cancel_draft()
         self.roll.drop_lasso()  # (a waiting loop would cut the opened project, hunt 2026-10-23)
         self.shapes = shapes
+        self.stop_loaded()  # (still playing: its MIDI stops, the shapes play on)
         self.loaded = None  # (another project: its loaded MIDI goes; attach_midi puts a new one in after this)
         self.midi_link = link
         self.drop_finding()
@@ -521,6 +522,7 @@ class ProjectFiles:
                               "tempo_log": self.tempo_pane.log,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
+                              "loaded_synths": self.loaded_synths,
                               "domino_256": self.domino256.get(), "keep_colours": self.keep_colours.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
@@ -706,6 +708,10 @@ class ProjectFiles:
                 self.voices_var.set(str(v))
             self.play_guard.set(win.get("play_voice_guard") is True)
             self.play_limiter.set(win.get("play_limiter") is True)
+            v = win.get("loaded_synths")
+            if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 16:
+                self.loaded_synths = v
+                self.synths_var.set(str(v))
             self.domino256.set(win.get("domino_256") is True)
             self.keep_colours.set(win.get("keep_colours") is True)
             self.sync_builtin()

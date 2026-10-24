@@ -72,7 +72,7 @@ from window.between_window import BetweenGroups
 from notes.between import (copied as between_copied, keep_pushes, push_sizes, sync_groups, turns as between_turns,
                            whole_groups)
 from window.app_pictures import Pictures
-from window.app_playback import Playback
+from window.app_playback import GROUP_DEFAULT, Playback
 from window.history import BOXES, CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
@@ -285,6 +285,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
         self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)
+        # synths side by side playing a loaded MIDI (user 2026-10-24: all cores would halt the PC; half to start)
+        self.loaded_synths = GROUP_DEFAULT
+        self.synths_var = tk.StringVar(self, value=str(GROUP_DEFAULT))
+        self.synths_entry = None  # (in Settings → Sound)
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
@@ -411,6 +415,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
         self.loaded = None  # a loaded MIDI file (Load MIDI: notes.loaded.LoadedMidi), its notes drawn under the shapes
         self.midi_link = None  # the project's MIDI file (notes.loaded.clean_link): kept while it isn't loaded too
+        self.loaded_play = None  # the loaded MIDI playing along (files.play_loaded.LoadedPlayer)
+        self.loaded_group = None  # ... its synths on Built-in BASSMIDI (files.synth.LiveGroup)
+        self._thin_seen = (0, 0.0)  # (its thinned count, when it last grew: "Overloaded")
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
@@ -1918,6 +1925,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.midi_link is not None:  # (a loaded MIDI goes too; Undo brings back the shapes only)
             self.midi_link = None
             self.drop_finding()
+            self.stop_loaded()
             self.loaded = None
             self.roll.forget_loaded()
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes

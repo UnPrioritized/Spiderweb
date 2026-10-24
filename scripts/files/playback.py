@@ -359,6 +359,7 @@ class Player:
         self._sorting = False  # a thread is putting them in order (cleared by it under _lock as it ends)
         self._lock = threading.Lock()
         self._gen = 0  # one for each start (a sort left from an earlier play is thrown away)
+        self.ready = None  # a threading.Event the line waits for before it starts (play_loaded.LoadedPlayer.ready)
 
     @property
     def running(self):
@@ -442,6 +443,10 @@ class Player:
         shared = tune or self.shared
         ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune, self.ports)
         del notes
+        ready = self.ready  # (a loaded MIDI playing along: the line waits until its first notes are read)
+        while ready is not None and not ready.wait(0.01):
+            if stop.is_set():
+                return
         self._clock = (clock(), self.map.sec(t0), self.map)
         held = self.held = {}
         sent = self.cc_sent = set()

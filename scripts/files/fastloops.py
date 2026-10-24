@@ -30,6 +30,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_note_ticks  midi_scan.note_ticks (Keep timing's anchors on a loaded MIDI), the very same function compiled
   midi_index, midi_close, midi_grid, midi_halve   midi_index's functions (Load MIDI's pass: notes paired, the index
                  to read a track from anywhere, the overview picture), the very same functions compiled
+  play_read, play_order, play_hist, play_emit   midi_play's functions (playing a loaded MIDI), compiled
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
 
@@ -42,7 +43,7 @@ from numba import carray, cfunc, njit, types
 from numba.core import caching
 from numba.typed import List
 
-from files import midi_index as _index, midi_scan
+from files import midi_index as _index, midi_play, midi_scan
 from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX,
                          LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP)
 
@@ -1611,6 +1612,10 @@ midi_close = njit(cache=CACHE, nogil=True)(_index.close)
 midi_grid = njit(cache=CACHE, nogil=True)(_index.grid)
 midi_halve = njit(cache=CACHE, nogil=True)(_index.halve)
 midi_cover = njit(cache=CACHE, nogil=True)(_index.cover)
+play_read = njit(cache=CACHE, nogil=True)(midi_play.read)
+play_order = njit(cache=CACHE, nogil=True)(midi_play.order)
+play_hist = njit(cache=CACHE, nogil=True)(midi_play.hist)
+play_emit = njit(cache=CACHE, nogil=True)(midi_play.emit)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1693,3 +1698,11 @@ def warm():
                np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
                z.copy(), z.copy())
     loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
+    i32 = np.zeros(1, np.int32)
+    play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),
+              i32.copy(), 0)
+    play_order(i1, i32, i32, 0, 1, i1.copy(), i32.copy(), i32.copy())
+    h2 = np.zeros((1, 128), np.int64)
+    play_hist(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, h2)
+    play_emit(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, i1, i1.copy(), np.zeros(1 << 17, np.int64), np.zeros((1, 3), np.uint8),
+              i1.copy(), False)

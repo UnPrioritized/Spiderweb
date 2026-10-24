@@ -4,6 +4,7 @@ soundfont and settings."""
 import math
 import os
 import threading
+import time
 from tkinter import filedialog, messagebox
 
 from files import errors
@@ -19,6 +20,9 @@ from window.hz_preview import VOICES
 from window.widgets import bad, good
 
 RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's CC run-on (the longest counts)
+GROUP_MOST = 16  # synths side by side playing a loaded MIDI at most (Settings → Sound)
+GROUP_DEFAULT = max(1, min(GROUP_MOST, (os.cpu_count() or 4) // 2))  # ... to start: half the cores (user
+# 2026-10-24: every core would halt the PC)
 
 
 def font_sig(path):
@@ -68,8 +72,13 @@ class Playback:
         self.player.shared = self.rows_apart()
         rendered, ccs, ports = self.play_parts(ppq, bpm)
         end = self.play_end(ppq, beats, self.playhead)
+        self.player.ready = None
+        self.player.stop()
+        self.player._clock = None  # (the loaded MIDI's feeder waits for the new line, never the last play's)
+        if self.loaded is not None:  # (first: the play line waits until its first notes are read)
+            self.start_loaded(int(round(self.playhead * ppq)))
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
-                          heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1))
+                          heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo:
@@ -79,11 +88,50 @@ class Playback:
         self._play_job = self.after(15, self._play_tick)
 
     def play_end(self, ppq, beats, start):
-        """Where playing stops: a quarter bar after the last note ends (or after the play line if already past
-        it), rounded up to the next quarter-bar line."""
+        """Where playing stops: a quarter bar after the last note ends (a loaded MIDI's too; or after the play
+        line if already past it), rounded up to the next quarter-bar line."""
         quarter = beats / 4
         last = (int(self.rendered[:, 1].max()) if len(self.rendered) else 0) / ppq
+        if self.loaded is not None:
+            last = max(last, self.loaded.end / ppq)
         return math.ceil((max(last, start) + quarter) / quarter - 1e-9) * quarter
+
+    def file_heard(self):
+        """A loaded MIDI's own tempo for heard_tempo (its notes keep their file time in Keep timing parts), else
+        None."""
+        from notes.loaded import file_tempos
+        return file_tempos(self.loaded) if self.loaded is not None else None
+
+    def start_loaded(self, t0):
+        """The loaded MIDI plays along from tick t0, the play line (files/play_loaded.py): Built-in BASSMIDI = its
+        own synths side by side (a LiveGroup, opened for each play), other MIDI outs = the same device. The Player
+        starts its line once the first notes are read (Player.ready)."""
+        from files.play_loaded import LoadedPlayer
+        from files.playback import KDMAPI
+        from files.synth import LiveGroup
+        self.stop_loaded()
+        sinks, kind = None, "kdmapi" if self.out.name == KDMAPI else "device"
+        if self.out.name == BUILTIN and self.synth is not None:
+            try:
+                self.loaded_group = LiveGroup(self.synth, self.loaded_synths, self.play_voices,
+                                              limiter=self.play_limiter.get())
+                sinks, kind = self.loaded_group.lives, "group"
+            except SynthError as e:  # (its own shapes still play: told on the status line)
+                self.status.config(text=str(e))
+                return
+        tl = self.track_list
+        self.loaded_play = LoadedPlayer(self.loaded, self.player, self.out, sinks, kind,
+                                        muted=lambda: [-1 - s for s in tuple(tl.muted) if s < 0])
+        self.player.ready = self.loaded_play.ready
+        self.loaded_play.start(t0)
+
+    def stop_loaded(self):
+        if self.loaded_play is not None:
+            self.loaded_play.stop()
+            self.loaded_play = None
+        if self.loaded_group is not None:
+            self.loaded_group.close()
+            self.loaded_group = None
 
     def play_changed(self):
         """The notes or the project's numbers changed while playing: it plays on with them from where it is (a new
@@ -103,7 +151,7 @@ class Playback:
         rendered, ccs, ports = self.play_parts(ppq, bpm)
         end = self.play_end(ppq, beats, self.player.position())
         self.player.update(rendered, bpm, end, self.picture_use10, ccs, ports,
-                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1))
+                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
 
     def play_tempo(self):
         """The tempo line changed while playing: the player goes on at the new speed (the notes stay)."""
@@ -117,7 +165,7 @@ class Playback:
         if ppq != self.player.ppq:
             return self.play_changed()
         end = int(self.player.stop_beat * ppq) + 1
-        self.player.set_tempo(bpm, heard_tempo(self.tempo, bpm, ppq, end))
+        self.player.set_tempo(bpm, heard_tempo(self.tempo, bpm, ppq, end, self.file_heard()))
 
     def play_parts(self, ppq, bpm):
         """play_apart's, the CC lines as the player's messages (cc_list)."""
@@ -165,6 +213,7 @@ class Playback:
             self.player.stop()
             self.roll.show_playhead()
             self.schedule_autosave()
+        self.stop_loaded()
         self.overload.stop()
         self.show_overload()
         self.play_btn.config(text=tr("app.play_space"))
@@ -173,6 +222,13 @@ class Playback:
         """The red text at the status line's right end (and in Settings → Sound): "Overloaded", with the
         voices playing when the limit was lowered by itself."""
         text = self.overload.text()
+        lp = self.loaded_play
+        if lp is not None:  # (a loaded MIDI's notes thinned for the synth within the last second: overloaded too)
+            now = time.perf_counter()
+            if lp.thinned != self._thin_seen[0]:
+                self._thin_seen = (lp.thinned, now)
+            if not text and now - self._thin_seen[1] < 1.0:
+                text = tr("app.overloaded")
         if text != self.overload_text:
             self.overload_text = text
             self.overload_label.config(text=text)
@@ -386,7 +442,28 @@ class Playback:
                 self.overload.set_limit(v)  # (its thread sends it: heard at once)
             elif self.out.name == BUILTIN and self.out.handle:
                 self.out.handle.set_voices(v)
+            if self.loaded_group is not None:
+                self.loaded_group.set_voices(v)
             self.note_builtin()
+            self.schedule_autosave()
+
+    def on_loaded_synths(self):
+        """Synths for a loaded MIDI typed (Settings → Sound): heard from the next Play."""
+        e = self.synths_entry
+        try:
+            v = int(round(float(calc(self.synths_var.get()))))
+            if not 1 <= v <= GROUP_MOST:
+                raise ValueError
+        except (ValueError, ZeroDivisionError):
+            if e is not None and e.winfo_exists():
+                bad(e)
+            return
+        if e is not None and e.winfo_exists():
+            good(e)
+        if str(v) != self.synths_var.get():
+            self.synths_var.set(str(v))
+        if v != self.loaded_synths:
+            self.loaded_synths = v
             self.schedule_autosave()
 
     def on_play_guard(self):
@@ -398,6 +475,8 @@ class Playback:
         """Heard at once while Built-in BASSMIDI is open."""
         if self.out.name == BUILTIN and self.out.handle:
             self.out.handle.set_limiter(self.play_limiter.get())
+        if self.loaded_group is not None:
+            self.loaded_group.set_limiter(self.play_limiter.get())
         self.note_builtin()
         self.schedule_autosave()
 

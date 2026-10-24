@@ -584,6 +584,8 @@
  "bs.change_tip": "Pick another soundfont (.sf2 / .sfz). The Hz bass preview uses the same one.",
  "bs.guard": "Lower it by itself when overloaded",
  "bs.guard_tip": "Ticked: while the processor can't make the sound fast enough (it stops or crackles), the voice limit is lowered until it keeps up, then quickly raised back to yours once it's calm. Each Play starts from your limit (moving the play line while it plays keeps the lowered one).",
+ "bs.synths": "Synths for a loaded MIDI:",
+ "bs.synths_tip": "A loaded MIDI plays on this many synths side by side, each on its own processor core, so busy black MIDI parts can sound fuller (half your cores to start). More = fewer notes left out in the busiest parts, but less room for the rest of your PC: lower it if your PC slows down while playing. Heard from the next Play.",
  "bs.limiter": "Use OmniMIDI Limiter",
  "bs.limiter_tip": "Ticked: sound louder than full volume is turned down instead of clipped (clipping = a harsh, broken sound in busy parts), so busy parts sound cleaner but flatter. Off: too loud is clipped. Heard at once.",
  "bs.limiter_slow": "\nWithout the optional speed-up Numba, playback may break up for a moment while you edit with it on.",
