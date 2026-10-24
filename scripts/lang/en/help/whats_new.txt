@@ -6,7 +6,7 @@ What's new:
 
 • Lasso tool (J): draw a loop round notes and press Enter to cut out what's inside, a bite or a hole, and select it. Drag round, click points (Polygonal) or let it cling to the notes without cutting any (Magnetic). The loop waits for Enter, so you can drag its points and bend it with curve handles first. The drawer has it too, for cutting strokes. See Help → Lasso.
 
-• Conductor pane (View → Conductor pane): draw the tempo as a line under the piano roll, with jumps, glides, curves and formulas, and copy and paste it. Catch-up runs fast after a stop until the music is back on time. Keep timing changes the tempo while the music sounds the same, and Fit bar lines keeps the bar lines on the bars you hear. The ruler shows every tempo change. See Help → Conductor pane.
+• Conductor pane (View → Conductor pane): draw the tempo as a line under the piano roll, with jumps, glides, curves and formulas, and copy and paste it. Catch-up runs fast after a stop until the music is back on time. Keep timing lets a part show one tempo while the notes sound at another: keep the audio, or keep the visual and draw the heard tempo as its own purple line. Fit bar lines keeps the bar lines on the bars you hear. The ruler shows every tempo change. See Help → Conductor pane.
 
 • Track list (press Tab, or use the View menu): the tracks your MIDI will have, one row each with a picture of its notes, so you can see where your shapes land before you export. Click a track and press Tab to see only it on the piano roll; the toolbar's Multiple tracks button shows other tracks you pick faintly behind it. Each row has a speaker to mute it (right-click: solo) while playing, and the Conductor row shows the tempo. See Help → Track list.
 

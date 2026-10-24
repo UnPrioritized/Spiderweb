@@ -6,20 +6,22 @@ With no tempo points the song plays at 120 BPM, the MIDI standard. The tempo at 
 
 Unlike many MIDI programs, the tempo here is a line you draw, like velocities: points where the BPM is set, and parts between them that hold, glide or curve.
 
-Line: click to add a point, drag to draw a line (it replaces the points in between). The new line keeps squares at its ends and a round handle in the middle until Enter, Esc or a click elsewhere: drag a square to move that end, the handle to bend the line. Ctrl+Z takes the whole line away.
+Line: a click adds a held step. Over a held tempo it holds until the next point; inside a ramp it is a short dip until the ramp's next step, then the ramp goes on as before. A click right above or below a point sets that point's BPM instead.
+
+Drag to draw a line. It replaces only its own stretch: the tempo before it stays as it was, a ramp after it goes on from where it was, and a held tempo after it takes the line's end BPM until the next point. While you drag, the pane already shows the result. The new line keeps squares at its ends and a round handle in the middle until Enter, Esc or a click elsewhere: drag a square to move that end, the handle to bend the line. Ctrl+Z takes the whole line away.
 [clip:conductor-line]
 
 Formula: drawn like Line, but the part follows the formula in the box next to it (x goes from 0 at its first point to 1 at the next).
 
 Points and line ends snap onto note starts and ends nearby and onto other tempo points; otherwise they sit on whole ticks. Hold Shift for whole ticks only. BPM snap rounds the BPM (Off for any BPM).
 
-A click on a point where a curved part arrives makes a jump: the curve arrives there, and the tempo goes on from the second point at the same moment.
+A click on the beat where a curved part arrives (or within one Interval step of it) makes a jump: the curve arrives there, and the tempo goes on from the second point at the same moment.
 
 Double right-click switches between Select and the last drawing tool.
 
 ## Picking and changing
 
-Select: click a point, catch-up or part to pick it (the play line goes there too). Drag on empty space for a Select box over that whole time; Ctrl+drag adds another box. Drag inside the box to move what it picked, in time and BPM; Ctrl+drag copies it. Ctrl+A picks everything.
+Select: click a point, catch-up or part to pick it (the play line goes there too). Drag on empty space for a Select box over that whole time; Ctrl+drag adds another box. Drag inside the box to move what it picked in time; Ctrl+drag copies it, and the pane shows the result while you drag. A copied catch-up that would land inside another catch-up is left out. Ctrl+A picks everything.
 
 Drag a point to move it. Double-click a point to type its BPM, or use the BPM box below the tools (drag its word like any number box). Delete removes the picked ones. Right-click gives a menu (right-click never deletes).
 
@@ -37,7 +39,7 @@ Interval: curved parts change the tempo every this many ticks (24 like many MIDI
 
 Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with every step up, so huge spikes and very slow stops fit on one screen. Fit shows the whole line. The wheel over the numbers on the left zooms, Shift+wheel or a drag there scrolls.
 
-The ruler above the piano roll shows each tempo change ("120 → 60", "60 ↗ 180"); rest the mouse on one for the exact BPMs. The number in the pane's top row is the exact tempo at the play line.
+The ruler above the piano roll shows each tempo change ("120 → 60", "60 ↗ 180"); rest the mouse on one for the exact BPMs. Changes of the heard tempo inside Keep timing parts show in purple. The number in the pane's top row is the exact tempo at the play line, with the heard tempo after it in purple brackets where the two differ.
 [clip:conductor-ruler]
 
 ## Catch-up
@@ -55,12 +57,22 @@ The line below the tools says the BPM the catch-up needs. In red it can't work: 
 
 ## Keep timing
 
-Tick Keep timing on a picked part: its notes keep the time they had at the tempo heard just before it. The new tempo only changes how fast the piano roll scrolls in other programs; the music sounds the same. The export moves the notes in ticks to make it exact. The part after the last point can be picked too (to the song's end).
+Keep timing lets a part show one tempo while the notes sound at another. Pick a part and choose in the Keep timing dropdown:
+
+• Keep the audio: the notes keep the time they had at the tempo heard just before the part. The tempo you draw only changes how fast the piano roll scrolls in other programs; the music sounds the same.
+
+• Keep the visual: the other way round. The tempo line stays what the file shows, and the purple line is the tempo the notes sound at.
+
+Either way the export moves the notes in ticks to make it exact. Switching between the two swaps the lines. The part after the last point can be picked too (to the song's end). Keep timing doesn't work inside a catch-up's yellow area.
 [clip:conductor-keep]
 
-The purple area is a Keep timing part, and the dotted line is the tempo the notes keep.
+The purple area is a Keep timing part, and the purple line is the heard tempo, the one the notes sound at (dashed while you draw the visual tempo).
 
-Notes closer than one tick at the slower tempo can't stay exact: there the tempo stays faster, and the pane shows an orange dashed line. A higher PPQ helps.
+Draw: Visual tempo / Heard tempo (in the pane's top row) picks which line the tools draw. With Heard tempo, the tools draw the purple line, and everything outside the Keep timing parts is faded. A line drawn across several parts keeps only what lands inside them. Where the sound jumps at a part's end, a dotted upright line joins the two tempos.
+
+Turning Keep timing on puts a point at the part's end at the heard tempo's BPM there, so the sound goes on smoothly. It follows the heard line's end until you change it.
+
+Notes closer than one tick at the slower tempo can't stay exact: there the tempo stays faster, and the pane shows an orange dashed line and a red "Notes under 1 tick apart". "No time signature fits this bar" means Fit bar lines can't find a time signature for a bar Keep timing made too short or odd (the sound is still right). An orange "CC moved by up to a tick" means CC messages there move a tick at most so the tempo can stay. Rest the mouse on one of these for more. A higher PPQ helps with all three.
 
 A Keep timing part drawn faster than the tempo before it gives the MIDI file more ticks a second than the piano roll has. Tick Finer gates in Keep timing parts in the Hz bass window's Settings… and that Hz bass is made on those finer ticks there, so it buzzes less, most of all on high notes. Only the exported file changes: the piano roll and playback stay on the project's ticks.
 
