@@ -896,7 +896,9 @@ class RollDrawing:
             self.play_follow = PlayFollow(self.app)
         free = self.play_follow.free((self.view_t, self.sx), start)
         if self.app.player.running and not busy and free and (x > w - 6 * self.scale or x < self.kb_w):
-            self.view_t = self.app.playhead
+            # (on a whole pixel, like every view move: the pictures made ahead fit only then, else the loaded
+            # notes' overview showed first and the notes shifted when the exact one came, user 2026-10-25)
+            self.view_t = math.floor(self.app.playhead * self.sx) / self.sx
             self.clamp_view()
             self.play_follow.turned((self.view_t, self.sx))
             self.request_redraw()  # the full redraw puts the line back too

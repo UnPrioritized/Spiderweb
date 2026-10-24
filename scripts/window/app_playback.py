@@ -86,6 +86,8 @@ class Playback:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
+        if self.loaded is not None:  # (a redraw now: the loaded notes' exact pictures start reading ahead the way
+            self.roll.request_redraw()  # it plays before the first page turn, roll_loaded._keep_ahead)
         self._play_job = self.after(15, self._play_tick)
 
     def play_end(self, ppq, beats, start):

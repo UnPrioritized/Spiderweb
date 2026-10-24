@@ -86,7 +86,7 @@ class LoadedNotes:
         nk = p_hi - p_lo + 1
         if nk < 1 or order == ():
             return
-        mark = (key, getattr(self, "loaded_version", 0))
+        mark = (key, getattr(self, "loaded_version", 0), self.app.player.running)  # (playing starts: read ahead)
         now = getattr(self, "_loaded_now", None)
         if now is None or now[0] != mark:  # (one frame's strips share it)
             now = self._loaded_now = (mark, *self.loaded_tabs(lm, key, ax, bx, W, p_lo, nk, order, faint))
@@ -224,6 +224,12 @@ class LoadedNotes:
         soon = int(W * MARGIN) * 3 // 4
         short_left = d < soon and -e.bx / ax > lm.first
         short_right = e.W - d - W < soon and (e.W - e.bx) / ax < lm.end
+        if self.app.player.running:  # (playing: only ahead matters, and a page turn moves the view a little over a
+            # screen at once, so the picture must reach past it beforehand, else the overview shows first and the
+            # notes shift when the exact one comes: user 2026-10-25, Lagtester bars ~150 / 199)
+            if e.W - d - W < W + W // 4 and (e.W - e.bx) / ax < lm.end:
+                self._want(lm, style, ax, bx, W, order, faint, rest=False, ahead=1)
+            return
         if short_left != short_right:  # (reaching further the way the view goes)
             self._want(lm, style, ax, bx, W, order, faint, rest=False, ahead=1 if short_right else -1)
         elif short_left:
