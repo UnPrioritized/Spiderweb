@@ -682,6 +682,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.bind("<B2-Motion>", self.pan_to)
         self.bind("<MouseWheel>", self.on_wheel)
         grab_while_panning(self)
+        self.handle_tip = Tooltip(self, "")  # (on a bend handle while the mouse rests there: handle_hover)
+        self.handle_tip.spot = lambda: (self.winfo_pointerx() + 12, self.winfo_pointery() + 20)
 
     # ------------------------------------------------------------ the line the tools edit (user 2026-10-24)
 
@@ -1187,12 +1189,66 @@ class TempoPane(ConductorMarks, tk.Canvas):
         set_bend(p, [min(1.0, max(0.0, 2 * fx - 0.5)), min(1.0, max(0.0, 2 * fy - 0.5))])
 
     def toggle_s(self, i):
-        """Right-click on the handle: the part an S-curve (the same bend, mirrored on its second half) / back to a
-        line (one undo step)."""
+        """The handle's S-curve: the part an S-curve (the same bend, mirrored on its second half) / back to a line
+        (one undo step)."""
         p = self.ed()["points"][i]
         self.app.push_undo(name=tr("tempo.step_s"))
         p[2] = "line" if p[2] == "s" else "s"
         self.app.tempo_changed()
+
+    def unbend(self, n, line=False):
+        """Handle n's part straight again (line: an S-curve a line too) / catch-up n its own curve again (one undo
+        step; nothing when it already is)."""
+        if n[0] == "catch":
+            c = self.ed()["catch"][n[1]]
+            if catch_get(c, 5) is not None:
+                self.app.push_undo(name=tr("tempo.step_catch_bend"))
+                catch_set(c, 5, None)
+                self.app.tempo_changed()
+            return
+        p = self.ed()["points"][n[1]]
+        if bend_of(p) != BEND or line and p[2] == "s":
+            self.app.push_undo(name=tr("tempo.step_bend"))
+            set_bend(p, list(BEND))
+            if line:
+                p[2] = "line"
+            self.app.tempo_changed()
+
+    def handle_menu(self, e, n):
+        """Right-click on a bend handle (user 2026-10-24, was an instant S-curve switch): Straight line / S-curve
+        (ticked when on); a catch-up's: Its own curve again / Delete catch-up."""
+        tempo = self.ed()
+        menu = tk.Menu(self, tearoff=0)
+        if n[0] == "part":
+            p = tempo["points"][n[1]]
+            menu.add_command(label=tr("tempo.handle_straight"), command=lambda: self.unbend(n, True),
+                             state="normal" if bend_of(p) != BEND or p[2] == "s" else "disabled")
+            self._s_var = tk.BooleanVar(self, value=p[2] == "s")
+            menu.add_checkbutton(label=tr("tempo.handle_s"), variable=self._s_var,
+                                 command=lambda: self.toggle_s(n[1]))
+        else:
+            c = tempo["catch"][n[1]]
+            menu.add_command(label=tr("tempo.handle_own"), command=lambda: self.unbend(n),
+                             state="disabled" if catch_get(c, 5) is None else "normal")
+            menu.add_separator()
+            menu.add_command(label=tr("tempo.delete_catch"), command=lambda: self.delete_items([c]))
+        try:
+            menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            menu.grab_release()
+            self.menu_shut = time.perf_counter()  # (see right_menu)
+
+    def handle_hover(self, handle, e):
+        """A tip box on the bend handle while the mouse rests on it (user 2026-10-24: double-click was hard to
+        find)."""
+        tip = self.handle_tip
+        text = "" if handle is None or self.drag else tr("tempo.handle_tip" if handle[0] == "part"
+                                                         else "tempo.catch_handle_tip")
+        if text != tip.text:
+            tip.hide()
+            tip.text = text
+            if text and not tip.used and not e.state & tip.BUTTONS:
+                tip.schedule()
 
     def snap_beat(self, b, e):
         """On the grid (Shift: free): the Select box's move, the catch-up being added, a click's play line."""
@@ -1718,19 +1774,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         n = self.handle_at(e.x, e.y) if i is None else None
         if n is not None:  # (the bend handle: straight / the catch-up's own curve again)
             self.drag = None
-            if n[0] == "catch":
-                c = self.ed()["catch"][n[1]]
-                if catch_get(c, 5) is not None:
-                    self.app.push_undo(name=tr("tempo.step_catch_bend"))
-                    catch_set(c, 5, None)
-                    self.app.tempo_changed()
-                return
-            p = self.ed()["points"][n[1]]
-            if bend_of(p) != BEND:
-                self.app.push_undo(name=tr("tempo.step_bend"))
-                set_bend(p, list(BEND))
-                self.app.tempo_changed()
-            return
+            return self.unbend(n)
         if i is None and self.box.tool.get() == "select" and getattr(self.app, "tempo_clip", None) \
                 and self.catch_at(e.x) is None:  # (Select double-click on empty space: the copy there, like the
             self.drag = None                     # piano roll's; snapped like it, Shift free; user 2026-10-22)
@@ -2043,8 +2087,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.box.sync()
         self.picked()
         n = self.handle_at(e.x, e.y)
-        if n is not None and n[0] == "part":  # (the bend handle: an S-curve / a line again, user)
-            return self.toggle_s(n[1])
+        if n is not None:  # (the bend handle: its own menu)
+            return self.handle_menu(e, n)
         tempo = self.ed()
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
@@ -2464,6 +2508,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         # of text)
         hint = None
         handle = self.handle_at(e.x, e.y)
+        self.handle_hover(None if self.point_at(e.x, e.y) is not None or self.placing else handle, e)
         if e.x < roll.kb_w:
             want, hint = "sb_v_double_arrow", "numbers"
         elif self.placing:

@@ -30,7 +30,7 @@ Drag a point to move it. Double-click a point to type its BPM, or use the BPM bo
 
 A picked part shows its settings below the tools:
 
-• Part curve: Hold, then jump / Line / S-curve / Formula. Drag the round handle to bend a line; right-click it for an S-curve, double-click for straight again.
+• Part curve: Hold, then jump / Line / S-curve / Formula. Drag the round handle to bend a line; double-click it for straight again, or right-click it for Straight line and S-curve.
 
 • The dropdown beside it: Linear adds the same BPM every beat; Exponential grows by the same share every beat, good for huge spikes.
 
@@ -54,7 +54,7 @@ Right-click → Add catch-up BPM here, then two drags: first over the time it co
 
 Above: 120 BPM, a stop at 60 for one beat, then the catch-up runs at 140 BPM until the music is back on time when the line returns to 120.
 
-Drag the catch-up line to change how long the slow part holds, and the edges of the yellow and teal areas to change them (right-click an edge to set it back to automatic). Shapes: Flat, Fast, then slow, Slow, then fast, Up and down, or Formula; the first two have a round handle to bend them.
+Drag the catch-up line to change how long the slow part holds, and the edges of the yellow and teal areas to change them (right-click an edge to set it back to automatic). Shapes: Flat, Fast, then slow, Slow, then fast, Up and down, or Formula; the first two have a round handle to bend them (double-click it, or right-click → Its own curve again, to undo the bend).
 
 The line below the tools says the BPM the catch-up needs. In red it can't work: the slow part is already too long, so move the line before the bar it names.
 
