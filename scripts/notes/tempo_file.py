@@ -191,13 +191,14 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     # a part on to the song's end stops at the last note (not a tick past it: no gap there to count); its heard
     # tempo: one whole number, or one per tick from its heard tempo line
     keeps = [(n, a, last_tick if e is None else e) for n, (_, a, e, _) in enumerate(lay["keeps"])]
+    own = [lay["own_line"][n] for n, a, e in keeps if e > a]  # (a part with its own heard line: that, always)
     keeps = [(a, e, keep_heard(lay, n, a, e)) for n, a, e in keeps if e > a]
     fit_bars = tempo.get("bars", True)
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
     gaps, dense, gave = [], [], []
-    for a, e, u in keeps:
+    for (a, e, u), mine in zip(keeps, own):
         inside = ticks[(ticks > a) & (ticks < e)]
         marks = [np.array([a, e], np.int64), inside]
         if fit_bars:
@@ -205,8 +206,9 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         drawn = _per_tick(segs, a, e)
         sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
         was = None if heard is None else np.concatenate([[0], np.cumsum(_per_tick(heard_segs(heard, e), a, e))])
-        if not isinstance(u, int):  # (its own heard tempo line: that, also over a loaded MIDI's own tempo)
-            was = np.concatenate([[0], np.cumsum(u)])
+        if mine:  # (its own heard tempo line: that, also over a loaded MIDI's own tempo, even one steady value:
+            # a flat line, e.g. Keep the visual's, was left to the file's tempo, hunt 2026-10-24)
+            was = None if isinstance(u, int) else np.concatenate([[0], np.cumsum(u)])
         lo = loose[(loose > a) & (loose < e)]
         while True:
             n = np.unique(np.concatenate(marks + [lo]))

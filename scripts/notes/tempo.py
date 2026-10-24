@@ -796,7 +796,7 @@ def layout(tempo, base, ppq):
     if len(_layouts) > 8:
         _layouts.clear()
     _layouts[key] = out = {"start_u": start_u, "keeps": keeps_out, "worked": worked, "real": real,
-                           "keep_segs": keep_segs}
+                           "keep_segs": keep_segs, "own_line": [bool(ln["points"]) for ln in lines]}
     return out
 
 
