@@ -1857,12 +1857,25 @@ class TempoPane(ConductorMarks, tk.Canvas):
         kind_after = part_kind(owner, self.box.draw_scale)
         kind_after[0], kind_after[1], kind_after[4] = "hold", "", list(BEND)
         last = [float(b1), clamp_bpm(v1), *kind_after]
+        # (where Keep timing starts / ends / changes heard line under it: a point stays there, on the line, with
+        # what was there; a line across a part's end made the part reach the line's end, hunt 2026-10-24)
+        was, edges = (first[5], heard_line(first)), []
+        for p in work:
+            if b0 + 1e-9 < p[0] < b1 - 1e-9 and (keeps(p), heard_line(p)) != was:
+                was = keeps(p), heard_line(p)
+                edges.append((p[0], keeps(p), copy.deepcopy(p[7]) if keeps(p) and heard_of(p) else None))
         had = ids(work)
         self.lay_points(work, [first, last], [(b0, b1)], base)
         if steady and not on_end and any(p is last for p in work):  # (an old held tempo: the end value holds on
             # to the next point; the same value as there = last already gone, nothing to do)
             work[:] = [p for p in work if not (abs(p[0] - b1) < 1e-9 and id(p) not in had and p is not last)]
             drop_loose(work)
+        for x, keep, heard in edges:
+            p = split_at(work, x, base)
+            p[5] = keep
+            del p[7:]
+            if heard is not None:
+                p.append(heard)
         return work, first
 
     # ------------------------------------------------------------ the line just drawn, live (user 2026-10-22)
