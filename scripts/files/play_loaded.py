@@ -49,13 +49,15 @@ BUDGET_LEAST, BUDGET_MOST = 20_000, 1_500_000  # (a synth: one makes ~1 M notes 
 # A synth's load reading LAGS (measured 2026-10-24, Shinki beats 1100-1125, 8 synths x 500 voices: budgets grew to 1.5 M
 # each, the synths jammed up to 440 % and lost ~4.5 s of sound in 25 s). So each synth's CEILING is learned from the
 # sound it really loses (any PC: user asked; position vs the clock): sound lost = budget halved, ceiling = LOST_CAP of
-# what it was; no loss for a while = the ceiling creeps up (CAP_RISE each check). Kept for the next play (_caps).
+# what it was, ONLY while that synth was full of notes (thinned / backed up in that check: hunt 2026-10-25, a device
+# hiccup or one wall left light MIDIs thinned for 20-40 s); no loss for a while = the ceiling climbs back (CAP_RISE
+# each check). Kept for the next play per synth count + voices + soundfont (_caps).
 LOST_S = 0.005  # sound missing in one check (~0.1 s) that counts as lost
 LOST_CAP = 0.7
-CAP_RISE = 1.01  # (~10 % a second)
+CAP_RISE = 1.05  # (~60 % a second once calm: back from a wrong lowering within a few seconds)
 GROW = 1.08  # a budget growing: this much each check
 WARM_S = 2.0  # sound lost this soon after the line starts never lowers a ceiling (start-up loses some at any load)
-_caps = {}  # (synths, voices each) -> each synth's learned ceiling, for the next play
+_caps = {}  # (synths, voices each, soundfont) -> each synth's learned ceiling, for the next play
 SKIP = 64 * 16 * 128  # (port x channel x key: note-offs still to leave out)
 POOL = 12  # windows' arrays kept for use again at most
 
@@ -388,7 +390,9 @@ class LoadedPlayer:
         hit = np.zeros(K, bool)  # (more notes than its budget lately: may get a bigger one)
         behind = np.zeros(K, bool)  # (backed up lately: never a bigger one then)
         if self.sinks:  # each synth's ceiling (learned last play), its place in its sound, checks without loss
-            got = _caps.get(K)
+            first = self.sinks[0]
+            caps_key = (K, getattr(first, "voices", None), getattr(first, "font_path", None))
+            got = _caps.get(caps_key)
             cap = np.array(got if got is not None else [BUDGET_MOST] * K, np.float64)
             pos = [(time.perf_counter(), live.position()) for live in self.sinks]
             calm = np.zeros(K, np.int64)
@@ -417,7 +421,8 @@ class LoadedPlayer:
                         t_at, p = time.perf_counter(), live.position()
                         lost = (t_at - pos[r][0]) - (p - pos[r][1]) / 8 / RATE  # (seconds it couldn't make)
                         pos[r] = (t_at, p)
-                        if lost > LOST_S and now - warm > WARM_S:
+                        if lost > LOST_S and now - warm > WARM_S and (hit[r] or behind[r]):  # (full of notes:
+                            # its budget's doing; else a device / PC hiccup, nothing to learn)
                             cap[r] = max(BUDGET_LEAST, min(cap[r], self.budgets[r]) * LOST_CAP)
                             self.budgets[r] = max(BUDGET_LEAST, int(self.budgets[r] * 0.5))
                             calm[r] = 0
@@ -437,7 +442,7 @@ class LoadedPlayer:
                         elif cpu < 40 and hit[r] and not behind[r] and calm[r] > 3:
                             self.budgets[r] = int(self.budgets[r] * GROW)
                         self.budgets[r] = max(BUDGET_LEAST, min(self.budgets[r], int(cap[r])))
-                    _caps[K] = cap.tolist()
+                    _caps[caps_key] = cap.tolist()
                     hit[:] = False
                     behind[:] = False
             t_c, sec, tmap = clock

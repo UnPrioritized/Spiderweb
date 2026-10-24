@@ -733,6 +733,7 @@ class Live:
             raise SynthError("synth.failed", err=err)
 
     def set_voices(self, voices):
+        self.voices = voices  # (play_loaded keeps what it learned per voice limit)
         self.synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_MIDI_VOICES, float(voices))
 
     def set_limiter(self, on):
