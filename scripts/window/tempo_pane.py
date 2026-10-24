@@ -977,6 +977,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         Select box is the yellow area already (several: from the first one's start to the last one's end)."""
         if self.bands:  # (the boxes come back if it's called off)
             a, b = self.bands_reach()
+            if not self.catch_free(a, b):
+                return
             self.placing = {"step": 2, "a": a, "b": b, "hover": None, "bands": self.bands}
             self.bands = []
         else:
@@ -984,6 +986,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.box.hint.config(text=tr("tempo.hint_catch%d" % self.placing["step"]))
         self.app.roll.focus_set()  # (Esc reaches it, whatever box had the keyboard)
         self.request_redraw()
+
+    def catch_free(self, a, b):
+        """True when beats a..b touch no catch-up's yellow / teal area (user 2026-10-24: one catch-up per area, a
+        second one inside it is refused); else the status line says so."""
+        for st, _ in plans(self.ed(), self.base(), self.app.ppq):
+            if st["end"] is not None and min(st["from"], st["line"]) < b and a < st["end"]:
+                self.app.status.config(text=tr("tempo.catch_overlap"))
+                return False
+        return True
 
     def cancel_placing(self):
         """Adding a catch-up called off (Esc, right-click, another tool, Ctrl+Z): nothing left drawn, the kept
@@ -1001,7 +1012,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         p, tempo = self.placing, self.ed()
         tick = 1.0 / max(1, self.app.ppq)
         line = max(p["b"], tick)
-        if any(abs(c[0] - line) < 1e-9 for c in tempo["catch"]):
+        if any(abs(c[0] - line) < 1e-9 for c in tempo["catch"]) or not self.catch_free(min(p["a"], line),
+                                                                                         line + tick):
             return self.cancel_placing()
         self.app.push_undo(name=tr("tempo.step_catch_add"))
         item = [line, "flat", ""]
@@ -1486,7 +1498,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         elif d["kind"] == "draw":
             self.draw_part(d)
         elif d["kind"] == "catch1":
-            if d["span"] is not None:  # (a click does nothing: it waits for a drag)
+            if d["span"] is not None and not self.catch_free(*d["span"]):  # (over another catch-up: called off)
+                self.cancel_placing()
+            elif d["span"] is not None:  # (a click does nothing: it waits for a drag)
                 self.placing = {"step": 2, "a": d["span"][0], "b": d["span"][1], "hover": None}
                 self.box.hint.config(text=tr("tempo.hint_catch2"))
             self.request_redraw()
@@ -1838,15 +1852,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if menu.index("end") is not None:
                 menu.add_separator()
         on_mark = item is None and self.sig_menu_items(menu, e)  # (time / key signatures: Add here, or the mark's)
-        if not on_mark and self.box.mode == "visual":  # (catch-ups: the visual tempo's only)
-            sep()
+        zone = self.zone_at(e.x) if item is None and not on_mark else None
+        if not on_mark and self.box.mode == "visual" and zone is None:  # (catch-ups: the visual tempo's only; never
+            sep()                                                       # inside another one's area, user)
             menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
         for k, at, key in ((3, self.start_at, "tempo.catch_auto"), (4, self.end_at, "tempo.catch_end_auto")):
             n = at(e.x) if item is None else None
             if n is not None and catch_get(tempo["catch"][n], k) is not None:  # (an edge set by hand)
                 sep()
                 menu.add_command(label=tr(key), command=lambda c=tempo["catch"][n], k=k: self.auto_edge(c, k))
-        zone = self.zone_at(e.x) if item is None and not on_mark else None
         if zone is not None:  # (anywhere in its yellow / teal area, user 2026-10-24: the line was hard to hit)
             sep()
             menu.add_command(label=tr("tempo.delete_catch"),

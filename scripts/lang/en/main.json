@@ -374,6 +374,7 @@
  "tempo.keep_tip": "Keep the audio: the notes sound at the heard tempo (the purple line) while the file shows this part's tempo; the export moves them in ticks. Keep the visual: the file keeps showing its tempo while the sound follows the heard line. Switching swaps the two lines.",
  "tempo.keeps_tip": "Keep timing for every part between the picked points (they become one Keep timing part)",
  "tempo.delete_catch": "Delete catch-up",
+ "tempo.catch_overlap": "Not added: that time is already inside a catch-up (one catch-up per stretch)",
  "tempo.keep_off": "Off",
  "tempo.keep_audio": "Keep the audio",
  "tempo.keep_visual": "Keep the visual",
