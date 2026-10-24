@@ -1192,11 +1192,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def tick_beat(self, b, skip=(), free=False):
         """b on a whole tick: where drawing puts things (user 2026-10-22: no grid, like many MIDI programs); within
-        6 px of a tempo point (not one in skip): its exact beat, so a jump's second point can be put there. free:
-        not kept inside the run being edited (Heard tempo drawing: what lands outside is cut off afterwards)."""
+        6 px of a tempo point (not one in skip), but never further than one Interval step (zoomed out, 6 px reached
+        over several steps: a click there landed on the point, user 2026-10-24): its exact beat, so a jump's second
+        point can be put there. free: not kept inside the run being edited (Heard tempo drawing: what lands outside
+        is cut off afterwards)."""
         ppq, roll = max(1, self.app.ppq), self.app.roll
         if roll.sx:
-            r = 6 * self.scale / roll.sx
+            r = min(6 * self.scale / roll.sx, max(1, int(self.ed().get("every", EVERY))) / ppq)
             near = [p[0] for p in self.ed()["points"] if abs(p[0] - b) <= r and not any(p is s for s in skip)]
             ends = [x for _, _, a, e in self.runs() for x in (a, e) if x is not None] if free and \
                 self.box.mode == "heard" else self.run_span() or ()
@@ -1715,13 +1717,24 @@ class TempoPane(ConductorMarks, tk.Canvas):
         part's next Interval step (one held value, as Domino's one event among a ramp's many), then the part goes
         on as before; over a held tempo (or past the last point): it holds up to the next point. Its Keep timing /
         heard line go along. On the beat of a point where a curve arrives: a second point there, the tempo from
-        there on (user 2026-10-22: a jump right where a glide ends). None when one is there."""
+        there on (user 2026-10-22: a jump right where a glide ends). On another point's beat: that point (a jump's
+        leaving one) takes the clicked BPM, its ramp kept (user 2026-10-24, like Domino setting the event on that
+        tick). None when nothing changes."""
         pts = self.ed()["points"]
         end = self.glide_end(b)
         if end is not None and abs(end[1] - clamp_bpm(v)) < 1e-9:
             return None
         if end is None and any(abs(p[0] - b) < 1e-9 for p in pts):
-            return None
+            item = [p for p in pts if abs(p[0] - b) < 1e-9][-1]
+            if abs(item[1] - clamp_bpm(v)) < 1e-9:
+                return None
+            self.app.push_undo(name=tr("tempo.step_bpm"))
+            item[1] = clamp_bpm(v)
+            drop_loose(pts)
+            self.sel = [item] if any(p is item for p in pts) else []
+            self.part = None
+            self.app.tempo_changed()
+            return item
         self.app.push_undo(name=tr("tempo.step_add"))
         before = [p for p in pts if p[0] < b]
         after = [p for p in pts if p[0] > b]
@@ -1737,6 +1750,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         at = sum(1 for p in pts if p[0] < b + 1e-9)
         kind = part_kind(pts[at - 1] if at > 0 else None, self.box.draw_scale)
         kind[0], kind[1], kind[4] = "hold", "", list(BEND)
+        if end is not None:  # (a jump: the ramp leaving there goes on from the new BPM, user 2026-10-24)
+            kind = copy.deepcopy(end[2:])
+            end[2], end[3], end[6] = "hold", "", list(BEND)
         item = [float(end[0] if end is not None else b), clamp_bpm(v), *kind]
         pts.insert(at, item)
         drop_loose(pts)  # (the cut point is an arrival only where a ramp comes in)
