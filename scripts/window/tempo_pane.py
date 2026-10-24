@@ -1484,7 +1484,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         tempo, cop = self.ed(), ids(d["copies"])
         work = dict(tempo, **{key: [copy.deepcopy(it) for it in tempo[key] if id(it) not in cop]
                               for key in ("points", "catch")})
-        new_p, new_c, _, _ = self.lay_copies(work, *laid, self.ed_base())
+        new_p, new_c, spans, _ = self.lay_copies(work, *laid, self.ed_base())
+        d["laid"] = spans  # (the box drawn there: moved past a teal area as letting go moves it, draw_drag)
         return work, new_p + new_c
 
     def is_point(self, item):
@@ -2336,23 +2337,38 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 at = round(at / sb) * sb
         self.put_copies(clip, self.tick_beat(at, skip=self.ed()["points"]), tr("tempo.step_paste"))
 
-    def put_copies(self, clip, at, name, push=True, stay=False):
+    def put_copies(self, clip, at, name, push=True, stay=False, teal=True):
         """clip's items placed from beat at, replacing what's in its boxes there (push: its own undo step). A clip
-        of catch-up lines only leaves the points alone. stay: its first point always stays (lay_points)."""
+        of catch-up lines only leaves the points alone. stay: its first point always stays (lay_points). teal:
+        never starting inside a catch-up's teal area (lay_copies)."""
         if push:
             self.app.push_undo(name=name)
-        new_p, new_c, spans, note = self.lay_copies(self.ed(), clip, at, self.ed_base(), stay)
+        new_p, new_c, spans, note = self.lay_copies(self.ed(), clip, at, self.ed_base(), stay, teal)
         if note:
             self.app.status.config(text=tr(note))
         self.bands, self.sel, self.part = [(lo, hi) for lo, hi in spans if hi > lo], new_p + new_c, None
         self.app.tempo_changed()
 
-    def lay_copies(self, tempo, clip, at, base, stay=False):
+    def lay_copies(self, tempo, clip, at, base, stay=False, teal=True):
         """put_copies' work on the line tempo (in place; a throwaway copy shows a Ctrl+drag as letting go gives it,
         hunt 2026-10-24): (the new points kept, the new catch-ups, the boxes' stretches, a status text key or
-        None). base: the line's BPM before its first point."""
-        spans = joined([(at + a, at + b) for a, b in clip.get("spans") or [(0.0, clip["length"])]])
+        None). base: the line's BPM before its first point. teal: a start inside a catch-up's teal area moves to
+        that area's end (user 2026-10-24: the copy replaced its end point, the catch-up ran on to the copy's line;
+        never for a Domino paste, which stays with its notes)."""
         one, note = 1.0 / max(1, self.app.ppq), None
+        for _ in range(len(tempo["catch"]) + 1) if teal else ():
+            hit = next(((st, c) for st, c in zip(stretches(tempo, self.base()), tempo["catch"])
+                        if st["end"] is not None and st["line"] + 1e-9 < at <= st["end"] + 1e-9), None)
+            if hit is None:
+                break
+            st, c = hit
+            if at < st["end"] - 1e-9:
+                at, note = st["end"], "tempo.paste_after_catch"
+            if catch_get(c, 4) is None:  # (it ended on the point the copy replaces: its end kept by hand)
+                catch_set(c, 4, st["end"])
+            if at >= st["end"] - 1e-9:
+                break
+        spans = joined([(at + a, at + b) for a, b in clip.get("spans") or [(0.0, clip["length"])]])
         new_p = [[max(0.0, p[0] + at)] + copy.deepcopy(p[1:]) for p in clip["points"]]
         for p in new_p:  # (their heard tempo lines along)
             shift_heard(p, at)
@@ -2393,7 +2409,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         new = [[b, bpm, "hold", "", "lin", False, list(BEND)] for b, bpm in tempos]
         if how == "replace":
             clip = {"length": length, "points": new, "catch": [], "spans": [(0.0, length)]}
-            self.put_copies(clip, at, tr("project.paste_from_domino"), push, stay=True)
+            self.put_copies(clip, at, tr("project.paste_from_domino"), push, stay=True, teal=False)
             # (nothing picked, no Select box: a whole song pasted looked all selected, user 2026-10-23; the pasted
             # notes are what's selected)
             self.bands, self.sel, self.part = [], [], None
@@ -3165,6 +3181,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             for x in (x0, x1):
                 self.create_line(x, 0, x, h, fill=edge, width=2, dash=(4, 3))
         spans = d["more"] + [d["span"]] * bool(d["span"]) if d and d["kind"] == "box" else self.bands
+        if d and d["kind"] == "move" and d.get("copies") is not None and d.get("laid"):
+            spans = [(a, b) for a, b in d["laid"] if b > a]
         if spans:  # (the whole height, like the box many MIDI programs show in their lanes)
             h = self.winfo_height()
             draw_boxes(self, [(roll.t2x(a), 1, roll.t2x(b), h - 2) for a, b in spans], roll.kb_w, 0, self.scale)
