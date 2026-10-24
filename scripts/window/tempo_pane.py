@@ -20,6 +20,7 @@ import math
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk
 
 import numpy as np
@@ -34,13 +35,13 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          swap_part, tempo_text)
 from notes.tempo import changed as tempo_edited
 from notes.loaded import file_tempos
-from notes.tempo_file import dense_spots
+from notes.tempo_file import limit_spots
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
                               set_cursor)
 from window import look
-from window.conductor_marks import ConductorMarks
+from window.conductor_marks import ROW, ConductorMarks
 from window.widgets import Scrub, ShortLabel, Tooltip, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
@@ -636,6 +637,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.bands = []  # the kept Select boxes [(first, last beat)]: the pane's whole height (Ctrl+drag adds one)
         self.live = None  # the line just drawn, its ends still movable: {"base", "ends", "first", "seen"}
         self._dense = (None, [])  # (what it was worked out for, beats where Keep timing notes are too close)
+        self._limits = {"dense": [], "gave": [], "unfit": []}  # (the limit texts' spots, tempo_file.limit_spots)
         self._dense_job = None
         self.drag = None
         self._pan = None
@@ -1865,12 +1867,17 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.read_anchors(lm)
                 return
             ticks = np.concatenate([ticks, lm._anchors[0]])
-        try:
-            heard = file_tempos(lm) if lm is not None else None  # (a loaded MIDI: its notes keep their file time)
-            spots = sorted(dense_spots(app.tempo, self.base(), app.ppq, app.beats, ticks, heard))
-        except MemoryError:
-            spots = []
-        self._dense = (key, spots)
+        limits = {"dense": [], "gave": [], "unfit": []}
+        if any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
+            try:
+                heard = file_tempos(lm) if lm is not None else None  # (a loaded MIDI: its notes keep their file time)
+                cc = app.cc_messages(app.ppq, self.base())  # (CC messages: they give way a tick, said in orange)
+                loose = np.array([m[0] for ms in cc.values() for m in ms], np.int64)
+                limits = limit_spots(app.tempo, self.base(), app.ppq, app.beats, ticks, heard, loose)
+            except MemoryError:
+                pass
+        self._limits = {k: sorted(set(v)) for k, v in limits.items()}
+        self._dense = (key, self._limits["dense"])
         self.request_redraw()
 
     def read_anchors(self, lm):
@@ -2357,6 +2364,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "sb_h_double_arrow", "on_" + self.edge_at(e.x)[0]
         elif any(a <= roll.x2t(e.x) < b for a, b in self.keep_offs()):  # (why the part's Keep timing is off)
             want, hint = PENCIL_CURSOR if self.box.tool.get() != "select" else SELECT_CURSOR, "on_keep_off"
+        elif self.limit_at(e.x, e.y) is not None:  # (a limit text / mark: what it means)
+            want, hint = PENCIL_CURSOR if self.box.tool.get() != "select" else SELECT_CURSOR, \
+                "on_limit_" + self.limit_at(e.x, e.y)
         elif self.dense_at(e.x):  # (an orange line: what it means)
             want, hint = PENCIL_CURSOR if self.box.tool.get() != "select" else SELECT_CURSOR, "on_dense"
         elif self.box.tool.get() != "select":
@@ -2805,6 +2815,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             x, y, r = roll.t2x(b), float(self.b2y(v)), 5 * self.scale
             self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.TEMPO_PICKED,
                                   width=lw + 1)
+        lines = [(xs, ys)] + [(hx, hy) for hx, _, hy, _ in heard]
+        self.draw_limits(lines, kb, w, h, lw)
         # the numbers on the left
         self.create_rectangle(0, 0, kb, h, fill=look.RULER_BG, outline="")
         self.create_line(kb - 1, 0, kb - 1, h, fill=look.ROLL_EDGE)
@@ -2816,6 +2828,61 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.draw_playhead()
         for bar in self.bars:
             bar.refresh()
+
+    def draw_limits(self, lines, kb, w, h, lw):
+        """Short texts naming what the file can't do where Keep timing asks for it (user 2026-10-24): notes under a
+        tick apart / a bar no time signature fits (red), CC messages moved a tick (orange). One text where a stretch
+        of such spots starts in view (the next one once past its end), a short mark on every spot; at the bottom,
+        at the top when a line runs through that place (below the signature marks when one is there)."""
+        roll, s = self.app.roll, self.scale
+        font = look.font(8, "bold")
+        th = 13 * s  # (a text's height)
+        sig_x = [roll.t2x(b) for b, _, _, _ in self.sig_marks()]
+        taken = []  # (x0, x1, y0, y1) of the texts put
+        for kind, colour in (("dense", look.ERROR), ("unfit", look.ERROR), ("gave", look.WARN)):
+            spots = self._limits.get(kind) or []
+            lo = bisect.bisect_left(spots, roll.x2t(kb))
+            hi = bisect.bisect_right(spots, roll.x2t(w))
+            free_from = -math.inf
+            text = tr("tempo.limit_" + kind)
+            tw = tkfont.Font(font=font).measure(text)
+            for b in spots[lo:hi]:
+                x = roll.t2x(b)
+                if kind != "dense":  # (dense spots have their orange dashed lines already)
+                    self.create_line(x, h - 8 * s, x, h, fill=colour, width=lw * 2, tags=("limit", "limit_" + kind))
+                if x < free_from:
+                    continue
+                x0, x1 = x + 3 * s, x + 3 * s + tw
+                free_from = x1 + 20 * s
+                low = any(self.crosses(lx, ly, x0, x1, h - th - 4 * s, h) for lx, ly in lines)
+                # (at the top: under the "Keep timing" words, lower still under a signature mark)
+                y = (2 * ROW * s + 12 * s if any(x0 - 4 * s <= sx <= x1 for sx in sig_x) else 24 * s) if low \
+                    else h - th - 2 * s
+                while any(a < x1 and x0 < b2 and abs(y - y0) < th for a, b2, y0, _ in taken):  # (texts don't overlap)
+                    y = y + th if low else y - th
+                taken.append((x0, x1, y, y + th))
+                self.create_rectangle(x0 - 2 * s, y, x1 + 2 * s, y + th, fill=look.ROLL_BG, outline="",
+                                      tags=("limit", "limit_" + kind))
+                self.create_text(x0, y + th / 2, text=text, anchor="w", fill=colour, font=font,
+                                 tags=("limit", "limit_" + kind))
+
+    @staticmethod
+    def crosses(lx, ly, x0, x1, y0, y1):
+        """True when the line through points (lx, ly) passes through the box x0..x1, y0..y1 (each piece's ends'
+        box: a steep piece crossing it counts too)."""
+        if len(lx) < 2:
+            return False
+        ax, bx, ay, by = lx[:-1], lx[1:], ly[:-1], ly[1:]
+        on = (np.maximum(ax, bx) >= x0) & (np.minimum(ax, bx) <= x1)
+        return bool(np.any(on & (np.maximum(ay, by) >= y0) & (np.minimum(ay, by) <= y1)))
+
+    def limit_at(self, x, y):
+        """The limit text kind ("dense" / "unfit" / "gave") under the mouse, or None."""
+        for item in self.find_overlapping(x - 1, y - 1, x + 1, y + 1)[::-1]:
+            for tag in self.gettags(item):
+                if tag.startswith("limit_"):
+                    return tag[6:]
+        return None
 
     def draw_drag(self, lw):
         """A select box being dragged, or the part the Linear / Curve / Formula pencil is drawing."""

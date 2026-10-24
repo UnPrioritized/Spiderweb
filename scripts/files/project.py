@@ -1196,6 +1196,8 @@ class ProjectFiles:
             note += tr("project.tempo_hz", where=self.bar_text(plan["hz"][0]))
         if plan["dense"]:
             note += tr("project.tempo_dense", where=self.bar_text(plan["dense"][0]))
+        if plan.get("unfit"):
+            note += tr("project.tempo_unfit", where=self.bar_text(plan["unfit"][0]))
         if plan.get("gave"):  # (a heads-up only, user 2026-10-23)
             n = len(plan["gave"])
             note += trn("project.tempo_cc_gave", n, n=n, where=self.bar_text(plan["gave"][0]))

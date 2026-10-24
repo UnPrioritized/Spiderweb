@@ -243,6 +243,46 @@ def dense_spots(tempo, base, ppq, beats, ticks, heard=None):
     return keep_gaps(tempo, base, ppq, beats, np.asarray(ticks, np.int64).ravel(), heard=heard)[5]
 
 
+def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
+    """What the Conductor pane's limit texts show (user 2026-10-24), quicker than file_plan (no tempo values):
+    {"dense": beats where notes in a Keep timing part are under a tick apart, "gave": CC messages (loose) moved by
+    a tick or less, "unfit": bars no time signature fits (file_plan's "unfit")}. The same as the export's, but
+    for the rare gap whose tempo pair needs a tick more or less."""
+    out = {"dense": [], "gave": [], "unfit": []}
+    if not has_tempo(tempo) or not any(len(p) > 5 and p[5] is True for p in tempo.get("points", ())):
+        return out
+    ticks = np.asarray(ticks, np.int64).ravel()
+    loose = np.zeros(0, np.int64) if loose is None else np.asarray(loose, np.int64).ravel()
+    upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
+    bars = bar_ticks(tempo, ppq, upto)
+    _, _, _, keeps, gaps, out["dense"], out["gave"] = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose, heard)
+    if not tempo.get("bars", True) or not gaps:
+        return out
+    bars = bar_ticks(tempo, ppq, max(upto, max(e for _, e, _ in keeps)))
+    _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
+    bp_n, bp_f, offset = [0], [0], 0  # (the file's ticks at the anchors, as file_plan's map)
+    for (a, e, _), (n, _, k, _) in zip(keeps, gaps):
+        f = a + offset + np.concatenate([[0], np.cumsum(k)])
+        bp_n += n.tolist()
+        bp_f += f.tolist()
+        offset = int(f[-1]) - e
+    bp_n, bp_f = np.array(bp_n, np.int64), np.array(bp_f, np.int64)
+    stop = min(len(bars) - 2, int(np.searchsorted(bars, max(e for _, e, _ in keeps), "right")))
+    lines = bars[:stop + 2]
+    i = np.searchsorted(bp_n, lines, "right") - 1
+    fl = bp_f[i] + (lines - bp_n[i])  # (bar lines are anchors inside the parts: exact)
+    longest = int(max(bar_lengths(ppq)))
+    for m in range(stop + 1):
+        have, length = int(lines[m + 1] - lines[m]), int(fl[m + 1] - fl[m])
+        if length == have:
+            continue
+        while length > longest and signature(length, ppq) is None:
+            length -= longest
+        if signature(length, ppq) is None:
+            out["unfit"].append(int(lines[m]) / ppq)
+    return out
+
+
 FINE_MOST = 64  # a Hz bass's finer gates: made on at most this many times the project's ticks
 FINE_TICKS = 1 << 22  # ... and at most this many ticks a beat
 
@@ -282,7 +322,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     (keep_gaps)."""
     out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": file_sigs(tempo, ppq),
            "keys": file_keys(tempo, ppq),
-           "map": lambda t: np.asarray(t, np.int64), "bp": None, "jumps": [], "hz": [], "dense": [], "gave": []}
+           "map": lambda t: np.asarray(t, np.int64), "bp": None, "jumps": [], "hz": [], "dense": [], "gave": [],
+           "unfit": []}
     if not has_tempo(tempo):
         return out
     start_u = base_us(base)
@@ -368,7 +409,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         out["sigs"] = [(int(to_file(t)), top, p) for t, top, p in out["sigs"]]
         out["keys"] = [(int(to_file(t)), sf, mi) for t, sf, mi in out["keys"]]
     if fit_bars and keeps:
-        out["sigs"] = _signatures(keeps, tempo, bars, ppq, to_file)
+        out["sigs"], unfit = _signatures(keeps, tempo, bars, ppq, to_file)
+        out["unfit"] = [t / ppq for t in unfit]
     # warnings
     starts = np.asarray(starts, np.int64).ravel()
     for st, plan in lay["worked"]:  # (a note in a jump plays off time where the time so far isn't the heard time)
@@ -450,18 +492,24 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
     """Bar compensation: in each bar a Keep timing part changed, the longest gaps there get a tick more / fewer
     each so the bar's length fits a time signature (the gaps' time stays: only their tempo changes a hair). A bar
     that can't be fitted gently stays as it is (no spikes: user's "a hair")."""
-    owed = {}  # bar -> (ticks the bar has, [(part, gap)] in it)
-    for p, ((a, e, _), (n, total, k, _)) in enumerate(zip(keeps, gaps)):
-        ms = np.searchsorted(bars, n[:-1], "right") - 1  # (each gap's bar, by the time signatures)
-        for j in range(len(k)):
-            m = int(ms[j])
-            have, where = owed.get(m, (int(bars[m + 1] - bars[m]), []))
-            owed[m] = (have - int(n[j + 1] - n[j]) + int(k[j]), where + [(p, j)])
-    for m, (have, where) in owed.items():
-        if not len(where):
-            continue
-        ks = np.array([int(gaps[p][2][j]) for p, j in where], np.int64)
-        tots = np.array([int(gaps[p][1][j]) for p, j in where], np.int64)
+    if not gaps:
+        return
+    # each gap's bar (by the time signatures), then the bars' gaps together, in order (a million gaps one by one in
+    # Python took seconds)
+    ms = np.concatenate([np.searchsorted(bars, n[:-1], "right") - 1 for n, _, _, _ in gaps])
+    ps = np.concatenate([np.full(len(k), p, np.int64) for p, (_, _, k, _) in enumerate(gaps)])
+    js = np.concatenate([np.arange(len(k)) for _, _, k, _ in gaps])
+    kk = np.concatenate([k for _, _, k, _ in gaps]).astype(np.int64)
+    tt = np.concatenate([total for _, total, _, _ in gaps]).astype(np.int64)
+    dk = kk - np.concatenate([np.diff(n) for n, _, _, _ in gaps])
+    order_m = np.argsort(ms, kind="stable")
+    ms, ps, js, dk, kk, tt = (x[order_m] for x in (ms, ps, js, dk, kk, tt))
+    cut = np.flatnonzero(np.diff(ms)) + 1
+    for lo, hi in zip(np.concatenate([[0], cut]).tolist(), np.concatenate([cut, [len(ms)]]).tolist()):
+        m = int(ms[lo])
+        have = int(bars[m + 1] - bars[m]) + int(dk[lo:hi].sum())
+        where = list(zip(ps[lo:hi].tolist(), js[lo:hi].tolist()))
+        ks, tots = kk[lo:hi], tt[lo:hi]
         room = np.maximum(1, (ks * NUDGE).astype(np.int64))  # (ticks each gap may give / take)
         up, down = np.minimum(room, tots - ks), np.minimum(room, ks - _least(tots))
         order = np.argsort(-ks, kind="stable")  # (longest gaps first)
@@ -478,18 +526,23 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
             left = abs(delta)
             while left:  # (one tick at a time round the longest gaps, up to each one's room)
                 for o, c in zip(order.tolist(), cap.tolist()):
-                    if left and abs(share[o]) < c:
+                    if not left:
+                        break
+                    if abs(share[o]) < c:
                         share[o] += 1 if delta > 0 else -1
                         left -= 1
-            for (p, j), s in zip(where, share.tolist()):
-                gaps[p][2][j] += s
+            for o in np.flatnonzero(share).tolist():
+                p, j = where[o]
+                gaps[p][2][j] += share[o]
             break
 
 
 def _signatures(keeps, tempo, bars, ppq, to_file):
-    """[(file tick, top, bottom power)]: a time signature wherever the bar length changes, up to the bar after the
-    last Keep timing part (then the project's own). A bar that kept its length keeps its own signature (6/8 stays
-    6/8, not 3/4); one fitted gets the nearest with its own note value first."""
+    """([(file tick, top, bottom power)], [Spiderweb ticks of the bars no time signature fits]): a time signature
+    wherever the bar length changes, up to the bar after the last Keep timing part (then the project's own). A bar
+    that kept its length keeps its own signature (6/8 stays 6/8, not 3/4); one fitted gets the nearest with its own
+    note value first. A bar squeezed shorter than any signature (or an odd length the nudge can't fix) has none:
+    the bar lines after it are off in other programs (the sound is right)."""
     last = max(e for _, e, _ in keeps)
     longest = int(max(bar_lengths(ppq)))
     own = file_sigs(tempo, ppq)
@@ -498,7 +551,7 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
     def own_at(tick):
         return own[max(0, bisect.bisect_right(starts, tick) - 1)][1:]
 
-    out, prev = [], None
+    out, prev, unfit = [], None, []
     stop = min(len(bars) - 2, int(np.searchsorted(bars, last, "right")))
     for m in range(0, stop + 1):
         f0, f1 = (int(x) for x in to_file(bars[m:m + 2]))
@@ -515,6 +568,7 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
             sig = signature(rest, ppq)
             if sig is None:  # (the rest fits none: the next bar writes its own again, so its line is right)
                 prev = None
+                unfit.append(int(bars[m]))
                 continue
             f0 = at
         if sig != prev:
@@ -527,4 +581,4 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
             if (top, power) != prev:
                 out.append((int(to_file(np.array([at]))[0]), top, power))
                 prev = (top, power)
-    return out
+    return out, unfit
