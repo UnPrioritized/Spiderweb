@@ -34,10 +34,12 @@ values lost 1 us each save)."""
 
 import bisect
 import copy
+import functools
 import json
 import math
 import os
 import re
+import struct
 
 import numpy as np
 
@@ -1125,10 +1127,18 @@ def _first_safe(cands):
     return int(cands[ok[0]]) if len(ok) else None
 
 
+@functools.lru_cache(maxsize=1 << 16)
 def _nearest1(x):
-    """nearest_safe of one value: k = 0, then the nearer side, then the other, k = 1, 2..."""
+    """nearest_safe of one value: k = 0, then the nearer side, then the other, k = 1, 2... (remembered)"""
     u = int(np.rint(x))
+    if _safe1(u):  # (k = 0: most often, no array needed)
+        return u
     s = 1 if x >= u else -1
+    for k in range(1, 33):  # (the next few in plain Python, the same order)
+        if _safe1(u + s * k):
+            return u + s * k
+        if _safe1(u - s * k):
+            return u - s * k
     for k0 in range(0, SAFE_REACH, _WINDOW):
         k = np.arange(max(k0, 1), min(k0 + _WINDOW, SAFE_REACH))
         cands = np.column_stack([u + s * k, u - s * k]).ravel()
@@ -1152,8 +1162,8 @@ def _next1(u, way):
 def nearest_safe(x):
     """The Domino-safe whole microseconds nearest x (array of floats), kept in 1..0xFFFFFF."""
     x = np.clip(np.asarray(x, float), 1, 0xFFFFFF)
-    if x.size == 1 and x.ndim == 1:  # (one at a time in _fit_blocks: thousands of blocks)
-        return np.array([_nearest1(float(x[0]))], np.int64)
+    if x.ndim == 1 and x.size <= 32:  # (one at a time in _fit_blocks, a short gap's few: thousands of calls)
+        return np.array([_nearest1(v) for v in x.tolist()], np.int64)
     u = np.rint(x).astype(np.int64)
     out = np.where(domino_safe(u), u, 0)
     left = out == 0
@@ -1177,6 +1187,8 @@ def next_safe(u, way):
     u = np.asarray(u, np.int64)
     if len(u) == 1:
         return np.array([_next1(int(u[0]), way)], np.int64)
+    if len(u) <= 32:  # (a short gap's few, thousands of calls: one by one in plain Python, the same first one)
+        return np.array([_next_small(v, way) for v in u.tolist()], np.int64)
     out = u.copy()
     # (only the ones still looking: one step at a time over the whole array took 15 s on a catch-up, hunt
     # 2026-10-24); most find one within a few steps
@@ -1191,6 +1203,19 @@ def next_safe(u, way):
     if len(idx):  # (slow tempos: safe values far apart; walked by the BPMs a file can store instead)
         out[idx] = _next_by_bpm(u[idx], way)
     return out
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _next_small(u, way):
+    """next_safe of one value in plain Python, _next_by_bpm's walk (remembered: one export asked the same value
+    thousands of times, 92 whole numbers from the next safe one)."""
+    c = u + way
+    while 1 <= c <= 0xFFFFFF and (c - u) * way < SAFE_REACH:
+        v = int(6e7 / struct.unpack("f", struct.pack("f", 6e7 / c))[0])
+        if v == c:
+            return c
+        c = v if (v - c) * way > 0 else c + way
+    return u
 
 
 def _next_by_bpm(u, way):
@@ -1252,7 +1277,7 @@ def _fit_exact(ideal, target):
     for k in range(SAFE_REACH):
         for a in (a0 - k, a0 + k):
             b = rest - a
-            if 1 <= a <= 0xFFFFFF and 1 <= b <= 0xFFFFFF and domino_safe([a, b]).all():
+            if _safe1(a) and _safe1(b):  # (plain Python: thousands of gaps, one try each step)
                 out[n - 2], out[n - 1] = a, b
                 return out
     return None
@@ -1330,9 +1355,84 @@ def _safe_side(start, way):
     return out
 
 
+def _safe1(u):
+    """domino_safe of one whole number, in plain Python (the same float32 rounding; thousands of calls a second)."""
+    if not 1 <= u <= 0xFFFFFF:
+        return False
+    bpm = struct.unpack("f", struct.pack("f", 6e7 / u))[0]
+    return int(6e7 / bpm) == u
+
+
+_FAR = object()  # (_near_pair: safe values too far apart here, the full search decides)
+
+
+def _near_pair(n, target):
+    """_flat_pair's answer found from the nearest safe values out (plain Python, a few each side: the full search
+    built PAIR_REACH each side and tried every pair, 62,000 times in one export), stopping once no pair further
+    out can be as near; the same pair (same nearness sums, same order on a tie). _FAR when the safe values are
+    far apart (the full search then)."""
+    q = target / n
+
+    def side(u, way):
+        while True:
+            for _ in range(64):
+                if _safe1(u):
+                    yield u
+                    break
+                u += way
+            else:
+                raise LookupError
+            u += way
+
+    try:
+        gd, gu = side(math.floor(q), -1), side(math.ceil(q), 1)
+        downs, ups = [next(gd)], [next(gu)]
+        best, done = None, set()
+        while True:
+            for ia, av in enumerate(downs):
+                for ib, bv in enumerate(ups):
+                    if (ia, ib) in done:
+                        continue
+                    done.add((ia, ib))
+                    if bv == av:
+                        continue
+                    gap = bv - av
+                    k, rest = divmod(n * bv - target, gap)
+                    if rest or not 0 <= k <= n:
+                        continue
+                    far = (q - float(av)) + (float(bv) - q)
+                    if best is None or (far, ia, ib) < best[:3]:
+                        best = (far, ia, ib, av, bv, k)
+            # (a pair with a further value: at least this far; strictly further = can't win, ties included)
+            limit = math.inf if best is None else best[0] + 1e-6
+            grow_d = len(downs) < PAIR_REACH and ups[0] - (downs[-1] - 1) <= limit
+            grow_u = len(ups) < PAIR_REACH and (ups[-1] + 1) - downs[0] <= limit
+            if not grow_d and not grow_u:
+                break
+            if grow_d:
+                downs.append(next(gd))
+            if grow_u:
+                ups.append(next(gu))
+    except (LookupError, StopIteration):
+        return _FAR
+    if best is None:
+        return None if len(downs) >= PAIR_REACH and len(ups) >= PAIR_REACH else _FAR
+    _, ia, ib, av, bv, k = best  # (a tie: the full search's order = by the down value's place, then the up's)
+    return np.concatenate([np.full(k, av, np.int64), np.full(n - k, bv, np.int64)])
+
+
 def _flat_pair(n, target):
     """n Domino-safe values adding up to exactly target, all one value or a run of A then a run of B (one or two
     tempo changes); the pair nearest the average first. None if no such pair is near."""
+    a, r = divmod(int(target), int(n))  # (most often: the two whole numbers round the average, both safe; that's
+    if r == 0 and _safe1(a):  # the nearest pair, as the search below finds; hunt 2026-10-24: export speed)
+        return np.full(n, a, np.int64)
+    if r and _safe1(a) and _safe1(a + 1):
+        k = n * (a + 1) - target
+        return np.concatenate([np.full(k, a, np.int64), np.full(n - k, a + 1, np.int64)])
+    got = _near_pair(n, target)
+    if got is not _FAR:
+        return got
     q = target / n
     downs, ups = _safe_side(math.floor(q), -1), _safe_side(math.ceil(q), 1)
     if not downs or not ups:

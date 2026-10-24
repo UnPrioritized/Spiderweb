@@ -423,6 +423,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         curved = (k > every) & (np.searchsorted(changes, n[:-1], "right") < np.searchsorted(changes, n[1:], "left"))
         quick, qa, qb, qka = _quick_pairs(k, total)
         quick &= ~curved
+        fewest = _least(total)
         buf = _RunBuf(2 * len(k))
         for j, (fast, kj, tj, aj, bj, kaj) in enumerate(zip(quick.tolist(), k.tolist(), total.tolist(),
                                                               qa.tolist(), qb.tolist(), qka.tolist())):
@@ -442,8 +443,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
                 ideal = drawn[n0 - a + (np.arange(kj) * (n1 - n0)) // kj].astype(np.float64)
                 got = _fit_blocks(ideal, tj, every)
             if got is None:  # (no Domino-safe values for that many ticks: a tick more or less, rare)
+                least = int(fewest[j])
                 for kk in [kj] + [kj + s * w for s in range(1, 9) for w in (1, -1)]:
-                    if int(_least(np.array([tj]))[0]) <= kk <= tj:
+                    if least <= kk <= tj:
                         got = pairs.get(kk, tj)
                         if got is not None:
                             kj = k[j] = kk
