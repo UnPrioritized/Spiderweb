@@ -26,7 +26,7 @@ from collections import deque
 import numpy as np
 
 from files import midi_play, speed
-from files.synth import GROUP_BUFFER, RATE
+from files.synth import GROUP_BUFFER
 from files.midi_scan import C_BEND, C_CC, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS
 
 STEP_S = 0.003  # the feeder's beat
@@ -42,20 +42,10 @@ BACKLOG = 1 << 20  # bytes waiting in a synth past which it gets no new notes (i
 WANT = 4_000_000  # events a reading window aims at (its length in ticks follows)
 WINDOW_S = 0.25  # a reading window is this much of the song at most
 SPAN_MOST = 1 << 22  # a window's ticks at most (the counting sort's table)
-BUDGET_SYNTH = 200_000  # note-ons a second to start from on each of Built-in BASSMIDI's synths (then by its load)
+BUDGET_SYNTH = 600_000  # note-ons a second to start from on each of Built-in BASSMIDI's synths (then by its load)
 BUDGET_KDMAPI = 200_000  # ... OmniMIDI (KDMAPI): one message per call from Python
 BUDGET_DEVICE = 30_000  # ... a Windows MIDI device
 BUDGET_LEAST, BUDGET_MOST = 20_000, 1_500_000  # (a synth: one makes ~1 M notes a second at 1,000 voices, measured)
-# A synth's load reading LAGS (measured 2026-10-24, Shinki beats 1100-1125, 8 synths x 500 voices: budgets grew to 1.5 M
-# each, the synths jammed up to 440 % and lost ~4.5 s of sound in 25 s). So each synth's CEILING is learned from the
-# sound it really loses (any PC: user asked; position vs the clock): sound lost = budget halved, ceiling = LOST_CAP of
-# what it was; no loss for a while = the ceiling creeps up (CAP_RISE each check). Kept for the next play (_caps).
-LOST_S = 0.005  # sound missing in one check (~0.1 s) that counts as lost
-LOST_CAP = 0.7
-CAP_RISE = 1.01  # (~10 % a second)
-GROW = 1.08  # a budget growing: this much each check
-WARM_S = 2.0  # sound lost this soon after the line starts never lowers a ceiling (start-up loses some at any load)
-_caps = {}  # (synths, voices each) -> each synth's learned ceiling, for the next play
 SKIP = 64 * 16 * 128  # (port x channel x key: note-offs still to leave out)
 POOL = 12  # windows' arrays kept for use again at most
 
@@ -387,20 +377,12 @@ class LoadedPlayer:
         checked = 0.0  # (mutes read at once)
         hit = np.zeros(K, bool)  # (more notes than its budget lately: may get a bigger one)
         behind = np.zeros(K, bool)  # (backed up lately: never a bigger one then)
-        if self.sinks:  # each synth's ceiling (learned last play), its place in its sound, checks without loss
-            got = _caps.get(K)
-            cap = np.array(got if got is not None else [BUDGET_MOST] * K, np.float64)
-            pos = [(time.perf_counter(), live.position()) for live in self.sinks]
-            calm = np.zeros(K, np.int64)
-        warm = None  # (when the line started: the synths' first moments lose a little sound, never counted)
         while not self._stop.is_set():
             time.sleep(STEP_S)
             clock = self.player._clock
             if clock is None:
                 continue
             now = time.perf_counter()
-            if warm is None:
-                warm = now
             dt, last = min(now - last, 0.05), now
             if now - checked > 0.1:  # (mutes; the synths' load sets the budget)
                 checked = now
@@ -412,19 +394,8 @@ class LoadedPlayer:
                     self.muted = m
                 except Exception:  # (the list changing meanwhile: next time)
                     pass
-                if self.sinks:  # (each synth's own budget by the sound it lost and its load)
+                if self.sinks:  # (each synth's own budget by its own load)
                     for r, live in enumerate(self.sinks):
-                        t_at, p = time.perf_counter(), live.position()
-                        lost = (t_at - pos[r][0]) - (p - pos[r][1]) / 8 / RATE  # (seconds it couldn't make)
-                        pos[r] = (t_at, p)
-                        if lost > LOST_S and now - warm > WARM_S:
-                            cap[r] = max(BUDGET_LEAST, min(cap[r], self.budgets[r]) * LOST_CAP)
-                            self.budgets[r] = max(BUDGET_LEAST, int(self.budgets[r] * 0.5))
-                            calm[r] = 0
-                        else:
-                            calm[r] += 1
-                            if calm[r] > 10:
-                                cap[r] = min(BUDGET_MOST, cap[r] * CAP_RISE)
                         cpu = live.cpu()
                         if cpu > 150 or live.queued() > 2 * BACKLOG:  # (jammed: what waits is too late anyway)
                             live.drop_waiting()
@@ -434,10 +405,8 @@ class LoadedPlayer:
                             self.budgets[r] = max(BUDGET_LEAST, int(self.budgets[r] * 0.5))
                         elif cpu > 75:
                             self.budgets[r] = max(BUDGET_LEAST, int(self.budgets[r] * 0.75))
-                        elif cpu < 40 and hit[r] and not behind[r] and calm[r] > 3:
-                            self.budgets[r] = int(self.budgets[r] * GROW)
-                        self.budgets[r] = max(BUDGET_LEAST, min(self.budgets[r], int(cap[r])))
-                    _caps[K] = cap.tolist()
+                        elif cpu < 40 and hit[r] and not behind[r]:
+                            self.budgets[r] = min(BUDGET_MOST, int(self.budgets[r] * 1.15))
                     hit[:] = False
                     behind[:] = False
             t_c, sec, tmap = clock
