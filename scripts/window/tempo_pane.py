@@ -1710,10 +1710,12 @@ class TempoPane(ConductorMarks, tk.Canvas):
         return q if p[2] != "hold" and p[1] != q[1] else None
 
     def add_point(self, b, v):
-        """A new point (picked): a HELD step from there on, like Domino (user 2026-10-24: clicks inside / after a
-        ramp made ramps); the part it was put in keeps its curve up to it, its Keep timing / heard line go along.
-        On the beat of a point where a curve arrives: a second point there, the tempo from there on (user
-        2026-10-22: a jump right where a glide ends). None when one is there."""
+        """A new point (picked), like a Domino click (user 2026-10-24, its pictures): a HELD step that changes only
+        its own bit. Inside a ramp / curve: the part stays exactly as it was around it, the click lasts up to the
+        part's next Interval step (one held value, as Domino's one event among a ramp's many), then the part goes
+        on as before; over a held tempo (or past the last point): it holds up to the next point. Its Keep timing /
+        heard line go along. On the beat of a point where a curve arrives: a second point there, the tempo from
+        there on (user 2026-10-22: a jump right where a glide ends). None when one is there."""
         pts = self.ed()["points"]
         end = self.glide_end(b)
         if end is not None and abs(end[1] - clamp_bpm(v)) < 1e-9:
@@ -1721,8 +1723,17 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if end is None and any(abs(p[0] - b) < 1e-9 for p in pts):
             return None
         self.app.push_undo(name=tr("tempo.step_add"))
-        if end is None and any(p[0] < b for p in pts) and any(p[0] > b for p in pts):  # (inside a ramp: it stays
-            split_at(pts, b, self.ed_base())  # exactly as it was up to the click, a jump there; user 2026-10-24)
+        before = [p for p in pts if p[0] < b]
+        after = [p for p in pts if p[0] > b]
+        if end is None and before and after:  # (inside a part: it stays exactly as it was around the click)
+            owner, nxt = before[-1], after[0]
+            if owner[2] != "hold" and owner[1] != nxt[1]:  # (a ramp: the click lasts up to its next step only)
+                ppq, every = max(1, self.app.ppq), max(1, int(self.ed().get("every", EVERY)))
+                a, t = math.ceil(owner[0] * ppq - 1e-9), round(b * ppq)
+                back = (a + ((t - a) // every + 1) * every) / ppq
+                if back < nxt[0] - 1e-9:
+                    split_at(pts, back, self.ed_base())
+            split_at(pts, b, self.ed_base())
         at = sum(1 for p in pts if p[0] < b + 1e-9)
         kind = part_kind(pts[at - 1] if at > 0 else None, self.box.draw_scale)
         kind[0], kind[1], kind[4] = "hold", "", list(BEND)
