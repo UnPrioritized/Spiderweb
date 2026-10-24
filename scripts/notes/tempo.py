@@ -16,8 +16,13 @@ formula; the two eases bend by a handle (catch[5]). A catch-up never moves notes
 
 Keep timing (a tick per part, point[5]): the part's notes keep the time they have at the tempo heard before it;
 the export moves them in ticks (notes/tempo_file.py). The part after the last point goes on to the song's end.
+HEARD TEMPO LINE (user 2026-10-24; point[7], missing = none): {"line": points like the tempo line's (no Keep
+timing, no line of their own), "visual": True = "Keep the visual" picked}. Inside the part the sound follows that
+line (beats are the song's, so a part cut in two keeps reading the same line); before its first point the tempo
+heard just before the part, as without one.
 
-Saved in the project as "tempo": {"points": [[beat, bpm, curve, formula, "lin" / "exp", keep timing], ...],
+Saved in the project as "tempo": {"points": [[beat, bpm, curve, formula, "lin" / "exp", keep timing, bend, heard
+line?], ...],
 "catch": [[beat, shape, formula, start, end, bend], ...], "every": ticks, "bars": Fit bar lines}, beats like the shapes (a PPQ change
 moves nothing).
 
@@ -108,39 +113,7 @@ def clean_tempo(data):
     out = empty()
     if not isinstance(data, dict):
         return out
-    seen = {}
-    for p in data.get("points", []) if isinstance(data.get("points"), list) else []:
-        if not isinstance(p, list):  # (broken by hand: that point left out, the rest kept)
-            continue
-        try:
-            b, v = float(p[0]), float(p[1])
-            kind = p[2] if len(p) > 2 and isinstance(p[2], str) else "hold"
-            bend = list(BEND) if kind != "s" else [0.5, 0.0]  # (an S-curve from before: much like it was)
-            kind, bend = OLD_CURVES.get(kind, (kind, bend))
-            kind = kind if kind in CURVES else "hold"
-            text = p[3] if len(p) > 3 and isinstance(p[3], str) else ""
-            scale = p[4] if len(p) > 4 and isinstance(p[4], str) and p[4] in SCALES else "lin"
-            keep = len(p) > 5 and p[5] is True
-            got = p[6] if len(p) > 6 and isinstance(p[6], list) and len(p[6]) == 2 else None
-            if got and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
-                           for x in got):
-                bend = [min(1.0, max(0.0, float(x))) for x in got]
-        except (TypeError, ValueError, IndexError, OverflowError):
-            continue
-        if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
-            continue
-        key = round(b, 9)
-        if seen.get(key, 0) >= 2:
-            continue
-        seen[key] = seen.get(key, 0) + 1
-        # (formulas up to 4000 letters: a part cut by a paste writes its formula again, longer each time)
-        out["points"].append([b, clamp_bpm(v), kind, text[:4000], scale, keep, bend])
-    out["points"].sort(key=lambda p: p[0])  # (stable: a pair keeps its order)
-    for i in range(len(out["points"]) - 1):  # (a pair on exactly one beat, not a hair apart)
-        p, q = out["points"][i:i + 2]
-        if round(p[0], 9) == round(q[0], 9):
-            q[0] = p[0]
-    drop_loose(out["points"])
+    out["points"] = _clean_points(data.get("points"))
     every = data.get("every", EVERY)
     out["every"] = every if isinstance(every, int) and not isinstance(every, bool) and 1 <= every <= 65535 else EVERY
     out["bars"] = data.get("bars", True) is not False
@@ -178,6 +151,71 @@ def clean_tempo(data):
     out["sigs"] = clean_sigs(data.get("sigs"))
     out["keysigs"] = clean_keysigs(data.get("keysigs"))
     return out
+
+
+def _clean_points(raw, inner=False):
+    """A tempo line's points cleaned (clean_tempo); inner = a heard tempo line's (no Keep timing, no line of
+    their own)."""
+    pts = []
+    seen = {}
+    for p in raw if isinstance(raw, list) else []:
+        if not isinstance(p, list):  # (broken by hand: that point left out, the rest kept)
+            continue
+        try:
+            b, v = float(p[0]), float(p[1])
+            kind = p[2] if len(p) > 2 and isinstance(p[2], str) else "hold"
+            bend = list(BEND) if kind != "s" else [0.5, 0.0]  # (an S-curve from before: much like it was)
+            kind, bend = OLD_CURVES.get(kind, (kind, bend))
+            kind = kind if kind in CURVES else "hold"
+            text = p[3] if len(p) > 3 and isinstance(p[3], str) else ""
+            scale = p[4] if len(p) > 4 and isinstance(p[4], str) and p[4] in SCALES else "lin"
+            keep = len(p) > 5 and p[5] is True
+            got = p[6] if len(p) > 6 and isinstance(p[6], list) and len(p[6]) == 2 else None
+            if got and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+                           for x in got):
+                bend = [min(1.0, max(0.0, float(x))) for x in got]
+        except (TypeError, ValueError, IndexError, OverflowError):
+            continue
+        if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
+            continue
+        key = round(b, 9)
+        if seen.get(key, 0) >= 2:
+            continue
+        seen[key] = seen.get(key, 0) + 1
+        # (formulas up to 4000 letters: a part cut by a paste writes its formula again, longer each time)
+        pt = [b, clamp_bpm(v), kind, text[:4000], scale, keep and not inner, bend]
+        heard = None if inner or len(p) < 8 else clean_heard(p[7])
+        if heard:
+            pt.append(heard)
+        pts.append(pt)
+    pts.sort(key=lambda p: p[0])  # (stable: a pair keeps its order)
+    for i in range(len(pts) - 1):  # (a pair on exactly one beat, not a hair apart)
+        p, q = pts[i:i + 2]
+        if round(p[0], 9) == round(q[0], 9):
+            q[0] = p[0]
+    drop_loose(pts)
+    return pts
+
+
+def clean_heard(h):
+    """A part's heard tempo line (point[7]) from a file / undo step -> a safe one, None when it has nothing."""
+    if not isinstance(h, dict):
+        return None
+    out = {"line": _clean_points(h.get("line"), inner=True)}
+    if h.get("visual") is True:
+        out["visual"] = True
+    return out if out["line"] or "visual" in out else None
+
+
+def heard_of(p):
+    """A point's heard tempo line (point[7]: {"line", "visual"?}), None without one."""
+    return p[7] if len(p) > 7 and p[7] else None
+
+
+def heard_line(p):
+    """A Keep timing part's own heard tempo points ([] = it plays the tempo heard just before it all along)."""
+    h = heard_of(p)
+    return h["line"] if h else []
 
 
 def drop_loose(pts):
@@ -543,6 +581,16 @@ def _put(segs, ra, rb, ru):
     return sorted(out, key=lambda s: s[0])
 
 
+def _put_all(segs, ra, rb, news):
+    """segs with ticks ra..rb replaced by news ([(a, b, us)] covering ra..rb, e.g. a heard tempo line's)."""
+    out = []
+    for a, b, u in segs:
+        for lo, hi in ((a, min(b, ra)), (max(a, rb), b)):
+            if hi > lo:
+                out.append((lo, hi, u if isinstance(u, int) else u[lo - a:hi - a]))
+    return sorted(out + [s for s in news if s[1] > s[0]], key=lambda s: s[0])
+
+
 def catch_plan(tempo, base, st, ppq, real=None):
     """A stretch's catch-up worked out in the file's own whole numbers (ticks x microseconds), so the pane and the
     export always agree: {"ok", "push", "bpm" (flat: its BPM; else its fastest / slowest), "target" (the catch-up's
@@ -670,11 +718,24 @@ def layout(tempo, base, ppq):
     todo = sorted([(beat_tick(st["line"] if n in inner else st["from"], ppq), 0, n) for n, st in enumerate(sts)]
                   + [(a, 1, n) for n, (_, a, _) in enumerate(keeps_at)])
 
+    lines = [{"points": heard_line(tempo["points"][i]), "every": tempo.get("every", EVERY)} for i, _, _ in keeps_at]
+
+    def keep_segs(n, lo, hi):
+        """Keep timing piece n's heard tempo over ticks lo..hi: its heard line, before that line's first point
+        (or without one) the tempo heard just before the piece."""
+        u = keep_u[n]
+        if not lines[n]["points"]:
+            return [(lo, hi, u)] if hi > lo else []
+        return _segments(lines[n], 60_000_000 / u, u, ppq, lo, hi)
+
     def heard(t):
         if t < 0:
             return start_u
-        for a, b, u in reversed(spans):
+        for a, b, u, n in reversed(spans):
             if a <= t and (b is None or t < b):
+                if n is not None and lines[n]["points"]:
+                    u = keep_segs(n, t, t + 1)[0][2]
+                    return u if isinstance(u, int) else int(u[0])
                 return u
         u = _segments(tempo, base, start_u, ppq, t, t + 1)[0][2]
         return u if isinstance(u, int) else int(u[0])
@@ -687,18 +748,18 @@ def layout(tempo, base, ppq):
         if kind == 0:
             bases[n] = u
             if sts[n]["end"] is not None:
-                spans.append((beat_tick(sts[n]["from"], ppq), beat_tick(sts[n]["end"], ppq), u))
+                spans.append((beat_tick(sts[n]["from"], ppq), beat_tick(sts[n]["end"], ppq), u, None))
         else:
             keep_u[n] = u
-            spans.append((t0, keeps_at[n][2], u))
+            spans.append((t0, keeps_at[n][2], u, n))
     keeps_out = [(i, a, e, keep_u[n]) for n, (i, a, e) in enumerate(keeps_at)]
 
     def real(a, b):
         segs = _segments(tempo, base, start_u, ppq, a, b)
-        for _, ka, ke, u in keeps_out:
+        for n, (_, ka, ke, u) in enumerate(keeps_out):
             lo, hi = max(a, ka), min(b, b if ke is None else ke)
             if hi > lo:
-                segs = _put(segs, lo, hi, u)
+                segs = _put_all(segs, lo, hi, keep_segs(n, lo, hi))
         return segs
 
     worked = []
@@ -707,7 +768,20 @@ def layout(tempo, base, ppq):
         worked.append((st, catch_plan(tempo, base, st, ppq, real)))
     if len(_layouts) > 8:
         _layouts.clear()
-    _layouts[key] = out = {"start_u": start_u, "keeps": keeps_out, "worked": worked, "real": real}
+    _layouts[key] = out = {"start_u": start_u, "keeps": keeps_out, "worked": worked, "real": real,
+                           "keep_segs": keep_segs}
+    return out
+
+
+def keep_heard(lay, n, lo, hi):
+    """layout()'s Keep timing piece n's heard tempo over ticks lo..hi: one whole number (no heard line, or it holds
+    there) or an int64 array, one per tick."""
+    segs = lay["keep_segs"](n, lo, hi)
+    if len(segs) == 1 and isinstance(segs[0][2], int):
+        return segs[0][2]
+    out = np.empty(hi - lo, np.int64)
+    for a, b, u in segs:
+        out[a - lo:b - lo] = u
     return out
 
 

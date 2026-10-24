@@ -29,7 +29,7 @@ from files.mathexpr import calc, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
                          bpm_text, clamp_bpm, curve, drop_loose, formula_fn,
-                         catch_get, catch_set, keeps, layout,
+                         catch_get, catch_set, heard_of, keeps, layout,
                          plans, shown_bpm, split_at, step_edges, tempo_text)
 from notes.tempo import changed as tempo_edited
 from notes.loaded import file_tempos
@@ -1871,7 +1871,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 continue
             prev = pts[i - 1] if i > 0 else None
             if (prev is None and p[1] == clamp_bpm(base) and not keeps(p) and not (stay and p is new[0])) or \
-                    (prev is not None and prev[2] == "hold" and prev[1] == p[1] and keeps(prev) == keeps(p)):
+                    (prev is not None and prev[2] == "hold" and prev[1] == p[1] and keeps(prev) == keeps(p)
+                     and heard_of(prev) == heard_of(p)):
                 del pts[i]
         alive = ids(pts)
         return [p for p in new if id(p) in alive]

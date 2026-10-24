@@ -20,8 +20,8 @@ import bisect
 import numpy as np
 
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
-from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put, _runs, base_us, beat_tick, domino_safe,
-                         file_segments, has_tempo, layout, tempo_text)
+from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put_all, _runs, base_us, beat_tick, domino_safe,
+                         file_segments, has_tempo, keep_heard, layout, tempo_text)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
 PAIR_CACHE = 4096  # gaps up to this many ticks have their tempo pair remembered (black MIDI repeats the same gaps)
@@ -138,7 +138,8 @@ def _spans_off(segs, keeps, start_u):
     timing parts at their heard tempo."""
     lo, hi = [], []
     for a, b, u in segs:
-        inside = [(max(a, ka), min(b, ke), ku) for ka, ke, ku in keeps if min(b, ke) > max(a, ka)]
+        inside = [(max(a, ka), min(b, ke), ku if isinstance(ku, int) else ku[max(a, ka) - ka:min(b, ke) - ka])
+                  for ka, ke, ku in keeps if min(b, ke) > max(a, ka)]
         pieces, at = [], a
         for x, y, ku in inside:
             if x > at:
@@ -187,9 +188,10 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     every_tick = np.concatenate([ticks, loose])
     segs, bad = file_segments(tempo, base, ppq, int(every_tick.max()) + 1 if len(every_tick) else 0)
     last_tick = int(every_tick.max()) if len(every_tick) else 0
-    # a part on to the song's end stops at the last note (not a tick past it: no gap there to count)
-    keeps = [(a, last_tick if e is None else e, u) for _, a, e, u in lay["keeps"]]
-    keeps = [(a, e, u) for a, e, u in keeps if e > a]
+    # a part on to the song's end stops at the last note (not a tick past it: no gap there to count); its heard
+    # tempo: one whole number, or one per tick from its heard tempo line
+    keeps = [(n, a, last_tick if e is None else e) for n, (_, a, e, _) in enumerate(lay["keeps"])]
+    keeps = [(a, e, keep_heard(lay, n, a, e)) for n, a, e in keeps if e > a]
     fit_bars = tempo.get("bars", True)
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
@@ -203,6 +205,8 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         drawn = _per_tick(segs, a, e)
         sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
         was = None if heard is None else np.concatenate([[0], np.cumsum(_per_tick(heard_segs(heard, e), a, e))])
+        if not isinstance(u, int):  # (its own heard tempo line: that, also over a loaded MIDI's own tempo)
+            was = np.concatenate([[0], np.cumsum(u)])
         lo = loose[(loose > a) & (loose < e)]
         while True:
             n = np.unique(np.concatenate(marks + [lo]))
@@ -251,13 +255,15 @@ def finer_parts(tempo, base, ppq, last):
         return []
     segs, _ = file_segments(tempo, base, ppq, last + 1)
     out = []
-    for _, a, e, u in layout(tempo, base, ppq)["keeps"]:
+    lay = layout(tempo, base, ppq)
+    for n, (_, a, e, _) in enumerate(lay["keeps"]):
         e = last + 1 if e is None else e
         if e <= a:
             continue
         drawn = _per_tick(segs, a, min(e, segs[-1][1]))
-        if len(drawn) and drawn.max() <= u:
-            times = min(-(-u // int(drawn.min())), FINE_MOST, max(1, FINE_TICKS // ppq))
+        u = keep_heard(lay, n, a, a + len(drawn))  # (the heard tempo: one, or per tick from its heard line)
+        if len(drawn) and np.all(drawn <= u):
+            times = min(int(np.max(-(-np.asarray(u) // drawn))), FINE_MOST, max(1, FINE_TICKS // ppq))
             if times > 1:
                 out.append((a, e, int(times)))
     return out
@@ -376,7 +382,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         for a, ke, ku in keeps:
             lo, hi = max(a, s0), min(ke, e)
             if hi > lo:
-                real[lo - s0:hi - s0] = ku
+                real[lo - s0:hi - s0] = ku if isinstance(ku, int) else ku[lo - a:hi - a]
         so_far = np.concatenate([[0], np.cumsum(real)])
         off = on[so_far[on - s0] != (on - s0) * st["base_u"]]
         if len(off):
@@ -402,8 +408,10 @@ def heard_tempo(tempo, base, ppq, end=0):
     if key in _heard:  # (Play / each tempo edit while playing: remembered until the line changes)
         return _heard[key]
     segs, _ = file_segments(tempo, base, ppq, end)
-    for _, a, e, u in layout(tempo, base, ppq)["keeps"]:
-        segs = _put(segs, a, segs[-1][1] if e is None else e, u)
+    lay = layout(tempo, base, ppq)
+    for n, (_, a, e, _) in enumerate(lay["keeps"]):
+        e = segs[-1][1] if e is None else e
+        segs = _put_all(segs, a, e, lay["keep_segs"](n, a, e))  # (its heard tempo line, if any)
     if len(_heard) > 4:
         _heard.clear()
     _heard[key] = out = _runs(segs)
