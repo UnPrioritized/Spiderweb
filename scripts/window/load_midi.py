@@ -216,6 +216,9 @@ class LoadWindow(tk.Toplevel):
             row = ttk.Label(self.body, text="", width=60)
             row.pack(anchor="w", pady=(4 if key == "wait" else 1, 0))
             self.steps[key] = row
+            if key == "read":  # (its counts on a line of their own: Shinki's cut the step line off)
+                self.count = ttk.Label(self.body, text="", foreground=look.HINT)
+                self.count.pack(anchor="w", padx=(18, 0))
         self.bar = ttk.Progressbar(self.body, length=440, maximum=1000)
         self.bar.pack(anchor="w", pady=(10, 2))
         self.info = ttk.Label(self.body, text="", foreground=look.HINT)
@@ -242,8 +245,7 @@ class LoadWindow(tk.Toplevel):
         at = order.index(stage)
         took = time.perf_counter() - ld.started
         texts = {"wait": tr("load.step_wait"),
-                 "read": tr("load.step_read", done=f"{ld.tracks_done:,}", tracks=f"{len(self.mf.tracks):,}",
-                            notes=f"{ld.notes_found:,}"),
+                 "read": tr("load.step_read"),
                  "overview": tr("load.step_overview"), "done": tr("load.step_done" if self.link is None else "load.step_again")}
         for i, key in enumerate(order):
             if key == "wait" and at > 0 and took < 0.2:
@@ -251,6 +253,8 @@ class LoadWindow(tk.Toplevel):
                 continue
             mark = "✓ " if i < at else ("▶ " if i == at else "   ")
             self.steps[key].config(text=mark + texts[key], foreground=look.DARK_TEXT if i <= at else look.HINT)
+        self.count.config(text=tr("load.step_read_count", done=f"{ld.tracks_done:,}", tracks=f"{len(self.mf.tracks):,}",
+                                  notes=f"{ld.notes_found:,}") if at >= 1 else "")
         if stage == "read" and ld.total:
             share = ld.done / ld.total
             self.bar.config(value=int(1000 * share))

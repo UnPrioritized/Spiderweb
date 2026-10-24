@@ -10,6 +10,7 @@ ruler and play line are canvas items. Each track's notes fill its row from its o
 import json
 import math
 import threading
+from collections import OrderedDict, deque
 import time
 import tkinter as tk
 import tkinter.font as tkfont
@@ -43,6 +44,10 @@ TIP_SHAPES = 8  # shapes named in a row's tip at most
 FAINT = 25      # % the tracks shown behind the current one are drawn at, at first (0 = hidden)
 ROWS_INLINE_S = 0.12  # a loaded MIDI's rows read exactly in the redraw itself for this long at most (the picture is
 # made again only after zooming or scrolling far: a slower one then beats rows changing look)
+TILE = 512  # px: a loaded MIDI's rows are read in blocks this wide along the song, kept while the zoom stays, and
+# the next ones read ahead in the background (user 2026-10-24, Shinki: each new picture read every row again,
+# ~100 ms stops while scrolling)
+TILES_BYTES = 128 << 20  # blocks kept at most (the oldest used go first)
 
 
 def hex_rgb(colour):
@@ -83,7 +88,9 @@ class TrackList(tk.Canvas):
         self._ids = []  # id() of the shapes when the tracks were worked out (their notes' owner numbers)
         self._sheet = None  # paint's picture: {"key", "x", "y" (its first pixel), "w", "h", "photo"}
         self._tempo_sheet = None  # (key, photo) of the Conductor row's, as wide
-        self._row_place, self._row_masks, self._row_job = None, {}, None  # a loaded MIDI's exact rows (where, them)
+        # a loaded MIDI's exact rows: the zoom they're for, {(row, block): keys x TILE mask, False = unreadable}
+        # (oldest used first), their bytes, the background reading
+        self._row_place, self._tiles, self._tile_bytes, self._row_job = None, OrderedDict(), 0, None
         self._heard = None  # (key, heard()'s answer) for the tempo line it was worked out for
         self._tip_memo = (None, "")  # (row, notes, shape count) -> row_tip's text
         self._fonts = {}  # font -> (tk font, its measuring function: measurer)
@@ -812,9 +819,10 @@ class TrackList(tk.Canvas):
     def paint_loaded_rows(self, img, rows, cx, cy):
         """A loaded MIDI's tracks' rows, laid out like paint_notes' (the track's own lowest .. highest key over the
         row's height). EXACT (user 2026-10-24: the small pictures looked blocky): each row read from the file like
-        the piano roll's exact pictures (roll_loaded.exact_tab, this track alone), at once while that's quick
-        (ROWS_INLINE_S), the rest on a background thread (the sheet painted again when they come); meanwhile the
-        loading pass's small picture (keys x up to loaded.PIC_COLS columns)."""
+        the piano roll's exact pictures (roll_loaded.exact_tab, this track alone) in TILE-wide blocks along the song,
+        kept while the zoom stays: at once while that's quick (ROWS_INLINE_S), the rest on a background thread that
+        then reads the blocks around the picture ahead (the sheet painted again once the shown ones come); meanwhile
+        the loading pass's small picture (keys x up to loaded.PIC_COLS columns)."""
         lm = self.app.loaded
         if lm is None or not self.lead:
             return
@@ -822,16 +830,15 @@ class TrackList(tk.Canvas):
         first, last = max(0, cy // self.row_h), min(self.lead - 1, (cy + ah) // self.row_h)
         pad = round(PAD * self.scale)
         inner = max(1, self.row_h - 2 * pad - 1)
-        ax, bx = self.sx / lm.ppq, -float(cx)  # (pixel c of img = tick t * ax + bx)
-        place = (id(lm), self.sx, cx, aw)
+        ax = self.sx / lm.ppq  # (pixel c of the song = tick t * ax)
+        place = (id(lm), self.sx)
         if self._row_place != place:
-            self._row_place, self._row_masks = place, {}
-            if self._row_job is not None:
-                self._row_job.stop = True
-                self._row_job = None
-        near = range(max(0, 2 * first - last), last + (last - first) + 1)  # (rows kept: a sheet's height each way)
-        for r in [r for r in self._row_masks if r not in near]:
-            del self._row_masks[r]
+            self._row_place = place
+            self._tiles.clear()
+            self._tile_bytes = 0
+            self.stop_rows()
+        self.take_rows()
+        j0, j1 = cx // TILE, (cx + aw - 1) // TILE
         rate = RL.rate_of(lm)
         until = time.perf_counter() + (ROWS_INLINE_S if RL.speed.loops() else 0)
         waiting = []
@@ -839,15 +846,29 @@ class TrackList(tk.Canvas):
             t = lm.tracks[r]
             if not t.notes:
                 continue
-            got = self._row_masks.get(r)
-            if got is None and time.perf_counter() + RL.view_bytes(lm, (r,), ax, bx, aw) / rate <= until:
-                got = self._row_masks[r] = row_mask(lm, r, ax, bx, aw)
-            if got is None or got is False:  # (False: unreadable, the small picture stays)
+            parts = []
+            for j in range(j0, j1 + 1):
+                got = self._tiles.get((r, j))
                 if got is None:
-                    waiting.append(r)
+                    if time.perf_counter() + RL.view_bytes(lm, (r,), ax, -float(j * TILE), TILE) / rate <= until:
+                        got = self.keep_tile((r, j), row_mask(lm, r, ax, -float(j * TILE), TILE))
+                    else:
+                        waiting.append((r, j))
+                else:
+                    self._tiles.move_to_end((r, j))
+                parts.append(got)
+            if all(isinstance(p, np.ndarray) for p in parts):
+                got = np.concatenate(parts, axis=1)[:, cx - j0 * TILE:cx - j0 * TILE + aw]
+            else:  # (blocks not read yet / unreadable (False): the small picture there)
                 got = small_mask(lm, t, cx, aw, self.sx)
                 if got is None:
-                    continue
+                    if not any(isinstance(p, np.ndarray) for p in parts):
+                        continue
+                    got = np.zeros((t.khi - t.klo + 1, aw), bool)
+                for j, p in enumerate(parts, j0):
+                    if isinstance(p, np.ndarray):
+                        a, b = max(cx, j * TILE), min(cx + aw, (j + 1) * TILE)
+                        got[:, a - cx:b - cx] = p[:, a - j * TILE:b - j * TILE]
             span = t.khi - t.klo + 1
             thick = max(1, inner // span)
             used = min(inner, span * thick)
@@ -862,26 +883,62 @@ class TrackList(tk.Canvas):
             colour = hex_rgb(look.TRACK_MUTED if -1 - r in self.muted else self.colour_of(-1 - r))
             img[ys[0]:ys[-1] + 1][mask] = colour
         if RL.changed(self, lm):  # (the file changed / went: said once, the small pictures stay)
-            waiting = []
-        if waiting and (self._row_job is None or self._row_job.place != place):
-            if self._row_job is not None:
-                self._row_job.stop = True
-            job = self._row_job = RowJob(lm, place, waiting, ax, bx, aw)
+            return
+        # the background reading: the blocks shown blocky first, then the ones around the picture (half its width
+        # each way along the song, half its height up and down) so scrolling finds them read
+        half = (last - first) // 2
+        ahead = [(r, j) for r in range(first, last + 1) if lm.tracks[r].notes
+                 for j in range(max(0, (cx - aw // 2) // TILE), (cx + aw + aw // 2) // TILE + 1)]
+        ahead += [(r, j) for r in [*range(max(0, first - half), first), *range(last + 1, min(self.lead, last + half + 1))]
+                  if lm.tracks[r].notes for j in range(j0, j1 + 1)]
+        todo = list(dict.fromkeys(waiting + [k for k in ahead if k not in self._tiles]))
+        job = self._row_job
+        if todo and (job is None or waiting):  # (blocks shown blocky: read those first, now)
+            self.stop_rows()
+            job = self._row_job = RowJob(lm, place, todo, ax, set(waiting))
             threading.Thread(target=job.run, daemon=True, name="track rows").start()
             self.after(RL.POLL_MS, self._poll_rows)
+
+    def keep_tile(self, key, mask):
+        """mask kept as block key; the oldest used go past TILES_BYTES. Returns mask."""
+        old = self._tiles.pop(key, None)
+        self._tile_bytes -= old.nbytes if isinstance(old, np.ndarray) else 0
+        self._tiles[key] = mask
+        self._tile_bytes += mask.nbytes if isinstance(mask, np.ndarray) else 0
+        while self._tile_bytes > TILES_BYTES and len(self._tiles) > 1:
+            _, gone = self._tiles.popitem(last=False)
+            self._tile_bytes -= gone.nbytes if isinstance(gone, np.ndarray) else 0
+        return mask
+
+    def take_rows(self):
+        """The background reading's blocks read so far, kept. True when a block shown blocky came."""
+        job, came = self._row_job, False
+        if job is None or job.place != self._row_place:
+            return False
+        while job.out:
+            key, mask = job.out.popleft()
+            self.keep_tile(key, mask)
+            came = came or key in job.shown
+        return came
+
+    def stop_rows(self):
+        if self._row_job is not None:
+            self._row_job.stop = True
+            self._row_job = None
 
     def _poll_rows(self):
         job = self._row_job
         if job is None:
             return
+        self.take_rows()
+        if job.shown and all(k in self._tiles for k in job.shown):  # (the blocky ones all read: painted again
+            job.shown = set()  # once, the reading ahead goes on)
+            self._sheet = None
+            self.request_redraw()
         if not job.done:
             self.after(RL.POLL_MS, self._poll_rows)
             return
         self._row_job = None
-        if job.place == self._row_place and not job.stop:
-            self._row_masks.update(job.masks)
-            self._sheet = None
-            self.request_redraw()
         RL.changed(self, job.lm)
 
     def draw_ruler(self, w, lines):
@@ -1115,18 +1172,19 @@ def small_mask(lm, t, cx, aw, sx):
 
 
 class RowJob:
-    """A loaded MIDI's rows read exactly on a background thread (stop = give up)."""
+    """A loaded MIDI's rows' blocks [(row, block)] read exactly on a background thread, in order (stop = give up);
+    shown = the ones on screen blocky."""
 
-    def __init__(self, lm, place, rows, ax, bx, W):
-        self.lm, self.place, self.rows, self.ax, self.bx, self.W = lm, place, rows, ax, bx, W
+    def __init__(self, lm, place, todo, ax, shown):
+        self.lm, self.place, self.todo, self.ax, self.shown = lm, place, todo, ax, shown
         self.stop = self.done = False
-        self.masks = {}
+        self.out = deque()  # ((row, block), mask) as read (TrackList.take_rows)
 
     def run(self):
-        for r in self.rows:
+        for r, j in self.todo:
             if self.stop:
                 break
-            self.masks[r] = row_mask(self.lm, r, self.ax, self.bx, self.W)
+            self.out.append(((r, j), row_mask(self.lm, r, self.ax, -float(j * TILE), TILE)))
         self.done = True
 
 
