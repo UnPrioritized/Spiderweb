@@ -51,13 +51,14 @@ LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 AREA_SHADE = 0.08  # how far a tick line on a coloured area is from that colour (at full strength)
+KEEP_SHADE = 0.14  # on the Keep timing parts' purple (user 2026-10-24: 0.08 still too faint there)
 
 
 def area_shade(colour, by):
     """A tick line's colour on a coloured area (user 2026-10-24): the area's colour, darker (dark look: lighter,
     like the grid there), by = how strong the tick lines show."""
     to = 255 if look.DARK else 0
-    k = AREA_SHADE * by
+    k = (KEEP_SHADE if colour == look.TEMPO_KEEP_BG else AREA_SHADE) * by
     return "#%02x%02x%02x" % tuple(round(c + (to - c) * k) for c in (int(colour[i:i + 2], 16) for i in (1, 3, 5)))
 
 

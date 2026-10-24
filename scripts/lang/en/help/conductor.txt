@@ -56,7 +56,7 @@ Above: 120 BPM, a stop at 60 for one beat, then the catch-up runs at 140 BPM unt
 
 Drag the catch-up line to change how long the slow part holds, and the edges of the yellow and teal areas to change them (right-click an edge to set it back to automatic). Shapes: Flat, Fast, then slow, Slow, then fast, Up and down, or Formula; the first two have a round handle to bend them (double-click it, or right-click → Its own curve again, to undo the bend).
 
-The line below the tools says the BPM the catch-up needs. In red it can't work: "Not possible" says why (for example "yellow part too long"), and resting the mouse on the red area tells you what to change.
+The line below the tools says the BPM the catch-up needs. In red it can't work: "Not possible" says why (for example "catch-up BPM too high"), and resting the mouse on the red area tells you what to change.
 
 ## Keep timing
 
