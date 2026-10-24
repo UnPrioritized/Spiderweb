@@ -1352,9 +1352,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
         cs = self.ed()["catch"]
         self.drag["zones"] = {id(cs[j]): (min(st["from"], st["line"]), st["line"], st["end"]) for j, (st, _) in
                               enumerate(plans(self.ed(), self.base(), self.app.ppq)) if st["end"] is not None}
-        # (a Select box's stretch moved: the heard tempo lines of its points go along, hunt 2026-10-24)
-        self.drag["heards"] = [(s, [q[0] for q in heard_line(s)]) for s, _, v in self.drag["orig"] + [
-            (m, None, 0) for m, _ in self.drag["mates"]] if v is not None and heard_line(s)] if band else []
+        # (a Select box's stretch moved: the heard tempo lines of its points go along, hunt 2026-10-24; only when it
+        # holds the whole Keep timing part, else the heard line stays on its beats: one point moved inside a part
+        # shifted that point's copy only, splitting the part, hunt 2026-10-24)
+        moving = [s for s, _, v in self.drag["orig"] if v is not None] + [m for m, _ in self.drag["mates"]]
+        got = ids(moving)
+        whole = {id(q) for _, members, _, _ in self.runs() if all(id(q) in got for q in members) for q in members}
+        self.drag["heards"] = [(s, [q[0] for q in heard_line(s)]) for s in moving
+                               if id(s) in whole and heard_line(s)] if band else []
 
     def copy_drag(self, d):
         """A Ctrl+drag's first move: copies of what the Select box holds are what moves (the originals stay)."""
