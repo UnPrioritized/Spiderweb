@@ -16,6 +16,7 @@ from files.mathexpr import fmt
 from notes.tempo import DRAWN, DRAWN_BENDS, DRAWN_POINTS, catch_get, catch_set, drawn_at, drawn_from
 from window import look
 from window.speed_graph import BEND_SNAP, FLAT, SNAP, PointDialog
+from window.tempo_pane import ids
 from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, chart_edges, remember_place
 
 PRESETS = [(tr("tempo.shape_" + k), k) for k in ("flat", "ease", "rise", "ramp")]
@@ -34,6 +35,8 @@ class CatchGraph(tk.Toplevel):
         self.ml, self.mb = chart_edges(s, ("100 %",), 46, 22)
         self.mr, self.mt = int(12 * s), int(10 * s)
         self.point_labels = (tr("catch_graph.across"), tr("catch_graph.push"))  # (PointDialog's two boxes)
+        self.several = False  # the Select box holds several drawn catch-ups (none edited: click one)
+        self.held = None  # the catch-up shown last (kept while it isn't drawn for a moment: undo brings it back)
         self.c = None  # the catch-up edited (its own list in the tempo line), None: no drawn catch-up picked
         self.pts = [list(p) for p in DRAWN]
         self.drag = None  # ("pt" / "bend", i)
@@ -93,13 +96,27 @@ class CatchGraph(tk.Toplevel):
     # ------------------------------------------------------------ the picked catch-up
 
     def target(self):
-        """The picked catch-up when it's a drawn one (the visual tempo's), else None."""
-        box = self.box
-        pick = box.pane.picked()
-        if box.mode != "visual" or not pick or pick[0] != "catch":
+        """The drawn catch-up to edit (user 2026-10-24, picked A + C): the one clicked, or the only drawn one in the
+        Select box (several: "several", click one); else the one shown so far, as long as it's still there and
+        drawn (clicking points / empty space keeps it; after an undo: the one on the same beat). None: none."""
+        box, lines = self.box, self.app.tempo["catch"]
+        if box.mode == "visual":
+            pick = box.pane.picked()
+            if pick and pick[0] == "catch":
+                c = box.pane.ed()["catch"][pick[1]]
+                if c[1] == "drawn":
+                    return c
+            elif box.pane.bands:
+                mine = ids(box.pane.sel)
+                inside = [c for c in lines if id(c) in mine and c[1] == "drawn"]
+                if len(inside) == 1:
+                    return inside[0]
+                if inside:
+                    return "several"
+        if self.held is None:
             return None
-        c = box.pane.ed()["catch"][pick[1]]
-        return c if c[1] == "drawn" else None
+        same = [c for c in lines if c is self.held] or [c for c in lines if c[0] == self.held[0]]
+        return same[0] if same and same[0][1] == "drawn" else None
 
     def live(self):
         return self.c is not None
@@ -109,6 +126,14 @@ class CatchGraph(tk.Toplevel):
         if self.drag:
             return
         c = self.target()
+        old = self.held
+        if c is None and old is not None and not any(x is old or x[0] == old[0] for x in self.app.tempo["catch"]):
+            return self.close()  # (its catch-up deleted)
+        self.several = c == "several"
+        if self.several:
+            c = None
+        if c is not None:
+            self.held = c
         if c is not self.c:  # (another one picked, or the line came back from an undo: its steps here start again)
             self.c = c
             self.session = None if c is None else [list(p) for p in catch_get(c, 6) or DRAWN]
@@ -265,15 +290,16 @@ class CatchGraph(tk.Toplevel):
             text = tr("catch_graph.at", at=fmt(round(at[0] * 100, 1)), p=fmt(round(at[1] * 100, 1)))
             cv.create_text(self.u2x(0) + 6 * s, y0 + 4 * s, text=text, anchor="nw", fill=look.VALUE,
                            font=look.font(8))
-        self.info.config(text=tr("catch_graph.info") if self.live() else tr("catch_graph.pick"))
+        self.info.config(text=tr("catch_graph.info") if self.live() else tr(
+            "catch_graph.several" if self.several else "catch_graph.pick"))
         self.show_result()
 
     def show_result(self):
         """What the catch-up works out (as the bar shows it): its BPM, or why it can't."""
-        pick = self.box.pane.picked()
-        if not self.live() or not pick:
+        at = [j for j, c in enumerate(self.app.tempo["catch"]) if c is self.c]
+        if not self.live() or not at:
             return self.result.config(text="")
-        res, bad = self.box.pane.catch_result(pick[1])
+        res, bad = self.box.pane.catch_result(at[0])
         self.result.config(text=res, foreground=look.ERROR if bad else look.TEMPO_CATCH)
 
     def drag_at(self):
