@@ -373,6 +373,7 @@
  "tempo.hint_on_dense": "Notes too close for this part's slower tempo: it stays faster here, the timing is still right. A higher PPQ helps.",
  "tempo.keep_tip": "Keep the audio: the notes sound at the heard tempo (the purple line) while the file shows this part's tempo; the export moves them in ticks. Keep the visual: the file keeps showing its tempo while the sound follows the heard line. Switching swaps the two lines.",
  "tempo.keeps_tip": "Keep timing for every part between the picked points (they become one Keep timing part)",
+ "tempo.delete_catch": "Delete catch-up",
  "tempo.keep_off": "Off",
  "tempo.keep_audio": "Keep the audio",
  "tempo.keep_visual": "Keep the visual",

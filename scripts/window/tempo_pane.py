@@ -954,6 +954,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 return j
         return None
 
+    def zone_at(self, x):
+        """The catch-up whose yellow or teal area is at x (its index; the later one where two meet), or None."""
+        b, got = self.app.roll.x2t(x), None
+        for j, (st, _) in enumerate(plans(self.ed(), self.base(), self.app.ppq)):
+            if st["end"] is not None and min(st["from"], st["line"]) <= b < st["end"]:
+                got = j
+        return got
+
     def end_at(self, x):
         """The catch-up whose teal area's right edge is at x (its index), or None."""
         roll = self.app.roll
@@ -1826,18 +1834,26 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.menu_wait = None
         tempo = self.ed()
         menu = tk.Menu(self, tearoff=0)
+        def sep():  # (a line between groups, never on top: user 2026-10-24 saw a stray one)
+            if menu.index("end") is not None:
+                menu.add_separator()
         on_mark = item is None and self.sig_menu_items(menu, e)  # (time / key signatures: Add here, or the mark's)
         if not on_mark and self.box.mode == "visual":  # (catch-ups: the visual tempo's only)
-            menu.add_separator()
+            sep()
             menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
         for k, at, key in ((3, self.start_at, "tempo.catch_auto"), (4, self.end_at, "tempo.catch_end_auto")):
             n = at(e.x) if item is None else None
             if n is not None and catch_get(tempo["catch"][n], k) is not None:  # (an edge set by hand)
-                menu.add_separator()
+                sep()
                 menu.add_command(label=tr(key), command=lambda c=tempo["catch"][n], k=k: self.auto_edge(c, k))
+        zone = self.zone_at(e.x) if item is None and not on_mark else None
+        if zone is not None:  # (anywhere in its yellow / teal area, user 2026-10-24: the line was hard to hit)
+            sep()
+            menu.add_command(label=tr("tempo.delete_catch"),
+                             command=lambda c=tempo["catch"][zone]: self.delete_items([c]))
         if item is not None:  # (user: right-click doesn't delete; Delete picked ones, or this menu)
             gone = self.sel if self.is_sel(item) else [item]
-            menu.add_separator()
+            sep()
             menu.add_command(label=tr("tempo.delete"), command=lambda: self.delete_items(gone))
         try:
             menu.tk_popup(e.x_root, e.y_root)
