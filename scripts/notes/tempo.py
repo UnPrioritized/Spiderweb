@@ -204,12 +204,22 @@ def clean_heard(h):
     out = {"line": _clean_points(h.get("line"), inner=True)}
     if h.get("visual") is True:
         out["visual"] = True
-    return out if out["line"] or "visual" in out else None
+    end = h.get("end")
+    if isinstance(end, (int, float)) and not isinstance(end, bool) and math.isfinite(end) and end > 0:
+        out["end"] = clamp_bpm(end)
+    return out if out["line"] or "visual" in out or "end" in out else None
 
 
 def heard_of(p):
     """A point's heard tempo line (point[7]: {"line", "visual"?}), None without one."""
     return p[7] if len(p) > 7 and p[7] else None
+
+
+def shift_heard(p, db, floor=0.0):
+    """Point p's heard tempo line moved db beats (in place; it's in song beats: a copied / pasted / moved part takes
+    it along, hunt 2026-10-24); never before floor (None: a copy's own beats, may be below 0)."""
+    for q in heard_line(p):
+        q[0] = q[0] + db if floor is None else max(floor, q[0] + db)
 
 
 def heard_line(p):
@@ -666,11 +676,22 @@ def keeps(p):
     return len(p) > 5 and p[5] is True
 
 
-def keep_parts(tempo):
-    """[(point index, first beat, end beat or None = on to the song's end)] of the Keep timing parts, without the
-    catch-ups' own areas (line to end: a catch-up never moves notes), so a part may come in two pieces."""
+def keep_off(tempo, sts):
+    """[(first, end beat)] of the catch-ups' yellow areas a Keep timing part is switched off in (user 2026-10-24: Keep
+    timing doesn't work inside a catch-up's yellow area; it played the tempo the catch-up comes back to and could
+    undo the catch-up). A catch-up whose line is inside a Keep timing part is that part's own: not these."""
     pts = tempo["points"]
-    spans = [(c[0], catch_end(tempo, k)) for k, c in enumerate(tempo["catch"])]
+    parts = [(p[0], pts[i + 1][0] if i + 1 < len(pts) else math.inf) for i, p in enumerate(pts) if keeps(p)]
+    return [(st["from"], st["line"]) for st in sts if st["end"] is not None and st["from"] < st["line"]
+            and not any(a <= st["line"] - 1e-9 < e for a, e in parts)]
+
+
+def keep_parts(tempo, sts=()):
+    """[(point index, first beat, end beat or None = on to the song's end)] of the Keep timing parts, without the
+    catch-ups' own areas (line to end: a catch-up never moves notes) and the yellow areas of sts (stretches) they're
+    off in (keep_off), so a part may come in pieces."""
+    pts = tempo["points"]
+    spans = [(c[0], catch_end(tempo, k)) for k, c in enumerate(tempo["catch"])] + keep_off(tempo, sts)
     out = []
     for i, p in enumerate(pts):
         if not keeps(p):
@@ -705,7 +726,7 @@ def layout(tempo, base, ppq):
     tempo = json.loads(key[0])  # (its own copy: what's remembered never changes with the line)
     start_u = base_us(base)
     sts = stretches(tempo, base)
-    kps = keep_parts(tempo)
+    kps = keep_parts(tempo, sts)
     spans = []  # (a, b or None, heard us) in the order they're found
     keeps_at = []
     for i, b, end in kps:  # (ticks by the points' rule: a part starts on the first tick at or after its beat)
@@ -849,6 +870,16 @@ def end_point(tempo, base, ppq, i, force=False):
     arrive = pts[on[0]][1] if len(on) == 2 or p[2] != "hold" else p[1]
     if not force and abs(arrive - q[1]) > 1e-9 * q[1]:
         return False
+    run = [i]  # (the run's parts remember it: later heard edits move it along while it's still this, hunt)
+    while run[0] > 0 and keeps(pts[run[0] - 1]) and json.dumps(heard_of(pts[run[0] - 1])) == json.dumps(heard_of(p)):
+        run.insert(0, run[0] - 1)
+    for k in run:
+        m = pts[k]
+        if not heard_of(m):
+            m.extend([False] * (6 - len(m)) + [list(BEND)] * (len(m) < 7))
+            del m[7:]
+            m.append({"line": []})
+        m[7]["end"] = v
     if len(on) == 1 and p[2] != "hold" and p[1] != q[1]:  # (a glide arrives: it stays, the tempo jumps from there)
         pts.insert(on[0] + 1, [q[0], v] + copy.deepcopy(q[2:]))
     else:
