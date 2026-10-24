@@ -222,7 +222,8 @@ class TempoBox(ttk.Frame):
         row2 = ttk.Frame(self, padding=(2, 0, 2, 2))
         row2.pack(fill="x")
         tall = max(self.every_box.winfo_reqheight(), self.snap.winfo_reqheight())
-        ttk.Frame(row2, width=1, height=tall).pack(side="left")  # (keeps its height when nothing's picked)
+        self.tall = ttk.Frame(row2, width=1, height=tall)  # (keeps its height when nothing's picked)
+        self.tall.pack(side="left")
         self.point_row = row = ttk.Frame(row2)
         lb = ttk.Label(row, text=tr("tempo.bpm"))
         lb.pack(side="left")
@@ -271,6 +272,7 @@ class TempoBox(ttk.Frame):
             self.shape.bind(seq, lambda e: self.wheel_pick(), add="+")
         self.graph_button = ttk.Button(row, text=tr("path.graph"), command=self.open_graph)  # (Drawn only)
         self.graph_window = None  # the drawn catch-up's window (catch_graph.py), while open
+        self.fit_tall()
         self.formula_var = tk.StringVar()
         self.formula_box = ttk.Entry(row2, textvariable=self.formula_var, width=16)
         self.formula_box.bind("<Return>", lambda e: self.typed_formula())
@@ -397,11 +399,21 @@ class TempoBox(ttk.Frame):
             self.graph_window.sync()
         shown = tuple(map(str, rows))
         if shown != self._shown:  # (packed again only when it changes: no flashing while dragging)
+            self.fit_tall()
             for w in (self.point_row, self.part_row, self.catch_row, self.formula_box, self.result):
                 w.pack_forget()
             for w in rows:
                 w.pack(side="left", padx=(0, 8), before=self.hint)
             self._shown = shown
+
+    def fit_tall(self):
+        """The second row as tall as its tallest box / button always (user 2026-10-24: the Graph… button is taller
+        than the boxes, so the pane jumped as it came and went); measured again each time its rows change, so
+        another look / font size still fits."""
+        h = max(w.winfo_reqheight() for w in (self.every_box, self.snap, self.bpm_box, self.keeps_box, self.curve,
+                                              self.shape, self.graph_button))
+        if int(self.tall.cget("height")) != h:
+            self.tall.configure(height=h)
 
     def bpm_snap(self):
         return BPM_SNAPS[max(0, self.snap.current())]
@@ -993,7 +1005,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
     def bar_catch(self):
         """The catch-up line whose row the bar shows (user 2026-10-24: only clicking its line was hard to find): the
         one picked; the only one in the Select box (beside the points' BPM box); with nothing picked, the one whose
-        yellow / teal area the play line is in, while not playing (playing, the row would pop in and out). None:
+        yellow / teal area the play line is in, while not playing (playing, the row would pop in and out) and the
+        mouse isn't held in the pane. None:
         none (the visual tempo's only)."""
         if self.box.mode != "visual":
             return None
@@ -1003,7 +1016,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if pick and pick[0] == "point":
             lines = self.sel_idx("catch")
             return lines[0] if self.bands and len(lines) == 1 else None
-        if pick or self.app.player.running:
+        if pick or self.app.player.running or self.drag or self.placing:  # (not while the mouse is held, user)
             return None
         at = self.app.playhead
         for j, (st, _) in enumerate(plans(self.app.tempo, self.base(), self.app.ppq)):
