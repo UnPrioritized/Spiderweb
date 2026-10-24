@@ -1721,11 +1721,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if end is None and any(abs(p[0] - b) < 1e-9 for p in pts):
             return None
         self.app.push_undo(name=tr("tempo.step_add"))
-        at = sum(1 for p in pts if p[0] < b + (1e-9 if end is not None else 0))
+        if end is None and any(p[0] < b for p in pts) and any(p[0] > b for p in pts):  # (inside a ramp: it stays
+            split_at(pts, b, self.ed_base())  # exactly as it was up to the click, a jump there; user 2026-10-24)
+        at = sum(1 for p in pts if p[0] < b + 1e-9)
         kind = part_kind(pts[at - 1] if at > 0 else None, self.box.draw_scale)
         kind[0], kind[1], kind[4] = "hold", "", list(BEND)
         item = [float(end[0] if end is not None else b), clamp_bpm(v), *kind]
         pts.insert(at, item)
+        drop_loose(pts)  # (the cut point is an arrival only where a ramp comes in)
         self.sel, self.part = [item], None
         self.app.tempo_changed()
         return item
@@ -1770,42 +1773,43 @@ class TempoPane(ConductorMarks, tk.Canvas):
         """A part from (b0, v0) to (b1, v1) over the points there (they're replaced), picked; like: a first point
         whose curve / formula / scale / keep / bend it takes. Returns its first point."""
         pts = self.ed()["points"]
-        pts[:], first = self.laid(pts, b0, v0, b1, v1, kind, text, like)
+        first = self.laid(pts, b0, v0, b1, v1, kind, text, self.ed_base(), like, True)[1]
         self.sel, self.part = [], first
         self.app.tempo_changed()
         return first
 
-    def laid(self, pts, b0, v0, b1, v1, kind, text, like=None):
-        """lay_part's points: (the line pts with the part laid in, a new list; its first point), pts unchanged (a
-        drag shows what letting go will give with it, user 2026-10-24)."""
+    def laid(self, pts, b0, v0, b1, v1, kind, text, base, like=None, inplace=False):
+        """lay_part's points: (the line pts with the part laid in, its first point); a copy unless inplace (a drag
+        shows what letting go will give, user 2026-10-24). base: the line's BPM before its first point.
+        THE PART OVERRIDES ONLY ITS OWN STRETCH, like Domino (user 2026-10-24: the parts before / after were bent
+        to meet it): the line before it stays exactly (a jump at its start where they differ); after it an old
+        ramp / curve goes on from where it was (a jump back), an old held tempo is replaced by its end value up to
+        the next point (Domino's steps do that). Drawn from / up to a jump: its arrival / its leaving tempo stays
+        (lay_points' edges)."""
         if b1 < b0:
             b0, v0, b1, v1 = b1, v1, b0, v0
-        before = [p for p in pts if p[0] <= b1 + 1e-9]
-        # (the part after keeps its curve)
-        after_kind = part_kind(before[-1] if before else None, self.box.draw_scale)
-        held = [p for p in pts if p[0] <= b0 + 1e-9]
+        work = pts if inplace else copy.deepcopy(pts)
+        held = [p for p in work if p[0] <= b0 + 1e-9]
         first = [float(b0), clamp_bpm(v0), kind, text, self.box.draw_scale, bool(held) and keeps(held[-1]),
                  list(BEND)]
         if first[5] and heard_of(held[-1]):  # (inside a Keep timing run: its heard line along)
             first.append(copy.deepcopy(held[-1][7]))
         if like is not None:
             first[2:] = copy.deepcopy(like[2:])
-        last = [float(b1), clamp_bpm(v1), *after_kind]
-        # (user 2026-10-22: drawn from where a glide arrives = a jump there, that point kept; drawn up to a jump =
-        # it arrives there, the tempo after the jump kept)
-        end = self.glide_end(b0, pts)
-        at_b0 = [p for p in pts if abs(p[0] - b0) < 1e-9]
-        if len(at_b0) == 2:  # (drawn from a jump: its arrival stays, the line replaces its second point; hunt)
-            end = at_b0[0]
-        arrive = [end] if end is not None and abs(end[1] - first[1]) > 1e-9 else []
-        if arrive:
-            first[0] = end[0]
-        at_b1 = [p for p in pts if abs(p[0] - b1) < 1e-9]
-        leave = at_b1[1:] if len(at_b1) == 2 else []
-        if leave:
-            last[0] = leave[0][0]
-        return ([p for p in pts if p[0] < b0 - 1e-9] + arrive + [first, last] + leave +
-                [p for p in pts if p[0] > b1 + 1e-9]), first
+        under = [p for p in work if p[0] <= b1 + 1e-9]  # (the part the line's end lands in)
+        owner = under[-1] if under else None
+        on_end = owner is not None and abs(owner[0] - b1) < 1e-9  # (a point of its own there: it plays on)
+        steady = owner is None or owner[2] == "hold" or not any(p[0] > b1 + 1e-9 for p in work)
+        kind_after = part_kind(owner, self.box.draw_scale)
+        kind_after[0], kind_after[1], kind_after[4] = "hold", "", list(BEND)
+        last = [float(b1), clamp_bpm(v1), *kind_after]
+        had = ids(work)
+        self.lay_points(work, [first, last], [(b0, b1)], base)
+        if steady and not on_end and any(p is last for p in work):  # (an old held tempo: the end value holds on
+            # to the next point; the same value as there = last already gone, nothing to do)
+            work[:] = [p for p in work if not (abs(p[0] - b1) < 1e-9 and id(p) not in had and p is not last)]
+            drop_loose(work)
+        return work, first
 
     # ------------------------------------------------------------ the line just drawn, live (user 2026-10-22)
 
@@ -2631,13 +2635,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
         text = self.box.draw_formula if kind == "formula" else ""
         args = (d["b0"], d["v0"], d["b1"], d["v1"], kind, text)
         if self.box.mode != "heard":
-            return {"tempo": dict(self.app.tempo, points=self.laid(self.app.tempo["points"], *args)[0])}
+            return {"tempo": dict(self.app.tempo, points=self.laid(self.app.tempo["points"], *args, self.base())[0])}
         lo, hi = sorted((d["b0"], d["b1"]))
-        out = {}
+        out, tempo = {}, self.app.tempo
+        at = {id(q): k for k, q in enumerate(tempo["points"])}
         for p, members, a, e in self.runs():
             if a < hi - 1e-9 and (e is None or e > lo + 1e-9):
                 line = self.ed()["points"] if p is self.run else heard_line(p)
-                new = self.laid(line, *args)[0]
+                base = heard_before(tempo, self.base(), self.app.ppq, at[id(members[0])], at[id(members[-1])])
+                new = self.laid(line, *args, base)[0]
                 out.update({id(m): new for m in members})
         return {"heard": out}
 
