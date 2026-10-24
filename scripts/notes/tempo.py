@@ -1417,6 +1417,27 @@ def ruler_marks(tempo, base, ppq, bar=4):
     return out
 
 
+def heard_marks(tempo, base, ppq, bar=4):
+    """ruler_marks for each Keep timing run's own heard tempo line (user 2026-10-24: the ruler marks its points too,
+    in purple, same rules): only the points inside the run, before its first point = the tempo heard before the run;
+    a glide's line stops at the run's end. No catch-ups (a heard line has none)."""
+    out, pts = [], tempo["points"]
+    for i, j in keep_runs(tempo):
+        line = heard_line(pts[i])
+        if not line:
+            continue
+        a, e = pts[i][0], pts[j + 1][0] if j + 1 < len(pts) else math.inf
+        inside = [q for q in line if a - 1e-9 <= q[0] <= e + 1e-9]
+        if not inside:
+            continue
+        got = ruler_marks({"points": inside, "catch": [], "every": tempo.get("every", EVERY)},
+                          heard_before(tempo, base, ppq, i, j), ppq, bar)
+        for b, kind, v, until, *steps in got:
+            if kind == "point" and b < e - 1e-9:  # (a point on the run's end: the sound goes on from the line after)
+                out.append((b, "heard", v, None if until is None else min(until, e), *steps))
+    return out
+
+
 def _stairs(marks, k, pts, lines, bar):
     """The marks from k on that make stairs (held steps in a row, one way, small, within a bar of each other, no
     catch-up line between them); fewer than STAIR_MIN = not stairs."""

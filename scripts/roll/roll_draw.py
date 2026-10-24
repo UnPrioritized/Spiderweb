@@ -21,7 +21,7 @@ from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained
 from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
-from notes.tempo import bpm_text, ruler_marks, short_bpm, tempo_text
+from notes.tempo import bpm_text, heard_marks, ruler_marks, short_bpm, tempo_text
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
 from roll.tiles import Tiles, see_through
@@ -1735,21 +1735,24 @@ class RollDrawing:
         if pane is None:
             return []
         out = []
-        for b, kind, v, until, *steps in ruler_marks(self.app.tempo, pane.base(), self.app.ppq, self.app.beats):
+        args = (self.app.tempo, pane.base(), self.app.ppq, self.app.beats)
+        # (the heard tempo lines' own points too, in purple: user 2026-10-24)
+        for b, kind, v, until, *steps in ruler_marks(*args) + heard_marks(*args):
             x = b * self.sx  # (from the song's start: scrolling only slides them)
             ux = None if until is None else until * self.sx
             if kind == "catch":
                 tip = tr("tempo.mark_catch", bpm=bpm_text(v)) if v is not None else tr("tempo.not_possible")
                 out.append((x, tr("tempo.catch"), [tip], look.TEMPO_CATCH if v is not None else look.ERROR, ux))
                 continue
+            colour, heard = (look.TEMPO_KEEP, tr("tempo.mark_heard") + " ") if kind == "heard" else (look.RULER_TEMPO, "")
             before, at, then = v
             if steps:  # (stairs: before -> first step, then the climb; tip = the whole, then each step)
                 steps, way = steps[0], "↗" if then > before else "↘"
                 text = f"{short_bpm(before)} {way} {short_bpm(then)}"
-                tips = [trn("tempo.mark_steps", len(steps), bpm=f"{bpm_text(before)} {way} {bpm_text(then)}",
-                            n=f"{len(steps):,}")]
+                tips = [heard + trn("tempo.mark_steps", len(steps), bpm=f"{bpm_text(before)} {way} {bpm_text(then)}",
+                                    n=f"{len(steps):,}")]
                 tips += [f"{bpm_text(a)} → {bpm_text(c)} BPM" for _, a, c in steps]
-                out.append((x, text, tips, look.RULER_TEMPO, ux))
+                out.append((x, text, tips, colour, ux))
                 continue
             short, full = [], []
             if before is not None and abs(before - at) > 1e-6 * at:
@@ -1759,7 +1762,7 @@ class RollDrawing:
                 way = "↗" if then > at else "↘"
                 short.append(f"{short_bpm(at)} {way} {short_bpm(then)}" if not short else f"{way} {short_bpm(then)}")
                 full.append(f"{bpm_text(at)} {way} {bpm_text(then)}" if not full else f"{way} {bpm_text(then)}")
-            out.append((x, " ".join(short), [(" ".join(full) or bpm_text(at)) + " BPM"], look.RULER_TEMPO, ux))
+            out.append((x, " ".join(short), [heard + (" ".join(full) or bpm_text(at)) + " BPM"], colour, ux))
         return sorted(out, key=lambda m: m[0])
 
     def tempo_shown(self, key, measure):
