@@ -142,8 +142,8 @@ def clean_tempo(data):
                 return None
         start, end = edge(3), edge(4)
         item = [b, shape, text[:200]]
-        catch_set(item, 3, start if start is not None and 0 <= start < b else None)
-        catch_set(item, 4, end if end is not None and b < end <= FAR else None)
+        catch_set(item, 3, start if start is not None and 0 <= start <= FAR else None)  # (past the line: a pin
+        catch_set(item, 4, end if end is not None and 0 < end <= FAR else None)          # waiting, stretches)
         bend = c[5] if len(c) > 5 else None
         if isinstance(bend, list) and len(bend) == 2 and all(
                 isinstance(x, (int, float)) and not isinstance(x, bool) and 0 <= x <= 1 for x in bend):
@@ -367,7 +367,7 @@ def catch_end(tempo, k):
     c, lines = tempo["catch"][k], [x[0] for x in tempo["catch"]]
     after = [p[0] for p in tempo["points"] if p[0] > c[0]] + lines[k + 1:k + 2]
     end = min(after) if after else None
-    if catch_get(c, 4) is not None:
+    if catch_get(c, 4) is not None and catch_get(c, 4) > c[0]:  # (a pin the line went past: waits, stretches)
         end = min([catch_get(c, 4)] + lines[k + 1:k + 2])
     return end
 
@@ -416,8 +416,12 @@ def stretches(tempo, base):
                     leaves = pts[i][2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != pts[i][1]
                     start = pb[i] if leaves else (pb[cands[n + 1]] if n + 1 < len(cands) else b)
                     break
+        # (an edge set by hand the line was dragged past STAYS, only not used: the line back = the area back,
+        # user 2026-10-24; shown as a thick line, "pin" / "pin_end")
         out[k] = {"from": start, "read": read, "manual": hand is not None and hand < b,
-                  "manual_end": hand_end is not None,
+                  "manual_end": hand_end is not None and hand_end > b,
+                  "pin": hand if hand is not None and hand >= b else None,
+                  "pin_end": hand_end if hand_end is not None and hand_end <= b else None,
                   "line": b, "end": end, "shape": shape, "text": text, "bend": catch_get(c, 5)}
     return out
 

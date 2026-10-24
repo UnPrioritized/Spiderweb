@@ -1609,12 +1609,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             for s, bs in d.get("heards", ()):  # (heard tempo lines along with a Select box)
                 for q, b in zip(heard_line(s), bs):
                     q[0] = max(0.0, b + shift)
-            for s, b, v in d["orig"]:  # (a line dragged alone past its own hand-set edge: that edge automatic
-                # at once, as opening the file makes it, so undo / save + open give the same)
-                if v is None and catch_get(s, 3) is not None and s[3] >= s[0]:
-                    catch_set(s, 3, None)
-                if v is None and catch_get(s, 4) is not None and s[4] <= s[0]:
-                    catch_set(s, 4, None)
+            # (a line dragged past its own hand-set edge: the edge stays where it was, unused until the line is
+            # back; user 2026-10-24: it went automatic for good, a Keep timing part before it fell into the area)
             order = d.setdefault("order", {})  # (two on one beat: in the order they last had where it worked, so
             for key in ("points", "catch"):    # going back there gives the same line, hunt 2026-10-24)
                 tempo[key].sort(key=lambda it: (it[0], order.get(id(it), 0)))
@@ -3009,6 +3005,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if on.sum() >= 2:
                 self.create_line(*np.column_stack([px[on], py[on]]).ravel().tolist(), fill=look.TEMPO_PICKED,
                                  width=lw + 3)
+        for st, _ in worked:  # (an edge set by hand the line went past: where the area comes back to, thick)
+            for at, col in ((st["pin"], look.TEMPO_DRAWN_EDGE), (st["pin_end"], look.TEMPO_CATCH)):
+                if at is not None and kb <= roll.t2x(at) <= w:
+                    self.create_line(roll.t2x(at), 0, roll.t2x(at), h, fill=col, width=lw * 4, tags="catch_pin")
         # catch-up lines and their words
         for j, (st, plan) in enumerate(worked):
             ok = plan["ok"]
