@@ -210,9 +210,8 @@ class LoadedPlayer:
         """A window's events in tick order, in arrays from the pool (the feeder gives them back once played)."""
         n = len(ts)
         with self._lock:
-            got = next((b for b in self._pool if len(b[0]) >= n), None)
-            if got is not None:
-                self._pool.remove(got)
+            i = next((i for i, b in enumerate(self._pool) if len(b[0]) >= n), None)
+            got = None if i is None else self._pool.pop(i)  # (by place: remove() compares the arrays)
         if got is None:
             size = 1 << max(16, (n - 1).bit_length())
             got = (np.empty(size, np.int64), np.empty(size, np.int32), np.empty(size, np.int32))
