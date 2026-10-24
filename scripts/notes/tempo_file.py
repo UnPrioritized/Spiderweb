@@ -178,7 +178,8 @@ def heard_segs(events, end):
 def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None):
     """The Keep timing parts' gaps between anchors: (layout, segs, bad catch-ups, keeps [(a, e, us)], gaps [[n,
     total, file ticks, drawn]], dense = beats of EVERY gap whose two notes are under a tick apart at the part's
-    tempo (it stays faster there)). ticks = the ticks keeping their time (int64 array); loose = ticks keeping
+    tempo (it stays faster there), gave, times = each part's heard time: ticks x us from its start, one per tick
+    (array, first 0) or the one us every tick takes). ticks = the ticks keeping their time (int64 array); loose = ticks keeping
     their time only where they have room (CC messages, user 2026-10-23: never the tempo staying faster for one):
     one under a tick from another is no anchor (file_plan's map puts it between its neighbours). heard = a
     loaded MIDI's own tempo [(tick, us)]: its notes keep the time they have in the file (user 2026-10-24: no
@@ -197,7 +198,7 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
-    gaps, dense, gave = [], [], []
+    gaps, dense, gave, times = [], [], [], []
     for (a, e, u), mine in zip(keeps, own):
         inside = ticks[(ticks > a) & (ticks < e)]
         marks = [np.array([a, e], np.int64), inside]
@@ -234,7 +235,8 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
         k = np.clip(k, _least(total), total)
         gaps.append([n, total, k, drawn])
-    return lay, segs, bad, keeps, gaps, dense, sorted(gave)
+        times.append(was if was is not None else int(u))
+    return lay, segs, bad, keeps, gaps, dense, sorted(gave), times
 
 
 def dense_spots(tempo, base, ppq, beats, ticks, heard=None):
@@ -257,7 +259,8 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
     loose = np.zeros(0, np.int64) if loose is None else np.asarray(loose, np.int64).ravel()
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
     bars = bar_ticks(tempo, ppq, upto)
-    _, _, _, keeps, gaps, out["dense"], out["gave"] = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose, heard)
+    _, _, _, keeps, gaps, out["dense"], out["gave"], _ = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose,
+                                                                   heard)
     if not tempo.get("bars", True) or not gaps:
         return out
     bars = bar_ticks(tempo, ppq, max(upto, max(e for _, e, _ in keeps)))
@@ -334,8 +337,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     loose = np.asarray(loose, np.int64).ravel()
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
     bars = bar_ticks(tempo, ppq, upto)
-    lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"] = keep_gaps(tempo, base, ppq, beats, ticks, bars,
-                                                                             loose, heard)
+    lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
+                                                                                    bars, loose, heard)
     end = segs[-1][1]
     every = tempo.get("every", EVERY)
     fit_bars = tempo.get("bars", True)
@@ -345,9 +348,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
     # the file's tempo: plain stretches shifted, Keep timing parts made of their gaps
     pairs = _Pairs()
-    file_segs, bp_n, bp_f = [], [0], [0]
+    file_segs, bp_n, bp_f, clocks = [], [0], [0], []
     offset, at = 0, 0
-    for (a, e, u), (n, total, k, drawn) in zip(keeps, gaps):
+    for (a, e, u), (n, total, k, drawn), heard_t in zip(keeps, gaps, times):
         file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, a)]
         parts, last = [], None
         changes = np.flatnonzero(drawn[1:] != drawn[:-1]) + 1 + a  # (ticks where the drawn tempo changes)
@@ -376,6 +379,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         fa = a + offset
         vals = np.concatenate(parts)
         file_segs.append((fa, fa + len(vals), vals))
+        # (each part's heard and file clocks: a CC message that gave way goes on the file tick sounding nearest its
+        # heard time, hunt 2026-10-24: the same share of ticks was up to 190 ms off where the tempo is uneven)
+        clocks.append((a, e, fa, heard_t, np.concatenate([[0], np.cumsum(vals, dtype=np.float64)])))
         f = fa + np.concatenate([[0], np.cumsum(k)])
         bp_n += n.tolist()
         bp_f += f.tolist()
@@ -389,8 +395,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     bp_n, bp_f = np.array(bp_n, np.int64), np.array(bp_f, np.int64)
 
     def to_file(t):
-        # between two anchors: the same share of the way (a CC message that gave way, keep_gaps), never onto the
-        # anchor before when there's room (one a tick after a note stays after it)
+        # between two anchors (a CC message that gave way, keep_gaps): the file tick sounding nearest its heard
+        # time, never onto the anchor before when there's room (one a tick after a note stays after it)
         t = np.asarray(t, np.int64)
         i = np.searchsorted(bp_n, t, "right") - 1
         out = bp_f[i] + (t - bp_n[i])
@@ -399,14 +405,32 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         mid = (j > i) & (t > bp_n[i]) & (d > 0) & (fd != d)
         if np.any(mid):
             share = bp_f[i] + np.rint((t - bp_n[i]) * fd / np.maximum(d, 1)).astype(np.int64)
+            for a, e, fa, heard_t, clock in clocks:
+                on = mid & (t > a) & (t < e)
+                if not np.any(on):
+                    continue
+                x = t[on] - a
+                want = heard_t[x] if isinstance(heard_t, np.ndarray) else x.astype(np.float64) * heard_t
+                k = np.clip(np.searchsorted(clock, want), 1, len(clock) - 1)
+                k = np.where(want - clock[k - 1] <= clock[k] - want, k - 1, k)
+                share[on] = fa + k
             # (on the note before = written before its note-on: a tick on, the next anchor's tick when that's all
             # the room there is (hunt 2026-10-23))
-            share = np.where(share == bp_f[i], bp_f[i] + np.minimum(fd, 1), share)
+            share = np.clip(share, bp_f[i] + np.minimum(fd, 1), bp_f[j])
             out = np.where(mid, share, out)
         return out
 
     if keeps:
-        out["bp"] = (bp_n, bp_f)  # (the map as anchors -> file ticks: a loaded MIDI's export, midi_scan.rewrite)
+        # (the map as anchors -> file ticks: a loaded MIDI's export, midi_scan.rewrite; the CC messages that gave
+        # way as anchors of their own there, so they land by time too)
+        lt = np.setdiff1d(loose, bp_n)
+        if len(lt):
+            lf = to_file(lt)
+            n_all, f_all = np.concatenate([bp_n, lt]), np.concatenate([bp_f, lf])
+            order = np.argsort(n_all, kind="stable")
+            out["bp"] = (n_all[order], f_all[order])
+        else:
+            out["bp"] = (bp_n, bp_f)
         out["map"] = to_file
         out["sigs"] = [(int(to_file(t)), top, p) for t, top, p in out["sigs"]]
         out["keys"] = [(int(to_file(t)), sf, mi) for t, sf, mi in out["keys"]]
