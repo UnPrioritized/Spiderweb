@@ -647,7 +647,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.bands = []  # the kept Select boxes [(first, last beat)]: the pane's whole height (Ctrl+drag adds one)
         self.live = None  # the line just drawn, its ends still movable: {"base", "ends", "first", "seen"}
         self._dense = (None, [])  # (what it was worked out for, beats where Keep timing notes are too close)
-        self._limits = {"dense": [], "gave": [], "unfit": []}  # (the limit texts' spots, tempo_file.limit_spots)
+        self._limits = {"dense": [], "gave": [], "unfit": [], "moved": []}  # (the limit texts' spots, tempo_file.limit_spots)
         self._dense_job = None
         self.drag = None
         self._pan = None
@@ -1961,7 +1961,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 return
             # (its export writes the file alone: its notes and CC messages, not the shapes, hunt 2026-10-24)
             ticks, loose = lm._anchors
-        limits = {"dense": [], "gave": [], "unfit": []}
+        limits = {"dense": [], "gave": [], "unfit": [], "moved": []}
         if any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
             try:
                 heard = file_tempos(lm) if lm is not None else None  # (a loaded MIDI: its notes keep their file time)
@@ -2996,7 +2996,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def draw_limits(self, lines, kb, w, h, lw):
         """Short texts naming what the file can't do where Keep timing asks for it (user 2026-10-24): notes under a
-        tick apart / a bar no time signature fits (red), CC messages moved a tick (orange). One text where a stretch
+        tick apart / a bar no time signature fits (red), CC messages moved a tick / bar lines written a little off
+        (orange). One text where a stretch
         of such spots starts in view (the next one once past its end), a short mark on every spot; at the bottom,
         at the top when a line runs through that place (below the signature marks when one is there)."""
         roll, s = self.app.roll, self.scale
@@ -3004,7 +3005,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         th = 13 * s  # (a text's height)
         sig_x = [roll.t2x(b) for b, _, _, _ in self.sig_marks()]
         taken = []  # (x0, x1, y0, y1) of the texts put
-        for kind, colour in (("dense", look.ERROR), ("unfit", look.ERROR), ("gave", look.WARN)):
+        for kind, colour in (("dense", look.ERROR), ("unfit", look.ERROR), ("gave", look.WARN),
+                             ("moved", look.WARN)):  # (bar lines written a little off: BAR CARRY-OVER, user)
             spots = self._limits.get(kind) or []
             lo = bisect.bisect_left(spots, roll.x2t(kb))
             hi = bisect.bisect_right(spots, roll.x2t(w))

@@ -316,9 +316,10 @@ def dense_spots(tempo, base, ppq, beats, ticks, heard=None):
 def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
     """What the Conductor pane's limit texts show (user 2026-10-24), quicker than file_plan (no tempo values):
     {"dense": beats where notes in a Keep timing part are under a tick apart, "gave": CC messages (loose) moved by
-    a tick or less, "unfit": bars no time signature fits (file_plan's "unfit")}. The same as the export's, but
+    a tick or less, "unfit": bars no time signature fits (file_plan's "unfit"), "moved": bar lines written a
+    little off (BAR CARRY-OVER, file_plan's "moved")}. The same as the export's, but
     for the rare gap whose tempo pair needs a tick more or less."""
-    out = {"dense": [], "gave": [], "unfit": []}
+    out = {"dense": [], "gave": [], "unfit": [], "moved": []}
     if not has_tempo(tempo) or not any(len(p) > 5 and p[5] is True for p in tempo.get("points", ())):
         return out
     ticks = np.asarray(ticks, np.int64).ravel()
@@ -342,15 +343,9 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
     lines = bars[:stop + 2]
     i = np.searchsorted(bp_n, lines, "right") - 1
     fl = bp_f[i] + (lines - bp_n[i])  # (bar lines are anchors inside the parts: exact)
-    longest = int(max(bar_lengths(ppq)))
-    for m in range(stop + 1):
-        have, length = int(lines[m + 1] - lines[m]), int(fl[m + 1] - fl[m])
-        if length == have:
-            continue
-        while length > longest and signature(length, ppq) is None:
-            length -= longest
-        if signature(length, ppq) is None:
-            out["unfit"].append(int(lines[m]) / ppq)
+    _, moved, unfit = _written_lines(fl, bar_lengths(ppq))
+    out["unfit"] = [int(lines[m]) / ppq for m in unfit]
+    out["moved"] = [int(lines[m + 1]) / ppq for m in moved]
     return out
 
 
@@ -394,7 +389,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     out = {"events": [(0, round(60_000_000 / base))], "bad": [], "sigs": file_sigs(tempo, ppq),
            "keys": file_keys(tempo, ppq),
            "map": lambda t: np.asarray(t, np.int64), "bp": None, "jumps": [], "hz": [], "dense": [], "gave": [],
-           "unfit": []}
+           "unfit": [], "moved": []}
     if not has_tempo(tempo):
         return out
     start_u = base_us(base)
@@ -518,8 +513,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         out["sigs"] = [(int(to_file(t)), top, p) for t, top, p in out["sigs"]]
         out["keys"] = [(int(to_file(t)), sf, mi) for t, sf, mi in out["keys"]]
     if fit_bars and keeps:
-        out["sigs"], unfit = _signatures(keeps, tempo, bars, ppq, to_file)
+        out["sigs"], unfit, moved = _signatures(keeps, tempo, bars, ppq, to_file)
         out["unfit"] = [t / ppq for t in unfit]
+        out["moved"] = [t / ppq for t in moved]
     # warnings
     starts = np.asarray(starts, np.int64).ravel()
     for st, plan in lay["worked"]:  # (a note in a jump plays off time where the time so far isn't the heard time)
@@ -597,10 +593,56 @@ def ticks_at(runs, ppq, seconds):
 NUDGE = 0.05  # bar compensation: a gap's ticks change by at most this share (or one tick), so its tempo a hair
 
 
+def _fit_length(d, lengths):
+    """The bar length nearest d (file ticks) that time signatures can write: as many of the longest as needed, then
+    the nearest one (the shorter on a tie); d itself when it fits."""
+    longest, base = int(lengths[-1]), 0
+    while d > longest and not (lengths[min(np.searchsorted(lengths, d), len(lengths) - 1)] == d):
+        d, base = d - longest, base + longest
+    i = int(np.searchsorted(lengths, d))
+    if i < len(lengths) and lengths[i] == d:
+        return base + int(d)
+    near = [int(lengths[j]) for j in (i - 1, i) if 0 <= j < len(lengths)]
+    return base + min(near, key=lambda x: (abs(x - d), x))
+
+
+def _written_lines(fl, lengths):
+    """BAR CARRY-OVER (user 2026-10-24): the file's bar lines fl (ticks, in order) as time signatures can write them:
+    each bar the length nearest to reaching its true line, so a bar no signature fits is written a little off and
+    the next bar puts it right (usually within 2 bars; on until it can). The last line is kept exact (the project's
+    own signatures go on from there). A carry that can't settle before then (no notes left to nudge) isn't used:
+    that bar is left with no signature as before and the next line is exact. (written lines, bars whose end line
+    is moved, bars left with none)."""
+    w = np.array(fl, np.int64)
+    moved, unfit = [], []
+    m, last = 0, len(fl) - 1
+    while m < last:
+        if _fit_length(int(fl[m + 1] - w[m]), lengths) == fl[m + 1] - w[m]:
+            m += 1
+            continue
+        k, trial, chain = m, w.copy(), []  # (carried on bar by bar until a bar lands on its line)
+        while k < last - 1:
+            trial[k + 1] = trial[k] + _fit_length(int(fl[k + 1] - trial[k]), lengths)
+            chain.append(k)
+            k += 1
+            if _fit_length(int(fl[k + 1] - trial[k]), lengths) == fl[k + 1] - trial[k]:
+                break
+        else:
+            k = None
+        if k is None or k >= last:
+            unfit.append(m)  # (never settles: the old way, this bar alone without one)
+            m += 1
+            continue
+        w, moved = trial, moved + chain
+        m = k
+    return w, moved, unfit
+
+
 def _fit_bar_lines(gaps, keeps, bars, lengths):
     """Bar compensation: in each bar a Keep timing part changed, the longest gaps there get a tick more / fewer
     each so the bar's length fits a time signature (the gaps' time stays: only their tempo changes a hair). A bar
-    that can't be fitted gently stays as it is (no spikes: user's "a hair")."""
+    that can't be fitted gently is written the nearest length a signature gives, and the next bars aim to land
+    the bar line back (BAR CARRY-OVER, _written_lines, user 2026-10-24); no spikes: user's "a hair"."""
     if not gaps:
         return
     # each gap's bar (by the time signatures), then the bars' gaps together, in order (a million gaps one by one in
@@ -614,44 +656,63 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
     order_m = np.argsort(ms, kind="stable")
     ms, ps, js, dk, kk, tt = (x[order_m] for x in (ms, ps, js, dk, kk, tt))
     cut = np.flatnonzero(np.diff(ms)) + 1
+    carry, last = 0, None  # (written bar line - true one, at the start of the bar after `last`)
     for lo, hi in zip(np.concatenate([[0], cut]).tolist(), np.concatenate([cut, [len(ms)]]).tolist()):
         m = int(ms[lo])
-        have = int(bars[m + 1] - bars[m]) + int(dk[lo:hi].sum())
+        if carry and last is not None:  # (bars in between, no gaps to nudge: the carry goes on through them)
+            for b in range(last + 1, m):
+                need = int(bars[b + 1] - bars[b]) - carry
+                carry = _fit_length(need, lengths) - need
+        last = m
+        true = int(bars[m + 1] - bars[m]) + int(dk[lo:hi].sum())  # (the bar's file length now)
         where = list(zip(ps[lo:hi].tolist(), js[lo:hi].tolist()))
         ks, tots = kk[lo:hi], tt[lo:hi]
         room = np.maximum(1, (ks * NUDGE).astype(np.int64))  # (ticks each gap may give / take)
         up, down = np.minimum(room, tots - ks), np.minimum(room, ks - _least(tots))
         order = np.argsort(-ks, kind="stable")  # (longest gaps first)
-        i = int(np.searchsorted(lengths, have))
-        tries = sorted(lengths[max(0, i - 3):i + 3].tolist(), key=lambda x: abs(x - have))
-        for want in tries:
-            delta = want - have
-            if delta == 0:
-                break
-            cap = (up if delta > 0 else down)[order]
-            if cap.sum() < abs(delta):
-                continue
-            share = np.zeros(len(ks), np.int64)
-            left = abs(delta)
-            while left:  # (one tick at a time round the longest gaps, up to each one's room)
-                for o, c in zip(order.tolist(), cap.tolist()):
-                    if not left:
-                        break
-                    if abs(share[o]) < c:
-                        share[o] += 1 if delta > 0 else -1
-                        left -= 1
-            for o in np.flatnonzero(share).tolist():
-                p, j = where[o]
-                gaps[p][2][j] += share[o]
-            break
+
+        def nudge(have):
+            """The bar's gaps nudged so `have` becomes a length a signature gives: the ticks moved, or None."""
+            i = int(np.searchsorted(lengths, have))
+            for want in sorted(lengths[max(0, i - 3):i + 3].tolist(), key=lambda x: abs(x - have)):
+                delta = want - have
+                if delta == 0:
+                    return 0
+                cap = (up if delta > 0 else down)[order]
+                if cap.sum() < abs(delta):
+                    continue
+                share = np.zeros(len(ks), np.int64)
+                left = abs(delta)
+                while left:  # (one tick at a time round the longest gaps, up to each one's room)
+                    for o, c in zip(order.tolist(), cap.tolist()):
+                        if not left:
+                            break
+                        if abs(share[o]) < c:
+                            share[o] += 1 if delta > 0 else -1
+                            left -= 1
+                for o in np.flatnonzero(share).tolist():
+                    p, j = where[o]
+                    gaps[p][2][j] += share[o]
+                return delta
+            return None
+
+        # (landing on its true line from where the last line was written: the carry settled; else its own length
+        # fitted as before, the carry going on; else written the nearest length and the rest carried on)
+        if nudge(true - carry) is not None:
+            carry = 0
+            continue
+        moved_by = nudge(true) if carry else None
+        need = true + (moved_by or 0) - carry
+        carry = _fit_length(need, lengths) - need
 
 
 def _signatures(keeps, tempo, bars, ppq, to_file):
-    """([(file tick, top, bottom power)], [Spiderweb ticks of the bars no time signature fits]): a time signature
-    wherever the bar length changes, up to the bar after the last Keep timing part (then the project's own). A bar
-    that kept its length keeps its own signature (6/8 stays 6/8, not 3/4); one fitted gets the nearest with its own
-    note value first. A bar squeezed shorter than any signature (or an odd length the nudge can't fix) has none:
-    the bar lines after it are off in other programs (the sound is right)."""
+    """([(file tick, top, bottom power)], [Spiderweb ticks of the bars no time signature fits], [Spiderweb ticks
+    of the bar lines written a little off]): a time signature wherever the bar length changes, up to the bar after
+    the last Keep timing part (then the project's own). A bar that kept its length keeps its own signature (6/8
+    stays 6/8, not 3/4); one fitted gets the nearest with its own note value first. A bar no signature fits is
+    written the nearest length one gives and the next bars put the line right (BAR CARRY-OVER, _written_lines);
+    only the last one, where the project's own go on, can be left with none (the sound is right)."""
     last = max(e for _, e, _ in keeps)
     longest = int(max(bar_lengths(ppq)))
     own = file_sigs(tempo, ppq)
@@ -662,8 +723,9 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
 
     out, prev, unfit = [], None, []
     stop = min(len(bars) - 2, int(np.searchsorted(bars, last, "right")))
+    lines, moved, _ = _written_lines(to_file(bars[:stop + 2]), bar_lengths(ppq))
     for m in range(0, stop + 1):
-        f0, f1 = (int(x) for x in to_file(bars[m:m + 2]))
+        f0, f1 = int(lines[m]), int(lines[m + 1])
         mine = own_at(int(bars[m]))
         sig = mine if f1 - f0 == int(bars[m + 1] - bars[m]) else signature(f1 - f0, ppq, mine[1])
         if sig is None:  # (too long for one signature: as many of the longest as fit, then the rest)
@@ -690,4 +752,4 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
             if (top, power) != prev:
                 out.append((int(to_file(np.array([at]))[0]), top, power))
                 prev = (top, power)
-    return out, unfit
+    return out, unfit, [int(bars[m + 1]) for m in moved]

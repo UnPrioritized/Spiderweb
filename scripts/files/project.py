@@ -1198,6 +1198,8 @@ class ProjectFiles:
             note += tr("project.tempo_dense", where=self.bar_text(plan["dense"][0]))
         if plan.get("unfit"):
             note += tr("project.tempo_unfit", where=self.bar_text(plan["unfit"][0]))
+        if plan.get("moved"):  # (bar carry-over, user 2026-10-24: no surprises in the export)
+            note += tr("project.tempo_moved", where=self.bar_text(plan["moved"][0]))
         if plan.get("gave"):  # (a heads-up only, user 2026-10-23)
             n = plan.get("gave_n") or len(plan["gave"])
             note += trn("project.tempo_cc_gave", n, n=n, where=self.bar_text(plan["gave"][0]))

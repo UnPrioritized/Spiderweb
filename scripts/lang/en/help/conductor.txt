@@ -90,7 +90,9 @@ A MIDI file only has whole ticks, so Keep timing has limits. The pane marks each
 
 • CC moved by up to a tick (orange): CC messages (Hz bass CC lines, pasted CC) that fall between ticks move to the nearest tick so the tempo can stay. Notes are never moved this way.
 
-• No time signature fits this bar (red): Keep timing made a bar a length no time signature fits, so Fit bar lines can't keep the bar lines there. Other programs show the bar lines off there; the sound is still right.
+• Bar line moved a little (orange): Keep timing made a bar a length no time signature fits. Fit bar lines writes the nearest one instead, so other programs show that bar line a little off, and the next bars put it back. The sound is still right.
+
+• No time signature fits this bar (red): the same, but with no notes after it to put the bar line back, so the bar is left without one. Other programs show the bar lines off there; the sound is still right.
 
 • Inside a catch-up's yellow area Keep timing is off: the catch-up needs the real tempo there.
 
