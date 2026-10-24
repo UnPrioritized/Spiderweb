@@ -962,6 +962,34 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 got = j
         return got
 
+    def zones(self, skip=None):
+        """[(first, end beat)] of the catch-ups' yellow + teal areas (skip: leave out catch-up line skip's own)."""
+        return [(min(st["from"], st["line"]), st["end"]) for j, (st, _) in
+                enumerate(plans(self.ed(), self.base(), self.app.ppq))
+                if st["end"] is not None and (skip is None or self.ed()["catch"][j] is not skip)]
+
+    def room(self, b, skip=None):
+        """(first, last beat) free of other catch-ups' areas around beat b (user 2026-10-24: a catch-up being
+        made / dragged stops dead at another one's edge), None when b is inside one."""
+        lo, hi = 0.0, math.inf
+        for a, e in self.zones(skip):
+            if a - 1e-9 <= b < e - 1e-9 and not abs(b - a) < 1e-9:
+                return None
+            if e <= b + 1e-9:
+                lo = max(lo, e)
+            elif a >= b - 1e-9:
+                hi = min(hi, a)
+        return lo, hi
+
+    def edge_at(self, x):
+        """("start", j) / ("end", j): the catch-up edge under the mouse. Where one's teal end touches another's
+        yellow start, the area the mouse is over decides (user 2026-10-24: never a tie)."""
+        s, n = self.start_at(x), self.end_at(x)
+        if s is not None and n is not None and s != n:
+            st = plans(self.ed(), self.base(), self.app.ppq)[s][0]
+            return ("start", s) if x >= self.app.roll.t2x(st["from"]) else ("end", n)
+        return ("start", s) if s is not None else ("end", n) if n is not None else None
+
     def end_at(self, x):
         """The catch-up whose teal area's right edge is at x (its index), or None."""
         roll = self.app.roll
@@ -1018,7 +1046,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.app.push_undo(name=tr("tempo.step_catch_add"))
         item = [line, "flat", ""]
         catch_set(item, 3, p["a"] if p["a"] < line else None)
-        catch_set(item, 4, max(self.snap_beat(self.app.roll.x2t(e.x), e), line + tick))
+        end = min(self.snap_beat(self.app.roll.x2t(e.x), e), (self.room(line) or (0, math.inf))[1])
+        catch_set(item, 4, max(end, line + tick))  # (stops at the next catch-up's area, user 2026-10-24)
         tempo["catch"].insert(sum(1 for c in tempo["catch"] if c[0] < line), item)
         self.placing = None
         self.box.pick_tool_hint()
@@ -1230,12 +1259,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.bands = []
                 self.set_sel([item])
             return self.start_move(e, item, pushed=False)
-        for kind, j in (("start", self.start_at(e.x)), ("end", self.end_at(e.x))):
-            if j is not None:  # the yellow area's left edge / the teal area's right edge
-                self.bands = []
-                self.set_sel([tempo["catch"][j]])
-                self.drag = {"kind": kind, "item": tempo["catch"][j], "x": e.x, "pushed": False}
-                return
+        edge = self.edge_at(e.x)
+        if edge is not None:  # the yellow area's left edge / the teal area's right edge
+            kind, j = edge
+            self.bands = []
+            self.set_sel([tempo["catch"][j]])
+            self.drag = {"kind": kind, "item": tempo["catch"][j], "x": e.x, "pushed": False}
+            return
         b, v = self.tick_beat(roll.x2t(e.x)), self.snap_bpm(self.y2b(e.y), e)
         if tool == "select":
             beat = roll.x2t(e.x)
@@ -1270,6 +1300,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
                      "press": self.app.roll.x2t(e.x), "band": band, "ref": item[0] if item is not None else self.bands_reach()[0],
                      "time_only": self.box.tool.get() == "select",
                      "v0": item[1] if item is not None and self.is_point(item) else None, "db": 0.0}
+        held = ids(self.sel)  # (the other catch-ups' areas as they are now: a moved one stops at them)
+        self.drag["zones"] = [(min(st["from"], st["line"]), st["end"]) for j, (st, _) in
+                              enumerate(plans(self.ed(), self.base(), self.app.ppq))
+                              if st["end"] is not None and id(self.ed()["catch"][j]) not in held]
 
     def copy_drag(self, d):
         """A Ctrl+drag's first move: copies of what the Select box holds are what moves (the originals stay)."""
@@ -1329,6 +1363,12 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if d["kind"] == "catch1":
             d["x1"] = e.x
             d["span"] = self.box_span(d, e)
+            room = self.room(d["b0"]) if d["span"] else None  # (stops dead at another catch-up's edge, user)
+            if d["span"] and room is not None:
+                lo, hi = max(d["span"][0], room[0]), min(d["span"][1], room[1])
+                d["span"] = (lo, hi) if hi - lo > 1e-9 else None
+            elif d["span"]:
+                d["span"] = None
             return self.request_redraw()
         if d["kind"] == "bend":
             if not d["pushed"]:
@@ -1351,6 +1391,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 d["pushed"] = True
             c, tick = d["item"], 1.0 / max(1, self.app.ppq)
             b = self.move_beat(roll.x2t(e.x), e)
+            room = self.room(c[0], skip=c)  # (not into another catch-up's area: stops at its edge, user)
+            if room is not None:
+                b = min(max(b, room[0]), room[1])
             catch_set(c, 3, min(b, c[0] - tick)) if d["kind"] == "start" else catch_set(c, 4, max(b, c[0] + tick))
             self.app.tempo_changed()
             return self.show_position(e)
@@ -1416,6 +1459,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
             span = self.run_span()
             if span and any(id(p) in moved and not span[0] - 1e-9 <= p[0] <= span[1] + 1e-9 for p in tempo["points"]):
                 return True
+            if d.get("zones") and any(id(c) in moved for c in tempo["catch"]):  # (a catch-up's area into another's
+                tempo_edited()  # as they were at the press: it stops where it last fitted, user 2026-10-24)
+                for j, (st, _) in enumerate(plans(tempo, self.base(), self.app.ppq)):
+                    a, e = min(st["from"], st["line"]), st["end"] if st["end"] is not None else st["line"]
+                    if id(tempo["catch"][j]) in moved and any(a < ze - 1e-9 and za < e - 1e-9 or
+                                                              za - 1e-9 <= st["line"] < ze - 1e-9
+                                                              for za, ze in d["zones"]):
+                        return True
             for key in ("points", "catch"):
                 its = tempo[key]
                 k = 0
@@ -1815,7 +1866,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         tempo = self.ed()
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
-        on_edge = item is None and (self.start_at(e.x) is not None or self.end_at(e.x) is not None)
+        on_edge = item is None and self.edge_at(e.x) is not None
         on_edge = on_edge or item is None and self.sig_mark_at(e.x, e.y) is not None  # (a signature's mark)
         if item is None and not on_edge and not self.in_band(e.x):  # (empty space: the menu waits to see if it's
             self.drop_menu_wait()                                    # a double right-click, user)
@@ -1856,8 +1907,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if not on_mark and self.box.mode == "visual" and zone is None:  # (catch-ups: the visual tempo's only; never
             sep()                                                       # inside another one's area, user)
             menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
-        for k, at, key in ((3, self.start_at, "tempo.catch_auto"), (4, self.end_at, "tempo.catch_end_auto")):
-            n = at(e.x) if item is None else None
+        edge = self.edge_at(e.x) if item is None else None
+        for k, kind, key in ((3, "start", "tempo.catch_auto"), (4, "end", "tempo.catch_end_auto")):
+            n = edge[1] if edge and edge[0] == kind else None
             if n is not None and catch_get(tempo["catch"][n], k) is not None:  # (an edge set by hand)
                 sep()
                 menu.add_command(label=tr(key), command=lambda c=tempo["catch"][n], k=k: self.auto_edge(c, k))
@@ -2199,7 +2251,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if roll.sx is None or self.view is None:
             return
         if self.placing and self.placing["step"] == 2:  # (the teal area shown up to the mouse before the press)
-            self.placing["hover"] = self.snap_beat(roll.x2t(e.x), e)
+            stop = (self.room(self.placing["b"]) or (0, math.inf))[1]  # (up to the next catch-up's area)
+            self.placing["hover"] = min(self.snap_beat(roll.x2t(e.x), e), stop)
             self.request_redraw()
         # the pointer + the hint line: only what can be done right here (user 2026-10-22: the whole list was a wall
         # of text)
@@ -2219,8 +2272,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "fleur", "on_handle" if handle[0] == "part" else "on_catch_handle"
         elif self.catch_at(e.x) is not None:
             want, hint = "sb_h_double_arrow", "on_catch"
-        elif self.start_at(e.x) is not None or self.end_at(e.x) is not None:
-            want, hint = "sb_h_double_arrow", "on_edge"
+        elif self.edge_at(e.x) is not None:  # (which one: the hint says, user 2026-10-24)
+            want, hint = "sb_h_double_arrow", "on_" + self.edge_at(e.x)[0]
         elif self.dense_at(e.x):  # (an orange line: what it means)
             want, hint = PENCIL_CURSOR if self.box.tool.get() != "select" else SELECT_CURSOR, "on_dense"
         elif self.box.tool.get() != "select":
@@ -2488,6 +2541,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
                                       fill=look.TEMPO_CATCH_BG if plan["ok"] else look.TEMPO_BAD_BG)
                 if st["manual_end"] and xe >= kb:  # (its right edge drags; set by hand: a solid line)
                     self.create_line(xe, 0, xe, h, fill=look.TEMPO_CATCH, width=lw * 2)
+        zone_starts = {round(min(st["from"], st["line"]), 9) for st, _ in worked if st["end"] is not None}
+        for st, _ in worked:  # (two catch-ups' areas touching: a thin gap between, user 2026-10-24)
+            if st["end"] is not None and round(st["end"], 9) in zone_starts:
+                x = roll.t2x(st["end"])
+                if kb <= x <= w:
+                    self.create_rectangle(x - 1.5 * lw, 0, x + 1.5 * lw, h, fill=look.ROLL_BG, outline="",
+                                          tags="catch_gap")
         ppq = self.app.ppq
         heard_mode = self.box.mode == "heard"  # (Draw: Heard tempo: the heard lines full, the drawn one faded)
         keep_spans = [(max(kb, roll.t2x(a / ppq)), w if e is None else min(w, roll.t2x(e / ppq)), u, a / ppq,
