@@ -966,13 +966,19 @@ class RollDrawing:
         cols += [(round(self.t2x(b)), look.GRID_BEAT) for b in beat_lines(sigs, max(0.0, b_lo), b_hi, 5 / self.sx)]
         cols += [(round(self.t2x(b)), look.GRID_BAR) for b, _ in bar_lines(sigs, max(0.0, b_lo), b_hi, 6 / self.sx)]
         ppq = self.app.ppq
-        tick_px = self.sx / ppq
-        if tick_px >= TICK_FROM:  # zoomed far in: a line each tick, fading in (first: a snap / beat / bar line wins)
-            by = 0.4 + 0.6 * min(1.0, (tick_px - TICK_FROM) / (TICK_FULL - TICK_FROM))
+        by = self.tick_by()
+        if by is not None:  # zoomed far in: a line each tick, fading in (first: a snap / beat / bar line wins)
             color, taken = fade(look.GRID_TICK, 1 - by), {x for x, _ in cols}
             ticks = (round(self.t2x(i / ppq)) for i in range(max(0, math.ceil(b_lo * ppq)), math.floor(b_hi * ppq) + 1))
             cols = [(x, color) for x in ticks if x not in taken] + cols
         return [c for c in cols if int(self.kb_w) <= c[0] < w]
+
+    def tick_by(self):
+        """How strong the tick lines show (0.4 .. 1), None while zoomed out too far for them."""
+        tick_px = self.sx / self.app.ppq
+        if tick_px < TICK_FROM:
+            return None
+        return 0.4 + 0.6 * min(1.0, (tick_px - TICK_FROM) / (TICK_FULL - TICK_FROM))
 
     def draw_grid(self, w, h, rows, cols):
         x0, top = self.kb_w, self.ruler_h

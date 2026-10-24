@@ -50,6 +50,17 @@ NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
+AREA_SHADE = 0.08  # how far a tick line on a coloured area is from that colour (at full strength)
+
+
+def area_shade(colour, by):
+    """A tick line's colour on a coloured area (user 2026-10-24): the area's colour, darker (dark look: lighter,
+    like the grid there), by = how strong the tick lines show."""
+    to = 255 if look.DARK else 0
+    k = AREA_SHADE * by
+    return "#%02x%02x%02x" % tuple(round(c + (to - c) * k) for c in (int(colour[i:i + 2], 16) for i in (1, 3, 5)))
+
+
 def ids(items):
     """The ids of items: "is it one of these" without going through them all each time."""
     return {id(it) for it in items}
@@ -2790,19 +2801,22 @@ class TempoPane(ConductorMarks, tk.Canvas):
         top, bot = self.area()
         lw = max(1, round(self.scale))
         worked = plans(tempo, base, self.app.ppq)
+        areas = []  # (x0, x1, colour) of each coloured area, later ones on top: the faint grid lines' shade
         # stretches: the held part (amber) and its catch-up (teal; red when it can't work)
         for st, plan in worked:
             x1 = roll.t2x(st["line"])
             if st["end"] is not None and st["from"] < st["line"]:  # (its left edge drags: where it counts from)
                 x0 = roll.t2x(st["from"])
                 self.create_rectangle(max(kb, x0), 0, max(kb, x1), h, fill=look.TEMPO_DRAWN_BG, outline="")
+                areas.append((x0, x1, look.TEMPO_DRAWN_BG))
                 if x0 >= kb:
                     self.create_line(x0, 0, x0, h, fill=look.TEMPO_DRAWN_EDGE, width=lw * (2 if st["manual"] else 1),
                                      dash=() if st["manual"] else (3, 3))
             if st["end"] is not None:
                 xe = roll.t2x(st["end"])
-                self.create_rectangle(max(kb, x1), 0, max(kb, xe), h, outline="",
-                                      fill=look.TEMPO_CATCH_BG if plan["ok"] else look.TEMPO_BAD_BG)
+                fill = look.TEMPO_CATCH_BG if plan["ok"] else look.TEMPO_BAD_BG
+                self.create_rectangle(max(kb, x1), 0, max(kb, xe), h, outline="", fill=fill)
+                areas.append((x1, xe, fill))
                 if st["manual_end"] and xe >= kb:  # (its right edge drags; set by hand: a solid line)
                     self.create_line(xe, 0, xe, h, fill=look.TEMPO_CATCH, width=lw * 2)
         zone_starts = {round(min(st["from"], st["line"]), 9) for st, _ in worked if st["end"] is not None}
@@ -2812,6 +2826,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 if kb <= x <= w:
                     self.create_rectangle(x - 1.5 * lw, 0, x + 1.5 * lw, h, fill=look.ROLL_BG, outline="",
                                           tags="catch_gap")
+                    areas.append((x - 1.5 * lw, x + 1.5 * lw, None))
         ppq = self.app.ppq
         heard_mode = self.box.mode == "heard"  # (Draw: Heard tempo: the heard lines full, the drawn one faded)
         keep_spans = [(max(kb, roll.t2x(a / ppq)), w if e is None else min(w, roll.t2x(e / ppq)), u, a / ppq,
@@ -2819,6 +2834,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         keep_spans = [s for s in keep_spans if s[1] > s[0]]
         for x0, x1, *_ in keep_spans:  # Keep timing parts (purple), their notes keep the tempo heard before
             self.create_rectangle(x0, 0, x1, h, fill=look.TEMPO_KEEP_BG, outline="")
+            areas.append((x0, x1, look.TEMPO_KEEP_BG))
         offs = self.keep_offs(worked)  # (Keep timing inside a catch-up's yellow area: off, user 2026-10-24)
         for a, b in offs:
             x0, x1 = max(kb, roll.t2x(a)), min(w, roll.t2x(b))
@@ -2834,11 +2850,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 xa = min(w, roll.t2x(a)) if a != math.inf else w
                 if xa > x:
                     self.create_rectangle(x, 0, xa, h, fill=look.TEMPO_OUT_BG, outline="", tags="heard_out")
+                    areas.append((x, xa, look.TEMPO_OUT_BG))
                 x = max(x, w if e is None else roll.t2x(e))
                 if x >= w:
                     break
+        by = roll.tick_by() or 1.0
         for x, c in roll.grid_cols(w):
             if x >= kb:
+                if c not in (look.GRID_BEAT, look.GRID_BAR):  # (tick / snap lines: a shade of the area they're on)
+                    c = next((area_shade(f, by) if f else c for x0, x1, f in reversed(areas) if x0 <= x < x1), c)
                 self.create_line(x, 0, x, h, fill=c)
         for v, strong in self.labels():
             y = round(float(self.b2y(v)))
