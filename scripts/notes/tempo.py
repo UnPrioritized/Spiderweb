@@ -830,11 +830,12 @@ def keep_end_bpm(tempo, base, ppq, i):
     return None
 
 
-def end_point(tempo, base, ppq, i):
+def end_point(tempo, base, ppq, i, force=False):
     """Keep timing turned on (or swapped) for point i's part: the tempo after it starts at the BPM heard at its end,
     so the sound goes on smoothly (user 2026-10-24: they put that point by hand; it can be deleted). Nothing when
-    the part runs to the song's end, the part after keeps timing too or the line is there already. True when it
-    changed something."""
+    the part runs to the song's end, the part after keeps timing too, the line is there already or the drawn line
+    jumps there already (a jump the user made stays, user 2026-10-24: their point after it moved; force: anyway).
+    True when it changed something."""
     pts = tempo["points"]
     changed()
     v = keep_end_bpm(tempo, base, ppq, i)
@@ -844,6 +845,9 @@ def end_point(tempo, base, ppq, i):
     on = [k for k, q in enumerate(pts) if abs(q[0] - pts[i + 1][0]) < 1e-9]
     q, p = pts[on[-1]], pts[i]
     if keeps(q) or abs(q[1] - v) <= 1e-9 * v:
+        return False
+    arrive = pts[on[0]][1] if len(on) == 2 or p[2] != "hold" else p[1]
+    if not force and abs(arrive - q[1]) > 1e-9 * q[1]:
         return False
     if len(on) == 1 and p[2] != "hold" and p[1] != q[1]:  # (a glide arrives: it stays, the tempo jumps from there)
         pts.insert(on[0] + 1, [q[0], v] + copy.deepcopy(q[2:]))
@@ -866,6 +870,9 @@ def swap_part(tempo, base, ppq, i, j=None):
     a = p[0]
     e = pts[j + 1][0] if j + 1 < len(pts) else None
     kb = clamp_bpm(heard_before(tempo, base, ppq, i, j))
+    was = keep_end_bpm(tempo, base, ppq, j)  # (the sound smooth after it before: smooth after the swap too)
+    smooth = was is not None and abs(pts[[k for k, q in enumerate(pts) if abs(q[0] - e) < 1e-9][-1]][1] - was) \
+        <= 1e-9 * was
     h = heard_of(p) or {"line": []}
     hl = copy.deepcopy(h["line"])  # (the heard line over the part, cut at its ends: the same line)
     split_at(hl, a, kb)
@@ -907,7 +914,7 @@ def swap_part(tempo, base, ppq, i, j=None):
     lp = pts[last]
     drop_loose(pts)  # (an arrival on a beat nothing glides into any more: gone, so the index found again)
     last = next(k for k, q in enumerate(pts) if q is lp)
-    end_point(tempo, base, ppq, last)
+    end_point(tempo, base, ppq, last, force=smooth)
     return last
 
 
