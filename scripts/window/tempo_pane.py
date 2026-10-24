@@ -144,16 +144,21 @@ class TempoBox(ttk.Frame):
         bar = self.bar = ttk.Frame(self, padding=(2, 2))
         bar.pack(fill="x")
         ttk.Label(bar, text=tr("tempo.tempo")).pack(side="left", padx=(2, 4))
-        # the exact BPM at the play line (user 2026-10-22; a set width: playing doesn't push the tools about)
-        # (always 2 decimals, room for the fastest a file holds: "60,000,000.00"; the tools after it never move)
-        self.play_bpm = ttk.Label(bar, text="", width=len(f"{60_000_000:,.2f}") + 1, foreground=look.INFO)
-        self.play_bpm.pack(side="left", padx=(0, 0))
+        # the exact BPM at the play line (user 2026-10-22), then the tempo heard there in purple brackets, only where
+        # it differs: inside a Keep timing part (user 2026-10-24: right after the number). Both in a box with room
+        # for the longest, "60,000,000.00 (60,000,000.00)": playing never pushes the tools after it about
+        nums = self.play_box = ttk.Frame(bar)
+        nums.pack(side="left", padx=(0, 4))
+        self.play_bpm = ttk.Label(nums, text="", foreground=look.INFO)
+        self.play_bpm.pack(side="left")
         Tooltip(self.play_bpm, tr("tempo.play_bpm_tip"))
-        # (the tempo heard there in brackets, purple, only where it differs: inside a Keep timing part; user
-        # 2026-10-24; room kept for the longest so the bar never shifts)
-        self.play_heard = ttk.Label(bar, text="", width=len(f"({60_000_000:,.2f})") + 1, foreground=look.TEMPO_KEEP)
-        self.play_heard.pack(side="left", padx=(0, 4))
+        self.play_heard = ttk.Label(nums, text="", foreground=look.TEMPO_KEEP)
+        self.play_heard.pack(side="left", padx=(4, 0))
         Tooltip(self.play_heard, tr("tempo.play_heard_tip"))
+        most = f"{60_000_000:,.2f}"
+        font = tkfont.Font(root=self, font=ttk.Style(self).lookup("TLabel", "font") or "TkDefaultFont")
+        nums.configure(width=font.measure(f"{most} ({most})") + 8, height=self.play_bpm.winfo_reqheight())
+        nums.pack_propagate(False)
         # (one always down, user 2026-10-22, like many MIDI programs: Line's click = a point, no pencil-only mode)
         self.tool = tk.StringVar(value="line")  # select / line / formula
         self.last_pencil = "line"  # (double right-click: Select <-> this)
