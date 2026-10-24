@@ -1376,6 +1376,31 @@ class TempoPane(ConductorMarks, tk.Canvas):
         for key in ("points", "catch"):
             tempo[key].sort(key=lambda it: it[0])
 
+    def copies_at(self, d):
+        """A Ctrl+drag let go now: (its clip, BPM moved along; the beat it's laid from), or None (not moved)."""
+        dv = next((s[1] - v for s, _, v in d["orig"] if v is not None), 0.0)
+        clip = d.get("clip")
+        if not (self.bands and clip and (abs(d["db"]) > 1e-12 or abs(dv) > 1e-12)):
+            return None
+        clip = dict(clip, points=[[p[0], clamp_bpm(p[1] + dv)] + p[2:] for p in clip["points"]])
+        return clip, joined(d["band"])[0][0] + d["db"]
+
+    def copies_preview(self):
+        """While a Ctrl+drag is held: the line as letting go gives it (hunt 2026-10-24: the copies drawn over the
+        old points looked like catch-ups merging, then jumped when let go): (that line, the copies in it), else
+        None."""
+        d = self.drag
+        if not d or d["kind"] != "move" or d.get("copies") is None:
+            return None
+        laid = self.copies_at(d)
+        if laid is None:
+            return None
+        tempo, cop = self.ed(), ids(d["copies"])
+        work = dict(tempo, **{key: [copy.deepcopy(it) for it in tempo[key] if id(it) not in cop]
+                              for key in ("points", "catch")})
+        new_p, new_c, _, _ = self.lay_copies(work, *laid, self.ed_base())
+        return work, new_p + new_c
+
     def is_point(self, item):
         return any(item is p for p in self.ed()["points"])
 
@@ -1630,14 +1655,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if d.get("copies") is not None:  # (Ctrl+drag let go: the copies replace what was where they landed,
                 # as a paste does; not moved = no copies)
                 tempo, cop = self.ed(), ids(d["copies"])
-                dv = next((s[1] - v for s, _, v in d["orig"] if v is not None), 0.0)
-                moved = bool(self.bands) and (abs(d["db"]) > 1e-12 or abs(dv) > 1e-12)
+                laid = self.copies_at(d)
                 for key in ("points", "catch"):  # (the copies only showed it: laid in like a paste, hunt 2026-10-22)
                     tempo[key][:] = [it for it in tempo[key] if id(it) not in cop]
-                clip = d.get("clip")
-                if moved and clip:
-                    clip = dict(clip, points=[[p[0], clamp_bpm(p[1] + dv)] + p[2:] for p in clip["points"]])
-                    self.put_copies(clip, joined(d["band"])[0][0] + d["db"], None, push=False)
+                if laid is not None:
+                    self.put_copies(*laid, None, push=False)
                 else:
                     self.bands = list(d["band"] or [])
                     self.sel = self.in_spans(self.bands)
@@ -2671,6 +2693,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         the old one): {"tempo": the project's tempo line with it} (Draw: Visual tempo) / {"heard": {id(a run's
         point): its heard line with it}} (Draw: Heard tempo), else None."""
         d, ppq = self.drag, max(1, self.app.ppq)
+        got = self.copies_preview() if self.box.mode == "heard" and self._ed is not None else None
+        if got is not None:  # (a Ctrl+drag held, Heard tempo: its line as letting go gives it)
+            return {"heard": {id(m): got[0]["points"] for m in self._ed[3]}}
         if not d or d["kind"] != "draw" or not d.get("moved") or abs(d["b1"] - d["b0"]) < 0.5 / ppq:
             return None
         kind = DRAWS.get(self.box.tool.get(), "line")
@@ -2707,6 +2732,17 @@ class TempoPane(ConductorMarks, tk.Canvas):
         return out
 
     def redraw(self):
+        got = self.copies_preview() if self.box.mode != "heard" else None
+        if got is None:
+            return self.draw_all()
+        keep = self.app.tempo, self.sel  # (a Ctrl+drag held: everything drawn as letting go gives it)
+        self.app.tempo, self.sel = got
+        try:
+            self.draw_all()
+        finally:
+            self.app.tempo, self.sel = keep
+
+    def draw_all(self):
         self._redraw_pending = False
         if not self.winfo_ismapped():
             return
