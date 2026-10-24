@@ -1736,6 +1736,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if d["pushed"]:
                 self.app.settle_history()
         elif d["kind"] == "move":
+            if any(v is None for _, _, v in d["orig"]):  # (a catch-up line let go: its edges' thick lines go)
+                self.request_redraw()
             if d.get("copies") is not None:  # (Ctrl+drag let go: the copies replace what was where they landed,
                 # as a paste does; not moved = no copies)
                 tempo, cop = self.ed(), ids(d["copies"])
@@ -3005,8 +3007,15 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if on.sum() >= 2:
                 self.create_line(*np.column_stack([px[on], py[on]]).ravel().tolist(), fill=look.TEMPO_PICKED,
                                  width=lw + 3)
-        for st, _ in worked:  # (an edge set by hand the line went past: where the area comes back to, thick)
-            for at, col in ((st["pin"], look.TEMPO_DRAWN_EDGE), (st["pin_end"], look.TEMPO_CATCH)):
+        d = self.drag if isinstance(self.drag, dict) else {}
+        held = {id(s) for s, _, v in d.get("orig", ()) if v is None}  # (catch-up lines being dragged)
+        for j, (st, _) in enumerate(worked):  # (an edge set by hand the line went past, or with no area to show
+            # it: where the area comes back to, thick; ALWAYS while its line is dragged, user 2026-10-24)
+            c = tempo["catch"][j] if j < len(tempo["catch"]) else None
+            always = c is not None and id(c) in held or st["end"] is None
+            start = catch_get(c, 3) if always and c is not None else st["pin"]
+            end = catch_get(c, 4) if always and c is not None else st["pin_end"]
+            for at, col in ((start, look.TEMPO_DRAWN_EDGE), (end, look.TEMPO_CATCH)):
                 if at is not None and kb <= roll.t2x(at) <= w:
                     self.create_line(roll.t2x(at), 0, roll.t2x(at), h, fill=col, width=lw * 4, tags="catch_pin")
         # catch-up lines and their words
