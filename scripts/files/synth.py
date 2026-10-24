@@ -56,7 +56,10 @@ GROUP_QUEUE = 8 << 20  # bytes of messages a LiveGroup's synth holds waiting (a 
 # 0) the sound device's ONE mixing thread made them one after another: all 8 lost ~100 ms a second together in the
 # Lagtester's busy parts at ~20 % load each (user heard stutter, 2026-10-24); 0.03 s already fixed it. The loaded
 # MIDI's notes are sent this much early (play_loaded) so they still sound on the play line.
-GROUP_BUFFER = 0.05
+GROUP_BUFFER = 0.03
+# ms between BASS's refills of those buffers: notes sent within one refill all start at its beginning, so a long one
+# makes fast spam uneven (user 2026-10-24: smoother in OmniMIDI, which makes sound in small slices). 5 = BASS's least.
+GROUP_PERIOD = 5
 _CONFIG_MIDI_COMPACT = 0x10400
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
 _EV_PITCHRANGE = 5
@@ -702,10 +705,8 @@ class Live:
         font = _Font(self.font, -1, 0)
         midi.BASS_MIDI_StreamSetFonts(self.handle, ctypes.byref(font), 1)
         h, at = self.handle, bass.BASS_ChannelSetAttribute
-        if plain:  # (refilled every quarter of it: a refill period longer than the buffer breaks up, see Stream)
-            ms = max(5, int(GROUP_BUFFER * 1000 / 4))
-            if bass.BASS_GetConfig(_CONFIG_UPDATEPERIOD) > ms:
-                bass.BASS_SetConfig(_CONFIG_UPDATEPERIOD, ms)
+        if plain and bass.BASS_GetConfig(_CONFIG_UPDATEPERIOD) > GROUP_PERIOD:
+            bass.BASS_SetConfig(_CONFIG_UPDATEPERIOD, GROUP_PERIOD)
         for attr, value in ((_ATTRIB_BUFFER, GROUP_BUFFER if plain else 0), (_ATTRIB_MIDI_SRC, 0), (_ATTRIB_MIDI_KILL, 1),
                             (_ATTRIB_MIDI_CPU, self.CPU), (_ATTRIB_MIDI_QUEUE_ASYNC, GROUP_QUEUE if plain else self.QUEUE),
                             (_ATTRIB_VOL, volume)):
