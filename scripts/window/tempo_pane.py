@@ -211,6 +211,13 @@ class TempoBox(ttk.Frame):
         # drag the word / Up, Down / the wheel (user 2026-10-22), like every number box; several BPMs: from the first
         sc = Scrub(app, [(self.bpm_box, self.bpm_var, self.scrubbed_bpm)], (1, 10, 0.01), MIN_BPM, MAX_BPM, label=lb)
         sc.read = lambda text: calc(str(text).replace(",", ""))  # (blank: the first one's number itself)
+        # several points picked: Keep timing for every part they start (user 2026-10-24)
+        self.keeps_label = ttk.Label(row, text=tr("tempo.keep"))
+        self.keeps_box = ttk.Combobox(row, state="readonly", width=15,
+                                      values=[tr("tempo.keep_" + k) for k in KEEP_HOW])
+        self.keeps_box.bind("<<ComboboxSelected>>", lambda e: self.picked_keeps())
+        for w in (self.keeps_label, self.keeps_box):
+            Tooltip(w, tr("tempo.keeps_tip"))
         self.part_row = row = ttk.Frame(row2)
         ttk.Label(row, text=tr("tempo.curve")).pack(side="left")
         self.curve = ttk.Combobox(row, state="readonly", width=20, values=[tr("tempo.curve_" + k) for k in CURVES])
@@ -307,6 +314,13 @@ class TempoBox(ttk.Frame):
         if kind == "point":
             if self.focus_get() is not self.bpm_box:
                 self.sync_bpm([tempo["points"][i] for i in pick[1]])
+            many = self.mode == "visual" and len(pick[1]) > 1
+            if many != bool(self.keeps_box.winfo_manager()):
+                for w in (self.keeps_label, self.keeps_box):
+                    w.pack(side="left", padx=(8 if w is self.keeps_label else 4, 0)) if many else w.pack_forget()
+            if many:
+                hows = {keep_how(tempo["points"][i]) for i in pick[1][:-1]}
+                self.keeps_box.set(tr("tempo.keep_" + hows.pop()) if len(hows) == 1 else "")
         elif kind == "part":
             p = tempo["points"][pick[1]]
             last = pick[1] == len(tempo["points"]) - 1  # (after the last point: it holds on, only Keep timing)
@@ -464,27 +478,50 @@ class TempoBox(ttk.Frame):
 
     def picked_keep(self):
         pick = self.pane.picked()
-        if pick and pick[0] == "part":
-            want, tempo, i = KEEP_HOW[max(0, self.keep_box.current())], self.app.tempo, pick[1]
-            p = tempo["points"][i]
-            if want != keep_how(p) and self.mode == "visual":
-                self.app.push_undo(name=tr("tempo.step_keep"))
-                p.extend([False] * (6 - len(p)))
-                base, ppq = self.pane.base(), self.app.ppq
-                if want == "off":
-                    p[5] = False  # (only the tick: the bend and heard line after it stay, hunt 2026-10-22)
-                else:
-                    on = keeps(p)
-                    p[5] = True
-                    tempo_edited()
-                    if keep_how(p) != want:  # (Keep the audio <-> Keep the visual: the two lines swap, on the
-                        # whole run the part is in: its parts share one heard line)
-                        s, t = next(r for r in keep_runs(tempo) if r[0] <= i <= r[1])
-                        swap_part(tempo, base, ppq, s, t)
-                    elif not on:  # (the tempo after it goes on from where the heard line ends, user 2026-10-24)
-                        end_point(tempo, base, ppq, i)
-                self.app.tempo_changed()
+        if pick and pick[0] == "part" and self.mode == "visual":
+            i = pick[1]  # (a part of a Keep timing run: the whole run, user 2026-10-24: they're one part)
+            s, t = next((r for r in keep_runs(self.app.tempo) if r[0] <= i <= r[1]), (i, i))
+            self.set_keep(list(range(s, t + 1)), KEEP_HOW[max(0, self.keep_box.current())])
         self.app.roll.focus_set()
+
+    def picked_keeps(self):
+        """Several points picked: Keep timing for the parts between them (the last one's part leaves the picked
+        stretch: not it)."""
+        pick = self.pane.picked()
+        if pick and pick[0] == "point" and len(pick[1]) > 1 and self.mode == "visual" and \
+                self.keeps_box.current() >= 0:
+            self.set_keep(pick[1][:-1], KEEP_HOW[self.keeps_box.current()])
+        self.app.roll.focus_set()
+
+    def set_keep(self, idx, want):
+        """Keep timing Off / Keep the audio / Keep the visual for the parts of points idx (one undo step): turned on
+        = the tempo after goes on from where the heard line ends (end_point); audio <-> visual = each run's two
+        lines swap (swap_part)."""
+        tempo = self.app.tempo
+        pts = tempo["points"]
+        if not idx or all(keep_how(pts[i]) == want for i in idx):
+            return
+        self.app.push_undo(name=tr("tempo.step_keep"))
+        base, ppq = self.pane.base(), self.app.ppq
+        picked = [pts[i] for i in idx]
+        newly = set()
+        for p in picked:
+            p.extend([False] * (6 - len(p)))
+            if want != "off" and not keeps(p):
+                newly.add(id(p))
+            p[5] = want != "off"  # (only the tick: the bend and heard line after it stay, hunt 2026-10-22)
+        tempo_edited()
+        if want != "off":
+            mine = ids(picked)
+            for s, t in reversed(keep_runs(tempo)):  # (from the end: the indices before stay right)
+                if not any(id(q) in mine for q in pts[s:t + 1]):
+                    continue
+                if keep_how(pts[s]) != want:
+                    swap_part(tempo, base, ppq, s, t)
+                elif any(id(q) in newly for q in pts[s:t + 1]):
+                    end_point(tempo, base, ppq, t)
+                tempo_edited()
+        self.app.tempo_changed()
 
     def set_mode(self, key):
         """Draw: Visual tempo / Heard tempo (user 2026-10-24): which line the tools edit; the other fades and can't
@@ -2456,7 +2493,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         dense = self.dense_now()
-        for x0, x1, u, b0, b1, _ in keep_spans:  # (the words on top)
+        run_of = {k: n for n, (s, t) in enumerate(keep_runs(tempo)) for k in range(s, t + 1)}
+        words = []  # [x0, x1, too close, run, end beat]: a run's pieces side by side = one part, one word (user)
+        for x0, x1, u, b0, b1, i in keep_spans:
             # notes too close for its tempo (user 2026-10-22: shown while editing, not only after the export): a
             # dashed orange line on each spot (one per pixel)
             bad = bisect.bisect_left(dense, b0 - 1e-9) < bisect.bisect_right(dense, b1 + 1e-9)
@@ -2464,6 +2503,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
                           bisect.bisect_right(dense, min(b1, roll.x2t(x1)) + 1e-9)]
             for x in np.unique(np.round(roll.t2x(np.asarray(shown, float)))).tolist() if shown else ():
                 self.create_line(x, 0, x, h, fill=look.WARN, dash=(3, 3), width=lw)
+            if words and words[-1][3] == run_of.get(i) and abs(words[-1][4] - b0) < 1e-9:
+                words[-1][1], words[-1][2], words[-1][4] = x1, words[-1][2] or bad, b1
+            else:
+                words.append([x0, x1, bad, run_of.get(i), b1])
+        for x0, x1, bad, _, _ in words:  # (the words on top)
             text, colour = (tr("tempo.keep_dense"), look.WARN) if bad else (tr("tempo.keep"), look.TEMPO_KEEP)
             if x1 - x0 > 70 * self.scale:
                 self.create_text((x0 + x1) / 2, top + 8 * self.scale, text=text, fill=colour,
