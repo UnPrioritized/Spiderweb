@@ -1628,6 +1628,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         d, self.drag = self.drag, None
         if not d:
             return
+        roll = self.app.roll  # (the ruler's tempo marks, kept as they were while a big tempo map was dragged)
+        self.after_idle(lambda: roll.draw_tempo_marks(roll.kept_box() or []))
         live = self.live_line()
         if drop_loose(self.ed()["points"]):  # (a jump's first point the drag left with nothing gliding in)
             self.app.tempo_changed()

@@ -1805,13 +1805,20 @@ class RollDrawing:
                self.view_t, s, bands)
         if key == self._tempo_key and self.find_withtag("tempomark"):
             return
+        if pane is not None and pane.drag and getattr(self, "_tempo_slow", False) and self.find_withtag("tempomark") \
+                and self._tempo_key and key[1:] == self._tempo_key[1:]:
+            return  # (a Conductor pane drag over a big tempo map: the marks as they were until let go, hunt
+            #         2026-10-24: ~0.9 s a mouse move at 20,000 points; on_release draws them)
         self.delete("tempomark")
         self._tempo_key, self.tempo_tips = key, []
         font = look.font(7, fit=True)
         if getattr(self, "_tempo_font", (None,))[0] != font:
             self._tempo_font = (font, tkfont.Font(font=font))
         measure = self._tempo_font[1].measure
+        t0 = time.perf_counter()
         shown = self.tempo_shown(key[:3] + (self.sx, s, font), measure)
+        if self._tempo_laid[0] != getattr(self, "_tempo_timed", None):  # (laid out just now, not kept: timed)
+            self._tempo_timed, self._tempo_slow = self._tempo_laid[0], time.perf_counter() - t0 > 0.05
         at = self.t2x(0)  # (the layout is from the song's start: scrolling slides it, hunt 2026-10-22: 0.12 s a
         y, tags = 8 * s, ("frame", "tempomark")  # step at 2000 points laid out again)
         first = max(0, bisect.bisect_left([m[4] for m in shown], kb - at) - 1)  # (skip what's far left)
