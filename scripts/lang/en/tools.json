@@ -682,6 +682,7 @@
  "catch_graph.title": "Drawn catch-up",
  "catch_graph.info": "Left to right: the teal area, from the catch-up line to its end. Bottom to top: how hard the catch-up pushes there (0 % = the tempo heard before it). Spiderweb still works out the BPM, so it always lands on time.",
  "catch_graph.pick": "Click a catch-up line with the Drawn shape in the Tempo pane, or put a Select box over one, to draw its shape.",
+ "catch_graph.heard": "Catch-ups belong to the visual tempo: switch Draw back to Visual tempo to draw this one.",
  "catch_graph.several": "The Select box holds several Drawn catch-ups: click the line of the one to draw.",
  "catch_graph.hint": "Drag the round handle in the middle of a piece up or down to bend it; double-click it to make it straight again. Click anywhere to add a point, drag points (Shift = free; the two ends only move up and down), right-click a point to type where it is or delete it. Ctrl+Z / Ctrl+Y undo / redo here.",
  "catch_graph.at": "{at} % across → pushes {p} %",

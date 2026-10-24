@@ -35,7 +35,7 @@ class CatchGraph(tk.Toplevel):
         self.ml, self.mb = chart_edges(s, ("100 %",), 46, 22)
         self.mr, self.mt = int(12 * s), int(10 * s)
         self.point_labels = (tr("catch_graph.across"), tr("catch_graph.push"))  # (PointDialog's two boxes)
-        self.several = False  # the Select box holds several drawn catch-ups (none edited: click one)
+        self.several = self.heard = False  # several drawn ones in the Select box / Draw: Heard tempo: none edited
         self.held = None  # the catch-up shown last (kept while it isn't drawn for a moment: undo brings it back)
         self.c = None  # the catch-up edited (its own list in the tempo line), None: no drawn catch-up picked
         self.pts = [list(p) for p in DRAWN]
@@ -98,19 +98,21 @@ class CatchGraph(tk.Toplevel):
     def target(self):
         """The drawn catch-up to edit (user 2026-10-24, picked A + C): the one the bar shows (clicked, alone in the
         Select box, at the play line), or the only drawn one in the Select box (several: "several", click one); else the one shown so far, as long as it's still there and
-        drawn (clicking points / empty space keeps it; after an undo: the one on the same beat). None: none."""
+        drawn (clicking points / empty space keeps it; after an undo: the one on the same beat). None: none.
+        "heard": Draw: Heard tempo (catch-ups are the visual tempo's: nothing to edit, hunt 2026-10-24)."""
         box, lines = self.box, self.app.tempo["catch"]
-        if box.mode == "visual":
-            j = box.pane.bar_catch()  # (the one the bar shows: picked, alone in the Select box, at the play line)
-            if j is not None and lines[j][1] == "drawn":
-                return lines[j]
-            if j is None and box.pane.bands:
-                mine = ids(box.pane.sel)
-                inside = [c for c in lines if id(c) in mine and c[1] == "drawn"]
-                if len(inside) == 1:
-                    return inside[0]
-                if inside:
-                    return "several"
+        if box.mode != "visual":
+            return "heard"
+        j = box.pane.bar_catch()  # (the one the bar shows: picked, alone in the Select box, at the play line)
+        if j is not None and lines[j][1] == "drawn":
+            return lines[j]
+        if j is None and box.pane.bands:
+            mine = ids(box.pane.sel)
+            inside = [c for c in lines if id(c) in mine and c[1] == "drawn"]
+            if len(inside) == 1:
+                return inside[0]
+            if inside:
+                return "several"
         if self.held is None:
             return None
         same = [c for c in lines if c is self.held] or [c for c in lines if c[0] == self.held[0]]
@@ -127,15 +129,23 @@ class CatchGraph(tk.Toplevel):
         old = self.held
         if c is None and old is not None and not any(x is old or x[0] == old[0] for x in self.app.tempo["catch"]):
             return self.close()  # (its catch-up deleted)
-        self.several = c == "several"
-        if self.several:
+        self.several, self.heard = c == "several", c == "heard"
+        if self.several or self.heard:
             c = None
-        if c is not None:
+        again = c is not None and old is not None and (c is old or c[0] == old[0])  # (the one shown before: after
+        if c is not None:                                                        # an undo / redo, back from Heard)
             self.held = c
-        if c is not self.c:  # (another one picked, or the line came back from an undo: its steps here start again)
+        if c is not self.c and again and self.session is not None:  # (found again: Cancel's points kept, hunt)
             self.c = c
-            self.session = None if c is None else [list(p) for p in catch_get(c, 6) or DRAWN]
-            self.pts = [list(p) for p in (self.session or DRAWN)]
+            now = [list(p) for p in catch_get(c, 6) or DRAWN]
+            if now != self.pts:
+                self.pts = now
+                self.hist.reset()
+        elif c is not self.c:  # (another one picked: its steps here start again; none for now: kept for it)
+            self.c = c
+            if c is not None:
+                self.session = [list(p) for p in catch_get(c, 6) or DRAWN]
+                self.pts = [list(p) for p in self.session]
             self.hist.reset()
         elif c is not None and not self._storing:
             now = [list(p) for p in catch_get(c, 6) or DRAWN]
@@ -218,7 +228,10 @@ class CatchGraph(tk.Toplevel):
         self.close()
 
     def cancel(self):
-        """The points as they were when the window opened (or this catch-up was picked): one more main step."""
+        """The points as they were when the window opened (or this catch-up was picked): one more main step. Mid-drag
+        (Esc with the mouse held): the drag taken back first like Ctrl+Z, its step gone (hunt 2026-10-24)."""
+        if self.drag:
+            self.undo_key(-1)
         if self.job:
             self.after_cancel(self.job)
             self.job = None
@@ -289,7 +302,7 @@ class CatchGraph(tk.Toplevel):
             cv.create_text(self.u2x(0) + 6 * s, y0 + 4 * s, text=text, anchor="nw", fill=look.VALUE,
                            font=look.font(8))
         self.info.config(text=tr("catch_graph.info") if self.live() else tr(
-            "catch_graph.several" if self.several else "catch_graph.pick"))
+            "catch_graph.several" if self.several else "catch_graph.heard" if self.heard else "catch_graph.pick"))
         self.show_result()
 
     def show_result(self):
@@ -297,7 +310,7 @@ class CatchGraph(tk.Toplevel):
         at = [j for j, c in enumerate(self.app.tempo["catch"]) if c is self.c]
         if not self.live() or not at:
             return self.result.config(text="")
-        res, bad = self.box.pane.catch_result(at[0])
+        res, bad = self.box.pane.catch_result(at[0], self.app.tempo)
         self.result.config(text=res, foreground=look.ERROR if bad else look.TEMPO_CATCH)
 
     def drag_at(self):

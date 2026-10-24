@@ -375,9 +375,9 @@ class TempoBox(ttk.Frame):
             drawn = c[1] == "drawn"
             if drawn != bool(self.graph_button.winfo_manager()):
                 self.graph_button.pack(side="left", padx=(4, 0)) if drawn else self.graph_button.pack_forget()
-            formula = c[1] == "formula"
+            formula = c[1] == "formula" and pick is not None  # (the play line's row: never the box, hunt)
             text, tip = c[2] or FORMULA, tr("tempo.catch_formula_tip")
-        if not formula and kind is None and j is None and self.tool.get() == "formula":  # (the Formula pencil's)
+        if not formula and kind is None and self.tool.get() == "formula":  # (the Formula pencil's formula)
             formula, text, tip = True, self.draw_formula, tr("tempo.formula_tip")
         if formula:
             if self.focus_get() is not self.formula_box:
@@ -423,7 +423,7 @@ class TempoBox(ttk.Frame):
         formula: the Formula box (not a part's: the catch-up the bar shows, bar_catch)."""
         pick = self.pane.picked()
         tempo = self.pane.ed()
-        j = self.pane.bar_catch() if formula and not (pick and pick[0] == "part") else None
+        j = self.pane.bar_catch() if formula and pick and pick[0] == "point" else None
         if j is not None:
             self._typed_for = ("catch", tempo["catch"][j])
         elif pick and pick[0] == "point":
@@ -666,7 +666,7 @@ class TempoBox(ttk.Frame):
     def typed_formula(self):
         got = self.target()
         text = self.formula_var.get().strip()
-        if (not got or got[0] == "point") and self.pane.bar_catch() is not None:  # (the catch-up row beside them)
+        if got and got[0] == "point" and self.pane.bar_catch() is not None:  # (the catch-up row beside them)
             got = ("catch", self.pane.ed()["catch"][self.pane.bar_catch()])
         if not got or got[0] not in ("part", "catch"):
             if self.tool.get() == "formula" and text != self.draw_formula:
@@ -2792,9 +2792,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     # ------------------------------------------------------------ the catch-up's words in the bar
 
-    def catch_result(self, j):
+    def catch_result(self, j, tempo=None):
         """(text, can't) for catch-up line j: its BPM, or why it can't work."""
-        tempo, base = self.ed(), self.base()
+        tempo, base = tempo or self.ed(), self.base()
         st, plan = plans(tempo, base, self.app.ppq)[j]
         if plan["empty"]:
             return tr("tempo.catch_empty"), True
@@ -3348,7 +3348,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         t = math.floor(app.playhead * app.ppq + 1e-9)
         v = bpm_at(app.tempo, self.base(), app.ppq, t)
-        bar = (app.player.running, self.bar_catch())  # (the play line moved into / out of a catch-up's areas)
+        # (the play line moved into / out of a catch-up's areas: only asked when stopped with nothing picked, the
+        # only time it counts; each frame with a big tempo line and a point picked cost 14 ms, hunt 2026-10-24)
+        idle = not (app.player.running or self.sel or self.part is not None or self.drag or self.placing)
+        bar = (app.player.running, self.bar_catch() if idle else None)
         if bar != getattr(self, "_bar_catch", bar):
             self.box.sync()
         self._bar_catch = bar
