@@ -845,7 +845,8 @@ def fresh_marks(copies):
     import uuid
     new = {}
     for sh in copies:
-        sh.pop("extract", None)  # (a copy of an Extract shape hides no loaded notes: the plan's choice)
+        from notes.loaded import drop_extract
+        drop_extract(sh)  # (a copy of an Extract shape hides no loaded notes: the plan's choice; merges' parts too)
         for m in (sh.get("cut") or {}).get("marks", []):
             m["id"] = new.setdefault(m["id"], uuid.uuid4().hex[:12])
         if "paste" in sh:

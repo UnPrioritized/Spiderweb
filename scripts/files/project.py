@@ -18,7 +18,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
-                          merges_unmade, one_voice, shape_notes_tracks, slot_ports, slot_track_channel)
+                          merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports, slot_track_channel)
 from notes.hzbass import clean_hz
 from notes.loaded import (clean_link, conductor_line, extract_ports, file_tempos, own_hits, retime_for, same_conductor,
                           tempo_new, tempo_tracks)
@@ -991,6 +991,9 @@ class ProjectFiles:
         lm = self.loaded
         if getattr(self, "_exporting", None):
             return
+        if getattr(self, "_box_reading", None):  # (extracted notes not hidden yet: they'd be written twice, hunt)
+            self.status.config(text=tr("load.export_reading"))
+            return
         try:  # (Keep in memory too: the copy is made from the file, hunt 2026-10-24)
             lm.mf.same()
         except MidiError:
@@ -1047,11 +1050,15 @@ class ProjectFiles:
         # 2026-10-25; the shapes left out = nothing hidden either, the file as it was)
         hid = lm.frozen(hide=why is None)
         left = lm.notes - len(hid.h_s)  # (the file's notes written: extracted ones left out)
-        ports = extract_ports(self.shapes) or None  # (extracted notes keep their port: every own track gets one)
+        # (extracted notes keep their port: only their tracks on another port get one, the rest stay as ever)
+        took = [i for i, sh in enumerate(self.shapes) if extract_ports([sh])]
+        ports = {s for s in np.unique(notes[np.isin(notes[:, 5], took), 4]).tolist()
+                 if slot_port(s, use10)} if took else None
         lanes = slot_lanes(notes, use10)
         # (own notes exactly where the file had them, extracted and left alone: an overlap the file already had)
         mine = ~same_rows(np.column_stack([notes[:, 0], notes[:, 1], lanes]),
                           np.column_stack([hid.h_s, hid.h_e, hid.h_lane]))
+        before = notes
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
         heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
@@ -1077,7 +1084,9 @@ class ProjectFiles:
                 added = None
                 if len(notes):
                     job["step"] = "load.checking_own"
-                    job["hits"] = own_hits(hid, notes[mine, 0], notes[mine, 1], lanes[mine],
+                    # (the ticks before Keep timing: the loaded notes are read as they are in the file, and both
+                    # move alike, so the same notes overlap; hunt 2026-10-25)
+                    job["hits"] = own_hits(hid, before[mine, 0], before[mine, 1], lanes[mine],
                                            cancel=lambda: job["cancel"],
                                            progress=lambda d, n: job.update(done=d, total=n))
                     pieces, job["tracks"] = note_tracks(notes, use10, pad, cc, ports)

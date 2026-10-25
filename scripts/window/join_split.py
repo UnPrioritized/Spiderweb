@@ -19,7 +19,7 @@ from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.passengers import pack_cc, unpack_cc
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
-from notes.loaded import held_extract
+from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
@@ -426,6 +426,9 @@ class JoinSplit:
         new = [shape(out, tr("join_split.merged"))]
         if len(rest):
             new.append(shape(rest, tr("join_split.merge_leftovers"), "leftovers", lapped))
+            ex = clean_extract([g for i in pair for g in extract_groups(held_extract(self.shapes[i]))])
+            if ex:  # (its notes taken from a loaded MIDI stay out of it until both shapes are gone, hunt 2026-10-25)
+                new[-1]["extract"] = ex
         sus = [self.shapes[i].get("sustain") for i in pair]
         if sus[0] is not None and alike(sus[0]) == alike(sus[1]):  # (both sustained alike: so are the merged notes,
             for sh in new:                                          # like Join; stops put by hand: on their ticks)
@@ -564,6 +567,9 @@ class JoinSplit:
                           "slid": slid, "kslid": kslid, "way": way, "id": mid}
         if rest is not None:
             rest.update(name=tr("join_split.merge_leftovers"), made="leftovers", leftover_of=mid)
+            ex = held_extract(sh)  # (like slice pieces: its loaded notes stay out until both are gone)
+            if ex:
+                rest["extract"] = ex
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         if late:  # (slid before the song's start: everything waits; an Add between group as a whole, hunt)

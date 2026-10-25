@@ -310,7 +310,14 @@ class LoadWindow(tk.Toplevel):
                             [("use", tr("load.use_changed")), ("find", tr("load.find_original")),
                              ("keep", tr("load.keep_without"))], icon="warning")
         if answer == "use":
+            from notes.loaded import drop_extract, shape_boxes
+            took = [sh for sh in app.shapes if shape_boxes([sh])]
+            for sh in took:  # (their boxes are the old file's ticks + tracks: would hide other notes, hunt 2026-10-25)
+                drop_extract(sh)
             app.reattach_midi(lm, retempo=True)
+            if took:
+                messagebox.showinfo(tr("load.title"), trn("load.extract_released", len(took), n=len(took)),
+                                    parent=app)
         elif answer == "find":
             app.after_idle(lambda: find_loaded(app, pick=True))
         else:

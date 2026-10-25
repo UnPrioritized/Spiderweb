@@ -192,8 +192,8 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tem
 
 def note_tracks(notes, use10=False, pad=True, cc=None, ports=None):
     """write_midi's note tracks alone, no header or tempo track: (pieces, how many tracks). A loaded MIDI's export
-    puts them after the file's own tracks. ports True: every track starts with its port (extracted notes from
-    another port: their slots' rounds are their ports)."""
+    puts them after the file's own tracks. ports: a set of slots whose tracks start with their port (extracted
+    notes from another port: their slots' rounds are their ports)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     tracks = track_slots(notes, pad)
@@ -208,13 +208,13 @@ def _pieces(notes, count, tracks, use10, start, cc, ports=None):
         order = np.argsort(slots, kind="stable")
         cuts = np.searchsorted(slots[order], np.arange(count + 1))
         del slots
-    ports = slot_ports(count, cc, use10) if ports is None else ports
+    every, ports = slot_ports(count, cc, use10), ports or ()
     for track in tracks.tolist():
         channel = slot_track_channel(track, use10)[1]
         mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
         events = (cc_track(mine, channel, cc[track]) if cc.get(track) else track_events(mine, channel) if len(mine)
                   else [empty_track(channel)])
-        if ports:
+        if every or track in ports:
             events = [bytes([0, 0xFF, 0x21, 1, slot_port(track, use10)])] + events
         yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
         yield from events

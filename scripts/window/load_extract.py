@@ -54,7 +54,8 @@ def sync_extract(app, found=None):
         return
     boxes = shape_boxes(app.shapes)
     found = dict(found or {})
-    need = {box_key(b): b for b in boxes if box_key(b) not in lm._taken and box_key(b) not in found}
+    lm._taken.update(found)  # (an Extract's own read: kept even while other boxes are still read)
+    need = {box_key(b): b for b in boxes if box_key(b) not in lm._taken}
     if need:
         read_boxes(app, lm, list(need.values()))
         return
@@ -95,8 +96,13 @@ def read_boxes(app, lm, boxes):
             app.busy(tr("extract.reading", pct=int(100 * job["done"] / job["total"])))
             app.after(100, poll)
             return
-        app._box_reading = None
+        if getattr(app, "_box_reading", None) is job:  # (a newer read's record left alone)
+            app._box_reading = None
         app.busy(None)
+        if job["again"] and app.loaded is lm and job["error"] is None:  # (shapes changed while it read)
+            lm._taken.update(job["got"])
+            sync_extract(app)
+            return
         if app.loaded is not lm or job["error"] is not None:
             if isinstance(job["error"], MemoryError):
                 messagebox.showerror(tr("app.spiderweb_2"), tr("big_ask.out_of_memory"), parent=app)
@@ -118,7 +124,10 @@ def stop_extract(app):
 def extract_loaded(app):
     """Right-click → Extract loaded notes: read on a thread (the status line says how far; Esc stops it), then
     asked."""
-    if not can_extract(app) or getattr(app, "_extracting", None):
+    if not can_extract(app):
+        return
+    if getattr(app, "_extracting", None):
+        app.status.config(text=tr("extract.busy"))
         return
     lm = app.loaded
     order, faint = shown_tracks(app, lm)
@@ -126,7 +135,10 @@ def extract_loaded(app):
         order = [n for n in order if n not in faint]
     tracks = sorted(order) if order is not None else [n for n, t in enumerate(lm.tracks) if t.notes]
     boxes = boxes_now(app)
-    if not boxes or not tracks:
+    if not boxes:
+        return
+    if not tracks:
+        app.status.config(text=tr("extract.no_tracks"))
         return
     new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks} for a, b, c, d in boxes]
     if any(boxes_meet(a, b) for a in new for b in shape_boxes(app.shapes)):

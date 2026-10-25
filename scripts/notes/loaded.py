@@ -423,6 +423,13 @@ def held_extract(sh):
     return clean_extract(groups)
 
 
+def drop_extract(sh):
+    """sh (a copy) holds no Extract any more, nor do its merge's parts at any depth."""
+    sh.pop("extract", None)
+    for p in _parts(sh):
+        drop_extract(p)
+
+
 def _parts(sh):
     return [p for k in ("merge", "unmerge") if isinstance(sh.get(k), dict) and isinstance(sh[k].get("parts"), list)
             for p in sh[k]["parts"] if isinstance(p, dict)]
