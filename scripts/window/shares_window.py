@@ -1,10 +1,11 @@
 """Recolour's Shares… window (side panel Shares…, panel_recolour.py; notes/recolour.py; user 2026-10-25 picked a
 small window): Colours = how many each colour set uses (its own ones first, then new ones = new channels), and each
-colour's share, a knob + a box (25 or 1/4) + a Pin tick per colour. The shares always add up to 100 %: one changed,
-the others keep their sizes to each other (user), pinned ones stay (user: what can't be done simply doesn't move).
+colour's share, a knob + a box (25 or 1/4) + a padlock per colour (user 2026-10-25: the "Pin" tick row was too
+crowded; texts say "locked", the saved key stays "pins"). The shares always add up to 100 %: one changed, the others
+keep their sizes to each other (user), locked ones stay (user: what can't be done simply doesn't move).
 Stays open and follows the selection like Gate sensitive merge's. Several shapes: each takes a change on its own list
 (so the shown % holds for each); a box where they differ is blank, like the side panel's Mixed. Each knob turn /
-wheel run / typed number / Even shares / pin is one undo step; Ctrl+Z while a knob is held = back to the press."""
+wheel run / typed number / Even shares / lock is one undo step; Ctrl+Z while a knob is held = back to the press."""
 
 import math
 import tkinter as tk
@@ -78,6 +79,48 @@ class ShareKnob(Knob):
             self.changed(value, done)
         elif done:
             self.changed(value, True)
+
+
+class LockButton(tk.Canvas):
+    """A small padlock drawn with lines (no font glyph: Linux): open + grey = free, shut + dark = locked, shut +
+    grey = mixed. Click / Space / Enter = toggled(); greyed = nothing."""
+
+    def __init__(self, parent, scale, toggled):
+        self.size = size = round(18 * scale)
+        super().__init__(parent, width=size, height=size, highlightthickness=0, takefocus=True, cursor="hand2",
+                         background=ttk.Style().lookup("TFrame", "background") or "#f0f0f0")
+        self.locked, self.enabled, self.toggled = False, True, toggled  # (locked: True / False / None = mixed)
+        self.bind("<ButtonPress-1>", lambda e: self.click())
+        for key in ("<space>", "<Return>"):
+            self.bind(key, lambda e: self.click())
+        self.draw()
+
+    def click(self):
+        if self.enabled:
+            self.focus_set()
+            self.toggled()
+
+    def show(self, state, enabled):
+        if (state, enabled) != (self.locked, self.enabled):
+            self.locked, self.enabled = state, enabled
+            self.config(takefocus=enabled, cursor="hand2" if enabled else "")
+            self.draw()
+
+    def draw(self):
+        self.delete("all")
+        s = self.size
+        shut = self.locked is not False
+        col = look.LOCK_ON if self.locked is True and self.enabled else \
+            look.KNOB_RING_OFF if not self.enabled else look.LOCK_OFF
+        w = max(1, round(s / 10))
+        x0, x1, y0, y1 = s * 0.2, s * 0.8, s * 0.45, s * 0.9  # (body)
+        lift = 0 if shut else s * 0.12  # (open: the shackle lifted, its right leg off the body)
+        r0, r1 = s * 0.3, s * 0.7
+        self.create_arc(r0, s * 0.1 - lift, r1, s * 0.6 - lift, start=0, extent=180, style="arc", outline=col,
+                        width=w)
+        self.create_line(r0, s * 0.35 - lift, r0, y0, fill=col, width=w)
+        self.create_line(r1, s * 0.35 - lift, r1, y0 - (lift and s * 0.12), fill=col, width=w)
+        self.create_rectangle(x0, y0, x1, y1, outline=col, width=w, fill=col if self.locked is True else "")
 
 
 def share_text(text):
@@ -180,15 +223,14 @@ class SharesWindow(tk.Toplevel):
             ent = ttk.Entry(r, textvariable=var, width=7, justify="right")
             ent.pack(side="left")
             ttk.Label(r, text="%").pack(side="left")
+            lock = LockButton(r, app.scale, lambda i=i: self.on_pin(i))
+            lock.pack(side="left", padx=(2, 0))
             ent.bind("<Return>", lambda ev, i=i: self.on_typed(i))
             ent.bind("<FocusOut>", lambda ev, i=i: self.on_typed(i))
-            pin = tk.BooleanVar()
-            tick = ttk.Checkbutton(cell, text=tr("shares.pin"), variable=pin, command=lambda i=i: self.on_pin(i))
-            tick.pack()
-            Tooltip(tick, tr("shares.pin_tip"))
+            Tooltip(lock, tr("shares.lock_tip"))
             tips = [Tooltip(w, tr("shares.share_tip")) for w in (name, knob, ent)]
             self.cells.append({"cell": cell, "name": name, "knob": knob, "var": var, "entry": ent, "shown": "",
-                               "pin": pin, "tick": tick, "tips": tips})
+                               "lock": lock, "tips": tips})
         ttk.Label(box, text=tr("shares.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                   justify="left").pack(anchor="w", fill="x", pady=(8, 0))
         row = ttk.Frame(box)
@@ -268,8 +310,7 @@ class SharesWindow(tk.Toplevel):
                 tip.text = tr("shares.share_tip") if len(vals) == 1 else tr("shares.mixed_tip")
             c["entry"].config(state="normal" if used > 1 else "disabled")
             pinned = {i in L["pins"] for L in mine}
-            c["pin"].set(pinned == {True})
-            c["tick"].state(["alternate" if len(pinned) > 1 else "!alternate", "!disabled" if used > 1 else "disabled"])
+            c["lock"].show(pinned.pop() if len(pinned) == 1 else None, used > 1)
 
     # ---- changes (each shape on its own list)
 
@@ -362,8 +403,7 @@ class SharesWindow(tk.Toplevel):
         self.change(lambda L: (evened(L["shares"], L["pins"]) if L["pins"] else None, L["pins"]))
 
     def on_pin(self, i):
-        on = self.cells[i]["pin"].get()
-        self.cells[i]["tick"].state(["!alternate"])
+        on = self.cells[i]["lock"].locked is not True  # (mixed = locked for all, like a half-ticked box)
         self.wheel = None
 
         def pinned(L):

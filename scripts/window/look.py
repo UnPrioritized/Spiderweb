@@ -289,6 +289,7 @@ TOOL_PICKED = pick("#cce4f7", "#2f5a8a")
 KNOB_ORANGE, KNOB_GREEN = pick("#f5a623"), pick("#7cc21b")  # Claw / Strum / Chop knobs
 KNOB_RING, KNOB_RING_FOCUS, KNOB_RING_OFF = pick("#bbb", "#6c6c70"), pick("#888", "#a0a0a4"), pick("#ccc", "#4f4f52")
 KNOB_BODY, KNOB_BODY_OFF, KNOB_POINTER = pick("#555", "#252527"), pick("#aaa", "#4a4a4d"), pick("white", "#e2e2e4")
+LOCK_ON, LOCK_OFF = pick("#333", "#e2e2e4"), pick("#aaa", "#6c6c70")  # Shares window's padlocks (locked / open)
 TAB_TROUGH, TAB_THUMB = pick("#e2e2e2", "#333336"), pick("#a6a6a6", "#6c6c6f")  # the tab row's scrollbar
 TAB_THUMB_HELD = pick("#7a7a7a", "#8a8a8e")
 CHOP_BORDER, CHOP_GRID = pick("#bbb", "#5c5c5f"), pick("#e8e8e8", "#48484b")
