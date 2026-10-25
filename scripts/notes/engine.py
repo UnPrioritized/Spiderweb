@@ -43,7 +43,7 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
-from notes.recolour import clean_recolour, is_recoloured, recoloured, rule_of, without_recolour
+from notes.recolour import box_of, clean_recolour, is_recoloured, recoloured, rule_of, without_recolour
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
@@ -655,7 +655,7 @@ def fx_notes(sh, ppq, keys, get):
         if not is_recoloured(sh):
             return notes, tracks
         return recoloured(notes, tracks, rule_of(sh["recolour"]), is_sustained(sh) or sh.get("held") is True,
-                          is_pasted_flipped(sh) or is_gate_flipped(sh))
+                          is_pasted_flipped(sh) or is_gate_flipped(sh), whole_box(sh, get))
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
@@ -699,6 +699,18 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
     return with_glue(*kind_notes_tracks(sh, ppq, keys), sh, ppq)
+
+
+def whole_box(sh, get):
+    """A sliced piece's Recolour box: its whole shape's notes' box where the piece is now (sliced.source), so the
+    piece keeps the colours it had in the whole (recolour.recoloured box); None for any other shape."""
+    if not sh.get("cut"):
+        return None
+    got = source(without_recolour(sh))
+    if got is None:
+        return None
+    notes, _ = get(got[0])
+    return box_of(notes) if len(notes) else None
 
 
 def tagged_notes(sh, k, ppq, keys):

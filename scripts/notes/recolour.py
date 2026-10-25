@@ -275,11 +275,16 @@ def framed_centre(rc, c, back=False):
     return [50 + a * x + b * y, 50 + cc * x + d * y]
 
 
-def places_of(notes, rc, gate):
+def box_of(notes):
+    """(first start, last end, lowest key, highest key) of notes."""
+    return int(notes[:, 0].min()), int(notes[:, 1].max()), int(notes[:, 2].min()), int(notes[:, 2].max())
+
+
+def places_of(notes, rc, gate, box):
     """Where the dice, groups and areas look at each note: where it was before the shape was gate flipped (gate:
     its runs mirrored back, user's rule: every key row exactly reversed, colours too) and flipped (rc "frame"
-    without a turn: mirrored back in the notes' box, note for note). A turned shape's notes are new ones: its turn
-    only moves the Clumps areas (areas)."""
+    without a turn: mirrored back in the box, note for note). A turned shape's notes are new ones: its turn only
+    moves the Clumps areas (areas)."""
     if gate:
         from notes.gateflip import mirrored_runs
         notes = mirrored_runs(notes, None, True)[0]
@@ -288,19 +293,21 @@ def places_of(notes, rc, gate):
         return notes
     p = np.array(notes, np.int64)
     if a < 0:
-        w = int(p[:, 0].min() + p[:, 1].max())
+        w = box[0] + box[1]
         p[:, 0], p[:, 1] = w - p[:, 1], w - p[:, 0]
     if d < 0:
-        p[:, 2] = int(p[:, 2].min() + p[:, 2].max()) - p[:, 2]
+        p[:, 2] = box[2] + box[3] - p[:, 2]
     return p
 
 
-def recoloured(notes, tracks, rc, held=False, gate=False):
+def recoloured(notes, tracks, rc, held=False, gate=False, box=None):
     """The shape's notes and tracks after its Recolour rc (rule_of). Nothing to shuffle (plan): unchanged. First
     the notes are settled as their colours before would sound (render's overlap rule on each colour: a note cut
     where a later one of its colour starts on its key, notes starting together made one), so a new colour never
     frees a cut note: the notes stay as heard with Recolour off. held: sustained (overlaps kept, render held): not
-    settled, its notes of one colour may still sound together. gate: the shape is gate flipped (places_of)."""
+    settled, its notes of one colour may still sound together. gate: the shape is gate flipped (places_of). box:
+    the box (box_of) the dice and areas count in, e.g. a sliced piece's whole shape's (so a piece keeps the colours
+    it had in the whole); None = the notes' own."""
     if tracks is None and len(notes) and rc["mode"] in SPLIT:  # (one colour: Split works from it)
         tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
@@ -311,14 +318,15 @@ def recoloured(notes, tracks, rc, held=False, gate=False):
     which, pals = plan(t, rc)
     low = t % ROUND
     lap = t - low  # (each note's round, put back after)
-    at = places_of(notes, rc, gate)
-    corner = (int(at[:, 0].min()), int(at[:, 2].min()))
+    box = box or box_of(notes)
+    at = places_of(notes, rc, gate, box)
+    corner = (box[0], box[2])
     pick = dice(at, low, rc["seed"], 1, corner)
     roll = dice(at, low, rc["seed"], 0, corner)
     clumps = rc["mode"] == "clumps"
     if clumps:  # (every note takes the colour of the area it lands in: the throw = where it lands)
         n = sum(len(p) for p in pals) if rc.get("mix") and len(pals) > 1 else max(len(p) for p in pals)
-        pick, roll = areas(at, rc, pick, n), np.zeros(len(notes))
+        pick, roll = areas(at, rc, pick, n, box), np.zeros(len(notes))
     if rc.get("by"):
         lead = leaders(at, rc["by"])
         pick, roll = pick[lead], roll[lead]
@@ -340,7 +348,7 @@ def recoloured(notes, tracks, rc, held=False, gate=False):
     return notes, lap + new
 
 
-def areas(notes, rc, u, n):
+def areas(notes, rc, u, n, box=None):
     """Split: Clumps: where each note's middle lands, 0 <= place < 1 across the colour areas (Shares cut it in
     order), in the shape's box (time and keys each 0..1: the same on any zoom). Bands = stripes across the Angle's
     way (0 = upright, in time order), Wedges = slices around the Centre point, Swirl = wedges twisted more near it
@@ -348,7 +356,7 @@ def areas(notes, rc, u, n):
     Rough edges (Amount) = each place moved by up to about one area: mostly by a smooth noise (ragged clumps), a
     little by the note's own throw u."""
     s, e, k = (np.asarray(notes[:, c], np.float64) for c in (0, 1, 2))
-    t0, t1, k0, k1 = s.min(), e.max(), k.min(), k.max()
+    t0, t1, k0, k1 = box or box_of(notes)  # (box: counted in another box, recoloured)
     x = ((s + e) / 2 - t0) / max(t1 - t0, 1.0)
     y = (k - k0) / (k1 - k0) if k1 > k0 else np.full(len(k), 0.5)
     f = rc.get("frame")

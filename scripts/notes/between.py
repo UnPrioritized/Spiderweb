@@ -302,6 +302,14 @@ class Pair:
         if x is not None and y is not None:  # (both ends with Gate subtract: amounts / graph step by step, each side)
             from notes.subtract import mixed_subtract
             out["subtract"] = mixed_subtract(x, y, f, mix)
+        from notes.recolour import clean_recolour
+        x, y = clean_recolour(a.get("recolour")), clean_recolour(b.get("recolour"))
+        if x and y and x["mode"] == y["mode"]:  # (both ends recoloured alike: Amount, Shares... step by step; the
+            near = x if f < 0.5 else y  # dice and flips of the nearer end)
+            out["recolour"] = dict(mix(x, y, f), seed=near["seed"])
+            out["recolour"].pop("frame", None)
+            if near.get("frame"):
+                out["recolour"]["frame"] = near["frame"]
         return clean_shape(out)
 
 
