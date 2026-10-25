@@ -500,6 +500,51 @@ def overview_tab(lm, ax, bx, W, k_lo, nk):
     return tab, np.zeros((nk, W), np.uint8)
 
 
+SCRUB_COLS = 256  # right-drag listening reads the swept ticks as this many columns at most
+SCRUB_S = 0.04  # ... exactly when that's guessed this quick, else from the overview (sounding keys only)
+_GROUP_CH = np.argsort(COLOURS_16)  # (channel colour group -> channel)
+
+
+def scrub_notes(lm, order, lo, hi, at):
+    """Right-drag listening on a loaded MIDI (user 2026-10-25): {(channel, key): (start, velocity)} of what's drawn
+    on top: the keys sounding at tick `at` (start None) and notes starting in ticks lo..hi (start = about their
+    tick; the latest per key). order = the tracks shown (shown_tracks, faint ones left out), None = all. Velocity
+    as drawn (to within 4); the overview (where reading exactly is slow) has no starts nor velocities (100)."""
+    lo, hi = int(lo), int(hi)
+    if order == () or getattr(lm, "changed", False) or hi < lo:
+        return {}
+    W = int(min(SCRUB_COLS, hi - lo + 1))
+    ax = W / (hi - lo + 1)
+    bx = -lo * ax
+    slow = speed.loops() is None or guess_bytes(lm, order, ax, bx, W) / rate_of(lm) > SCRUB_S
+    try:
+        if not slow:
+            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order)
+        elif order is None:
+            tab, marks = overview_tab(lm, ax, bx, W, 0, lm.keys)
+        else:
+            tab, marks = pictures_tab(lm, order, frozenset(), ax, bx, W, 0, lm.keys)
+    except Exception:  # (a file that changed / went: silent, told when drawing / exporting)
+        write_log_now()
+        return {}
+    if tab is None:
+        return {}
+
+    def note(code):
+        group, shade = divmod(int(code), 32)
+        return int(_GROUP_CH[group % 16]), 100 if slow else min(127, shade * 4 + 2)
+    out = {}
+    c = int(min(W - 1, max(0, round(at * ax + bx))))
+    for k in np.flatnonzero(tab[:, c] >= 0).tolist():
+        out[note(tab[k, c])[0], k] = (None, note(tab[k, c])[1])
+    if not slow:
+        ks, cs = np.nonzero((marks & 1) & (tab >= 0))
+        for k, col in zip(ks.tolist(), cs.tolist()):  # (columns in order: the latest start per key wins)
+            ch, v = note(tab[k, col])
+            out[ch, k] = (lo + int(col / ax), v)
+    return out
+
+
 def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
     """tab's columns c0..c1 painted into img (its pixel [0, 0] = screen (x0, y0)), each key's row like a note:
     edge colour on its first / last pixel row and where marks say a note starts / ends, fill inside. NumPy twin of

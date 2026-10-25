@@ -519,6 +519,15 @@ class Playback:
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
         held = self._scrub_held
+        if self.loaded is not None and not tuned:  # (a loaded MIDI's notes drawn on top there; Spiderweb's own win
+            from roll.roll_loaded import scrub_notes, shown_tracks  # a key both sound)
+            order, faint = shown_tracks(self, self.loaded)
+            if order is not None:  # (faint tracks: shown only, not listened to, like Spiderweb's)
+                order = tuple(n for n in order if n not in faint)
+            ppq_lm = self.loaded.ppq / self.ppq  # (its own ticks)
+            for k, (s, v) in scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm).items():
+                if k not in now:  # (sounding without a start in this sweep: held on as it is, a new key sounds)
+                    now[k] = (held.get(k, -1) if s is None else -2 - s, v)
         if self.out.edo and self.out.name != BUILTIN and now and not held:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
         for k in [k for k in held if k not in now]:
