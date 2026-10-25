@@ -367,6 +367,9 @@ class SharesWindow(tk.Toplevel):
         ttk.Label(side, text=tr("shares.push")).pack(anchor="w")
         self.push_text = ttk.Label(side, text="", foreground=look.HINT)
         self.push_text.pack(anchor="w")
+        # (flipped / turned since: the areas went with it, the numbers stay as typed; recolour.py FRAME)
+        self.framed = ttk.Label(box, text=tr("shares.framed"), foreground=look.HINT,
+                                wraplength=int(300 * app.scale), justify="left")
 
     def _number_box(self, parent, name, lo, hi, word):
         var = tk.StringVar()
@@ -486,6 +489,12 @@ class SharesWindow(tk.Toplevel):
                         ("right", px < MOST_PUSH)):
             self.pushes[way].state(["!disabled" if ok or len(pushes) > 1 else "disabled"])
         self.push_none.state(["!disabled" if pushes != {(0, 0)} else "disabled"])
+        framed = any(r.get("frame") for r in rcs)
+        if framed != bool(self.framed.winfo_manager()):
+            if framed:
+                self.framed.pack(anchor="w", fill="x", pady=(6, 0))
+            else:
+                self.framed.pack_forget()
 
     def show_box(self, name, vals, on):
         """A Clumps number box shows vals (blank where they differ), unless being typed in."""
@@ -701,6 +710,9 @@ class SharesWindow(tk.Toplevel):
             self.call_off(self.hold)
         self.take_typing()
         self.app.shares_window = None
+        roll = self.app.roll
+        if (roll.drag or ("",))[0] == "rccentre":  # (a Centre point dot held: let go, what it moved kept)
+            roll.drag = None
         self.destroy()
         self.app.roll.focus_set()
         self.app.roll.request_redraw()

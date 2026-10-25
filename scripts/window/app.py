@@ -232,7 +232,9 @@ def recolour_back(sh, notes_tracks, made_as, notes, tracks):
     bn, bt = notes_tracks(without_recolour(made_as))
     if bt is None or not len(bn):
         return colours_back(sh)
-    return counted_starts(notes, tracks, first_starts(bn, bt, unflipped_starts(bn) if colours_back(sh) else None))
+    back = colours_back(sh)  # (new colours, Split's too: counted by where they start unflipped)
+    return counted_starts(notes, tracks, first_starts(bn, bt, unflipped_starts(bn) if back else None),
+                          unflipped_starts(notes) if back else None)
 
 
 def sends_cc(sh):

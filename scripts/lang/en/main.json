@@ -1001,6 +1001,7 @@
  "shares.push_none_tip": "No push.",
  "shares.push_no": "None",
  "shares.push_mixed": "Differs between the shapes",
+ "shares.framed": "Flipped or turned since: the areas moved with the shape, but these numbers stay as you set them.",
  "shares.pushed_right": "{n} right",
  "shares.pushed_left": "{n} left",
  "shares.pushed_up": "{n} up",

@@ -4,7 +4,7 @@ dragging a dot sets the Centre point (in % of the box, like the window's boxes) 
 % (Shift = free); one undo step a drag."""
 
 from files.lang import tr
-from notes.recolour import clean_recolour, without_recolour
+from notes.recolour import clean_recolour, framed_centre, without_recolour
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -27,7 +27,7 @@ class CentreDots:
             if not len(notes):
                 continue
             box = (int(notes[:, 0].min()), int(notes[:, 1].max()), int(notes[:, 2].min()), int(notes[:, 2].max()))
-            out.append((sh, box, rc.get("centre", [50, 50])))
+            out.append((sh, box, framed_centre(rc, rc.get("centre", [50, 50]))))  # (flipped / turned since: there)
         return out
 
     def centre_xy(self, box, c):
@@ -58,6 +58,9 @@ class CentreDots:
         return False
 
     def centre_drag(self, e):
+        if not getattr(self.app, "shares_window", None):  # (the window closed mid-drag: let go)
+            self.drag = None
+            return
         t0, t1, k0, k1 = self.drag[1]
         b, p = self.from_xy(e.x, e.y)
         c = [100 * (b * self.app.ppq - t0) / max(t1 - t0, 1), 100 * (p - k0) / (k1 - k0) if k1 > k0 else 50.0]
@@ -67,5 +70,5 @@ class CentreDots:
         def changed(old, sh):
             if not old or old["mode"] != "clumps":
                 return old
-            return dict(old, centre=c)
+            return dict(old, centre=[round(v, 3) for v in framed_centre(old, c, back=True)])
         self.app.change_recolour(changed, None, push=False)

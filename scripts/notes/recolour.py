@@ -95,7 +95,33 @@ def clean_recolour(r):
     if isinstance(p, list) and len(p) == 2 and all(number(x) and x == int(x) and abs(x) <= MOST_PUSH for x in p) \
             and any(p):
         out["push"] = [int(x) for x in p]
+    f = r.get("frame")
+    if isinstance(f, list) and all(number(x) for x in f) and tuple(f) in FRAMES and tuple(f) != SAME:
+        out["frame"] = [int(x) for x in f]
     return out
+
+
+# FRAME (rc "frame"): the shape flipped / turned since its Recolour was set, as [a, b, c, d]: a place in its box as
+# shown (time, keys, each -0.5..0.5 from the middle) -> where it was then: (a * x + b * y, c * x + d * y). The colours
+# are worked out there, so they flip and turn with the shape (fx.flip_shape / turn_shape: moved); the Clumps
+# settings stay as typed (the Shares window says so).
+SAME = (1, 0, 0, 1)
+SIDEWAYS, UPSIDE = (-1, 0, 0, 1), (1, 0, 0, -1)  # (each move undone)
+CLOCKWISE, ANTI = (0, -1, 1, 0), (0, 1, -1, 0)
+FRAMES = {(a, 0, 0, d) for a in (1, -1) for d in (1, -1)} | {(0, b, c, 0) for b in (1, -1) for c in (1, -1)}
+
+
+def moved(sh, back):
+    """sh's Recolour told the shape was flipped / turned (back: that move undone, SIDEWAYS...). Changes sh."""
+    r = sh.get("recolour")
+    if not isinstance(r, dict):
+        return
+    a, b, c, d = r.get("frame") or SAME
+    e, f, g, h = back
+    m = [a * e + b * g, a * f + b * h, c * e + d * g, c * f + d * h]
+    sh["recolour"] = {k: v for k, v in r.items() if k != "frame"}
+    if tuple(m) != SAME:
+        sh["recolour"]["frame"] = m
 
 
 def rule_of(r):
@@ -239,12 +265,42 @@ def enough(pals, mix):
     return (sum(len(p) for p in pals) if mix and len(pals) > 1 else max(len(p) for p in pals)) >= 2
 
 
-def recoloured(notes, tracks, rc, held=False):
+def framed_centre(rc, c, back=False):
+    """A Centre point c (% of the box) as shown on the flipped / turned shape (rc "frame"); back: a shown one ->
+    the setting."""
+    a, b, cc, d = rc.get("frame") or SAME
+    if not back:  # (shown = the frame undone: its rows and columns swapped)
+        b, cc = cc, b
+    x, y = c[0] - 50, c[1] - 50
+    return [50 + a * x + b * y, 50 + cc * x + d * y]
+
+
+def places_of(notes, rc, gate):
+    """Where the dice, groups and areas look at each note: where it was before the shape was gate flipped (gate:
+    its runs mirrored back, user's rule: every key row exactly reversed, colours too) and flipped (rc "frame"
+    without a turn: mirrored back in the notes' box, note for note). A turned shape's notes are new ones: its turn
+    only moves the Clumps areas (areas)."""
+    if gate:
+        from notes.gateflip import mirrored_runs
+        notes = mirrored_runs(notes, None, True)[0]
+    a, b, _, d = rc.get("frame") or SAME
+    if b or (a > 0 and d > 0):
+        return notes
+    p = np.array(notes, np.int64)
+    if a < 0:
+        w = int(p[:, 0].min() + p[:, 1].max())
+        p[:, 0], p[:, 1] = w - p[:, 1], w - p[:, 0]
+    if d < 0:
+        p[:, 2] = int(p[:, 2].min() + p[:, 2].max()) - p[:, 2]
+    return p
+
+
+def recoloured(notes, tracks, rc, held=False, gate=False):
     """The shape's notes and tracks after its Recolour rc (rule_of). Nothing to shuffle (plan): unchanged. First
     the notes are settled as their colours before would sound (render's overlap rule on each colour: a note cut
     where a later one of its colour starts on its key, notes starting together made one), so a new colour never
     frees a cut note: the notes stay as heard with Recolour off. held: sustained (overlaps kept, render held): not
-    settled, its notes of one colour may still sound together."""
+    settled, its notes of one colour may still sound together. gate: the shape is gate flipped (places_of)."""
     if tracks is None and len(notes) and rc["mode"] in SPLIT:  # (one colour: Split works from it)
         tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
@@ -255,15 +311,16 @@ def recoloured(notes, tracks, rc, held=False):
     which, pals = plan(t, rc)
     low = t % ROUND
     lap = t - low  # (each note's round, put back after)
-    corner = (int(notes[:, 0].min()), int(notes[:, 2].min()))
-    pick = dice(notes, low, rc["seed"], 1, corner)
-    roll = dice(notes, low, rc["seed"], 0, corner)
+    at = places_of(notes, rc, gate)
+    corner = (int(at[:, 0].min()), int(at[:, 2].min()))
+    pick = dice(at, low, rc["seed"], 1, corner)
+    roll = dice(at, low, rc["seed"], 0, corner)
     clumps = rc["mode"] == "clumps"
     if clumps:  # (every note takes the colour of the area it lands in: the throw = where it lands)
         n = sum(len(p) for p in pals) if rc.get("mix") and len(pals) > 1 else max(len(p) for p in pals)
-        pick, roll = areas(notes, rc, pick, n), np.zeros(len(notes))
+        pick, roll = areas(at, rc, pick, n), np.zeros(len(notes))
     if rc.get("by"):
-        lead = leaders(notes, rc["by"])
+        lead = leaders(at, rc["by"])
         pick, roll = pick[lead], roll[lead]
     change = roll < (1.0 if clumps else rc["amount"] / 100)
     shares = rc.get("shares")
@@ -294,6 +351,9 @@ def areas(notes, rc, u, n):
     t0, t1, k0, k1 = s.min(), e.max(), k.min(), k.max()
     x = ((s + e) / 2 - t0) / max(t1 - t0, 1.0)
     y = (k - k0) / (k1 - k0) if k1 > k0 else np.full(len(k), 0.5)
+    f = rc.get("frame")
+    if f and f[1]:  # (turned since: each place turned back, places_of did the flips)
+        x, y = 0.5 + f[1] * (y - 0.5), 0.5 + f[2] * (x - 0.5)
     cx, cy = (v / 100 for v in rc.get("centre", (50, 50)))
     px, py = rc.get("push", (0, 0))
     gx, gy = 2 ** (px / 2), 2 ** (py / 2)  # (pushed right: x ** gx < x, so the cuts land further right, bunched)
@@ -329,14 +389,14 @@ def _noise(x, y, seed, cells):
     fx, fy = gx - ix, gy - iy
     fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
     ix, iy = ix.astype(np.int64), iy.astype(np.int64)
-
-    def at(a, b):
-        with np.errstate(over="ignore"):
-            v = _mixed(_mixed(np.full(len(a), np.uint64(seed * 2 + 7), np.uint64) ^ a.view(np.uint64))
-                       ^ b.view(np.uint64))
-        return (v >> np.uint64(11)).astype(np.float64) / float(1 << 53)
-    top = at(ix, iy + 1) * (1 - fx) + at(ix + 1, iy + 1) * fx
-    bottom = at(ix, iy) * (1 - fx) + at(ix + 1, iy) * fx
+    a, b = np.meshgrid(np.arange(cells + 2, dtype=np.int64), np.arange(cells + 2, dtype=np.int64), indexing="ij")
+    with np.errstate(over="ignore"):  # (each corner's value once, looked up by every note: much quicker)
+        v = _mixed(_mixed(np.full(a.size, np.uint64(seed * 2 + 7), np.uint64) ^ a.reshape(-1).view(np.uint64))
+                   ^ b.reshape(-1).view(np.uint64))
+    grid = ((v >> np.uint64(11)).astype(np.float64) / float(1 << 53)).reshape(a.shape)
+    ix, iy = np.clip(ix, 0, cells), np.clip(iy, 0, cells)
+    top = grid[ix, iy + 1] * (1 - fx) + grid[ix + 1, iy + 1] * fx
+    bottom = grid[ix, iy] * (1 - fx) + grid[ix + 1, iy] * fx
     return bottom * (1 - fy) + top * fy
 
 
@@ -438,11 +498,12 @@ def first_starts(notes, tracks, starts=None):
     return dict(zip(ids.tolist(), first.tolist()))
 
 
-def counted_starts(notes, tracks, firsts):
+def counted_starts(notes, tracks, firsts, own=None):
     """Each note's start as render should count it (its colour's first start before recolouring, firsts); a colour
-    that had none: the note's own start."""
+    that had none: the note's own start (own: the starts to count by instead, e.g. a gate flipped shape's unflipped
+    ones)."""
     low = np.asarray(tracks, np.int64) % ROUND
-    own = np.asarray(notes[:, 0], np.int64)
+    own = np.asarray(notes[:, 0] if own is None else own, np.int64)
     if not firsts:
         return own
     ids = np.array(sorted(firsts), np.int64)

@@ -654,7 +654,8 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get(without_recolour(sh))
         if not is_recoloured(sh):
             return notes, tracks
-        return recoloured(notes, tracks, rule_of(sh["recolour"]), is_sustained(sh) or sh.get("held") is True)
+        return recoloured(notes, tracks, rule_of(sh["recolour"]), is_sustained(sh) or sh.get("held") is True,
+                          is_pasted_flipped(sh) or is_gate_flipped(sh))
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
