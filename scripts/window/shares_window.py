@@ -532,7 +532,7 @@ class SharesWindow(tk.Toplevel):
         self.take_typing()  # (a number typed in a box first: its own step)
         self.hold = KnobHold(self, knob)
         self.app.held_scrub = self.hold  # (shortcuts wait, Ctrl+Z = back to the press: App.key_undo)
-        self.app.scrubbing = True  # (slow notes made when the mouse rests or is let go)
+        self.app.scrubbing = "follow"  # (slow notes made in the background over and over while held: App.shapes_changed)
 
     def on_knob(self, i, v, done):
         self.on_turn(self.cells[i]["knob"], done, lambda: self.set_share(i, v))

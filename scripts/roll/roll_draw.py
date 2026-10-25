@@ -455,7 +455,8 @@ class RollDrawing:
         carried = self.carried()
         if carried is None:
             self._carry = None
-        if app.notes_late and not self.drag and not app._late_notes:  # (a drag called off: the notes catch up)
+        # (a drag called off: the notes catch up; a held knob / number box isn't one)
+        if app.notes_late and not (self.drag or app.scrubbing) and not app._late_notes:
             app.notes_rested()
         if carried is not None and w > self.kb_w and h > self.ruler_h:
             self.paint_carried(w, h, rows, cols, fixed, *carried)

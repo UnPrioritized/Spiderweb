@@ -366,7 +366,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.pattern = NO_NOTES  # rendered without the masks' own notes: what masks show (= rendered but in Single)
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
-        self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too
+        self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too ("follow":
+        # a Shares knob, they follow it in the background)
         self._merge_time, self._merges_owed = 0.0, False  # (remake_merges' last time; put off while scrubbing)
         self.held_scrub = None  # that Scrub (shortcuts / Delete wait, Ctrl+Z cancels it)
         self._trimmed = None  # the oldest steps the 300 limit dropped for the last step (add_undo_step)
@@ -1552,8 +1553,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
         # (Nested's / Tiles' / Ripples' centre points: the notes are all they show, so they follow in the background,
         # user)
+        # (a Shares knob held too: the colours follow it, user 2026-10-25)
         follow = (self.roll.drag and self.roll.drag[0] == "handle" and isinstance(self.roll.drag[1], tuple)
-                  and self.roll.drag[1][0] in ("centre", "ripple"))
+                  and self.roll.drag[1][0] in ("centre", "ripple")) or self.scrubbing == "follow"
         if not now and (self.roll.drag or self.scrubbing) and (
                 slow or follow and busy > 0.03 or moving and (busy > 0.03 or self.roll._img is not None)):
             self.notes_late = True
