@@ -190,16 +190,17 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tem
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
 
-def note_tracks(notes, use10=False, pad=True, cc=None):
+def note_tracks(notes, use10=False, pad=True, cc=None, ports=None):
     """write_midi's note tracks alone, no header or tempo track: (pieces, how many tracks). A loaded MIDI's export
-    puts them after the file's own tracks."""
+    puts them after the file's own tracks. ports True: every track starts with its port (extracted notes from
+    another port: their slots' rounds are their ports)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     tracks = track_slots(notes, pad)
-    return _pieces(notes, count, tracks, use10, b"", cc or {}), len(tracks)
+    return _pieces(notes, count, tracks, use10, b"", cc or {}, ports), len(tracks)
 
 
-def _pieces(notes, count, tracks, use10, start, cc):
+def _pieces(notes, count, tracks, use10, start, cc, ports=None):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory)."""
     yield start
     if count > 1:  # (one sort finds every track's notes, in their own order)
@@ -207,7 +208,7 @@ def _pieces(notes, count, tracks, use10, start, cc):
         order = np.argsort(slots, kind="stable")
         cuts = np.searchsorted(slots[order], np.arange(count + 1))
         del slots
-    ports = slot_ports(count, cc, use10)
+    ports = slot_ports(count, cc, use10) if ports is None else ports
     for track in tracks.tolist():
         channel = slot_track_channel(track, use10)[1]
         mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]

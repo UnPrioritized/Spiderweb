@@ -20,7 +20,7 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, one_voice, shape_notes_tracks, slot_ports, slot_track_channel)
 from notes.hzbass import clean_hz
-from notes.loaded import (clean_link, conductor_line, file_tempos, own_hits, retime_for, same_conductor,
+from notes.loaded import (clean_link, conductor_line, extract_ports, file_tempos, own_hits, retime_for, same_conductor,
                           tempo_new, tempo_tracks)
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
@@ -192,6 +192,14 @@ def slot_lanes(notes, use10):
     us = np.unique(slots)
     chans = np.array([slot_track_channel(int(k), use10)[1] for k in us.tolist()], np.int64)
     return chans[np.searchsorted(us, slots)] * 256 + notes[:, 2]
+
+
+def same_rows(a, b):
+    """Which rows of a (n x 3 whole numbers) are also rows of b."""
+    if not len(a) or not len(b):
+        return np.zeros(len(a), bool)
+    v = lambda x: np.ascontiguousarray(x, np.int64).view(np.dtype((np.void, 24))).ravel()
+    return np.isin(v(a), v(b))
 
 
 def timed_ticks(plan, notes, cc):
@@ -866,6 +874,11 @@ class ProjectFiles:
         running = getattr(self, "_finding", None)
         if running is not None and running.link is not self.midi_link:
             running.drop()
+        from window.load_extract import stop_extract
+        stop_extract(self)  # (an Extract still reading the MIDI before: stopped)
+        job = getattr(self, "_box_reading", None)
+        if job:
+            job["cancel"] = True
 
     def find_loaded_later(self):
         """After a project with a MIDI link opened: the MIDI is loaded again (asked about when it's missing)."""
@@ -988,7 +1001,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("load.tempo_damaged", tracks=", ".join(
                 str(t.number + 1) for t in lm.mf.damaged()[:10])), parent=self)
             return
-        notes, cc = self.rendered[:0], {}
+        notes, cc, why = self.rendered[:0], {}, None
         if len(self.rendered):
             why = ("load.shapes_damaged" if lm.mf.damaged() or M_CUT in lm.mf.marks else
                    "load.shapes_format" if lm.mf.format > 1 or M_RMID in lm.mf.marks else None)
@@ -1030,7 +1043,15 @@ class ProjectFiles:
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
                                  "plan": None, "step": "load.exporting", "hits": 0, "tracks": 0}
         use10, pad = self.picture_use10, self.pad_tracks()
-        left = lm.notes - len(lm.h_s)  # (the file's notes written: extracted ones left out)
+        # (the extracted notes as they are NOW: an undo / Extract while it runs changes nothing in it, hunt
+        # 2026-10-25; the shapes left out = nothing hidden either, the file as it was)
+        hid = lm.frozen(hide=why is None)
+        left = lm.notes - len(hid.h_s)  # (the file's notes written: extracted ones left out)
+        ports = extract_ports(self.shapes) or None  # (extracted notes keep their port: every own track gets one)
+        lanes = slot_lanes(notes, use10)
+        # (own notes exactly where the file had them, extracted and left alone: an overlap the file already had)
+        mine = ~same_rows(np.column_stack([notes[:, 0], notes[:, 1], lanes]),
+                          np.column_stack([hid.h_s, hid.h_e, hid.h_lane]))
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
         heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
@@ -1056,16 +1077,16 @@ class ProjectFiles:
                 added = None
                 if len(notes):
                     job["step"] = "load.checking_own"
-                    job["hits"] = own_hits(lm, notes[:, 0], notes[:, 1], slot_lanes(notes, use10),
+                    job["hits"] = own_hits(hid, notes[mine, 0], notes[mine, 1], lanes[mine],
                                            cancel=lambda: job["cancel"],
                                            progress=lambda d, n: job.update(done=d, total=n))
-                    pieces, job["tracks"] = note_tracks(notes, use10, pad, cc)
+                    pieces, job["tracks"] = note_tracks(notes, use10, pad, cc, ports)
                     added = Added(pieces, job["tracks"], 16 * len(notes))
                 job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),
                              cancel=lambda: job["cancel"], retime=retime, added=added,
-                             hidden=lm.skip_of)  # (closing Spiderweb: its temp file goes)
+                             hidden=hid.skip_of)  # (closing Spiderweb: its temp file goes)
             except BaseException as e:  # (said below)
                 job["error"] = e
             job["finished"] = True
@@ -1077,6 +1098,8 @@ class ProjectFiles:
                      tracks=trn("n.tracks", job["tracks"], n=job["tracks"]))
             if job["hits"]:
                 out += trn("load.own_hits", job["hits"], n=job["hits"])
+            if len(hid.h_s):
+                out += trn("load.own_extracted", len(hid.h_s), n=len(hid.h_s))
             return out + self.cc_note(cc, True)
 
         def poll():
@@ -1097,8 +1120,9 @@ class ProjectFiles:
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
                     note=self.tempo_notes(job["plan"]) + own_note()))
             elif e is None:
-                messagebox.showinfo(tr("project.spiderweb"), tr("load.exported_own" if len(notes) else "load.exported",
-                                                                path=path, notes=trn("n.notes", left, n=left))
+                messagebox.showinfo(tr("project.spiderweb"), tr(
+                    ("load.exported_own_extracted" if len(hid.h_s) else "load.exported_own") if len(notes) else
+                    "load.exported", path=path, notes=trn("n.notes", left, n=left))
                                     + own_note())
             elif isinstance(e, MidiError):
                 messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info))

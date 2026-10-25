@@ -467,6 +467,10 @@ def _halves(sh, parts, ppq):
         if "unmerge" in sh:  # (no Split back any more: not called "Merged notes", hunt)
             from files.lang import tr
             half["name"] = tr("join_split.plain_name", name=sh.get("name") or "")
+            from notes.loaded import held_extract
+            ex = held_extract(sh)  # (its parts' Extracts: taken over, their notes stay out of the loaded MIDI)
+            if ex:
+                half["extract"] = ex
         if mirrored:
             half["flip_colours"] = True
         if "name" not in sh:

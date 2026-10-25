@@ -19,6 +19,7 @@ from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.passengers import pack_cc, unpack_cc
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
+from notes.loaded import held_extract
 from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
@@ -658,6 +659,9 @@ class JoinSplit:
                 new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)
                 new[i]["made"] = "plain"
                 new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
+                ex = held_extract(sh) if moved is None else None  # (its notes taken from a loaded MIDI stay out of
+                if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
+                    new[i]["extract"] = ex
         return new
 
     def multi_rendered(self):

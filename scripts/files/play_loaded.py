@@ -76,11 +76,8 @@ def _loops():
 
 def track_ports(lm):
     """(port index per track (0 .. ports - 1, by the file's FF 21 port numbers; none = port 0), ports used)."""
-    from notes.loaded import PORT
-    raw = []
-    for t in lm.tracks:
-        got = t.metas(PORT)
-        raw.append(got[0][1][0] if got and got[0][1] else 0)
+    from notes.loaded import port_numbers
+    raw = port_numbers(lm).tolist()
     used = sorted(set(raw)) or [0]
     return np.array([used.index(p) for p in raw], np.int64), len(used)
 

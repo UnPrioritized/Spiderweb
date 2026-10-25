@@ -81,7 +81,7 @@ def has_index(mf):
     try:
         with np.load(index_file(mf.path, mf.size), allow_pickle=False) as z:
             return _fits(json.loads(bytes(z["head"]).decode("utf-8")), mf)
-    except (OSError, ValueError, KeyError, TypeError):
+    except Exception:  # (none, or a damaged file: BadZipFile, EOFError... = none, hunt 2026-10-25)
         return False
 
 
@@ -98,7 +98,7 @@ def load_index(mf):
                 return None
             arrays = {k: z[k] for k in ARRAYS}
             cnt, top = z["cnt"], z["top"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except Exception:  # (damaged too: read the usual way)
         return None
     for t, s in zip(mf.tracks, head["tracks"]):
         t.flags, t.last_tick, t.after, t.hash = s["flags"], s["last_tick"], s["after"], s["hash"]
@@ -143,8 +143,11 @@ def saved_list():
         try:
             with np.load(f, allow_pickle=False) as z:
                 path = json.loads(bytes(z["head"]).decode("utf-8")).get("path", "")
+        except Exception:  # (damaged: listed by its own name, so it can be deleted)
+            path = f
+        try:
             out.append((os.path.getmtime(f), path, f, os.path.getsize(f)))
-        except (OSError, ValueError, KeyError):
+        except OSError:
             continue
     return [(p, f, s) for _, p, f, s in sorted(out, reverse=True)]
 
@@ -166,8 +169,9 @@ def _declined():
 
 
 def offer(lm):
-    """After a load: offer to save its index? (read from the file, slow, none saved, not declined)"""
-    return (lm.mode == "file" and lm.seconds > SLOW_S and not os.path.exists(index_file(lm.path, lm.mf.size))
+    """After a load: offer to save its index? (read from the file, slow, none saved that fits it now: an old one
+    for the file before it changed is saved over, hunt 2026-10-25; not declined)"""
+    return (lm.mode == "file" and lm.seconds > SLOW_S and not has_index(lm.mf)
             and os.path.normcase(os.path.abspath(lm.path)) not in _declined())
 
 

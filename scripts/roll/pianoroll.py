@@ -31,7 +31,7 @@ from roll.roll_funnel import FunnelEditing
 from roll.roll_hz import HzStart
 from window import look
 from window.hz_window import open_hz
-from window.load_extract import can_extract
+from window.load_extract import can_extract, stop_extract
 from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
@@ -2069,6 +2069,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return "break"
         k = e.keysym.lower()
         if k == "escape":
+            if stop_extract(self.app):  # (an Extract still reading: stopped)
+                return "break"
             pane = getattr(self.app, "key_pane", None)
             if pane is not None and pane.placing:  # (the Tempo pane adding a catch-up: called off)
                 return pane.cancel_placing()
