@@ -73,7 +73,7 @@ from notes.between import (copied as between_copied, keep_pushes, push_sizes, sy
                            whole_groups)
 from window.app_pictures import Pictures
 from window.app_playback import GROUP_DEFAULT, Playback
-from window.history import BOXES, CH10_OFF, HistoryPanel
+from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, painting_order
@@ -1913,7 +1913,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def new_project(self):
         """The Project tab's New: a new MIDI. The shapes and the tempo line go (their Select boxes / picks too); PPQ,
         keys, the output file, channel settings and the Domino start stay; BPM and the time signature go back to
-        MIDI's 120 and 4/4 (user). Asked first; one undo step, which brings the boxes back too (history._restore)."""
+        MIDI's 120 and 4/4 (user). Asked first (unsaved work: save it first?). NOTHING SURVIVES (user 2026-10-25:
+        Ctrl+Z after New brought the tempo back without the loaded MIDI): like Open, the undo / redo steps go."""
         boxes = (self.pvar["bpm"].get(), self.project_file)
         try:
             usual = calc(boxes[0]) == 120
@@ -1923,9 +1924,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not self.shapes and plain and usual and not boxes[1] and self.loaded is None and self.midi_link is None:
             return
         ask = tr("app.new_ask") + ("\n\n" + tr("load.new_closes") if self.midi_link is not None else "")
-        if not messagebox.askyesno(tr("app.spiderweb_2"), ask, icon="warning", parent=self):
-            return
-        if self.midi_link is not None:  # (a loaded MIDI goes too; Undo brings back the shapes only)
+        if self.saved_key() == self._saved_shapes or not self.shapes and plain:
+            if not messagebox.askyesno(tr("app.spiderweb_2"), ask, icon="warning", parent=self):
+                return
+        else:  # (unsaved work: one question, save it first?)
+            answer = messagebox.askyesnocancel(tr("app.spiderweb_2"), ask + "\n\n" + tr("app.new_save_first"),
+                                               icon="warning", default="yes", parent=self)
+            if answer is None or answer and not self.save_project():
+                return
+        if self.midi_link is not None:  # (a loaded MIDI goes too)
             self.midi_link = None
             self.drop_finding()
             self.stop_loaded()
@@ -1933,11 +1940,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.roll.forget_loaded()
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes
         self.roll.drop_lasso()  # (a waiting loop would cut the new one)
-        self.push_undo(name=tr("app.new"))
-        state, name, sel, hz = self.undo_stack[-1]
-        self.undo_stack[-1] = (state, name, tuple(sel) + ((BOXES,) + boxes,), hz)  # (the step's mark: _restore)
+        self.stop_play()
+        self.undo_stack.clear()  # (nothing of the old project comes back, like Open)
+        self.redo_stack.clear()
+        self._redo_kept = self._trimmed = None
+        self._saved_shapes = self._saved_mark = None
+        self.set_playhead(0.0)
+        if hasattr(self, "track_list"):  # (its mutes, highlight and picks belonged to the old song)
+            self.track_list.forget()
         self.shapes.clear()
-        self.project_file = None  # (Save asks for a name again; Ctrl+Z brings the file back)
+        self.project_file = None  # (Save asks for a name again)
         self.tempo = empty_tempo()
         self.tempo_pane.forget()
         self.roll.box_kept = None
@@ -1946,7 +1958,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.pvar["bpm"].set("120")  # (remakes what hangs on it: on_project_change)
         self.tempo_changed()
         self.shapes_changed()
+        self.sync_ppq_lock()  # (no loaded MIDI any more: PPQ can be changed again)
         self.sync_history()
+        self.sync_window_title()
 
     def duplicate(self):
         if not self.sels:
