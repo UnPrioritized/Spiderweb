@@ -294,10 +294,14 @@ def order_rects(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, show
     return ra[:m].copy(), rb[:m].copy(), rc[:m].copy(), rd[:m].copy(), re[:m].copy()
 
 
+NO_END = 1 << 30  # (a colour number's flag: the note's end was cut short for painting, roll_draw.covered_ends)
+
+
 @njit(cache=CACHE, nogil=True)
-def note_top(top_px, kb, top, w, h, x0, y0, x1, y1):
+def note_top(top_px, half, kb, top, w, h, x0, y0, x1, y1, color):
     """top_px (the region's pixels, row by row, -1 filled) = note number * 2 + (1 = outline) of the note painted
-    last on each pixel. Same pixels as a canvas rectangle with a 1-pixel outline: x0..x1 and y0..y1 inclusive."""
+    last on each pixel. Same pixels as a canvas rectangle with a 1-pixel outline: x0..x1 and y0..y1 inclusive.
+    half = 1 where a note under the top one starts / ends (its fill shaded there; user 2026-10-25)."""
     iw = w - kb
     for k in range(len(x0)):
         a, b = max(y0[k], top), min(y1[k] + 1, h)
@@ -306,24 +310,35 @@ def note_top(top_px, kb, top, w, h, x0, y0, x1, y1):
             continue
         solid = x1[k] - x0[k] < 2 or y1[k] - y0[k] < 2  # too small to have a fill: all outline
         left, right = c == x0[k], d == x1[k] + 1  # (its left / right outline on screen?)
+        end = right and (color[k] & NO_END) == 0  # (its end column counts as an end)
         fill, edge = 2 * k, 2 * k + 1
         for y in range(a, b):
             row = (y - top) * iw - kb
             v = edge if solid or y == y0[k] or y == y1[k] else fill
             for x in range(c, d):
-                top_px[row + x] = v
+                p = row + x
+                mine = 1 if (left and x == c) or (end and x == d - 1) else 0
+                half[p] = (2 if half[p] != 0 else 0) | mine  # (1 = its start / end here, 2 = one under it)
+                top_px[p] = v
             if v == fill:
                 if left:
                     top_px[row + c] = edge
                 if right:
                     top_px[row + d - 1] = edge
+    for p in range(len(half)):
+        half[p] = 1 if half[p] >= 2 else 0
 
 
 @njit(cache=CACHE, nogil=True)
 def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb):
     """Each note's colours painted straight into img (pixels x 3), the last painted winning: the same pixels as
-    note_top's notes on top coloured in, without that list."""
+    note_top's notes on top coloured in, without that list. Where a note under it starts / ends, a note's fill is
+    shaded halfway to its edge colour."""
     iw = w - kb
+    # (a key row's notes all cover the same pixel rows, so its first row stands for it: 1 = the top note's start /
+    # end in that column, 2 = one under it)
+    flags = np.zeros(max(h - top, 0) * max(iw, 0), np.uint8)
+    under = np.zeros(max(iw, 0), np.int64)
     for k in range(len(x0)):
         a, b = max(y0[k], top), min(y1[k] + 1, h)
         c, d = max(x0[k], kb), min(x1[k] + 1, w)
@@ -331,8 +346,24 @@ def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb):
             continue
         solid = x1[k] - x0[k] < 2 or y1[k] - y0[k] < 2
         left, right = c == x0[k], d == x1[k] + 1
-        f0, f1, f2 = rgb[color[k], 0, 0], rgb[color[k], 0, 1], rgb[color[k], 0, 2]
-        e0, e1, e2 = rgb[color[k], 1, 0], rgb[color[k], 1, 1], rgb[color[k], 1, 2]
+        end = right and (color[k] & NO_END) == 0
+        q = color[k] & (NO_END - 1)
+        f0, f1, f2 = rgb[q, 0, 0], rgb[q, 0, 1], rgb[q, 0, 2]
+        e0, e1, e2 = rgb[q, 1, 0], rgb[q, 1, 1], rgb[q, 1, 2]
+        first = (a - top) * iw - kb
+        m = 0  # (columns with a note under it starting / ending: under[:m])
+        for x in range(first + c, first + d):
+            if flags[x] != 0:
+                under[m] = x - first
+                m += 1
+                flags[x] = 2
+        if left:
+            flags[first + c] |= 1
+        if end:
+            flags[first + d - 1] |= 1
+        s0 = s1 = s2 = 0
+        if m:
+            s0, s1, s2 = (np.int64(f0) + e0) // 2, (np.int64(f1) + e1) // 2, (np.int64(f2) + e2) // 2
         for y in range(a, b):
             row = (y - top) * iw - kb
             if solid or y == y0[k] or y == y1[k]:
@@ -341,6 +372,9 @@ def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb):
             else:
                 for x in range(c, d):
                     img[row + x, 0], img[row + x, 1], img[row + x, 2] = f0, f1, f2
+                for i in range(m):
+                    x = under[i]
+                    img[row + x, 0], img[row + x, 1], img[row + x, 2] = s0, s1, s2
                 if left:
                     img[row + c, 0], img[row + c, 1], img[row + c, 2] = e0, e1, e2
                 if right:
@@ -1706,7 +1740,7 @@ def warm():
     order_screen(s, e, key, color, first, 0, 1, f, f, f, f, f, f, b, False, f, f)
     order_rects(s, e, key, color, first, 0, 1, f, f, f, f, f, f, b, False, f, f, 0, 0, 1, i1, i1)
     last_on_pixels(i1.copy(), i1.copy(), i1.copy(), i1.copy(), 0, 0, 1, i1, i1)
-    note_top(np.full(1, -1, np.int64), 0, 0, 1, 1, i1, i1, i1, i1)
+    note_top(np.full(1, -1, np.int64), np.zeros(1, np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1)
     paint_notes(np.zeros((1, 3), np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, np.zeros((1, 2, 3), np.uint8))
     overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
     overlap_order(np.zeros((1, 6), np.int64))
