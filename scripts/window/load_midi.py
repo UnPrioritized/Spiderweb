@@ -9,6 +9,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from files import midi_saved as saved
 from files.lang import tr, trn
 from files.midi_read import Cancelled, FileChanged, MidiError, MidiFile, M_SMPTE
 from files.project import OUTPUT_DIR
@@ -339,17 +340,58 @@ class LoadWindow(tk.Toplevel):
             notes.append(tr("load.sum_resynced", tracks=", ".join(str(n + 1) for n in c["resynced"][:10])))
         if c["damaged"]:
             notes.append(tr("load.sum_damaged", tracks=", ".join(str(n + 1) for n in c["damaged"][:10])))
+        if lm.from_index:
+            lines.append(tr("load.sum_from_index"))
         for t in lines:
             ttk.Label(self.body, text=t).pack(anchor="w", pady=(2, 0))
         for t in notes:
             ttk.Label(self.body, text=t, foreground=look.WARN, wraplength=460, justify="left").pack(anchor="w",
                                                                                                  pady=(6, 0))
-        ok = ttk.Button(self.buttons, text=tr("load.ok"), command=self.destroy)
+        never = None
+        if saved.offer(lm):  # (a slow load: its index kept? asked once, step 12)
+            never = self.index_offer(lm)
+
+        def close():
+            if never is not None and never.get():
+                saved.decline(lm.path)
+            self.destroy()
+        ok = ttk.Button(self.buttons, text=tr("load.ok"), command=close)
         ok.pack(side="right")
         ok.focus_set()
-        self.bind("<Return>", lambda e: self.destroy())
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda e: close())
+        self.protocol("WM_DELETE_WINDOW", close)
+        self.bind("<Escape>", lambda e: close())
+
+    def index_offer(self, lm):
+        """The summary's question: save the index (its size), or never ask for this file. Returns the tick's var."""
+        box = ttk.Frame(self.body)
+        box.pack(anchor="w", fill="x", pady=(12, 0))
+        ttk.Label(box, text=tr("load.index_ask", s=f"{lm.seconds:.0f}", size=size_text(lm.index_bytes())),
+                  wraplength=460, justify="left").pack(anchor="w")
+        row = ttk.Frame(box)
+        row.pack(anchor="w", pady=(6, 0))
+        never = tk.BooleanVar(self, value=False)
+
+        def save():
+            self.config(cursor="watch")
+            self.update_idletasks()
+            try:
+                size = saved.save_index(lm)
+            except OSError as e:
+                done.config(text=tr("load.index_failed", why=e.strerror or str(e)), foreground=look.WARN)
+            else:
+                done.config(text=tr("load.index_saved", size=size_text(size)))
+                for w in (button, tick):
+                    w.state(["disabled"])
+            finally:
+                self.config(cursor="")
+        button = ttk.Button(row, text=tr("load.index_save"), command=save)
+        button.pack(side="left")
+        tick = ttk.Checkbutton(row, text=tr("load.index_never"), variable=never)
+        tick.pack(side="left", padx=(10, 0))
+        done = ttk.Label(box, text="", foreground=look.HINT)
+        done.pack(anchor="w", pady=(4, 0))
+        return never
 
     def cancel(self):
         if self.loader is None:

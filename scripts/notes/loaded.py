@@ -51,6 +51,7 @@ class LoadedMidi:
         self.levels = levels  # [(cnt, top)]: the overview, level n = buckets of G << n ticks
         self.keys = levels[0][0].shape[0]  # 128, or 256 (a 256 keys MIDI)
         self.seconds = seconds
+        self.from_index = False  # (opened from its saved index, files/midi_saved.py)
         self.notes = sum(t.notes for t in infos)
         self.end = max((t.end for t in infos if t.notes), default=0)  # the last note's end (ticks)
         self.last_tick = max((t.last_tick for t in infos), default=0)
@@ -642,6 +643,13 @@ class Loader:
         if speed.loops() is None and self.total > PLAIN_MOST:
             raise MidiError("load.needs_speed")
         self.stage = "read"
+        if not self.keep:  # (its index saved by an earlier load: a moment, no read of the file, step 12)
+            from files.midi_saved import load_index
+            lm = load_index(self.mf)
+            if lm is not None:
+                lm.seconds, lm.from_index = time.perf_counter() - self.started, True
+                self.done, self.tracks_done, self.notes_found = self.total, len(lm.tracks), lm.notes
+                return lm
         loops = speed.loops()
         self._index = loops.midi_index if loops else midi_index.index
         self._close = loops.midi_close if loops else midi_index.close

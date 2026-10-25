@@ -15,7 +15,7 @@ from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
 from window.drawer import clean_name
 from window.updates import often_box
-from window.widgets import Tooltip, keep_width, letter_jump, name_list, remember_place, set_names
+from window.widgets import ShortLabel, Tooltip, keep_width, letter_jump, name_list, remember_place, set_names
 
 
 def look_box(parent):
@@ -203,6 +203,7 @@ class SettingsWindow(tk.Toplevel):
         self.build_tips(page)
         self.build_keep_colours(page)
         self.build_domino(page)
+        self.build_indexes(page)
         self.build_language()
         tabs.insert(0, self.pages["general"])  # (General first, user 2026-10-18)
         tabs.select(0)
@@ -266,6 +267,34 @@ class SettingsWindow(tk.Toplevel):
                         command=self.app.shapes_changed).pack(anchor="w")
         ttk.Label(page, text=tr("settings.keep_colours_hint"), foreground=look.HINT,
                   wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
+
+    def build_indexes(self, page):
+        """Load MIDI's saved indexes (files/midi_saved.py): each MIDI's name, the index's size, a Delete button."""
+        from files import midi_saved
+        from window.load_midi import size_text
+        ttk.Separator(page).pack(fill="x", pady=(12, 8))
+        ttk.Label(page, text=tr("settings.indexes")).pack(anchor="w")
+        box = ttk.Frame(page)
+        box.pack(anchor="w", fill="x", pady=(4, 0))
+        width = round(360 * self.app.scale)
+
+        def fill():
+            for w in box.winfo_children():
+                w.destroy()
+            got = midi_saved.saved_list()
+            if not got:
+                ttk.Label(box, text=tr("settings.indexes_none"), foreground=look.HINT).pack(anchor="w")
+            for path, f, size in got:
+                row = ttk.Frame(box)
+                row.pack(anchor="w", fill="x", pady=(2, 0))
+                ttk.Button(row, text=tr("settings.index_delete"), takefocus=False,
+                           command=lambda f=f: (midi_saved.delete_index(f), fill())).pack(side="right")
+                ttk.Label(row, text=size_text(size), foreground=look.HINT).pack(side="right", padx=(6, 6))
+                ShortLabel(row, text=os.path.basename(path)).pack(side="left", fill="x", expand=True)
+            ttk.Frame(box, width=width, height=0).pack(anchor="w")
+        fill()
+        ttk.Label(page, text=tr("settings.indexes_hint"), foreground=look.HINT, wraplength=width,
+                  justify="left").pack(anchor="w", pady=(4, 0))
 
     def build_domino(self, page):
         """(Experimental) Domino 256 keys: Copy / Paste / Export to Domino keep keys above 127 (off: left out)."""
