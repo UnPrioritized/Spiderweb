@@ -1,6 +1,8 @@
 Space (or Play) plays from the play line through the MIDI out picked in Settings (Help menu) → Sound; the blue line follows and the view jumps along. Click the bar numbers (or click empty space with Select) to move the play line; dragging along them selects (see Selecting). While playing, clicks don't move the play line (stop first); dragging a box and drawing work as usual, and a right-drag listens on top of what's playing. You can scroll freely while playing: the view waits until you stop for half a second, then jumps back to the play line. Playing stops a quarter bar after the last note.
 
-Built-in BASSMIDI (in the MIDI out list) plays through Spiderweb's own synth, with a soundfont you pick (the Hz bass preview uses the same one). Pressing Play with no soundfont yet asks for one. Settings (Help menu) → Sound changes the soundfont and the Voice limit: how many sounds can ring at once.
+Built-in BASSMIDI (in the MIDI out list) plays through Spiderweb's own synth, with soundfonts you pick (the Hz bass preview uses the same ones). Pressing Play with no soundfont yet asks for one. Settings (Help menu) → Sound has the Soundfonts list and the Voice limit: how many sounds can ring at once.
+
+Soundfonts can be stacked. The top one is used first; a sound it doesn't have comes from the next one down. For example, put your piano soundfont on top and a General MIDI one under it: the piano plays your piano, and drums or other instruments come from the General MIDI one. A sound no soundfont has stays silent, like in other players. Add… adds soundfonts at the bottom, Up and Down change the order, Remove takes one out of the list.
 
 When the computer can't keep up, a red "Overloaded" shows at the right end of the status line at the bottom: lower the Voice limit, or tick "Lower it by itself when overloaded" in Settings (Help menu) → Sound.
 

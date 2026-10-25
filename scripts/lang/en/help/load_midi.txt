@@ -66,7 +66,7 @@ Delete the shape or undo, and the notes are back in the loaded MIDI. A copy of t
 
 ## Playing
 
-The loaded MIDI plays with your shapes: every track that isn't muted in the track list, every event as written. With Built-in BASSMIDI, it plays on several synths side by side (Settings → Sound → Synths for a loaded MIDI, half your processor's cores at first). Channel 10 plays as drums when your soundfont has a drum kit.
+The loaded MIDI plays with your shapes: every track that isn't muted in the track list, every event as written. With Built-in BASSMIDI, it plays on several synths side by side (Settings → Sound → Synths for a loaded MIDI, half your processor's cores at first). It plays the instruments the file asks for when a soundfont in your list has them, and channel 10 plays as drums when one has a drum kit. A piano-only soundfont leaves other instruments and drums silent, like other players: add a General MIDI soundfont under it in Settings → Sound → Soundfonts. Your own shapes always play the piano.
 
 No synth can play every note of the busiest walls of notes. Where there are too many, the quietest notes are left out (with their note-off), the play line keeps real time and "Overloaded" shows at the status line's right end.
 
