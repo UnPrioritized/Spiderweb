@@ -9,7 +9,8 @@ emit   one step's events as raw MIDI bytes for each synth: thinned, muted and la
 
 import numpy as np
 
-def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base, sk, sk_i, sk_end):
+def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base, sk, sk_i, sk_end, count, opened,
+         slot):
     """Many tracks' whole channel events before tick t1 in one go (one Python call for hundreds of tracks: Shinki
     has ~800 busy ones in a slice of time). Track j's bytes = b[at[j]:at[j] + size[j]] (a track walk() read
     without BAD, from where it was), its tick / running status so far tick[j] / run[j] (moved on). Events into
@@ -18,7 +19,9 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base
     get loaded while playing), keys past 127 (a synth has 128), meta / sysex events. A track stops at its first
     event at or after t1 (nxt[j] = that tick, not read; else -1) or at one not wholly in its bytes; used[j] = its
     bytes read. Hidden events (Extract, midi_scan): track j's are sk[sk_i[j]:sk_end[j]] (byte places in the track,
-    sk_i moved on), b[at[j]] = its byte base[j]. Returns n."""
+    sk_i moved on), b[at[j]] = its byte base[j]. count: notes only counted, never kept (finding where playing
+    starts, or stepping over a wall too big to read): opened[slot[j] x 2048 + channel x 128 + key] = notes sounding
+    (an off with none sounding: nothing); key pressure left out too; the other events kept. Returns n."""
     for j in range(len(at)):
         p = at[j]
         end = at[j] + size[j]
@@ -69,6 +72,14 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base
                 if (hi == 0x8 or hi == 0x9 or hi == 0xA) and a >= 128:
                     keep = False
                 if hid and (hi == 0x8 or hi == 0x9):
+                    keep = False
+                if count and keep and (hi == 0x8 or hi == 0x9 or hi == 0xA):
+                    if hi != 0xA:
+                        ln = slot[j] * 2048 + (s & 15) * 128 + (a & 127)
+                        if hi == 0x9 and v > 0:
+                            opened[ln] += 1
+                        elif opened[ln] > 0:
+                            opened[ln] -= 1
                     keep = False
                 if keep:
                     out_t[n] = t

@@ -60,6 +60,11 @@ WARM_S = 2.0  # sound lost this soon after the line starts never lowers a ceilin
 _caps = {}  # (synths, voices each, soundfont) -> each synth's learned ceiling, for the next play
 SKIP = 64 * 16 * 128  # (port x channel x key: note-offs still to leave out)
 POOL = 12  # windows' arrays kept for use again at most
+POOL_LONGEST = 1 << 23  # ... each this long at most (a wall's big ones go)
+WINDOW_MOST = 4 * WANT  # a window holding more events is read again shorter (one tick: stepped over, counted only)
+QUEUE_MOST = 8 * WANT  # events read ahead at most (hunt 2026-10-25: a wall's offs read ahead took 16-30 GB)
+NO_COUNT = np.zeros(1, np.int64)
+READY_S = 0.5  # seconds of the song read before the play line starts
 
 
 def _loops():
@@ -111,6 +116,7 @@ class LoadedPlayer:
         self.thinned = 0  # note-ons left out (budget / late), so far
         self.sent = 0  # note-ons sent
         self.jumps = 0
+        self.walls = 0  # (ticks stepped over: more events than a window may hold)
         self.dropped = 0  # (times a jammed synth's waiting messages were thrown away)
         self.windows, self.read_s = 0, 0.0  # (windows read, seconds reading them took: measuring)
         self.error = None
@@ -160,10 +166,15 @@ class LoadedPlayer:
             p = int(self.pos[s])
             buf[a:a + z] = self.lm.tracks[int(self.num[s])].data[p:p + z]
 
-    def _read(self, slots, t1):
-        """Slots' events up to tick t1 (their places moved on): (ticks, messages, track numbers), track by track."""
+    def _read(self, slots, t1, most=None, count=None):
+        """Slots' events up to tick t1 (their places moved on): (ticks, messages, track numbers), track by track.
+        most: more events than this = None (stopped part way: the caller puts the places back and reads less).
+        count = the notes sounding per slot x channel x key, notes only counted there (not kept)."""
         read = _loops()[0]
         n = 0
+        counting = count is not None
+        if count is None:
+            count = NO_COUNT
         while len(slots):
             # (up to the first checkpoint at or past t1: every event before t1 is before it)
             j2 = np.searchsorted(self.cp_key, slots * self.M + t1, "left")
@@ -180,7 +191,8 @@ class LoadedPlayer:
             more = []
             for lo in range(0, len(slots), 4096):  # (batches: the buffer stays small)
                 ss, zz = slots[lo:lo + 4096], size[lo:lo + 4096]
-                cut = np.searchsorted(np.cumsum(zz), BATCH, "right") + 1  # (about BATCH bytes a call)
+                cut = np.searchsorted(np.cumsum(zz), BATCH // 8 if counting else BATCH, "right") + 1  # (about BATCH
+                # bytes a call; counting: the room kept for what it may hold stays small)
                 ss, zz = ss[:cut], zz[:cut]
                 if cut < len(slots[lo:lo + 4096]):
                     more.append(slots[lo:lo + 4096][cut:])
@@ -194,7 +206,7 @@ class LoadedPlayer:
                 sk_i = self.sk_i[ss].copy()
                 n = self._room(n, total // 2 + 2 * len(ss))
                 n = read(self._buf, at, zz, t1, tick, run, nxt, used, self.num32[ss], self._sc_t, self._sc_m,
-                         self._sc_k, n, self.pos[ss], self.sk, sk_i, self.sk_end[ss])
+                         self._sc_k, n, self.pos[ss], self.sk, sk_i, self.sk_end[ss], counting, count, ss)
                 self.tick[ss], self.run[ss], self.nxt[ss], self.sk_i[ss] = tick, run, nxt, sk_i
                 self.pos[ss] += used
                 # what this window still needs of them: cut short by the chunk / an event longer than read
@@ -208,6 +220,8 @@ class LoadedPlayer:
                 again = (nxt < 0) & ~done & ((self.pos[ss] < ends) | (stuck & ~ends_here))
                 if again.any():
                     more.append(ss[again])
+                if most is not None and n > most:  # (too many for one window: read less)
+                    return None
             slots = np.concatenate(more) if more else np.zeros(0, np.int64)
         return self._sc_t[:n], self._sc_m[:n], self._sc_k[:n]
 
@@ -262,22 +276,17 @@ class LoadedPlayer:
         lm = self.lm
         self.sk_i = np.array([lm.skip_at[n] + np.searchsorted(lm.skip_of(n), p) for n, p in
                               zip(self.num.tolist(), self.pos.tolist())], np.int64).reshape(-1)
-        ts, ms, ks = self._read(slots, t0)
-        notes = (ms & 0xE0) == 0x80
-        if notes.any():  # (what's still open at t0 sounds on past it; each slot's own count)
-            slot_of = np.searchsorted(self.num, ks[notes].astype(np.int64))
-            m = ms[notes].astype(np.int64)
-            q = slot_of * 2048 + (m & 15) * 128 + ((m >> 8) & 127)
-            np.add.at(opened, q, np.where(((m & 0xF0) == 0x90) & (((m >> 16) & 127) > 0), 1, -1))
+        # (notes only counted on the way: what's still open at t0 sounds on past it, each slot's own count; a
+        # dense part's millions of notes are never kept, hunt 2026-10-25: 1.9 GB to start inside Shinki's wall)
+        ts, ms, ks = self._read(slots, t0, count=opened)
         np.maximum(opened, 0, out=opened)
         skip = np.zeros(SKIP, np.int64)
         live = np.flatnonzero(opened)
         if len(live):
             port = self.tport[self.num[live // 2048]] % 64
             np.add.at(skip, port * 2048 + live % 2048, opened[live])
-        other = ~notes & ((ms & 0xF0) != 0xA0)
-        o = np.argsort(ts[other], kind="stable")
-        return skip, (ts[other][o], ms[other][o], ks[other][o])
+        o = np.argsort(ts, kind="stable")
+        return skip, (ts[o].copy(), ms[o].copy(), ks[o].copy())
 
     def _reader(self, t0):
         self._buf, self._file = None, None
@@ -297,6 +306,9 @@ class LoadedPlayer:
                     self._queue.clear()
                     self._queue.append([chase[0], chase[1], chase[2], 0, skip, None])  # (controllers before the start)
                     self._jump = None
+                    # (read up to here now: the feeder measures from the new place, hunt 2026-10-25: a jump that
+                    # took long to place asked for another at once, over and over, and playing went silent)
+                    self._horizon = start
                 span = max(1, self.lm.ppq // 8)
                 w0 = start
                 last = int(max((self.lm.tracks[int(n)].last_tick for n in self.num), default=0))
@@ -306,6 +318,7 @@ class LoadedPlayer:
                         time.sleep(0.02)
                         continue
                     if self._ahead(w0) > AHEAD_S or (self.player._clock is None and len(self._queue) > 8):
+                        self.ready.set()  # (read far enough: the line may start)
                         time.sleep(0.005)
                         continue
                     w1 = w0 + span
@@ -316,16 +329,40 @@ class LoadedPlayer:
                     if tmap.sec(w1) - tmap.sec(w0) > WINDOW_S:  # (never a long stretch at once: a quiet part's
                         # doubled windows ran into a wall and read for seconds)
                         w1 = max(w0 + 1, int(tmap.tick(tmap.sec(w0) + WINDOW_S)))
+                    if self._queued() > QUEUE_MOST:  # (a wall read ahead: memory, never more than this)
+                        self.ready.set()
+                        time.sleep(0.005)
+                        continue
                     began = time.perf_counter()
                     todo = np.flatnonzero(~self.done & (self.nxt < w1))
-                    ts, ms, ks = self._read(todo, w1)
+                    kept = [a.copy() for a in (self.pos, self.tick, self.run, self.nxt, self.want, self.done,
+                                               self.sk_i)]
+                    got = self._read(todo, w1, most=WINDOW_MOST)
+                    if got is None:  # (too many events in it: a shorter window from the same place)
+                        self.pos, self.tick, self.run, self.nxt, self.want, self.done, self.sk_i = kept
+                        if w1 - w0 > 1:
+                            span = max(1, (w1 - w0) // 4)
+                            continue
+                        # one tick holding more than a window may: stepped over, its notes only counted (never
+                        # heard: no synth plays that many), every sound stopped there, on after it
+                        skip, chase = self._place(w1)
+                        with self._lock:
+                            if self._gen != gen or self._jump is not None:
+                                break
+                            self._queue.append([chase[0], chase[1], chase[2], 0, ("wall", skip), None])
+                            self._horizon = w1
+                        self.walls += 1
+                        w0 = w1
+                        continue
+                    ts, ms, ks = got
                     ts, ms, ks, base = self._sorted(ts, ms, ks, w0, w1)
                     with self._lock:
                         if self._gen != gen or self._jump is not None:
                             break
                         self._queue.append([ts, ms, ks, 0, None, base])
                         self._horizon = w1
-                    self.ready.set()  # (the play line may start: the Player waits for it)
+                    if tmap.sec(w1) - tmap.sec(start) >= READY_S:  # (the play line may start: the Player waits
+                        self.ready.set()  # for it; a head start, else a dense part ran dry at once, hunt 10-25)
                     self.windows += 1
                     self.read_s += time.perf_counter() - began
                     # (the next window: about WANT events)
@@ -347,6 +384,11 @@ class LoadedPlayer:
             self.ready.set()
             if self._file is not None:
                 self._file.close()
+
+    def _queued(self):
+        """Events read and not played yet."""
+        with self._lock:
+            return sum(len(e[0]) - e[3] for e in self._queue)
 
     def _ahead(self, tick):
         """Seconds tick is ahead of the play line now (None clock: 0)."""
@@ -467,8 +509,7 @@ class LoadedPlayer:
                     skip[:] = 0
                 if cur is None and self._queue:
                     cur = self._queue.popleft()
-                    if cur[4] is not None:
-                        skip += cur[4]
+                    self._took(cur, skip)
                 horizon = getattr(self, "_horizon", None)
             if cur is None:
                 if horizon is not None and tmap.sec(horizon) < s_now - BEHIND_S and self._jump is None:
@@ -512,14 +553,25 @@ class LoadedPlayer:
                     self.thinned += max(0, ons - int(kept.sum()))
                 if i >= len(ts):
                     with self._lock:
-                        if cur[5] is not None and len(self._pool) < POOL:  # (its arrays: for a later window)
-                            self._pool.append(cur[5])
+                        if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
+                            self._pool.append(cur[5])  # (its arrays: for a later window; a wall's go)
                         cur = self._queue.popleft() if self._queue and self._gen == gen else None
-                        if cur is not None and cur[4] is not None:
-                            skip += cur[4]
+                        if cur is not None:
+                            self._took(cur, skip)
                     continue
                 break
         self.silence()
+
+    def _took(self, cur, skip):
+        """A window taken by the feeder: its note-offs to leave out added; a wall stepped over (the reader's
+        ("wall", counts)): every sound stopped, the offs to leave out = the notes sounding after it."""
+        if cur[4] is None:
+            return
+        if isinstance(cur[4], tuple):
+            self.silence()
+            skip[:] = cur[4][1]
+        else:
+            skip += cur[4]
 
     # --- start / stop -------------------------------------------------------------------------------------------
 

@@ -1709,7 +1709,7 @@ def warm():
     loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
     i32 = np.zeros(1, np.int32)
     play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),
-              i32.copy(), 0, i1.copy(), i1[:0], i1.copy(), i1.copy())
+              i32.copy(), 0, i1.copy(), i1[:0], i1.copy(), i1.copy(), False, i1.copy(), i1.copy())
     play_order(i1, i32, i32, 0, 1, i1.copy(), i32.copy(), i32.copy())
     h2 = np.zeros((1, 128), np.int64)
     play_hist(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, h2)
