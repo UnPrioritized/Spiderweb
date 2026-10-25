@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
-from files.own_tracks import HAND, plan
+from files.own_tracks import HAND, add_tracks, plan
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import BEATS_FAR, slot_track_channel
@@ -49,6 +49,7 @@ TILE = 512  # px: a loaded MIDI's rows are read in blocks this wide along the so
 # the next ones read ahead in the background (user 2026-10-24, Shinki: each new picture read every row again,
 # ~100 ms stops while scrolling)
 TILES_BYTES = 128 << 20  # blocks kept at most (the oldest used go first)
+MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 
 
 def hex_rgb(colour):
@@ -85,6 +86,7 @@ class TrackList(tk.Canvas):
         self._all = self._slots  # every row's track: a loaded MIDI's (-1 - its number) first, then the slots
         self.lead = 0  # rows of a loaded MIDI's tracks (Load MIDI) before Spiderweb's own
         self._hand = {}  # id -> the own track (added by hand, files/own_tracks.py) of each such row
+        self.menu_shut = 0.0  # when the right-click menu last closed (perf_counter)
         self._row_of = np.zeros(0, np.int64)  # slot -> row (-1: none)
         self._ranges = None  # (each slot's lowest keys, highest keys): key_ranges, worked out when drawn
         self._ids = []  # id() of the shapes when the tracks were worked out (their notes' owner numbers)
@@ -532,6 +534,8 @@ class TrackList(tk.Canvas):
     def on_press(self, e):
         self.focus_set()
         self.tip.use()
+        if time.perf_counter() - self.menu_shut < MENU_CLICK_S:  # (the click that closed the right-click menu:
+            return                                                # Windows hands it on, like the Tempo pane's)
         playing = self.app.player.running  # (playing: the play line stays, user 2026-10-23)
         if e.y < self.ruler_h:  # the play line, on the track list's snap (Shift: free)
             if e.x >= self.name_w and self.sx and not playing:
@@ -602,15 +606,105 @@ class TrackList(tk.Canvas):
             self.shown_changed()
 
     def on_right(self, e):
-        """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs)."""
+        """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs).
+        Anywhere else under the ruler: the tracks' menu (track_menu)."""
         row = self.row_at(e.y)
-        if row is None or row < 0 or not self.on_speaker(e.x):
+        if e.y >= self.ruler_h and (row is None or row < 0 or not self.on_speaker(e.x)):
+            return self.track_menu(e, row)
+        if row is None or row < 0:
             return
         slot, every = int(self.tracks()[row]), {int(s) for s in self.tracks()}
         self.muted = set() if self.muted == every - {slot} else every - {slot}
         self.tip.hide()
         self.request_redraw()
         self.app.play_changed()
+
+    # ------------------------------------------------------------ own tracks (added by hand: files/own_tracks.py)
+
+    def track_menu(self, e, row):
+        """Right-click on a row / below them (like Domino's): Add Track, Remove Track. row: the track list row
+        clicked (-1 = the Conductor row, None = below the tracks)."""
+        self.tip.hide()
+        s = int(self.tracks()[row]) if row is not None and row >= 0 else None
+        own = self.own_track(s)
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
+        menu.add_separator()
+        menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_own(s),
+                         state="normal" if own is not None else "disabled")
+        try:
+            menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            menu.grab_release()
+            self.menu_shut = time.perf_counter()  # (the click that closed it does nothing: on_press)
+
+    def own_row(self, row):
+        """A track list row as own_tracks.insert_at's row: among Spiderweb's own tracks (-1 = before them all:
+        the Conductor row, a loaded MIDI's track; None = after them all)."""
+        if row is None:
+            return None
+        return row - self.lead if row >= self.lead else -1
+
+    def row_channel(self, row):
+        """The channel (0-15) of the track in row, None for none (the Conductor row, a loaded track without notes)."""
+        if row is None or row < 0 or row >= len(self.tracks()):
+            return None
+        s = int(self.tracks()[row])
+        if s < 0:
+            return self.app.loaded.tracks[-s - 1].channel
+        if s >= HAND:
+            return self._hand[s]["ch"]
+        return slot_track_channel(s, self.app.picture_use10)[1]
+
+    def next_channel(self, row):
+        """Add Track's channel: the one after the clicked track's (below the tracks: the last one's), channel 1
+        after none; channel 10 skipped while "Use channel 10" is off."""
+        ch = self.row_channel(len(self.tracks()) - 1 if row is None else row)
+        ch = 0 if ch is None else (ch + 1) % 16
+        if ch == 9 and not self.app.picture_use10:
+            ch = 10
+        return ch
+
+    def set_own(self, new, name):
+        """The own tracks replaced by new (one undo step called name)."""
+        app = self.app
+        app.push_undo(name=name)
+        app.own_tracks = new
+        self.own_changed()
+
+    def own_changed(self):
+        """The own tracks changed (set_own, undo): the list, its picker, the status line and the title again."""
+        self.tracks()
+        self.shown_changed()
+        self.app.update_status()
+        self.app.schedule_autosave()
+        self.app.sync_history()
+
+    def add_own(self, row, chs):
+        """One track per channel in chs, after row (own_row), the first of them highlighted."""
+        app = self.app
+        autos = len(self._slots)
+        new, ids = add_tracks(app.own_tracks, autos, self.own_row(row), chs)
+        self.set_own(new, tr("tracks.add_step" if len(chs) == 1 else "tracks.add_many_step"))
+        self.current = HAND + ids[0]
+        self.shown_changed()
+        at = self.row_of_id(self.current)
+        if at is not None:  # (in view)
+            y = at * self.row_h
+            h = self.winfo_height() - self.area()[1]
+            if y < self.top or y + self.row_h > self.top + h:
+                self.top = y - h // 2
+                self.clamp()
+                self.request_redraw()
+
+    def remove_own(self, s):
+        """Remove Track (an own track only, for now)."""
+        own = self.own_track(s)
+        if own is None:
+            return
+        if self.current == s:
+            self.current = None
+        self.set_own([t for t in self.app.own_tracks if t is not own], tr("tracks.remove_step"))
 
     def speaker_x(self):
         return self.name_w - 13 * self.scale
