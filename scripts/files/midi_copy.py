@@ -6,15 +6,21 @@ different, is never put in place."""
 
 import hashlib
 import os
+import queue
 import shutil
+import threading
 
 import numpy as np
 
 from files import midi_scan, safefile, speed
-from files.midi_read import BIGGEST_EVENT, PIECE, Cancelled, FileChanged, MidiError
+from files.midi_read import BIGGEST_EVENT, PIECE, SCAN_WORKERS, Cancelled, FileChanged, MidiError
 
 ROOM_SPARE = 64 << 20  # free disk space wanted on top of the file's size
 HELD_TRACK = 64 << 20  # a track written event by event up to this size is made in memory (else counted first)
+CHECKS_HELD = 256 << 20  # copied bytes waiting for their check at most (the copy waits for the checks past it)
+AHEAD = 8  # pieces read ahead of the writing at most
+CHECK_APART = 256 << 10  # tracks from this size checked on other cores (smaller ones on the reading thread)
+SEND_LEAST = 1 << 20  # small pieces joined up to this before they go to the writer
 
 
 def same_file(a, b):
@@ -71,11 +77,76 @@ class _Work:
             self.progress(self.done, self.mf.size)
 
     def pieces(self):
+        """The bytes to write, read AHEAD on a thread of their own (reading and writing side by side: the copy took
+        read + write time one after the other)."""
+        q, stop = queue.Queue(AHEAD), threading.Event()
+
+        def send(item):
+            while not stop.is_set():
+                try:
+                    q.put(item, timeout=0.1)
+                    return True
+                except queue.Full:
+                    pass
+            return False
+
+        def read():
+            pieces, small, size = self._all(), [], 0
+            try:
+                for piece in pieces:
+                    if len(piece) < SEND_LEAST:  # (tens of thousands of tiny tracks: one hand-over each was slow)
+                        small.append(piece)
+                        size += len(piece)
+                        if size < SEND_LEAST:
+                            continue
+                        piece, small, size = b"".join(small), [], 0
+                    elif small:
+                        if not send(b"".join(small)):
+                            return
+                        small, size = [], 0
+                    if not send(piece):
+                        return
+                if small and not send(b"".join(small)):
+                    return
+                send((None, None))
+            except BaseException as e:
+                send((None, e))
+            finally:
+                pieces.close()
+
+        th = threading.Thread(target=read, daemon=True, name="midi copy")
+        th.start()
+        try:
+            while True:
+                piece = q.get()
+                if isinstance(piece, tuple):
+                    if piece[1] is not None:
+                        raise piece[1]
+                    return
+                yield piece
+        finally:
+            stop.set()  # (the writer stopped early: the reading ends at its next piece)
+            th.join()
+
+    def _all(self):
         mf = self.mf
         self.watch = mf.watch()
         rest = hashlib.blake2b(digest_size=16)  # (everything but the tracks' events, as read: = mf.raw_hash)
         added = self.added
         last = max(i for i, (kind, *_) in enumerate(mf.pieces) if kind == "track")
+        checks = _Checks(min(SCAN_WORKERS, os.cpu_count() or 1))
+        try:
+            yield from self._pieces(mf, rest, added, last, checks)
+            bad = checks.finish()
+        finally:
+            checks.stop()
+        if bad:
+            raise MidiError("midi.check_failed", track=bad[0] + 1)
+        if rest.hexdigest() != mf.raw_hash:  # (the header etc. changed since it was read)
+            raise FileChanged()
+        mf.same()
+
+    def _pieces(self, mf, rest, added, last, checks):
         with open(mf.path, "rb") as f:
             for i, (kind, *what) in enumerate(mf.pieces):
                 if i == last + 1 and added is not None:
@@ -110,20 +181,28 @@ class _Work:
                         yield from self.rewritten(f, t, None if changed else h, hin)
                     if changed and h.hexdigest() != t.hash:  # (read differently than when loaded)
                         raise FileChanged()
+                    if h.hexdigest() != t.hash:
+                        raise MidiError("midi.check_failed", track=t.number + 1)
                 else:  # (a damaged track is only ever copied, its length as the file has it)
                     yield head
                     self.written += 8
-                    h = hashlib.blake2b(digest_size=16)
+                    if t.size < CHECK_APART:  # (handing a tiny track over costs more than its hash)
+                        h = hashlib.blake2b(digest_size=16)
+                        for piece in self.raw(f, t.start, t.size):
+                            h.update(piece)
+                            yield piece
+                        if h.hexdigest() != t.hash:
+                            raise MidiError("midi.check_failed", track=t.number + 1)
+                        continue
+                    job = checks.start(t)  # (checked on another core while the copy goes on)
                     for piece in self.raw(f, t.start, t.size):
-                        h.update(piece)
+                        checks.put(job, piece)
                         yield piece
-                if h.hexdigest() != t.hash:
-                    raise MidiError("midi.check_failed", track=t.number + 1)
+                    checks.end(job)
+                    if checks.bad:  # (stopped at the next track, like before)
+                        return
             if last == len(mf.pieces) - 1 and added is not None:
                 yield from self.own(added)
-        if rest.hexdigest() != mf.raw_hash:  # (the header etc. changed since it was read)
-            raise FileChanged()
-        mf.same()
 
     def own(self, added):
         for piece in added.chunks:
@@ -223,6 +302,70 @@ class _Work:
                 tail += vlq(max(0, int(ins_t[j]) - done)) + bytes(ins_b[ins_at[j]:ins_at[j + 1]])
                 done = max(done, int(ins_t[j]))
             yield bytes(tail)
+
+
+class _Checks:
+    """Each copied track's hash worked out on DAEMON threads while the copy goes on (hashlib lets go of the GIL:
+    one core did ~850 MB/s, most of a plain export's time). The very bytes written are hashed, in order, one
+    thread per track; bad = numbers of the tracks that came out different."""
+
+    def __init__(self, n):
+        self.jobs, self.bad, self.held, self.open = queue.Queue(), [], 0, None
+        self.cv = threading.Condition()
+        self.threads = [threading.Thread(target=self._work, daemon=True, name="midi check") for _ in range(n)]
+        for th in self.threads:
+            th.start()
+
+    def start(self, t):
+        self.open = job = (t, queue.SimpleQueue())
+        self.jobs.put(job)
+        return job
+
+    def put(self, job, piece):
+        with self.cv:
+            while self.held > CHECKS_HELD and not self.bad:
+                self.cv.wait()
+            self.held += len(piece)
+        job[1].put(piece)
+
+    def end(self, job):
+        job[1].put(None)
+        self.open = None
+
+    def _work(self):
+        while True:
+            job = self.jobs.get()
+            if job is None:
+                return
+            t, pieces = job
+            h = hashlib.blake2b(digest_size=16)
+            while True:
+                piece = pieces.get()
+                if piece is None:
+                    break
+                h.update(piece)
+                with self.cv:
+                    self.held -= len(piece)
+                    self.cv.notify_all()
+            if h.hexdigest() != t.hash:
+                with self.cv:
+                    self.bad.append(t.number)
+                    self.cv.notify_all()
+
+    def finish(self):
+        """Waits for every check; the bad tracks' numbers, smallest first."""
+        for _ in self.threads:
+            self.jobs.put(None)
+        for th in self.threads:
+            th.join()
+        return sorted(self.bad)
+
+    def stop(self):
+        """(Cancelled / failed: the threads end without waiting for them.) The track still being copied is ended."""
+        if self.open is not None:
+            self.end(self.open)
+        for _ in self.threads:
+            self.jobs.put(None)
 
 
 def vlq(n):
