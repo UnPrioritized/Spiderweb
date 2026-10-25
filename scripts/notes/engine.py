@@ -1727,13 +1727,15 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             if pin is not None:
                 if fixed[len(unit_of)] == "solid" and len(lst):
                     ids, which = unique_inverse(pin)
+                    o = np.argsort(which, kind="stable")  # (each track's notes in their order: one sort, no masks)
+                    cut, every = np.searchsorted(which[o], np.arange(len(ids) + 1)), lst[o]
                     for k, s in enumerate(ids.tolist()):
                         u = unmapped_slot(s, use10)
                         if u is not None:  # (on channel 10 while shapes skip it: no other shape takes it anyway)
                             taken[len(units)] = u
                             if team is not None:  # (a step turned into plain notes: the other turns step round it)
                                 solid_teams.append((len(units), team))
-                            units.append(lst[which == k])
+                            units.append(every[cut[k]:cut[k + 1]])
                 unit_of.append(None)
                 continue
             if team is not None:
@@ -1764,9 +1766,12 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 us = [paste_unit[pid, t] for t in ids.tolist()]
                 b = back[len(unit_of)]
                 starts = whole_starts(len(unit_of)) if b == "whole" else unflipped_starts(lst) if b else lst[:, 0]
+                o = np.argsort(which, kind="stable")  # (each track's notes in their order: one sort, no masks)
+                cut, every = np.searchsorted(which[o], np.arange(len(ids) + 1)), lst[o]
+                first = np.minimum.reduceat(np.asarray(starts)[o], cut[:-1])
                 for k, u in enumerate(us):
-                    units[u] = np.concatenate([units[u], lst[which == k]])
-                    s0 = int(starts[which == k].min())
+                    units[u] = np.concatenate([units[u], every[cut[k]:cut[k + 1]]])
+                    s0 = int(first[k])
                     paste_first[u] = min(paste_first.get(u, s0), s0)
                 if ordered[len(unit_of)]:  # (pasted notes: the whole paste's tracks in track order, below)
                     paste_ordered.add(pid)
@@ -1799,9 +1804,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             else:
                 mine = [lst]
             if back[len(unit_of) - 1]:  # (each colour's channel as unflipped: counted from where it starts then)
-                starts = unflipped_starts(lst)
+                starts = np.full(len(ids), np.iinfo(np.int64).max)
+                np.minimum.at(starts, which, unflipped_starts(lst))
                 for k in range(len(ids)):
-                    firsts[len(units) + k] = int(starts[which == k].min())
+                    firsts[len(units) + k] = int(starts[k])
             if ordered[len(unit_of) - 1]:  # (one start for all: ties go by unit, so by track)
                 s0 = int(lst[:, 0].min())
                 for k in range(len(ids)):

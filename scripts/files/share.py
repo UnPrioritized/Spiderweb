@@ -43,7 +43,7 @@ class ShareError(ValueError):
 
 def pack(body):
     """A JSON text -> the shared line."""
-    raw = zlib.compress(body.encode("utf-8"), 9)
+    raw = zlib.compress(body.encode("utf-8"), 6)  # (9: 1.5x the time for 2 % smaller, a 27 MB copy took 0.5 s)
     return f"SPIDERWEB{VERSION}:" + base64.b64encode(raw).decode("ascii")
 
 

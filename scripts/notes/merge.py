@@ -357,9 +357,11 @@ def part_rows(parts, ppq, keys, rounds=False):
         ids, which = unique_inverse(tracks) if len(tracks) else (tracks, tracks)
         starts = unflipped_starts(notes) if len(notes) and colours_back(p) else notes[:, 0]
         mine = range(len(units), len(units) + len(ids))
+        o = np.argsort(which, kind="stable")  # (each track's notes in their order: one sort, not a mask each)
+        cut = np.searchsorted(which[o], np.arange(len(ids) + 1))
         for k in range(len(ids)):
-            units.append(notes[which == k])
-            firsts.append(int(starts[which == k].min()))
+            units.append(notes[o[cut[k]:cut[k + 1]]])
+            firsts.append(int(starts[o[cut[k]:cut[k + 1]]].min()))
         if len(ids) > 1 and tracks_apart(p):
             forced.append(mine)
         made.append((notes, which, mine.start))
