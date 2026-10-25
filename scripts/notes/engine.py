@@ -1503,13 +1503,14 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
         if fixed[i] != "solid" or pin is None or not len(lst):
             continue
         ids, which = unique_inverse(pin)
-        new = pin.copy()
         now = ids.tolist()  # (the shape's tracks' slots: moved ones' new slots, the rest as they are)
+        order = np.argsort(which, kind="stable")  # (each track's notes in their own order, without a mask each)
+        at = np.searchsorted(which[order], np.arange(len(now) + 1))
         for k, s in enumerate(ids.tolist()):
-            mine = sorted_spans(lst[which == k], split)
+            mine = sorted_spans(lst[order[at[k]:at[k + 1]]], split)
             others, bad, tried = set(now) - {s}, None, 0
             while s in others or (placed.clashes(mine, s) if bad is None else s in bad):
-                tried += 1
+                tried += s not in others  # (only real clashes count: stepping over the shape's own slots is free)
                 if bad is None and tried >= 8:
                     bad = placed.clashing(mine)
                 u = unmapped_slot(s, use10) if step == 1 else None
@@ -1521,8 +1522,7 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
                     s += 1
             placed.add(mine, s)
             now[k] = s
-            new[which == k] = s
-        out[i] = new
+        out[i] = np.asarray(now, pin.dtype)[which]
     return out
 
 
@@ -1540,30 +1540,26 @@ def sorted_spans(notes, split):
 
 
 class PlacedSpans:
-    """pushed_solid's tracks placed so far: each one's sorted_spans and slot, with its first and last tick, so a new
-    track is only compared with the ones near it in time. Also every slot's spans together (by_slot): on one slot
-    they never overlap (placed only where they don't clash), so they stay sorted, apart spans."""
+    """pushed_solid's tracks placed so far. Every slot's spans together (by_slot): on one slot they never overlap
+    (placed only where they don't clash), so they stay sorted, apart spans. And all spans in a few runs sorted by
+    start (runs: each about half the one before, two alike in size merged), with each run's longest span, so a track
+    is only compared with the spans starting near its own (a user's 64 stacked 256-key pastes: comparing every
+    placed note for each track took 56 s)."""
 
     def __init__(self):
-        self.spans, self.slots = [], []
-        self.bounds = np.zeros((2, 64), np.int64)  # (each track's first and last tick; grows by doubling)
-        self.by_slot = {}
+        self.by_slot = {}  # slot -> (lo, hi, first tick, last tick)
+        self.runs, self.coming = [], []  # (lo sorted, hi, slot, longest span); tracks not in runs yet
 
     def add(self, mine, slot):
         lo, hi, t0, t1 = mine
         if len(lo):
-            n = len(self.spans)
-            if n == self.bounds.shape[1]:
-                self.bounds = np.concatenate([self.bounds, np.zeros_like(self.bounds)], axis=1)
-            self.bounds[:, n] = t0, t1
-            self.spans.append((lo, hi))
-            self.slots.append(slot)
+            self.coming.append((lo, hi, slot))
             had = self.by_slot.get(slot)
             if had is not None:
                 lo, hi = np.concatenate([had[0], lo]), np.concatenate([had[1], hi])
                 order = np.argsort(lo, kind="stable")
-                lo, hi = lo[order], hi[order]
-            self.by_slot[slot] = (lo, hi)
+                lo, hi, t0, t1 = lo[order], hi[order], min(t0, had[2]), max(t1, had[3])
+            self.by_slot[slot] = (lo, hi, t0, t1)
 
     def clashes(self, mine, slot):
         """Does mine clash with the tracks placed on slot?"""
@@ -1571,26 +1567,40 @@ class PlacedSpans:
         had = self.by_slot.get(slot)
         if had is None or not len(lo):
             return False
-        at = np.searchsorted(had[1], lo, "right")  # (the slot's first span ending after each of mine starts)
+        at = had[1].searchsorted(lo, "right")  # (the slot's first span ending after each of mine starts)
         ok = at < len(had[0])
         return bool((had[0][at[ok]] < hi[ok]).any())
 
     def clashing(self, mine):
         """The slots of placed tracks that clash with mine (same key, overlapping: touching doesn't)."""
-        lo, hi, t0, t1 = mine
-        if not len(lo) or not self.spans:
-            return set()
-        b = self.bounds[:, :len(self.spans)]
-        near = np.flatnonzero((b[0] < t1) & (b[1] > t0)).tolist()
-        if not near:
-            return set()
-        plo = np.concatenate([self.spans[j][0] for j in near])
-        phi = np.concatenate([self.spans[j][1] for j in near])
-        slot = np.repeat(np.array([self.slots[j] for j in near], np.int64), [len(self.spans[j][0]) for j in near])
-        at = np.searchsorted(hi, plo, "right")  # (mine's first span ending after each placed one starts)
-        hit = at < len(lo)
-        hit[hit] = lo[at[hit]] < phi[hit]
-        return set(np.unique(slot[hit]).tolist())
+        lo, hi = mine[0], mine[1]
+        out = set()
+        if not len(lo):
+            return out
+        for plo, phi, slot in self.coming:  # (made only when asked: most tracks find a free slot without it)
+            self.runs.append((plo, phi, np.full(len(plo), slot, np.int64), int((phi - plo).max())))
+            while len(self.runs) > 1 and len(self.runs[-2][0]) <= 2 * len(self.runs[-1][0]):
+                (alo, ahi, aslot, al), (blo, bhi, bslot, bl) = self.runs[-2:]
+                rlo = np.concatenate([alo, blo])
+                order = np.argsort(rlo, kind="stable")
+                self.runs[-2:] = [(rlo[order], np.concatenate([ahi, bhi])[order],
+                                   np.concatenate([aslot, bslot])[order], max(al, bl))]
+        self.coming = []
+        for plo, phi, slot, longest in self.runs:
+            i0 = plo.searchsorted(lo - longest, "right")  # (a span starting longest or more before mine ends by then)
+            n = np.maximum(plo.searchsorted(hi, "left") - i0, 0)
+            total = int(n.sum())
+            if total > len(plo):  # (long spans: each of the run's spans looked up in mine instead)
+                at = hi.searchsorted(plo, "right")  # (mine's first span ending after each placed one starts)
+                hit = at < len(lo)
+                hit[hit] = lo[at[hit]] < phi[hit]
+                out.update(np.unique(slot[hit]).tolist())
+            elif total:
+                ends = np.cumsum(n)
+                at = np.repeat(i0 - ends + n, n) + np.arange(total)  # (every span starting near each of mine)
+                hit = phi[at] > np.repeat(lo, n)
+                out.update(np.unique(slot[at[hit]]).tolist())
+        return out
 
 
 def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None, together=None):
