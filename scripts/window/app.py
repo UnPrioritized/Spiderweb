@@ -1941,6 +1941,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo = empty_tempo()
         self.tempo_pane.forget()
         self.roll.box_kept = None
+        self.roll.view_t = 0.0  # (back to bar 1, zoom kept: user)
         self.select(None)
         self.pvar["bpm"].set("120")  # (remakes what hangs on it: on_project_change)
         self.tempo_changed()
