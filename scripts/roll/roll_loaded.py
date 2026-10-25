@@ -13,6 +13,7 @@ of colour numbers (roll_draw's note colours: the channel's, shaded by velocity):
   key x 1/16 beat), a few ms at any size. Far out on a giant song (EXACT_MOST_S) the overview alone."""
 
 import math
+import os
 import threading
 import time
 
@@ -610,28 +611,17 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     """(tab, marks) of every note on screen: tracks (numbers, the one drawn on top first; default all, the last
     track on top), read from their checkpoints before the view. None if stopped. took = [bytes read] (added to)."""
     fast = speed.loops()
-    cover = fast.midi_cover if fast else midi_index.cover
     t0 = int(np.floor((-0.5 - bx) / ax))
     t1 = int(np.ceil((W + 0.5 - bx) / ax))
     tab = np.full((nk, W), -1, np.int64)
     marks = np.zeros((nk, W), np.uint8)
     nx = np.tile(np.arange(W + 1, dtype=np.int64), (nk, 1))
     filled = np.zeros(nk, np.int64)
-    cnt_q, first_q, vel_q = np.zeros(QS, np.int64), np.zeros(QS, np.int64), np.zeros(QS, np.int64)
-    sq, sa, sb, sv = (np.zeros(SPANS, np.int64) for _ in range(4))
-    st = np.zeros(C_SIZE, np.int64)
-    normal, behind = colours(), colours(True)
     order = tracks if tracks is not None else range(len(lm.tracks) - 1, -1, -1)
-    f = None
-    if lm.mode != "memory":
-        if not still_same(lm):
-            return None, None
-        try:
-            f = open(lm.path, "rb")
-        except OSError:
-            lm.changed = True
-            return None, None
-    buf = None
+    if lm.mode != "memory" and not still_same(lm):
+        return None, None
+    covered = []  # (tracks whose every row is painted already: they only shade, read on other cores)
+    rd = TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint)
     try:
         for n in order:
             if stop():
@@ -639,50 +629,131 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
             t = lm.tracks[n]
             if not t.notes or t.end <= t0 or t.first > t1 or t.khi < k_lo or t.klo >= k_lo + nk:
                 continue
-            if not len(t.cp_off):  # (covered tracks are read too: their notes' starts / ends shade the ones above)
+            if fast and (filled[max(t.klo, k_lo) - k_lo:min(t.khi, k_lo + nk - 1) - k_lo + 1] >= W).all():
+                covered.append(n)
                 continue
-            j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
-            j2 = int(np.searchsorted(t.cp_tick, t1, "right"))
-            start = int(t.cp_off[j])
-            end = int(t.cp_off[j2]) if j2 < len(t.cp_off) else t.limit
-            if end <= start:
-                continue
-            e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
-            qs = t.e_q[e0:e1].astype(np.int64)
-            cnt_q[qs] = t.e_cnt[e0:e1]
-            first_q[qs] = t.cp_tick[j]
-            vel_q[qs] = t.e_vel[e0:e1]
-            lanes, counts = lm.hidden_open(n, start)  # (extracted: not sounding)
-            cnt_q[lanes] -= counts
-            skip = lm.skip_of(n)
-            if took is not None:
-                took[0] += end - start
-            if t.data is not None:
-                b = t.data[start:end]
-            else:
-                size = end - start
-                if buf is None or len(buf) < size:
-                    buf = np.empty(max(size, 1 << 20), np.uint8)
-                f.seek(lm.mf.tracks[n].start + start)
-                got = f.readinto(memoryview(buf)[:size])
-                if got != size:
-                    lm.changed = True
-                    return None, None
-                b = buf[:size]
-            st[:] = 0
-            st[C_TICK], st[C_RUN] = t.cp_tick[j], t.cp_run[j]
-            colour = behind if n in faint else normal
-            p = cover(b, 0, len(b), start, skip, st, cnt_q, first_q, vel_q, t1, -1, ax, bx, W, k_lo, colour, tab, nx,
-                      filled, marks, sq, sa, sb, sv)
-            close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)
-            cover(b, p, p, start, skip, st, cnt_q, first_q, vel_q, t1, close, ax, bx, W, k_lo, colour, tab, nx, filled,
-                  marks, sq, sa, sb, sv)
+            if not rd.read(n, tab, nx, filled, marks):
+                return None, None
+        if covered and not read_covered(lm, covered, rd, tab, marks, stop):
+            return None, None
     finally:
-        if f is not None:
-            f.close()
-    if f is not None and not still_same(lm):  # (changed while it was read: nothing read is trusted)
+        rd.close()
+        if took is not None:
+            took[0] += rd.took
+    if lm.mode != "memory" and not still_same(lm):  # (changed while it was read: nothing read is trusted)
         return None, None
     return tab, marks
+
+
+def read_covered(lm, covered, first, tab, marks, stop):
+    """Covered tracks (nothing left to paint: their notes' starts / ends only add marks 4) read side by side on
+    several cores, each with its own marks, joined at the end (same marks in any order). False = stopped / the
+    file changed."""
+    n_threads = min(len(covered), max(1, (os.cpu_count() or 2) // 2))
+    nk, W = tab.shape
+    queue = list(reversed(covered))
+    lock = threading.Lock()
+    bad = []
+
+    def work(rd, own):
+        full = np.full((nk, W + 1), W, np.int64)  # (every pixel taken: nothing gets painted)
+        dummy = np.zeros(nk, np.int64)
+        while not bad:
+            with lock:
+                if not queue:
+                    return
+                n = queue.pop()
+            if stop() or not rd.read(n, tab, full, dummy, own):
+                bad.append(True)
+                return
+    readers = [first] + [TrackReader(lm, first.ax, first.bx, W, first.k_lo, first.t0, first.t1, first.faint)
+                         for _ in range(n_threads - 1)]
+    owns = [marks] + [np.zeros_like(marks) for _ in range(n_threads - 1)]
+    threads = [threading.Thread(target=work, args=(rd, own), daemon=True, name="loaded notes")
+               for rd, own in zip(readers[1:], owns[1:])]
+    try:
+        for th in threads:
+            th.start()
+        work(readers[0], owns[0])
+        for th in threads:
+            th.join()
+    finally:
+        for rd in readers[1:]:
+            rd.close()
+            first.took += rd.took
+    if bad:
+        return False
+    for own in owns[1:]:
+        marks |= own
+    return True
+
+
+class TrackReader:
+    """One track at a time painted into an exact picture's tables (cover from its checkpoint before t0), with its
+    own scratch arrays and file handle, so several can read side by side."""
+
+    def __init__(self, lm, ax, bx, W, k_lo, t0, t1, faint):
+        self.lm, self.ax, self.bx, self.W, self.k_lo, self.t0, self.t1, self.faint = lm, ax, bx, W, k_lo, t0, t1, faint
+        fast = speed.loops()
+        self.cover = fast.midi_cover if fast else midi_index.cover
+        self.cnt_q, self.first_q, self.vel_q = np.zeros(QS, np.int64), np.zeros(QS, np.int64), np.zeros(QS, np.int64)
+        self.sq, self.sa, self.sb, self.sv = (np.zeros(SPANS, np.int64) for _ in range(4))
+        self.st = np.zeros(C_SIZE, np.int64)
+        self.normal, self.behind = colours(), colours(True)
+        self.f = self.buf = None
+        self.took = 0
+
+    def read(self, n, tab, nx, filled, marks):
+        """Track n painted in; False = the file changed / went (lm.changed)."""
+        lm, t, t0, t1 = self.lm, self.lm.tracks[n], self.t0, self.t1
+        if not len(t.cp_off):
+            return True
+        j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
+        j2 = int(np.searchsorted(t.cp_tick, t1, "right"))
+        start = int(t.cp_off[j])
+        end = int(t.cp_off[j2]) if j2 < len(t.cp_off) else t.limit
+        if end <= start:
+            return True
+        cnt_q, first_q, vel_q, st = self.cnt_q, self.first_q, self.vel_q, self.st
+        e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
+        qs = t.e_q[e0:e1].astype(np.int64)
+        cnt_q[qs] = t.e_cnt[e0:e1]
+        first_q[qs] = t.cp_tick[j]
+        vel_q[qs] = t.e_vel[e0:e1]
+        lanes, counts = lm.hidden_open(n, start)  # (extracted: not sounding)
+        cnt_q[lanes] -= counts
+        skip = lm.skip_of(n)
+        self.took += end - start
+        if t.data is not None:
+            b = t.data[start:end]
+        else:
+            size = end - start
+            if self.buf is None or len(self.buf) < size:
+                self.buf = np.empty(max(size, 1 << 20), np.uint8)
+            try:
+                if self.f is None:
+                    self.f = open(lm.path, "rb")
+                self.f.seek(lm.mf.tracks[n].start + start)
+                got = self.f.readinto(memoryview(self.buf)[:size])
+            except OSError:
+                got = -1
+            if got != size:
+                lm.changed = True
+                return False
+            b = self.buf[:size]
+        st[:] = 0
+        st[C_TICK], st[C_RUN] = t.cp_tick[j], t.cp_run[j]
+        colour = self.behind if n in self.faint else self.normal
+        args = (self.ax, self.bx, self.W, self.k_lo, colour, tab, nx, filled, marks, self.sq, self.sa, self.sb, self.sv)
+        p = self.cover(b, 0, len(b), start, skip, st, cnt_q, first_q, vel_q, t1, -1, *args)
+        close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)
+        self.cover(b, p, p, start, skip, st, cnt_q, first_q, vel_q, t1, close, *args)
+        return True
+
+    def close(self):
+        if self.f is not None:
+            self.f.close()
+            self.f = None
 
 
 def still_same(lm):
