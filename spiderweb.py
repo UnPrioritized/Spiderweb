@@ -83,6 +83,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_text.py     the Text tool: typing on the roll, the caret
     roll_hz.py       the Hz bass tool: picking where a Hz bass starts
     roll_path.py     Copy along a path: the path drawn, B placed and its points dragged
+    roll_centre.py   Recolour's Split: Clumps centre point dot, dragged on the piano roll
     roll_shared.py   colours, key names, modifier keys, outline caches
     tiles.py         the notes' picture on screen as tiles (moved along when the view scrolls)
     zoombar.py       the piano roll's scrollbars (drag an end to zoom) and zoom buttons
