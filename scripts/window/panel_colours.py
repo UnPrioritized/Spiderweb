@@ -180,6 +180,7 @@ class ColoursPanel:
                 self.cycle_every_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
             else:
                 self.cycle_every_row.pack_forget()
+        self.sync_recolour()  # (the Recolour row under it: panel_recolour.py)
 
     def show_cycle_unit(self):
         key = self.cycle_unit_key

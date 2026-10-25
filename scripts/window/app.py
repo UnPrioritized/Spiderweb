@@ -29,7 +29,7 @@ from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
-                            turn_velocities, why_not as gate_why_not)
+                            turn_velocities, unflipped_starts, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
 from notes import hz_cc
 from notes.hz_cc import cc_spans
@@ -38,6 +38,7 @@ from notes.hzbass import fit_length, has_cc, own_channels
 from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
                         slot_pal, slot_rule, tidy_groups)
 from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
+from notes.recolour import counted_starts, first_starts, is_recoloured, without_recolour
 from notes.sustain import is_sustained
 from notes.strips import gap_of, has_strips, strip_colours, strip_laps, strip_spans
 from notes.pattern import moved_formulas
@@ -49,6 +50,7 @@ from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
 from window.panel_colours import ColoursPanel
+from window.panel_recolour import RecolourPanel
 from window.panel_mask import MaskPanel
 from window.panel_custom import CustomPanel
 from window.panel_nested import NestedPanel
@@ -204,12 +206,16 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz")) or "cc" in sh} \
         if mode == "auto" else {}  # (pasted notes' passengers: each track's on its slot)
     note_slots = {i: None for i, (sh, s) in enumerate(zip(shapes, strips)) if s and "cc" in sh}
+    ordered = [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh for sh in shapes]
+    # (a recoloured shape's colours: each counted as starting where it did before, so they keep their channels)
+    backs = [recolour_back(s, notes_tracks, dict(s_as, _rounds=True) if r else s_as, n, t)
+             if mode == "auto" and not o and t is not None and is_recoloured(s) else colours_back(s)
+             for s, s_as, r, o, (n, t) in zip(shapes, shapes_as, took, ordered, got)]
     rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],
-                             [colours_back(sh) for sh in shapes],
-                             [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh for sh in shapes], laps, keep,
+                             backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
                              busy, together, note_slots)
@@ -217,6 +223,15 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
         if s is not None and len(s):
             voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
     return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}
+
+
+def recolour_back(sh, notes_tracks, made_as, notes, tracks):
+    """render's back for a recoloured shape: each note's start counted as its colour's first start before Recolour
+    (unflipped when gate flipped), so Amount 0 gives the channels Off does (recolour.py)."""
+    bn, bt = notes_tracks(without_recolour(made_as))
+    if bt is None or not len(bn):
+        return colours_back(sh)
+    return counted_starts(notes, tracks, first_starts(bn, bt, unflipped_starts(bn) if colours_back(sh) else None))
 
 
 def sends_cc(sh):
@@ -246,7 +261,7 @@ def cc_texts(shapes, mode):
                                    for sh in shapes))
 
 
-class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, MaskPanel, PolygonPanel, FreehandPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
+class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, MaskPanel, PolygonPanel, FreehandPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         mac_buttons()  # (Mac's Tk 8.6: right / middle button swapped back, before any binding)
@@ -1027,6 +1042,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                   font=look.font(8),
                                   wraplength=int(300 * self.scale), justify="left")
         self._build_colours()
+        self._build_recolour()
         self._build_mask()
         last = self.last_row = ttk.Frame(self.settings)
         last.pack(fill="x", pady=(4, 0))
@@ -1477,8 +1493,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """shape_notes_tracks, remembered. Each note tool page goes on top of the notes remembered without it
         (trying a page's settings doesn't make the notes before it again). Outside Multi channel a Hz bass's notes
         are made as for one channel (Own channel per note needs Multi channel)."""
-        if self.channel_mode.get() != "auto":
-            sh = one_voice(sh)
+        if self.channel_mode.get() != "auto":  # (Recolour too: in one channel it would only change overlaps)
+            sh = without_recolour(one_voice(sh)) if "recolour" in sh else one_voice(sh)
         key = (shape_key(sh), self.ppq, self.keys)
         cache = self._notes_cache
         got = cache.pop(key, None)

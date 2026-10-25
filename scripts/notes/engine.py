@@ -43,6 +43,7 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
+from notes.recolour import clean_recolour, is_recoloured, recoloured, without_recolour
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
@@ -392,6 +393,9 @@ def clean_shape(sh):
     sub = clean_subtract(sh.get("subtract"))
     if sub is not None:  # its gates made shorter (subtract.py)
         out["subtract"] = sub
+    rc = clean_recolour(sh.get("recolour"))
+    if rc is not None:  # its notes' colours changed (recolour.py)
+        out["recolour"] = rc
     # (again on what was read: a number written as text, "nan" or "1e400", got past sane as text; and where it
     # reaches, its strokes too)
     return out if sane(out) and within_reach(out) else None
@@ -646,6 +650,11 @@ def fx_notes(sh, ppq, keys, get):
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     sh = made_from(sh)  # (a Hz bass's CC lines make no notes: never from them, whoever asks)
+    if "recolour" in sh:  # (colours only, on the notes as they come out at the very end: recolour.py)
+        notes, tracks = get(without_recolour(sh))
+        if not is_recoloured(sh):
+            return notes, tracks
+        return recoloured(notes, tracks, clean_recolour(sh["recolour"]), is_sustained(sh) or sh.get("held") is True)
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
@@ -1803,9 +1812,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 mine = [every[a:b] for a, b in zip(cut[:-1].tolist(), cut[1:].tolist())]
             else:
                 mine = [lst]
-            if back[len(unit_of) - 1]:  # (each colour's channel as unflipped: counted from where it starts then)
-                starts = np.full(len(ids), np.iinfo(np.int64).max)
-                np.minimum.at(starts, which, unflipped_starts(lst))
+            b = back[len(unit_of) - 1]
+            if b is not None and b is not False:  # (each colour's channel as unflipped: counted from where it
+                starts = np.full(len(ids), np.iinfo(np.int64).max)  # starts then; recoloured: as before, an array)
+                np.minimum.at(starts, which, b if isinstance(b, np.ndarray) else unflipped_starts(lst))
                 for k in range(len(ids)):
                     firsts[len(units) + k] = int(starts[k])
             if ordered[len(unit_of) - 1]:  # (one start for all: ties go by unit, so by track)

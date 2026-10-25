@@ -96,7 +96,7 @@ class MaskPanel:
         shown = bool(tgts)
         if shown != bool(self.mask_box.winfo_manager()):
             if shown:
-                self.mask_box.pack(fill="x", pady=(4, 0), after=self.colours_box)
+                self.mask_box.pack(fill="x", pady=(4, 0), after=self.recolour_box)  # (under Recolour, panel_recolour.py)
             else:
                 self.mask_box.pack_forget()
         if not shown:
