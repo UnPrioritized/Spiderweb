@@ -16,8 +16,9 @@ from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
 BY_CHOICES = [(b, tr("recolour.by_" + b)) for b in BY]
 AMOUNT_WORDS = {"shuffle": ("recolour.amount", "recolour.amount_tip"),
-                "scatter": ("recolour.amount", "recolour.amount_tip_scatter")}
-START_AMOUNT = {"shuffle": 100.0, "scatter": 50.0}
+                "scatter": ("recolour.amount", "recolour.amount_tip_scatter"),
+                "clumps": ("recolour.rough", "recolour.amount_tip_clumps")}
+START_AMOUNT = {"shuffle": 100.0, "scatter": 50.0, "clumps": 20.0}
 
 
 class RecolourPanel:

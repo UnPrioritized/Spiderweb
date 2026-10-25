@@ -22,7 +22,8 @@ set unless "Mix across sets" (rc "mix"). Shares (rc "shares", % by place in the 
 for a note that changes; "colours" = how many each set uses, its own ones first, then new ones (new channels; at
 most rc "most": 15, 16 with Use channel 10).
 SPLIT (works from one colour; Colours not set = 2): Split: Scattered ("scatter") = Amount of the notes torn off their
-colour onto another one (never their own, by Shares).
+colour onto another one (never their own, by Shares). Split: Clumps ("clumps") = the shape's box cut into colour
+areas (areas: bands / swirl / wedges, Shares = each area's size), Amount = how rough their edges are.
 Per chord / Per run (rc "by"): the notes of one chord (one start) / one run (touching end to start on a key) share
 one throw of the dice, the first note's, so they change together and take one colour.
 """
@@ -35,9 +36,12 @@ import numpy as np
 from files.speed import loops
 from notes.custom import ROUND
 
-MODES = ("shuffle", "scatter")
-SPLIT = ("scatter",)  # (Split modes: work from one colour, 2 colours when Colours isn't set)
+MODES = ("shuffle", "scatter", "clumps")
+SPLIT = ("scatter", "clumps")  # (Split modes: work from one colour, 2 colours when Colours isn't set)
 BY = ("note", "chord", "run")
+PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
+TIGHT, MOST_TIGHT = 1.0, 50.0  # Swirl tightness: turns from the centre point to the edge
+MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more toward that side)
 MOST_SEED = 2 ** 31 - 1
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
 SET = 15  # colours in a colour set (always: the ticks change no colour)
@@ -76,6 +80,21 @@ def clean_recolour(r):
         out["mix"] = True
     if r.get("by") in BY[1:]:
         out["by"] = r["by"]
+    if r.get("pattern") in PATTERNS[1:]:
+        out["pattern"] = r["pattern"]
+    a = r.get("angle")
+    if number(a) and abs(a) <= 360 and round(a, 3):
+        out["angle"] = round(float(a), 3)
+    t = r.get("tight")
+    if number(t) and 0 <= t <= MOST_TIGHT and round(t, 3) != TIGHT:
+        out["tight"] = round(float(t), 3)
+    c = r.get("centre")
+    if isinstance(c, list) and len(c) == 2 and all(number(x) and 0 <= x <= 100 for x in c) and c != [50, 50]:
+        out["centre"] = [round(float(x), 3) for x in c]
+    p = r.get("push")
+    if isinstance(p, list) and len(p) == 2 and all(number(x) and x == int(x) and abs(x) <= MOST_PUSH for x in p) \
+            and any(p):
+        out["push"] = [int(x) for x in p]
     return out
 
 
@@ -239,10 +258,14 @@ def recoloured(notes, tracks, rc, held=False):
     corner = (int(notes[:, 0].min()), int(notes[:, 2].min()))
     pick = dice(notes, low, rc["seed"], 1, corner)
     roll = dice(notes, low, rc["seed"], 0, corner)
+    clumps = rc["mode"] == "clumps"
+    if clumps:  # (every note takes the colour of the area it lands in: the throw = where it lands)
+        n = sum(len(p) for p in pals) if rc.get("mix") and len(pals) > 1 else max(len(p) for p in pals)
+        pick, roll = areas(notes, rc, pick, n), np.zeros(len(notes))
     if rc.get("by"):
         lead = leaders(notes, rc["by"])
         pick, roll = pick[lead], roll[lead]
-    change = roll < rc["amount"] / 100
+    change = roll < (1.0 if clumps else rc["amount"] / 100)
     shares = rc.get("shares")
     take = torn if rc["mode"] == "scatter" else lambda p, w, own, u: p[picked(w, u)]
     if rc.get("mix") and len(pals) > 1:
@@ -258,6 +281,63 @@ def recoloured(notes, tracks, rc, held=False):
         got = np.where(change[m], take(p, weights(len(p), shares), low[m], pick[m]), low[m])
         new[m] = kept_apart(notes[m], low[m], got, p, pick[m])
     return notes, lap + new
+
+
+def areas(notes, rc, u, n):
+    """Split: Clumps: where each note's middle lands, 0 <= place < 1 across the colour areas (Shares cut it in
+    order), in the shape's box (time and keys each 0..1: the same on any zoom). Bands = stripes across the Angle's
+    way (0 = upright, in time order), Wedges = slices around the Centre point, Swirl = wedges twisted more near it
+    (Swirl tightness = turns out to the edge). Push bunches the areas toward a side (the box squeezed there).
+    Rough edges (Amount) = each place moved by up to about one area: mostly by a smooth noise (ragged clumps), a
+    little by the note's own throw u."""
+    s, e, k = (np.asarray(notes[:, c], np.float64) for c in (0, 1, 2))
+    t0, t1, k0, k1 = s.min(), e.max(), k.min(), k.max()
+    x = ((s + e) / 2 - t0) / max(t1 - t0, 1.0)
+    y = (k - k0) / (k1 - k0) if k1 > k0 else np.full(len(k), 0.5)
+    cx, cy = (v / 100 for v in rc.get("centre", (50, 50)))
+    px, py = rc.get("push", (0, 0))
+    gx, gy = 2 ** (px / 2), 2 ** (py / 2)  # (pushed right: x ** gx < x, so the cuts land further right, bunched)
+    x, cx = np.clip(x, 0, 1) ** gx, cx ** gx
+    y, cy = np.clip(y, 0, 1) ** gy, cy ** gy
+    turn = rc.get("angle", 0.0) / 360
+    pattern = rc.get("pattern", "bands")
+    dx, dy = x - cx, y - cy
+    if pattern == "bands":
+        a = turn * 2 * np.pi
+        q = dx * np.cos(a) + dy * np.sin(a)
+        ends = [(X - cx) * np.cos(a) + (Y - cy) * np.sin(a) for X in (0, 1) for Y in (0, 1)]
+        place = (q - min(ends)) / max(max(ends) - min(ends), 1e-12)
+    else:
+        place = np.arctan2(dy, dx) / (2 * np.pi) - turn
+        if pattern == "swirl":
+            far = max(np.hypot(X - cx, Y - cy) for X in (0, 1) for Y in (0, 1))
+            place = place + rc.get("tight", TIGHT) * np.sqrt(np.hypot(dx, dy) / max(far, 1e-12))
+    rough = rc["amount"] / 100
+    if rough:
+        seed = rc["seed"]
+        wobble = 0.65 * _noise(x, y, seed, 6) + 0.35 * _noise(x, y, seed + 1, 17)
+        place = place + rough / n * (2.2 * (wobble - 0.5) + 0.4 * (u - 0.5))
+    if pattern == "bands":
+        return np.clip(place, 0.0, np.nextafter(1.0, 0))
+    return np.mod(place, 1.0)
+
+
+def _noise(x, y, seed, cells):
+    """A smooth bumpy value 0..1 over the box (cells bumps across), the same for the same seed."""
+    gx, gy = x * cells, y * cells
+    ix, iy = np.floor(gx), np.floor(gy)
+    fx, fy = gx - ix, gy - iy
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    ix, iy = ix.astype(np.int64), iy.astype(np.int64)
+
+    def at(a, b):
+        with np.errstate(over="ignore"):
+            v = _mixed(_mixed(np.full(len(a), np.uint64(seed * 2 + 7), np.uint64) ^ a.view(np.uint64))
+                       ^ b.view(np.uint64))
+        return (v >> np.uint64(11)).astype(np.float64) / float(1 << 53)
+    top = at(ix, iy + 1) * (1 - fx) + at(ix + 1, iy + 1) * fx
+    bottom = at(ix, iy) * (1 - fx) + at(ix + 1, iy) * fx
+    return bottom * (1 - fy) + top * fy
 
 
 def torn(p, w, own, u):
