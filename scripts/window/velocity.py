@@ -512,7 +512,7 @@ class VelocityPane(tk.Canvas):
         # (the notes the piano roll shows: with a track highlighted in the track list, only its, hunt 2026-10-23)
         pic = None if self.edit or roll.draft_notes() is not None else (
             self.app.drawn, (frozenset(self.app.sels), roll.sx, roll.view_t, roll.kb_w, w, h, self.top,
-                                tuple(roll.grid_cols(w))))
+                                tuple(roll.grid_cols(w)), roll.loaded_mark()))  # (+ a loaded MIDI's exact pictures)
         if pic and self.img is not None and self._pic and self._pic[0] is pic[0] and self._pic[1] == pic[1]:
             self.create_image(kb, 0, image=self.img, anchor="nw")
         else:
@@ -611,6 +611,10 @@ class VelocityPane(tk.Canvas):
         x0, x1 = np.round(s * ax + bx).astype(np.int64), np.round(e * ax + bx).astype(np.int64)
         on = ~((x1 < 0) | (x0 >= iw))
         x0, x1, y, layer = x0[on], x1[on], ys[vel[on]], layer[on]
+        lx, lv, lg = self.loaded_starts(iw)  # (a loaded MIDI's notes: faded, behind, can't be changed)
+        if len(lx):
+            x0, x1 = np.concatenate([x0, lx]), np.concatenate([x1, lx])
+            y, layer = np.concatenate([y, ys[lv]]), np.concatenate([layer, lg])
         # each bar (column and layer): its highest note
         bar = x0 >= 0
         top = np.full(iw * len(LAYERS), 1 << 30, np.int64)
@@ -621,6 +625,27 @@ class VelocityPane(tk.Canvas):
         caps = np.unique(np.column_stack([y[long], np.maximum(x0[long], 0), np.minimum(x1[long], iw - 1),
                                           layer[long]]), axis=0)
         return tops, set(map(tuple, caps.tolist()))
+
+    def loaded_starts(self, iw):
+        """A loaded MIDI's note starts in the view as the piano roll's exact picture has them (Load MIDI step 13:
+        shown, never changed): (columns, velocities, faded colour layers). Each pixel = the note drawn on top there
+        (velocity to within 4). Nothing while the piano roll shows the overview (zoomed far out)."""
+        none = (np.zeros(0, np.int64),) * 3
+        roll = self.app.roll
+        got = roll.loaded_view(None) if self.app.loaded is not None else None
+        if got is None:
+            return none
+        lm, _, (ax, bx, W, _, _, _, _, order, faint) = got
+        from roll.roll_draw import TRACK_FADE
+        found = roll._exact_for((id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0]), ax, bx, W)
+        if found is None:
+            return none
+        e, d = found
+        n = min(W, iw)
+        tab, marks = e.tab[:, d:d + n], e.marks[:, d:d + n]
+        k, x = np.nonzero((marks & 1) & (tab >= 0) & (tab < 16 * 32))  # (faint tracks' colours: left out)
+        code = tab[k, x]
+        return x.astype(np.int64), np.minimum(127, (code % 32) * 4 + 2), (code // 32).astype(np.int64)
 
     def paint(self, w, h, kb):
         """Grid and bars as one picture, built row by row from the top (bars only ever start, going down)."""
