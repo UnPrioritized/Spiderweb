@@ -509,10 +509,11 @@ def scrub_notes(lm, order, lo, hi, at):
     """Right-drag listening on a loaded MIDI (user 2026-10-25): {(channel, key): (start, velocity)} of what's drawn
     on top: the keys sounding at tick `at` (start None) and notes starting in ticks lo..hi (start = about their
     tick; the latest per key). order = the tracks shown (shown_tracks, faint ones left out), None = all. Velocity
-    as drawn (to within 4); the overview (where reading exactly is slow) has no starts nor velocities (100)."""
+    as drawn (to within 4); the overview (where reading exactly is slow) has no starts nor velocities (100).
+    Returns (that, rough): rough = from the overview (the status line says so)."""
     lo, hi = int(lo), int(hi)
     if order == () or getattr(lm, "changed", False) or hi < lo:
-        return {}
+        return {}, False
     W = int(min(SCRUB_COLS, hi - lo + 1))
     ax = W / (hi - lo + 1)
     bx = -lo * ax
@@ -526,9 +527,9 @@ def scrub_notes(lm, order, lo, hi, at):
             tab, marks = pictures_tab(lm, order, frozenset(), ax, bx, W, 0, lm.keys)
     except Exception:  # (a file that changed / went: silent, told when drawing / exporting)
         write_log_now()
-        return {}
+        return {}, False
     if tab is None:
-        return {}
+        return {}, False
 
     def note(code):
         group, shade = divmod(int(code), 32)
@@ -542,7 +543,7 @@ def scrub_notes(lm, order, lo, hi, at):
         for k, col in zip(ks.tolist(), cs.tolist()):  # (columns in order: the latest start per key wins)
             ch, v = note(tab[k, col])
             out[ch, k] = (lo + int(col / ax), v)
-    return out
+    return out, slow
 
 
 def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):

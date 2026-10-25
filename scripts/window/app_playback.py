@@ -11,7 +11,7 @@ from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.playback import BUILTIN, cc_list
-from files.synth import FONT_TYPES, LIVE_PORTS, Live, Synth, SynthError, silent_list
+from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
@@ -525,9 +525,14 @@ class Playback:
             if order is not None:  # (faint tracks: shown only, not listened to, like Spiderweb's)
                 order = tuple(n for n in order if n not in faint)
             ppq_lm = self.loaded.ppq / self.ppq  # (its own ticks)
-            for k, (s, v) in scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm).items():
+            got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm)
+            drums = self.out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
+            for (ch, p), (s, v) in got.items():  # own drum channel; other MIDI outs' channel 10 is drums already)
+                k = (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
                 if k not in now:  # (sounding without a start in this sweep: held on as it is, a new key sounds)
                     now[k] = (held.get(k, -1) if s is None else -2 - s, v)
+            if rough:  # (too many notes to read in time: every key drawn, one loudness; user 2026-10-25)
+                self.status.config(text=tr("app.scrub_rough"))
         if self.out.edo and self.out.name != BUILTIN and now and not held:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
         for k in [k for k in held if k not in now]:

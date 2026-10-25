@@ -68,6 +68,9 @@ MOST_CHANNELS = 128  # a BASSMIDI stream's most channels (measured 2026-10-21: 1
 STREAM_PORTS = MOST_CHANNELS // 16  # ports (16 channels each) the Hz preview's stream has
 LIVE_PORTS = 6  # ... Live's: then 31-EDO's channels (playback.EDO_FIRST)
 LIVE_CHANNELS = MOST_CHANNELS
+LIVE_DRUMS = 127  # Live's last channel (past 31-EDO's): drums, for a loaded MIDI's channel 10 heard by right-drag
+# listening (user 2026-10-25: playback plays them as drums; Spiderweb's own channel 10 stays a piano)
+LIVE_DRUMS_CODE = (LIVE_DRUMS >> 4) << 24 | LIVE_DRUMS & 15  # (Live.send's channel part: group << 24 | channel)
 # the control changes a Hz bass's CC lines send (hz_cc.py) as BASSMIDI's own events: Volume, Pan, Expression, Cutoff
 _EV_CC = {7: 12, 10: 13, 11: 14, 74: 25}
 _EVENTS_RAW, _EVENTS_CANCEL = 0x10000, 0x4000000
@@ -720,6 +723,8 @@ class Live:
         # in Spiderweb is meant as drums)
         for port in range(1 if plain else LIVE_PORTS):  # (every port's channel 10)
             midi.BASS_MIDI_StreamEvent(h, port * 16 + 9, _EV_DRUMS, 1 if drums else 0)
+        if not plain:  # (before the samples load: its drum kit with them, never mid-play)
+            midi.BASS_MIDI_StreamEvent(h, LIVE_DRUMS, _EV_DRUMS, 1)
         synth._load_samples(h)  # (program 0: no wait at the first notes; one stream at a time, see _load_samples)
         self._rpn = {}  # (channel past 16, CC 101 / 100: the bend range being set, send)
         if not plain:
