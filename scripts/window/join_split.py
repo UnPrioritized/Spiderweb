@@ -16,6 +16,7 @@ from notes.between import group_of, turns as between_turns
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
+from notes.fillgaps import fill_gaps as filled
 from notes.passengers import pack_cc, unpack_cc
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
@@ -634,17 +635,74 @@ class JoinSplit:
         self.shapes_changed()
         self.status.config(text=trn("join_split.plain_done", len(new), n=len(new)))
 
-    def plain_copies(self, got, moved=None, own=False):
+    def fill_targets(self):
+        """The selected shapes Fill gaps works on: not Hz bass, images or masks (their notes are a preview)."""
+        return [i for i in sorted(self.sels) if i < len(self.shapes) and (sh := self.shapes[i])
+                and not sh.get("hz") and "picture" not in sh and not is_mask(sh)]
+
+    def fill_gaps(self, way, same):
+        """Fill gaps (notes/fillgaps.py; window/fill_window.py): the selected shapes' notes as heard, every key row
+        across all of them together, the gaps closed (way right / left / middle; same: which of the notes starting
+        on one tick stays). Each shape becomes its own plain-notes shape, colours kept; one with every note lost to
+        another's same-start note goes. One undo step."""
+        self.commit_typing()
+        got = self.fill_targets()
+        if not got:
+            self.status.config(text=tr("fill_gaps.nothing"))
+            return
+        changed = []
+
+        def together(rows):
+            order = sorted(rows)
+            both = np.concatenate([rows[i] for i in order])
+            out, at = filled(both, way, same)
+            changed.append(len(at) != len(both) or not np.array_equal(out, both[at]))
+            owner = np.concatenate([np.full(len(rows[i]), i, np.int64) for i in order])[at]
+            return {i: out[owner == i] for i in order}
+        new = self.plain_copies(got, together=together)
+        if not changed:  # (no notes at all)
+            self.status.config(text=tr("fill_gaps.nothing"))
+            return
+        if not changed[0]:
+            self.status.config(text=tr("fill_gaps.no_gaps"))
+            return
+        for i, sh in new.items():
+            old = self.shapes[i]
+            if "notes" in old and not old.get("merge"):  # (pasted / plain notes already: keep their name)
+                sh["name"] = old.get("name", sh["name"])
+                if old.get("made"):
+                    sh["made"] = old["made"]
+            if same == "both":  # (overlaps kept: not cut again by the overlap rule)
+                sh["held"] = True
+        gone = [i for i in got if i not in new]
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("fill_gaps.undo"))
+        self.put_plain(new)
+        if gone:
+            self.unlink_groups(gone)
+            for i in reversed(gone):
+                del self.shapes[i]
+        kept = [i - sum(j < i for j in gone) for i in got if i in new]
+        if kept:
+            self.select_many(kept, kept[0])
+        else:
+            self.select_many([], None)
+        self.shapes_changed()
+        self.status.config(text=trn("fill_gaps.done", len(kept), n=len(kept)))
+
+    def plain_copies(self, got, moved=None, own=False, together=None):
         """Turn into plain notes' new shapes: {i: a shape of shape i's notes exactly as they sound now, each note on
         the channel it has now} for the shapes in got that have notes. moved(rows): their rendered rows changed
         first (Gate sensitive merge: slid). own: the shape's own notes, not as other shapes overlapping them cut
-        them (Single channel; merge slides it away from them, hunt), each on its channel all the same."""
+        them (Single channel; merge slides it away from them, hunt), each on its channel all the same.
+        together({i: rows}) -> {i: rows}: every shape's rows changed at once (Fill gaps: key rows across shapes)."""
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         owners = self.rendered[:, 5]
         use10, multi = self.multi_rendered()
         new = {}
         auto = self.channel_mode.get() == "auto"
+        laid_rows = {}
         for i in got:
             rows = self.rendered[owners == i]
             sh = self.shapes[i]
@@ -657,17 +715,22 @@ class JoinSplit:
                 if own or not auto:
                     rows = multi_slots(rows, slots)
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
-                cc_slots = {i: laid(i)} if "cc" in sh else {}
-                if moved:
-                    rows = moved(rows)
-                    if not len(rows):  # (none of them wanted: merge leftovers)
-                        continue
-                new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)
-                new[i]["made"] = "plain"
-                new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
-                ex = held_extract(sh) if moved is None else None  # (its notes taken from a loaded MIDI stay out of
-                if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
-                    new[i]["extract"] = ex
+                laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
+        if together:
+            changed = together({i: r for i, (r, _) in laid_rows.items()})
+            laid_rows = {i: (changed[i], cc) for i, (_, cc) in laid_rows.items() if i in changed}
+        for i, (rows, cc_slots) in laid_rows.items():
+            sh = self.shapes[i]
+            if moved:
+                rows = moved(rows)
+            if not len(rows):  # (none of them wanted: merge leftovers; Fill gaps: all lost to same-start notes)
+                continue
+            new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)
+            new[i]["made"] = "plain"
+            new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
+            ex = held_extract(sh) if moved is None else None  # (its notes taken from a loaded MIDI stay out of
+            if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
+                new[i]["extract"] = ex
         return new
 
     def multi_rendered(self):
