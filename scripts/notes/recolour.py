@@ -2,7 +2,7 @@
 a shape's notes keep their keys, starts and gates, only which colour each one has changes.
 
 Shuffle: the colours the shape already has go round its notes. Amount (0-100 %) = how many notes get a new one,
-each picked at random among the shape's colours (an equal share each). STEADY: each note's dice come from the note
+each picked at random among its set's colours (by their Shares). STEADY: each note's dice come from the note
 itself (start, end, key counted from the shape's first tick and lowest key, its colour before) and the shape's seed
 (New shuffle = another seed), so drawing again or moving the shape gives the same colours and an edit only changes
 the notes it touches (a copy looks the same until its own New shuffle). Each note keeps its Colours round ("Repeated
@@ -13,6 +13,14 @@ Only in Multi channel (App.notes_tracks leaves it out otherwise: in one channel 
 
 The shape's colours keep the channels they had before (App all_notes: each colour counted as starting where it
 started before, render's back), so Amount 0 looks like Off.
+
+COLOUR SETS (colour_sets): each Colours repeat ("Repeated colours get new channels": the track's round) is a set,
+and a repeat with more colours than one set holds (15, 16 with Use channel 10: pasted notes' tracks) is cut into
+sets in track order. Each note is shuffled within its own set (so a colour never turns up in a repeat it wasn't
+in), unless "Mix across sets" (rc "mix"). Shares (rc "shares", % by place in the set) = how likely each colour is
+for a note that changes; "colours" = how many each set uses, its own ones first, then new ones (new channels).
+Per chord / Per run (rc "by"): the notes of one chord (one start) / one run (touching end to start on a key) share
+one throw of the dice, the first note's, so they change together and take one colour.
 """
 
 import heapq
@@ -24,21 +32,53 @@ from files.speed import loops
 from notes.custom import ROUND
 
 MODES = ("shuffle",)
+BY = ("note", "chord", "run")
 MOST_SEED = 2 ** 31 - 1
+MOST = 15  # colours in a set (16 with Use channel 10: the shape's "most", App.notes_tracks)
+
+
+def number(x):
+    return not isinstance(x, bool) and isinstance(x, (int, float)) and x == x
 
 
 def clean_recolour(r):
-    """A saved sh["recolour"] -> {"mode", "amount": 0..100 (3 decimals), "seed": int}, or None (Off)."""
+    """A saved sh["recolour"] -> {"mode", "amount": 0..100 (3 decimals), "seed": int, and only when set: "shares"
+    [% per place], "colours" n (2..16), "mix" True, "by" "chord" / "run"}, or None (Off)."""
     if not isinstance(r, dict) or r.get("mode") not in MODES:
         return None
     a = r.get("amount", 100)
-    if isinstance(a, bool) or not isinstance(a, (int, float)) or a != a:
+    if not number(a):
         a = 100
     s = r.get("seed", 1)
-    if isinstance(s, bool) or not isinstance(s, (int, float)) or s != s:
+    if not number(s):
         s = 1
-    return {"mode": r["mode"], "amount": round(min(max(float(a), 0.0), 100.0), 3),
-            "seed": int(min(max(s, 0), MOST_SEED))}
+    out = {"mode": r["mode"], "amount": round(min(max(float(a), 0.0), 100.0), 3),
+           "seed": int(min(max(s, 0), MOST_SEED))}
+    sh = r.get("shares")
+    if isinstance(sh, list) and 0 < len(sh) <= 16 and all(number(x) and x >= 0 for x in sh) and sum(sh) > 0:
+        out["shares"] = [round(min(float(x), 100.0), 3) for x in sh]
+    n = r.get("colours")
+    if number(n) and n == int(n) and 2 <= n <= 16:
+        out["colours"] = int(n)
+    if r.get("mix") is True:
+        out["mix"] = True
+    if r.get("by") in BY[1:]:
+        out["by"] = r["by"]
+    return out
+
+
+def rule_of(r):
+    """clean_recolour + "most": how many colours one set holds (with_most)."""
+    rc = clean_recolour(r)
+    if rc is not None:
+        rc["most"] = 16 if r.get("most") == 16 else MOST
+    return rc
+
+
+def with_most(sh, all16):
+    """sh with its Recolour told a set holds 16 colours while Multi channel uses channel 10 (App.notes_tracks)."""
+    r = sh.get("recolour")
+    return dict(sh, recolour=dict(r, most=16)) if all16 and isinstance(r, dict) else sh
 
 
 def can_recolour(sh):
@@ -81,27 +121,117 @@ def dice(notes, low, seed, salt, corner):
     return (x >> np.uint64(11)).astype(np.float64) / float(1 << 53)
 
 
+def colour_sets(t, most=MOST):
+    """(each note's set number, each set's own colours: track values, sorted) of tracks t: a set per Colours
+    repeat (t // ROUND), cut every most colours in track order."""
+    ids, inv = np.unique(t, return_inverse=True)
+    rounds = ids // ROUND
+    place = np.arange(len(ids)) - np.searchsorted(rounds, rounds)  # (each colour's place in its repeat)
+    _, set_of = np.unique(np.column_stack([rounds, place // most]), axis=0, return_inverse=True)
+    set_of = set_of.reshape(-1)
+    return set_of[inv.reshape(-1)], [ids[set_of == s] for s in range(int(set_of.max()) + 1)]
+
+
+def palettes(owns, n, most=MOST):
+    """Each set's colours to shuffle among: its own, then new ones (track values after the last of its repeat)
+    up to n (None = its own only; never more than most)."""
+    out, after = [], {}
+    for own in owns:  # (after every colour of its repeat: a new one never lands between other tracks)
+        r = int(own[0]) // ROUND
+        after[r] = max(after.get(r, 0), int(own[-1]) + 1)
+    for own in owns:
+        r = int(own[0]) // ROUND
+        nxt = after[r]
+        extra = max(0, min(n or 0, most) - len(own))
+        after[r] = nxt + extra
+        out.append(np.concatenate([own, np.arange(nxt, nxt + extra, dtype=np.int64)]) if extra else own)
+    return out
+
+
+def weights(n, shares):
+    """The chances of a set's n colours (shares by place, missing ones the average), adding up to 1."""
+    if shares:
+        w = np.array([shares[i] if i < len(shares) else sum(shares) / len(shares) for i in range(n)], np.float64)
+    else:
+        w = np.ones(n)
+    if w.sum() <= 0:
+        w = np.ones(n)
+    return w / w.sum()
+
+
+def picked(w, u):
+    """The place each throw u (0 <= u < 1) lands on, colours given chances w (one with 0 never)."""
+    return np.minimum(np.searchsorted(np.cumsum(w), u, side="right"), len(w) - 1)
+
+
+def leaders(notes, by):
+    """Each note's group's first note (its index): "chord" = notes starting together (lowest key first), "run" =
+    notes on one key each starting where the one before ends."""
+    s, e, k = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
+    if by == "chord":
+        o = np.lexsort((k, s))
+        new = np.ones(len(o), bool)
+        new[1:] = s[o][1:] != s[o][:-1]
+    else:
+        o = np.lexsort((s, k))
+        new = np.ones(len(o), bool)
+        new[1:] = (k[o][1:] != k[o][:-1]) | (s[o][1:] != e[o][:-1])
+    lead = np.empty(len(o), np.int64)
+    lead[o] = o[np.flatnonzero(new)[np.cumsum(new) - 1]]
+    return lead
+
+
+def plan(tracks, rc):
+    """(each note's set, each set's colours) for tracks under rc, or None when there's nothing to shuffle (no set
+    with 2 colours, or with Mix across sets fewer than 2 in all)."""
+    if tracks is None or not len(tracks):
+        return None
+    which, owns = colour_sets(np.asarray(tracks, np.int64), rc.get("most", MOST))
+    pals = palettes(owns, rc.get("colours"), rc.get("most", MOST))
+    return (which, pals) if enough(pals, rc.get("mix")) else None
+
+
+def enough(pals, mix):
+    """Something to shuffle: a set with 2 colours, or with Mix across sets (2 sets or more) 2 in all."""
+    if not pals:
+        return False
+    return (sum(len(p) for p in pals) if mix and len(pals) > 1 else max(len(p) for p in pals)) >= 2
+
+
 def recoloured(notes, tracks, rc, held=False):
-    """The shape's notes and tracks after its Recolour rc (clean_recolour). One colour (tracks None or all one):
-    unchanged. First the notes are settled as their colours before would sound (render's overlap rule on each
-    colour: a note cut where a later one of its colour starts on its key, notes starting together made one), so a
-    new colour never frees a cut note: the notes stay as heard with Recolour off. held: sustained (overlaps kept,
-    render held): not settled, its notes of one colour may still sound together."""
-    if tracks is None or not len(notes):
+    """The shape's notes and tracks after its Recolour rc (rule_of). Nothing to shuffle (plan): unchanged. First
+    the notes are settled as their colours before would sound (render's overlap rule on each colour: a note cut
+    where a later one of its colour starts on its key, notes starting together made one), so a new colour never
+    frees a cut note: the notes stay as heard with Recolour off. held: sustained (overlaps kept, render held): not
+    settled, its notes of one colour may still sound together."""
+    if tracks is None or not len(notes) or plan(tracks, rc) is None:
         return notes, tracks
     t = np.asarray(tracks, np.int64)
-    if len(np.unique(t % ROUND)) < 2:
-        return notes, tracks
     if not held:
         notes, t = settled(notes, t)
+    which, pals = plan(t, rc)
     low = t % ROUND
-    colours = np.unique(low)
     corner = (int(notes[:, 0].min()), int(notes[:, 2].min()))
     pick = dice(notes, low, rc["seed"], 1, corner)
-    change = dice(notes, low, rc["seed"], 0, corner) < rc["amount"] / 100
-    new = np.where(change, colours[np.minimum((pick * len(colours)).astype(np.int64), len(colours) - 1)], low)
-    new = kept_apart(notes, low, new, colours, pick)
-    return notes, t - low + new
+    roll = dice(notes, low, rc["seed"], 0, corner)
+    if rc.get("by"):
+        lead = leaders(notes, rc["by"])
+        pick, roll = pick[lead], roll[lead]
+    change = roll < rc["amount"] / 100
+    shares = rc.get("shares")
+    if rc.get("mix") and len(pals) > 1:
+        pool = np.concatenate(pals)
+        w = np.concatenate([weights(len(p), shares) for p in pals])
+        new = np.where(change, pool[picked(w / w.sum(), pick)], t)
+        return notes, kept_apart(notes, t, new, np.unique(pool), pick)
+    new = t.copy()
+    for s, p in enumerate(pals):
+        m = np.flatnonzero(which == s)
+        if len(p) < 2 or not len(m):
+            continue
+        got = np.where(change[m], p[picked(weights(len(p), shares), pick[m])], t[m])
+        new[m] = kept_apart(notes[m], t[m], got, p, pick[m])
+    return notes, new
 
 
 def settled(notes, t):

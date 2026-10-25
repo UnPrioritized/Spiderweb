@@ -43,7 +43,7 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
-from notes.recolour import clean_recolour, is_recoloured, recoloured, without_recolour
+from notes.recolour import clean_recolour, is_recoloured, recoloured, rule_of, without_recolour
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
@@ -654,7 +654,7 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get(without_recolour(sh))
         if not is_recoloured(sh):
             return notes, tracks
-        return recoloured(notes, tracks, clean_recolour(sh["recolour"]), is_sustained(sh) or sh.get("held") is True)
+        return recoloured(notes, tracks, rule_of(sh["recolour"]), is_sustained(sh) or sh.get("held") is True)
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)

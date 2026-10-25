@@ -38,7 +38,7 @@ from notes.hzbass import fit_length, has_cc, own_channels
 from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, picture_like, pinned_slots, silent,
                         slot_pal, slot_rule, tidy_groups)
 from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
-from notes.recolour import counted_starts, first_starts, is_recoloured, without_recolour
+from notes.recolour import counted_starts, first_starts, is_recoloured, with_most, without_recolour
 from notes.sustain import is_sustained
 from notes.strips import gap_of, has_strips, strip_colours, strip_laps, strip_spans
 from notes.pattern import moved_formulas
@@ -334,6 +334,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sustain_window = None  # Sustain… (sustain_window.py)
         self.subtract_window = None  # Gate subtract… (subtract_window.py)
         self.merge_window = None  # Gate sensitive merge… (merge_window.py)
+        self.shares_window = None  # Recolour's Shares… (shares_window.py)
         self.fill_window = None  # Fill gaps… (fill_window.py)
         self.strips_window = None  # Channel per strip… (strips_window.py)
         self.path_pos = ""
@@ -1495,6 +1496,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         are made as for one channel (Own channel per note needs Multi channel)."""
         if self.channel_mode.get() != "auto":  # (Recolour too: in one channel it would only change overlaps)
             sh = without_recolour(one_voice(sh)) if "recolour" in sh else one_voice(sh)
+        elif "recolour" in sh:  # (a colour set holds 16 with channel 10 used)
+            sh = with_most(sh, self.all16())
         key = (shape_key(sh), self.ppq, self.keys)
         cache = self._notes_cache
         got = cache.pop(key, None)
@@ -1702,13 +1705,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                               "follow": follow}
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast = frozenset(self.sels), speed.loops()
-        voiced = self.channel_mode.get() == "auto"
+        voiced, wide = self.channel_mode.get() == "auto", self.all16()
 
         def notes_tracks(sh):
             if job["stop"]:
                 raise Stopped
             if not voiced:  # (as App.notes_tracks: Recolour left out too)
                 sh = without_recolour(one_voice(sh)) if "recolour" in sh else one_voice(sh)
+            elif "recolour" in sh:
+                sh = with_most(sh, wide)
             k = (shape_key(sh), key[1], key[2])
             got = known.get(k) or job["own"].get(k)
             if got is None:

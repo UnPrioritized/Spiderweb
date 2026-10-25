@@ -1,5 +1,5 @@
 """The side panel's Recolour row, under Colours (notes/recolour.py): which colour each note of a shape has, its notes
-kept where they are."""
+kept where they are. Shares… opens window/shares_window.py."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -8,18 +8,21 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.custom import ROUND
-from notes.recolour import MODES, can_recolour, clean_recolour, new_seed, without_recolour
+from notes.merge import has_colours
+from notes.recolour import BY, MODES, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
+    without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
+BY_CHOICES = [(b, tr("recolour.by_" + b)) for b in BY]
 
 
 class RecolourPanel:
     """Mixed into App."""
 
     def _build_recolour(self):
-        """Recolour [Off / Shuffle] [New shuffle]; under it, while on: Amount [n] %."""
+        """Recolour [Off / Shuffle] [New shuffle]; under it, while on: Amount [n] %, [Per note] [Shares…], and
+        Mix across sets while a shape has more than one colour set."""
         box = self.recolour_box = ttk.Frame(self.settings)
         box.pack(fill="x", pady=(4, 0), after=self.colours_box)
         c = ttk.Frame(box)
@@ -33,7 +36,9 @@ class RecolourPanel:
         self.recolour_tip = Tooltip(self.recolour_mode, tr("recolour.tip"))
         self.recolour_again = ttk.Button(c, text=tr("recolour.again"), command=lambda: self.on_recolour("seed"))
         Tooltip(self.recolour_again, tr("recolour.again_tip"))
-        row = self.recolour_row = ttk.Frame(box)  # (only shown while Recolour is on)
+        rows = self.recolour_row = ttk.Frame(box)  # (only shown while Recolour is on)
+        row = ttk.Frame(rows)
+        row.pack(anchor="w")
         lb = ttk.Label(row, text=tr("recolour.amount"))
         lb.pack(side="left")
         self.recolour_var = tk.StringVar()
@@ -45,16 +50,47 @@ class RecolourPanel:
         Tooltip(lb, tr("recolour.amount_tip"))
         e.bind("<Return>", lambda ev: self.on_recolour("amount"))
         leave_box(self, e, self.recolour_var, lambda left: self.on_recolour("amount", left and e))
+        row = ttk.Frame(rows)
+        row.pack(anchor="w", pady=(2, 0))
+        self.recolour_by = ttk.Combobox(row, values=[t for _, t in BY_CHOICES], state="readonly",
+                                        width=max(len(t) for _, t in BY_CHOICES))
+        self.recolour_by.pack(side="left")
+        self.recolour_by.bind("<<ComboboxSelected>>", lambda ev: (self.on_recolour("by"), self.roll.focus_set()))
+        self.recolour_by_tip = Tooltip(self.recolour_by, tr("recolour.by_tip"))
+        b = self.recolour_shares = ttk.Button(row, text=tr("recolour.shares"), command=self.open_shares)
+        b.pack(side="left", padx=(6, 0))
+        Tooltip(b, tr("recolour.shares_tip"))
+        self.recolour_mix = tk.BooleanVar()
+        self.recolour_mix_tick = ttk.Checkbutton(rows, text=tr("recolour.mix"), variable=self.recolour_mix,
+                                                 command=lambda: self.on_recolour("mix"))
+        self.recolour_mix_tip = Tooltip(self.recolour_mix_tick, tr("recolour.mix_tip", most=15))
+
+    def open_shares(self):
+        from window.shares_window import open_shares
+        open_shares(self)
 
     def recolour_targets(self):
         """The selected shapes Recolour works on (not a Hz bass); nothing selected: none (no setting for new
         shapes)."""
         return [self.shapes[i] for i in sorted(self.sels) if can_recolour(self.shapes[i])]
 
+    def set_most(self):
+        """How many colours a colour set holds: 15, 16 while Multi channel uses channel 10."""
+        return 16 if self.all16() else 15
+
+    def colour_owns(self, sh):
+        """Each colour set's own colours (track values) of sh's notes before Recolour, as Multi channel makes them
+        (with "Repeated colours get new channels" each repeat its own set; the notes as remembered: no new work after
+        a change)."""
+        made = dict(sh, _rounds=True) if self.rounds_apart() and has_colours(sh) else sh
+        _, tracks = self.notes_tracks(without_recolour(made))
+        if tracks is None or not len(tracks):
+            return []
+        return colour_sets(np.asarray(tracks, np.int64), self.set_most())[1]
+
     def colour_count(self, sh):
-        """How many colours sh's notes have before Recolour (its notes as remembered: no new work after a change)."""
-        _, tracks = self.notes_tracks(without_recolour(sh))
-        return 1 if tracks is None or not len(tracks) else len(np.unique(np.asarray(tracks, np.int64) % ROUND))
+        """How many colours sh's notes have before Recolour (the most in one set)."""
+        return max((len(o) for o in self.colour_owns(sh)), default=1)
 
     def sync_recolour(self):
         tgts = self.recolour_targets()
@@ -65,10 +101,19 @@ class RecolourPanel:
         mode = next(iter(modes)) if len(modes) == 1 else None
         self.recolour_mode.current([v for v, _ in RECOLOUR_CHOICES].index(mode))
         same_or_blank(self.recolour_entry, self.recolour_var, [fmt(r["amount"]) for r in live] or ["100"])
+        bys = {r.get("by", "note") for r in live} or {"note"}
+        if len(bys) == 1:
+            self.recolour_by.current(BY.index(next(iter(bys))))
+        show_mixed(self.recolour_by, len(bys) > 1, self.recolour_by_tip, tr("recolour.by_tip"))
+        mixes = {bool(r.get("mix")) for r in live}
+        self.recolour_mix.set(mixes == {True})
+        self.recolour_mix_tick.state(["alternate" if len(mixes) > 1 else "!alternate"])
         self._loading = False
         lonely = bool(live) and self.channel_mode.get() != "auto"
-        # (a shape with one colour: Shuffle has nothing to swap, hunt 2026-10-25)
-        single = not lonely and any(r and self.colour_count(t) < 2 for t, r in zip(tgts, on))
+        owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
+        # (nothing to shuffle, e.g. one colour: Shuffle has nothing to swap, hunt 2026-10-25)
+        single = not lonely and any(r and not enough(palettes(o, r.get("colours"), self.set_most()), r.get("mix"))
+                                    for o, r in zip(owns, on))
         self.recolour_mode.config(state="readonly" if tgts else "disabled",
                                   style="Gap.TCombobox" if lonely or single else "TCombobox")
         show_mixed(self.recolour_mode, len(modes) > 1, self.recolour_tip,
@@ -85,15 +130,24 @@ class RecolourPanel:
                 self.recolour_again.pack(side="left")
             else:
                 self.recolour_again.pack_forget()
+        sets = shown and any(len(o) > 1 for o in owns)  # (more than one colour set: Mix across sets)
+        if sets != bool(self.recolour_mix_tick.winfo_manager()):
+            if sets:
+                self.recolour_mix_tick.pack(anchor="w", pady=(2, 0))
+            else:
+                self.recolour_mix_tick.pack_forget()
+        self.recolour_mix_tip.text = tr("recolour.mix_tip", most=self.set_most())
+        w = getattr(self, "shares_window", None)
+        if w:
+            w.sync()
 
     def on_recolour(self, what, left=None):
-        """The Recolour dropdown (what = "mode"), the Amount box ("amount") or New shuffle ("seed"). Only what was
-        changed goes to each shape (several picked keep their own amounts). left: the box that was left, nothing
-        unless its number changed (leave_box)."""
+        """The Recolour dropdown (what = "mode"), the Amount box ("amount"), New shuffle ("seed"), Per note / chord /
+        run ("by") or Mix across sets ("mix"). Only what was changed goes to each shape (several picked keep their
+        own amounts). left: the box that was left, nothing unless its number changed (leave_box)."""
         if self._loading or str(self.recolour_mode.cget("state")) == "disabled" or (
                 left is not None and unchanged(left)):
             return
-        tgts = self.recolour_targets()
         if what == "mode":
             i = self.recolour_mode.current()
             if i < 0:  # (still Mixed: nothing picked)
@@ -112,6 +166,14 @@ class RecolourPanel:
                 return bad(e)
             good(e)
             amount = round(amount, 3)
+        elif what == "by":
+            i = self.recolour_by.current()
+            if i < 0:
+                return
+            by = BY[i]
+        elif what == "mix":
+            self.recolour_mix_tick.state(["!alternate"])
+            mix = self.recolour_mix.get()
 
         def changed(old):
             if what == "mode":
@@ -122,13 +184,28 @@ class RecolourPanel:
                 return old
             if what == "amount":
                 return dict(old, amount=amount)
+            if what == "by":
+                return dict({k: v for k, v in old.items() if k != "by"}, **({"by": by} if by != "note" else {}))
+            if what == "mix":
+                return dict({k: v for k, v in old.items() if k != "mix"}, **({"mix": True} if mix else {}))
             return dict(old, seed=new_seed())
 
+        self.change_recolour(changed, tr("recolour.undo_again" if what == "seed" else "recolour.undo"))
+
+    def change_recolour(self, changed, name, push=True):
+        """Each selected shape's Recolour = changed(its old one, clean); one undo step named name (push False: part
+        of the step taken before, e.g. a knob still turning). False when nothing changed."""
+        tgts = self.recolour_targets()
         olds = [clean_recolour(t.get("recolour")) for t in tgts]
-        new = [changed(o) for o in olds]
+        new = []
+        for o in olds:
+            c = changed(o)
+            new.append(clean_recolour(c) if c else None)
         if all(o == n for o, n in zip(olds, new)):
-            return self.sync_recolour()
-        self.push_undo(name=tr("recolour.undo_again" if what == "seed" else "recolour.undo"))
+            self.sync_recolour()
+            return False
+        if push:
+            self.push_undo(name=name)
         for t, r in zip(tgts, new):
             if r:
                 t["recolour"] = r
@@ -137,3 +214,4 @@ class RecolourPanel:
         self.shapes_changed()
         self.sync_recolour()
         self.schedule_autosave()
+        return True

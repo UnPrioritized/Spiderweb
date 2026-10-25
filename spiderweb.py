@@ -65,6 +65,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     strips_window.py the Channel per strip window (on / off, notes between, the count, strip colours)
     merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     fill_window.py   the Fill gaps window (stretch left / right / meet in the middle, same-start notes)
+    shares_window.py Recolour's Shares window (how many colours, a knob + box per colour's share)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
     format_window.py the colour list format editor (live output, tags, codes, the user's formats)
