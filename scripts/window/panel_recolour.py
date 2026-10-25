@@ -21,7 +21,8 @@ class RecolourPanel:
         box.pack(fill="x", pady=(4, 0), after=self.colours_box)
         c = ttk.Frame(box)
         c.pack(anchor="w")
-        ttk.Label(c, text=tr("recolour.recolour")).pack(side="left")
+        self.recolour_word = ttk.Label(c, text=tr("recolour.recolour"))  # (one column: app._build_shape_settings)
+        self.recolour_word.pack(side="left")
         self.recolour_mode = ttk.Combobox(c, values=[t for _, t in RECOLOUR_CHOICES], state="readonly",
                                           width=max(len(t) for _, t in RECOLOUR_CHOICES))
         self.recolour_mode.pack(side="left", padx=(5, 4))

@@ -1065,7 +1065,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.points_box.pack(fill="x", pady=(6, 0))
         # their boxes start at one place, the funnel's too; Colours' rows start under its dropdown, like Inside's.
         # (Not "Last note": 7 px wider, it pushed Tiles' rows past the panel's edge; it never shows with them)
-        widest = label_column([lb, self.colours_word, self.shape_word, self.inside_word])
+        widest = label_column([lb, self.colours_word, self.recolour_word, self.shape_word, self.inside_word])
         self.funnel_box.columnconfigure(0, minsize=widest)
         self.cycle_rows_pad = widest + 5  # (panel_colours sync_colours packs the rows there)
         self.cycle_every_row.pack_configure(padx=(self.cycle_rows_pad, 0))
