@@ -473,6 +473,8 @@
  "tempo.step_delete_many": "Delete tempo points",
  "tempo.step_draw": "Draw a tempo part",
  "tempo.step_bpm": "Tempo point BPM",
+ "tempo.place_tip": "Where the point sits, as bar:beat:tick (e.g. 5:3:240). Type a new place and press Enter to move it there.",
+ "tempo.place_refused": "The point can't go there: another tempo point or a catch-up is in the way.",
  "tempo.step_curve": "Tempo curve",
  "tempo.step_bend": "Bend a tempo line",
  "tempo.step_catch_bend": "Bend a catch-up",

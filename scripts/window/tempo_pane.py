@@ -35,6 +35,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          swap_part, tempo_text)
 from notes.tempo import changed as tempo_edited, keep_heard
 from notes.loaded import file_tempos
+from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.tempo_file import limit_spots
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
@@ -1683,11 +1684,16 @@ class TempoPane(ConductorMarks, tk.Canvas):
         # the pencil by where the snapped press was; the box keeps its distance)
         at = roll.x2t(e.x) if d["grab"] is not None else d["ref"] + roll.x2t(e.x) - d["press"]
         held = [s for s, _, _ in d["orig"]] + [s for s, _ in d.get("mates", ())]
-        db = (self.move_beat(at, e, held) if d["grab"] is not None else self.snap_beat(at, e)) - d["ref"]
+        if "to" in d:  # (a place typed in the double-click box: exactly there, BPM kept)
+            db = d["to"] - d["ref"]
+        else:
+            db = (self.move_beat(at, e, held) if d["grab"] is not None else self.snap_beat(at, e)) - d["ref"]
         db = max([db] + [-b for _, b, _ in d["orig"]] + [-lo for lo, _ in d["band"] or ()])  # (not before 0)
         # (a grabbed point / line: BPM too, Select as well, user 2026-10-22; the Select box: time only, like Domino,
         # user 2026-10-24)
-        if d["v0"] is not None:
+        if "to" in d:
+            dv = 0.0
+        elif d["v0"] is not None:
             dv = self.snap_bpm(self.y2b(e.y), e) - d["v0"]
         elif d["band"]:
             dv = 0.0
@@ -2759,38 +2765,96 @@ class TempoPane(ConductorMarks, tk.Canvas):
     # ------------------------------------------------------------ typing a BPM on a point
 
     def open_typing(self, i):
+        """The BPM box over a point, and under it its place as bar:beat:tick (user 2026-10-25: typed too, moves the
+        point like a drag would). Enter = both go in, Esc = neither, Tab between them."""
         self.close_typing(True)
         item = self.ed()["points"][i]
         self.set_sel([item])
         b, v = item[:2]
-        var = tk.StringVar(value=bpm_text(v))
-        box = tk.Entry(self, textvariable=var, width=9, font=look.font(9), relief="solid", bd=1)
+        var, place = tk.StringVar(value=bpm_text(v)), tk.StringVar(value=self.place_text(b))
+        frame = tk.Frame(self)
+        boxes = [tk.Entry(frame, textvariable=w, width=12, font=look.font(9), relief="solid", bd=1)
+                 for w in (var, place)]
+        for box in boxes:
+            box.pack(fill="x")
+            box.bind("<Return>", lambda e: self.close_typing(True))
+            box.bind("<KP_Enter>", lambda e: self.close_typing(True))
+            box.bind("<Escape>", lambda e: self.close_typing(False))
+            box.bind("<FocusOut>", lambda e: self.after_idle(self.typing_left))
+        Tooltip(boxes[1], tr("tempo.place_tip"))
+        frame.update_idletasks()
         x, y = self.app.roll.t2x(b), float(self.b2y(v))
-        box.place(x=min(max(x + 8, 0), max(0, self.winfo_width() - 90)), y=max(0, y - 22))
-        box.select_range(0, "end")
-        box.focus_set()
-        box.bind("<Return>", lambda e: self.close_typing(True))
-        box.bind("<KP_Enter>", lambda e: self.close_typing(True))
-        box.bind("<Escape>", lambda e: self.close_typing(False))
-        box.bind("<FocusOut>", lambda e: self.close_typing(True))
-        self._typing = (box, var, item)
+        w, h = frame.winfo_reqwidth(), frame.winfo_reqheight()
+        frame.place(x=min(max(x + 8, 0), max(0, self.winfo_width() - w)),
+                    y=max(0, min(y - h - 6, self.winfo_height() - h)))
+        boxes[0].select_range(0, "end")
+        boxes[0].focus_set()
+        self._typing = (frame, var, item, place, place.get())
+
+    def place_text(self, b):
+        """A beat as bar:beat:tick, "5:3:240" (bars and beats from 1, ticks from 0; the time signature's beats)."""
+        ppq = max(1, self.app.ppq)
+        return "%d:%d:%d" % bar_beat_tick(sigs_of(self.app.tempo), round(b * ppq), ppq)
+
+    def typed_place(self, text):
+        """bar:beat:tick (or bar:beat / bar) typed -> beats, or None when it can't be read."""
+        try:
+            nums = [int(s) for s in text.replace(" ", "").split(":")]
+        except ValueError:
+            return None
+        if not 1 <= len(nums) <= 3:
+            return None
+        bar, beat, tick = nums + [1, 0][len(nums) - 1:]
+        if bar < 1 or beat < 1 or tick < 0:
+            return None
+        ppq = max(1, self.app.ppq)
+        return round(from_bar_beat_tick(sigs_of(self.app.tempo), bar, beat, tick, ppq) * ppq) / ppq
+
+    def typing_left(self):
+        """The keyboard left a box: Tab to the other one keeps them open, anywhere else = done."""
+        if self._typing and str(self.focus_get() or "").startswith(str(self._typing[0])):
+            return
+        self.close_typing(True)
 
     def close_typing(self, keep):
         if not self._typing:
             return
-        box, var, p = self._typing
+        frame, var, p, place, was = self._typing
         self._typing = None
         if keep and any(p is q for q in self.ed()["points"]):
+            v = None
             try:
                 v = calc(var.get().replace(",", ""))
-                if isinstance(v, (int, float)) and math.isfinite(v) and v > 0 and clamp_bpm(v) != p[1]:
-                    self.app.push_undo(name=tr("tempo.step_bpm"))
-                    p[1] = clamp_bpm(v)
-                    self.app.tempo_changed()
+                if not (isinstance(v, (int, float)) and math.isfinite(v) and v > 0 and clamp_bpm(v) != p[1]):
+                    v = None
             except (ValueError, ArithmeticError, TypeError, SyntaxError):
                 pass
-        box.destroy()
+            b = self.typed_place(place.get()) if place.get().strip() != was else None
+            if b is not None and abs(b - p[0]) < 1e-9:
+                b = None
+            if v is not None or b is not None:
+                self.app.push_undo(name=tr("tempo.step_move" if b is not None else "tempo.step_bpm"))
+                if v is not None:
+                    p[1] = clamp_bpm(v)
+                if b is not None and not self.move_typed(p, b):
+                    self.app.status.config(text=tr("tempo.place_refused"))
+                self.app.tempo_changed()
+        frame.destroy()
         self.app.roll.focus_set()
+
+    def move_typed(self, p, b):
+        """Point p moved to beat b by the drag's own rules (its jump partner goes along; where a drag couldn't go,
+        it stays). False when it didn't move."""
+        x = self.app.roll.t2x(p[0])
+        e = type("Typed", (), {"x": x, "y": float(self.b2y(p[1])), "state": 0})()
+        self.set_sel([p])
+        self.start_move(e, p, pushed=True)
+        d, self.drag = self.drag, None
+        d["to"] = b
+        start = p[0]
+        self.move_to(d, e)
+        drop_loose(self.ed()["points"])
+        return abs(p[0] - start) > 1e-9
 
     # ------------------------------------------------------------ the catch-up's words in the bar
 
