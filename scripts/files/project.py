@@ -44,6 +44,7 @@ from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
+from files.own_tracks import clean_own_tracks
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_tracks, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
@@ -254,6 +255,7 @@ class ProjectFiles:
             # (whenever anything in it isn't the default: a 3/4 with no tempo point too, hunt 2026-10-24; a plain
             # one is left out, so files without a tempo line stay as they were)
             **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
+            **({"own_tracks": self.own_tracks} if self.own_tracks else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
         }
 
@@ -369,6 +371,7 @@ class ProjectFiles:
             # (saved with the BPM box: its BPM a point on beat 0, so it plays as it did, user 2026-10-23)
             tempo["points"].insert(0, [0.0, clamp_bpm(float(old_bpm)), "hold", "", "lin", False, [0.5, 0.5]])
         link = clean_link(data.get("loaded"))  # (its MIDI: loaded again by find_loaded, after this)
+        own = clean_own_tracks(data.get("own_tracks"))
 
         was = project_json(self.project_data()), self.undo_stack[:], self.redo_stack[:], self._redo_kept
         was_loaded = self.loaded
@@ -421,6 +424,7 @@ class ProjectFiles:
         self.drop_finding()
         self.roll.forget_loaded()
         self.tempo = tempo
+        self.own_tracks = own
         # (only an autosave has them: the project file it belonged to, and whether it had unsaved changes)
         self._file_extra = (data.get("project_file"), data.get("unsaved"))
         if hasattr(self, "tempo_pane"):  # (the old project's Select box / picks / catch-up being added go)
@@ -826,6 +830,7 @@ class ProjectFiles:
         data.update(shapes=[], view=None, playhead=0.0, ppq=str(lm.ppq), bpm="120")
         data["tempo"] = conductor_line(lm)  # (the file's tempos + signatures, group C step 8)
         data.pop("loaded", None)
+        data.pop("own_tracks", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
@@ -937,12 +942,14 @@ class ProjectFiles:
 
     def saved_key(self):
         """What Open project compares with the last save / open: the shapes and the tempo line."""
-        return json.dumps([self.shapes, self.tempo if self.tempo != empty_tempo() else None])
+        return json.dumps([self.shapes, self.tempo if self.tempo != empty_tempo() else None]
+                          + ([self.own_tracks] if self.own_tracks else []))
 
     def may_replace(self, name):
-        """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line) aren't
-        saved in a project file as they are, asks to save them first. False = don't open."""
-        if not self.shapes and self.tempo == empty_tempo() or self.saved_key() == self._saved_shapes:
+        """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line, the own
+        tracks) aren't saved in a project file as they are, asks to save them first. False = don't open."""
+        if (not self.shapes and self.tempo == empty_tempo() and not self.own_tracks
+                or self.saved_key() == self._saved_shapes):
             return True
         answer = messagebox.askyesnocancel(tr("project.open_project"), tr("project.save_before_open", name=name),
                                            icon="warning", default="yes", parent=self)

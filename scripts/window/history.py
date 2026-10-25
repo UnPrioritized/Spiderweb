@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from files.own_tracks import clean_own_tracks
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
 from notes.tempo import changed as tempo_edited, clean_tempo, tempo_text
@@ -178,6 +179,7 @@ class HistoryPanel:
         tempo_edited()
         if (self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack
                 and self.step_tempo(self.undo_stack[-1]) == tempo_text(self.tempo)
+                and self.step_tracks(self.undo_stack[-1]) == json.dumps(self.own_tracks)
                 and not boxes_mark(self.undo_stack[-1])):  # (New with nothing to clear still set the boxes)
             kept = getattr(self, "_redo_kept", None)
             if kept and kept[1] == len(self.undo_stack):
@@ -330,19 +332,25 @@ class HistoryPanel:
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
         None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
         the one of them clicked, the picked Ripples source, the Tempo pane's line as JSON, what the Tempo pane picked
-        as JSON). The tempo line rides here so every step carries it (it isn't a shape): undo / redo put it back with
-        the shapes."""
+        as JSON, the own tracks as JSON). The tempo line and the own tracks ride here so every step carries them
+        (they aren't shapes): undo / redo put them back with the shapes."""
         boxes = self.roll.kept_box()
         pane = getattr(self, "tempo_pane", None)
         tempo_edited()  # (a step is saved as the line may change, before tempo_changed says so: read it again)
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
                 self.stroke, list(self.parts), self.part_main, self.ripple_pick, tempo_text(self.tempo),
-                pane.pick_state() if pane else "{}")
+                pane.pick_state() if pane else "{}", json.dumps(self.own_tracks))
 
     def step_tempo(self, step):
         """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
         sel = step[2]
         return sel[8] if len(sel) > 8 and isinstance(sel[8], str) else tempo_text(self.tempo)
+
+    def step_tracks(self, step):
+        """The own tracks (JSON) an undo step kept; the ones now for a step made without them."""
+        sel = step[2]
+        return sel[10] if len(sel) > 10 and isinstance(sel[10], str) and sel[10][:1] == "[" else json.dumps(
+            self.own_tracks)
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -495,6 +503,10 @@ class HistoryPanel:
             if len(picked) > 9 and isinstance(picked[9], str) and picked[9].startswith("{"):
                 self.tempo_pane.restore_pick(picked[9])  # (its Select box and what was picked, user)
             self.tempo_changed(restoring=True)  # (Hz bass warnings: sync_panel / the Hz window's after_restore below)
+        if len(picked) > 10 and isinstance(picked[10], str) and picked[10][:1] == "[":
+            own = clean_own_tracks(json.loads(picked[10]))
+            if own != self.own_tracks:
+                self.own_tracks = own
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

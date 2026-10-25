@@ -544,6 +544,7 @@
  "tracks.channels_one": "{n} channel",
  "tracks.channels": "{n} channels",
  "tracks.from_file": "From the loaded MIDI file",
+ "tracks.own_tip": "A track you added (right-click: Properties…)",
  "tracks.shapes": "From: {names}",
  "tracks.more_shapes_one": "and {n} more shape",
  "tracks.more_shapes": "and {n} more shapes",

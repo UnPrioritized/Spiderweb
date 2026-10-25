@@ -452,6 +452,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.midi_device = tk.StringVar(value=DEFAULT_DEVICE)
         self._vel_height = int(170 * s)
         self.tempo = empty_tempo()  # the Tempo pane's line (notes/tempo.py), saved with the project, undo steps too
+        self.own_tracks = []  # tracks added by hand (files/own_tracks.py), saved + undone like the tempo line;
+        # replaced (never changed in place) on every change, so the track list sees it by identity
         self.show_tempo = tk.BooleanVar(value=False)
         self._tempo_height = int(150 * s)
         self.pvar = {
@@ -1956,6 +1958,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         except ValueError:
             usual = False
         plain = not any(self.tempo.get(k) for k in ("points", "catch", "keysigs")) and sigs_of(self.tempo) == [DEFAULT_SIG]
+        plain = plain and not self.own_tracks
         if not self.shapes and plain and usual and not boxes[1] and self.loaded is None and self.midi_link is None:
             return
         ask = tr("app.new_ask") + ("\n\n" + tr("load.new_closes") if self.midi_link is not None else "")
@@ -1986,6 +1989,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes.clear()
         self.project_file = None  # (Save asks for a name again)
         self.tempo = empty_tempo()
+        self.own_tracks = []
         self.tempo_pane.forget()
         self.roll.box_kept = None
         self.roll.view_t = 0.0  # (back to bar 1, zoom kept: user)
