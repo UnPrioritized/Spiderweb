@@ -33,6 +33,7 @@ from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import (COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow, grab_while_panning,
                               slot_colours)
 from window import look
+from window.track_windows import AddTracksBox, PropertiesBox
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
 
 NAME_W = 150    # the names' column (x scale)
@@ -110,6 +111,7 @@ class TrackList(tk.Canvas):
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", lambda e: setattr(self, "_sweep", None))
         self.bind("<ButtonPress-3>", self.on_right)
+        self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Escape>", lambda e: self.show_all())  # (user 2026-10-23: the Conductor click alone was hidden)
         self.bind("<Motion>", self.on_motion)
         self.bind("<MouseWheel>", self.on_wheel)
@@ -629,8 +631,11 @@ class TrackList(tk.Canvas):
         own = self.own_track(s)
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
+        menu.add_command(label=tr("tracks.add_tracks"), command=lambda: self.ask_add(row))
         menu.add_separator()
         menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_own(s),
+                         state="normal" if own is not None else "disabled")
+        menu.add_command(label=tr("tracks.properties"), command=lambda: self.ask_properties(s),
                          state="normal" if own is not None else "disabled")
         try:
             menu.tk_popup(e.x_root, e.y_root)
@@ -696,6 +701,38 @@ class TrackList(tk.Canvas):
                 self.top = y - h // 2
                 self.clamp()
                 self.request_redraw()
+
+    def ask_add(self, row):
+        """Add Tracks…: one track per channel ticked in its window, after row."""
+        chs = AddTracksBox(self).run()
+        if chs:
+            self.add_own(row, chs)
+
+    def ask_properties(self, s):
+        """Properties… (an own track): its name and channel in a small window."""
+        own = self.own_track(s)
+        if own is None:
+            return
+        got = PropertiesBox(self, own["name"], own["ch"]).run()
+        if got is not None:
+            self.set_properties(s, *got)
+
+    def set_properties(self, s, name, ch):
+        own = self.own_track(s)
+        if own is None or (own["name"], own["ch"]) == (name, ch):
+            return
+        self.set_own([dict(t, name=name, ch=ch) if t is own else t for t in self.app.own_tracks],
+                     tr("tracks.properties_step"))
+
+    def on_double(self, e):
+        """Double-click an own track's name: its Properties (like Domino's). Any other second click = a click (Tk
+        gives a double-click binding the press instead of <ButtonPress-1>)."""
+        self.on_press(e)
+        row = self.row_at(e.y)
+        if row is not None and row >= 0 and e.x < self.name_w and not self.on_speaker(e.x):
+            s = int(self.tracks()[row])
+            if self.own_track(s) is not None:
+                self.ask_properties(s)
 
     def remove_own(self, s):
         """Remove Track (an own track only, for now)."""
