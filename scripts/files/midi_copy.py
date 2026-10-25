@@ -27,11 +27,12 @@ def same_file(a, b):
         return False
 
 
-def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None):
+def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, added=None):
     """Writes mf (a scanned MidiFile) to dst unchanged. walk = every readable track written event by event (what a
     changed track goes through) instead of copied: the result must be the very same bytes. progress(bytes done,
     bytes in all); cancel() True = Cancelled (dst untouched). retime (Retime): a changed tempo's tracks written
-    again (old tempo events out, the new list in, ticks moved by Keep timing); the rest copied as it is."""
+    again (old tempo events out, the new list in, ticks moved by Keep timing); the rest copied as it is. added
+    (Added): Spiderweb's own tracks put after the file's last track."""
     if not mf.scanned:
         raise ValueError("scan() the file first")
     if same_file(mf.path, dst) or same_file(mf.path, dst + ".tmp"):  # (safefile's temp file: writing it would
@@ -41,9 +42,10 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None):
         free = shutil.disk_usage(folder).free
     except OSError as e:
         raise MidiError("midi.cant_write", why=e.strerror or str(e)) from None
-    if free < mf.size + ROOM_SPARE:
-        raise MidiError("midi.no_room", need=-(-(mf.size + ROOM_SPARE) // 2 ** 20), free=free // 2 ** 20)
-    work = _Work(mf, walk, progress, cancel, retime)
+    need = mf.size + ROOM_SPARE + (added.size if added is not None else 0)
+    if free < need:
+        raise MidiError("midi.no_room", need=-(-need // 2 ** 20), free=free // 2 ** 20)
+    work = _Work(mf, walk, progress, cancel, retime, added)
     try:
         safefile.write_bytes(dst, work.pieces())
     except OSError as e:
@@ -52,8 +54,9 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None):
 
 
 class _Work:
-    def __init__(self, mf, walk, progress, cancel, retime=None):
+    def __init__(self, mf, walk, progress, cancel, retime=None, added=None):
         self.mf, self.walk, self.progress, self.cancel, self.retime = mf, walk, progress, cancel, retime
+        self.added = added
         self.done, self.written = 0, 0
         self.buf = bytearray(PIECE)
         self.out = None
@@ -69,12 +72,18 @@ class _Work:
         mf = self.mf
         self.watch = mf.watch()
         rest = hashlib.blake2b(digest_size=16)  # (everything but the tracks' events, as read: = mf.raw_hash)
+        added = self.added
+        last = max(i for i, (kind, *_) in enumerate(mf.pieces) if kind == "track")
         with open(mf.path, "rb") as f:
-            for kind, *what in mf.pieces:
+            for i, (kind, *what) in enumerate(mf.pieces):
+                if i == last + 1 and added is not None:
+                    yield from self.own(added)
                 if kind == "raw":
                     start, size = what
-                    for piece in self.raw(f, start, size):
+                    for k, piece in enumerate(self.raw(f, start, size)):
                         rest.update(piece)
+                        if added is not None and start == 0 and k == 0:  # (the header)
+                            piece = added.header(piece, len(mf.tracks))
                         yield piece
                     continue
                 t = what[0]
@@ -107,9 +116,18 @@ class _Work:
                         yield piece
                 if h.hexdigest() != t.hash:
                     raise MidiError("midi.check_failed", track=t.number + 1)
+            if last == len(mf.pieces) - 1 and added is not None:
+                yield from self.own(added)
         if rest.hexdigest() != mf.raw_hash:  # (the header etc. changed since it was read)
             raise FileChanged()
         mf.same()
+
+    def own(self, added):
+        for piece in added.chunks:
+            if self.cancel and self.cancel():
+                raise Cancelled()
+            self.written += len(piece)
+            yield piece
 
     def read_exact(self, f, start, size):
         self.watch.read(size)
@@ -209,6 +227,20 @@ def vlq(n):
         out.insert(0, (n & 127) | 128)
         n >>= 7
     return bytes(out)
+
+
+class Added:
+    """Spiderweb's own tracks put after a loaded MIDI's last track (its shapes drawn on top, plan step 10):
+    chunks = whole MTrk chunks (bytes, made as they're written), count = how many, size = about how many bytes. The
+    header then says format 1 (a format 0 file has one track) and the new track count."""
+
+    def __init__(self, chunks, count, size=0):
+        self.chunks, self.count, self.size = chunks, count, size
+
+    def header(self, piece, tracks):
+        b = bytearray(piece)
+        b[8:12] = (1).to_bytes(2, "big") + (tracks + self.count).to_bytes(2, "big")
+        return bytes(b)
 
 
 NO_INSERTS = (np.zeros(0, np.int64), np.zeros(1, np.int64), np.zeros(0, np.uint8))

@@ -18,10 +18,10 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
 from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
-                          merges_unmade, one_voice, shape_notes_tracks, slot_ports)
+                          merges_unmade, one_voice, shape_notes_tracks, slot_ports, slot_track_channel)
 from notes.hzbass import clean_hz
-from notes.loaded import (clean_link, conductor_line, file_tempos, retime_for, same_conductor, tempo_new,
-                          tempo_tracks)
+from notes.loaded import (clean_link, conductor_line, file_tempos, own_hits, retime_for, same_conductor,
+                          tempo_new, tempo_tracks)
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
@@ -44,11 +44,12 @@ from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
-from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, track_slots, write_midi
+from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_tracks, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
 from files.errors import write_log
-from files.midi_read import Cancelled, FileChanged, MidiError
+from files.midi_copy import Added
+from files.midi_read import M_CUT, M_RMID, Cancelled, FileChanged, MidiError
 from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
@@ -181,6 +182,16 @@ def short_shape(sh):
         return short_num(v) if k in ("gate", "gate0", "gate1", "k") else v
     # (a Gate sensitive merge's notes are made again from its recipe when loaded: merge.py)
     return json.dumps({k: short(k, v) for k, v in sh.items() if not (k == "notes" and "merge" in sh)})
+
+
+def slot_lanes(notes, use10):
+    """Each note's channel x 256 + key as exported (a slot's track has one channel: slot_track_channel)."""
+    slots = notes[:, 4]
+    if not len(slots):
+        return slots.copy()
+    us = np.unique(slots)
+    chans = np.array([slot_track_channel(int(k), use10)[1] for k in us.tolist()], np.int64)
+    return chans[np.searchsorted(us, slots)] * 256 + notes[:, 2]
 
 
 def timed_ticks(plan, notes, cc):
@@ -959,8 +970,9 @@ class ProjectFiles:
         checked). The Conductor line still the file's own = exactly as it was loaded; changed (group C step 8) =
         the file's tempo events left out and the new list put into the track that had the first one (or each track
         that had a list: asked when there were several), Keep timing moving every event by the file's own note
-        ticks. Shapes on top come in a later step: asked first. In the background (a 17 GB file takes a minute),
-        the status line says how far."""
+        ticks. Spiderweb's own shapes = their own new tracks after the file's last one (plan step 10), moved by
+        Keep timing like the file's notes; the message counts those sounding on a loaded note's channel + key. In
+        the background (a 17 GB file takes a minute), the status line says how far."""
         lm = self.loaded
         if getattr(self, "_exporting", None):
             return
@@ -974,9 +986,27 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("load.tempo_damaged", tracks=", ".join(
                 str(t.number + 1) for t in lm.mf.damaged()[:10])), parent=self)
             return
-        if len(self.rendered) and not messagebox.askyesno(
-                tr("project.spiderweb"), tr("load.export_only_file"), icon="warning", parent=self):
-            return
+        notes, cc = self.rendered[:0], {}
+        if len(self.rendered):
+            why = ("load.shapes_damaged" if lm.mf.damaged() or M_CUT in lm.mf.marks else
+                   "load.shapes_format" if lm.mf.format > 1 or M_RMID in lm.mf.marks else None)
+            tracks = len(track_slots(self.rendered, self.pad_tracks()))
+            if why is None and len(lm.mf.tracks) + tracks > MAX_TRACKS + 1:
+                messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=len(
+                    lm.mf.tracks) + tracks, most=MAX_TRACKS + 1), parent=self)
+                return
+            if why is not None:
+                if not messagebox.askyesno(tr("project.spiderweb"), tr("load.shapes_cant", why=tr(why)),
+                                           icon="warning", parent=self):
+                    return
+            else:
+                if not ask_big(self, "midi", len(self.rendered)):
+                    return
+                if long_silences(self.rendered) and not messagebox.askokcancel(
+                        tr("project.spiderweb"), tr("project.long_silences", ppq=lm.ppq, beats=MAX_DELTA // lm.ppq),
+                        icon="warning"):
+                    return
+                notes, cc = self.rendered.copy(), self.cc_messages(lm.ppq, self.read_project()[1])
         targets = []
         if retimed and tempo_new(lm, self.tempo):  # (signatures changed alone: the tempo stays as it is, no question)
             lists = tempo_tracks(lm)
@@ -996,12 +1026,14 @@ class ProjectFiles:
             return
         from files.midi_copy import copy_through
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
-                                 "plan": None, "step": "load.exporting"}
+                                 "plan": None, "step": "load.exporting", "hits": 0, "tracks": 0}
+        use10, pad = self.picture_use10, self.pad_tracks()
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
         heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
 
         def run():
+            nonlocal notes, cc
             try:
                 retime = None
                 if retimed:
@@ -1010,16 +1042,39 @@ class ProjectFiles:
                         job["step"] = "load.reading_ticks"
                         ticks, loose = lm.anchors(cancel=lambda: job["cancel"],
                                                   progress=lambda d, n: job.update(done=d, total=n))
+                        # (the shapes' notes keep their time too: anchors of their own)
+                        ticks = np.union1d(ticks, np.concatenate([notes[:, 0], notes[:, 1]]))
+                        loose = np.union1d(loose, np.array([m[0] for ms in cc.values() for m in ms], np.int64))
                     job["step"] = "project.tempo_working"
                     plan = job["plan"] = file_plan(tempo, 120, ppq, beats, ticks, ticks, None, loose, heard)
                     retime = retime_for(lm, tempo, plan, targets)
-                    job["step"] = "load.exporting"
+                    if keeps and len(notes):
+                        notes, cc = timed_ticks(plan, notes, cc)
+                added = None
+                if len(notes):
+                    job["step"] = "load.checking_own"
+                    job["hits"] = own_hits(lm, notes[:, 0], notes[:, 1], slot_lanes(notes, use10),
+                                           cancel=lambda: job["cancel"],
+                                           progress=lambda d, n: job.update(done=d, total=n))
+                    pieces, job["tracks"] = note_tracks(notes, use10, pad, cc)
+                    added = Added(pieces, job["tracks"], 16 * len(notes))
+                job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),
-                             cancel=lambda: job["cancel"], retime=retime)  # (closing Spiderweb: its temp file goes)
+                             cancel=lambda: job["cancel"], retime=retime,
+                             added=added)  # (closing Spiderweb: its temp file goes)
             except BaseException as e:  # (said below)
                 job["error"] = e
             job["finished"] = True
+
+        def own_note():  # (the message's lines about the shapes added)
+            if not len(notes):
+                return ""
+            out = tr("load.own_added", notes=trn("n.notes", len(notes), n=len(notes)),
+                     tracks=trn("n.tracks", job["tracks"], n=job["tracks"]))
+            if job["hits"]:
+                out += trn("load.own_hits", job["hits"], n=job["hits"])
+            return out + self.cc_note(cc, True)
 
         def poll():
             if not job["finished"]:
@@ -1037,10 +1092,11 @@ class ProjectFiles:
                 messagebox.showinfo(tr("project.spiderweb"), tr(
                     "load.exported_tempo" if targets else "load.exported_sigs", path=path, notes=trn("n.notes", lm.notes, n=lm.notes),
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
-                    note=self.tempo_notes(job["plan"])))
+                    note=self.tempo_notes(job["plan"]) + own_note()))
             elif e is None:
-                messagebox.showinfo(tr("project.spiderweb"), tr("load.exported", path=path,
-                                                                notes=trn("n.notes", lm.notes, n=lm.notes)))
+                messagebox.showinfo(tr("project.spiderweb"), tr("load.exported_own" if len(notes) else "load.exported",
+                                                                path=path, notes=trn("n.notes", lm.notes, n=lm.notes))
+                                    + own_note())
             elif isinstance(e, MidiError):
                 messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info))
             elif isinstance(e, OSError):
@@ -1382,7 +1438,8 @@ class ProjectFiles:
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
         if not len(notes) or high == len(notes) and not mod:
             messagebox.showerror(tr("project.spiderweb"),
-                                 tr("project.no_notes_yet_draw_something_inside", keys=min(self.keys, 128) - 1))
+                                 tr("project.no_notes_yet_draw_something_inside", keys=min(self.keys, 128) - 1)
+                                 + self.loaded_left_out())
             return
         # (worked out with every note, as Export MIDI does, so the files line up tick for tick; then the keys
         # Domino can't hold left out)
@@ -1421,11 +1478,18 @@ class ProjectFiles:
                 + (tr("project.dms_keys_256") if mod else
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                 + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else "")
-                + (tr("project.ports_dms") if ports else ""))
+                + (tr("project.ports_dms") if ports else "") + self.loaded_left_out())
         slow = tempo_items(tempo)[1] if tempo else 0
         warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "") + self.cc_note(cc)
         (messagebox.showwarning if long or ports or warn else messagebox.showinfo)(tr("project.spiderweb"),
                                                                                     text + warn)
+
+    def loaded_left_out(self, short=False):
+        """The Domino messages' line when a MIDI is loaded: its notes never go into a Domino copy / .dms (plan step
+        10), only the shapes."""
+        if self.loaded is None and self.midi_link is None:
+            return ""
+        return tr("load.domino_short" if short else "load.domino_left_out")
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
@@ -1462,8 +1526,9 @@ class ProjectFiles:
         if not mod:
             notes = notes[notes[:, 2] <= 127]
         if not len(notes):
-            messagebox.showerror(tr("project.spiderweb"), tr("project.no_notes_to_copy_draw_something")
+            messagebox.showerror(tr("project.spiderweb"), (tr("project.no_notes_to_copy_draw_something")
                                  if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
+                                 + self.loaded_left_out())
             return
         span = conductor = None
         # (CCs before the first note: the copy starts at the earliest, so a lead-in keeps its timing, hunt 2026-10-22)
@@ -1521,7 +1586,8 @@ class ProjectFiles:
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                 + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else "")
                 + (tr("project.cc_not_written") if self.cc_note({}, shapes=[self.shapes[i] for i in self.sels]
-                                                                 if self.sels else None) else ""))
+                                                                 if self.sels else None) else "")
+                + self.loaded_left_out(short=True))
         self.status.config(text=text)
         warn = ""
         if plan:  # (the tempo warnings as Export to Domino gives them; places only inside what was copied)

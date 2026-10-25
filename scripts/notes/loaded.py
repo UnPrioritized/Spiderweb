@@ -236,6 +236,77 @@ def retime_for(lm, tempo, plan, targets):
     return Retime(plan["bp"] if keep_map else None, drop, inserts, tempo_tracks(lm, tuple(drop)) if drop else [])
 
 
+def own_hits(lm, s, e, lane, cancel=None, progress=None):
+    """How many of Spiderweb's own notes (starts s, ends e, lanes = channel x 256 + key; the file's ticks) sound at
+    the same time as a loaded note on the same channel + key (the export's heads-up: players can cut those, plan
+    step 10). Each track is read only over the own notes' time, from its checkpoint before. cancel() True =
+    Cancelled; progress(done, total) in bytes."""
+    n = len(s)
+    if not n:
+        return 0
+    order = np.lexsort((s, lane))
+    s, e, lane = (np.ascontiguousarray(a[order], np.int64) for a in (s, e, lane))
+    lane_at = np.searchsorted(lane, np.arange(QS + 1)).astype(np.int64)
+    shift = lane << 50  # (ticks < 2^48: each lane's latest end so far in one go)
+    top = np.maximum.accumulate(e + shift) - shift
+    t0, t1 = int(s.min()), int(e.max())
+    k_lo, k_hi = int((lane & 255).min()), int((lane & 255).max())
+    hit = np.zeros(n, np.uint8)
+    loops = speed.loops()
+    busy = loops.midi_busy_hits if loops else midi_scan.busy_hits
+    mf = lm.mf
+    jobs = []
+    for num, t in enumerate(lm.tracks):
+        if not t.notes or t.end <= t0 or t.first >= t1 or t.khi < k_lo or t.klo > k_hi or not len(t.cp_off):
+            continue
+        j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
+        jobs.append((num, t, j, int(t.cp_off[j])))
+    total, done = sum(t.limit - start for _, t, _, start in jobs), 0
+    buf = bytearray(PIECE)
+    with open(mf.path, "rb") as f:
+        watch = mf.watch()
+        for num, t, j, start in jobs:
+            cnt, since = np.zeros(QS, np.int64), np.zeros(QS, np.int64)
+            e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
+            qs = t.e_q[e0:e1].astype(np.int64)
+            cnt[qs] = t.e_cnt[e0:e1]
+            since[qs] = t.cp_tick[j]
+            st = np.zeros(midi_scan.BH_SIZE, np.int64)
+            st[midi_scan.BH_TICK], st[midi_scan.BH_RUN] = t.cp_tick[j], t.cp_run[j]
+            size = t.limit - start
+            if t.data is not None:
+                b = t.data[start:t.limit]
+                busy(b, 0, len(b), t1, st, cnt, since, lane_at, s, e, top, hit)
+                done += size
+            elif size > 0:
+                reader = mf.pieces_of(f, mf.tracks[num].start + start, size, buf, watch)
+                filled, final = next(reader)
+                while True:
+                    if cancel and cancel():
+                        raise Cancelled()
+                    view = np.frombuffer(buf, np.uint8, filled) if loops else memoryview(buf)[:filled]
+                    used = busy(view, 0, filled, t1, st, cnt, since, lane_at, s, e, top, hit)
+                    del view
+                    done += used
+                    if progress:
+                        progress(done, total)
+                    if st[midi_scan.BH_STOP] or (final and used >= filled):
+                        break
+                    try:
+                        filled, final = reader.send(used)
+                    except StopIteration:
+                        break
+                reader.close()
+            # (still sounding: to the own notes' end, or to the track's end when it ran out: shown up to there)
+            at = t1 if st[midi_scan.BH_STOP] else max(int(st[midi_scan.BH_TICK]), t.last_tick)
+            for q in np.flatnonzero(cnt > 0).tolist():
+                a, z = int(lane_at[q]), int(lane_at[q + 1])
+                if z > a and at > since[q]:
+                    hit[a:z] |= ((s[a:z] < at) & (e[a:z] > since[q])).astype(np.uint8)
+    lm.mf.same()
+    return int(hit.sum())
+
+
 def file_hash(mf):
     """One short code for every byte of a scanned file (its tracks' hashes + the rest's): a project knows the file
     again by it, wherever it's moved."""

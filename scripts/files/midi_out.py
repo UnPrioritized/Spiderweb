@@ -190,6 +190,15 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tem
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
 
+def note_tracks(notes, use10=False, pad=True, cc=None):
+    """write_midi's note tracks alone, no header or tempo track: (pieces, how many tracks). A loaded MIDI's export
+    puts them after the file's own tracks."""
+    notes = np.asarray(notes, np.int64).reshape(-1, 6)
+    count = int(notes[:, 4].max()) + 1 if len(notes) else 0
+    tracks = track_slots(notes, pad)
+    return _pieces(notes, count, tracks, use10, b"", cc or {}), len(tracks)
+
+
 def _pieces(notes, count, tracks, use10, start, cc):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory)."""
     yield start

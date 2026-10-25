@@ -2131,8 +2131,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if lm._anchors is None:  # (a loaded MIDI's note ticks: one read of the file, on a thread)
                 self.read_anchors(lm)
                 return
-            # (its export writes the file alone: its notes and CC messages, not the shapes, hunt 2026-10-24)
-            ticks, loose = lm._anchors
+            # (its export writes the file's notes and CC messages + the shapes' (Load MIDI step 10), as there)
+            cc = app.cc_messages(app.ppq, self.base())
+            ticks = np.union1d(lm._anchors[0], ticks)
+            loose = np.union1d(lm._anchors[1], np.array([m[0] for ms in cc.values() for m in ms], np.int64))
         limits = {"dense": [], "gave": [], "unfit": [], "moved": []}
         if any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
             try:

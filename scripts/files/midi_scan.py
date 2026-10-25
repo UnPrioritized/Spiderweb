@@ -7,7 +7,8 @@ walk     reads events and counts them, checking each byte (a damaged file never 
 rewrite  writes a track again event by event (ticks moved by a map, tempo events left out / put in): an
          unchanged gap keeps its own bytes, running status as in the file (an explicit status only where the one
          written last differs)
-note_ticks  marks the ticks with note-ons / offs and other channel events (Keep timing's anchors)"""
+note_ticks  marks the ticks with note-ons / offs and other channel events (Keep timing's anchors)
+busy_hits   marks Spiderweb's own notes sounding with a track's notes on the same channel + key (the export's count)"""
 
 import numpy as np
 
@@ -438,4 +439,100 @@ def note_ticks(b, p, end, final, mark, base, st):
         p = q
     st[NT_TICK] = tick
     st[NT_RUN] = run
+    return p
+
+
+# busy_hits(): st = [tick, running status, stopped at t_stop]
+BH_TICK, BH_RUN, BH_STOP = range(3)
+BH_SIZE = 3
+
+
+def busy_hits(b, p, end, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit):
+    """Spiderweb's own notes sounding at the same time as this track's notes on the same channel + key: hit[i] = 1.
+    Own notes by lane (channel x 256 + key): lane_at[q] .. lane_at[q + 1], sorted by start (own_s), own_e their
+    ends, own_top the latest end so far in the lane. cnt[q] = the track's notes sounding on lane q, since[q] = from
+    when (a track walk() read without BAD, from a checkpoint: its open counts). Stops at the first event at or after
+    t_stop (st[BH_STOP] = 1) or one not wholly in b; returns where. Lanes still sounding: the caller ends them."""
+    tick = st[BH_TICK]
+    run = st[BH_RUN]
+    while p < end:
+        q = p
+        d = 0
+        whole = True
+        while True:
+            if q >= end:
+                whole = False
+                break
+            c = b[q]
+            q += 1
+            d = (d << 7) | (c & 127)
+            if c < 128:
+                break
+        if whole and q >= end:
+            whole = False
+        if not whole:
+            break
+        t = tick + d
+        if t >= t_stop:
+            st[BH_STOP] = 1
+            break
+        s = np.int64(b[q])
+        if s >= 128:
+            q += 1
+        else:
+            s = run
+        if s < 0xF0:
+            hi = s >> 4
+            need = 1 if hi == 0xC or hi == 0xD else 2
+            if q + need > end:
+                break
+            if s >= 128:
+                run = s
+            if hi == 0x8 or hi == 0x9:
+                ln = (s & 15) * 256 + np.int64(b[q])
+                if hi == 0x9 and b[q + 1] > 0:
+                    if cnt[ln] == 0:
+                        since[ln] = t
+                    cnt[ln] += 1
+                elif cnt[ln] > 0:
+                    cnt[ln] -= 1
+                    if cnt[ln] == 0 and t > since[ln]:  # (a stretch of time this lane sounded: own notes in it)
+                        a = since[ln]
+                        lo = lane_at[ln]
+                        top = lane_at[ln + 1]
+                        while lo < top:  # (own notes starting before t)
+                            mid = (lo + top) // 2
+                            if own_s[mid] < t:
+                                lo = mid + 1
+                            else:
+                                top = mid
+                        j = lo - 1
+                        while j >= lane_at[ln] and own_top[j] > a:
+                            if own_e[j] > a:
+                                hit[j] = 1
+                            j -= 1
+            q += need
+        else:
+            if s == 0xFF:
+                if q >= end:
+                    break
+                q += 1
+            ln = 0
+            whole = True
+            while True:
+                if q >= end:
+                    whole = False
+                    break
+                c = b[q]
+                q += 1
+                ln = (ln << 7) | (c & 127)
+                if c < 128:
+                    break
+            q += ln
+            if not whole or q > end:
+                break
+        tick = t
+        p = q
+    st[BH_TICK] = tick
+    st[BH_RUN] = run
     return p
