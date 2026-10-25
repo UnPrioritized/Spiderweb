@@ -574,10 +574,13 @@ def _first_ticks(pb, ppq):
     out = []
     for b in pb:
         c = max(0, math.ceil(b * ppq))
-        while c > 0 and (c - 1) / ppq >= b:
-            c -= 1
-        while c / ppq < b:
-            c += 1
+        for _ in range(4):  # (a step or two at most; huge beats stop changing per tick and looped for good, hunt
+            if c > 0 and (c - 1) / ppq >= b:  # 2026-10-25)
+                c -= 1
+            elif c / ppq < b:
+                c += 1
+            else:
+                break
         out.append(c)
     return out
 

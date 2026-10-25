@@ -33,7 +33,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_runs, keeps,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
                          swap_part, tempo_text)
-from notes.tempo import changed as tempo_edited, keep_heard
+from notes.tempo import changed as tempo_edited, keep_heard, FAR
 from notes.loaded import file_tempos
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.tempo_file import limit_spots
@@ -2781,6 +2781,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
             box.bind("<KP_Enter>", lambda e: self.close_typing(True))
             box.bind("<Escape>", lambda e: self.close_typing(False))
             box.bind("<FocusOut>", lambda e: self.after_idle(self.typing_left))
+        for box, other in zip(boxes, boxes[::-1]):  # (Tab / Shift+Tab only go round the two rows)
+            for key in ("<Tab>", "<Shift-Tab>", "<ISO_Left_Tab>"):
+                box.bind(key, lambda e, o=other: (o.focus_set(), o.select_range(0, "end"), "break")[-1])
         Tooltip(boxes[1], tr("tempo.place_tip"))
         frame.update_idletasks()
         x, y = self.app.roll.t2x(b), float(self.b2y(v))
@@ -2797,7 +2800,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         return "%d:%d:%d" % bar_beat_tick(sigs_of(self.app.tempo), round(b * ppq), ppq)
 
     def typed_place(self, text):
-        """bar:beat:tick (or bar:beat / bar) typed -> beats, or None when it can't be read."""
+        """bar:beat:tick (or bar:beat / bar) typed -> beats, or None when it can't be read; "far" past the
+        farthest beat a tempo point is kept at (tempo.FAR: undo / reopening dropped it, hunt 2026-10-25)."""
         try:
             nums = [int(s) for s in text.replace(" ", "").split(":")]
         except ValueError:
@@ -2808,7 +2812,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if bar < 1 or beat < 1 or tick < 0:
             return None
         ppq = max(1, self.app.ppq)
-        return round(from_bar_beat_tick(sigs_of(self.app.tempo), bar, beat, tick, ppq) * ppq) / ppq
+        if max(bar, beat, tick / ppq) > FAR:  # (before any maths: huge numbers froze the pane / overflowed)
+            return "far"
+        b = round(from_bar_beat_tick(sigs_of(self.app.tempo), bar, beat, tick, ppq) * ppq) / ppq
+        return "far" if b > FAR else b
 
     def typing_left(self):
         """The keyboard left a box: Tab to the other one keeps them open, anywhere else = done."""
@@ -2821,26 +2828,46 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         frame, var, p, place, was = self._typing
         self._typing = None
-        if keep and any(p is q for q in self.ed()["points"]):
-            v = None
-            try:
-                v = calc(var.get().replace(",", ""))
-                if not (isinstance(v, (int, float)) and math.isfinite(v) and v > 0 and clamp_bpm(v) != p[1]):
-                    v = None
-            except (ValueError, ArithmeticError, TypeError, SyntaxError):
-                pass
-            b = self.typed_place(place.get()) if place.get().strip() != was else None
-            if b is not None and abs(b - p[0]) < 1e-9:
-                b = None
-            if v is not None or b is not None:
-                self.app.push_undo(name=tr("tempo.step_move" if b is not None else "tempo.step_bpm"))
-                if v is not None:
-                    p[1] = clamp_bpm(v)
-                if b is not None and not self.move_typed(p, b):
-                    self.app.status.config(text=tr("tempo.place_refused"))
-                self.app.tempo_changed()
-        frame.destroy()
-        self.app.roll.focus_set()
+        try:
+            if keep and any(p is q for q in self.ed()["points"]):
+                self.take_typed(p, var.get(), place.get(), was)
+        finally:  # (the box always goes, hunt 2026-10-25: an error left it stuck on the pane)
+            frame.destroy()
+            self.app.roll.focus_set()
+
+    def take_typed(self, p, bpm, place, was):
+        """The double-click box's BPM and place go to point p: one step, named for what really changed; none when
+        nothing did (hunt 2026-10-25)."""
+        v = None
+        try:
+            v = calc(bpm.replace(",", ""))
+            if not (isinstance(v, (int, float)) and math.isfinite(v) and v > 0 and clamp_bpm(v) != p[1]):
+                v = None
+        except (ValueError, ArithmeticError, TypeError, SyntaxError):
+            pass
+        b = self.typed_place(place) if place.strip() != was else None
+        status = None
+        if b is None and place.strip() != was:
+            status = "tempo.place_bad"
+        elif b == "far":
+            b, status = None, "tempo.place_refused"
+        elif b is not None and abs(b - p[0]) < 1e-9:
+            b = None
+        if v is not None or b is not None:
+            app = self.app
+            app.push_undo(name=tr("tempo.step_bpm"))
+            if v is not None:
+                p[1] = clamp_bpm(v)
+            if b is not None:
+                if self.move_typed(p, b):
+                    st = app.undo_stack[-1]
+                    app.undo_stack[-1] = (st[0], tr("tempo.step_move")) + tuple(st[2:])
+                else:
+                    status = "tempo.place_refused"
+            app.tempo_changed()
+            app.settle_history()  # (a refused move with no BPM change: the empty step goes, Redo kept)
+        if status:
+            self.app.status.config(text=tr(status))
 
     def move_typed(self, p, b):
         """Point p moved to beat b by the drag's own rules (its jump partner goes along; where a drag couldn't go,
