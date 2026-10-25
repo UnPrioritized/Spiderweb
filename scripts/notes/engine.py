@@ -1493,8 +1493,10 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
     shapes keep their colours" off; user 2026-10-20: 352 path copies made 646 channels, most empty): the next free
     slot in the order the other shapes take them (with "Use channel 10": channel 10 last of each 16, unless "1-16 in
     order"; user 2026-10-20), never one they skip (channel 10, unmapped_slot). A moved track never lands on a slot
-    the same shape's other tracks use (hunt 2026-10-20: two colours folded onto one channel). Every slot a track
-    clashes on is found in one go (hunt: trying slot after slot, 200 copies x 15 colours took 286 s)."""
+    the same shape's other tracks use (hunt 2026-10-20: two colours folded onto one channel). A track first tries
+    its slots one by one against that slot's tracks only (a user's 32 stacked 256-key pastes: comparing each of
+    3,640 tracks with every placed note took 34 s); after a few clashing slots, every slot it clashes on is found
+    in one go (hunt: trying slot after slot, 200 copies x 15 colours took 286 s)."""
     placed = PlacedSpans()
     out = list(pinned)
     for i, (lst, pin) in enumerate(zip(note_lists, pinned)):
@@ -1505,8 +1507,11 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
         now = ids.tolist()  # (the shape's tracks' slots: moved ones' new slots, the rest as they are)
         for k, s in enumerate(ids.tolist()):
             mine = sorted_spans(lst[which == k], split)
-            bad = placed.clashing(mine) | (set(now) - {s})
-            while s in bad:
+            others, bad, tried = set(now) - {s}, None, 0
+            while s in others or (placed.clashes(mine, s) if bad is None else s in bad):
+                tried += 1
+                if bad is None and tried >= 8:
+                    bad = placed.clashing(mine)
                 u = unmapped_slot(s, use10) if step == 1 else None
                 if u is not None:
                     s = int(mapped_slots(np.array([u + 1]), use10)[0])
@@ -1536,11 +1541,13 @@ def sorted_spans(notes, split):
 
 class PlacedSpans:
     """pushed_solid's tracks placed so far: each one's sorted_spans and slot, with its first and last tick, so a new
-    track is only compared with the ones near it in time."""
+    track is only compared with the ones near it in time. Also every slot's spans together (by_slot): on one slot
+    they never overlap (placed only where they don't clash), so they stay sorted, apart spans."""
 
     def __init__(self):
         self.spans, self.slots = [], []
         self.bounds = np.zeros((2, 64), np.int64)  # (each track's first and last tick; grows by doubling)
+        self.by_slot = {}
 
     def add(self, mine, slot):
         lo, hi, t0, t1 = mine
@@ -1551,6 +1558,22 @@ class PlacedSpans:
             self.bounds[:, n] = t0, t1
             self.spans.append((lo, hi))
             self.slots.append(slot)
+            had = self.by_slot.get(slot)
+            if had is not None:
+                lo, hi = np.concatenate([had[0], lo]), np.concatenate([had[1], hi])
+                order = np.argsort(lo, kind="stable")
+                lo, hi = lo[order], hi[order]
+            self.by_slot[slot] = (lo, hi)
+
+    def clashes(self, mine, slot):
+        """Does mine clash with the tracks placed on slot?"""
+        lo, hi = mine[0], mine[1]
+        had = self.by_slot.get(slot)
+        if had is None or not len(lo):
+            return False
+        at = np.searchsorted(had[1], lo, "right")  # (the slot's first span ending after each of mine starts)
+        ok = at < len(had[0])
+        return bool((had[0][at[ok]] < hi[ok]).any())
 
     def clashing(self, mine):
         """The slots of placed tracks that clash with mine (same key, overlapping: touching doesn't)."""
