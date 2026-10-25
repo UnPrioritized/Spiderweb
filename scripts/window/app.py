@@ -568,8 +568,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"] if key in TOOL_TOPICS else tr("app.lasso_tip"))
             if key == "lasso":  # (its ▾: Lasso / Polygonal; picking one picks the tool too)
-                from window.tool_picker import SIZE, _arrow_inside, _picture
-                self._lasso_arrow = _picture(max(SIZE, round(SIZE * self.scale)), look.rgb(look.ICON), _arrow_inside)
+                from window.tool_picker import arrow_picture
+                self._lasso_arrow = arrow_picture(self.scale)
                 mb = ttk.Menubutton(bar, image=self._lasso_arrow, style="Toolbutton", takefocus=False)  # (the
                 # drawing tools' arrow)
                 menu = tk.Menu(mb, tearoff=False)

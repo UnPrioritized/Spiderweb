@@ -74,22 +74,25 @@ def _wrench_inside(x, y):
     return jaw or near_segment(x, y, 3.2, 12.8, 10.0, 6.0, 2.4)
 
 
-def png_bytes(inside, size, rgb=None):
+def png_bytes(inside, size, rgb=None, width=None):
     """The picture as PNG bytes in the look's picture colour (or rgb), its edges smoothed (4 x 4 samples per pixel),
-    see-through around it."""
+    see-through around it. width = narrower than size: the box's middle part only (its sides cut off)."""
     rgb = rgb or look.rgb(look.ICON)
     rows = []
     k = SIZE / size
+    width = width or size
+    cut = (size - width) / 2
     for py in range(size):
         row = bytearray(b"\0")
-        for px in range(size):
-            hits = sum(inside((px + (i + 0.5) / 4) * k, (py + (j + 0.5) / 4) * k) for i in range(4) for j in range(4))
+        for px in range(width):
+            hits = sum(inside((px + cut + (i + 0.5) / 4) * k, (py + (j + 0.5) / 4) * k)
+                       for i in range(4) for j in range(4))
             row += bytes((*rgb, round(255 * hits / 16)))
         rows.append(bytes(row))
 
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) +
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, size, 8, 6, 0, 0, 0)) +
             chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 

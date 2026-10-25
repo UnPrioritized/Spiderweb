@@ -404,7 +404,10 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[DRAWER_TOOL_TOPICS[key]]["tip"])
             if key == "lasso":  # (its ▾: Lasso / Polygonal; picking one picks the tool too)
-                mb = ttk.Menubutton(bar, text="▾", style="Toolbutton", takefocus=False)
+                from window.tool_picker import arrow_picture
+                self._lasso_arrow = arrow_picture(self.scale)
+                mb = ttk.Menubutton(bar, image=self._lasso_arrow, style="Toolbutton", takefocus=False)  # (the
+                # drawing tools' arrow: the "▾" letter sat off-centre)
                 menu = tk.Menu(mb, tearoff=0)
                 for mode in ("free", "poly"):
                     menu.add_radiobutton(label=tr("app.lasso_" + mode), value=mode, variable=self.lasso_kind,

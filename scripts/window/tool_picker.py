@@ -29,7 +29,18 @@ def _pin_inside(x, y):
 
 def _arrow_inside(x, y):
     """A triangle pointing down, in the middle of the box."""
-    return 5.5 <= y <= 10.5 and abs(x - 8) <= (10.5 - y) * 0.9
+    return 6.1 <= y <= 9.9 and abs(x - 8) <= (9.9 - y) * 0.9  # (a bit smaller, user 2026-10-25)
+
+
+ARROW_WIDE = 10  # the arrow's picture: narrower than the others (as tall), so its button is too (user 2026-10-25)
+
+
+def arrow_picture(scale, colour=None):
+    """The ▾ for the buttons that open a list (drawing tools, Lasso, Multiple tracks)."""
+    size = max(SIZE, round(SIZE * scale))
+    width = size - 2 * round((size - size * ARROW_WIDE / SIZE) / 2)  # (sides cut evenly: the arrow stays centred)
+    data = png_bytes(_arrow_inside, size, look.rgb(colour or look.ICON), width)
+    return tk.PhotoImage(data=base64.b64encode(data), format="png")
 
 
 def _let_go_on(e):
@@ -76,7 +87,7 @@ class ToolPicker:
         self.main = ttk.Radiobutton(box, variable=self.var, style="Toolbutton", takefocus=False)
         self.main.pack(side="left")
         self.main_tip = Tooltip(self.main, "")
-        self.arrow_pic = _picture(size, look.rgb(look.ICON), _arrow_inside)  # (drawn, so it sits right in the middle)
+        self.arrow_pic = arrow_picture(app.scale)  # (drawn, so it sits right in the middle)
         self.arrow = ttk.Button(box, image=self.arrow_pic, style="Toolbutton", command=self.open, takefocus=False)
         self.arrow.pack(side="left")
         Tooltip(self.arrow, tr("app.tools_list_tip"))

@@ -1230,7 +1230,10 @@ def build_onion(app, parent):
     highlighted (sync_onion)."""
     b = ttk.Checkbutton(parent, text=tr("tracks.onion"), variable=app.onion, style="Toolbutton")
     Tooltip(b, tr("tracks.onion_tip"))
-    more = ttk.Menubutton(parent, text="▾", style="Toolbutton", width=2)
+    from window.tool_picker import arrow_picture  # (the drawing tools' drawn arrow: the "▾" letter sat left / low)
+    pics = arrow_picture(app.scale), arrow_picture(app.scale, look.ICON_OFF)
+    more = ttk.Menubutton(parent, image=(pics[0], "disabled", pics[1]), style="Toolbutton")
+    more.pics = pics  # (kept, or Tk forgets the pictures)
     menu = tk.Menu(more, tearoff=False)
     tl = lambda: app.track_list  # noqa: E731  (made after the toolbar)
     menu.add_command(label=tr("tracks.onion_previous"), command=lambda: tl().behind_near(-1))
