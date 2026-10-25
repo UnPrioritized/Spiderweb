@@ -21,6 +21,8 @@ track order (never by Use channel 10 / the rounds tick: both change no colour). 
 set unless "Mix across sets" (rc "mix"). Shares (rc "shares", % by place in the set) = how likely each colour is
 for a note that changes; "colours" = how many each set uses, its own ones first, then new ones (new channels; at
 most rc "most": 15, 16 with Use channel 10).
+SPLIT (works from one colour; Colours not set = 2): Split: Scattered ("scatter") = Amount of the notes torn off their
+colour onto another one (never their own, by Shares).
 Per chord / Per run (rc "by"): the notes of one chord (one start) / one run (touching end to start on a key) share
 one throw of the dice, the first note's, so they change together and take one colour.
 """
@@ -33,7 +35,8 @@ import numpy as np
 from files.speed import loops
 from notes.custom import ROUND
 
-MODES = ("shuffle",)
+MODES = ("shuffle", "scatter")
+SPLIT = ("scatter",)  # (Split modes: work from one colour, 2 colours when Colours isn't set)
 BY = ("note", "chord", "run")
 MOST_SEED = 2 ** 31 - 1
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
@@ -195,13 +198,18 @@ def leaders(notes, by):
         lead = nxt
 
 
+def wanted(rc):
+    """How many colours a set uses (palettes' n): Colours, else its own ones (Split: at least 2)."""
+    return rc.get("colours") or (2 if rc.get("mode") in SPLIT else None)
+
+
 def plan(tracks, rc):
     """(each note's set, each set's colours) for tracks under rc, or None when there's nothing to shuffle (no set
     with 2 colours, or with Mix across sets fewer than 2 in all)."""
     if tracks is None or not len(tracks):
         return None
     which, owns = colour_sets(np.asarray(tracks, np.int64) % ROUND)
-    pals = palettes(owns, rc.get("colours"), rc.get("most", MOST))
+    pals = palettes(owns, wanted(rc), rc.get("most", MOST))
     return (which, pals) if enough(pals, rc.get("mix")) else None
 
 
@@ -218,6 +226,8 @@ def recoloured(notes, tracks, rc, held=False):
     where a later one of its colour starts on its key, notes starting together made one), so a new colour never
     frees a cut note: the notes stay as heard with Recolour off. held: sustained (overlaps kept, render held): not
     settled, its notes of one colour may still sound together."""
+    if tracks is None and len(notes) and rc["mode"] in SPLIT:  # (one colour: Split works from it)
+        tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
         return notes, tracks
     t = np.asarray(tracks, np.int64)
@@ -234,19 +244,34 @@ def recoloured(notes, tracks, rc, held=False):
         pick, roll = pick[lead], roll[lead]
     change = roll < rc["amount"] / 100
     shares = rc.get("shares")
+    take = torn if rc["mode"] == "scatter" else lambda p, w, own, u: p[picked(w, u)]
     if rc.get("mix") and len(pals) > 1:
         pool = np.concatenate(pals)  # (each set weighed by its colours: even shares = every colour alike)
         w = np.concatenate([weights(len(p), shares) * len(p) for p in pals])
-        new = np.where(change, pool[picked(w / w.sum(), pick)], low)
+        new = np.where(change, take(pool, w / w.sum(), low, pick), low)
         return notes, lap + kept_apart(notes, low, new, np.unique(pool), pick)
     new = low.copy()
     for s, p in enumerate(pals):
         m = np.flatnonzero(which == s)
         if len(p) < 2 or not len(m):
             continue
-        got = np.where(change[m], p[picked(weights(len(p), shares), pick[m])], low[m])
+        got = np.where(change[m], take(p, weights(len(p), shares), low[m], pick[m]), low[m])
         new[m] = kept_apart(notes[m], low[m], got, p, pick[m])
     return notes, lap + new
+
+
+def torn(p, w, own, u):
+    """Split: Scattered: each note's colour among p (chances w) but never its own one (own), the others' chances
+    kept to each other; no other colour with a chance = its own."""
+    order = np.argsort(p)
+    at = np.minimum(np.searchsorted(p[order], own), len(p) - 1)
+    mine = np.where(p[order][at] == own, order[at], -1)
+    wo = np.where(mine >= 0, w[np.maximum(mine, 0)], 0.0)
+    before = np.where(mine >= 0, (np.cumsum(w) - w)[np.maximum(mine, 0)], 2.0)
+    v = u * (1 - wo)
+    v = np.where(v >= before, v + wo, v)  # (stepping over its own colour's stretch)
+    got = p[picked(w, np.minimum(v, np.nextafter(1.0, 0)))]
+    return np.where((1 - wo > 1e-9) & (got != own), got, own)
 
 
 def settled(notes, t):

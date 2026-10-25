@@ -10,11 +10,14 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.recolour import BY, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
-    without_recolour
+    wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
 BY_CHOICES = [(b, tr("recolour.by_" + b)) for b in BY]
+AMOUNT_WORDS = {"shuffle": ("recolour.amount", "recolour.amount_tip"),
+                "scatter": ("recolour.amount", "recolour.amount_tip_scatter")}
+START_AMOUNT = {"shuffle": 100.0, "scatter": 50.0}
 
 
 class RecolourPanel:
@@ -47,7 +50,8 @@ class RecolourPanel:
         Scrub(self, [(e, self.recolour_var, lambda: self.on_recolour("amount"))], (1, 10, 0.1), 0, 100, label=lb,
               drag_box=True)
         ttk.Label(row, text="%").pack(side="left")
-        Tooltip(lb, tr("recolour.amount_tip"))
+        self.recolour_amount_word = lb
+        self.recolour_amount_tip = Tooltip(lb, tr("recolour.amount_tip"))
         e.bind("<Return>", lambda ev: self.on_recolour("amount"))
         leave_box(self, e, self.recolour_var, lambda left: self.on_recolour("amount", left and e))
         row = ttk.Frame(rows)
@@ -81,8 +85,10 @@ class RecolourPanel:
     def colour_owns(self, sh):
         """Each colour set's own colours of sh's notes before Recolour (the notes as remembered: no new work after a
         change)."""
-        _, tracks = self.notes_tracks(without_recolour(sh))
-        if tracks is None or not len(tracks):
+        notes, tracks = self.notes_tracks(without_recolour(sh))
+        if tracks is None:  # (all on one colour)
+            return [np.zeros(1, np.int64)] if len(notes) else []
+        if not len(tracks):
             return []
         return colour_sets(np.asarray(tracks, np.int64) % ROUND)[1]
 
@@ -110,13 +116,16 @@ class RecolourPanel:
         lonely = bool(live) and self.channel_mode.get() != "auto"
         owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
         # (nothing to shuffle, e.g. one colour: Shuffle has nothing to swap, hunt 2026-10-25)
-        single = not lonely and any(r and not enough(palettes(o, r.get("colours"), self.set_most()), r.get("mix"))
+        single = not lonely and any(r and not enough(palettes(o, wanted(r), self.set_most()), r.get("mix"))
                                     for o, r in zip(owns, on))
         self.recolour_mode.config(state="readonly" if tgts else "disabled",
                                   style="Gap.TCombobox" if lonely or single else "TCombobox")
         show_mixed(self.recolour_mode, len(modes) > 1, self.recolour_tip,
                    tr("recolour.tip") + (tr("recolour.needs") if lonely else tr("recolour.one") if single else ""))
         self.recolour_entry.config(state="normal" if live else "disabled", style="TEntry")
+        kind = mode if mode in AMOUNT_WORDS else "shuffle"  # (Mixed: the plain Amount)
+        self.recolour_amount_word.config(text=tr(AMOUNT_WORDS[kind][0]))
+        self.recolour_amount_tip.text = tr(AMOUNT_WORDS[kind][1])
         shown = bool(live)
         if shown != bool(self.recolour_row.winfo_manager()):
             if shown:
@@ -177,7 +186,10 @@ class RecolourPanel:
             if what == "mode":
                 if mode is None:
                     return None
-                return dict(old, mode=mode) if old else {"mode": mode, "amount": 100.0, "seed": new_seed()}
+                if old and old["mode"] == mode:
+                    return old
+                # (another mode: its own Amount to start from, the word means another thing there)
+                return dict(old or {"seed": new_seed()}, mode=mode, amount=START_AMOUNT[mode])
             if not old:
                 return old
             if what == "amount":

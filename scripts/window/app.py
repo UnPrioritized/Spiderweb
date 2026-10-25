@@ -211,7 +211,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     backs = [recolour_back(s, notes_tracks, dict(s_as, _rounds=True) if r else s_as, n, t)
              if mode == "auto" and not o and t is not None and is_recoloured(s) else colours_back(s)
              for s, s_as, r, o, (n, t) in zip(shapes, shapes_as, took, ordered, got)]
-    rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got], [tracks_apart(sh) for sh in shapes],
+    rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got],
+                             [tracks_apart(sh) or is_recoloured(sh) for sh in shapes],  # (Split: from one colour)
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
                              [is_sustained(sh) or sh.get("held") is True for sh in shapes],

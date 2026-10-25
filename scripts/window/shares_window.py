@@ -13,7 +13,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import clean_recolour, palettes, weights
+from notes.recolour import SPLIT, clean_recolour, palettes, wanted, weights
 from window import look
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, bad, good, remember_place, wheel_ready
@@ -256,13 +256,15 @@ class SharesWindow(tk.Toplevel):
         return [t for t in self.app.recolour_targets() if clean_recolour(t.get("recolour"))]
 
     def layout(self, sh):
-        """sh's {own: the most own colours in a set, used: colours used in a set, shares: % per place, pins}."""
+        """sh's {own: the most own colours in a set, least: the fewest Colours can be (Split: 2), used: colours used
+        in a set, shares: % per place, pins}."""
         rc = clean_recolour(sh.get("recolour")) or {}
         owns = self.app.colour_owns(sh)
         own = max((len(o) for o in owns), default=1)
-        used = max((len(p) for p in palettes(owns, rc.get("colours"), self.app.set_most())), default=1)
+        used = max((len(p) for p in palettes(owns, wanted(rc), self.app.set_most())), default=1)
         shares = [round(x * 100, 3) for x in weights(used, rc.get("shares")).tolist()]
-        return {"own": own, "used": used, "shares": shares, "pins": [p for p in rc.get("pins", ()) if p < used]}
+        return {"own": own, "least": max(own, 2) if rc.get("mode") in SPLIT else own, "used": used,
+                "shares": shares, "pins": [p for p in rc.get("pins", ()) if p < used]}
 
     def sync(self):
         """Show the selected recoloured shapes' colours and shares (not while a knob is held): a box where they
@@ -285,7 +287,7 @@ class SharesWindow(tk.Toplevel):
         if self.focus_get() is not self.n_entry or self.n_var.get() == self.n_shown:
             self.n_var.set(n_text)
         self.n_shown = n_text
-        self.n_tip.text = tr("shares.colours_tip", least=own, most=most)
+        self.n_tip.text = tr("shares.colours_tip", least=lays[0]["least"] if on else 1, most=most)
         self.even.state(["!disabled" if on and used > 1 else "disabled"])
         for i, c in enumerate(self.cells):
             show = i < used
@@ -430,10 +432,10 @@ class SharesWindow(tk.Toplevel):
         def changed(old, sh):
             if not old:
                 return old
-            own = self.layout(sh)["own"]
+            L = self.layout(sh)
             out = {k: v for k, v in old.items() if k != "colours"}
-            m = max(own, min(most, n))
-            return dict(out, colours=m) if m > own else out
+            m = max(L["least"], min(most, n))
+            return dict(out, colours=m) if m > L["least"] else out
 
         self.n_shown = self.n_var.get()
         self.app.change_recolour(changed, tr("recolour.undo_colours"))
