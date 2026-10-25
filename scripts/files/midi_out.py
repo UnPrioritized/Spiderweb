@@ -1,6 +1,8 @@
 """Writes a standard MIDI file (format 1) by hand."""
 
+import os
 import struct
+import threading
 
 import numpy as np
 
@@ -13,6 +15,10 @@ MAX_DELTA = (1 << 28) - 1  # the longest wait between two events a MIDI file can
 MAX_TRACKS = 65535 - 1  # note tracks a MIDI file can hold (its header counts 16 bits, the tempo track is one)
 PIECE = 1 << 20  # events made at a time without the speed-ups
 END = b"\x00\xFF\x2F\x00"  # end-of-track
+TRACK_WORKERS = 8  # tracks made side by side (with the speed-ups)
+AHEAD_NOTES = 16_000_000  # notes in tracks under way / made ahead of the one written at most (~64 bytes each
+# while made: the sort's arrays, ~8 bytes once made)
+JOB_NOTES = 200_000  # small tracks made together in jobs of about this many notes
 
 
 def vlq(value):
@@ -35,7 +41,7 @@ def track_events(notes, ch):
     fast = loops()
     if fast is not None:  # (the bytes in one pass: ~3x quicker)
         del tick
-        return [fast.midi_events(np.ascontiguousarray(notes), order, ch, MAX_DELTA)]
+        return [fast.midi_events(np.ascontiguousarray(notes), np.arange(n), order, ch, MAX_DELTA)]
     # (in pieces: the NumPy way makes many arrays per event)
     return [_events(notes, order[at:at + PIECE], tick, int(tick[order[at - 1]] >> 1) if at else 0, ch)
             for at in range(0, 2 * n, PIECE)]
@@ -201,22 +207,105 @@ def note_tracks(notes, use10=False, pad=True, cc=None, ports=None):
 
 
 def _pieces(notes, count, tracks, use10, start, cc, ports=None):
-    """write_midi's file as pieces, one track at a time (a big file is never whole in memory)."""
+    """write_midi's file as pieces, one track at a time (a big file is never whole in memory). With the speed-ups
+    the tracks are made side by side on several cores (midi_track), written in order."""
     yield start
     if count > 1:  # (one sort finds every track's notes, in their own order)
         slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
         order = np.argsort(slots, kind="stable")
-        cuts = np.searchsorted(slots[order], np.arange(count + 1))
+        cuts = np.zeros(count + 1, np.int64)
+        np.cumsum(np.bincount(slots, minlength=count), out=cuts[1:])
         del slots
     every, ports = slot_ports(count, cc, use10), ports or ()
-    for track in tracks.tolist():
+    fast = loops()
+    if fast is not None and (not len(notes) or notes[:, 0].min() < 0):  # (the radix sort: ticks from 0 only)
+        fast = None
+    if fast is not None:
+        notes = np.ascontiguousarray(notes)
+        bits = int(notes[:, 1].max() * 2 + 2).bit_length()
+
+    def make(track):
         channel = slot_track_channel(track, use10)[1]
-        mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
-        events = (cc_track(mine, channel, cc[track]) if cc.get(track) else track_events(mine, channel) if len(mine)
-                  else [empty_track(channel)])
+        if fast is not None and not cc.get(track):
+            rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
+            events = [fast.midi_track(notes, rows, channel, MAX_DELTA, bits)] if len(rows) else [empty_track(channel)]
+        else:
+            mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
+            events = (cc_track(mine, channel, cc[track]) if cc.get(track) else track_events(mine, channel)
+                      if len(mine) else [empty_track(channel)])
         if every or track in ports:
             events = [bytes([0, 0xFF, 0x21, 1, slot_port(track, use10)])] + events
-        yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
-        yield from events
-        events = None
-        yield END
+        return events
+
+    # jobs = tracks one after another up to JOB_NOTES notes (tens of thousands of tiny tracks: one hand-over each
+    # cost more than making them)
+    sizes = (cuts[tracks + 1] - cuts[tracks] if count > 1 else np.full(len(tracks), len(notes))).tolist()
+    jobs, weights, group, held = [], [], [], 0
+    for t, size in zip(tracks.tolist(), sizes):
+        group.append(t)
+        held += size
+        if held >= JOB_NOTES:
+            jobs.append(group)
+            weights.append(held)
+            group, held = [], 0
+    if group:
+        jobs.append(group)
+        weights.append(held)
+    jobs = [lambda g=g: [make(t) for t in g] for g in jobs]
+    for made in (_in_order(jobs, min(TRACK_WORKERS, os.cpu_count() or 1), weights)
+                 if fast is not None and len(jobs) > 1 else (job() for job in jobs)):
+        for events in made:
+            yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
+            yield from events
+            yield END
+        made = events = None
+
+
+def _in_order(jobs, n, weights):
+    """Each job()'s result, in the jobs' order, made on n DAEMON threads (closing Spiderweb never waits for them).
+    Memory: jobs done or under way past the one written weigh (weights) AHEAD_NOTES at most (one at least). A job's
+    error is raised here, in its place."""
+    cv, results, stop = threading.Condition(), {}, [False]
+    nxt = [0]  # (the next job to start)
+    want = [0]  # (the next result to hand out)
+    held = [0]  # (weight of the jobs started and not handed out)
+
+    def work():
+        while True:
+            with cv:
+                while (not stop[0] and nxt[0] < len(jobs) and nxt[0] > want[0]
+                       and held[0] + weights[nxt[0]] > AHEAD_NOTES):
+                    cv.wait()
+                if stop[0] or nxt[0] >= len(jobs):
+                    return
+                i = nxt[0]
+                nxt[0] += 1
+                held[0] += weights[i]
+            try:
+                got = (True, jobs[i]())
+            except BaseException as e:
+                got = (False, e)
+            with cv:
+                results[i] = got
+                cv.notify_all()
+
+    threads = [threading.Thread(target=work, daemon=True, name="midi tracks") for _ in range(n)]
+    for th in threads:
+        th.start()
+    try:
+        for i in range(len(jobs)):
+            with cv:
+                while i not in results:
+                    cv.wait()
+                ok, got = results.pop(i)
+                want[0] = i + 1
+                held[0] -= weights[i]
+                cv.notify_all()
+            if not ok:
+                raise got
+            yield got
+            got = None
+    finally:
+        with cv:
+            stop[0] = True
+            cv.notify_all()

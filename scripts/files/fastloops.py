@@ -11,6 +11,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
   recolour_apart recolour.kept_apart's walk through bursts of 3+ overlapping notes (Recolour)
   midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
+  midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   clash_levels   engine.clash_levels: Hz bass layers' notes clashing on a key -> their levels
   note_ends      hzbass.note_lengths: a Hz bass's notes' ends by its Note length
@@ -1553,13 +1554,30 @@ def _put_vlq(out, p, d):
 
 
 @njit(cache=CACHE, nogil=True)
-def midi_events(notes, order, ch, most):
+def midi_track(notes, rows, ch, most, bits):
+    """midi_events for the notes at rows (in their order), sorted here too: ticks * 2 (+ 1 on a note-on, so offs
+    come first) below 2 ** bits. Lets go of the GIL all the way (midi_out: tracks made side by side)."""
+    m = len(rows)
+    own = np.empty((m, 4), np.int64)  # (taken out once: reading the rows far apart again and again was most of it)
+    k = np.empty(2 * m, np.int64)
+    for i in range(m):
+        r = rows[i]
+        for c in range(4):
+            own[i, c] = notes[r, c]
+        k[2 * i] = own[i, 0] * 2 + 1
+        k[2 * i + 1] = own[i, 1] * 2
+    return midi_events(own, np.arange(m), radix_order(k, bits), ch, most)
+
+
+@njit(cache=CACHE, nogil=True)
+def midi_events(notes, rows, order, ch, most):
     """midi_out.track_events' bytes (end-of-track not included): order = event numbers in time order
-    (note i's on = 2i, its off = 2i + 1); a wait over most is split by empty text events (FF 01 00)."""
+    (note i's on = 2i, its off = 2i + 1; note i = notes[rows[i]]); a wait over most is split by empty text events
+    (FF 01 00)."""
     size, last = 0, 0
     for i in range(len(order)):
         j = order[i]
-        d = notes[j >> 1, j & 1] - last
+        d = notes[rows[j >> 1], j & 1] - last
         last += d
         while d > most:
             size += 7  # (most takes 4 bytes)
@@ -1569,7 +1587,8 @@ def midi_events(notes, order, ch, most):
     p, last = 0, 0
     for i in range(len(order)):
         j = order[i]
-        d = notes[j >> 1, j & 1] - last
+        r = rows[j >> 1]
+        d = notes[r, j & 1] - last
         last += d
         while d > most:
             p = _put_vlq(out, p, most)
@@ -1579,8 +1598,8 @@ def midi_events(notes, order, ch, most):
         p = _put_vlq(out, p, d)
         on = (j & 1) == 0
         out[p] = (0x90 if on else 0x80) | ch
-        out[p + 1] = notes[j >> 1, 2] & 0xFF
-        out[p + 2] = notes[j >> 1, 3] & 0xFF if on else 0
+        out[p + 1] = notes[r, 2] & 0xFF
+        out[p + 2] = notes[r, 3] & 0xFF if on else 0
         p += 3
     return out
 
@@ -1748,7 +1767,8 @@ def warm():
     overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
     overlap_order(np.zeros((1, 6), np.int64))
     recolour_apart(i1, i1, i1, i1, i1.copy(), np.zeros(1), i1, i1 + 1, 1)
-    midi_events(np.zeros((1, 6), np.int64), np.zeros(2, np.int64), 0, 1)
+    midi_events(np.zeros((1, 6), np.int64), i1 * 0, np.zeros(2, np.int64), 0, 1)
+    midi_track(np.zeros((1, 6), np.int64), i1 * 0, 0, 1, 1)
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
     key_order(i1, i1, i1, i1)
