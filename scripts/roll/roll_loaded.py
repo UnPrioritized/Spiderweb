@@ -110,9 +110,14 @@ class LoadedNotes:
 
     # ------------------------------------------------------------------ which picture
 
+    def loaded_style(self, lm, order, faint):
+        """What an exact picture depends on besides its place (Exact.style; the velocity pane looks pictures up by
+        it too, hunt 2026-10-25). loud_on stays LAST (ExactJob reads style[-1])."""
+        return id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0], loud_on(self.app)
+
     def loaded_tabs(self, lm, key, ax, bx, W, p_lo, nk, order, faint):
         """(tab, marks) of the view: keys p_lo .. + nk x W columns."""
-        style = (id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0], loud_on(self.app))  # (loud last)
+        style = self.loaded_style(lm, order, faint)
         rows = slice(p_lo, p_lo + nk)
         got = self._exact_for(style, ax, bx, W)
         if got is not None:
@@ -621,12 +626,12 @@ class ExactJob:
         self.done = True
 
 
-def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled):
+def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled, ghost):
     """NumPy twin of midi_index.merge_loud (the same tables)."""
     for k in np.flatnonzero(tfilled):
         t, g, mt, mg = ttab[k], tab[k], tmarks[k], marks[k]
         on = t >= 0
-        win = on & ((g < 0) | ((t & 31) > (g & 31)))
+        win = on & ((g < 0) | ((t & 31) + np.where(t >= ghost, 0, 32) > (g & 31) + np.where(g >= ghost, 0, 32)))
         lose = on & ~win
         hid = (g >= 0) & (mg != 0)
         new = np.where((mt & 3) != 0, mt & 3, np.where(hid | ((mt & 4) != 0), 4, 0)).astype(np.uint8)
@@ -714,7 +719,7 @@ def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took):
             if bad or stop() or not readers[i].read(int(n), ttab, tnx, tfilled, tmarks):
                 bad.append(True)
                 return
-            merge(tab, marks, ttab, tmarks, tnx, tfilled)
+            merge(tab, marks, ttab, tmarks, tnx, tfilled, GHOST_BASE * 32)
         made[i] = (tab, marks)
     try:
         threads = [threading.Thread(target=work, args=(i,), daemon=True, name="loaded notes")
@@ -736,7 +741,7 @@ def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took):
     spare = np.zeros((nk, W + 1), np.int64)
     for later in made[1:]:  # (the block lower down merged in like one track)
         rows[:] = 1
-        merge(tab, marks, later[0], later[1], spare, rows)
+        merge(tab, marks, later[0], later[1], spare, rows, GHOST_BASE * 32)
     if lm.mode != "memory" and not still_same(lm):
         return None, None
     return tab, marks

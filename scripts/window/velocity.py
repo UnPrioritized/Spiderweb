@@ -636,8 +636,7 @@ class VelocityPane(tk.Canvas):
         if got is None:
             return none
         lm, _, (ax, bx, W, _, _, _, _, order, faint) = got
-        from roll.roll_draw import TRACK_FADE
-        found = roll._exact_for((id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0]), ax, bx, W)
+        found = roll._exact_for(roll.loaded_style(lm, order, faint), ax, bx, W)
         if found is None:
             return none
         e, d = found

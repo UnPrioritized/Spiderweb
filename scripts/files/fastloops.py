@@ -1797,7 +1797,7 @@ def warm():
                np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
                z.copy(), z.copy())
     loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
-    midi_merge_loud(t2, m2, t2.copy(), m2.copy(), np.zeros((1, 3), np.int64), np.zeros(1, np.int64))
+    midi_merge_loud(t2, m2, t2.copy(), m2.copy(), np.zeros((1, 3), np.int64), np.zeros(1, np.int64), 1 << 20)
     i32 = np.zeros(1, np.int32)
     play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),
               i32.copy(), 0, i1.copy(), i1[:0], i1.copy(), i1.copy(), False, i1.copy(), i1.copy())

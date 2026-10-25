@@ -476,11 +476,13 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
     return p
 
 
-def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled):
+def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled, ghost):
     """"Louder notes on top" (user 2026-10-25): one track's own table (ttab / tmarks, painted alone by cover) merged
     into the picture: a pixel goes to the louder note (velocity shade = colour number & 31; equal = the one there,
     tracks go from the top one down), a start / end that loses = marks 4 under the winner, the old winner's
-    starts / ends under a new one too. The track's tables are made empty again (only rows it painted)."""
+    starts / ends under a new one too. Colour numbers >= ghost (faint tracks picked behind) never win over a full
+    one (hunt 2026-10-25: they covered the highlighted track). The track's tables are made empty again (only rows
+    it painted)."""
     nk, W = tab.shape
     for k in range(nk):
         if tfilled[k] == 0:
@@ -492,7 +494,7 @@ def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled):
             if t < 0:
                 continue
             g = tab[k, x]
-            if g < 0 or (t & 31) > (g & 31):
+            if g < 0 or (t & 31) + (0 if t >= ghost else 32) > (g & 31) + (0 if g >= ghost else 32):
                 hid = g >= 0 and marks[k, x] != 0
                 tab[k, x] = t
                 if mt & 3:

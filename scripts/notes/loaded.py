@@ -751,6 +751,7 @@ class Loader:
             time.sleep(0.05)
         if speed.loops() is None and self.total > PLAIN_MOST:
             raise MidiError("load.needs_speed")
+        self.started = time.perf_counter()  # (the reading's time only: never the wait above, hunt 2026-10-25)
         self.stage = "read"
         if not self.keep:  # (its index saved by an earlier load: a moment, no read of the file, step 12)
             from files.midi_saved import load_index
