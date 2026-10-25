@@ -1007,6 +1007,7 @@
  "shares.pushed_down": "{n} down",
  "shares.undo_clumps": "Change clumps",
  "shares.undo_push": "Push clumps",
+ "shares.undo_centre": "Move centre point",
  "recolour.again": "New shuffle",
  "recolour.again_tip": "A new random result. The same shape always shows the same result until you press this.",
  "recolour.amount": "Amount",

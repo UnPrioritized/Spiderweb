@@ -446,6 +446,7 @@ class SharesWindow(tk.Toplevel):
             c["lock"].show(pinned.pop() if len(pinned) == 1 else None, used > 1)
         self.hint.config(text=tr("shares.hint_clumps" if areas else "shares.hint"))
         self.sync_clumps([r for r in rcs if r["mode"] == "clumps"])
+        app.roll.request_redraw()  # (the Centre point dots: roll_centre.py)
 
     def sync_clumps(self, rcs):
         """The Clumps rows: shown while a selected shape uses Split: Clumps (what they set goes to those only)."""
@@ -702,6 +703,7 @@ class SharesWindow(tk.Toplevel):
         self.app.shares_window = None
         self.destroy()
         self.app.roll.focus_set()
+        self.app.roll.request_redraw()
 
 
 def open_shares(app):

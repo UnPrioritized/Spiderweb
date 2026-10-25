@@ -35,6 +35,7 @@ from window.load_extract import can_extract, stop_extract
 from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
+from roll.roll_centre import CentreDots
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
                               RULER_TOP, VEL_TOP, bind_double_right, black_bands, box_kind, boxes_side, boxes_upright,
@@ -49,7 +50,7 @@ EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                PathEditing, SustainStops, LassoDrawing, tk.Canvas):
+                PathEditing, SustainStops, LassoDrawing, CentreDots, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -360,6 +361,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
         return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
+                                                     "rccentre",
                                                      "sustop", "lasso_free", "lasso_poly", "lasso_point",
                                                      "lasso_magnet")
 
@@ -1078,6 +1080,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if not self.draft and self.path_press(e):  # Copy along a path's window open: B placed, or its point grabbed
             return
+        if not self.draft and self.centre_press(e):  # Shares window open: a Clumps Centre point dot grabbed
+            return
         if self.stop_press(e):  # a sustained shape's stop line held (the Select tool)
             return
         tool = app.tool.get()
@@ -1275,6 +1279,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.stop_drag(e)
         elif kind == "path":
             self.path_drag(e)
+        elif kind == "rccentre":
+            self.centre_drag(e)
         elif kind == "box":
             self.box_mouse = (e.x, e.y, e.state)
             self.box_to()
@@ -1503,6 +1509,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if kind == "path":
             self.path_release(e)
+            self.drag = None
+            return
+        if kind == "rccentre":
             self.drag = None
             return
         if kind.startswith("lasso"):
