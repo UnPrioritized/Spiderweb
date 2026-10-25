@@ -18,6 +18,8 @@ What's new:
 
 • Gate trim (right-click → Gate trim…): each row of touching notes keeps a share of its length (or a number of ticks), from the left or the right, so a circle at 25 % becomes a crescent. Notes keep their lengths. See Help → Gate trim.
 
+• Fill gaps (right-click → Fill gaps…): on each key, the empty space between the selected notes is closed, across all their colours. Stretch notes right, left or both ways until they meet, and pick which note stays when two start on the same tick. See Help → Fill gaps.
+
 • Time and key signatures: right-click in the Conductor pane. Bar lines and numbers follow them everywhere. They replace the Beats per bar box, and the start tempo is now the Conductor pane's point at bar 1 (no BPM box; old projects get that point by themselves).
 
 • A Hz bass stays in tune where the tempo changes under it. When the tempo there changes later, it says so in orange, with an Update button.

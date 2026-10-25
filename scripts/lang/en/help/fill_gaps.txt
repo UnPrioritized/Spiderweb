@@ -1,0 +1,35 @@
+Select the shapes whose empty space you want gone, then right-click one: Fill gaps… (also in the Tools menu). On each key, the gaps between the notes are closed, so the notes touch. All the selected shapes count together, whatever their colours, so bands of different colours end up touching each other.
+
+## Which way
+
+Stretch right: each note's end moves up to the next note's start. The last note of each key row stays as it is.
+
+Stretch left: each note's start moves back to the end of the note before it. The notes then start earlier, so the timing changes. The first note of each key row stays as it is.
+
+Meet in the middle: both notes stretch toward each other and meet halfway. When the gap is an odd number of ticks, the earlier note gets the extra tick.
+
+Every gap between the selected notes is filled, big ones too. To leave a gap alone, leave the notes on one side of it out of the selection.
+
+## Notes that overlap
+
+When a note runs on into the next one, it's cut where the next one starts, and both are kept.
+
+When two notes start on the same tick of a key, pick which one stays:
+
+• Keep the earlier colour: the note on the earlier track stays (the order the Track list shows).
+
+• Keep the later colour: the note on the later track stays.
+
+• Keep both: both stay, overlapping. Notes that run on into the next one are kept whole too.
+
+The note that stays keeps its own velocity.
+
+## What you get
+
+Each selected shape becomes a shape of plain notes, the way Turn into plain notes makes one, and keeps its colours. A shape that lost all its notes to notes starting on the same tick is removed. Hz bass, images and masks are left out.
+
+It's one undo step: Ctrl+Z gives the shapes back as they were.
+
+The window stays open and follows the selection, so you can select other shapes and fill again. Close or Esc closes it.
+
+With Gate subtract: fill the gaps first, then use Gate subtract on the result to get even gaps everywhere.
