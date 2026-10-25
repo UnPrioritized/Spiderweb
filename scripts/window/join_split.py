@@ -16,7 +16,7 @@ from notes.between import group_of, turns as between_turns
 from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
 from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
-from notes.fillgaps import fill_gaps as filled
+from notes.fillgaps import fill_gaps as filled, needs_fill
 from notes.passengers import pack_cc, unpack_cc
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
@@ -61,6 +61,14 @@ def multi_slots(rows, multi):
     found = (at >= 0) & (have[np.maximum(at, 0)] == want)
     rows[:, 4] = np.where(found, slot[np.maximum(at, 0)], most)
     return rows
+
+
+def by_owner(rows):
+    """rows (rendered's columns) -> shape number -> its rows, in their order (sorted once, sliced out)."""
+    o = np.argsort(rows[:, 5], kind="stable")
+    rows = rows[o]
+    owners = rows[:, 5]
+    return lambda i: rows[np.searchsorted(owners, i):np.searchsorted(owners, i, side="right")]
 
 
 def without10(sh, use10):
@@ -641,37 +649,52 @@ class JoinSplit:
                 and not sh.get("hz") and "picture" not in sh and not is_mask(sh)]
 
     def fill_problem(self, way, same):
-        """Why Fill gaps would do nothing for the selection (the window's hint, Fill greyed), or None: the shown notes
-        (only where and when they sound matters here, not their channels)."""
+        """Why Fill gaps would do nothing for the selection (the window's hint, Fill greyed), or None: the notes as
+        Fill gaps takes them (each shape's own, laid as in Multi channel, hunt 10-25)."""
         got = self.fill_targets()
-        rows = self.rendered[np.isin(self.rendered[:, 5], got)] if got else self.rendered[:0]
+        key = (id(self.rendered), self.shapes_gen, self.channel_mode.get())
+        kept = getattr(self, "_fill_multi", None)
+        if kept and kept[0] == key:  # (outside Multi channel it's the whole project's notes again: once per change)
+            multi = kept[1]
+        else:
+            multi = self.multi_rendered()[1]
+            self._fill_multi = (key, multi)
+        rows = multi[np.isin(multi[:, 5], got)] if got else multi[:0]
         if not len(rows):
             return tr("fill_gaps.nothing")
-        out, at = filled(rows, way, same)
-        if len(at) == len(rows) and np.array_equal(out, rows[at]):
-            return tr("fill_gaps.no_gaps")
-        return None
+        return None if needs_fill(rows, way, same) else tr("fill_gaps.no_gaps")
 
     def fill_gaps(self, way, same):
-        """Fill gaps (notes/fillgaps.py; window/fill_window.py): the selected shapes' notes as heard, every key row
-        across all of them together, the gaps closed (way right / left / middle; same: which of the notes starting
-        on one tick stays). Each shape becomes its own plain-notes shape, colours kept; one with every note lost to
-        another's same-start note goes. One undo step."""
+        """Fill gaps (notes/fillgaps.py; window/fill_window.py): the selected shapes' notes, each shape's own as laid
+        in Multi channel (Single channel merges same-start notes before the choice could count, hunt 10-25), every
+        key row across all of them together, the gaps closed (way right / left / middle; same: which of the notes
+        starting on one tick stays). Each shape becomes its own plain-notes shape, colours kept (fixed channels /
+        image colours too); one that had notes and lost them all to another's same-start notes goes, its Extract
+        handed to a shape that stays. One undo step."""
         self.commit_typing()
         got = self.fill_targets()
         if not got:
             self.status.config(text=tr("fill_gaps.nothing"))
             return
-        changed = []
+        changed, had = [], set()
 
         def together(rows):
             order = sorted(rows)
+            had.update(order)
             both = np.concatenate([rows[i] for i in order])
+            owner = np.concatenate([np.full(len(rows[i]), i, np.int64) for i in order])
             out, at = filled(both, way, same)
             changed.append(len(at) != len(both) or not np.array_equal(out, both[at]))
-            owner = np.concatenate([np.full(len(rows[i]), i, np.int64) for i in order])[at]
-            return {i: out[owner == i] for i in order}
-        new = self.plain_copies(got, together=together)
+            owner = owner[at]
+            o = np.argsort(owner, kind="stable")  # (each shape's part in one go: thousands of shapes, hunt)
+            out, owner = out[o], owner[o]
+            ends = np.searchsorted(owner, order + [order[-1] + 1])
+            return {i: out[ends[j]:ends[j + 1]] for j, i in enumerate(order)}
+        self.busy(tr("fill_gaps.busy"))
+        try:
+            new = self.plain_copies(got, together=together, whole=True)
+        finally:
+            self.busy(None)
         if not changed:  # (no notes at all)
             self.status.config(text=tr("fill_gaps.nothing"))
             return
@@ -684,9 +707,17 @@ class JoinSplit:
                 sh["name"] = old.get("name", sh["name"])
                 if old.get("made"):
                     sh["made"] = old["made"]
-            if same == "both":  # (overlaps kept: not cut again by the overlap rule)
+            if old.get("own_slots") is True:  # (Extract / an image's masked notes: channels fixed in every mode,
+                sh["own_slots"] = True       # hunt 10-25; without10 left its tracks + slots10 by that rule)
+            if "picture_notes" in old:
+                sh["picture_notes"] = copy.deepcopy(old["picture_notes"])
+            if same == "both" or old.get("held"):  # (overlaps kept: not cut again by the overlap rule)
                 sh["held"] = True
-        gone = [i for i in got if i not in new]
+        gone = [i for i in sorted(had) if i not in new]  # (shapes that never had notes stay as they are, hunt)
+        lost = clean_extract([g for i in gone for g in extract_groups(held_extract(self.shapes[i]))])
+        if lost and new:  # (its loaded notes stay out of the file while the filled notes are there, hunt)
+            heir = new[min(new)]
+            heir["extract"] = clean_extract(extract_groups(heir.get("extract")) + extract_groups(lost))
         self.roll.cancel_draft()
         self.push_undo(name=tr("fill_gaps.undo"))
         self.put_plain(new)
@@ -694,7 +725,7 @@ class JoinSplit:
             self.unlink_groups(gone)
             for i in reversed(gone):
                 del self.shapes[i]
-        kept = [i - sum(j < i for j in gone) for i in got if i in new]
+        kept = [i - sum(j < i for j in gone) for i in got if i not in gone]
         if kept:
             self.select_many(kept, kept[0])
         else:
@@ -702,23 +733,25 @@ class JoinSplit:
         self.shapes_changed()
         self.status.config(text=trn("fill_gaps.done", len(kept), n=len(kept)))
 
-    def plain_copies(self, got, moved=None, own=False, together=None):
+    def plain_copies(self, got, moved=None, own=False, together=None, whole=False):
         """Turn into plain notes' new shapes: {i: a shape of shape i's notes exactly as they sound now, each note on
         the channel it has now} for the shapes in got that have notes. moved(rows): their rendered rows changed
         first (Gate sensitive merge: slid). own: the shape's own notes, not as other shapes overlapping them cut
         them (Single channel; merge slides it away from them, hunt), each on its channel all the same.
-        together({i: rows}) -> {i: rows}: every shape's rows changed at once (Fill gaps: key rows across shapes)."""
+        together({i: rows}) -> {i: rows}: every shape's rows changed at once (Fill gaps: key rows across shapes).
+        whole: the notes as laid in Multi channel in every mode (Fill gaps: Single channel's merging left out)."""
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
-        owners = self.rendered[:, 5]
         use10, multi = self.multi_rendered()
+        shown = by_owner(multi if whole else self.rendered)  # (each shape's rows sliced out, not searched for:
+        multi_of = shown if whole else by_owner(multi)       # thousands of shapes, hunt 10-25)
         new = {}
-        auto = self.channel_mode.get() == "auto"
+        auto = self.channel_mode.get() == "auto" or whole
         laid_rows = {}
         for i in got:
-            rows = self.rendered[owners == i]
+            rows = shown(i)
             sh = self.shapes[i]
-            slots = rows if auto else multi[multi[:, 5] == i]
+            slots = rows if auto else multi_of(i)
             if own:
                 n = np.asarray(self.notes_of(sh), np.int64).reshape(-1, 4)
                 rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])

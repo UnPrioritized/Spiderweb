@@ -57,7 +57,8 @@ class FillWindow(tk.Toplevel):
         app = self.app
         way, same = self.way.get(), self.same.get()
         app.fill_way, app.fill_same = way, same
-        seen = (way, same, tuple(sorted(app.sels)), app.shapes_gen, len(app.shapes))
+        seen = (way, same, tuple(sorted(app.sels)), app.shapes_gen, len(app.shapes), id(app.rendered),
+                app.channel_mode.get())  # (the notes made again: undo / redo, Channels, hunt 10-25)
         if seen == self.seen:  # (worked out already: big shapes, every panel sync)
             return
         self.seen = seen

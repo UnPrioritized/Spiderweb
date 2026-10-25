@@ -13,6 +13,32 @@ SAME = ("early", "late", "both")
 _BIG = 1 << 40  # (key x _BIG + tick: one number per key row's tick; ticks stay far below it)
 
 
+def needs_fill(rows, way, same):
+    """Would fill_gaps change rows? The same answer, quicker (one sort; the Fill gaps window asks on every click)."""
+    rows = np.asarray(rows, np.int64).reshape(-1, 6)
+    if len(rows) < 2:
+        return False
+    o = np.argsort(rows[:, 2] * _BIG + rows[:, 0], kind="stable")
+    k, s, e = rows[o, 2], rows[o, 0], rows[o, 1]
+    on_key = k[1:] == k[:-1]
+    at_once = on_key & (s[1:] == s[:-1])
+    if same != "both" and at_once.any():  # (one of them goes)
+        return True
+    later = on_key & ~at_once
+    run = np.maximum.accumulate(k * _BIG + e) - k * _BIG  # (the latest end on the key so far)
+    if (later & (run[:-1] < s[1:])).any():  # (a gap)
+        return True
+    if same != "both":
+        return bool((later & (e[:-1] > s[1:])).any())  # (an overlap cut)
+    if way != "right":
+        return False
+    first = np.r_[True, ~on_key | (s[1:] != s[:-1])]  # (Keep both, right: a short note among longer ones reaching on)
+    g = np.cumsum(first) - 1
+    gk, gs = k[first], s[first]
+    nxt = np.where(np.r_[gk[1:] == gk[:-1], False], np.r_[gs[1:], 0], -1)[g]
+    return bool(((nxt >= 0) & (e < nxt)).any())
+
+
 def fill_gaps(rows, way, same):
     """rows: (start, end, key, velocity, slot, owner) notes of every shape picked -> (the notes filled, the same
     columns, in the order given; which of rows they are). owner breaks a tie of slots (lower = earlier)."""

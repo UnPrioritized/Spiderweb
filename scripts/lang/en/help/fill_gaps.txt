@@ -24,9 +24,13 @@ When two notes start on the same tick of a key, pick which one stays:
 
 The note that stays keeps its own velocity.
 
+A Sustained shape's notes overlap on purpose. Keep both keeps those overlaps; the other two choices cut them like any other overlap.
+
 ## What you get
 
-Each selected shape becomes a shape of plain notes, the way Turn into plain notes makes one, and keeps its colours. A shape that lost all its notes to notes starting on the same tick is removed. Hz bass, images and masks are left out.
+Each selected shape becomes a shape of plain notes, the way Turn into plain notes makes one, and keeps its colours. A shape that lost all its notes to notes starting on the same tick is removed. A shape that makes no notes at all (for example, one moved above the top key) is left as it is. Hz bass, images and masks are left out.
+
+Notes extracted from a loaded MIDI keep their channels, and notes masked from an image keep the image's colours.
 
 It's one undo step: Ctrl+Z gives the shapes back as they were.
 

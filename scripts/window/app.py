@@ -1623,6 +1623,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.fill_shape_list(counts, chans, most_colours(self.all16()), self.colours_used())
         if self.strips_window:  # (its count / Multi channel line from these notes: made late, Channels changed)
             self.strips_window.show()
+        if self.fill_window:  # (anything to fill? from these notes: undo / redo, Channels changed, hunt 10-25)
+            self.fill_window.sync()
         self.sync_list_selection()
         self.roll.request_redraw()
         self.track_list.changed()

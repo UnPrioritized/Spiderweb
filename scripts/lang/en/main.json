@@ -70,6 +70,7 @@
  "fill_gaps.nothing": "Select the shapes whose gaps you want to fill (not Hz bass, images or masks).",
  "fill_gaps.no_gaps": "Nothing to fill: there are no gaps between these notes.",
  "fill_gaps.undo": "Fill gaps",
+ "fill_gaps.busy": "Filling the gaps…",
  "fill_gaps.done": "Filled the gaps: {n} shapes are plain notes now",
  "fill_gaps.done_one": "Filled the gaps: the shape is plain notes now",
  "merge_window.merge": "Merge",
