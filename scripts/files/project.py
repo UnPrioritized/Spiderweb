@@ -1013,11 +1013,11 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("load.tempo_damaged", tracks=", ".join(
                 str(t.number + 1) for t in lm.mf.damaged()[:10])), parent=self)
             return
-        notes, cc, why = self.rendered[:0], {}, None
-        if len(self.rendered):
+        notes, cc, why, own = self.rendered[:0], {}, None, []
+        if len(self.rendered) or self.own_tracks:  # (own tracks without notes are written too)
             why = ("load.shapes_damaged" if lm.mf.damaged() or M_CUT in lm.mf.marks else
                    "load.shapes_format" if lm.mf.format > 1 or M_RMID in lm.mf.marks else None)
-            tracks = len(track_slots(self.rendered, self.pad_tracks()))
+            tracks = len(track_slots(self.rendered, self.pad_tracks())) + len(self.own_tracks)
             if why is None and len(lm.mf.tracks) + tracks > MAX_TRACKS + 1:
                 messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=len(
                     lm.mf.tracks) + tracks, most=MAX_TRACKS + 1), parent=self)
@@ -1034,6 +1034,7 @@ class ProjectFiles:
                         icon="warning"):
                     return
                 notes, cc = self.rendered.copy(), self.cc_messages(lm.ppq, self.read_project()[1])
+                own = [dict(t) for t in self.own_tracks]
         targets = []
         if retimed and tempo_new(lm, self.tempo):  # (signatures changed alone: the tempo stays as it is, no question)
             lists = tempo_tracks(lm)
@@ -1091,14 +1092,15 @@ class ProjectFiles:
                     if keeps and len(notes):
                         notes, cc = timed_ticks(plan, notes, cc)
                 added = None
-                if len(notes):
+                if len(notes) or own:
                     job["step"] = "load.checking_own"
                     # (the ticks before Keep timing: the loaded notes are read as they are in the file, and both
                     # move alike, so the same notes overlap; hunt 2026-10-25)
-                    job["hits"] = own_hits(hid, before[mine, 0], before[mine, 1], lanes[mine],
-                                           cancel=lambda: job["cancel"],
-                                           progress=lambda d, n: job.update(done=d, total=n))
-                    pieces, job["tracks"] = note_tracks(notes, use10, pad, cc, ports)
+                    if len(notes):
+                        job["hits"] = own_hits(hid, before[mine, 0], before[mine, 1], lanes[mine],
+                                               cancel=lambda: job["cancel"],
+                                               progress=lambda d, n: job.update(done=d, total=n))
+                    pieces, job["tracks"] = note_tracks(notes, use10, pad, cc, ports, own)
                     added = Added(pieces, job["tracks"], 16 * len(notes))
                 job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1110,7 +1112,7 @@ class ProjectFiles:
             job["finished"] = True
 
         def own_note():  # (the message's lines about the shapes added)
-            if not len(notes):
+            if not len(notes) and not own:
                 return ""
             out = tr("load.own_added", notes=trn("n.notes", len(notes), n=len(notes)),
                      tracks=trn("n.tracks", job["tracks"], n=job["tracks"]))
@@ -1258,7 +1260,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
-        tracks = len(track_slots(self.rendered, self.pad_tracks()))
+        tracks = len(track_slots(self.rendered, self.pad_tracks())) + len(self.own_tracks)
         if tracks > MAX_TRACKS:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=tracks, most=MAX_TRACKS))
             return
@@ -1277,7 +1279,8 @@ class ProjectFiles:
         notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc)
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
-                                                 self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"])):
+                                                 self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"],
+                                                 own=self.own_tracks)):
             return
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
@@ -1514,9 +1517,10 @@ class ProjectFiles:
         keys = [k for k in plan["keys"] if k[0] <= last]
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
-                               pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys))):
+                               pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys,
+                               own=self.own_tracks))):
             return
-        tracks = len(track_slots(notes, self.pad_tracks()))
+        tracks = len(track_slots(notes, self.pad_tracks())) + len(self.own_tracks)
         ports = slot_ports(int(notes[:, 4].max()) + 1, cc, self.picture_use10)  # (as dms_data decides)
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)

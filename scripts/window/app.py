@@ -2554,6 +2554,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 if self._used_tracks[0] is not self.rendered:
                     self._used_tracks = (self.rendered, len(track_slots(self.rendered, False)))
                 tracks = self._used_tracks[1]
+            tracks += len(self.own_tracks)
             parts.append(tr("app.one_track") if tracks == 1 else
                          tr("app.tracks_one_channel_each", slot_count=tracks))
         if self.sels:

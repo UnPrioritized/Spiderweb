@@ -7,6 +7,7 @@ import threading
 import numpy as np
 
 from files.safefile import write_bytes
+from files.own_tracks import plan
 from files.speed import loops
 from notes.engine import slot_port, slot_ports, slot_track_channel
 
@@ -181,34 +182,43 @@ def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
     return head
 
 
-def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None):
+def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None,
+               own=()):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
     (use10: channel 10 used too, slot_track_channel; pad: track_slots). Nothing marks channel 10 as not drums
     (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
     the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events); with them past one round of
-    channels every track starts with its port (FF 21: engine.slot_ports). tempo, sigs: tempo_track's."""
+    channels every track starts with its port (FF 21: engine.slot_ports). tempo, sigs: tempo_track's. own: the
+    tracks added by hand (files/own_tracks.py), put among the slots' (own_tracks.plan)."""
     head = tempo_track(bpm, beats, tempo, sigs, keys)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
-    tracks = track_slots(notes, pad)
+    tracks = plan(track_slots(notes, pad), own)
     write_bytes(path, _pieces(notes, count, tracks, use10,
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
 
-def note_tracks(notes, use10=False, pad=True, cc=None, ports=None):
+def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=()):
     """write_midi's note tracks alone, no header or tempo track: (pieces, how many tracks). A loaded MIDI's export
     puts them after the file's own tracks. ports: a set of slots whose tracks start with their port (extracted
     notes from another port: their slots' rounds are their ports)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
-    tracks = track_slots(notes, pad)
+    tracks = plan(track_slots(notes, pad), own)
     return _pieces(notes, count, tracks, use10, b"", cc or {}, ports), len(tracks)
+
+
+def name_event(name):
+    """A track name (FF 03) at tick 0, in Shift-JIS (CP932) like Domino (letters it can't hold: "?")."""
+    data = name.encode("cp932", "replace")
+    return b"\x00\xFF\x03" + vlq(len(data)) + data
 
 
 def _pieces(notes, count, tracks, use10, start, cc, ports=None):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory). With the speed-ups
-    the tracks are made side by side on several cores (midi_track), written in order."""
+    the tracks are made side by side on several cores (midi_track), written in order. tracks: slots, and own
+    tracks (dicts: an empty track with their name and channel)."""
     yield start
     if count > 1:  # (one sort finds every track's notes, in their own order)
         slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
@@ -225,6 +235,9 @@ def _pieces(notes, count, tracks, use10, start, cc, ports=None):
         bits = int(notes[:, 1].max() * 2 + 2).bit_length()
 
     def make(track):
+        if type(track) is dict:  # (an own track: empty for now, its name first)
+            events = ([name_event(track["name"])] if track["name"] else []) + [empty_track(track["ch"])]
+            return ([bytes([0, 0xFF, 0x21, 1, 0])] if every else []) + events
         channel = slot_track_channel(track, use10)[1]
         if fast is not None and not cc.get(track):
             rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
@@ -239,9 +252,9 @@ def _pieces(notes, count, tracks, use10, start, cc, ports=None):
 
     # jobs = tracks one after another up to JOB_NOTES notes (tens of thousands of tiny tracks: one hand-over each
     # cost more than making them)
-    sizes = (cuts[tracks + 1] - cuts[tracks] if count > 1 else np.full(len(tracks), len(notes))).tolist()
+    sizes = [0 if type(t) is dict else int(cuts[t + 1] - cuts[t]) if count > 1 else len(notes) for t in tracks]
     jobs, weights, group, held = [], [], [], 0
-    for t, size in zip(tracks.tolist(), sizes):
+    for t, size in zip(tracks, sizes):
         group.append(t)
         held += size
         if held >= JOB_NOTES:

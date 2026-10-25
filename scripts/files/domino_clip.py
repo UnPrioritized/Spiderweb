@@ -25,6 +25,7 @@ import numpy as np
 from files import clipboard
 from files.lang import tr
 from files.midi_out import track_slots
+from files.own_tracks import plan
 from files.speed import loops
 from notes.engine import slot_port, slot_ports, slot_track_channel
 
@@ -366,7 +367,8 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=()):
     return b"".join(r[2] for r in out), slow
 
 
-def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None, keys=None):
+def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None, keys=None,
+             own=()):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
     (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad:
@@ -377,12 +379,13 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None,
     Packed as it's made, PIECE notes at a time: the whole unpacked file (40 bytes a note) never sits in memory, and
     the notes are cut into tracks by one sort instead of a search through all of them for each track. cc = {slot:
     messages} (hz_cc.slot_events): control items on its track. tempo = [(tick, us)] + sigs = [(tick, top, bottom
-    power)] (the Tempo pane's, tempo_file.file_plan): the Conductor track's instead of one BPM."""
+    power)] (the Tempo pane's, tempo_file.file_plan): the Conductor track's instead of one BPM. own: the tracks
+    added by hand (files/own_tracks.py), among the slots' like the MIDI export's."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys)
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys, own)
 
 
-def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None, keys=None):
+def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None, keys=None, own=()):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
@@ -409,7 +412,11 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
     count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     order, cuts = track_orders(notes, count, z.pool)
     ports = slot_ports(count, cc, use10)  # (Output port A, B, ... as the MIDI export's)
-    for slot in track_slots(notes, pad).tolist():
+    for slot in plan(track_slots(notes, pad), own):
+        if type(slot) is dict:  # (a track added by hand: empty for now, its name in Domino's own text bytes)
+            track_head(slot["ch"], slot["name"].encode("cp932", "replace"), 0)
+            feed(track_tail(0))
+            continue
         mine = order[cuts[slot]:cuts[slot + 1]]
         port = slot_port(slot, use10) if ports else 0
         if (cc or {}).get(slot):  # (a Hz bass's CC messages among its notes: made whole, they're few tracks)
