@@ -304,7 +304,8 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
     began it). A key sounds while any note on it does (first on, first off doesn't change that), so a key's spans
     are painted, not its notes: tab[key - k_lo, x] = colour[channel, velocity // 4] where no track above painted
     yet (tracks go from the top one down; nx = each row's next free pixel, so every pixel is painted once).
-    marks: 1 = a note starts at that pixel, 2 = a span ends there. Pixel x of tick t = round(t * ax + bx).
+    marks: 1 = a note starts at that pixel, 2 = a span ends there, 4 = a hidden note starts / ends there (under a
+    track above, or one of a stack ending while the key sounds on). Pixel x of tick t = round(t * ax + bx).
     Reads up to tick t1; close_at >= 0 = the end: what still sounds is painted up to that tick. b[0] = the track's
     byte base; skip = its hidden events (Extract, midi_scan). Returns where it stopped in b."""
     tick = st[C_TICK]
@@ -361,8 +362,8 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
                         cnt_q[qq] += 1
                         kk = k - k_lo
                         x = np.int64(np.floor(t * ax + bx + 0.5))
-                        if 0 <= kk < nk and 0 <= x < W and tab[kk, x] < 0:
-                            marks[kk, x] |= 1
+                        if 0 <= kk < nk and 0 <= x < W:
+                            marks[kk, x] |= 1 if tab[kk, x] < 0 else 4
                     elif cnt_q[qq] > 0:
                         cnt_q[qq] -= 1
                         if cnt_q[qq] == 0:
@@ -371,6 +372,11 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
                             sb[n] = t
                             sv[n] = vel_q[qq]
                             n += 1
+                        else:  # (one of a stack ends, the key sounds on: hidden)
+                            kk = k - k_lo
+                            x = np.int64(np.floor(t * ax + bx + 0.5))
+                            if 0 <= kk < nk and 0 <= x < W:
+                                marks[kk, x] |= 4
                 q += need
             elif s == 0xFF or s == 0xF0 or s == 0xF7:
                 mt = -1
@@ -448,6 +454,8 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
                 x += 1
             if ends and last == xb - 1:
                 marks[kk, last] |= 2
+            elif ends:  # (its end under a track above)
+                marks[kk, xb - 1] |= 4
         n = 0
         if not full:
             break

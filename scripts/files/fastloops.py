@@ -1682,9 +1682,17 @@ def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
             x = c + kb - x0
             if x < 0 or x >= iw:
                 continue
-            m = marks[kk, c] != 0
+            m = (marks[kk, c] & 3) != 0
+            half = (marks[kk, c] & 4) != 0
             for y in range(ya, yb):
-                e = 1 if (solid or y == a or y == b - 1 or m) else 0
+                if solid or y == a or y == b - 1 or m:
+                    e = 1
+                elif half:  # (a hidden note starts / ends: halfway to the edge colour)
+                    for i in range(3):
+                        img[y - y0, x, i] = (np.int64(rgb[code, 0, i]) + rgb[code, 1, i]) // 2
+                    continue
+                else:
+                    e = 0
                 img[y - y0, x, 0] = rgb[code, e, 0]
                 img[y - y0, x, 1] = rgb[code, e, 1]
                 img[y - y0, x, 2] = rgb[code, e, 2]

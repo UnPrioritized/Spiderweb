@@ -2,7 +2,8 @@
 They never go through note_rects: 100 M - 2 B notes would take seconds a frame. Each picture is a key x pixel table
 of colour numbers (roll_draw's note colours: the channel's, shaded by velocity):
 - EXACT pictures: every track read from its checkpoint before the picture's start (from memory or from the file),
-  the top track first, each pixel painted once (midi_index.cover). Made a screen WIDER than the view on each side
+  the top track first, each pixel painted once (midi_index.cover); covered tracks are read too, their notes'
+  starts / ends shading the notes above (marks 4, user 2026-10-25: see the activity under covering tracks). Made a screen WIDER than the view on each side
   (MARGIN) for every key, so scrolling sideways / up and down only moves along them (the user saw notes switch
   while scrolling, 2026-10-24: never show two looks of the same notes). Made in the frame itself when that's quick
   (INLINE_S, guessed from the bytes to read), else on a background thread, and again further on before the view
@@ -35,7 +36,6 @@ KEEP = 3  # exact pictures kept (newest first)
 RATE = {"memory": 1.5e9, "file": 0.8e9}  # bytes a second read + painted, until pictures have been timed
 RATE_PLAIN = 0.5e6  # ... without the speed-ups (plain Python)
 TIMED_LEAST = 4 << 20  # pictures reading fewer bytes don't time the rate (their fixed costs would)
-
 
 class Exact:
     """One exact picture: rows = every key of the file (0 .. keys - 1) x W columns, pixel x of tick t =
@@ -548,7 +548,8 @@ def scrub_notes(lm, order, lo, hi, at):
 
 def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
     """tab's columns c0..c1 painted into img (its pixel [0, 0] = screen (x0, y0)), each key's row like a note:
-    edge colour on its first / last pixel row and where marks say a note starts / ends, fill inside. NumPy twin of
+    edge colour on its first / last pixel row and where marks say a note starts / ends, halfway between where a
+    hidden note starts / ends (marks 4), fill inside. NumPy twin of
     fastloops.loaded_pixels (the same pixels)."""
     ih, iw = img.shape[:2]
     for kk in range(tab.shape[0]):
@@ -564,10 +565,12 @@ def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
         xs = on + c0 + kb - x0
         keep = (xs >= 0) & (xs < iw)
         xs, cs = xs[keep], cs[keep]
-        m = marks[kk, c0:c1][on][keep] != 0
+        mk = marks[kk, c0:c1][on][keep]
+        m, half = (mk & 3) != 0, (mk & 4) != 0
         fill, edge = rgb[cs, 0], rgb[cs, 1]
         solid = b - 1 - a < 2
-        inside = np.where(m[:, None], edge, fill)
+        shade = ((fill.astype(np.int64) + edge) // 2).astype(img.dtype)  # (a hidden note starts / ends there)
+        inside = np.where(m[:, None], edge, np.where(half[:, None], shade, fill))
         for y in range(ya, yb):
             img[y - y0, xs] = edge if (solid or y == a or y == b - 1) else inside
 
@@ -636,10 +639,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
             t = lm.tracks[n]
             if not t.notes or t.end <= t0 or t.first > t1 or t.khi < k_lo or t.klo >= k_lo + nk:
                 continue
-            a, z = max(t.klo, k_lo) - k_lo, min(t.khi, k_lo + nk - 1) - k_lo + 1
-            if (filled[a:z] >= W).all():  # (every row it could paint is full: hidden under the tracks above)
-                continue
-            if not len(t.cp_off):
+            if not len(t.cp_off):  # (covered tracks are read too: their notes' starts / ends shade the ones above)
                 continue
             j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
             j2 = int(np.searchsorted(t.cp_tick, t1, "right"))
