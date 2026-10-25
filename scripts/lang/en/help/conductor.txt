@@ -26,7 +26,7 @@ Double right-click switches between Select and the last drawing tool.
 
 Select: click a point, catch-up or part to pick it (the play line goes there too). Drag on empty space for a Select box over that whole time; Ctrl+drag adds another box. Drag inside the box to move what it picked in time; Ctrl+drag copies it, and the pane shows the result while you drag. A copied catch-up that would land inside another catch-up is left out. Ctrl+A picks everything.
 
-Drag a point to move it. Double-click a point to type its BPM, or use the BPM box below the tools (drag its word like any number box). Delete removes the picked ones. Right-click gives a menu (right-click never deletes).
+Drag a point to move it. Double-click a point to type its BPM; the row under it shows where the point sits as bar:beat:tick (e.g. 5:3:240), and typing a new place there moves the point. Or use the BPM box below the tools (drag its word like any number box). Delete removes the picked ones. Right-click gives a menu (right-click never deletes).
 
 A picked part shows its settings below the tools:
 
