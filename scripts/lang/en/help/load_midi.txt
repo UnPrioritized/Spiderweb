@@ -1,0 +1,81 @@
+File → Load MIDI… opens a MIDI file as a new project: its notes are drawn under your shapes, its tempos and time signatures come into the Conductor pane, and the project takes its PPQ. It's made for black MIDIs of millions or billions of notes, so you can change their tempo, draw shapes on top, or take some notes out to work on.
+
+The MIDI file stays the boss: Spiderweb never copies its notes into shapes. The project only saves a link to the file and your changes, so it stays small. Export MIDI reads the file again and copies it byte for byte, changing only what you changed.
+
+[clip:load-ask]
+
+## Loading
+
+Before reading, Spiderweb asks how to hold the notes:
+
+• Read them from the MIDI file: uses little memory. Zoomed-in views read the file again, so they draw a little slower. The only choice for files too big for your memory.
+
+• Keep them in memory: zoomed-in views draw faster. Only offered when the file fits with 2 GB of memory to spare.
+
+A window shows each step while it reads, with Cancel. Your project is replaced only when the reading is done. The summary at the end counts the notes, tracks, channels and tempo changes, and says what's odd in the file (notes 0 ticks long, notes never let go, damaged tracks). Those are left exactly as they are.
+
+A very big file can take a while (17 GB: about 30 seconds on a fast drive). After a slow load, Spiderweb offers to save the file's index: where everything is in it, never the notes. Next time it opens in a moment. Settings → General lists the saved indexes with their sizes, and deletes them. A changed file is read again the usual way.
+
+[clip:load-summary]
+
+## The project and its MIDI
+
+The MIDI file must stay with the project. If it's moved, Spiderweb looks beside the project; if it's not there, it asks you to find it (File → Find the Project's MIDI…). If the file was changed since (saved again from another program), Spiderweb asks before using it, never quietly.
+
+To give the project to someone, use File → Save a Copy for Sharing…: it saves the project and copies the MIDI beside it, so the two travel together.
+
+The PPQ box is greyed: the project uses the file's PPQ.
+
+## Seeing the notes
+
+Zoomed out, the notes show from an overview made while loading. Zoomed in, the exact notes are read from the file. Each track's notes are in their channel's colour, and a track higher in the file is drawn on top.
+
+Press Tab for the track list: one row per track of the file, then the tracks of your own shapes. Click a track and press Tab to see only it (see Track list).
+
+The velocity pane shows the loaded notes' velocities faded behind your own. They can't be changed there.
+
+## Tempo
+
+The file's tempos and time signatures are in the Conductor pane, and everything there works on them: jumps, glides, catch-ups, Keep timing (see Conductor pane). Keep timing keeps the time the notes have in the file.
+
+Export MIDI with the Conductor as it was loaded copies the file exactly. With a changed tempo, the file's tempo events are left out and the new tempo list goes into the track that had the first one. When the file has its tempo list in several tracks, Spiderweb asks: only the first of them, or every one.
+
+## Shapes on top
+
+Draw shapes over the loaded notes as usual. Export MIDI adds them as new tracks after the file's own, which stay copied exactly. With Keep timing they keep their time like the file's notes.
+
+Your shapes and the loaded notes don't change each other: each keeps its own channels. The export's message counts your notes that sound on the same key and channel as a loaded note at the same time, since some MIDI players cut such notes short.
+
+Copy to Domino and Export to Domino take only your shapes, not the loaded notes.
+
+## Extract
+
+Loaded notes can't be selected, moved or deleted one by one. To work on some of them, take them out:
+
+1. Drag a Select box (or a band along the ruler) over them.
+
+2. Right-click inside the box → Extract loaded notes.
+
+Every loaded note whose start is inside the box (time and keys) is taken whole, from the tracks the piano roll shows (all of them when no track is highlighted). They become one plain notes shape, and leave the loaded MIDI: drawn, heard and exported from the shape now.
+
+[clip:load-extract]
+
+They keep their channels, keys, lengths, velocities, overlaps and doubled notes. They lose their track (the shape's notes go on new tracks when exported), their note-off velocity, and the order of notes on the same tick. Spiderweb asks first and says so.
+
+Delete the shape or undo, and the notes are back in the loaded MIDI. A copy of the shape takes nothing out. A box overlapping notes you already extracted is refused: delete or undo that shape first.
+
+## Playing
+
+The loaded MIDI plays with your shapes: every track that isn't muted in the track list, every event as written. With Built-in BASSMIDI, it plays on several synths side by side (Settings → Sound → Synths for a loaded MIDI, half your processor's cores at first). Channel 10 plays as drums when your soundfont has a drum kit.
+
+No synth can play every note of the busiest walls of notes. Where there are too many, the quietest notes are left out (with their note-off), the play line keeps real time and "Overloaded" shows at the status line's right end.
+
+Right-drag listens to the loaded notes too. On very dense parts it listens roughly (every key drawn, one loudness) and the status line says so.
+
+## Limits
+
+• Files that count time in video frames can't be loaded.
+
+• Damaged files load and export exactly as they are, but their tempo can't be changed, their damaged tracks give no notes to Extract, and Export MIDI can't add your shapes to them (it asks to export the file alone).
+
+• The same goes for shapes on files whose tracks don't play together (format 2) and RIFF MIDI files.
