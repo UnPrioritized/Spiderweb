@@ -38,7 +38,7 @@ Angle turns the areas, from -360 to 360 degrees. Drag its knob up or down, or ri
 
 Swirl tightness: how many times the swirl turns from the Centre point to the edge. It twists most near the centre.
 
-Centre point: where Swirl and Wedges turn around, in % of the shape's box (50 / 50 is the middle). While the window is open, the piano roll shows it as a dot on the shape: drag the dot to move it (whole %, hold Shift for in between).
+Centre point: where Swirl and Wedges turn around, in % of the shape's box (50 / 50 is the middle). While the window is open, the piano roll shows it as a dot on the shape: drag the dot to move it (whole %, hold Shift for in between). Right-click the dot to put it back in the middle.
 
 Push bunches the areas toward one side, a step per click; the dot in the middle takes the push away.
 

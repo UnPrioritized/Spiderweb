@@ -1818,6 +1818,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if self.stop_right(e):  # a sustained shape's stop line: removed
             return
+        if not self.draft and self.centre_right(e):  # Recolour's Centre point dot: back to the middle
+            return
         finished = bool(self.draft and self.draft["kind"] in ("poly", "arc"))
         if self.follow:  # a shape started with a click, not finished: dropped
             self.drop_hz_keys()  # a new Hz bass's start mark goes too

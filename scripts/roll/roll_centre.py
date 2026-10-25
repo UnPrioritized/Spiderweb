@@ -48,16 +48,32 @@ class CentreDots:
             self.create_line(x - r * 1.8, y, x + r * 1.8, y, fill=look.PATH_LINE, width=line, tags="rccentre")
             self.create_line(x, y - r * 1.8, x, y + r * 1.8, fill=look.PATH_LINE, width=line, tags="rccentre")
 
-    def centre_press(self, e):
-        """A left press on a Centre point dot: grabbed (one undo step). True if taken."""
+    def centre_hit(self, e):
+        """(its shape's Recolour, notes, box) of the Centre point dot under the mouse, else None."""
         g = GRAB * self.scale
         for sh, made, spot in reversed(self.centre_boxes()):
             x, y = self.centre_xy(spot)
             if abs(x - e.x) <= g and abs(y - e.y) <= g:
-                self.app.push_undo(name=tr("shares.undo_centre"))
-                self.drag = ("rccentre", made)
-                return True
-        return False
+                return made
+        return None
+
+    def centre_press(self, e):
+        """A left press on a Centre point dot: grabbed (one undo step). True if taken."""
+        made = self.centre_hit(e)
+        if made is None:
+            return False
+        self.app.push_undo(name=tr("shares.undo_centre"))
+        self.drag = ("rccentre", made)
+        return True
+
+    def centre_right(self, e):
+        """A right-click on a Centre point dot: every selected Clumps shape's Centre point back to the middle (like
+        Nested's; one undo step, none when nothing moves). True if taken."""
+        if self.centre_hit(e) is None:
+            return False
+        self.app.change_recolour(lambda old, sh: {k: v for k, v in old.items() if k != "centre"}
+                                 if old and old["mode"] == "clumps" else old, tr("shares.undo_centre"))
+        return True
 
     def centre_drag(self, e):
         if not getattr(self.app, "shares_window", None):  # (the window closed mid-drag: let go)
