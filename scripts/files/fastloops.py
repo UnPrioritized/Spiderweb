@@ -29,6 +29,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_rewrite   midi_scan.rewrite (a track written again with its ticks moved), the very same function compiled
   midi_note_ticks  midi_scan.note_ticks (Keep timing's anchors on a loaded MIDI), the very same function compiled
   midi_busy_hits   midi_scan.busy_hits (own notes on a loaded note's channel + key), the very same function compiled
+  midi_gather    midi_scan.gather (Extract: a loaded track's notes in a box), the very same function compiled
   midi_index, midi_close, midi_grid, midi_halve   midi_index's functions (Load MIDI's pass: notes paired, the index
                  to read a track from anywhere, the overview picture), the very same functions compiled
   play_read, play_order, play_hist, play_emit   midi_play's functions (playing a loaded MIDI), compiled
@@ -1609,6 +1610,7 @@ midi_walk = njit(cache=CACHE, nogil=True)(midi_scan.walk)
 midi_rewrite = njit(cache=CACHE, nogil=True)(midi_scan.rewrite)
 midi_note_ticks = njit(cache=CACHE, nogil=True)(midi_scan.note_ticks)
 midi_busy_hits = njit(cache=CACHE, nogil=True)(midi_scan.busy_hits)
+midi_gather = njit(cache=CACHE, nogil=True)(midi_scan.gather)
 midi_index = njit(cache=CACHE, nogil=True)(_index.index)
 midi_close = njit(cache=CACHE, nogil=True)(_index.close)
 midi_grid = njit(cache=CACHE, nogil=True)(_index.grid)
@@ -1685,10 +1687,13 @@ def warm():
     u8 = np.zeros(1, np.uint8)
     midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
     midi_rewrite(u8, 0, 0, True, i1, i1.copy(), False, np.zeros(128, np.uint8), i1[:0], np.zeros(1, np.int64),
-                 u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64))
+                 u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64), 0, i1[:0])
     midi_note_ticks(u8, 0, 0, True, u8.copy(), 0, np.zeros(midi_scan.NT_SIZE, np.int64))
-    midi_busy_hits(u8, 0, 0, 1, np.zeros(midi_scan.BH_SIZE, np.int64), i1.copy(), i1.copy(), np.zeros(2, np.int64),
-                   i1.copy(), i1.copy(), i1.copy(), u8.copy())
+    midi_busy_hits(u8, 0, 0, 0, i1[:0], 1, np.zeros(midi_scan.BH_SIZE, np.int64), i1.copy(), i1.copy(),
+                   np.zeros(2, np.int64), i1.copy(), i1.copy(), i1.copy(), u8.copy())
+    midi_gather(u8, 0, 0, 0, i1[:0], 0, 1, 0, 127, u8.copy(), np.zeros(midi_scan.GA_SIZE, np.int64), i1.copy(),
+                i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(),
+                i1.copy(), u8.copy())
     q, z = np.zeros(_index.QS, np.int64), np.zeros(4, np.int64)
     ix, cov, i32 = _index.new_state(), np.zeros((128, 8), np.int32), np.zeros((128, 8), np.int32)
     midi_index(u8, 0, 0, 0, 60, ix, q, q.copy(), q.copy(), q.copy(), q.copy(), q.copy(), z, z.copy(), z.copy(),
@@ -1698,13 +1703,13 @@ def warm():
     midi_grid(cov, 0, 1, 0, 0, i32, i32.copy(), 0, np.zeros((1, 2), np.uint8), 1)
     midi_halve(i32, i32.copy(), np.zeros((128, 4), np.int32), np.zeros((128, 4), np.int32))
     t2, m2 = np.full((1, 2), -1, np.int64), np.zeros((1, 2), np.uint8)
-    midi_cover(u8, 0, 0, np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,
+    midi_cover(u8, 0, 0, 0, i1[:0], np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,
                np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
                z.copy(), z.copy())
     loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
     i32 = np.zeros(1, np.int32)
     play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),
-              i32.copy(), 0)
+              i32.copy(), 0, i1.copy(), i1[:0], i1.copy(), i1.copy())
     play_order(i1, i32, i32, 0, 1, i1.copy(), i32.copy(), i32.copy())
     h2 = np.zeros((1, 128), np.int64)
     play_hist(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, h2)

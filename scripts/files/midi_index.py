@@ -292,28 +292,32 @@ def grid(cov, glo, ghi, klo, khi, cnt, top, track, pic, pf):
                 pic[k - klo, (g - glo) // pf] = 1
 
 
-# cover(): st = [tick, running status, stopped (1 = past t1, 2 = can't be read on), spans waiting]
-C_TICK, C_RUN, C_STOP, C_SPANS = range(4)
-C_SIZE = 4
+# cover(): st = [tick, running status, stopped (1 = past t1, 2 = can't be read on), spans waiting, place in skip]
+C_TICK, C_RUN, C_STOP, C_SPANS, C_SKIP = range(5)
+C_SIZE = 5
 
 
-def cover(b, p, end, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, colour, tab, nx, filled, marks, sq,
-          sa, sb, sv):
+def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, colour, tab, nx, filled,
+          marks, sq, sa, sb, sv):
     """One track's notes painted onto a key x pixel table, reading its events in b[p:end] (from a checkpoint:
     cnt_q = notes sounding per channel + key there, first_q = since when, vel_q = the velocity of the one that
     began it). A key sounds while any note on it does (first on, first off doesn't change that), so a key's spans
     are painted, not its notes: tab[key - k_lo, x] = colour[channel, velocity // 4] where no track above painted
     yet (tracks go from the top one down; nx = each row's next free pixel, so every pixel is painted once).
     marks: 1 = a note starts at that pixel, 2 = a span ends there. Pixel x of tick t = round(t * ax + bx).
-    Reads up to tick t1; close_at >= 0 = the end: what still sounds is painted up to that tick. Returns where it
-    stopped in b."""
+    Reads up to tick t1; close_at >= 0 = the end: what still sounds is painted up to that tick. b[0] = the track's
+    byte base; skip = its hidden events (Extract, midi_scan). Returns where it stopped in b."""
     tick = st[C_TICK]
     run = st[C_RUN]
+    si = st[C_SKIP]
     nk = tab.shape[0]
     room = len(sq)
     n = st[C_SPANS]
     while True:
         while p < end and st[C_STOP] == 0 and n < room:
+            while si < len(skip) and skip[si] < base + p:
+                si += 1
+            hid = si < len(skip) and skip[si] == base + p
             q = p
             d = 0
             while q < end:
@@ -346,7 +350,7 @@ def cover(b, p, end, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, c
                     break
                 if explicit:
                     run = s
-                if hi == 0x9 or hi == 0x8:
+                if (hi == 0x9 or hi == 0x8) and not hid:
                     k = np.int64(b[q])
                     v = np.int64(b[q + 1])
                     qq = (s & 15) * 256 + k
@@ -450,6 +454,7 @@ def cover(b, p, end, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, c
     st[C_TICK] = tick
     st[C_RUN] = run
     st[C_SPANS] = 0
+    st[C_SKIP] = si
     return p
 
 

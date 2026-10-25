@@ -8,7 +8,13 @@ rewrite  writes a track again event by event (ticks moved by a map, tempo events
          unchanged gap keeps its own bytes, running status as in the file (an explicit status only where the one
          written last differs)
 note_ticks  marks the ticks with note-ons / offs and other channel events (Keep timing's anchors)
-busy_hits   marks Spiderweb's own notes sounding with a track's notes on the same channel + key (the export's count)"""
+busy_hits   marks Spiderweb's own notes sounding with a track's notes on the same channel + key (the export's count)
+gather      a track's notes starting in a box (Extract): each one's ticks, key, velocity and where its note-on /
+            note-off events are in the track (what readers skip once it's extracted)
+
+HIDDEN NOTES (Extract): a sorted array of the track's byte offsets (skip) of the events left out, the note-on and
+the note-off a note was paired with (first on, first off, counted with every note: the pairing is the file's).
+Readers skip an event whose first byte (its gap) is at one; st keeps where in skip they are."""
 
 import numpy as np
 
@@ -193,23 +199,25 @@ def walk(b, p, end, final, rest, st, cnt):
 
 # rewrite(): st = [tick read, running status read, tick written, running status written, End of Track seen, next
 # event to put in (ins_t)]
-RW_TICK, RW_RUN, RW_DONE, RW_WRUN, RW_EOT, RW_INS = range(6)
-RW_SIZE = 6
+RW_TICK, RW_RUN, RW_DONE, RW_WRUN, RW_EOT, RW_INS, RW_SKIP = range(7)
+RW_SIZE = 7
 
 
-def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st):
+def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st, base, skip):
     """Writes the whole events in b[p:end] (a track walk() read without BAD) into out from o. use_map: each event's
     tick moved through the Keep timing map (bp_n -> bp_f: tempo_file.file_plan's to_file, the very same rule:
     anchors exactly, between two the same share of the way). drop[type] = 1: meta events of that type left
     out (a tempo list written anew), their time carried on. ins_t / ins_at / ins_b: events put in (ticks written,
     in order; event k = ins_b[ins_at[k]:ins_at[k + 1]]), each before the first event at or after its tick; the
-    ones past the track's end before its End of Track (which then moves later). Stops at the first event not
-    wholly in b, or one that wouldn't fit in out. Returns (where it stopped in b, where it stopped in out)."""
+    ones past the track's end before its End of Track (which then moves later). Hidden events (Extract: skip, b[0]
+    = the track's byte base) left out, their time carried on. Stops at the first event not wholly in b, or one
+    that wouldn't fit in out. Returns (where it stopped in b, where it stopped in out)."""
     tick = st[RW_TICK]
     run = st[RW_RUN]
     done = st[RW_DONE]
     wrun = st[RW_WRUN]
     k = st[RW_INS]
+    si = st[RW_SKIP]
     n_ins = len(ins_t)
     room = len(out)
     while p < end:
@@ -324,6 +332,14 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
             tick = t
             p = q
             continue
+        while si < len(skip) and skip[si] < base + p:
+            si += 1
+        if si < len(skip) and skip[si] == base + p and s < 0xF0:  # (an extracted note's on / off: left out too)
+            if explicit:
+                run = s
+            tick = t
+            p = q
+            continue
         dd = nt - done
         if dd < 0:
             dd = 0
@@ -368,6 +384,7 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
     st[RW_DONE] = done
     st[RW_WRUN] = wrun
     st[RW_INS] = k
+    st[RW_SKIP] = si
     return p, o
 
 
@@ -442,20 +459,25 @@ def note_ticks(b, p, end, final, mark, base, st):
     return p
 
 
-# busy_hits(): st = [tick, running status, stopped at t_stop]
-BH_TICK, BH_RUN, BH_STOP = range(3)
-BH_SIZE = 3
+# busy_hits(): st = [tick, running status, stopped at t_stop, place in skip]
+BH_TICK, BH_RUN, BH_STOP, BH_SKIP = range(4)
+BH_SIZE = 4
 
 
-def busy_hits(b, p, end, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit):
+def busy_hits(b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit):
     """Spiderweb's own notes sounding at the same time as this track's notes on the same channel + key: hit[i] = 1.
     Own notes by lane (channel x 256 + key): lane_at[q] .. lane_at[q + 1], sorted by start (own_s), own_e their
     ends, own_top the latest end so far in the lane. cnt[q] = the track's notes sounding on lane q, since[q] = from
-    when (a track walk() read without BAD, from a checkpoint: its open counts). Stops at the first event at or after
-    t_stop (st[BH_STOP] = 1) or one not wholly in b; returns where. Lanes still sounding: the caller ends them."""
+    when (a track walk() read without BAD, from a checkpoint: its open counts). b[0] = the track's byte base;
+    skip = its hidden events (Extract). Stops at the first event at or after t_stop (st[BH_STOP] = 1) or one not
+    wholly in b; returns where. Lanes still sounding: the caller ends them."""
     tick = st[BH_TICK]
     run = st[BH_RUN]
+    si = st[BH_SKIP]
     while p < end:
+        while si < len(skip) and skip[si] < base + p:
+            si += 1
+        hid = si < len(skip) and skip[si] == base + p
         q = p
         d = 0
         whole = True
@@ -488,7 +510,7 @@ def busy_hits(b, p, end, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top,
                 break
             if s >= 128:
                 run = s
-            if hi == 0x8 or hi == 0x9:
+            if (hi == 0x8 or hi == 0x9) and not hid:
                 ln = (s & 15) * 256 + np.int64(b[q])
                 if hi == 0x9 and b[q + 1] > 0:
                     if cnt[ln] == 0:
@@ -535,4 +557,127 @@ def busy_hits(b, p, end, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top,
         p = q
     st[BH_TICK] = tick
     st[BH_RUN] = run
+    st[BH_SKIP] = si
+    return p
+
+
+# gather(): st = [tick, running status, notes found, of them still sounding, place in skip, done]
+GA_TICK, GA_RUN, GA_N, GA_OPEN, GA_SKIP, GA_DONE = range(6)
+GA_SIZE = 6
+
+
+def gather(b, p, end, base, skip, t0, t1, k0, k1, chans, st, old, newer, head, tail, nxt, o_s, o_e, o_k, o_v, o_on,
+           o_off, o_was):
+    """A track's notes starting in ticks t0 .. t1 - 1 on keys k0..k1 of the channels chans[ch] = 1 (Extract), read
+    from a checkpoint (old = notes sounding per channel + key there: all older). Each found note i: o_s / o_e its
+    start / end tick (end -1 = not let go yet), o_k channel x 256 + key, o_v velocity, o_on / o_off its note-on /
+    note-off's byte place in the track (b[0] = byte base; o_off -1 until let go), o_was = 1 when it's hidden already
+    (skip). Paired first on, first off with EVERY note (newer = ones starting at t1 or later, never ending one of
+    the box's first). Done (st[GA_DONE] = 1) once past t1 with none of them sounding. Stops when o_* are full (st
+    [GA_N] = their length: call again with bigger ones) or at an event not wholly in b; returns where."""
+    tick = st[GA_TICK]
+    run = st[GA_RUN]
+    n = st[GA_N]
+    si = st[GA_SKIP]
+    room = len(o_s)
+    while p < end and st[GA_DONE] == 0 and n < room:
+        q = p
+        d = 0
+        whole = True
+        while True:
+            if q >= end:
+                whole = False
+                break
+            c = b[q]
+            q += 1
+            d = (d << 7) | (c & 127)
+            if c < 128:
+                break
+        if whole and q >= end:
+            whole = False
+        if not whole:
+            break
+        t = tick + d
+        if t >= t1 and st[GA_OPEN] == 0:
+            st[GA_DONE] = 1
+            break
+        while si < len(skip) and skip[si] < base + p:
+            si += 1
+        hid = si < len(skip) and skip[si] == base + p
+        s = np.int64(b[q])
+        if s >= 128:
+            q += 1
+        else:
+            s = run
+        if s < 0xF0:
+            hi = s >> 4
+            need = 1 if hi == 0xC or hi == 0xD else 2
+            if q + need > end:
+                break
+            if s >= 128:
+                run = s
+            if hi == 0x8 or hi == 0x9:
+                k = np.int64(b[q])
+                ch = s & 15
+                ln = ch * 256 + k
+                if chans[ch] and k0 <= k <= k1:
+                    if hi == 0x9 and b[q + 1] > 0:
+                        if t < t0:
+                            old[ln] += 1
+                        elif t < t1:
+                            o_s[n] = t
+                            o_e[n] = -1
+                            o_k[n] = ln
+                            o_v[n] = np.int64(b[q + 1])
+                            o_on[n] = base + p
+                            o_off[n] = -1
+                            o_was[n] = 1 if hid else 0
+                            nxt[n] = -1
+                            if tail[ln] >= 0:
+                                nxt[tail[ln]] = n
+                            else:
+                                head[ln] = n
+                            tail[ln] = n
+                            n += 1
+                            st[GA_OPEN] += 1
+                        else:
+                            newer[ln] += 1
+                    elif old[ln] > 0:
+                        old[ln] -= 1
+                    elif head[ln] >= 0:
+                        i = head[ln]
+                        o_e[i] = t
+                        o_off[i] = base + p
+                        head[ln] = nxt[i]
+                        if head[ln] < 0:
+                            tail[ln] = -1
+                        st[GA_OPEN] -= 1
+                    elif newer[ln] > 0:
+                        newer[ln] -= 1
+            q += need
+        else:
+            if s == 0xFF:
+                if q >= end:
+                    break
+                q += 1
+            ln = 0
+            whole = True
+            while True:
+                if q >= end:
+                    whole = False
+                    break
+                c = b[q]
+                q += 1
+                ln = (ln << 7) | (c & 127)
+                if c < 128:
+                    break
+            q += ln
+            if not whole or q > end:
+                break
+        tick = t
+        p = q
+    st[GA_TICK] = tick
+    st[GA_RUN] = run
+    st[GA_N] = n
+    st[GA_SKIP] = si
     return p

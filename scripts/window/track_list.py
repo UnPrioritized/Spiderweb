@@ -831,7 +831,7 @@ class TrackList(tk.Canvas):
         pad = round(PAD * self.scale)
         inner = max(1, self.row_h - 2 * pad - 1)
         ax = self.sx / lm.ppq  # (pixel c of the song = tick t * ax)
-        place = (id(lm), self.sx)
+        place = (id(lm), lm.hide_ver, self.sx)  # (notes extracted / back: read again)
         if self._row_place != place:
             self._row_place = place
             self._tiles.clear()

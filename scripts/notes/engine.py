@@ -20,6 +20,7 @@ from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX
                           clean_strokes, custom_notes_groups, custom_strokes, cycle_turns, cycling)
 from notes.between import KINDS as BETWEEN_KINDS, clean_between
 from notes.envelope import env_values, velocity_env
+from notes.loaded import clean_extract
 from notes.joined import clean_joined, is_joined, joined_paths
 from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, left_edge, note_lengths, own_channels,
                           velocity_parts, with_layers, without_cc)
@@ -335,6 +336,9 @@ def clean_shape(sh):
                 out["picture_notes"] = {"pal": list(pal) if ok else None}
             if sh.get("held") is True:
                 out["held"] = True
+            ex = clean_extract(sh.get("extract"))
+            if ex:  # (Load MIDI's Extract: the loaded notes it took stay hidden while it's there, loaded.py)
+                out["extract"] = ex
             if sh.get("made") in ("mask", "leftovers", "path", "plain"):
                 out["made"] = sh["made"]
             if isinstance(sh.get("leftover_of"), str):  # (a two-shapes merge's leftovers: its Split takes them back)
@@ -1122,7 +1126,9 @@ def _kind_notes_tracks(sh, ppq, keys):
         if cycling(sh):  # (a merged shape with Colours: turns across it all, not its shapes' own colours)
             own[:, 1] = 0
         if sh.get("own_vel"):  # (the same note in two tracks stays twice: they can go to different channels)
-            got = unique_rows(np.column_stack([raw, own]))
+            got = np.column_stack([raw, own])
+            if not sh.get("extract"):  # (Extract's notes as loaded: doubles kept, plan step 11)
+                got = unique_rows(got)
             if cycling(sh) and len(got):
                 return got[:, :4], cycle_turns(sh, got[:, :3], ppq)
             return got[:, :4], got[:, 4]

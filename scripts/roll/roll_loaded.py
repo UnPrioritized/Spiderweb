@@ -65,7 +65,7 @@ class LoadedNotes:
         bx = self.kb_w - self.view_t * self.sx - kb  # (pixel c of the table = screen x kb + c)
         pal = getattr(self.app, "picture_pal", None)
         order, faint = shown_tracks(self.app, lm)
-        key = (id(lm), W, kb, top, h, round(ax, 12), round(bx, 6), p_lo, p_hi, tuple(pal or ()), order,
+        key = (id(lm), lm.hide_ver, W, kb, top, h, round(ax, 12), round(bx, 6), p_lo, p_hi, tuple(pal or ()), order,
                frozenset(faint), TRACK_FADE[0])
         return lm, key, (ax, bx, W, p_lo, p_hi, kb, top, order, faint)
 
@@ -75,7 +75,7 @@ class LoadedNotes:
         if lm is None:
             return None
         order, faint = shown_tracks(self.app, lm)
-        return id(lm), getattr(self, "loaded_version", 0), order, faint, TRACK_FADE[0]
+        return id(lm), lm.hide_ver, getattr(self, "loaded_version", 0), order, faint, TRACK_FADE[0]
 
     def paint_loaded(self, img, region):
         """The loaded notes into img, the picture of region = (x0, y0, x1, y1) of the screen (paint_region)."""
@@ -110,7 +110,7 @@ class LoadedNotes:
 
     def loaded_tabs(self, lm, key, ax, bx, W, p_lo, nk, order, faint):
         """(tab, marks) of the view: keys p_lo .. + nk x W columns."""
-        style = (id(lm), order, frozenset(faint), TRACK_FADE[0])
+        style = (id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0])
         rows = slice(p_lo, p_lo + nk)
         got = self._exact_for(style, ax, bx, W)
         if got is not None:
@@ -652,6 +652,9 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
             cnt_q[qs] = t.e_cnt[e0:e1]
             first_q[qs] = t.cp_tick[j]
             vel_q[qs] = t.e_vel[e0:e1]
+            lanes, counts = lm.hidden_open(n, start)  # (extracted: not sounding)
+            cnt_q[lanes] -= counts
+            skip = lm.skip_of(n)
             if took is not None:
                 took[0] += end - start
             if t.data is not None:
@@ -669,11 +672,11 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
             st[:] = 0
             st[C_TICK], st[C_RUN] = t.cp_tick[j], t.cp_run[j]
             colour = behind if n in faint else normal
-            p = cover(b, 0, len(b), st, cnt_q, first_q, vel_q, t1, -1, ax, bx, W, k_lo, colour, tab, nx, filled,
-                      marks, sq, sa, sb, sv)
+            p = cover(b, 0, len(b), start, skip, st, cnt_q, first_q, vel_q, t1, -1, ax, bx, W, k_lo, colour, tab, nx,
+                      filled, marks, sq, sa, sb, sv)
             close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)
-            cover(b, p, p, st, cnt_q, first_q, vel_q, t1, close, ax, bx, W, k_lo, colour, tab, nx, filled, marks,
-                  sq, sa, sb, sv)
+            cover(b, p, p, start, skip, st, cnt_q, first_q, vel_q, t1, close, ax, bx, W, k_lo, colour, tab, nx, filled,
+                  marks, sq, sa, sb, sv)
     finally:
         if f is not None:
             f.close()

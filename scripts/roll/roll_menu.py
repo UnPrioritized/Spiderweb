@@ -8,6 +8,7 @@ import numpy as np
 
 from files.lang import tr
 from window.formula_host import FunnelHost, PolygonHost, RollHost, StrokeHost, formula_menu
+from window.load_extract import can_extract, extract_loaded
 from notes.areas import most_colours
 from notes.convert import originals
 from notes.custom import ROLES, can_fit_upright, fit_upright
@@ -51,6 +52,8 @@ class ShapeMenu:
             if part and part not in app.parts:
                 app.set_parts(self.part_group(sh, part), main=part)
         m = tk.Menu(self, tearoff=0)
+        if self.kept_box():  # (right-clicked inside a kept Select box: Load MIDI's Extract first)
+            self.extract_item(m)
         got = self.funnel_parts()
         if got:
             _, lines, curves = got
@@ -274,6 +277,7 @@ class ShapeMenu:
 
         m.add_command(label=tr("roll_menu.box_selected", n=len(app.sels)), state="disabled")
         m.add_separator()
+        self.extract_item(m)
         n = len(app.sels)  # (user, 2026-10-02: shapes that all take a formula get Formula ▸, changing them all)
         if len(app.pattern_targets()) == n:
             self.formula_menu(m)
@@ -307,6 +311,21 @@ class ShapeMenu:
         if app.pieces():
             item(tr("roll_menu.make_complete"), "", app.make_complete)
         self.group_items(m, item, True, True, True)
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+
+    def extract_item(self, m):
+        """Load MIDI's Extract (window/load_extract.py), first in a kept Select box's menu while a MIDI is loaded."""
+        if can_extract(self.app):
+            m.add_command(label=tr("extract.menu"), command=lambda: extract_loaded(self.app))
+            m.add_separator()
+
+    def show_extract_menu(self, e):
+        """Right-click inside a kept Select box that selected no shape, a MIDI loaded: Extract alone."""
+        m = tk.Menu(self, tearoff=0)
+        self.extract_item(m)
         try:
             m.tk_popup(e.x_root, e.y_root)
         finally:

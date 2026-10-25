@@ -26,6 +26,8 @@ MARK_MOST = 1 << 26  # Keep timing's note ticks are marked this many ticks at a 
 SPARE = 2 << 30  # "Keep in memory" only with this much memory left over (user 2026-10-23)
 TEMPO, NAME, PORT, TIME_SIG, KEY_SIG = 0x51, 0x03, 0x21, 0x58, 0x59
 PAIRING = "fifo"  # how note-ons and note-offs are paired (first on, first off: Domino, user 2026-10-23); saved
+NO_LANES = (np.zeros(0, np.int64), np.zeros(0, np.int64))
+EXTRACT_ASK, EXTRACT_MOST = 1_000_000, 10_000_000  # Extract: asked past this many notes, refused past that many
 
 
 class TrackInfo:
@@ -54,6 +56,12 @@ class LoadedMidi:
         self.last_tick = max((t.last_tick for t in infos), default=0)
         self.first = min((t.first for t in infos if t.notes), default=0)
         self._anchors = None  # (anchors(): the note ticks, read once when first needed)
+        # (Extract: notes hidden, set_hidden. skip_all[skip_at[n]:skip_at[n + 1]] = track n's events left out
+        # (sorted byte places); h_* = every hidden note by track, then note-on place; hide_ver = changes count)
+        self.boxes, self._taken = (), {}
+        self.hide_ver = 0
+        self._set_hidden(np.zeros(0, np.int64), *(np.zeros(0, np.int64) for _ in range(6)))
+        self._level0 = None
 
     def counts(self):
         """What the summary says."""
@@ -135,6 +143,36 @@ class LoadedMidi:
         """What a project file keeps to find this MIDI again and know it's the same (never its notes)."""
         return {"path": self.path, "size": self.mf.size, "mtime": self.mf.mtime, "hash": file_hash(self.mf),
                 "mode": self.mode, "ppq": self.ppq, "pairing": PAIRING}
+
+    def _set_hidden(self, trk, s, e, lane, vel, on, off):
+        """The hidden notes (Extract) as the readers want them: sorted by track then note-on place."""
+        o = np.lexsort((on, trk))
+        self.h_trk, self.h_s, self.h_e, self.h_lane, self.h_vel, self.h_on, self.h_off = (
+            a[o] for a in (trk, s, e, lane, vel, on, off))
+        n = len(self.tracks)
+        self.h_at = np.searchsorted(self.h_trk, np.arange(n + 1)).astype(np.int64)
+        ev_t = np.concatenate([self.h_trk, self.h_trk[self.h_off >= 0]])
+        ev_p = np.concatenate([self.h_on, self.h_off[self.h_off >= 0]])
+        o = np.lexsort((ev_p, ev_t))
+        self.skip_all = np.ascontiguousarray(ev_p[o], np.int64)
+        self.skip_at = np.searchsorted(ev_t[o], np.arange(n + 1)).astype(np.int64)
+
+    def skip_of(self, n):
+        """Track n's hidden events (sorted byte places in the track)."""
+        return self.skip_all[self.skip_at[n]:self.skip_at[n + 1]]
+
+    def hidden_open(self, n, at):
+        """(lanes, counts) of track n's hidden notes sounding at byte place at (note-on before it, note-off at or
+        after it / never): a read starting there takes them off its checkpoint's counts."""
+        a, z = self.h_at[n], self.h_at[n + 1]
+        if a == z:
+            return NO_LANES
+        on, off = self.h_on[a:z], self.h_off[a:z]
+        k = int(np.searchsorted(on, at))  # (note-ons before it)
+        open_ = (off[:k] >= at) | (off[:k] < 0)
+        if not open_.any():
+            return NO_LANES
+        return np.unique(self.h_lane[a:z][:k][open_], return_counts=True)
 
     def channel_of(self, number):
         return self.tracks[number].channel
@@ -271,22 +309,27 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
             qs = t.e_q[e0:e1].astype(np.int64)
             cnt[qs] = t.e_cnt[e0:e1]
             since[qs] = t.cp_tick[j]
+            lanes, counts = lm.hidden_open(num, start)  # (extracted: not sounding)
+            cnt[lanes] -= counts
+            skip = lm.skip_of(num)
             st = np.zeros(midi_scan.BH_SIZE, np.int64)
             st[midi_scan.BH_TICK], st[midi_scan.BH_RUN] = t.cp_tick[j], t.cp_run[j]
             size = t.limit - start
             if t.data is not None:
                 b = t.data[start:t.limit]
-                busy(b, 0, len(b), t1, st, cnt, since, lane_at, s, e, top, hit)
+                busy(b, 0, len(b), start, skip, t1, st, cnt, since, lane_at, s, e, top, hit)
                 done += size
             elif size > 0:
                 reader = mf.pieces_of(f, mf.tracks[num].start + start, size, buf, watch)
                 filled, final = next(reader)
+                at = start
                 while True:
                     if cancel and cancel():
                         raise Cancelled()
                     view = np.frombuffer(buf, np.uint8, filled) if loops else memoryview(buf)[:filled]
-                    used = busy(view, 0, filled, t1, st, cnt, since, lane_at, s, e, top, hit)
+                    used = busy(view, 0, filled, at, skip, t1, st, cnt, since, lane_at, s, e, top, hit)
                     del view
+                    at += used
                     done += used
                     if progress:
                         progress(done, total)
@@ -305,6 +348,191 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
                     hit[a:z] |= ((s[a:z] < at) & (e[a:z] > since[q])).astype(np.uint8)
     lm.mf.same()
     return int(hit.sum())
+
+
+def clean_extract(v):
+    """A shape's "extract" (the loaded notes it took, Extract): {"boxes": [[t0, t1, k0, k1]] (ticks: note-ons in
+    t0 .. t1 - 1; keys k0..k1), "tracks": [numbers]}, checked; None when it can't be used."""
+    if not isinstance(v, dict) or not isinstance(v.get("boxes"), list) or not isinstance(v.get("tracks"), list):
+        return None
+    boxes = [[int(x) for x in b] for b in v["boxes"][:256] if isinstance(b, list) and len(b) == 4
+             and all(type(x) is int for x in b) and b[0] < b[1] and b[2] <= b[3]]
+    tracks = sorted({int(n) for n in v["tracks"] if type(n) is int and 0 <= n < 65536})
+    if not boxes or not tracks:
+        return None
+    return {"boxes": boxes, "tracks": tracks}
+
+
+def shape_boxes(shapes):
+    """Every box the shapes' "extract" hold, in order: the loaded notes hidden. A Gate sensitive merge's shapes
+    (kept inside it for Split, merge.py) count: its notes hold them."""
+    out = []
+    for sh in shapes:
+        if sh.get("extract"):
+            out += [{"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": sh["extract"]["tracks"]}
+                    for b in sh["extract"]["boxes"]]
+        for k in ("merge", "unmerge"):
+            if isinstance(sh.get(k), dict) and isinstance(sh[k].get("parts"), list):
+                out += shape_boxes([p for p in sh[k]["parts"] if isinstance(p, dict)])
+    return out
+
+
+def box_key(box):
+    """An Extract box (a shape's "extract": t0, t1 ticks, k0, k1 keys, tracks) as something to compare."""
+    return int(box["t0"]), int(box["t1"]), int(box["k0"]), int(box["k1"]), tuple(sorted(box["tracks"]))
+
+
+def boxes_meet(a, b):
+    """Two Extract boxes could hold the same notes (time, keys and tracks all overlap)."""
+    a, b = box_key(a), box_key(b)
+    return a[0] < b[1] and b[0] < a[1] and a[2] <= b[3] and b[2] <= a[3] and bool(set(a[4]) & set(b[4]))
+
+
+def gather_box(lm, box, cancel=None, progress=None):
+    """The notes an Extract box takes (note-on in ticks t0 .. t1 - 1, keys k0..k1, its tracks), each whole:
+    {"trk", "s", "e", "lane" (channel x 256 + key), "vel", "on", "off" (byte places; off -1 = never let go, e =
+    its track's end)} sorted by start; notes hidden already (another box) left out. Each track read from its
+    checkpoint before t0 until every note it took has ended."""
+    t0, t1, k0, k1, tracks = box_key(box)
+    loops = speed.loops()
+    run = loops.midi_gather if loops else midi_scan.gather
+    mf = lm.mf
+    chans = np.ones(16, np.uint8)
+    jobs = []
+    for n in tracks:
+        t = lm.tracks[n] if 0 <= n < len(lm.tracks) else None
+        if (t is None or not t.notes or t.end <= t0 or t.first >= t1 or t.khi < k0 or t.klo > k1
+                or not len(t.cp_off) or not mf.tracks[n].whole):  # (a damaged track is only ever copied whole)
+            continue
+        j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
+        jobs.append((n, t, j, int(t.cp_off[j])))
+    total, done = sum(t.limit - start for _, t, _, start in jobs), 0
+    got = []
+    buf = bytearray(PIECE)
+    with open(mf.path, "rb") as f:
+        watch = mf.watch()
+        for n, t, j, start in jobs:
+            old, newer = np.zeros(QS, np.int64), np.zeros(QS, np.int64)
+            e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
+            old[t.e_q[e0:e1].astype(np.int64)] = t.e_cnt[e0:e1]
+            lanes, counts = lm.hidden_open(n, start)
+            old[lanes] -= counts
+            head, tail = np.full(QS, -1, np.int64), np.full(QS, -1, np.int64)
+            size = 1 << 12
+            o = [np.zeros(size, np.int64) for _ in range(8)]  # (s, e, lane, vel, on, off, next, was)
+            o[7] = np.zeros(size, np.uint8)
+            st = np.zeros(midi_scan.GA_SIZE, np.int64)
+            st[midi_scan.GA_TICK], st[midi_scan.GA_RUN] = t.cp_tick[j], t.cp_run[j]
+            skip = lm.skip_of(n)
+            limit = t.limit - start
+            reader = None
+            if t.data is None:
+                reader = mf.pieces_of(f, mf.tracks[n].start + start, limit, buf, watch)
+                filled, final = next(reader)
+            else:
+                filled, final = limit, True
+            at = 0  # (the bytes read so far, before the piece)
+            while True:
+                if cancel and cancel():
+                    raise Cancelled()
+                if reader is None:
+                    view = t.data[start + at:t.limit]
+                else:
+                    view = np.frombuffer(buf, np.uint8, filled) if loops else memoryview(buf)[:filled]
+                used = run(view, 0, len(view), start + at, skip, t0, t1, k0, k1, chans, st, old, newer, head, tail,
+                           o[6], o[0], o[1], o[2], o[3], o[4], o[5], o[7])
+                del view
+                at += used
+                done += used
+                if progress:
+                    progress(done, total)
+                if st[midi_scan.GA_DONE]:
+                    break
+                full = st[midi_scan.GA_N] >= len(o[0])
+                if full:  # (bigger, on from where it stopped)
+                    if st[midi_scan.GA_N] > EXTRACT_MOST:
+                        break
+                    o = [np.concatenate([a, np.zeros(len(a), a.dtype)]) for a in o]
+                    if reader is None:
+                        continue
+                elif reader is None or (final and used >= filled):
+                    break
+                try:
+                    filled, final = reader.send(used)
+                except StopIteration:
+                    break
+            if reader is not None:
+                reader.close()
+            m = int(st[midi_scan.GA_N])
+            s, e, lane, vel, on, off, was = (a[:m] for a in (o[0], o[1], o[2], o[3], o[4], o[5], o[7]))
+            e = np.where(e < 0, max(int(st[midi_scan.GA_TICK]), t.last_tick), e)  # (never let go: its track's end)
+            keep = was == 0
+            got.append((np.full(int(keep.sum()), n, np.int64), s[keep], e[keep], lane[keep], vel[keep], on[keep],
+                        off[keep]))
+    mf.same()
+    keys = ("trk", "s", "e", "lane", "vel", "on", "off")
+    if not got:
+        return {k: np.zeros(0, np.int64) for k in keys}
+    cols = [np.concatenate([g[i] for g in got]) for i in range(7)]
+    o = np.argsort(cols[1], kind="stable")
+    return {k: c[o] for k, c in zip(keys, cols)}
+
+
+def set_boxes(lm, boxes, found=None):
+    """The loaded notes hidden = the ones these Extract boxes took (the shapes holding them now, in order); a box
+    not seen before is gathered (found = {box_key: gather_box's} made already). The overview loses them too."""
+    keys = [box_key(b) for b in boxes]
+    if tuple(keys) == lm.boxes:
+        return False
+    taken = {}
+    lm._taken.update(found or {})  # (every box read is kept: undo / redo bring them back without reading)
+    for b, k in zip(boxes, keys):
+        if k in taken:
+            continue
+        got = lm._taken.get(k)
+        if got is None:
+            got = lm._taken[k] = gather_box(lm, b)
+        taken[k] = got
+    lm.boxes = tuple(keys)
+    parts = list(taken.values())
+    cols = [np.concatenate([np.zeros(0, np.int64)] + [p[c] for p in parts]) for c in
+            ("trk", "s", "e", "lane", "vel", "on", "off")]
+    lm._set_hidden(*cols)
+    _hide_overview(lm, cols[0], cols[1], cols[2], cols[3])
+    lm.hide_ver += 1
+    return True
+
+
+def _hide_overview(lm, trk, s, e, lane):
+    """The overview without the hidden notes: each key's sounding count taken down over the buckets they cover
+    (as the loading pass counted them), a bucket with none left = empty; the halved levels made again."""
+    if lm._level0 is None:
+        if not len(trk):
+            return
+        lm._level0 = tuple(a.copy() for a in lm.levels[0])
+    cnt, top = (a.copy() for a in lm._level0)
+    G, ng = lm.G, cnt.shape[1]
+    g0 = s // G
+    ok = g0 < GRID_MOST - 1
+    if ok.any():
+        k = (lane & 255)[ok]
+        ee = np.maximum(e, s + 1)[ok]
+        a, z = g0[ok], np.minimum((ee - 1) // G + 1, GRID_MOST - 1)
+        d = np.zeros((cnt.shape[0], ng + 1), np.int64)
+        np.add.at(d, (k, np.minimum(a, ng)), 1)
+        np.add.at(d, (k, np.minimum(z, ng)), -1)
+        cnt = np.maximum(cnt - np.cumsum(d, axis=1)[:, :ng], 0).astype(cnt.dtype)
+        top = np.where(cnt > 0, top, -1).astype(top.dtype)
+    loops = speed.loops()
+    halve = loops.midi_halve if loops else midi_index.halve
+    levels = [(cnt, top)]
+    while cnt.shape[1] > 1:
+        n2 = (cnt.shape[1] + 1) // 2
+        c2, t2 = np.zeros((cnt.shape[0], n2), np.int32), np.zeros((cnt.shape[0], n2), np.int32)
+        halve(cnt, top, c2, t2)
+        levels.append((c2, t2))
+        cnt, top = c2, t2
+    lm.levels = levels
 
 
 def file_hash(mf):

@@ -31,6 +31,7 @@ from roll.roll_funnel import FunnelEditing
 from roll.roll_hz import HzStart
 from window import look
 from window.hz_window import open_hz
+from window.load_extract import can_extract
 from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
@@ -1889,12 +1890,26 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                         self.app.sels == sels and self.kept_box() == kept and show()))
             elif i is not None and sc["deselect"]:  # near a shape (or on its notes): its menu
                 self.show_menu(e, i)
+            elif sc["deselect"] and not self.draft and not self.app.sels and self.in_kept(sc["x"], sc["y"]) and can_extract(self.app):
+                # (a box over a loaded MIDI's notes alone: Extract; waits like the box menu for a double right-click)
+                kept = self.kept_box()
+                self.menu_wait = self.after(DOUBLE_MS, lambda: (
+                    setattr(self, "menu_wait", None), self.kept_box() == kept and self.show_extract_menu(e)))
             elif sc["deselect"]:
                 self.cancel_draft()
                 if not self.kept_box():  # (a Select box / ruler band stays with what it selected: user, like
                     self.app.select(None)  # many MIDI programs; a left click on empty space drops it)
         else:
             self.app.scrub_end()
+
+    def in_kept(self, x, y):
+        """(x, y) inside the kept Select boxes or on a ruler band's black part."""
+        kept = self.kept_box()
+        if not kept:
+            return False
+        rects = [self.box_rect(a) for a in kept if a not in self.ruler_boxes(kept)]
+        return bool(self.ruler_band(SimpleNamespace(x=x, y=y), kept)
+                    or rects and boxes_side(rects, x, y, 0) == (0, 0))
 
     def commit_draft(self):
         self.keep_draft()

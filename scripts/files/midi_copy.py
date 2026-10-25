@@ -27,12 +27,13 @@ def same_file(a, b):
         return False
 
 
-def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, added=None):
+def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, added=None, hidden=None):
     """Writes mf (a scanned MidiFile) to dst unchanged. walk = every readable track written event by event (what a
     changed track goes through) instead of copied: the result must be the very same bytes. progress(bytes done,
     bytes in all); cancel() True = Cancelled (dst untouched). retime (Retime): a changed tempo's tracks written
     again (old tempo events out, the new list in, ticks moved by Keep timing); the rest copied as it is. added
-    (Added): Spiderweb's own tracks put after the file's last track."""
+    (Added): Spiderweb's own tracks put after the file's last track. hidden(track number) = its events left out
+    (Extract: sorted byte places, midi_scan), written again without them."""
     if not mf.scanned:
         raise ValueError("scan() the file first")
     if same_file(mf.path, dst) or same_file(mf.path, dst + ".tmp"):  # (safefile's temp file: writing it would
@@ -45,7 +46,7 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
     need = mf.size + ROOM_SPARE + (added.size if added is not None else 0)
     if free < need:
         raise MidiError("midi.no_room", need=-(-need // 2 ** 20), free=free // 2 ** 20)
-    work = _Work(mf, walk, progress, cancel, retime, added)
+    work = _Work(mf, walk, progress, cancel, retime, added, hidden)
     try:
         safefile.write_bytes(dst, work.pieces())
     except OSError as e:
@@ -54,9 +55,10 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
 
 
 class _Work:
-    def __init__(self, mf, walk, progress, cancel, retime=None, added=None):
+    def __init__(self, mf, walk, progress, cancel, retime=None, added=None, hidden=None):
         self.mf, self.walk, self.progress, self.cancel, self.retime = mf, walk, progress, cancel, retime
         self.added = added
+        self.hidden = hidden or (lambda n: NO_SKIP)
         self.done, self.written = 0, 0
         self.buf = bytearray(PIECE)
         self.out = None
@@ -90,7 +92,8 @@ class _Work:
                 head = self.read_exact(f, t.head, 8)
                 rest.update(head)
                 rt = self.retime
-                changed = rt is not None and t.whole and (rt.bp is not None or t.number in rt.tracks)
+                changed = t.whole and ((rt is not None and (rt.bp is not None or t.number in rt.tracks))
+                                       or len(self.hidden(t.number)) > 0)
                 if (self.walk or changed) and t.whole:
                     # a changed track: its bytes READ are checked (it comes out different); else what's written
                     h = hashlib.blake2b(digest_size=16)
@@ -179,6 +182,7 @@ class _Work:
         use_map = rt is not None and rt.bp is not None
         drop = rt.drop if rt is not None else np.zeros(128, np.uint8)
         ins_t, ins_at, ins_b = (rt.inserts.get(t.number) if rt is not None else None) or NO_INSERTS
+        skip = np.ascontiguousarray(self.hidden(t.number), np.int64)
         buf = self.buf
         out = self.out_for(min(len(buf), t.size))
         st = np.zeros(midi_scan.RW_SIZE, np.int64)
@@ -190,7 +194,8 @@ class _Work:
                 view, oview = np.frombuffer(buf, np.uint8, filled), np.frombuffer(out, np.uint8)
             else:
                 view, oview = memoryview(buf)[:filled], out
-            used, o = rewrite(view, 0, filled, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, oview, 0, st)
+            used, o = rewrite(view, 0, filled, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, oview, 0, st,
+                              taken, skip)
             del view, oview
             if hin is not None and used:
                 hin.update(memoryview(buf)[:used])
@@ -243,6 +248,7 @@ class Added:
         return bytes(b)
 
 
+NO_SKIP = np.zeros(0, np.int64)
 NO_INSERTS = (np.zeros(0, np.int64), np.zeros(1, np.int64), np.zeros(0, np.uint8))
 
 

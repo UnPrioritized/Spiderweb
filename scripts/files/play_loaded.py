@@ -141,6 +141,9 @@ class LoadedPlayer:
         self.cp_off = cat([lm.tracks[n].cp_off for n in num])
         self.cp_run = cat([lm.tracks[n].cp_run for n in num])
         self.mode_file = lm.mode != "memory"
+        # (Extract: the hidden events, read as they were when playing started)
+        self.sk = lm.skip_all
+        self.sk_end = lm.skip_at[self.num + 1] if len(num) else np.zeros(0, np.int64)
 
     def _fill(self, buf, slots, at, size):
         """buf[at[j]:at[j] + size[j]] = slot j's bytes from its place (file: one read each; kept bytes: copied)."""
@@ -188,10 +191,11 @@ class LoadedPlayer:
                 self._fill(self._buf, ss, at, zz)
                 tick, run = self.tick[ss].copy(), self.run[ss].copy()
                 nxt, used = np.empty(len(ss), np.int64), np.empty(len(ss), np.int64)
+                sk_i = self.sk_i[ss].copy()
                 n = self._room(n, total // 2 + 2 * len(ss))
                 n = read(self._buf, at, zz, t1, tick, run, nxt, used, self.num32[ss], self._sc_t, self._sc_m,
-                         self._sc_k, n)
-                self.tick[ss], self.run[ss], self.nxt[ss] = tick, run, nxt
+                         self._sc_k, n, self.pos[ss], self.sk, sk_i, self.sk_end[ss])
+                self.tick[ss], self.run[ss], self.nxt[ss], self.sk_i[ss] = tick, run, nxt, sk_i
                 self.pos[ss] += used
                 # what this window still needs of them: cut short by the chunk / an event longer than read
                 done = self.pos[ss] >= self.limit[ss]
@@ -252,6 +256,12 @@ class LoadedPlayer:
                 q = t.e_q[a:b].astype(np.int64)
                 ok = q % 256 < 128
                 np.add.at(opened, s * 2048 + (q[ok] // 256) * 128 + q[ok] % 256, t.e_cnt[a:b][ok])
+                q, c = self.lm.hidden_open(int(self.num[s]), int(self.pos[s]))  # (extracted: not sounding)
+                ok = q % 256 < 128
+                np.add.at(opened, s * 2048 + (q[ok] // 256) * 128 + q[ok] % 256, -c[ok])
+        lm = self.lm
+        self.sk_i = np.array([lm.skip_at[n] + np.searchsorted(lm.skip_of(n), p) for n, p in
+                              zip(self.num.tolist(), self.pos.tolist())], np.int64).reshape(-1)
         ts, ms, ks = self._read(slots, t0)
         notes = (ms & 0xE0) == 0x80
         if notes.any():  # (what's still open at t0 sounds on past it; each slot's own count)

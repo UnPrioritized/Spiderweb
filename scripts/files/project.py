@@ -849,6 +849,8 @@ class ProjectFiles:
             self.tempo_pane.forget()
             self.tempo_changed()
         self.roll.forget_loaded()
+        from window.load_extract import sync_extract
+        sync_extract(self)  # (the project's extracted shapes: their notes hidden again)
         if str(lm.ppq) != self.pvar["ppq"].get():
             self.pvar["ppq"].set(str(lm.ppq))
         if lm.keys > 128 and self.keys == KEYS[0]:
@@ -1028,6 +1030,7 @@ class ProjectFiles:
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
                                  "plan": None, "step": "load.exporting", "hits": 0, "tracks": 0}
         use10, pad = self.picture_use10, self.pad_tracks()
+        left = lm.notes - len(lm.h_s)  # (the file's notes written: extracted ones left out)
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
         heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
@@ -1061,8 +1064,8 @@ class ProjectFiles:
                 job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),
-                             cancel=lambda: job["cancel"], retime=retime,
-                             added=added)  # (closing Spiderweb: its temp file goes)
+                             cancel=lambda: job["cancel"], retime=retime, added=added,
+                             hidden=lm.skip_of)  # (closing Spiderweb: its temp file goes)
             except BaseException as e:  # (said below)
                 job["error"] = e
             job["finished"] = True
@@ -1090,12 +1093,12 @@ class ProjectFiles:
                 messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
             elif e is None and job["plan"] is not None:
                 messagebox.showinfo(tr("project.spiderweb"), tr(
-                    "load.exported_tempo" if targets else "load.exported_sigs", path=path, notes=trn("n.notes", lm.notes, n=lm.notes),
+                    "load.exported_tempo" if targets else "load.exported_sigs", path=path, notes=trn("n.notes", left, n=left),
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
                     note=self.tempo_notes(job["plan"]) + own_note()))
             elif e is None:
                 messagebox.showinfo(tr("project.spiderweb"), tr("load.exported_own" if len(notes) else "load.exported",
-                                                                path=path, notes=trn("n.notes", lm.notes, n=lm.notes))
+                                                                path=path, notes=trn("n.notes", left, n=left))
                                     + own_note())
             elif isinstance(e, MidiError):
                 messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info))

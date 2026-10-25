@@ -9,7 +9,7 @@ emit   one step's events as raw MIDI bytes for each synth: thinned, muted and la
 
 import numpy as np
 
-def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n):
+def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base, sk, sk_i, sk_end):
     """Many tracks' whole channel events before tick t1 in one go (one Python call for hundreds of tracks: Shinki
     has ~800 busy ones in a slice of time). Track j's bytes = b[at[j]:at[j] + size[j]] (a track walk() read
     without BAD, from where it was), its tick / running status so far tick[j] / run[j] (moved on). Events into
@@ -17,14 +17,20 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n):
     program changes, bank select (CC 0 / 32: the piano plays everything, user 2026-10-11, and no other samples
     get loaded while playing), keys past 127 (a synth has 128), meta / sysex events. A track stops at its first
     event at or after t1 (nxt[j] = that tick, not read; else -1) or at one not wholly in its bytes; used[j] = its
-    bytes read. Returns n."""
+    bytes read. Hidden events (Extract, midi_scan): track j's are sk[sk_i[j]:sk_end[j]] (byte places in the track,
+    sk_i moved on), b[at[j]] = its byte base[j]. Returns n."""
     for j in range(len(at)):
         p = at[j]
         end = at[j] + size[j]
         tk = tick[j]
         rn = run[j]
         nxt[j] = -1
+        si = sk_i[j]
         while p < end:
+            pos = base[j] + p - at[j]
+            while si < sk_end[j] and sk[si] < pos:
+                si += 1
+            hid = si < sk_end[j] and sk[si] == pos
             q = p
             d = 0
             whole = True
@@ -62,6 +68,8 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n):
                 keep = hi != 0xC and not (hi == 0xB and (a == 0 or a == 32))
                 if (hi == 0x8 or hi == 0x9 or hi == 0xA) and a >= 128:
                     keep = False
+                if hid and (hi == 0x8 or hi == 0x9):
+                    keep = False
                 if keep:
                     out_t[n] = t
                     out_m[n] = s | (a & 127) << 8 | (v & 127) << 16
@@ -92,6 +100,7 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n):
         tick[j] = tk
         run[j] = rn
         used[j] = p - at[j]
+        sk_i[j] = si
     return n
 
 
