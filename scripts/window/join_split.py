@@ -640,6 +640,18 @@ class JoinSplit:
         return [i for i in sorted(self.sels) if i < len(self.shapes) and (sh := self.shapes[i])
                 and not sh.get("hz") and "picture" not in sh and not is_mask(sh)]
 
+    def fill_problem(self, way, same):
+        """Why Fill gaps would do nothing for the selection (the window's hint, Fill greyed), or None: the shown notes
+        (only where and when they sound matters here, not their channels)."""
+        got = self.fill_targets()
+        rows = self.rendered[np.isin(self.rendered[:, 5], got)] if got else self.rendered[:0]
+        if not len(rows):
+            return tr("fill_gaps.nothing")
+        out, at = filled(rows, way, same)
+        if len(at) == len(rows) and np.array_equal(out, rows[at]):
+            return tr("fill_gaps.no_gaps")
+        return None
+
     def fill_gaps(self, way, same):
         """Fill gaps (notes/fillgaps.py; window/fill_window.py): the selected shapes' notes as heard, every key row
         across all of them together, the gaps closed (way right / left / middle; same: which of the notes starting

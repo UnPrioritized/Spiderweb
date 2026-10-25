@@ -15,6 +15,7 @@ class FillWindow(tk.Toplevel):
         super().__init__(app)
         self.withdraw()
         self.app = app
+        self.seen = None  # what sync worked out the hint for
         app.fill_window = self
         self.title(tr("fill_gaps.title"))
         self.transient(app)
@@ -54,16 +55,22 @@ class FillWindow(tk.Toplevel):
     def sync(self):
         """The hint for the picked way, + why it can't fill (Fill greyed) / what's left out."""
         app = self.app
-        app.fill_way, app.fill_same = self.way.get(), self.same.get()
-        hint = tr("fill_gaps.hint_" + self.way.get())
+        way, same = self.way.get(), self.same.get()
+        app.fill_way, app.fill_same = way, same
+        seen = (way, same, tuple(sorted(app.sels)), app.shapes_gen, len(app.shapes))
+        if seen == self.seen:  # (worked out already: big shapes, every panel sync)
+            return
+        self.seen = seen
+        hint = tr("fill_gaps.hint_" + way)
         got = app.fill_targets()
         sels = [i for i in app.sels if i < len(app.shapes)]
-        if not got:
-            hint += "\n\n" + tr("fill_gaps.nothing")
-        elif len(got) < len(sels):
+        problem = app.fill_problem(way, same)
+        if got and len(got) < len(sels):
             hint += "\n\n" + tr("fill_gaps.left_out")
+        if problem:
+            hint += "\n\n" + problem
         self.hint.config(text=hint)
-        self.go.state(["!disabled"] if got else ["disabled"])
+        self.go.state(["disabled"] if problem else ["!disabled"])
 
     def enter(self, e):
         """Enter: the button that has the keyboard (Tab to Close + Enter = close), else Fill."""
