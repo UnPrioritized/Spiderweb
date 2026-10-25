@@ -36,7 +36,14 @@ HIGH_DATA = 128  # a data byte over 127 (keys 128-255 of 256 keys MIDIs)
 MOST_TICK = 1 << 48  # a track reaching a later tick is damaged (BAD)
 # cnt: counts of each kind
 C_EVENTS, C_ON, C_OFF, C_ON0, C_POLY, C_CC, C_PROG, C_PRESS, C_BEND, C_TEMPO, C_META, C_SYSEX, C_CHANNELS = range(13)
-C_SIZE = 13
+C_ADDED = 12  # (counts before this one add up over tracks; the rest are bits / states)
+# Instruments (user 2026-10-25: playback follows a loaded MIDI's program changes; their sounds are loaded before
+# playing, never while): programs used as bits (C_PROGS: channels but 10, C_KITS: channel 10's drum kits; 2 x 64
+# bits each), each channel's bank select now (C_BANK + channel: msb | lsb << 7) and its last program change
+# (C_PTICK + channel: its tick + 1, 0 = none; C_PVAL + channel: program | bank << 7, the bank in effect then)
+C_PROGS, C_KITS = 13, 15
+C_BANK, C_PTICK, C_PVAL = 17, 33, 49
+C_SIZE = 65
 
 
 def walk(b, p, end, final, rest, st, cnt):
@@ -117,8 +124,17 @@ def walk(b, p, end, final, rest, st, cnt):
                         cnt[C_POLY] += 1
                     elif hi == 0xB:
                         cnt[C_CC] += 1
+                        if b[q] == 0:
+                            cnt[C_BANK + ch] = (cnt[C_BANK + ch] & ~np.int64(127)) | (b[q + 1] & 127)
+                        elif b[q] == 32:
+                            cnt[C_BANK + ch] = (cnt[C_BANK + ch] & 127) | (np.int64(b[q + 1] & 127) << 7)
                     elif hi == 0xC:
                         cnt[C_PROG] += 1
+                        pg = np.int64(b[q] & 127)
+                        bits = C_KITS if ch == 9 else C_PROGS
+                        cnt[bits + (pg >> 6)] |= np.int64(1) << (pg & 63)
+                        cnt[C_PTICK + ch] = tick + d + 1
+                        cnt[C_PVAL + ch] = pg | (cnt[C_BANK + ch] << 7)
                     elif hi == 0xD:
                         cnt[C_PRESS] += 1
                     else:

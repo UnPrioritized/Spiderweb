@@ -36,7 +36,12 @@ SETTLE = 0.5  # seconds after the last change before the sound is made (a slider
 # second: sound made for each step was thrown away at once, user). Playing (Space) makes it at once.
 LOADED_SHOWN = 3.0  # seconds the green "soundfont loaded" stays
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # pieces made at once
-DEFAULTS = {"on": False, "font": "", "voices": 1000, "nofx": False, "volume": 0.8, "live_mb": 1000}
+DEFAULTS = {"on": False, "font": "", "more_fonts": [], "voices": 1000, "nofx": False, "volume": 0.8, "live_mb": 1000}
+
+
+def font_list(cfg):
+    """The soundfonts picked, first = used first: "font" + "more_fonts" (the ones under it, user 2026-10-25)."""
+    return [cfg["font"]] + [p for p in cfg.get("more_fonts", []) if p != cfg["font"]] if cfg["font"] else []
 VOICES = (1, 100000)  # the voice limit's range
 LIVE_MB = (100, 65536)  # the live keys' memory limit's range (MB)
 
@@ -47,6 +52,8 @@ def clean_settings(d):
     got = dict(DEFAULTS)
     if isinstance(d.get("font"), str):
         got["font"] = d["font"]
+    if isinstance(d.get("more_fonts"), list):
+        got["more_fonts"] = list(dict.fromkeys(p for p in d["more_fonts"] if isinstance(p, str) and p))
     if isinstance(d.get("voices"), int) and VOICES[0] <= d["voices"] <= VOICES[1]:
         got["voices"] = d["voices"]
     if isinstance(d.get("live_mb"), int) and LIVE_MB[0] <= d["live_mb"] <= LIVE_MB[1]:
@@ -115,25 +122,25 @@ class Preview:
         errors.note("Hz preview", f"on, voice limit {self.cfg['voices']}, no FX "
                                   f"{'on' if self.cfg['nofx'] else 'off'}, {WORKERS} pieces at once")
         self.clear()
-        if self.synth.needs_open(self.cfg["font"]) and not (self.load and self.load.is_alive()):
+        if self.synth.needs_open(font_list(self.cfg)) and not (self.load and self.load.is_alive()):
             self._load_font()  # (one still opening: tick opens the one picked once it's done)
         if not self._tick:
             self._tick = self.win.after(0, self.tick)
         return None
 
     def _load_font(self):
-        """The soundfont picked opened in the background (see loading)."""
-        font = self.cfg["font"]
-        self.load = threading.Thread(target=self._open_font, args=(font,), daemon=True)
-        self.load.error, self.load.path = None, font
+        """The soundfonts picked opened in the background (see loading)."""
+        fonts = font_list(self.cfg)
+        self.load = threading.Thread(target=self._open_font, args=(fonts,), daemon=True)
+        self.load.error, self.load.path, self.load.bad = None, fonts, None
         self.load.start()
 
-    def _open_font(self, path):
+    def _open_font(self, paths):
         try:
-            self.synth.set_font(path)
+            self.synth.set_fonts(paths)
             self.synth.warm_up()
         except SynthError as e:
-            self.load.error = str(e)
+            self.load.error, self.load.bad = str(e), e.path
 
     def loading(self):
         """True until tick has seen the soundfont open (then just_loaded)."""
@@ -297,11 +304,11 @@ class Preview:
         if not self.win.winfo_exists():
             return
         if self.load is not None and not self.load.is_alive():  # the soundfont is open (or failed)
-            err, path, self.load = self.load.error, self.load.path, None
-            if path != self.cfg["font"]:  # (another one was picked while it opened: that one now)
+            err, path, bad, self.load = self.load.error, self.load.path, self.load.bad, None
+            if path != font_list(self.cfg):  # (another one was picked while it opened: that one now)
                 self._load_font()
             elif err:
-                return self.win.preview_failed(err, font=True)
+                return self.win.preview_failed(err, font=bad or True)
             else:
                 self.loaded_at = time.perf_counter()
                 self.app.ring_check()  # (Auto's CC run-on: measured from it now if it isn't known)

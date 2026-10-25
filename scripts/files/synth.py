@@ -84,6 +84,7 @@ class SynthError(Exception):
     def __init__(self, key, **values):
         super().__init__(key)
         self.key, self.values = key, values
+        self.path = None  # (Synth.set_fonts: the soundfont that couldn't be read)
 
     def __str__(self):
         from files.lang import tr
@@ -245,21 +246,30 @@ def silent_list(path, bad):
     return "\n".join(lines) + "\n\n" + tr("synth.silent_why")
 
 
+def _paths(paths):
+    """A soundfont path or a list of them as a tuple, each once (the first place kept)."""
+    return tuple(dict.fromkeys([paths] if isinstance(paths, str) else paths))
+
+
 class Synth:
-    """BASS started once, with a soundfont. can_play = False when there's no sound device (render still works)."""
+    """BASS started once, with a list of soundfonts (user 2026-10-25, like a MIDI driver's: each note plays from the first
+    one down the list that has its instrument; none = silent, as in other players). font = their handles in that
+    order (() = none), font_paths = their files, font_path = the first one's. can_play = False when there's no
+    sound device (render still works)."""
 
     def __init__(self):
         self.bass, self.midi = load_dlls()
         self.play_device = None  # (BASS's number for the sound device, once it opened)
         if not self._init(_DEVICE_DEFAULT):
             self._init(_DEVICE_NONE)  # (sound can still be made, not played: the device is asked for again)
-        self.font, self.font_path = 0, None
-        self.opened = 0  # set_font calls so far (the same file opened again is a new font: see font_key)
+        self.font, self.font_paths, self.font_path = (), (), None
+        self.opened = 0  # set_fonts calls so far (the same file opened again is a new font: see font_key)
         self.stale = False  # True = open the soundfont again even if it's the same file (it was picked again)
         self._lock = threading.Lock()
         self._users = {}  # font -> renders using it now (an old font is only closed when none are left)
         self._old = set()  # fonts replaced, to close once unused
         self._loading = threading.Lock()  # samples loaded by one thread at a time (see _load_samples)
+        self._presets = set()  # (font, preset, bank) loaded by load_presets
 
     def _load_samples(self, h):
         """The samples stream h needs, loaded one thread at a time: six at once into one soundfont crashed (with
@@ -288,7 +298,45 @@ class Synth:
         return True
 
     def set_font(self, path):
-        """Opens a soundfont (.sf2 / .sfz); the old one is closed. SynthError if it can't be read."""
+        """Opens one soundfont (.sf2 / .sfz) alone, see set_fonts."""
+        self.set_fonts([path])
+
+    def set_fonts(self, paths):
+        """Opens the soundfonts (first = used first); ones no longer listed are closed, ones still listed stay open
+        (a big one takes a while), all opened again after a pick (stale). SynthError if one can't be read: then
+        the ones open before stay."""
+        paths = _paths(paths)
+        if self.stale:
+            self._close_first()
+        have = dict(zip(self.font_paths, self.font))
+        fonts, opened = [], []
+        try:
+            for path in paths:
+                if path not in have:
+                    have[path] = self._open(path)
+                    opened.append(have[path])
+                fonts.append(have[path])
+        except SynthError as e:
+            e.path = path
+            for f in opened:
+                self.midi.BASS_MIDI_FontFree(f)
+            raise
+        with self._lock:
+            old = set(self.font) - set(fonts)
+            self.font, self.font_paths, self.font_path = tuple(fonts), paths, paths[0] if paths else None
+            self.opened, self.stale = self.opened + 1, False
+            self._old |= old
+        self._free_unused()
+
+        def size(path):
+            try:
+                return f"{os.path.getsize(path) / 2 ** 20:.0f} MB"
+            except OSError:
+                return "size ?"
+        errors.note("soundfont", "; ".join(f"{os.path.basename(p)}, {size(p)}" for p in paths))
+
+    def _open(self, path):
+        """BASSMIDI's handle for one soundfont, checked. SynthError if it can't be read."""
         if path.lower().endswith(".sfz"):
             try:
                 spaced = sfz.read(path)[1]
@@ -296,8 +344,6 @@ class Synth:
                 spaced = False  # (BASSMIDI says it can't be read)
             if spaced:  # (opens, silent, and crashed Spiderweb when it was closed: refused before BASSMIDI sees it)
                 raise SynthError("synth.sfz_spaced", name=os.path.basename(path))
-        if path == self.font_path:
-            self._close_first()
         font = self._font_init(path)
         if not font:
             err = self.bass.BASS_ErrorGetCode()
@@ -314,28 +360,17 @@ class Synth:
                 self.bass.BASS_ErrorGetCode() == _ERROR_CODEC:
             self.midi.BASS_MIDI_FontFree(font)
             raise SynthError("synth.pack_codec", name=os.path.basename(path))
-        with self._lock:
-            old, self.font, self.font_path = self.font, font, path
-            self.opened, self.stale = self.opened + 1, False
-            if old:
-                self._old.add(old)
-        self._free_unused()
-        try:
-            size = f"{os.path.getsize(path) / 2 ** 20:.0f} MB"
-        except OSError:
-            size = "size ?"
-        errors.note("soundfont", f"{os.path.basename(path)}, {size}")
+        return font
 
     def _close_first(self, wait=3.0):
-        """The open soundfont closed before the same file is opened again: BASSMIDI shares sample files between
+        """The open soundfonts closed before the same files are opened again: BASSMIDI shares sample files between
         open copies, so a sample that failed stays silent while any copy is open (measured 2026-10-16). Sound
-        still being made with it is waited for (wait seconds at most; then it's closed once that ends)."""
+        still being made with them is waited for (wait seconds at most; then they're closed once that ends)."""
         with self._lock:
-            old, self.font = self.font, 0
-            if old:
-                self._old.add(old)
+            old, self.font, self.font_paths, self.font_path = self.font, (), (), None
+            self._old |= set(old)
         end = time.monotonic() + wait
-        while old and self._users.get(old) and time.monotonic() < end:
+        while any(self._users.get(f) for f in old) and time.monotonic() < end:
             time.sleep(0.02)
         self._free_unused()
 
@@ -345,15 +380,21 @@ class Synth:
         return (self.midi.BASS_MIDI_FontInit(path, _UNICODE) if WINDOWS else
                 self.midi.BASS_MIDI_FontInit(os.fsencode(path), 0))
 
-    def needs_open(self, path):
-        """True when path isn't the open soundfont, or it was picked again (BASSMIDI keeps a sample that failed
-        once silent until the font is opened anew, also after the file comes back: hunt 2026-10-16)."""
-        return self.font_path != path or self.stale
+    def needs_open(self, paths):
+        """True when paths (one or a list) aren't the open soundfonts, or they were picked again (BASSMIDI keeps a
+        sample that failed once silent until the font is opened anew, also after the file comes back: hunt
+        2026-10-16)."""
+        return self.font_paths != _paths(paths) or self.stale
 
     @property
     def font_key(self):
-        """Which opening of which soundfont is in use (None = none): recordings of it are good while it's the same."""
-        return (self.font_path, self.opened) if self.font_path else None
+        """Which opening of which soundfonts is in use (None = none): recordings of it are good while it's the same."""
+        return (self.font_paths, self.opened) if self.font_paths else None
+
+    def set_stream_fonts(self, h, fonts):
+        """Stream h plays from fonts (handles, first = used first), every preset of each."""
+        arr = (_Font * len(fonts))(*[_Font(f, -1, 0) for f in fonts])
+        self.midi.BASS_MIDI_StreamSetFonts(h, arr, len(fonts))
 
     def silent_samples(self, path, cancel=None):
         """(An .sfz) (samples, [(file name, "missing" / "unreadable")], refused): the sample files it names that the
@@ -387,21 +428,24 @@ class Synth:
         return len(names), bad, refused
 
     def _take(self):
-        """The font to use, counted as in use until _give."""
+        """The fonts to use, counted as in use until _give."""
         with self._lock:
-            font = self.font
-            self._users[font] = self._users.get(font, 0) + 1
-        return font
+            fonts = self.font
+            for f in fonts:
+                self._users[f] = self._users.get(f, 0) + 1
+        return fonts
 
-    def _give(self, font):
+    def _give(self, fonts):
         with self._lock:
-            self._users[font] -= 1
+            for f in fonts:
+                self._users[f] -= 1
         self._free_unused()
 
     def _free_unused(self):
         with self._lock:
             gone = [f for f in self._old if not self._users.get(f)]
             self._old.difference_update(gone)
+            self._presets = {k for k in self._presets if k[0] not in gone}  # (a handle may be given out again)
         for f in gone:
             self.midi.BASS_MIDI_FontFree(f)
 
@@ -411,11 +455,26 @@ class Synth:
         h = self.midi.BASS_MIDI_StreamCreateEvents(ev.ctypes.data, 960, _STREAM_DECODE | _SAMPLE_FLOAT, RATE)
         if h:
             used = self._take()
-            font = _Font(used, -1, 0)
-            self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
+            self.set_stream_fonts(h, used)
             self._load_samples(h)
             self.bass.BASS_StreamFree(h)
             self._give(used)
+
+    def load_presets(self, programs, kits):
+        """The sounds of these programs (every bank) and drum kits (bank 128) loaded into every open soundfont now,
+        one thread at a time (_load_samples' rule), so playing a file that switches to them never loads any (a
+        loaded MIDI's program changes, play_loaded.preload). Ones a soundfont hasn't: skipped. Loaded once per
+        opening of a soundfont."""
+        fonts = self._take()
+        try:
+            with self._loading:
+                for f in fonts:
+                    for preset, bank in [(p, -1) for p in sorted(programs)] + [(k, 128) for k in sorted(kits)]:
+                        if (f, preset, bank) not in self._presets:
+                            self.midi.BASS_MIDI_FontLoad(f, preset, bank)
+                            self._presets.add((f, preset, bank))
+        finally:
+            self._give(fonts)
 
     def ring_after(self, keys, most):
         """Seconds the soundfont's sound (program 0, no reverb / chorus) goes on after a note is let go: the longest
@@ -444,8 +503,7 @@ class Synth:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
         sf = self._take()
         try:
-            font = _Font(sf, -1, 0)
-            self.midi.BASS_MIDI_StreamSetFonts(h, ctypes.byref(font), 1)
+            self.set_stream_fonts(h, sf)
             bass.BASS_ChannelSetAttribute(h, _ATTRIB_MIDI_VOICES, float(voices))
             self._load_samples(h)
             # past the last note (the stream can't jump there): from PREROLL before the last note ends, so the
@@ -481,10 +539,10 @@ class Synth:
 
     def close(self):
         """(After every render has finished.)"""
-        for f in self._old | ({self.font} if self.font else set()):
+        for f in self._old | set(self.font):
             self.midi.BASS_MIDI_FontFree(f)
         self._old.clear()
-        self.font = 0
+        self.font, self.font_paths, self.font_path = (), (), None
         self.bass.BASS_Free()
 
 
@@ -699,14 +757,13 @@ class Live:
         if not synth.can_play:
             raise SynthError("synth.no_device")
         bass, midi = synth.bass, synth.midi
-        self.synth, self.font_path = synth, synth.font_path
+        self.synth, self.font_path, self.font_paths = synth, synth.font_path, synth.font_paths
         self.handle = midi.BASS_MIDI_StreamCreate(16 if plain else LIVE_CHANNELS,
                                                   _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0), RATE)
         if not self.handle:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
         self.font = synth._take()
-        font = _Font(self.font, -1, 0)
-        midi.BASS_MIDI_StreamSetFonts(self.handle, ctypes.byref(font), 1)
+        synth.set_stream_fonts(self.handle, self.font)
         h, at = self.handle, bass.BASS_ChannelSetAttribute
         if plain and bass.BASS_GetConfig(_CONFIG_UPDATEPERIOD) > GROUP_PERIOD:
             bass.BASS_SetConfig(_CONFIG_UPDATEPERIOD, GROUP_PERIOD)

@@ -5,7 +5,6 @@ synth while it plays: when it can't make the sound as fast as it plays (busy spa
 saved in user/settings.ini [sound]."""
 
 import collections
-import os
 import threading
 import time
 from tkinter import ttk
@@ -14,6 +13,7 @@ from files import speed
 from files.lang import tr
 from files.synth import RATE
 from window import look
+from window.font_list import FontList
 from window.hz_preview import VOICES
 from window.widgets import Scrub, Tooltip
 
@@ -31,17 +31,13 @@ class BuiltinPanel(ttk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
-        s = app.scale
         box = self
         box.columnconfigure(1, weight=1)
         r = 0
 
-        ttk.Label(box, text=tr("ps.font")).grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
-        self.font_name = ttk.Label(box, text="", wraplength=round(250 * s))
-        self.font_name.grid(row=r, column=1, sticky="w", pady=3)
-        b = ttk.Button(box, text=tr("ps.change"), command=app.pick_soundfont)
-        b.grid(row=r, column=2, sticky="w", padx=(8, 0), pady=3)
-        Tooltip(b, tr("bs.change_tip"))
+        ttk.Label(box, text=tr("ps.fonts")).grid(row=r, column=0, sticky="ne", padx=(0, 8), pady=3)
+        self.fonts = FontList(box, app)  # (shared with the Hz bass preview)
+        self.fonts.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
         r += 1
 
         lb = ttk.Label(box, text=tr("ps.voices"))
@@ -98,10 +94,7 @@ class BuiltinPanel(ttk.Frame):
     def refresh(self):
         if not self.winfo_exists():
             return
-        font = self.app.hz_preview["font"]
-        name = os.path.basename(font) if font else tr("ps.no_font")
-        if self.font_name.cget("text") != name:
-            self.font_name.config(text=name)
+        self.fonts.refresh()
         text = self.app.overload_text
         if self.state.cget("text") != text:
             self.state.config(text=text)

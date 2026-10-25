@@ -378,15 +378,24 @@ class MidiFile:
                 "tracks": [t.hash for t in self.tracks], "rest": self.raw_hash}
 
     def counts(self):
-        """All tracks' counts added (midi_scan.C_*; channels = the channels used, as bits)."""
+        """All tracks' counts added (midi_scan.C_*; channels = the channels used, programs / drum kits used: as bits;
+        the per-channel states left 0)."""
         out = np.zeros(C_SIZE, np.int64)
-        channels = 0
+        bits = [midi_scan.C_CHANNELS, midi_scan.C_PROGS, midi_scan.C_PROGS + 1, midi_scan.C_KITS, midi_scan.C_KITS + 1]
         for t in self.tracks:
             if t.counts is not None:
-                out += t.counts
-                channels |= int(t.counts[midi_scan.C_CHANNELS])
-        out[midi_scan.C_CHANNELS] = channels
+                out[:midi_scan.C_ADDED] += t.counts[:midi_scan.C_ADDED]
+                out[bits] |= t.counts[bits]
         return out
+
+    def programs(self):
+        """(programs, drum kits) the file's program changes use, as sets (program 0 / kit 0 not counted unless
+        changed to)."""
+        c = self.counts()
+
+        def of(at):
+            return {k for k in range(128) if int(c[at + (k >> 6)]) >> (k & 63) & 1}
+        return of(midi_scan.C_PROGS), of(midi_scan.C_KITS)
 
     def damaged(self):
         """Tracks that can't be read to their end (BAD / CUT)."""

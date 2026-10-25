@@ -27,7 +27,7 @@ import numpy as np
 
 from files import midi_play, speed
 from files.synth import GROUP_BUFFER, RATE
-from files.midi_scan import C_BEND, C_CC, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS
+from files.midi_scan import C_BEND, C_CC, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS, C_PROG, C_PTICK, C_PVAL
 
 STEP_S = 0.003  # the feeder's beat
 AHEAD_S = 1.0  # read this far ahead of the play line at most
@@ -70,8 +70,17 @@ READY_S = 0.5  # seconds of the song read before the play line starts
 def _loops():
     fast = speed.loops()
     if fast is not None:
-        return fast.play_read, fast.play_order, fast.play_hist, fast.play_emit
-    return midi_play.read, midi_play.order, midi_play.hist, midi_play.emit
+        return fast.play_read, fast.play_order, fast.play_hist, fast.play_emit, fast.play_programs
+    return midi_play.read, midi_play.order, midi_play.hist, midi_play.emit, midi_play.programs
+
+
+def preload(synth, lm):
+    """The sounds of every instrument lm's program changes ask for (and the piano / drum kit 0 they start with)
+    loaded into each soundfont BEFORE playing (user 2026-10-25: playback follows the file's instruments; samples
+    loaded while playing, in BASS's threads, crashed with an SFZ before). A soundfont without one: skipped there
+    (that instrument comes from the next soundfont, or stays silent, like other players)."""
+    progs, kits = lm.mf.programs()
+    synth.load_presets(progs | {0}, kits | {0})
 
 
 def track_ports(lm):
@@ -85,7 +94,8 @@ def track_ports(lm):
 def playable(mt):
     """A track with channel events to play (midi_scan's counts)."""
     c = mt.counts
-    return c is not None and int(c[C_ON] + c[C_OFF] + c[C_ON0] + c[C_POLY] + c[C_CC] + c[C_PRESS] + c[C_BEND]) > 0
+    return c is not None and int(c[C_ON] + c[C_OFF] + c[C_ON0] + c[C_POLY] + c[C_CC] + c[C_PROG] + c[C_PRESS]
+                                 + c[C_BEND]) > 0
 
 
 class LoadedPlayer:
@@ -273,9 +283,12 @@ class LoadedPlayer:
         lm = self.lm
         self.sk_i = np.array([lm.skip_at[n] + np.searchsorted(lm.skip_of(n), p) for n, p in
                               zip(self.num.tolist(), self.pos.tolist())], np.int64).reshape(-1)
+        before = self._instruments(self.pos.copy(), self.tick.copy())
         # (notes only counted on the way: what's still open at t0 sounds on past it, each slot's own count; a
         # dense part's millions of notes are never kept, hunt 2026-10-25: 1.9 GB to start inside Shinki's wall)
         ts, ms, ks = self._read(slots, t0, count=opened)
+        if len(before[0]):
+            ts, ms, ks = (np.concatenate([a, b]) for a, b in zip(before, (ts, ms, ks)))
         np.maximum(opened, 0, out=opened)
         skip = np.zeros(SKIP, np.int64)
         live = np.flatnonzero(opened)
@@ -284,6 +297,58 @@ class LoadedPlayer:
             np.add.at(skip, port * 2048 + live % 2048, opened[live])
         o = np.argsort(ts, kind="stable")
         return skip, (ts[o].copy(), ms[o].copy(), ks[o].copy())
+
+    def _instruments(self, pos, tick):
+        """The program changes (with their bank select) in effect at each slot's checkpoint (pos / tick: where its
+        reading starts; the ones after it are read with the rest): (ticks, messages, track numbers), sent before
+        anything else when playing starts there. From the load pass's last change per channel (midi_scan C_PTICK /
+        C_PVAL) when it came before the checkpoint, else the track walked up to it (midi_play.programs)."""
+        out = []
+        for s in np.flatnonzero(pos > 0).tolist():
+            n = int(self.num[s])
+            c = self.lm.mf.tracks[n].counts
+            if not int(c[C_PROG]):
+                continue
+            last = c[C_PTICK:C_PTICK + 16] - 1
+            if (last >= tick[s]).any():  # (a change at / after the checkpoint: its state there walked)
+                st = self._walk_programs(s, int(pos[s]))
+                last, vals = st[midi_play.PS_PTICK:midi_play.PS_PTICK + 16] - 1, st[midi_play.PS_PVAL:]
+            else:
+                vals = c[C_PVAL:C_PVAL + 16]
+            for ch in np.flatnonzero(last >= 0).tolist():
+                v, t = int(vals[ch]), int(last[ch])
+                bank = v >> 7
+                for m in (0xB0 | ch | (bank & 127) << 16, 0xB0 | ch | 32 << 8 | (bank >> 7 & 127) << 16,
+                          0xC0 | ch | (v & 127) << 8):
+                    out.append((t, m, n))
+        if not out:
+            return np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32)
+        a = np.array(out, np.int64)
+        return a[:, 0].copy(), a[:, 1].astype(np.int32), a[:, 2].astype(np.int32)
+
+    def _walk_programs(self, s, upto):
+        """midi_play.programs over slot s's bytes before byte place upto (its checkpoint), a piece at a time."""
+        walk = _loops()[4]
+        st = np.zeros(midi_play.PS_SIZE, np.int64)
+        n, p = int(self.num[s]), 0
+        buf = np.empty(min(CHUNK, max(upto, 1)), np.uint8)
+        while p < upto:
+            z = min(len(buf), upto - p)
+            if self.mode_file:
+                self._file.seek(int(self.start_of[s]) + p)
+                got = self._file.readinto(memoryview(buf)[:z])
+                if got < z:
+                    break
+            else:
+                buf[:z] = np.frombuffer(self.lm.tracks[n].data[p:p + z], np.uint8)
+            used = walk(buf, 0, z, st)
+            if used == 0:
+                if len(buf) >= upto - p or len(buf) >= 1 << 28:  # (an event past the place / too big: done)
+                    break
+                buf = np.empty(2 * len(buf), np.uint8)
+                continue
+            p += used
+        return st
 
     def _reader(self, t0):
         self._buf, self._file = None, None
@@ -411,18 +476,21 @@ class LoadedPlayer:
 
     def silence(self, reset=False):
         """Every sound of the file stopped (sustain let go, all notes off: their release still rings); reset = the
-        controllers back to where players start (before playing from a new place)."""
+        controllers back to where players start (before playing from a new place), the piano on every channel (the
+        instruments in effect there come with the controllers: _place)."""
         msgs = [(0xB0, 64, 0), (0xB0, 123, 0)]
         if reset:
-            msgs += [(0xB0, 121, 0), (0xB0, 7, 100), (0xB0, 10, 64), (0xE0, 0, 64)]
-        raw = bytes(b for ch in range(16) for s, a, v in msgs for b in (s | ch, a, v))
+            msgs += [(0xB0, 121, 0), (0xB0, 7, 100), (0xB0, 10, 64), (0xE0, 0, 64), (0xB0, 0, 0), (0xB0, 32, 0),
+                     (0xC0, 0)]
         if self.sinks:
+            raw = bytes(b for ch in range(16) for m in msgs for b in (m[0] | ch,) + m[1:])
             buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
             for live in self.sinks:
                 live.send_raw(ctypes.addressof(buf), len(raw))
         else:
-            for i in range(0, len(raw), 3):
-                self.out.send(raw[i] | raw[i + 1] << 8 | raw[i + 2] << 16)
+            for ch in range(16):
+                for m in msgs:
+                    self.out.send(m[0] | ch | m[1] << 8 | (m[2] if len(m) > 2 else 0) << 16)
 
     def _feeder(self):
         hist, emit = _loops()[2], _loops()[3]
@@ -440,7 +508,7 @@ class LoadedPlayer:
         behind = np.zeros(K, bool)  # (backed up lately: never a bigger one then)
         if self.sinks:  # each synth's ceiling (learned last play), its place in its sound, checks without loss
             first = self.sinks[0]
-            caps_key = (K, getattr(first, "voices", None), getattr(first, "font_path", None))
+            caps_key = (K, getattr(first, "voices", None), getattr(first, "font_paths", None))
             got = _caps.get(caps_key)
             cap = np.array(got if got is not None else [BUDGET_MOST] * K, np.float64)
             pos = [(time.perf_counter(), live.position()) for live in self.sinks]

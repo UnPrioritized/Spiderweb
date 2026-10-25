@@ -299,7 +299,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
         self.out = MidiOut(self.make_live)
-        self.font_failed = False  # (make_live: the soundfont couldn't be read)
+        self.font_failed = None  # (make_live: the soundfont that couldn't be read)
         self.player = Player(self.out)
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)

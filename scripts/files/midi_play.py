@@ -1,7 +1,8 @@
 """The byte loops for playing a loaded MIDI (Load MIDI group D). Plain Python here; files/fastloops.py compiles the
 very same functions with Numba (play_read / play_order / play_hist / play_emit), so both give identical results.
 
-read   many tracks' channel events from their bytes, up to a tick (what playing needs: no programs, no bank select)
+read   many tracks' channel events from their bytes, up to a tick (what playing needs)
+programs  a track's program / bank state at a byte place (where playing starts: the instruments in effect there)
 order  events of many tracks put in tick order (counting sort: each track's own order kept, earlier tracks first)
 hist   how many note-ons each synth gets in one step, by velocity (the note budget's thinning)
 emit   one step's events as raw MIDI bytes for each synth: thinned, muted and late notes left out together with
@@ -14,9 +15,9 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base
     """Many tracks' whole channel events before tick t1 in one go (one Python call for hundreds of tracks: Shinki
     has ~800 busy ones in a slice of time). Track j's bytes = b[at[j]:at[j] + size[j]] (a track walk() read
     without BAD, from where it was), its tick / running status so far tick[j] / run[j] (moved on). Events into
-    out_t (ticks) / out_m (status | data 1 << 8 | data 2 << 16) / out_k (kn[j], its track) from n. Left out:
-    program changes, bank select (CC 0 / 32: the piano plays everything, user 2026-10-11, and no other samples
-    get loaded while playing), keys past 127 (a synth has 128), meta / sysex events. A track stops at its first
+    out_t (ticks) / out_m (status | data 1 << 8 | data 2 << 16) / out_k (kn[j], its track) from n. Program changes
+    and bank select are kept (user 2026-10-25: the file's instruments play; their sounds are loaded before playing,
+    play_loaded.preload). Left out: keys past 127 (a synth has 128), meta / sysex events. A track stops at its first
     event at or after t1 (nxt[j] = that tick, not read; else -1) or at one not wholly in its bytes; used[j] = its
     bytes read. Hidden events (Extract, midi_scan): track j's are sk[sk_i[j]:sk_end[j]] (byte places in the track,
     sk_i moved on), b[at[j]] = its byte base[j]. count: notes only counted, never kept (finding where playing
@@ -68,7 +69,7 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base
                     rn = s
                 a = np.int64(b[q])
                 v = np.int64(b[q + 1]) if need == 2 else np.int64(0)
-                keep = hi != 0xC and not (hi == 0xB and (a == 0 or a == 32))
+                keep = True
                 if (hi == 0x8 or hi == 0x9 or hi == 0xA) and a >= 128:
                     keep = False
                 if hid and (hi == 0x8 or hi == 0x9):
@@ -113,6 +114,82 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base
         used[j] = p - at[j]
         sk_i[j] = si
     return n
+
+
+PS_TICK, PS_RUN, PS_BANK, PS_PTICK, PS_PVAL = 0, 1, 2, 18, 34  # programs(): st, as midi_scan's C_BANK / C_PTICK /
+PS_SIZE = 50  # C_PVAL per channel
+
+
+def programs(b, p, end, st):
+    """The whole events in b[p:end] (a track's bytes from its start, piece after piece: st carries on) walked for
+    the instruments: each channel's bank select now and its last program change (st[PS_PTICK + channel] = its tick
+    + 1, 0 = none; st[PS_PVAL + channel] = program | bank << 7). Returns where it stopped (an event not wholly in b:
+    call again with more from there)."""
+    tk = st[PS_TICK]
+    rn = st[PS_RUN]
+    while p < end:
+        q = p
+        d = 0
+        whole = True
+        while True:
+            if q >= end:
+                whole = False
+                break
+            c = np.int64(b[q])
+            q += 1
+            d = (d << 7) | (c & 127)
+            if c < 128:
+                break
+        if not whole or q >= end:
+            break
+        s = np.int64(b[q])
+        if s >= 128:
+            q += 1
+        else:
+            s = rn
+        if s < 0xF0:
+            hi = s >> 4
+            need = 1 if hi == 0xC or hi == 0xD else 2
+            if q + need > end:
+                break
+            if s >= 128:
+                rn = s
+            ch = s & 15
+            a = np.int64(b[q]) & 127
+            if hi == 0xB and need == 2:
+                v = np.int64(b[q + 1]) & 127
+                if a == 0:
+                    st[PS_BANK + ch] = (st[PS_BANK + ch] & ~np.int64(127)) | v
+                elif a == 32:
+                    st[PS_BANK + ch] = (st[PS_BANK + ch] & 127) | (v << 7)
+            elif hi == 0xC:
+                st[PS_PTICK + ch] = tk + d + 1
+                st[PS_PVAL + ch] = a | (st[PS_BANK + ch] << 7)
+            q += need
+        else:
+            if s == 0xFF:
+                if q >= end:
+                    break
+                q += 1
+            ln = 0
+            whole = True
+            while True:
+                if q >= end:
+                    whole = False
+                    break
+                c = np.int64(b[q])
+                q += 1
+                ln = (ln << 7) | (c & 127)
+                if c < 128:
+                    break
+            q += ln
+            if not whole or q > end:
+                break
+        tk += d
+        p = q
+    st[PS_TICK] = tk
+    st[PS_RUN] = rn
+    return p
 
 
 def order(ticks, ms, ks, base, span, out_t, out_m, out_k):
@@ -162,7 +239,7 @@ def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room,
         hi = s >> 4
         ch = s & 15
         port = tport[trk[i]]
-        size = 2 if hi == 0xD and not three else 3
+        size = 2 if (hi == 0xC or hi == 0xD) and not three else 3
         if hi == 0x8 or hi == 0x9 or hi == 0xA:
             key = (m >> 8) & 127
             # (the synth: the synths in blocks, one per port; each channel's block turned by its number, so a busy

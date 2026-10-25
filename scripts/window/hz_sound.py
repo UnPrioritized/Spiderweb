@@ -97,13 +97,14 @@ class HzSound:
         self.redraw()
         self.canvas.focus_set()  # (so Space plays)
 
-    def ask_font(self):
-        """The soundfont picker: True when one was picked (it's the preview's now)."""
-        return self.app.ask_soundfont(self, "hz.preview_pick_font")
+    def ask_font(self, replace=None):
+        """The soundfont picker: True when one was picked (in place of replace, else of the top one)."""
+        return self.app.ask_soundfont(self, "hz.preview_pick_font", replace)
 
     def preview_failed(self, err, font=False):
-        """The synth or the soundfont didn't work: the preview goes off and says why. font: the soundfont couldn't
-        be opened: another one is offered (else the same file was tried again at every switch-on)."""
+        """The synth or the soundfont didn't work: the preview goes off and says why. font: a soundfont couldn't be
+        opened (its path, or True): another one is offered in its place (else the same file was tried again at
+        every switch-on)."""
         self.preview_on.set(False)
         self.app.hz_preview["on"] = False
         self.preview.stop()
@@ -111,7 +112,8 @@ class HzSound:
         if not font:
             return messagebox.showerror(tr("hz.window_title"), err, parent=self)
         if messagebox.askyesno(tr("hz.window_title"), err + "\n\n" + tr("hz.preview_other_font"), icon="error",
-                               parent=self) and self.winfo_exists() and self.ask_font():
+                               parent=self) and self.winfo_exists() and \
+                self.ask_font(font if isinstance(font, str) else None):
             self.preview_on.set(True)
             self.on_preview()
 

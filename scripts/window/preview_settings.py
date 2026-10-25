@@ -10,7 +10,6 @@
   recordings kept), updated while it works so a changed voice limit shows its effect at once. These are program
   settings, not the project's: no undo, kept with the window settings in the autosave."""
 
-import os
 import tkinter as tk
 from tkinter import ttk
 
@@ -19,6 +18,7 @@ from files.mathexpr import calc, fmt
 from notes.hz_cc import RING, ring_of, typed_ring
 from notes.hzbass import AUTO_MOST, RING_MOST
 from window import look
+from window.font_list import FontList
 from window.hz_gates import GATE_MODES
 from window.hz_preview import LIVE_MB, VOICES, WORKERS
 from window.hz_trace import open_trace
@@ -151,12 +151,9 @@ class PreviewSettings(tk.Toplevel):
         r += 1
         head(tr("ps.preview_head"), r, 8)
         r += 1
-        ttk.Label(box, text=tr("ps.font")).grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
-        self.font_name = ttk.Label(box, text="", wraplength=round(250 * s))
-        self.font_name.grid(row=r, column=1, sticky="w", pady=3)
-        b = ttk.Button(box, text=tr("ps.change"), command=self.pick_font)
-        b.grid(row=r, column=2, sticky="w", padx=(8, 0), pady=3)
-        Tooltip(b, tr("ps.change_tip"))
+        ttk.Label(box, text=tr("ps.fonts")).grid(row=r, column=0, sticky="ne", padx=(0, 8), pady=3)
+        self.fonts = FontList(box, app)  # (shared with Built-in BASSMIDI: set_soundfonts makes the sound again)
+        self.fonts.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
         r += 1
 
         lb = ttk.Label(box, text=tr("ps.voices"))
@@ -240,9 +237,7 @@ class PreviewSettings(tk.Toplevel):
         if not self.winfo_exists() or not self.winfo_viewable():
             return
         cfg, p = self.app.hz_preview, self.win.preview
-        name = os.path.basename(cfg["font"]) if cfg["font"] else tr("ps.no_font")
-        if self.font_name.cget("text") != name:
-            self.font_name.config(text=name)
+        self.fonts.refresh()
         limit = cfg["voices"]
         if not self.win.preview_on.get():
             used, colour = tr("ps.off"), look.INFO
@@ -326,10 +321,6 @@ class PreviewSettings(tk.Toplevel):
         v = round(v, 2)  # (as the box shows it: leaving it unchanged changes nothing)
         self.ring_var.set(fmt(v))
         self.win.put_lengths(tr("hz.step_ring"), ring=v)
-
-    def pick_font(self):
-        if self.app.ask_soundfont(self, "hz.preview_pick_font"):
-            self.remake()
 
     def on_voices(self):
         try:

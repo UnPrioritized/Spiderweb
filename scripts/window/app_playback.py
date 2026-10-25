@@ -16,7 +16,7 @@ from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
 from notes.tempo_file import heard_tempo
-from window.hz_preview import VOICES
+from window.hz_preview import VOICES, font_list
 from window.widgets import bad, good
 
 RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's CC run-on (the longest counts)
@@ -59,7 +59,7 @@ class Playback:
         err = self.out.open(dev)
         while err and dev == BUILTIN and self.font_failed:  # (moved, gone or broken: offer another, hunt 2026-10-09)
             if not messagebox.askyesno(tr("app.spiderweb_2"), err + "\n\n" + tr("synth.pick_other"), parent=self) \
-                    or not self.pick_soundfont():
+                    or not self.pick_soundfont(self.font_failed):
                 return
             err = self.out.open(dev)
         if err:
@@ -109,13 +109,14 @@ class Playback:
         """The loaded MIDI plays along from tick t0, the play line (files/play_loaded.py): Built-in BASSMIDI = its
         own synths side by side (a LiveGroup, opened for each play), other MIDI outs = the same device. The Player
         starts its line once the first notes are read (Player.ready)."""
-        from files.play_loaded import LoadedPlayer
+        from files.play_loaded import LoadedPlayer, preload
         from files.playback import KDMAPI
         from files.synth import LiveGroup
         self.stop_loaded()
         sinks, kind = None, "kdmapi" if self.out.name == KDMAPI else "device"
         if self.out.name == BUILTIN and self.synth is not None:
             try:
+                preload(self.synth, self.loaded)  # (the file's instruments: loaded now, never while playing)
                 self.loaded_group = LiveGroup(self.synth, self.loaded_synths, self.play_voices,
                                               limiter=self.play_limiter.get())
                 sinks, kind = self.loaded_group.lives, "group"
@@ -264,20 +265,20 @@ class Playback:
 
     def make_live(self):
         """(MidiOut.open) The built-in synth started for playing, with the soundfont (the Hz bass preview's) and
-        voice limit set now. Raises SynthError (font_failed = True when the soundfont couldn't be read)."""
-        self.font_failed = False
-        font = self.hz_preview["font"]
-        if not font:
+        voice limit set now. Raises SynthError (font_failed = the soundfont that couldn't be read, else None)."""
+        self.font_failed = None
+        fonts = font_list(self.hz_preview)
+        if not fonts:
             raise SynthError("synth.no_font")
         self.busy(tr("app.opening_soundfont"))  # (a big soundfont takes a moment)
         try:
             if self.synth is None:
                 self.synth = Synth()
-            if self.synth.needs_open(font):
+            if self.synth.needs_open(fonts):
                 try:
-                    self.synth.set_font(font)
-                except SynthError:
-                    self.font_failed = True
+                    self.synth.set_fonts(fonts)
+                except SynthError as e:
+                    self.font_failed = e.path or fonts[0]
                     raise
             live = Live(self.synth, self.play_voices, limiter=self.play_limiter.get())
             self.note_builtin()
@@ -297,25 +298,46 @@ class Playback:
                 w.take_voices()
             w.master.winfo_toplevel().show_builtin()
 
-    def ask_soundfont(self, parent, title):
-        """The soundfont file picker (shared soundfont: Built-in BASSMIDI and the Hz bass preview), over parent with
-        the title text key. True = one was picked (it's the shared one now)."""
+    def ask_soundfont(self, parent, title, replace=None):
+        """The soundfont file picker (shared soundfonts: Built-in BASSMIDI and the Hz bass preview), over parent with
+        the title text key: the one picked takes the place of replace (a soundfont in the list that couldn't be
+        read), else of the top one. True = one was picked."""
         cfg = self.hz_preview
+        fonts = font_list(cfg)
+        at = fonts.index(replace) if replace in fonts else 0
         path = filedialog.askopenfilename(
             parent=parent, title=tr(title),
-            initialdir=os.path.dirname(cfg["font"]) if cfg["font"] else None,
+            initialdir=os.path.dirname(fonts[at]) if fonts else None,
             filetypes=[(tr("hz.preview_fonts"), FONT_TYPES), (tr("hz.preview_all"), "*.*")])
         if not path:
             return False
-        cfg["font"] = os.path.normpath(path)
-        self.schedule_autosave()
-        self.soundfont_changed()  # (Settings → Sound shows the new name)
+        path = os.path.normpath(path)
+        fonts[at:at + 1] = [path]
+        self.set_soundfonts(fonts, again=True, added=[path], remake=False)
         return True
 
-    def pick_soundfont(self):
-        """Pick the soundfont (shared by Built-in BASSMIDI and the Hz bass preview). True = one was picked."""
-        if not self.ask_soundfont(self, "app.pick_soundfont_title"):
+    def set_soundfonts(self, paths, again=False, added=(), remake=True):
+        """The soundfonts list changed (font_list.FontList, a pick): saved, Built-in BASSMIDI opens them at the next
+        note, the Hz bass preview makes its sound again (remake). again = open the ones still listed anew too
+        (one was picked again); added = the new ones (an .sfz among them is checked)."""
+        cfg = self.hz_preview
+        paths = list(dict.fromkeys(paths))
+        cfg["font"], cfg["more_fonts"] = (paths[0] if paths else ""), paths[1:]
+        self.schedule_autosave()
+        self.soundfont_changed(again, added)  # (Settings → Sound shows the new names)
+        if remake:
+            self.remake_preview()
+
+    def pick_soundfont(self, replace=None):
+        """Pick a soundfont (shared by Built-in BASSMIDI and the Hz bass preview): in place of replace, else of the
+        top one. True = one was picked."""
+        if not self.ask_soundfont(self, "app.pick_soundfont_title", replace):
             return False
+        self.remake_preview()
+        return True
+
+    def remake_preview(self):
+        """The Hz bass preview makes its sound again with the soundfonts set now."""
         hz = self.hz_window
         if hz is not None:  # (the preview makes its sound again with it)
             if hz.settings_window and hz.settings_window.winfo_exists():
@@ -324,26 +346,27 @@ class Playback:
                 err = hz.preview.remake()
                 if err:
                     hz.preview_failed(err)
-        return True
 
     def fresh_builtin(self):
         """Built-in BASSMIDI open with another soundfont than the shared one (one picked where nobody told this
         window, e.g. the Hz window asking when its file is gone): closed, so it opens the new one."""
         live = self.out.handle
-        if self.out.name == BUILTIN and live and live.font_path != self.hz_preview["font"]:
+        opened = getattr(live, "font_paths", None) or [p for p in [getattr(live, "font_path", None)] if p]
+        if self.out.name == BUILTIN and live and list(opened) != font_list(self.hz_preview):
             self.out.close()
 
-    def soundfont_changed(self):
-        """The shared soundfont was changed (here or in the Hz bass preview's settings): Built-in BASSMIDI opens it
-        at the next note."""
+    def soundfont_changed(self, again=True, added=None):
+        """The shared soundfonts were changed (set_soundfonts): Built-in BASSMIDI opens them at the next note. again
+        = opened anew even if open (picked again); added = the new ones (None: the top one) checked (.sfz)."""
         if self.out.name == BUILTIN:
             self.stop_play()
             self.scrub_end()
             self.out.close()
         self.sync_builtin()
-        if self.synth is not None:
+        if self.synth is not None and again:
             self.synth.stale = True  # (picked again = opened again: samples put back since then are found)
-        self.check_samples(self.hz_preview["font"])
+        sfz = [p for p in ([self.hz_preview["font"]] if added is None else added) if p.lower().endswith(".sfz")]
+        self.check_samples(sfz[-1] if sfz else "")  # (one check at a time: the newest pick's)
         self.ring_check()
 
     def ring_check(self, quiet=False):

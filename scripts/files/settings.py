@@ -102,6 +102,9 @@ def _put_line(lines, section, key, value):
             lines += [f"[{section}]", new]
 
 
+PATHS = "paths"  # a kind: file paths, " | " between them (a "|" can't be in a Windows file name)
+
+
 # The program's own settings that older versions kept in the autosave's window settings (user, 2026-10-11): read
 # from here when this file has them (the autosave's value only while it hasn't: an older version's, copied over at
 # the next autosave), and left out of the autosave once saved here. Window key -> (section, key, kind).
@@ -112,6 +115,7 @@ APP_KEYS = {
     "play_limiter": ("sound", "omnimidi_limiter", bool),
     "loaded_synths": ("sound", "loaded_midi_synths", int),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)
+    "more_soundfonts": ("sound", "more_soundfonts", PATHS),  # (the ones under it in the list, user 2026-10-25)
     "hz_on": ("hz_preview", "on", bool),
     "hz_voices": ("hz_preview", "voice_limit", int),
     "hz_nofx": ("hz_preview", "without_effects", bool),
@@ -130,13 +134,15 @@ APP_KEYS = {
 }
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)
 # the ones the autosave keeps inside its "hz_preview" settings (1.5.1 sweep: all app-wide): window key -> key there
-IN_HZ = {"soundfont": "font", "hz_on": "on", "hz_voices": "voices", "hz_nofx": "nofx", "hz_volume": "volume",
+IN_HZ = {"soundfont": "font", "more_soundfonts": "more_fonts", "hz_on": "on", "hz_voices": "voices", "hz_nofx": "nofx", "hz_volume": "volume",
          "hz_live_mb": "live_mb", "hz_ring": "ring", "hz_ring_font": "ring_font"}
 
 
 def _read_value(text, kind):
     """A saved text as kind, or None when it doesn't read as one (then the autosave's / the default is used).
     Anything but a path / name may have a " # note" after it."""
+    if kind == PATHS:
+        return [s.strip() for s in text.split("|") if s.strip()]
     if kind is not str:
         for mark in (" #", " ;", "\t#", "\t;"):
             text = text.split(mark)[0]
@@ -161,7 +167,11 @@ def _write_value(value, kind):
     """value as the file's text, or None when it can't be saved there safely (then it stays in the autosave)."""
     if kind is bool:
         return "yes" if value is True else "no" if value is False else None
-    if kind is list:
+    if kind == PATHS:
+        if not isinstance(value, list) or any(not isinstance(s, str) or "|" in s or s != s.strip() for s in value):
+            return None
+        text = " | ".join(value)
+    elif kind is list:
         if not isinstance(value, list) or any("," in str(s) for s in value):
             return None
         text = ", ".join(str(s) for s in value)
