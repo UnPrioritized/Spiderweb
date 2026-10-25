@@ -1785,9 +1785,12 @@ def warm():
     ix, cov, i32 = _index.new_state(), np.zeros((128, 8), np.int32), np.zeros((128, 8), np.int32)
     midi_index(u8, 0, 0, 0, 60, ix, q, q.copy(), q.copy(), q.copy(), q.copy(), q.copy(), z, z.copy(), z.copy(),
                z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), cov,
-               np.zeros(16, np.int64), z.copy(), z.copy(), z.copy(), np.zeros((4, _index.META_KEEP), np.uint8))
-    midi_close(ix, 60, q, q.copy(), q.copy(), z, z.copy(), z.copy(), z.copy(), z.copy(), cov)
-    midi_grid(cov, 0, 1, 0, 0, i32, i32.copy(), 0, np.zeros((1, 2), np.uint8), 1)
+               np.zeros((128, 8), np.uint8), np.zeros(16, np.int64), z.copy(), z.copy(), z.copy(),
+               np.zeros((4, _index.META_KEEP), np.uint8))
+    midi_close(ix, 60, q, q.copy(), q.copy(), z, z.copy(), z.copy(), z.copy(), z.copy(), cov,
+               np.zeros((128, 8), np.uint8))
+    midi_grid(cov, np.zeros((128, 8), np.uint8), 0, 1, 0, 0, i32, i32.copy(), i32.copy(), 0,
+              np.zeros((1, 2), np.uint8), 1)
     midi_halve(i32, i32.copy(), np.zeros((128, 4), np.int32), np.zeros((128, 4), np.int32))
     t2, m2 = np.full((1, 2), -1, np.int64), np.zeros((1, 2), np.uint8)
     midi_cover(u8, 0, 0, 0, i1[:0], np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,

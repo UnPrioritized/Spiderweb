@@ -480,7 +480,8 @@ def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk):
 
 def overview_tab(lm, ax, bx, W, k_lo, nk):
     """(tab, marks) from the loading pass's grid: each key x pixel = the highest track sounding there, in its
-    channel's colour (marks: none)."""
+    channel's colour; marks from its edges (lm.edges: 2 = the top track's note starts / ends there = edge colour,
+    1 = only a track under it = the shade)."""
     tpp = 1 / ax
     L = 0
     while L + 1 < len(lm.levels) and (lm.G << (L + 1)) <= tpp:
@@ -492,21 +493,25 @@ def overview_tab(lm, ax, bx, W, k_lo, nk):
     ta = (c - 0.5 - bx) * tpp
     b0 = np.floor(ta / GL).astype(np.int64)
     b1 = np.maximum(np.ceil((ta + tpp) / GL).astype(np.int64), b0 + 1)
-    rows = top[k_lo:k_lo + nk]
     out = np.full((nk, W), -1, np.int64)
-    if len(rows):
+    edge = np.zeros((nk, W), np.uint8)
+    for grid, got in ((top, out), (lm.edges[L], edge)):
+        rows = grid[k_lo:k_lo + nk]
+        if not len(rows):
+            continue
         on = (b1 > 0) & (b0 < ng)
         a = np.clip(b0, 0, ng - 1)
         if tpp >= GL and on.any():  # (each column a bucket or more: the most over its buckets, starts increasing)
             idx = np.flatnonzero(on)
             starts = a[idx]
-            out[:, idx] = np.maximum.reduceat(rows[:, :int(np.clip(b1[idx[-1]], 1, ng))], starts, axis=1)
+            got[:, idx] = np.maximum.reduceat(rows[:, :int(np.clip(b1[idx[-1]], 1, ng))], starts, axis=1)
         else:
-            out[:, on] = rows[:, a[on]]
+            got[:, on] = rows[:, a[on]]
     tracks = np.array([t.channel if t.channel is not None else 0 for t in lm.tracks], np.int64)
     code = COLOURS_16[tracks] * 32 + SHADE
     tab = np.where(out >= 0, code[np.clip(out, 0, len(code) - 1)], -1)
-    return tab, np.zeros((nk, W), np.uint8)
+    marks = np.where(out < 0, 0, np.where(edge == 2, 1, np.where(edge == 1, 4, 0))).astype(np.uint8)
+    return tab, marks
 
 
 SCRUB_COLS = 256  # right-drag listening reads the swept ticks as this many columns at most

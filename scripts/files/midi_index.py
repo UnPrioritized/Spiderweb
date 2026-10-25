@@ -13,7 +13,8 @@ means the newest ends last, so a read starting at the checkpoint knows that key 
 of the notes (Shinki holds 800 million at once).
 
 Overview: per key x bucket (G ticks): how many notes sound there (a diff per key while reading, added up per track
-at its end), and the highest track sounding there (drawn on top)."""
+at its end), the highest track sounding there (drawn on top), and the highest track with a note starting or
+ending there (its edges far zoomed out: notes/loaded.py edge_levels)."""
 
 import numpy as np
 
@@ -44,10 +45,11 @@ def new_state():
 
 
 def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, pw, cp_off, cp_tick, cp_run, cp_ent,
-          e_q, e_cnt, e_end, e_vel, e_nx, cov, chn, m_tick, m_type, m_len, m_data):
+          e_q, e_cnt, e_end, e_vel, e_nx, cov, edg, chn, m_tick, m_type, m_len, m_data):
     """Reads the whole events in b[p:end] (bytes midi_scan.walk found good; b[0] = the track's byte at) into the
     index. Returns (GO or what it needs more room for, where it stopped). q_vel / e_vel = the velocity of the note
-    that began a key's sounding (cover's colour for it, the same wherever a read starts)."""
+    that began a key's sounding (cover's colour for it, the same wherever a read starts). edg (cov's size) = 1 in
+    each bucket where a note starts or has its last tick (the overview's note edges)."""
     tick = ix[X_TICK]
     run = ix[X_RUN]
     nk = cov.shape[0]
@@ -153,6 +155,7 @@ def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, 
                         ix[X_NOPEN] = nopen + 1
                     if not far:
                         cov[k, g] += 1
+                        edg[k, g] = 1
                         if g < ix[X_GLO]:
                             ix[X_GLO] = g
                     ix[X_NOTES] += 1
@@ -184,6 +187,7 @@ def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, 
                         w = e_nx[w]
                     if not far:
                         cov[k, g1] -= 1
+                        edg[k, g1 - 1] = 1
                         if g1 > ix[X_GHI]:
                             ix[X_GHI] = g1
                     if ee > ix[X_END]:
@@ -246,7 +250,7 @@ def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, 
     return status, p
 
 
-def close(ix, G, q_hd, q_rl, opened, pt, pn, pw, e_end, e_nx, cov):
+def close(ix, G, q_hd, q_rl, opened, pt, pn, pw, e_end, e_nx, cov, edg):
     """The track's end: notes never let go end at its last tick (cov must reach that bucket)."""
     t = ix[X_TICK]
     for j in range(ix[X_NOPEN]):
@@ -263,6 +267,7 @@ def close(ix, G, q_hd, q_rl, opened, pt, pn, pw, e_end, e_nx, cov):
                 w = e_nx[w]
             if s0 // G < GRID_MOST - 1:
                 cov[k, g1] -= 1
+                edg[k, g1 - 1] = 1
                 if g1 > ix[X_GHI]:
                     ix[X_GHI] = g1
             if ee > ix[X_END]:
@@ -275,15 +280,20 @@ def close(ix, G, q_hd, q_rl, opened, pt, pn, pw, e_end, e_nx, cov):
     ix[X_NOPEN] = 0
 
 
-def grid(cov, glo, ghi, klo, khi, cnt, top, track, pic, pf):
+def grid(cov, edg, glo, ghi, klo, khi, cnt, top, etop, track, pic, pf):
     """A finished track's notes into the overview: sounding counts added to cnt, track to top where it's the
-    highest, its own small picture (keys klo..khi x buckets glo.. in steps of pf) marked; cov cleared."""
+    highest, to etop where it's the highest with a note edge there (edg), its own small picture (keys klo..khi x
+    buckets glo.. in steps of pf) marked; cov + edg cleared."""
     most = 2147483647
     for k in range(klo, khi + 1):
         c = 0
         for g in range(glo, ghi + 1):
             c += cov[k, g]
             cov[k, g] = 0
+            if edg[k, g]:
+                edg[k, g] = 0
+                if track > etop[k, g]:
+                    etop[k, g] = track
             if c > 0:
                 was = cnt[k, g]
                 cnt[k, g] = most if c > most - was else was + c

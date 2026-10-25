@@ -45,11 +45,14 @@ class TrackInfo:
 
 
 class LoadedMidi:
-    def __init__(self, mf, mode, G, infos, levels, seconds):
+    def __init__(self, mf, mode, G, infos, levels, seconds, edges=None):
         self.mf, self.path, self.mode = mf, mf.path, mode
         self.ppq, self.G = mf.ppq, G
         self.tracks = infos  # [TrackInfo] in file order
         self.levels = levels  # [(cnt, top)]: the overview, level n = buckets of G << n ticks
+        # [uint8 like each level's top]: 2 = the top track has a note starting / ending there, 1 = only a track
+        # under it does (edge_levels; the far-zoom picture's edges + shade)
+        self.edges = edges if edges is not None else [np.zeros(t.shape, np.uint8) for c, t in levels]
         self.keys = levels[0][0].shape[0]  # 128, or 256 (a 256 keys MIDI)
         self.seconds = seconds
         self.from_index = False  # (opened from its saved index, files/midi_saved.py)
@@ -80,7 +83,7 @@ class LoadedMidi:
 
     def index_bytes(self):
         """Memory the index + overview take (the tracks' bytes not counted)."""
-        n = sum(a.nbytes for c, t in self.levels for a in (c, t))
+        n = sum(a.nbytes for c, t in self.levels for a in (c, t)) + sum(e.nbytes for e in self.edges)
         for t in self.tracks:
             n += sum(getattr(t, k).nbytes for k in ("cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end",
                                                     "e_vel", "m_tick", "m_type", "m_len", "m_data", "pic"))
@@ -594,6 +597,20 @@ def _bytes(got):
     return sum(a.nbytes for a in got.values())
 
 
+def edge_levels(etop, levels):
+    """Each overview level's edges (LoadedMidi.edges) from etop (level 0: the highest track with a note starting /
+    ending in each bucket; halved by the highest of two, like top): 2 where that's the top track, 1 under it
+    (user 2026-10-25: far zoomed out a giant song's dense notes showed as one note running across)."""
+    out = []
+    for n, (cnt, top) in enumerate(levels):
+        if n:
+            if etop.shape[1] % 2:
+                etop = np.concatenate([etop, np.full((etop.shape[0], 1), -1, etop.dtype)], axis=1)
+            etop = etop.reshape(etop.shape[0], -1, 2).max(axis=2)
+        out.append(np.where(etop < 0, 0, np.where(etop >= top, 2, 1)).astype(np.uint8))
+    return out
+
+
 def _hide_overview(lm, trk, s, e, lane):
     """The overview without the hidden notes: each key's sounding count taken down over the buckets they cover
     (as the loading pass counted them), a bucket with none left = empty; the halved levels made again."""
@@ -685,6 +702,7 @@ class _Thread:
         self.pn = np.zeros(1 << 14, np.int64)
         self.pw = np.zeros(1 << 14, np.int64)
         self.cov = np.zeros((nk, ng), np.int32)
+        self.edg = np.zeros((nk, ng), np.uint8)
         self.chn = np.zeros(16, np.int64)
 
     def clear(self):
@@ -716,6 +734,7 @@ class Loader:
         nk = 128
         self.cnt = np.zeros((nk, 1024), np.int32)
         self.top = np.full((nk, 1024), -1, np.int32)
+        self.etop = np.full((nk, 1024), -1, np.int32)
         self.started = time.perf_counter()
 
     def run(self):
@@ -748,9 +767,9 @@ class Loader:
         self.stage = "overview"
         if self.cancelled:
             raise Cancelled()
-        levels = self._levels(loops)
+        levels, edges = self._levels(loops)
         return LoadedMidi(self.mf, "memory" if self.keep else "file", self.G, self._infos, levels,
-                          time.perf_counter() - self.started)
+                          time.perf_counter() - self.started, edges)
 
     def _progress(self, done, total):
         self.done = done
@@ -765,8 +784,8 @@ class Loader:
         halve = loops.midi_halve if loops else midi_index.halve
         with self._lock:
             ng = max(1, max((i.end for i in self._infos if i and i.notes), default=0) // self.G + 1)
-            cnt, top = self.cnt[:, :ng].copy(), self.top[:, :ng].copy()
-        self.cnt = self.top = None
+            cnt, top, etop = self.cnt[:, :ng].copy(), self.top[:, :ng].copy(), self.etop[:, :ng].copy()
+        self.cnt = self.top = self.etop = None
         levels = [(cnt, top)]
         while cnt.shape[1] > 1:
             n2 = (cnt.shape[1] + 1) // 2
@@ -774,7 +793,7 @@ class Loader:
             halve(cnt, top, c2, t2)
             levels.append((c2, t2))
             cnt, top = c2, t2
-        return levels
+        return levels, edge_levels(etop, levels)
 
     def grow_grid(self, nk, ng):
         """The overview grows to nk keys x ng buckets at least (under the lock)."""
@@ -784,9 +803,11 @@ class Loader:
         nk, ng = max(nk, k0), max(ng, g0 * 2)
         cnt = np.zeros((nk, ng), np.int32)
         top = np.full((nk, ng), -1, np.int32)
+        etop = np.full((nk, ng), -1, np.int32)
         cnt[:k0, :g0] = self.cnt
         top[:k0, :g0] = self.top
-        self.cnt, self.top = cnt, top
+        etop[:k0, :g0] = self.etop
+        self.cnt, self.top, self.etop = cnt, top, etop
 
 
 class _TrackPass:
@@ -823,7 +844,8 @@ class _TrackPass:
         while not ix[X_STOP]:
             status, p = self.L._index(view, p, used, at, self.L.G, ix, th.q_hd, th.q_tl, th.q_rl, th.q_pos, th.q_vel, th.opened,
                                       th.pt, th.pn, th.pw, self.cp_off, self.cp_tick, self.cp_run, self.cp_ent,
-                                      self.e_q, self.e_cnt, self.e_end, self.e_vel, self.e_nx, th.cov, th.chn, self.m_tick,
+                                      self.e_q, self.e_cnt, self.e_end, self.e_vel, self.e_nx, th.cov, th.edg, th.chn,
+                                      self.m_tick,
                                       self.m_type, self.m_len, self.m_data)
             if status == GO:
                 break
@@ -863,12 +885,14 @@ class _TrackPass:
             return
         cov = np.zeros((max(nk, k0), max(ng, g0)), np.int32)
         cov[:k0, :g0] = th.cov
-        th.cov = cov
+        edg = np.zeros(cov.shape, np.uint8)
+        edg[:k0, :g0] = th.edg
+        th.cov, th.edg = cov, edg
 
     def done(self):
         L, t, th, ix = self.L, self.t, self.th, self.ix
         self.cover(th.cov.shape[0], min(int(ix[X_TICK]) // L.G + 3, GRID_MOST))
-        L._close(ix, L.G, th.q_hd, th.q_rl, th.opened, th.pt, th.pn, th.pw, self.e_end, self.e_nx, th.cov)
+        L._close(ix, L.G, th.q_hd, th.q_rl, th.opened, th.pt, th.pn, th.pw, self.e_end, self.e_nx, th.cov, th.edg)
         i = TrackInfo()
         i.number = t.number
         for name, at in (("notes", X_NOTES), ("zero", X_ZERO), ("hang", X_HANG), ("orphan", X_ORPHAN),
@@ -904,7 +928,7 @@ class _TrackPass:
             pic = np.zeros((i.khi - i.klo + 1, cols), np.uint8)
             with L._lock:
                 L.grow_grid(th.cov.shape[0], ghi + 1)
-                L._grid(th.cov, glo, ghi, i.klo, i.khi, L.cnt, L.top, t.number, pic, pf)
+                L._grid(th.cov, th.edg, glo, ghi, i.klo, i.khi, L.cnt, L.top, L.etop, t.number, pic, pf)
             i.pic, i.pic_klo, i.pic_glo, i.pic_pf, i.pic_cols = np.packbits(pic, axis=1), i.klo, glo, pf, cols
         else:
             i.pic, i.pic_klo, i.pic_glo, i.pic_pf, i.pic_cols = np.zeros((0, 0), np.uint8), 0, 0, 1, 0

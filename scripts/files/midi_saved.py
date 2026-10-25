@@ -19,7 +19,7 @@ from files.about import USER
 from files.safefile import write_bytes, write_text
 
 FOLDER = os.path.join(USER, "midi-index")
-INDEX_VER = 1
+INDEX_VER = 2  # (2: the overview's edges, 2026-10-25; older ones = doesn't fit, offered again)
 SLOW_S = 10.0  # a load taking longer than this offers to save its index
 DECLINED = "declined.json"
 ARRAYS = ("chn", "cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end", "e_vel", "m_tick", "m_type",
@@ -57,7 +57,8 @@ def save_index(lm):
             "infos": [{k: _plain(getattr(i, k)) for k in SCALARS} for i in lm.tracks],
             "shapes": {k: [list(getattr(i, k).shape) for i in lm.tracks] for k in ARRAYS}}
     level0 = lm._level0 if lm._level0 is not None else lm.levels[0]  # (as loaded: never the Extract one)
-    arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8), "cnt": level0[0], "top": level0[1]}
+    arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8), "cnt": level0[0], "top": level0[1],
+              "edges": np.concatenate([e.reshape(-1) for e in lm.edges])}  # (every level: made from a grid not kept)
     for k in ARRAYS:
         parts = [getattr(i, k).reshape(-1) for i in lm.tracks]
         arrays[k] = np.concatenate(parts) if parts else np.zeros(0, np.int64)
@@ -97,7 +98,7 @@ def load_index(mf):
             if not _fits(head, mf):
                 return None
             arrays = {k: z[k] for k in ARRAYS}
-            cnt, top = z["cnt"], z["top"]
+            cnt, top, edges = z["cnt"], z["top"], z["edges"]
     except Exception:  # (damaged too: read the usual way)
         return None
     for t, s in zip(mf.tracks, head["tracks"]):
@@ -128,7 +129,11 @@ def load_index(mf):
         halve(cnt, top, c2, t2)
         levels.append((c2, t2))
         cnt, top = c2, t2
-    return LoadedMidi(mf, "file", head["G"], infos, levels, head["seconds"])
+    cut = np.cumsum([0] + [t.size for c, t in levels])
+    if cut[-1] != edges.size:  # (damaged: read the usual way)
+        return None
+    edges = [edges[a:b].reshape(t.shape) for a, b, (c, t) in zip(cut[:-1], cut[1:], levels)]
+    return LoadedMidi(mf, "file", head["G"], infos, levels, head["seconds"], edges)
 
 
 def saved_list():
