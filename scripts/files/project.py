@@ -543,6 +543,7 @@ class ProjectFiles:
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "loaded_synths": self.loaded_synths,
                               "domino_256": self.domino256.get(), "keep_colours": self.keep_colours.get(),
+                              "loud_on_top": self.loud_on_top.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
                               "tracks": self.track_list.state(),
@@ -733,6 +734,7 @@ class ProjectFiles:
                 self.synths_var.set(str(v))
             self.domino256.set(win.get("domino_256") is True)
             self.keep_colours.set(win.get("keep_colours") is True)
+            self.loud_on_top.set(win.get("loud_on_top") is True)
             self.sync_builtin()
         kept(sound)
 

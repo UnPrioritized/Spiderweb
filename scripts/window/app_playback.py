@@ -520,12 +520,12 @@ class Playback:
                 now[k] = (s, v)
         held = self._scrub_held
         if self.loaded is not None and not tuned:  # (a loaded MIDI's notes drawn on top there; Spiderweb's own win
-            from roll.roll_loaded import scrub_notes, shown_tracks  # a key both sound)
+            from roll.roll_loaded import loud_on, scrub_notes, shown_tracks  # a key both sound)
             order, faint = shown_tracks(self, self.loaded)
             if order is not None:  # (faint tracks: shown only, not listened to, like Spiderweb's)
                 order = tuple(n for n in order if n not in faint)
             ppq_lm = self.loaded.ppq / self.ppq  # (its own ticks)
-            got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm)
+            got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm, loud_on(self))
             drums = self.out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
             for (ch, p), (s, v) in got.items():  # own drum channel; other MIDI outs' channel 10 is drums already)
                 k = (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)

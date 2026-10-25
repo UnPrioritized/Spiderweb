@@ -466,6 +466,39 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
     return p
 
 
+def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled):
+    """"Louder notes on top" (user 2026-10-25): one track's own table (ttab / tmarks, painted alone by cover) merged
+    into the picture: a pixel goes to the louder note (velocity shade = colour number & 31; equal = the one there,
+    tracks go from the top one down), a start / end that loses = marks 4 under the winner, the old winner's
+    starts / ends under a new one too. The track's tables are made empty again (only rows it painted)."""
+    nk, W = tab.shape
+    for k in range(nk):
+        if tfilled[k] == 0:
+            continue
+        for x in range(W):
+            t = ttab[k, x]
+            mt = tmarks[k, x]
+            tmarks[k, x] = 0
+            if t < 0:
+                continue
+            g = tab[k, x]
+            if g < 0 or (t & 31) > (g & 31):
+                hid = g >= 0 and marks[k, x] != 0
+                tab[k, x] = t
+                if mt & 3:
+                    marks[k, x] = mt & 3
+                elif hid or mt & 4:
+                    marks[k, x] = 4
+                else:
+                    marks[k, x] = 0
+            elif mt != 0 and (marks[k, x] & 3) == 0:
+                marks[k, x] |= 4
+            ttab[k, x] = -1
+        for x in range(W + 1):
+            tnx[k, x] = x
+        tfilled[k] = 0
+
+
 def halve(cnt, top, cnt2, top2):
     """The next overview level: two buckets -> one (most sounding, highest track)."""
     n = cnt.shape[1]

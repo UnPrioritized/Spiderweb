@@ -1184,6 +1184,8 @@
  "settings.button_tip": "Settings: the look of Spiderweb, sound, update checks, tips (saved for every project).",
  "settings.look_tab": "Look",
  "settings.general_tab": "General",
+ "settings.loud_on_top": "Louder notes on top (loaded MIDI)",
+ "settings.loud_on_top_hint": "Where a loaded MIDI's notes lie on top of each other on one key, the loudest one shows (equally loud: the later track's). Off: the later track's note always shows, like many MIDI programs. Handy in dense black MIDIs, where quiet notes covering the keys hide the music.\nEither way, a note's fill is a little darker where a hidden note under it starts or ends.",
  "settings.keep_colours": "Overlapping shapes keep their colours",
  "settings.keep_colours_hint": "Multi channel: a shape (plain notes too) that overlaps an earlier one moves whole to the next row of channels (15 further, 16 with channel 10 used), so its colours stay the same. Off: it takes the next free channels (other colours).\nMany shapes on top of each other make many tracks: untick Keep empty tracks under Multi channel to write only the tracks with notes.",
  "settings.domino_256":"(Experimental) Domino 256 keys",

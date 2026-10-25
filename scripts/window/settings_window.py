@@ -184,6 +184,7 @@ class SettingsWindow(tk.Toplevel):
                   justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.build_size(page, 2)
         self.build_palettes(page, 11)
+        self.build_loud(page, 17)
         self.build_sound()
         # General: updates (how often to look, and looking now: the answer shows under the row), then tips
         tab = self.pages["general"] = ScrollPage(tabs)
@@ -267,6 +268,15 @@ class SettingsWindow(tk.Toplevel):
                         command=self.app.shapes_changed).pack(anchor="w")
         ttk.Label(page, text=tr("settings.keep_colours_hint"), foreground=look.HINT,
                   wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
+
+    def build_loud(self, page, r):
+        """A loaded MIDI's louder notes drawn on top (roll_loaded.loud_tab); off = the later track on top."""
+        ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+        ttk.Checkbutton(page, text=tr("settings.loud_on_top"), variable=self.app.loud_on_top, takefocus=False,
+                        command=self.app.roll.request_redraw).grid(row=r + 1, column=0, columnspan=2, sticky="w")
+        ttk.Label(page, text=tr("settings.loud_on_top_hint"), foreground=look.HINT,
+                  wraplength=round(360 * self.app.scale), justify="left").grid(row=r + 2, column=0, columnspan=2,
+                                                                               sticky="w", pady=(4, 0))
 
     def build_indexes(self, page):
         """Load MIDI's saved indexes (files/midi_saved.py): each MIDI's name, the index's size, a Delete button."""

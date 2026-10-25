@@ -311,6 +311,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
+        self.loud_on_top = tk.BooleanVar(self, value=False)  # Settings → Look: a loaded MIDI's louder notes drawn on top
         self.overload, self.overload_text = Overload(), ""  # (red on the status line while it can't keep up)
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None

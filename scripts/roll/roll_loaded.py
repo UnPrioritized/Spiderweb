@@ -67,7 +67,7 @@ class LoadedNotes:
         pal = getattr(self.app, "picture_pal", None)
         order, faint = shown_tracks(self.app, lm)
         key = (id(lm), lm.hide_ver, W, kb, top, h, round(ax, 12), round(bx, 6), p_lo, p_hi, tuple(pal or ()), order,
-               frozenset(faint), TRACK_FADE[0])
+               frozenset(faint), TRACK_FADE[0], loud_on(self.app))
         return lm, key, (ax, bx, W, p_lo, p_hi, kb, top, order, faint)
 
     def loaded_mark(self):
@@ -76,7 +76,8 @@ class LoadedNotes:
         if lm is None:
             return None
         order, faint = shown_tracks(self.app, lm)
-        return id(lm), lm.hide_ver, getattr(self, "loaded_version", 0), order, faint, TRACK_FADE[0]
+        return (id(lm), lm.hide_ver, getattr(self, "loaded_version", 0), order, faint, TRACK_FADE[0],
+                loud_on(self.app))
 
     def paint_loaded(self, img, region):
         """The loaded notes into img, the picture of region = (x0, y0, x1, y1) of the screen (paint_region)."""
@@ -111,7 +112,7 @@ class LoadedNotes:
 
     def loaded_tabs(self, lm, key, ax, bx, W, p_lo, nk, order, faint):
         """(tab, marks) of the view: keys p_lo .. + nk x W columns."""
-        style = (id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0])
+        style = (id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0], loud_on(self.app))  # (loud last)
         rows = slice(p_lo, p_lo + nk)
         got = self._exact_for(style, ax, bx, W)
         if got is not None:
@@ -182,7 +183,8 @@ class LoadedNotes:
                 return None
             began, took = time.perf_counter(), [0]
             try:
-                tab, marks = exact_tab(lm, ax, e.bx - s0, s1 - s0, 0, lm.keys, tracks=order, faint=faint, took=took)
+                tab, marks = exact_tab(lm, ax, e.bx - s0, s1 - s0, 0, lm.keys, tracks=order, faint=faint, took=took,
+                                       loud=style[-1])
             except Exception:
                 write_log_now()
                 return None
@@ -209,7 +211,7 @@ class LoadedNotes:
     def _make_now(self, lm, style, ax, bx, W, order, faint):
         began, took = time.perf_counter(), [0]
         try:
-            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, faint=faint, took=took)
+            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, faint=faint, took=took, loud=style[-1])
         except Exception:  # (a file that changed / went: the overview stays; told when exporting)
             write_log_now()
             return None
@@ -405,6 +407,12 @@ def colours(faint=False):
     return groups[:, None] * 32 + np.arange(32)[None, :]
 
 
+def loud_on(app):
+    """Settings → Look "Louder notes on top (loaded MIDI)" ticked?"""
+    var = getattr(app, "loud_on_top", None)
+    return bool(var is not None and var.get())
+
+
 def shown_tracks(app, lm):
     """(order, faint) of the loaded tracks the piano roll shows: order None = every track (nothing highlighted in
     the track list), else the track numbers drawn, the highlighted one first (on top), then the ones picked behind
@@ -506,10 +514,11 @@ SCRUB_S = 0.04  # ... exactly when that's guessed this quick, else from the over
 _GROUP_CH = np.argsort(COLOURS_16)  # (channel colour group -> channel)
 
 
-def scrub_notes(lm, order, lo, hi, at):
+def scrub_notes(lm, order, lo, hi, at, loud=False):
     """Right-drag listening on a loaded MIDI (user 2026-10-25): {(channel, key): (start, velocity)} of what's drawn
     on top: the keys sounding at tick `at` (start None) and notes starting in ticks lo..hi (start = about their
-    tick; the latest per key). order = the tracks shown (shown_tracks, faint ones left out), None = all. Velocity
+    tick; the latest per key). order = the tracks shown (shown_tracks, faint ones left out), None = all; loud =
+    louder notes on top (Settings → Look). Velocity
     as drawn (to within 4); the overview (where reading exactly is slow) has no starts nor velocities (100).
     Returns (that, rough): rough = from the overview (the status line says so)."""
     lo, hi = int(lo), int(hi)
@@ -521,7 +530,7 @@ def scrub_notes(lm, order, lo, hi, at):
     slow = speed.loops() is None or guess_bytes(lm, order, ax, bx, W) / rate_of(lm) > SCRUB_S
     try:
         if not slow:
-            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order)
+            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, loud=loud)
         elif order is None:
             tab, marks = overview_tab(lm, ax, bx, W, 0, lm.keys)
         else:
@@ -597,7 +606,7 @@ class ExactJob:
             for bx, W in self.parts:
                 began, took = time.perf_counter(), [0]
                 tab, marks = exact_tab(self.lm, self.ax, bx, W, 0, self.lm.keys, stop=lambda: self.stop,
-                                       tracks=self.order, faint=self.faint, took=took)
+                                       tracks=self.order, faint=self.faint, took=took, loud=self.style[-1])
                 if tab is None or self.stop:
                     break
                 learn_rate(self.lm, took[0], time.perf_counter() - began)
@@ -607,9 +616,30 @@ class ExactJob:
         self.done = True
 
 
-def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=(), took=None):
+def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled):
+    """NumPy twin of midi_index.merge_loud (the same tables)."""
+    for k in np.flatnonzero(tfilled):
+        t, g, mt, mg = ttab[k], tab[k], tmarks[k], marks[k]
+        on = t >= 0
+        win = on & ((g < 0) | ((t & 31) > (g & 31)))
+        lose = on & ~win
+        hid = (g >= 0) & (mg != 0)
+        new = np.where((mt & 3) != 0, mt & 3, np.where(hid | ((mt & 4) != 0), 4, 0)).astype(np.uint8)
+        mg[lose & (mt != 0) & ((mg & 3) == 0)] |= 4
+        mg[win] = new[win]
+        g[win] = t[win]
+        t[:] = -1
+        mt[:] = 0
+        tnx[k] = np.arange(tnx.shape[1])
+        tfilled[k] = 0
+
+
+def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=(), took=None, loud=False):
     """(tab, marks) of every note on screen: tracks (numbers, the one drawn on top first; default all, the last
-    track on top), read from their checkpoints before the view. None if stopped. took = [bytes read] (added to)."""
+    track on top), read from their checkpoints before the view. None if stopped. took = [bytes read] (added to).
+    loud: louder notes on top (Settings → Look; each track painted alone, then merge_loud)."""
+    if loud:
+        return loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took)
     fast = speed.loops()
     t0 = int(np.floor((-0.5 - bx) / ax))
     t1 = int(np.ceil((W + 0.5 - bx) / ax))
@@ -641,6 +671,68 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
         if took is not None:
             took[0] += rd.took
     if lm.mode != "memory" and not still_same(lm):  # (changed while it was read: nothing read is trusted)
+        return None, None
+    return tab, marks
+
+
+def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took):
+    """exact_tab with louder notes on top: each track painted alone into its own tables, then merged in. Blocks of
+    neighbouring tracks (about the same bytes each) merged on several cores, the blocks then merged in order (the
+    same picture: merging is the same in any grouping, kept in track order)."""
+    fast = speed.loops()
+    merge = fast.midi_merge_loud if fast else merge_loud
+    t0 = int(np.floor((-0.5 - bx) / ax))
+    t1 = int(np.ceil((W + 0.5 - bx) / ax))
+    order = tracks if tracks is not None else range(len(lm.tracks) - 1, -1, -1)
+    busy = [n for n in order if lm.tracks[n].notes and lm.tracks[n].end > t0 and lm.tracks[n].first <= t1
+            and lm.tracks[n].khi >= k_lo and lm.tracks[n].klo < k_lo + nk]
+    if lm.mode != "memory" and not still_same(lm):
+        return None, None
+    n_threads = min(len(busy), max(1, (os.cpu_count() or 2) // 2)) if fast else 1
+    if n_threads > 1:  # (blocks of about the same bytes)
+        size = np.array([view_bytes(lm, (n,), ax, bx, W) for n in busy], np.float64)
+        cut = np.searchsorted(np.cumsum(size), np.arange(1, n_threads) * size.sum() / n_threads)
+        blocks = [b for b in np.split(np.array(busy, np.int64), cut) if len(b)]
+    else:
+        blocks = [busy]
+    readers = [TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint) for _ in blocks]
+    made = [None] * len(blocks)
+    bad = []
+
+    def work(i):
+        tab = np.full((nk, W), -1, np.int64)
+        marks = np.zeros((nk, W), np.uint8)
+        ttab, tmarks = tab.copy(), marks.copy()
+        tnx = np.tile(np.arange(W + 1, dtype=np.int64), (nk, 1))
+        tfilled = np.zeros(nk, np.int64)
+        for n in blocks[i]:
+            if bad or stop() or not readers[i].read(int(n), ttab, tnx, tfilled, tmarks):
+                bad.append(True)
+                return
+            merge(tab, marks, ttab, tmarks, tnx, tfilled)
+        made[i] = (tab, marks)
+    try:
+        threads = [threading.Thread(target=work, args=(i,), daemon=True, name="loaded notes")
+                   for i in range(1, len(blocks))]
+        for th in threads:
+            th.start()
+        work(0)
+        for th in threads:
+            th.join()
+    finally:
+        for rd in readers:
+            rd.close()
+            if took is not None:
+                took[0] += rd.took
+    if bad:
+        return None, None
+    tab, marks = made[0]
+    rows = np.ones(nk, np.int64)
+    spare = np.zeros((nk, W + 1), np.int64)
+    for later in made[1:]:  # (the block lower down merged in like one track)
+        rows[:] = 1
+        merge(tab, marks, later[0], later[1], spare, rows)
+    if lm.mode != "memory" and not still_same(lm):
         return None, None
     return tab, marks
 
