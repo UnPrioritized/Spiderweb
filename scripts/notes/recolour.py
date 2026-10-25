@@ -455,8 +455,9 @@ def areas(notes, rc, u, n, box=None, own=None):
     dx, dy = x - cx, y - cy
     if pattern == "bands":
         a = turn * 2 * np.pi
-        q = dx * np.cos(a) + dy * np.sin(a)
-        ends = [(X - cx) * np.cos(a) + (Y - cy) * np.sin(a) for X in (0, 1) for Y in (0, 1)]
+        ca, sa = round(np.cos(a), 12), round(np.sin(a), 12)  # (90 degrees exact: a row on a cut stays one colour)
+        q = dx * ca + dy * sa
+        ends = [(X - cx) * ca + (Y - cy) * sa for X in (0, 1) for Y in (0, 1)]
         place = (q - min(ends)) / max(max(ends) - min(ends), 1e-12)
     else:
         place = np.arctan2(dy, dx) / (2 * np.pi) - turn
