@@ -69,17 +69,32 @@ def save_index(lm):
     return len(data)
 
 
+def _fits(head, mf):
+    """A saved index's head is for mf as it is now."""
+    from notes.loaded import PAIRING
+    return (head.get("ver") == INDEX_VER and head.get("pairing") == PAIRING and head.get("size") == mf.size
+            and head.get("mtime") == mf.mtime and head.get("layout") == _layout(mf))
+
+
+def has_index(mf):
+    """mf (laid out) has a saved index it can be opened from (only its head is read: the load window says so)."""
+    try:
+        with np.load(index_file(mf.path, mf.size), allow_pickle=False) as z:
+            return _fits(json.loads(bytes(z["head"]).decode("utf-8")), mf)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def load_index(mf):
     """The LoadedMidi of mf (laid out, not scanned) from its saved index, or None (none, or not this file as it is
     now: then the usual read)."""
-    from notes.loaded import PAIRING, LoadedMidi, TrackInfo
+    from notes.loaded import LoadedMidi, TrackInfo
     from files import midi_index, speed
     path = index_file(mf.path, mf.size)
     try:
         with np.load(path, allow_pickle=False) as z:
             head = json.loads(bytes(z["head"]).decode("utf-8"))
-            if (head.get("ver") != INDEX_VER or head.get("pairing") != PAIRING or head.get("size") != mf.size
-                    or head.get("mtime") != mf.mtime or head.get("layout") != _layout(mf)):
+            if not _fits(head, mf):
                 return None
             arrays = {k: z[k] for k in ARRAYS}
             cnt, top = z["cnt"], z["top"]

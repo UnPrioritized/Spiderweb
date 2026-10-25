@@ -182,11 +182,15 @@ class LoadWindow(tk.Toplevel):
                                      tracks=trn("load.tracks", len(mf.tracks), n=f"{len(mf.tracks):,}"),
                                      ppq=mf.ppq)).pack(anchor="w", pady=(2, 10))
         ttk.Label(self.body, text=tr("load.how")).pack(anchor="w")
-        self.keep = tk.BooleanVar(self, value=keep_ok)
+        indexed = saved.has_index(mf)  # (a saved index: reading from the file opens in a moment, so it's picked)
+        self.keep = tk.BooleanVar(self, value=keep_ok and not indexed)
         ttk.Radiobutton(self.body, text=tr("load.from_file"), variable=self.keep, value=False).pack(anchor="w",
                                                                                                     pady=(6, 0))
         ttk.Label(self.body, text=tr("load.from_file_info"), foreground=look.HINT, wraplength=440,
                   justify="left").pack(anchor="w", padx=(22, 0))
+        if indexed:
+            ttk.Label(self.body, text=tr("load.index_found"), foreground=look.GOOD, wraplength=440,
+                      justify="left").pack(anchor="w", padx=(22, 0), pady=(2, 0))
         r = ttk.Radiobutton(self.body, text=tr("load.keep", size=size_text(need)), variable=self.keep, value=True)
         r.pack(anchor="w", pady=(8, 0))
         if keep_ok:

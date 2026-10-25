@@ -1899,6 +1899,7 @@
  "extract.done_one": "Extracted {n} loaded note into a new shape.",
  "load.sum_from_index": "Opened from its saved index (Settings → General lists them).",
  "load.index_ask": "Reading this MIDI took {s} s. Save its index ({size}) so it opens in a moment next time? Only where things are in the file is kept, never the notes; Settings → General lists saved indexes.",
+ "load.index_found": "A saved index was found for this file: it opens from it in a moment (Keep in memory reads the whole file instead).",
  "load.index_save": "Save Index",
  "load.index_never": "Don't ask again for this file",
  "load.index_saved": "Saved ({size}).",
