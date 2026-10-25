@@ -27,7 +27,8 @@ import numpy as np
 
 from files import midi_play, speed
 from files.synth import GROUP_BUFFER, RATE
-from files.midi_scan import C_BEND, C_CC, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS, C_PROG, C_PTICK, C_PVAL
+from files.midi_scan import (C_BANK, C_BEND, C_BTICK, C_CC, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS, C_PROG, C_PTICK,
+                             C_PVAL)
 
 STEP_S = 0.003  # the feeder's beat
 AHEAD_S = 1.0  # read this far ahead of the play line at most
@@ -74,13 +75,18 @@ def _loops():
     return midi_play.read, midi_play.order, midi_play.hist, midi_play.emit, midi_play.programs
 
 
-def preload(synth, lm):
-    """The sounds of every instrument lm's program changes ask for (and the piano / drum kit 0 they start with)
-    loaded into each soundfont BEFORE playing (user 2026-10-25: playback follows the file's instruments; samples
-    loaded while playing, in BASS's threads, crashed with an SFZ before). A soundfont without one: skipped there
-    (that instrument comes from the next soundfont, or stays silent, like other players)."""
+def instruments(lm):
+    """(programs, drum kits) lm plays: its program changes' and the piano / drum kit 0 every channel starts with."""
     progs, kits = lm.mf.programs()
-    synth.load_presets(progs | {0}, kits | {0})
+    return progs | {0}, kits | {0}
+
+
+def preload(synth, lm):
+    """The sounds of every instrument lm plays loaded BEFORE playing (user 2026-10-25: playback follows the file's
+    instruments; samples loaded while playing, in BASS's threads, crashed with an SFZ before), each from the
+    soundfont it's heard from; none has it = silent, like other players. Slow the first time (a whole piano from a
+    hard disk: seconds): App.start_loaded runs it in the background when presets_missing."""
+    synth.load_presets(*instruments(lm))
 
 
 def track_ports(lm):
@@ -299,39 +305,54 @@ class LoadedPlayer:
         return skip, (ts[o].copy(), ms[o].copy(), ks[o].copy())
 
     def _instruments(self, pos, tick):
-        """The program changes (with their bank select) in effect at each slot's checkpoint (pos / tick: where its
-        reading starts; the ones after it are read with the rest): (ticks, messages, track numbers), sent before
-        anything else when playing starts there. From the load pass's last change per channel (midi_scan C_PTICK /
-        C_PVAL) when it came before the checkpoint, else the track walked up to it (midi_play.programs)."""
+        """The program changes (with their bank select) and bank selects in effect at each slot's checkpoint (pos /
+        tick: where its reading starts; the ones after it are read with the rest): (ticks, messages, track
+        numbers), sent before anything else when playing starts there. From the load pass's last ones per channel
+        (midi_scan C_PTICK / C_PVAL / C_BANK / C_BTICK) when they came before the checkpoint, else the track walked
+        up to it (midi_play.programs). The bank as it stands goes after the program (hunt 2026-10-25: a bank select
+        after the last program change was lost, the next program change then took the wrong bank)."""
+        PS = midi_play
         out = []
         for s in np.flatnonzero(pos > 0).tolist():
             n = int(self.num[s])
             c = self.lm.mf.tracks[n].counts
-            if not int(c[C_PROG]):
+            plast, blast = c[C_PTICK:C_PTICK + 16] - 1, c[C_BTICK:C_BTICK + 16] - 1
+            if not int(c[C_PROG]) and not (blast >= 0).any():
                 continue
-            last = c[C_PTICK:C_PTICK + 16] - 1
-            if (last >= tick[s]).any():  # (a change at / after the checkpoint: its state there walked)
+            if (plast >= tick[s]).any() or (blast >= tick[s]).any():  # (a change at / after the checkpoint: walked)
                 st = self._walk_programs(s, int(pos[s]))
-                last, vals = st[midi_play.PS_PTICK:midi_play.PS_PTICK + 16] - 1, st[midi_play.PS_PVAL:]
+                plast, blast = st[PS.PS_PTICK:PS.PS_PTICK + 16] - 1, st[PS.PS_BTICK:PS.PS_BTICK + 16] - 1
+                vals, banks = st[PS.PS_PVAL:PS.PS_PVAL + 16], st[PS.PS_BANK:PS.PS_BANK + 16]
             else:
-                vals = c[C_PVAL:C_PVAL + 16]
-            for ch in np.flatnonzero(last >= 0).tolist():
-                v, t = int(vals[ch]), int(last[ch])
-                bank = v >> 7
-                for m in (0xB0 | ch | (bank & 127) << 16, 0xB0 | ch | 32 << 8 | (bank >> 7 & 127) << 16,
-                          0xC0 | ch | (v & 127) << 8):
-                    out.append((t, m, n))
+                vals, banks = c[C_PVAL:C_PVAL + 16], c[C_BANK:C_BANK + 16]
+
+            def bank_select(t, ch, bank):
+                out.append((t, 0xB0 | ch | (bank & 127) << 16, n))
+                out.append((t, 0xB0 | ch | 32 << 8 | (bank >> 7 & 127) << 16, n))
+            for ch in range(16):
+                if plast[ch] >= 0:
+                    v, t = int(vals[ch]), int(plast[ch])
+                    bank_select(t, ch, v >> 7)
+                    out.append((t, 0xC0 | ch | (v & 127) << 8, n))
+                if blast[ch] >= 0:
+                    bank_select(int(blast[ch]), ch, int(banks[ch]))
         if not out:
             return np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32)
         a = np.array(out, np.int64)
         return a[:, 0].copy(), a[:, 1].astype(np.int32), a[:, 2].astype(np.int32)
 
     def _walk_programs(self, s, upto):
-        """midi_play.programs over slot s's bytes before byte place upto (its checkpoint), a piece at a time."""
+        """midi_play.programs over slot s's bytes before byte place upto (its checkpoint), a piece at a time. Each
+        place walked to is remembered with the file (hunt 2026-10-25: a giant track was read from its start at
+        every Space and every jump, seconds from a hard disk): the next walk goes on from the nearest one before."""
         walk = _loops()[4]
-        st = np.zeros(midi_play.PS_SIZE, np.int64)
-        n, p = int(self.num[s]), 0
-        buf = np.empty(min(CHUNK, max(upto, 1)), np.uint8)
+        n = int(self.num[s])
+        walks = self.lm.__dict__.setdefault("prog_walks", {}).setdefault(n, {})
+        p = max((q for q in walks if q <= upto), default=0)
+        st = walks[p].copy() if p else np.zeros(midi_play.PS_SIZE, np.int64)
+        if p == upto:
+            return st
+        buf = np.empty(min(CHUNK, max(upto - p, 1)), np.uint8)
         while p < upto:
             z = min(len(buf), upto - p)
             if self.mode_file:
@@ -348,6 +369,8 @@ class LoadedPlayer:
                 buf = np.empty(2 * len(buf), np.uint8)
                 continue
             p += used
+        if p == upto:
+            walks[p] = st.copy()
         return st
 
     def _reader(self, t0):

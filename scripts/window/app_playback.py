@@ -34,6 +34,19 @@ def font_sig(path):
     return f"{st.st_size}:{int(st.st_mtime)}:{os.path.normpath(path)}" if st else None
 
 
+def fonts_sig(paths):
+    """font_sig of every soundfont in the list ("|" between; one soundfont = its own font_sig), None: none / one
+    missing. Auto's run-on is made by the whole list (hunt 2026-10-25: keyed on the top one, changes under it were
+    never measured again)."""
+    sigs = [font_sig(p) for p in paths]
+    return "|".join(sigs) if sigs and None not in sigs else None
+
+
+READY_AFTER_MS = 1500  # Built-in BASSMIDI made ready this long after the start (ready_builtin); None = never (tests)
+LIVE_SETTLE_S = 0.4  # a synth opened right at Space runs this long before the notes (hunt 2026-10-25: a new BASSMIDI
+# stream lost its first 12-46 ms; notes 0.4 s after it opened lost none)
+
+
 class Playback:
     """Mixed into App."""
 
@@ -56,6 +69,7 @@ class Playback:
         if dev == BUILTIN and not self.hz_preview["font"] and not self.pick_soundfont():
             return
         self.fresh_builtin()
+        fresh = dev == BUILTIN and not (self.out.handle and self.out.name == dev)
         err = self.out.open(dev)
         while err and dev == BUILTIN and self.font_failed:  # (moved, gone or broken: offer another, hunt 2026-10-09)
             if not messagebox.askyesno(tr("app.spiderweb_2"), err + "\n\n" + tr("synth.pick_other"), parent=self) \
@@ -65,6 +79,8 @@ class Playback:
         if err:
             messagebox.showerror(tr("app.spiderweb_2"), err)
             return
+        if fresh and self.out.handle:  # (opened just now, not ahead by ready_builtin: it runs a moment first)
+            time.sleep(LIVE_SETTLE_S)
         if self.hz_window:  # (one thing plays at a time, user)
             self.hz_window.preview.stop_play()
             self.hz_window.draw_preview()
@@ -76,6 +92,7 @@ class Playback:
         self.player.stop()
         self.player._clock = None  # (the loaded MIDI's feeder waits for the new line, never the last play's)
         self.player.map = None  # (its reader waits for this play's tempo: Player.start sets it)
+        self.piano_back()
         if self.loaded is not None:  # (first: the play line waits until its first notes are read)
             self.start_loaded(int(round(self.playhead * ppq)))
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
@@ -109,27 +126,67 @@ class Playback:
         """The loaded MIDI plays along from tick t0, the play line (files/play_loaded.py): Built-in BASSMIDI = its
         own synths side by side (a LiveGroup, opened for each play), other MIDI outs = the same device. The Player
         starts its line once the first notes are read (Player.ready)."""
-        from files.play_loaded import LoadedPlayer, preload
+        from files.play_loaded import instruments, preload
+        self.stop_loaded()
+        synth = self.synth if self.out.name == BUILTIN else None
+        if synth is None or not synth.presets_missing(*instruments(self.loaded)):
+            self._start_loaded_now(t0)
+            return
+        # the file's instruments loaded first, in the background (hunt 2026-10-25: a whole piano from a hard disk
+        # froze the window for seconds at the first Space); the play line waits for them (gate), "Loading…" shown
+        gate, me, lm = threading.Event(), object(), self.loaded
+        self.player.ready = gate
+        self._instruments_job = me
+        self.busy(tr("app.loading_instruments"))
+        job = threading.Thread(target=preload, args=(synth, lm), daemon=True)
+        job.start()
+
+        def done():
+            if job.is_alive():
+                self.after(30, done)
+                return
+            if self._instruments_job is not me:
+                return  # (stopped meanwhile, or played again: that one goes on)
+            self._instruments_job = None
+            self.busy(None)
+            if self.player.running and self.loaded is lm:
+                self._start_loaded_now(t0, gate)
+        self.after(30, done)
+
+    def _start_loaded_now(self, t0, gate=None):
+        """start_loaded once the file's instruments are loaded. gate = the play line's waiting (opened once the
+        loaded MIDI's first notes are read)."""
+        from files.play_loaded import LoadedPlayer
         from files.playback import KDMAPI
         from files.synth import LiveGroup
-        self.stop_loaded()
         sinks, kind = None, "kdmapi" if self.out.name == KDMAPI else "device"
         if self.out.name == BUILTIN and self.synth is not None:
             try:
-                preload(self.synth, self.loaded)  # (the file's instruments: loaded now, never while playing)
                 self.loaded_group = LiveGroup(self.synth, self.loaded_synths, self.play_voices,
                                               limiter=self.play_limiter.get())
                 sinks, kind = self.loaded_group.lives, "group"
             except SynthError as e:  # (its own shapes still play: told on the status line)
                 self.status.config(text=str(e))
+                if gate is not None:
+                    gate.set()
                 return
         tl = self.track_list
-        self.loaded_play = LoadedPlayer(self.loaded, self.player, self.out, sinks, kind,
-                                        muted=lambda: [-1 - s for s in tuple(tl.muted) if s < 0])
-        self.player.ready = self.loaded_play.ready
-        self.loaded_play.start(t0)
+        lp = self.loaded_play = LoadedPlayer(self.loaded, self.player, self.out, sinks, kind,
+                                             muted=lambda: [-1 - s for s in tuple(tl.muted) if s < 0])
+        if gate is None:
+            self.player.ready = lp.ready
+        else:  # (the line already waits on gate: opened once this one's first notes are read, or it's stopped)
+            def pass_on():
+                while not lp.ready.wait(0.01) and self.loaded_play is lp:
+                    pass
+                gate.set()
+            threading.Thread(target=pass_on, daemon=True).start()
+        lp.start(t0)
 
     def stop_loaded(self):
+        if getattr(self, "_instruments_job", None) is not None:  # (instruments still loading: that play is off)
+            self._instruments_job = None
+            self.busy(None)
         if self.loaded_play is not None:
             self.loaded_play.stop()
             self.loaded_play = None
@@ -223,9 +280,21 @@ class Playback:
             self.roll.show_playhead()
             self.schedule_autosave()
         self.stop_loaded()
+        self.piano_back()
         self.overload.stop()
         self.show_overload()
         self.play_btn.config(text=tr("app.play_space"))
+
+    def piano_back(self):
+        """(A Windows MIDI device / OmniMIDI: the loaded MIDI and the shapes share its 16 channels) bank 0 + the
+        piano on every channel, at every play's start and stop: a loaded MIDI's instruments never stay on for the
+        shapes (hunt 2026-10-25; user: own shapes always the piano). Built-in BASSMIDI plays a loaded MIDI on synths
+        of its own."""
+        if self.out.handle is None or self.out.name == BUILTIN:
+            return
+        for ch in range(16):
+            for m in (0xB0 | ch, 0xB0 | ch | 32 << 8, 0xC0 | ch):
+                self.out.send(m)
 
     def show_overload(self):
         """The red text at the status line's right end (and in Settings → Sound): "Overloaded", with the
@@ -262,6 +331,8 @@ class Playback:
         if self.hz_window:
             self.hz_window.show_cc()  # (16 channels or plenty)
         self.schedule_autosave()
+        if READY_AFTER_MS is not None:
+            self.after(300, self.ready_builtin)
 
     def make_live(self):
         """(MidiOut.open) The built-in synth started for playing, with the soundfont (the Hz bass preview's) and
@@ -286,6 +357,45 @@ class Playback:
             return live
         finally:
             self.busy(None)
+
+    def ready_builtin(self):
+        """Built-in BASSMIDI made ready before the first Space (user 2026-10-25: "the first play after the app is
+        opened will always make the wonky sound", soundfonts on a hard disk): the soundfonts opened and the start
+        of every piano sound loaded in the background (Synth.warm_piano: its live stream can't load them ahead,
+        they came from the disk while playing), then the synth itself opened, so it already runs at the first
+        note (a new one lost its first moments). After the start (READY_AFTER_MS), a soundfont change and picking
+        Built-in BASSMIDI. Anything wrong = nothing done here: said when it plays."""
+        if self.midi_device.get() != BUILTIN or self.out.handle is not None:
+            return
+        fonts = font_list(self.hz_preview)
+        if not fonts or not all(os.path.isfile(p) for p in fonts):
+            return
+        try:
+            if self.synth is None:
+                self.synth = Synth()
+        except SynthError:
+            return
+        synth, me = self.synth, object()
+        self._ready_job = me
+
+        def work():
+            try:
+                synth.set_fonts(fonts)
+                synth.warm_piano()
+            except SynthError:
+                pass
+        job = threading.Thread(target=work, daemon=True)
+        job.start()
+
+        def done():
+            if job.is_alive():
+                self.after(100, done)
+                return
+            if (self._ready_job is me and self.winfo_exists() and self.midi_device.get() == BUILTIN
+                    and self.out.handle is None and not self.player.running and font_list(self.hz_preview) == fonts
+                    and not synth.needs_open(fonts)):
+                self.out.open(BUILTIN)  # (quick now: the soundfonts are open)
+        self.after(100, done)
 
     def sync_builtin(self):
         """Settings → Sound shows Built-in BASSMIDI's settings only while it's the MIDI out."""
@@ -321,7 +431,7 @@ class Playback:
         note, the Hz bass preview makes its sound again (remake). again = open the ones still listed anew too
         (one was picked again); added = the new ones (an .sfz among them is checked)."""
         cfg = self.hz_preview
-        paths = list(dict.fromkeys(paths))
+        paths = font_list({"font": "", "more_fonts": list(paths)})  # (each file once, whatever its spelling)
         cfg["font"], cfg["more_fonts"] = (paths[0] if paths else ""), paths[1:]
         self.schedule_autosave()
         self.soundfont_changed(again, added)  # (Settings → Sound shows the new names)
@@ -337,8 +447,14 @@ class Playback:
         return True
 
     def remake_preview(self):
-        """The Hz bass preview makes its sound again with the soundfonts set now."""
+        """The Hz bass preview makes its sound again with the soundfonts set now (none left = it goes off quietly,
+        hunt 2026-10-25: Remove on the last one gave a "Pick a soundfont first" popup)."""
         hz = self.hz_window
+        if hz is not None and not font_list(self.hz_preview):
+            if hz.preview_on.get():
+                hz.preview_on.set(False)
+                hz.on_preview()
+            return
         if hz is not None:  # (the preview makes its sound again with it)
             if hz.settings_window and hz.settings_window.winfo_exists():
                 hz.settings_window.remake()
@@ -366,23 +482,26 @@ class Playback:
         if self.synth is not None and again:
             self.synth.stale = True  # (picked again = opened again: samples put back since then are found)
         sfz = [p for p in ([self.hz_preview["font"]] if added is None else added) if p.lower().endswith(".sfz")]
-        self.check_samples(sfz[-1] if sfz else "")  # (one check at a time: the newest pick's)
+        self.check_samples(sfz)
         self.ring_check()
+        if READY_AFTER_MS is not None:
+            self.after(300, self.ready_builtin)
 
     def ring_check(self, quiet=False):
         """Auto's CC run-on (hz_cc.auto_ring) for the soundfont picked: the time remembered for it, else measured in
         the background once the synth has it open (Hz preview, Built-in BASSMIDI); 3 seconds (hz_cc.RING) until
         then. quiet: only set (the settings being read at the start: the notes are made after)."""
         cfg = self.hz_preview
-        sig = font_sig(cfg["font"])
+        fonts = font_list(cfg)
+        sig = fonts_sig(fonts)
         if sig is not None and cfg.get("ring_font") == sig:
             self.auto_ring_is(cfg["ring"], quiet)
             return
         self.auto_ring_is(None, quiet)
         synth = getattr(self, "synth", None)  # (none yet while the settings are read at the start)
-        if (sig is None or synth is None or not synth.font_path
-                or os.path.normpath(synth.font_path) != os.path.normpath(cfg["font"]) or synth.stale
-                or getattr(self, "_ring_job", None) == sig):
+        if (sig is None or synth is None or not synth.font_paths
+                or [os.path.normpath(p) for p in synth.font_paths] != [os.path.normpath(p) for p in fonts]
+                or synth.stale or getattr(self, "_ring_job", None) == sig):
             return
         self._ring_job, result = sig, []
 
@@ -399,7 +518,7 @@ class Playback:
                 self.after(200, done)
                 return
             self._ring_job = None
-            if result and font_sig(cfg["font"]) == sig and self.winfo_exists():
+            if result and fonts_sig(font_list(cfg)) == sig and self.winfo_exists():
                 cfg["ring"], cfg["ring_font"] = math.ceil(result[0] * 10 - 1e-9) / 10, sig  # (up to a tenth)
                 self.schedule_autosave()
                 self.auto_ring_is(cfg["ring"])
@@ -415,13 +534,15 @@ class Playback:
         if win and win.settings_window:  # (only its run-on box: a whole sync mid-drag put the note dragged back)
             win.settings_window.show_ring(win.target())
 
-    def check_samples(self, path):
-        """(An .sfz just picked) its sound files checked in the background: missing ones or ones in a format the
-        synth can't read = one warning, as the synth opens such a soundfont without a word and those sounds are
-        missing. A soundfont the synth refuses altogether: nothing here, its "couldn't be read" lists them. Only
-        the newest pick's check speaks (another pick meanwhile, even of the same file, stops this one)."""
+    def check_samples(self, paths):
+        """(The .sfz files just picked / added, one after another) their sound files checked in the background:
+        missing ones or ones in a format the synth can't read = one warning each, as the synth opens such a
+        soundfont without a word and those sounds are missing. A soundfont the synth refuses altogether: nothing
+        here, its "couldn't be read" lists them. Only the newest pick's check speaks (another pick meanwhile, even
+        of the same file, stops this one)."""
         self._sample_check = getattr(self, "_sample_check", 0) + 1
-        if not path or not path.lower().endswith(".sfz"):
+        paths = [p for p in paths if p and p.lower().endswith(".sfz")]
+        if not paths:
             return
         try:
             if self.synth is None:
@@ -431,25 +552,29 @@ class Playback:
         synth, result, me = self.synth, [], self._sample_check
 
         def work():
-            try:
-                result.append(synth.silent_samples(path, cancel=lambda: self._sample_check != me))
-            except OSError:
-                pass  # (the soundfont itself unreadable: the synth says so when it opens it)
+            for path in paths:
+                try:
+                    result.append((path, synth.silent_samples(path, cancel=lambda: self._sample_check != me)))
+                except OSError:
+                    pass  # (the soundfont itself unreadable: the synth says so when it opens it)
         job = threading.Thread(target=work, daemon=True)
         job.start()
 
         def done():
             if job.is_alive():
                 self.after(200, done)
-            elif result and result[0][1] and not result[0][2] and self._sample_check == me and self.winfo_exists():
+                return
+            for path, (_, bad, refused) in result:
+                if not bad or refused or self._sample_check != me or not self.winfo_exists():
+                    continue
                 try:
                     focus = self.focus_get()
                 except KeyError:
                     focus = None  # (a dropdown's list open: Tk's own widget, unknown here)
                 messagebox.showwarning(
                     tr("synth.silent_title"),
-                    trn("synth.silent", len(result[0][1]), name=os.path.basename(path), n=f"{len(result[0][1]):,}")
-                    + "\n\n" + silent_list(path, result[0][1]),
+                    trn("synth.silent", len(bad), name=os.path.basename(path), n=f"{len(bad):,}")
+                    + "\n\n" + silent_list(path, bad),
                     parent=focus.winfo_toplevel() if focus else self)
         self.after(200, done)
 

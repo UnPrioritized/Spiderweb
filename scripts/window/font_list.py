@@ -10,7 +10,7 @@ from tkinter import filedialog, ttk
 from files.lang import tr
 from files.synth import FONT_TYPES
 from window import look
-from window.hz_preview import font_list
+from window.hz_preview import font_list, same_file
 from window.widgets import ListTip, Tooltip
 
 ROWS = (3, 6)  # the list's height in rows: at least, at most (more scroll)
@@ -98,9 +98,11 @@ class FontList(ttk.Frame):
         got = [os.path.normpath(p) for p in (self.tk.splitlist(got) if isinstance(got, str) else got or ())]
         if not got:
             return
-        again = any(p in paths for p in got)  # (one already listed = opened again: samples put back are found)
-        new = paths + [p for p in dict.fromkeys(got) if p not in paths]
-        self.put(new, len(new) - 1, again, [p for p in got if p not in paths])
+        have = {same_file(p) for p in paths}
+        again = any(same_file(p) in have for p in got)  # (one already listed = opened again: put-back samples found)
+        added = [p for p in got if same_file(p) not in have]
+        new = font_list({"font": "", "more_fonts": paths + added})  # (each file once)
+        self.put(new, len(new) - 1, again, added)
 
     def remove(self):
         i = self.picked()

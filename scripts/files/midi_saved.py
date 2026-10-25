@@ -19,7 +19,7 @@ from files.about import USER
 from files.safefile import write_bytes, write_text
 
 FOLDER = os.path.join(USER, "midi-index")
-INDEX_VER = 3  # (2: the overview's edges, 3: instruments in the counts, 2026-10-25; older = doesn't fit, offered again)
+INDEX_VER = 4  # (2: the overview's edges, 3-4: instruments in the counts, 2026-10-25; older = doesn't fit, offered again)
 SLOW_S = 10.0  # a load taking longer than this offers to save its index
 DECLINED = "declined.json"
 ARRAYS = ("chn", "cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end", "e_vel", "m_tick", "m_type",

@@ -440,6 +440,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.midi_link = None  # the project's MIDI file (notes.loaded.clean_link): kept while it isn't loaded too
         self.loaded_play = None  # the loaded MIDI playing along (files.play_loaded.LoadedPlayer)
         self.loaded_group = None  # ... its synths on Built-in BASSMIDI (files.synth.LiveGroup)
+        self._instruments_job = None  # ... its instruments loading before it plays (start_loaded)
         self._thin_seen = (0, 0.0)  # (its thinned count, when it last grew: "Overloaded")
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
@@ -479,6 +480,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
         self.updates.start()  # (What's new after an update; asks about / looks for updates)
         speed.start()  # (the compiled loops for lots of notes, if Numba is there: loaded in the background)
+        from window import app_playback
+        if app_playback.READY_AFTER_MS is not None:  # (Built-in BASSMIDI ready before the first Space)
+            self.after(app_playback.READY_AFTER_MS, self.ready_builtin)
 
         for k, v in self.pvar.items():  # (the output file name changes no notes: typing it remade them all, slow)
             v.trace_add("write", lambda *_, k=k: self.schedule_autosave() if k == "output" else self.on_project_change(True))

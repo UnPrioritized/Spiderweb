@@ -61,6 +61,9 @@ GROUP_BUFFER = 0.03
 # makes fast spam uneven (user 2026-10-24: smoother in OmniMIDI, which makes sound in small slices). 5 = BASS's least.
 GROUP_PERIOD = 5
 _CONFIG_MIDI_COMPACT = 0x10400
+_FONTLOAD_TIME = 8  # (BASS_MIDI_FontLoadEx: the length in ms)
+WARM_MS = 500  # warm_piano: the start of every piano sound loaded ahead (hunt 2026-10-25: 0.5 s of a 460 MB piano the
+# disk hadn't read took 0.8 s and 22 MB, and the first play then lost no sound)
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
 _EV_PITCHRANGE = 5
 MOST_CHANNELS = 128  # a BASSMIDI stream's most channels (measured 2026-10-21: 129+ refused, error 20; an event
@@ -156,7 +159,7 @@ def load_dlls():
                             ("BASS_MIDI_StreamCreate", [u, u, u], u), ("BASS_MIDI_StreamEvents", [u, u, p, u], u),
                             ("BASS_MIDI_StreamEvent", [u, u, u, u], i),
                             ("BASS_MIDI_StreamSetFonts", [u, p, u], i), ("BASS_MIDI_StreamLoadSamples", [u], i),
-                            ("BASS_MIDI_FontLoad", [u, i, i], i)):
+                            ("BASS_MIDI_FontLoad", [u, i, i], i), ("BASS_MIDI_FontLoadEx", [u, i, i, u, u], i)):
         fn = getattr(midi, name)
         fn.argtypes, fn.restype = args, res
     _dlls = bass, midi
@@ -269,7 +272,8 @@ class Synth:
         self._users = {}  # font -> renders using it now (an old font is only closed when none are left)
         self._old = set()  # fonts replaced, to close once unused
         self._loading = threading.Lock()  # samples loaded by one thread at a time (see _load_samples)
-        self._presets = set()  # (font, preset, bank) loaded by load_presets
+        self._presets = set()  # (preset, bank) load_presets has loaded for the soundfonts open now
+        self._opening = threading.RLock()  # set_fonts one at a time (Hz preview's thread, Space on the window's)
 
     def _load_samples(self, h):
         """The samples stream h needs, loaded one thread at a time: six at once into one soundfont crashed (with
@@ -302,10 +306,17 @@ class Synth:
         self.set_fonts([path])
 
     def set_fonts(self, paths):
-        """Opens the soundfonts (first = used first); ones no longer listed are closed, ones still listed stay open
-        (a big one takes a while), all opened again after a pick (stale). SynthError if one can't be read: then
-        the ones open before stay."""
+        """Opens the soundfonts (in the list's order: each overrides the ones before it); ones no longer listed are
+        closed, ones still listed stay open (a big one takes a while), all opened again after a pick (stale).
+        SynthError if one can't be read: then the ones open before stay. One call at a time (hunt 2026-10-25: the
+        Hz preview's thread and Space could each take the other's closed soundfont into the list); already open as
+        asked = nothing to do."""
         paths = _paths(paths)
+        with self._opening:
+            if self.stale or self.font_paths != paths:
+                self._set_fonts(paths)
+
+    def _set_fonts(self, paths):
         if self.stale:
             self._close_first()
         have = dict(zip(self.font_paths, self.font))
@@ -326,6 +337,7 @@ class Synth:
             self.font, self.font_paths, self.font_path = tuple(fonts), paths, paths[0] if paths else None
             self.opened, self.stale = self.opened + 1, False
             self._old |= old
+            self._presets = set()  # (another list: each sound may be heard from another soundfont now)
         self._free_unused()
 
         def size(path):
@@ -369,6 +381,7 @@ class Synth:
         with self._lock:
             old, self.font, self.font_paths, self.font_path = self.font, (), (), None
             self._old |= set(old)
+            self._presets = set()
         end = time.monotonic() + wait
         while any(self._users.get(f) for f in old) and time.monotonic() < end:
             time.sleep(0.02)
@@ -446,7 +459,6 @@ class Synth:
         with self._lock:
             gone = [f for f in self._old if not self._users.get(f)]
             self._old.difference_update(gone)
-            self._presets = {k for k in self._presets if k[0] not in gone}  # (a handle may be given out again)
         for f in gone:
             self.midi.BASS_MIDI_FontFree(f)
 
@@ -461,19 +473,48 @@ class Synth:
             self.bass.BASS_StreamFree(h)
             self._give(used)
 
-    def load_presets(self, programs, kits):
-        """The sounds of these programs (every bank) and drum kits (bank 128) loaded into every open soundfont now,
-        one thread at a time (_load_samples' rule), so playing a file that switches to them never loads any (a
-        loaded MIDI's program changes, play_loaded.preload). Ones a soundfont hasn't: skipped. Loaded once per
-        opening of a soundfont."""
+    def warm_piano(self, ms=WARM_MS):
+        """The first ms of every piano (program 0) sound loaded now, from the soundfont it's heard from (the last in
+        the list that has one). Built-in BASSMIDI's own stream is a live one: BASSMIDI can't load its sounds ahead
+        (StreamLoadSamples does nothing there), so the first play read them from the disk while playing and
+        stuttered (user 2026-10-25: at every Spiderweb start, soundfonts on a hard disk; hunt measured up to 2.1 ms
+        of each 5 ms piece the first time, 0.1 ms after). The rest of each sound loads as it plays, quickly."""
         fonts = self._take()
         try:
             with self._loading:
-                for f in fonts:
-                    for preset, bank in [(p, -1) for p in sorted(programs)] + [(k, 128) for k in sorted(kits)]:
-                        if (f, preset, bank) not in self._presets:
-                            self.midi.BASS_MIDI_FontLoad(f, preset, bank)
-                            self._presets.add((f, preset, bank))
+                for f in reversed(fonts):
+                    if self.midi.BASS_MIDI_FontLoadEx(f, 0, 0, ms, _FONTLOAD_TIME):
+                        break
+        finally:
+            self._give(fonts)
+
+    @staticmethod
+    def _wanted(programs, kits):
+        return [(p, -1) for p in sorted(programs)] + [(k, 128) for k in sorted(kits)]
+
+    def presets_missing(self, programs, kits):
+        """True when load_presets still has something to load for these."""
+        return any(key not in self._presets for key in self._wanted(programs, kits))
+
+    def load_presets(self, programs, kits):
+        """The whole sounds of these programs (every bank) and drum kits (bank 128) loaded now, each from the
+        soundfont it's heard from (the last in the list that has it; hunt 2026-10-25: loading it into every one
+        took seconds and memory for nothing), one thread at a time (_load_samples' rule), so playing a file that
+        switches to them never loads any (a loaded MIDI's program changes, play_loaded.preload; whole sounds: up to
+        16 synths play it side by side, and sounds loading while they play is what crashed with an SFZ). Ones no
+        soundfont has: skipped. Done once per set of soundfonts (set_fonts starts again)."""
+        fonts = self._take()
+        try:
+            with self._loading:
+                for key in self._wanted(programs, kits):
+                    if key in self._presets:
+                        continue
+                    for f in reversed(fonts):
+                        if self.midi.BASS_MIDI_FontLoad(f, *key):
+                            break
+                    with self._lock:
+                        if self.font == fonts:  # (still the soundfonts it was loaded for)
+                            self._presets.add(key)
         finally:
             self._give(fonts)
 

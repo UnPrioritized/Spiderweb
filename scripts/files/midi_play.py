@@ -116,14 +116,15 @@ def read(b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base
     return n
 
 
-PS_TICK, PS_RUN, PS_BANK, PS_PTICK, PS_PVAL = 0, 1, 2, 18, 34  # programs(): st, as midi_scan's C_BANK / C_PTICK /
-PS_SIZE = 50  # C_PVAL per channel
+PS_TICK, PS_RUN, PS_BANK, PS_PTICK, PS_PVAL, PS_BTICK = 0, 1, 2, 18, 34, 50  # programs(): st, as midi_scan's
+PS_SIZE = 66  # C_BANK / C_PTICK / C_PVAL / C_BTICK per channel
 
 
 def programs(b, p, end, st):
     """The whole events in b[p:end] (a track's bytes from its start, piece after piece: st carries on) walked for
-    the instruments: each channel's bank select now and its last program change (st[PS_PTICK + channel] = its tick
-    + 1, 0 = none; st[PS_PVAL + channel] = program | bank << 7). Returns where it stopped (an event not wholly in b:
+    the instruments: each channel's bank select now (st[PS_BTICK + channel] = its last one's tick + 1) and its last
+    program change (st[PS_PTICK + channel] = its tick + 1, 0 = none; st[PS_PVAL + channel] = program | bank << 7).
+    Returns where it stopped (an event not wholly in b:
     call again with more from there)."""
     tk = st[PS_TICK]
     rn = st[PS_RUN]
@@ -160,8 +161,10 @@ def programs(b, p, end, st):
                 v = np.int64(b[q + 1]) & 127
                 if a == 0:
                     st[PS_BANK + ch] = (st[PS_BANK + ch] & ~np.int64(127)) | v
+                    st[PS_BTICK + ch] = tk + d + 1
                 elif a == 32:
                     st[PS_BANK + ch] = (st[PS_BANK + ch] & 127) | (v << 7)
+                    st[PS_BTICK + ch] = tk + d + 1
             elif hi == 0xC:
                 st[PS_PTICK + ch] = tk + d + 1
                 st[PS_PVAL + ch] = a | (st[PS_BANK + ch] << 7)

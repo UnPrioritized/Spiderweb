@@ -40,10 +40,11 @@ C_ADDED = 12  # (counts before this one add up over tracks; the rest are bits / 
 # Instruments (user 2026-10-25: playback follows a loaded MIDI's program changes; their sounds are loaded before
 # playing, never while): programs used as bits (C_PROGS: channels but 10, C_KITS: channel 10's drum kits; 2 x 64
 # bits each), each channel's bank select now (C_BANK + channel: msb | lsb << 7) and its last program change
-# (C_PTICK + channel: its tick + 1, 0 = none; C_PVAL + channel: program | bank << 7, the bank in effect then)
+# (C_PTICK + channel: its tick + 1, 0 = none; C_PVAL + channel: program | bank << 7, the bank in effect then) and
+# its last bank select (C_BTICK + channel: its tick + 1, 0 = none)
 C_PROGS, C_KITS = 13, 15
-C_BANK, C_PTICK, C_PVAL = 17, 33, 49
-C_SIZE = 65
+C_BANK, C_PTICK, C_PVAL, C_BTICK = 17, 33, 49, 65
+C_SIZE = 81
 
 
 def walk(b, p, end, final, rest, st, cnt):
@@ -126,8 +127,10 @@ def walk(b, p, end, final, rest, st, cnt):
                         cnt[C_CC] += 1
                         if b[q] == 0:
                             cnt[C_BANK + ch] = (cnt[C_BANK + ch] & ~np.int64(127)) | (b[q + 1] & 127)
+                            cnt[C_BTICK + ch] = tick + d + 1
                         elif b[q] == 32:
                             cnt[C_BANK + ch] = (cnt[C_BANK + ch] & 127) | (np.int64(b[q + 1] & 127) << 7)
+                            cnt[C_BTICK + ch] = tick + d + 1
                     elif hi == 0xC:
                         cnt[C_PROG] += 1
                         pg = np.int64(b[q] & 127)

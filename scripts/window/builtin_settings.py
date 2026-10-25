@@ -106,6 +106,8 @@ class Overload:
     itself: what it couldn't make in time isn't heard). With guard, the voice limit is lowered while sound goes
     missing and raised slowly back to the user's limit once it's quiet again."""
     EVERY = 0.1  # seconds between looks
+    WARM = 0.5  # sound missing this soon after playing starts doesn't count (hunt 2026-10-25: a synth just opened
+    # loses its first moments; at the first play the limit was lowered and notes cut for 5 s)
     TOO_MUCH = 0.02  # seconds missing within the last second = overloaded (BASS makes sound in pieces: some wobble)
     DROP = 0.85  # the limit is multiplied by this while overloaded and still losing sound...
     DROP_WAIT = 0.3  # ...at most this often (a lower limit takes a moment to show)
@@ -164,6 +166,7 @@ class Overload:
     def _run(self):
         live, clock = self.live, time.perf_counter
         t0, p0 = clock(), live.position()
+        began = t0
         lost = collections.deque()  # (time, seconds missing since the look before; negative = sound ran ahead)
         busy = collections.deque()  # (time, voices sounding)
         last_drop = last_climb = last_over = t0
@@ -171,6 +174,8 @@ class Overload:
         while not self._stop.wait(self.EVERY):
             t, p = clock(), live.position()
             gone = (t - t0) - (p - p0) / 8 / RATE
+            if t - began < self.WARM:
+                gone = 0.0
             t0, p0 = t, p
             lost.append((t, gone))  # (with its sign: a device giving its position in steps evens out)
             while lost[0][0] < t - 1:

@@ -39,12 +39,24 @@ WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # pieces made at once
 DEFAULTS = {"on": False, "font": "", "more_fonts": [], "voices": 1000, "nofx": False, "volume": 0.8, "live_mb": 1000}
 
 
-def font_list(cfg):
-    """The soundfonts picked, in the list's order (each overrides the ones above it): "font" + "more_fonts" (the
-    ones under it, user 2026-10-25)."""
-    return [cfg["font"]] + [p for p in cfg.get("more_fonts", []) if p != cfg["font"]] if cfg["font"] else []
 VOICES = (1, 100000)  # the voice limit's range
 LIVE_MB = (100, 65536)  # the live keys' memory limit's range (MB)
+
+
+def same_file(path):
+    """A soundfont path as one spelling per file (hunt 2026-10-25: other capitals / slashes = listed twice)."""
+    return os.path.normcase(os.path.normpath(path))
+
+
+def font_list(cfg):
+    """The soundfonts picked, in the list's order (each overrides the ones above it): "font" + "more_fonts" (the
+    ones under it, user 2026-10-25), each file once."""
+    seen, out = set(), []
+    for p in ([cfg["font"]] if cfg["font"] else []) + list(cfg.get("more_fonts", [])):
+        if p and same_file(p) not in seen:
+            seen.add(same_file(p))
+            out.append(p)
+    return out
 
 
 def clean_settings(d):
@@ -54,7 +66,9 @@ def clean_settings(d):
     if isinstance(d.get("font"), str):
         got["font"] = d["font"]
     if isinstance(d.get("more_fonts"), list):
-        got["more_fonts"] = list(dict.fromkeys(p for p in d["more_fonts"] if isinstance(p, str) and p))
+        got["more_fonts"] = [p for p in d["more_fonts"] if isinstance(p, str) and p]
+    fonts = font_list(got)  # (each file once; the top line empty, e.g. typed so: the next one is the top, hunt)
+    got["font"], got["more_fonts"] = (fonts[0] if fonts else ""), fonts[1:]
     if isinstance(d.get("voices"), int) and VOICES[0] <= d["voices"] <= VOICES[1]:
         got["voices"] = d["voices"]
     if isinstance(d.get("live_mb"), int) and LIVE_MB[0] <= d["live_mb"] <= LIVE_MB[1]:
