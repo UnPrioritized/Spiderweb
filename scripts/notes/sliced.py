@@ -281,6 +281,8 @@ def made_at_cut(sh, ppq, keys, make):
     notes = notes.copy()
     notes[:, :2] += round(d[0] * ppq)
     notes[:, 2] += round(d[1]) - up
+    if sh.get("_free"):  # (not cut at the edges: Recolour's box, engine.free_box)
+        return notes, tracks
     keep = (notes[:, 2] >= 0) & (notes[:, 2] < keys) & (notes[:, 1] > 0)
     notes = notes[keep]
     notes[:, 0] = np.maximum(notes[:, 0], 0)

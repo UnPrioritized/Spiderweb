@@ -343,6 +343,7 @@ def part_rows(parts, ppq, keys, rounds=False):
     from notes.custom import ROUND, tracks_apart
     from notes.engine import assign_slots, shape_notes_tracks, unique_inverse
     from notes.gateflip import colours_back, unflipped_starts
+    from notes.recolour import is_recoloured
     units, forced, firsts, made, laps, after = [], [], [], [], [], 0
     for p in parts:
         p = {k: v for k, v in p.items() if k not in ("sustain", "subtract")}
@@ -362,7 +363,7 @@ def part_rows(parts, ppq, keys, rounds=False):
         for k in range(len(ids)):
             units.append(notes[o[cut[k]:cut[k + 1]]])
             firsts.append(int(starts[o[cut[k]:cut[k + 1]]].min()))
-        if len(ids) > 1 and tracks_apart(p):
+        if len(ids) > 1 and (tracks_apart(p) or is_recoloured(p)):  # (Recolour's colours: apart, like render's)
             forced.append(mine)
         made.append((notes, which, mine.start))
     slots = np.asarray(assign_slots(units, "key", forced, firsts) if units else [], np.int64)
@@ -639,6 +640,7 @@ def flipped_settings(q, L, vrev=None):
     box, but only flips turn velocities round); None = worked out from L (older recipes). Changes q."""
     from notes.fx import reverse_velocity
     from notes.gaterange import flipped_range, turned_range
+    from notes.recolour import ANTI, CLOCKWISE, SIDEWAYS, UPSIDE, moved
     if vrev:
         reverse_velocity(q)
     if L is None:
@@ -648,7 +650,10 @@ def flipped_settings(q, L, vrev=None):
         for k in ("range", "range_kept"):
             if q.get(k):
                 q[k] = turned_range(q[k], cw)
+        turn = CLOCKWISE if cw else ANTI  # (its Recolour turned too, after the rest: recolour.py FRAME)
         L = np.array([[0, -1], [1, 0]] if cw else [[0, 1], [-1, 0]], float) @ L  # (the rest after turning back)
+    else:
+        turn = None
     if np.linalg.det(L) < 0:
         sideways = L[0, 0] < 0
         if sideways and vrev is None:
@@ -656,10 +661,15 @@ def flipped_settings(q, L, vrev=None):
         for k in ("range", "range_kept"):
             if q.get(k):
                 q[k] = flipped_range(q[k], sideways)
+        moved(q, SIDEWAYS if sideways else UPSIDE)
     elif L[0, 0] < 0:  # (a half turn: the Range runs the other way on both axes)
         for k in ("range", "range_kept"):
             if q.get(k):
                 q[k] = flipped_range(flipped_range(q[k], True), False)
+        moved(q, SIDEWAYS)
+        moved(q, UPSIDE)
+    if turn:
+        moved(q, turn)
     return q
 
 

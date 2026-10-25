@@ -23,6 +23,8 @@ from notes.gateflip import lifted, put_back, turn_velocities
 from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
+from notes.engine import free_box
+from notes.recolour import box_of, carried, is_recoloured, without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
@@ -99,6 +101,23 @@ def last_note(olds, new):
     """"Last note: starts on it" for new (olds joined) and whether every old last note stays (joined.py)."""
     return joined_end_dot([(sh.get("end_dot"), cached_arrays(sh)) for sh in olds], cached_arrays(new),
                           olds[0].get("end_dot"))
+
+
+def carry_recolour(app, whole, parts):
+    """Pieces of a recoloured drawn shape: each one's Recolour remembers the whole's box (recolour.carried), so it
+    keeps the colours it had in the whole however it's moved, flipped or changed later. Changes parts."""
+    if not is_recoloured(whole):
+        return
+
+    def box(s):
+        s = without_recolour(s)
+        notes, _ = app.notes_tracks(s)
+        return (free_box(s, notes, app.notes_tracks, app.keys) or box_of(notes)) if len(notes) else None
+    w = box(whole)
+    for p in parts if w else ():
+        b = box(p) if isinstance(p.get("recolour"), dict) else None
+        if b:
+            p["recolour"] = carried(whole["recolour"], w, b)
 
 
 def part_glue(part, whole):
@@ -854,6 +873,7 @@ class JoinSplit:
         if velocity:  # (like Slice, hunt: Sustain's stops put by hand kept per piece, Gate subtract's graph cut)
             carry_stops(self, [old], parts)
             carry_subtract(self, old, parts)
+            carry_recolour(self, old, parts)
         self.shapes[i:i + 1] = parts
         self.select_many(range(i, i + len(parts)), i)
         self.shapes_changed()
@@ -1213,6 +1233,8 @@ class JoinSplit:
             if i in done:
                 carry_stops(self, [sh], parts)  # (Sustain's stops put by hand: each piece keeps the ones inside it)
                 carry_subtract(self, sh, parts)  # (Gate subtract's graph across the shape: cut per piece)
+                if i not in plain:
+                    carry_recolour(self, sh, parts)  # (each piece keeps the colours it had in the whole)
                 picked += [len(new) + k for k, p in enumerate(parts) if pick is None or pick(p)]
             new += parts
         self.shapes[:] = new

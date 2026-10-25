@@ -12,7 +12,7 @@ Split: Clumps: the shape is cut into colour areas, and each note takes the colou
 
 ## Amount and New shuffle
 
-Amount (Shuffle, Split: Scattered): how many notes get a new colour. 0 % = none, so it looks as if Recolour were off; 100 % = every note. Split: Clumps has Rough edges here instead: 0 % = a clean cut between the areas, higher = more and more ragged edges.
+Amount (Shuffle, Split: Scattered): how many notes are dealt a colour again. 0 % = none, so it looks as if Recolour were off; 100 % = every note. In Shuffle a note can land on the colour it already had (with 2 colours, about half of them do), while Split: Scattered always moves it to another colour. Split: Clumps has Rough edges here instead: 0 % = a clean cut between the areas, higher = more and more ragged edges.
 
 The result is random, but steady: the same shape always shows the same colours, even after moving it, copying it or opening the project again. A small change only changes the colours of the notes it touches. New shuffle gives a new random result.
 
@@ -50,6 +50,6 @@ Recolour comes last, after everything else (Sustain and Gate subtract too): it o
 
 Flip and Turn 90° take the colours along: a flipped shape shows its colours mirrored. Gate aware flip reverses every key row exactly, colours included. After a flip or turn, the Clumps numbers stay as you set them (the window says so), while the areas move with the shape. After a turn, Shuffle and Split: Scattered pick new colours.
 
-Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour. Slicing pasted notes (Slice or Lasso) turns the pieces into plain notes with the colours you saw, without Recolour. Add between blends Recolour step by step when both shapes use the same mode.
+Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, wherever you move them. (A spam piece that you flip lays its spam again from its new start, so its notes move a little and get new colours.) Slicing pasted notes (Slice or Lasso) turns the pieces into plain notes with the colours you saw, without Recolour. Add between blends Recolour step by step when both shapes use the same mode.
 
 Turn into plain notes, Gate sensitive merge, Copy to Domino and Export MIDI all keep the colours you see.

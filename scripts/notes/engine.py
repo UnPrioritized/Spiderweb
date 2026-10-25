@@ -56,8 +56,8 @@ from notes.mask import clean_mask
 from notes.passengers import check_cc
 from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
-from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved_by, piece_knives,
-                          piece_notes, run_origins, source, spotted_notes, steps_kept, whole_made)
+from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved, moved_by,
+                          piece_knives, piece_notes, run_origins, source, spotted_notes, steps_kept, whole_made)
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -655,7 +655,7 @@ def fx_notes(sh, ppq, keys, get):
         if not is_recoloured(sh):
             return notes, tracks
         return recoloured(notes, tracks, rule_of(sh["recolour"]), is_sustained(sh) or sh.get("held") is True,
-                          is_pasted_flipped(sh) or is_gate_flipped(sh), whole_box(sh, get))
+                          is_pasted_flipped(sh) or is_gate_flipped(sh), free_box(sh, notes, get, keys))
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
@@ -701,16 +701,21 @@ def fx_notes(sh, ppq, keys, get):
     return with_glue(*kind_notes_tracks(sh, ppq, keys), sh, ppq)
 
 
-def whole_box(sh, get):
-    """A sliced piece's Recolour box: its whole shape's notes' box where the piece is now (sliced.source), so the
-    piece keeps the colours it had in the whole (recolour.recoloured box); None for any other shape."""
-    if not sh.get("cut"):
+def free_box(sh, notes, get, keys):
+    """The box (recolour.box_of) of sh's notes (without Recolour: notes) as they'd be without the piano roll's
+    edges cutting them, so a shape pushed partly past the song's start / the keys keeps its colours (Recolour counts
+    from it); None when they reach no edge (the notes' own box)."""
+    if not len(notes) or (notes[:, 0].min() > 0 and notes[:, 2].min() > 0 and notes[:, 2].max() < keys - 1):
         return None
-    got = source(without_recolour(sh))
-    if got is None:
+    plain = dict(without_recolour(sh), _free=True)
+    up = 0
+    if notes[:, 2].min() == 0 and "pts" in sh:  # (rows below the lowest key aren't made at all: lifted, counted back)
+        up = max(0, math.ceil(-min(p for _, p in cached_path(sh)) + 1))
+    free, _ = get(moved(plain, (0, up)) if up else plain)
+    if not len(free):
         return None
-    notes, _ = get(got[0])
-    return box_of(notes) if len(notes) else None
+    b = box_of(free)
+    return b[0], b[1], b[2] - up, b[3] - up
 
 
 def tagged_notes(sh, k, ppq, keys):
@@ -1120,9 +1125,12 @@ def _kind_notes_tracks(sh, ppq, keys):
     raw = note_array(raw, 3)
     if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)
         raw = note_lengths(sh["hz"], raw, ppq, sh["kind"] != "funnel", sh)
-    keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
-    raw = raw[keep]
-    raw[:, 0] = np.maximum(raw[:, 0], 0)
+    if sh.get("_free"):  # (not cut at the piano roll's edges: only Recolour's box asks, free_box)
+        keep = np.ones(len(raw), bool)
+    else:
+        keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
+        raw = raw[keep]
+        raw[:, 0] = np.maximum(raw[:, 0], 0)
     tracks = None
     if spots is not None:  # (Colours count over the whole's notes, then the piece keeps its own)
         spots = spots[keep]

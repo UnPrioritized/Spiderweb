@@ -43,6 +43,8 @@ PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
 TIGHT, MOST_TIGHT = 1.0, 50.0  # Swirl tightness: turns from the centre point to the edge
 MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more toward that side)
 MOST_SEED = 2 ** 31 - 1
+BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": [0, 0]}  # (left out when so: Add
+# between blends from them)
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
 SET = 15  # colours in a colour set (always: the ticks change no colour)
 
@@ -98,7 +100,37 @@ def clean_recolour(r):
     f = r.get("frame")
     if isinstance(f, list) and all(number(x) for x in f) and tuple(f) in FRAMES and tuple(f) != SAME:
         out["frame"] = [int(x) for x in f]
+    w = r.get("whole")
+    if isinstance(w, list) and len(w) == 6 and all(number(x) and x == int(x) and abs(x) < 1 << 40 for x in w) \
+            and w[4] >= 0 and w[5] >= 0 and any(w[:4]):
+        out["whole"] = [int(x) for x in w]
     return out
+
+
+# WHOLE (rc "whole", a sliced drawn piece: carried): [first start, last end, lowest key, highest key] of the shape it
+# was cut from, each counted from the piece's own box (box_of, before any flip), + that box's width (ticks) and
+# height (keys). The dice corner and the Clumps areas count in that box, so a piece keeps the colours it had in the
+# whole wherever it goes, flipped, turned or no longer a piece.
+
+
+def carried(whole_rc, whole, piece):
+    """A piece's Recolour, cut from a shape whose Recolour is whole_rc (whole: that shape's notes' box, piece: the
+    piece's, both box_of without Recolour, not cut at the piano roll's edges): the whole's box remembered (rc
+    "whole", counted where the colours are worked out: a flipped shape's places mirrored back). A shape turned since
+    its Recolour was set: nothing remembered (Shuffle throws again after a turn anyway)."""
+    rc = dict(whole_rc)
+    a, b, _, d = rc.get("frame") or SAME
+    if b:
+        rc.pop("whole", None)
+        return clean_recolour(rc)
+    S, P = [int(v) for v in whole], [int(v) for v in piece]
+    o = rc.get("whole") or [0, 0, 0, 0]  # (cut from a piece: counted in its own whole's box)
+    B = [S[i] + o[i] for i in range(4)]  # (where the whole's colours count, mirrored back like its notes)
+    # (a flipped whole's notes are mirrored back in its box, the piece's in its own: the same notes land c apart)
+    ct = S[0] + S[1] - P[0] - P[1] if a < 0 else 0
+    ck = S[2] + S[3] - P[2] - P[3] if d < 0 else 0
+    rc["whole"] = [B[0] - ct - P[0], B[1] - ct - P[1], B[2] - ck - P[2], B[3] - ck - P[3], P[1] - P[0], P[3] - P[2]]
+    return clean_recolour(rc)
 
 
 # FRAME (rc "frame"): the shape flipped / turned since its Recolour was set, as [a, b, c, d]: a place in its box as
@@ -265,14 +297,34 @@ def enough(pals, mix):
     return (sum(len(p) for p in pals) if mix and len(pals) > 1 else max(len(p) for p in pals)) >= 2
 
 
-def framed_centre(rc, c, back=False):
-    """A Centre point c (% of the box) as shown on the flipped / turned shape (rc "frame"); back: a shown one ->
-    the setting."""
-    a, b, cc, d = rc.get("frame") or SAME
-    if not back:  # (shown = the frame undone: its rows and columns swapped)
-        b, cc = cc, b
-    x, y = c[0] - 50, c[1] - 50
-    return [50 + a * x + b * y, 50 + cc * x + d * y]
+def centre_spot(rc, notes, own, c):
+    """Where the Centre point c (% of the colours' box) sits on the piano roll, (tick, key), for notes (as shown,
+    without Recolour; own: engine.free_box): in the box the areas count in (a piece: its whole's), flipped / turned
+    as the shape was since (rc "frame")."""
+    S = box_of(notes)
+    B, F = colour_box(notes, rc, own)
+    a, b, f2, d = rc.get("frame") or SAME
+    if not b:
+        t, k = B[0] + c[0] / 100 * (B[1] - B[0]), B[2] + c[1] / 100 * (B[3] - B[2])
+        return (S[0] + S[1] - t if a < 0 else t), (S[2] + S[3] - k if d < 0 else k)
+    (a0, a1), (b0, b1) = whole_shares(rc)
+    u, v = a0 + c[0] / 100 * (a1 - a0) - 0.5, b0 + c[1] / 100 * (b1 - b0) - 0.5
+    x, y = 0.5 + f2 * v, 0.5 + b * u  # (shown = the turn undone back: rows and columns swapped)
+    return F[0] + x * (F[1] - F[0]), F[2] + y * (F[3] - F[2])
+
+
+def centre_at(rc, notes, own, t, k):
+    """The Centre point (% of the colours' box) for a spot (tick, key) on the piano roll (centre_spot's way back)."""
+    S = box_of(notes)
+    B, F = colour_box(notes, rc, own)
+    a, b, f2, d = rc.get("frame") or SAME
+    if not b:
+        t, k = (S[0] + S[1] - t if a < 0 else t), (S[2] + S[3] - k if d < 0 else k)
+        return [100 * (t - B[0]) / max(B[1] - B[0], 1), 100 * (k - B[2]) / (B[3] - B[2]) if B[3] > B[2] else 50.0]
+    x, y = (t - F[0]) / max(F[1] - F[0], 1) - 0.5, ((k - F[2]) / (F[3] - F[2]) if F[3] > F[2] else 0.5) - 0.5
+    u, v = 0.5 + b * y, 0.5 + f2 * x
+    (a0, a1), (b0, b1) = whole_shares(rc)
+    return [100 * (u - a0) / max(a1 - a0, 1e-12), 100 * (v - b0) / (b1 - b0) if b1 > b0 else 50.0]
 
 
 def box_of(notes):
@@ -300,14 +352,15 @@ def places_of(notes, rc, gate, box):
     return p
 
 
-def recoloured(notes, tracks, rc, held=False, gate=False, box=None):
+def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     """The shape's notes and tracks after its Recolour rc (rule_of). Nothing to shuffle (plan): unchanged. First
     the notes are settled as their colours before would sound (render's overlap rule on each colour: a note cut
     where a later one of its colour starts on its key, notes starting together made one), so a new colour never
     frees a cut note: the notes stay as heard with Recolour off. held: sustained (overlaps kept, render held): not
-    settled, its notes of one colour may still sound together. gate: the shape is gate flipped (places_of). box:
-    the box (box_of) the dice and areas count in, e.g. a sliced piece's whole shape's (so a piece keeps the colours
-    it had in the whole); None = the notes' own."""
+    settled, its notes of one colour may still sound together. gate: the shape is gate flipped (places_of). own:
+    the notes' box without the piano roll's edges (engine.free_box; None = as they are): the dice and areas count
+    from it (and a piece's whole's box, rc "whole": colour_box), so pushing a shape against an edge keeps its
+    colours."""
     if tracks is None and len(notes) and rc["mode"] in SPLIT:  # (one colour: Split works from it)
         tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
@@ -318,15 +371,15 @@ def recoloured(notes, tracks, rc, held=False, gate=False, box=None):
     which, pals = plan(t, rc)
     low = t % ROUND
     lap = t - low  # (each note's round, put back after)
-    box = box or box_of(notes)
-    at = places_of(notes, rc, gate, box)
+    box, own = colour_box(notes, rc, own)
+    at = places_of(notes, rc, gate, box_of(notes))
     corner = (box[0], box[2])
     pick = dice(at, low, rc["seed"], 1, corner)
     roll = dice(at, low, rc["seed"], 0, corner)
     clumps = rc["mode"] == "clumps"
     if clumps:  # (every note takes the colour of the area it lands in: the throw = where it lands)
         n = sum(len(p) for p in pals) if rc.get("mix") and len(pals) > 1 else max(len(p) for p in pals)
-        pick, roll = areas(at, rc, pick, n, box), np.zeros(len(notes))
+        pick, roll = areas(at, rc, pick, n, box, own), np.zeros(len(notes))
     if rc.get("by"):
         lead = leaders(at, rc["by"])
         pick, roll = pick[lead], roll[lead]
@@ -348,7 +401,34 @@ def recoloured(notes, tracks, rc, held=False, gate=False, box=None):
     return notes, lap + new
 
 
-def areas(notes, rc, u, n, box=None):
+def whole_shares(rc):
+    """((start, end) across, (bottom, top) up) of the whole's box (rc "whole") in shares of the piece's own box
+    (0, 1 = its own)."""
+    w = rc.get("whole")
+    if not w:
+        return (0.0, 1.0), (0.0, 1.0)
+    wd, ht = max(w[4], 1), max(w[5], 1)
+    return (w[0] / wd, 1 + w[1] / wd), (w[2] / ht, 1 + w[3] / ht)
+
+
+def colour_box(notes, rc, own=None):
+    """(the box the dice corner and Clumps areas count in, the shape's own box) for notes (as shown, without
+    Recolour; own: their box without the piano roll's edges, engine.free_box), both where the colours are worked
+    out (a flipped shape's mirrored back in its notes' box, places_of)."""
+    S = box_of(notes)
+    F = list(own or S)
+    a, b, _, d = rc.get("frame") or SAME
+    if not b:
+        if a < 0:
+            F[0], F[1] = S[0] + S[1] - F[1], S[0] + S[1] - F[0]
+        if d < 0:
+            F[2], F[3] = S[2] + S[3] - F[3], S[2] + S[3] - F[2]
+    w = rc.get("whole")
+    B = (F[0] + w[0], F[1] + w[1], F[2] + w[2], F[3] + w[3]) if w and not b else tuple(F)
+    return B, tuple(F)
+
+
+def areas(notes, rc, u, n, box=None, own=None):
     """Split: Clumps: where each note's middle lands, 0 <= place < 1 across the colour areas (Shares cut it in
     order), in the shape's box (time and keys each 0..1: the same on any zoom). Bands = stripes across the Angle's
     way (0 = upright, in time order), Wedges = slices around the Centre point, Swirl = wedges twisted more near it
@@ -356,12 +436,15 @@ def areas(notes, rc, u, n, box=None):
     Rough edges (Amount) = each place moved by up to about one area: mostly by a smooth noise (ragged clumps), a
     little by the note's own throw u."""
     s, e, k = (np.asarray(notes[:, c], np.float64) for c in (0, 1, 2))
-    t0, t1, k0, k1 = box or box_of(notes)  # (box: counted in another box, recoloured)
+    f = rc.get("frame")
+    turned = bool(f and f[1])
+    t0, t1, k0, k1 = (own if turned else box) or box_of(notes)  # (box: the colours' box, colour_box)
     x = ((s + e) / 2 - t0) / max(t1 - t0, 1.0)
     y = (k - k0) / (k1 - k0) if k1 > k0 else np.full(len(k), 0.5)
-    f = rc.get("frame")
-    if f and f[1]:  # (turned since: each place turned back, places_of did the flips)
+    if turned:  # (turned since: each place turned back in its own box, places_of did the flips; then in the whole's)
         x, y = 0.5 + f[1] * (y - 0.5), 0.5 + f[2] * (x - 0.5)
+        (a0, a1), (b0, b1) = whole_shares(rc)
+        x, y = (x - a0) / max(a1 - a0, 1e-12), (y - b0) / max(b1 - b0, 1e-12) if b1 > b0 else y
     cx, cy = (v / 100 for v in rc.get("centre", (50, 50)))
     px, py = rc.get("push", (0, 0))
     gx, gy = 2 ** (px / 2), 2 ** (py / 2)  # (pushed right: x ** gx < x, so the cuts land further right, bunched)
