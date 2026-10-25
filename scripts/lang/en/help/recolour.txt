@@ -4,15 +4,21 @@ It works on every kind of shape except a Hz bass: drawn shapes, pasted notes and
 
 ## Modes
 
+In the pictures, the left circle is the shape without Recolour and the right one is the same shape with it.
+
 Shuffle: the colours the shape already has are handed out again at random. Pasted notes use their own colours, drawn shapes the ones from Colours. A shape with only one colour has nothing to shuffle (the dropdown turns orange): give it more colours with Colours, or add new ones in Shares….
+[clip:recolour-shuffle]
 
 Split: Scattered: works even on a shape with one colour. Notes picked at random are torn off their colour onto another one, never their own. With one colour, a second one is added by itself.
+[clip:recolour-scattered]
 
 Split: Clumps: the shape is cut into colour areas, and each note takes the colour of the area its middle is in. By default the areas are bands from left to right; Shares… lays them out other ways (see Clumps below).
+[clip:recolour-bands]
 
 ## Amount and New shuffle
 
-Amount (Shuffle, Split: Scattered): how many notes are dealt a colour again. 0 % = none, so it looks as if Recolour were off; 100 % = every note. In Shuffle a note can land on the colour it already had (with 2 colours, about half of them do), while Split: Scattered always moves it to another colour. Split: Clumps has Rough edges here instead: 0 % = a clean cut between the areas, higher = more and more ragged edges.
+Amount (Shuffle, Split: Scattered): how many notes are dealt a colour again. 0 % = none, so it looks as if Recolour were off; 100 % = every note. In Shuffle a note can land on the colour it already had (with 2 colours, about half of them do), while Split: Scattered always moves it to another colour. Split: Clumps has Rough edges here instead: 0 % = a clean cut between the areas, higher = more and more ragged edges (the picture: 60 %).
+[clip:recolour-rough]
 
 The result is random, but steady: the same shape always shows the same colours, even after moving it, copying it or opening the project again. A small change only changes the colours of the notes it touches. New shuffle gives a new random result.
 
@@ -32,7 +38,9 @@ Pasted notes with more than 15 colours are cut into colour sets of 15, in track 
 
 While a selected shape uses Split: Clumps, the Shares window shows more settings for its areas:
 
-Pattern: Bands (stripes across the shape), Swirl (arms that twist around the Centre point) or Wedges (slices around the Centre point, like a pizza).
+Pattern: Bands (stripes across the shape), Swirl (arms that twist around the Centre point) or Wedges (slices around the Centre point, like a pizza). The pictures: Swirl, then Wedges.
+[clip:recolour-swirl]
+[clip:recolour-wedges]
 
 Angle turns the areas, from -360 to 360 degrees. Drag its knob up or down, or right-click the knob to point it.
 
