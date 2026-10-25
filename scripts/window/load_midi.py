@@ -85,6 +85,30 @@ def ask_choice(parent, title, text, buttons, icon="question"):
     return answer[0]
 
 
+def offer_index(app, lm):
+    """A project's MIDI loaded again slowly (no summary page there): the summary's Save Index question in its own
+    window (user 2026-10-25, picked A: deleting the index meant it was never offered again)."""
+    if app.loaded is not lm or not saved.offer(lm):
+        return
+    answer = ask_choice(app, tr("load.title"), tr("load.index_ask", s=f"{lm.seconds:.0f}",
+                                                  size=size_text(lm.index_bytes())),
+                        [("save", tr("load.index_save")), ("never", tr("load.index_never")),
+                         ("later", tr("load.index_later"))])
+    if answer == "never":
+        saved.decline(lm.path)
+    elif answer == "save":
+        app.config(cursor="watch")
+        app.update_idletasks()
+        try:
+            size = saved.save_index(lm)
+        except OSError as e:
+            messagebox.showerror(tr("load.title"), tr("load.index_failed", why=e.strerror or str(e)), parent=app)
+        else:
+            app.status.config(text=tr("load.index_saved_status", size=size_text(size)))
+        finally:
+            app.config(cursor="")
+
+
 def find_loaded(app, pick=False):
     """An opened project's MIDI loaded again (its link: notes.loaded.clean_link). Not where it was = asked (find
     it / go on without it); pick = straight to the file picker. Found = loaded with the progress window, then
@@ -304,6 +328,7 @@ class LoadWindow(tk.Toplevel):
             return
         if not link["hash"] or lm.link()["hash"] == link["hash"]:  # (the same file, moved or not)
             app.reattach_midi(lm)
+            app.after_idle(lambda: offer_index(app, lm))
             return
         # changed since the project was saved (saved again from another program?): never used quietly
         answer = ask_choice(app, tr("load.title"), tr("load.link_changed", path=lm.path),
@@ -318,6 +343,7 @@ class LoadWindow(tk.Toplevel):
             if took:
                 messagebox.showinfo(tr("load.title"), trn("load.extract_released", len(took), n=len(took)),
                                     parent=app)
+            app.after_idle(lambda: offer_index(app, lm))
         elif answer == "find":
             app.after_idle(lambda: find_loaded(app, pick=True))
         else:

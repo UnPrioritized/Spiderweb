@@ -2016,6 +2016,8 @@
  "load.index_save": "Save Index",
  "load.index_never": "Don't ask again for this file",
  "load.index_saved": "Saved ({size}).",
+ "load.index_later": "Not now",
+ "load.index_saved_status": "The MIDI's index was saved ({size}): it opens in a moment next time.",
  "load.index_failed": "The index couldn't be saved: {why}",
  "load.domino_left_out": "\n\nThe loaded MIDI's notes aren't included, only your shapes. Export MIDI writes both.",
  "load.domino_short": " (only your shapes, not the loaded MIDI)",
