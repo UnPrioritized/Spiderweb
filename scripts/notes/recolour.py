@@ -46,7 +46,8 @@ def number(x):
 
 def clean_recolour(r):
     """A saved sh["recolour"] -> {"mode", "amount": 0..100 (3 decimals), "seed": int, and only when set: "shares"
-    [% per place], "colours" n (2..16), "mix" True, "by" "chord" / "run"}, or None (Off)."""
+    [% per place], "pins" [places whose share stays when others change: the Shares window], "colours" n (2..16),
+    "mix" True, "by" "chord" / "run"}, or None (Off)."""
     if not isinstance(r, dict) or r.get("mode") not in MODES:
         return None
     a = r.get("amount", 100)
@@ -63,6 +64,11 @@ def clean_recolour(r):
     n = r.get("colours")
     if number(n) and n == int(n) and 2 <= n <= 16:
         out["colours"] = int(n)
+    pins = r.get("pins")
+    if isinstance(pins, list):
+        pins = sorted({int(p) for p in pins if number(p) and p == int(p) and 0 <= p < 16})
+        if pins:
+            out["pins"] = pins
     if r.get("mix") is True:
         out["mix"] = True
     if r.get("by") in BY[1:]:
@@ -129,6 +135,8 @@ def colour_sets(low):
     every SET colours in order."""
     ids, inv = np.unique(low, return_inverse=True)
     set_of = np.arange(len(ids)) // SET
+    if len(ids) > SET and len(ids) % SET == 1:  # (a lone last colour joins the set before: 16 colours = one set)
+        set_of[-1] -= 1
     return set_of[inv.reshape(-1)], [ids[set_of == s] for s in range(int(set_of.max()) + 1)]
 
 
@@ -167,13 +175,24 @@ def leaders(notes, by):
         o = np.lexsort((k, s))
         new = np.ones(len(o), bool)
         new[1:] = s[o][1:] != s[o][:-1]
-    else:
-        o = np.lexsort((s, k))
-        new = np.ones(len(o), bool)
-        new[1:] = (k[o][1:] != k[o][:-1]) | (s[o][1:] != e[o][:-1])
-    lead = np.empty(len(o), np.int64)
-    lead[o] = o[np.flatnonzero(new)[np.cumsum(new) - 1]]
-    return lead
+        lead = np.empty(len(o), np.int64)
+        lead[o] = o[np.flatnonzero(new)[np.cumsum(new) - 1]]
+        return lead
+    # a run: each note follows a note on its key ending where it starts (also past notes overlapping in between)
+    ends = k * (1 << 40) + e
+    o = np.argsort(ends, kind="stable")
+    at = np.searchsorted(ends[o], k * (1 << 40) + s)
+    found = at < len(o)
+    found[found] = ends[o][at[found]] == (k * (1 << 40) + s)[found]
+    lead = np.arange(len(s))
+    before = o[np.minimum(at, len(o) - 1)]
+    ok = found & (s[before] < s)  # (starting earlier: a chain never comes back round)
+    lead[ok] = before[ok]
+    while True:  # (each note to the first of its chain)
+        nxt = lead[lead]
+        if (nxt == lead).all():
+            return lead
+        lead = nxt
 
 
 def plan(tracks, rc):
@@ -216,8 +235,8 @@ def recoloured(notes, tracks, rc, held=False):
     change = roll < rc["amount"] / 100
     shares = rc.get("shares")
     if rc.get("mix") and len(pals) > 1:
-        pool = np.concatenate(pals)
-        w = np.concatenate([weights(len(p), shares) for p in pals])
+        pool = np.concatenate(pals)  # (each set weighed by its colours: even shares = every colour alike)
+        w = np.concatenate([weights(len(p), shares) * len(p) for p in pals])
         new = np.where(change, pool[picked(w / w.sum(), pick)], low)
         return notes, lap + kept_apart(notes, low, new, np.unique(pool), pick)
     new = low.copy()

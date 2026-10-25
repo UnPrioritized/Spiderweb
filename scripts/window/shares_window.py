@@ -1,8 +1,10 @@
 """Recolour's Shares… window (side panel Shares…, panel_recolour.py; notes/recolour.py; user 2026-10-25 picked a
 small window): Colours = how many each colour set uses (its own ones first, then new ones = new channels), and each
-colour's share, a knob + a box (25 or 1/4) per colour. The shares always add up to 100 %: one changed, the others
-keep their sizes to each other (user). Stays open and follows the selection like Gate sensitive merge's; each turn /
-typed number / Even shares is one undo step on the selected shapes (several: all get the shown shares)."""
+colour's share, a knob + a box (25 or 1/4) + a Pin tick per colour. The shares always add up to 100 %: one changed,
+the others keep their sizes to each other (user), pinned ones stay (user: what can't be done simply doesn't move).
+Stays open and follows the selection like Gate sensitive merge's. Several shapes: each takes a change on its own list
+(so the shown % holds for each); a box where they differ is blank, like the side panel's Mixed. Each knob turn /
+wheel run / typed number / Even shares / pin is one undo step; Ctrl+Z while a knob is held = back to the press."""
 
 import math
 import tkinter as tk
@@ -93,20 +95,46 @@ def share_text(text):
     return v
 
 
-def spread(shares, i, v):
-    """shares (%, adding up to 100) with place i set to v: the others scaled to make 100 again, keeping their sizes
-    to each other (all of them 0: shared evenly)."""
+def spread(shares, i, v, pins=()):
+    """shares (%, adding up to 100) with place i set to v: the others not pinned scaled to make 100 again, keeping
+    their sizes to each other (all of them 0: shared evenly); pinned ones stay. v is kept within what the pinned
+    ones leave; nothing free to take the rest = unchanged."""
+    n = len(shares)
+    free = [k for k in range(n) if k != i and k not in pins]
+    if not free:
+        return list(shares)
+    fixed = sum(shares[k] for k in range(n) if k != i and k in pins)
+    v = max(0.0, min(v, 100 - fixed))
     out = list(shares)
-    rest = sum(x for k, x in enumerate(out) if k != i)
-    for k in range(len(out)):
-        if k != i:
-            out[k] = (out[k] / rest * (100 - v)) if rest > 0 else (100 - v) / (len(out) - 1)
+    rest = sum(out[k] for k in free)
+    for k in free:
+        out[k] = (out[k] / rest * (100 - fixed - v)) if rest > 0 else (100 - fixed - v) / len(free)
     out[i] = v
     out = [round(x, 3) for x in out]
-    big = max((k for k in range(len(out)) if k != i), key=lambda k: out[k], default=None)
-    if big is not None and out[big] > 0:  # (the rounding left over goes on the biggest other: 100 exactly)
-        out[big] = round(out[big] + 100 - sum(out), 3)
+    big = max(free, key=lambda k: out[k])
+    out[big] = round(max(0.0, out[big] + 100 - sum(out)), 3)  # (the rounding left over: 100 exactly)
     return out
+
+
+def evened(shares, pins=()):
+    """Every share not pinned the same, sharing what the pinned ones leave."""
+    free = [k for k in range(len(shares)) if k not in pins]
+    if not free:
+        return list(shares)
+    left = max(0.0, 100 - sum(x for k, x in enumerate(shares) if k in pins))
+    out = [x if k in pins else round(left / len(free), 3) for k, x in enumerate(shares)]
+    out[free[0]] = round(max(0.0, out[free[0]] + 100 - sum(out)), 3)
+    return out
+
+
+class KnobHold:
+    """A share knob held (App.held_scrub): shortcuts wait, Ctrl+Z goes back to the press with no step."""
+
+    def __init__(self, win, knob):
+        self.win, self.knob, self.drag = win, knob, {"gesture": object()}
+
+    def cancel(self):
+        self.win.call_off(self)
 
 
 class SharesWindow(tk.Toplevel):
@@ -118,8 +146,9 @@ class SharesWindow(tk.Toplevel):
         self.title(tr("shares.title"))
         self.transient(app)
         self.resizable(False, False)
-        self.turning = None  # a knob held / wheel steps: (it, the undo step it made)
-        self.places = 0  # colours shown
+        self.hold = None  # a knob held (KnobHold)
+        self.wheel = None  # (knob, gesture) of wheel / arrow steps in a row: one undo step
+        self.n_shown = ""
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
         self.what = ttk.Label(box, text="", foreground=look.HINT)
@@ -153,9 +182,13 @@ class SharesWindow(tk.Toplevel):
             ttk.Label(r, text="%").pack(side="left")
             ent.bind("<Return>", lambda ev, i=i: self.on_typed(i))
             ent.bind("<FocusOut>", lambda ev, i=i: self.on_typed(i))
-            for w in (name, knob, ent):
-                Tooltip(w, tr("shares.share_tip"))
-            self.cells.append({"cell": cell, "name": name, "knob": knob, "var": var, "entry": ent, "shown": ""})
+            pin = tk.BooleanVar()
+            tick = ttk.Checkbutton(cell, text=tr("shares.pin"), variable=pin, command=lambda i=i: self.on_pin(i))
+            tick.pack()
+            Tooltip(tick, tr("shares.pin_tip"))
+            tips = [Tooltip(w, tr("shares.share_tip")) for w in (name, knob, ent)]
+            self.cells.append({"cell": cell, "name": name, "knob": knob, "var": var, "entry": ent, "shown": "",
+                               "pin": pin, "tick": tick, "tips": tips})
         ttk.Label(box, text=tr("shares.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                   justify="left").pack(anchor="w", fill="x", pady=(8, 0))
         row = ttk.Frame(box)
@@ -163,6 +196,7 @@ class SharesWindow(tk.Toplevel):
         ttk.Button(row, text=tr("shares.close"), command=self.close).pack(side="right")
         self.even = ttk.Button(row, text=tr("shares.even"), command=self.on_even)
         self.even.pack(side="left")
+        Tooltip(self.even, tr("shares.even_tip"))
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.sync()
@@ -176,41 +210,39 @@ class SharesWindow(tk.Toplevel):
     # ---- what the selection holds
 
     def targets(self):
-        """(the selected recoloured shapes, their Recolours)."""
-        app = self.app
-        tg = [(t, clean_recolour(t.get("recolour"))) for t in app.recolour_targets()]
-        tg = [(t, r) for t, r in tg if r]
-        return [t for t, _ in tg], [r for _, r in tg]
+        """The selected recoloured shapes."""
+        return [t for t in self.app.recolour_targets() if clean_recolour(t.get("recolour"))]
 
-    def layout(self):
-        """(least colours = the most own ones in a set, colours used, own ones in the biggest set, shares in % per
-        place) of the first selected recoloured shape, or None."""
-        tgts, rcs = self.targets()
-        if not tgts:
-            return None
-        most = self.app.set_most()
-        owns = self.app.colour_owns(tgts[0])
+    def layout(self, sh):
+        """sh's {own: the most own colours in a set, used: colours used in a set, shares: % per place, pins}."""
+        rc = clean_recolour(sh.get("recolour")) or {}
+        owns = self.app.colour_owns(sh)
         own = max((len(o) for o in owns), default=1)
-        pals = palettes(owns, rcs[0].get("colours"), most)
-        used = max((len(p) for p in pals), default=1)
-        shares = [round(x * 100, 3) for x in weights(used, rcs[0].get("shares")).tolist()]
-        return own, used, shares, most
+        used = max((len(p) for p in palettes(owns, rc.get("colours"), self.app.set_most())), default=1)
+        shares = [round(x * 100, 3) for x in weights(used, rc.get("shares")).tolist()]
+        return {"own": own, "used": used, "shares": shares, "pins": [p for p in rc.get("pins", ()) if p < used]}
 
     def sync(self):
-        """Show the first selected recoloured shape's colours and shares (not while a knob is held)."""
-        if self.turning and self.turning[0].held():
+        """Show the selected recoloured shapes' colours and shares (not while a knob is held): a box where they
+        differ is blank; boxes being typed in (changed, with the keyboard) keep the typing."""
+        if self.hold:
             return
         app = self.app
-        tgts, _ = self.targets()
-        got = self.layout()
+        tgts = self.targets()
+        lays = [self.layout(t) for t in tgts]
         self.what.config(text=tr("shares.nothing") if not tgts else
                          tr("shares.shape", name=app.shape_label(tgts[0])) if len(tgts) == 1 else
                          tr("shares.n_shapes", n=len(tgts)))
-        on = got is not None
-        own, used, shares, most = got if on else (1, 0, [], 15)
+        on = bool(lays)
+        useds = {L["used"] for L in lays}
+        used = max(useds, default=0)
+        own = lays[0]["own"] if on else 1
+        most = max(app.set_most(), own)
         self.n_entry.config(state="normal" if on else "disabled")
-        if self.focus_get() is not self.n_entry:
-            self.n_var.set(str(used) if on else "")
+        n_text = str(used) if len(useds) == 1 else ""
+        if self.focus_get() is not self.n_entry or self.n_var.get() == self.n_shown:
+            self.n_var.set(n_text)
+        self.n_shown = n_text
         self.n_tip.text = tr("shares.colours_tip", least=own, most=most)
         self.even.state(["!disabled" if on and used > 1 else "disabled"])
         for i, c in enumerate(self.cells):
@@ -222,41 +254,88 @@ class SharesWindow(tk.Toplevel):
                     c["cell"].grid_remove()
             if not show:
                 continue
-            c["name"].config(text=tr("shares.colour" if i < own else "shares.new", n=i + 1))
-            c["knob"].set(round(shares[i], 1))
+            mine = [L for L in lays if i < L["used"]]
+            vals = {L["shares"][i] for L in mine}
+            first = mine[0]
+            c["name"].config(text=tr("shares.colour" if i < first["own"] else "shares.new", n=i + 1))
+            c["knob"].set(round(first["shares"][i], 1))
             c["knob"].on(used > 1)
-            text = fmt(shares[i])
-            if self.focus_get() is not c["entry"] or c["shown"] != c["var"].get():
+            text = fmt(first["shares"][i]) if len(vals) == 1 else ""
+            if self.focus_get() is not c["entry"] or c["var"].get() == c["shown"]:
                 c["var"].set(text)
             c["shown"] = text
+            for tip in c["tips"]:
+                tip.text = tr("shares.share_tip") if len(vals) == 1 else tr("shares.mixed_tip")
             c["entry"].config(state="normal" if used > 1 else "disabled")
-        self.places = used
+            pinned = {i in L["pins"] for L in mine}
+            c["pin"].set(pinned == {True})
+            c["tick"].state(["alternate" if len(pinned) > 1 else "!alternate", "!disabled" if used > 1 else "disabled"])
 
-    # ---- changes
+    # ---- changes (each shape on its own list)
 
-    def put_shares(self, shares, push=True):
-        return self.app.change_recolour(lambda old: dict(old, shares=shares) if old else old,
-                                        tr("recolour.undo_shares"), push)
+    def change(self, fn, name=None, push=True):
+        """Each selected shape's shares / pins = fn(its layout) -> (shares, pins); one undo step."""
+        def changed(old, sh):
+            if not old:
+                return old
+            got = fn(self.layout(sh))
+            if got is None:
+                return old
+            shares, pins = got
+            out = {k: v for k, v in old.items() if k not in ("shares", "pins")}
+            if shares is not None:
+                out["shares"] = shares
+            if pins:
+                out["pins"] = pins
+            return out
+        return self.app.change_recolour(changed, name or tr("recolour.undo_shares"), push)
 
-    def shown_shares(self):
-        got = self.layout()
-        return list(got[2]) if got else []
+    def set_share(self, i, v, name=None):
+        return self.change(lambda L: (spread(L["shares"], i, v, L["pins"]), L["pins"]) if i < L["used"] else None,
+                           name)
 
     def knob_pressed(self, knob):
-        self.turning = (knob, None)
+        self.take_typing()  # (a number typed in a box first: its own step)
+        self.hold = KnobHold(self, knob)
+        self.app.held_scrub = self.hold  # (shortcuts wait, Ctrl+Z = back to the press: App.key_undo)
+        self.app.scrubbing = True  # (slow notes made when the mouse rests or is let go)
 
     def on_knob(self, i, v, done):
-        """A knob turned: while held one undo step for the whole turn; wheel / arrow steps in a row one step too."""
+        """A knob turned: a held turn is one undo step (scrub_step), wheel / arrow steps in a row too."""
         knob = self.cells[i]["knob"]
-        shares = self.shown_shares()
-        if not shares or i >= len(shares):
-            return
-        step = self.turning[1] if self.turning and self.turning[0] is knob else None
-        push = step is None or step is not self.app.last_step()
-        if self.put_shares(spread(shares, i, v), push) and push:
-            self.turning = (knob, self.app.last_step())
-        if done and not knob.held():
+        hold = self.hold if self.hold and self.hold.knob is knob else None
+        if hold:
+            gesture = hold.drag["gesture"]
+        else:
+            sc = self.app._scrub
+            if not (self.wheel and self.wheel[0] is knob and sc and sc["gesture"] is self.wheel[1]):
+                self.wheel = (knob, object())
+            gesture = self.wheel[1]
+        if not (hold and done and not knob.held()):
+            self.app.scrub_step(gesture, lambda: self.set_share(i, v))
+        if hold and done and not knob.held():  # (let go: the notes catch up, the window shows what's there)
+            self.end_hold()
+        elif not hold:
             self.sync()
+
+    def end_hold(self):
+        self.hold = None
+        self.app.held_scrub = None
+        self.app.scrubbing = False
+        self.app.catch_up_notes()
+        self.sync()
+
+    def call_off(self, hold):
+        """Ctrl+Z while a knob is held: the shares as at the press, no step; the held mouse turns nothing more."""
+        if self.hold is not hold:
+            return
+        hold.knob.call_off()
+        self.hold = None
+        self.app.held_scrub = None
+        self.app.scrubbing = False
+        self.app.take_back_scrub(hold.drag["gesture"])
+        self.app.catch_up_notes()
+        self.sync()
 
     def on_typed(self, i):
         c = self.cells[i]
@@ -268,50 +347,70 @@ class SharesWindow(tk.Toplevel):
             c["var"].set(c["shown"])
             return bad(c["entry"])
         good(c["entry"])
-        shares = self.shown_shares()
-        if i < len(shares):
-            self.turning = None
-            self.put_shares(spread(shares, i, v))
-            self.sync()
+        self.wheel = None
+        c["shown"] = c["var"].get()  # (a sync while the shapes change shows what they got)
+        self.set_share(i, v)
+        self.sync()
 
     def on_even_one(self, i):
-        shares = self.shown_shares()
-        if len(shares) > 1:
-            self.turning = None
-            self.put_shares(spread(shares, i, 100 / len(shares)))
+        self.wheel = None
+        self.change(lambda L: (spread(L["shares"], i, 100 / L["used"], L["pins"]), L["pins"])
+                    if 1 < L["used"] and i < L["used"] else None)
 
     def on_even(self):
-        self.turning = None
-        self.app.change_recolour(lambda old: {k: v for k, v in old.items() if k != "shares"} if old else old,
-                                 tr("recolour.undo_shares"))
+        self.wheel = None
+        self.change(lambda L: (evened(L["shares"], L["pins"]) if L["pins"] else None, L["pins"]))
+
+    def on_pin(self, i):
+        on = self.cells[i]["pin"].get()
+        self.cells[i]["tick"].state(["!alternate"])
+        self.wheel = None
+
+        def pinned(L):
+            if i >= L["used"]:
+                return None
+            pins = sorted(set(L["pins"]) | {i}) if on else [p for p in L["pins"] if p != i]
+            return L["shares"], pins
+        self.change(pinned, tr("shares.undo_pin"))
+        self.sync()
 
     def on_colours(self):
-        """Colours typed: each set uses that many (its own ones at least, at most a set's 15 / 16)."""
-        got = self.layout()
-        if not got or str(self.n_entry.cget("state")) == "disabled":
+        """Colours typed: each set uses that many (each shape: its own ones at least, at most a set's 15 / 16)."""
+        if not self.targets() or str(self.n_entry.cget("state")) == "disabled" or self.n_var.get() == self.n_shown:
             return
-        own, used, _, most = got
         try:
             n = int(round(calc(self.n_var.get())))
         except ValueError:
-            self.n_var.set(str(used))
+            self.n_var.set(self.n_shown)
             return bad(self.n_entry)
-        n = max(own, min(most, n))
-        self.n_var.set(str(n))
         good(self.n_entry)
-        if n == used:
-            return
-        self.turning = None
+        self.wheel = None
+        most = self.app.set_most()
 
-        def changed(old):
+        def changed(old, sh):
             if not old:
                 return old
+            own = self.layout(sh)["own"]
             out = {k: v for k, v in old.items() if k != "colours"}
-            return dict(out, colours=n) if n > own else out
+            m = max(own, min(most, n))
+            return dict(out, colours=m) if m > own else out
 
+        self.n_shown = self.n_var.get()
         self.app.change_recolour(changed, tr("recolour.undo_colours"))
+        self.sync()
+
+    def take_typing(self):
+        """A number typed without Enter is used (closing: like Settings' typed voice limit)."""
+        for i, c in enumerate(self.cells):
+            if c["cell"].winfo_manager() and c["var"].get() != c["shown"]:
+                self.on_typed(i)
+        if self.n_var.get() != self.n_shown:
+            self.on_colours()
 
     def close(self):
+        if self.hold:
+            self.call_off(self.hold)
+        self.take_typing()
         self.app.shares_window = None
         self.destroy()
         self.app.roll.focus_set()

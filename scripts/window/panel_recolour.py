@@ -173,7 +173,7 @@ class RecolourPanel:
             self.recolour_mix_tick.state(["!alternate"])
             mix = self.recolour_mix.get()
 
-        def changed(old):
+        def changed(old, _sh=None):
             if what == "mode":
                 if mode is None:
                     return None
@@ -191,13 +191,13 @@ class RecolourPanel:
         self.change_recolour(changed, tr("recolour.undo_again" if what == "seed" else "recolour.undo"))
 
     def change_recolour(self, changed, name, push=True):
-        """Each selected shape's Recolour = changed(its old one, clean); one undo step named name (push False: part
-        of the step taken before, e.g. a knob still turning). False when nothing changed."""
+        """Each selected shape's Recolour = changed(its old one, clean; the shape); one undo step named name (push
+        False: part of the step taken before). False when nothing changed."""
         tgts = self.recolour_targets()
         olds = [clean_recolour(t.get("recolour")) for t in tgts]
         new = []
-        for o in olds:
-            c = changed(o)
+        for o, t in zip(olds, tgts):
+            c = changed(o, t)
             new.append(clean_recolour(c) if c else None)
         if all(o == n for o, n in zip(olds, new)):
             self.sync_recolour()
