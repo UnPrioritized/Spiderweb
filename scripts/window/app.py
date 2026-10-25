@@ -1707,8 +1707,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def notes_tracks(sh):
             if job["stop"]:
                 raise Stopped
-            if not voiced:
-                sh = one_voice(sh)
+            if not voiced:  # (as App.notes_tracks: Recolour left out too)
+                sh = without_recolour(one_voice(sh)) if "recolour" in sh else one_voice(sh)
             k = (shape_key(sh), key[1], key[2])
             got = known.get(k) or job["own"].get(k)
             if got is None:

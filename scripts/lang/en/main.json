@@ -944,6 +944,7 @@
  "recolour.shuffle": "Shuffle",
  "recolour.tip": "Changes which colour each note has. The notes stay exactly where they are, with the same gates.\nShuffle: the colours the shape already has are handed out again at random (pasted notes: their own colours; drawn shapes: the colours from Colours).\nTwo notes on the same key that sound together keep different colours, so they never cut each other.\nNeeds Channels: Multi channel.",
  "recolour.needs": "\n\nChannels isn't Multi channel now: all its notes are in one channel, so the colours don't change.",
+ "recolour.one": "\n\nThis shape has only one colour, so there's nothing to shuffle. Give it more with Colours above.",
  "recolour.again": "New shuffle",
  "recolour.again_tip": "A new random result. The same shape always shows the same result until you press this.",
  "recolour.amount": "Amount",

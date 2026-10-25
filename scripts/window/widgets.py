@@ -34,6 +34,14 @@ def fit_dropdowns(root):
     holding names (shapes, fonts, devices...) opt out with keep_width; the synth window's keep their size and
     make the text smaller instead (its knob grid stays put)."""
     root.bind_class("TCombobox", "<Map>", lambda e: fit_dropdown(e.widget), add="+")
+    # (a pick from the list leaves the text highlighted, and highlighted text is drawn in the plain colour: an
+    # orange warning box showed black or half black, hunt 2026-10-25; a box you can't type in never needs it)
+    root.bind_class("TCombobox", "<<ComboboxSelected>>", lambda e: unhighlight(e.widget), add="+")
+
+
+def unhighlight(cb):
+    if isinstance(cb, ttk.Combobox) and cb.winfo_exists() and "readonly" in str(cb.cget("state")):
+        cb.selection_clear()  # (after the box's own handler: it may have closed its window)
 
 
 def line_up(rows, labels=()):

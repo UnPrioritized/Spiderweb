@@ -3,8 +3,9 @@ a shape's notes keep their keys, starts and gates, only which colour each one ha
 
 Shuffle: the colours the shape already has go round its notes. Amount (0-100 %) = how many notes get a new one,
 each picked at random among the shape's colours (an equal share each). STEADY: each note's dice come from the note
-itself (start, end, key, its colour before) and the shape's seed (New shuffle = another seed), so drawing again
-gives the same colours and an edit only changes the notes it touches. Each note keeps its Colours round ("Repeated
+itself (start, end, key counted from the shape's first tick and lowest key, its colour before) and the shape's seed
+(New shuffle = another seed), so drawing again or moving the shape gives the same colours and an edit only changes
+the notes it touches (a copy looks the same until its own New shuffle). Each note keeps its Colours round ("Repeated
 colours get new channels"). The notes are first settled as they sound with Recolour off (settled: a note cut by
 a later one of its colour stays cut), then two notes on one key sounding together (different colours, else they'd
 have been settled) never end up on one colour (they'd cut or merge each other); touching end to start is fine.
@@ -19,6 +20,7 @@ import random
 
 import numpy as np
 
+from files.speed import loops
 from notes.custom import ROUND
 
 MODES = ("shuffle",)
@@ -65,10 +67,13 @@ def _mixed(x):
     return x ^ (x >> np.uint64(31))
 
 
-def dice(notes, tracks, seed, salt):
-    """One number 0 <= u < 1 per note, from the note itself, its colour before and the seed (the same note in the
-    same shape always gets the same one)."""
-    cols = [np.asarray(notes[:, c], np.int64) for c in (0, 1, 2)] + [np.asarray(tracks, np.int64)]
+def dice(notes, low, seed, salt, corner):
+    """One number 0 <= u < 1 per note, from the note itself (counted from corner = the shape's first tick and lowest
+    key, so moving the shape keeps it), its colour before (without its Colours round: the project's repeat tick
+    changes no dice) and the seed: the same note in the same shape always gets the same one."""
+    t0, k0 = corner
+    cols = [np.asarray(notes[:, 0], np.int64) - t0, np.asarray(notes[:, 1], np.int64) - t0,
+            np.asarray(notes[:, 2], np.int64) - k0, np.asarray(low, np.int64)]
     with np.errstate(over="ignore"):
         x = np.full(len(notes), np.uint64(seed * 2 + salt), np.uint64)
         for c in cols:
@@ -81,7 +86,7 @@ def recoloured(notes, tracks, rc, held=False):
     unchanged. First the notes are settled as their colours before would sound (render's overlap rule on each
     colour: a note cut where a later one of its colour starts on its key, notes starting together made one), so a
     new colour never frees a cut note: the notes stay as heard with Recolour off. held: sustained (overlaps kept,
-    render held): not settled."""
+    render held): not settled, its notes of one colour may still sound together."""
     if tracks is None or not len(notes):
         return notes, tracks
     t = np.asarray(tracks, np.int64)
@@ -91,8 +96,9 @@ def recoloured(notes, tracks, rc, held=False):
         notes, t = settled(notes, t)
     low = t % ROUND
     colours = np.unique(low)
-    pick = dice(notes, t, rc["seed"], 1)
-    change = dice(notes, t, rc["seed"], 0) < rc["amount"] / 100
+    corner = (int(notes[:, 0].min()), int(notes[:, 2].min()))
+    pick = dice(notes, low, rc["seed"], 1, corner)
+    change = dice(notes, low, rc["seed"], 0, corner) < rc["amount"] / 100
     new = np.where(change, colours[np.minimum((pick * len(colours)).astype(np.int64), len(colours) - 1)], low)
     new = kept_apart(notes, low, new, colours, pick)
     return notes, t - low + new
@@ -114,10 +120,10 @@ def settled(notes, t):
 
 
 def kept_apart(notes, old, new, colours, pick):
-    """new colours with every clash put right: a note sounding on its key together with an earlier one (overlapping,
-    not just touching) that had another colour before, but has the same one now, gets a colour none of those
-    sounding with it has (its own one first, else the next free one from its dice), or its own one when all are
-    taken. Only the keys where notes overlap are walked through."""
+    """new colours with every clash put right: a note sounding on its key together with earlier ones (overlapping,
+    not just touching) gets a colour none of those with ANOTHER colour before has now (its own one first, else a
+    free one from its dice), or its own one when all are taken. Notes of one colour before may share (sustained).
+    Only bursts of notes overlapping on a key are looked at: pairs all at once, bigger ones note by note."""
     s, e, k = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
     o = np.lexsort((s, k))
     ks, ss, es = k[o], s[o], e[o]
@@ -128,25 +134,43 @@ def kept_apart(notes, old, new, colours, pick):
     if not over.any():
         return new
     new = new.copy()
+    burst = np.cumsum(~over) - 1  # (each note's burst: notes on a key each overlapping one before it)
+    size = np.bincount(burst)
+    pair = over & (size[burst] == 2)  # the second note of a burst of two
+    if pair.any():
+        b = o[pair]
+        a = o[np.flatnonzero(pair) - 1]
+        clash = (old[a] != old[b]) & (new[a] == new[b])
+        a, b = a[clash], b[clash]
+        if len(b):
+            n = len(colours)
+            other = colours[(np.searchsorted(colours, new[a]) + 1
+                             + np.minimum((pick[b] * (n - 1)).astype(np.int64), n - 2)) % n]
+            new[b] = np.where(old[b] != new[a], old[b], other)
+    starts = np.flatnonzero(~over)
+    big = np.flatnonzero(size > 2)
+    fast = loops()
+    if fast and len(big):  # (the compiled walk: the same colours, files/fastloops.py)
+        to = np.ascontiguousarray
+        old_c, new_c = np.searchsorted(colours, old), np.searchsorted(colours, new)
+        fast.recolour_apart(to(o, np.int64), to(ss), to(e), to(old_c, np.int64), new_c, to(pick, np.float64),
+                            to(starts[big], np.int64), to(size[big], np.int64), len(colours))
+        return colours[new_c]
     lst = colours.tolist()
-    for key in np.unique(ks[over]).tolist():
-        a, b = np.searchsorted(ks, [key, key + 1])
-        sounding = []  # (end, note) of the notes still sounding on this key
-        for j in range(a, b):
+    for w in big.tolist():
+        sounding = []  # (end, note) of the notes still sounding in this burst
+        for j in range(int(starts[w]), int(starts[w]) + int(size[w])):
             i = int(o[j])
             while sounding and sounding[0][0] <= ss[j]:  # (ending where this one starts: touching, fine)
                 heapq.heappop(sounding)
-            if over[j]:
-                with_it = [int(x) for _, x in sounding]
-                taken = {int(new[x]) for x in with_it}
-                if int(new[i]) in taken and int(old[i]) not in {int(old[x]) for x in with_it}:
-                    free = [c for c in lst if c not in taken]
-                    if not free:
-                        new[i] = old[i]
-                    elif int(old[i]) in free:
-                        new[i] = old[i]
-                    else:
-                        new[i] = free[min(int(pick[i] * len(free)), len(free) - 1)]
+            mine = int(old[i])
+            taken = {int(new[x]) for _, x in sounding if int(old[x]) != mine}
+            if int(new[i]) in taken:
+                free = [c for c in lst if c not in taken]
+                if not free or mine in free:
+                    new[i] = mine
+                else:
+                    new[i] = free[min(int(pick[i] * len(free)), len(free) - 1)]
             heapq.heappush(sounding, (int(es[j]), i))
     return new
 

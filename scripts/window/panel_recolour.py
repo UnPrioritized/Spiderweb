@@ -4,9 +4,12 @@ kept where they are."""
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
+
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import MODES, can_recolour, clean_recolour, new_seed
+from notes.custom import ROUND
+from notes.recolour import MODES, can_recolour, clean_recolour, new_seed, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
@@ -48,6 +51,11 @@ class RecolourPanel:
         shapes)."""
         return [self.shapes[i] for i in sorted(self.sels) if can_recolour(self.shapes[i])]
 
+    def colour_count(self, sh):
+        """How many colours sh's notes have before Recolour (its notes as remembered: no new work after a change)."""
+        _, tracks = self.notes_tracks(without_recolour(sh))
+        return 1 if tracks is None or not len(tracks) else len(np.unique(np.asarray(tracks, np.int64) % ROUND))
+
     def sync_recolour(self):
         tgts = self.recolour_targets()
         on = [clean_recolour(t.get("recolour")) for t in tgts]
@@ -59,10 +67,12 @@ class RecolourPanel:
         same_or_blank(self.recolour_entry, self.recolour_var, [fmt(r["amount"]) for r in live] or ["100"])
         self._loading = False
         lonely = bool(live) and self.channel_mode.get() != "auto"
+        # (a shape with one colour: Shuffle has nothing to swap, hunt 2026-10-25)
+        single = not lonely and any(r and self.colour_count(t) < 2 for t, r in zip(tgts, on))
         self.recolour_mode.config(state="readonly" if tgts else "disabled",
-                                  style="Gap.TCombobox" if lonely else "TCombobox")
+                                  style="Gap.TCombobox" if lonely or single else "TCombobox")
         show_mixed(self.recolour_mode, len(modes) > 1, self.recolour_tip,
-                   tr("recolour.tip") + (tr("recolour.needs") if lonely else ""))
+                   tr("recolour.tip") + (tr("recolour.needs") if lonely else tr("recolour.one") if single else ""))
         self.recolour_entry.config(state="normal" if live else "disabled", style="TEntry")
         shown = bool(live)
         if shown != bool(self.recolour_row.winfo_manager()):

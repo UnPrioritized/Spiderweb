@@ -9,6 +9,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   paint_notes    roll_draw.paint_region: the notes' colours straight into the picture (the last painted wins)
   overlap_order  engine.resolve_overlaps' groups and sort (first_seen + overlap_order)
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
+  recolour_apart recolour.kept_apart's walk through bursts of 3+ overlapping notes (Recolour)
   midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   clash_levels   engine.clash_levels: Hz bass layers' notes clashing on a key -> their levels
@@ -485,6 +486,48 @@ def overlap_sweep(notes, order, group):
             out[m, 1] = end
             m += 1
     return out, m
+
+
+@njit(cache=CACHE, nogil=True)
+def recolour_apart(order, ss, e, old, new, pick, bstart, bsize, nc):
+    """recolour.kept_apart's walk through its bursts of 3+ notes (old / new: colour numbers 0 .. nc - 1, new changed
+    in place): a note keeps no colour that a note sounding with it, of ANOTHER colour before, has now (its own one
+    first, else the free one its dice pick, its own one when none is free)."""
+    act = np.empty(max(1, bsize.max() if len(bsize) else 1), np.int64)
+    taken = np.zeros(nc, np.bool_)
+    for w in range(len(bstart)):
+        na = 0
+        for j in range(bstart[w], bstart[w] + bsize[w]):
+            i = order[j]
+            m = 0
+            for q in range(na):  # (ending where this one starts: touching, fine)
+                x = act[q]
+                if e[x] > ss[j]:
+                    act[m] = x
+                    m += 1
+            na = m
+            for c in range(nc):
+                taken[c] = False
+            count = 0
+            for q in range(na):
+                x = act[q]
+                if old[x] != old[i] and not taken[new[x]]:
+                    taken[new[x]] = True
+                    count += 1
+            if taken[new[i]]:
+                free = nc - count
+                if free == 0 or not taken[old[i]]:
+                    new[i] = old[i]
+                else:
+                    r = min(int(pick[i] * free), free - 1)
+                    for c in range(nc):
+                        if not taken[c]:
+                            if r == 0:
+                                new[i] = c
+                                break
+                            r -= 1
+            act[na] = i
+            na += 1
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1659,6 +1702,7 @@ def warm():
     paint_notes(np.zeros((1, 3), np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, np.zeros((1, 2, 3), np.uint8))
     overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
     overlap_order(np.zeros((1, 6), np.int64))
+    recolour_apart(i1, i1, i1, i1, i1.copy(), np.zeros(1), i1, i1 + 1, 1)
     midi_events(np.zeros((1, 6), np.int64), np.zeros(2, np.int64), 0, 1)
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
