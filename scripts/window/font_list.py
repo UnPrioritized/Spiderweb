@@ -1,6 +1,6 @@
 """The soundfonts list (user 2026-10-25, like a MIDI driver's): Settings → Sound (Built-in BASSMIDI) and the Hz bass
-settings show the same list, shared by both. Top = used first: a sound it doesn't have comes from the next one
-down, none has it = silent. Add… (several at once, at the bottom), Remove (Delete key too), Up, Down; every change
+settings show the same list, shared by both. Order matters: each soundfont overrides the ones above it (a sound
+it doesn't have comes from them), none has it = silent. Add… (several at once, at the bottom), Remove (Delete key too), Up, Down; every change
 goes to app.set_soundfonts."""
 
 import os

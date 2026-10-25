@@ -22,7 +22,7 @@ What's new:
 
 • Recolour (side panel, under Colours): changes which colour each note has, while the notes stay exactly where they are. Shuffle the colours a shape already has, or split it into new ones, Scattered at random or in Clumps: bands, swirls or wedges you can turn, twist, centre and push. Shares… sets how many colours and how much of each. It works on pasted notes too, and the colours stay put when you move, copy, flip or slice the shape. See Help → Recolour.
 
-• Several soundfonts, stacked (Settings → Sound → Soundfonts): the top one is used first, and a sound it doesn't have comes from the next one down, so a piano soundfont and a General MIDI one can play together. A loaded MIDI now plays the instruments it asks for. See Help → Playback.
+• Several soundfonts, stacked (Settings → Sound → Soundfonts): order matters, each one overrides the ones above it, so a General MIDI soundfont and your piano can play together. A loaded MIDI now plays the instruments it asks for. See Help → Playback.
 
 • Time and key signatures: right-click in the Conductor pane. Bar lines and numbers follow them everywhere. They replace the Beats per bar box, and the start tempo is now the Conductor pane's point at bar 1 (no BPM box; old projects get that point by themselves).
 

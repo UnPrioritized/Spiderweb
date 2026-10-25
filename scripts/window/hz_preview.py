@@ -40,7 +40,8 @@ DEFAULTS = {"on": False, "font": "", "more_fonts": [], "voices": 1000, "nofx": F
 
 
 def font_list(cfg):
-    """The soundfonts picked, first = used first: "font" + "more_fonts" (the ones under it, user 2026-10-25)."""
+    """The soundfonts picked, in the list's order (each overrides the ones above it): "font" + "more_fonts" (the
+    ones under it, user 2026-10-25)."""
     return [cfg["font"]] + [p for p in cfg.get("more_fonts", []) if p != cfg["font"]] if cfg["font"] else []
 VOICES = (1, 100000)  # the voice limit's range
 LIVE_MB = (100, 65536)  # the live keys' memory limit's range (MB)

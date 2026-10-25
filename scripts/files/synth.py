@@ -252,10 +252,10 @@ def _paths(paths):
 
 
 class Synth:
-    """BASS started once, with a list of soundfonts (user 2026-10-25, like a MIDI driver's: each note plays from the first
-    one down the list that has its instrument; none = silent, as in other players). font = their handles in that
-    order (() = none), font_paths = their files, font_path = the first one's. can_play = False when there's no
-    sound device (render still works)."""
+    """BASS started once, with a list of soundfonts (user 2026-10-25, like a MIDI driver's: each overrides the ones
+    above it, so a note plays from the LAST one in the list that has its instrument; none = silent, as in other
+    players). font = their handles in the list's order (() = none), font_paths = their files, font_path = the first
+    one's. can_play = False when there's no sound device (render still works)."""
 
     def __init__(self):
         self.bass, self.midi = load_dlls()
@@ -392,8 +392,9 @@ class Synth:
         return (self.font_paths, self.opened) if self.font_paths else None
 
     def set_stream_fonts(self, h, fonts):
-        """Stream h plays from fonts (handles, first = used first), every preset of each."""
-        arr = (_Font * len(fonts))(*[_Font(f, -1, 0) for f in fonts])
+        """Stream h plays from fonts (handles in the list's order: each overrides the ones before it, so BASSMIDI,
+        which uses the first it's given first, gets them backwards), every preset of each."""
+        arr = (_Font * len(fonts))(*[_Font(f, -1, 0) for f in reversed(fonts)])
         self.midi.BASS_MIDI_StreamSetFonts(h, arr, len(fonts))
 
     def silent_samples(self, path, cancel=None):
