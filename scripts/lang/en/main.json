@@ -952,7 +952,7 @@
  "recolour.shares": "Shares…",
  "recolour.shares_tip": "How many colours to use and how much of each.",
  "recolour.mix": "Mix across sets",
- "recolour.mix_tip": "This shape has more than one colour set (each repeat of its colours, or every {most} tracks of pasted notes).\nOff: each note only takes colours from its own set.\nOn: notes may take a colour from any set.",
+ "recolour.mix_tip": "These notes have more than {most} colours, so they're split into colour sets of {most} (in track order).\nOff: each note only takes colours from its own set.\nOn: notes may take a colour from any set.",
  "recolour.undo_shares": "Change shares",
  "recolour.undo_colours": "Recolour colours",
  "shares.title": "Shares",

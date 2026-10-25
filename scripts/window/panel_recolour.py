@@ -8,8 +8,8 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.merge import has_colours
-from notes.recolour import BY, MODES, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
+from notes.custom import ROUND
+from notes.recolour import BY, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
     without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
@@ -63,7 +63,7 @@ class RecolourPanel:
         self.recolour_mix = tk.BooleanVar()
         self.recolour_mix_tick = ttk.Checkbutton(rows, text=tr("recolour.mix"), variable=self.recolour_mix,
                                                  command=lambda: self.on_recolour("mix"))
-        self.recolour_mix_tip = Tooltip(self.recolour_mix_tick, tr("recolour.mix_tip", most=15))
+        self.recolour_mix_tip = Tooltip(self.recolour_mix_tick, tr("recolour.mix_tip", most=SET))
 
     def open_shares(self):
         from window.shares_window import open_shares
@@ -79,14 +79,12 @@ class RecolourPanel:
         return 16 if self.all16() else 15
 
     def colour_owns(self, sh):
-        """Each colour set's own colours (track values) of sh's notes before Recolour, as Multi channel makes them
-        (with "Repeated colours get new channels" each repeat its own set; the notes as remembered: no new work after
-        a change)."""
-        made = dict(sh, _rounds=True) if self.rounds_apart() and has_colours(sh) else sh
-        _, tracks = self.notes_tracks(without_recolour(made))
+        """Each colour set's own colours of sh's notes before Recolour (the notes as remembered: no new work after a
+        change)."""
+        _, tracks = self.notes_tracks(without_recolour(sh))
         if tracks is None or not len(tracks):
             return []
-        return colour_sets(np.asarray(tracks, np.int64), self.set_most())[1]
+        return colour_sets(np.asarray(tracks, np.int64) % ROUND)[1]
 
     def colour_count(self, sh):
         """How many colours sh's notes have before Recolour (the most in one set)."""
@@ -136,7 +134,7 @@ class RecolourPanel:
                 self.recolour_mix_tick.pack(anchor="w", pady=(2, 0))
             else:
                 self.recolour_mix_tick.pack_forget()
-        self.recolour_mix_tip.text = tr("recolour.mix_tip", most=self.set_most())
+        self.recolour_mix_tip.text = tr("recolour.mix_tip", most=SET)
         w = getattr(self, "shares_window", None)
         if w:
             w.sync()
