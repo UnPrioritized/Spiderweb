@@ -201,7 +201,9 @@ class RecolourPanel:
                 return dict({k: v for k, v in old.items() if k != "mix"}, **({"mix": True} if mix else {}))
             return dict(old, seed=new_seed())
 
-        self.change_recolour(changed, tr("recolour.undo_again" if what == "seed" else "recolour.undo"))
+        if self.change_recolour(changed, tr("recolour.undo_again" if what == "seed" else "recolour.undo")) and \
+                what == "mode" and mode is not None:
+            self.tips.show("recolour", wait=True)  # (the first time: what it does)
 
     def change_recolour(self, changed, name, push=True):
         """Each selected shape's Recolour = changed(its old one, clean; the shape); one undo step named name (push

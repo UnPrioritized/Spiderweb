@@ -20,6 +20,8 @@ What's new:
 
 • Fill gaps (right-click → Fill gaps…): on each key, the empty space between the selected notes is closed, across all their colours. Stretch notes right, left or both ways until they meet, and pick which note stays when two start on the same tick. See Help → Fill gaps.
 
+• Recolour (side panel, under Colours): changes which colour each note has, while the notes stay exactly where they are. Shuffle the colours a shape already has, or split it into new ones, Scattered at random or in Clumps: bands, swirls or wedges you can turn, twist, centre and push. Shares… sets how many colours and how much of each. It works on pasted notes too, and the colours stay put when you move, copy, flip or slice the shape. See Help → Recolour.
+
 • Time and key signatures: right-click in the Conductor pane. Bar lines and numbers follow them everywhere. They replace the Beats per bar box, and the start tempo is now the Conductor pane's point at bar 1 (no BPM box; old projects get that point by themselves).
 
 • A Hz bass stays in tune where the tempo changes under it. When the tempo there changes later, it says so in orange, with an Update button.

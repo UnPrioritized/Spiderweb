@@ -1,0 +1,55 @@
+Recolour changes which colour each note of a shape has. The notes never move: every note keeps its key, its start and its gate, only its colour changes. Select a shape and pick a Recolour mode in the side panel, under Colours. It needs Channels: Multi channel (in one channel every note has the same colour anyway).
+
+It works on every kind of shape except a Hz bass: drawn shapes, pasted notes and the shapes made with Extract loaded notes, so note art made elsewhere can be recoloured too.
+
+## Modes
+
+Shuffle: the colours the shape already has are handed out again at random. Pasted notes use their own colours, drawn shapes the ones from Colours. A shape with only one colour has nothing to shuffle (the dropdown turns orange): give it more colours with Colours, or add new ones in Shares….
+
+Split: Scattered: works even on a shape with one colour. Notes picked at random are torn off their colour onto another one, never their own. With one colour, a second one is added by itself.
+
+Split: Clumps: the shape is cut into colour areas, and each note takes the colour of the area its middle is in. By default the areas are bands from left to right; Shares… lays them out other ways (see Clumps below).
+
+## Amount and New shuffle
+
+Amount (Shuffle, Split: Scattered): how many notes get a new colour. 0 % = none, so it looks as if Recolour were off; 100 % = every note. Split: Clumps has Rough edges here instead: 0 % = a clean cut between the areas, higher = more and more ragged edges.
+
+The result is random, but steady: the same shape always shows the same colours, even after moving it, copying it or opening the project again. A small change only changes the colours of the notes it touches. New shuffle gives a new random result.
+
+Per note / Per chord / Per run: Per note, each note gets its own colour. Per chord, notes that start at the same time change together and get one colour. Per run, notes on one key that touch (each starts where the one before ends) change together and get one colour.
+
+## Shares
+
+Shares… opens a small window that follows the selection. Colours sets how many colours to use: the shape's own ones first, then new ones (each new colour gets new channels), up to 15 (16 when Multi channel uses channel 10).
+
+Each colour has a knob and a box for its share: how likely that colour is for a note that changes (in Split: Clumps, how big its area is). Type a % (25) or a fraction (1/4). The shares always add up to 100 %: when you change one, the others keep their sizes to each other. The lock under a colour keeps its share as it is. Even shares makes them all the same (locked ones stay). Drag a knob up or down; middle-click it for an even share.
+
+The colours come out close to the shares, not exact, because the notes are picked at random.
+
+Pasted notes with more than 15 colours are cut into colour sets of 15, in track order. Each note only takes colours from its own set, unless you tick Mix across sets.
+
+## Clumps
+
+While a selected shape uses Split: Clumps, the Shares window shows more settings for its areas:
+
+Pattern: Bands (stripes across the shape), Swirl (arms that twist around the Centre point) or Wedges (slices around the Centre point, like a pizza).
+
+Angle turns the areas, from -360 to 360 degrees. Drag its knob up or down, or right-click the knob to point it.
+
+Swirl tightness: how many times the swirl turns from the Centre point to the edge. It twists most near the centre.
+
+Centre point: where Swirl and Wedges turn around, in % of the shape's box (50 / 50 is the middle). While the window is open, the piano roll shows it as a dot on the shape: drag the dot to move it (whole %, hold Shift for in between).
+
+Push bunches the areas toward one side, a step per click; the dot in the middle takes the push away.
+
+## With the rest of Spiderweb
+
+Two notes on the same key that sound together always keep different colours, so they never cut each other off. With "Repeated colours get new channels", each note stays on the channels of the repeat it was in before.
+
+Recolour comes last, after everything else (Sustain and Gate subtract too): it only changes colours.
+
+Flip and Turn 90° take the colours along: a flipped shape shows its colours mirrored. Gate aware flip reverses every key row exactly, colours included. After a flip or turn, the Clumps numbers stay as you set them (the window says so), while the areas move with the shape. After a turn, Shuffle and Split: Scattered pick new colours.
+
+Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour. Slicing pasted notes (Slice or Lasso) turns the pieces into plain notes with the colours you saw, without Recolour. Add between blends Recolour step by step when both shapes use the same mode.
+
+Turn into plain notes, Gate sensitive merge, Copy to Domino and Export MIDI all keep the colours you see.
