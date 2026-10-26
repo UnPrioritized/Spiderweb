@@ -1,6 +1,8 @@
 Press Tab to swap the piano roll for the track list, and Tab again to go back. It shows the tracks your MIDI will have: one row per track, in the same order as Export MIDI and Export to Domino write them, each with a small picture of its notes in its channel's colour.
 
-The Conductor row on top has a line at each tempo change: the faster the tempo, the taller the line, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the heights use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures.
+The All tracks row at the very top shows every track's notes together, each in its track's colour. It's taller than the tracks, so it doesn't look like one more track. It's highlighted while no track is: the piano roll then shows every track, and Spiderweb puts each new shape on channels itself (see Channels).
+
+The Conductor row under it has a line at each tempo change: the faster the tempo, the taller the line, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the heights use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures.
 
 Spiderweb picks the tracks for your shapes itself (see Channels): use the list to check which shapes land on which track before you export. You can also add tracks of your own (see below). Rest the mouse on a track's name to see its channel, how many notes it has and which shapes they come from. Long names end in "…" and show whole there.
 
@@ -25,20 +27,20 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 • Once a shape is laid, each colour stays on its track: adding or moving tracks later changes nothing, nor does moving the shape. More colours later carry on below its last track. With Single channel or As drawn, every colour plays on the highlighted track.
 • On Spiderweb's own tracks the shape is pinned: nothing already there moves, and later shapes may share those tracks. Spiderweb's automatic shapes never land on tracks you added.
 • Tracks Spiderweb adds next to yours get a green tinted name; they go away by themselves when no shape uses them. Change one in Properties… to keep it as yours.
-• With nothing highlighted, a pasted shape that was laid in this project stays on its tracks, and a duplicate always does.
+• With All tracks highlighted, a pasted shape that was laid in this project stays on its tracks, and a duplicate always does.
 • Changing a track's channel in Properties… moves its shapes to the new channel.
 • The Shapes list shows "(in Track name)" after a shape that's laid on tracks.
 • Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't be laid on a track yet: they keep their own channels, and the status line says so.
 
 ## Highlighting a track
 
-Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to all tracks: press Esc in the track list, click its Conductor row, or pick All tracks in the Multiple tracks ▾ list on the toolbar. Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
+Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to All tracks: click the All tracks row, press Esc in the track list, pick All tracks in the Multiple tracks ▾ list on the toolbar, or Ctrl+wheel up past the first track. The corner then says "All tracks". Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
 
 When a shape you draw, paste or move lands on another track, the highlight moves to that track, so it never vanishes under the mouse (if it lands on several tracks, every track shows). When channels are handed out again (for example a shape drawn over others), the highlight stays with the music it was showing.
 
 ## Multiple tracks
 
-The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour. All tracks at its top clears the highlight.
+The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour. All tracks at its top highlights the All tracks row.
 
 In the track list: Ctrl+click a track to pick it or not, Ctrl+drag over tracks to pick every track you cross, Shift+click a track to highlight it alone (nothing picked, Multiple tracks off). Picked tracks get a dot in their colour. Show multiple tracks… (above the list, or Pick tracks… in the ▾ list) opens the list of tracks: click a track to pick it or not, drag to do the same to every track you cross. Faint sets how strongly they show (0 % hides them).
 
