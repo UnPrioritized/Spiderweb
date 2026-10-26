@@ -15,4 +15,14 @@ A shape with glue or Claw machine, Strum or Chop pages is cut through its notes 
 
 To freeze a shape, right-click it → Turn into plain notes. It becomes pasted notes, exactly as it sounds now, and each note keeps its channel. Then Slice cuts it by time like any pasted notes. It works on merged shapes too.
 
+## Slice with shape
+
+Pick Slice ▾ → Slice with shape, then click a shape: it becomes a knife. Everything under its notes is cut out as its own piece and selected, and the knife itself stays as it was. Only its notes cut: on each key row, the stretches its notes cover, so a ring cuts out a ring and leaves the hole alone.
+
+Or right-click a shape lying over others → Slice with shape. The shape in front cuts the shapes behind it. With several shapes selected (a Select box), the one in front cuts only the other selected ones.
+
+Custom shapes, pasted notes and text can be knives. Pasted notes under the knife are cut straight away. Drawn shapes, lines and text under it: Spiderweb asks once, then turns them into plain notes and cuts them. Merged shapes and Hz bass stay whole until you turn them into plain notes. Pictures and shapes on hidden tracks aren't cut.
+
+The pieces keep their colours. To make a piece stand out, right-click it → New colours ▸ (Multi channel only). Next free colours gives it channels nothing else uses while it plays. Channel 1 to 16 puts all its notes on that channel.
+
 One Ctrl+Z puts everything back as it was.
