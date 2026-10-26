@@ -629,8 +629,8 @@ class TrackList(tk.Canvas):
             if picture:  # (in the picture: dragged = a Select box, Ctrl adds it; let go without a drag = the click)
                 return self.box_press(e, max(0.0, self.x2t(e.x)), row, pick=True)
             return self.select_click(row, e.state & 0x4, e.state & 0x1)
-        if picture:  # (a drag on the picture: a Select box; a click: the play line + the track, as before)
-            self.box_press(e, max(0.0, self.x2t(e.x)), row)
+        if picture and self.box_press(e, max(0.0, self.x2t(e.x)), row):  # (a drag on the picture: a Select box;
+            return  # a click: the play line + the track, as before; inside the boxes: on letting go, box_release)
         if row >= 0 and e.x < self.name_w:  # (a track's name: dragged = the tracks moved, group C)
             s, group = int(self.tracks()[row]), self.picked_tracks()
             # (on one of several selected: they stay selected for the drag; let go without one = that track alone,
@@ -687,12 +687,13 @@ class TrackList(tk.Canvas):
         press outside the kept boxes drops them (Ctrl: kept, the new one added)."""
         ctrl = bool(e.state & 0x4)
         inside = self.box_at(e.x, e.y)
-        if inside and not ctrl:  # (inside the kept boxes: they stay)
-            return
-        if not ctrl:
+        if not ctrl and not inside:
             self.drop_boxes()
+        # (inside the kept boxes: dragged = what they hold moved, Ctrl = copied; a click = the play line + the track)
         self._box = {"x": e.x, "y": e.y, "t": beat, "row": row, "band": band, "ctrl": ctrl,
-                     "shift": bool(e.state & 0x1), "pick": pick, "on": False, "box": None}
+                     "shift": bool(e.state & 0x1), "pick": pick, "on": False, "box": None, "move": inside,
+                     "dt": 0.0, "drow": 0}
+        return inside
 
     def box_at(self, x, y):
         """True if (x, y) is inside a kept box (on the ruler: a ruler band)."""
@@ -719,6 +720,8 @@ class TrackList(tk.Canvas):
             b["on"] = True
             self.tip.hide()
         t, shift = max(0.0, self.x2t(e.x)), bool(e.state & 0x1)
+        if b["move"]:
+            return self.move_box_drag(b, e, t, shift)
         if b["band"]:
             lo, hi = sorted(self.ticked(x) if s else self.snapped(x) for x, s in ((b["t"], b["shift"]), (t, shift)))
             b["box"] = {"t0": lo, "t1": hi, "rows": None} if hi > lo else None
@@ -730,10 +733,41 @@ class TrackList(tk.Canvas):
             b["box"] = {"t0": lo, "t1": hi, "rows": tuple(sorted((b["row"], row)))}
         self.request_redraw()
 
+    def move_box_drag(self, b, e, t, shift):
+        """The kept boxes dragged by their inside: dt = their left side onto the NEAREST grid line (Shift: ticks;
+        the piano roll's box moves), never before beat 0; drow = rows, the boxes kept inside the list (a ruler band:
+        time only)."""
+        left = min(x["t0"] for x in self.boxes)
+        want = left + t - b["t"]
+        b["dt"] = max(0.0, self.ticked(want) if shift else self.snapped(want)) - left
+        if any(x["rows"] is None for x in self.boxes):
+            b["drow"] = 0
+        else:
+            top = self.area()[1]
+            row = int((e.y - top + self.top) // self.row_h)
+            lo = min(x["rows"][0] for x in self.boxes)
+            hi = max(x["rows"][1] for x in self.boxes)
+            b["drow"] = min(max(row - b["row"], -lo), len(self.tracks()) - 1 - hi)
+        self.request_redraw()
+
     def box_release(self):
         """Let go: the box kept (Ctrl: with the others); boxes and ruler bands are never kept together (the piano
         roll's rule). No drag: a Ctrl / Shift click picks tracks (select_click)."""
         b, self._box = self._box, None
+        if b["move"]:
+            if b["on"] and (b["dt"] or b["drow"] or b["ctrl"]):
+                from window.track_moves import move_boxed
+                move_boxed(self.app, self.boxes, b["dt"], b["drow"], copying=b["ctrl"])
+            elif not b["on"] and b["pick"]:
+                self.select_click(b["row"], b["ctrl"], b["shift"])
+            elif not b["on"] and b["row"] is not None:  # (a click inside: the play line + the track, as outside)
+                if not self.app.player.running:
+                    self.app.set_playhead(self.snapped(b["t"]))
+                self.current, self.selected = int(self.tracks()[b["row"]]), set()
+                self.anchor = (self.current, self.current)
+                self.shown_changed()
+            self.request_redraw()
+            return
         if b["on"]:
             new = b["box"]
             if new is not None:
@@ -807,6 +841,10 @@ class TrackList(tk.Canvas):
         """The kept boxes + the one being dragged on screen: [(x0, y0, x1, y1)] (a ruler band: every row)."""
         top, n, rh = self.area()[1], len(self._all), self.row_h
         shown = self.boxes + ([self._box["box"]] if self._box is not None and self._box["box"] is not None else [])
+        m = self._box if self._box is not None and self._box["move"] and self._box["on"] else None
+        if m is not None:  # (being moved: where they'd land)
+            shown = [dict(b, t0=b["t0"] + m["dt"], t1=b["t1"] + m["dt"], rows=None if b["rows"] is None else
+                          (b["rows"][0] + m["drow"], b["rows"][1] + m["drow"])) for b in self.boxes]
         out = []
         for b in shown:
             r0, r1 = b["rows"] if b["rows"] is not None else (0, n - 1)
@@ -845,7 +883,9 @@ class TrackList(tk.Canvas):
     def bands_x(self):
         """[(x0, x1)] of the ruler bands on screen (the ruler black there, like the piano roll's)."""
         shown = self.boxes + ([self._box["box"]] if self._box is not None and self._box["box"] is not None else [])
-        return [(self.t2x(b["t0"]), self.t2x(b["t1"])) for b in shown if b["rows"] is None]
+        m = self._box if self._box is not None and self._box["move"] and self._box["on"] else None
+        dt = m["dt"] if m is not None else 0.0
+        return [(self.t2x(b["t0"] + dt), self.t2x(b["t1"] + dt)) for b in shown if b["rows"] is None]
 
     def step_track(self, way):
         """Ctrl+wheel on the piano roll / its panes (like Domino, user 2026-10-24): the next (way 1, wheel down) or
