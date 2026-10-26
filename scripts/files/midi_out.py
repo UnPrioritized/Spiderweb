@@ -7,7 +7,7 @@ import threading
 import numpy as np
 
 from files.safefile import write_bytes
-from files.own_tracks import plan
+from files.own_tracks import among_file, plan
 from files.speed import loops
 from notes.engine import OWN0, auto_count, own_id, slot_port, slot_ports, slot_track_channel
 
@@ -221,13 +221,31 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tem
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
 
-def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=()):
-    """write_midi's note tracks alone, no header or tempo track: (pieces, how many tracks). A loaded MIDI's export
-    puts them after the file's own tracks. ports: a set of slots whose tracks start with their port (extracted
-    notes from another port: their slots' rounds are their ports)."""
+def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=(), files=0):
+    """write_midi's note tracks alone, no header or tempo track: (pieces, how many tracks, {k: [whole MTrk chunks]}).
+    A loaded MIDI's export puts pieces after the file's own tracks, and the last answer's chunks before its k-th
+    track (own tracks placed among its files tracks: own_tracks "file"). ports: a set of slots whose tracks start
+    with their port (extracted notes from another port: their slots' rounds are their ports)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    tracks = plan(track_slots(notes, pad), own, np.unique(notes[:, 4]))
-    return _pieces(notes, tracks, use10, b"", cc or {}, ports), len(tracks)
+    head, rest = among_file(list(own), files)
+    tracks = plan(track_slots(notes, pad), rest, np.unique(notes[:, 4]))
+    before = {}
+    if head:
+        for t, data in zip(head, track_chunks(notes, head, use10, cc, ports)):
+            before.setdefault(t["file"], []).append(data)
+    return _pieces(notes, tracks, use10, b"", cc or {}, ports), len(tracks) + len(head), before
+
+
+def track_chunks(notes, tracks, use10, cc, ports):
+    """Each of tracks' whole MTrk chunk (bytes), in order."""
+    out, part = [], []
+    for piece in _pieces(notes, tracks, use10, b"", cc or {}, ports, ends=True):
+        if piece is None:
+            out.append(b"".join(part))
+            part = []
+        else:
+            part.append(piece)
+    return out
 
 
 def name_event(name):
@@ -236,10 +254,11 @@ def name_event(name):
     return b"\x00\xFF\x03" + vlq(len(data)) + data
 
 
-def _pieces(notes, tracks, use10, start, cc, ports=None):
+def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory). With the speed-ups
     the tracks are made side by side on several cores (midi_track), written in order. tracks: slots, and own
-    tracks (dicts: their name first, then the notes drawn into them, on their channel; port A)."""
+    tracks (dicts: their name first, then the notes drawn into them, on their channel; port A). ends: None
+    after each track too (track_chunks)."""
     yield start
     notes, autos, count, at = own_compact(notes)
     if count > 1:  # (one sort finds every track's notes, in their own order)
@@ -305,6 +324,8 @@ def _pieces(notes, tracks, use10, start, cc, ports=None):
             yield b"MTrk" + struct.pack(">I", sum(len(e) for e in events) + len(END))
             yield from events
             yield END
+            if ends:
+                yield None
         made = events = None
 
 

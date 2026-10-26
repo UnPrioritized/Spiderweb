@@ -27,7 +27,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
-from files.own_tracks import HAND, from_rows, into_ids, new_id, next_channel, plan
+from files.own_tracks import HAND, file_order, from_rows, full_plan, into_ids, new_id, next_channel
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -1869,7 +1869,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         own, changed = list(self.own_tracks), False
         by_id = {t["id"]: t for t in own}
         slots, filled = track_slots(rendered, self.pad_tracks()), np.unique(rendered[:, 4])
-        rows = [-1 - r if type(r) is int else r["id"] for r in plan(slots, own, filled)]
+        # (a loaded MIDI's tracks left out for now: yours among them in their places)
+        rows = [-1 - r if type(r) is int else r["id"] for r in full_plan(file_order(self.loaded), slots, own, filled)
+                if type(r) is not int or r >= 0]
         inserted = []
 
         def channel(v):
@@ -1895,6 +1897,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             v = new_id(own, self.own_next)
             self.own_next = v + 1
             t = {"id": v, "name": "", "ch": next_channel(channel(prev), use10), "after": -1, "auto": True}
+            if prev >= 0 and "file" in by_id[prev]:  # (among a loaded MIDI's tracks: there too)
+                t["file"] = by_id[prev]["file"]
             own.append(t)
             by_id[v] = t
             rows.insert(rows.index(prev) + 1, v)

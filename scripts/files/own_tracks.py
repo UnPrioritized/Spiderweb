@@ -2,7 +2,9 @@
 app.own_tracks = [{"id", "name", "ch" 0-15, "after"}] in the order they show. "after" = how many of Spiderweb's
 automatic tracks WITH NOTES (the slots, midi_out.track_slots; empty ones kept between channels don't count:
 counted) come before it; -1 = after all of them (so is a number past them). The automatic tracks keep their slot
-order around them. Saved in the project, undone with the shapes."""
+order around them. With a loaded MIDI (group D) a track may sit among the file's tracks: "file" = how many of the
+file's tracks come before it (missing: after them all, among Spiderweb's by "after"). Saved in the project, undone
+with the shapes."""
 
 NAME_MOST = 100  # letters in a track's name at most
 HAND = 1 << 40   # the track list's id of own track n: HAND + n (slots are >= 0, a loaded MIDI's tracks < 0)
@@ -31,6 +33,8 @@ def clean_own_tracks(raw):
                     "ch": ch, "after": after})
         if t.get("auto") is True:  # (added by Spiderweb for a shape's colours: App.fit_into)
             out[-1]["auto"] = True
+        if type(t.get("file")) is int and 0 <= t["file"] <= COUNT_MOST:  # (among a loaded MIDI's tracks)
+            out[-1]["file"] = t["file"]
     return out
 
 
@@ -78,16 +82,42 @@ def plan(slots, own, filled=None):
     return out + slots[k:]
 
 
+def file_order(lm):
+    """A loaded MIDI's track numbers in the order they're listed and written (none loaded: [])."""
+    return list(range(len(lm.tracks))) if lm is not None else []
+
+
+def among_file(own, files):
+    """The own tracks sitting among a loaded MIDI's files tracks ("file" below files) and the rest."""
+    head = [t for t in own if t.get("file", files) < files]
+    ids = {t["id"] for t in head}
+    return head, [t for t in own if t["id"] not in ids]
+
+
+def full_plan(files, slots, own, filled=None):
+    """Every track in the order it's listed and written with a loaded MIDI: its tracks (files = their numbers in
+    the order they show, each -1 - number) with the own tracks placed among them ("file"), then plan's."""
+    head, rest = among_file(own, len(files))
+    head = sorted(head, key=lambda t: t["file"])  # (stable: the list's own order among equals)
+    out, j = [], 0
+    for k, n in enumerate(files):
+        while j < len(head) and head[j]["file"] <= k:
+            out.append(head[j])
+            j += 1
+        out.append(-1 - n)
+    return out + head[j:] + plan(slots, rest, filled)
+
+
 def new_id(own, floor=0):
     """The next track id: past every track there and never below floor (the project's ids so far, app.own_next:
     an id is never used twice, hunt 2026-10-26: a copy from a removed track landed in a new one with its id)."""
     return max(max((t["id"] for t in own), default=-1) + 1, floor)
 
 
-def add_tracks(own, slots, row, chs, floor=0, filled=None):
-    """own with one new track per channel in chs added just after row `row` of plan's order (None: at the end; -1:
-    first of them all); (new list, new ids). floor: new_id's; slots, filled: plan's."""
-    rows = plan(slots, own, filled)
+def add_tracks(own, slots, row, chs, floor=0, filled=None, files=()):
+    """own with one new track per channel in chs added just after row `row` of full_plan's order (None: at the end;
+    -1: first of them all); (new list, new ids). floor: new_id's; slots, filled: plan's; files: full_plan's."""
+    rows = full_plan(files, slots, own, filled)
     at = len(rows) if row is None else 0 if row < 0 else row + 1
     first = new_id(own, floor)
     new = [{"id": first + k, "name": "", "ch": ch, "after": -1} for k, ch in enumerate(chs)]
@@ -103,20 +133,31 @@ def move_rows(rows, moved, gap):
 
 
 def from_rows(rows, slots, own, filled=None):
-    """The own tracks (own: as they are now, by id) in the order rows (plan's, maybe with tracks no longer there)
-    has them, each "after" the automatic tracks with notes (plan's filled; None = all in slots) before it (-1 when
-    no automatic track comes after it). Own tracks rows doesn't list go at the end, as they were."""
+    """The own tracks (own: as they are now, by id) in the order rows (plan's or full_plan's, maybe with tracks no
+    longer there) has them, each "after" the automatic tracks with notes (plan's filled; None = all in slots) before
+    it (-1 when no automatic track comes after it), and "file" = the loaded MIDI's tracks (negative) before it when
+    one comes after it (rows without them, e.g. the MIDI not found: "file" kept as it was). Own tracks rows doesn't
+    list go at the end, as they were."""
     live, by_id = {int(s) for s in slots}, {t["id"]: t for t in own}
     count = live if filled is None else live & {int(s) for s in filled}
-    out, seen, listed = [], 0, set()
+    out, seen, files, listed = [], 0, 0, set()
+    any_file = any(type(r) is int and r < 0 for r in rows)
     later = [False] * len(rows)  # (an automatic track somewhere after this row)
+    later_file = [False] * len(rows)  # (... a loaded MIDI's track)
     for k in range(len(rows) - 2, -1, -1):
         later[k] = later[k + 1] or (type(rows[k + 1]) is int and rows[k + 1] in live)
+        later_file[k] = later_file[k + 1] or (type(rows[k + 1]) is int and rows[k + 1] < 0)
     for k, r in enumerate(rows):
         if type(r) is int:
             seen += r in count
+            files += r < 0
         elif r["id"] in by_id and r["id"] not in listed:
             listed.add(r["id"])
-            out.append(dict(by_id[r["id"]], after=seen if later[k] else -1))
+            t = dict(by_id[r["id"]], after=seen if later[k] else -1)
+            if any_file:
+                t.pop("file", None)
+                if later_file[k]:
+                    t["file"] = files
+            out.append(t)
     return out + [t for t in own if t["id"] not in listed]
 

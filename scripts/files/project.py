@@ -1107,8 +1107,9 @@ class ProjectFiles:
                         job["hits"] = own_hits(hid, before[mine, 0], before[mine, 1], lanes[mine],
                                                cancel=lambda: job["cancel"],
                                                progress=lambda d, n: job.update(done=d, total=n))
-                    pieces, job["tracks"] = note_tracks(notes, use10, pad, cc, ports, own)
-                    added = Added(pieces, job["tracks"], 16 * len(notes))
+                    pieces, job["tracks"], between = note_tracks(notes, use10, pad, cc, ports, own,
+                                                                 len(lm.tracks))
+                    added = Added(pieces, job["tracks"], 16 * len(notes), between)
                 job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),

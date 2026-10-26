@@ -49,7 +49,8 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
         free = shutil.disk_usage(folder).free
     except OSError as e:
         raise MidiError("midi.cant_write", why=e.strerror or str(e)) from None
-    need = mf.size + ROOM_SPARE + (added.size if added is not None else 0)
+    need = mf.size + ROOM_SPARE + (added.size + sum(len(c) for cs in added.before.values() for c in cs)
+                                   if added is not None else 0)
     if free < need:
         raise MidiError("midi.no_room", need=-(-need // 2 ** 20), free=free // 2 ** 20)
     work = _Work(mf, walk, progress, cancel, retime, added, hidden)
@@ -150,7 +151,7 @@ class _Work:
         with open(mf.path, "rb") as f:
             for i, (kind, *what) in enumerate(mf.pieces):
                 if i == last + 1 and added is not None:
-                    yield from self.own(added)
+                    yield from self.own(added.chunks)
                 if kind == "raw":
                     start, size = what
                     for k, piece in enumerate(self.raw(f, start, size)):
@@ -160,6 +161,8 @@ class _Work:
                         yield piece
                     continue
                 t = what[0]
+                if added is not None and t.number in added.before:
+                    yield from self.own(added.before[t.number])
                 head = self.read_exact(f, t.head, 8)
                 rest.update(head)
                 rt = self.retime
@@ -202,10 +205,10 @@ class _Work:
                     if checks.bad:  # (stopped at the next track, like before)
                         return
             if last == len(mf.pieces) - 1 and added is not None:
-                yield from self.own(added)
+                yield from self.own(added.chunks)
 
-    def own(self, added):
-        for piece in added.chunks:
+    def own(self, chunks):
+        for piece in chunks:
             if self.cancel and self.cancel():
                 raise Cancelled()
             self.written += len(piece)
@@ -379,11 +382,14 @@ def vlq(n):
 
 class Added:
     """Spiderweb's own tracks put after a loaded MIDI's last track (its shapes drawn on top, plan step 10):
-    chunks = whole MTrk chunks (bytes, made as they're written), count = how many, size = about how many bytes. The
-    header then says format 1 (a format 0 file has one track) and the new track count."""
+    chunks = whole MTrk chunks (bytes, made as they're written), count = how many (before's too), size = about how
+    many bytes; before = {track number: [whole MTrk chunks]} put just before that file track (tracks of yours
+    placed among the file's, group D). The header then says format 1 (a format 0 file has one track) and the new
+    track count."""
 
-    def __init__(self, chunks, count, size=0):
+    def __init__(self, chunks, count, size=0, before=None):
         self.chunks, self.count, self.size = chunks, count, size
+        self.before = before or {}
 
     def header(self, piece, tracks):
         b = bytearray(piece)
