@@ -24,7 +24,7 @@ from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
+from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
 from files.own_tracks import HAND, into_ids, new_id, next_channel, plan
@@ -279,7 +279,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
     need = {}
     if not inside:
         return rendered, slots, need
-    parts = [rendered]
+    parts, together = [rendered], []
     for i, (n, t) in inside.items():
         sh = shapes[i]
         colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None and len(n)
@@ -292,8 +292,18 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         on = np.array([entry_slot(v, own, rule, use10) for v in ids], np.int64)
         if mode != "auto":  # (Single channel / As drawn: every colour on its first track, hunt 2026-10-26)
             colour = np.zeros_like(colour)
-        parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i,
-                              mode != "raw" and not is_sustained(sh) and sh.get("held") is not True))
+        fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True
+        if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
+            together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
+        else:
+            parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, fix))
+    if together:  # (pinned on one of Spiderweb's tracks: with the notes already there)
+        together = np.concatenate(together)
+        there = np.isin(rendered[:, 4], np.unique(together[together[:, 4] < OWN0, 4]))
+        if there.any():
+            parts[0] = rendered[~there]
+            together = np.concatenate([rendered[there], together])
+        parts.append(fix_rows(together))
     rendered = np.concatenate(parts)
     return rendered, max(slots, auto_count(rendered[:, 4])), need  # (automatic tracks shapes were pinned on, B11)
 
@@ -317,13 +327,18 @@ def in_track(notes, slots, owner, fix):
     """A shape's notes on tracks added by hand (slots: each note's): rendered rows (fix: its own overlaps on each
     track fixed, resolve_overlaps)."""
     rows = np.zeros((len(notes), 6), np.int64)
-    rows[:, :4], rows[:, 5] = notes, owner
-    if fix and len(rows):
-        ids, rows[:, 4] = np.unique(slots, return_inverse=True)  # (small numbers while fixing: OWN0's are huge)
-        rows = resolve_overlaps(rows)
-        rows[:, 4] = ids[rows[:, 4]]
-    else:
-        rows[:, 4] = slots
+    rows[:, :4], rows[:, 5], rows[:, 4] = notes, owner, slots
+    return fix_rows(rows) if fix else rows
+
+
+def fix_rows(rows):
+    """Rendered rows with their overlaps on each track fixed (resolve_overlaps)."""
+    if not len(rows):
+        return rows
+    rows = rows.copy()
+    ids, rows[:, 4] = np.unique(rows[:, 4], return_inverse=True)  # (small numbers while fixing: OWN0's are huge)
+    rows = resolve_overlaps(rows)
+    rows[:, 4] = ids[rows[:, 4]]
     return rows
 
 

@@ -790,27 +790,24 @@ class TrackList(tk.Canvas):
         rows = move_rows(full, {ids.index(s) for s in group if s in ids}, at)
         if [r if type(r) is int else HAND + r["id"] for r in rows] == ids:
             return
-        from window.app import can_go_in
+        from window.app import can_go_in, placed_on
         autos = [s for s in group if s < HAND]
         r = app.rendered
         owners = []
-        if autos and len(r):
-            # (every automatic track those shapes are on is taken too, and every shape on those, until none is
-            # left: nothing pinned, no track split in two, only the order changes, like Domino's; user 2026-10-26:
-            # pinned colours kept empty tracks between them, a shape sharing a track stayed behind on a copy of it)
-            auto = r[:, 4] < OWN0
-            every = set(autos)
-            while True:
-                owners = np.unique(r[auto & np.isin(r[:, 4], list(every)), 5])
-                more = set(np.unique(r[auto & np.isin(r[:, 5], owners), 4]).tolist())
-                if more <= every:
-                    break
-                every |= more
-            owners = owners.tolist()
-            # (empty ones too, kept only as a gap between channels: they'd go once the tracks around them are
-            # yours; Domino keeps empty tracks)
-            every |= set(self._slots.tolist()) - set(r[auto, 4].tolist())
-            autos = [int(s) for s in self._slots if int(s) in every]
+        if autos:
+            # (EVERY automatic track is taken, empty ones too, with every shape on them: nothing pinned, no track
+            # split in two, nothing handed out again, only the order changes, like Domino's; user 2026-10-26, after
+            # pinned colours kept empty tracks between them and the music left behind got new channels / gap tracks)
+            autos = [int(s) for s in self._slots]
+            owners = set(np.unique(r[r[:, 4] < OWN0, 5]).tolist()) if len(r) else set()
+            # (a shape with no notes of its own now, e.g. all merged into others' in Single channel: it'd come
+            # back on a track of Spiderweb's later)
+            noted = set(np.unique(r[:, 5]).tolist()) if len(r) else set()
+            chans = app.own_channels()
+            owners |= {i for i, sh in enumerate(app.shapes)
+                       if i not in noted and can_go_in(sh) and not placed_on(sh, chans)}
+            owners |= {i for i, sh in enumerate(app.shapes) if any(v < 0 for v in placed_on(sh, chans))}  # (pinned)
+            owners = sorted(owners)
         if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
             return app.status.config(text=tr("tracks.cant_move"))
         app.roll.end_typing()
@@ -857,7 +854,8 @@ class TrackList(tk.Canvas):
                         sh[key] = [taken.get(entry_slot(v, chans, rule, use10), v) if v < 0 else v
                                    for v in into_ids({"into": sh[key]})]
                 continue
-            slots = app.colour_slots(sh, r[r[:, 5] == i])
+            mine = r[r[:, 5] == i]
+            slots = app.colour_slots(sh, mine) if len(mine) else [autos[0]]  # (no notes now: the first one)
             entries = [taken.get(s, -1 - s) for s in (slots if multi else slots[:1])]
             for key in ("cols", "into_gap", "into_rest", "slots10"):
                 sh.pop(key, None)
