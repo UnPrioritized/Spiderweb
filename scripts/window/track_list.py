@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
-from files.own_tracks import HAND, add_tracks, plan
+from files.own_tracks import HAND, add_tracks, into_ids, plan
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import BEATS_FAR, slot_track_channel, track_ids
@@ -756,7 +756,9 @@ class TrackList(tk.Canvas):
         own = self.own_track(s)
         if own is None or (own["name"], own["ch"]) == (name, ch):
             return
-        self.set_own([dict(t, name=name, ch=ch) if t is own else t for t in self.app.own_tracks],
+        # (a track Spiderweb added for a shape's colours: changed by hand = yours, kept even when unused)
+        mine = {k: v for k, v in own.items() if k != "auto"}
+        self.set_own([dict(mine, name=name, ch=ch) if t is own else t for t in self.app.own_tracks],
                      tr("tracks.properties_step"))
 
     def on_double(self, e):
@@ -778,7 +780,7 @@ class TrackList(tk.Canvas):
         app = self.app
         if self.current == s:
             self.current = None
-        gone = {i for i, sh in enumerate(app.shapes) if app.in_own_track(sh) and sh["into"] == own["id"]}
+        gone = {i for i, sh in enumerate(app.shapes) if app.in_own_track(sh) and into_ids(sh)[0] == own["id"]}
         app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
         app.push_undo(name=tr("tracks.remove_step"))
         for i in sorted(gone, reverse=True):
@@ -842,7 +844,7 @@ class TrackList(tk.Canvas):
         lines = [f"{self.name_of(row)}  ·  {self.channel_of(slot)}",
                  trn("tracks.notes", len(mine), n=f"{len(mine):,}")]
         if slot >= HAND:
-            lines.insert(1, tr("tracks.own_tip"))
+            lines.insert(1, tr("tracks.added_tip" if self.own_track(slot).get("auto") else "tracks.own_tip"))
         owners = np.unique(mine[:, 5]).tolist() if len(mine) else []
         names = [self.app.shape_label(self.app.shapes[i]) for i in owners[:TIP_SHAPES] if i < len(self.app.shapes)]
         if names:
@@ -1296,6 +1298,8 @@ class TrackList(tk.Canvas):
             picked = slot == self.current
             if picked:
                 self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK, outline="")
+            elif (self.own_track(slot) or {}).get("auto"):  # (added by Spiderweb for a shape's colours, user)
+                self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_ADDED, outline="")
             if self.row_h >= 12 * s:
                 colour = look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT
                 ch = self.channel_of(slot)

@@ -297,7 +297,7 @@ class MaskPanel:
                 sh = self.copied(got[got[:, 4] == s], False, multi=False)
                 for k in ("own_slots", "slots10"):
                     sh.pop(k, None)
-                sh["into"] = own_id(s)
+                sh["into"] = [own_id(s)]
                 made[i].append(sh)
         if not made:
             self.status.config(text=tr("mask.apply_nothing"))

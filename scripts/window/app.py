@@ -26,6 +26,7 @@ from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, track_ids)
+from files.own_tracks import fill_down, into_ids
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -149,8 +150,8 @@ def can_go_in(sh):
 def into_channel(sh, own):
     """The channel of the track added by hand the shape is drawn into (own: {track id: channel}), or None: an
     automatic shape (also when that track isn't there)."""
-    i = sh.get("into")
-    return own.get(i) if own and i is not None and can_go_in(sh) else None
+    ids = into_ids(sh)
+    return own.get(ids[0]) if own and ids and can_go_in(sh) else None
 
 
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
@@ -163,9 +164,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order). keep: Settings →
     General "Overlapping shapes keep their colours" (render keep). busy: per shape the times its CC lines are
     sent (App.cc_busy: render busy). own: {id: channel} of the tracks added by hand: a shape drawn into one
-    (into_channel) has all its notes on it in every mode, its own overlaps fixed as if alone (Single channel; As
+    (into_channel) has its notes on its tracks (into_ids: colour k on the k-th, colours in its tracks' order; more
+    colours than tracks: the last one's) in every mode, its own overlaps fixed as if alone (Single channel; As
     drawn: kept), other shapes' never (Domino lets two notes share a key in a track); the other shapes never take
-    it nor step round it."""
+    them nor step round them. Also returns {shape's number: how many colours it has} for those (App.fit_into)."""
     team_laps = []
     teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
@@ -201,7 +203,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     laps = [lap[:0] if o and lap is not None else lap for o, lap in zip(off, laps)]
     # (shapes drawn into a track added by hand: taken out of the channel work, put on their track below)
     into = [into_channel(sh, own) for sh in shapes]
-    inside = {i: got[i][0] for i, ch in enumerate(into) if ch is not None}
+    inside = {i: got[i] for i, ch in enumerate(into) if ch is not None}
     got = [(n[:0], None if t is None else t[:0]) if i in inside else (n, t) for i, (n, t) in enumerate(got)]
     laps = [lap[:0] if i in inside and lap is not None else lap for i, lap in enumerate(laps)]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
@@ -241,24 +243,40 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
                              busy, together, note_slots)
+    need = {}
     if inside:
-        rendered = np.concatenate([rendered] + [in_track(n, own_slot(shapes[i]["into"], into[i]), i,
-                                                         mode != "raw" and not is_sustained(shapes[i])
-                                                         and shapes[i].get("held") is not True)
-                                                for i, n in inside.items()])
+        parts = [rendered]
+        for i, (n, t) in inside.items():
+            sh = shapes[i]
+            colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None and len(n)
+                      else np.zeros(len(n), np.int64))
+            need[i] = int(colour.max()) + 1 if len(n) else 0
+            ids = []
+            for v in into_ids(sh):  # (its tracks up to the first one that's gone: fill_down fills them again)
+                if v not in own:
+                    break
+                ids.append(v)
+            on = np.array([own_slot(v, own[v]) for v in ids], np.int64)
+            parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i,
+                                  mode != "raw" and not is_sustained(sh) and sh.get("held") is not True))
+        rendered = np.concatenate(parts)
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
             voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
-    return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}
+    return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}, need
 
 
-def in_track(notes, slot, owner, fix):
-    """A shape's notes on a track added by hand: rendered rows (fix: its own overlaps fixed, resolve_overlaps)."""
+def in_track(notes, slots, owner, fix):
+    """A shape's notes on tracks added by hand (slots: each note's): rendered rows (fix: its own overlaps on each
+    track fixed, resolve_overlaps)."""
     rows = np.zeros((len(notes), 6), np.int64)
     rows[:, :4], rows[:, 5] = notes, owner
-    if fix:
+    if fix and len(rows):
+        ids, rows[:, 4] = np.unique(slots, return_inverse=True)  # (small numbers while fixing: OWN0's are huge)
         rows = resolve_overlaps(rows)
-    rows[:, 4] = slot
+        rows[:, 4] = ids[rows[:, 4]]
+    else:
+        rows[:, 4] = slots
     return rows
 
 
@@ -1644,14 +1662,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
-        if made is None:
-            made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
+        def make():
+            return all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
                              self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
                              keep=self.keep_colours.get(),
                              busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels())
+        if made is None:
+            made = make()
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
-        wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots = made
+        if self.fit_into(made[5]):  # (a shape in a track got more colours: tracks filled down, made again)
+            made = make()
+        wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _ = made
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
         started = time.perf_counter()
@@ -1732,6 +1754,32 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """{id: channel} of the tracks added by hand (all_notes own)."""
         return {t["id"]: t["ch"] for t in self.own_tracks}
 
+    def fit_into(self, need):
+        """Domino's fill-down (own_tracks.fill_down, user 2026-10-26): each shape in a track added by hand gets one
+        track per colour (need: all_notes'), tracks Spiderweb added and no shape uses go. Multi channel only (Single
+        channel / As drawn put every colour on one: nothing is taken away then). No undo step of its own: part of
+        the change that asked for it. True if the shapes' tracks changed (the notes are made again)."""
+        if self.channel_mode.get() != "auto":
+            return False
+        own, changed = self.own_tracks, False
+        autos = self.slot_count or 0
+        for i, n in need.items():
+            sh = self.shapes[i]
+            if n <= 0:
+                continue
+            own, ids = fill_down(own, autos, into_ids(sh), n, self.picture_use10)
+            if ids != into_ids(sh):
+                sh["into"] = ids
+                changed = True
+        used = {v for sh in self.shapes for v in into_ids(sh)}
+        kept = [t for t in own if not t.get("auto") or t["id"] in used]
+        if len(kept) != len(own):
+            own = kept
+        if own is not self.own_tracks:
+            self.own_tracks = own
+            changed = True
+        return changed
+
     def into_target(self):
         """The id of the track added by hand highlighted in the track list (new shapes go into it), or None."""
         own = self.track_list.own_track(self.track_list.current)
@@ -1748,7 +1796,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return False
         if not can_go_in(sh):
             return True
-        sh["into"] = target
+        sh["into"] = [target]
         return False
 
     def in_own_track(self, sh):

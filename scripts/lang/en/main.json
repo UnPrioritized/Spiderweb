@@ -545,6 +545,7 @@
  "tracks.channels": "{n} channels",
  "tracks.from_file": "From the loaded MIDI file",
  "tracks.own_tip": "A track you added (right-click: Properties…)",
+ "tracks.added_tip": "Added by Spiderweb for a shape's colours: goes away when no shape uses it (change it in Properties… to keep it)",
  "tracks.in_list": "{name} (in {track})",
  "tracks.removed_shapes": "Removed the track and the {n} shapes in it.",
  "tracks.removed_shapes_one": "Removed the track and the shape in it.",

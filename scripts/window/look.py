@@ -186,6 +186,7 @@ TRACK_CONDUCTOR = pick("#8a8a8a", "#a0a0a4")
 TRACK_MUTED = pick("#b8b8b8", "#6c6c70")  # a muted track's notes
 TRACK_TEMPO = pick("#3874d8", "#7fa8f0")  # the Conductor row's BPM bars
 TRACK_NAME_BG, TRACK_TEXT = pick("#fafafa", "#3a3a3c"), pick("#222", "#e2e2e4")
+TRACK_ADDED = pick("#e6f4e3", "#33443a")  # (a track Spiderweb added for a shape's colours: faint green, user)
 TRACK_PICK, TRACK_PICK_TEXT = pick("#3874d8", "#2f6fd0"), pick("#ffffff", "#ffffff")
 # The notes' (fill, edge) per channel slot in the dark look (user's pick "B warm": the light look's colours lighter
 # with a little cream; light look's in roll_shared.SLOT_COLORS), the shape being drawn

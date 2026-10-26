@@ -15,6 +15,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
+from files.own_tracks import into_ids
 from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
@@ -353,8 +354,12 @@ class PathWindow(ToolWindow):
             if not len(notes) or notes.shape[1] < 5:
                 continue
             tag = notes[:, -1]
-            into = app.in_own_track(sh)  # (drawn into a track added by hand: the copies go into it too)
-            slots = np.zeros(len(notes), np.int64) if into else self.shown_slots(notes, tag, tracks, i, shown)
+            into = app.in_own_track(sh)  # (drawn into tracks added by hand: the copies go into them too, each
+            if into:                     # colour on its own, as all_notes counts them)
+                slots = (np.unique(np.asarray(tracks, np.int64), return_inverse=True)[1].ravel()
+                         if tracks is not None else np.zeros(len(notes), np.int64))
+            else:
+                slots = self.shown_slots(notes, tag, tracks, i, shown)
             order = np.argsort(tag, kind="stable")  # (each copy's notes cut out once: one scan per copy was slow)
             cuts = np.flatnonzero(np.diff(tag[order])) + 1
             news = []
@@ -370,7 +375,7 @@ class PathWindow(ToolWindow):
                 if into:
                     for key in ("own_slots", "slots10"):
                         new.pop(key, None)
-                    new["into"] = sh["into"]
+                    new["into"] = into_ids(sh)
                 news.append(new)
             made[i] = news
         total = sum(len(v) for v in made.values())

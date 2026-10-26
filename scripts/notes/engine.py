@@ -14,7 +14,7 @@ from contextlib import contextmanager
 import numpy as np
 
 from files.lang import tr
-from files.own_tracks import HAND, ID_MOST
+from files.own_tracks import HAND, ID_MOST, INTO_MOST
 from files.speed import key_sort, loops
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve, clean_cycle,
@@ -239,8 +239,10 @@ def clean_shape(sh):
             and all(type(t) is int for t in tm[1:])):
         # (its group's colour turn, kept when Turn into plain notes unlinked it, + its repeat: between.turns)
         out["team"] = list(tm)
-    into = sh.get("into")
-    if type(into) is int and 0 <= into < ID_MOST:  # the track added by hand it's drawn into (files/own_tracks.py)
+    into = sh.get("into")  # the tracks added by hand it's drawn into, one per colour (files/own_tracks.py)
+    into = [into] if type(into) is int else into if isinstance(into, list) else []
+    into = [v for v in into[:INTO_MOST] if type(v) is int and 0 <= v < ID_MOST]
+    if into:
         out["into"] = into
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))

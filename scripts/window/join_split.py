@@ -18,7 +18,9 @@ from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.fillgaps import fill_gaps as filled, needs_fill
 from notes.passengers import pack_cc, unpack_cc
-from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
+from files.own_tracks import into_ids
+from notes.engine import (SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, own_id, shape_notes_tracks,
+                          shape_path)
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import SKIP10, is_mask, same_mask
@@ -776,9 +778,11 @@ class JoinSplit:
                 rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])
                 slots = self.own_slots(i, use10)
             if len(rows):  # (a shape with no notes stays as it is)
-                if self.in_own_track(sh):  # (drawn into a track added by hand: the copy goes into it too)
-                    rows = rows.copy()
-                    rows[:, 4] = 0
+                if self.in_own_track(sh):  # (drawn into tracks added by hand: the copy goes into them too, each
+                    rows = shown(i).copy()  # note's colour = its track's place in the shape's list)
+                    place = {v: k for k, v in enumerate(into_ids(sh))}
+                    ids, back = np.unique(rows[:, 4], return_inverse=True)
+                    rows[:, 4] = np.array([place.get(own_id(int(s)), 0) for s in ids], np.int64)[back.ravel()]
                 elif own or not auto:
                     rows = multi_slots(rows, slots)
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
@@ -797,7 +801,7 @@ class JoinSplit:
             new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
             if self.in_own_track(sh):
                 new[i].pop("own_slots", None)
-                new[i]["into"] = sh["into"]
+                new[i]["into"] = into_ids(sh)
             ex = held_extract(sh) if moved is None else None  # (its notes taken from a loaded MIDI stay out of
             if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
                 new[i]["extract"] = ex
@@ -811,7 +815,7 @@ class JoinSplit:
         from window.app import all_notes  # (app.py imports this file)
         # (the project's ticks as they are: all16 / in_order / rounds_apart are off outside Multi channel, hunt)
         all16 = self.use_ch10.get()
-        _, use10, multi, _, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
+        _, use10, multi, _, _, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
                                        self.notes_tracks, rounds=self.new_rounds.get(),
                                        order=all16 and self.ch10_order.get(), keep=self.keep_colours.get(),
                                        busy=self.cc_busy("auto"), own=self.own_channels())
@@ -827,7 +831,7 @@ class JoinSplit:
         gid = group_of(sh)
         alone = [s for s in self.shapes if s is sh or gid is not None and group_of(s) == gid]
         all16 = self.use_ch10.get()
-        _, used10, rows, _, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
+        _, used10, rows, _, _, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
                                        rounds=self.new_rounds.get(), order=all16 and self.ch10_order.get(),
                                        busy=self.cc_busy("auto", alone), own=self.own_channels())
         rows = rows[rows[:, 5] == next(k for k, s in enumerate(alone) if s is sh)].copy()
