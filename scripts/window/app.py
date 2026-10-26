@@ -25,8 +25,9 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
-                          one_voice, own_slot, render, resolve_overlaps, shape_key, track_ids)
-from files.own_tracks import fill_down, into_ids
+                          one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
+                          auto_count)
+from files.own_tracks import HAND, into_ids, next_channel, plan
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -147,11 +148,27 @@ def can_go_in(sh):
     return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh) or "cc" in sh)
 
 
-def into_channel(sh, own):
-    """The channel of the track added by hand the shape is drawn into (own: {track id: channel}), or None: an
-    automatic shape (also when that track isn't there)."""
-    ids = into_ids(sh)
-    return own.get(ids[0]) if own and ids and can_go_in(sh) else None
+def placed_on(sh, own):
+    """The tracks the shape was laid on (Draw into a track; own: {id: channel} of the tracks added by hand): its
+    into_ids up to the first track added by hand that's gone (from there on: laid again, App.fit_into). Each a
+    track added by hand's id (>= 0) or -1 - an automatic track's slot (pinned there, B11). [] = an automatic shape
+    (also when its first one is gone, or it can't go in: can_go_in)."""
+    out = []
+    if not can_go_in(sh):
+        return out
+    for v in into_ids(sh):
+        if v >= 0 and v not in (own or {}):
+            break
+        out.append(v)
+    return out
+
+
+def entry_slot(v, own, rule, use10):
+    """A placed_on entry's slot now: a track added by hand = engine.own_slot; an automatic track = its slot, as the
+    project's channel rule has it now (rule = the shape's "slots10" when laid: mask.as_used)."""
+    if v >= 0:
+        return own_slot(v, own[v])
+    return int(as_used(np.array([-1 - v], np.int64), rule, use10)[0])
 
 
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
@@ -163,11 +180,12 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
     each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order). keep: Settings →
     General "Overlapping shapes keep their colours" (render keep). busy: per shape the times its CC lines are
-    sent (App.cc_busy: render busy). own: {id: channel} of the tracks added by hand: a shape drawn into one
-    (into_channel) has its notes on its tracks (into_ids: colour k on the k-th, colours in its tracks' order; more
-    colours than tracks: the last one's) in every mode, its own overlaps fixed as if alone (Single channel; As
-    drawn: kept), other shapes' never (Domino lets two notes share a key in a track); the other shapes never take
-    them nor step round them. Also returns {shape's number: how many colours it has} for those (App.fit_into)."""
+    sent (App.cc_busy: render busy). own: {id: channel} of the tracks added by hand. A shape laid on tracks
+    (placed_on: drawn / pasted with a track highlighted) has its notes on them (colour k on the k-th, colours in
+    its tracks' order; more colours than tracks: the last one's) in every mode, its own overlaps fixed as if alone
+    (Single channel; As drawn: kept), other shapes' never (Domino lets two notes share a key in a track); the other
+    shapes never step round them (nor take tracks added by hand). Also returns {shape's number: how many colours
+    it has} for those (App.fit_into)."""
     team_laps = []
     teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
@@ -201,9 +219,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     off = [silent(sh) or quiet and is_mask(sh) for sh in shapes]
     got = [(n[:0], None if t is None else t[:0]) if o else (n, t) for o, (n, t) in zip(off, got)]
     laps = [lap[:0] if o and lap is not None else lap for o, lap in zip(off, laps)]
-    # (shapes drawn into a track added by hand: taken out of the channel work, put on their track below)
-    into = [into_channel(sh, own) for sh in shapes]
-    inside = {i: got[i] for i, ch in enumerate(into) if ch is not None}
+    # (shapes laid on tracks: taken out of the channel work, put on their tracks below)
+    into = [placed_on(sh, own) for sh in shapes]
+    inside = {i: got[i] for i, p in enumerate(into) if p}
     got = [(n[:0], None if t is None else t[:0]) if i in inside else (n, t) for i, (n, t) in enumerate(got)]
     laps = [lap[:0] if i in inside and lap is not None else lap for i, lap in enumerate(laps)]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
@@ -219,7 +237,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (Turn into plain notes / a path's Turn into plain shapes: "solid", other shapes step round its channels)
     pins = [pinned_slots(sh, mode) and ("solid" if sh.get("made") in ("plain", "path") else True) for sh in shapes]
     rules = [slot_rule(sh) if pin else None for sh, pin in zip(shapes, pins)]
-    use10 = any(r is True for r in rules)
+    use10 = any(r is True for r in rules) or any(shapes[i].get("slots10") is True for i in inside)
     # (pinned tracks made with channel 10 skipped stay on their channels while it's used: mask.as_used)
     got = [(n, as_used(t, r, use10 or all16)) for (n, t), r in zip(got, rules)]
     # (with all16 the shapes use channel 10 too, but only as their 16th: render's "all"; in order: "order")
@@ -251,15 +269,13 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
             colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None and len(n)
                       else np.zeros(len(n), np.int64))
             need[i] = int(colour.max()) + 1 if len(n) else 0
-            ids = []
-            for v in into_ids(sh):  # (its tracks up to the first one that's gone: fill_down fills them again)
-                if v not in own:
-                    break
-                ids.append(v)
-            on = np.array([own_slot(v, own[v]) for v in ids], np.int64)
+            ids = into[i]
+            rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
+            on = np.array([entry_slot(v, own, rule, use10 or all16) for v in ids], np.int64)
             parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i,
                                   mode != "raw" and not is_sustained(sh) and sh.get("held") is not True))
         rendered = np.concatenate(parts)
+        slots = max(slots, auto_count(rendered[:, 4]))  # (automatic tracks shapes were pinned on, B11)
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
             voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
@@ -1671,7 +1687,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             made = make()
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
-        if self.fit_into(made[5]):  # (a shape in a track got more colours: tracks filled down, made again)
+        if self.fit_into(made):  # (shapes laid on tracks got more colours: laid down the rows, made again)
             made = make()
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _ = made
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
@@ -1754,54 +1770,161 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """{id: channel} of the tracks added by hand (all_notes own)."""
         return {t["id"]: t["ch"] for t in self.own_tracks}
 
-    def fit_into(self, need):
-        """Domino's fill-down (own_tracks.fill_down, user 2026-10-26): each shape in a track added by hand gets one
-        track per colour (need: all_notes'), tracks Spiderweb added and no shape uses go. Multi channel only (Single
-        channel / As drawn put every colour on one: nothing is taken away then). No undo step of its own: part of
-        the change that asked for it. True if the shapes' tracks changed (the notes are made again)."""
+    def fit_into(self, made):
+        """Lays the shapes drawn / pasted with a track highlighted (all_notes' made: their colour counts, made[5])
+        like Domino's paste (user 2026-10-26): colour k on the row cols[k] below the highlighted one (a copy's
+        columns: copy_columns; else the next row down), WHATEVER track is there (one added by hand = into it, an
+        automatic one = pinned on its slot); past the list's end new tracks of the highlighted one's kind (added by
+        hand: "auto", tinted, the channel after the one above; automatic: the next slots). Once laid each colour stays
+        on its track; more colours later carry on below the last one. Tracks Spiderweb added that no shape lists go.
+        Multi channel only (Single channel / As drawn put every colour on the first). No undo step of its own: part
+        of the change that asked for it. True if anything changed (the notes are made again)."""
         if self.channel_mode.get() != "auto":
             return False
-        own, changed = self.own_tracks, False
-        autos = self.slot_count or 0
+        need, rendered, use10 = made[5], made[2], made[1]
+        own, changed = list(self.own_tracks), False
+        by_id = {t["id"]: t for t in own}
+        rows = [-1 - r if type(r) is int else r["id"] for r in plan(track_slots(rendered, self.pad_tracks()), own)]
+
+        def channel(v):
+            return by_id[v]["ch"] if v >= 0 else slot_track_channel(-1 - v, use10)[1]
+
+        def at_end(kind_own):
+            """A new track at the end of the rows (kind_own: added by hand, else an automatic slot)."""
+            if kind_own:
+                v = max([t["id"] for t in own] + [-1]) + 1
+                t = {"id": v, "name": "", "ch": next_channel(channel(rows[-1]) if rows else 0, use10), "after": -1,
+                     "auto": True}
+                own.append(t)
+                by_id[v] = t
+            else:
+                v = -1 - (max([-1 - r for r in rows if r < 0] + [-1]) + 1)
+            rows.append(v)
+            return v
+
         for i, n in need.items():
             sh = self.shapes[i]
-            if n <= 0:
+            have, cols = placed_on(sh, {v: t["ch"] for v, t in by_id.items()}), sh.get("cols")
+            if n <= 0 or not have or (len(have) >= n and not cols):
+                if have and len(have) > max(n, 1):
+                    sh["into"] = have[:max(n, 1)]
+                    changed = True
                 continue
-            own, ids = fill_down(own, autos, into_ids(sh), n, self.picture_use10)
-            if ids != into_ids(sh):
-                sh["into"] = ids
-                changed = True
-        used = {v for sh in self.shapes for v in into_ids(sh)}
+            if have[0] not in rows:
+                continue
+            anchor = rows.index(have[0])
+            if cols:  # (a copy's columns, or a Domino paste's tracks: from the highlighted row, gaps kept)
+                have, made_here = [], []
+            else:
+                made_here = []
+            while len(have) < n:
+                k = len(have)
+                if have and have[-1] not in rows:  # (its last track isn't listed: nothing to go on from)
+                    break
+                r = anchor + cols[k] if cols and k < len(cols) else (rows.index(have[-1]) + 1 if have else anchor)
+                while r >= len(rows):
+                    made_here.append(at_end(have[0] >= 0 if have else rows[anchor] >= 0))
+                have.append(rows[r])
+            sh["into"] = have
+            sh.pop("cols", None)
+            gap = [v for v in made_here if v >= 0 and v not in have]
+            if gap:
+                sh["into_gap"] = sorted(set(sh.get("into_gap", [])) | set(gap))
+            if any(v < 0 for v in have):  # (its automatic tracks' channel rule, kept when Use channel 10 changes)
+                sh["slots10"] = bool(use10) and any(channel(v) == 9 for v in have if v < 0)
+            changed = True
+        used = {v for sh in self.shapes for key in ("into", "into_gap") for v in (sh.get(key) or [])
+                if type(v) is int}
         kept = [t for t in own if not t.get("auto") or t["id"] in used]
-        if len(kept) != len(own):
-            own = kept
-        if own is not self.own_tracks:
-            self.own_tracks = own
+        if kept != self.own_tracks:
+            self.own_tracks = kept
             changed = True
         return changed
 
-    def into_target(self):
-        """The id of the track added by hand highlighted in the track list (new shapes go into it), or None."""
-        own = self.track_list.own_track(self.track_list.current)
-        return None if own is None else own["id"]
+    def copy_columns(self, idx):
+        """Ctrl+C's columns (Domino's paste, user 2026-10-26): {shape's number: each colour's row in the track list,
+        counted from the first row of everything copied}, so a paste lays them out the same from the highlighted
+        track. Multi channel only (else one channel: nothing to keep); shapes with no notes left out."""
+        if self.channel_mode.get() != "auto" or not len(self.rendered):
+            return {}
+        tl, r = self.track_list, self.rendered
+        own = self.own_channels()
+        rows = {}
+        for i in idx:
+            sh = self.shapes[i]
+            mine = r[r[:, 5] == i]
+            if not len(mine):
+                continue
+            if placed_on(sh, own):  # (laid on tracks: its own list, one per colour)
+                ids = track_ids(np.array(self.laid_slots(sh), np.int64)).tolist()
+            else:  # (each colour's track: where its notes are now, found by start + key)
+                n, t = self.notes_tracks(sh)
+                n = np.asarray(n, np.int64).reshape(-1, 4)
+                colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None
+                          else np.zeros(len(n), np.int64))
+                have = mine[:, 0] * 1024 + mine[:, 2]
+                o = np.argsort(have, kind="stable")
+                have, slot = have[o], mine[o, 4]
+                want = n[:, 0] * 1024 + n[:, 2]
+                at = np.clip(np.searchsorted(have, want), 0, len(have) - 1)
+                found = have[at] == want
+                vals, counts = np.unique(mine[:, 4], return_counts=True)
+                most = int(vals[counts.argmax()])  # (a colour none of whose notes were found: the shape's main one)
+                ids = []
+                for k in range(int(colour.max()) + 1 if len(colour) else 1):
+                    got = slot[at[found & (colour == k)]]
+                    if len(got):
+                        vals, counts = np.unique(got, return_counts=True)
+                    s = int(vals[counts.argmax()]) if len(got) else most
+                    ids.append(int(track_ids(np.array([s]))[0]))
+            at_rows = [tl.row_of_id(v) for v in ids]
+            if None not in at_rows:
+                rows[i] = at_rows
+        if not rows:
+            return {}
+        first = min(min(v) for v in rows.values())
+        return {i: [v - first for v in got] for i, got in rows.items()}
 
-    def put_into_current(self, sh, keep=False):
-        """A new shape goes into the highlighted track added by hand (Draw into a track; keep: one already in a
-        track of this project stays in it). True if it can't go in (can_go_in): it stays automatic."""
-        if keep and self.in_own_track(sh):
-            return False
-        sh.pop("into", None)
-        target = self.into_target()
+    def into_target(self):
+        """The track highlighted in the track list new shapes are laid on (placed_on's entry: a track added by
+        hand's id, an automatic track = -1 - its slot), or None (nothing / a loaded MIDI's track highlighted)."""
+        tl = self.track_list
+        s = tl.current
+        if s is None:
+            return None
+        own = tl.own_track(s)
+        if own is not None:
+            return own["id"]
+        return -1 - s if 0 <= s < HAND else None
+
+    def put_into_current(self, sh, relay=True):
+        """A new shape is laid from the highlighted track (Draw into a track; fit_into lays its colours). relay
+        False (duplicate) or nothing highlighted: one already laid in this project stays where it is. True if it
+        can't go in (can_go_in): it stays automatic."""
+        target = self.into_target() if relay else None
         if target is None:
+            if not self.in_own_track(sh):
+                for key in ("into", "cols", "into_gap", "slots10"):
+                    sh.pop(key, None)
+            sh.pop("cols", None)
             return False
+        sh.pop("into_gap", None)
         if not can_go_in(sh):
+            for key in ("into", "cols", "slots10"):
+                sh.pop(key, None)
             return True
         sh["into"] = [target]
         return False
 
+    def laid_slots(self, sh):
+        """The slot each colour of a shape laid on tracks has in the notes now (all_notes' entry_slot), in order."""
+        own = self.own_channels()
+        rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
+        return [entry_slot(v, own, rule, self.picture_use10) for v in placed_on(sh, own)]
+
     def in_own_track(self, sh):
-        """True if the shape is drawn into a track added by hand (into_channel)."""
-        return into_channel(sh, self.own_channels()) is not None
+        """True if the shape is laid on tracks (placed_on: drawn / pasted with a track highlighted)."""
+        return bool(placed_on(sh, self.own_channels()))
 
     def cc_busy(self, mode, shapes=None):
         """all_notes' busy for these shapes (cc_busy)."""
@@ -2122,23 +2245,21 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not self.sels:
             return
         shift = max(self.snap_beats(), 1 / self.ppq) if self.snap_beats() else 1.0  # (a step under a tick: on top)
-        self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, tr("app.duplicate"))
+        self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, tr("app.duplicate"), relay=False)
 
-    def add_copies(self, shapes, shift, name=tr("app.paste"), into=True):
+    def add_copies(self, shapes, shift, name=tr("app.paste"), relay=True):
         """Add copies of shapes moved shift beats later, and select them. Returns how many had 16 colours brought
         down to 15 (copied from a project with "Use channel 10" into one without; also said in the status line).
-        into: copies not in a track go into the highlighted track added by hand (False: automatic)."""
+        relay: laid from the highlighted track (put_into_current; False = a duplicate: where they are)."""
         self.push_undo(name=name)
         first = len(self.shapes)
         left_out = 0
         for sh in shapes:
             new = copy.deepcopy(sh)
             new["pts"] = [[b + shift, p] for b, p in new["pts"]]
-            # (already in one of this project's tracks: kept there; else the highlighted track's, Draw into a track)
-            if into:
-                left_out += self.put_into_current(new, keep=True)
-            elif not self.in_own_track(new):
-                new.pop("into", None)
+            # (laid from the highlighted track by its columns, like Domino's paste; a duplicate / nothing highlighted:
+            # one laid in this project stays where it is)
+            left_out += self.put_into_current(new, relay)
             self.shapes.append(new)
         fresh_marks(self.shapes[first:])
         between_copied(self.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
@@ -2222,6 +2343,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return self.roll.copy_stroke(*self.picked())
         if self.sels:
             self.clipboard = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
+            cols = self.copy_columns(sorted(self.sels))  # (each colour's row: pasted the same way, like Domino)
+            for i, sh in zip(sorted(self.sels), self.clipboard):
+                sh.pop("cols", None)
+                if i in cols:
+                    sh["cols"] = cols[i]
             self.clip_kind = "shapes"
             line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
             msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))

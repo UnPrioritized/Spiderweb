@@ -1697,6 +1697,8 @@ class ProjectFiles:
                     notes[:, 0] -= shift
             if notes is not None and len(notes):
                 made = notes_shape(notes, self.ppq, tr("project.pasted_notes"))
+                tracks = np.unique(notes[:, 4])  # (its tracks' columns, gaps kept: laid from a highlighted track)
+                made["cols"] = (tracks - tracks.min()).tolist()
                 if rides:  # (the tracks' CCs and other events ride along: passengers.py; ticks from the first note)
                     t0 = int(notes[:, 0].min()) + shift
                     made["cc"] = pack_cc([(t - t0, k, tag, body) for t, k, tag, body in rides])

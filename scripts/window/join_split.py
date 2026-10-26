@@ -19,8 +19,7 @@ from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.fillgaps import fill_gaps as filled, needs_fill
 from notes.passengers import pack_cc, unpack_cc
 from files.own_tracks import into_ids
-from notes.engine import (SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, own_id, shape_notes_tracks,
-                          shape_path)
+from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import SKIP10, is_mask, same_mask
@@ -778,11 +777,11 @@ class JoinSplit:
                 rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])
                 slots = self.own_slots(i, use10)
             if len(rows):  # (a shape with no notes stays as it is)
-                if self.in_own_track(sh):  # (drawn into tracks added by hand: the copy goes into them too, each
-                    rows = shown(i).copy()  # note's colour = its track's place in the shape's list)
-                    place = {v: k for k, v in enumerate(into_ids(sh))}
+                if self.in_own_track(sh):  # (laid on tracks: the copy is laid on them too, each note's colour =
+                    rows = shown(i).copy()  # its track's place in the shape's list)
+                    place = {s: k for k, s in reversed(list(enumerate(self.laid_slots(sh))))}
                     ids, back = np.unique(rows[:, 4], return_inverse=True)
-                    rows[:, 4] = np.array([place.get(own_id(int(s)), 0) for s in ids], np.int64)[back.ravel()]
+                    rows[:, 4] = np.array([place.get(int(s), 0) for s in ids], np.int64)[back.ravel()]
                 elif own or not auto:
                     rows = multi_slots(rows, slots)
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
@@ -802,6 +801,10 @@ class JoinSplit:
             if self.in_own_track(sh):
                 new[i].pop("own_slots", None)
                 new[i]["into"] = into_ids(sh)
+                if "slots10" in sh:
+                    new[i]["slots10"] = sh["slots10"]
+                else:
+                    new[i].pop("slots10", None)
             ex = held_extract(sh) if moved is None else None  # (its notes taken from a loaded MIDI stay out of
             if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
                 new[i]["extract"] = ex

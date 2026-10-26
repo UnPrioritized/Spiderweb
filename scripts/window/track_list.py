@@ -413,9 +413,10 @@ class TrackList(tk.Canvas):
                 return own["name"]
         return tr("tracks.name", n=row + 1)
 
-    def own_name(self, track_id):
-        """The name the track added by hand with this id shows (its own, else "Track n")."""
-        row = self.row_of_id(HAND + track_id)
+    def own_name(self, entry):
+        """The name a shape's track (into_ids entry: a track added by hand's id, or -1 - an automatic slot) shows
+        (its own, else "Track n")."""
+        row = self.row_of_id(HAND + entry if entry >= 0 else -1 - entry)
         return self.name_of(row) if row is not None else ""
 
     def own_track(self, s):

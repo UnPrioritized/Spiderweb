@@ -28,50 +28,22 @@ def clean_own_tracks(raw):
         seen.add(i)
         out.append({"id": i, "name": clean_name(t.get("name", "")) if isinstance(t.get("name", ""), str) else "",
                     "ch": ch, "after": after})
-        if t.get("auto") is True:  # (added by Spiderweb for a shape's colours: fill_down)
+        if t.get("auto") is True:  # (added by Spiderweb for a shape's colours: App.fit_into)
             out[-1]["auto"] = True
     return out
 
 
 def into_ids(sh):
-    """The tracks added by hand the shape's colours go on (one per colour, the first = the one it was drawn into)."""
+    """The tracks a shape's colours were laid on, one per colour (Draw into a track, App.fit_into): a track added by
+    hand's id (>= 0), or -1 - an automatic track's slot (pinned there)."""
     v = sh.get("into")
     return [v] if type(v) is int else list(v) if isinstance(v, list) else []
 
 
 def next_channel(ch, use10):
-    """The channel after ch for a track fill_down adds (10 skipped while it isn't used, 16 -> 1)."""
+    """The channel after ch for a track App.fit_into adds (10 skipped while it isn't used, 16 -> 1)."""
     ch = (ch + 1) % 16
     return ch + 1 if ch == 9 and not use10 else ch
-
-
-def fill_down(own, autos, into, need, use10):
-    """Domino's fill-down for a shape's colours (user 2026-10-26): its tracks into (ids, one per colour; the first
-    = the track it was drawn into) made `need` long: each colour on the next track of own below the one before
-    (in the order they show, placed), none left = a new track at the bottom ("auto": added by Spiderweb, the
-    channel after the one above). Ids own no longer has: the colours from there on are filled again. Longer than
-    need: cut. -> (own (the same list when nothing was added), into)."""
-    order = [t["id"] for t in placed_order(own, autos)]
-    by_id = {t["id"]: t for t in own}
-    have = []
-    for v in into:
-        if v not in by_id:
-            break
-        have.append(v)
-    if not have or len(have) >= need:
-        return own, have[:max(need, 1)]
-    added = []
-    while len(have) < need:
-        at = order.index(have[-1])
-        nxt = next((v for v in order[at + 1:] if v not in have), None)
-        if nxt is None:
-            nxt = max(order) + 1
-            t = {"id": nxt, "name": "", "ch": next_channel(by_id[have[-1]]["ch"], use10), "after": -1, "auto": True}
-            added.append(t)
-            by_id[nxt] = t
-            order.append(nxt)
-        have.append(nxt)
-    return (own + added if added else own), have
 
 
 def placed(own, autos):

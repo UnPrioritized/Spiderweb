@@ -239,11 +239,16 @@ def clean_shape(sh):
             and all(type(t) is int for t in tm[1:])):
         # (its group's colour turn, kept when Turn into plain notes unlinked it, + its repeat: between.turns)
         out["team"] = list(tm)
-    into = sh.get("into")  # the tracks added by hand it's drawn into, one per colour (files/own_tracks.py)
-    into = [into] if type(into) is int else into if isinstance(into, list) else []
-    into = [v for v in into[:INTO_MOST] if type(v) is int and 0 <= v < ID_MOST]
-    if into:
-        out["into"] = into
+    # the tracks it was laid on, one per colour (files/own_tracks.py into_ids: a track added by hand's id, or -1 - an
+    # automatic track's slot), the colours' columns still to lay (Domino's paste), gap tracks it keeps
+    for key, low in (("into", -ID_MOST), ("cols", 0), ("into_gap", 0)):
+        got = sh.get(key)
+        got = [got] if type(got) is int else got if isinstance(got, list) else []
+        got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < ID_MOST]
+        if got:
+            out[key] = got
+    if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
+        out["slots10"] = sh["slots10"]
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:

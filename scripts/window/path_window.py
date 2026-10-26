@@ -376,6 +376,8 @@ class PathWindow(ToolWindow):
                     for key in ("own_slots", "slots10"):
                         new.pop(key, None)
                     new["into"] = into_ids(sh)
+                    if "slots10" in sh:  # (its automatic tracks' channel rule)
+                        new["slots10"] = sh["slots10"]
                 news.append(new)
             made[i] = news
         total = sum(len(v) for v in made.values())

@@ -18,17 +18,17 @@ A new track is highlighted at once. Your tracks stay where you put them, among t
 
 ## Drawing into a track
 
-Highlight a track you added, then draw: every new shape goes into that track. Its notes play on the track's channel and take its colour, whatever the Channels setting is, and they never move to another track when they overlap other shapes. Spiderweb's own shapes never land on your tracks either. Two shapes in one track may overlap on the same keys, as in many MIDI programs.
+Highlight a track, then draw or paste: the new shape is laid on that track, like pasting in Domino. Its notes play on the track's channel and take its colour, whatever the Channels setting is, and they never move to another track when they overlap other shapes. Two shapes in one track may overlap on the same keys, as in many MIDI programs.
 
-• A shape with several colours fills downwards, like pasting in Domino (with Multi channel): colour 1 goes on the highlighted track, colour 2 on the next track of yours below it, and so on. When your tracks run out, Spiderweb adds new ones at the bottom, each on the channel after the one above (channel 10 skipped while it isn't used). Their names are tinted green; they go away by themselves when no shape uses them. Change one in Properties… to keep it as yours.
-• Once a shape is placed, each colour stays on its track: adding or moving tracks later changes nothing. More colours later carry on below its last track. With Single channel or As drawn, every colour plays on the highlighted track.
-• Pasting with one of your tracks highlighted puts the pasted shapes into it. Shapes that were in one of this project's tracks stay in theirs, and so do copies and duplicates.
-• Paste from Domino goes into the highlighted track too: a copy with several tracks fills downwards, one track each.
-• Changing the track's channel in Properties… moves its shapes to the new channel.
-• The Shapes list shows "(in Track name)" after a shape that's in one of your tracks.
-• Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't go into a track yet: they keep their own channels, and the status line says so.
-
-With a track of Spiderweb's own highlighted (or none), shapes get their tracks as before.
+• A shape with several colours goes downwards (with Multi channel): colour 1 on the highlighted track, colour 2 on the row below, and so on, whatever track is there (one of yours or one of Spiderweb's). Past the last row new tracks are added at the bottom, each on the channel after the one above (channel 10 skipped while it isn't used).
+• A copy keeps its columns, like Domino's: shapes copied from tracks 1 and 5 and pasted with track 11 highlighted land on tracks 11 and 15. Paste from Domino keeps the gaps between its tracks too.
+• Once a shape is laid, each colour stays on its track: adding or moving tracks later changes nothing, nor does moving the shape. More colours later carry on below its last track. With Single channel or As drawn, every colour plays on the highlighted track.
+• On Spiderweb's own tracks the shape is pinned: nothing already there moves, and later shapes may share those tracks. Spiderweb's automatic shapes never land on tracks you added.
+• Tracks Spiderweb adds next to yours get a green tinted name; they go away by themselves when no shape uses them. Change one in Properties… to keep it as yours.
+• With nothing highlighted, a pasted shape that was laid in this project stays on its tracks, and a duplicate always does.
+• Changing a track's channel in Properties… moves its shapes to the new channel.
+• The Shapes list shows "(in Track name)" after a shape that's laid on tracks.
+• Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't be laid on a track yet: they keep their own channels, and the status line says so.
 
 ## Highlighting a track
 
