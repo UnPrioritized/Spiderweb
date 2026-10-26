@@ -185,6 +185,7 @@ class HistoryPanel:
                 and self.step_file_order(self.undo_stack[-1]) == json.dumps(self.file_order)
                 and self.step_file_gone(self.undo_stack[-1]) == json.dumps(self.file_gone)
                 and self.step_file_props(self.undo_stack[-1]) == json.dumps(self.file_props)
+                and (len(self.undo_stack[-1][2]) <= 16 or self.undo_stack[-1][2][16] == self.start_track)
                 and not boxes_mark(self.undo_stack[-1])):  # (New with nothing to clear still set the boxes)
             kept = getattr(self, "_redo_kept", None)
             if kept and kept[1] == len(self.undo_stack):
@@ -349,7 +350,8 @@ class HistoryPanel:
                 pane.pick_state() if pane else "{}", json.dumps(self.own_tracks), json.dumps(self.deleted),
                 json.dumps(self.file_order), json.dumps(self.file_gone), json.dumps(self.file_props),
                 # (the track list's Select boxes: back with the notes they held, hunt 2026-10-26)
-                json.dumps(getattr(getattr(self, "track_list", None), "boxes", [])))
+                json.dumps(getattr(getattr(self, "track_list", None), "boxes", [])),
+                self.start_track)  # (a new project's empty Track 1: back after an undone Remove Track)
 
     def step_tempo(self, step):
         """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
@@ -558,6 +560,8 @@ class HistoryPanel:
         if tl is not None and len(picked) > 15 and isinstance(picked[15], str) and picked[15][:1] == "[":
             tl.boxes = [dict(b, rows=None if b["rows"] is None else tuple(b["rows"])) for b in json.loads(picked[15])]
             tl._box = None
+        if len(picked) > 16 and type(picked[16]) is bool:
+            self.start_track = picked[16]
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

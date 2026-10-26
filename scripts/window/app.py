@@ -619,6 +619,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.own_tracks = []  # tracks added by hand (files/own_tracks.py), saved + undone like the tempo line;
         # replaced (never changed in place) on every change, so the track list sees it by identity
         self.own_next = 0  # the next own track's id (never one used before in this project: own_tracks.new_id; saved)
+        # a new project's empty Track 1 (user 2026-10-26, like Domino's empty tracks): Spiderweb's first track listed
+        # and written while it has no notes, until Remove Track (least_tracks; saved, undone)
+        self.start_track = True
         # {n: {"name", "ch"}} of the loaded MIDI's tracks shapes are drawn into, as saved with the project: used
         # while its MIDI isn't loaded (file_tracks)
         self.file_saved = {}
@@ -1605,6 +1608,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         colours", rows_apart) and "Keep empty tracks" off."""
         return not (self.blocks_apart() and not self.pad_rounds.get())
 
+    def least_tracks(self):
+        """Spiderweb's tracks listed and written at least (midi_out.track_slots' least): 1 for a new project's empty
+        Track 1 (start_track), none with a loaded MIDI (its own tracks instead)."""
+        return int(self.start_track and self.loaded is None and self.midi_link is None)
+
     def rows_apart(self):
         """True while overlapping shapes move to the next row of channels (Settings → General, Multi channel only)."""
         return self.keep_colours.get() and self.channel_mode.get() == "auto"
@@ -1980,7 +1988,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return False
         own, changed = list(self.own_tracks), False
         by_id = {t["id"]: t for t in own}
-        slots, filled = track_slots(rendered, self.pad_tracks()), np.unique(rendered[:, 4])
+        slots, filled = track_slots(rendered, self.pad_tracks(), self.least_tracks()), np.unique(rendered[:, 4])
         # (every row: an automatic slot s as -1 - s, yours by id, a loaded MIDI's track n as FILE0 + n; group D)
         files = self.file_tracks()
         rows = [(-1 - r if r >= 0 else FILE0 - 1 - r) if type(r) is int else r["id"]
@@ -2505,7 +2513,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         except ValueError:
             usual = False
         plain = not any(self.tempo.get(k) for k in ("points", "catch", "keysigs")) and sigs_of(self.tempo) == [DEFAULT_SIG]
-        plain = plain and not self.own_tracks
+        plain = plain and not self.own_tracks and self.start_track
         if not self.shapes and plain and usual and not boxes[1] and self.loaded is None and self.midi_link is None:
             return
         ask = tr("app.new_ask") + ("\n\n" + tr("load.new_closes") if self.midi_link is not None else "")
@@ -2537,6 +2545,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.project_file = None  # (Save asks for a name again)
         self.tempo = empty_tempo()
         self.own_tracks, self.own_next = [], 0
+        self.start_track = True  # (one empty Track 1, nothing highlighted: user 2026-10-26)
         # (the old song's deleted notes, dragged track order and track names: nothing to do with the new one, hunt)
         self.deleted, self.file_order, self.file_saved, self.midi_missing = [], None, {}, False
         self.file_gone, self.file_props = [], {}

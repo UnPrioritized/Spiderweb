@@ -169,23 +169,25 @@ def _chunk(data):
 
 
 
-def track_slots(notes, pad=True):
+def track_slots(notes, pad=True, least=0):
     """The automatic slots written as tracks, in order: every slot up to the last one used (pad: empty ones too, so
     each shows its channel), or only the ones with notes ("Fill each round with empty tracks" off). The tracks
-    added by hand (engine.OWN0) aren't among them (own_tracks.plan puts them in)."""
+    added by hand (engine.OWN0) aren't among them (own_tracks.plan puts them in). least: slots 0.. at least
+    (App.least_tracks: a new project's empty Track 1)."""
     if not len(notes):
-        return np.zeros(0, np.int64)
+        return np.arange(least, dtype=np.int64)
     if pad:
-        return np.arange(auto_count(notes[:, 4]))
+        return np.arange(max(auto_count(notes[:, 4]), least), dtype=np.int64)
     slots = np.unique(np.asarray(notes[:, 4], np.int64))
-    return slots[:np.searchsorted(slots, OWN0)]
+    slots = slots[:np.searchsorted(slots, OWN0)]
+    return slots if len(slots) >= least else np.arange(least, dtype=np.int64)
 
 
-def own_compact(notes, own=()):
+def own_compact(notes, own=(), floor=0):
     """notes with the slots of tracks added by hand (engine.OWN0 + ...) numbered just past the automatic ones, in
     own's order (the rest after): (notes, automatic slots, slots in all, {own track id: its slot}); notes unchanged
-    (not copied) without any."""
-    autos = auto_count(notes[:, 4])
+    (not copied) without any. floor: automatic slots at least (an empty Track 1 written: track_slots' least)."""
+    autos = max(auto_count(notes[:, 4]), floor)
     if not len(notes) or notes[:, 4].max() < OWN0:
         return notes, autos, autos, {}
     s = notes[:, 4]
@@ -223,9 +225,9 @@ def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
 
 
 def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None,
-               own=()):
+               own=(), least=0):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
-    (use10: channel 10 used too, slot_track_channel; pad: track_slots). Nothing marks channel 10 as not drums
+    (use10: channel 10 used too, slot_track_channel; pad, least: track_slots). Nothing marks channel 10 as not drums
     (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
     the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events); with them past one round of
     channels every track starts with its port (FF 21: engine.slot_ports). tempo, sigs: tempo_track's. own: the
@@ -233,7 +235,7 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tem
     head = tempo_track(bpm, beats, tempo, sigs, keys)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    tracks = plan(track_slots(notes, pad), own, np.unique(notes[:, 4]))
+    tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]))
     write_bytes(path, _pieces(notes, tracks, use10,
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
@@ -277,7 +279,8 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
     tracks (dicts: their name first, then the notes drawn into them, on their channel; port A). ends: None
     after each track too (track_chunks)."""
     yield start
-    notes, autos, count, at = own_compact(notes)
+    # (an empty Track 1 among them, track_slots' least: the own tracks' notes numbered past it)
+    notes, autos, count, at = own_compact(notes, floor=max((t + 1 for t in tracks if type(t) is not dict), default=0))
     if count > 1:  # (one sort finds every track's notes, in their own order)
         slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
         order = np.argsort(slots, kind="stable")

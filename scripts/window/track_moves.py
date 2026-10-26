@@ -410,6 +410,8 @@ def delete_boxed(app, boxes, lm, files, got, name, extra=None):
             app.own_tracks = [t for t in app.own_tracks if t["id"] not in extra["own"]]
         if extra["files"]:
             app.file_gone = sorted(set(app.file_gone) | set(extra["files"]))
+        if 0 in extra["ids"]:  # (Track 1 removed: a new project's empty one doesn't come back, user 2026-10-26)
+            app.start_track = False
         if tl.current is not None and tl.current in extra["ids"]:
             tl.current = None
         tl.selected -= set(extra["ids"])

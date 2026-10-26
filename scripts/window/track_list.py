@@ -153,10 +153,10 @@ class TrackList(tk.Canvas):
         """The slots written as tracks, in order (worked out again only when the notes change)."""
         app = self.app
         n, pad, use10, lm, own = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded, app.own_written()
-        waiting, order = app.waiting_rows(), (app.file_order, tuple(app.file_gone))
+        waiting, order = app.waiting_rows(), (app.file_order, tuple(app.file_gone), app.least_tracks())
         made = self._made
         if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own, waiting, order):
-            slots = track_slots(n, pad).astype(np.int64)
+            slots = track_slots(n, pad, order[2]).astype(np.int64)  # (a new project's empty Track 1 too)
             size = int(slots.max()) + 1 if len(slots) else 0
             # (a loaded MIDI's tracks first (their numbers -1, -2, ...), the tracks added by hand among them and among
             # Spiderweb's: own_tracks.full_plan, the exports' order)
@@ -1155,6 +1155,7 @@ class TrackList(tk.Canvas):
         app = self.app
         taken = self.take_tracks(autos, owners)
         if taken:
+            app.start_track = False  # (an empty Track 1 is yours now: not listed twice)
             rows = [{"id": taken[x]} if type(x) is int and x in taken else x for x in rows]
 
             def mine_now(s):  # (an automatic track taken: its new id)

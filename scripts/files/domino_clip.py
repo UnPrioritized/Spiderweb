@@ -373,10 +373,10 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=()):
 
 
 def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None, keys=None,
-             own=()):
+             own=(), least=0):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
-    (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad:
+    (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad; least:
     midi_out.track_slots), each with its own
     channel (Domino refuses a track mixing channels); a track on channel 10 is marked as a drum track like Domino
     does, unless drums is False (the project's "Use channel 10": wanted for its colour). Keys above 127 must be
@@ -387,10 +387,11 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None,
     power)] (the Tempo pane's, tempo_file.file_plan): the Conductor track's instead of one BPM. own: the tracks
     added by hand (files/own_tracks.py), among the slots' like the MIDI export's."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys, own)
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys, own, least)
 
 
-def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None, keys=None, own=()):
+def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None, keys=None, own=(),
+             least=0):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
@@ -414,8 +415,8 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
     track_head(0, b"Conductor", len(events), True)
     feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]
                                               + [r[0] for r in (keys or [])]))))
-    tracks = plan(track_slots(notes, pad), own, np.unique(notes[:, 4]))
-    notes, autos, count, hand = own_compact(notes, own)
+    tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]))
+    notes, autos, count, hand = own_compact(notes, own, max((t + 1 for t in tracks if type(t) is not dict), default=0))
     order, cuts = track_orders(notes, count, z.pool)
     ports = slot_ports(autos, cc, use10)  # (Output port A, B, ... as the MIDI export's)
     for slot in tracks:

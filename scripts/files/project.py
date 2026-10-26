@@ -257,6 +257,7 @@ class ProjectFiles:
             **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
             **({"own_tracks": self.own_tracks} if self.own_tracks else {}),
             **({"own_next": self.own_next} if self.own_next else {}),
+            **({"start_track": True} if self.start_track else {}),  # (a new project's empty Track 1, not removed)
             **({"deleted": self.deleted} if self.deleted else {}),  # (Delete loaded notes' boxes)
             **({"file_order": self.file_order} if self.file_order else {}),  # (the loaded tracks as dragged)
             **({"file_gone": self.file_gone} if self.file_gone else {}),  # (the loaded tracks removed)
@@ -433,6 +434,7 @@ class ProjectFiles:
         self.roll.forget_loaded()
         self.tempo = tempo
         self.own_tracks = own
+        self.start_track = data.get("start_track") is True  # (projects from before: their tracks as they were)
         self.file_saved = clean_file_tracks(data.get("file_tracks"))
         self.deleted = extract_groups(data.get("deleted"))
         self.file_order = clean_file_order(data.get("file_order"))
@@ -849,6 +851,7 @@ class ProjectFiles:
         data.pop("loaded", None)
         data.pop("own_tracks", None)
         data.pop("own_next", None)
+        data.pop("start_track", None)  # (the file's tracks instead of an empty Track 1)
         data.pop("file_tracks", None)
         data.pop("deleted", None)
         data.pop("file_order", None)
@@ -976,6 +979,7 @@ class ProjectFiles:
         """What Open project compares with the last save / open: the shapes and the tempo line."""
         return json.dumps([self.shapes, self.tempo if self.tempo != empty_tempo() else None]
                           + ([self.own_tracks] if self.own_tracks else []) + ([self.deleted] if self.deleted else [])
+                          + ([{"start_track": True}] if self.start_track else [])
                           + ([{"file_order": self.file_order}] if self.file_order else [])
                           + ([{"file_gone": self.file_gone}] if self.file_gone else [])
                           + ([{"file_props": {str(n): v for n, v in self.file_props.items()}}] if self.file_props else []))
@@ -1317,7 +1321,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
-        tracks = len(track_slots(self.rendered, self.pad_tracks())) + len(self.with_file_tracks())
+        tracks = len(track_slots(self.rendered, self.pad_tracks(), self.least_tracks())) + len(self.with_file_tracks())
         if tracks > MAX_TRACKS:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=tracks, most=MAX_TRACKS))
             return
@@ -1337,7 +1341,7 @@ class ProjectFiles:
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
                                                  self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"],
-                                                 own=self.with_file_tracks())):
+                                                 own=self.with_file_tracks(), least=self.least_tracks())):
             return
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
@@ -1575,9 +1579,9 @@ class ProjectFiles:
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
                                pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys,
-                               own=self.with_file_tracks()))):
+                               own=self.with_file_tracks(), least=self.least_tracks()))):
             return
-        tracks = len(track_slots(notes, self.pad_tracks())) + len(self.with_file_tracks())
+        tracks = len(track_slots(notes, self.pad_tracks(), self.least_tracks())) + len(self.with_file_tracks())
         ports = slot_ports(auto_count(notes[:, 4]), cc, self.picture_use10)  # (as dms_data decides)
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)
