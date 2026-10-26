@@ -1601,8 +1601,17 @@ class ProjectFiles:
             return ""
         return tr("load.domino_short" if short else "load.domino_left_out")
 
+    def list_boxed(self):
+        """The track list showing with Select boxes kept: which of rendered's notes start inside them (Copy to
+        Domino copies only those, user 2026-10-26: "copy only the selected area"); else None."""
+        if not self.tracks_shown() or not self.track_list.boxes:
+            return None
+        from window.track_moves import boxed
+        return boxed(self, self.track_list.boxes)
+
     def copy_to_domino(self):
-        """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected) on the clipboard, for
+        """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected; the track list's Select
+        boxes kept: the notes starting in them) on the clipboard, for
         Ctrl+V in Domino. One track per channel that has notes; the copy starts on the first note or at the bar
         line before it (domino_start)."""
         if not clipboard.RAW:
@@ -1615,10 +1624,21 @@ class ProjectFiles:
             return
         self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
         notes = self.rendered
-        cc = self.cc_messages(ppq, bpm, set(self.sels) if self.sels else None)
+        boxed = self.list_boxed()
+        if boxed is not None and not boxed.any():
+            self.status.config(text=tr("tracks.box_empty"))
+            return
+        sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
+        cc = self.cc_messages(ppq, bpm, set(sels) if sels else None)
+        if boxed is not None:  # (their CC lines: only inside the boxes' time too)
+            boxes = self.track_list.boxes
+            lo, hi = round(min(b["t0"] for b in boxes) * ppq), round(max(b["t1"] for b in boxes) * ppq)
+            cc = {s: [m for m in ms if lo <= m[0] < hi] for s, ms in cc.items()}
         plan = None
-        if self.sels:
-            notes = notes[np.isin(notes[:, 5], sorted(self.sels))]
+        if boxed is not None:
+            notes = notes[boxed]
+        elif sels:
+            notes = notes[np.isin(notes[:, 5], sels)]
         heard = (int(notes[:, 0].min()) / ppq, int(notes[:, 1].max()) / ppq) if len(notes) else (0, 0)
         if (has_tempo(self.tempo) or sigs_of(self.tempo) != [DEFAULT_SIG] or self.tempo.get("keysigs"))                 and len(notes):
             # (the tempo line + time signatures come too: Keep timing worked out on the whole song up to the copy's
@@ -1630,14 +1650,17 @@ class ProjectFiles:
             upto = int(lines[np.searchsorted(lines, upto)]) if upto < lines[-1] else upto
             timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)
             cc = timed_ticks(plan, notes[:0], cc)[1]  # (the notes as the file has them: finer Hz basses too)
-            notes = timed[np.isin(timed[:, 5], sorted(self.sels))] if self.sels else timed
+            if boxed is not None and len(timed) == len(boxed):
+                notes = timed[boxed]
+            else:  # (Hz basses made again with finer gates: whole shapes)
+                notes = timed[np.isin(timed[:, 5], sels)] if sels else timed
         high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
         if not mod:
             notes = notes[notes[:, 2] <= 127]
         if not len(notes):
             messagebox.showerror(tr("project.spiderweb"), (tr("project.no_notes_to_copy_draw_something")
-                                 if not self.sels or high else tr("project.the_selected_shapes_have_no_notes"))
+                                 if not sels or high else tr("project.the_selected_shapes_have_no_notes"))
                                  + self.loaded_left_out())
             return
         span = conductor = None
@@ -1687,7 +1710,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
             return
         self.own_domino_copy = clipboard.copy_count()  # (pasted straight back: its tempo isn't asked about)
-        what =((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if self.sels else
+        what =((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if sels else
                 trn("project.all_notes", len(notes), n=len(notes)))
         where = (tr("project.the_conductor_track") if plan else
                  tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks))
@@ -1697,8 +1720,8 @@ class ProjectFiles:
                 + (tr("project.copied_keys_256") if mod else
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                 + (trn("project.long_gates_cut", long, long=long, most=GATE_MAX) if long else "")
-                + (tr("project.cc_not_written") if self.cc_note({}, shapes=[self.shapes[i] for i in self.sels]
-                                                                 if self.sels else None) else "")
+                + (tr("project.cc_not_written") if self.cc_note({}, shapes=[self.shapes[i] for i in sels]
+                                                                 if sels else None) else "")
                 + self.loaded_left_out(short=True))
         self.status.config(text=text)
         warn = ""

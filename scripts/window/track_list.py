@@ -662,7 +662,7 @@ class TrackList(tk.Canvas):
                 return self.box_press(e, max(0.0, self.x2t(e.x)), row, pick=True)
             return self.select_click(row, e.state & 0x4, e.state & 0x1)
         if picture and self.box_press(e, max(0.0, self.x2t(e.x)), row):  # (a drag on the picture: a Select box;
-            return  # a click: the play line + the track, as before; inside the boxes: on letting go, box_release)
+            return  # a click: the play line + the track, as before; inside the boxes: box_release)
         if row >= 0 and e.x < self.name_w:  # (a track's name: dragged = the tracks moved, group C)
             s, group = int(self.tracks()[row]), self.picked_tracks()
             # (on one of several selected: they stay selected for the drag; let go without one = that track alone,
@@ -721,7 +721,7 @@ class TrackList(tk.Canvas):
         inside = self.box_at(e.x, e.y)
         if not ctrl and not inside:
             self.drop_boxes()
-        # (inside the kept boxes: dragged = what they hold moved, Ctrl = copied; a click = the play line + the track)
+        # (inside the kept boxes: dragged = what they hold moved, Ctrl = copied; a plain click = nothing)
         self._box = {"x": e.x, "y": e.y, "t": beat, "row": row, "band": band, "ctrl": ctrl,
                      "shift": bool(e.state & 0x1), "pick": pick, "on": False, "box": None, "move": inside,
                      "dt": 0.0, "drow": 0}
@@ -793,12 +793,7 @@ class TrackList(tk.Canvas):
                 move_boxed(self.app, self.boxes, b["dt"], b["drow"], copying=b["ctrl"])
             elif not b["on"] and b["pick"]:
                 self.select_click(b["row"], b["ctrl"], b["shift"])
-            elif not b["on"] and b["row"] is not None:  # (a click inside: the play line + the track, as outside)
-                if not self.app.player.running:
-                    self.app.set_playhead(self.snapped(b["t"]))
-                self.current, self.selected = int(self.tracks()[b["row"]]), set()
-                self.anchor = (self.current, self.current)
-                self.shown_changed()
+            # (a plain click inside: nothing, the play line and the highlight stay; user 2026-10-26)
             self.request_redraw()
             return
         if b["on"]:
@@ -1212,8 +1207,11 @@ class TrackList(tk.Canvas):
 
     def on_right(self, e):
         """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs).
-        Anywhere else under the ruler: the tracks' menu (track_menu)."""
+        The names (and below them): the tracks' menu (track_menu); the notes' picture / a ruler band: the edit menu
+        (edit_menu; user 2026-10-26, Domino's)."""
         row = self.row_at(e.y)
+        if e.x >= self.name_w and self.sx and (e.y >= self.ruler_h or self.box_at(e.x, e.y)):
+            return self.edit_menu(e)
         if e.y >= self.ruler_h and (row is None or row < 0 or not self.on_speaker(e.x)):
             return self.track_menu(e, row)
         if row is None or row < 0:
@@ -1223,6 +1221,34 @@ class TrackList(tk.Canvas):
         self.tip.hide()
         self.request_redraw()
         self.app.play_changed()
+
+    def edit_menu(self, e):
+        """Right-click on the notes' picture: Cut / Copy / Paste / Delete, Copy to Domino, Select all, each what its
+        key does in the list. Outside the boxes: they're dropped first (like a click), the items needing one greyed.
+        The play line and the highlight stay."""
+        self.tip.hide()
+        if self.busy():
+            return
+        if not self.box_at(e.x, e.y):
+            self.drop_boxes()
+        has = "normal" if self.boxes else "disabled"
+        menu = tk.Menu(self, tearoff=0)
+        for item in ((tr("menu.cut"), tr("roll_menu.ctrl_x"), self.key_cut, has),
+                     (tr("menu.copy"), tr("roll_menu.ctrl_c"), self.key_copy, has),
+                     (tr("menu.paste"), tr("roll_menu.ctrl_v"), self.key_paste, "normal"),
+                     (tr("app.delete"), tr("roll_menu.del"), self.key_delete, has), None,
+                     (tr("menu.domino_copy"), tr("menu.ctrl_shift_c"), self.app.copy_to_domino, has), None,
+                     (tr("menu.select_all"), tr("menu.ctrl_a"), self.select_all, "normal")):
+            if item is None:
+                menu.add_separator()
+            else:
+                label, key, fn, state = item
+                menu.add_command(label=label, accelerator=key, command=fn, state=state)
+        try:
+            menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            menu.grab_release()
+            self.menu_shut = time.perf_counter()  # (the click that closed it does nothing: on_press)
 
     # ------------------------------------------------------------ own tracks (added by hand: files/own_tracks.py)
 
@@ -1499,8 +1525,9 @@ class TrackList(tk.Canvas):
     def on_motion(self, e):
         row = self.row_at(e.y)
         cursor = SELECT_CURSOR if row is not None and e.x >= self.name_w else "arrow"  # (the Select tool's, like
-        if e.y < self.ruler_h and self.box_at(e.x, e.y):                                # many MIDI programs)
-            cursor = "sb_h_double_arrow"  # (a ruler band: drag what it holds sideways, the piano roll's)
+        if self.box_at(e.x, e.y):                                                       # many MIDI programs)
+            # (a ruler band: drag what it holds sideways; a box: moved, the piano roll's)
+            cursor = "sb_h_double_arrow" if e.y < self.ruler_h else "fleur"
         if getattr(self, "_cursor", None) != cursor:
             self._cursor = cursor
             self.config(cursor=cursor)

@@ -3179,7 +3179,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 # group E)
                 tl = self.track_list
                 own = {self.select_all: tl.select_all, self.copy_selected: tl.key_copy, self.cut_selected: tl.key_cut,
-                       self.paste: tl.key_paste}.get(fn) or getattr(fn, "in_list", None)
+                       self.paste: tl.key_paste, self.copy_to_domino: self.copy_to_domino}.get(fn) or getattr(
+                           fn, "in_list", None)
                 if own is not None and not self.track_list.busy():
                     own()
                 return "break"
