@@ -75,7 +75,9 @@ class TrackList(tk.Canvas):
         self.behind = set()  # slots shown faintly behind it on the piano roll ("Show multiple tracks")
         self.onion = app.onion  # ... while this is on (the main toolbar's toggle; off = one track)
         self.onion.trace_add("write", lambda *_: self.shown_changed())
-        self._sweep = None  # a Ctrl+drag over the rows: (picked or not, the last row it reached)
+        self.selected = set()  # tracks Ctrl+clicked along with the highlighted one (like Domino's; the right-click
+        # menu works on them all), never the highlighted one itself
+        self._sweep = None  # a Ctrl+drag over the rows: (selected or not, the last row it reached)
         self.muted = set()   # slots not played (the speaker in their row; playback only, never the files)
         self.faint = FAINT
         self.faint_var = tk.StringVar(value=str(FAINT))
@@ -171,6 +173,7 @@ class TrackList(tk.Canvas):
                 self.current = None  # (its track is gone)
             self.behind = {s for s in self.behind if there(s)}
             self.muted = {s for s in self.muted if there(s)}
+            self.selected = {s for s in self.selected if there(s)}
         return self._all
 
     def row_of_id(self, s):
@@ -223,7 +226,7 @@ class TrackList(tk.Canvas):
     def forget(self):
         """Another project opened: nothing muted, highlighted or picked behind, back at its start; the zoom stays
         (user 2026-10-23: remembered)."""
-        self.current, self.behind, self.muted, self.owners = None, set(), set(), set()
+        self.current, self.behind, self.muted, self.owners, self.selected = None, set(), set(), set(), set()
         self.view_t, self.top, self._sheet = 0.0, 0, None
         sync_onion(self.app)
         self.request_redraw()
@@ -302,9 +305,6 @@ class TrackList(tk.Canvas):
             return beat
         at = where(sigs, beat)[2]
         return max(0.0, at + round((beat - at) / step) * step)
-
-    def toggle_behind(self, slot):
-        self.set_behind(self.behind ^ {slot})
 
     def set_behind(self, slots):
         """The tracks shown behind the highlighted one; picking some switches the main toolbar's toggle on."""
@@ -593,10 +593,15 @@ class TrackList(tk.Canvas):
             return
         if row >= 0 and self.on_speaker(e.x):  # its speaker: muted / heard
             return self.toggle_mute(int(self.tracks()[row]))
-        if e.state & 0x4 and row >= 0:  # Ctrl+click: shown behind the current track or not; dragged on: every row
-            slot = int(self.tracks()[row])  # crossed the same (user 2026-10-23)
-            self.toggle_behind(slot)
-            self._sweep = (slot in self.behind, row)
+        if e.state & 0x4 and row >= 0:  # Ctrl+click: selected along with the highlighted track or not (like Domino's,
+            slot = int(self.tracks()[row])  # user 2026-10-26; was: shown behind); dragged on: every row crossed the
+            if self.current is None:        # same (the highlight stays; none yet = this one)
+                self.current = slot
+                self.shown_changed()
+            elif slot != self.current:
+                self.selected ^= {slot}
+                self.request_redraw()
+            self._sweep = (slot == self.current or slot in self.selected, row)
             return
         if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
             beat = max(0.0, self.x2t(e.x))
@@ -604,6 +609,7 @@ class TrackList(tk.Canvas):
         if row == CONDUCTOR_ROW:  # (the tempo's row: the highlight stays; All tracks is the row above it)
             return
         self.current = None if row < 0 else int(self.tracks()[row])
+        self.selected = set()
         if e.state & 0x1 and row >= 0:  # Shift+click: only this track, nothing behind it
             self.behind = set()
             self.onion.set(False)
@@ -620,7 +626,7 @@ class TrackList(tk.Canvas):
         at = slots.index(self.current) if self.current in slots else 0
         row = min(max(at + way, 0), len(slots) - 1)
         if slots[row] != self.current:
-            self.current = slots[row]
+            self.current, self.selected = slots[row], set()
             self.shown_changed()
         if row == 0:
             return self.app.status.config(text=tr("tracks.all"))
@@ -631,12 +637,21 @@ class TrackList(tk.Canvas):
     def show_all(self):
         """The All tracks row highlighted (current None): the piano roll shows every track and Spiderweb picks new
         shapes' channels (Esc, a click on the row, All tracks in the ▾ list)."""
+        self.selected = set()
         if self.current is not None:
             self.current = None
             self.shown_changed()
+        else:
+            self.request_redraw()
+
+    def picked_tracks(self):
+        """The highlighted track and the ones selected with it, in the list's order (the right-click menu's)."""
+        group = self.selected | ({self.current} if self.current is not None else set())
+        return [int(s) for s in self.tracks() if int(s) in group]
 
     def on_drag(self, e):
-        """Ctrl+drag after a Ctrl+click: every row the mouse crosses gets what the pressed row got."""
+        """Ctrl+drag after a Ctrl+click: every row the mouse crosses gets what the pressed row got (selected or not;
+        the highlighted track stays)."""
         if self._sweep is None:
             return
         on, last = self._sweep
@@ -645,13 +660,11 @@ class TrackList(tk.Canvas):
             row = len(self.tracks()) - 1 if e.y >= self.area()[1] else 0
         a, b = sorted((last, row))
         slots = {int(s) for s in self.tracks()[a:b + 1]}
-        new = self.behind | slots if on else self.behind - slots
+        new = (self.selected | slots if on else self.selected - slots) - {self.current}
         self._sweep = (on, row)
-        if new != self.behind:
-            self.behind = new
-            if on:
-                self.onion.set(True)
-            self.shown_changed()
+        if new != self.selected:
+            self.selected = new
+            self.request_redraw()
 
     def on_right(self, e):
         """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs).
@@ -676,19 +689,22 @@ class TrackList(tk.Canvas):
         stays put."""
         self.tip.hide()
         s = int(self.tracks()[row]) if row is not None and row >= 0 else None
-        if row not in (None, CONDUCTOR_ROW) and s != self.current:  # (highlighted first, like a click; user 10-26)
-            self.current = s
+        # (on one of several selected tracks: they stay selected and the menu works on them all, like Domino's;
+        # else highlighted first, like a click; user 2026-10-26)
+        if row not in (None, CONDUCTOR_ROW) and s not in self.picked_tracks():
+            self.current, self.selected = s, set()
             self.shown_changed()
             self.update_idletasks()
-        own = self.own_track(s)
+        group = self.picked_tracks() if s in self.picked_tracks() else [s]
+        own = [t for t in group if self.own_track(t) is not None]
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
         menu.add_command(label=tr("tracks.add_tracks"), command=lambda: self.ask_add(row))
         menu.add_separator()
-        menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_own(s),
-                         state="normal" if own is not None else "disabled")
+        menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_own(own),
+                         state="normal" if own else "disabled")
         menu.add_command(label=tr("tracks.properties"), command=lambda: self.ask_properties(s),
-                         state="normal" if own is not None else "disabled")
+                         state="normal" if self.own_track(s) is not None and len(group) == 1 else "disabled")
         try:
             menu.tk_popup(e.x_root, e.y_root)
         finally:
@@ -790,23 +806,25 @@ class TrackList(tk.Canvas):
             if self.own_track(s) is not None:
                 self.ask_properties(s)
 
-    def remove_own(self, s):
-        """Remove Track (an own track only, for now): the shapes drawn into it go with it (like Domino), in the same
-        undo step; the status line counts them."""
-        own = self.own_track(s)
-        if own is None:
+    def remove_own(self, ss):
+        """Remove Track on the tracks ss (own tracks only, for now; several = the selected ones): the shapes drawn
+        into them go with them (like Domino), in the same undo step; the status line counts them."""
+        owns = [t for t in map(self.own_track, ss) if t is not None]
+        if not owns:
             return
         app = self.app
-        if self.current == s:
+        ids = {t["id"] for t in owns}
+        if self.current in ss:
             self.current = None
-        gone = {i for i, sh in enumerate(app.shapes) if app.in_own_track(sh) and into_ids(sh)[0] == own["id"]}
+        self.selected -= set(ss)
+        gone = {i for i, sh in enumerate(app.shapes) if app.in_own_track(sh) and into_ids(sh)[0] in ids}
         app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
-        app.push_undo(name=tr("tracks.remove_step"))
+        app.push_undo(name=tr("tracks.remove_step" if len(owns) == 1 else "tracks.remove_many_step"))
         for i in sorted(gone, reverse=True):
             del app.shapes[i]
         rest = [i - sum(j < i for j in gone) for i in sorted(app.sels - gone)]
         app.select_many(rest, max(rest, default=None))
-        app.own_tracks = [t for t in app.own_tracks if t is not own]
+        app.own_tracks = [t for t in app.own_tracks if t["id"] not in ids]
         self.own_changed()
         if gone:
             app.status.config(text=trn("tracks.removed_shapes", len(gone), n=len(gone)))
@@ -940,7 +958,8 @@ class TrackList(tk.Canvas):
             return
         ox = self.left_px()
         key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._all), self.current,
-               frozenset(self.muted), json.dumps(sigs_of(self.app.tempo)), aw, ah, self.app.ppq)
+               frozenset(self.muted), frozenset(self.selected), json.dumps(sigs_of(self.app.tempo)), aw, ah,
+               self.app.ppq)
         sh = self._sheet
         if sh is None or sh["key"] != key or not (sh["x"] <= ox and ox + aw <= sh["x"] + sh["w"]
                                                    and sh["y"] <= self.top and self.top + ah <= sh["y"] + sh["h"]):
@@ -960,8 +979,12 @@ class TrackList(tk.Canvas):
         rh, slots = self.row_h, self._all
         rows = (np.arange(ch) + cy) // rh  # (each pixel row's track row)
         base = np.array([hex_rgb(look.TRACK_ROW), hex_rgb(look.TRACK_ROW_ALT), hex_rgb(look.TRACK_PICKED),
-                         hex_rgb(look.TRACK_EMPTY)], np.uint8)
+                         hex_rgb(look.TRACK_EMPTY), hex_rgb(look.TRACK_SELECTED)], np.uint8)
         kind = np.where(rows >= len(slots), 3, rows % 2)
+        for s in self.selected:  # (Ctrl+clicked along with the highlighted one: fainter)
+            got = self.row_of_id(s)
+            if got is not None:
+                kind[rows == got] = 4
         at = self.row_of_id(self.current)
         if at is not None:
             kind[rows == at] = 2
@@ -1403,12 +1426,14 @@ class TrackList(tk.Canvas):
             yb = ya + self.row_h
             slot = int(slots[row])
             picked = slot == self.current
-            if picked:
-                self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK, outline="")
+            chosen = not picked and slot in self.selected  # (selected along with it: a fainter blue, like Domino)
+            if picked or chosen:
+                self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK if picked else look.TRACK_SELECT,
+                                      outline="")
             elif (self.own_track(slot) or {}).get("auto"):  # (added by Spiderweb for a shape's colours, user)
                 self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_ADDED, outline="")
             if self.row_h >= 12 * s:
-                colour = look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT
+                colour = (look.TRACK_PICK_TEXT if picked else look.TRACK_SELECT_TEXT if chosen else look.TRACK_TEXT)
                 ch = self.channel_of(slot)
                 room = x1 - 44 * s - measure(ch) - 8 * s
                 name = cut_text(self.name_of(row), room, measure)
@@ -1602,8 +1627,8 @@ def build_strip(app, parent, tl):
 
 
 class BehindWindow(tk.Toplevel):
-    """Show multiple tracks: which tracks the piano roll shows faintly behind the current one (Ctrl+click a row in
-    the track list does the same). Not modal: changes show at once."""
+    """Show multiple tracks: which tracks the piano roll shows faintly behind the current one. Not modal: changes
+    show at once."""
 
     def __init__(self, tl):
         app = tl.app

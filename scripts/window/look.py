@@ -188,6 +188,9 @@ TRACK_TEMPO = pick("#3874d8", "#7fa8f0")  # the Conductor row's BPM bars
 TRACK_NAME_BG, TRACK_TEXT = pick("#fafafa", "#3a3a3c"), pick("#222", "#e2e2e4")
 TRACK_ADDED = pick("#e6f4e3", "#33443a")  # (a track Spiderweb added for a shape's colours: faint green, user)
 TRACK_PICK, TRACK_PICK_TEXT = pick("#3874d8", "#2f6fd0"), pick("#ffffff", "#ffffff")
+# (tracks Ctrl+clicked along with the highlighted one: a fainter blue, like Domino's; their picture rows too)
+TRACK_SELECT, TRACK_SELECT_TEXT = pick("#a9c4f0", "#3d4b63"), pick("#10203a", "#e2e2e4")
+TRACK_SELECTED = pick("#e9f0fb", "#3c4049")
 # The notes' (fill, edge) per channel slot in the dark look (user's pick "B warm": the light look's colours lighter
 # with a little cream; light look's in roll_shared.SLOT_COLORS), the shape being drawn
 NOTES_DARK = [("#a3bef1", "#19449b"), ("#f7a39e", "#a51610"), ("#a6f4a0", "#36842b"), ("#f5e1a0", "#9c7b18"),
