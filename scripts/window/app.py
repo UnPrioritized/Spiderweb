@@ -221,7 +221,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     laps = [lap[:0] if o and lap is not None else lap for o, lap in zip(off, laps)]
     # (shapes laid on tracks: taken out of the channel work, put on their tracks below)
     into = [placed_on(sh, own) for sh in shapes]
-    inside = {i: got[i] for i, p in enumerate(into) if p}
+    # ("New channels each Colours round": each round's colours are colours of their own on the tracks too, laid
+    # after the round before; user 2026-10-26: a copy pasted into a track went round the same ones)
+    inside = {i: (got[i][0], np.asarray(got[i][1], np.int64) + laps[i] * ROUND) if rounds and laps[i] is not None
+              and got[i][1] is not None else got[i] for i, p in enumerate(into) if p}
     got = [(n[:0], None if t is None else t[:0]) if i in inside else (n, t) for i, (n, t) in enumerate(got)]
     laps = [lap[:0] if i in inside and lap is not None else lap for i, lap in enumerate(laps)]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
