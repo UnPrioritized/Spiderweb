@@ -413,6 +413,11 @@ class TrackList(tk.Canvas):
                 return own["name"]
         return tr("tracks.name", n=row + 1)
 
+    def own_name(self, track_id):
+        """The name the track added by hand with this id shows (its own, else "Track n")."""
+        row = self.row_of_id(HAND + track_id)
+        return self.name_of(row) if row is not None else ""
+
     def own_track(self, s):
         """The own track (added by hand) of track id s, or None."""
         return self._hand.get(s) if s is not None and s >= HAND else None
@@ -765,13 +770,25 @@ class TrackList(tk.Canvas):
                 self.ask_properties(s)
 
     def remove_own(self, s):
-        """Remove Track (an own track only, for now)."""
+        """Remove Track (an own track only, for now): the shapes drawn into it go with it (like Domino), in the same
+        undo step; the status line counts them."""
         own = self.own_track(s)
         if own is None:
             return
+        app = self.app
         if self.current == s:
             self.current = None
-        self.set_own([t for t in self.app.own_tracks if t is not own], tr("tracks.remove_step"))
+        gone = {i for i, sh in enumerate(app.shapes) if app.in_own_track(sh) and sh["into"] == own["id"]}
+        app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
+        app.push_undo(name=tr("tracks.remove_step"))
+        for i in sorted(gone, reverse=True):
+            del app.shapes[i]
+        rest = [i - sum(j < i for j in gone) for i in sorted(app.sels - gone)]
+        app.select_many(rest, max(rest, default=None))
+        app.own_tracks = [t for t in app.own_tracks if t is not own]
+        self.own_changed()
+        if gone:
+            app.status.config(text=trn("tracks.removed_shapes", len(gone), n=len(gone)))
 
     def speaker_x(self):
         return self.name_w - 13 * self.scale
