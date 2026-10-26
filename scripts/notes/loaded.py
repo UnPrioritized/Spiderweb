@@ -162,10 +162,11 @@ class LoadedMidi:
         self.skip_all = np.ascontiguousarray(ev_p[o], np.int64)
         self.skip_at = np.searchsorted(ev_t[o], np.arange(n + 1)).astype(np.int64)
 
-    def frozen(self, hide=True):
+    def frozen(self, hide=True, spare=()):
         """This MIDI with the notes hidden now kept as they are (an export in the background: undo / Extract while
-        it runs change nothing in it); hide False = nothing hidden (exported as loaded)."""
-        return Frozen(self, hide)
+        it runs change nothing in it); hide False = nothing hidden (exported as loaded). spare: box keys (box_key)
+        whose notes are NOT hidden (an Extract left as it was: its notes stay in the file as they are, group D)."""
+        return Frozen(self, hide, spare)
 
     def skip_of(self, n):
         """Track n's hidden events (sorted byte places in the track)."""
@@ -195,13 +196,21 @@ class Frozen:
     """LoadedMidi.frozen's: everything as lm's, the hidden notes as they were when made."""
     skip_of, hidden_open = LoadedMidi.skip_of, LoadedMidi.hidden_open
 
-    def __init__(self, lm, hide):
+    def __init__(self, lm, hide, spare=()):
         self._lm = lm
-        src = lm if hide else LoadedMidi.__new__(LoadedMidi)
+        got = [lm._taken[k] for k in spare if k in lm._taken] if hide else []
+        src = lm if hide and not got else LoadedMidi.__new__(LoadedMidi)
         if not hide:
             src.tracks = lm.tracks
             z = np.zeros(0, np.int64)
             LoadedMidi._set_hidden(src, z, z, z, z, z, z, z)
+        elif got:  # (every hidden note but the spared boxes')
+            src.tracks = lm.tracks
+            code = lm.h_trk * (1 << 40) + lm.h_on
+            spared = np.concatenate([g["trk"] * (1 << 40) + g["on"] for g in got])
+            keep = ~np.isin(code, spared)
+            LoadedMidi._set_hidden(src, *(a[keep] for a in (lm.h_trk, lm.h_s, lm.h_e, lm.h_lane, lm.h_vel, lm.h_on,
+                                                           lm.h_off)))
         for k in ("h_trk", "h_s", "h_e", "h_lane", "h_vel", "h_on", "h_off", "h_at", "skip_all", "skip_at"):
             setattr(self, k, getattr(src, k))
 
@@ -398,6 +407,9 @@ def _clean_group(v):
     out = {"boxes": boxes, "tracks": tracks}
     if v.get("ports") is True:  # (some notes came from tracks on another port: the export writes ports)
         out["ports"] = True
+    sig = v.get("sig")  # (its notes as made: load_extract.untouched)
+    if isinstance(sig, str) and len(sig) == 32 and all(c in "0123456789abcdef" for c in sig):
+        out["sig"] = sig
     return out
 
 

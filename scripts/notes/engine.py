@@ -253,6 +253,10 @@ def clean_shape(sh):
         got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < high]
         if got:
             out[key] = got
+    chs = sh.get("into_ch")  # (an Extract: each colour's own channel in the loaded MIDI's track it came from)
+    if "into" in out and isinstance(chs, list) and len(chs) == len(out["into"]) and all(
+            type(c) is int and 0 <= c <= 15 for c in chs):
+        out["into_ch"] = list(chs)
     if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
         out["slots10"] = sh["slots10"]
     if "into" in out and sh.get("into_new") is True:  # (just drawn / pasted, colours not laid yet: App.fit_into)

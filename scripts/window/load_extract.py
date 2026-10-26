@@ -4,9 +4,11 @@ highlighted + shown tracks (all tracks when none is highlighted), taken whole, b
 those notes are hidden in the file (drawn, heard and exported without them). The box belongs to the shape
 (sh["extract"]): delete it or undo and the notes come back; a copy of it hides nothing (sliced.fresh_marks).
 
-The shape's notes are "as loaded": channels kept (pinned slots, own_slots), overlaps kept (held), velocities their
-own; boxes of two Extracts never overlap (a note can only be in one)."""
+The shape's notes are "as loaded": in the file's track they came from on their own channel (group D: laid there,
+"into" + "into_ch"), overlaps kept (held), velocities their own; boxes of two Extracts never overlap (a note can
+only be in one). One left as it was = the export keeps the file's own bytes (untouched)."""
 
+import hashlib
 import threading
 from tkinter import messagebox
 
@@ -14,13 +16,42 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.midi_read import Cancelled, MidiError
+from files.own_tracks import FILE0
 from notes.custom import notes_shape
-from notes.engine import PORTS
-from notes.loaded import (EXTRACT_ASK, EXTRACT_MOST, box_key, boxes_meet, gather_box, port_numbers, set_boxes,
-                          shape_boxes)
+from notes.engine import own_slot
+from notes.loaded import EXTRACT_ASK, EXTRACT_MOST, box_key, boxes_meet, gather_box, set_boxes, shape_boxes
 from roll.roll_draw import TRACK_FADE
 from roll.roll_loaded import shown_tracks
 from roll.roll_shared import RULER_TOP
+
+
+def notes_sig(rows):
+    """A fingerprint of notes (start, end, key, velocity, slot), in any order."""
+    rows = np.ascontiguousarray(np.asarray(rows, np.int64).reshape(-1, 5))
+    rows = rows[np.lexsort(rows.T[::-1])] if len(rows) else rows
+    return hashlib.blake2b(rows.tobytes(), digest_size=16).hexdigest()
+
+
+def own_slots_of(pairs):
+    """The slots of (track * 16 + channel) pairs laid in the loaded MIDI's tracks (engine.own_slot)."""
+    return np.array([own_slot(FILE0 + int(p) // 16, int(p) % 16) for p in pairs], np.int64)
+
+
+def untouched(shapes, rendered):
+    """The Extracts left exactly as they were made (their notes = the fingerprint taken then): (their boxes' keys,
+    their shape numbers). The export keeps those notes in the file as they are, byte for byte (user 2026-10-26:
+    extracting alone changes nothing)."""
+    keys, owners = [], []
+    for i, sh in enumerate(shapes):
+        ex = sh.get("extract")
+        if not isinstance(ex, dict) or not ex.get("sig"):
+            continue
+        mine = rendered[rendered[:, 5] == i, :5]
+        if len(mine) and notes_sig(mine) == ex["sig"]:
+            keys += [box_key({"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": ex["tracks"]})
+                     for b in ex["boxes"]]
+            owners.append(i)
+    return keys, owners
 
 
 def can_extract(app):
@@ -208,17 +239,19 @@ def finish(app, lm, new, got):
             messagebox.showerror(tr("app.spiderweb_2"), tr("extract.overlap"), parent=app)
         return
     ch = lane >> 8
-    use10 = bool((ch == 9).any())  # (channel 10 kept as channel 10: the shape's slots count it, mask.slot_rule)
-    port = port_numbers(lm)[trk] % PORTS  # (each round of channels = a port: midi_out writes it as the port)
-    slot = (ch if use10 else np.where(ch > 9, ch - 1, ch)) + port * (16 if use10 else 15)
+    # the notes stay IN THE FILE'S TRACK they came from, each on its own channel (group D, user 2026-10-26: they
+    # came out sorted by channel, the file's order and names lost): one colour per (track, channel), laid there
+    pairs, colour = np.unique(trk * 16 + ch, return_inverse=True)
     scale = app.ppq / lm.ppq  # (the project uses the file's PPQ: 1)
     rows = np.column_stack([np.rint(s * scale), np.maximum(1, np.rint((e - s) * scale)), lane & 255, vel,
-                            slot]).astype(np.int64)
+                            colour.ravel()]).astype(np.int64)
     sh = notes_shape(rows, app.ppq, tr("extract.name"))
-    sh.update(own_slots=True, slots10=use10, held=True)
-    sh["extract"] = {"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new], "tracks": new[0]["tracks"]}
-    if port.any():
-        sh["extract"]["ports"] = True
+    sh.update(own_slots=True, held=True, into=[FILE0 + int(p) // 16 for p in pairs],
+              into_ch=[int(p) % 16 for p in pairs])
+    sh["extract"] = {"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new], "tracks": new[0]["tracks"],
+                     # (its notes as made: left as they are, the export keeps the file's own bytes, user 2026-10-26)
+                     "sig": notes_sig(np.column_stack([rows[:, 0], rows[:, 0] + rows[:, 1], rows[:, 2], rows[:, 3],
+                                                       own_slots_of(pairs)[colour.ravel()]]))}
     found = {box_key(b): g for b, g in zip(new, got)}
     app.push_undo(name=tr("extract.step"))
     app.shapes.append(sh)

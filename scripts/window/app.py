@@ -185,6 +185,15 @@ def entry_slot(v, own, rule, use10):
     return int(as_used(np.array([-1 - v], np.int64), rule, use10)[0])
 
 
+def laid_slots_of(sh, ids, own, use10):
+    """Each placed_on entry's slot now (entry_slot), in order; an Extract's colours in a loaded MIDI's track keep
+    their own channel there (sh["into_ch"]: a track may hold notes on several, group D)."""
+    rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
+    chs = sh.get("into_ch") if isinstance(sh.get("into_ch"), list) else []
+    return [own_slot(v, chs[k]) if v >= FILE0 and k < len(chs) else entry_slot(v, own, rule, use10)
+            for k, v in enumerate(ids)]
+
+
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
               keep=False, busy=None, own=None, stash=None):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
@@ -305,8 +314,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         ids = placed_on(sh, own)
         if not ids:
             continue
-        rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
-        on = np.array([entry_slot(v, own, rule, use10) for v in ids], np.int64)
+        on = np.array(laid_slots_of(sh, ids, own, use10), np.int64)
         if mode != "auto" and not pinned_slots(sh, mode):  # (Single channel / As drawn: every colour on its first
             colour = np.zeros_like(colour)                  # track, hunt 2026-10-26; an Extract keeps its channels)
         fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True
@@ -2136,8 +2144,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def laid_slots(self, sh):
         """The slot each colour of a shape laid on tracks has in the notes now (all_notes' entry_slot), in order."""
         own = self.own_channels()
-        rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
-        return [entry_slot(v, own, rule, self.picture_use10) for v in placed_on(sh, own)]
+        return laid_slots_of(sh, placed_on(sh, own), own, self.picture_use10)
 
     def in_own_track(self, sh):
         """True if the shape is laid on tracks (placed_on: drawn / pasted with a track highlighted)."""

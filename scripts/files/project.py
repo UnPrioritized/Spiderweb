@@ -1069,7 +1069,12 @@ class ProjectFiles:
         use10, pad = self.picture_use10, self.pad_tracks()
         # (the extracted notes as they are NOW: an undo / Extract while it runs changes nothing in it, hunt
         # 2026-10-25; the shapes left out = nothing hidden either, the file as it was)
-        hid = lm.frozen(hide=why is None)
+        # (an Extract left as it was: its notes stay in the file as they are, byte for byte; user 2026-10-26)
+        from window.load_extract import untouched
+        spare, kept = untouched(self.shapes, notes) if why is None and len(notes) else ([], [])
+        if kept:
+            notes = notes[~np.isin(notes[:, 5], kept)]
+        hid = lm.frozen(hide=why is None, spare=spare)
         left = lm.notes - len(hid.h_s)  # (the file's notes written: extracted ones left out)
         # (extracted notes keep their port: only their tracks on another port get one, the rest stay as ever)
         took = [i for i, sh in enumerate(self.shapes) if extract_ports([sh])]
