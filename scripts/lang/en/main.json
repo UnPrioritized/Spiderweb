@@ -1861,7 +1861,7 @@
  "help.conductor.words": "conductor tempo bpm speed jump stop glide catch-up catch up keep timing time signature key signature meter bar beats per bar",
  "help.tracks.title": "Track list (Tab)",
  "help.tracks.tip": "Tab swaps the piano roll for the track list: the tracks your MIDI will have, each with a picture of its notes. Click one and press Tab to see only that track.",
- "help.tracks.words": "track list tracks tab ghost faint show multiple mute speaker overview channels export drag order move",
+ "help.tracks.words": "track list tracks tab ghost faint show multiple mute speaker overview channels export drag order move select box copy paste cut delete remove properties",
  "help.hz_live.title": "Live keys (Hz bass)",
  "help.hz_live.tip": "This sound is NOT your MIDI. The live keys play a quick copy that Spiderweb makes from your soundfont's own notes, so you can try a Hz bass before placing it. Only notes you place in the Hz bass window go into your MIDI. It can sound a little different from a real render, most with soundfonts that change their sound at random.",
  "help.hz_live.words": "hz bass live keys keyboard play hold preview quick sound fake copy synth window soundfont memory presets preset meter tabs",
