@@ -32,8 +32,9 @@ from notes.tempo import bpm_text, tempo_text
 from notes.tempo_file import heard_tempo
 from roll import roll_loaded as RL
 from roll.roll_draw import TRACK_FADE
-from roll.roll_shared import (COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow, grab_while_panning,
-                              slot_colours)
+from roll.roll_shared import (BOX_STILL, COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow,
+                              draw_boxes as outline_boxes, grab_while_panning, slot_colours)
+from roll.tiles import see_through
 from window import look
 from window.track_windows import AddTracksBox, PropertiesBox
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
@@ -57,6 +58,7 @@ TILES_BYTES = 128 << 20  # blocks kept at most (the oldest used go first)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 MOVE_PX = 5  # a press on a track's name moved this far (x scale) = dragging the tracks to another place
 EDGE_MS = 40  # how often the list scrolls while tracks are dragged past its top / bottom
+FILL_TILE = 256  # px: a Select box's see-through fill is put on in squares this big (one small picture per size)
 
 
 def hex_rgb(colour):
@@ -88,6 +90,12 @@ class TrackList(tk.Canvas):
         # line is above), "keep" (pressed on one of several selected: a click without a drag picks it alone),
         # "s", "job" (scrolling at an edge)}
         self._move = None
+        # the Select boxes kept in the picture (group E, like Domino's): [{"t0", "t1" (beats), "rows": (first, last)
+        # row, or None = a ruler band over every row}]; the one being dragged: {"x", "y", "t" (pressed beat), "row",
+        # "band", "ctrl", "shift" (at the press), "pick" (Ctrl / Shift click on a row: tracks picked if no drag),
+        # "on" (dragged far enough), "box" (as it'd be kept now)}
+        self.boxes, self._box = [], None
+        self._fills = OrderedDict()  # (w, h) -> the boxes' see-through fill picture of that size
         self.muted = set()   # slots not played (the speaker in their row; playback only, never the files)
         self.faint = FAINT
         self.faint_var = tk.StringVar(value=str(FAINT))
@@ -189,6 +197,9 @@ class TrackList(tk.Canvas):
             self.behind = {s for s in self.behind if there(s)}
             self.muted = {s for s in self.muted if there(s)}
             self.selected = {s for s in self.selected if there(s)}
+            last = len(every) - 1  # (rows gone: the boxes kept on the rows left)
+            self.boxes = [b if b["rows"] is None else dict(b, rows=(b["rows"][0], min(b["rows"][1], last)))
+                          for b in self.boxes if b["rows"] is None or b["rows"][0] <= last]
         return self._all
 
     def row_of_id(self, s):
@@ -234,6 +245,7 @@ class TrackList(tk.Canvas):
         """Another project opened: nothing muted, highlighted or picked behind, back at its start; the zoom stays
         (user 2026-10-23: remembered)."""
         self.current, self.behind, self.muted, self.owners, self.selected = None, set(), set(), set(), set()
+        self.boxes, self._box = [], None
         self.view_t, self.top, self._sheet = 0.0, 0, None
         sync_onion(self.app)
         self.request_redraw()
@@ -594,10 +606,13 @@ class TrackList(tk.Canvas):
         if time.perf_counter() - self.menu_shut < MENU_CLICK_S:  # (the click that closed the right-click menu:
             return                                                # Windows hands it on, like the Tempo pane's)
         playing = self.app.player.running  # (playing: the play line stays, user 2026-10-23)
-        if e.y < self.ruler_h:  # the play line, on the track list's snap (Shift: free)
-            if e.x >= self.name_w and self.sx and not playing:
+        self._box = None
+        if e.y < self.ruler_h:  # the play line, on the track list's snap (Shift: free); dragged: a ruler band
+            if e.x >= self.name_w and self.sx:
                 beat = max(0.0, self.x2t(e.x))
-                self.app.set_playhead(beat if e.state & 0x1 else self.snapped(beat))
+                if not playing:  # (moved on the press also when it becomes a band, like the piano roll's ruler)
+                    self.app.set_playhead(beat if e.state & 0x1 else self.snapped(beat))
+                self.box_press(e, beat, None, band=True)
             return
         row = self.row_at(e.y)
         self._sweep = None
@@ -609,8 +624,13 @@ class TrackList(tk.Canvas):
             self.toggle_mute(slot)
             self._sweep = (slot in self.muted, row)
             return
+        picture = row >= 0 and e.x >= self.name_w and self.sx
         if row >= 0 and e.state & 0x5 and self.current is not None:  # Ctrl / Shift: several tracks (select)
+            if picture:  # (in the picture: dragged = a Select box, Ctrl adds it; let go without a drag = the click)
+                return self.box_press(e, max(0.0, self.x2t(e.x)), row, pick=True)
             return self.select_click(row, e.state & 0x4, e.state & 0x1)
+        if picture:  # (a drag on the picture: a Select box; a click: the play line + the track, as before)
+            self.box_press(e, max(0.0, self.x2t(e.x)), row)
         if row >= 0 and e.x < self.name_w:  # (a track's name: dragged = the tracks moved, group C)
             s, group = int(self.tracks()[row]), self.picked_tracks()
             # (on one of several selected: they stay selected for the drag; let go without one = that track alone,
@@ -660,6 +680,173 @@ class TrackList(tk.Canvas):
         else:
             self.request_redraw()
 
+    # ------------------------------------------------------------ Select boxes (group E)
+
+    def box_press(self, e, beat, row, band=False, pick=False):
+        """A press on the picture (row) or the ruler (band): dragged = a Select box / a ruler band (box_drag). A
+        press outside the kept boxes drops them (Ctrl: kept, the new one added)."""
+        ctrl = bool(e.state & 0x4)
+        inside = self.box_at(e.x, e.y)
+        if inside and not ctrl:  # (inside the kept boxes: they stay)
+            return
+        if not ctrl:
+            self.drop_boxes()
+        self._box = {"x": e.x, "y": e.y, "t": beat, "row": row, "band": band, "ctrl": ctrl,
+                     "shift": bool(e.state & 0x1), "pick": pick, "on": False, "box": None}
+
+    def box_at(self, x, y):
+        """True if (x, y) is inside a kept box (on the ruler: a ruler band)."""
+        if not self.boxes or self.sx is None or x < self.name_w:
+            return False
+        t = self.x2t(x)
+        row = self.row_at(y)
+        if y < self.ruler_h:
+            return any(b["rows"] is None and b["t0"] <= t <= b["t1"] for b in self.boxes)
+        if row is None or row < 0:
+            return False
+        return any(b["t0"] <= t <= b["t1"] and (b["rows"] is None or b["rows"][0] <= row <= b["rows"][1])
+                   for b in self.boxes)
+
+    def box_drag(self, e):
+        """The box being dragged: the pressed corner on the grid line before the press, the mouse's out to the grid
+        line past it (the piano roll's Select box), whole rows; a ruler band's ends on the NEAREST grid line (the
+        piano roll's ruler). Shift: whole ticks (each corner as Shift was when it moved)."""
+        b = self._box
+        if not b["on"]:
+            still = BOX_STILL * self.scale
+            if abs(e.x - b["x"]) < still and (b["band"] or abs(e.y - b["y"]) < still):
+                return
+            b["on"] = True
+            self.tip.hide()
+        t, shift = max(0.0, self.x2t(e.x)), bool(e.state & 0x1)
+        if b["band"]:
+            lo, hi = sorted(self.ticked(x) if s else self.snapped(x) for x, s in ((b["t"], b["shift"]), (t, shift)))
+            b["box"] = {"t0": lo, "t1": hi, "rows": None} if hi > lo else None
+        else:
+            top = self.area()[1]
+            y = min(max(e.y, top), self.winfo_height() - 1)
+            row = min(max(int((y - top + self.top) // self.row_h), 0), len(self.tracks()) - 1)
+            lo, hi = self.box_span(b["t"], t, b["shift"], shift)
+            b["box"] = {"t0": lo, "t1": hi, "rows": tuple(sorted((b["row"], row)))}
+        self.request_redraw()
+
+    def box_release(self):
+        """Let go: the box kept (Ctrl: with the others); boxes and ruler bands are never kept together (the piano
+        roll's rule). No drag: a Ctrl / Shift click picks tracks (select_click)."""
+        b, self._box = self._box, None
+        if b["on"]:
+            new = b["box"]
+            if new is not None:
+                band = new["rows"] is None
+                self.boxes = [x for x in (self.boxes if b["ctrl"] else []) if (x["rows"] is None) == band] + [new]
+            self.request_redraw()
+        elif b["pick"]:
+            self.select_click(b["row"], b["ctrl"], b["shift"])
+
+    def busy(self):
+        """A drag going on in the list (tracks, a box, speakers): its keys wait."""
+        return self._move is not None or self._box is not None or self._sweep is not None
+
+    def drop_boxes(self):
+        if self.boxes:
+            self.boxes = []
+            self.request_redraw()
+
+    def ticked(self, beat):
+        """beat on whole ticks."""
+        ppq = self.app.ppq
+        return max(0.0, round(beat * ppq) / ppq)
+
+    def grid_edge(self, beat, after):
+        """The grid line of the track list's snap at or before beat (after: at or after it)."""
+        snap, sigs = self.snap.get(), sigs_of(self.app.tempo)
+        if snap == "off":
+            return self.ticked(beat)
+        if snap == "bar":
+            return bar_line(sigs, beat, after=after)
+        step = snap_beats(snap, self.app.beats)
+        if not step:
+            return self.ticked(beat)
+        at = where(sigs, beat)[2]
+        k = (beat - at) / step
+        if after:  # (a bar's last step ends on the next bar line)
+            return min(at + math.ceil(k - 1e-9) * step, bar_line(sigs, beat, after=True))
+        return at + math.floor(k + 1e-9) * step
+
+    def box_span(self, a, b, shift_a, shift_b):
+        """(lo, hi) beats of a box pressed at a, dragged to b (roll_shared.grid_span's rule on the list's grid):
+        never thinner than a grid step (Shift: a tick)."""
+        tick = 1 / self.app.ppq
+        a = self.ticked(a) if shift_a else self.grid_edge(a, False)
+        if b >= a:
+            hi = self.ticked(b) if shift_b else self.grid_edge(b, True)
+            if hi <= a + 1e-9:
+                hi = a + tick if shift_b else self.grid_edge(a + tick, True)
+            return a, hi
+        lo = self.ticked(b) if shift_b else self.grid_edge(b, False)
+        return max(0.0, min(lo, a - tick)), a
+
+    def select_all(self):
+        """Ctrl+A in the track list (like Domino's): a ruler band from the song's start to the last note's end over
+        every track; the tracks' names stay as they are (user 2026-10-26: blue names = the TRACKS picked)."""
+        end = self.last_end()
+        self._box = None
+        self.boxes = [{"t0": 0.0, "t1": end, "rows": None}] if end > 0 else []
+        self.request_redraw()
+
+    def last_end(self):
+        """The last note's end in beats, any track (a loaded MIDI's too); 0 = no notes."""
+        n, ppq = self.app.rendered, self.app.ppq
+        end = int(n[:, 1].max()) / ppq if len(n) else 0.0
+        lm = self.app.loaded
+        if lm is not None:
+            end = max(end, lm.end / lm.ppq)
+        return end
+
+    def box_rects(self):
+        """The kept boxes + the one being dragged on screen: [(x0, y0, x1, y1)] (a ruler band: every row)."""
+        top, n, rh = self.area()[1], len(self._all), self.row_h
+        shown = self.boxes + ([self._box["box"]] if self._box is not None and self._box["box"] is not None else [])
+        out = []
+        for b in shown:
+            r0, r1 = b["rows"] if b["rows"] is not None else (0, n - 1)
+            out.append((self.t2x(b["t0"]), top + r0 * rh - self.top, self.t2x(b["t1"]), top + (r1 + 1) * rh - self.top))
+        return out
+
+    def draw_boxes(self, w, h):
+        """The boxes over the picture: a see-through fill in tiles (one picture per size, kept) + the Select box's
+        outline (user 2026-10-26: outline + a light see-through fill)."""
+        rects = self.box_rects()
+        if not rects:
+            return
+        left, top = self.area()
+        tile = FILL_TILE
+        for x0, y0, x1, y1 in rects:
+            a, b = max(round(x0), left), min(round(x1), w)
+            c, d = max(round(y0), top), min(round(y1), h)
+            for y in range(c, d, tile):
+                for x in range(a, b, tile):
+                    self.create_image(x, y, image=self.fill_picture(min(tile, b - x), min(tile, d - y)), anchor="nw")
+        outline_boxes(self, rects, left, top, self.scale)
+
+    def fill_picture(self, w, h):
+        got = self._fills.get((w, h))
+        if got is None:
+            rgba = np.empty((h, w, 4), np.uint8)
+            rgba[..., :3] = hex_rgb(look.TRACK_BOX_FILL)
+            rgba[..., 3] = look.TRACK_BOX_ALPHA
+            got = self._fills[(w, h)] = see_through(self, rgba)
+            while len(self._fills) > 16:
+                self._fills.popitem(last=False)
+        else:
+            self._fills.move_to_end((w, h))
+        return got
+
+    def bands_x(self):
+        """[(x0, x1)] of the ruler bands on screen (the ruler black there, like the piano roll's)."""
+        shown = self.boxes + ([self._box["box"]] if self._box is not None and self._box["box"] is not None else [])
+        return [(self.t2x(b["t0"]), self.t2x(b["t1"])) for b in shown if b["rows"] is None]
+
     def step_track(self, way):
         """Ctrl+wheel on the piano roll / its panes (like Domino, user 2026-10-24): the next (way 1, wheel down) or
         previous track highlighted, empty ones too; the All tracks row (nothing highlighted) above the first one; stops
@@ -699,6 +886,8 @@ class TrackList(tk.Canvas):
         a track's name: the tracks moved (move_drag)."""
         if self._move is not None:
             return self.move_drag(e.y)
+        if self._box is not None:
+            return self.box_drag(e)
         if self._sweep is None:
             return
         on, last = self._sweep
@@ -716,6 +905,8 @@ class TrackList(tk.Canvas):
 
     def on_release(self, e):
         self._sweep = None
+        if self._box is not None:
+            return self.box_release()
         m = self._move
         if m is None:
             return
@@ -733,6 +924,12 @@ class TrackList(tk.Canvas):
         if self._move is not None and self._move["on"] and e.state & 0x100:  # (still held: a release missed leaves
             return self.end_move()                                          # no drag behind)
         self.end_move()
+        if self._box is not None and e.state & 0x100:  # (a box being dragged: called off)
+            self._box = None
+            return self.request_redraw()
+        self._box = None
+        if self.boxes:  # (the kept Select boxes go first, like the piano roll's)
+            return self.drop_boxes()
         self.show_all()
 
     def moving(self):
@@ -1187,6 +1384,7 @@ class TrackList(tk.Canvas):
         self.delete("all")
         lines = self.shown_bars(w)
         self.paint(w, h)
+        self.draw_boxes(w, h)
         self.draw_ruler(w, lines)
         self.draw_all(w)
         self.draw_conductor(w)
@@ -1490,14 +1688,21 @@ class TrackList(tk.Canvas):
     def draw_ruler(self, w, lines):
         s, top = self.scale, self.ruler_h
         self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="")
+        bands = self.bands_x()
+        for x0, x1 in bands:  # (black over a ruler band, like the piano roll's ruler)
+            self.create_rectangle(max(x0, self.name_w), 0, x1, top, fill=look.RULER_PICK, outline="")
+
+        def ink(x, plain):  # (text starting in a band: white)
+            return look.RULER_PICK_TEXT if any(x0 <= x < x1 for x0, x1 in bands) else plain
         font = look.font(8, fit=True)
         measure = self.measurer(font)
         end = -math.inf
         for x, n in lines:  # bar numbers in the bottom half
             if x < self.name_w or x < end:
                 continue
-            self.create_line(x, top - 6 * s, x, top, fill=look.RULER_TICK)
-            self.create_text(x + 3, top - 9 * s, text=str(n + 1), anchor="w", fill=look.RULER_TEXT, font=font)
+            self.create_line(x, top - 6 * s, x, top, fill=ink(x, look.RULER_TICK))
+            self.create_text(x + 3, top - 9 * s, text=str(n + 1), anchor="w", fill=ink(x + 3, look.RULER_TEXT),
+                             font=font)
             end = x + 3 + measure(str(n + 1)) + 4
         tempo = self.app.tempo
         marks = {}  # beat -> texts: time / key signatures in the top half
@@ -1512,7 +1717,7 @@ class TrackList(tk.Canvas):
             text = f"({', '.join(marks[beat])})"
             if x < self.name_w - 1 or x < end or x > w:
                 continue
-            self.create_text(x + 1, 7 * s, text=text, anchor="w", fill=look.RULER_TEXT, font=small)
+            self.create_text(x + 1, 7 * s, text=text, anchor="w", fill=ink(x + 1, look.RULER_TEXT), font=small)
             end = x + measure(text)
         self.create_line(0, top, w, top, fill=look.ROLL_EDGE)
         self.create_rectangle(0, 0, self.name_w, top, fill=look.RULER_BG, outline="")

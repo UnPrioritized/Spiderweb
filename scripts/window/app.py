@@ -3121,7 +3121,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return None
             if self.tracks_shown() and fn not in (self.toggle_tracks, self.toggle_play, self.generate,
                                                    self.new_project, self.open_project):
-                return "break"  # (the track list shows: shortcuts never change shapes out of sight)
+                # (the track list shows: shortcuts never change shapes out of sight; the list's own keys work there,
+                # group E)
+                own = {self.select_all: self.track_list.select_all}.get(fn)
+                if own is not None and not self.track_list.busy():
+                    own()
+                return "break"
             if self.box_drawn() or not while_held and (self.roll.holding() or self.vel.edit or self.held_scrub
                                                        or getattr(self, "tempo_pane", None) is not None
                                                        and self.tempo_pane.drag):

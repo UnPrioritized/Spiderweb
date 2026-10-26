@@ -191,6 +191,8 @@ TRACK_PICK, TRACK_PICK_TEXT = pick("#3874d8", "#2f6fd0"), pick("#ffffff", "#ffff
 # (tracks Ctrl+clicked along with the highlighted one: a fainter blue, like Domino's; their picture rows too)
 TRACK_SELECT, TRACK_SELECT_TEXT = pick("#a9c4f0", "#3d4b63"), pick("#10203a", "#e2e2e4")
 TRACK_SELECTED = pick("#e9f0fb", "#3c4049")
+# (the track list's Select box: its see-through fill over the rows and how solid it is, 0..255; outline SELECT_BOX)
+TRACK_BOX_FILL, TRACK_BOX_ALPHA = pick("#3874d8", "#7fa8f0"), 48
 # The notes' (fill, edge) per channel slot in the dark look (user's pick "B warm": the light look's colours lighter
 # with a little cream; light look's in roll_shared.SLOT_COLORS), the shape being drawn
 NOTES_DARK = [("#a3bef1", "#19449b"), ("#f7a39e", "#a51610"), ("#a6f4a0", "#36842b"), ("#f5e1a0", "#9c7b18"),
