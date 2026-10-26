@@ -426,6 +426,7 @@ class ProjectFiles:
         self.stop_loaded()  # (still playing: its MIDI stops, the shapes play on)
         self.loaded = None  # (another project: its loaded MIDI goes; attach_midi puts a new one in after this)
         self.midi_link = link
+        self.midi_missing = False  # (looked for now: "not found" only once that fails, load_midi.said_without)
         self.drop_finding()
         self.roll.forget_loaded()
         self.tempo = tempo
@@ -954,7 +955,7 @@ class ProjectFiles:
         midi = ""
         if link is not None and link.get("path"):
             name = os.path.basename(link["path"])
-            missing = self.loaded is None and getattr(self, "_finding", None) is None
+            missing = self.loaded is None and getattr(self, "midi_missing", False)
             midi = tr("app.title_midi_missing" if missing else "app.title_midi", name=name)
         if self.project_file:
             title = tr("app.title_file", name=os.path.basename(self.project_file),

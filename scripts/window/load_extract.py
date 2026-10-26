@@ -358,6 +358,17 @@ def delete_loaded(app, shapes_too=False):
     if any(boxes_meet(a, b) for a in new for b in staying):
         messagebox.showerror(tr("app.spiderweb_2"), tr("delete_loaded.overlap"), parent=app)
         return
+    step = None
+    if gone:  # (the Delete key: the shapes go AT ONCE, the step the read's notes join; a selected Extract's notes
+        # are back in the file first, so they're deleted too, like the rest of the box; Ctrl+Z mid-read = that step
+        # undone and the read's notes dropped, hunt 2026-10-26)
+        app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
+        app.push_undo(name=tr("app.delete"))
+        for i in sorted(gone, reverse=True):
+            del app.shapes[i]
+        app.select_many([], None)
+        app.shapes_changed()
+        step = app.undo_stack[-1]
     job = app._extracting = {"done": 0, "total": 1, "got": None, "error": None, "finished": False, "cancel": False}
 
     def run():
@@ -386,25 +397,27 @@ def delete_loaded(app, shapes_too=False):
             return
         if e is not None:
             raise e
-        finish_delete(app, lm, new, job["got"], gone)
+        finish_delete(app, lm, new, job["got"], step)
     threading.Thread(target=run, daemon=True, name="delete loaded notes").start()
     poll()
 
 
-def finish_delete(app, lm, new, got, gone):
-    """The boxes read: one undo step deleting the shapes in gone (the Delete key) and hiding the notes."""
+def finish_delete(app, lm, new, got, step=None):
+    """The boxes read: the notes hidden, in one undo step: step (the Delete key's, its shapes already deleted: only
+    while it's still the newest step, else something changed meanwhile and nothing more happens) or a new one."""
+    if step is not None and (not app.undo_stack or app.undo_stack[-1][0] is not step[0]):  # (its shapes' state:
+        # a step renamed in place stays the same one)
+        return
     old = {int(t) * (1 << 40) + int(o) for t, o in zip(lm.h_trk.tolist(), lm.h_on.tolist())}
     taken = {int(t) * (1 << 40) + int(o) for g in got for t, o in zip(g["trk"].tolist(), g["on"].tolist())}
     n = len(taken - old)  # (notes newly gone: ones hidden already, e.g. a box over a box deleted before, not counted)
-    if not n and not gone:
-        app.status.config(text=tr("delete_loaded.none"))
+    if not n:
+        if step is None:
+            app.status.config(text=tr("delete_loaded.none"))
         return
-    app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
-    app.push_undo(name=tr("app.delete" if gone else "delete_loaded.step"))
-    if gone:
-        for i in sorted(gone, reverse=True):
-            del app.shapes[i]
-        app.select_many([], None)
+    if step is None:
+        app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
+        app.push_undo(name=tr("delete_loaded.step"))
     if n:
         app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new],
                                       "tracks": new[0]["tracks"]}]

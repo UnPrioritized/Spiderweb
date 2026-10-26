@@ -2499,6 +2499,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.project_file = None  # (Save asks for a name again)
         self.tempo = empty_tempo()
         self.own_tracks, self.own_next = [], 0
+        # (the old song's deleted notes, dragged track order and track names: nothing to do with the new one, hunt)
+        self.deleted, self.file_order, self.file_saved, self.midi_missing = [], None, {}, False
         self.project_token = os.urandom(8).hex()  # (copies from before New: not laid on these tracks)
         self.tempo_pane.forget()
         self.roll.box_kept = None
@@ -3239,6 +3241,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.vel.request_redraw()
         if self.hz_window and hasattr(self.hz_window, "redraw"):
             self.hz_window.redraw()
+        args = getattr(self, "_list_args", None)  # (Extracts are named by their bars: shape_label, hunt 2026-10-26)
+        if args is not None and len(args[0]) == len(self.shapes) and any(sh.get("extract") for sh in self.shapes):
+            self.fill_shape_list(*args)
+            self.sync_list_selection()
 
     def bar_text(self, beat):
         """A beat as "bar 3 beat 2" (bar and beat counted from 1 by the time signatures, beat may have a

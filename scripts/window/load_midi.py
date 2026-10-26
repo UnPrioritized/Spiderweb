@@ -109,6 +109,34 @@ def offer_index(app, lm):
             app.config(cursor="")
 
 
+def use_changed(app, lm):
+    """A project's MIDI changed since it was saved, "Use it as it is now": loaded, its Conductor line taken, and what
+    was made for the old file let go (said in one message): the Extracts (their boxes are the old file's ticks +
+    tracks: they'd hide other notes, hunt 2026-10-25), Delete loaded notes' boxes and the dragged track order (hunt
+    2026-10-26)."""
+    from notes.loaded import drop_extract, shape_boxes
+    took = [sh for sh in app.shapes if shape_boxes([sh])]
+    for sh in took:
+        drop_extract(sh)
+    gone, moved = bool(app.deleted), app.file_order is not None
+    app.deleted, app.file_order = [], None
+    app.reattach_midi(lm, retempo=True)
+    if took or gone or moved:
+        app.shapes_changed()  # (the Shapes list's names: no longer Extracts)
+        text = "\n\n".join(([trn("load.extract_released", len(took), n=len(took))] if took else [])
+                           + ([tr("load.deleted_released")] if gone else [])
+                           + ([tr("load.order_released")] if moved else []))
+        messagebox.showinfo(tr("load.title"), text, parent=app)
+
+
+def said_without(app):
+    """The project goes on without its MIDI (not found / not picked / kept without): the status line says so and the
+    title says "not found" (only now: while it's still looked for or loading, its name alone, hunt 2026-10-26)."""
+    app.midi_missing = True
+    app.status.config(text=tr("load.status_without"))
+    app.sync_window_title()
+
+
 def find_loaded(app, pick=False):
     """An opened project's MIDI loaded again (its link: notes.loaded.clean_link). Not where it was = asked (find
     it / go on without it); pick = straight to the file picker. Found = loaded with the progress window, then
@@ -127,14 +155,14 @@ def find_loaded(app, pick=False):
         if not pick and ask_choice(app, tr("load.title"), tr("load.link_missing", path=link["path"]),
                                    [("find", tr("load.find")), ("keep", tr("load.keep_without"))],
                                    icon="warning") != "find":
-            app.status.config(text=tr("load.status_without"))
+            said_without(app)
             return
         path = filedialog.askopenfilename(
             title=tr("load.find_title"), initialdir=folder or os.path.dirname(link["path"]) or OUTPUT_DIR,
             initialfile=os.path.basename(link["path"]),
             filetypes=[(tr("load.midi_files"), "*.mid *.midi *.rmi *.smf"), (tr("project.all_files"), "*.*")])
         if not path:
-            app.status.config(text=tr("load.status_without"))
+            said_without(app)
             return
     try:
         mf = MidiFile(path)
@@ -169,7 +197,7 @@ class LoadWindow(tk.Toplevel):
         else:  # (as it was saved; shown only when it takes a moment: a small file loads in a blink)
             app._finding = self
             self.bind("<Destroy>", lambda e: e.widget is self and getattr(app, "_finding", None) is self
-                      and (setattr(app, "_finding", None), app.sync_window_title()))  # ("not found" if it failed)
+                      and setattr(app, "_finding", None))
             self.start(link["mode"] == "memory" and L.can_keep(mf, free_memory()))
             self.after(REOPEN_SHOW_MS, lambda: self.winfo_exists() and self.show())
 
@@ -302,7 +330,7 @@ class LoadWindow(tk.Toplevel):
         if isinstance(ld.error, Cancelled) or ld.cancelled:  # (Cancel in the last step too: the project stays, hunt)
             self.destroy()
             if self.link is not None:
-                self.app.status.config(text=tr("load.status_without"))
+                said_without(self.app)
             return
         if ld.error is not None:
             e = ld.error
@@ -335,19 +363,12 @@ class LoadWindow(tk.Toplevel):
                             [("use", tr("load.use_changed")), ("find", tr("load.find_original")),
                              ("keep", tr("load.keep_without"))], icon="warning")
         if answer == "use":
-            from notes.loaded import drop_extract, shape_boxes
-            took = [sh for sh in app.shapes if shape_boxes([sh])]
-            for sh in took:  # (their boxes are the old file's ticks + tracks: would hide other notes, hunt 2026-10-25)
-                drop_extract(sh)
-            app.reattach_midi(lm, retempo=True)
-            if took:
-                messagebox.showinfo(tr("load.title"), trn("load.extract_released", len(took), n=len(took)),
-                                    parent=app)
+            use_changed(app, lm)
             app.after_idle(lambda: offer_index(app, lm))
         elif answer == "find":
             app.after_idle(lambda: find_loaded(app, pick=True))
         else:
-            app.status.config(text=tr("load.status_without"))
+            said_without(app)
 
     # ------------------------------------------------------------------ 3: summary
 

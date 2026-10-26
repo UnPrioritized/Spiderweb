@@ -775,6 +775,7 @@ class BetweenGroups:
     def fill_shape_list(self, counts, chans, many, tints=None):
         """The Shapes list from scratch (counts / chans: per shape; many: the channel count shown orange; tints: per
         shape the colours used, App.colours_used: with repeats on new channels the orange goes by these)."""
+        self._list_args = (counts, chans, many, tints)  # (filled again as it is: App.meter_changed)
         self.listbox.delete(0, "end")
         rendered = getattr(self, "rendered", None)
         for r, row in enumerate(self.shape_rows()):
