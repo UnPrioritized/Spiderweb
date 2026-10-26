@@ -27,7 +27,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
-from files.own_tracks import HAND, into_ids, next_channel, plan
+from files.own_tracks import HAND, into_ids, new_id, next_channel, plan
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -553,6 +553,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo = empty_tempo()  # the Tempo pane's line (notes/tempo.py), saved with the project, undo steps too
         self.own_tracks = []  # tracks added by hand (files/own_tracks.py), saved + undone like the tempo line;
         # replaced (never changed in place) on every change, so the track list sees it by identity
+        self.own_next = 0  # the next own track's id (never one used before in this project: own_tracks.new_id; saved)
+        # this project's own mark (a new one at New / Open): Ctrl+C's copies carry it, so a copy laid on tracks keeps
+        # them only when pasted back into the same project (put_into_current; hunt 2026-10-26)
+        self.project_token = os.urandom(8).hex()
         self.show_tempo = tk.BooleanVar(value=False)
         self._tempo_height = int(150 * s)
         self.pvar = {
@@ -1824,7 +1828,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def at_end(kind_own):
             """A new track at the end of the rows (kind_own: added by hand, else an automatic slot)."""
             if kind_own:
-                v = max([t["id"] for t in own] + [-1]) + 1
+                v = new_id(own, self.own_next)
+                self.own_next = v + 1
                 t = {"id": v, "name": "", "ch": next_channel(channel(rows[-1]) if rows else 0, use10), "after": -1,
                      "auto": True}
                 own.append(t)
@@ -1961,8 +1966,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         False (duplicate) or nothing highlighted: one already laid in this project stays where it is. True if it
         can't go in (can_go_in): it stays automatic."""
         target = self.into_target() if relay else None
+        # (a paste copied from another project / before New or Open / a shared line: its tracks aren't these)
+        foreign = relay and sh.pop("into_from", None) != self.project_token
+        sh.pop("into_from", None)
         if target is None:
-            if not self.in_own_track(sh):
+            if foreign or not self.in_own_track(sh):
                 for key in ("into", "cols", "into_gap", "into_rest", "slots10"):
                     sh.pop(key, None)
             sh.pop("cols", None)
@@ -2289,7 +2297,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes.clear()
         self.project_file = None  # (Save asks for a name again)
         self.tempo = empty_tempo()
-        self.own_tracks = []
+        self.own_tracks, self.own_next = [], 0
+        self.project_token = os.urandom(8).hex()  # (copies from before New: not laid on these tracks)
         self.tempo_pane.forget()
         self.roll.box_kept = None
         self.roll.view_t = 0.0  # (back to bar 1, zoom kept: user)
@@ -2408,6 +2417,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 sh.pop("cols", None)
                 if i in cols:
                     sh["cols"] = cols[i]
+                sh["into_from"] = self.project_token  # (its tracks are this project's: put_into_current)
             self.clip_kind = "shapes"
             line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
             msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))

@@ -785,7 +785,8 @@ class TrackList(tk.Canvas):
         """One track per channel in chs, after row (own_row), the first of them highlighted."""
         app = self.app
         autos = len(self._slots)
-        new, ids = add_tracks(app.own_tracks, autos, self.own_row(row), chs)
+        new, ids = add_tracks(app.own_tracks, autos, self.own_row(row), chs, app.own_next)
+        app.own_next = max(ids) + 1
         self.set_own(new, tr("tracks.add_step" if len(chs) == 1 else "tracks.add_many_step"))
         self.current = HAND + ids[0]
         self.shown_changed()

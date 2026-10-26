@@ -64,8 +64,10 @@ def plan(slots, own):
     return out + slots[k:]
 
 
-def new_id(own):
-    return max((t["id"] for t in own), default=-1) + 1
+def new_id(own, floor=0):
+    """The next track id: past every track there and never below floor (the project's ids so far, app.own_next:
+    an id is never used twice, hunt 2026-10-26: a copy from a removed track landed in a new one with its id)."""
+    return max(max((t["id"] for t in own), default=-1) + 1, floor)
 
 
 def insert_at(own, autos, row):
@@ -90,11 +92,12 @@ def insert_at(own, autos, row):
     return sum(1 for b in befores if b < last[1]), last[1]  # (before the own tracks already after that one)
 
 
-def add_tracks(own, autos, row, chs):
-    """own with one new track per channel in chs added after own row `row` (insert_at); (new list, new ids)."""
+def add_tracks(own, autos, row, chs, floor=0):
+    """own with one new track per channel in chs added after own row `row` (insert_at); (new list, new ids). floor:
+    new_id's."""
     out = [dict(t) for t in placed_order(own, autos)]
     at, after = insert_at(out, autos, row)
-    ids, first = [], new_id(out)
+    ids, first = [], new_id(out, floor)
     for k, ch in enumerate(chs):
         out.insert(at + k, {"id": first + k, "name": "", "ch": ch, "after": after})
         ids.append(first + k)

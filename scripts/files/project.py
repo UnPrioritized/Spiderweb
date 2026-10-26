@@ -44,7 +44,7 @@ from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
-from files.own_tracks import clean_own_tracks
+from files.own_tracks import ID_MOST, clean_own_tracks, new_id
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_tracks, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
@@ -256,6 +256,7 @@ class ProjectFiles:
             # one is left out, so files without a tempo line stay as they were)
             **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
             **({"own_tracks": self.own_tracks} if self.own_tracks else {}),
+            **({"own_next": self.own_next} if self.own_next else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
         }
 
@@ -425,6 +426,10 @@ class ProjectFiles:
         self.roll.forget_loaded()
         self.tempo = tempo
         self.own_tracks = own
+        nxt = data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
+        self.own_next = new_id(own, nxt if type(nxt) is int and 0 <= nxt < ID_MOST else 0)
+        if not quiet:  # (another project: copies from the one before aren't laid on these tracks)
+            self.project_token = os.urandom(8).hex()
         # (only an autosave has them: the project file it belonged to, and whether it had unsaved changes)
         self._file_extra = (data.get("project_file"), data.get("unsaved"))
         if hasattr(self, "tempo_pane"):  # (the old project's Select box / picks / catch-up being added go)
@@ -831,9 +836,11 @@ class ProjectFiles:
         data["tempo"] = conductor_line(lm)  # (the file's tempos + signatures, group C step 8)
         data.pop("loaded", None)
         data.pop("own_tracks", None)
+        data.pop("own_next", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
+        self.project_token = os.urandom(8).hex()  # (a new project: copies from before aren't laid on its tracks)
         self.loaded, self.midi_link = lm, lm.link()
         self.roll.forget_loaded()
         self.project_file = None
