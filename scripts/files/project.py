@@ -1754,8 +1754,8 @@ class ProjectFiles:
         self.roll.cancel_draft()
         self.busy(tr("project.pasting_from_domino"))
         try:
-            if sh is not None:
-                self.add_copies([sh], at, tr("project.paste_from_domino"))
+            if sh is not None:  # (one track: into the highlighted track added by hand; several: their own, user)
+                self.add_copies([sh], at, tr("project.paste_from_domino"), into=len(np.unique(notes[:, 4])) == 1)
             if tempos:  # (no points of its own: straight in, whatever was picked for the signatures)
                 self.tempo_pane.put_domino(tempos, at, length, how if self.tempo["points"] else "replace", sh is None)
             if how != "notes" and (sigs or keys):  # (time / key signatures along, in the same undo step)

@@ -1732,6 +1732,25 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """{id: channel} of the tracks added by hand (all_notes own)."""
         return {t["id"]: t["ch"] for t in self.own_tracks}
 
+    def into_target(self):
+        """The id of the track added by hand highlighted in the track list (new shapes go into it), or None."""
+        own = self.track_list.own_track(self.track_list.current)
+        return None if own is None else own["id"]
+
+    def put_into_current(self, sh, keep=False):
+        """A new shape goes into the highlighted track added by hand (Draw into a track; keep: one already in a
+        track of this project stays in it). True if it can't go in (can_go_in): it stays automatic."""
+        if keep and self.in_own_track(sh):
+            return False
+        sh.pop("into", None)
+        target = self.into_target()
+        if target is None:
+            return False
+        if not can_go_in(sh):
+            return True
+        sh["into"] = target
+        return False
+
     def in_own_track(self, sh):
         """True if the shape is drawn into a track added by hand (into_channel)."""
         return into_channel(sh, self.own_channels()) is not None
@@ -1858,9 +1877,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.mask.get() and not is_mask(sh) and can_mask(sh):  # (drawn with the Mask tick on: a mask, mask.py)
             sh["mask"] = self.new_mask()
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
+        left_out = self.put_into_current(sh)
         self.shapes.append(sh)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
+        if left_out:
+            self.status.config(text=tr("tracks.not_into"))
         if sh["kind"] == "curve":  # the first curve: its anchors and handles
             self.tips.show("curves_pen", wait=True)
         self.tips.show("undo", wait=True)  # the first shape: how to take it back
@@ -2054,14 +2076,21 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         shift = max(self.snap_beats(), 1 / self.ppq) if self.snap_beats() else 1.0  # (a step under a tick: on top)
         self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, tr("app.duplicate"))
 
-    def add_copies(self, shapes, shift, name=tr("app.paste")):
+    def add_copies(self, shapes, shift, name=tr("app.paste"), into=True):
         """Add copies of shapes moved shift beats later, and select them. Returns how many had 16 colours brought
-        down to 15 (copied from a project with "Use channel 10" into one without; also said in the status line)."""
+        down to 15 (copied from a project with "Use channel 10" into one without; also said in the status line).
+        into: copies not in a track go into the highlighted track added by hand (False: automatic)."""
         self.push_undo(name=name)
         first = len(self.shapes)
+        left_out = 0
         for sh in shapes:
             new = copy.deepcopy(sh)
             new["pts"] = [[b + shift, p] for b, p in new["pts"]]
+            # (already in one of this project's tracks: kept there; else the highlighted track's, Draw into a track)
+            if into:
+                left_out += self.put_into_current(new, keep=True)
+            elif not self.in_own_track(new):
+                new.pop("into", None)
             self.shapes.append(new)
         fresh_marks(self.shapes[first:])
         between_copied(self.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
@@ -2071,6 +2100,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes_changed()
         said = [trn("app.pasted_15", clamped, n=clamped)] if clamped else []
         said += [trn("app.pasted_picture_15", cut, n=cut)] if cut else []
+        said += [tr("tracks.not_into")] if left_out else []
         if said:
             self.status.config(text="  ".join(said))
         return clamped
