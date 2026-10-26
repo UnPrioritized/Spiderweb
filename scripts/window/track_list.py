@@ -2249,13 +2249,16 @@ class TrackList(tk.Canvas):
                                 outline=colour, width=max(1, round(s)))
 
     def see_now(self):
-        """Tab into the list (user 2026-10-26): the play line out of view = the view goes to it (as a page turn
-        does), the highlighted track's row out of view = scrolled to the middle."""
+        """Tab into the list (user 2026-10-26): the play line out of view = the view goes to the PAGE holding it
+        (pages of the view's width from the song's start, like Domino: on the first page = bar 1 stays), the
+        highlighted track's row out of view = scrolled to the middle."""
         if self.sx is None:
             return
+        self.update_idletasks()  # (just packed: its real width, else the first Tab always jumped, user 2026-10-26)
         x = self.t2x(self.app.playhead)
         if x < self.name_w or x > self.winfo_width() - 6 * self.scale:
-            self.view_t = self.app.playhead
+            page = max(1, self.winfo_width() - self.name_w) / self.sx
+            self.view_t = page * int(self.app.playhead // page)
         row = self.row_of_id(self.current) if self.current is not None else None
         if row is not None:
             h = self.winfo_height() - self.area()[1]

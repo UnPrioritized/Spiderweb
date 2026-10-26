@@ -967,9 +967,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.snap_picker.use(self.snap, tr("snap.tip"))
             self.roll.focus_set()
             r = self.roll
+            r.update_idletasks()  # (just packed: its real width)
             x = r.t2x(self.playhead) if r.sx else None
             if x is not None and (x < r.kb_w or x > r.winfo_width() - 6 * r.scale):  # (off screen here: the piano
-                r.view_t = self.playhead  # roll shows it, user 2026-10-24; either way, 10-26)
+                page = max(1, r.winfo_width() - r.kb_w) / r.sx  # roll shows its PAGE, user 2026-10-24 / 26: pages
+                r.view_t = round(page * int(self.playhead // page) * r.sx) / r.sx  # from the song's start, like
+                # Domino; whole pixels)
                 r.clamp_view()
             r.request_redraw()
         else:
