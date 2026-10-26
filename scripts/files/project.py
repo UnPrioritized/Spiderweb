@@ -889,6 +889,7 @@ class ProjectFiles:
             self.keys_var.set(str(KEYS[1]))
         if hasattr(self, "track_list"):
             self.track_list.request_redraw()
+        self.sync_window_title()
         self.sync_panel()
         self.roll.request_redraw()
         self.schedule_autosave()
@@ -945,14 +946,21 @@ class ProjectFiles:
         self.sync_window_title()
 
     def sync_window_title(self):
-        """The window's title: "song.json - Spiderweb 1.6.2", a * while unsaved, "Unsaved project" with no file."""
+        """The window's title: "song.json - Spiderweb 1.6.2", a * while unsaved, "Unsaved project" with no file; the
+        project's MIDI after it in brackets (user 2026-10-26), "not found" while it's missing."""
         if not hasattr(self, "pvar"):
             return
+        link = getattr(self, "midi_link", None)
+        midi = ""
+        if link is not None and link.get("path"):
+            name = os.path.basename(link["path"])
+            missing = self.loaded is None and getattr(self, "_finding", None) is None
+            midi = tr("app.title_midi_missing" if missing else "app.title_midi", name=name)
         if self.project_file:
             title = tr("app.title_file", name=os.path.basename(self.project_file),
-                       star=tr("app.title_star") if self.is_dirty() else "", VERSION=VERSION)
+                       star=tr("app.title_star") if self.is_dirty() else "", midi=midi, VERSION=VERSION)
         else:
-            title = tr("app.title_unsaved", VERSION=VERSION)
+            title = tr("app.title_unsaved", midi=midi, VERSION=VERSION)
         if title != self._title:
             self._title = title
             self.title(title)

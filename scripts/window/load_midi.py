@@ -169,7 +169,7 @@ class LoadWindow(tk.Toplevel):
         else:  # (as it was saved; shown only when it takes a moment: a small file loads in a blink)
             app._finding = self
             self.bind("<Destroy>", lambda e: e.widget is self and getattr(app, "_finding", None) is self
-                      and setattr(app, "_finding", None))
+                      and (setattr(app, "_finding", None), app.sync_window_title()))  # ("not found" if it failed)
             self.start(link["mode"] == "memory" and L.can_keep(mf, free_memory()))
             self.after(REOPEN_SHOW_MS, lambda: self.winfo_exists() and self.show())
 
