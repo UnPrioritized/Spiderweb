@@ -767,6 +767,8 @@
  "app.flip_upside_down": "Flip upside down",
  "app.turn_90": "Turn 90°",
  "app.pasted_notes": "Pasted notes",
+ "app.extracted_bar": "Extracted notes (bar {bar})",
+ "app.extracted_bars": "Extracted notes (bars {first}–{last})",
  "app.text_2": "Text: {value}",
  "app.joined_pieces": "{curve} (joined, {pieces} pieces)",
  "app.custom": "Custom: {value}",

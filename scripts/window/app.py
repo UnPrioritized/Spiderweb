@@ -2945,6 +2945,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 "notes" in sh and sh.get("name") in (tr("join_split.merge_leftovers"),  # (plain notes, user; made
                                                      tr("mask.applied"))):  # before "made")
             return sh.get("name") or "?"
+        if sh.get("extract"):  # (where it was taken from, user 2026-10-26: several Extracts all said "Pasted notes")
+            from notes.loaded import extract_groups
+            boxes = [b for g in extract_groups(sh["extract"]) for b in g["boxes"]]
+            if boxes:
+                sigs, ppq = sigs_of(self.tempo), self.ppq
+                a = where(sigs, min(b[0] for b in boxes) / ppq)[0] + 1
+                z = where(sigs, max(min(b[0] for b in boxes), max(b[1] for b in boxes) - 1) / ppq)[0] + 1
+                return tr("app.extracted_bar", bar=a) if a == z else tr("app.extracted_bars", first=a, last=z)
         if "notes" in sh:
             return tr("app.pasted_notes")
         if sh.get("text"):
