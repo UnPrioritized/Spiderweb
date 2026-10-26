@@ -44,7 +44,7 @@ from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
-from files.own_tracks import ID_MOST, clean_file_tracks, clean_own_tracks, new_id
+from files.own_tracks import ID_MOST, clean_file_order, clean_file_tracks, clean_own_tracks, new_id
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_inserts, note_tracks, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
@@ -258,6 +258,7 @@ class ProjectFiles:
             **({"own_tracks": self.own_tracks} if self.own_tracks else {}),
             **({"own_next": self.own_next} if self.own_next else {}),
             **({"deleted": self.deleted} if self.deleted else {}),  # (Delete loaded notes' boxes)
+            **({"file_order": self.file_order} if self.file_order else {}),  # (the loaded tracks as dragged)
             # (the loaded MIDI's tracks shapes are drawn into: their name + channel, for opening without it)
             **({"file_tracks": {str(n): self.file_tracks()[n] for n in self.file_into()}} if self.file_into() else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
@@ -431,7 +432,8 @@ class ProjectFiles:
         self.own_tracks = own
         self.file_saved = clean_file_tracks(data.get("file_tracks"))
         self.deleted = extract_groups(data.get("deleted"))
-        nxt = data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
+        self.file_order = clean_file_order(data.get("file_order"))
+        nxt =data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
         self.own_next = new_id(own, nxt if type(nxt) is int and 0 <= nxt < ID_MOST else 0)
         if not quiet:  # (another project: copies from the one before aren't laid on these tracks)
             self.project_token = os.urandom(8).hex()
@@ -844,6 +846,7 @@ class ProjectFiles:
         data.pop("own_next", None)
         data.pop("file_tracks", None)
         data.pop("deleted", None)
+        data.pop("file_order", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
@@ -957,7 +960,8 @@ class ProjectFiles:
     def saved_key(self):
         """What Open project compares with the last save / open: the shapes and the tempo line."""
         return json.dumps([self.shapes, self.tempo if self.tempo != empty_tempo() else None]
-                          + ([self.own_tracks] if self.own_tracks else []) + ([self.deleted] if self.deleted else []))
+                          + ([self.own_tracks] if self.own_tracks else []) + ([self.deleted] if self.deleted else [])
+                          + ([{"file_order": self.file_order}] if self.file_order else []))
 
     def may_replace(self, name):
         """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line, the own
@@ -1088,6 +1092,7 @@ class ProjectFiles:
         mine = ~same_rows(np.column_stack([notes[:, 0], notes[:, 1], lanes]),
                           np.column_stack([hid.h_s, hid.h_e, hid.h_lane]))
         before = notes
+        order = self.file_rows()  # (the file's tracks as the track list shows them: dragged, D4)
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
         heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
@@ -1137,7 +1142,7 @@ class ProjectFiles:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),
                              cancel=lambda: job["cancel"], retime=retime, added=added,
-                             hidden=hid.skip_of)  # (closing Spiderweb: its temp file goes)
+                             hidden=hid.skip_of, order=order)  # (closing Spiderweb: its temp file goes)
             except BaseException as e:  # (said below)
                 job["error"] = e
             job["finished"] = True

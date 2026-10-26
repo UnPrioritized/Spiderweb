@@ -33,13 +33,15 @@ def same_file(a, b):
         return False
 
 
-def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, added=None, hidden=None):
+def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, added=None, hidden=None, order=None):
     """Writes mf (a scanned MidiFile) to dst unchanged. walk = every readable track written event by event (what a
     changed track goes through) instead of copied: the result must be the very same bytes. progress(bytes done,
     bytes in all); cancel() True = Cancelled (dst untouched). retime (Retime): a changed tempo's tracks written
     again (old tempo events out, the new list in, ticks moved by Keep timing); the rest copied as it is. added
     (Added): Spiderweb's own tracks put after the file's last track. hidden(track number) = its events left out
-    (Extract: sorted byte places, midi_scan), written again without them."""
+    (Extract: sorted byte places, midi_scan), written again without them. order: the track numbers in the order
+    they're written (dragged in the track list, D4; None = the file's): each track's place in the file takes the
+    one order puts there, anything between tracks stays where it is."""
     if not mf.scanned:
         raise ValueError("scan() the file first")
     if same_file(mf.path, dst) or same_file(mf.path, dst + ".tmp"):  # (safefile's temp file: writing it would
@@ -53,7 +55,7 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
                                    if added is not None else 0)
     if free < need:
         raise MidiError("midi.no_room", need=-(-need // 2 ** 20), free=free // 2 ** 20)
-    work = _Work(mf, walk, progress, cancel, retime, added, hidden)
+    work = _Work(mf, walk, progress, cancel, retime, added, hidden, order)
     try:
         safefile.write_bytes(dst, work.pieces())
     except OSError as e:
@@ -62,9 +64,14 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
 
 
 class _Work:
-    def __init__(self, mf, walk, progress, cancel, retime=None, added=None, hidden=None):
+    def __init__(self, mf, walk, progress, cancel, retime=None, added=None, hidden=None, order=None):
         self.mf, self.walk, self.progress, self.cancel, self.retime = mf, walk, progress, cancel, retime
         self.added = added
+        tracks = [what[0] for kind, *what in mf.pieces if kind == "track"]
+        by = {t.number: t for t in tracks}
+        if order is not None and (sorted(order) != sorted(by) or list(order) == [t.number for t in tracks]):
+            order = None  # (not a reordering of these tracks / the file's own: copied as it is)
+        self.order = None if order is None else [by[n] for n in order]
         self.hidden = hidden or (lambda n: NO_SKIP)
         self.done, self.written = 0, 0
         self.buf = bytearray(PIECE)
@@ -135,9 +142,11 @@ class _Work:
         rest = hashlib.blake2b(digest_size=16)  # (everything but the tracks' events, as read: = mf.raw_hash)
         added = self.added
         last = max(i for i, (kind, *_) in enumerate(mf.pieces) if kind == "track")
+        if self.order is not None:  # (tracks written in another order: the hash goes in the file's, read first)
+            self.rest_in_order(mf, rest)
         checks = _Checks(min(SCAN_WORKERS, os.cpu_count() or 1))
         try:
-            yield from self._pieces(mf, rest, added, last, checks)
+            yield from self._pieces(mf, _NoHash() if self.order is not None else rest, added, last, checks)
             bad = checks.finish()
         finally:
             checks.stop()
@@ -147,7 +156,19 @@ class _Work:
             raise FileChanged()
         mf.same()
 
+    def rest_in_order(self, mf, rest):
+        """rest (mf.raw_hash's) worked out from the file in its own order: everything but the tracks' events."""
+        with open(mf.path, "rb") as f:
+            for kind, *what in mf.pieces:
+                if kind == "track":
+                    rest.update(self.read_exact(f, what[0].head, 8))
+                    continue
+                start, size = what
+                for at in range(start, start + size, PIECE):
+                    rest.update(self.read_exact(f, at, min(PIECE, start + size - at)))
+
     def _pieces(self, mf, rest, added, last, checks):
+        pos = -1  # (the place among the tracks: the order's track goes there)
         with open(mf.path, "rb") as f:
             for i, (kind, *what) in enumerate(mf.pieces):
                 if i == last + 1 and added is not None:
@@ -160,9 +181,10 @@ class _Work:
                             piece = added.header(piece, len(mf.tracks))
                         yield piece
                     continue
-                t = what[0]
-                if added is not None and t.number in added.before:
-                    yield from self.own(added.before[t.number])
+                pos += 1
+                t = what[0] if self.order is None else self.order[pos]
+                if added is not None and pos in added.before:  # (your tracks placed before the pos-th one)
+                    yield from self.own(added.before[pos])
                 head = self.read_exact(f, t.head, 8)
                 rest.update(head)
                 rt = self.retime
@@ -383,8 +405,8 @@ def vlq(n):
 class Added:
     """Spiderweb's own tracks put after a loaded MIDI's last track (its shapes drawn on top, plan step 10):
     chunks = whole MTrk chunks (bytes, made as they're written), count = how many (before's too), size = about how
-    many bytes; before = {track number: [whole MTrk chunks]} put just before that file track (tracks of yours
-    placed among the file's, group D). The header then says format 1 (a format 0 file has one track) and the new
+    many bytes; before = {k: [whole MTrk chunks]} put just before the k-th file track written (tracks of yours
+    placed among the file's, group D; k = its place in copy_through's order). The header then says format 1 (a format 0 file has one track) and the new
     track count."""
 
     def __init__(self, chunks, count, size=0, before=None):
@@ -395,6 +417,11 @@ class Added:
         b = bytearray(piece)
         b[8:12] = (1).to_bytes(2, "big") + (tracks + self.count).to_bytes(2, "big")
         return bytes(b)
+
+
+class _NoHash:
+    def update(self, data):
+        pass
 
 
 NO_SKIP = np.zeros(0, np.int64)

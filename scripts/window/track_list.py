@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
-from files.own_tracks import (HAND, add_tracks, among_file, file_order, from_rows, full_plan, into_ids, move_rows,
+from files.own_tracks import (HAND, add_tracks, among_file, clean_file_order, file_order, from_rows, full_plan, into_ids, move_rows,
                               new_id, plan)
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
@@ -142,9 +142,9 @@ class TrackList(tk.Canvas):
         """The slots written as tracks, in order (worked out again only when the notes change)."""
         app = self.app
         n, pad, use10, lm, own = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded, app.own_written()
-        waiting = app.waiting_rows()
+        waiting, order = app.waiting_rows(), app.file_order
         made = self._made
-        if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own, waiting):
+        if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own, waiting, order):
             slots = track_slots(n, pad).astype(np.int64)
             size = int(slots.max()) + 1 if len(slots) else 0
             # (a loaded MIDI's tracks first (their numbers -1, -2, ...), the tracks added by hand among them and among
@@ -178,7 +178,7 @@ class TrackList(tk.Canvas):
             # (rows before Spiderweb's own part: a loaded MIDI's tracks and yours among them)
             self.lead = len(rows) - len(plan(slots, among_file(own, len(files))[1] if files else own, self._filled))
             self._all = every
-            self._made = (n, pad, use10, id(lm), own, waiting)
+            self._made = (n, pad, use10, id(lm), own, waiting, order)
 
             def there(s):
                 if s >= HAND:
@@ -736,9 +736,10 @@ class TrackList(tk.Canvas):
         self.show_all()
 
     def moving(self):
-        """The tracks a drag from a name moves: the highlighted one and the ones selected with it (a loaded MIDI's
-        stay: group D)."""
-        return [s for s in self.picked_tracks() if s >= 0]
+        """The tracks a drag from a name moves: the highlighted one and the ones selected with it, a loaded MIDI's
+        too (D4; not while it waits for its MIDI: those rows stay first)."""
+        loaded = self.app.loaded is not None
+        return [s for s in self.picked_tracks() if s >= 0 or loaded]
 
     def move_drag(self, y):
         """Tracks dragged by a name (group C, like Domino's): a line between two rows shows where they land; past
@@ -784,7 +785,9 @@ class TrackList(tk.Canvas):
 
     def move_tracks(self, gap):
         """The dragged tracks (moving) put together above row gap, in their order: one undo step. Spiderweb's
-        automatic tracks among them become yours first (take_tracks). Nothing moves when they're there already."""
+        automatic tracks among them become yours first (take_tracks). A loaded MIDI's tracks moved = app.file_order
+        (the list and the export follow it; the piano roll keeps drawing in the file's order, user 2026-10-26 B).
+        Nothing moves when they're there already."""
         app = self.app
         group = self.moving()
         # (every track, also tinted ones left out of the list)
@@ -797,7 +800,7 @@ class TrackList(tk.Canvas):
         if [r if type(r) is int else HAND + r["id"] for r in rows] == ids:
             return
         from window.app import can_go_in, placed_on
-        autos = [s for s in group if s < HAND]
+        autos = [s for s in group if 0 <= s < HAND]
         r = app.rendered
         owners = []
         if autos:
@@ -833,6 +836,8 @@ class TrackList(tk.Canvas):
         # (a tinted track dragged = yours, like Properties)
         app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if t["id"] in moved else t
                           for t in from_rows(rows, self._slots, app.own_tracks, self._filled)]
+        if app.loaded is not None:
+            app.file_order = clean_file_order([-1 - r for r in rows if type(r) is int and r < 0])
         self.own_changed()
         if taken:
             app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
@@ -1104,7 +1109,7 @@ class TrackList(tk.Canvas):
         """A row's whole name, channel, note count and the shapes whose notes are on it."""
         if row < 0:
             return tr("tracks.all_tip" if row == ALL_ROW else "tracks.conductor_tip")
-        key = (row, self._made and id(self._made[0]), len(self.app.shapes), id(self.app.own_tracks))
+        key = (row, self._made and id(self._made[0]), len(self.app.shapes), id(self.app.own_tracks), id(self._all))
         if self._tip_memo[0] == key:  # (worked out once per row: every mouse move took 60 ms on huge tracks)
             return self._tip_memo[1]
         text = self.row_tip_text(row)

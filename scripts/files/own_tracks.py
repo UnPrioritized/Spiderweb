@@ -98,9 +98,23 @@ def plan(slots, own, filled=None):
     return out + slots[k:]
 
 
-def file_order(lm):
-    """A loaded MIDI's track numbers in the order they're listed and written (none loaded: [])."""
-    return list(range(len(lm.tracks))) if lm is not None else []
+def clean_file_order(raw):
+    """A project's "file_order" as read (the loaded MIDI's track numbers in the order they're listed, D4): a list of
+    every number 0..n-1 once, else None (the file's own order)."""
+    if (not isinstance(raw, list) or not 0 < len(raw) <= COUNT_MOST or any(type(n) is not int for n in raw)
+            or sorted(raw) != list(range(len(raw)))):
+        return None
+    return None if raw == list(range(len(raw))) else list(raw)
+
+
+def file_order(lm, order=None):
+    """A loaded MIDI's track numbers in the order they're listed and written (none loaded: []): order (dragged in the
+    track list, D4) when it fits the file, else the file's own. The piano roll keeps drawing in the file's order (user
+    2026-10-26 picked B)."""
+    if lm is None:
+        return []
+    n = len(lm.tracks)
+    return list(order) if order is not None and len(order) == n else list(range(n))
 
 
 def among_file(own, files):

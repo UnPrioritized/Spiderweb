@@ -605,6 +605,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # Delete loaded notes (group D): [{"boxes", "tracks"}] like an Extract's, the loaded notes in them hidden;
         # saved + undone like the own tracks, replaced (never changed in place) on every change
         self.deleted = []
+        # the loaded MIDI's track numbers in the order the track list shows and the export writes them (dragged, D4;
+        # None = the file's own); saved + undone like the deleted boxes
+        self.file_order = None
         # this project's own mark (a new one at New / Open): Ctrl+C's copies carry it, so a copy laid on tracks keeps
         # them only when pasted back into the same project (put_into_current; hunt 2026-10-26)
         self.project_token = os.urandom(8).hex()
@@ -1885,7 +1888,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def file_rows(self):
         """The loaded MIDI's track numbers in the order they're listed (own_tracks.full_plan's files); none while
         it isn't loaded (waiting_rows)."""
-        return file_order(self.loaded)
+        return file_order(self.loaded, self.file_order)
 
     def waiting_rows(self):
         """Its MIDI not loaded (not found): the file's track numbers shapes are drawn into, listed first as tracks
