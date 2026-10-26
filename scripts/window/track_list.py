@@ -1371,8 +1371,10 @@ class TrackList(tk.Canvas):
                 c = colour_id(int(s))
                 if c not in order:
                     order.append(c)
-            per_slot = {int(s): colour_id(int(s)) for s in np.unique(slots).tolist()}
-            cid = np.array([per_slot[int(s)] for s in slots.tolist()], np.int64)
+            # (each track's colour number once, then looked up for every note at once: a lookup per note was most
+            # of a redraw at 2 M notes, hunt 2026-10-26)
+            uniq, back = np.unique(slots, return_inverse=True)
+            cid = np.array([colour_id(int(s)) for s in uniq.tolist()], np.int64)[back.ravel()]
             for c in order:  # (+1 where a line starts, -1 just past its end, added up: covered where > 0)
                 on = cid == c
                 cover = np.bincount(k[on] * (cw + 1) + xa[on], minlength=span * (cw + 1)).astype(np.int32)

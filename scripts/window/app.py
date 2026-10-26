@@ -172,7 +172,7 @@ def entry_slot(v, own, rule, use10):
 
 
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
-              keep=False, busy=None, own=None):
+              keep=False, busy=None, own=None, stash=None):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count, {Hz bass's number: {voice: slot}} for those with
     their own channel per note (render voice_slots)). all16: the project's "Use channel 10" (every
@@ -185,7 +185,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     its tracks' order; more colours than tracks: the last one's) in every mode, its own overlaps fixed as if alone
     (Single channel; As drawn: kept), other shapes' never (Domino lets two notes share a key in a track); the other
     shapes never step round them (nor take tracks added by hand). Also returns {shape's number: how many colours
-    it has} for those (App.fit_into)."""
+    it has} for those (App.fit_into). stash: a dict given = what lay_again needs kept in it."""
     team_laps = []
     teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
@@ -261,25 +261,54 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
                              busy, together, note_slots)
-    need = {}
-    if inside:
-        parts = [rendered]
-        for i, (n, t) in inside.items():
-            sh = shapes[i]
-            colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None and len(n)
-                      else np.zeros(len(n), np.int64))
-            need[i] = int(colour.max()) + 1 if len(n) else 0
-            ids = into[i]
-            rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
-            on = np.array([entry_slot(v, own, rule, use10 or all16) for v in ids], np.int64)
-            parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i,
-                                  mode != "raw" and not is_sustained(sh) and sh.get("held") is not True))
-        rendered = np.concatenate(parts)
-        slots = max(slots, auto_count(rendered[:, 4]))  # (automatic tracks shapes were pinned on, B11)
+    if stash is not None:  # (App.fit_into's laying again: lay_again)
+        stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
+                     all16=all16, mode=mode)
+    rendered, slots, need = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode)
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
             voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
+    if stash is not None:
+        stash["voice_slots"] = voice_slots
     return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}, need
+
+
+def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
+    """all_notes' last part: the shapes laid on tracks ({number: (notes, colours)}) put on them, after the other
+    shapes' rendered notes: (rendered, slot count, {number: how many colours it has})."""
+    need = {}
+    if not inside:
+        return rendered, slots, need
+    parts = [rendered]
+    for i, (n, t) in inside.items():
+        sh = shapes[i]
+        colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None and len(n)
+                  else np.zeros(len(n), np.int64))
+        need[i] = int(colour.max()) + 1 if len(n) else 0
+        ids = placed_on(sh, own)
+        if not ids:
+            continue
+        rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
+        on = np.array([entry_slot(v, own, rule, use10) for v in ids], np.int64)
+        parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i,
+                              mode != "raw" and not is_sustained(sh) and sh.get("held") is not True))
+    rendered = np.concatenate(parts)
+    return rendered, max(slots, auto_count(rendered[:, 4])), need  # (automatic tracks shapes were pinned on, B11)
+
+
+def lay_again(made, stash, shapes, own):
+    """all_notes' answer again after App.fit_into changed only where laid shapes go (stash: what all_notes kept),
+    without making every shape's notes again (hunt 2026-10-26: a paste into a track made the whole song twice); None
+    when that isn't enough (a laid shape left / joined the others, or channel 10's use changed: all_notes again)."""
+    inside = stash.get("inside")
+    if inside is None or {i for i, sh in enumerate(shapes) if placed_on(sh, own)} != set(inside):
+        return None
+    use10 = stash["base10"] or any(shapes[i].get("slots10") is True for i in inside)
+    if (use10 or stash["all16"]) != made[1]:
+        return None
+    rendered, slots, need = lay_inside(stash["rendered"], stash["slots"], inside, shapes, own, made[1],
+                                       stash["mode"])
+    return made[0], made[1], rendered, slots, made[4], need
 
 
 def in_track(notes, slots, owner, fix):
@@ -1678,17 +1707,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
+        stash = {}
+
         def make():
+            stash.clear()
             return all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
                              self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
                              keep=self.keep_colours.get(),
-                             busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels())
+                             busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels(), stash=stash)
         if made is None:
             made = make()
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
-        if self.fit_into(made):  # (shapes laid on tracks got more colours: laid down the rows, made again)
-            made = make()
+        if self.fit_into(made):  # (shapes laid on tracks got more colours: laid down the rows, laid again)
+            made = lay_again(made, stash, self.shapes, self.own_channels()) or make()
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _ = made
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
@@ -1850,9 +1882,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         tl, r = self.track_list, self.rendered
         own = self.own_channels()
         rows = {}
+        # (the notes sorted by shape once, each shape's read from there: a search through every note per shape froze
+        # Ctrl+C for seconds on big projects, hunt 2026-10-26)
+        by = np.argsort(r[:, 5], kind="stable")
+        owners = r[by, 5]
         for i in idx:
             sh = self.shapes[i]
-            mine = r[r[:, 5] == i]
+            a, b = np.searchsorted(owners, [i, i + 1])
+            mine = r[by[a:b]]
             if not len(mine):
                 continue
             if placed_on(sh, own):  # (laid on tracks: its own list, one per colour)
@@ -1862,6 +1899,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 n = np.asarray(n, np.int64).reshape(-1, 4)
                 colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None
                           else np.zeros(len(n), np.int64))
+                if not len(colour) or colour.max() == 0:  # (one colour: the track most of its notes are on)
+                    vals, counts = np.unique(mine[:, 4], return_counts=True)
+                    at_rows = [tl.row_of_id(int(track_ids(np.array([int(vals[counts.argmax()])]))[0]))]
+                    if None not in at_rows:
+                        rows[i] = at_rows
+                    continue
                 have = mine[:, 0] * 1024 + mine[:, 2]
                 o = np.argsort(have, kind="stable")
                 have, slot = have[o], mine[o, 4]
