@@ -2099,6 +2099,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 elif self.app.sels:
                     self.box_kept = None
                     self.app.select(None)
+                elif self.box_kept:  # (a box that selected no shape: over nothing / only a loaded MIDI's notes)
+                    self.box_kept = None
+                    self.request_redraw()
         elif k in ("return", "kp_enter"):
             if not (self.app.vel.confirm() | self.app.tempo_pane.confirm()):  # Enter = done with a velocity /
                 self.finish_poly()                                             # tempo line
