@@ -1839,16 +1839,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         own, mode = self.own_tracks, self.channel_mode.get()
         if not any(t.get("auto") for t in own):
             return own
-        key = (id(own), mode, self.shapes_gen)
-        got = getattr(self, "_own_written", None)
-        if got is not None and got[0] == key:
-            return got[1]
         chans = self.own_channels()
         if mode == "auto":
             shown = {v for sh in self.shapes for k in ("into", "into_gap") for v in (sh.get(k) or [])
                      if type(v) is int}
         else:
             shown = {p[0] for p in (placed_on(sh, chans) for sh in self.shapes) if p}
+        # (kept by what it shows: a change counter missed shapes laid again within one change, sweep 2026-10-26)
+        key = (id(own), mode, frozenset(shown))
+        got = getattr(self, "_own_written", None)
+        if got is not None and got[0] == key:
+            return got[1]
         out = [t for t in own if not t.get("auto") or t["id"] in shown]
         out = own if len(out) == len(own) else out
         self._own_written = (key, out)
