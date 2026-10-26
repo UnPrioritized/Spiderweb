@@ -241,6 +241,25 @@ def heard_segs(events, end):
     return [s for s in out if s[1] > s[0]]
 
 
+def loaded_part(heard, lay, n, end):
+    """A loaded MIDI's Keep timing piece n (layout's keeps) heard at the file's own tempo [(a, b, us)] up to tick
+    end, but STARTING at the tempo heard just before it when the Conductor line there was changed (user
+    2026-10-26: their 135 before the part, the file's 136 in it, was unintuitive); the file's changes inside it
+    still come. A file change right on its start: the file's."""
+    a, before = lay["keeps"][n][1], lay["keeps"][n][3]
+    prev = [k for k, (_, _, e, _) in enumerate(lay["keeps"]) if e == a and not lay["own_line"][k]]
+    if prev:  # (right after another piece: what that one plays at its end, not its own start tempo)
+        got = loaded_part(heard, lay, prev[0], a)
+        before = got[-1][2] if got else before
+    full = heard_segs(heard, end)
+    segs = [(max(x, a), min(y, end), u) for x, y, u in full if y > a]
+    if a > 0 and segs:
+        x0 = next(x for x, y, _ in full if y > a)
+        if x0 < a and int(before) != segs[0][2]:  # (the file's tempo runs on across the start: was it changed?)
+            segs[0] = (segs[0][0], segs[0][1], int(before))
+    return segs
+
+
 def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None):
     """The Keep timing parts' gaps between anchors: (layout, segs, bad catch-ups, keeps [(a, e, us)], gaps [[n,
     total, file ticks, drawn]], dense = beats of EVERY gap whose two notes are under a tick apart at the part's
@@ -259,20 +278,21 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     # tempo: one whole number, or one per tick from its heard tempo line
     keeps = [(n, a, last_tick if e is None else e) for n, (_, a, e, _) in enumerate(lay["keeps"])]
     own = [lay["own_line"][n] for n, a, e in keeps if e > a]  # (a part with its own heard line: that, always)
+    files = [None if heard is None else loaded_part(heard, lay, n, e) for n, a, e in keeps if e > a]
     keeps = [(a, e, keep_heard(lay, n, a, e)) for n, a, e in keeps if e > a]
     fit_bars = tempo.get("bars", True)
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
     gaps, dense, gave, times = [], [], [], []
-    for (a, e, u), mine in zip(keeps, own):
+    for (a, e, u), mine, part in zip(keeps, own, files):
         inside = ticks[(ticks > a) & (ticks < e)]
         marks = [np.array([a, e], np.int64), inside]
         if fit_bars:
             marks.append(bars[(bars > a) & (bars < e)])
         drawn = _per_tick(segs, a, e)
         sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
-        was = None if heard is None else np.concatenate([[0], np.cumsum(_per_tick(heard_segs(heard, e), a, e))])
+        was = None if part is None else np.concatenate([[0], np.cumsum(_per_tick(part, a, e))])
         if mine:  # (its own heard tempo line: that, also over a loaded MIDI's own tempo, even one steady value:
             # a flat line, e.g. Keep the visual's, was left to the file's tempo, hunt 2026-10-24)
             was = None if isinstance(u, int) else np.concatenate([[0], np.cumsum(u)])
@@ -560,8 +580,7 @@ def heard_tempo(tempo, base, ppq, end=0, heard=None):
     for n, (_, a, e, _) in enumerate(lay["keeps"]):
         e = segs[-1][1] if e is None else e
         if heard is not None and not lay["own_line"][n]:
-            part = [(max(x, a), min(y, e), u) for x, y, u in heard_segs(heard, e) if y > a]
-            segs = _put_all(segs, a, e, part)
+            segs = _put_all(segs, a, e, loaded_part(heard, lay, n, e))
             continue
         segs = _put_all(segs, a, e, lay["keep_segs"](n, a, e))  # (its heard tempo line, if any)
     if len(_heard) > 4:
