@@ -1330,7 +1330,8 @@ class RollDrawing:
         if c is None or c["rendered"] is not app.drawn or c["key"] != key:
             c = self._carry = {"rendered": app.drawn, "key": key, "area": None, "base": None}
             rects = self.note_rects(w, h, only=False)
-            if len(app.drawn) > w * h // 2000 or row_overlap(rects):  # (a picture, as redraw paints them)
+            if len(app.drawn) > w * h // 2000 or app.loaded is not None or row_overlap(rects):  # (a picture, as redraw
+                # paints them: a loaded MIDI's notes are only in the picture, else they went every other frame)
                 c["base"] = self.paint_region(rows, cols, rects, (kb, top, w, h), ring=False)
         if c["base"] is not None:
             if self._shown is c["base"] and self._tiles is not None:
@@ -1380,7 +1381,8 @@ class RollDrawing:
         if c is None or c[0] is not app.drawn or c[1] != key:
             rects = self.note_rects(w, h, draft="without")
             # (more than this: a picture either way, see redraw)
-            base = self.paint_region(rows, cols, rects, region, ring=False) if len(rects[0]) > w * h // 2000 else None
+            base = (self.paint_region(rows, cols, rects, region, ring=False)
+                    if len(rects[0]) > w * h // 2000 or app.loaded is not None else None)
             c = self._draft_base = (app.drawn, key, base)
         if c[2] is None:
             return False
