@@ -1423,13 +1423,16 @@ def shape_ids(shapes, owners):
 
 def moved_to(shapes, owners, slots, ids, slot):
     """The track (slot) now holding most notes of the shapes with these ids (shape_ids): slot itself while it holds
-    as many as any, None when none of them has notes. owners / slots: each note's shape / track."""
+    any of them (user 2026-10-26: a 15-colour shape's highlighted track holding fewer than its others made the
+    highlight jump at every edit), None when none of them has notes. owners / slots: each note's shape / track."""
     known = [i for i, sh in enumerate(shapes) if id(sh) in ids]
     on = slots[np.isin(owners, known)] if known else slots[:0]
     if not len(on):
         return None
+    if (on == slot).any():
+        return slot
     where, counts = np.unique(on, return_counts=True)
-    return slot if (on == slot).sum() >= counts.max() else int(where[counts.argmax()])
+    return int(where[counts.argmax()])
 
 
 def build_onion(app, parent):
