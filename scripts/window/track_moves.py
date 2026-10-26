@@ -72,23 +72,35 @@ def lay_on(app, sh, rows):
         sh["slots10"] = bool(use10) and any(slot_track_channel(-1 - v, use10)[1] == 9 for v in entries if v < 0)
 
 
+
+
 def move_boxed(app, boxes, dt, drow, copying=False):
-    """The notes in the boxes moved dt beats and drow rows (copying: copies moved, the notes stay): one undo step.
-    A loaded MIDI's notes in them are read first (on a thread, the status line says how far) and become an Extract
-    (user 2026-10-26; copying: a plain copy of them, nothing hidden), moved with the rest."""
+    """The notes in the boxes moved dt beats and drow rows (copying: copies moved, the notes stay): one undo step."""
+    return box_job(app, boxes, "copy" if copying else "move", dt, drow)
+
+
+def box_job(app, boxes, kind, dt=0.0, drow=0):
+    """What's in the list's boxes: "move" / "copy" (dragged, Ctrl: copies), "clip" (Ctrl+C), "cut" (Ctrl+X),
+    "delete". A loaded MIDI's notes in them are read first (on a thread, the status line says how far): moved = an
+    Extract (user 2026-10-26), copied = a plain copy (nothing hidden), deleted = Delete loaded notes'. False when
+    nothing was done (the status line says why)."""
     from window.app import can_go_in
     r = app.rendered
     inside = boxed(app, boxes)
     owners = np.unique(r[inside, 5]).tolist()
-    if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
-        app.status.config(text=tr("tracks.box_cant"))
-        return False
+    order = np.argsort(r[:, 5], kind="stable")
+    whose = r[order, 5]
+    for i in owners:  # (laid on tracks / cut into plain notes: not every kind of shape can)
+        a, z = np.searchsorted(whose, [i, i + 1])
+        if not can_go_in(app.shapes[i]) and (kind in ("move", "copy") or not inside[order[a:z]].all()):
+            app.status.config(text=tr("tracks.box_cant"))
+            return False
     files = loaded_boxes(app, boxes)
     if not files:
         if not inside.any():
             app.status.config(text=tr("tracks.box_empty"))
             return False
-        return move_now(app, boxes, dt, drow, copying)
+        return finish_job(app, boxes, kind, dt, drow)
     if getattr(app, "_extracting", None):
         app.status.config(text=tr("extract.busy"))
         return False
@@ -136,20 +148,30 @@ def move_boxed(app, boxes, dt, drow, copying=False):
         if not n and not boxed(app, boxes).any():
             app.status.config(text=tr("tracks.box_empty"))
             return
-        app.roll.end_typing()
-        app.push_undo(name=tr("tracks.box_copy_step" if copying else "tracks.box_move_step"))
-        fresh = []
-        if n:
-            sh = loaded_shape(app, lm, files, got, copying)
-            app.shapes.append(sh)
-            fresh.append(len(app.shapes) - 1)
-            if not copying:
-                sync_extract(app, {box_key(b): g for b, g in zip(files, got)})
-            app.shapes_changed()
-        move_now(app, boxes, dt, drow, copying, pushed=True, fresh=fresh)
-    threading.Thread(target=run, daemon=True, name="move loaded notes").start()
+        finish_job(app, boxes, kind, dt, drow, lm, files, got if n else [])
+    threading.Thread(target=run, daemon=True, name="loaded notes in the track list's box").start()
     poll()
     return True
+
+
+def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=()):
+    """box_job once a loaded MIDI's notes in the boxes are read (got: per box of files; none = no loaded notes)."""
+    if kind in ("clip", "cut"):
+        clip_boxed(app, boxes, loaded_shape(app, lm, files, got, True) if got else None)
+        if kind == "clip":
+            return True
+    if kind in ("cut", "delete"):
+        return delete_boxed(app, boxes, lm, files, got, tr("app.cut" if kind == "cut" else "tracks.box_delete_step"))
+    app.roll.end_typing()
+    app.push_undo(name=tr("tracks.box_copy_step" if kind == "copy" else "tracks.box_move_step"))
+    fresh = []
+    if got:
+        app.shapes.append(loaded_shape(app, lm, files, got, kind == "copy"))
+        fresh.append(len(app.shapes) - 1)
+        if kind == "move":
+            sync_extract(app, {box_key(b): g for b, g in zip(files, got)})
+        app.shapes_changed()
+    return move_now(app, boxes, dt, drow, kind == "copy", fresh)
 
 
 def loaded_boxes(app, boxes):
@@ -216,20 +238,18 @@ def loaded_shape(app, lm, files, got, copying):
     return sh
 
 
-def move_now(app, boxes, dt, drow, copying=False, pushed=False, fresh=()):
-    """move_boxed once the notes are all Spiderweb's (pushed: its undo step made already; fresh: shapes just made of
-    loaded notes: moved, never copied)."""
+def plans_of(app, boxes, drow):
+    """Per shape with notes in the boxes: (its number, wholly inside, which of its notes (by_owner's order), each
+    colour's row + drow). None when a row isn't there (or is a damaged loaded track's)."""
     tl = app.track_list
     r = app.rendered
     rows = tl.note_rows()
     inside = boxed(app, boxes)
-    owners = np.unique(r[inside, 5]).tolist()
     order = np.argsort(r[:, 5], kind="stable")
     whose = r[order, 5]
-    # (each shape: what goes where, worked out on the notes as they are before anything changes)
-    plans, entries = [], [row_entry(app, int(s)) for s in tl.tracks()]
-    n_rows = len(entries)
-    for i in owners:
+    entries = [row_entry(app, int(s)) for s in tl.tracks()]
+    plans = []
+    for i in np.unique(r[inside, 5]).tolist():
         a, z = np.searchsorted(whose, [i, i + 1])
         at = order[a:z]
         m = inside[at]
@@ -241,18 +261,35 @@ def move_now(app, boxes, dt, drow, copying=False, pushed=False, fresh=()):
             if app.in_own_track(app.shapes[i]):  # (laid: its notes' colours = their track's place in its list)
                 place = {s: k for k, s in reversed(list(enumerate(app.laid_slots(app.shapes[i]))))}
                 key = np.array([place.get(int(s), 0) for s in key.tolist()], np.int64)
-            vals, first = np.unique(key, return_index=True)
+            _, first = np.unique(key, return_index=True)
             got = rows[at][m][first].tolist()
-        if any(g is None or not 0 <= g + drow < n_rows or entries[g + drow] is None for g in got):
-            if pushed:  # (the loaded notes made into a shape already: taken back, as before)
-                app.undo()
-                app.redo_stack.clear()
-            app.status.config(text=tr("tracks.box_cant"))
-            return False
+        if any(g is None or not 0 <= g + drow < len(entries) or entries[g + drow] is None for g in got):
+            return None
         plans.append((i, whole, m, [g + drow for g in got]))
-    if not pushed:
-        app.roll.end_typing()
-        app.push_undo(name=tr("tracks.box_copy_step" if copying else "tracks.box_move_step"))
+    return plans
+
+
+def parts_of(app, i, m):
+    """Shape i cut by m (its notes in the box, by_owner's order): (the part inside, the rest) as plain notes
+    (either None when empty); a shape holding loaded notes (an Extract) = both keep holding them."""
+    ex = held_extract(app.shapes[i])
+    piece, rest = (app.plain_copies({i}, moved=lambda rr, keep=keep: rr[keep]).get(i) for keep in (m, ~m))
+    for p in (piece, rest):
+        if ex and p is not None:
+            p["extract"] = copy.deepcopy(ex)
+    return piece, rest
+
+
+def move_now(app, boxes, dt, drow, copying=False, fresh=()):
+    """box_job's move / copy once the notes are all Spiderweb's (its undo step made already; fresh: shapes just made
+    of loaded notes: moved, never copied)."""
+    tl = app.track_list
+    plans = plans_of(app, boxes, drow)
+    if plans is None:  # (the step taken back: as before)
+        app.undo()
+        app.redo_stack.clear()
+        app.status.config(text=tr("tracks.box_cant"))
+        return False
     cut, moved, extra = 0, [], []
     for i, whole, m, to in plans:
         sh = app.shapes[i]
@@ -265,16 +302,12 @@ def move_now(app, boxes, dt, drow, copying=False, pushed=False, fresh=()):
             else:
                 moved.append(i)
         else:
-            ex = held_extract(sh)
-            parts = [app.plain_copies({i}, moved=lambda rr, keep=keep: rr[keep]).get(i) for keep in (m, ~m)]
-            piece, rest = parts
+            piece, rest = parts_of(app, i, m)
             if piece is None:
                 continue
-            if ex and not copying:  # (both parts hold the loaded notes it took)
-                piece["extract"] = copy.deepcopy(ex)
-            if rest is not None and not copying:
-                if ex:
-                    rest["extract"] = ex
+            if copying:
+                drop_extract(piece)
+            elif rest is not None:
                 app.shapes[i] = rest
             extra.append(piece)
             cut += not copying
@@ -301,4 +334,64 @@ def move_now(app, boxes, dt, drow, copying=False, pushed=False, fresh=()):
     tl.request_redraw()
     if cut:
         app.status.config(text=trn("tracks.box_cut", cut, n=cut))
+    return True
+
+
+def clip_boxed(app, boxes, loaded=None):
+    """Ctrl+C in the list: the notes in the boxes copied (shapes wholly inside as they are, parts of others as plain
+    notes, loaded: a plain copy of the loaded MIDI's), each colour's row remembered from the copy's first row, so
+    Ctrl+V lays them out the same from the highlighted track (Domino's paste: App.fit_into's columns)."""
+    tl = app.track_list
+    plans = plans_of(app, boxes, 0) or []
+    pieces, rows = [], []
+    for i, whole, m, to in plans:
+        if whole:
+            piece = copy.deepcopy(app.shapes[i])
+        else:
+            piece = parts_of(app, i, m)[0]
+            if piece is None:
+                continue
+        drop_extract(piece)
+        pieces.append(piece)
+        rows.append(to)
+    if loaded is not None:
+        pieces.append(loaded)
+        rows.append([tl.row_of_id(FILE0 - 1 - v) for v in loaded["into"]])
+    if not pieces:
+        app.status.config(text=tr("tracks.box_empty"))
+        return False
+    first = min(min(r) for r in rows)
+    for piece, r in zip(pieces, rows):
+        for key in ("into_gap", "into_rest", "into_new"):
+            piece.pop(key, None)
+        piece["cols"] = [v - first for v in r]
+    app.put_clipboard(pieces)
+    return True
+
+
+def delete_boxed(app, boxes, lm, files, got, name):
+    """Delete (Ctrl+X's second half) in the list: the notes in the boxes go (shapes wholly inside deleted, the rest
+    of others kept as plain notes, a loaded MIDI's = Delete loaded notes'), one undo step; the boxes go too."""
+    tl = app.track_list
+    plans = plans_of(app, boxes, 0) or []
+    parts = {i: parts_of(app, i, m)[1] for i, whole, m, _ in plans if not whole}
+    gone = {i for i, whole, _, _ in plans if whole} | {i for i, rest in parts.items() if rest is None}
+    if not gone and not parts and not got:
+        app.status.config(text=tr("tracks.box_empty"))
+        return False
+    app.roll.end_typing()
+    app.push_undo(name=name)
+    for i, rest in parts.items():
+        if rest is not None:
+            app.shapes[i] = rest
+    for i in sorted(gone, reverse=True):
+        del app.shapes[i]
+    if got:
+        app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]]], "tracks": b["tracks"]}
+                                     for b in files]
+        sync_extract(app, {box_key(b): g for b, g in zip(files, got)})
+    app.select_many([], None)
+    tl.boxes = []
+    app.shapes_changed()
+    tl.request_redraw()
     return True

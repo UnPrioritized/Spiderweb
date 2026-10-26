@@ -777,6 +777,39 @@ class TrackList(tk.Canvas):
         elif b["pick"]:
             self.select_click(b["row"], b["ctrl"], b["shift"])
 
+    def key_copy(self):
+        """Ctrl+C in the list: the Select boxes' notes (track_moves.clip_boxed)."""
+        from window.track_moves import box_job
+        if self.boxes:
+            box_job(self.app, self.boxes, "clip")
+
+    def key_cut(self):
+        from window.track_moves import box_job
+        if self.boxes:
+            box_job(self.app, self.boxes, "cut")
+
+    def key_delete(self):
+        from window.track_moves import box_job
+        if self.boxes:
+            box_job(self.app, self.boxes, "delete")
+
+    def key_paste(self):
+        """Ctrl+V in the list (Domino's): what was copied, at the play line, laid from the highlighted track down
+        (App.paste); a Select box round what came in."""
+        app = self.app
+        before = len(app.shapes)
+        app.paste()
+        new = list(range(before, len(app.shapes)))
+        r = app.rendered
+        mine = np.isin(r[:, 5], new) if new and len(r) else np.zeros(len(r), bool)
+        rows = self.note_rows()[mine]
+        rows = rows[rows >= 0]
+        if not len(rows):
+            return
+        self.boxes = [{"t0": int(r[mine, 0].min()) / app.ppq, "t1": int(r[mine, 1].max()) / app.ppq,
+                       "rows": (int(rows.min()), int(rows.max()))}]
+        self.request_redraw()
+
     def busy(self):
         """A drag going on in the list (tracks, a box, speakers): its keys wait."""
         return self._move is not None or self._box is not None or self._sweep is not None

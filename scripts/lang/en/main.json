@@ -570,6 +570,7 @@
  "tracks.cant_move": "Spiderweb's tracks hold a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events: they can't be moved yet.",
  "tracks.box_move_step": "Move notes",
  "tracks.box_copy_step": "Copy notes",
+ "tracks.box_delete_step": "Delete notes",
  "tracks.box_cant": "The box holds a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events: move those on the piano roll.",
  "tracks.box_empty": "No notes in the box.",
  "tracks.box_cut": "{n} shapes cut at the box's edge: their parts are plain notes now.",

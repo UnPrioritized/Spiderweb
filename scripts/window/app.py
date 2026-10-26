@@ -688,8 +688,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.bind_all(k, self.hotkey(self.cut_selected, main_only=True))
         # Delete pressed while a toolbar / panel button has the keyboard (Ctrl+A works there): the piano roll's own
         # Delete, with its mid-drag / velocity line rules (the roll handles its own key itself)
-        self.bind_all("<Delete>", lambda e: None if e.widget is self.roll else
-                      self.hotkey(lambda: self.roll.on_key(e), main_only=True, while_held=True)(e))
+        def delete_key(e):
+            if e.widget is self.roll:
+                return None
+            fn = lambda: self.roll.on_key(e)
+            fn.in_list = self.track_list.key_delete  # (the track list showing: its Select box's notes, group E)
+            return self.hotkey(fn, main_only=True, while_held=True)(e)
+        self.bind_all("<Delete>", delete_key)
         for keys, fn in (("Control-n Control-N", self.new_project), ("Control-o Control-O", self.open_project),
                          ("Control-e Control-E", self.generate),  # (the File menu's keys, user 2026-10-22)
                          ("Control-c Control-C", self.copy_selected),
@@ -2614,24 +2619,30 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not whole and self.picked():
             return self.roll.copy_stroke(*self.picked())
         if self.sels:
-            self.clipboard = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
+            shapes = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
             cols = self.copy_columns(sorted(self.sels))  # (each colour's row: pasted the same way, like Domino)
-            for i, sh in zip(sorted(self.sels), self.clipboard):
+            for i, sh in zip(sorted(self.sels), shapes):
                 sh.pop("cols", None)
                 if i in cols:
                     sh["cols"] = cols[i]
-                sh["into_from"] = self.project_token  # (its tracks are this project's: put_into_current)
-            self.clip_kind = "shapes"
-            line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
-            msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
-            if put_text(line):
-                self.remember_clip()
-                if len(line) > LONG_LINE:
-                    msg += tr("app.too_long", chars=len(line))
-            else:
-                self.remember_clip()
-                msg += tr("app.couldn_t_share")
-            self.status.config(text=msg)
+            self.put_clipboard(shapes)
+
+    def put_clipboard(self, shapes):
+        """shapes (copies, their "cols" set) are what Ctrl+V pastes now (also the track list's Ctrl+C)."""
+        for sh in shapes:
+            sh["into_from"] = self.project_token  # (its tracks are this project's: put_into_current)
+        self.clipboard = shapes
+        self.clip_kind = "shapes"
+        line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
+        msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
+        if put_text(line):
+            self.remember_clip()
+            if len(line) > LONG_LINE:
+                msg += tr("app.too_long", chars=len(line))
+        else:
+            self.remember_clip()
+            msg += tr("app.couldn_t_share")
+        self.status.config(text=msg)
 
     def cut_selected(self, whole=False):
         """Ctrl+X: what Ctrl+C and Delete work on (a funnel's highlighted curves, a picked stroke, else the selected
@@ -3123,7 +3134,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                    self.new_project, self.open_project):
                 # (the track list shows: shortcuts never change shapes out of sight; the list's own keys work there,
                 # group E)
-                own = {self.select_all: self.track_list.select_all}.get(fn)
+                tl = self.track_list
+                own = {self.select_all: tl.select_all, self.copy_selected: tl.key_copy, self.cut_selected: tl.key_cut,
+                       self.paste: tl.key_paste}.get(fn) or getattr(fn, "in_list", None)
                 if own is not None and not self.track_list.busy():
                     own()
                 return "break"
