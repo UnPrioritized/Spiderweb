@@ -2344,10 +2344,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     # HOW THE EDGES WORK (user 2026-10-22, after a hunt: pastes bent / flattened / changed the tempo round them):
     # a copy holds EXACTLY what its boxes show: the tempo line cut at each box edge (tempo.split_at), at the
-    # start the tempo leaving it, at the end the tempo arriving. A paste / cut / Delete with a box changes ONLY
-    # the stretch inside: the target is cut at the edges too, the point arriving at the start and the one the
-    # part after the end leaves from stay; a pasted part leaves from / arrives at them (a jump when they differ).
-    # Touching / overlapping boxes count as one.
+    # start the tempo leaving it, at the end the tempo arriving. A paste changes ONLY the stretch inside: the
+    # target is cut at the edges too, the point arriving at the start and the one the part after the end leaves
+    # from stay; a pasted part leaves from / arrives at them (a jump when they differ). Cut / Delete with a box
+    # only take the points out (empty_spans, user 2026-10-26). Touching / overlapping boxes count as one.
 
     def clip_of(self, spans=None, items=None):
         """What Ctrl+C keeps: {"length", "points", "catch", "spans"}, beats from the copy's start. spans: boxes
@@ -2431,22 +2431,27 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.delete_items(list(self.sel), tr("tempo.step_cut"))
 
     def empty_spans(self, spans, name):
-        """Everything inside the boxes goes (one undo step); the tempo round them stays as it was: the line is cut
-        at the edges, the point arriving at each start holds its BPM to the end, where the part after leaves
-        from its own point (Ctrl+X / Delete with a box; cut + paste back = the same tempo)."""
+        """Everything inside the boxes goes (one undo step), like deleting tempo events in Domino (user 2026-10-26:
+        a point came back at the box's end): the tempo arriving at each box's start holds on to the next point
+        after it. A curved part running into the box is cut on its start first, so the line before stays as it
+        was (Ctrl+X / Delete with a box)."""
         tempo, base = self.ed(), self.ed_base()
         spans = [(lo, hi) for lo, hi in joined(spans) if hi - lo > 1e-9]
         if not spans:
             return
         self.app.push_undo(name=name)
-        tempo["catch"][:] = [c for c in tempo["catch"] if not any(lo - 1e-9 <= c[0] <= hi + 1e-9 for lo, hi in spans)]
+        tempo["catch"][:] = [c for c in tempo["catch"] if not any(lo - 1e-9 <= c[0] < hi - 1e-9 for lo, hi in spans)]
         pts = tempo["points"]
-        if pts:
-            self.lay_points(pts, [], spans, base)
-            for lo, _ in spans:  # (the emptied stretch holds the BPM arriving at its start)
-                at = [p for p in pts if abs(p[0] - lo) < 1e-9]
-                if len(at) == 1:
-                    at[0][2:4] = ["hold", ""]
+        for lo, hi in spans:
+            if not any(lo - 1e-9 <= p[0] < hi - 1e-9 for p in pts):
+                continue
+            keep = None
+            before = [p for p in pts if p[0] < lo - 1e-9]
+            if before and before[-1][2] != "hold":  # (a curve arriving at / crossing the start: held from there)
+                on = [p for p in pts if abs(p[0] - lo) < 1e-9]
+                keep = on[0] if on else split_at(pts, lo, base)
+                keep[2:4] = ["hold", ""]
+            pts[:] = [p for p in pts if p is keep or not lo - 1e-9 <= p[0] < hi - 1e-9]
         alive = ids(pts + tempo["catch"])
         self.sel = [s for s in self.sel if id(s) in alive]
         self.app.tempo_changed()
