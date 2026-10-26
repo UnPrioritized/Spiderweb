@@ -793,14 +793,26 @@ class TrackList(tk.Canvas):
         from window.app import can_go_in
         autos = [s for s in group if s < HAND]
         r = app.rendered
-        owners = np.unique(r[np.isin(r[:, 4], autos), 5]).tolist() if autos and len(r) else []
+        owners = []
+        if autos and len(r):
+            # (every automatic track those shapes are on is taken too, and every shape on those, until none is
+            # left: nothing pinned, no track split in two, only the order changes, like Domino's; user 2026-10-26:
+            # pinned colours kept empty tracks between them, a shape sharing a track stayed behind on a copy of it)
+            auto = r[:, 4] < OWN0
+            every = set(autos)
+            while True:
+                owners = np.unique(r[auto & np.isin(r[:, 4], list(every)), 5])
+                more = set(np.unique(r[auto & np.isin(r[:, 5], owners), 4]).tolist())
+                if more <= every:
+                    break
+                every |= more
+            owners = owners.tolist()
+            # (empty ones too, kept only as a gap between channels: they'd go once the tracks around them are
+            # yours; Domino keeps empty tracks)
+            every |= set(self._slots.tolist()) - set(r[auto, 4].tolist())
+            autos = [int(s) for s in self._slots if int(s) in every]
         if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
             return app.status.config(text=tr("tracks.cant_move"))
-        if autos:  # (every automatic track those shapes are on is taken too: nothing left pinned, only the order
-            # changes, like Domino's; user 2026-10-26: pinned colours kept empty tracks between them)
-            on = np.isin(r[:, 5], owners) & (r[:, 4] < OWN0)
-            every = set(autos) | set(np.unique(r[on, 4]).tolist())
-            autos = [int(s) for s in self._slots if int(s) in every]
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.move_step"))
         taken = self.take_tracks(autos, owners) if autos else {}
