@@ -120,6 +120,8 @@ class LoadedPlayer:
         else:  # (one device: 16 channels, every port onto them)
             self.tport, self.ports = np.zeros(len(lm.tracks), np.int64), 1
         self.muted = np.zeros(len(lm.tracks), np.uint8)
+        moved = lm.rechannel  # (Track Properties' channels, per track: -1 = as written)
+        self.chans = None if moved is None else np.asarray(moved, np.int64).copy()
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._queue = deque()  # [ticks, messages, tracks, place reached, skips to add, arrays] windows read, in order
@@ -236,7 +238,20 @@ class LoadedPlayer:
                 if most is not None and n > most:  # (too many for one window: read less)
                     return None
             slots = np.concatenate(more) if more else np.zeros(0, np.int64)
+        self._rechannel(self._sc_m[:n], self._sc_k[:n])
         return self._sc_t[:n], self._sc_m[:n], self._sc_k[:n]
+
+    def _rechannel(self, ms, ks):
+        """Messages of tracks given a new channel in Track Properties (lm.rechannel, as playing started) moved onto
+        it, in place (ks: each one's track number)."""
+        new = self.chans
+        if new is None or not len(ms):
+            return
+        ch = new[ks]
+        hi = ms & 0xF0
+        on = (ch >= 0) & (hi >= 0x80) & (hi < 0xF0)
+        if on.any():
+            ms[on] = (ms[on] & ~0xF) | ch[on].astype(ms.dtype)
 
     def _room(self, n, more):
         """The reading's own arrays hold n events + more (grown, never made anew for each window: fresh memory
@@ -293,6 +308,16 @@ class LoadedPlayer:
         # (notes only counted on the way: what's still open at t0 sounds on past it, each slot's own count; a
         # dense part's millions of notes are never kept, hunt 2026-10-25: 1.9 GB to start inside Shinki's wall)
         ts, ms, ks = self._read(slots, t0, count=opened)
+        self._rechannel(before[1], before[2])
+        if self.chans is not None:  # (notes sounding at t0 counted on their tracks' new channels: offs skipped there)
+            live = np.flatnonzero(opened)
+            ch = self.chans[self.num[live // 2048]]
+            moved = live[ch >= 0]
+            if len(moved):
+                to = moved // 2048 * 2048 + ch[ch >= 0] * 128 + moved % 128
+                got = opened[moved]
+                opened[moved] = 0
+                np.add.at(opened, to, got)
         if len(before[0]):
             ts, ms, ks = (np.concatenate([a, b]) for a, b in zip(before, (ts, ms, ks)))
         np.maximum(opened, 0, out=opened)

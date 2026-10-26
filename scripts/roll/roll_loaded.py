@@ -403,6 +403,14 @@ def write_log_now():
     write_log(*sys.exc_info(), "(drawing a loaded MIDI's notes)")
 
 
+def track_channel(lm, n):
+    """Loaded track n's channel as shown: Track Properties' (lm.rechannel), else its main one."""
+    moved = lm.rechannel
+    if moved is not None and n < len(moved) and moved[n] >= 0:
+        return int(moved[n])
+    return lm.tracks[n].channel or 0
+
+
 def colours(faint=False):
     """[channel, velocity // 4] -> colour number (roll_draw's NOTE_COLORS: channel colour group x 32 + shade;
     faint: a track shown behind the highlighted one, roll_draw.ghost_code's shades)."""
@@ -474,7 +482,7 @@ def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk):
             got = np.logical_or.reduceat(bits[:, :int(np.clip(c1[idx[-1]], 1, t.pic_cols))], a, axis=1)
         else:
             got = bits[:, a]
-        code = COLOURS_16[t.channel or 0] + (GHOST_BASE if n in faint else 0)
+        code = COLOURS_16[track_channel(lm, n)] + (GHOST_BASE if n in faint else 0)
         code = code * 32 + (min(30, SHADE) if n in faint else SHADE)
         part = tab[kk0 - k_lo:kk1 - k_lo + 1]
         sub = part[:, idx]
@@ -512,7 +520,7 @@ def overview_tab(lm, ax, bx, W, k_lo, nk):
             got[:, idx] = np.maximum.reduceat(rows[:, :int(np.clip(b1[idx[-1]], 1, ng))], starts, axis=1)
         else:
             got[:, on] = rows[:, a[on]]
-    tracks = np.array([t.channel if t.channel is not None else 0 for t in lm.tracks], np.int64)
+    tracks = np.array([track_channel(lm, n) for n in range(len(lm.tracks))], np.int64)
     code = COLOURS_16[tracks] * 32 + SHADE
     tab = np.where(out >= 0, code[np.clip(out, 0, len(code) - 1)], -1)
     marks = np.where(out < 0, 0, np.where(edge == 2, 1, np.where(edge == 1, 4, 0))).astype(np.uint8)
@@ -846,7 +854,10 @@ class TrackReader:
         st[:] = 0
         st[C_TICK], st[C_RUN] = t.cp_tick[j], t.cp_run[j]
         colour = self.behind if n in self.faint else self.normal
-        args = (self.ax, self.bx, self.W, self.k_lo, colour, tab, nx, filled, marks, self.sq, self.sa, self.sb, self.sv)
+        moved = lm.rechannel
+        if moved is not None and n < len(moved) and moved[n] >= 0:  # (Track Properties' channel: every note on it)
+            colour = colour[np.full(16, moved[n])]
+        args =(self.ax, self.bx, self.W, self.k_lo, colour, tab, nx, filled, marks, self.sq, self.sa, self.sb, self.sv)
         p = self.cover(b, 0, len(b), start, skip, st, cnt_q, first_q, vel_q, t1, -1, *args)
         close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)
         self.cover(b, p, p, start, skip, st, cnt_q, first_q, vel_q, t1, close, *args)

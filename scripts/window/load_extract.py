@@ -110,6 +110,32 @@ def sync_extract(app, found=None):
         app.start_play(keep=True)
 
 
+def sync_channels(app):
+    """The loaded tracks given a new channel in Track Properties (app.file_props) shown and heard on it: lm.rechannel
+    = each track's new channel (-1: its events' own), the pictures read again (hide_ver), playing started again from
+    where it is (user 2026-10-26: only the export had it)."""
+    lm = app.loaded
+    if lm is None:
+        return
+    new = np.full(len(lm.tracks), -1, np.int64)
+    for n, p in app.file_props.items():
+        if p.get("ch") is not None and 0 <= n < len(new):
+            new[n] = p["ch"]
+    if not (new >= 0).any():
+        new = None
+    old = lm.rechannel
+    if (old is None) == (new is None) and (new is None or np.array_equal(old, new)):
+        return
+    lm.rechannel = new
+    lm.hide_ver += 1
+    app.roll.request_redraw()
+    if hasattr(app, "track_list"):
+        app.track_list.request_redraw()
+    if app.player.running:
+        app.stop_play()
+        app.start_play(keep=True)
+
+
 def read_boxes(app, lm, boxes):
     """sync_extract's boxes not read yet: read on a thread (status line), then sync_extract again."""
     job = getattr(app, "_box_reading", None)

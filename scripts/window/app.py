@@ -100,7 +100,7 @@ from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.tempo_pane import TempoBox
 from window.track_list import TrackList, build_onion, build_strip, sync_onion
-from window.load_extract import sync_extract
+from window.load_extract import sync_channels, sync_extract
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
@@ -1708,6 +1708,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.after_idle(self.sync_mask)
         if self.loaded is not None:  # (Extract: the loaded notes the shapes took stay hidden, the rest come back)
             sync_extract(self)
+            sync_channels(self)  # (Track Properties' channels: shown and heard on them)
         if not now and self.scrubbing and self._merge_time > 0.03:  # (a big merged shape: made when the mouse rests)
             self._merges_owed = True
         else:

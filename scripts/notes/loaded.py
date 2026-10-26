@@ -65,6 +65,7 @@ class LoadedMidi:
         # (sorted byte places); h_* = every hidden note by track, then note-on place; hide_ver = changes count)
         self.boxes, self._taken = (), {}
         self.hide_ver = 0
+        self.rechannel = None  # (Track Properties' new channels: per track, -1 = its own; load_extract.sync_channels)
         self._set_hidden(np.zeros(0, np.int64), *(np.zeros(0, np.int64) for _ in range(6)))
         self._level0 = None
 
