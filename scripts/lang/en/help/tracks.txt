@@ -42,7 +42,7 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 
 ## Selecting notes in the track list
 
-Drag on the tracks' pictures to draw a Select box over some tracks and some time, like in Domino. It holds the notes that start inside it. Its edges snap to the track list's snap (Shift: free), Ctrl+drag adds another box, and a click outside the box or Esc drops it. Drag on the bar numbers instead for a box over every track (the bar numbers turn black there). Ctrl+A makes one from the song's start to the last note's end; the tracks' names don't turn blue, since blue names are for selecting tracks.
+Drag on the tracks' pictures to draw a Select box over some tracks and some time, like in Domino. It holds the notes that start inside it. Its edges snap to the track list's snap (Shift: free), Ctrl+drag adds another box, and a click outside the box or Esc drops it. Drag on the bar numbers instead to select that time on every track: the bar numbers turn black there and the tracks stay as they are. Drag that black part sideways to move its notes in time. Ctrl+A selects from the song's start to the last note's end the same way; the tracks' names don't turn blue, since blue names are for selecting tracks.
 
 • Drag inside the box to move its notes to other tracks and in time. The box's left edge lands on the nearest snap line, and tracks keep their distance from each other. Hold Ctrl to move copies instead.
 • A shape wholly inside the box moves as it is. A shape only partly inside is cut at the box's edge: both parts become plain notes, and the part inside moves.
@@ -61,7 +61,7 @@ When a shape you draw, paste or move lands on another track, the highlight moves
 
 ## Multiple tracks
 
-The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour. All tracks at its top highlights the All tracks row.
+The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour. All tracks at its top highlights the All tracks row. Each track keeps its own picks, like in Domino: highlight another track and you see the tracks picked for that one.
 
 Picked tracks get a dot in their colour in the track list. Show multiple tracks… (above the list, or Pick tracks… in the ▾ list) opens the list of tracks: click a track to pick it or not, drag to do the same to every track you cross. Faint sets how strongly they show (0 % hides them).
 
