@@ -1441,6 +1441,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.place_catch(e)
             return
         live_end = self.live_end_at(e.x, e.y)  # (a line just drawn may end outside the parts)
+        if live_end is None and self.point_at(e.x, e.y) is None and self.handle_at(e.x, e.y) is None \
+                and self.sig_mark_at(e.x, e.y) is not None:  # (a signature's mark: a double-click opens its box,
+            self.drag = None                                    # so the first click draws / moves nothing)
+            return
         if self.box.mode == "heard" and live_end is None:  # (Heard tempo: inside the Keep timing parts; a press
             run = self.run_at(roll.x2t(e.x))                # picks the run)
             if run is None and self.box.tool.get() in DRAWS:  # (drawing may start anywhere: only what lands in
@@ -1898,6 +1902,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if n is not None:  # (the bend handle: straight / the catch-up's own curve again)
             self.drag = None
             return self.unbend(n)
+        mark = self.sig_mark_at(e.x, e.y) if i is None else None
+        if mark is not None:  # (a time / key signature: its box, user 2026-10-26)
+            self.drag = None
+            return self.edit_time_sig(mark[0][0]) if mark[1] == 0 else self.edit_key_sig(mark[0][0], mark[0])
         if i is None and self.box.tool.get() == "select" and getattr(self.app, "tempo_clip", None) \
                 and self.catch_at(e.x) is None:  # (Select double-click on empty space: the copy there, like the
             self.drag = None                     # piano roll's; snapped like it, Shift free; user 2026-10-22)
@@ -2687,6 +2695,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "fleur", "on_point"
         elif handle is not None:
             want, hint = "fleur", "on_handle" if handle[0] == "part" else "on_catch_handle"
+        elif self.sig_mark_at(e.x, e.y) is not None:  # (a time / key signature, user 2026-10-26: wasn't obvious)
+            mark, row = self.sig_mark_at(e.x, e.y)
+            want, hint = "hand2", "on_key_sig" if row else "on_time_sig" if mark[0] > 0 else "on_first_sig"
         elif self.catch_at(e.x) is not None:
             want, hint = "sb_h_double_arrow", "on_catch"
         elif self.pin_at(e.x) is not None:  # (a thick line: what it is, hunt 2026-10-24)

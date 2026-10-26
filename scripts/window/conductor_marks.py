@@ -16,6 +16,7 @@ from window import look
 MARK_LEN = 10  # px (x the window's scale): a mark's line down from the pane's top edge
 ROW = 12  # px (x scale) between the time signature row and the key signature row
 REACH = 5  # px (x scale) a right-click may be off a mark's line
+REACH_DOWN = 6  # px (x scale) the key row's marks reach below their line
 
 
 def _dialog(parent, title, body_fn):
@@ -132,14 +133,18 @@ class ConductorMarks:
             self.create_text(x + 3 * s, y0 + MARK_LEN * s / 2, text=text, anchor="w", fill=look.SIG_MARK, font=font)
 
     def sig_mark_at(self, x, y):
-        """The signature mark (its list, row) a right-click at x, y is on, or None."""
+        """The signature mark (its list, row) the mouse at x, y is on, or None: its line or its text, the key row
+        reaching a little below its text (user 2026-10-26: easier to hit)."""
         s, roll = self.scale, self.app.roll
-        row = int(y // (ROW * s))
-        if row > 1 or y > row * ROW * s + MARK_LEN * s + 2 * s:
+        row = min(1, int(y // (ROW * s)))  # (the key row reaches on below its own ROW)
+        if y < 0 or y > row * ROW * s + MARK_LEN * s + (2 if row == 0 else REACH_DOWN) * s:
             return None
-        got = [(abs(roll.t2x(b) - x), m, r) for b, r, _, m in self.sig_marks() if r == row
-               and -REACH * s <= x - roll.t2x(b) <= 40 * s]  # (on its line or its text)
-        return min(got, key=lambda g: g[0])[1:] if got else None
+        font = look.font(7, "bold")
+        got = [(mx, m, r) for mx, r, text, m in ((roll.t2x(b), r, text, m) for b, r, text, m in
+                                                  self.sig_marks() if r == row)
+               if -REACH * s <= x - mx <= 300 * s  # (its text measured only near it: every mouse move asks)
+               and x - mx <= 5 * s + self.tk.call("font", "measure", font, text)]
+        return max(got, key=lambda g: g[0])[1:] if got else None  # (the last one starting before the mouse)
 
     def sig_menu_items(self, menu, e):
         """The right-click menu's signature items: a mark's Change / Remove, else Add ... here."""

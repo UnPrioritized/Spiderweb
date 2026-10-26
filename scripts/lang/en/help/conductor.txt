@@ -100,7 +100,7 @@ A MIDI file only has whole ticks, so Keep timing has limits. The pane marks each
 
 ## Time and key signatures
 
-Right-click in the pane → Add time signature here… or Add key signature here…. Each starts on the bar line at or before the click and shows as a short line from the pane's top edge ("3/4", "Ab Maj"). Right-click one to change or remove it (the first time signature can only be changed). The ruler shows them next to the bar number: "5 (3/4, Ab Maj)".
+Right-click in the pane → Add time signature here… or Add key signature here…. Each starts on the bar line at or before the click and shows as a short line from the pane's top edge ("3/4", "Ab Maj"). Double-click one to change it, or right-click it to change or remove it (the first time signature can only be changed). The ruler shows them next to the bar number: "5 (3/4, Ab Maj)".
 [clip:conductor-signatures]
 
 Bar lines, bar numbers and the Bar snap follow the time signatures everywhere, the Hz bass window too. A time signature always starts a new bar: one left in the middle of a bar moves back to that bar's start.
