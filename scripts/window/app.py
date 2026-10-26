@@ -933,17 +933,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.roll.focus_set()
             r = self.roll
             x = r.t2x(self.playhead) if r.sx else None
-            if (self.playhead != getattr(self, "_list_playhead", self.playhead) and x is not None
-                    and (x < r.kb_w or x > r.winfo_width() - 6 * r.scale)):  # (moved in the list, off screen here:
-                r.view_t = self.playhead  # the piano roll shows it, user 2026-10-24)
+            if x is not None and (x < r.kb_w or x > r.winfo_width() - 6 * r.scale):  # (off screen here: the piano
+                r.view_t = self.playhead  # roll shows it, user 2026-10-24; either way, 10-26)
                 r.clamp_view()
             r.request_redraw()
         else:
-            self._list_playhead = self.playhead
             self.tips.show("tracks")
             self.panes.pack_forget()
             self.track_box.pack(**place)
             self.snap_picker.use(self.track_list.snap, tr("tracks.snap_tip"))
+            self.track_list.see_now()  # (the play line / highlighted row off screen there: shown, user 2026-10-26)
             self.track_list.focus_set()
             self.track_list.request_redraw()
 
@@ -1185,6 +1184,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         ListTip(self.listbox)
         # hand the keys back to the roll, so Space plays instead of picking a list row
         self.listbox.bind("<ButtonRelease-1>", lambda e: self.roll.focus_set(), add="+")
+        self.listbox.bind("<Double-Button-1>", self.on_list_double)
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
         ttk.Button(btns, text=tr("app.duplicate"), command=self.duplicate).pack(side="left")
@@ -2391,6 +2391,45 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             primary = (rows[max(added)][0] if added else self.sel if self.sel in picked else
                        max(picked, default=None))
             self.select_many(picked, primary)
+
+    def on_list_double(self, e):
+        """Double-click a Shapes list row: the piano roll jumps to that shape (user 2026-10-26; the track list showing
+        = back to the piano roll first)."""
+        rows = self.shape_rows()
+        r = self.listbox.nearest(e.y)
+        if not 0 <= r < len(rows):
+            return
+        if self.tracks_shown():
+            self.toggle_tracks()
+        self.show_shapes(rows[r])
+
+    def show_shapes(self, idxs):
+        """The piano roll's view moved (zoom kept) so shapes idxs show: their drawing and notes in the middle, or
+        their start at the left edge / their top key at the top when they don't fit."""
+        r = self.roll
+        if r.sx is None or r.sy is None:
+            return
+        bs, ps = [], []
+        for i in idxs:
+            if i < len(self.shapes):
+                for b, p in cached_path(self.shapes[i]):
+                    bs.append(b)
+                    ps.append(p)
+        notes = self.rendered
+        if len(notes):
+            mine = notes[np.isin(notes[:, 5], list(idxs))]
+            if len(mine):
+                bs += [mine[:, 0].min() / self.ppq, mine[:, 1].max() / self.ppq]
+                ps += [mine[:, 2].min(), mine[:, 2].max()]
+        if not bs:
+            return
+        lo, hi, k0, k1 = float(min(bs)), float(max(bs)), float(min(ps)), float(max(ps))
+        wide = (r.winfo_width() - r.kb_w) / r.sx
+        tall = (r.winfo_height() - r.ruler_h) / r.sy
+        r.view_t = (lo + hi - wide) / 2 if hi - lo <= wide * 0.9 else lo - wide * 0.05
+        r.view_top = (k0 + k1 + tall) / 2 if k1 - k0 + 1 <= tall else k1 + 1
+        r.clamp_view()
+        r.request_redraw()
 
     def delete_selected(self, only=None, name=None):
         """Delete the selected shapes, or `only` these (Delete while dragging them): the rest stay selected."""

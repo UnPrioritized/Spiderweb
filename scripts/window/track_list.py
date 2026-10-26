@@ -1760,6 +1760,22 @@ class TrackList(tk.Canvas):
                 self.create_arc(x + 3 * s - r, cy - r, x + 3 * s + r, cy + r, start=-40, extent=80, style="arc",
                                 outline=colour, width=max(1, round(s)))
 
+    def see_now(self):
+        """Tab into the list (user 2026-10-26): the play line out of view = the view goes to it (as a page turn
+        does), the highlighted track's row out of view = scrolled to the middle."""
+        if self.sx is None:
+            return
+        x = self.t2x(self.app.playhead)
+        if x < self.name_w or x > self.winfo_width() - 6 * self.scale:
+            self.view_t = self.app.playhead
+        row = self.row_of_id(self.current) if self.current is not None else None
+        if row is not None:
+            h = self.winfo_height() - self.area()[1]
+            y = row * self.row_h - self.top
+            if y < 0 or y + self.row_h > h:
+                self.top = round(row * self.row_h - (h - self.row_h) / 2)
+        self.clamp()
+
     def show_playhead(self, start=False):
         """The play line moved: while playing, the page turns near the right edge (like the piano roll) or back to
         a line left of the view, never while the user scrolls / zooms (PlayFollow, user 2026-10-23: it fought the
