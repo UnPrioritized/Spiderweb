@@ -564,17 +564,19 @@ class HzGates:
         self.redraw()
         self.app.schedule_autosave()
 
-    def on_fx(self):
-        """The Effects button: shows / hides the effects pane (off to start with, user)."""
+    def on_fx(self, save=True):
+        """The Effects button: shows / hides the effects pane (off to start with, user). save False: a project opened
+        (only the pane follows its button)."""
         if self.app.hz_fx.get():
             self.fx.canvas.pack(side="bottom", fill="x", before=self.notes_box)
         else:
             self.fx.drag = None
             self.fx.sel = set()  # (hidden points stay out of copy / cut / Delete)
             self.fx.canvas.pack_forget()
-        self.app.schedule_autosave()
+        if save:
+            self.app.schedule_autosave()
 
-    def on_loud(self):
+    def on_loud(self, save=True):
         """The Loudness button: shows / hides the loudness pane (off to start with, user), under the effects pane."""
         pane = self.loudness
         if self.app.hz_loud.get():
@@ -584,7 +586,8 @@ class HzGates:
         else:
             pane.edit = None
             pane.box.pack_forget()
-        self.app.schedule_autosave()
+        if save:
+            self.app.schedule_autosave()
 
     def commit_fx(self, before):
         """The effects' lines changed: one undo step. before = FxPane.state() to go back to if it's

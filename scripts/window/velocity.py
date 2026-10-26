@@ -375,6 +375,7 @@ class VelocityPane(tk.Canvas):
             done[i] = (sh, env, base, (lo, hi), fx)
         if cv is not None:
             cv["done"] = done
+            app.changed_in_step()  # (the line's own step: after a save, unsaved now)
         app.shapes_changed()
         app.sync_panel()
         return done
@@ -589,6 +590,9 @@ class VelocityPane(tk.Canvas):
         first, end = roll.visible_range(t_lo, t_hi)
         notes = roll.sorted_notes()[first:end]
         vel = notes[:, 3].copy()
+        ghost = vel == -1  # (hidden by a mask: drawn at their real velocity, they still play, hunt 10-27)
+        if ghost.any():
+            vel[ghost] = self.ghost_vels(notes[ghost])
         if preview is not None:  # velocities being drawn right now
             drawn = preview[first:end]
             vel = np.where(drawn >= 0, drawn, vel)
@@ -625,6 +629,27 @@ class VelocityPane(tk.Canvas):
         caps = np.unique(np.column_stack([y[long], np.maximum(x0[long], 0), np.minimum(x1[long], iw - 1),
                                           layer[long]]), axis=0)
         return tops, set(map(tuple, caps.tolist()))
+
+    def ghost_vels(self, notes):
+        """The real velocity of notes a mask hides (shown as velocity -1 rows), found by start, key and shape in the
+        notes that play; one not found = -2 (left out)."""
+        app = self.app
+        ren, covered = app.rendered, app.mask_covered
+        cache = getattr(self, "_ghosts", None)
+        if cache is None or cache[0] is not ren or cache[1] is not covered:
+            n = len(app.shapes) + 1
+            g = ren[np.isin(ren[:, 5], list(covered))] if covered else ren[:0]
+            if len(g) and (g[:, 0].min() < 0 or g[:, 0].max() >= (1 << 52) // (256 * n)):
+                g = g[:0]  # (ticks too far out for one number: left out)
+            keys = (g[:, 0] * 256 + g[:, 2]) * n + g[:, 5]
+            order = np.argsort(keys, kind="stable")
+            cache = self._ghosts = (ren, covered, n, keys[order], g[order, 3])
+        n, keys, vels = cache[2:]
+        if not len(keys):
+            return np.full(len(notes), -2, np.int64)
+        q = (notes[:, 0] * 256 + notes[:, 2]) * n + notes[:, 5]
+        i = np.minimum(np.searchsorted(keys, q), len(keys) - 1)
+        return np.where(keys[i] == q, vels[i], -2)
 
     def loaded_starts(self, iw):
         """A loaded MIDI's note starts in the view as the piano roll's exact picture has them (Load MIDI step 13:

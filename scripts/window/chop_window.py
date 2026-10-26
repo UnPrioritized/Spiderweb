@@ -471,19 +471,31 @@ class ChopWindow(ToolWindow):
                 entry.config(style="TEntry")
         if self.snap.get() != (c["snap"] or TYPED):  # (no snap kept: shown as typed ticks)
             self.snap.set(c["snap"] or TYPED)
+        self.show_count()
 
     def preview(self, now=True):
         super().preview(now)
         if self.late or not self.winfo_exists():
             return
+        self.show_count()
+
+    def show_count(self):
+        """The "Notes: before → after" line for the shapes and page shown now (worked out each time the window
+        shows its settings: another shape / page kept the old numbers, hunt 10-27); a "+" with no page yet: empty."""
+        if not hasattr(self, "info") or getattr(self, "late", None):
+            return
         app = self.app
+        if not self.targets or self.at is None and self.cfg["pieces"]:  # (no pieces: its warning still shows)
+            if self.info.cget("text"):
+                self.info.config(text="")
+            return
         shapes = [app.shapes[i] for i in self.targets if i < len(app.shapes)]
         after = sum(len(app.notes_of(sh)) for sh in shapes)
 
         def before_page(i):  # (the shape's notes as this page gets them)
             sh = app.shapes[i]
             fx = sh.get("fx") or []
-            k = len(fx) if self.at is None else self.at[i]
+            k = len(fx) if self.at is None else self.at.get(i, len(fx))
             return dict(sh, fx=fx[:k]) if k else {a: b for a, b in sh.items() if a != "fx"}
         plain = [app.notes_of(before_page(i)) for i in self.targets if i < len(app.shapes)]
         before = sum(len(n) for n in plain)

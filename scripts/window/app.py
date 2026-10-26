@@ -1086,6 +1086,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.ppq_box = ttk.Combobox(row, textvariable=self.pvar[key], values=PPQS, width=7, height=12)
                 self.ppq_box.pack(side="left")
                 self.ppq_tip = Tooltip(self.ppq_box, "")  # (a loaded MIDI's PPQ can't change: sync_ppq_lock)
+                self.hz_ppq = None  # (box, tip, its own tip): the Hz bass Settings… PPQ box while open
                 # a typed PPQ counts on Enter / leaving the box / a pick from the list (user: each key remade the
                 # notes and rounded the tool windows' ticks at every half-typed PPQ); a wrong one: back to the last good
                 for seq in ("<Return>", "<FocusOut>", "<<ComboboxSelected>>"):
@@ -1181,7 +1182,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         Tooltip(self.rounds_tick, tr("app.new_rounds_tip"))
         # (user 2026-10-18: shown only while it's ticked; off = only tracks with notes are written, channels kept)
         self.pad_tick = ttk.Checkbutton(ch, text=tr("app.pad_rounds"), variable=self.pad_rounds,
-                                        command=self.update_status)
+                                        command=self.on_pad_rounds)
         Tooltip(self.pad_tick, tr("app.pad_rounds_tip"))
         self.sync_channels_fold()
         r += 1
@@ -1340,9 +1341,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def sync_ppq_lock(self):
         """A project with a MIDI file keeps the file's PPQ (its notes are in its ticks): the box greyed, its tip says why."""
         locked = self.midi_link is not None
-        if locked != self.ppq_box.instate(["disabled"]):
-            self.ppq_box.state(["disabled" if locked else "!disabled"])
-        self.ppq_tip.text = tr("load.ppq_locked") if locked else ""
+        for box, tip, free in ((self.ppq_box, self.ppq_tip, ""), self.hz_ppq or (None, None, "")):
+            if box is None or not box.winfo_exists():
+                continue  # (the Hz bass window's Settings… box too: the same PPQ, hunt 10-27)
+            if locked != box.instate(["disabled"]):
+                box.state(["disabled" if locked else "!disabled"])
+            tip.text = tr("load.ppq_locked") if locked else free
+
+    def typing_ppq(self, ppq_done=False):
+        """A PPQ still being typed in the Project box or the Hz bass Settings… one (taken on Enter / leaving it)."""
+        hz = self.hz_ppq[0] if self.hz_ppq and self.hz_ppq[0].winfo_exists() else None
+        return not ppq_done and (self.typing_in(self.ppq_box) or hz is not None and self.typing_in(hz))
 
     def sync_panel(self):
         sh = self.selected()
@@ -1497,7 +1506,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def hz_tuned_before_ppq(self, typed, ppq_done):
         """The Hz bass shapes in tune with the tempo under them, when the PPQ box now holds another PPQ (they're made
         for the new one's tempo steps too: a PPQ change keeps the tone by itself)."""
-        if typed and not ppq_done and self.typing_in(self.ppq_box):
+        if typed and self.typing_ppq(ppq_done):
             return []
         try:
             if calc_int(self.pvar["ppq"].get(), 1, 65535) == self.ppq:
@@ -1515,7 +1524,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         before = (self.ppq, self.keys)
         tuned = self.hz_tuned_before_ppq(typed, ppq_done)
         for key, lo, hi in (("ppq", 1, 65535),):
-            if key == "ppq" and typed and not ppq_done and self.typing_in(self.ppq_box):
+            if key == "ppq" and typed and self.typing_ppq(ppq_done):
                 continue  # (still being typed: taken on Enter / leaving it)
             try:
                 setattr(self, key, calc_int(self.pvar[key].get(), lo, hi))
@@ -1567,8 +1576,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                   self.sustain_window, self.subtract_window, self.merge_window, self.fill_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
-        if self.image_window and self.keys != before[1]:
-            self.image_window.show_settings()  # (its Keys inside the new key range)
+        if self.image_window and (self.ppq, self.keys) != before:
+            self.image_window.show_settings()  # (its Keys inside the new key range; One step in the new ticks)
+        if self.ppq != before[0] and getattr(self, "tempo_box", None) is not None:
+            self.tempo_box.sync()  # (the catch-up result is worked out in ticks, hunt 10-27)
 
     def all16(self):
         """True while Multi channel uses channel 10 too ("Use channel 10", shown only under Multi channel)."""
@@ -1579,7 +1590,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not hasattr(self, "channels_short"):  # (a trace before the panel is made)
             return
         folded = self.channels_folded.get()
-        self.channels_head.config(text="▶" if folded else "▼")
+        if self.channels_head.cget("text") != ("▶" if folded else "▼"):  # (every shapes_changed: only changes)
+            self.channels_head.config(text="▶" if folded else "▼")
         mode = self.channel_mode.get()
         words = [tr("app.ch_short_" + mode)]
         if mode == "auto":
@@ -1592,7 +1604,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 words.append(tr("app.ch_short_rounds"))
             if self.blocks_apart() and self.pad_rounds.get():
                 words.append(tr("app.ch_short_pad"))
-        self.channels_short.config(text=", ".join(words))
+        if self.channels_short.cget("text") != ", ".join(words):
+            self.channels_short.config(text=", ".join(words))
         grid_shown(self.channels_rows, not folded)
         grid_shown(self.channels_short, folded)
 
@@ -1810,6 +1823,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.pad_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), after=self.rounds_tick)
             else:
                 self.pad_tick.pack_forget()
+        self.sync_channels_fold()  # (", empty tracks" comes and goes with Channel per strip, hunt 10-27)
         made = self.notes_made(any_spot=now == "follow")
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
@@ -2369,8 +2383,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.show_colour_limit()
         if self.hz_window:
             self.hz_window.show_clash(self.hz_window.target())  # (Multi channel only)
+        self.path_follow()  # (its "needs Multi channel" note)
         if self.channel_mode.get() == "auto":
             self.tips.show("channels", wait=True)
+
+    def on_pad_rounds(self):
+        """"Keep empty tracks" ticked / unticked: the export's tracks change (the title's *, the autosave, the track
+        list's rows; hunt 10-27)."""
+        self.update_status()
+        self.schedule_autosave()
+        tl = getattr(self, "track_list", None)
+        if tl is not None and tl.winfo_ismapped():
+            tl._sheet = tl._all_sheet = None
+            tl.request_redraw()
 
     def show_colour_limit(self):
         """The open drawer and Image window show the colours allowed now (16 with "Use channel 10")."""
@@ -3309,9 +3334,33 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.after_cancel(self._tempo_play_job)
             self._tempo_play_job = self.after(80 if self.tempo_pane.drag else 0, self.play_tempo)
 
+    def let_go(self):
+        """The mouse let go of a drag on the piano roll or in the Conductor pane: what the side panel and the open
+        windows say about the shapes follows (Hz bass "Tempo changed", the path window's B; hunt 10-27)."""
+        if any(sh.get("hz") for sh in self.shapes):
+            self.sync_hz_panels()
+            if self.hz_window:
+                self.hz_window.show_stale()
+        self.path_follow()
+
+    def path_follow(self):
+        """The open Copy along a path window's boxes and notes as the shapes / bars / Channels are now (not the box
+        being typed in)."""
+        w = self.path_window
+        if not w or not w.winfo_exists():
+            return
+        try:
+            typing = self.focus_get() in w.entries.values()
+        except (KeyError, tk.TclError):
+            typing = True
+        if not typing:
+            w.show()
+
     def meter_changed(self):
         """A time / key signature added, changed or removed: the bar lines everywhere follow."""
         self.tempo_changed()
+        self.sync_title()  # (an Extract's heading names its bars, hunt 10-27)
+        self.path_follow()
         self.roll.request_redraw()
         self.vel.request_redraw()
         if self.hz_window and hasattr(self.hz_window, "redraw"):

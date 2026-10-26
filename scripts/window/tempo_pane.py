@@ -344,8 +344,10 @@ class TempoBox(ttk.Frame):
         rows = {"point": [self.point_row], "part": [self.part_row]}.get(kind, [])
         j = pane.bar_catch()  # (the catch-up row: picked, in the Select box beside the points, or at the play line)
         formula = False
+        mine = self.focus_get() if not getattr(self, "_rewrite", False) else None  # (the box being typed in)
+        self._rewrite = False
         if kind == "point":
-            if self.focus_get() is not self.bpm_box:
+            if mine is not self.bpm_box:
                 self.sync_bpm([tempo["points"][i] for i in pick[1]])
             many = self.mode == "visual" and len(pick[1]) > 1
             if many != bool(self.keeps_box.winfo_manager()):
@@ -381,7 +383,7 @@ class TempoBox(ttk.Frame):
         if not formula and kind is None and self.tool.get() == "formula":  # (the Formula pencil's formula)
             formula, text, tip = True, self.draw_formula, tr("tempo.formula_tip")
         if formula:
-            if self.focus_get() is not self.formula_box:
+            if mine is not self.formula_box:
                 self.formula_var.set(text)
             self.formula_tip.set_text(tip)
             rows.append(self.formula_box)
@@ -389,7 +391,7 @@ class TempoBox(ttk.Frame):
             res, bad = pane.catch_result(j)
             self.result.config(text=res, foreground=look.ERROR if bad else look.TEMPO_CATCH)
             rows.append(self.result)
-        if self.focus_get() is not self.every_box:
+        if mine is not self.every_box:
             self.every_var.set(str(self.app.tempo.get("every", EVERY)))
         self.bars_var.set(self.app.tempo.get("bars", True))
         can = bool(keep_runs(self.app.tempo))  # (Heard tempo: only while some part keeps timing)
@@ -406,6 +408,13 @@ class TempoBox(ttk.Frame):
             for w in rows:
                 w.pack(side="left", padx=(0, 8), before=self.hint)
             self._shown = shown
+
+    def forget_typing(self):
+        """Undo / redo / a History jump: the boxes show the line as it is now, even the one being typed in, and
+        what was typed there is dropped (leaving the box changes nothing; hunt 10-27: it came back as a new step)."""
+        self._typed_for = None
+        self._committed = False
+        self._rewrite = True
 
     def fit_tall(self):
         """The second row as tall as its tallest box / button always (user 2026-10-24: the Graph… button is taller
@@ -1503,9 +1512,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if self.in_band(e.x) and not e.state & CTRL:
                 return self.start_move(e, None, pushed=False)  # (inside a box: all they picked, in time)
             ctrl = bool(e.state & CTRL)  # (Ctrl: another box, added to the ones kept, user 2026-10-22)
+            was = (list(self.bands), self.part)  # (Ctrl+Z while the box is dragged: back to these, end_drag)
             self.part, more, self.bands = None, self.bands if ctrl else [], []
             self.drag = {"kind": "box", "x": e.x, "x1": e.x, "b0": beat, "shift0": bool(e.state & SHIFT),
-                         "span": None, "before": list(self.sel), "ctrl": ctrl, "more": more}
+                         "span": None, "before": list(self.sel), "ctrl": ctrl, "more": more, "was": was}
             self.request_redraw()
             return
         self.bands = []  # (Line / Formula: a click = a point, a drag = a part; let go: draw_part)
@@ -1872,6 +1882,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
                     self.bands = []
                     self.set_sel([d["grab"]])
                 self.move_line(e)
+        if d["kind"] not in ("box", "view", "catch1"):
+            self.app.let_go()  # (Hz bass "Tempo changed" in the side panel / Hz window, hunt 10-27)
 
     def move_line(self, e):
         """A Select click: the play line to the click (snapped like the piano roll's); playing: it stays (user
@@ -1888,6 +1900,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         only = bool(self.placing) or bool(d) and d["kind"] in ("box", "draw", "catch1", "view") or \
             bool(d) and d.get("pushed") is False
         self.cancel_placing()
+        if d and d["kind"] == "box":  # (the picks and boxes from before the press, hunt 10-27)
+            self.sel = list(d["before"])
+            self.bands, self.part = d["was"]
+            self.box.sync()
         if d:
             self.request_redraw()
         return only
@@ -2109,6 +2125,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         (b0, v0), (b1, v1) = ends
         lv["first"] = self.lay_part(b0, v0, b1, v1, old[2], old[3], like=old)
         self.live_seen()
+        self.app.changed_in_step()  # (the line's own step: after a save, unsaved now, hunt 10-27)
 
     def dense_key(self):
         app = self.app

@@ -1495,8 +1495,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         app = self.app
         if app.custom_shape.lower() == old.lower():  # (the Custom shape tool's shape: renamed there too)
             app.custom_shape = new
-            app.sync_custom()
             app.schedule_autosave()
+        app.sync_custom()  # (a placed shape's "not in the library" mark, hunt 10-27)
         self.refresh_list(select=new)
 
     def keep_changes(self):
@@ -1566,9 +1566,9 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         app = self.app
         if app.custom_shape.lower() == name.lower() and not app.custom_template(app.custom_shape):
             app.custom_shape = "Circle"  # (the Custom shape tool used it: back to Circle, user)
-            app.sync_custom()
             app.schedule_autosave()
             app.status.config(text=tr("drawer.deleted_in_use", name=name))
+        app.sync_custom()  # (a placed shape's "not in the library" mark, hunt 10-27)
         self.refresh_list()
 
     def save(self):
@@ -1600,6 +1600,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         self.dirty = False
         self.refresh_list(select=name)
         self.redraw()
+        self.app.sync_custom()  # (a placed shape's "not in the library" mark goes, hunt 10-27)
         return name
 
     def export(self):

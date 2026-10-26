@@ -951,6 +951,14 @@ class ProjectFiles:
         top = self.undo_stack[-1] if getattr(self, "undo_stack", None) else None
         return mark is None or mark[0] is not top or mark[1] != self.file_key()
 
+    def changed_in_step(self):
+        """A change put into the newest undo step (a live line's end square dragged, its Loops changed): when that
+        step is the saved one, the project is unsaved now (hunt 10-27: no * came back)."""
+        mark = self._saved_mark
+        if mark is not None and self.undo_stack and mark[0] is self.undo_stack[-1]:
+            self._saved_mark = None
+        self.sync_window_title()
+
     def mark_saved(self):
         self._saved_mark = (self.undo_stack[-1] if self.undo_stack else None, self.file_key())
         self.sync_window_title()

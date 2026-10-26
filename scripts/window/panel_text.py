@@ -154,6 +154,8 @@ class TextPanel:
         return self.text_defaults, self.text_defaults["size"]
 
     def sync_text(self):
+        if self.font_dialog and self.font_dialog.winfo_exists() and self.font_target() != self._font_for:
+            self.font_dialog.destroy()
         typing = self.roll.typing
         tool = self.tool.get()
         shapes = self.text_shapes()
@@ -265,3 +267,11 @@ class TextPanel:
         tx, _ = self.text_current()
         self.font_dialog = FontDialog(self, tx["font"], tx.get("text", ""),
                                       lambda f: self.set_text_setting({"font": f}))
+        self._font_for = self.font_target()
+
+    def font_target(self):
+        """Which texts an open Font window is for (another text picked = it closes, hunt 10-27: it kept showing the
+        first text's words and font, OK went to the new one)."""
+        typing = self.roll.typing
+        return (bool(typing), typing and typing.get("i"),
+                tuple(i for i in sorted(self.sels) if self.shapes[i].get("text")))

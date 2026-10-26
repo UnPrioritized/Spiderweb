@@ -541,6 +541,7 @@ class HistoryPanel:
             self.tempo = clean_tempo(json.loads(picked[8]))
             if len(picked) > 9 and isinstance(picked[9], str) and picked[9].startswith("{"):
                 self.tempo_pane.restore_pick(picked[9])  # (its Select box and what was picked, user)
+            self.tempo_box.forget_typing()
             self.tempo_changed(restoring=True)  # (Hz bass warnings: sync_panel / the Hz window's after_restore below)
         if len(picked) > 10 and isinstance(picked[10], str) and picked[10][:1] == "[":
             own = clean_own_tracks(json.loads(picked[10]))

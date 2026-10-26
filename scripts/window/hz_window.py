@@ -359,6 +359,11 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                              else "disabled")
         if bool(self.layers.box.winfo_manager()) != self.app.hz_layers.get():  # (a project opened)
             self.layers.show(self.app.hz_layers.get())
+        fx = bool(self.fx.canvas.winfo_manager()) != self.app.hz_fx.get()  # (the same for Effects / Loudness, hunt
+        if fx:                                                              # 10-27)
+            self.on_fx(save=False)
+        if fx or bool(self.loudness.box.winfo_manager()) != self.app.hz_loud.get():
+            self.on_loud(save=False)  # (packed again after Effects: it sits above that pane)
         if self.every_tone() and not self.fitted:
             self.fit_view()
         elif not self.every_tone() and self.homed != (mark and mark[0]):  # no notes (a new Hz bass): back to the
