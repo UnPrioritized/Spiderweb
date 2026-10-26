@@ -1974,4 +1974,5 @@ class RollDrawing:
                                          fill=look.RULER_PICK_TEXT if pick(cx + measure(ch) / 2) else look.RULER_TEXT)
         self.draw_tempo_marks(boxes)
         self.tag_raise("tempomark")
+        self.tag_raise("trackmark")  # (over the corner's patch: a Select box drag hid the track's name, user 10-26)
         self.tag_raise("playhead")
