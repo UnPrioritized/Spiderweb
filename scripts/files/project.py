@@ -20,8 +20,8 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import (CHANNEL_MODES, OWN0, SHAPE_DEFAULTS, SPLITS, auto_count, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports, slot_track_channel, track_ids)
 from notes.hzbass import clean_hz
-from notes.loaded import (clean_link, conductor_line, extract_ports, file_tempos, own_hits, retime_for, same_conductor,
-                          tempo_new, tempo_tracks)
+from notes.loaded import (clean_link, conductor_line, extract_groups, extract_ports, file_tempos, own_hits, retime_for,
+                          same_conductor, tempo_new, tempo_tracks)
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
@@ -257,6 +257,7 @@ class ProjectFiles:
             **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
             **({"own_tracks": self.own_tracks} if self.own_tracks else {}),
             **({"own_next": self.own_next} if self.own_next else {}),
+            **({"deleted": self.deleted} if self.deleted else {}),  # (Delete loaded notes' boxes)
             # (the loaded MIDI's tracks shapes are drawn into: their name + channel, for opening without it)
             **({"file_tracks": {str(n): self.file_tracks()[n] for n in self.file_into()}} if self.file_into() else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
@@ -429,6 +430,7 @@ class ProjectFiles:
         self.tempo = tempo
         self.own_tracks = own
         self.file_saved = clean_file_tracks(data.get("file_tracks"))
+        self.deleted = extract_groups(data.get("deleted"))
         nxt = data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
         self.own_next = new_id(own, nxt if type(nxt) is int and 0 <= nxt < ID_MOST else 0)
         if not quiet:  # (another project: copies from the one before aren't laid on these tracks)
@@ -841,6 +843,7 @@ class ProjectFiles:
         data.pop("own_tracks", None)
         data.pop("own_next", None)
         data.pop("file_tracks", None)
+        data.pop("deleted", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
@@ -954,7 +957,7 @@ class ProjectFiles:
     def saved_key(self):
         """What Open project compares with the last save / open: the shapes and the tempo line."""
         return json.dumps([self.shapes, self.tempo if self.tempo != empty_tempo() else None]
-                          + ([self.own_tracks] if self.own_tracks else []))
+                          + ([self.own_tracks] if self.own_tracks else []) + ([self.deleted] if self.deleted else []))
 
     def may_replace(self, name):
         """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line, the own

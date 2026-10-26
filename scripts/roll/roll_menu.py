@@ -8,7 +8,7 @@ import numpy as np
 
 from files.lang import tr
 from window.formula_host import FunnelHost, PolygonHost, RollHost, StrokeHost, formula_menu
-from window.load_extract import can_extract, extract_loaded
+from window.load_extract import can_extract, delete_loaded, extract_loaded
 from notes.areas import most_colours
 from notes.convert import originals
 from notes.custom import ROLES, can_fit_upright, fit_upright
@@ -326,6 +326,8 @@ class ShapeMenu:
         (alone: the only item, no separator under it)."""
         if can_extract(self.app):
             m.add_command(label=tr("extract.menu"), command=lambda: extract_loaded(self.app))
+            # (group D: gone with no shape, like Domino's Delete)
+            m.add_command(label=tr("delete_loaded.menu"), command=lambda: delete_loaded(self.app))
             if not alone:
                 m.add_separator()
 

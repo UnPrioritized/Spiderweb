@@ -31,7 +31,7 @@ from roll.roll_funnel import FunnelEditing
 from roll.roll_hz import HzStart
 from window import look
 from window.hz_window import open_hz
-from window.load_extract import can_extract, stop_extract
+from window.load_extract import can_extract, delete_loaded, stop_extract
 from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
@@ -2116,6 +2116,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.delete_parts()
             elif self.picked_stroke(sh) is not None and len(self.app.sels) == 1:
                 self.delete_stroke(sh, self.app.stroke)
+            elif can_extract(self.app):  # (a kept Select box over a loaded MIDI: its notes in the box go too, like
+                delete_loaded(self.app, shapes_too=True)  # Domino's Delete; group D)
             else:
                 self.app.delete_selected()
         elif k == "g" and not e.state & CTRL:

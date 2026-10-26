@@ -455,10 +455,15 @@ def shape_boxes(shapes):
     (kept inside it for Split, merge.py) count: its notes hold them."""
     out = []
     for sh in shapes:
-        for g in extract_groups(sh.get("extract")):
-            out += [{"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": g["tracks"]} for b in g["boxes"]]
+        out += group_boxes(extract_groups(sh.get("extract")))
         out += shape_boxes(_parts(sh))
     return out
+
+
+def group_boxes(groups):
+    """The boxes of Extract-like groups ({"boxes", "tracks"}), as shape_boxes gives them (also App.deleted's: Delete
+    loaded notes, group D)."""
+    return [{"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": g["tracks"]} for g in groups for b in g["boxes"]]
 
 
 def extract_ports(shapes):

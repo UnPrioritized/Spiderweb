@@ -19,7 +19,8 @@ from files.midi_read import Cancelled, MidiError
 from files.own_tracks import FILE0
 from notes.custom import notes_shape
 from notes.engine import own_slot
-from notes.loaded import EXTRACT_ASK, EXTRACT_MOST, box_key, boxes_meet, gather_box, set_boxes, shape_boxes
+from notes.loaded import (EXTRACT_ASK, EXTRACT_MOST, box_key, boxes_meet, gather_box, group_boxes, set_boxes,
+                          shape_boxes)
 from roll.roll_draw import TRACK_FADE
 from roll.roll_loaded import shown_tracks
 from roll.roll_shared import RULER_TOP
@@ -54,6 +55,11 @@ def untouched(shapes, rendered):
     return keys, owners
 
 
+def hidden_boxes(app):
+    """Every box whose loaded notes are hidden: the shapes' Extract boxes, then Delete loaded notes' (app.deleted)."""
+    return shape_boxes(app.shapes) + group_boxes(app.deleted)
+
+
 def can_extract(app):
     """A loaded MIDI and a kept Select box (or ruler band) on the piano roll: Extract is offered."""
     return app.loaded is not None and not getattr(app.loaded, "changed", False) and bool(app.roll.kept_box())
@@ -83,7 +89,7 @@ def sync_extract(app, found=None):
     lm = app.loaded
     if lm is None:
         return
-    boxes = shape_boxes(app.shapes)
+    boxes = hidden_boxes(app)
     found = dict(found or {})
     lm._taken.update(found)  # (an Extract's own read: kept even while other boxes are still read)
     need = {box_key(b): b for b in boxes if box_key(b) not in lm._taken}
@@ -172,7 +178,7 @@ def extract_loaded(app):
         app.status.config(text=tr("extract.no_tracks"))
         return
     new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks} for a, b, c, d in boxes]
-    if any(boxes_meet(a, b) for a in new for b in shape_boxes(app.shapes)):
+    if any(boxes_meet(a, b) for a in new for b in hidden_boxes(app)):
         messagebox.showerror(tr("app.spiderweb_2"), tr("extract.overlap"), parent=app)
         return
     job = app._extracting = {"done": 0, "total": 1, "got": None, "error": None, "finished": False, "cancel": False}
@@ -233,7 +239,7 @@ def finish(app, lm, new, got):
     if not messagebox.askokcancel(tr("app.spiderweb_2"), text, parent=app, icon="warning" if n > EXTRACT_ASK
                                   else "question"):
         return
-    if app.loaded is not lm or any(boxes_meet(a, b) for a in new for b in shape_boxes(app.shapes)):
+    if app.loaded is not lm or any(boxes_meet(a, b) for a in new for b in hidden_boxes(app)):
         # (an undo while it read brought back an Extract of the same notes, hunt 2026-10-25)
         if app.loaded is lm:
             messagebox.showerror(tr("app.spiderweb_2"), tr("extract.overlap"), parent=app)
@@ -259,3 +265,93 @@ def finish(app, lm, new, got):
     app.select(len(app.shapes) - 1)
     app.shapes_changed()
     app.status.config(text=trn("extract.done", n, n=f"{n:,}"))
+
+
+def delete_tracks(app, lm):
+    """The loaded tracks Delete loaded notes takes (user 2026-10-26, like Domino: the highlighted track only, the
+    ones shown behind it are for looking; none highlighted = every track; one of Spiderweb's / yours = none).
+    Damaged tracks never (only ever copied as they are)."""
+    cur = app.track_list.current
+    whole = [n for n, t in enumerate(lm.tracks) if t.notes and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole]
+    if cur is None:
+        return whole
+    return [-1 - cur] if cur < 0 and -1 - cur in whole else []
+
+
+def delete_loaded(app, shapes_too=False):
+    """Delete loaded notes (right-click in a kept Select box; the Delete key: the selected shapes too, one undo
+    step): the loaded notes whose note-on is in the boxes (delete_tracks) are hidden like an Extract's, with no shape
+    (app.deleted: saved, undone; group D). No question, like deleting shapes (user). Read on a thread first (Esc
+    stops it). A box over an Extract that stays = refused (the notes are that shape's)."""
+    lm = app.loaded
+    gone = set(app.sels) if shapes_too else set()
+    tracks = delete_tracks(app, lm) if can_extract(app) else []
+    boxes = boxes_now(app) if tracks else []
+    if not boxes:
+        if gone:
+            app.delete_selected()
+        elif can_extract(app):
+            app.status.config(text=tr("delete_loaded.none"))
+        return
+    if getattr(app, "_extracting", None):
+        app.status.config(text=tr("extract.busy"))
+        return
+    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks} for a, b, c, d in boxes]
+    staying = shape_boxes([sh for i, sh in enumerate(app.shapes) if i not in gone])
+    if any(boxes_meet(a, b) for a in new for b in staying):
+        messagebox.showerror(tr("app.spiderweb_2"), tr("delete_loaded.overlap"), parent=app)
+        return
+    job = app._extracting = {"done": 0, "total": 1, "got": None, "error": None, "finished": False, "cancel": False}
+
+    def run():
+        try:
+            job["got"] = [gather_box(lm, b, cancel=lambda: job["cancel"],
+                                     progress=lambda d, n: job.update(done=d, total=max(n, 1))) for b in new]
+        except BaseException as e:  # (said below)
+            job["error"] = e
+        job["finished"] = True
+
+    def poll():
+        if not job["finished"]:
+            app.busy(tr("extract.reading", pct=int(100 * job["done"] / job["total"])))
+            app.after(100, poll)
+            return
+        app._extracting = None
+        app.busy(None)
+        e = job["error"]
+        if isinstance(e, Cancelled) or app.loaded is not lm:
+            return
+        if isinstance(e, (OSError, MidiError)):
+            messagebox.showerror(tr("app.spiderweb_2"), tr("load.export_gone", path=lm.path), parent=app)
+            return
+        if isinstance(e, MemoryError):
+            messagebox.showerror(tr("app.spiderweb_2"), tr("big_ask.out_of_memory"), parent=app)
+            return
+        if e is not None:
+            raise e
+        finish_delete(app, lm, new, job["got"], gone)
+    threading.Thread(target=run, daemon=True, name="delete loaded notes").start()
+    poll()
+
+
+def finish_delete(app, lm, new, got, gone):
+    """The boxes read: one undo step deleting the shapes in gone (the Delete key) and hiding the notes."""
+    old = {int(t) * (1 << 40) + int(o) for t, o in zip(lm.h_trk.tolist(), lm.h_on.tolist())}
+    taken = {int(t) * (1 << 40) + int(o) for g in got for t, o in zip(g["trk"].tolist(), g["on"].tolist())}
+    n = len(taken - old)  # (notes newly gone: ones hidden already, e.g. a box over a box deleted before, not counted)
+    if not n and not gone:
+        app.status.config(text=tr("delete_loaded.none"))
+        return
+    app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
+    app.push_undo(name=tr("app.delete" if gone else "delete_loaded.step"))
+    if gone:
+        for i in sorted(gone, reverse=True):
+            del app.shapes[i]
+        app.select_many([], None)
+    if n:
+        app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new],
+                                      "tracks": new[0]["tracks"]}]
+    sync_extract(app, {box_key(b): g for b, g in zip(new, got)})
+    app.shapes_changed()
+    if n:
+        app.status.config(text=trn("delete_loaded.done", n, n=f"{n:,}"))

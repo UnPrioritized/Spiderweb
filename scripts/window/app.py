@@ -602,6 +602,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # {n: {"name", "ch"}} of the loaded MIDI's tracks shapes are drawn into, as saved with the project: used
         # while its MIDI isn't loaded (file_tracks)
         self.file_saved = {}
+        # Delete loaded notes (group D): [{"boxes", "tracks"}] like an Extract's, the loaded notes in them hidden;
+        # saved + undone like the own tracks, replaced (never changed in place) on every change
+        self.deleted = []
         # this project's own mark (a new one at New / Open): Ctrl+C's copies carry it, so a copy laid on tracks keeps
         # them only when pasted back into the same project (put_into_current; hunt 2026-10-26)
         self.project_token = os.urandom(8).hex()
