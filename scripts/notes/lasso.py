@@ -49,22 +49,23 @@ def knife_spans(notes):
     key, ...) cover on each key row; touching or overlapping notes = one stretch, only an empty gap parts them.
     Passed to the lasso functions in place of a loop."""
     notes = np.asarray(notes, np.int64)
-    out = {}
+    if len(notes):
+        notes = notes[notes[:, 1] > notes[:, 0]]
     if not len(notes):
-        return out
-    notes = notes[np.lexsort((notes[:, 0], notes[:, 2]))]
-    for r in np.unique(notes[:, 2]).tolist():
-        edges = []
-        for a, b in notes[notes[:, 2] == r][:, :2].tolist():
-            if b <= a:
-                continue
-            if edges and a <= edges[-1]:
-                edges[-1] = max(edges[-1], b)
-            else:
-                edges += [a, b]
-        if edges:
-            out[int(r)] = edges
-    return out
+        return {}
+    s0 = notes[:, 0] - notes[:, 0].min()  # (by row, then start: one key, quicker than lexsort)
+    notes = notes[np.argsort((notes[:, 2] - notes[:, 2].min()) * (int(s0.max()) + 1) + s0)]
+    s, e, r = notes[:, 0], notes[:, 1], notes[:, 2]
+    # each note's end, the furthest so far on its row (rows kept apart by a lift bigger than any span)
+    lift = (np.cumsum(np.r_[0, r[1:] != r[:-1]])) * (int(e.max()) - int(s.min()) + 1)
+    reach = np.maximum.accumulate(e - s.min() + lift) - lift + s.min()
+    new = np.r_[True, (r[1:] != r[:-1]) | (s[1:] > reach[:-1])]  # (a row's first note, or after an empty gap)
+    first = np.flatnonzero(new)
+    last = np.r_[first[1:] - 1, len(s) - 1]
+    rows = r[first]
+    cut = np.flatnonzero(np.r_[True, rows[1:] != rows[:-1]])
+    edges = np.column_stack((s[first], reach[last])).ravel()
+    return {int(row): part.tolist() for row, part in zip(rows[cut].tolist(), np.split(edges, cut[1:] * 2))}
 
 
 def _spans(loop, rows, ppq):

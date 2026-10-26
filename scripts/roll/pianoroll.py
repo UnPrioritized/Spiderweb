@@ -1137,7 +1137,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.box_moving = boxes_upright(kept)[0]
             self.box_kept = (self.box_moving, set(app.sels))
 
-        if tool == "slice" and app.slice_mode.get() == "shape":  # (Slice with shape: the click's shape cuts on let go)
+        if tool == "slice" and app.slice_mode.get() == "shape":  # (Slice with shape: the click's shape cuts on let go;
+            if kept:  # the Select boxes go with the cut's undo step, then away: hunt 10-26)
+                self.box_kept = (kept, set(app.sels))
             self.drag = ("knife", e.x, e.y)
             return
         if tool == "slice":  # (the kept Select boxes stay: only what's in them is cut)
@@ -1538,6 +1540,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.drag = None
             if abs(e.x - x) < 4 and abs(e.y - y) < 4:
                 self.knife_click(x, y)
+            if self.box_kept:
+                self.box_kept = None
+                self.request_redraw()
             return
         if kind == "slice":  # (a click without dragging cuts nothing)
             _, a, b, x, y = self.drag
@@ -1823,6 +1828,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         A right-drag listens to the notes under the mouse instead (any tool). Nothing while the left button holds
         something (a point removed under a held one: wrong point / error)."""
         self.drop_menu_wait()
+        if self.drag and self.drag[0] == "knife":  # a Slice with shape click held: called off, no menu (hunt 10-26)
+            self.drag = None
+            return
         if self.drag and self.drag[0] in ("box", "slice"):  # a Select box / slice line being drawn: called off
             box = self.drag[0] == "box"                     # wherever the mouse is, no menu (user, like Domino)
             self.cancel_draft()

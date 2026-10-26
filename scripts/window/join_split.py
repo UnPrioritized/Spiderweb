@@ -1207,10 +1207,32 @@ class JoinSplit:
         among = sels[:-1] if len(sels) > 1 else range(k)
         among = [i for i in among if i not in self.hidden_shapes and not is_mask(self.shapes[i])
                  and "picture" not in self.shapes[i]]
-        spans = knife_spans(self.notes_of(self.shapes[k])) if among else {}
-        if spans and any(takes(self.notes_of(self.shapes[i]), spans, self.ppq) for i in among):
-            return k, among
+        knife = np.asarray(self.knife_notes(k)) if among else ()
+        if not len(knife):
+            return None
+        t0, t1, k0, k1 = knife[:, 0].min(), knife[:, 1].max(), knife[:, 2].min(), knife[:, 2].max()
+        spans = None
+        for i in among:
+            sh = self.shapes[i]
+            if "merge" in sh or sh.get("hz"):  # (can't be cut: no item for them alone, hunt 10-26)
+                continue
+            ns = np.asarray(self.notes_of(sh))
+            if not len(ns) or ns[:, 0].min() >= t1 or ns[:, 1].max() <= t0 or ns[:, 2].min() > k1 \
+                    or ns[:, 2].max() < k0:  # (quick: nowhere near the knife)
+                continue
+            spans = knife_spans(knife) if spans is None else spans
+            if takes(ns, spans, self.ppq):
+                return k, among
         return None
+
+    def knife_notes(self, k):
+        """Shape k's notes that cut: with a track highlighted in the track list only those on the shown tracks
+        (hunt 10-26: hidden ones cut out of sight)."""
+        notes = self.notes_of(self.shapes[k])
+        if self.track_list.current is None or getattr(self, "drawn_all", None) is None:
+            return notes
+        d = self.drawn_all
+        return d[(d[:, 5] == k) & np.isin(self.drawn_slots, list(self.track_list.shown_slots()))][:, :4]
 
     def knife_cut(self, k, only=None):
         """Slice with shape: shape k's own notes cut every shown shape under them (notes/lasso.knife_spans: on each
@@ -1225,7 +1247,7 @@ class JoinSplit:
             self.shapes_changed(now=True)
         knife = self.shapes[k]
         name = self.shape_label(knife)
-        spans = knife_spans(self.notes_of(knife))
+        spans = knife_spans(self.knife_notes(k))
         if not spans:
             self.status.config(text=tr("join_split.knife_no_notes", name=name))
             return False
@@ -1290,26 +1312,30 @@ class JoinSplit:
 
     def new_colour_targets(self):
         """The selected plain notes shapes New colours ▸ works on (pasted / plain notes, pieces; not pictures,
-        masks, merged shapes)."""
-        return [i for i in sorted(self.sels) if self.lasso_pasted(self.shapes[i])]
+        masks, merged shapes; not shapes laid in a track: the track's channel wins, hunt 10-26)."""
+        return [i for i in sorted(self.sels) if self.lasso_pasted(self.shapes[i]) and not self.shapes[i].get("into")]
 
-    def free_slots(self, i, n):
+    def free_slots(self, i, n, given=(), apart=()):
         """n slots (render's) no other shape's note uses while shape i sounds (first start .. last end), lowest
-        first; channel 10 only with Use channel 10 (app.all16)."""
+        first, within the first 15 / 16 (more = colours sounding already: None); channel 10 only with Use channel
+        10 (app.all16), and last (hunt 10-26). given: (t0, t1, slots) handed out already this go; apart: shapes
+        getting new colours too (their old slots count as free)."""
         r = self.rendered
         mine = r[r[:, 5] == i]
         if not len(mine):
             return list(range(n))
         t0, t1 = int(mine[:, 0].min()), int(mine[:, 1].max())
-        near = r[(r[:, 5] != i) & (r[:, 0] < t1) & (r[:, 1] > t0)]
-        used = set(near[:, 4].tolist())
-        skip10 = self.picture_use10 and not self.all16()  # (slots counting channel 10: keep off it)
-        out, s = [], 0
-        while len(out) < n:
-            if s not in used and not (skip10 and s % 16 == 9):
-                out.append(s)
-            s += 1
-        return out
+        near = r[~np.isin(r[:, 5], [i, *apart]) & (r[:, 0] < t1) & (r[:, 1] > t0)]
+        block = 16 if self.picture_use10 else 15
+        used = set((near[:, 4] % block).tolist())  # (by channel: a later block's slot sounds on the same one)
+        for a, b, slots in given:
+            if a < t1 and b > t0:
+                used.update(slots)
+        order = [s for s in range(block) if not (self.picture_use10 and s == 9)]
+        if self.all16():
+            order.append(9)
+        out = [s for s in order if s not in used][:n]
+        return out if len(out) == n else None
 
     def new_colours(self, ch):
         """New colours ▸ (user 2026-10-24, Slice with shape pieces keep their colours until this): ch None = Next
@@ -1324,12 +1350,20 @@ class JoinSplit:
         if self.notes_late:
             self.shapes_changed(now=True)
         use10 = bool(self.picture_use10)
-        plans = {}
+        plans, given = {}, []
         for i in got:
             rows = unpack_notes(self.shapes[i]["notes"])
             olds = np.unique(rows[:, 4])
-            if ch is None:  # (rendered slots: slots10 = the slot rule they were made under)
-                plans[i] = (dict(zip(olds.tolist(), self.free_slots(i, len(olds)))), use10)
+            if ch is None:  # (rendered slots: slots10 = the slot rule they were made under; one shape after another,
+                # so shapes picked together get colours apart too, hunt 10-26)
+                free = self.free_slots(i, len(olds), given, got)
+                if free is None:
+                    self.status.config(text=tr("join_split.new_none"))
+                    return
+                mine = self.rendered[self.rendered[:, 5] == i]
+                if len(mine):
+                    given.append((int(mine[:, 0].min()), int(mine[:, 1].max()), free))
+                plans[i] = (dict(zip(olds.tolist(), free)), use10)
             else:  # (slots10 True: slot k = channel k; else channel 10 skipped)
                 plans[i] = ({t: 9 if ch == 10 else SKIP10.index(ch - 1) for t in olds.tolist()}, ch == 10)
         self.push_undo(name=tr("join_split.new_colours"))
