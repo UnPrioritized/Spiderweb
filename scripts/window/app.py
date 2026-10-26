@@ -290,6 +290,8 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
             continue
         rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
         on = np.array([entry_slot(v, own, rule, use10) for v in ids], np.int64)
+        if mode != "auto":  # (Single channel / As drawn: every colour on its first track, hunt 2026-10-26)
+            colour = np.zeros_like(colour)
         parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i,
                               mode != "raw" and not is_sustained(sh) and sh.get("held") is not True))
     rendered = np.concatenate(parts)
@@ -1806,6 +1808,25 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """{id: channel} of the tracks added by hand (all_notes own)."""
         return {t["id"]: t["ch"] for t in self.own_tracks}
 
+    def own_written(self):
+        """The tracks added by hand the track list shows and the exports write. Multi channel: all of them. Single
+        channel / As drawn (hunt 2026-10-26, user: you get what you see): a laid shape plays every colour on its first
+        track, so the tracks Spiderweb added only for its other colours (tinted, "auto") are left out until Multi
+        channel again. The same list while nothing changes (the track list compares it by identity)."""
+        own, mode = self.own_tracks, self.channel_mode.get()
+        if mode == "auto" or not any(t.get("auto") for t in own):
+            return own
+        key = (id(own), mode, self.shapes_gen)
+        got = getattr(self, "_own_written", None)
+        if got is not None and got[0] == key:
+            return got[1]
+        chans = self.own_channels()
+        firsts = {p[0] for p in (placed_on(sh, chans) for sh in self.shapes) if p}
+        out = [t for t in own if not t.get("auto") or t["id"] in firsts]
+        out = own if len(out) == len(own) else out
+        self._own_written = (key, out)
+        return out
+
     def fit_into(self, made):
         """Lays the shapes drawn / pasted with a track highlighted (all_notes' made: their colour counts, made[5])
         like Domino's paste (user 2026-10-26): colour k on the row cols[k] below the highlighted one (a copy's
@@ -2875,7 +2896,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 if self._used_tracks[0] is not self.rendered:
                     self._used_tracks = (self.rendered, len(track_slots(self.rendered, False)))
                 tracks = self._used_tracks[1]
-            tracks += len(self.own_tracks)
+            tracks += len(self.own_written())
             parts.append(tr("app.one_track") if tracks == 1 else
                          tr("app.tracks_one_channel_each", slot_count=tracks))
         if self.sels:

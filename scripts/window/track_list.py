@@ -132,7 +132,7 @@ class TrackList(tk.Canvas):
     def tracks(self):
         """The slots written as tracks, in order (worked out again only when the notes change)."""
         app = self.app
-        n, pad, use10, lm, own = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded, app.own_tracks
+        n, pad, use10, lm, own = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded, app.own_written()
         made = self._made
         if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own):
             slots = track_slots(n, pad).astype(np.int64)
@@ -742,7 +742,15 @@ class TrackList(tk.Canvas):
         the Conductor row, a loaded MIDI's track; None = after them all)."""
         if row is None:
             return None
-        return row - self.lead if row >= self.lead else -1
+        if row < self.lead:
+            return -1
+        own = self.app.own_tracks
+        if len(self._hand) == len(own):
+            return row - self.lead
+        # (Single channel with tinted tracks left out of the list, App.own_written: the row among all of them)
+        s = int(self._mine[row - self.lead])
+        full = [r if type(r) is int else HAND + r["id"] for r in plan(self._slots, own)]
+        return full.index(s) if s in full else row - self.lead
 
     def row_channel(self, row):
         """The channel (0-15) of the track in row, None for none (the Conductor row, a loaded track without notes)."""
@@ -930,6 +938,15 @@ class TrackList(tk.Canvas):
                  trn("tracks.notes", len(mine), n=f"{len(mine):,}")]
         if slot >= HAND:
             lines.insert(1, tr("tracks.added_tip" if self.own_track(slot).get("auto") else "tracks.own_tip"))
+        if self.app.channel_mode.get() != "auto":  # (laid shapes' other colours: on this track until Multi channel)
+            from window.app import placed_on
+            entry, chans, more = slot - HAND if slot >= HAND else -1 - slot, self.app.own_channels(), set()
+            for sh in self.app.shapes:
+                laid = placed_on(sh, chans)
+                if laid and laid[0] == entry:
+                    more |= set(laid[1:]) - {entry}
+            if more:
+                lines.append(trn("tracks.waiting", len(more), n=len(more)))
         owners = np.unique(mine[:, 5]).tolist() if len(mine) else []
         names = [self.app.shape_label(self.app.shapes[i]) for i in owners[:TIP_SHAPES] if i < len(self.app.shapes)]
         if names:

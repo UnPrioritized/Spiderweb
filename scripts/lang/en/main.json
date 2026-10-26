@@ -550,6 +550,8 @@
  "tracks.added_tip": "Added by Spiderweb for a shape's colours: goes away when no shape uses it (change it in Properties… to keep it)",
  "tracks.in_list": "{name} (in {track})",
  "tracks.removed_shapes": "Removed the track and the {n} shapes in it.",
+ "tracks.waiting": "+{n} tracks for its shapes' colours in Multi channel (Single channel / As drawn: every colour plays here)",
+ "tracks.waiting_one": "+1 track for its shapes' colours in Multi channel (Single channel / As drawn: every colour plays here)",
  "tracks.removed_plain": "{n} shapes had colours on other tracks too: they're plain notes now, with those colours.",
  "tracks.removed_plain_one": "A shape had colours on other tracks too: it's plain notes now, with those colours.",
  "tracks.removed_shapes_one": "Removed the track and the shape in it.",
