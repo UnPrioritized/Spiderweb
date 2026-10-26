@@ -1241,7 +1241,7 @@ class TrackList(tk.Canvas):
         the rows."""
         n, ppq = self.app.rendered, self.app.ppq
         ah, aw = img.shape[:2]
-        if not len(n) or not len(self._slots):
+        if not len(n) or not len(self._mine):  # (every track one of yours: no automatic ones, still drawn)
             return
         first, last = cy // self.row_h, (cy + ah) // self.row_h
         lo_t, hi_t = cx / self.sx * ppq, (cx + aw) / self.sx * ppq
