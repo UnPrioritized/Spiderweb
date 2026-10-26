@@ -1936,32 +1936,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 continue
             if placed_on(sh, own):  # (laid on tracks: its own list, one per colour)
                 ids = track_ids(np.array(self.laid_slots(sh), np.int64)).tolist()
-            else:  # (each colour's track: where its notes are now, found by start + key)
-                n, t = self.notes_tracks(sh)
-                n = np.asarray(n, np.int64).reshape(-1, 4)
-                colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None
-                          else np.zeros(len(n), np.int64))
-                if not len(colour) or colour.max() == 0:  # (one colour: the track most of its notes are on)
-                    vals, counts = np.unique(mine[:, 4], return_counts=True)
-                    at_rows = [tl.row_of_id(int(track_ids(np.array([int(vals[counts.argmax()])]))[0]))]
-                    if None not in at_rows:
-                        rows[i] = at_rows
-                    continue
-                have = mine[:, 0] * 1024 + mine[:, 2]
-                o = np.argsort(have, kind="stable")
-                have, slot = have[o], mine[o, 4]
-                want = n[:, 0] * 1024 + n[:, 2]
-                at = np.clip(np.searchsorted(have, want), 0, len(have) - 1)
-                found = have[at] == want
-                vals, counts = np.unique(mine[:, 4], return_counts=True)
-                most = int(vals[counts.argmax()])  # (a colour none of whose notes were found: the shape's main one)
-                ids = []
-                for k in range(int(colour.max()) + 1 if len(colour) else 1):
-                    got = slot[at[found & (colour == k)]]
-                    if len(got):
-                        vals, counts = np.unique(got, return_counts=True)
-                    s = int(vals[counts.argmax()]) if len(got) else most
-                    ids.append(int(track_ids(np.array([s]))[0]))
+            else:
+                ids = track_ids(np.array(self.colour_slots(sh, mine), np.int64)).tolist()
             at_rows = [tl.row_of_id(v) for v in ids]
             if None not in at_rows:
                 rows[i] = at_rows
@@ -1969,6 +1945,32 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return {}
         first = min(min(v) for v in rows.values())
         return {i: [v - first for v in got] for i, got in rows.items()}
+
+    def colour_slots(self, sh, mine):
+        """Each colour's slot of a shape not laid on tracks (mine: its rendered notes, some): where most of that
+        colour's notes are now, found by start + key; one colour = the slot most of its notes are on (also for a
+        colour none of whose notes were found)."""
+        vals, counts = np.unique(mine[:, 4], return_counts=True)
+        most = int(vals[counts.argmax()])
+        n, t = self.notes_tracks(sh)
+        n = np.asarray(n, np.int64).reshape(-1, 4)
+        colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None
+                  else np.zeros(len(n), np.int64))
+        if not len(colour) or colour.max() == 0:
+            return [most]
+        have = mine[:, 0] * 1024 + mine[:, 2]
+        o = np.argsort(have, kind="stable")
+        have, slot = have[o], mine[o, 4]
+        want = n[:, 0] * 1024 + n[:, 2]
+        at = np.clip(np.searchsorted(have, want), 0, len(have) - 1)
+        found = have[at] == want
+        out = []
+        for k in range(int(colour.max()) + 1):
+            got = slot[at[found & (colour == k)]]
+            if len(got):
+                vals, counts = np.unique(got, return_counts=True)
+            out.append(int(vals[counts.argmax()]) if len(got) else most)
+        return out
 
     def into_target(self):
         """The track highlighted in the track list new shapes are laid on (placed_on's entry: a track added by

@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
-from files.own_tracks import HAND, add_tracks, into_ids, plan
+from files.own_tracks import HAND, add_tracks, from_rows, into_ids, move_rows, new_id, plan
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import BEATS_FAR, slot_track_channel, track_ids
@@ -53,6 +53,8 @@ TILE = 512  # px: a loaded MIDI's rows are read in blocks this wide along the so
 # ~100 ms stops while scrolling)
 TILES_BYTES = 128 << 20  # blocks kept at most (the oldest used go first)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
+MOVE_PX = 5  # a press on a track's name moved this far (x scale) = dragging the tracks to another place
+EDGE_MS = 40  # how often the list scrolls while tracks are dragged past its top / bottom
 
 
 def hex_rgb(colour):
@@ -80,6 +82,10 @@ class TrackList(tk.Canvas):
         self.anchor = None  # where a Shift+click's range starts: (the last plain / Ctrl+clicked track, the
         # highlighted one then)
         self._sweep = None  # a drag from a speaker over the rows: (muted or not, the last row it reached)
+        # a press on a track's name, dragged = the tracks moved (group C): {"y", "on" (dragging), "gap" (the row the
+        # line is above), "keep" (pressed on one of several selected: a click without a drag picks it alone),
+        # "s", "job" (scrolling at an edge)}
+        self._move = None
         self.muted = set()   # slots not played (the speaker in their row; playback only, never the files)
         self.faint = FAINT
         self.faint_var = tk.StringVar(value=str(FAINT))
@@ -116,10 +122,10 @@ class TrackList(tk.Canvas):
         self.bind("<Map>", lambda e: self.request_redraw())
         self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<B1-Motion>", self.on_drag)
-        self.bind("<ButtonRelease-1>", lambda e: setattr(self, "_sweep", None))
+        self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<ButtonPress-3>", self.on_right)
         self.bind("<Double-Button-1>", self.on_double)
-        self.bind("<Escape>", lambda e: self.show_all())  # (user 2026-10-23: the Conductor click alone was hidden)
+        self.bind("<Escape>", self.on_escape)
         self.bind("<Motion>", self.on_motion)
         self.bind("<MouseWheel>", self.on_wheel)
         self.bind("<ButtonPress-2>", self.start_pan)
@@ -591,6 +597,7 @@ class TrackList(tk.Canvas):
             return
         row = self.row_at(e.y)
         self._sweep = None
+        self.end_move()
         if row is None:
             return
         if row >= 0 and self.on_speaker(e.x):  # its speaker: muted / heard; dragged on: every speaker crossed the
@@ -600,6 +607,14 @@ class TrackList(tk.Canvas):
             return
         if row >= 0 and e.state & 0x5 and self.current is not None:  # Ctrl / Shift: several tracks (select)
             return self.select_click(row, e.state & 0x4, e.state & 0x1)
+        if row >= 0 and e.x < self.name_w:  # (a track's name: dragged = the tracks moved, group C)
+            s, group = int(self.tracks()[row]), self.picked_tracks()
+            # (on one of several selected: they stay selected for the drag; let go without one = that track alone,
+            # like a file list)
+            self._move = {"y": e.y, "on": False, "gap": None, "keep": s in group and len(group) > 1, "s": s,
+                          "job": None}
+            if self._move["keep"]:
+                return
         if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
             beat = max(0.0, self.x2t(e.x))
             self.app.set_playhead(self.snapped(beat))
@@ -676,7 +691,10 @@ class TrackList(tk.Canvas):
         return [int(s) for s in self.tracks() if int(s) in group]
 
     def on_drag(self, e):
-        """A drag from a speaker: every track the mouse crosses gets what the pressed one got (muted or heard)."""
+        """A drag from a speaker: every track the mouse crosses gets what the pressed one got (muted or heard). From
+        a track's name: the tracks moved (move_drag)."""
+        if self._move is not None:
+            return self.move_drag(e.y)
         if self._sweep is None:
             return
         on, last = self._sweep
@@ -691,6 +709,146 @@ class TrackList(tk.Canvas):
             self.muted = new
             self.request_redraw()
             self.app.play_changed()
+
+    def on_release(self, e):
+        self._sweep = None
+        m = self._move
+        if m is None:
+            return
+        self.end_move()
+        if m["on"]:
+            if m["gap"] is not None:
+                self.move_tracks(m["gap"])
+        elif m["keep"]:  # (a click on one of several selected tracks: that one alone, like a file list)
+            self.current, self.selected, self.anchor = m["s"], set(), (m["s"], m["s"])
+            self.shown_changed()
+
+    def on_escape(self, e):
+        """Esc: tracks being dragged stay where they were; else the All tracks row (user 2026-10-23: the Conductor
+        click alone was hidden)."""
+        if self._move is not None and self._move["on"]:
+            return self.end_move()
+        self.show_all()
+
+    def moving(self):
+        """The tracks a drag from a name moves: the highlighted one and the ones selected with it (a loaded MIDI's
+        stay: group D)."""
+        return [s for s in self.picked_tracks() if s >= 0]
+
+    def move_drag(self, y):
+        """Tracks dragged by a name (group C, like Domino's): a line between two rows shows where they land; past
+        the list's top / bottom it scrolls (move_edge)."""
+        m = self._move
+        if not m["on"]:
+            if abs(y - m["y"]) < MOVE_PX * self.scale:
+                return
+            if not self.moving():
+                self._move = None
+                return
+            m["on"] = True
+            self.tip.hide()
+        m["last"] = y
+        top, h = self.area()[1], self.winfo_height()
+        gap = round((y - top + self.top) / self.row_h)
+        m["gap"] = min(max(gap, self.lead), len(self.tracks()))  # (never above a loaded MIDI's tracks: group D)
+        if (y < top or y > h) and m["job"] is None:
+            m["job"] = self.after(EDGE_MS, self.move_edge)
+        self.request_redraw()
+
+    def move_edge(self):
+        m = self._move
+        if m is None:
+            return
+        m["job"] = None
+        y, top, h = m["last"], self.area()[1], self.winfo_height()
+        way = -1 if y < top else 1 if y > h else 0
+        old = self.top
+        self.top += way * max(1, self.row_h // 2)
+        self.clamp()
+        if self.top != old:
+            self.move_drag(y)
+
+    def end_move(self):
+        """The drag of tracks over (or called off): its line goes."""
+        m, self._move = self._move, None
+        if m is not None:
+            if m["job"] is not None:
+                self.after_cancel(m["job"])
+            if m["on"]:
+                self.request_redraw()
+
+    def move_tracks(self, gap):
+        """The dragged tracks (moving) put together above row gap, in their order: one undo step. Spiderweb's
+        automatic tracks among them become yours first (take_tracks). Nothing moves when they're there already."""
+        app = self.app
+        group = self.moving()
+        full = plan(self._slots, app.own_tracks)  # (every track, also tinted ones left out of the list: own_written)
+        ids = [r if type(r) is int else HAND + r["id"] for r in full]
+        mine = [int(s) for s in self._mine]
+        at = ids.index(mine[gap - self.lead]) if gap - self.lead < len(mine) else len(full)
+        rows = move_rows(full, {ids.index(s) for s in group if s in ids}, at)
+        if [r if type(r) is int else HAND + r["id"] for r in rows] == ids:
+            return
+        from window.app import can_go_in
+        autos = [s for s in group if s < HAND]
+        r = app.rendered
+        owners = np.unique(r[np.isin(r[:, 4], autos), 5]).tolist() if autos and len(r) else []
+        if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
+            return app.status.config(text=tr("tracks.cant_move"))
+        app.roll.end_typing()
+        app.push_undo(name=tr("tracks.move_step"))
+        taken = self.take_tracks(autos, owners) if autos else {}
+        if taken:
+            rows = [{"id": taken[x]} if type(x) is int and x in taken else x for x in rows]
+
+            def mine_now(s):  # (an automatic track taken: its new id)
+                return HAND + taken[s] if s in taken else s
+            self.current = None if self.current is None else mine_now(self.current)
+            self.selected = set(map(mine_now, self.selected))
+            self.muted, self.behind = set(map(mine_now, self.muted)), set(map(mine_now, self.behind))
+            app.shapes_changed()  # (its shapes on the new tracks: the automatic tracks as they are after)
+            self.tracks()
+        moved = {s - HAND for s in group if s >= HAND} | set(taken.values())
+        # (a tinted track dragged = yours, like Properties)
+        app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if t["id"] in moved else t
+                          for t in from_rows(rows, self._slots, app.own_tracks)]
+        self.own_changed()
+        if taken:
+            app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
+
+    def take_tracks(self, autos, owners):
+        """Spiderweb's automatic tracks autos (slots) made yours (group C, user 2026-10-26: touching a track makes it
+        yours): a track of yours on each one's channel, and every shape with notes there (owners) laid on it, its
+        colours on other automatic tracks pinned there (B11). {slot: the new track's id}."""
+        from window.app import entry_slot, placed_on
+        app = self.app
+        use10, r, chans = app.picture_use10, app.rendered, app.own_channels()
+        own, taken = list(app.own_tracks), {}
+        for s in autos:
+            v = new_id(own, app.own_next)
+            app.own_next = v + 1
+            own.append({"id": v, "name": "", "ch": slot_track_channel(s, use10)[1], "after": -1})
+            taken[s] = v
+        multi = app.channel_mode.get() == "auto"
+        for i in owners:
+            sh = app.shapes[i]
+            if placed_on(sh, chans):  # (laid already: its entries on these tracks now go to the new ones)
+                rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
+                for key in ("into", "into_rest"):
+                    if sh.get(key) is not None:
+                        sh[key] = [taken.get(entry_slot(v, chans, rule, use10), v) if v < 0 else v
+                                   for v in into_ids({"into": sh[key]})]
+                continue
+            slots = app.colour_slots(sh, r[r[:, 5] == i])
+            entries = [taken.get(s, -1 - s) for s in (slots if multi else slots[:1])]
+            for key in ("cols", "into_gap", "into_rest", "slots10"):
+                sh.pop(key, None)
+            sh["into"] = entries
+            if any(v < 0 for v in entries):  # (fit_into's channel rule for automatic tracks it's pinned on)
+                sh["slots10"] = bool(use10) and any(slot_track_channel(-1 - v, use10)[1] == 9
+                                                     for v in entries if v < 0)
+        app.own_tracks = own
+        return taken
 
     def on_right(self, e):
         """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs).
@@ -984,6 +1142,10 @@ class TrackList(tk.Canvas):
         self.draw_all(w)
         self.draw_conductor(w)
         self.draw_names(h)
+        m = self._move
+        if m is not None and m["on"] and m["gap"] is not None:  # (where dragged tracks land, Domino's black line)
+            y = self.area()[1] + m["gap"] * self.row_h - self.top
+            self.create_line(0, y, w, y, fill=look.TRACK_TEXT, width=max(2, round(2 * self.scale)))
         self.draw_playhead()
         for bar in self.bars:
             bar.refresh()

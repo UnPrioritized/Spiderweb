@@ -104,6 +104,30 @@ def add_tracks(own, autos, row, chs, floor=0):
     return out, ids
 
 
+def move_rows(rows, moved, gap):
+    """rows (plan's) with the ones at the places in moved taken out and put back together, in their order, where
+    row gap was (gap = len(rows): at the end): the track list's drag (group C)."""
+    keep = [r for k, r in enumerate(rows) if k not in moved]
+    at = sum(1 for k in range(gap) if k not in moved)
+    return keep[:at] + [rows[k] for k in sorted(moved)] + keep[at:]
+
+
+def from_rows(rows, slots, own):
+    """The own tracks (own: as they are now, by id) in the order rows (plan's, maybe with tracks no longer there)
+    has them, each "after" the automatic tracks in slots before it (-1 past the last one). Own tracks rows doesn't
+    list go at the end, as they were."""
+    live, by_id = {int(s) for s in slots}, {t["id"]: t for t in own}
+    out, seen, listed = [], 0, set()
+    total = sum(1 for r in rows if type(r) is int and r in live)
+    for r in rows:
+        if type(r) is int:
+            seen += r in live
+        elif r["id"] in by_id and r["id"] not in listed:
+            listed.add(r["id"])
+            out.append(dict(by_id[r["id"]], after=-1 if seen >= total else seen))
+    return out + [t for t in own if t["id"] not in listed]
+
+
 def placed_order(own, autos):
     """own sorted the way it shows (placed): kept so, adding next to a track is a plain insert."""
     return [t for t, _ in placed(own, autos)]
