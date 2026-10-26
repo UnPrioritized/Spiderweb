@@ -608,6 +608,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # the loaded MIDI's track numbers in the order the track list shows and the export writes them (dragged, D4;
         # None = the file's own); saved + undone like the deleted boxes
         self.file_order = None
+        self.file_gone = []  # (its tracks removed in the track list, group E: not listed nor written; saved + undone)
+        self.file_props = {}  # (its tracks' new names / channels, Track Properties: {number: {"name", "ch"}}; the same)
         # this project's own mark (a new one at New / Open): Ctrl+C's copies carry it, so a copy laid on tracks keeps
         # them only when pasted back into the same project (put_into_current; hunt 2026-10-26)
         self.project_token = os.urandom(8).hex()
@@ -1881,7 +1883,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if got is None or got[0] is not lm:
             got = self._file_tracks = (lm, {n: {"name": t.name or "", "ch": t.channel if t.channel is not None else 0}
                                             for n, t in enumerate(lm.tracks)})
-        return got[1]
+        props = self.file_props
+        if not props:
+            return got[1]
+        # (Track Properties' new name / channel, group E)
+        return {n: {k: v if props.get(n, {}).get(k) is None else props[n][k] for k, v in d.items()}
+                for n, d in got[1].items()}
 
     def with_file_tracks(self):
         """own_written + the loaded MIDI's tracks shapes are drawn into, each as a track of its own under its name,
@@ -1893,7 +1900,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def file_rows(self):
         """The loaded MIDI's track numbers in the order they're listed (own_tracks.full_plan's files); none while
         it isn't loaded (waiting_rows)."""
-        return file_order(self.loaded, self.file_order)
+        return file_order(self.loaded, self.file_order, self.file_gone)
 
     def waiting_rows(self):
         """Its MIDI not loaded (not found): the file's track numbers shapes are drawn into, listed first as tracks
@@ -2506,6 +2513,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.own_tracks, self.own_next = [], 0
         # (the old song's deleted notes, dragged track order and track names: nothing to do with the new one, hunt)
         self.deleted, self.file_order, self.file_saved, self.midi_missing = [], None, {}, False
+        self.file_gone, self.file_props = [], {}
         self.project_token = os.urandom(8).hex()  # (copies from before New: not laid on these tracks)
         self.tempo_pane.forget()
         self.roll.box_kept = None

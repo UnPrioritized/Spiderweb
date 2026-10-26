@@ -13,7 +13,10 @@ import threading
 import numpy as np
 
 from files import midi_scan, safefile, speed
+from files.midi_out import name_event
 from files.midi_read import BIGGEST_EVENT, PIECE, SCAN_WORKERS, Cancelled, FileChanged, MidiError
+
+NAME = 0x03  # a track name's meta event type (Track Properties' new name goes in its place)
 
 ROOM_SPARE = 64 << 20  # free disk space wanted on top of the file's size
 HELD_TRACK = 64 << 20  # a track written event by event up to this size is made in memory (else counted first)
@@ -33,7 +36,8 @@ def same_file(a, b):
         return False
 
 
-def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, added=None, hidden=None, order=None):
+def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, added=None, hidden=None, order=None,
+                 props=None):
     """Writes mf (a scanned MidiFile) to dst unchanged. walk = every readable track written event by event (what a
     changed track goes through) instead of copied: the result must be the very same bytes. progress(bytes done,
     bytes in all); cancel() True = Cancelled (dst untouched). retime (Retime): a changed tempo's tracks written
@@ -41,7 +45,10 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
     (Added): Spiderweb's own tracks put after the file's last track. hidden(track number) = its events left out
     (Extract: sorted byte places, midi_scan), written again without them. order: the track numbers in the order
     they're written (dragged in the track list, D4; None = the file's): each track's place in the file takes the
-    one order puts there, anything between tracks stays where it is."""
+    one order puts there, anything between tracks stays where it is; tracks left out of it aren't written (removed,
+    group E). props: {track number: {"name": its new name or None, "ch": its new channel 0-15 or None}} (Track
+    Properties, group E): those tracks written again, the name in place of theirs at tick 0, every channel event on
+    that channel."""
     if not mf.scanned:
         raise ValueError("scan() the file first")
     if same_file(mf.path, dst) or same_file(mf.path, dst + ".tmp"):  # (safefile's temp file: writing it would
@@ -55,7 +62,7 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
                                    if added is not None else 0)
     if free < need:
         raise MidiError("midi.no_room", need=-(-need // 2 ** 20), free=free // 2 ** 20)
-    work = _Work(mf, walk, progress, cancel, retime, added, hidden, order)
+    work = _Work(mf, walk, progress, cancel, retime, added, hidden, order, props)
     try:
         safefile.write_bytes(dst, work.pieces())
     except OSError as e:
@@ -64,15 +71,18 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
 
 
 class _Work:
-    def __init__(self, mf, walk, progress, cancel, retime=None, added=None, hidden=None, order=None):
+    def __init__(self, mf, walk, progress, cancel, retime=None, added=None, hidden=None, order=None, props=None):
         self.mf, self.walk, self.progress, self.cancel, self.retime = mf, walk, progress, cancel, retime
         self.added = added
         tracks = [what[0] for kind, *what in mf.pieces if kind == "track"]
         by = {t.number: t for t in tracks}
-        if order is not None and (sorted(order) != sorted(by) or list(order) == [t.number for t in tracks]):
-            order = None  # (not a reordering of these tracks / the file's own: copied as it is)
+        if order is not None and (len(set(order)) != len(order) or not set(order) <= set(by)
+                                  or list(order) == [t.number for t in tracks]):
+            order = None  # (not some of these tracks once each / the file's own: copied as it is)
+        # (tracks left out of order = removed in the track list, group E: not written, the header counts the rest)
         self.order = None if order is None else [by[n] for n in order]
         self.hidden = hidden or (lambda n: NO_SKIP)
+        self.props = props or {}
         self.done, self.written = 0, 0
         self.buf = bytearray(PIECE)
         self.out = None
@@ -175,21 +185,27 @@ class _Work:
                     yield from self.own(added.chunks)
                 if kind == "raw":
                     start, size = what
+                    written = len(mf.tracks) if self.order is None else len(self.order)
                     for k, piece in enumerate(self.raw(f, start, size)):
                         rest.update(piece)
-                        if added is not None and start == 0 and k == 0:  # (the header)
-                            piece = added.header(piece, len(mf.tracks))
+                        if start == 0 and k == 0:  # (the header)
+                            if added is not None:
+                                piece = added.header(piece, written)
+                            elif written != len(mf.tracks):
+                                piece = piece[:10] + written.to_bytes(2, "big") + piece[12:]
                         yield piece
                     continue
                 pos += 1
-                t = what[0] if self.order is None else self.order[pos]
                 if added is not None and pos in added.before:  # (your tracks placed before the pos-th one)
                     yield from self.own(added.before[pos])
+                if self.order is not None and pos >= len(self.order):  # (tracks removed: fewer written)
+                    continue
+                t = what[0] if self.order is None else self.order[pos]
                 head = self.read_exact(f, t.head, 8)
                 rest.update(head)
                 rt = self.retime
                 changed = t.whole and ((rt is not None and (rt.bp is not None or t.number in rt.tracks))
-                                       or len(self.hidden(t.number)) > 0)
+                                       or len(self.hidden(t.number)) > 0 or t.number in self.props)
                 if (self.walk or changed) and t.whole:
                     # a changed track: its bytes READ are checked (it comes out different); else what's written
                     h = hashlib.blake2b(digest_size=16)
@@ -286,6 +302,15 @@ class _Work:
         use_map = rt is not None and rt.bp is not None
         drop = rt.drop if rt is not None else np.zeros(128, np.uint8)
         ins_t, ins_at, ins_b = (rt.inserts.get(t.number) if rt is not None else None) or NO_INSERTS
+        prop = self.props.get(t.number) or {}
+        chan = -1 if prop.get("ch") is None else int(prop["ch"])
+        if prop.get("name") is not None:  # (its name events out, the new one first)
+            drop = drop.copy()
+            drop[NAME] = 1
+            ev = name_event(prop["name"])[1:]  # (without its time: put in at tick 0)
+            ins_t = np.concatenate([np.zeros(1, np.int64), np.asarray(ins_t, np.int64)])
+            ins_at = np.concatenate([np.zeros(1, np.int64), np.asarray(ins_at, np.int64) + len(ev)])
+            ins_b = np.concatenate([np.frombuffer(ev, np.uint8), np.asarray(ins_b, np.uint8)])
         skip = np.ascontiguousarray(self.hidden(t.number), np.int64)
         buf = self.buf
         out = self.out_for(min(len(buf), t.size))
@@ -299,7 +324,7 @@ class _Work:
             else:
                 view, oview = memoryview(buf)[:filled], out
             used, o = rewrite(view, 0, filled, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, oview, 0, st,
-                              taken, skip)
+                              taken, skip, chan)
             del view, oview
             if hin is not None and used:
                 hin.update(memoryview(buf)[:used])
@@ -324,7 +349,10 @@ class _Work:
         if k < len(ins_t):  # (a track without End of Track: what's left to put in goes at its end)
             done, tail = int(st[midi_scan.RW_DONE]), bytearray()
             for j in range(k, len(ins_t)):
-                tail += vlq(max(0, int(ins_t[j]) - done)) + bytes(ins_b[ins_at[j]:ins_at[j + 1]])
+                ev = bytearray(ins_b[ins_at[j]:ins_at[j + 1]])
+                if chan >= 0 and ev and 0x80 <= ev[0] < 0xF0:
+                    ev[0] = (ev[0] & 0xF0) | chan
+                tail += vlq(max(0, int(ins_t[j]) - done)) + bytes(ev)
                 done = max(done, int(ins_t[j]))
             yield bytes(tail)
 

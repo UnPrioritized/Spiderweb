@@ -79,11 +79,12 @@ def move_boxed(app, boxes, dt, drow, copying=False):
     return box_job(app, boxes, "copy" if copying else "move", dt, drow)
 
 
-def box_job(app, boxes, kind, dt=0.0, drow=0):
+def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None):
     """What's in the list's boxes: "move" / "copy" (dragged, Ctrl: copies), "clip" (Ctrl+C), "cut" (Ctrl+X),
-    "delete". A loaded MIDI's notes in them are read first (on a thread, the status line says how far): moved = an
-    Extract (user 2026-10-26), copied = a plain copy (nothing hidden), deleted = Delete loaded notes'. False when
-    nothing was done (the status line says why)."""
+    "delete", "remove" (Remove Track: deleted + extra = {"ids": the list's track ids, "own": your tracks' ids,
+    "files": a loaded MIDI's track numbers} gone with them in the same step). A loaded MIDI's notes in them are read
+    first (on a thread, the status line says how far): moved = an Extract (user 2026-10-26), copied = a plain copy
+    (nothing hidden), deleted = Delete loaded notes'. False when nothing was done (the status line says why)."""
     from window.app import can_go_in
     r = app.rendered
     inside = boxed(app, boxes)
@@ -97,10 +98,10 @@ def box_job(app, boxes, kind, dt=0.0, drow=0):
             return False
     files = loaded_boxes(app, boxes)
     if not files:
-        if not inside.any():
+        if not inside.any() and kind != "remove":
             app.status.config(text=tr("tracks.box_empty"))
             return False
-        return finish_job(app, boxes, kind, dt, drow)
+        return finish_job(app, boxes, kind, dt, drow, extra=extra)
     if getattr(app, "_extracting", None):
         app.status.config(text=tr("extract.busy"))
         return False
@@ -145,21 +146,24 @@ def box_job(app, boxes, kind, dt=0.0, drow=0):
             return
         if any(boxes_meet(a, b) for a in files for b in hidden_boxes(app)):  # (an undo while it read brought back
             return                                                             # an Extract of these notes)
-        if not n and not boxed(app, boxes).any():
+        if not n and not boxed(app, boxes).any() and kind != "remove":
             app.status.config(text=tr("tracks.box_empty"))
             return
-        finish_job(app, boxes, kind, dt, drow, lm, files, got if n else [])
+        finish_job(app, boxes, kind, dt, drow, lm, files, got if n else [], extra)
     threading.Thread(target=run, daemon=True, name="loaded notes in the track list's box").start()
     poll()
     return True
 
 
-def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=()):
+def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=(), extra=None):
     """box_job once a loaded MIDI's notes in the boxes are read (got: per box of files; none = no loaded notes)."""
     if kind in ("clip", "cut"):
         clip_boxed(app, boxes, loaded_shape(app, lm, files, got, True) if got else None)
         if kind == "clip":
             return True
+    if kind == "remove":
+        name = tr("tracks.remove_step" if len(extra["ids"]) == 1 else "tracks.remove_many_step")
+        return delete_boxed(app, boxes, lm, files, got, name, extra)
     if kind in ("cut", "delete"):
         return delete_boxed(app, boxes, lm, files, got, tr("app.cut" if kind == "cut" else "tracks.box_delete_step"))
     app.roll.end_typing()
@@ -369,14 +373,14 @@ def clip_boxed(app, boxes, loaded=None):
     return True
 
 
-def delete_boxed(app, boxes, lm, files, got, name):
+def delete_boxed(app, boxes, lm, files, got, name, extra=None):
     """Delete (Ctrl+X's second half) in the list: the notes in the boxes go (shapes wholly inside deleted, the rest
     of others kept as plain notes, a loaded MIDI's = Delete loaded notes'), one undo step; the boxes go too."""
     tl = app.track_list
     plans = plans_of(app, boxes, 0) or []
     parts = {i: parts_of(app, i, m)[1] for i, whole, m, _ in plans if not whole}
     gone = {i for i, whole, _, _ in plans if whole} | {i for i, rest in parts.items() if rest is None}
-    if not gone and not parts and not got:
+    if not gone and not parts and not got and extra is None:
         app.status.config(text=tr("tracks.box_empty"))
         return False
     app.roll.end_typing()
@@ -390,6 +394,14 @@ def delete_boxed(app, boxes, lm, files, got, name):
         app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]]], "tracks": b["tracks"]}
                                      for b in files]
         sync_extract(app, {box_key(b): g for b, g in zip(files, got)})
+    if extra is not None:  # (Remove Track: the tracks go too)
+        if extra["own"]:
+            app.own_tracks = [t for t in app.own_tracks if t["id"] not in extra["own"]]
+        if extra["files"]:
+            app.file_gone = sorted(set(app.file_gone) | set(extra["files"]))
+        if tl.current is not None and tl.current in extra["ids"]:
+            tl.current = None
+        tl.selected -= set(extra["ids"])
     app.select_many([], None)
     tl.boxes = []
     app.shapes_changed()

@@ -118,8 +118,8 @@ def use_changed(app, lm):
     took = [sh for sh in app.shapes if shape_boxes([sh])]
     for sh in took:
         drop_extract(sh)
-    gone, moved = bool(app.deleted), app.file_order is not None
-    app.deleted, app.file_order = [], None
+    gone, moved = bool(app.deleted), app.file_order is not None or bool(app.file_gone) or bool(app.file_props)
+    app.deleted, app.file_order, app.file_gone, app.file_props = [], None, [], {}
     app.reattach_midi(lm, retempo=True)
     if took or gone or moved:
         app.shapes_changed()  # (the Shapes list's names: no longer Extracts)

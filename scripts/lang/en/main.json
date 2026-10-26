@@ -2062,7 +2062,7 @@
  "load.export_reading": "Still reading the loaded notes your shapes took: export when it's done.",
  "load.extract_released": "The MIDI file changed, so the notes your {n} extracted shapes took can't be found in it any more.\n\nThose shapes keep their notes but no longer hide anything in the file. If the file still has those notes, they're now there twice: delete the shapes if so.",
  "load.deleted_released": "The loaded notes you deleted are back: they were deleted from the file as it was. Delete them again if you need to.",
- "load.order_released": "The file's tracks are in their own order again: you moved them in the file as it was.",
+ "load.order_released": "The file's tracks are all back in their own order: you moved or removed them in the file as it was.",
  "load.extract_released_one": "The MIDI file changed, so the notes your extracted shape took can't be found in it any more.\n\nThat shape keeps its notes but no longer hides anything in the file. If the file still has those notes, they're now there twice: delete the shape if so.",
  "extract.name": "Extracted notes",
  "extract.step": "Extract loaded notes",

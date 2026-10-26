@@ -107,14 +107,43 @@ def clean_file_order(raw):
     return None if raw == list(range(len(raw))) else list(raw)
 
 
-def file_order(lm, order=None):
+def clean_file_gone(raw):
+    """A project's "file_gone" as read (the loaded MIDI's tracks removed in the track list, group E): sorted track
+    numbers, each once; anything else = none."""
+    if not isinstance(raw, list) or len(raw) > COUNT_MOST or any(type(n) is not int or n < 0 for n in raw):
+        return []
+    return sorted(set(raw))
+
+
+def clean_file_props(raw):
+    """A project's "file_props" as read (Track Properties on the loaded MIDI's tracks, group E): {track number:
+    {"name": text or None, "ch": 0-15 or None}}, unchanged ones left out."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for k, v in list(raw.items())[:COUNT_MOST]:
+        try:
+            n = int(k)
+        except (TypeError, ValueError):
+            continue
+        if n < 0 or not isinstance(v, dict):
+            continue
+        name = v.get("name") if isinstance(v.get("name"), str) else None
+        ch = v.get("ch") if type(v.get("ch")) is int and 0 <= v["ch"] <= 15 else None
+        if name is not None or ch is not None:
+            out[n] = {"name": name[:NAME_MOST] if name is not None else None, "ch": ch}
+    return out
+
+
+def file_order(lm, order=None, gone=()):
     """A loaded MIDI's track numbers in the order they're listed and written (none loaded: []): order (dragged in the
-    track list, D4) when it fits the file, else the file's own. The piano roll keeps drawing in the file's order (user
-    2026-10-26 picked B)."""
+    track list, D4) when it fits the file, else the file's own; the ones in gone (removed, group E) left out. The
+    piano roll keeps drawing in the file's order (user 2026-10-26 picked B)."""
     if lm is None:
         return []
     n = len(lm.tracks)
-    return list(order) if order is not None and len(order) == n else list(range(n))
+    rows = list(order) if order is not None and len(order) == n else list(range(n))
+    return [k for k in rows if k not in gone] if gone else rows
 
 
 def among_file(own, files):

@@ -26,6 +26,7 @@ from files.own_tracks import (HAND, add_tracks, among_file, clean_file_order, fi
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import BEATS_FAR, OWN0, slot_track_channel, track_ids
+from notes.loaded import KEY_SIG, TEMPO, TIME_SIG, tempo_tracks
 from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text, tempo_text
@@ -150,7 +151,7 @@ class TrackList(tk.Canvas):
         """The slots written as tracks, in order (worked out again only when the notes change)."""
         app = self.app
         n, pad, use10, lm, own = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded, app.own_written()
-        waiting, order = app.waiting_rows(), app.file_order
+        waiting, order = app.waiting_rows(), (app.file_order, tuple(app.file_gone))
         made = self._made
         if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own, waiting, order):
             slots = track_slots(n, pad).astype(np.int64)
@@ -207,8 +208,9 @@ class TrackList(tk.Canvas):
         self.tracks()
         if s is None:
             return None
-        if s < 0:
-            return int(self._file_row[-s - 1]) if -s - 1 < len(self._file_row) else None
+        if s < 0:  # (-1: not listed, e.g. removed)
+            return int(self._file_row[-s - 1]) if -s - 1 < len(self._file_row) and self._file_row[-s - 1] >= 0 \
+                else None
         if s >= HAND:
             at = np.flatnonzero(self._all == s)
             return int(at[0]) if len(at) else None
@@ -447,7 +449,8 @@ class TrackList(tk.Canvas):
         """A loaded MIDI's track n's main channel (None: no notes); its MIDI not loaded: as saved (App.file_tracks)."""
         lm = self.app.loaded
         if lm is not None:
-            return lm.tracks[n].channel if n < len(lm.tracks) else None
+            new = (self.app.file_props.get(n) or {}).get("ch")  # (Track Properties' channel, group E)
+            return new if new is not None else lm.tracks[n].channel if n < len(lm.tracks) else None
         return self.app.file_tracks().get(n, {}).get("ch")
 
     def channel_of(self, slot):
@@ -1069,29 +1072,55 @@ class TrackList(tk.Canvas):
         rows = move_rows(full, {ids.index(s) for s in group if s in ids}, at)
         if [r if type(r) is int else HAND + r["id"] for r in rows] == ids:
             return
-        from window.app import can_go_in, placed_on
-        autos = [s for s in group if 0 <= s < HAND]
-        r = app.rendered
-        owners = []
-        if autos:
-            # (EVERY automatic track is taken, empty ones too, with every shape on them: nothing pinned, no track
-            # split in two, nothing handed out again, only the order changes, like Domino's; user 2026-10-26, after
-            # pinned colours kept empty tracks between them and the music left behind got new channels / gap tracks)
-            autos = [int(s) for s in self._slots]
-            owners = set(np.unique(r[r[:, 4] < OWN0, 5]).tolist()) if len(r) else set()
-            # (a shape with no notes of its own now, e.g. all merged into others' in Single channel: it'd come
-            # back on a track of Spiderweb's later)
-            noted = set(np.unique(r[:, 5]).tolist()) if len(r) else set()
-            chans = app.own_channels()
-            owners |= {i for i, sh in enumerate(app.shapes)
-                       if i not in noted and can_go_in(sh) and not placed_on(sh, chans)}
-            owners |= {i for i, sh in enumerate(app.shapes) if any(v < 0 for v in placed_on(sh, chans))}  # (pinned)
-            owners = sorted(owners)
-        if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
-            return app.status.config(text=tr("tracks.cant_move"))
+        autos, owners = [], []
+        if any(0 <= s < HAND for s in group):
+            got = self.snapshot()
+            if got is None:
+                return
+            autos, owners = got
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.move_step"))
-        taken = self.take_tracks(autos, owners) if autos else {}
+        taken, rows = self.take_all(autos, owners, rows) if autos else ({}, rows)
+        moved = {s - HAND for s in group if s >= HAND} | set(taken.values())
+        # (a tinted track dragged = yours, like Properties)
+        app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if t["id"] in moved else t
+                          for t in from_rows(rows, self._slots, app.own_tracks, self._filled)]
+        if app.loaded is not None:
+            # (the removed ones after them: the order holds every track of the file)
+            app.file_order = clean_file_order([-1 - r for r in rows if type(r) is int and r < 0] + app.file_gone)
+        self.own_changed()
+        if taken:
+            app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
+
+    def snapshot(self):
+        """Touching an automatic track makes them ALL yours (dragged, Properties): (every automatic slot, the shapes on
+        them), or None when one can't go in (status line)."""
+        from window.app import can_go_in, placed_on
+        app = self.app
+        r = app.rendered
+        # (EVERY automatic track is taken, empty ones too, with every shape on them: nothing pinned, no track split in
+        # two, nothing handed out again, only the order changes, like Domino's; user 2026-10-26, after pinned colours
+        # kept empty tracks between them and the music left behind got new channels / gap tracks)
+        autos = [int(s) for s in self._slots]
+        owners = set(np.unique(r[r[:, 4] < OWN0, 5]).tolist()) if len(r) else set()
+        # (a shape with no notes of its own now, e.g. all merged into others' in Single channel: it'd come back on a
+        # track of Spiderweb's later)
+        noted = set(np.unique(r[:, 5]).tolist()) if len(r) else set()
+        chans = app.own_channels()
+        owners |= {i for i, sh in enumerate(app.shapes)
+                   if i not in noted and can_go_in(sh) and not placed_on(sh, chans)}
+        owners |= {i for i, sh in enumerate(app.shapes) if any(v < 0 for v in placed_on(sh, chans))}  # (pinned)
+        owners = sorted(owners)
+        if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
+            app.status.config(text=tr("tracks.cant_move"))
+            return None
+        return autos, owners
+
+    def take_all(self, autos, owners, rows):
+        """snapshot's tracks made yours (in the undo step made already): ({slot: its new id}, rows (full_plan's) with
+        them in place); the highlight, picks, mutes go along."""
+        app = self.app
+        taken = self.take_tracks(autos, owners)
         if taken:
             rows = [{"id": taken[x]} if type(x) is int and x in taken else x for x in rows]
 
@@ -1102,15 +1131,7 @@ class TrackList(tk.Canvas):
             self.muted, self.behind = set(map(mine_now, self.muted)), set(map(mine_now, self.behind))
             app.shapes_changed()  # (its shapes on the new tracks: the automatic tracks as they are after)
             self.tracks()
-        moved = {s - HAND for s in group if s >= HAND} | set(taken.values())
-        # (a tinted track dragged = yours, like Properties)
-        app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if t["id"] in moved else t
-                          for t in from_rows(rows, self._slots, app.own_tracks, self._filled)]
-        if app.loaded is not None:
-            app.file_order = clean_file_order([-1 - r for r in rows if type(r) is int and r < 0])
-        self.own_changed()
-        if taken:
-            app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
+        return taken, rows
 
     def take_tracks(self, autos, owners):
         """Spiderweb's automatic tracks autos (slots) made yours (group C, user 2026-10-26: touching a track makes it
@@ -1184,15 +1205,15 @@ class TrackList(tk.Canvas):
             self.shown_changed()
             self.update_idletasks()
         group = self.picked_tracks() if s in self.picked_tracks() else [s]
-        own = [t for t in group if self.own_track(t) is not None]
+        gone = [t for t in group if t is not None and self.removable(t)]
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
         menu.add_command(label=tr("tracks.add_tracks"), command=lambda: self.ask_add(row))
         menu.add_separator()
-        menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_own(own),
-                         state="normal" if own else "disabled")
+        menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_tracks(gone),
+                         state="normal" if gone else "disabled")
         menu.add_command(label=tr("tracks.properties"), command=lambda: self.ask_properties(s),
-                         state="normal" if self.own_track(s) is not None and len(group) == 1 else "disabled")
+                         state="normal" if self.has_properties(s) and len(group) == 1 else "disabled")
         try:
             menu.tk_popup(e.x_root, e.y_root)
         finally:
@@ -1278,14 +1299,71 @@ class TrackList(tk.Canvas):
         if chs:
             self.add_own(row, chs)
 
+    def has_properties(self, s):
+        """Properties… works on it: yours, Spiderweb's (made yours first), a loaded MIDI's (loaded, not damaged)."""
+        if s is None:
+            return False
+        if s >= 0:
+            return True
+        lm, n = self.app.loaded, -1 - s
+        return lm is not None and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole
+
     def ask_properties(self, s):
-        """Properties… (an own track): its name and channel in a small window."""
-        own = self.own_track(s)
-        if own is None:
+        """Properties…: its name and channel in a small window. Yours: changed as it is; a loaded MIDI's: kept as the
+        file's track's new name / channel (app.file_props, written again on export, group E); Spiderweb's: every
+        automatic track made yours first (dragging's rule), then it's changed."""
+        if not self.has_properties(s):
             return
-        got = PropertiesBox(self, own["name"], own["ch"]).run()
-        if got is not None:
-            self.set_properties(s, *got)
+        own = self.own_track(s)
+        if own is not None:
+            got = PropertiesBox(self, own["name"], own["ch"]).run()
+            if got is not None:
+                self.set_properties(s, *got)
+            return
+        if s < 0:
+            now = self.app.file_tracks().get(-1 - s, {"name": "", "ch": 0})
+            got = PropertiesBox(self, now["name"], now["ch"]).run()
+            if got is not None:
+                self.set_file_props(-1 - s, *got)
+            return
+        ch = slot_track_channel(s, self.app.picture_use10)[1]
+        got = PropertiesBox(self, "", ch).run()
+        if got is not None and got != ("", ch):
+            self.set_auto_properties(s, *got)
+
+    def set_file_props(self, n, name, ch):
+        """A loaded MIDI's track n given a new name / channel (the file's own = none kept): one undo step."""
+        t = self.app.loaded.tracks[n]
+        mine = {"name": None if name == (t.name or "") else name,
+                "ch": None if ch == (t.channel if t.channel is not None else 0) else ch}
+        new = dict(self.app.file_props)
+        if mine["name"] is None and mine["ch"] is None:
+            new.pop(n, None)
+        else:
+            new[n] = mine
+        if new == self.app.file_props:
+            return
+        self.app.roll.end_typing()
+        self.app.push_undo(name=tr("tracks.properties_step"))
+        self.app.file_props = new
+        self.own_changed()
+
+    def set_auto_properties(self, s, name, ch):
+        """One of Spiderweb's tracks given a name / channel: every automatic track made yours (snapshot), then this
+        one changed, one undo step."""
+        app = self.app
+        got = self.snapshot()
+        if got is None:
+            return
+        full = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
+        app.roll.end_typing()
+        app.push_undo(name=tr("tracks.properties_step"))
+        taken, rows = self.take_all(*got, full)
+        app.own_tracks = [dict(t, name=name, ch=ch) if t["id"] == taken.get(s) else t
+                          for t in from_rows(rows, self._slots, app.own_tracks, self._filled)]
+        self.own_changed()
+        if taken:
+            app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
 
     def set_properties(self, s, name, ch):
         own = self.own_track(s)
@@ -1297,14 +1375,39 @@ class TrackList(tk.Canvas):
                      tr("tracks.properties_step"))
 
     def on_double(self, e):
-        """Double-click an own track's name: its Properties (like Domino's). Any other second click = a click (Tk
-        gives a double-click binding the press instead of <ButtonPress-1>)."""
+        """Double-click a track's name: its Properties (like Domino's). Any other second click = a click (Tk gives a
+        double-click binding the press instead of <ButtonPress-1>)."""
         self.on_press(e)
         row = self.row_at(e.y)
         if row is not None and row >= 0 and e.x < self.name_w and not self.on_speaker(e.x):
-            s = int(self.tracks()[row])
-            if self.own_track(s) is not None:
-                self.ask_properties(s)
+            self.ask_properties(int(self.tracks()[row]))
+
+    def removable(self, s):
+        """Remove Track works on it (group E: every track but a loaded MIDI's holding the song's tempo / time / key
+        signatures (the Conductor) or a damaged one: those are only ever copied as they are)."""
+        if s >= 0:
+            return True
+        lm, n = self.app.loaded, -1 - s
+        if lm is None:  # (waiting for its MIDI: shapes drawn into it)
+            return True
+        return (n < len(lm.mf.tracks) and lm.mf.tracks[n].whole
+                and n not in tempo_tracks(lm, (TEMPO, TIME_SIG, KEY_SIG)))
+
+    def remove_tracks(self, ss):
+        """Remove Track: yours alone = remove_own; with Spiderweb's / a loaded MIDI's = every note on them deleted
+        (track_moves: shapes wholly on them go, the rest of others stays as plain notes, a loaded MIDI's = deleted
+        notes) and the tracks with them, one undo step (Spiderweb's go once empty, a loaded MIDI's are left out of
+        the list and the export: app.file_gone)."""
+        if all(self.own_track(s) is not None for s in ss):
+            return self.remove_own(ss)
+        from window.track_moves import box_job
+        rows = sorted(r for r in map(self.row_of_id, ss) if r is not None)
+        if not rows:
+            return
+        boxes = [{"t0": 0.0, "t1": float(BEATS_FAR), "rows": (r, r)} for r in rows]
+        own = {self.own_track(s)["id"] for s in ss if self.own_track(s) is not None}
+        files = [-1 - s for s in ss if s < 0]
+        box_job(self.app, boxes, "remove", extra={"ids": list(ss), "own": own, "files": files})
 
     def remove_own(self, ss):
         """Remove Track on the tracks ss (own tracks only, for now; several = the selected ones): the shapes drawn

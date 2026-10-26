@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from files.own_tracks import clean_file_order, clean_own_tracks
+from files.own_tracks import clean_file_gone, clean_file_order, clean_file_props, clean_own_tracks
 from notes.loaded import extract_groups
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
@@ -183,6 +183,8 @@ class HistoryPanel:
                 and self.step_tracks(self.undo_stack[-1]) == json.dumps(self.own_tracks)
                 and self.step_deleted(self.undo_stack[-1]) == json.dumps(self.deleted)
                 and self.step_file_order(self.undo_stack[-1]) == json.dumps(self.file_order)
+                and self.step_file_gone(self.undo_stack[-1]) == json.dumps(self.file_gone)
+                and self.step_file_props(self.undo_stack[-1]) == json.dumps(self.file_props)
                 and not boxes_mark(self.undo_stack[-1])):  # (New with nothing to clear still set the boxes)
             kept = getattr(self, "_redo_kept", None)
             if kept and kept[1] == len(self.undo_stack):
@@ -335,7 +337,8 @@ class HistoryPanel:
         """The selection as an undo step keeps it: (selected shape numbers, the main one, the kept Select boxes or
         None, the Hz bass window's HzWindow.sel_state() or None, the picked stroke, the funnel's highlighted parts,
         the one of them clicked, the picked Ripples source, the Tempo pane's line as JSON, what the Tempo pane picked
-        as JSON, the own tracks as JSON, Delete loaded notes' boxes as JSON, the loaded MIDI's track order as JSON).
+        as JSON, the own tracks as JSON, Delete loaded notes' boxes as JSON, the loaded MIDI's track order as JSON, its tracks removed as JSON, their
+        new names / channels as JSON).
         The tempo line, the own tracks, the deleted boxes and the order ride here so every step carries them (they
         aren't shapes): undo / redo put them back with the shapes."""
         boxes = self.roll.kept_box()
@@ -344,7 +347,7 @@ class HistoryPanel:
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
                 self.stroke, list(self.parts), self.part_main, self.ripple_pick, tempo_text(self.tempo),
                 pane.pick_state() if pane else "{}", json.dumps(self.own_tracks), json.dumps(self.deleted),
-                json.dumps(self.file_order))
+                json.dumps(self.file_order), json.dumps(self.file_gone), json.dumps(self.file_props))
 
     def step_tempo(self, step):
         """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
@@ -368,6 +371,20 @@ class HistoryPanel:
         sel = step[2]
         return sel[12] if len(sel) > 12 and isinstance(sel[12], str) and sel[12][:1] in "[n" else json.dumps(
             self.file_order)
+
+    def step_file_gone(self, step):
+        """The loaded MIDI's tracks removed in the track list (JSON) an undo step kept; the ones now for a step made
+        without them."""
+        sel = step[2]
+        return sel[13] if len(sel) > 13 and isinstance(sel[13], str) and sel[13][:1] == "[" else json.dumps(
+            self.file_gone)
+
+    def step_file_props(self, step):
+        """The loaded MIDI's tracks' new names / channels (JSON) an undo step kept; the ones now for a step made
+        without them."""
+        sel = step[2]
+        return sel[14] if len(sel) > 14 and isinstance(sel[14], str) and sel[14][:1] == "{" else json.dumps(
+            self.file_props)
 
     def scrub_step(self, gesture, run):
         """run() steps a number box (widgets.Scrub). The steps of one gesture (a label drag, or arrows / wheel on the
@@ -530,6 +547,10 @@ class HistoryPanel:
                 self.deleted = deleted  # (shapes_changed below hides / brings back their loaded notes)
         if len(picked) > 12 and isinstance(picked[12], str) and picked[12][:1] in "[n":
             self.file_order = clean_file_order(json.loads(picked[12]))
+        if len(picked) > 13 and isinstance(picked[13], str) and picked[13][:1] == "[":
+            self.file_gone = clean_file_gone(json.loads(picked[13]))
+        if len(picked) > 14 and isinstance(picked[14], str) and picked[14][:1] == "{":
+            self.file_props = clean_file_props(json.loads(picked[14]))
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

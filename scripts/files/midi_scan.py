@@ -222,14 +222,15 @@ RW_TICK, RW_RUN, RW_DONE, RW_WRUN, RW_EOT, RW_INS, RW_SKIP = range(7)
 RW_SIZE = 7
 
 
-def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st, base, skip):
+def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st, base, skip, chan=-1):
     """Writes the whole events in b[p:end] (a track walk() read without BAD) into out from o. use_map: each event's
     tick moved through the Keep timing map (bp_n -> bp_f: tempo_file.file_plan's to_file, the very same rule:
     anchors exactly, between two the same share of the way). drop[type] = 1: meta events of that type left
     out (a tempo list written anew), their time carried on. ins_t / ins_at / ins_b: events put in (ticks written,
     in order; event k = ins_b[ins_at[k]:ins_at[k + 1]]), each before the first event at or after its tick; the
     ones past the track's end before its End of Track (which then moves later). Hidden events (Extract: skip, b[0]
-    = the track's byte base) left out, their time carried on. Stops at the first event not wholly in b, or one
+    = the track's byte base) left out, their time carried on. chan 0-15: every channel event written on that channel
+    (Track Properties on a loaded track, group E; -1 = as it is). Stops at the first event not wholly in b, or one
     that wouldn't fit in out. Returns (where it stopped in b, where it stopped in out)."""
     tick = st[RW_TICK]
     run = st[RW_RUN]
@@ -339,9 +340,12 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
                     v |= 128
                 out[o] = v
                 o += 1
+            at = o
             for m in range(ins_at[k], ins_at[k + 1]):
                 out[o] = ins_b[m]
                 o += 1
+            if chan >= 0 and o > at and 0x80 <= out[at] < 0xF0:  # (put in on the track's channel too)
+                out[at] = (out[at] & 0xF0) | chan
             done += gap
             k += 1
             wrun = -1  # (a meta event ends running status: the next channel event writes its status, hunt 2026-10-24)
@@ -363,7 +367,10 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
         if dd < 0:
             dd = 0
             nt = done
-        add = 1 if (not explicit and s < 0xF0 and wrun != s) else 0
+        ws = s  # (the status written)
+        if chan >= 0 and s < 0xF0:
+            ws = (s & 0xF0) | chan
+        add = 1 if (not explicit and s < 0xF0 and wrun != ws) else 0
         size = (gap_end - p if dd == d else 10) + add + (q - gap_end)
         if o + size > room:
             break
@@ -384,15 +391,18 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
                 out[o] = v
                 o += 1
         if add:
-            out[o] = s
+            out[o] = ws
             o += 1
+        at = o
         for m in range(gap_end, q):
             out[o] = b[m]
             o += 1
+        if explicit and ws != s:
+            out[at] = ws
         if s < 0xF0:
             if explicit:
                 run = s
-            wrun = s
+            wrun = ws
         tick = t
         done = nt
         p = q
