@@ -2039,6 +2039,7 @@
  "delete_loaded.step": "Delete loaded notes",
  "delete_loaded.overlap": "This box overlaps notes you extracted (on the same tracks and keys at the same time). Delete that shape too (select it with the box), or pick a box beside it.",
  "delete_loaded.none": "No loaded note starts in the box on the highlighted track (all tracks while none is highlighted).",
+ "delete_loaded.many": "More than {n} loaded notes in the box: too many to outline. The box shows what Delete takes.",
  "delete_loaded.done": "Deleted {n} loaded notes.",
  "delete_loaded.done_one": "Deleted {n} loaded note.",
  "extract.too_many": "The box holds {n} loaded notes. Extract takes {most} at most: as Spiderweb notes they need a lot of memory. Pick a smaller box.",

@@ -267,6 +267,63 @@ def finish(app, lm, new, got):
     app.status.config(text=trn("extract.done", n, n=f"{n:,}"))
 
 
+BOX_RING_MOST = 200_000  # loaded notes in a kept box outlined at most (measured: 200k notes' outline ~0.15 s a zoom
+# step; more = the box alone shows what Delete takes, the status line counts them)
+
+
+def box_notes(app):
+    """The loaded notes Delete loaded notes would take now (kept box, delete_tracks), as (starts, ends, keys) in the
+    project's ticks for the red outline round selected notes (user 2026-10-26, pick C: like shapes); None while
+    they're read (on a thread: the piano roll is drawn again when they come), when there are none, or past
+    BOX_RING_MOST (said on the status line)."""
+    lm = app.loaded
+    if not can_extract(app) or getattr(app.roll, "drag", None):
+        return None
+    tracks = delete_tracks(app, lm)
+    boxes = boxes_now(app) if tracks else []
+    if not boxes:
+        return None
+    key = (id(lm), lm.hide_ver, tuple(map(tuple, boxes)), tuple(tracks), app.ppq)
+    job = getattr(app, "_box_notes", None)
+    if job is not None and job["key"] == key:
+        return job["cols"]
+    if job is not None:
+        job["cancel"] = True
+    job = app._box_notes = {"key": key, "cols": None, "cancel": False, "finished": False, "many": 0}
+    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks} for a, b, c, d in boxes]
+    scale = app.ppq / lm.ppq
+
+    def run():
+        try:
+            got, n = [], 0
+            for b in new:
+                got.append(gather_box(lm, b, cancel=lambda: job["cancel"], most=BOX_RING_MOST - n))
+                n += len(got[-1]["s"])
+                if n > BOX_RING_MOST:
+                    break
+            if n > BOX_RING_MOST:
+                job["many"] = n
+            elif n:
+                s, e, lane = (np.concatenate([g[k] for g in got]) for k in ("s", "e", "lane"))
+                job["cols"] = (np.rint(s * scale).astype(np.int64), np.rint(e * scale).astype(np.int64),
+                               (lane & 255).astype(np.int64))
+        except BaseException:  # (stopped, or the file changed: no outline)
+            job["cols"] = None
+        job["finished"] = True
+
+    def poll():
+        if not job["finished"]:
+            app.after(50, poll)
+            return
+        if getattr(app, "_box_notes", None) is job and not job["cancel"]:
+            if job["many"]:
+                app.status.config(text=tr("delete_loaded.many", n=f"{BOX_RING_MOST:,}"))
+            app.roll.request_redraw()
+    threading.Thread(target=run, daemon=True, name="loaded notes in the box").start()
+    app.after(50, poll)
+    return None
+
+
 def delete_tracks(app, lm):
     """The loaded tracks Delete loaded notes takes (user 2026-10-26, like Domino: the highlighted track only, the
     ones shown behind it are for looking; none highlighted = every track; one of Spiderweb's / yours = none).

@@ -453,8 +453,9 @@ class RollDrawing:
         rows, cols = self.grid_parts(w, h)
         # the picture below shows exactly this: when nothing here changed (e.g. dragging a shape whose notes catch up
         # later), it's shown again as it is instead of being painted again
+        boxed = getattr(app, "_box_notes", None)  # (the loaded notes a kept box outlines: come in later, a thread)
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
-                 self.loaded_mark())
+                 self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])))
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
@@ -634,10 +635,12 @@ class RollDrawing:
         before the view to a screen after it (a shape of millions of notes zoomed in: millions of pieces, ~1 s each
         zoom step and every pan step slow), made again when the view gets near that stretch's ends."""
         app = self.app
-        if not app.sels or not app.show_notes.get() or not len(app.drawn):
+        from window.load_extract import box_notes  # (it imports this file)
+        boxed = box_notes(app)  # (a kept box over a loaded MIDI: the loaded notes Delete would take, group D)
+        if not (app.sels and len(app.drawn) or boxed is not None) or not app.show_notes.get():
             return None
         ppq, ax = app.ppq, self.sx / app.ppq
-        key = (frozenset(app.sels), self.sx, ppq)
+        key = (frozenset(app.sels), self.sx, ppq, id(boxed))
         span = max(1.0, self.winfo_width() - self.kb_w) / ax  # (the view's width in ticks)
         va = self.view_t * ppq
         pad = 16 / ax  # (the ring's pixels reach a little past its notes' ends)
@@ -645,13 +648,15 @@ class RollDrawing:
         if (got is None or got[0] is not app.drawn or got[1] != key or va - pad < got[3][0]
                 or va + span + pad > got[3][1]):
             fast = loops()
-            kept = self.paint_order(fast) if fast else None
+            kept = self.paint_order(fast) if fast and app.sels else None
             if kept is not None:  # (the selected shapes' notes are already together there, last)
                 (s, e, k, _, first, _), others = kept
                 s, e, k = s[first[others]:], e[first[others]:], k[first[others]:]
             else:
-                notes = app.drawn[np.isin(app.drawn[:, 5], list(app.sels))]
+                notes = app.drawn[np.isin(app.drawn[:, 5], list(app.sels))] if app.sels else app.drawn[:0]
                 s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
+            if boxed is not None:
+                s, e, k = (np.concatenate([a, b]) for a, b in zip((s, e, k), boxed))
             wa, wb = math.floor(va - span), math.ceil(va + 2 * span)
             near = (e > wa) & (s < wb)
             if near.all():  # (all of it: good wherever the view goes)
@@ -1433,9 +1438,12 @@ class RollDrawing:
         tl = getattr(self.app, "track_list", None)
         if loaded and tl is not None and tl.current is not None and tl.current < 0:
             # (a loaded track highlighted: Spiderweb's notes shown are only faint ones picked behind it, so they go
-            # under it, hunt 2026-10-24)
-            self.paint_rects(img, rects, region, ring)
+            # under it, hunt 2026-10-24; the red line over both: its loaded notes in a kept box have it, group D)
+            self.paint_rects(img, rects, region, False)
             self.paint_loaded(img, region)
+            at = self.ring_pixels(region) if ring else None
+            if at is not None:
+                img.reshape(-1, 3)[at] = RING_RGB
             return img
         if loaded:
             self.paint_loaded(img, region)  # (a loaded MIDI's notes: under Spiderweb's own)
