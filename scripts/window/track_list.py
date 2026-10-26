@@ -666,14 +666,17 @@ class TrackList(tk.Canvas):
             return self._hand[s]["ch"]
         return slot_track_channel(s, self.app.picture_use10)[1]
 
-    def next_channel(self, row):
-        """Add Track's channel: the one after the clicked track's (below the tracks: the last one's), channel 1
-        after none; channel 10 skipped while "Use channel 10" is off."""
-        ch = self.row_channel(len(self.tracks()) - 1 if row is None else row)
-        ch = 0 if ch is None else (ch + 1) % 16
-        if ch == 9 and not self.app.picture_use10:
-            ch = 10
-        return ch
+    def next_channel(self, row=None):
+        """Add Track's channel, like Domino's: the lowest channel no track uses yet (Spiderweb's own, the ones added
+        by hand, a loaded MIDI's); all used: the one fewest tracks use (lowest first: 1, 2, 3... again, on port A,
+        user 2026-10-26: not port B). Channel 10 skipped while "Use channel 10" is off."""
+        counts = [0] * 16
+        for r in range(len(self.tracks())):
+            ch = self.row_channel(r)
+            if ch is not None:
+                counts[ch] += 1
+        chs = [c for c in range(16) if c != 9 or self.app.picture_use10]
+        return min(chs, key=lambda c: (counts[c], c))
 
     def set_own(self, new, name):
         """The own tracks replaced by new (one undo step called name)."""

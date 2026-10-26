@@ -9,7 +9,7 @@ Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar
 ## Adding your own tracks
 
 Right-click in the track list:
-• Add Track adds one empty track after the track you right-clicked (right-click below the tracks to add it at the end). It gets the channel after that track's.
+• Add Track adds one empty track after the track you right-clicked (right-click below the tracks to add it at the end). It gets the lowest channel no track uses yet. When every channel is taken, it starts again from channel 1 (tracks can share a channel).
 • Add Tracks… adds one track for each channel you tick. Drag over the ticks to tick or untick many at once.
 • Remove Track removes a track you added.
 • Properties… sets a track's name and channel. Double-clicking its name does the same.
