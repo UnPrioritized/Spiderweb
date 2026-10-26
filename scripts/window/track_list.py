@@ -624,10 +624,15 @@ class TrackList(tk.Canvas):
     # ------------------------------------------------------------ own tracks (added by hand: files/own_tracks.py)
 
     def track_menu(self, e, row):
-        """Right-click on a row / below them (like Domino's): Add Track, Remove Track. row: the track list row
-        clicked (-1 = the Conductor row, None = below the tracks)."""
+        """Right-click on a row / below them (like Domino's): the row is highlighted (the Conductor row: none), then
+        Add Track, Add Tracks…, Remove Track, Properties…. row: the track list row clicked (-1 = the Conductor row,
+        None = below the tracks: the highlight stays). The play line stays put."""
         self.tip.hide()
         s = int(self.tracks()[row]) if row is not None and row >= 0 else None
+        if row is not None and s != self.current:  # (highlighted first, like a click; user 2026-10-26)
+            self.current = s
+            self.shown_changed()
+            self.update_idletasks()
         own = self.own_track(s)
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
