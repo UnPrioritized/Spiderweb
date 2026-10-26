@@ -13,7 +13,7 @@ Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar
 Right-click in the track list:
 • Add Track adds one empty track after the track you right-clicked (right-click below the tracks to add it at the end). It gets the lowest channel no track uses yet. When every channel is taken, it starts again from channel 1 (tracks can share a channel).
 • Add Tracks… adds one track for each channel you tick. Drag over the ticks to tick or untick many at once.
-• Remove Track removes a track you added, and the shapes drawn into it.
+• Remove Track removes a track you added, and the shapes drawn into it. A shape with colours on other tracks too keeps those: it becomes plain notes of the colours left, each still on its track.
 • Properties… sets a track's name and channel. Double-clicking its name does the same.
 
 A new track is highlighted at once. Your tracks stay where you put them, among the tracks Spiderweb makes for your shapes, and are saved with the project. Export MIDI and Export to Domino write them with their names and channels. Each change can be undone with Ctrl+Z. Remove Track and Properties… only work on tracks you added. On a loaded MIDI, new tracks go after the file's own tracks.

@@ -550,6 +550,8 @@
  "tracks.added_tip": "Added by Spiderweb for a shape's colours: goes away when no shape uses it (change it in Properties… to keep it)",
  "tracks.in_list": "{name} (in {track})",
  "tracks.removed_shapes": "Removed the track and the {n} shapes in it.",
+ "tracks.removed_plain": "{n} shapes had colours on other tracks too: they're plain notes now, with those colours.",
+ "tracks.removed_plain_one": "A shape had colours on other tracks too: it's plain notes now, with those colours.",
  "tracks.removed_shapes_one": "Removed the track and the shape in it.",
  "tracks.not_into": "Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't go into a track yet: they keep their own channels.",
  "tracks.add_track": "Add Track",

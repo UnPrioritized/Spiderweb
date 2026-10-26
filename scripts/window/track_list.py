@@ -834,7 +834,10 @@ class TrackList(tk.Canvas):
 
     def remove_own(self, ss):
         """Remove Track on the tracks ss (own tracks only, for now; several = the selected ones): the shapes drawn
-        into them go with them (like Domino), in the same undo step; the status line counts them."""
+        into them go with them (like Domino), in the same undo step. A shape with only SOME of its colours on them
+        (hunt 2026-10-26, user's pick: like Domino, only those notes go) becomes plain notes of its other colours,
+        each still on its track; the status line counts both."""
+        from window.app import placed_on
         owns = [t for t in map(self.own_track, ss) if t is not None]
         if not owns:
             return
@@ -843,17 +846,35 @@ class TrackList(tk.Canvas):
         if self.current in ss:
             self.current = None
         self.selected -= set(ss)
-        gone = {i for i, sh in enumerate(app.shapes) if app.in_own_track(sh) and into_ids(sh)[0] in ids}
         app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
+        own = app.own_channels()
+        laids = [placed_on(sh, own) for sh in app.shapes]
+        hit = {i: laid for i, laid in enumerate(laids) if any(v in ids for v in laid)}
+        gone = {i for i, laid in hit.items() if all(v in ids for v in laid)}
+        part = sorted(set(hit) - gone)
+
+        def drop(rows_of):  # (plain_copies' rows: the 5th column = each note's colour's place in its list)
+            return {i: rows[~np.isin(np.minimum(rows[:, 4], len(hit[i]) - 1),
+                                     [k for k, v in enumerate(hit[i]) if v in ids])] for i, rows in rows_of.items()}
+        plain = app.plain_copies(part, together=drop) if part else {}
+        for i, sh in plain.items():  # (its colours left, in order: each on the track it was on)
+            sh["into"] = [v for v in hit[i] if v not in ids]
+        gone |= set(part) - set(plain)
         app.push_undo(name=tr("tracks.remove_step" if len(owns) == 1 else "tracks.remove_many_step"))
+        app.put_plain(plain)
         for i in sorted(gone, reverse=True):
             del app.shapes[i]
         rest = [i - sum(j < i for j in gone) for i in sorted(app.sels - gone)]
         app.select_many(rest, max(rest, default=None))
         app.own_tracks = [t for t in app.own_tracks if t["id"] not in ids]
         self.own_changed()
+        said = []
         if gone:
-            app.status.config(text=trn("tracks.removed_shapes", len(gone), n=len(gone)))
+            said.append(trn("tracks.removed_shapes", len(gone), n=len(gone)))
+        if plain:
+            said.append(trn("tracks.removed_plain", len(plain), n=len(plain)))
+        if said:
+            app.status.config(text=" ".join(said))
 
     def speaker_x(self):
         return self.name_w - 13 * self.scale
