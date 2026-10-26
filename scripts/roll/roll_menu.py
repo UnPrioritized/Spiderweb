@@ -321,16 +321,18 @@ class ShapeMenu:
         finally:
             m.grab_release()
 
-    def extract_item(self, m):
-        """Load MIDI's Extract (window/load_extract.py), first in a kept Select box's menu while a MIDI is loaded."""
+    def extract_item(self, m, alone=False):
+        """Load MIDI's Extract (window/load_extract.py), first in a kept Select box's menu while a MIDI is loaded
+        (alone: the only item, no separator under it)."""
         if can_extract(self.app):
             m.add_command(label=tr("extract.menu"), command=lambda: extract_loaded(self.app))
-            m.add_separator()
+            if not alone:
+                m.add_separator()
 
     def show_extract_menu(self, e):
         """Right-click inside a kept Select box that selected no shape, a MIDI loaded: Extract alone."""
         m = tk.Menu(self, tearoff=0)
-        self.extract_item(m)
+        self.extract_item(m, alone=True)
         try:
             m.tk_popup(e.x_root, e.y_root)
         finally:
