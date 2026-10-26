@@ -712,7 +712,7 @@ class TrackList(tk.Canvas):
 
     def ask_add(self, row):
         """Add Tracks…: one track per channel ticked in its window, after row."""
-        chs = AddTracksBox(self).run()
+        chs = AddTracksBox(self, self.app.picture_use10).run()
         if chs:
             self.add_own(row, chs)
 

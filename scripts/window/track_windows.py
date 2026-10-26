@@ -77,16 +77,18 @@ class PropertiesBox(_Box):
 
 
 class AddTracksBox(_Box):
-    """Add Tracks: the channels (0-15, in order) ticked, or None. Every channel ticked at first."""
+    """Add Tracks: the channels (0-15, in order) ticked, or None. Every channel ticked at first, but channel 10
+    while "Use channel 10" is off (use10 False; it can still be ticked, user 2026-10-26)."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, use10=True):
+        self.use10 = use10
         super().__init__(parent, tr("tracks.add_many_title"))
 
     def fill(self, f):
         ttk.Label(f, text=tr("tracks.add_many_hint"), foreground=look.HINT, justify="left",
                   wraplength=round(260 * getattr(self.parent, "scale", 1))).grid(row=0, column=0, columnspan=2,
                                                                                  sticky="w", pady=(0, 6))
-        self.vars = [tk.BooleanVar(value=True) for _ in range(16)]
+        self.vars = [tk.BooleanVar(value=c != 9 or self.use10) for c in range(16)]
         self.ticks = []
         for c in range(16):
             b = ttk.Checkbutton(f, text=tr("tracks.channel", ch=c + 1), variable=self.vars[c], takefocus=False)
