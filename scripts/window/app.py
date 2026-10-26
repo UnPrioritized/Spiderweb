@@ -113,6 +113,7 @@ PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1
         3840, 4096, 5760, 7680, 8192, 11520, 12288, 15360, 16384, 23040, 24576, 30720, 32768, 36864,
         46080, 49152, 65535]
 TOOLS = [("select", tr("app.select"), "v"), ("slice", tr("app.slice"), "k"), ("lasso", tr("app.lasso"), "j")]
+SLICE_MODES = [("line", tr("app.slice_line")), ("shape", tr("app.slice_shape"))]
 LASSO_MODES = [("free", tr("app.lasso_free")), ("poly", tr("app.lasso_poly")),
                ("magnet", tr("app.lasso_magnet"))]  # (the Lasso button's ▾)
 # in the drawing tools' list (tool_picker.py), in this order
@@ -565,6 +566,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._normal_geometry = None
 
         self.tool = tk.StringVar(value="select")  # (each tool's tip shows when it's picked, see help.py)
+        self.slice_mode = tk.StringVar(value="line")  # the Slice tool's ▾: "line" (drag a line) / "shape" (Slice with
+        #                                               shape: click the shape to cut with)
         self.lasso_mode = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points) /
         #                                               "magnet" (clings to the notes)
         self.lasso_mode.trace_add("write", lambda *_: hasattr(self, "roll") and self.roll.drop_lasso(unfinished=True))
@@ -760,18 +763,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                 style="Toolbutton")
             b.pack(side="left", padx=1)
             Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"] if key in TOOL_TOPICS else tr("app.lasso_tip"))
-            if key == "lasso":  # (its ▾: Lasso / Polygonal; picking one picks the tool too)
-                from window.tool_picker import arrow_picture
-                self._lasso_arrow = arrow_picture(self.scale)
-                mb = ttk.Menubutton(bar, image=self._lasso_arrow, style="Toolbutton", takefocus=False)  # (the
+            if key in ("slice", "lasso"):  # (its ▾: Slice / Slice with shape, Lasso / Polygonal...; picking one
+                from window.tool_picker import arrow_picture  # picks the tool too)
+                if not hasattr(self, "_tool_arrow"):
+                    self._tool_arrow = arrow_picture(self.scale)
+                mb = ttk.Menubutton(bar, image=self._tool_arrow, style="Toolbutton", takefocus=False)  # (the
                 # drawing tools' arrow)
                 menu = tk.Menu(mb, tearoff=False)
-                for mode, name in LASSO_MODES:
-                    menu.add_radiobutton(label=name, value=mode, variable=self.lasso_mode,
-                                         command=lambda: self.tool.set("lasso"))
+                modes, var = (SLICE_MODES, self.slice_mode) if key == "slice" else (LASSO_MODES, self.lasso_mode)
+                for mode, name in modes:
+                    menu.add_radiobutton(label=name, value=mode, variable=var,
+                                         command=lambda key=key: self.tool.set(key))
                 mb["menu"] = menu
                 mb.pack(side="left", padx=(0, 1))
-                Tooltip(mb, tr("app.lasso_tip"))
+                Tooltip(mb, tr("app.slice_modes_tip") if key == "slice" else tr("app.lasso_tip"))
         line = ttk.Separator(bar, orient="vertical")
         line.pack(side="left", fill="y", padx=(3, 3), pady=2)
         # the drawing tool picked last + the list; its pinned tools' buttons go in the bar too (fit_toolbar)

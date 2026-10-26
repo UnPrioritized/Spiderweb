@@ -30,7 +30,7 @@ from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merg
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
-from notes.lasso import inside_point, lasso_notes, loop_crossings, path_middle, takes, touches
+from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
                           rejoined, slice_in_two, split_here_ok, tooled)
@@ -1187,6 +1187,87 @@ class JoinSplit:
         n = len(done)
         self.status.config(text=trn("join_split.lasso_cut", n, n=n) if done else
                            trn("join_split.lasso_whole", len(whole), n=len(whole)))
+        return True
+
+    def can_knife(self, sh):
+        """A shape Slice with shape cuts with (user 2026-10-24): custom shapes, pasted notes, text; not lines,
+        pictures, masks, merged shapes, Hz bass."""
+        return sh["kind"] == "custom" and "picture" not in sh and "merge" not in sh and not sh.get("hz") \
+            and not is_mask(sh)
+
+    def knife_cut(self, k):
+        """Slice with shape: shape k's own notes cut every shown shape under them (notes/lasso.knife_spans: on each
+        key row the stretches its notes cover, touching ones joined; no notes = no cut, even inside a ring). The
+        part under the knife is the inside piece, every note across an edge cut in two there; the knife stays.
+        Drawn shapes, lines and text under it: asked once, then turned into plain notes and cut in the same undo
+        step (user 2026-10-26, like the Lasso); merged shapes / Hz bass stay whole (Slice's message). Pieces keep
+        their colours; the inside pieces (and shapes wholly under it) end up selected. -> True when cut."""
+        self.commit_typing()
+        if self.notes_late:  # (notes still catching up with a drag: made now)
+            self.shapes_changed(now=True)
+        knife = self.shapes[k]
+        name = self.shape_label(knife)
+        spans = knife_spans(self.notes_of(knife))
+        if not spans:
+            self.status.config(text=tr("join_split.knife_no_notes", name=name))
+            return False
+        drawn, whole, skipped = [], [], 0
+        targets = [i for i in self.shown_shapes() if i != k and not is_mask(self.shapes[i])
+                   and "picture" not in self.shapes[i]]
+        for i in targets:
+            sh = self.shapes[i]
+            if self.lasso_pasted(sh):
+                continue
+            got = takes(self.notes_of(sh), spans, self.ppq)
+            if not got:
+                continue
+            if "merge" in sh or sh.get("hz"):
+                skipped += 1
+            elif got == "whole":
+                whole.append(i)
+            else:
+                drawn.append(i)
+        if drawn:
+            if not messagebox.askokcancel(tr("join_split.knife"), trn("join_split.knife_ask_plain", len(drawn),
+                                                                     n=len(drawn), name=name),
+                                          icon="question", parent=self):
+                return False
+            new = self.plain_copies(drawn)
+        done = {}
+        for i in targets:
+            sh = new[i] if drawn and i in new else self.shapes[i]
+            if not self.lasso_pasted(sh):
+                continue
+            notes, tracks = self.all_rows(sh)
+            got, _ = lasso_notes(sh, notes, tracks, spans, self.ppq)
+            if got:
+                got[1]["_inside"] = True
+                done[i] = got
+            elif len(notes) and touches(notes, spans, self.ppq):
+                whole.append(i)
+        more = trn("join_split.knife_skipped", skipped, n=skipped) if skipped else ""
+        if not done and not drawn:
+            if whole:
+                self.select_many(whole, whole[0])
+                self.status.config(text=trn("join_split.knife_whole", len(whole), n=len(whole), name=name) + more)
+            else:
+                self.status.config(text=tr("join_split.knife_only_skipped") if skipped else
+                                   tr("join_split.knife_nothing", name=name))
+            return False
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("join_split.knife"))
+        if drawn:
+            self.put_plain(new)
+        inside = [self.shapes[i] for i in whole]
+        picked = self.put_pieces(done, set(done), None, pick=lambda p: p.pop("_inside", False)) if done else []
+        for p in (p for parts in done.values() for p in parts):
+            p.pop("_inside", None)
+        picked += [j for j, s in enumerate(self.shapes) if any(s is w for w in inside)]
+        self.select_many(picked, picked[0] if picked else None)
+        self.shapes_changed()
+        n = len(done)
+        self.status.config(text=(trn("join_split.knife_cut", n, n=n, name=name) if done else
+                                 trn("join_split.knife_whole", len(whole), n=len(whole), name=name)) + more)
         return True
 
     def lasso_magnet_notes(self):

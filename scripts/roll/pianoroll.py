@@ -838,6 +838,16 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         owners = self.note_owners(x, y)
         return out + lines + [i for i in rest if i not in lines and i in owners]
 
+    def knife_click(self, x, y):
+        """Slice with shape: the top shape under x, y (masks never cut: looked through) cuts with its notes, when it
+        can (App.can_knife); a line over pasted notes = the line (can't cut), never the notes under it."""
+        app = self.app
+        under = [i for i in self.shapes_at(x, y) if i not in app.hidden_shapes and not is_mask(app.shapes[i])]
+        if under and app.can_knife(app.shapes[under[0]]):
+            app.knife_cut(under[0])
+        else:
+            app.status.config(text=tr("join_split.knife_cant" if under else "join_split.knife_click"))
+
     def next_at(self, x, y, i):
         """The shape after i under x, y (shapes_at, round again to the first), or None when i is the only one."""
         got = self.shapes_at(x, y)
@@ -1127,6 +1137,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.box_moving = boxes_upright(kept)[0]
             self.box_kept = (self.box_moving, set(app.sels))
 
+        if tool == "slice" and app.slice_mode.get() == "shape":  # (Slice with shape: the click's shape cuts on let go)
+            self.drag = ("knife", e.x, e.y)
+            return
         if tool == "slice":  # (the kept Select boxes stay: only what's in them is cut)
             if kept:
                 self.box_kept = (kept, set(app.sels))
@@ -1519,6 +1532,12 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.after_cancel(self.box_timer)
                 self.box_timer = None
             self.lasso_release(e)
+            return
+        if kind == "knife":  # (a drag cuts nothing)
+            _, x, y = self.drag
+            self.drag = None
+            if abs(e.x - x) < 4 and abs(e.y - y) < 4:
+                self.knife_click(x, y)
             return
         if kind == "slice":  # (a click without dragging cuts nothing)
             _, a, b, x, y = self.drag
