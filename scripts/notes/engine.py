@@ -14,6 +14,7 @@ from contextlib import contextmanager
 import numpy as np
 
 from files.lang import tr
+from files.own_tracks import ID_MOST
 from files.speed import key_sort, loops
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve, clean_cycle,
@@ -92,6 +93,25 @@ CHANNELS = [c for c in range(16) if c != 9]
 LAST10 = np.array(CHANNELS + [9], np.int64)  # ("Use channel 10": the shapes' 16 channels in order, render)
 CLASH = 1 << 16  # a track number this or past it: a Hz bass layer's note clashing with another layer's (layered_notes):
 #                  its track // CLASH = how many channels past the shape's own (in every Channels mode)
+OWN0 = 1 << 32  # a slot this or past it: a track added by hand (files/own_tracks.py), OWN0 + its id * 16 + its
+#                 channel (so the channel is slot & 15 everywhere); the automatic slots are all below it
+
+
+def own_slot(track_id, ch):
+    return OWN0 + track_id * 16 + ch
+
+
+def own_id(slot):
+    """The id of the track added by hand that slot (>= OWN0) is."""
+    return (slot - OWN0) >> 4
+
+
+def auto_count(slots):
+    """How many automatic slots there are up to the last one used (slots: the notes' slot column): own tracks'
+    left out."""
+    slots = np.asarray(slots)
+    auto = slots[slots < OWN0] if len(slots) and slots.max() >= OWN0 else slots
+    return int(auto.max()) + 1 if len(auto) else 0
 
 
 # ---------------------------------------------------------------- shapes
@@ -211,6 +231,9 @@ def clean_shape(sh):
             and all(type(t) is int for t in tm[1:])):
         # (its group's colour turn, kept when Turn into plain notes unlinked it, + its repeat: between.turns)
         out["team"] = list(tm)
+    into = sh.get("into")
+    if type(into) is int and 0 <= into < ID_MOST:  # the track added by hand it's drawn into (files/own_tracks.py)
+        out["into"] = into
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:
@@ -1910,7 +1933,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
 
 def slot_track_channel(slot, use10=False):
     """Slot number -> (track index, MIDI channel 0-15), one channel per track, skipping the drum channel (use10:
-    not skipping it: slot k = channel k; render keeps the other shapes off those slots)."""
+    not skipping it: slot k = channel k; render keeps the other shapes off those slots). A track added by hand
+    (OWN0): its own channel."""
+    if slot >= OWN0:
+        return slot, slot & 15
     return slot, slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
 
 
@@ -1919,8 +1945,11 @@ PORTS = 16  # MIDI ports players tell apart (measured: port 16 = port 0)
 
 def slot_port(slot, use10=False):
     """The port of a slot's track when ports are written (slot_ports): each round of the channels its own, so slots
-    on one channel number never share a channel (16 rounds; a 17th is the 1st again)."""
-    return slot // (16 if use10 else len(CHANNELS)) % PORTS
+    on one channel number never share a channel (16 rounds; a 17th is the 1st again). A track added by hand: port A
+    (user 2026-10-26)."""
+    if slot >= OWN0:
+        return 0
+    return slot //(16 if use10 else len(CHANNELS)) % PORTS
 
 
 def slot_ports(slots, cc, use10=False):

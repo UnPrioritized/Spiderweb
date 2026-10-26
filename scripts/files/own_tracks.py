@@ -6,6 +6,7 @@ them). The automatic tracks keep their slot order around them. Saved in the proj
 NAME_MOST = 100  # letters in a track's name at most
 HAND = 1 << 40   # the track list's id of own track n: HAND + n (slots are >= 0, a loaded MIDI's tracks < 0)
 COUNT_MOST = 65534  # own tracks at most (a MIDI file's most tracks)
+ID_MOST = 1 << 20  # ids below this (a shape's "into", engine.clean_shape; its notes' slot, engine.own_slot)
 
 
 def clean_name(text):
@@ -20,7 +21,7 @@ def clean_own_tracks(raw):
         if not isinstance(t, dict) or len(out) >= COUNT_MOST:
             continue
         i, ch, after = t.get("id"), t.get("ch"), t.get("after", -1)
-        if (type(i) is not int or i < 0 or i in seen or type(ch) is not int or not 0 <= ch <= 15
+        if (type(i) is not int or not 0 <= i < ID_MOST or i in seen or type(ch) is not int or not 0 <= ch <= 15
                 or type(after) is not int or after < -1 or after > 1 << 30):
             continue
         seen.add(i)

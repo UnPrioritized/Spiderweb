@@ -778,6 +778,9 @@ class JoinSplit:
             if len(rows):  # (a shape with no notes stays as it is)
                 if own or not auto:
                     rows = multi_slots(rows, slots)
+                if self.in_own_track(sh):  # (drawn into a track added by hand: the copy goes into it too)
+                    rows = rows.copy()
+                    rows[:, 4] = 0
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
                 laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
         if together:
@@ -792,6 +795,9 @@ class JoinSplit:
             new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)
             new[i]["made"] = "plain"
             new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
+            if self.in_own_track(sh):
+                new[i].pop("own_slots", None)
+                new[i]["into"] = sh["into"]
             ex = held_extract(sh) if moved is None else None  # (its notes taken from a loaded MIDI stay out of
             if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
                 new[i]["extract"] = ex
@@ -808,7 +814,7 @@ class JoinSplit:
         _, use10, multi, _, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
                                        self.notes_tracks, rounds=self.new_rounds.get(),
                                        order=all16 and self.ch10_order.get(), keep=self.keep_colours.get(),
-                                       busy=self.cc_busy("auto"))
+                                       busy=self.cc_busy("auto"), own=self.own_channels())
         return use10, multi
 
     def own_slots(self, i, use10):
@@ -823,10 +829,10 @@ class JoinSplit:
         all16 = self.use_ch10.get()
         _, used10, rows, _, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
                                        rounds=self.new_rounds.get(), order=all16 and self.ch10_order.get(),
-                                       busy=self.cc_busy("auto", alone))
+                                       busy=self.cc_busy("auto", alone), own=self.own_channels())
         rows = rows[rows[:, 5] == next(k for k, s in enumerate(alone) if s is sh)].copy()
         rows[:, 5] = i
-        if use10 and not used10:  # (made with channel 10 skipped: the same channels in the project's numbering)
+        if use10 and not used10 and not self.in_own_track(sh):  # (made with channel 10 skipped: the same channels in the project's numbering)
             t = rows[:, 4]
             rows[:, 4] = t // 15 * 16 + np.asarray(SKIP10)[t % 15]
         return rows

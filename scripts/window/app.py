@@ -25,7 +25,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
-                          one_voice, render, shape_key)
+                          one_voice, own_slot, render, resolve_overlaps, shape_key)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -140,8 +140,21 @@ class Stopped(Exception):
     """Notes being made in the background (App.notes_rested) aren't wanted any more."""
 
 
+def can_go_in(sh):
+    """True if the shape can be drawn into a track added by hand (Draw into a track group B: pictures, masks, Hz
+    basses and Channel per strip shapes keep their own channels for now)."""
+    return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh))
+
+
+def into_channel(sh, own):
+    """The channel of the track added by hand the shape is drawn into (own: {track id: channel}), or None: an
+    automatic shape (also when that track isn't there)."""
+    i = sh.get("into")
+    return own.get(i) if own and i is not None and can_go_in(sh) else None
+
+
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
-              keep=False, busy=None):
+              keep=False, busy=None, own=None):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count, {Hz bass's number: {voice: slot}} for those with
     their own channel per note (render voice_slots)). all16: the project's "Use channel 10" (every
@@ -149,7 +162,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     quiet: every mask's own notes left out (what the masks show: App.pattern). rounds: the project's "New channels
     each Colours round" (App.rounds_apart). order: its "Channels 1-16 in order" (App.in_order). keep: Settings →
     General "Overlapping shapes keep their colours" (render keep). busy: per shape the times its CC lines are
-    sent (App.cc_busy: render busy)."""
+    sent (App.cc_busy: render busy). own: {id: channel} of the tracks added by hand: a shape drawn into one
+    (into_channel) has all its notes on it in every mode, its own overlaps fixed as if alone (Single channel; As
+    drawn: kept), other shapes' never (Domino lets two notes share a key in a track); the other shapes never take
+    it nor step round it."""
     team_laps = []
     teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
@@ -183,6 +199,11 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     off = [silent(sh) or quiet and is_mask(sh) for sh in shapes]
     got = [(n[:0], None if t is None else t[:0]) if o else (n, t) for o, (n, t) in zip(off, got)]
     laps = [lap[:0] if o and lap is not None else lap for o, lap in zip(off, laps)]
+    # (shapes drawn into a track added by hand: taken out of the channel work, put on their track below)
+    into = [into_channel(sh, own) for sh in shapes]
+    inside = {i: got[i][0] for i, ch in enumerate(into) if ch is not None}
+    got = [(n[:0], None if t is None else t[:0]) if i in inside else (n, t) for i, (n, t) in enumerate(got)]
+    laps = [lap[:0] if i in inside and lap is not None else lap for i, lap in enumerate(laps)]
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
     # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
@@ -220,10 +241,25 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
                              busy, together, note_slots)
+    if inside:
+        rendered = np.concatenate([rendered] + [in_track(n, own_slot(shapes[i]["into"], into[i]), i,
+                                                         mode != "raw" and not is_sustained(shapes[i])
+                                                         and shapes[i].get("held") is not True)
+                                                for i, n in inside.items()])
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
             voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
     return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}
+
+
+def in_track(notes, slot, owner, fix):
+    """A shape's notes on a track added by hand: rendered rows (fix: its own overlaps fixed, resolve_overlaps)."""
+    rows = np.zeros((len(notes), 6), np.int64)
+    rows[:, :4], rows[:, 5] = notes, owner
+    if fix:
+        rows = resolve_overlaps(rows)
+    rows[:, 4] = slot
+    return rows
 
 
 def recolour_back(sh, notes_tracks, made_as, notes, tracks):
@@ -1612,7 +1648,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             made = all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
                              self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
                              keep=self.keep_colours.get(),
-                             busy=self.cc_busy(self.channel_mode.get()))
+                             busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels())
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots = made
@@ -1624,7 +1660,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             # (Single channel: sounding masks' notes cut the pattern's where they start; what a mask shows / Apply
             # makes = the pattern as it sounds without them, user)
             self.pattern = all_notes(self.shapes, self.ppq, self.keys, "single", self.channel_split, self.all16(),
-                                     self.notes_tracks, quiet=True)[2]
+                                     self.notes_tracks, quiet=True, own=self.own_channels())[2]
         if self.mask_preview.get():
             self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
                                                       self.pattern, GHOST_FADE[0] > 0)
@@ -1648,7 +1684,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
         if self.channel_mode.get() == "auto" and len(self.rendered):
-            pairs = np.unique(self.rendered[:, 5] * (self.slot_count + 1) + self.rendered[:, 4])
+            pairs = np.unique(self.rendered[:, 5] * (self.slot_count + 1)  # (a track added by hand: one channel)
+                              + np.minimum(self.rendered[:, 4], self.slot_count))
             chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
         # (an Add between group is one row: between_window.py)
         self.fill_shape_list(counts, chans, most_colours(self.all16()), self.colours_used())
@@ -1687,7 +1724,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         mode, split = self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys, mode, split, self.all16(),
                 self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode),
-                tuple(json.dumps(sh.get("strips")) for sh in self.shapes))  # (Channel per strip: not in shape_key)
+                tuple(json.dumps(sh.get("strips")) for sh in self.shapes),  # (Channel per strip: not in shape_key)
+                tuple(sorted(self.own_channels().items())))
+
+    def own_channels(self):
+        """{id: channel} of the tracks added by hand (all_notes own)."""
+        return {t["id"]: t["ch"] for t in self.own_tracks}
+
+    def in_own_track(self, sh):
+        """True if the shape is drawn into a track added by hand (into_channel)."""
+        return into_channel(sh, self.own_channels()) is not None
 
     def cc_busy(self, mode, shapes=None):
         """all_notes' busy for these shapes (cc_busy)."""
@@ -1738,7 +1784,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 busy = None if key[9] is None else cc_busy(  # (worked out here: a long Arpeggio's took 0.2 s)
                     [json.loads(t) if t else {} for t in key[9][1]], key[1], key[4])
                 got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
-                                busy=busy)
+                                busy=busy, own=dict(key[11]))
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:

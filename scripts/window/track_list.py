@@ -686,12 +686,11 @@ class TrackList(tk.Canvas):
         self.own_changed()
 
     def own_changed(self):
-        """The own tracks changed (set_own, undo): the list, its picker, the status line and the title again."""
+        """The own tracks changed (set_own): the list, its picker and the notes again (a channel changed: the shapes
+        drawn into the track take it; shapes_changed does the status line, title and autosave)."""
         self.tracks()
         self.shown_changed()
-        self.app.update_status()
-        self.app.schedule_autosave()
-        self.app.sync_history()
+        self.app.shapes_changed()
 
     def add_own(self, row, chs):
         """One track per channel in chs, after row (own_row), the first of them highlighted."""
