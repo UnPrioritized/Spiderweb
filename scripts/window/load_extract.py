@@ -422,6 +422,8 @@ def finish_delete(app, lm, new, got, step=None):
         app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new],
                                       "tracks": new[0]["tracks"]}]
     sync_extract(app, {box_key(b): g for b, g in zip(new, got)})
+    app.roll.box_kept = None  # (the box goes with its notes, like deleting shapes in it; undo brings it back, user)
     app.shapes_changed()
+    app.roll.request_redraw()
     if n:
         app.status.config(text=trn("delete_loaded.done", n, n=f"{n:,}"))
