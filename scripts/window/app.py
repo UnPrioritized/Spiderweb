@@ -27,7 +27,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
-from files.own_tracks import HAND, file_order, from_rows, full_plan, into_ids, new_id, next_channel
+from files.own_tracks import FILE0, HAND, file_order, from_rows, full_plan, into_ids, new_id, next_channel
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -161,6 +161,20 @@ def placed_on(sh, own):
             break
         out.append(v)
     return out
+
+
+class Known:
+    """placed_on's own for App.fit_into: a track id there = one of yours (by_id: {id: track}, grows as tracks are
+    added) or a loaded MIDI's track it knows (files: App.file_tracks)."""
+
+    def __init__(self, by_id, files):
+        self.by_id, self.files = by_id, files
+
+    def __contains__(self, v):
+        return v in self.by_id or v >= FILE0 and v - FILE0 in self.files
+
+    def __bool__(self):
+        return True
 
 
 def entry_slot(v, own, rule, use10):
@@ -577,6 +591,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.own_tracks = []  # tracks added by hand (files/own_tracks.py), saved + undone like the tempo line;
         # replaced (never changed in place) on every change, so the track list sees it by identity
         self.own_next = 0  # the next own track's id (never one used before in this project: own_tracks.new_id; saved)
+        # {n: {"name", "ch"}} of the loaded MIDI's tracks shapes are drawn into, as saved with the project: used
+        # while its MIDI isn't loaded (file_tracks)
+        self.file_saved = {}
         # this project's own mark (a new one at New / Open): Ctrl+C's copies carry it, so a copy laid on tracks keeps
         # them only when pasted back into the same project (put_into_current; hunt 2026-10-26)
         self.project_token = os.urandom(8).hex()
@@ -1826,8 +1843,51 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 tuple(sorted(self.own_channels().items())))
 
     def own_channels(self):
-        """{id: channel} of the tracks added by hand (all_notes own)."""
-        return {t["id"]: t["ch"] for t in self.own_tracks}
+        """{id: channel} of the tracks added by hand (all_notes own), and of the loaded MIDI's tracks shapes are
+        drawn into (FILE0 + its number: laid on like yours, group D)."""
+        out = {t["id"]: t["ch"] for t in self.own_tracks}
+        files = self.file_tracks()
+        for n in self.file_into():
+            out[FILE0 + n] = files[n]["ch"]
+        return out
+
+    def file_tracks(self):
+        """{n: {"name", "ch"}} of the loaded MIDI's tracks (its main channel; none = 1). Its MIDI not loaded: as
+        saved with the project (file_saved), so shapes drawn into them keep their channel and are listed and
+        exported under the track's name."""
+        lm = self.loaded
+        if lm is None:
+            return self.file_saved
+        got = getattr(self, "_file_tracks", None)
+        if got is None or got[0] is not lm:
+            got = self._file_tracks = (lm, {n: {"name": t.name or "", "ch": t.channel if t.channel is not None else 0}
+                                            for n, t in enumerate(lm.tracks)})
+        return got[1]
+
+    def with_file_tracks(self):
+        """own_written + the loaded MIDI's tracks shapes are drawn into, each as a track of its own under its name,
+        first (for writing WITHOUT the file: Export MIDI while it isn't loaded, Copy / Export to Domino)."""
+        files = self.file_tracks()
+        return [{"id": FILE0 + n, "name": files[n]["name"], "ch": files[n]["ch"], "after": 0}
+                for n in self.file_into()] + list(self.own_written())
+
+    def file_rows(self):
+        """The loaded MIDI's track numbers in the order they're listed (own_tracks.full_plan's files); none while
+        it isn't loaded (waiting_rows)."""
+        return file_order(self.loaded)
+
+    def waiting_rows(self):
+        """Its MIDI not loaded (not found): the file's track numbers shapes are drawn into, listed first as tracks
+        of their own under their names until it's back (yours keep their "file" places meanwhile)."""
+        return self.file_into() if self.loaded is None else []
+
+    def file_into(self):
+        """The loaded MIDI's track numbers shapes are drawn into (their into / into_rest), smallest first."""
+        files = self.file_tracks()
+        if not files:
+            return []
+        return sorted({v - FILE0 for sh in self.shapes for v in into_ids(sh) + list(sh.get("into_rest") or [])
+                       if type(v) is int and v >= FILE0 and v - FILE0 in files})
 
     def own_written(self):
         """The tracks added by hand the track list shows and the exports write. Multi channel: all of them. Single
@@ -1870,12 +1930,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         own, changed = list(self.own_tracks), False
         by_id = {t["id"]: t for t in own}
         slots, filled = track_slots(rendered, self.pad_tracks()), np.unique(rendered[:, 4])
-        # (a loaded MIDI's tracks left out for now: yours among them in their places)
-        rows = [-1 - r if type(r) is int else r["id"] for r in full_plan(file_order(self.loaded), slots, own, filled)
-                if type(r) is not int or r >= 0]
+        # (every row: an automatic slot s as -1 - s, yours by id, a loaded MIDI's track n as FILE0 + n; group D)
+        files = self.file_tracks()
+        rows = [(-1 - r if r >= 0 else FILE0 - 1 - r) if type(r) is int else r["id"]
+                for r in full_plan(self.file_rows(), slots, own, filled)]
         inserted = []
 
         def channel(v):
+            if v >= FILE0:
+                return files[v - FILE0]["ch"] if v - FILE0 in files else 0
             return by_id[v]["ch"] if v >= 0 else slot_track_channel(-1 - v, use10)[1]
 
         def at_end(kind_own):
@@ -1898,7 +1961,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             v = new_id(own, self.own_next)
             self.own_next = v + 1
             t = {"id": v, "name": "", "ch": next_channel(channel(prev), use10), "after": -1, "auto": True}
-            if prev >= 0 and "file" in by_id[prev]:  # (among a loaded MIDI's tracks: there too)
+            if prev in by_id and "file" in by_id[prev]:  # (among a loaded MIDI's tracks: there too)
                 t["file"] = by_id[prev]["file"]
             own.append(t)
             by_id[v] = t
@@ -1906,10 +1969,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             inserted.append(v)
             return v
 
+        known = Known(by_id, files)  # (yours, also the ones added below, and the loaded MIDI's)
         for i, n in need.items():
             sh = self.shapes[i]
             fresh = sh.pop("into_new", False)  # (just drawn / pasted: down the rows, like Domino's paste)
-            have, cols = placed_on(sh, {v: t["ch"] for v, t in by_id.items()}), sh.get("cols")
+            have, cols = placed_on(sh, known), sh.get("cols")
             if n <= 0 or not have or (len(have) >= n and not cols):
                 if have and len(have) > max(n, 1):  # (colours gone for now: their tracks kept aside, hunt 10-26)
                     sh["into_rest"] = have[max(n, 1):] + list(sh.get("into_rest") or [])
@@ -1917,7 +1981,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     changed = True
                 continue
             rest = list(sh.get("into_rest") or []) if not cols else []
-            while len(have) < n and rest and (rest[0] < 0 or rest[0] in by_id) and rest[0] not in have:
+            while len(have) < n and rest and (rest[0] < 0 or rest[0] in known) and rest[0] not in have:
                 have.append(rest.pop(0))  # (a colour back: on the track it had, while that track is still there)
             if not cols:
                 if rest and len(have) < n:  # (its track went meanwhile: the rest laid as new ones)
@@ -1958,7 +2022,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 sh["slots10"] = bool(use10) and any(channel(v) == 9 for v in have if v < 0)
             changed = True
         if inserted:  # (tracks put in the middle: every track's place worked out again from the rows)
-            own = from_rows([-1 - r if r < 0 else {"id": r} for r in rows], slots, own, filled)
+            own = from_rows([-1 - r if r < 0 else FILE0 - 1 - r if r >= FILE0 else {"id": r} for r in rows], slots,
+                            own, filled)
         # (a colour gone for now keeps its tinted track, hidden while empty: own_written; it comes back on it,
         # hunt 2026-10-26: Repeated colours off / on put them into your own track)
         used = {v for sh in self.shapes for key in ("into", "into_gap", "into_rest") for v in (sh.get(key) or [])
@@ -2029,7 +2094,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def into_target(self):
         """The track highlighted in the track list new shapes are laid on (placed_on's entry: a track added by
-        hand's id, an automatic track = -1 - its slot), or None (nothing / a loaded MIDI's track highlighted)."""
+        hand's id, an automatic track = -1 - its slot, a loaded MIDI's track n = FILE0 + n), or None (nothing, or a
+        damaged loaded track: the export only copies those as they are)."""
         tl = self.track_list
         s = tl.current
         if s is None:
@@ -2037,7 +2103,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         own = tl.own_track(s)
         if own is not None:
             return own["id"]
-        return -1 - s if 0 <= s < HAND else None
+        if s < 0:
+            n, lm = -1 - s, self.loaded
+            whole = lm is None or n >= len(lm.mf.tracks) or lm.mf.tracks[n].whole
+            return FILE0 + n if whole and n in self.file_tracks() else None
+        return -1 - s if s < HAND else None
 
     def put_into_current(self, sh, relay=True):
         """A new shape is laid from the highlighted track (Draw into a track; fit_into lays its colours). relay
@@ -2954,7 +3024,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 if self._used_tracks[0] is not self.rendered:
                     self._used_tracks = (self.rendered, len(track_slots(self.rendered, False)))
                 tracks = self._used_tracks[1]
-            tracks += len(self.own_written())
+            tracks += len(self.own_written()) + len(self.waiting_rows())
             parts.append(tr("app.one_track") if tracks == 1 else
                          tr("app.tracks_one_channel_each", slot_count=tracks))
         if self.sels:

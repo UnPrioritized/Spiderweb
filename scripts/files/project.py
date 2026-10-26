@@ -18,7 +18,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
 from notes.engine import (CHANNEL_MODES, OWN0, SHAPE_DEFAULTS, SPLITS, auto_count, clean_basics, clean_kept_patterns, clean_shape,
-                          merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports, slot_track_channel)
+                          merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports, slot_track_channel, track_ids)
 from notes.hzbass import clean_hz
 from notes.loaded import (clean_link, conductor_line, extract_ports, file_tempos, own_hits, retime_for, same_conductor,
                           tempo_new, tempo_tracks)
@@ -44,12 +44,12 @@ from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
-from files.own_tracks import ID_MOST, clean_own_tracks, new_id
-from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_tracks, track_slots, write_midi
+from files.own_tracks import ID_MOST, clean_file_tracks, clean_own_tracks, new_id
+from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_inserts, note_tracks, track_slots, write_midi
 from files.playback import keep_saved
 from files.about import HERE, USER, VERSION
 from files.errors import write_log
-from files.midi_copy import Added
+from files.midi_copy import Added, Retime
 from files.midi_read import M_CUT, M_RMID, Cancelled, FileChanged, MidiError
 from files.safefile import write_bytes, write_text
 from files.settings import save_app_settings, with_app_settings
@@ -257,6 +257,8 @@ class ProjectFiles:
             **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
             **({"own_tracks": self.own_tracks} if self.own_tracks else {}),
             **({"own_next": self.own_next} if self.own_next else {}),
+            # (the loaded MIDI's tracks shapes are drawn into: their name + channel, for opening without it)
+            **({"file_tracks": {str(n): self.file_tracks()[n] for n in self.file_into()}} if self.file_into() else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
         }
 
@@ -426,6 +428,7 @@ class ProjectFiles:
         self.roll.forget_loaded()
         self.tempo = tempo
         self.own_tracks = own
+        self.file_saved = clean_file_tracks(data.get("file_tracks"))
         nxt = data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
         self.own_next = new_id(own, nxt if type(nxt) is int and 0 <= nxt < ID_MOST else 0)
         if not quiet:  # (another project: copies from the one before aren't laid on these tracks)
@@ -837,6 +840,7 @@ class ProjectFiles:
         data.pop("loaded", None)
         data.pop("own_tracks", None)
         data.pop("own_next", None)
+        data.pop("file_tracks", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
@@ -1107,9 +1111,20 @@ class ProjectFiles:
                         job["hits"] = own_hits(hid, before[mine, 0], before[mine, 1], lanes[mine],
                                                cancel=lambda: job["cancel"],
                                                progress=lambda d, n: job.update(done=d, total=n))
-                    pieces, job["tracks"], between = note_tracks(notes, use10, pad, cc, ports, own,
-                                                                 len(lm.tracks))
-                    added = Added(pieces, job["tracks"], 16 * len(notes), between)
+                    # (shapes drawn into the file's own tracks, group D: their notes go INTO those tracks, only those
+                    # written again)
+                    tid = track_ids(notes[:, 4])
+                    inside = tid < 0
+                    if inside.any():
+                        part, tid = notes[inside], tid[inside]
+                        retime = (retime or Retime(None, (), {}, ())).add(
+                            {-1 - k: note_inserts(part[tid == k]) for k in np.unique(tid).tolist()})
+                        job["inside"] = len(part)
+                        notes = notes[~inside]
+                    if len(notes) or own:
+                        pieces, job["tracks"], between = note_tracks(notes, use10, pad, cc, ports, own,
+                                                                     len(lm.tracks))
+                        added = Added(pieces, job["tracks"], 16 * len(notes), between)
                 job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 copy_through(lm.mf, path, progress=lambda d, n: job.update(done=d, total=n),
@@ -1120,10 +1135,13 @@ class ProjectFiles:
             job["finished"] = True
 
         def own_note():  # (the message's lines about the shapes added)
-            if not len(notes) and not own:
+            inside = job.get("inside", 0)
+            if not len(notes) and not own and not inside:
                 return ""
             out = tr("load.own_added", notes=trn("n.notes", len(notes), n=len(notes)),
-                     tracks=trn("n.tracks", job["tracks"], n=job["tracks"]))
+                     tracks=trn("n.tracks", job["tracks"], n=job["tracks"])) if len(notes) or own else ""
+            if inside:
+                out += tr("load.own_inside", notes=trn("n.notes", inside, n=f"{inside:,}"))
             if job["hits"]:
                 out += trn("load.own_hits", job["hits"], n=job["hits"])
             if len(hid.h_s):
@@ -1268,7 +1286,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
-        tracks = len(track_slots(self.rendered, self.pad_tracks())) + len(self.own_written())
+        tracks = len(track_slots(self.rendered, self.pad_tracks())) + len(self.with_file_tracks())
         if tracks > MAX_TRACKS:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=tracks, most=MAX_TRACKS))
             return
@@ -1288,7 +1306,7 @@ class ProjectFiles:
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
                                                  self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"],
-                                                 own=self.own_written())):
+                                                 own=self.with_file_tracks())):
             return
         channels = tracks if self.channel_mode.get() == "auto" else 1
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
@@ -1526,9 +1544,9 @@ class ProjectFiles:
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
                                pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys,
-                               own=self.own_written()))):
+                               own=self.with_file_tracks()))):
             return
-        tracks = len(track_slots(notes, self.pad_tracks())) + len(self.own_written())
+        tracks = len(track_slots(notes, self.pad_tracks())) + len(self.with_file_tracks())
         ports = slot_ports(auto_count(notes[:, 4]), cc, self.picture_use10)  # (as dms_data decides)
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)
@@ -1623,7 +1641,7 @@ class ProjectFiles:
         notes, long = cut_gates(notes)
         try:
             raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from, cc, span, conductor,
-                            self.own_written())
+                            self.with_file_tracks())
             copied = put_on_clipboard(raw)
         except MemoryError:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))

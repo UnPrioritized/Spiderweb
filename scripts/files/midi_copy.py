@@ -420,3 +420,23 @@ class Retime:
             self.inserts[n] = (np.array([e[0] for e in events], np.int64), at,
                                np.frombuffer(b"".join(e[1] for e in events), np.uint8).copy())
         self.tracks = set(tracks) | set(inserts)
+
+    def add(self, extra):
+        """More events put in (group D: notes of shapes drawn into the file's tracks): {track number: (ticks, starts,
+        bytes)} like self.inserts' (midi_out.note_inserts), merged in time order with what's there (those first on
+        a shared tick)."""
+        for n, (t, at, b) in extra.items():
+            if n in self.inserts:
+                t0, at0, b0 = self.inserts[n]
+                ticks = np.concatenate([t0, t])
+                sizes = np.concatenate([np.diff(at0), np.diff(at)])
+                parts = [b0[at0[k]:at0[k + 1]] for k in range(len(t0))] + [b[at[k]:at[k + 1]] for k in range(len(t))]
+                order = np.argsort(ticks, kind="stable")
+                t = ticks[order]
+                at = np.zeros(len(order) + 1, np.int64)
+                at[1:] = np.cumsum(sizes[order])
+                b = np.concatenate([parts[k] for k in order]) if len(order) else np.zeros(0, np.uint8)
+            self.inserts[n] = (np.ascontiguousarray(t, np.int64), np.ascontiguousarray(at, np.int64),
+                               np.ascontiguousarray(b, np.uint8))
+            self.tracks.add(n)
+        return self

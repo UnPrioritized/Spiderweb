@@ -11,6 +11,10 @@ HAND = 1 << 40   # the track list's id of own track n: HAND + n (slots are >= 0,
 COUNT_MOST = 65534  # own tracks at most (a MIDI file's most tracks)
 ID_MOST = 1 << 20  # ids below this (a shape's "into", engine.clean_shape; its notes' slot, engine.own_slot)
 INTO_MOST = COUNT_MOST  # tracks one shape's colours go on at most (its "into": one per colour)
+# a loaded MIDI's track n as a shape's "into" entry (group D: drawn into the file's track): FILE0 + n, laid on like
+# a track of yours (its notes' slot engine.own_slot(FILE0 + n, its channel)); the track list's id stays -1 - n
+FILE0 = ID_MOST
+FILE_MOST = FILE0 + COUNT_MOST  # into entries below this
 
 
 def clean_name(text):
@@ -35,6 +39,18 @@ def clean_own_tracks(raw):
             out[-1]["auto"] = True
         if type(t.get("file")) is int and 0 <= t["file"] <= COUNT_MOST:  # (among a loaded MIDI's tracks)
             out[-1]["file"] = t["file"]
+    return out
+
+
+def clean_file_tracks(raw):
+    """A project's "file_tracks" as read ({track number: {"name", "ch"}} of the loaded MIDI's tracks shapes are drawn
+    into): anything that isn't one left out."""
+    out = {}
+    for k, t in (raw.items() if isinstance(raw, dict) else ()):
+        if (isinstance(k, str) and k.isdigit() and int(k) < COUNT_MOST and isinstance(t, dict)
+                and type(t.get("ch")) is int and 0 <= t["ch"] <= 15):
+            name = t.get("name", "")
+            out[int(k)] = {"name": clean_name(name) if isinstance(name, str) else "", "ch": t["ch"]}
     return out
 
 

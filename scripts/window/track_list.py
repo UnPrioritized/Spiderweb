@@ -142,20 +142,21 @@ class TrackList(tk.Canvas):
         """The slots written as tracks, in order (worked out again only when the notes change)."""
         app = self.app
         n, pad, use10, lm, own = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded, app.own_written()
+        waiting = app.waiting_rows()
         made = self._made
-        if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own):
+        if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own, waiting):
             slots = track_slots(n, pad).astype(np.int64)
             size = int(slots.max()) + 1 if len(slots) else 0
             # (a loaded MIDI's tracks first (their numbers -1, -2, ...), the tracks added by hand among them and among
             # Spiderweb's: own_tracks.full_plan, the exports' order)
             self._filled = np.unique(n[:, 4]) if len(n) else n[:0, 4]  # (tracks with notes: own_tracks.counted)
-            files = file_order(lm)
-            rows = full_plan(files, slots, own, self._filled)
+            files = app.file_rows()
+            rows = [-1 - k for k in waiting] + full_plan(files, slots, own, self._filled)
             self._hand = {HAND + t["id"]: t for t in own}
             every = np.array([r if type(r) is int else HAND + r["id"] for r in rows], np.int64)
             row_of = np.full(size, -1, np.int64)
             row_of[slots] = np.flatnonzero((every >= 0) & (every < HAND))
-            file_row = np.full(len(lm.tracks) if lm is not None else 0, -1, np.int64)
+            file_row = np.full(len(lm.tracks) if lm is not None else max(waiting, default=-1) + 1, -1, np.int64)
             file_row[-1 - every[every < 0]] = np.flatnonzero(every < 0)
             # muted / picked tracks keep their music when the tracks are handed out again (like the highlight:
             # follow; hunt 10-23, user picked A), else they're let go, never moved onto other music
@@ -175,14 +176,14 @@ class TrackList(tk.Canvas):
             self._ids = [id(sh) for sh in shapes]
             self._slots, self._row_of, self._file_row, self._rows_of_notes = slots, row_of, file_row, None
             # (rows before Spiderweb's own part: a loaded MIDI's tracks and yours among them)
-            self.lead = len(rows) - len(plan(slots, among_file(own, len(files))[1], self._filled))
+            self.lead = len(rows) - len(plan(slots, among_file(own, len(files))[1] if files else own, self._filled))
             self._all = every
-            self._made = (n, pad, use10, id(lm), own)
+            self._made = (n, pad, use10, id(lm), own, waiting)
 
             def there(s):
                 if s >= HAND:
                     return s in self._hand
-                return -s - 1 < len(file_row) if s < 0 else s < size and row_of[s] >= 0
+                return -s - 1 < len(file_row) and file_row[-s - 1] >= 0 if s < 0 else s < size and row_of[s] >= 0
             if self.current is not None and not there(self.current):
                 self.current = None  # (its track is gone)
             self.behind = {s for s in self.behind if there(s)}
@@ -215,8 +216,10 @@ class TrackList(tk.Canvas):
             tid = track_ids(n[:, 4])
             out = np.full(len(n), -1, np.int64)
             auto = tid < HAND
-            ok = auto & (tid < len(self._row_of))
+            ok = auto & (tid >= 0) & (tid < len(self._row_of))
             out[ok] = self._row_of[tid[ok]]
+            inside = (tid < 0) & (-1 - tid < len(self._file_row))  # (drawn into a loaded MIDI's track: its row)
+            out[inside] = self._file_row[-1 - tid[inside]]
             hand_rows = np.flatnonzero(mine >= HAND)
             if not auto.all() and len(hand_rows):  # (a track added by hand: its row)
                 o = np.argsort(mine[hand_rows])
@@ -412,7 +415,7 @@ class TrackList(tk.Canvas):
         """A loaded MIDI's track: the name it has in the file, else "Track n" (like Spiderweb's own)."""
         self.tracks()
         if self.file_at(row) is not None:
-            name = self.app.loaded.tracks[self.file_at(row)].name
+            name = self.app.file_tracks().get(self.file_at(row), {}).get("name")
             if name:
                 return name
         else:
@@ -428,9 +431,16 @@ class TrackList(tk.Canvas):
         self.tracks()  # (the tracks as they are now: undo / redo changes them while the list isn't drawn)
         return self._hand.get(s)
 
+    def file_channel(self, n):
+        """A loaded MIDI's track n's main channel (None: no notes); its MIDI not loaded: as saved (App.file_tracks)."""
+        lm = self.app.loaded
+        if lm is not None:
+            return lm.tracks[n].channel if n < len(lm.tracks) else None
+        return self.app.file_tracks().get(n, {}).get("ch")
+
     def channel_of(self, slot):
         if slot < 0:  # (a loaded MIDI's track: its main channel; none without notes)
-            ch = self.app.loaded.tracks[-slot - 1].channel
+            ch = self.file_channel(-1 - slot)
             return "" if ch is None else tr("tracks.channel", ch=ch + 1)
         if slot >= HAND:
             return tr("tracks.channel", ch=self._hand[slot]["ch"] + 1)
@@ -440,7 +450,7 @@ class TrackList(tk.Canvas):
         """The track's notes' colour: its channel's, as on the piano roll (the light look's darker edge colour shows
         better on thin lines; the dark look's fill colour)."""
         if slot < 0 or slot >= HAND:
-            ch = self.app.loaded.tracks[-slot - 1].channel if slot < 0 else self._hand[slot]["ch"]
+            ch = self.file_channel(-1 - slot) if slot < 0 else self._hand[slot]["ch"]
             fill, edge = SLOT_COLORS[COLOURS_16[ch or 0]]
         else:
             table = slot_colours(self.app.picture_use10)
@@ -778,9 +788,11 @@ class TrackList(tk.Canvas):
         app = self.app
         group = self.moving()
         # (every track, also tinted ones left out of the list)
-        full = full_plan(file_order(app.loaded), self._slots, app.own_tracks, self._filled)
+        full = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
         ids = [r if type(r) is int else HAND + r["id"] for r in full]
-        at = ids.index(int(self._all[gap])) if gap < len(self._all) else len(full)
+        # (above a row waiting for its MIDI, listed first: the top)
+        at = (ids.index(int(self._all[gap])) if int(self._all[gap]) in ids else 0) if gap < len(self._all) \
+            else len(full)
         rows = move_rows(full, {ids.index(s) for s in group if s in ids}, at)
         if [r if type(r) is int else HAND + r["id"] for r in rows] == ids:
             return
@@ -920,13 +932,14 @@ class TrackList(tk.Canvas):
         if row < 0:
             return -1
         own = self.app.own_tracks
-        if len(self._hand) == len(own):
+        if len(self._hand) == len(own) and not self.app.waiting_rows():
             return row
-        # (tinted tracks left out of the list, App.own_written: the row among all of them)
+        # (tinted tracks left out of the list, App.own_written: the row among all of them; a row waiting for its
+        # MIDI, listed first: before them all)
         s = int(self._all[row])
         full = [r if type(r) is int else HAND + r["id"]
-                for r in full_plan(file_order(self.app.loaded), self._slots, own, self._filled)]
-        return full.index(s) if s in full else row
+                for r in full_plan(self.app.file_rows(), self._slots, own, self._filled)]
+        return full.index(s) if s in full else -1
 
     def row_channel(self, row):
         """The channel (0-15) of the track in row, None for none (the Conductor row, a loaded track without notes)."""
@@ -934,7 +947,7 @@ class TrackList(tk.Canvas):
             return None
         s = int(self.tracks()[row])
         if s < 0:
-            return self.app.loaded.tracks[-s - 1].channel
+            return self.file_channel(-1 - s)
         if s >= HAND:
             return self._hand[s]["ch"]
         return slot_track_channel(s, self.app.picture_use10)[1]
@@ -970,7 +983,7 @@ class TrackList(tk.Canvas):
         """One track per channel in chs, after row (own_row), the first of them highlighted."""
         app = self.app
         new, ids = add_tracks(app.own_tracks, self._slots, self.own_row(row), chs, app.own_next, self._filled,
-                              file_order(app.loaded))
+                              app.file_rows())
         app.own_next = max(ids) + 1
         self.set_own(new, tr("tracks.add_step" if len(chs) == 1 else "tracks.add_many_step"))
         self.current = HAND + ids[0]
@@ -1100,17 +1113,29 @@ class TrackList(tk.Canvas):
 
     def row_tip_text(self, row):
         slot = int(self.tracks()[row])
-        if slot < 0:  # (a loaded MIDI's track)
-            t = self.app.loaded.tracks[-slot - 1]
-            lines = ["  ·  ".join(x for x in (self.name_of(row), self.channel_of(slot)) if x),
-                     trn("tracks.notes", t.notes, n=f"{t.notes:,}")]
-            used = int((t.chn > 0).sum())
-            if used > 1:
-                lines.append(trn("tracks.channels", used, n=used))
-            lines.append(tr("tracks.from_file"))
-            return "\n".join(lines)
         n = self.app.rendered
         mine = n[self.note_rows() == row] if len(n) else n
+        if slot < 0:  # (a loaded MIDI's track; shapes drawn into it, group D)
+            lines = ["  ·  ".join(x for x in (self.name_of(row), self.channel_of(slot)) if x)]
+            lm = self.app.loaded
+            if lm is not None:
+                t = lm.tracks[-slot - 1]
+                lines.append(trn("tracks.notes", t.notes, n=f"{t.notes:,}"))
+                used = int((t.chn > 0).sum())
+                if used > 1:
+                    lines.append(trn("tracks.channels", used, n=used))
+                lines.append(tr("tracks.from_file"))
+            else:
+                lines.append(tr("tracks.waiting_midi"))
+            if len(mine):
+                lines.append(trn("tracks.yours_inside", len(mine), n=f"{len(mine):,}"))
+                owners = np.unique(mine[:, 5]).tolist()
+                names = [self.app.shape_label(self.app.shapes[i]) for i in owners[:TIP_SHAPES]
+                         if i < len(self.app.shapes)]
+                lines.append(tr("tracks.shapes", names=", ".join(names)))
+                if len(owners) > TIP_SHAPES:
+                    lines.append(trn("tracks.more_shapes", len(owners) - TIP_SHAPES, n=len(owners) - TIP_SHAPES))
+            return "\n".join(lines)
         lines = [f"{self.name_of(row)}  ·  {self.channel_of(slot)}",
                  trn("tracks.notes", len(mine), n=f"{len(mine):,}")]
         if slot >= HAND:
@@ -1292,7 +1317,6 @@ class TrackList(tk.Canvas):
             track_row = at // self.row_h
             tk = np.ones(hh, np.int64)  # (each track row's; a loaded MIDI's: 1)
             inside = (track_row >= 0) & (track_row < len(self._all))
-            inside[inside] = self._all[track_row[inside]] >= 0  # (a loaded MIDI's rows: 1)
             tk[inside] = thick
             start = np.maximum(np.arange(hh) - tk + 1, track_row * self.row_h - cy + pad)  # (first row that counts)
             ups = np.cumsum(hit, axis=0, dtype=np.int32)

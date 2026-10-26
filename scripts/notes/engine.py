@@ -14,7 +14,7 @@ from contextlib import contextmanager
 import numpy as np
 
 from files.lang import tr
-from files.own_tracks import HAND, ID_MOST, INTO_MOST
+from files.own_tracks import FILE0, FILE_MOST, HAND, ID_MOST, INTO_MOST
 from files.speed import key_sort, loops
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve, clean_cycle,
@@ -108,10 +108,13 @@ def own_id(slot):
 
 def track_ids(slots):
     """The track list's track ids of notes on these slots: the slot itself; on a track added by hand, HAND + its
-    id (files/own_tracks.py)."""
+    id (files/own_tracks.py); in a loaded MIDI's track n (FILE0 + n), -1 - n."""
     slots = np.asarray(slots, np.int64)
     hand = slots >= OWN0
-    return np.where(hand, HAND + ((slots - OWN0) >> 4), slots) if hand.any() else slots
+    if not hand.any():
+        return slots
+    i = (slots - OWN0) >> 4
+    return np.where(hand, np.where(i >= FILE0, FILE0 - 1 - i, HAND + i), slots)
 
 
 def auto_count(slots):
@@ -242,10 +245,12 @@ def clean_shape(sh):
     # the tracks it was laid on, one per colour (files/own_tracks.py into_ids: a track added by hand's id, or -1 - an
     # automatic track's slot), the colours' columns still to lay (Domino's paste), gap tracks it keeps, the tracks of
     # colours gone for now (App.fit_into: back on them when they come back)
-    for key, low in (("into", -ID_MOST), ("cols", 0), ("into_gap", 0), ("into_rest", -ID_MOST)):
+    # (into / into_rest: a loaded MIDI's track too, FILE0 + its number)
+    for key, low, high in (("into", -ID_MOST, FILE_MOST), ("cols", 0, ID_MOST), ("into_gap", 0, ID_MOST),
+                           ("into_rest", -ID_MOST, FILE_MOST)):
         got = sh.get(key)
         got = [got] if type(got) is int else got if isinstance(got, list) else []
-        got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < ID_MOST]
+        got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < high]
         if got:
             out[key] = got
     if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)

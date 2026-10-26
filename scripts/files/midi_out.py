@@ -48,6 +48,23 @@ def track_events(notes, ch):
             for at in range(0, 2 * n, PIECE)]
 
 
+def note_inserts(notes):
+    """Notes put into a loaded MIDI's track (group D: shapes drawn into it), as midi_copy.Retime inserts: (ticks,
+    starts of each event in the bytes, bytes), every event with its status byte (channel = slot & 15), in time
+    order, note-offs first on a shared tick (like track_events)."""
+    n = len(notes)
+    tick = np.empty(2 * n, np.int64)
+    tick[0::2] = notes[:, 0] * 2 + 1
+    tick[1::2] = notes[:, 1] * 2
+    order = np.argsort(tick, kind="stable")
+    note, on = order >> 1, (order & 1) ^ 1
+    data = np.empty((2 * n, 3), np.uint8)
+    data[:, 0] = np.where(on == 1, 0x90, 0x80) | (notes[note, 4] & 15)
+    data[:, 1] = notes[note, 2]
+    data[:, 2] = notes[note, 3] * on
+    return tick[order] >> 1, np.arange(2 * n + 1, dtype=np.int64) * 3, data.ravel()
+
+
 def _events(notes, order, tick, last, ch):
     """track_events' bytes for some events in time order; last = the tick before the first of them."""
     tick, on, note = tick[order] >> 1, (order & 1) ^ 1, order >> 1
