@@ -5,6 +5,7 @@ maths is in notes/joined.py."""
 import copy
 import math
 import os
+import uuid
 from tkinter import messagebox, ttk
 from types import SimpleNamespace
 
@@ -1269,6 +1270,66 @@ class JoinSplit:
         self.status.config(text=(trn("join_split.knife_cut", n, n=n, name=name) if done else
                                  trn("join_split.knife_whole", len(whole), n=len(whole), name=name)) + more)
         return True
+
+    def new_colour_targets(self):
+        """The selected plain notes shapes New colours ▸ works on (pasted / plain notes, pieces; not pictures,
+        masks, merged shapes)."""
+        return [i for i in sorted(self.sels) if self.lasso_pasted(self.shapes[i])]
+
+    def free_slots(self, i, n):
+        """n slots (render's) no other shape's note uses while shape i sounds (first start .. last end), lowest
+        first; channel 10 only with Use channel 10 (app.all16)."""
+        r = self.rendered
+        mine = r[r[:, 5] == i]
+        if not len(mine):
+            return list(range(n))
+        t0, t1 = int(mine[:, 0].min()), int(mine[:, 1].max())
+        near = r[(r[:, 5] != i) & (r[:, 0] < t1) & (r[:, 1] > t0)]
+        used = set(near[:, 4].tolist())
+        skip10 = self.picture_use10 and not self.all16()  # (slots counting channel 10: keep off it)
+        out, s = [], 0
+        while len(out) < n:
+            if s not in used and not (skip10 and s % 16 == 9):
+                out.append(s)
+            s += 1
+        return out
+
+    def new_colours(self, ch):
+        """New colours ▸ (user 2026-10-24, Slice with shape pieces keep their colours until this): ch None = Next
+        free colours = channels no other shape uses while it sounds (my pick 10-26: by the usual overlap rules
+        pieces cut side by side never clash on a key, so nothing changed), each of its colours one, pinned; ch 1-16
+        = every note on that channel, pinned. Pinned = own_slots True (any Channels mode, like a picture's). One
+        undo step."""
+        got = self.new_colour_targets()
+        if not got:
+            return
+        self.commit_typing()
+        if self.notes_late:
+            self.shapes_changed(now=True)
+        use10 = bool(self.picture_use10)
+        plans = {}
+        for i in got:
+            rows = unpack_notes(self.shapes[i]["notes"])
+            olds = np.unique(rows[:, 4])
+            if ch is None:  # (rendered slots: slots10 = the slot rule they were made under)
+                plans[i] = (dict(zip(olds.tolist(), self.free_slots(i, len(olds)))), use10)
+            else:  # (slots10 True: slot k = channel k; else channel 10 skipped)
+                plans[i] = ({t: 9 if ch == 10 else SKIP10.index(ch - 1) for t in olds.tolist()}, ch == 10)
+        self.push_undo(name=tr("join_split.new_colours"))
+        for i, (to, rule) in plans.items():
+            sh = self.shapes[i]
+            sh["paste"] = uuid.uuid4().hex[:12]  # (no longer shares channels with the other pieces of its paste)
+            rows = unpack_notes(sh["notes"]).copy()
+            rows[:, 4] = [to[t] for t in rows[:, 4].tolist()]
+            sh["notes"] = pack_notes(rows)
+            if "cc" in sh:
+                sh["cc"] = pack_cc([(e[0], to.get(e[1], e[1]), e[2], e[3]) for e in unpack_cc(sh["cc"])])
+            sh["own_slots"], sh["slots10"] = True, rule
+            if ch is not None:
+                sh.pop("strips", None)  # (one channel: Channel per strip has nothing left to do)
+        self.shapes_changed()
+        self.status.config(text=trn("join_split.new_free_done", len(got), n=len(got)) if ch is None else
+                           trn("join_split.new_channel_done", len(got), n=len(got), ch=ch))
 
     def lasso_magnet_notes(self):
         """The notes a Magnetic lasso clings to: those it can cut as they are (pasted notes, lines; with Select boxes

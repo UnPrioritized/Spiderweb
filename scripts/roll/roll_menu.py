@@ -181,6 +181,7 @@ class ShapeMenu:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live, keys=True)
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
+        self.new_colours_menu(m)
         if app.fill_targets():
             item(tr("fill_gaps.menu"), "", lambda: open_fill(app))
         if len(app.sels) == 1 and app.can_split_pieces(sh):
@@ -311,6 +312,7 @@ class ShapeMenu:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live)
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
+        self.new_colours_menu(m)
         if app.fill_targets():
             item(tr("fill_gaps.menu"), "", lambda: open_fill(app))
         if app.pieces():
@@ -389,6 +391,21 @@ class ShapeMenu:
         if strips_targets(app):  # Channel per strip… (strips_window.py): pasted notes only, else left out
             self._strips_var = tk.BooleanVar(value=any_strips(app))
             m.add_checkbutton(label=tr("strips.menu"), variable=self._strips_var, command=lambda: open_strips(app))
+
+    def new_colours_menu(self, m):
+        """New colours ▸ (Slice with shape pieces, user 2026-10-24/26; any plain notes): Next free colours (the
+        usual overlap rules) or one channel by hand. Plain notes only, else left out; greyed outside Multi channel."""
+        app = self.app
+        if not app.new_colour_targets():
+            return
+        sub = tk.Menu(m, tearoff=False)
+        sub.add_command(label=tr("join_split.new_free"), command=lambda: app.new_colours(None))
+        sub.add_separator()
+        for ch in range(1, 17):
+            if ch != 10 or app.all16():
+                sub.add_command(label=tr("join_split.new_channel", n=ch), command=lambda ch=ch: app.new_colours(ch))
+        m.add_cascade(label=tr("join_split.new_colours"), menu=sub,
+                      state="normal" if app.channel_mode.get() == "auto" else "disabled")
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""
