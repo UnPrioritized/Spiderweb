@@ -9,7 +9,7 @@ import numpy as np
 from files.safefile import write_bytes
 from files.own_tracks import plan
 from files.speed import loops
-from notes.engine import slot_port, slot_ports, slot_track_channel
+from notes.engine import OWN0, auto_count, own_id, slot_port, slot_ports, slot_track_channel
 
 PPQ_WARN = 32767  # a PPQ this high or higher: many MIDI programs can't open the file; still written
 MAX_DELTA = (1 << 28) - 1  # the longest wait between two events a MIDI file can hold (4 bytes)
@@ -153,11 +153,34 @@ def _chunk(data):
 
 
 def track_slots(notes, pad=True):
-    """The slots written as tracks, in order: every slot up to the last one used (pad: empty ones too, so each
-    shows its channel), or only the ones with notes ("Fill each round with empty tracks" off)."""
+    """The automatic slots written as tracks, in order: every slot up to the last one used (pad: empty ones too, so
+    each shows its channel), or only the ones with notes ("Fill each round with empty tracks" off). The tracks
+    added by hand (engine.OWN0) aren't among them (own_tracks.plan puts them in)."""
     if not len(notes):
         return np.zeros(0, np.int64)
-    return np.arange(int(notes[:, 4].max()) + 1) if pad else np.unique(np.asarray(notes[:, 4], np.int64))
+    if pad:
+        return np.arange(auto_count(notes[:, 4]))
+    slots = np.unique(np.asarray(notes[:, 4], np.int64))
+    return slots[:np.searchsorted(slots, OWN0)]
+
+
+def own_compact(notes, own=()):
+    """notes with the slots of tracks added by hand (engine.OWN0 + ...) numbered just past the automatic ones, in
+    own's order (the rest after): (notes, automatic slots, slots in all, {own track id: its slot}); notes unchanged
+    (not copied) without any."""
+    autos = auto_count(notes[:, 4])
+    if not len(notes) or notes[:, 4].max() < OWN0:
+        return notes, autos, autos, {}
+    s = notes[:, 4]
+    mine = s >= OWN0
+    ids = np.unique(s[mine])
+    place = {t["id"]: k for k, t in enumerate(own)}
+    ranked = sorted(range(len(ids)), key=lambda k: (place.get(own_id(int(ids[k])), len(place)), k))
+    new = np.empty(len(ids), np.int64)
+    new[ranked] = autos + np.arange(len(ids))
+    notes = notes.copy()
+    notes[mine, 4] = new[np.searchsorted(ids, s[mine])]
+    return notes, autos, autos + len(ids), {own_id(int(v)): int(new[k]) for k, v in enumerate(ids.tolist())}
 
 
 def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
@@ -193,9 +216,8 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tem
     head = tempo_track(bpm, beats, tempo, sigs, keys)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     tracks = plan(track_slots(notes, pad), own)
-    write_bytes(path, _pieces(notes, count, tracks, use10,
+    write_bytes(path, _pieces(notes, tracks, use10,
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
 
@@ -204,9 +226,8 @@ def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=()):
     puts them after the file's own tracks. ports: a set of slots whose tracks start with their port (extracted
     notes from another port: their slots' rounds are their ports)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    count = int(notes[:, 4].max()) + 1 if len(notes) else 0
     tracks = plan(track_slots(notes, pad), own)
-    return _pieces(notes, count, tracks, use10, b"", cc or {}, ports), len(tracks)
+    return _pieces(notes, tracks, use10, b"", cc or {}, ports), len(tracks)
 
 
 def name_event(name):
@@ -215,18 +236,19 @@ def name_event(name):
     return b"\x00\xFF\x03" + vlq(len(data)) + data
 
 
-def _pieces(notes, count, tracks, use10, start, cc, ports=None):
+def _pieces(notes, tracks, use10, start, cc, ports=None):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory). With the speed-ups
     the tracks are made side by side on several cores (midi_track), written in order. tracks: slots, and own
-    tracks (dicts: an empty track with their name and channel)."""
+    tracks (dicts: their name first, then the notes drawn into them, on their channel; port A)."""
     yield start
+    notes, autos, count, at = own_compact(notes)
     if count > 1:  # (one sort finds every track's notes, in their own order)
         slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
         order = np.argsort(slots, kind="stable")
         cuts = np.zeros(count + 1, np.int64)
         np.cumsum(np.bincount(slots, minlength=count), out=cuts[1:])
         del slots
-    every, ports = slot_ports(count, cc, use10), ports or ()
+    every, ports = slot_ports(autos, cc, use10), ports or ()
     fast = loops()
     if fast is not None and (not len(notes) or notes[:, 0].min() < 0):  # (the radix sort: ticks from 0 only)
         fast = None
@@ -235,24 +257,36 @@ def _pieces(notes, count, tracks, use10, start, cc, ports=None):
         bits = int(notes[:, 1].max() * 2 + 2).bit_length()
 
     def make(track):
-        if type(track) is dict:  # (an own track: empty for now, its name first)
-            events = ([name_event(track["name"])] if track["name"] else []) + [empty_track(track["ch"])]
-            return ([bytes([0, 0xFF, 0x21, 1, 0])] if every else []) + events
-        channel = slot_track_channel(track, use10)[1]
-        if fast is not None and not cc.get(track):
+        head, mine_cc = [], cc.get(track) if type(track) is not dict else None
+        if type(track) is dict:  # (an own track: its name first, port A, its notes if any were drawn into it)
+            head = ([bytes([0, 0xFF, 0x21, 1, 0])] if every else []) + (
+                [name_event(track["name"])] if track["name"] else [])
+            channel, track = track["ch"], at.get(track["id"])
+            if track is None:
+                return head + [empty_track(channel)]
+        else:
+            channel = slot_track_channel(track, use10)[1]
+            if every or track in ports:
+                head = [bytes([0, 0xFF, 0x21, 1, slot_port(track, use10)])]
+        if fast is not None and not mine_cc:
             rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
             events = [fast.midi_track(notes, rows, channel, MAX_DELTA, bits)] if len(rows) else [empty_track(channel)]
         else:
             mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
-            events = (cc_track(mine, channel, cc[track]) if cc.get(track) else track_events(mine, channel)
+            events = (cc_track(mine, channel, mine_cc) if mine_cc else track_events(mine, channel)
                       if len(mine) else [empty_track(channel)])
-        if every or track in ports:
-            events = [bytes([0, 0xFF, 0x21, 1, slot_port(track, use10)])] + events
-        return events
+        return head + events
+
+    def size(t):
+        if type(t) is dict:
+            t = at.get(t["id"])
+            if t is None:
+                return 0
+        return int(cuts[t + 1] - cuts[t]) if count > 1 else len(notes)
 
     # jobs = tracks one after another up to JOB_NOTES notes (tens of thousands of tiny tracks: one hand-over each
     # cost more than making them)
-    sizes = [0 if type(t) is dict else int(cuts[t + 1] - cuts[t]) if count > 1 else len(notes) for t in tracks]
+    sizes = [size(t) for t in tracks]
     jobs, weights, group, held = [], [], [], 0
     for t, size in zip(tracks, sizes):
         group.append(t)

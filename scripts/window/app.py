@@ -25,7 +25,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
-                          one_voice, own_slot, render, resolve_overlaps, shape_key)
+                          one_voice, own_slot, render, resolve_overlaps, shape_key, track_ids)
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -142,8 +142,8 @@ class Stopped(Exception):
 
 def can_go_in(sh):
     """True if the shape can be drawn into a track added by hand (Draw into a track group B: pictures, masks, Hz
-    basses and Channel per strip shapes keep their own channels for now)."""
-    return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh))
+    basses, Channel per strip shapes and pasted notes with CC events keep their own channels for now)."""
+    return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh) or "cc" in sh)
 
 
 def into_channel(sh, own):
@@ -1666,7 +1666,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                       self.pattern, GHOST_FADE[0] > 0)
         else:  # (toolbar "Preview" off: the pattern drawn whole, only the masks' dashed lines; user)
             self.drawn, self.mask_covered = self.rendered, set()
-        self.drawn_slots = self.drawn[:, 4]  # (the real tracks: the track list's one-track view goes by these)
+        self.drawn_slots = track_ids(self.drawn[:, 4])  # (the real tracks: the track list's one-track view goes
+        #                                                  by these; a track added by hand: its HAND id)
         if self.strips_window:  # (its strips each in a colour of its own while it shows them)
             self.drawn = strip_colours(self.drawn, self.strips_window.shown_owners())
         self._mask_time = time.perf_counter() - started

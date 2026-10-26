@@ -8,7 +8,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
-from notes.engine import SHAPE_DEFAULTS, clean_shape
+from notes.engine import OWN0, SHAPE_DEFAULTS, clean_shape, own_id
 from notes.sustain import is_sustained
 from notes.passengers import carried, track_map
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
@@ -290,7 +290,15 @@ class MaskPanel:
             got = np.concatenate([got, self.rendered[np.isin(self.rendered[:, 5], unit)]])
             count += len(got)
             pics = np.array(["picture" in self.shapes[o] for o in got[:, 5].tolist()], bool)
-            made[i] = [sh for sh in (self.copied(got[pics], True), self.copied(got[~pics], False)) if sh]
+            hand = got[:, 4] >= OWN0  # (notes on a track added by hand: a copy in that track each)
+            made[i] = [sh for sh in (self.copied(got[pics & ~hand], True), self.copied(got[~pics & ~hand], False))
+                       if sh]
+            for s in np.unique(got[hand, 4]).tolist():
+                sh = self.copied(got[got[:, 4] == s], False, multi=False)
+                for k in ("own_slots", "slots10"):
+                    sh.pop(k, None)
+                sh["into"] = own_id(s)
+                made[i].append(sh)
         if not made:
             self.status.config(text=tr("mask.apply_nothing"))
             return

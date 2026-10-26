@@ -27,7 +27,7 @@ from tkinter import ttk
 from files.about import ICONS
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from notes.engine import CLASH, PORTS, slot_ports
+from notes.engine import CLASH, PORTS, auto_count, slot_ports
 from notes.hz_cc import sharers
 from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, has_cc, left_edge, own_channels
 from roll.roll_shared import CTRL, bind_double_right, grab_while_panning
@@ -430,7 +430,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                 ppq, bpm = app.ppq, sh["hz"]["bpm"]
             use10, per = app.picture_use10, 16 if app.picture_use10 else 15
             mine = app.cc_messages(ppq, bpm, {i})
-            ports = PORTS if slot_ports(int(app.rendered[:, 4].max()) + 1, mine, use10) else 0
+            ports = PORTS if slot_ports(auto_count(app.rendered[:, 4]), mine, use10) else 0
             in_file = sharers(app.rendered, i, mine, use10, ports)
             in_play, own = set(), False
             if not app.out.tuned:  # (31-EDO: channels by key row, not these)

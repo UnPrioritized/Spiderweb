@@ -24,7 +24,7 @@ from files.midi_out import track_slots
 from files.own_tracks import HAND, add_tracks, plan
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
-from notes.engine import BEATS_FAR, slot_track_channel
+from notes.engine import BEATS_FAR, slot_track_channel, track_ids
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text, tempo_text
 from notes.tempo_file import heard_tempo
@@ -148,11 +148,12 @@ class TrackList(tk.Canvas):
                     had = {ids[i] for i in np.unique(old[old[:, 4] == s, 5]).tolist() if i < len(ids)}
                     if not any(id(sh) in had for sh in shapes):  # (an empty track, or shapes made anew by undo:
                         return s                                   # kept on its number, like the highlight)
-                    return moved_to(shapes, n[:, 5], n[:, 4], had, s)
+                    return moved_to(shapes, n[:, 5], track_ids(n[:, 4]), had, s)
                 self.muted = {s for s in map(keep, self.muted) if s is not None}
                 self.behind = {s for s in map(keep, self.behind) if s is not None}
             self._ids = [id(sh) for sh in shapes]
-            self._slots, self._row_of, self._ranges = slots, row_of, None
+            self._slots, self._row_of, self._ranges, self._rows_of_notes = slots, row_of, None, None
+            self._mine = mine
             # a loaded MIDI's tracks first (Load MIDI: their numbers -1, -2, ...), Spiderweb's own after them (the
             # export adds them as new tracks after the file's)
             self.lead = len(lm.tracks) if lm is not None else 0
@@ -181,16 +182,38 @@ class TrackList(tk.Canvas):
             return int(at[0]) if len(at) else None
         return self.lead + int(self._row_of[s]) if s < len(self._row_of) and self._row_of[s] >= 0 else None
 
+    def note_rows(self):
+        """Each note's row among Spiderweb's own tracks (lead not counted; -1: none), worked out when asked."""
+        self.tracks()
+        if self._rows_of_notes is None:
+            n, mine = self._made[0], self._mine
+            tid = track_ids(n[:, 4])
+            out = np.full(len(n), -1, np.int64)
+            auto = tid < HAND
+            ok = auto & (tid < len(self._row_of))
+            out[ok] = self._row_of[tid[ok]]
+            if not auto.all():  # (a track added by hand: its row)
+                hand_rows = np.flatnonzero(mine >= HAND)
+                o = np.argsort(mine[hand_rows])
+                ids = mine[hand_rows][o]
+                at = np.searchsorted(ids, tid[~auto])
+                found = (at < len(ids)) & (ids[np.minimum(at, len(ids) - 1)] == tid[~auto])
+                out[~auto] = np.where(found, hand_rows[o][np.minimum(at, len(ids) - 1)], -1)
+            self._rows_of_notes = out
+        return self._rows_of_notes
+
     def key_ranges(self):
-        """(lowest, highest) key of each slot's notes (-1 / 1 << 30 for none), only when the list is drawn (hunt
-        10-23: every edit of a 2M-note song paid for it)."""
+        """(lowest, highest) key of each row's notes (Spiderweb's own rows; -1 / 1 << 30 for none), only when the
+        list is drawn (hunt 10-23: every edit of a 2M-note song paid for it)."""
         self.tracks()
         if self._ranges is None:
-            n, size = self._made[0], len(self._row_of)
+            n, size = self._made[0], len(self._mine)
             lo, hi = np.full(size, 1 << 30, np.int64), np.full(size, -1, np.int64)
             if len(n):
-                np.minimum.at(lo, n[:, 4], n[:, 2])
-                np.maximum.at(hi, n[:, 4], n[:, 2])
+                row = self.note_rows()
+                ok = row >= 0
+                np.minimum.at(lo, row[ok], n[ok, 2])
+                np.maximum.at(hi, row[ok], n[ok, 2])
             self._ranges = (lo, hi)
         return self._ranges
 
@@ -208,7 +231,7 @@ class TrackList(tk.Canvas):
             self.tracks()  # (the notes were made again: the mutes follow their music)
         if not self.muted or not len(notes):
             return notes
-        return notes[~np.isin(notes[:, 4], list(self.muted))]
+        return notes[~np.isin(track_ids(notes[:, 4]), list(self.muted))]
 
     def toggle_mute(self, slot):
         self.muted ^= {slot}
@@ -797,12 +820,12 @@ class TrackList(tk.Canvas):
                 lines.append(trn("tracks.channels", used, n=used))
             lines.append(tr("tracks.from_file"))
             return "\n".join(lines)
-        if slot >= HAND:
-            return "\n".join([f"{self.name_of(row)}  ·  {self.channel_of(slot)}", tr("tracks.own_tip")])
         n = self.app.rendered
-        mine = n[n[:, 4] == slot] if len(n) else n
+        mine = n[self.note_rows() == row - self.lead] if len(n) else n
         lines = [f"{self.name_of(row)}  ·  {self.channel_of(slot)}",
                  trn("tracks.notes", len(mine), n=f"{len(mine):,}")]
+        if slot >= HAND:
+            lines.insert(1, tr("tracks.own_tip"))
         owners = np.unique(mine[:, 5]).tolist() if len(mine) else []
         names = [self.app.shape_label(self.app.shapes[i]) for i in owners[:TIP_SHAPES] if i < len(self.app.shapes)]
         if names:
@@ -927,14 +950,15 @@ class TrackList(tk.Canvas):
             return
         first, last = cy // self.row_h, (cy + ah) // self.row_h
         lo_t, hi_t = cx / self.sx * ppq, (cx + aw) / self.sx * ppq
-        row = self._row_of[n[:, 4]] + self.lead
-        keep = (row >= first) & (row <= last) & (n[:, 1] > lo_t) & (n[:, 0] < hi_t)
+        own_row = self.note_rows()
+        row = own_row + self.lead
+        keep = (own_row >= 0) & (row >= first) & (row <= last) & (n[:, 1] > lo_t) & (n[:, 0] < hi_t)
         if not keep.any():
             return
         n, row = n[keep], row[keep]
-        slot, key = n[:, 4], n[:, 2]
+        key = n[:, 2]
         lows, highs = self.key_ranges()
-        lo, hi = lows[slot], highs[slot]
+        lo, hi = lows[row - self.lead], highs[row - self.lead]
         inner = max(1, self.row_h - 2 * round(PAD * self.scale) - 1)
         span = hi - lo + 1
         thick = np.maximum(1, inner // span)  # (few keys: thicker lines)
@@ -959,11 +983,9 @@ class TrackList(tk.Canvas):
         if pad:  # covered if a line starts at most its thickness - 1 rows up, within the same track row
             at = np.arange(hh) - pad + cy  # (each picture row's pixel in the rows)
             track_row = at // self.row_h
-            # (each track row's; a loaded MIDI's / an own track's: 1)
-            ids = self._all
-            mine = (ids >= 0) & (ids < HAND)
-            span = np.ones(len(ids), np.int64)
-            span[mine] = np.maximum(1, highs - lows + 1)[ids[mine]]
+            # (each track row's; a loaded MIDI's: 1)
+            span = np.ones(len(self._all), np.int64)
+            span[self.lead:] = np.maximum(1, highs - lows + 1)
             row_thick = np.maximum(1, inner // span)
             tk = np.ones(hh, np.int64)
             inside = (track_row >= 0) & (track_row < len(self._all))

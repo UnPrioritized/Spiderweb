@@ -16,8 +16,8 @@ from notes.fx import with_velocity
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
-                              box_kind, cached_path, draw_boxes, fade, grab_while_panning, ruler_boxes, set_cursor,
-                              slot_colours)
+                              box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
+                              set_cursor, slot_colours)
 from window import look
 
 LEVELS = (127, 96, 64, 32, 0)
@@ -596,7 +596,7 @@ class VelocityPane(tk.Canvas):
             mine = vel >= -1
             notes, vel = notes[mine], vel[mine]
         cols = slot_colours(getattr(self.app, "picture_use10", False))
-        slot = cols[notes[:, 4] % len(cols)]
+        slot = note_colours(notes[:, 4], cols)
         if sels:
             layer = np.where(np.isin(notes[:, 5], list(sels)), NORMAL + slot, slot)  # (own colours, others faded)
         else:

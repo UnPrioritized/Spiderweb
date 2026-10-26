@@ -17,7 +17,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
-from notes.engine import (CHANNEL_MODES, SHAPE_DEFAULTS, SPLITS, clean_basics, clean_kept_patterns, clean_shape,
+from notes.engine import (CHANNEL_MODES, OWN0, SHAPE_DEFAULTS, SPLITS, auto_count, clean_basics, clean_kept_patterns, clean_shape,
                           merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports, slot_track_channel)
 from notes.hzbass import clean_hz
 from notes.loaded import (clean_link, conductor_line, extract_ports, file_tempos, own_hits, retime_for, same_conductor,
@@ -1287,7 +1287,7 @@ class ProjectFiles:
                 if ppq >= PPQ_WARN else "")
         if (self.rendered[:, 2] > 127).any():
             note += tr("project.it_has_keys_above_127_256")
-        if slot_ports(int(self.rendered[:, 4].max()) + 1, cc, self.picture_use10):  # (as write_midi decides)
+        if slot_ports(auto_count(self.rendered[:, 4]), cc, self.picture_use10):  # (as write_midi decides)
             note += tr("project.ports_midi")
         note += self.tempo_notes(plan) + self.cc_note(cc, True)
         messagebox.showinfo(tr("project.spiderweb"),
@@ -1521,7 +1521,7 @@ class ProjectFiles:
                                own=self.own_tracks))):
             return
         tracks = len(track_slots(notes, self.pad_tracks())) + len(self.own_tracks)
-        ports = slot_ports(int(notes[:, 4].max()) + 1, cc, self.picture_use10)  # (as dms_data decides)
+        ports = slot_ports(auto_count(notes[:, 4]), cc, self.picture_use10)  # (as dms_data decides)
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
                    tracks=trn("n.tracks", tracks, n=tracks), path=path)
                 + (tr("project.dms_keys_256") if mod else
@@ -1603,17 +1603,19 @@ class ProjectFiles:
             return
         tracks = len(np.unique(notes[:, 4]))
         pad_from = None
-        if self.rows_apart():  # (shapes moved a row of channels on: the empty tracks between keep them there)
+        auto = notes[:, 4][notes[:, 4] < OWN0]  # (not the tracks added by hand: their own tracks, never padded)
+        if self.rows_apart() and len(auto):  # (shapes moved a row of channels on: the empty tracks between keep them)
             step = 16 if self.picture_use10 else 15
-            pad_from = int(notes[:, 4].min()) // step * step
-            tracks = int(notes[:, 4].max()) + 1 - pad_from
+            pad_from = int(auto.min()) // step * step
+            tracks = int(auto.max()) + 1 - pad_from + tracks - len(np.unique(auto))
         # (no channel 10 question when the project uses it on purpose: "Use channel 10")
         if not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)
         try:
-            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from, cc, span, conductor)
+            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from, cc, span, conductor,
+                            self.own_tracks)
             copied = put_on_clipboard(raw)
         except MemoryError:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))

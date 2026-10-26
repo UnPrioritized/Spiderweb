@@ -24,7 +24,7 @@ import numpy as np
 
 from files import clipboard
 from files.lang import tr
-from files.midi_out import track_slots
+from files.midi_out import own_compact, track_slots
 from files.own_tracks import plan
 from files.speed import loops
 from notes.engine import slot_port, slot_ports, slot_track_channel
@@ -157,7 +157,7 @@ def clip_span(notes, bar, start="bar"):
     return first, max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
 
 
-def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, conductor=None):
+def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, conductor=None, own=()):
     """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
     that has notes, in slot order, packed together (no empty tracks; pad_from: every slot from that one on gets a
     track, empty ones too: Overlapping shapes keep their colours, rows of channels); Domino fills tracks downwards
@@ -166,20 +166,25 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
     with the last, so the first note pastes right at Domino's cursor. Every track shares that stretch (made longer
     for CC messages past the last note). cc = {slot: messages} (hz_cc.slot_events): control items on its track.
     span = (first, length) instead of clip_span's; conductor = tempo_items bytes: a Conductor track first (Domino
-    keeps it only when pasted on its Conductor track; tested by the user 2026-10-21)."""
+    keeps it only when pasted on its Conductor track; tested by the user 2026-10-21). own: the tracks added by hand
+    (files/own_tracks.py): the ones with notes put among the slots' as in the MIDI export (own_tracks.plan)."""
     cc = cc or {}
     first, length = span or clip_span(notes, bar, start)
     length = max([length] + [ev[-1][0] - first + 1 for ev in cc.values() if ev])
     end = item(2009, item(1001, struct.pack("<I", length)))
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
-        order, cuts = track_orders(notes, int(notes[:, 4].max()) + 1, z.pool)
+        notes, autos, count, at = own_compact(notes, own)
+        order, cuts = track_orders(notes, count, z.pool)
+        slots = [at[t["id"]] if type(t) is dict else t
+                 for t in plan(range(autos), [t for t in own if t["id"] in at])] + sorted(
+                     set(range(autos, count)) - {at[t["id"]] for t in own if t["id"] in at})
 
         def events(s, a, b):
             rows = note_rows(notes[order[a:b]], first)
-            return b"".join(bytes(p) for p in with_cc(rows, cc[s], first)) if cc.get(s) else rows.tobytes()
+            return b"".join(bytes(p) for p in with_cc(rows, cc[s], first)) if s < autos and cc.get(s) else rows.tobytes()
         tracks = b"".join(item(1003, TRACK_HEAD + events(s, a, b) + end + TRACK_TAIL)
-                          for s, (a, b) in enumerate(zip(cuts[:-1].tolist(), cuts[1:].tolist()))
-                          if a < b or pad_from is not None and s >= pad_from)
+                          for s, a, b in ((s, int(cuts[s]), int(cuts[s + 1])) for s in slots)
+                          if a < b or pad_from is not None and pad_from <= s < autos)
         if conductor is not None:
             tracks = item(1003, CONDUCTOR_HEAD + conductor + end + TRACK_TAIL) + tracks
         data = SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST + tracks + SONG_TAIL
@@ -409,25 +414,31 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
     track_head(0, b"Conductor", len(events), True)
     feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]
                                               + [r[0] for r in (keys or [])]))))
-    count = int(notes[:, 4].max()) + 1 if len(notes) else 0
+    tracks = plan(track_slots(notes, pad), own)
+    notes, autos, count, hand = own_compact(notes, own)
     order, cuts = track_orders(notes, count, z.pool)
-    ports = slot_ports(count, cc, use10)  # (Output port A, B, ... as the MIDI export's)
-    for slot in plan(track_slots(notes, pad), own):
-        if type(slot) is dict:  # (a track added by hand: empty for now, its name in Domino's own text bytes)
-            track_head(slot["ch"], slot["name"].encode("cp932", "replace"), 0)
-            feed(track_tail(0))
-            continue
+    ports = slot_ports(autos, cc, use10)  # (Output port A, B, ... as the MIDI export's)
+    for slot in tracks:
+        name, port = b"", 0
+        if type(slot) is dict:  # (a track added by hand: its name in Domino's own text bytes, port A)
+            name, channel, slot = slot["name"].encode("cp932", "replace"), slot["ch"], hand.get(slot["id"])
+            if slot is None:
+                track_head(channel, name, 0)
+                feed(track_tail(0))
+                continue
+        else:
+            channel = slot_track_channel(slot, use10)[1]
+            port = slot_port(slot, use10) if ports else 0
+            if (cc or {}).get(slot):  # (a Hz bass's CC messages among its notes: made whole, they're few tracks)
+                part = notes[order[cuts[slot]:cuts[slot + 1]]]
+                pieces = with_cc(note_rows(part), cc[slot])
+                track_head(channel, b"", sum(len(p) for p in pieces), port=port)
+                for p in pieces:
+                    feed(bytes(p))
+                feed(track_tail(max(int(part[:, 1].max()) if len(part) else 0, cc[slot][-1][0])))
+                continue
         mine = order[cuts[slot]:cuts[slot + 1]]
-        port = slot_port(slot, use10) if ports else 0
-        if (cc or {}).get(slot):  # (a Hz bass's CC messages among its notes: made whole, they're few tracks)
-            part = notes[mine]
-            pieces = with_cc(note_rows(part), cc[slot])
-            track_head(slot_track_channel(slot, use10)[1], b"", sum(len(p) for p in pieces), port=port)
-            for p in pieces:
-                feed(bytes(p))
-            feed(track_tail(max(int(part[:, 1].max()) if len(part) else 0, cc[slot][-1][0])))
-            continue
-        track_head(slot_track_channel(slot, use10)[1], b"", len(mine) * NOTE.itemsize, port=port)
+        track_head(channel, name, len(mine) * NOTE.itemsize, port=port)
         end = 0
         for at in range(0, len(mine), PIECE):
             part = notes[mine[at:at + PIECE]]

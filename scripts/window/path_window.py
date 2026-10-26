@@ -353,7 +353,8 @@ class PathWindow(ToolWindow):
             if not len(notes) or notes.shape[1] < 5:
                 continue
             tag = notes[:, -1]
-            slots = self.shown_slots(notes, tag, tracks, i, shown)
+            into = app.in_own_track(sh)  # (drawn into a track added by hand: the copies go into it too)
+            slots = np.zeros(len(notes), np.int64) if into else self.shown_slots(notes, tag, tracks, i, shown)
             order = np.argsort(tag, kind="stable")  # (each copy's notes cut out once: one scan per copy was slow)
             cuts = np.flatnonzero(np.diff(tag[order])) + 1
             news = []
@@ -366,6 +367,10 @@ class PathWindow(ToolWindow):
                 new = without10(app.copied(rows, False, True), use10)
                 new["made"] = "path"
                 new["name"] = tr("path.plain_name", name=app.shape_label(sh), n=len(news) + 2)
+                if into:
+                    for key in ("own_slots", "slots10"):
+                        new.pop(key, None)
+                    new["into"] = sh["into"]
                 news.append(new)
             made[i] = news
         total = sum(len(v) for v in made.values())

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 import numpy as np
 
 from files.lang import tr
-from files.own_tracks import ID_MOST
+from files.own_tracks import HAND, ID_MOST
 from files.speed import key_sort, loops
 from notes.custom import (ALIGNS, ENDS,CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, BOX_STROKE, block_notes, check_notes,
                           clean_curve, clean_cycle,
@@ -104,6 +104,14 @@ def own_slot(track_id, ch):
 def own_id(slot):
     """The id of the track added by hand that slot (>= OWN0) is."""
     return (slot - OWN0) >> 4
+
+
+def track_ids(slots):
+    """The track list's track ids of notes on these slots: the slot itself; on a track added by hand, HAND + its
+    id (files/own_tracks.py)."""
+    slots = np.asarray(slots, np.int64)
+    hand = slots >= OWN0
+    return np.where(hand, HAND + ((slots - OWN0) >> 4), slots) if hand.any() else slots
 
 
 def auto_count(slots):
@@ -1938,6 +1946,20 @@ def slot_track_channel(slot, use10=False):
     if slot >= OWN0:
         return slot, slot & 15
     return slot, slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
+
+
+def channels_of(slots, use10=False):
+    """slot_track_channel's channels of many slots at once."""
+    slots = np.asarray(slots, np.int64)
+    ch = slots % 16 if use10 else np.asarray(CHANNELS, np.int64)[slots % len(CHANNELS)]
+    hand = slots >= OWN0
+    return np.where(hand, slots & 15, ch) if hand.any() else ch
+
+
+def ports_of(slots, use10, ports):
+    """slot_port's ports of many slots at once, going round ports (a player's)."""
+    slots = np.asarray(slots, np.int64)
+    return np.where(slots >= OWN0, 0, slots // (16 if use10 else len(CHANNELS)) % ports)
 
 
 PORTS = 16  # MIDI ports players tell apart (measured: port 16 = port 0)

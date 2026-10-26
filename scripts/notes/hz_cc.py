@@ -369,14 +369,15 @@ def cc_apart(rendered, per_shape, use10, ports=0):
     (and port, ports = the player's) nothing else plays on; none free = left shared. per_shape = {shape's number:
     slot_events of it alone}. Returns (rendered with the moved notes (a copy, only when some move), {slot:
     messages})."""
+    from notes.engine import auto_count, channels_of, ports_of  # (engine.py imports this file)
     per = 16 if use10 else 15  # (slots a round of channels: engine.CHANNELS without channel 10)
 
-    def place(slot):
-        return slot // per % ports if ports else 0, slot % per
+    def place(slot):  # (a track added by hand: its own channel, port A)
+        return int(ports_of(slot, use10, ports)) if ports else 0, int(channels_of(slot, use10))
     rendered = np.asarray(rendered).reshape(-1, 6)
     slots, owners = rendered[:, 4], rendered[:, 5]
     used = {place(s) for s in np.unique(slots).tolist()}
-    nxt = int(slots.max()) + 1 if len(rendered) else 0
+    nxt = auto_count(slots)
     out, moves = {}, []
     wanted = [s for messages in per_shape.values() for s in messages]
     rows = np.flatnonzero(np.isin(slots, wanted))  # (one pass over the song, not one per slot)
@@ -407,7 +408,7 @@ def sharers(rendered, i, messages, use10, ports=0):
     """The other shapes (their numbers) with notes on a channel shape i's CC messages ({slot: messages}) go on, while
     they're sent: what its CC lines change too (the Hz window's warning). ports = how many ports tell slots apart
     (engine.PORTS when the file writes them, a player's; 0 = one port: slots 15 apart share a channel)."""
-    per = 16 if use10 else 15
+    from notes.engine import channels_of, ports_of  # (engine.py imports this file)
     messages = {s: events for s, events in messages.items() if events}
     if not messages:
         return set()
@@ -416,11 +417,12 @@ def sharers(rendered, i, messages, use10, ports=0):
     # (the notes sounding while any of its lines are sent, first: a big song took ~1 s per edit)
     rendered = rendered[(rendered[:, 0] < last) & (rendered[:, 1] > first) & (rendered[:, 5] != i)]
     slots = rendered[:, 4]
+    chs = channels_of(slots, use10)  # (a track added by hand: its own channel, port A)
     out = set()
     for s, events in messages.items():
-        on = slots % per == s % per
+        on = chs == int(channels_of(s, use10))
         if ports:
-            on &= slots // per % ports == s // per % ports
+            on &= ports_of(slots, use10, ports) == int(ports_of(s, use10, ports))
         m = on & (rendered[:, 0] < events[-1][0]) & (rendered[:, 1] > events[0][0])
         out.update(np.unique(rendered[m, 5]).tolist())
     return out

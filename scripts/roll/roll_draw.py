@@ -23,7 +23,8 @@ from notes.sustain import is_sustained
 from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, heard_marks, ruler_marks, short_bpm, tempo_text
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
-                              PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_name, slot_colours)
+                              PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_colours,
+                              note_name, slot_colours)
 from roll.tiles import Tiles, see_through
 from window import look
 
@@ -1158,7 +1159,7 @@ class RollDrawing:
                     on = on[np.argsort(owner.astype(np.uint16) if 0 <= lo and hi < 65536 else owner, kind="stable")]
                     owner = notes[on, 5]
                 cols = slot_colours(getattr(app, "picture_use10", False))
-                color = cols[notes[on, 4] % len(cols)]
+                color = note_colours(notes[on, 4], cols)
                 pics = getattr(app, "picture_owners", ())
                 if len(pics) and pics.any():  # a placed picture's notes: its own colours (PICTURE_GROUP on)
                     mine = pics[np.clip(owner, 0, len(pics) - 1)]

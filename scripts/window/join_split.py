@@ -776,11 +776,11 @@ class JoinSplit:
                 rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])
                 slots = self.own_slots(i, use10)
             if len(rows):  # (a shape with no notes stays as it is)
-                if own or not auto:
-                    rows = multi_slots(rows, slots)
                 if self.in_own_track(sh):  # (drawn into a track added by hand: the copy goes into it too)
                     rows = rows.copy()
                     rows[:, 4] = 0
+                elif own or not auto:
+                    rows = multi_slots(rows, slots)
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
                 laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
         if together:

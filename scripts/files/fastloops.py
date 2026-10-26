@@ -135,6 +135,7 @@ def _cache():
 
 
 CACHE = _cache()
+OWN0 = 1 << 32  # (engine.OWN0, kept here: an import would have to join drop_stale's list)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -192,7 +193,12 @@ def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
         at[r] += 1
         s[o], e[o], key[o] = notes[i, 0], notes[i, 1], notes[i, 2]
         longest = max(longest, notes[i, 1] - notes[i, 0])
-        c = cols[notes[i, 4] % nslots]
+        sl = notes[i, 4]
+        if sl >= OWN0:  # (a track added by hand: its channel's colour, roll_shared.note_colours)
+            ch = sl & 15
+            c = ch if ch < 9 else 15 if ch == 9 else ch - 1
+        else:
+            c = cols[sl % nslots]
         if len(pics) and pics[min(max(notes[i, 5], 0), len(pics) - 1)]:
             c = picgroup + min(notes[i, 4], 15)
         if notes[i, 3] < 0:  # (-1: a mask's ghost, shade 31; -2 - velocity: a track shown behind the highlighted

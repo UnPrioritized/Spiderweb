@@ -11,7 +11,7 @@ import numpy as np
 from files.about import ICONS
 from files.system import ALT  # (used from here by the piano roll's parts)
 
-from notes.engine import cached_path, cached_strokes  # (used from here by the piano roll's parts)
+from notes.engine import OWN0, cached_path, cached_strokes  # (used from here by the piano roll's parts)
 from window import look
 
 PREVIEW_LIMIT = 200_000  # a custom shape / funnel being drawn with more notes than this previews as its outline only
@@ -113,6 +113,15 @@ COLOURS_16 = np.array(list(range(9)) + [CH10] + list(range(9, 15)), np.int64)
 def slot_colours(use10):
     """The slot -> colour table (COLOURS_16 while channel 10 is used: slot k = channel k)."""
     return COLOURS_16 if use10 else COLOURS_15
+
+
+def note_colours(slots, cols):
+    """The SLOT_COLORS places of notes on these slots (cols = slot_colours): a track added by hand (engine.OWN0)
+    takes its channel's colour (COLOURS_16; fastloops.paint_order works it out alike)."""
+    slots = np.asarray(slots, np.int64)
+    out = cols[slots % len(cols)]
+    hand = slots >= OWN0
+    return np.where(hand, COLOURS_16[slots & 15], out) if hand.any() else out
 
 
 SELECTED_COLOR = ("#ffb65c", "#9a4b00")

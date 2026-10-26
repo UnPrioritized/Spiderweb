@@ -13,7 +13,7 @@ import numpy as np
 
 from files.lang import tr
 from files.system import WINDOWS, wintypes
-from notes.engine import CHANNELS
+from notes.engine import channels_of, ports_of
 from notes.hz_settings import CC_NUMBER, CC_START
 
 MAPPER_NAME = "Windows default (MIDI Mapper)"
@@ -253,9 +253,9 @@ class _Ons:
             return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), edo_code(part[:, 2]).tolist(),
                             part[:, 3].tolist()))
         slot = part[:, 4]
-        ch = slot % 16 if self.use10 else np.array(CHANNELS, np.int64)[slot % len(CHANNELS)]  # (slot_track_channel)
+        ch = channels_of(slot, self.use10)
         if self.ports:
-            ch = ch | slot // (16 if self.use10 else len(CHANNELS)) % self.ports << 24  # (slot_port)
+            ch = ch | ports_of(slot, self.use10, self.ports) << 24
         return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), (ch | part[:, 2] << 8).tolist(),
                         part[:, 3].tolist()))
 
@@ -273,9 +273,9 @@ def cc_list(messages, use10, ports=0):
     << 24)."""
     out = []
     for slot, events in messages.items():
-        ch = slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
+        ch = int(channels_of(slot, use10))
         if ports:  # (the port its notes are on: _Ons.batch)
-            ch |= slot // (16 if use10 else len(CHANNELS)) % ports << 24
+            ch |= int(ports_of(slot, use10, ports)) << 24
         out += [(e[0], e[1] | ch | e[2] << 8 | e[3] << 16) for e in events
                 if e[1] is not None]  # (a pasted Domino event without a MIDI message: none)
     out.sort(key=lambda e: e[0])
