@@ -30,7 +30,7 @@ The PPQ box is greyed: the project uses the file's PPQ.
 
 Zoomed out, the notes show from an overview made while loading. Zoomed in, the exact notes are read from the file. Each track's notes are in their channel's colour, and a track higher in the file is drawn on top.
 
-Press Tab for the track list: one row per track of the file, then the tracks of your own shapes. Click a track and press Tab to see only it (see Track list).
+Press Tab for the track list: one row per track of the file, then the tracks of your own shapes. Click a track and press Tab to see only it (see Track list). Drag the file's tracks by their names to change the order Export MIDI writes them in; the piano roll keeps drawing them in the file's own order.
 
 The velocity pane shows the loaded notes' velocities faded behind your own. They can't be changed there.
 
@@ -42,9 +42,11 @@ Export MIDI with the Conductor as it was loaded copies the file exactly. With a 
 
 ## Shapes on top
 
-Draw shapes over the loaded notes as usual. Export MIDI adds them as new tracks after the file's own, which stay copied exactly. With Keep timing they keep their time like the file's notes.
+Draw shapes over the loaded notes as usual. Export MIDI adds them as new tracks after the file's own, which stay copied exactly. With Keep timing they keep their time like the file's notes. Tracks you add yourself can sit above or between the file's tracks (see Track list).
 
-Your shapes and the loaded notes don't change each other: each keeps its own channels. The export's message counts your notes that sound on the same key and channel as a loaded note at the same time, since some MIDI players cut such notes short.
+To draw into one of the file's own tracks, highlight it in the track list and draw or paste: the shape's notes go into that track, on its channel. A track holding several channels gets the one its Ch column shows (the one most of its notes use). Export MIDI writes only those tracks again; every other track is still copied exactly. If the project is opened without its MIDI, these shapes stay, and are shown and exported as tracks named after the file's tracks.
+
+Your shapes and the loaded notes don't change each other: each keeps its own channels. Single channel removes overlaps only among your shapes (drawn, extracted or pasted), never with the file's own notes. The export's message counts your notes that sound on the same key and channel as a loaded note at the same time, since some MIDI players cut such notes short.
 
 Copy to Domino and Export to Domino take only your shapes, not the loaded notes.
 
@@ -60,9 +62,15 @@ Every loaded note whose start is inside the box (time and keys) is taken whole, 
 
 [clip:load-extract]
 
-They keep their channels, keys, lengths, velocities, overlaps and doubled notes. They lose their track (the shape's notes go on new tracks when exported), their note-off velocity, and the order of notes on the same tick. Spiderweb asks first and says so.
+They stay in the tracks they came from, and keep their channels, keys, lengths, velocities, overlaps and doubled notes. Left as they are, Export MIDI writes the file exactly as it was. Once you change the shape, its tracks are written again: the notes' note-off velocity and the order of notes on the same tick may change. Spiderweb asks first and says so.
 
-Delete the shape or undo, and the notes are back in the loaded MIDI. A copy of the shape takes nothing out. A box overlapping notes you already extracted is refused: delete or undo that shape first.
+Delete the shape or undo, and the notes are back in the loaded MIDI. A copy of the shape takes nothing out. A box overlapping notes you already extracted (or deleted) is refused: delete or undo that first.
+
+## Deleting loaded notes
+
+To delete loaded notes, drag a Select box over them, then right-click inside it → Delete loaded notes, or press Delete. Every loaded note whose start is inside the box goes, from the highlighted track only (all tracks when none is highlighted; tracks shown faintly behind it are only for looking). Delete also deletes the selected shapes, in the same undo step. Nothing is asked, like deleting shapes: Ctrl+Z brings them back, and the project saves what was deleted.
+
+While a Select box is kept, the loaded notes it would take get a red outline, like selected shapes. When the box holds very many notes, the outline is left out and the status line says so.
 
 ## Playing
 

@@ -16,13 +16,15 @@ Right-click in the track list:
 • Remove Track removes a track you added, and the shapes drawn into it. A shape with colours on other tracks too keeps those: it becomes plain notes of the colours left, each still on its track.
 • Properties… sets a track's name and channel. Double-clicking its name does the same.
 
-A new track is highlighted at once. Your tracks stay where you put them, among the tracks Spiderweb makes for your shapes, and are saved with the project. Export MIDI and Export to Domino write them with their names and channels. Each change can be undone with Ctrl+Z. Remove Track and Properties… only work on tracks you added. On a loaded MIDI, new tracks go after the file's own tracks.
+A new track is highlighted at once. Your tracks stay where you put them, among the tracks Spiderweb makes for your shapes, and are saved with the project. Export MIDI and Export to Domino write them with their names and channels. Each change can be undone with Ctrl+Z. Remove Track and Properties… only work on tracks you added. On a loaded MIDI, Add Track on one of the file's tracks puts the new track right after it.
 
 ## Moving tracks
 
 Drag a track by its name up or down: a line between two rows shows where it lands, and it goes there when you let go. Every selected track goes along (see Highlighting a track), and tracks with gaps between them land together, in their order. Press Esc before letting go to leave them where they were. Dragging past the top or bottom of the list scrolls it. Each move can be undone with Ctrl+Z.
 
-Dragging one of Spiderweb's own tracks makes all of Spiderweb's tracks yours, empty ones too: each becomes a track you added, on the same channel, with its shapes laid on it. Only the order changes, like in Domino, and every track keeps its notes and channel. Shapes you draw later with All tracks highlighted get new tracks of Spiderweb's again. While Spiderweb's tracks hold a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events, they can't be moved yet. A green tinted track you drag becomes yours too. A loaded MIDI's tracks stay at the top.
+Dragging one of Spiderweb's own tracks makes all of Spiderweb's tracks yours, empty ones too: each becomes a track you added, on the same channel, with its shapes laid on it. Only the order changes, like in Domino, and every track keeps its notes and channel. Shapes you draw later with All tracks highlighted get new tracks of Spiderweb's again. While Spiderweb's tracks hold a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events, they can't be moved yet. A green tinted track you drag becomes yours too.
+
+A loaded MIDI's own tracks can be dragged too, and your tracks can go above or between them. The track list and Export MIDI follow the new order, and each of the file's tracks is still copied exactly. The piano roll keeps drawing the file's tracks in the file's own order (a later track covers an earlier one), so what covers what stays the same while you edit; other players draw the exported file in its new order, so there it can differ.
 
 ## Drawing into a track
 
@@ -35,11 +37,12 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 • Tracks Spiderweb adds next to yours get a green tinted name; they go away by themselves when no shape uses them. Change one in Properties… to keep it as yours.
 • With All tracks highlighted, a pasted shape that was laid in this project stays on its tracks, and a duplicate always does.
 • Changing a track's channel in Properties… moves its shapes to the new channel.
+• One of a loaded MIDI's tracks works the same: the shape goes into that track, on its channel (see Load MIDI).
 • Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't be laid on a track yet: they keep their own channels, and the status line says so.
 
 ## Highlighting a track
 
-Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to All tracks: click the All tracks row, press Esc in the track list, pick All tracks in the Multiple tracks ▾ list on the toolbar, or Ctrl+wheel up past the first track. The corner then says "All tracks". Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
+Click a track to highlight it. A click also puts the play line there, on the track list's snap. Pressing Tab into the track list scrolls it to the highlighted track and the play line when they're out of view, and pressing Tab back does the same for the play line on the piano roll. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to All tracks: click the All tracks row, press Esc in the track list, pick All tracks in the Multiple tracks ▾ list on the toolbar, or Ctrl+wheel up past the first track. The corner then says "All tracks". Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
 
 Select several tracks like files in a folder: Ctrl+click more tracks to select them along with the highlighted one, Shift+click to select every track from the last one you clicked to this one, Ctrl+Shift+click to add those to what's selected. Selected tracks turn a fainter blue, and the highlighted track keeps its deep blue (the piano roll still shows that one). Ctrl+click a selected track again to drop it. A plain click or All tracks clears the selection. Right-click one of the selected tracks and the menu works on them all: Remove Track removes every track you added among them, and Properties… is greyed while more than one is selected.
 
