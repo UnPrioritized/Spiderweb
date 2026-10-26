@@ -44,6 +44,36 @@ def row_spans(loop, rows, ppq):
     return out
 
 
+def knife_spans(notes):
+    """Slice with shape's knife (user 2026-10-24): {row: sorted tick edges} of the stretches its notes (start, end,
+    key, ...) cover on each key row; touching or overlapping notes = one stretch, only an empty gap parts them.
+    Passed to the lasso functions in place of a loop."""
+    notes = np.asarray(notes, np.int64)
+    out = {}
+    if not len(notes):
+        return out
+    notes = notes[np.lexsort((notes[:, 0], notes[:, 2]))]
+    for r in np.unique(notes[:, 2]).tolist():
+        edges = []
+        for a, b in notes[notes[:, 2] == r][:, :2].tolist():
+            if b <= a:
+                continue
+            if edges and a <= edges[-1]:
+                edges[-1] = max(edges[-1], b)
+            else:
+                edges += [a, b]
+        if edges:
+            out[int(r)] = edges
+    return out
+
+
+def _spans(loop, rows, ppq):
+    """row_spans of a loop, or a knife's spans (a dict from knife_spans) for these rows."""
+    if isinstance(loop, dict):
+        return {int(r): loop[int(r)] for r in rows if int(r) in loop}
+    return row_spans(loop, rows, ppq)
+
+
 def _box_spans(boxes, r, ppq):
     """The kept Select boxes' stretches of row r as sorted tick edges (joined where they overlap), or None (no
     boxes: the whole row)."""
@@ -77,14 +107,14 @@ def _both(e1, e2):
 
 def lasso_pieces(notes, loop, ppq, boxes=None):
     """notes (start, end, key, ...) ints cut where the loop crosses their row -> (which note each piece is from,
-    piece starts, piece ends, inside: True where the piece is inside the loop). boxes: the kept Select boxes
+    piece starts, piece ends, inside: True where the piece is inside the loop; or under a knife_spans knife). boxes: the kept Select boxes
     (b0, p0, b1, p1): only inside them counts as inside."""
     notes = np.asarray(notes, np.int64)
     if not len(notes):
         z = np.zeros(0, np.int64)
         return z, z, z, np.zeros(0, bool)
     keys = notes[:, 2]
-    spans = row_spans(loop, np.unique(keys), ppq)
+    spans = _spans(loop, np.unique(keys), ppq)
     whose, starts, ends, inside = [], [], [], []
     for r, edges in spans.items():
         if boxes is not None:
