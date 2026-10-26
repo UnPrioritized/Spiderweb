@@ -18,6 +18,12 @@ Right-click in the track list:
 
 A new track is highlighted at once. Your tracks stay where you put them, among the tracks Spiderweb makes for your shapes, and are saved with the project. Export MIDI and Export to Domino write them with their names and channels. Each change can be undone with Ctrl+Z. Remove Track and Properties… only work on tracks you added. On a loaded MIDI, new tracks go after the file's own tracks.
 
+## Moving tracks
+
+Drag a track by its name up or down: a line between two rows shows where it lands, and it goes there when you let go. Every selected track goes along (see Highlighting a track), and tracks with gaps between them land together, in their order. Press Esc before letting go to leave them where they were. Dragging past the top or bottom of the list scrolls it. Each move can be undone with Ctrl+Z.
+
+Dragging one of Spiderweb's own tracks makes it yours: it becomes a track you added, on the same channel, and every shape with notes on it is laid on it (its other colours stay on the tracks they're on now). Its notes don't change, but Spiderweb may hand the channels of its other shapes out again. A track holding a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events can't be moved yet. A green tinted track you drag becomes yours too. A loaded MIDI's tracks stay at the top.
+
 ## Drawing into a track
 
 Highlight a track, then draw or paste: the new shape is laid on that track, like pasting in Domino. Its notes play on the track's channel and take its colour, whatever the Channels setting is, and they never move to another track when they overlap other shapes. Two shapes in one track may overlap on the same keys, as in many MIDI programs.
