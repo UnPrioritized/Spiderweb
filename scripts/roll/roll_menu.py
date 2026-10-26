@@ -179,6 +179,7 @@ class ShapeMenu:
             item(tr("roll_menu.make_complete"), "", app.make_complete)
         if app.live_problem() is None:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live, keys=True)
+        self.knife_item(item)
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         self.new_colours_menu(m)
@@ -310,6 +311,7 @@ class ShapeMenu:
              tr("roll_menu.ctrl_g"), app.join_selected, ok)
         if app.live_problem() is None:
             item(tr("roll_menu.turn_into_live_shape"), tr("roll_menu.ctrl_r"), app.turn_into_live)
+        self.knife_item(item)
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         self.new_colours_menu(m)
@@ -391,6 +393,13 @@ class ShapeMenu:
         if strips_targets(app):  # Channel per strip… (strips_window.py): pasted notes only, else left out
             self._strips_var = tk.BooleanVar(value=any_strips(app))
             m.add_checkbutton(label=tr("strips.menu"), variable=self._strips_var, command=lambda: open_strips(app))
+
+    def knife_item(self, item):
+        """Slice with shape, when the front-most selected shape's notes are over another (App.knife_menu; user
+        2026-10-26: the Slice ▾ was hard to find)."""
+        got = self.app.knife_menu()
+        if got:
+            item(tr("join_split.knife"), "", lambda: self.app.knife_cut(*got), keys=False)
 
     def new_colours_menu(self, m):
         """New colours ▸ (Slice with shape pieces, user 2026-10-24/26; any plain notes): Next free colours (the

@@ -1196,13 +1196,30 @@ class JoinSplit:
         return sh["kind"] == "custom" and "picture" not in sh and "merge" not in sh and not sh.get("hz") \
             and not is_mask(sh)
 
-    def knife_cut(self, k):
+    def knife_menu(self):
+        """Right-click Slice with shape (user 2026-10-26): the front-most selected shape is the knife; one selected =
+        it cuts the shapes behind it, several = the other selected ones (unselected stay whole). -> (knife, targets)
+        when its notes are over one of them, else None (no item)."""
+        sels = sorted(self.sels)
+        if not sels or sels[-1] in self.hidden_shapes or not self.can_knife(self.shapes[sels[-1]]):
+            return None
+        k = sels[-1]
+        among = sels[:-1] if len(sels) > 1 else range(k)
+        among = [i for i in among if i not in self.hidden_shapes and not is_mask(self.shapes[i])
+                 and "picture" not in self.shapes[i]]
+        spans = knife_spans(self.notes_of(self.shapes[k])) if among else {}
+        if spans and any(takes(self.notes_of(self.shapes[i]), spans, self.ppq) for i in among):
+            return k, among
+        return None
+
+    def knife_cut(self, k, only=None):
         """Slice with shape: shape k's own notes cut every shown shape under them (notes/lasso.knife_spans: on each
         key row the stretches its notes cover, touching ones joined; no notes = no cut, even inside a ring). The
         part under the knife is the inside piece, every note across an edge cut in two there; the knife stays.
         Drawn shapes, lines and text under it: asked once, then turned into plain notes and cut in the same undo
         step (user 2026-10-26, like the Lasso); merged shapes / Hz bass stay whole (Slice's message). Pieces keep
-        their colours; the inside pieces (and shapes wholly under it) end up selected. -> True when cut."""
+        their colours; the inside pieces (and shapes wholly under it) end up selected. only: cut just these (the
+        right-click's, knife_menu). -> True when cut."""
         self.commit_typing()
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
@@ -1214,7 +1231,7 @@ class JoinSplit:
             return False
         drawn, whole, skipped = [], [], 0
         targets = [i for i in self.shown_shapes() if i != k and not is_mask(self.shapes[i])
-                   and "picture" not in self.shapes[i]]
+                   and "picture" not in self.shapes[i] and (only is None or i in only)]
         for i in targets:
             sh = self.shapes[i]
             if self.lasso_pasted(sh):
