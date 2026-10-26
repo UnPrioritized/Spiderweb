@@ -16,7 +16,6 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import calc
-from files.own_tracks import into_ids
 from notes import between
 from notes.areas import most_colours
 from notes.engine import cached_path
@@ -808,8 +807,6 @@ class BetweenGroups:
                     label = tr("strips.list", name=label)
                 if "cc" in sh:  # (pasted notes carrying CCs: passengers.py, user 2026-10-22)
                     label = tr("app.with_cc_list", name=label)
-                if self.in_own_track(sh):  # (drawn into a track added by hand: track_list.own_name)
-                    label = tr("tracks.in_list", name=label, track=self.track_list.own_name(into_ids(sh)[0]))
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
                           shape_label=label, counts=counts[i], uses=uses)
             self.listbox.insert("end", text)

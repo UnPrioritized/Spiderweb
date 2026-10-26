@@ -35,7 +35,6 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 • Tracks Spiderweb adds next to yours get a green tinted name; they go away by themselves when no shape uses them. Change one in Properties… to keep it as yours.
 • With All tracks highlighted, a pasted shape that was laid in this project stays on its tracks, and a duplicate always does.
 • Changing a track's channel in Properties… moves its shapes to the new channel.
-• The Shapes list shows "(in Track name)" after a shape that's laid on tracks.
 • Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't be laid on a track yet: they keep their own channels, and the status line says so.
 
 ## Highlighting a track

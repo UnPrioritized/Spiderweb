@@ -424,15 +424,12 @@ class TrackList(tk.Canvas):
                 return own["name"]
         return tr("tracks.name", n=row + 1)
 
-    def own_name(self, entry):
-        """The name a shape's track (into_ids entry: a track added by hand's id, or -1 - an automatic slot) shows
-        (its own, else "Track n")."""
-        row = self.row_of_id(HAND + entry if entry >= 0 else -1 - entry)
-        return self.name_of(row) if row is not None else ""
-
     def own_track(self, s):
         """The own track (added by hand) of track id s, or None."""
-        return self._hand.get(s) if s is not None and s >= HAND else None
+        if s is None or s < HAND:
+            return None
+        self.tracks()  # (the tracks as they are now: undo / redo changes them while the list isn't drawn)
+        return self._hand.get(s)
 
     def channel_of(self, slot):
         if slot < 0:  # (a loaded MIDI's track: its main channel; none without notes)
