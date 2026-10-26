@@ -176,7 +176,7 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
         notes, autos, count, at = own_compact(notes, own)
         order, cuts = track_orders(notes, count, z.pool)
         slots = [at[t["id"]] if type(t) is dict else t
-                 for t in plan(range(autos), [t for t in own if t["id"] in at])] + sorted(
+                 for t in plan(range(autos), [t for t in own if t["id"] in at], np.unique(notes[:, 4]))] + sorted(
                      set(range(autos, count)) - {at[t["id"]] for t in own if t["id"] in at})
 
         def events(s, a, b):
@@ -414,7 +414,7 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
     track_head(0, b"Conductor", len(events), True)
     feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]
                                               + [r[0] for r in (keys or [])]))))
-    tracks = plan(track_slots(notes, pad), own)
+    tracks = plan(track_slots(notes, pad), own, np.unique(notes[:, 4]))
     notes, autos, count, hand = own_compact(notes, own)
     order, cuts = track_orders(notes, count, z.pool)
     ports = slot_ports(autos, cc, use10)  # (Output port A, B, ... as the MIDI export's)

@@ -250,6 +250,8 @@ def clean_shape(sh):
             out[key] = got
     if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
         out["slots10"] = sh["slots10"]
+    if "into" in out and sh.get("into_new") is True:  # (just drawn / pasted, colours not laid yet: App.fit_into)
+        out["into_new"] = True
     if out["kind"] == "custom":
         strokes = clean_strokes(sh.get("strokes"))
         if len(out["pts"]) != 3 or not strokes:

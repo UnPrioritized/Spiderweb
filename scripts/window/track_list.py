@@ -25,6 +25,7 @@ from files.own_tracks import HAND, add_tracks, from_rows, into_ids, move_rows, n
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import BEATS_FAR, OWN0, slot_track_channel, track_ids
+from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text, tempo_text
 from notes.tempo_file import heard_tempo
@@ -96,6 +97,7 @@ class TrackList(tk.Canvas):
         self.bars = ()     # its scrollbars (zoombar.add_zoom_bars)
         self._made = None  # (rendered, pad, use10) the tracks below were worked out for
         self._slots = np.zeros(0, np.int64)  # the tracks: their slots, in order
+        self._filled = self._slots  # the slots with notes (own_tracks.counted: a track of yours counts only these)
         self._all = self._slots  # every row's track: a loaded MIDI's (-1 - its number) first, then the slots
         self.lead = 0  # rows of a loaded MIDI's tracks (Load MIDI) before Spiderweb's own
         self._hand = {}  # id -> the own track (added by hand, files/own_tracks.py) of each such row
@@ -144,7 +146,8 @@ class TrackList(tk.Canvas):
             slots = track_slots(n, pad).astype(np.int64)
             size = int(slots.max()) + 1 if len(slots) else 0
             # (the tracks added by hand among them: own_tracks.plan, the exports' order)
-            rows = plan(slots, own)
+            self._filled = np.unique(n[:, 4]) if len(n) else n[:0, 4]  # (tracks with notes: own_tracks.counted)
+            rows = plan(slots, own, self._filled)
             self._hand = {HAND + t["id"]: t for t in own}
             mine = np.array([r if type(r) is int else HAND + r["id"] for r in rows], np.int64)
             row_of = np.full(size, -1, np.int64)
@@ -780,7 +783,7 @@ class TrackList(tk.Canvas):
         automatic tracks among them become yours first (take_tracks). Nothing moves when they're there already."""
         app = self.app
         group = self.moving()
-        full = plan(self._slots, app.own_tracks)  # (every track, also tinted ones left out of the list: own_written)
+        full = plan(self._slots, app.own_tracks, self._filled)  # (every track, also tinted ones left out of the list)
         ids = [r if type(r) is int else HAND + r["id"] for r in full]
         mine = [int(s) for s in self._mine]
         at = ids.index(mine[gap - self.lead]) if gap - self.lead < len(mine) else len(full)
@@ -823,7 +826,7 @@ class TrackList(tk.Canvas):
         moved = {s - HAND for s in group if s >= HAND} | set(taken.values())
         # (a tinted track dragged = yours, like Properties)
         app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if t["id"] in moved else t
-                          for t in from_rows(rows, self._slots, app.own_tracks)]
+                          for t in from_rows(rows, self._slots, app.own_tracks, self._filled)]
         self.own_changed()
         if taken:
             app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
@@ -842,6 +845,10 @@ class TrackList(tk.Canvas):
             own.append({"id": v, "name": "", "ch": slot_track_channel(s, use10)[1], "after": -1})
             taken[s] = v
         multi = app.channel_mode.get() == "auto"
+        # (the notes sorted by shape once, each shape's read from there: a search through every note per shape took
+        # 2 s with 1000 shapes, hunt 2026-10-26)
+        by = np.argsort(r[:, 5], kind="stable")
+        whose = r[by, 5]
         for i in owners:
             sh = app.shapes[i]
             if placed_on(sh, chans):  # (laid already: its entries on these tracks now go to the new ones)
@@ -851,9 +858,12 @@ class TrackList(tk.Canvas):
                         sh[key] = [taken.get(entry_slot(v, chans, rule, use10), v) if v < 0 else v
                                    for v in into_ids({"into": sh[key]})]
                 continue
-            mine = r[r[:, 5] == i]
+            a, b = np.searchsorted(whose, [i, i + 1])
+            mine = r[by[a:b]]
             slots = app.colour_slots(sh, mine) if len(mine) else [autos[0]]  # (no notes now: the first one)
-            entries = [taken.get(s, -1 - s) for s in (slots if multi else slots[:1])]
+            # (Single channel / As drawn: one track, all colours on it; a shape keeping its own channels in every
+            # mode, e.g. an Extract, keeps every track, hunt 2026-10-26)
+            entries = [taken.get(s, -1 - s) for s in (slots if multi or pinned_slots(sh, "single") else slots[:1])]
             for key in ("cols", "into_gap", "into_rest", "slots10"):
                 sh.pop(key, None)
             sh["into"] = entries
@@ -909,7 +919,7 @@ class TrackList(tk.Canvas):
             self.menu_shut = time.perf_counter()  # (the click that closed it does nothing: on_press)
 
     def own_row(self, row):
-        """A track list row as own_tracks.insert_at's row: among Spiderweb's own tracks (-1 = before them all:
+        """A track list row as own_tracks.add_tracks' row: among Spiderweb's own tracks (-1 = before them all:
         the Conductor row, a loaded MIDI's track; None = after them all)."""
         if row is None:
             return None
@@ -918,9 +928,9 @@ class TrackList(tk.Canvas):
         own = self.app.own_tracks
         if len(self._hand) == len(own):
             return row - self.lead
-        # (Single channel with tinted tracks left out of the list, App.own_written: the row among all of them)
+        # (tinted tracks left out of the list, App.own_written: the row among all of them)
         s = int(self._mine[row - self.lead])
-        full = [r if type(r) is int else HAND + r["id"] for r in plan(self._slots, own)]
+        full = [r if type(r) is int else HAND + r["id"] for r in plan(self._slots, own, self._filled)]
         return full.index(s) if s in full else row - self.lead
 
     def row_channel(self, row):
@@ -963,8 +973,7 @@ class TrackList(tk.Canvas):
     def add_own(self, row, chs):
         """One track per channel in chs, after row (own_row), the first of them highlighted."""
         app = self.app
-        autos = len(self._slots)
-        new, ids = add_tracks(app.own_tracks, autos, self.own_row(row), chs, app.own_next)
+        new, ids = add_tracks(app.own_tracks, self._slots, self.own_row(row), chs, app.own_next, self._filled)
         app.own_next = max(ids) + 1
         self.set_own(new, tr("tracks.add_step" if len(chs) == 1 else "tracks.add_many_step"))
         self.current = HAND + ids[0]

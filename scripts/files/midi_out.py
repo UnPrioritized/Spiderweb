@@ -216,7 +216,7 @@ def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tem
     head = tempo_track(bpm, beats, tempo, sigs, keys)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    tracks = plan(track_slots(notes, pad), own)
+    tracks = plan(track_slots(notes, pad), own, np.unique(notes[:, 4]))
     write_bytes(path, _pieces(notes, tracks, use10,
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
@@ -226,7 +226,7 @@ def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=()):
     puts them after the file's own tracks. ports: a set of slots whose tracks start with their port (extracted
     notes from another port: their slots' rounds are their ports)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    tracks = plan(track_slots(notes, pad), own)
+    tracks = plan(track_slots(notes, pad), own, np.unique(notes[:, 4]))
     return _pieces(notes, tracks, use10, b"", cc or {}, ports), len(tracks)
 
 

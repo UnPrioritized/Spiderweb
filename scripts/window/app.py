@@ -27,7 +27,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
-from files.own_tracks import HAND, into_ids, new_id, next_channel, plan
+from files.own_tracks import HAND, from_rows, into_ids, new_id, next_channel, plan
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -293,8 +293,8 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
             continue
         rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
         on = np.array([entry_slot(v, own, rule, use10) for v in ids], np.int64)
-        if mode != "auto":  # (Single channel / As drawn: every colour on its first track, hunt 2026-10-26)
-            colour = np.zeros_like(colour)
+        if mode != "auto" and not pinned_slots(sh, mode):  # (Single channel / As drawn: every colour on its first
+            colour = np.zeros_like(colour)                  # track, hunt 2026-10-26; an Extract keeps its channels)
         fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True
         if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
             together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
@@ -303,6 +303,9 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
     if together:  # (pinned on one of Spiderweb's tracks: with the notes already there)
         together = np.concatenate(together)
         there = np.isin(rendered[:, 4], np.unique(together[together[:, 4] < OWN0, 4]))
+        if there.any():  # (sustained / held shapes and pictures keep their overlaps, as in render: hunt 10-26)
+            keeps = np.array([is_sustained(s) or s.get("held") is True or picture_like(s) for s in shapes] + [True])
+            there &= ~keeps[np.minimum(rendered[:, 5], len(shapes))]
         if there.any():
             parts[0] = rendered[~there]
             together = np.concatenate([rendered[there], together])
@@ -1830,17 +1833,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The tracks added by hand the track list shows and the exports write. Multi channel: all of them. Single
         channel / As drawn (hunt 2026-10-26, user: you get what you see): a laid shape plays every colour on its first
         track, so the tracks Spiderweb added only for its other colours (tinted, "auto") are left out until Multi
-        channel again. The same list while nothing changes (the track list compares it by identity)."""
+        channel again. In every mode a tinted track kept only for a colour gone for now (into_rest: e.g. Repeated colours
+        unticked) is left out too, until the colour is back. The same list while nothing changes (the track list
+        compares it by identity)."""
         own, mode = self.own_tracks, self.channel_mode.get()
-        if mode == "auto" or not any(t.get("auto") for t in own):
+        if not any(t.get("auto") for t in own):
             return own
         key = (id(own), mode, self.shapes_gen)
         got = getattr(self, "_own_written", None)
         if got is not None and got[0] == key:
             return got[1]
         chans = self.own_channels()
-        firsts = {p[0] for p in (placed_on(sh, chans) for sh in self.shapes) if p}
-        out = [t for t in own if not t.get("auto") or t["id"] in firsts]
+        if mode == "auto":
+            shown = {v for sh in self.shapes for k in ("into", "into_gap") for v in (sh.get(k) or [])
+                     if type(v) is int}
+        else:
+            shown = {p[0] for p in (placed_on(sh, chans) for sh in self.shapes) if p}
+        out = [t for t in own if not t.get("auto") or t["id"] in shown]
         out = own if len(out) == len(own) else out
         self._own_written = (key, out)
         return out
@@ -1859,7 +1868,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         need, rendered, use10 = made[5], made[2], made[1]
         own, changed = list(self.own_tracks), False
         by_id = {t["id"]: t for t in own}
-        rows = [-1 - r if type(r) is int else r["id"] for r in plan(track_slots(rendered, self.pad_tracks()), own)]
+        slots, filled = track_slots(rendered, self.pad_tracks()), np.unique(rendered[:, 4])
+        rows = [-1 - r if type(r) is int else r["id"] for r in plan(slots, own, filled)]
+        inserted = []
 
         def channel(v):
             return by_id[v]["ch"] if v >= 0 else slot_track_channel(-1 - v, use10)[1]
@@ -1878,8 +1889,21 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             rows.append(v)
             return v
 
+        def after(prev):
+            """A new tinted track right after the row prev (more colours of a shape laid before: hunt 2026-10-26,
+            user: never into another shape's track, however many tracks that makes)."""
+            v = new_id(own, self.own_next)
+            self.own_next = v + 1
+            t = {"id": v, "name": "", "ch": next_channel(channel(prev), use10), "after": -1, "auto": True}
+            own.append(t)
+            by_id[v] = t
+            rows.insert(rows.index(prev) + 1, v)
+            inserted.append(v)
+            return v
+
         for i, n in need.items():
             sh = self.shapes[i]
+            fresh = sh.pop("into_new", False)  # (just drawn / pasted: down the rows, like Domino's paste)
             have, cols = placed_on(sh, {v: t["ch"] for v, t in by_id.items()}), sh.get("cols")
             if n <= 0 or not have or (len(have) >= n and not cols):
                 if have and len(have) > max(n, 1):  # (colours gone for now: their tracks kept aside, hunt 10-26)
@@ -1912,6 +1936,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 k = len(have)
                 if have and have[-1] not in rows:  # (its last track isn't listed: nothing to go on from)
                     break
+                if have and not cols and not fresh:  # (colours it gained later, e.g. Repeated colours ticked)
+                    have.append(after(have[-1]))
+                    continue
                 r = anchor + cols[k] if cols and k < len(cols) else (rows.index(have[-1]) + 1 if have else anchor)
                 while r >= len(rows):
                     made_here.append(at_end(have[0] >= 0 if have else rows[anchor] >= 0))
@@ -1925,7 +1952,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if any(v < 0 for v in have):  # (its automatic tracks' channel rule, kept when Use channel 10 changes)
                 sh["slots10"] = bool(use10) and any(channel(v) == 9 for v in have if v < 0)
             changed = True
-        used = {v for sh in self.shapes for key in ("into", "into_gap") for v in (sh.get(key) or [])
+        if inserted:  # (tracks put in the middle: every track's place worked out again from the rows)
+            own = from_rows([-1 - r if r < 0 else {"id": r} for r in rows], slots, own, filled)
+        # (a colour gone for now keeps its tinted track, hidden while empty: own_written; it comes back on it,
+        # hunt 2026-10-26: Repeated colours off / on put them into your own track)
+        used = {v for sh in self.shapes for key in ("into", "into_gap", "into_rest") for v in (sh.get(key) or [])
                 if type(v) is int}
         kept = [t for t in own if not t.get("auto") or t["id"] in used]
         if kept != self.own_tracks:
@@ -1967,10 +1998,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def colour_slots(self, sh, mine):
         """Each colour's slot of a shape not laid on tracks (mine: its rendered notes, some): where most of that
         colour's notes are now, found by start + key; one colour = the slot most of its notes are on (also for a
-        colour none of whose notes were found)."""
+        colour none of whose notes were found). "Repeated colours get new channels": each repeat's colours are
+        colours of their own, in the order all_notes lays them (hunt 2026-10-26: repeats landed on other tracks)."""
         vals, counts = np.unique(mine[:, 4], return_counts=True)
         most = int(vals[counts.argmax()])
-        n, t = self.notes_tracks(sh)
+        n, t = self.notes_tracks(dict(sh, _rounds=True) if self.rounds_apart() and has_colours(sh) else sh)
         n = np.asarray(n, np.int64).reshape(-1, 4)
         colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None
                   else np.zeros(len(n), np.int64))
@@ -2012,17 +2044,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         sh.pop("into_from", None)
         if target is None:
             if foreign or not self.in_own_track(sh):
-                for key in ("into", "cols", "into_gap", "into_rest", "slots10"):
+                for key in ("into", "cols", "into_gap", "into_rest", "slots10", "into_new"):
                     sh.pop(key, None)
             sh.pop("cols", None)
             return False
         sh.pop("into_gap", None)
         sh.pop("into_rest", None)
         if not can_go_in(sh):
-            for key in ("into", "cols", "slots10"):
+            for key in ("into", "cols", "slots10", "into_new"):
                 sh.pop(key, None)
             return True
         sh["into"] = [target]
+        sh["into_new"] = True  # (its colours go down the rows like Domino's paste: fit_into)
         return False
 
     def laid_slots(self, sh):
