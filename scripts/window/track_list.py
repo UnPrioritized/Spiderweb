@@ -672,8 +672,8 @@ class TrackList(tk.Canvas):
             if self._move["keep"]:
                 return
         if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
-            beat = max(0.0, self.x2t(e.x))
-            self.app.set_playhead(self.snapped(beat))
+            beat = max(0.0, self.x2t(e.x))  # (Shift: free, as the Select box's corner)
+            self.app.set_playhead(self.ticked(beat) if e.state & 0x1 else self.snapped(beat))
         if row == CONDUCTOR_ROW:  # (the tempo's row: the highlight stays; All tracks is the row above it)
             return
         self.current = None if row < 0 else int(self.tracks()[row])
@@ -742,9 +742,9 @@ class TrackList(tk.Canvas):
                    for b in self.boxes)
 
     def box_drag(self, e):
-        """The box being dragged: the pressed corner on the grid line before the press, the mouse's out to the grid
-        line past it (the piano roll's Select box), whole rows; a ruler band's ends on the NEAREST grid line (the
-        piano roll's ruler). Shift: whole ticks (each corner as Shift was when it moved)."""
+        """The box being dragged: both corners on the NEAREST grid line (box_span: where the press put the play
+        line), whole rows; a ruler band's ends the same (the piano roll's ruler). Shift: whole ticks (each corner as
+        Shift was when it moved)."""
         b = self._box
         if not b["on"]:
             still = BOX_STILL * self.scale
@@ -869,17 +869,20 @@ class TrackList(tk.Canvas):
         return at + math.floor(k + 1e-9) * step
 
     def box_span(self, a, b, shift_a, shift_b):
-        """(lo, hi) beats of a box pressed at a, dragged to b (roll_shared.grid_span's rule on the list's grid):
-        never thinner than a grid step (Shift: a tick)."""
+        """(lo, hi) beats of a box pressed at a, dragged to b: both corners on the NEAREST grid line, like the play
+        line the press puts there (user 2026-10-26: the play line = the box's start or end); never thinner than a
+        grid step (Shift: a tick)."""
         tick = 1 / self.app.ppq
-        a = self.ticked(a) if shift_a else self.grid_edge(a, False)
+        a = self.ticked(a if shift_a else self.snapped(a))
         if b >= a:
-            hi = self.ticked(b) if shift_b else self.grid_edge(b, True)
+            hi = self.ticked(b if shift_b else self.snapped(b))
             if hi <= a + 1e-9:
                 hi = a + tick if shift_b else self.grid_edge(a + tick, True)
             return a, hi
-        lo = self.ticked(b) if shift_b else self.grid_edge(b, False)
-        return max(0.0, min(lo, a - tick)), a
+        lo = self.ticked(b if shift_b else self.snapped(b))
+        if lo >= a - 1e-9:
+            lo = a - tick if shift_b else self.grid_edge(a - tick, False)
+        return max(0.0, lo), a
 
     def select_all(self):
         """Ctrl+A in the track list (like Domino's): a ruler band from the song's start to the last note's end over
