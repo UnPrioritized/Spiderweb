@@ -145,7 +145,9 @@ class LoadedPlayer:
         """Every playable track's arrays, one place per track ("slot"): number, bytes, checkpoints put together
         (cp_key = slot x M + tick, so one search finds each track's own)."""
         lm = self.lm
-        num = [n for n, (t, mt) in enumerate(zip(lm.tracks, lm.mf.tracks)) if playable(mt) and t.limit > 0]
+        # (removed in the track list: none of its events, like the export)
+        num = [n for n, (t, mt) in enumerate(zip(lm.tracks, lm.mf.tracks)) if playable(mt) and t.limit > 0
+               and n not in lm.gone]
         self.num = np.array(num, np.int64)
         self.start_of = np.array([lm.mf.tracks[n].start for n in num], np.int64)
         self.limit = np.array([lm.tracks[n].limit for n in num], np.int64)

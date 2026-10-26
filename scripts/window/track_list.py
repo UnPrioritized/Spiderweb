@@ -354,7 +354,10 @@ class TrackList(tk.Canvas):
         self._behind = out
 
     def set_behind(self, slots):
-        """The tracks shown behind the highlighted one; picking some switches the main toolbar's toggle on."""
+        """The tracks shown behind the highlighted one; picking some switches the main toolbar's toggle on. All
+        tracks highlighted: nothing (picks belong to a track)."""
+        if self.current is None:
+            return
         grew = bool(set(slots) - self.behind)
         self.behind = set(slots)
         if grew and not self.onion.get():
@@ -1365,8 +1368,10 @@ class TrackList(tk.Canvas):
     def set_file_props(self, n, name, ch):
         """A loaded MIDI's track n given a new name / channel (the file's own = none kept): one undo step."""
         t = self.app.loaded.tracks[n]
+        # (its own channel = nothing to change, unless its notes use several: OK puts them all on it, hunt 10-26)
+        alone = np.count_nonzero(t.chn) <= 1
         mine = {"name": None if name == (t.name or "") else name,
-                "ch": None if ch == (t.channel if t.channel is not None else 0) else ch}
+                "ch": None if alone and ch == (t.channel if t.channel is not None else 0) else ch}
         new = dict(self.app.file_props)
         if mine["name"] is None and mine["ch"] is None:
             new.pop(n, None)
@@ -1642,7 +1647,9 @@ class TrackList(tk.Canvas):
         ox = self.left_px()
         key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._all), self.current,
                frozenset(self.muted), frozenset(self.selected), json.dumps(sigs_of(self.app.tempo)), aw, ah,
-               self.app.ppq, self.app.keys)
+               self.app.ppq, self.app.keys,
+               # (a loaded MIDI's notes hidden / back, read on a thread: shown at once, hunt 2026-10-26)
+               self.app.loaded.hide_ver if self.app.loaded is not None else None)
         sh = self._sheet
         if sh is None or sh["key"] != key or not (sh["x"] <= ox and ox + aw <= sh["x"] + sh["w"]
                                                    and sh["y"] <= self.top and self.top + ah <= sh["y"] + sh["h"]):
@@ -2036,7 +2043,9 @@ class TrackList(tk.Canvas):
             row = self.note_rows()
             keep = (row >= 0) & (n[:, 1] > lo_t) & (n[:, 0] < hi_t)
             n, row = n[keep], row[keep]
-        loaded = [r for r in range(len(self._file_row)) if lm.tracks[r].notes] if lm is not None else []
+        # (the listed ones only: a removed track's notes go with its row, hunt 2026-10-26)
+        loaded = [r for r in range(len(self._file_row)) if self._file_row[r] >= 0 and lm.tracks[r].notes] \
+            if lm is not None else []
         if not len(n) and not loaded:
             return img
         k_lo, span = 0, self.app.keys  # (the whole key range, like the rows)
@@ -2344,8 +2353,12 @@ def build_onion(app, parent):
 
 def sync_onion(app):
     on = getattr(app, "track_list", None) is not None and app.track_list.current is not None
-    for w in getattr(app, "onion_parts", ()):
+    # (the strip's Show multiple tracks… too: picks belong to a track, hunt 2026-10-26)
+    for w in tuple(getattr(app, "onion_parts", ())) + tuple(getattr(app, "strip_parts", ())):
         w.state(["!disabled"] if on else ["disabled"])
+    tl = getattr(app, "track_list", None)
+    if tl is not None and tl.picker:
+        tl.picker.fill()
 
 
 def build_strip(app, parent, tl):
@@ -2355,6 +2368,8 @@ def build_strip(app, parent, tl):
     b = ttk.Button(strip, text=tr("tracks.show_multiple"), command=tl.open_picker)
     b.pack(side="left")
     Tooltip(b, tr("tracks.show_multiple_tip"))
+    app.strip_parts = (b,)
+    sync_onion(app)
     lb = ttk.Label(strip, text=tr("tracks.faint"))
     lb.pack(side="left", padx=(10, 4))
     e = ttk.Entry(strip, textvariable=tl.faint_var, width=4, justify="center")
@@ -2415,6 +2430,7 @@ class BehindWindow(tk.Toplevel):
         tl, lb = self.tl, self.list
         slots = [int(s) for s in tl.tracks()]
         top = lb.yview()[0]
+        lb.config(state="normal")
         lb.delete(0, "end")
         for row, slot in enumerate(slots):
             text = f"{tl.name_of(row)}  ·  {tl.channel_of(slot)}"
@@ -2425,6 +2441,7 @@ class BehindWindow(tk.Toplevel):
                 lb.selection_set(row)
         self.slots = slots
         lb.yview_moveto(top)
+        lb.config(state="normal" if tl.current is not None else "disabled")  # (All tracks: nothing to pick for)
 
     def press(self, e):
         """A click toggles its row; dragging on gives every row the mouse crosses the same (user 2026-10-23:

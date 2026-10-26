@@ -16,7 +16,8 @@ from files.midi_read import Cancelled, MidiError
 from files.own_tracks import FILE0, HAND
 from notes.custom import notes_shape
 from notes.engine import slot_track_channel, track_ids
-from notes.loaded import EXTRACT_MOST, box_key, boxes_meet, drop_extract, gather_box, held_extract
+from notes.loaded import (EXTRACT_MOST, box_key, boxes_meet, drop_extract, extract_groups, gather_box,
+                          held_extract)
 from window.load_extract import hidden_boxes, sync_extract
 
 
@@ -61,9 +62,11 @@ def colour_rows(app, sh, mine):
 
 def lay_on(app, sh, rows):
     """sh laid on the tracks of these list rows (colour k on rows[k]; Domino's paste, done: nothing left to fit)."""
+    from window.app import keep_home
     tl = app.track_list
     ids = tl.tracks()
     entries = [row_entry(app, int(ids[r])) for r in rows]
+    keep_home(sh)  # (an Extract's colours on other tracks: those tracks' channels, laid_slots_of)
     for key in ("cols", "into_gap", "into_rest", "into_new", "slots10"):
         sh.pop(key, None)
     sh["into"] = entries
@@ -96,7 +99,9 @@ def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None):
         if not can_go_in(app.shapes[i]) and (kind in ("move", "copy") or not inside[order[a:z]].all()):
             app.status.config(text=tr("tracks.box_cant"))
             return False
-    files = loaded_boxes(app, boxes)
+    # (Remove Track: a loaded MIDI's tracks go whole, nothing read: left out of drawing / playing / the export by
+    # app.file_gone, hunt 2026-10-26: a 10 M-note track was refused)
+    files = loaded_boxes(app, boxes) if kind != "remove" else []
     if not files:
         if not inside.any() and kind != "remove":
             app.status.config(text=tr("tracks.box_empty"))
@@ -236,7 +241,7 @@ def loaded_shape(app, lm, files, got, copying):
                             colour.ravel()]).astype(np.int64)
     sh = notes_shape(rows, app.ppq, tr("extract.name"))
     sh.update(own_slots=True, held=True, into=[FILE0 + int(p) // 16 for p in pairs],
-              into_ch=[int(p) % 16 for p in pairs])
+              into_ch=[int(p) % 16 for p in pairs], into_home=[FILE0 + int(p) // 16 for p in pairs])
     if not copying:
         sh["extract"] = [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]]], "tracks": b["tracks"]} for b in files]
     return sh
@@ -388,8 +393,14 @@ def delete_boxed(app, boxes, lm, files, got, name, extra=None):
     for i, rest in parts.items():
         if rest is not None:
             app.shapes[i] = rest
+    # (an Extract deleted here: the notes it hid stay gone, user 2026-10-26 (hunt): moved loaded notes deleted in
+    # the list came back at their old place; the piano roll's Delete still gives them back)
+    taken = [{"boxes": [list(b) for b in g["boxes"]], "tracks": list(g["tracks"])}
+             for i in gone for g in extract_groups(held_extract(app.shapes[i]))]
     for i in sorted(gone, reverse=True):
         del app.shapes[i]
+    if taken:
+        app.deleted = app.deleted + taken
     if got:
         app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]]], "tracks": b["tracks"]}
                                      for b in files]

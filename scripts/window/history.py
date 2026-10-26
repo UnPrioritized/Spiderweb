@@ -347,7 +347,9 @@ class HistoryPanel:
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
                 self.stroke, list(self.parts), self.part_main, self.ripple_pick, tempo_text(self.tempo),
                 pane.pick_state() if pane else "{}", json.dumps(self.own_tracks), json.dumps(self.deleted),
-                json.dumps(self.file_order), json.dumps(self.file_gone), json.dumps(self.file_props))
+                json.dumps(self.file_order), json.dumps(self.file_gone), json.dumps(self.file_props),
+                # (the track list's Select boxes: back with the notes they held, hunt 2026-10-26)
+                json.dumps(getattr(getattr(self, "track_list", None), "boxes", [])))
 
     def step_tempo(self, step):
         """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
@@ -450,7 +452,8 @@ class HistoryPanel:
         if self.image_window and str(e.widget).startswith(str(self.image_window)):
             return "break"  # (the image window and its pop-ups: their text boxes only, the piano roll stays, hunt)
         if not self.in_hz(e.widget):
-            if self.box_drawn():
+            tl = getattr(self, "track_list", None)  # (a drag held in the track list: waits, like the piano roll's)
+            if self.box_drawn() or tl is not None and self.tracks_shown() and tl.busy():
                 return "break"
             return self.undo_roll(redo)
         if hz.drag:  # the mouse held there: Ctrl+Z only puts back what's being dragged (no step), Ctrl+Y nothing
@@ -551,6 +554,10 @@ class HistoryPanel:
             self.file_gone = clean_file_gone(json.loads(picked[13]))
         if len(picked) > 14 and isinstance(picked[14], str) and picked[14][:1] == "{":
             self.file_props = clean_file_props(json.loads(picked[14]))
+        tl = getattr(self, "track_list", None)
+        if tl is not None and len(picked) > 15 and isinstance(picked[15], str) and picked[15][:1] == "[":
+            tl.boxes = [dict(b, rows=None if b["rows"] is None else tuple(b["rows"])) for b in json.loads(picked[15])]
+            tl._box = None
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

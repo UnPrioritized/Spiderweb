@@ -111,9 +111,10 @@ def sync_extract(app, found=None):
 
 
 def sync_channels(app):
-    """The loaded tracks given a new channel in Track Properties (app.file_props) shown and heard on it: lm.rechannel
-    = each track's new channel (-1: its events' own), the pictures read again (hide_ver), playing started again from
-    where it is (user 2026-10-26: only the export had it)."""
+    """The loaded tracks given a new channel in Track Properties (app.file_props) shown and heard on it, and the
+    removed ones (app.file_gone) neither drawn nor heard: lm.rechannel = each track's new channel (-1: its events'
+    own), lm.gone; the pictures read again (hide_ver), playing started again from where it is (user 2026-10-26: only
+    the export had it)."""
     lm = app.loaded
     if lm is None:
         return
@@ -124,9 +125,10 @@ def sync_channels(app):
     if not (new >= 0).any():
         new = None
     old = lm.rechannel
-    if (old is None) == (new is None) and (new is None or np.array_equal(old, new)):
+    gone = frozenset(n for n in app.file_gone if 0 <= n < len(lm.tracks))
+    if (old is None) == (new is None) and (new is None or np.array_equal(old, new)) and gone == lm.gone:
         return
-    lm.rechannel = new
+    lm.rechannel, lm.gone = new, gone
     lm.hide_ver += 1
     app.roll.request_redraw()
     if hasattr(app, "track_list"):
@@ -279,7 +281,7 @@ def finish(app, lm, new, got):
                             colour.ravel()]).astype(np.int64)
     sh = notes_shape(rows, app.ppq, tr("extract.name"))
     sh.update(own_slots=True, held=True, into=[FILE0 + int(p) // 16 for p in pairs],
-              into_ch=[int(p) % 16 for p in pairs])
+              into_ch=[int(p) % 16 for p in pairs], into_home=[FILE0 + int(p) // 16 for p in pairs])
     sh["extract"] = {"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new], "tracks": new[0]["tracks"],
                      # (its notes as made: left as they are, the export keeps the file's own bytes, user 2026-10-26)
                      "sig": notes_sig(np.column_stack([rows[:, 0], rows[:, 0] + rows[:, 1], rows[:, 2], rows[:, 3],

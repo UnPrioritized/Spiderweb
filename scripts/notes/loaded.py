@@ -66,6 +66,7 @@ class LoadedMidi:
         self.boxes, self._taken = (), {}
         self.hide_ver = 0
         self.rechannel = None  # (Track Properties' new channels: per track, -1 = its own; load_extract.sync_channels)
+        self.gone = frozenset()  # (tracks removed in the track list: never drawn nor played; the same)
         self._set_hidden(np.zeros(0, np.int64), *(np.zeros(0, np.int64) for _ in range(6)))
         self._level0 = None
 
@@ -324,33 +325,50 @@ def retime_for(lm, tempo, plan, targets):
 def own_hits(lm, s, e, lane, cancel=None, progress=None):
     """How many of Spiderweb's own notes (starts s, ends e, lanes = channel x 256 + key; the file's ticks) sound at
     the same time as a loaded note on the same channel + key (the export's heads-up: players can cut those, plan
-    step 10). Each track is read only over the own notes' time, from its checkpoint before. cancel() True =
+    step 10). Each track is read only over the own notes' time, from its checkpoint before. A track given a new
+    channel in Track Properties (lm.rechannel) counts on it, removed ones (lm.gone) not at all. cancel() True =
     Cancelled; progress(done, total) in bytes."""
     n = len(s)
     if not n:
         return 0
-    order = np.lexsort((s, lane))
-    s, e, lane = (np.ascontiguousarray(a[order], np.int64) for a in (s, e, lane))
-    lane_at = np.searchsorted(lane, np.arange(QS + 1)).astype(np.int64)
-    shift = lane << 50  # (ticks < 2^48: each lane's latest end so far in one go)
-    top = np.maximum.accumulate(e + shift) - shift
+
+    def prepared(s, e, lane):  # (sorted by lane, then start: (s, e, lane, lane_at, top, their order))
+        order = np.lexsort((s, lane))
+        s, e, lane = (np.ascontiguousarray(a[order], np.int64) for a in (s, e, lane))
+        lane_at = np.searchsorted(lane, np.arange(QS + 1)).astype(np.int64)
+        shift = lane << 50  # (ticks < 2^48: each lane's latest end so far in one go)
+        top = np.maximum.accumulate(e + shift) - shift
+        return s, e, lane, lane_at, top, order
+    s, e, lane = (np.asarray(a, np.int64) for a in (s, e, lane))
+    whole = prepared(s, e, lane)
     t0, t1 = int(s.min()), int(e.max())
     k_lo, k_hi = int((lane & 255).min()), int((lane & 255).max())
-    hit = np.zeros(n, np.uint8)
+    hit = np.zeros(n, np.uint8)  # (in the given order)
     loops = speed.loops()
     busy = loops.midi_busy_hits if loops else midi_scan.busy_hits
     mf = lm.mf
+    moved = lm.rechannel
     jobs = []
     for num, t in enumerate(lm.tracks):
-        if not t.notes or t.end <= t0 or t.first >= t1 or t.khi < k_lo or t.klo > k_hi or not len(t.cp_off):
+        if (not t.notes or num in lm.gone or t.end <= t0 or t.first >= t1 or t.khi < k_lo or t.klo > k_hi
+                or not len(t.cp_off)):
             continue
         j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
-        jobs.append((num, t, j, int(t.cp_off[j])))
-    total, done = sum(t.limit - start for _, t, _, start in jobs), 0
+        if moved is not None and num < len(moved) and moved[num] >= 0:
+            # (its notes all on the new channel: the own notes there, read as if on each channel it was written on)
+            mine = np.flatnonzero(lane >> 8 == moved[num])
+            for ch in np.flatnonzero(t.chn).tolist():
+                if len(mine):
+                    got = prepared(s[mine], e[mine], ch * 256 + (lane[mine] & 255))
+                    jobs.append((num, t, j, int(t.cp_off[j]), got[:5], mine[got[5]]))
+        else:
+            jobs.append((num, t, j, int(t.cp_off[j]), whole[:5], whole[5]))
+    total, done = sum(job[1].limit - job[3] for job in jobs), 0
     buf = bytearray(PIECE)
     with open(mf.path, "rb") as f:
         watch = mf.watch()
-        for num, t, j, start in jobs:
+        for num, t, j, start, (s, e, lane, lane_at, top), back in jobs:
+            got = np.zeros(len(s), np.uint8)  # (hit, in this job's order)
             cnt, since = np.zeros(QS, np.int64), np.zeros(QS, np.int64)
             e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
             qs = t.e_q[e0:e1].astype(np.int64)
@@ -364,7 +382,7 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
             size = t.limit - start
             if t.data is not None:
                 b = t.data[start:t.limit]
-                busy(b, 0, len(b), start, skip, t1, st, cnt, since, lane_at, s, e, top, hit)
+                busy(b, 0, len(b), start, skip, t1, st, cnt, since, lane_at, s, e, top, got)
                 done += size
             elif size > 0:
                 reader = mf.pieces_of(f, mf.tracks[num].start + start, size, buf, watch)
@@ -374,7 +392,7 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
                     if cancel and cancel():
                         raise Cancelled()
                     view = np.frombuffer(buf, np.uint8, filled) if loops else memoryview(buf)[:filled]
-                    used = busy(view, 0, filled, at, skip, t1, st, cnt, since, lane_at, s, e, top, hit)
+                    used = busy(view, 0, filled, at, skip, t1, st, cnt, since, lane_at, s, e, top, got)
                     del view
                     at += used
                     done += used
@@ -392,7 +410,8 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
             for q in np.flatnonzero(cnt > 0).tolist():
                 a, z = int(lane_at[q]), int(lane_at[q + 1])
                 if z > a and at > since[q]:
-                    hit[a:z] |= ((s[a:z] < at) & (e[a:z] > since[q])).astype(np.uint8)
+                    got[a:z] |= ((s[a:z] < at) & (e[a:z] > since[q])).astype(np.uint8)
+            hit[back] |= got
     lm.mf.same()
     return int(hit.sum())
 

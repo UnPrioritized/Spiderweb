@@ -187,11 +187,31 @@ def entry_slot(v, own, rule, use10):
 
 def laid_slots_of(sh, ids, own, use10):
     """Each placed_on entry's slot now (entry_slot), in order; an Extract's colours in a loaded MIDI's track keep
-    their own channel there (sh["into_ch"]: a track may hold notes on several, group D)."""
+    their own channel there (sh["into_ch"]: a track may hold notes on several, group D) while they're on the track
+    they came from (sh["into_home"]) and it has no channel of its own from Track Properties (own.fixed); else the
+    track's channel, like your shapes' (hunt 2026-10-26: the export held two channels in one track)."""
     rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
     chs = sh.get("into_ch") if isinstance(sh.get("into_ch"), list) else []
-    return [own_slot(v, chs[k]) if v >= FILE0 and k < len(chs) else entry_slot(v, own, rule, use10)
-            for k, v in enumerate(ids)]
+    home = sh.get("into_home") if isinstance(sh.get("into_home"), list) else None
+    fixed = getattr(own, "fixed", ())
+
+    def own_ch(k, v):
+        return (v >= FILE0 and k < len(chs) and v not in fixed
+                and (home is None or k < len(home) and home[k] == v))
+    return [own_slot(v, chs[k]) if own_ch(k, v) else entry_slot(v, own, rule, use10) for k, v in enumerate(ids)]
+
+
+def keep_home(sh):
+    """Before an Extract's colours are laid on other tracks: the tracks they came from kept (into_home; made before
+    it was kept = the tracks it's on now)."""
+    if isinstance(sh.get("into_ch"), list) and not isinstance(sh.get("into_home"), list):
+        sh["into_home"] = [v for v in into_ids(sh)]
+
+
+class Channels(dict):
+    """App.own_channels' {id: channel}, + fixed = the loaded tracks (FILE0 + n) given a channel in Track
+    Properties (laid_slots_of: every colour in them on it)."""
+    fixed = frozenset()
 
 
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
@@ -1862,15 +1882,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys, mode, split, self.all16(),
                 self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode),
                 tuple(json.dumps(sh.get("strips")) for sh in self.shapes),  # (Channel per strip: not in shape_key)
-                tuple(sorted(self.own_channels().items())))
+                tuple(sorted(self.own_channels().items())), tuple(sorted(self.own_channels().fixed)))
 
     def own_channels(self):
         """{id: channel} of the tracks added by hand (all_notes own), and of the loaded MIDI's tracks shapes are
         drawn into (FILE0 + its number: laid on like yours, group D)."""
-        out = {t["id"]: t["ch"] for t in self.own_tracks}
+        out = Channels((t["id"], t["ch"]) for t in self.own_tracks)
         files = self.file_tracks()
         for n in self.file_into():
             out[FILE0 + n] = files[n]["ch"]
+        out.fixed = frozenset(FILE0 + n for n, p in self.file_props.items() if p.get("ch") is not None)
         return out
 
     def file_tracks(self):
@@ -2155,6 +2176,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return False
         sh.pop("into_gap", None)
         sh.pop("into_rest", None)
+        keep_home(sh)
         if not can_go_in(sh):
             for key in ("into", "cols", "slots10", "into_new"):
                 sh.pop(key, None)

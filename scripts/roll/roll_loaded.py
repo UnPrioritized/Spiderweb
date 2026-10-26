@@ -464,7 +464,7 @@ def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk):
     ta = (c - 0.5 - bx) * tpp
     for n in order:
         t = lm.tracks[n]
-        if not t.notes or not t.pic_cols:
+        if not t.notes or not t.pic_cols or n in lm.gone:  # (removed in the track list: not drawn)
             continue
         kk0, kk1 = max(t.pic_klo, k_lo), min(t.pic_klo + t.pic.shape[0] - 1, k_lo + nk - 1)
         if kk1 < kk0:
@@ -522,6 +522,8 @@ def overview_tab(lm, ax, bx, W, k_lo, nk):
             got[:, on] = rows[:, a[on]]
     tracks = np.array([track_channel(lm, n) for n in range(len(lm.tracks))], np.int64)
     code = COLOURS_16[tracks] * 32 + SHADE
+    if lm.gone:  # (removed in the track list: its buckets empty, far out only the top track is known)
+        out = np.where(np.isin(out, list(lm.gone)), -1, out)
     tab = np.where(out >= 0, code[np.clip(out, 0, len(code) - 1)], -1)
     marks = np.where(out < 0, 0, np.where(edge == 2, 1, np.where(edge == 1, 4, 0))).astype(np.uint8)
     return tab, marks
@@ -675,7 +677,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
             if stop():
                 return None, None
             t = lm.tracks[n]
-            if not t.notes or t.end <= t0 or t.first > t1 or t.khi < k_lo or t.klo >= k_lo + nk:
+            if not t.notes or n in lm.gone or t.end <= t0 or t.first > t1 or t.khi < k_lo or t.klo >= k_lo + nk:
                 continue
             if fast and (filled[max(t.klo, k_lo) - k_lo:min(t.khi, k_lo + nk - 1) - k_lo + 1] >= W).all():
                 covered.append(n)
@@ -702,8 +704,8 @@ def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took):
     t0 = int(np.floor((-0.5 - bx) / ax))
     t1 = int(np.ceil((W + 0.5 - bx) / ax))
     order = tracks if tracks is not None else range(len(lm.tracks) - 1, -1, -1)
-    busy = [n for n in order if lm.tracks[n].notes and lm.tracks[n].end > t0 and lm.tracks[n].first <= t1
-            and lm.tracks[n].khi >= k_lo and lm.tracks[n].klo < k_lo + nk]
+    busy = [n for n in order if lm.tracks[n].notes and n not in lm.gone and lm.tracks[n].end > t0
+            and lm.tracks[n].first <= t1 and lm.tracks[n].khi >= k_lo and lm.tracks[n].klo < k_lo + nk]
     if lm.mode != "memory" and not still_same(lm):
         return None, None
     n_threads = min(len(busy), max(1, (os.cpu_count() or 2) // 2)) if fast else 1
