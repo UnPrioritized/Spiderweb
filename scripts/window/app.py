@@ -1838,10 +1838,25 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             sh = self.shapes[i]
             have, cols = placed_on(sh, {v: t["ch"] for v, t in by_id.items()}), sh.get("cols")
             if n <= 0 or not have or (len(have) >= n and not cols):
-                if have and len(have) > max(n, 1):
+                if have and len(have) > max(n, 1):  # (colours gone for now: their tracks kept aside, hunt 10-26)
+                    sh["into_rest"] = have[max(n, 1):] + list(sh.get("into_rest") or [])
                     sh["into"] = have[:max(n, 1)]
                     changed = True
                 continue
+            rest = list(sh.get("into_rest") or []) if not cols else []
+            while len(have) < n and rest and (rest[0] < 0 or rest[0] in by_id) and rest[0] not in have:
+                have.append(rest.pop(0))  # (a colour back: on the track it had, while that track is still there)
+            if not cols:
+                if rest and len(have) < n:  # (its track went meanwhile: the rest laid as new ones)
+                    rest = []
+                if rest:
+                    sh["into_rest"] = rest
+                else:
+                    sh.pop("into_rest", None)
+                if len(have) >= n:
+                    sh["into"] = have
+                    changed = True
+                    continue
             if have[0] not in rows:
                 continue
             anchor = rows.index(have[0])
@@ -1858,8 +1873,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     made_here.append(at_end(have[0] >= 0 if have else rows[anchor] >= 0))
                 have.append(rows[r])
             sh["into"] = have
-            sh.pop("cols", None)
-            gap = [v for v in made_here if v >= 0 and v not in have]
+            if sh.pop("cols", None) is not None:  # (laid again from its columns: nothing kept aside)
+                sh.pop("into_rest", None)
+            gap =[v for v in made_here if v >= 0 and v not in have]
             if gap:
                 sh["into_gap"] = sorted(set(sh.get("into_gap", [])) | set(gap))
             if any(v < 0 for v in have):  # (its automatic tracks' channel rule, kept when Use channel 10 changes)
@@ -1947,11 +1963,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         target = self.into_target() if relay else None
         if target is None:
             if not self.in_own_track(sh):
-                for key in ("into", "cols", "into_gap", "slots10"):
+                for key in ("into", "cols", "into_gap", "into_rest", "slots10"):
                     sh.pop(key, None)
             sh.pop("cols", None)
             return False
         sh.pop("into_gap", None)
+        sh.pop("into_rest", None)
         if not can_go_in(sh):
             for key in ("into", "cols", "slots10"):
                 sh.pop(key, None)

@@ -198,7 +198,7 @@ class JoinSplit:
         they went automatic): news laid on laid (shared_into; [] = automatic), first's channel-10 rule kept."""
         from window.app import can_go_in
         for sh in news:
-            for key in ("into", "cols", "into_gap", "slots10"):
+            for key in ("into", "cols", "into_gap", "into_rest", "slots10"):
                 sh.pop(key, None)
             if laid and can_go_in(sh):
                 sh["into"] = list(laid)

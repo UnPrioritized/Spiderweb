@@ -240,8 +240,9 @@ def clean_shape(sh):
         # (its group's colour turn, kept when Turn into plain notes unlinked it, + its repeat: between.turns)
         out["team"] = list(tm)
     # the tracks it was laid on, one per colour (files/own_tracks.py into_ids: a track added by hand's id, or -1 - an
-    # automatic track's slot), the colours' columns still to lay (Domino's paste), gap tracks it keeps
-    for key, low in (("into", -ID_MOST), ("cols", 0), ("into_gap", 0)):
+    # automatic track's slot), the colours' columns still to lay (Domino's paste), gap tracks it keeps, the tracks of
+    # colours gone for now (App.fit_into: back on them when they come back)
+    for key, low in (("into", -ID_MOST), ("cols", 0), ("into_gap", 0), ("into_rest", -ID_MOST)):
         got = sh.get(key)
         got = [got] if type(got) is int else got if isinstance(got, list) else []
         got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < ID_MOST]
