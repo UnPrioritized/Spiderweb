@@ -453,7 +453,11 @@ class RollDrawing:
         rows, cols = self.grid_parts(w, h)
         # the picture below shows exactly this: when nothing here changed (e.g. dragging a shape whose notes catch up
         # later), it's shown again as it is instead of being painted again
-        boxed = getattr(app, "_box_notes", None)  # (the loaded notes a kept box outlines: come in later, a thread)
+        # (the loaded notes a kept box outlines: come in later, a thread; asked now, user 2026-10-26: the box gone
+        # while playing, the old job still keyed the picture and its red outline stayed)
+        from window.load_extract import box_notes  # (it imports this file)
+        ring = box_notes(app)
+        boxed = getattr(app, "_box_notes", None) if ring is not None else None
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
                  self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])))
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))

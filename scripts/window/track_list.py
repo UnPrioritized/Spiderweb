@@ -79,7 +79,9 @@ class TrackList(tk.Canvas):
         self.top = 0       # pixels the track rows are scrolled up
         self.current = None  # the highlighted track's slot (None: the Conductor row / nothing)
         self.owners = set()  # id() of the shapes with notes on it (follow: it keeps showing them when channels change)
-        self.behind = set()  # slots shown faintly behind it on the piano roll ("Show multiple tracks")
+        # slots shown faintly behind each track on the piano roll ("Show multiple tracks"; per track, like Domino's,
+        # user 2026-10-26: {track: its set}; behind = the highlighted one's)
+        self._behind = {}
         self.onion = app.onion  # ... while this is on (the main toolbar's toggle; off = one track)
         self.onion.trace_add("write", lambda *_: self.shown_changed())
         self.selected = set()  # tracks Ctrl+clicked along with the highlighted one (like Domino's; the right-click
@@ -170,7 +172,7 @@ class TrackList(tk.Canvas):
             # muted / picked tracks keep their music when the tracks are handed out again (like the highlight:
             # follow; hunt 10-23, user picked A), else they're let go, never moved onto other music
             shapes = self.app.shapes
-            if made is not None and (self.muted or self.behind):
+            if made is not None and (self.muted or self._behind):
                 old, ids = made[0], self._ids
 
                 def keep(s):
@@ -181,7 +183,7 @@ class TrackList(tk.Canvas):
                         return s                                   # kept on its number, like the highlight)
                     return moved_to(shapes, n[:, 5], track_ids(n[:, 4]), had, s)
                 self.muted = {s for s in map(keep, self.muted) if s is not None}
-                self.behind = {s for s in map(keep, self.behind) if s is not None}
+                self.map_behind(keep)
             self._ids = [id(sh) for sh in shapes]
             self._slots, self._row_of, self._file_row, self._rows_of_notes = slots, row_of, file_row, None
             # (rows before Spiderweb's own part: a loaded MIDI's tracks and yours among them)
@@ -195,7 +197,7 @@ class TrackList(tk.Canvas):
                 return -s - 1 < len(file_row) and file_row[-s - 1] >= 0 if s < 0 else s < size and row_of[s] >= 0
             if self.current is not None and not there(self.current):
                 self.current = None  # (its track is gone)
-            self.behind = {s for s in self.behind if there(s)}
+            self.map_behind(lambda s: s if there(s) else None)
             self.muted = {s for s in self.muted if there(s)}
             self.selected = {s for s in self.selected if there(s)}
             last = len(every) - 1  # (rows gone: the boxes kept on the rows left)
@@ -246,7 +248,7 @@ class TrackList(tk.Canvas):
     def forget(self):
         """Another project opened: nothing muted, highlighted or picked behind, back at its start; the zoom stays
         (user 2026-10-23: remembered)."""
-        self.current, self.behind, self.muted, self.owners, self.selected = None, set(), set(), set(), set()
+        self.current, self._behind, self.muted, self.owners, self.selected = None, {}, set(), set(), set()
         self.boxes, self._box = [], None
         self.view_t, self.top, self._sheet = 0.0, 0, None
         sync_onion(self.app)
@@ -326,6 +328,30 @@ class TrackList(tk.Canvas):
             return beat
         at = where(sigs, beat)[2]
         return max(0.0, at + round((beat - at) / step) * step)
+
+    @property
+    def behind(self):
+        """The tracks shown behind the highlighted one (each track keeps its own, like Domino's)."""
+        return self._behind.get(self.current, set())
+
+    @behind.setter
+    def behind(self, slots):
+        slots = set(slots)
+        if slots:
+            self._behind[self.current] = slots
+        else:
+            self._behind.pop(self.current, None)
+
+    def map_behind(self, fn):
+        """Every track's picks (and the track itself) through fn: a track's new id, None = gone."""
+        out = {}
+        for k, v in self._behind.items():
+            gone = k is not None and fn(k) is None
+            k = None if k is None else fn(k)  # (None: picked while no track was highlighted)
+            got = {s for s in map(fn, v) if s is not None}
+            if not gone and got:
+                out.setdefault(k, set()).update(got)
+        self._behind = out
 
     def set_behind(self, slots):
         """The tracks shown behind the highlighted one; picking some switches the main toolbar's toggle on."""
@@ -708,7 +734,8 @@ class TrackList(tk.Canvas):
             return any(b["rows"] is None and b["t0"] <= t <= b["t1"] for b in self.boxes)
         if row is None or row < 0:
             return False
-        return any(b["t0"] <= t <= b["t1"] and (b["rows"] is None or b["rows"][0] <= row <= b["rows"][1])
+        # (a ruler band shows on the ruler only, user 2026-10-26: its notes are dragged from there)
+        return any(b["rows"] is not None and b["t0"] <= t <= b["t1"] and b["rows"][0] <= row <= b["rows"][1]
                    for b in self.boxes)
 
     def box_drag(self, e):
@@ -874,8 +901,9 @@ class TrackList(tk.Canvas):
         return end
 
     def box_rects(self):
-        """The kept boxes + the one being dragged on screen: [(x0, y0, x1, y1)] (a ruler band: every row)."""
-        top, n, rh = self.area()[1], len(self._all), self.row_h
+        """The kept boxes + the one being dragged on screen: [(x0, y0, x1, y1)] (a ruler band: on the ruler only,
+        bands_x; user 2026-10-26, like Domino's)."""
+        top, rh = self.area()[1], self.row_h
         shown = self.boxes + ([self._box["box"]] if self._box is not None and self._box["box"] is not None else [])
         m = self._box if self._box is not None and self._box["move"] and self._box["on"] else None
         if m is not None:  # (being moved: where they'd land)
@@ -883,7 +911,9 @@ class TrackList(tk.Canvas):
                           (b["rows"][0] + m["drow"], b["rows"][1] + m["drow"])) for b in self.boxes]
         out = []
         for b in shown:
-            r0, r1 = b["rows"] if b["rows"] is not None else (0, n - 1)
+            if b["rows"] is None:
+                continue
+            r0, r1 = b["rows"]
             out.append((self.t2x(b["t0"]), top + r0 * rh - self.top, self.t2x(b["t1"]), top + (r1 + 1) * rh - self.top))
         return out
 
@@ -1128,7 +1158,8 @@ class TrackList(tk.Canvas):
                 return HAND + taken[s] if s in taken else s
             self.current = None if self.current is None else mine_now(self.current)
             self.selected = set(map(mine_now, self.selected))
-            self.muted, self.behind = set(map(mine_now, self.muted)), set(map(mine_now, self.behind))
+            self.muted = set(map(mine_now, self.muted))
+            self.map_behind(mine_now)
             app.shapes_changed()  # (its shapes on the new tracks: the automatic tracks as they are after)
             self.tracks()
         return taken, rows
@@ -1462,7 +1493,9 @@ class TrackList(tk.Canvas):
     def on_motion(self, e):
         row = self.row_at(e.y)
         cursor = SELECT_CURSOR if row is not None and e.x >= self.name_w else "arrow"  # (the Select tool's, like
-        if getattr(self, "_cursor", None) != cursor:                                    # many MIDI programs)
+        if e.y < self.ruler_h and self.box_at(e.x, e.y):                                # many MIDI programs)
+            cursor = "sb_h_double_arrow"  # (a ruler band: drag what it holds sideways, the piano roll's)
+        if getattr(self, "_cursor", None) != cursor:
             self._cursor = cursor
             self.config(cursor=cursor)
         if row is not None and row >= 0 and self.on_speaker(e.x):
@@ -1790,6 +1823,17 @@ class TrackList(tk.Canvas):
             mask = np.logical_or.reduceat(top, k0, axis=0) if span > used else top[k0]
             colour = hex_rgb(look.TRACK_MUTED if -1 - r in self.muted else self.colour_of(-1 - r))
             img[ys[0]:ys[-1] + 1][mask] = colour
+        # (the All tracks row: a track with notes taken out (moved, deleted, extracted) read exactly too, rows off
+        # screen as well: the loading pass's small picture still has them)
+        for r in self.cut_tracks(lm):
+            for j in range(j0, min(j1 + 1, end_j)):
+                self._shown_tiles.add((r, j))
+                if (r, j) in self._tiles:
+                    self._tiles.move_to_end((r, j))
+                elif time.perf_counter() + RL.view_bytes(lm, (r,), ax, -float(j * TILE), TILE) / rate <= until:
+                    self.keep_tile((r, j), row_mask(lm, r, ax, -float(j * TILE), TILE))
+                else:
+                    waiting.append((r, j))
         if RL.changed(self, lm):  # (the file changed / went: said once, the small pictures stay)
             return
         # the background reading: the blocks shown blocky first, then the ones around the picture (half its width
@@ -1806,6 +1850,25 @@ class TrackList(tk.Canvas):
             job = self._row_job = RowJob(lm, place, todo, ax, set(waiting))
             threading.Thread(target=job.run, daemon=True, name="track rows").start()
             self.after(RL.POLL_MS, self._poll_rows)
+
+    def cut_tracks(self, lm):
+        """The loaded MIDI's listed tracks with notes hidden (an Extract's, deleted ones)."""
+        fr = self._file_row
+        return [r for r in np.unique(lm.h_trk).tolist() if r < len(fr) and fr[r] >= 0 and lm.tracks[r].notes]
+
+    def tile_mask(self, r, cx, cw):
+        """Loaded track r's exact keys x cw pixels from pixel cx of the song, from its read blocks; None while one
+        isn't read (or can't be)."""
+        lm, parts = self.app.loaded, []
+        end_j = int(lm.end * self.sx / lm.ppq) // TILE + 1  # (paint_loaded_rows': past the song = empty)
+        for j in range(cx // TILE, (cx + cw - 1) // TILE + 1):
+            got = self._tiles.get((r, j))
+            if j >= end_j:
+                got = np.zeros((lm.tracks[r].khi - lm.tracks[r].klo + 1, TILE), bool)
+            if not isinstance(got, np.ndarray):
+                return None
+            parts.append(got)
+        return np.concatenate(parts, axis=1)[:, cx - cx // TILE * TILE:][:, :cw]
 
     def keep_tile(self, key, mask):
         """mask kept as block key; past TILES_BYTES the oldest used go, never the picture's own (_shown_tiles).
@@ -1853,7 +1916,7 @@ class TrackList(tk.Canvas):
         self.take_rows()
         if job.shown and all(k in self._tiles for k in job.shown):  # (the blocky ones all read: painted again
             job.shown = set()  # once, the reading ahead goes on)
-            self._sheet = None
+            self._sheet = self._all_sheet = None
             self.request_redraw()
         if not job.done:
             self.after(RL.POLL_MS, self._poll_rows)
@@ -1946,7 +2009,8 @@ class TrackList(tk.Canvas):
         y0, rh = self.ruler_h, self.all_h()
         sh = self._sheet
         if sh is not None and rh > 4:
-            key = (sh["key"], sh["x"], sh["w"], rh)  # (the sheet's key holds the notes, zoom, highlight, mutes)
+            lm = self.app.loaded  # (the sheet's key holds the notes, zoom, highlight, mutes)
+            key = (sh["key"], sh["x"], sh["w"], rh, lm.hide_ver if lm is not None else None)
             got = self._all_sheet
             if got is None or got[0] != key:
                 img = self.paint_all(sh["x"], sh["w"], rh - 1)
@@ -1988,9 +2052,12 @@ class TrackList(tk.Canvas):
                 colours.append(c)
             return ids[c]
         top = np.full((span, cw), -1, np.int64)  # (each key x pixel: the colour painted last there, -1 none)
+        cut = set(self.cut_tracks(lm)) if loaded else set()
         for r in loaded:
             t = lm.tracks[r]
-            got = small_mask(lm, t, cx, cw, self.sx)
+            got = self.tile_mask(r, cx, cw) if r in cut else None  # (notes taken out: read exactly)
+            if got is None:
+                got = small_mask(lm, t, cx, cw, self.sx)
             if got is not None and t.klo < span:
                 top[t.klo:t.khi + 1][got[:span - t.klo]] = colour_id(-1 - r)
         if len(n):

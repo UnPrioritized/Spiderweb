@@ -1948,11 +1948,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         automatic one = pinned on its slot); past the list's end new tracks of the highlighted one's kind (added by
         hand: "auto", tinted, the channel after the one above; automatic: the next slots). Once laid each colour stays
         on its track; more colours later carry on below the last one. Tracks Spiderweb added that no shape lists go.
-        Multi channel only (Single channel / As drawn put every colour on the first). No undo step of its own: part
+        Multi channel only (Single channel / As drawn put every colour on the first), except a copy with its columns
+        (the track list's Ctrl+C: its rows kept, like Domino's). No undo step of its own: part
         of the change that asked for it. True if anything changed (the notes are made again)."""
-        if self.channel_mode.get() != "auto":
-            return False
         need, rendered, use10 = made[5], made[2], made[1]
+        if self.channel_mode.get() != "auto":  # (the track list's copies keep their rows in every mode: Domino's)
+            need = {i: n for i, n in need.items() if self.shapes[i].get("cols")}
+            if not need:
+                return False
         own, changed = list(self.own_tracks), False
         by_id = {t["id"]: t for t in own}
         slots, filled = track_slots(rendered, self.pad_tracks()), np.unique(rendered[:, 4])
