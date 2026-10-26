@@ -1625,8 +1625,8 @@ class ProjectFiles:
         self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
         notes = self.rendered
         boxed = self.list_boxed()
-        if boxed is not None and not boxed.any():
-            self.status.config(text=tr("tracks.box_empty"))
+        if boxed is not None and not boxed.any():  # (a loaded MIDI's notes in it: never copied, said why)
+            self.status.config(text=tr("tracks.box_empty") + self.loaded_left_out(short=True))
             return
         sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
         cc = self.cc_messages(ppq, bpm, set(sels) if sels else None)
