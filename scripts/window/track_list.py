@@ -24,7 +24,7 @@ from files.midi_out import track_slots
 from files.own_tracks import HAND, add_tracks, from_rows, into_ids, move_rows, new_id, plan
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
-from notes.engine import BEATS_FAR, slot_track_channel, track_ids
+from notes.engine import BEATS_FAR, OWN0, slot_track_channel, track_ids
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text, tempo_text
 from notes.tempo_file import heard_tempo
@@ -726,8 +726,9 @@ class TrackList(tk.Canvas):
     def on_escape(self, e):
         """Esc: tracks being dragged stay where they were; else the All tracks row (user 2026-10-23: the Conductor
         click alone was hidden)."""
-        if self._move is not None and self._move["on"]:
-            return self.end_move()
+        if self._move is not None and self._move["on"] and e.state & 0x100:  # (still held: a release missed leaves
+            return self.end_move()                                          # no drag behind)
+        self.end_move()
         self.show_all()
 
     def moving(self):
@@ -795,6 +796,11 @@ class TrackList(tk.Canvas):
         owners = np.unique(r[np.isin(r[:, 4], autos), 5]).tolist() if autos and len(r) else []
         if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
             return app.status.config(text=tr("tracks.cant_move"))
+        if autos:  # (every automatic track those shapes are on is taken too: nothing left pinned, only the order
+            # changes, like Domino's; user 2026-10-26: pinned colours kept empty tracks between them)
+            on = np.isin(r[:, 5], owners) & (r[:, 4] < OWN0)
+            every = set(autos) | set(np.unique(r[on, 4]).tolist())
+            autos = [int(s) for s in self._slots if int(s) in every]
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.move_step"))
         taken = self.take_tracks(autos, owners) if autos else {}

@@ -22,7 +22,7 @@ A new track is highlighted at once. Your tracks stay where you put them, among t
 
 Drag a track by its name up or down: a line between two rows shows where it lands, and it goes there when you let go. Every selected track goes along (see Highlighting a track), and tracks with gaps between them land together, in their order. Press Esc before letting go to leave them where they were. Dragging past the top or bottom of the list scrolls it. Each move can be undone with Ctrl+Z.
 
-Dragging one of Spiderweb's own tracks makes it yours: it becomes a track you added, on the same channel, and every shape with notes on it is laid on it (its other colours stay on the tracks they're on now). Its notes don't change, but Spiderweb may hand the channels of its other shapes out again. A track holding a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events can't be moved yet. A green tinted track you drag becomes yours too. A loaded MIDI's tracks stay at the top.
+Dragging one of Spiderweb's own tracks makes it yours: it becomes a track you added, on the same channel, and every shape with notes on it is laid on it. The other tracks those shapes are on become yours too, so only the order changes and every track keeps its channel. Spiderweb may hand out channels to its other shapes again. A track holding a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events can't be moved yet. A green tinted track you drag becomes yours too. A loaded MIDI's tracks stay at the top.
 
 ## Drawing into a track
 
