@@ -776,6 +776,7 @@ class BetweenGroups:
         """The Shapes list from scratch (counts / chans: per shape; many: the channel count shown orange; tints: per
         shape the colours used, App.colours_used: with repeats on new channels the orange goes by these)."""
         self._list_args = (counts, chans, many, tints)  # (filled again as it is: App.meter_changed)
+        top = self.listbox.yview()[0]  # (emptying it scrolls to the top: put back below)
         self.listbox.delete(0, "end")
         rendered = getattr(self, "rendered", None)
         for r, row in enumerate(self.shape_rows()):
@@ -813,3 +814,4 @@ class BetweenGroups:
             self.listbox.insert("end", text)
             if warn > many:  # (past this the note colours and channel numbers repeat)
                 self.listbox.itemconfig(r, foreground=look.WARN, selectforeground=look.GAP_PICKED)
+        self.listbox.yview_moveto(top)

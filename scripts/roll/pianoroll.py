@@ -1072,6 +1072,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.on_release(e, second=True)
             return
         if e.x < self.kb_w or self.sx is None:
+            if kept:  # (the dropped box / band off the screen too, hunt 10-26)
+                self.request_redraw()
             return
         app = self.app
         self.press_beat = self.event_pt(e, snap=False)[0]

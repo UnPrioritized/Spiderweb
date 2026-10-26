@@ -1388,6 +1388,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for r, row in enumerate(self.shape_rows()):
             if self.sels.intersection(row):
                 self.listbox.selection_set(r)
+        r = None if self.sel is None else self.row_of(self.sel)
+        if r is not None:  # (the picked shape's row in view: a refill / new shape's row, hunt 10-26)
+            self.listbox.see(r)
 
     def sync_points(self):
         sh = self.selected()

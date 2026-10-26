@@ -431,7 +431,8 @@ class RollDrawing:
             self._grid_key = self._frame_key = None
             return
         frame_key = (w, h, self.kb_w, self.ruler_h, self.sx, self.sy, self.view_t, self.view_top, self.scale,
-                     self.app.keys, self.app.edo(), json.dumps(sigs_of(self.app.tempo)), self.track_mark())
+                     self.app.keys, self.app.edo(), json.dumps(sigs_of(self.app.tempo)),
+                     json.dumps(self.app.tempo.get("keysigs")), self.track_mark())
         if frame_key != self._frame_key:
             self.delete("frame", "playhead")
             self._frame_key = None
