@@ -1781,10 +1781,11 @@ class RollDrawing:
                              tags=("frame", "trackmark"))
 
     def track_mark(self):
-        """The corner's text while the track list highlights a track ("Track 3"), else ""."""
+        """The corner's text: the track the track list highlights ("Track 3"), else "All tracks" (user 2026-10-26:
+        always saying where new shapes go)."""
         tl = getattr(self.app, "track_list", None)
         if tl is None or tl.current is None:
-            return ""
+            return tr("tracks.all")
         row = tl.row_of_id(tl.current)
         return "" if row is None else tl.name_of(row)
 

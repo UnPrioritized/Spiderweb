@@ -40,6 +40,8 @@ NAME_W = 150    # the names' column (x scale)
 RULER_H = 28    # the ruler: signatures on top, bar numbers under them
 ROW_H = 26      # a row's height at first; zoomed up / down between ROW_LEAST and ROW_MOST
 ROW_LEAST, ROW_MOST = 8, 160
+ALL_H = 40      # the All tracks row's height at least (taller than a track, user 2026-10-26: not read as one more)
+ALL_ROW, CONDUCTOR_ROW = -2, -1  # row_at's answers for the two rows on top
 PAD = 3         # free pixels above / below a row's notes
 COLUMN = 28     # bar numbers closer than this many pixels: several bars per column (2, 4, 8...)
 TIP_SHAPES = 8  # shapes named in a row's tip at most
@@ -93,6 +95,7 @@ class TrackList(tk.Canvas):
         self._ids = []  # id() of the shapes when the tracks were worked out (their notes' owner numbers)
         self._sheet = None  # paint's picture: {"key", "x", "y" (its first pixel), "w", "h", "photo"}
         self._tempo_sheet = None  # (key, photo) of the Conductor row's, as wide
+        self._all_sheet = None  # (key, photo) of the All tracks row's, as wide
         # a loaded MIDI's exact rows: the zoom they're for, {(row, block): keys x TILE mask, False = unreadable}
         # (oldest used first), their bytes, the background reading
         self._row_place, self._tiles, self._tile_bytes, self._row_job = None, OrderedDict(), 0, None
@@ -445,8 +448,17 @@ class TrackList(tk.Canvas):
     # ------------------------------------------------------------ view
 
     def area(self):
-        """(left, top) of the notes' part: right of the names, under the ruler and the Conductor row."""
-        return self.name_w, self.ruler_h + self.row_h
+        """(left, top) of the notes' part: right of the names, under the ruler, the All tracks and Conductor rows."""
+        return self.name_w, self.conductor_y() + self.row_h
+
+    def all_h(self):
+        """The All tracks row's height: a bit taller than the tracks' (ALL_H at least, twice it at most)."""
+        s = self.scale
+        return max(round(ALL_H * s), min(self.row_h + round(12 * s), round(2 * ALL_H * s)))
+
+    def conductor_y(self):
+        """The Conductor row's top (under the All tracks row)."""
+        return self.ruler_h + self.all_h()
 
     def t2x(self, beat):
         return self.name_w + (beat - self.view_t) * self.sx
@@ -554,11 +566,13 @@ class TrackList(tk.Canvas):
     # ------------------------------------------------------------ mouse
 
     def row_at(self, y):
-        """The row under y: -1 = the Conductor row, None = the ruler / below the last track."""
+        """The row under y: ALL_ROW / CONDUCTOR_ROW = the rows on top, None = the ruler / below the last track."""
         if y < self.ruler_h:
             return None
+        if y < self.conductor_y():
+            return ALL_ROW
         if y < self.area()[1]:
-            return -1
+            return CONDUCTOR_ROW
         row = int((y - self.area()[1] + self.top) // self.row_h)
         return row if row < len(self.tracks()) else None
 
@@ -587,6 +601,8 @@ class TrackList(tk.Canvas):
         if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
             beat = max(0.0, self.x2t(e.x))
             self.app.set_playhead(self.snapped(beat))
+        if row == CONDUCTOR_ROW:  # (the tempo's row: the highlight stays; All tracks is the row above it)
+            return
         self.current = None if row < 0 else int(self.tracks()[row])
         if e.state & 0x1 and row >= 0:  # Shift+click: only this track, nothing behind it
             self.behind = set()
@@ -595,25 +611,26 @@ class TrackList(tk.Canvas):
 
     def step_track(self, way):
         """Ctrl+wheel on the piano roll / its panes (like Domino, user 2026-10-24): the next (way 1, wheel down) or
-        previous track highlighted, empty ones too; stops at the first / last; nothing highlighted = the first
-        (down) / last (up). The status line names it."""
+        previous track highlighted, empty ones too; the All tracks row (nothing highlighted) above the first one; stops
+        at the top / last. The status line names it."""
         rows = self.tracks()
         if not len(rows):
             return
-        slots = [int(s) for s in rows]
-        if self.current in slots:
-            row = min(max(slots.index(self.current) + way, 0), len(slots) - 1)
-        else:
-            row = 0 if way > 0 else len(slots) - 1
+        slots = [None] + [int(s) for s in rows]
+        at = slots.index(self.current) if self.current in slots else 0
+        row = min(max(at + way, 0), len(slots) - 1)
         if slots[row] != self.current:
             self.current = slots[row]
             self.shown_changed()
+        if row == 0:
+            return self.app.status.config(text=tr("tracks.all"))
         ch = self.channel_of(slots[row])
-        self.app.status.config(text=tr("tracks.stepped", name=self.name_of(row), ch=ch) if ch
-                               else self.name_of(row))
+        name = self.name_of(row - 1)
+        self.app.status.config(text=tr("tracks.stepped", name=name, ch=ch) if ch else name)
 
     def show_all(self):
-        """Nothing highlighted: the piano roll shows every track (Esc, the Conductor row, All tracks in the ▾ list)."""
+        """The All tracks row highlighted (current None): the piano roll shows every track and Spiderweb picks new
+        shapes' channels (Esc, a click on the row, All tracks in the ▾ list)."""
         if self.current is not None:
             self.current = None
             self.shown_changed()
@@ -653,12 +670,13 @@ class TrackList(tk.Canvas):
     # ------------------------------------------------------------ own tracks (added by hand: files/own_tracks.py)
 
     def track_menu(self, e, row):
-        """Right-click on a row / below them (like Domino's): the row is highlighted (the Conductor row: none), then
-        Add Track, Add Tracks…, Remove Track, Properties…. row: the track list row clicked (-1 = the Conductor row,
-        None = below the tracks: the highlight stays). The play line stays put."""
+        """Right-click on a row / below them (like Domino's): the row is highlighted (All tracks: none), then Add
+        Track, Add Tracks…, Remove Track, Properties…. row: the track list row clicked (ALL_ROW / CONDUCTOR_ROW: new
+        tracks before them all; the Conductor row and None = below the tracks: the highlight stays). The play line
+        stays put."""
         self.tip.hide()
         s = int(self.tracks()[row]) if row is not None and row >= 0 else None
-        if row is not None and s != self.current:  # (highlighted first, like a click; user 2026-10-26)
+        if row not in (None, CONDUCTOR_ROW) and s != self.current:  # (highlighted first, like a click; user 10-26)
             self.current = s
             self.shown_changed()
             self.update_idletasks()
@@ -808,7 +826,7 @@ class TrackList(tk.Canvas):
         if row is not None and row >= 0 and self.on_speaker(e.x):
             slot = int(self.tracks()[row])
             text = tr("tracks.unmute_tip" if slot in self.muted else "tracks.mute_tip")
-        elif row == -1 and e.x >= self.name_w and self.sx:
+        elif row == CONDUCTOR_ROW and e.x >= self.name_w and self.sx:
             text = self.bpm_tip(e.x)
         else:
             text = self.row_tip(row) if row is not None and e.x < self.name_w else ""
@@ -821,7 +839,7 @@ class TrackList(tk.Canvas):
     def row_tip(self, row):
         """A row's whole name, channel, note count and the shapes whose notes are on it."""
         if row < 0:
-            return tr("tracks.conductor_tip")
+            return tr("tracks.all_tip" if row == ALL_ROW else "tracks.conductor_tip")
         key = (row, self._made and id(self._made[0]), len(self.app.shapes), id(self.app.own_tracks))
         if self._tip_memo[0] == key:  # (worked out once per row: every mouse move took 60 ms on huge tracks)
             return self._tip_memo[1]
@@ -880,6 +898,7 @@ class TrackList(tk.Canvas):
         lines = self.shown_bars(w)
         self.paint(w, h)
         self.draw_ruler(w, lines)
+        self.draw_all(w)
         self.draw_conductor(w)
         self.draw_names(h)
         self.draw_playhead()
@@ -1239,11 +1258,98 @@ class TrackList(tk.Canvas):
             share = (np.where(has, val, lo) - lo) / (hi - lo)
         return np.where(has, np.maximum(1, np.round(1 + share * (inner - 1))), 0).astype(np.int64)
 
+    def draw_all(self, w):
+        """The All tracks row (user 2026-10-26): every track's notes together, each in its track's colour, from the
+        song's lowest to highest key; highlighted like a track while no track is (current None)."""
+        y0, rh = self.ruler_h, self.all_h()
+        sh = self._sheet
+        if sh is not None and rh > 4:
+            key = (sh["key"], sh["x"], sh["w"], rh)  # (the sheet's key holds the notes, zoom, highlight, mutes)
+            got = self._all_sheet
+            if got is None or got[0] != key:
+                img = self.paint_all(sh["x"], sh["w"], rh - 1)
+                photo = got[1] if got is not None and got[1].size == (sh["w"], rh - 1) else Photo(self, sh["w"], rh - 1)
+                photo.put(img)
+                got = self._all_sheet = (key, photo)
+            self.create_image(self.name_w - (self.left_px() - sh["x"]), y0, image=got[1].photo, anchor="nw")
+        self.create_line(0, y0 + rh - 1, w, y0 + rh - 1, fill=look.ROLL_EDGE)
+
+    def paint_all(self, cx, cw, h):
+        """draw_all's picture: cw x h pixels from pixel cx of the song. The tracks painted in order, a later one over
+        an earlier one; Spiderweb's own over a loaded MIDI's (as in the export). A loaded MIDI's tracks come from
+        the loading pass's small pictures (small_mask)."""
+        img = np.empty((h, cw, 3), np.uint8)
+        img[:] = hex_rgb(look.TRACK_PICKED if self.current is None else look.TRACK_ROW)
+        sigs = sigs_of(self.app.tempo)
+        xs = np.array([round(b * self.sx) - cx for b, _ in bar_lines(sigs, cx / self.sx, (cx + cw) / self.sx,
+                                                                     COLUMN * self.scale / self.sx)], np.int64)
+        img[:, xs[(xs >= 0) & (xs < cw)]] = hex_rgb(look.TRACK_BAR)
+        n, ppq, lm = self.app.rendered, self.app.ppq, self.app.loaded
+        lo_t, hi_t = cx / self.sx * ppq, (cx + cw) / self.sx * ppq
+        if len(n):
+            row = self.note_rows()
+            keep = (row >= 0) & (n[:, 1] > lo_t) & (n[:, 0] < hi_t)
+            n, row = n[keep], row[keep]
+        loaded = [r for r in range(self.lead) if lm.tracks[r].notes] if self.lead else []
+        keys = [int(n[:, 2].min()), int(n[:, 2].max())] if len(n) else []
+        for r in loaded:
+            keys += [lm.tracks[r].klo, lm.tracks[r].khi]
+        if not keys:
+            return img
+        k_lo, k_hi = min(keys), max(keys)
+        span = k_hi - k_lo + 1
+        colours, ids = [], {}  # the colours in painting order; colour -> its number there
+
+        def colour_id(slot):
+            c = look.TRACK_MUTED if slot in self.muted else self.colour_of(slot)
+            if c not in ids:
+                ids[c] = len(colours)
+                colours.append(c)
+            return ids[c]
+        top = np.full((span, cw), -1, np.int64)  # (each key x pixel: the colour painted last there, -1 none)
+        for r in loaded:
+            t = lm.tracks[r]
+            got = small_mask(lm, t, cx, cw, self.sx)
+            if got is not None:
+                top[t.klo - k_lo:t.khi - k_lo + 1][got] = colour_id(-1 - r)
+        if len(n):
+            xa = np.clip(np.floor(n[:, 0] / ppq * self.sx).astype(np.int64) - cx, 0, cw - 1)
+            xb = np.clip(np.maximum(xa, np.ceil(n[:, 1] / ppq * self.sx).astype(np.int64) - 1 - cx), 0, cw - 1)
+            k = n[:, 2] - k_lo
+            slots = self._all[row + self.lead]
+            order = []  # (each colour once, in the order of the first track using it: later tracks on top)
+            for s in self._all[np.unique(row) + self.lead].tolist():
+                c = colour_id(int(s))
+                if c not in order:
+                    order.append(c)
+            per_slot = {int(s): colour_id(int(s)) for s in np.unique(slots).tolist()}
+            cid = np.array([per_slot[int(s)] for s in slots.tolist()], np.int64)
+            for c in order:  # (+1 where a line starts, -1 just past its end, added up: covered where > 0)
+                on = cid == c
+                cover = np.bincount(k[on] * (cw + 1) + xa[on], minlength=span * (cw + 1)).astype(np.int32)
+                cover -= np.bincount(k[on] * (cw + 1) + xb[on] + 1, minlength=span * (cw + 1)).astype(np.int32)
+                top[np.cumsum(cover.reshape(span, cw + 1), axis=1)[:, :cw] > 0] = c
+        # keys -> pixel rows (top key first), like paint_notes': several keys a pixel = the one painted last
+        pad = round(PAD * self.scale)
+        inner = max(1, h - 2 * pad)
+        top = top[::-1]
+        if span > inner:
+            used = inner
+            pix = np.maximum.reduceat(top, np.arange(used) * span // used, axis=0)
+        else:
+            thick = inner // span
+            used = span * thick
+            pix = np.repeat(top, thick, axis=0)
+        y0 = pad + (inner - used) // 2
+        hit = pix >= 0
+        img[y0:y0 + used][hit] = np.array([hex_rgb(c) for c in colours], np.uint8)[pix[hit]]
+        return img
+
     def draw_conductor(self, w):
         """The Conductor row: a line at each tempo change, as tall as its BPM (the song's own slowest .. fastest,
         user 2026-10-23: Domino's 1-512 BPM wouldn't fit a MIDI file's range) and a short line at each time / key
         signature."""
-        s, y0 = self.scale, self.ruler_h
+        s, y0 = self.scale, self.conductor_y()
         y1 = y0 + self.row_h
         x0 = self.name_w
         sh = self._sheet
@@ -1318,7 +1424,14 @@ class TrackList(tk.Canvas):
                     self.draw_speaker(self.speaker_x(), mid, slot in self.muted, picked)
             self.create_line(0, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
         self.create_rectangle(0, y0, x1, top, fill=look.TRACK_NAME_BG, outline="")  # (rows scrolled under it)
-        self.create_text(18 * s, y0 + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
+        ya = self.conductor_y()
+        picked = self.current is None  # (the All tracks row: highlighted like a track)
+        if picked:
+            self.create_rectangle(0, y0, x1, ya - 1, fill=look.TRACK_PICK, outline="")
+        self.create_text(18 * s, (y0 + ya) / 2, text=tr("tracks.all"), anchor="w",
+                         fill=look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT, font=look.font(9, "bold"))
+        self.create_line(0, ya - 1, x1, ya - 1, fill=look.ROLL_EDGE)
+        self.create_text(18 * s, ya + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
                          font=font)
         self.create_line(0, top, x1, top, fill=look.ROLL_EDGE)
         self.create_line(x1, 0, x1, h, fill=look.ROLL_EDGE)
@@ -1447,7 +1560,7 @@ def build_onion(app, parent):
     more.pics = pics  # (kept, or Tk forgets the pictures)
     menu = tk.Menu(more, tearoff=False)
     tl = lambda: app.track_list  # noqa: E731  (made after the toolbar)
-    # (All tracks first: the list's Conductor row, which does the same, is at its top too; user 2026-10-26)
+    # (All tracks first: the list's All tracks row, which does the same, is at its top too; user 2026-10-26)
     menu.add_command(label=tr("tracks.onion_all"), command=lambda: tl().show_all())
     menu.add_separator()
     menu.add_command(label=tr("tracks.onion_previous"), command=lambda: tl().behind_near(-1))
