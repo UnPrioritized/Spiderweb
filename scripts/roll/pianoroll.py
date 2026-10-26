@@ -1648,6 +1648,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.app.sync_funnel()  # its note count
         self.drag = None
         self.draw_select_box()  # (the box stays, see kept_box)
+        if self.box_kept and getattr(self.app, "loaded", None) is not None:  # (the red outline round the loaded notes
+            self.request_redraw()  # in it is read only once no drag is held: nothing else redrew, user 2026-10-26)
 
     def on_double(self, e):
         # Tk turns a quick second click into a double-click; only polylines use it, everything else gets a normal click
