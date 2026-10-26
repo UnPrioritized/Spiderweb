@@ -960,6 +960,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Tab: the piano roll <-> the track list (user 2026-10-23, like Domino's)."""
         if self.roll.draft is not None or self.roll.follow is not None:
             return
+        if self.tracks_shown() and self.track_list.busy():  # (a drag held in the list: let go first, hunt 10-26)
+            return
         place = dict(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
         if self.tracks_shown():
             self.track_box.pack_forget()

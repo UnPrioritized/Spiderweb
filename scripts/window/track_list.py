@@ -1211,7 +1211,9 @@ class TrackList(tk.Canvas):
     def on_right(self, e):
         """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs).
         The names (and below them): the tracks' menu (track_menu); the notes' picture / a ruler band: the edit menu
-        (edit_menu; user 2026-10-26, Domino's)."""
+        (edit_menu; user 2026-10-26, Domino's). Nothing while a drag is held (the piano roll's rule, hunt 10-26)."""
+        if self.busy() or getattr(e, "state", 0) & 0x100:
+            return
         row = self.row_at(e.y)
         if e.x >= self.name_w and self.sx and (e.y >= self.ruler_h or self.box_at(e.x, e.y)):
             return self.edit_menu(e)
