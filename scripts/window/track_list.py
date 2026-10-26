@@ -77,7 +77,9 @@ class TrackList(tk.Canvas):
         self.onion.trace_add("write", lambda *_: self.shown_changed())
         self.selected = set()  # tracks Ctrl+clicked along with the highlighted one (like Domino's; the right-click
         # menu works on them all), never the highlighted one itself
-        self._sweep = None  # a Ctrl+drag over the rows: (selected or not, the last row it reached)
+        self.anchor = None  # where a Shift+click's range starts: (the last plain / Ctrl+clicked track, the
+        # highlighted one then)
+        self._sweep = None  # a drag from a speaker over the rows: (muted or not, the last row it reached)
         self.muted = set()   # slots not played (the speaker in their row; playback only, never the files)
         self.faint = FAINT
         self.faint_var = tk.StringVar(value=str(FAINT))
@@ -591,29 +593,53 @@ class TrackList(tk.Canvas):
         self._sweep = None
         if row is None:
             return
-        if row >= 0 and self.on_speaker(e.x):  # its speaker: muted / heard
-            return self.toggle_mute(int(self.tracks()[row]))
-        if e.state & 0x4 and row >= 0:  # Ctrl+click: selected along with the highlighted track or not (like Domino's,
-            slot = int(self.tracks()[row])  # user 2026-10-26; was: shown behind); dragged on: every row crossed the
-            if self.current is None:        # same (the highlight stays; none yet = this one)
-                self.current = slot
-                self.shown_changed()
-            elif slot != self.current:
-                self.selected ^= {slot}
-                self.request_redraw()
-            self._sweep = (slot == self.current or slot in self.selected, row)
+        if row >= 0 and self.on_speaker(e.x):  # its speaker: muted / heard; dragged on: every speaker crossed the
+            slot = int(self.tracks()[row])     # same (user 2026-10-26)
+            self.toggle_mute(slot)
+            self._sweep = (slot in self.muted, row)
             return
+        if row >= 0 and e.state & 0x5 and self.current is not None:  # Ctrl / Shift: several tracks (select)
+            return self.select_click(row, e.state & 0x4, e.state & 0x1)
         if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
             beat = max(0.0, self.x2t(e.x))
             self.app.set_playhead(self.snapped(beat))
         if row == CONDUCTOR_ROW:  # (the tempo's row: the highlight stays; All tracks is the row above it)
             return
         self.current = None if row < 0 else int(self.tracks()[row])
-        self.selected = set()
-        if e.state & 0x1 and row >= 0:  # Shift+click: only this track, nothing behind it
-            self.behind = set()
-            self.onion.set(False)
+        self.selected, self.anchor = set(), (self.current, self.current)
         self.shown_changed()
+
+    def select_click(self, row, ctrl, shift):
+        """Ctrl / Shift clicks on a track while one is highlighted, like a file list (user 2026-10-26; the
+        highlighted track keeps its deep blue, the others selected fainter):
+        - Ctrl+click: that track in or out of the selection, the next Shift range starts there (anchor);
+        - Shift+click: the tracks from the anchor to it, the rest dropped;
+        - Ctrl+Shift+click: the same tracks added to the selection.
+        Leaving out the highlighted track gives its deep blue to the first selected one left (never none)."""
+        rows = [int(s) for s in self.tracks()]
+        slot = rows[row]
+        group = set(self.picked_tracks())
+        if shift:
+            # (the anchor counts while the highlight is the one it was set with: moved by Ctrl+wheel, a menu... =
+            # from the highlighted track)
+            anchor, was = self.anchor if self.anchor is not None else (None, None)
+            at = rows.index(anchor if was == self.current and anchor in rows else self.current)
+            a, b = sorted((at, row))
+            span = set(rows[a:b + 1])
+            group = group | span if ctrl else span
+        else:
+            if slot in group and len(group) == 1:
+                return  # (the only one: stays highlighted)
+            group ^= {slot}
+        current = self.current if self.current in group else next(s for s in rows if s in group)
+        self.selected = group - {current}
+        if not shift:
+            self.anchor = (slot, current)
+        if current != self.current:
+            self.current = current
+            self.shown_changed()
+        else:
+            self.request_redraw()
 
     def step_track(self, way):
         """Ctrl+wheel on the piano roll / its panes (like Domino, user 2026-10-24): the next (way 1, wheel down) or
@@ -650,8 +676,7 @@ class TrackList(tk.Canvas):
         return [int(s) for s in self.tracks() if int(s) in group]
 
     def on_drag(self, e):
-        """Ctrl+drag after a Ctrl+click: every row the mouse crosses gets what the pressed row got (selected or not;
-        the highlighted track stays)."""
+        """A drag from a speaker: every track the mouse crosses gets what the pressed one got (muted or heard)."""
         if self._sweep is None:
             return
         on, last = self._sweep
@@ -660,11 +685,12 @@ class TrackList(tk.Canvas):
             row = len(self.tracks()) - 1 if e.y >= self.area()[1] else 0
         a, b = sorted((last, row))
         slots = {int(s) for s in self.tracks()[a:b + 1]}
-        new = (self.selected | slots if on else self.selected - slots) - {self.current}
+        new = self.muted | slots if on else self.muted - slots
         self._sweep = (on, row)
-        if new != self.selected:
-            self.selected = new
+        if new != self.muted:
+            self.muted = new
             self.request_redraw()
+            self.app.play_changed()
 
     def on_right(self, e):
         """Right-click a speaker: only this track plays (solo), again: every track (like many MIDI programs).

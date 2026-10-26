@@ -36,7 +36,7 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 
 Click a track to highlight it. A click also puts the play line there, on the track list's snap. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to All tracks: click the All tracks row, press Esc in the track list, pick All tracks in the Multiple tracks ▾ list on the toolbar, or Ctrl+wheel up past the first track. The corner then says "All tracks". Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and Slice and Lasso don't cut them. Hidden notes still play and still go into the files.
 
-Ctrl+click more tracks to select them along with the highlighted one: they turn a fainter blue, and the highlighted track keeps its deep blue (the piano roll still shows that one). Ctrl+click a selected track again to drop it, or Ctrl+drag over tracks to select every track you cross. A plain click or All tracks clears the selection. Right-click one of the selected tracks and the menu works on them all: Remove Track removes every track you added among them, and Properties… is greyed while more than one is selected.
+Select several tracks like files in a folder: Ctrl+click more tracks to select them along with the highlighted one, Shift+click to select every track from the last one you clicked to this one, Ctrl+Shift+click to add those to what's selected. Selected tracks turn a fainter blue, and the highlighted track keeps its deep blue (the piano roll still shows that one). Ctrl+click a selected track again to drop it. A plain click or All tracks clears the selection. Right-click one of the selected tracks and the menu works on them all: Remove Track removes every track you added among them, and Properties… is greyed while more than one is selected.
 
 When a shape you draw, paste or move lands on another track, the highlight moves to that track, so it never vanishes under the mouse (if it lands on several tracks, every track shows). When channels are handed out again (for example a shape drawn over others), the highlight stays with the music it was showing.
 
@@ -44,11 +44,11 @@ When a shape you draw, paste or move lands on another track, the highlight moves
 
 The Multiple tracks button on the toolbar shows other tracks faintly behind the highlighted one: on = the tracks you picked show too, off = the highlighted track alone. Its ▾ list picks them: the track before it, the track after it, Pick tracks…, or every track of the same colour. All tracks at its top highlights the All tracks row.
 
-In the track list, Shift+click a track to highlight it alone (nothing picked, Multiple tracks off). Picked tracks get a dot in their colour. Show multiple tracks… (above the list, or Pick tracks… in the ▾ list) opens the list of tracks: click a track to pick it or not, drag to do the same to every track you cross. Faint sets how strongly they show (0 % hides them).
+Picked tracks get a dot in their colour in the track list. Show multiple tracks… (above the list, or Pick tracks… in the ▾ list) opens the list of tracks: click a track to pick it or not, drag to do the same to every track you cross. Faint sets how strongly they show (0 % hides them).
 
 ## Mute
 
-Click a track's speaker to mute it: it isn't played until you click it again, and its picture turns grey. Right-click a speaker to hear only that track; right-click it again to hear every track. Muting only changes what you hear: Export MIDI and Export to Domino still write the track. When an edit changes which track a shape lands on, the mute (and a track picked to show behind) goes with that music; if its music is gone, it's cleared.
+Click a track's speaker to mute it: it isn't played until you click it again, and its picture turns grey. Drag from a speaker up or down to mute (or hear again) every track you cross. Right-click a speaker to hear only that track; right-click it again to hear every track. Muting only changes what you hear: Export MIDI and Export to Domino still write the track. When an edit changes which track a shape lands on, the mute (and a track picked to show behind) goes with that music; if its music is gone, it's cleared.
 
 ## Snap
 
