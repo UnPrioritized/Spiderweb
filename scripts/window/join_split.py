@@ -183,6 +183,28 @@ class JoinSplit:
             return tr("join_split.it_s_a_custom_shape_already")
         return None
 
+    def shared_into(self, olds):
+        """(the tracks every one of olds was laid on (Draw into a track), or [] when not all on the same ones; True if
+        any of them was laid on tracks but they differ: the new shape goes automatic, the warning says so)."""
+        from window.app import placed_on
+        own = self.own_channels()
+        laid = [placed_on(sh, own) for sh in olds]
+        if laid[0] and all(p == laid[0] for p in laid):
+            return laid[0], False
+        return [], any(laid)
+
+    def keep_into(self, news, laid, first):
+        """Join / Turn into live shape / Gate sensitive merge keep the tracks their shapes shared (hunt 2026-10-26:
+        they went automatic): news laid on laid (shared_into; [] = automatic), first's channel-10 rule kept."""
+        from window.app import can_go_in
+        for sh in news:
+            for key in ("into", "cols", "into_gap", "slots10"):
+                sh.pop(key, None)
+            if laid and can_go_in(sh):
+                sh["into"] = list(laid)
+                if isinstance(first.get("slots10"), bool):
+                    sh["slots10"] = first["slots10"]
+
     def turn_into_live(self):
         """The selected shapes -> one live shape (notes/convert.py), where the first of them was."""
         self.commit_typing()  # (a typed number: to the shapes before they're replaced)
@@ -193,12 +215,16 @@ class JoinSplit:
         order = sorted(self.sels)
         olds = [self.shapes[i] for i in order]
         lost = losses(olds)
+        laid, mixed = self.shared_into(olds)
+        if mixed:
+            lost.append(tr("join_split.leaves_tracks"))
         if lost and not messagebox.askokcancel(
                 tr("join_split.spiderweb"), tr("join_split.turning_these_into_a_live_shape") + "\n• ".join(lost) +
                 tr("join_split.split_into_separate_shapes_or_ctrl"), icon="warning", parent=self):
             return
         new = to_live(olds, [cached_strokes(sh) for sh in olds], self.defaults, self.custom_defaults,
                       self.roll.sy / self.roll.sx if self.roll.sx else None)
+        self.keep_into([new], laid, olds[0])
         carry_stops(self, olds, [new])  # (Sustain's stops put by hand: on the same ticks)
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.turn_into_live_shape"))
@@ -296,6 +322,9 @@ class JoinSplit:
         lost = shared_settings(olds)[1]
         if not again and not last_note(olds, new)[1]:
             lost.append(tr("join_split.last_note_moves"))
+        laid, mixed = self.shared_into(olds)
+        if mixed:
+            lost.append(tr("join_split.leaves_tracks"))
         if lost and not messagebox.askokcancel(
                 tr("join_split.spiderweb"), tr("join_split.joining_these_changes") + "\n• ".join(lost) +
                 tr("join_split.ctrl_z_gives_them_back"), icon="warning", parent=self):
@@ -303,6 +332,7 @@ class JoinSplit:
         if not again:
             carry_stops(self, olds, [new])
         new = again or new
+        self.keep_into([new], laid, olds[0])
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.join"))
         self.unlink_groups(order)
@@ -486,6 +516,7 @@ class JoinSplit:
             new[0]["merge"]["flips"] = flips
             for sh in new:  # (the leftovers too: they were flipped)
                 sh["gate_flip"] = True
+        self.keep_into(new, self.shared_into([self.shapes[i] for i in pair])[0], self.shapes[pair[0]])
         self.roll.cancel_draft()
         self.push_undo(name=tr("join_split.merge"))
         self.unlink_groups(pair)
