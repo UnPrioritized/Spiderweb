@@ -10,12 +10,10 @@
 //! key's tier-1 note, always kept).
 //!
 //! A block is ranked from the events of ONE push with frames in it, in a row. A block whose note-ons came in
-//! two pushes, or late into a later block, is told apart by `group` and chosen on the render thread instead.
+//! two pushes, or late into a later block, doesn't match its `Span` and is chosen on the render thread instead.
 
 use crate::Pending;
 
-/// `Pending::group` of an event that wasn't ranked (not a note-on, or its block wasn't busy enough).
-pub const NO_GROUP: u64 = 0;
 /// Note-ons in a block past which it is ranked whatever the allowance is now (a wall arriving while there is no
 /// limit yet must be ranked when the first cut comes).
 pub const RANK_ALWAYS: usize = 20_000;
@@ -31,7 +29,10 @@ pub static TAIL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::ne
 /// A copy's sounding time (length + TAIL) against the note it is merged into (both capped at HEARD + TAIL): 1 =
 /// as long.
 pub fn len_ratio(copy: u32, into: u32) -> f32 {
-    let tail = TAIL.load(std::sync::atomic::Ordering::Relaxed);
+    ratio_with(TAIL.load(std::sync::atomic::Ordering::Relaxed), copy, into)
+}
+
+fn ratio_with(tail: u32, copy: u32, into: u32) -> f32 {
     let (c, t) = (copy.min(HEARD) + tail, into.min(HEARD) + tail);
     (c.max(1) as f32 / t.max(1) as f32).min(1.0)
 }
@@ -42,34 +43,61 @@ pub fn len_ratio(copy: u32, into: u32) -> f32 {
 /// its share of the time.
 pub const COHERENT: f32 = 0.9;
 
+/// A note-on as the ranking reads it: packed small (a Shinki block's ~185,000 fit the CPU's cache; reading them
+/// out of the batch's messages all over memory was most of the ~4.6 ms a block ranking took, 2026-10-27).
+#[derive(Clone, Copy)]
+struct On {
+    frame: u64,
+    /// its place in the group's messages
+    i: u32,
+    len: u32,
+    slot: u16,
+    track: u16,
+    key: u8,
+    vel: u8,
+}
+
+const NONE: u32 = u32::MAX;
+
+/// A ranked group in its batch: messages `start..start + len`, `ons` note-ons ranked 0..ons. The render thread
+/// finding its block is exactly one chooses it in one pass over the messages, no checking pass (a Shinki block
+/// is ~20 MB of messages: reading them twice was most of the render thread's ~2.9 ms of choosing, 2026-10-27).
+#[derive(Clone, Copy, Debug)]
+pub struct Span {
+    pub start: u32,
+    pub len: u32,
+    pub ons: u32,
+}
+
 pub struct Ranker {
-    serial: u64,
-    by_key: [usize; 128],
-    by_slot: Vec<usize>,
-    ons: Vec<usize>,
-    t1: Vec<usize>,
-    t2: Vec<usize>,
-    t3: Vec<usize>,
-    order: Vec<usize>,
+    // (below: indices into `ons`)
+    by_key: [u32; 128],
+    by_slot: Vec<u32>,
+    ons: Vec<On>,
+    t1: Vec<u32>,
+    t2: Vec<u32>,
+    t3: Vec<u32>,
+    order: Vec<u32>,
+    rank_of: Vec<u32>,
     // round-robin scratch
     per_track: Vec<u32>,
     starts: Vec<u32>,
     tracks: Vec<u16>,
-    sorted: Vec<usize>,
-    by_vel: Vec<usize>,
+    sorted: Vec<u32>,
+    by_vel: Vec<u32>,
 }
 
 impl Ranker {
     pub fn new() -> Self {
         Ranker {
-            serial: 0,
-            by_key: [usize::MAX; 128],
-            by_slot: vec![usize::MAX; 256 * 128],
+            by_key: [NONE; 128],
+            by_slot: vec![NONE; 256 * 128],
             ons: Vec::new(),
             t1: Vec::new(),
             t2: Vec::new(),
             t3: Vec::new(),
             order: Vec::new(),
+            rank_of: Vec::new(),
             per_track: vec![0; 1 << 16],
             starts: vec![0; 1 << 16],
             tracks: Vec::new(),
@@ -79,117 +107,129 @@ impl Ranker {
     }
 
     /// Rank the note-ons of every block in `batch` with more than `over` of them (frames in a row of one block =
-    /// one group; the others stay unranked: chosen on the render thread if they ever need choosing).
-    pub fn rank(&mut self, batch: &mut [Pending], block_frames: u64, over: usize) {
+    /// one group; the others stay unranked: chosen on the render thread if they ever need choosing). Each ranked
+    /// group's place is added to `spans`, in order.
+    pub fn rank(&mut self, batch: &mut [Pending], block_frames: u64, over: usize, spans: &mut Vec<Span>) {
         let mut a = 0;
         while a < batch.len() {
-            let block = batch[a].frame / block_frames;
-            let mut b = a + 1;
-            while b < batch.len() && batch[b].frame / block_frames == block {
+            // (block bounds compared, not each frame divided: a division per message was ~1/3 of the ranking)
+            let start = batch[a].frame / block_frames * block_frames;
+            let end = start + block_frames;
+            self.ons.clear();
+            let mut b = a;
+            while b < batch.len() && (start..end).contains(&batch[b].frame) {
+                let p = &batch[b];
+                if p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0 {
+                    let key = ((p.msg >> 8) & 0x7F) as u8;
+                    self.ons.push(On {
+                        frame: p.frame,
+                        i: (b - a) as u32,
+                        len: p.len,
+                        slot: ((((p.msg >> 24) & 0x0F) << 4 | (p.msg & 0x0F)) as u16) * 128 + key as u16,
+                        track: p.track,
+                        key,
+                        vel: ((p.msg >> 16) & 0x7F) as u8,
+                    });
+                }
                 b += 1;
             }
-            let ons = batch[a..b].iter().filter(|p| p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0).count();
-            if ons > over {
-                self.serial += 1;
-                self.rank_group(&mut batch[a..b], self.serial);
+            if self.ons.len() > over {
+                self.rank_group(&mut batch[a..b]);
+                spans.push(Span { start: a as u32, len: (b - a) as u32, ons: self.ons.len() as u32 });
             }
             a = b;
         }
     }
 
-    fn rank_group(&mut self, g: &mut [Pending], group: u64) {
-        self.ons.clear();
-        for (i, p) in g.iter().enumerate() {
-            if p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0 {
-                self.ons.push(i);
+    fn rank_group(&mut self, g: &mut [Pending]) {
+        let ons = std::mem::take(&mut self.ons);
+        let rank = |o: &On| (o.len, o.vel);
+        for (j, o) in ons.iter().enumerate() {
+            let k = &mut self.by_key[o.key as usize];
+            if *k == NONE || rank(o) > rank(&ons[*k as usize]) {
+                *k = j as u32;
             }
-        }
-        if self.ons.is_empty() {
-            return;
-        }
-        let key = |p: &Pending| ((p.msg >> 8) & 0x7F) as usize;
-        let slot = |p: &Pending| ((((p.msg >> 24) & 0x0F) << 4 | (p.msg & 0x0F)) as usize) * 128 + key(p);
-        let rank = |p: &Pending| (p.len, (p.msg >> 16) & 0x7F);
-        for &i in &self.ons {
-            let k = &mut self.by_key[key(&g[i])];
-            if *k == usize::MAX || rank(&g[i]) > rank(&g[*k]) {
-                *k = i;
-            }
-            let s = &mut self.by_slot[slot(&g[i])];
-            if *s == usize::MAX || rank(&g[i]) > rank(&g[*s]) {
-                *s = i;
+            let s = &mut self.by_slot[o.slot as usize];
+            if *s == NONE || rank(o) > rank(&ons[*s as usize]) {
+                *s = j as u32;
             }
         }
         self.t1.clear();
         self.t2.clear();
         self.t3.clear();
-        for &i in &self.ons {
-            if self.by_key[key(&g[i])] == i {
-                self.t1.push(i);
-            } else if self.by_slot[slot(&g[i])] == i {
-                self.t2.push(i);
+        for (j, o) in ons.iter().enumerate() {
+            let j = j as u32;
+            if self.by_key[o.key as usize] == j {
+                self.t1.push(j);
+            } else if self.by_slot[o.slot as usize] == j {
+                self.t2.push(j);
             } else {
-                self.t3.push(i);
+                self.t3.push(j);
             }
         }
         self.order.clear();
-        let t1 = std::mem::take(&mut self.t1);
+        let t1 =std::mem::take(&mut self.t1);
         self.order.extend_from_slice(&t1);
         self.t1 = t1;
         let t2 = std::mem::take(&mut self.t2);
-        self.round_robin(g, &t2);
+        self.round_robin(&ons, &t2);
         self.t2 = t2;
         let t3 = std::mem::take(&mut self.t3);
-        self.round_robin(g, &t3);
+        self.round_robin(&ons, &t3);
         self.t3 = t3;
-        for (r, &i) in self.order.iter().enumerate() {
-            g[i].rank = r as u32;
-            g[i].group = group;
+        self.rank_of.clear();
+        self.rank_of.resize(ons.len(), 0);
+        for (r, &j) in self.order.iter().enumerate() {
+            self.rank_of[j as usize] = r as u32;
         }
-        for &i in &self.ons {
-            let (s, k) = (self.by_slot[slot(&g[i])], self.by_key[key(&g[i])]);
-            g[i].srep = g[s].rank;
-            g[i].krep = g[k].rank;
+        let tail = TAIL.load(std::sync::atomic::Ordering::Relaxed);
+        for (j, o) in ons.iter().enumerate() {
+            let (s, k) = (self.by_slot[o.slot as usize] as usize, self.by_key[o.key as usize] as usize);
+            let (so, ko) = (&ons[s], &ons[k]);
+            let p = &mut g[o.i as usize];
+            p.rank = self.rank_of[j];
+            p.srep = self.rank_of[s];
+            p.krep = self.rank_of[k];
             // (the same sound = same frame AND same velocity: other velocities may be other samples, which add
             // as powers; adding all same-frame copies as amplitudes left Shinki's F#2 / G2 6 dB too loud against
             // every note played with 4 M voices, 2026-10-27)
-            let vel = |p: &Pending| (p.msg >> 16) & 0x7F;
-            g[i].s_same = g[s].frame == g[i].frame && vel(&g[s]) == vel(&g[i]);
-            g[i].k_same = g[k].frame == g[i].frame && vel(&g[k]) == vel(&g[i]);
-            g[i].s_ratio = len_ratio(g[i].len, g[s].len);
-            g[i].k_ratio = len_ratio(g[i].len, g[k].len);
+            p.s_same = so.frame == o.frame && so.vel == o.vel;
+            p.k_same = ko.frame == o.frame && ko.vel == o.vel;
+            p.s_ratio = ratio_with(tail, o.len, so.len);
+            p.k_ratio = ratio_with(tail, o.len, ko.len);
         }
-        for &i in &self.ons {
-            self.by_key[key(&g[i])] = usize::MAX;
-            self.by_slot[slot(&g[i])] = usize::MAX;
+        self.by_key = [NONE; 128];
+        for o in &ons {
+            self.by_slot[o.slot as usize] = NONE;
         }
+        self.ons = ons;
     }
 
     /// Append `list` to `order`: tracks taking turns, each track's notes loudest first (stable). Counting sorts
     /// only (a dense block has ~200,000).
-    fn round_robin(&mut self, g: &[Pending], list: &[usize]) {
+    fn round_robin(&mut self, ons: &[On], list: &[u32]) {
         if list.is_empty() {
             return;
         }
         // loudest first, stable
         let mut hist = [0u32; 129];
-        for &i in list {
-            hist[127 - ((g[i].msg >> 16) & 0x7F) as usize + 1] += 1;
+        for &j in list {
+            hist[127 - ons[j as usize].vel as usize + 1] += 1;
         }
         for v in 1..129 {
             hist[v] += hist[v - 1];
         }
         self.by_vel.clear();
         self.by_vel.resize(list.len(), 0);
-        for &i in list {
-            let v = 127 - ((g[i].msg >> 16) & 0x7F) as usize;
-            self.by_vel[hist[v] as usize] = i;
+        for &j in list {
+            let v = 127 - ons[j as usize].vel as usize;
+            self.by_vel[hist[v] as usize] = j;
             hist[v] += 1;
         }
         // then grouped by track, stable (so loudest first inside each)
         self.tracks.clear();
-        for &i in &self.by_vel {
-            let t = g[i].track as usize;
+        for &j in &self.by_vel {
+            let t = ons[j as usize].track as usize;
             if self.per_track[t] == 0 {
                 self.tracks.push(t as u16);
             }
@@ -202,9 +242,9 @@ impl Ranker {
         }
         self.sorted.clear();
         self.sorted.resize(list.len(), 0);
-        for &i in &self.by_vel {
-            let t = g[i].track as usize;
-            self.sorted[self.starts[t] as usize] = i;
+        for &j in &self.by_vel {
+            let t = ons[j as usize].track as usize;
+            self.sorted[self.starts[t] as usize] = j;
             self.starts[t] += 1;
         }
         // turns: tracks with the most notes first (then the higher track number: the render thread's equal

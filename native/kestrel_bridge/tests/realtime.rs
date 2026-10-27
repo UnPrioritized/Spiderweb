@@ -273,6 +273,11 @@ fn realtime() {
             block_sum as f64 / samples_n as f64 / 1000.0,
             prep_sum as f64 / samples_n as f64 / 1000.0
         );
+        {
+            let p: Vec<f64> = kestrel_bridge::PROFILE.iter().map(|a| a.swap(0, std::sync::atomic::Ordering::Relaxed) as f64).collect();
+            let (pushes, blocks) = (p[5].max(1.0), p[6].max(1.0));
+            eprintln!("   per push ({pushes}): copy {:.2} ms, pairing {:.2}, ranking {:.2} | per block ({blocks}): choose + hand {:.2} ms, Kestrel render {:.2}",
+                p[0] / pushes / 1e6, p[1] / pushes / 1e6, p[2] / pushes / 1e6, p[3] / blocks / 1e6, p[4] / blocks / 1e6);        }
         eprintln!("   fast blocks {}, note-ons carrying merged copies {} (factor mean {:.2}, most {:.1})", st.fast_blocks,
             st.merged, st.merge_mean, st.merge_max);
         assert_eq!(st.failed, 0, "{:?}", synth.error());

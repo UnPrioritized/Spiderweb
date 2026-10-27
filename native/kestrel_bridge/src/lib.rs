@@ -112,9 +112,8 @@ struct Pending {
     /// A note-on's length in frames, paired with its note-off in the same push; LONG = its end wasn't in it
     /// (the budget keeps the longest start of a key: a held note beside spam on one key)
     len: u32,
-    /// Ranked at push (rank.rs): the block group it was ranked in (NO_GROUP = not), its place in that group's
-    /// priority order, and the ranks of the notes its loudness goes to if it is dropped.
-    group: u64,
+    /// Ranked at push (rank.rs; the batch's `spans` say which blocks were): its place in its block's priority
+    /// order, and the ranks of the notes its loudness goes to if it is dropped.
     rank: u32,
     srep: u32,
     krep: u32,
@@ -134,7 +133,6 @@ impl Pending {
             msg,
             track,
             len: LONG,
-            group: rank::NO_GROUP,
             rank: 0,
             srep: 0,
             krep: 0,
@@ -144,6 +142,16 @@ impl Pending {
             k_ratio: 1.0,
         }
     }
+}
+
+/// Measures (tests): nanoseconds summed in each step: 0 push copy, 1 push pairing, 2 push ranking, 3 render
+/// choosing + handing to Kestrel, 4 Kestrel's render_live; 5 pushes, 6 blocks.
+pub static PROFILE: [std::sync::atomic::AtomicU64; 7] = [const { std::sync::atomic::AtomicU64::new(0) }; 7];
+
+fn profile_add(step: usize, since: Instant) -> Instant {
+    let now = Instant::now();
+    PROFILE[step].fetch_add((now - since).as_nanos() as u64, Ordering::Relaxed);
+    now
 }
 
 /// `Pending::len` of a note whose end comes in a later push (or not a note-on).
@@ -156,15 +164,25 @@ struct Ring {
     spare: Vec<Vec<f32>>,
 }
 
+/// One push's messages, and where its ranked blocks are.
+#[derive(Default)]
+struct Batch {
+    msgs: Vec<Pending>,
+    spans: Vec<rank::Span>,
+}
+
 #[derive(Default)]
 struct Inbox {
-    batches: VecDeque<Vec<Pending>>,
+    batches: VecDeque<Batch>,
     /// kb_cancel calls so far (the render thread drops what it took before the last one)
     cancels: u64,
 }
 
 struct Shared {
     inbox: Mutex<Inbox>,
+    /// Played batches' memory, for the next pushes (fresh memory each push was most of push's copying: ~1.7 ms a
+    /// Shinki block, the system handing out ~20 MB page by page).
+    pool: Mutex<Vec<Batch>>,
     ring: Mutex<Ring>,
     /// Signalled when the output took a block (room to render) or on close.
     room: Condvar,
@@ -242,6 +260,7 @@ impl Synth {
         let ahead = opts.ahead_blocks.max(2) as usize;
         let shared = Arc::new(Shared {
             inbox: Mutex::new(Inbox::default()),
+            pool: Mutex::new(Vec::new()),
             ring: Mutex::new(Ring { blocks: VecDeque::new(), pos: 0, spare: Vec::new() }),
             room: Condvar::new(),
             stats: Mutex::new(KbStats { allowance: u32::MAX, ..Default::default() }),
@@ -300,18 +319,23 @@ impl Synth {
         if n == 0 {
             return;
         }
-        let mut batch: Vec<Pending> = (0..n).map(|i| Pending::new(frames[i], msgs[i], tracks[i])).collect();
-        // note lengths (given, or paired inside this push FIFO per channel + key), then each busy block's priority
-        // order: worked out here on the caller's thread, not the render thread's
+        let t = Instant::now();
+        PROFILE[5].fetch_add(1, Ordering::Relaxed);
+        let mut whole = self.shared.pool.lock().unwrap().pop().unwrap_or_default();
+        whole.spans.clear();
+        let batch = &mut whole.msgs;
+        batch.clear();
+        // note lengths given, or paired below inside this push (FIFO per channel + key)
+        match lens {
+            Some(l) => batch.extend((0..n).map(|i| Pending { len: l[i], ..Pending::new(frames[i], msgs[i], tracks[i]) })),
+            None => batch.extend((0..n).map(|i| Pending::new(frames[i], msgs[i], tracks[i]))),
+        }
+        let t = profile_add(0, t);
+        // then each busy block's priority order: worked out here on the caller's thread, not the render thread's
         {
             let mut prep = self.prep.lock().unwrap();
             let (open, ranker) = &mut *prep;
-            if let Some(l) = lens {
-                for (p, &len) in batch.iter_mut().zip(l) {
-                    p.len = len;
-                }
-            }
-            for i in (0..n).filter(|_| lens.is_none()) {
+            for i in (0..n).take_while(|_| lens.is_none()) {
                 let m = batch[i].msg;
                 let status = m & 0xF0;
                 if status != 0x90 && status != 0x80 {
@@ -325,7 +349,7 @@ impl Synth {
                     batch[j].len = (batch[i].frame.saturating_sub(batch[j].frame)).min(LONG as u64 - 1) as u32;
                 }
             }
-            for i in (0..n).filter(|_| lens.is_none()) {
+            for i in (0..n).take_while(|_| lens.is_none()) {
                 let m = batch[i].msg;
                 if m & 0xF0 == 0x90 {
                     let slot = ((((m >> 24) & 0x0F) << 4 | (m & 0x0F)) * 128 + ((m >> 8) & 0x7F)) as usize;
@@ -334,10 +358,12 @@ impl Synth {
             }
             // only blocks that may go over the allowance are worth ranking (it may halve before they play; and
             // past RANK_ALWAYS note-ons a block is ranked anyway: a cut must not find a wall unranked)
+            let t = profile_add(1, t);
             let allow = self.shared.allow_now.load(Ordering::Relaxed) as usize;
-            ranker.rank(&mut batch, self.block_frames as u64, (allow / 2).min(rank::RANK_ALWAYS));
+            ranker.rank(batch, self.block_frames as u64, (allow / 2).min(rank::RANK_ALWAYS), &mut whole.spans);
+            profile_add(2, t);
         }
-        self.shared.inbox.lock().unwrap().batches.push_back(batch);
+        self.shared.inbox.lock().unwrap().batches.push_back(whole);
     }
 
     /// Forget every message not rendered yet (sounding notes go on: send note-offs after this).
@@ -435,8 +461,10 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
     let mut cap = max_voices;
     let mut taken: Vec<Pending> = Vec::new();
     // batches taken from the inbox, not due yet (front batch read from `at`)
-    let mut future: VecDeque<Vec<Pending>> = VecDeque::new();
+    let mut future: VecDeque<Batch> = VecDeque::new();
     let mut at = 0usize;
+    // (the front batch's next span to look at)
+    let mut span = 0usize;
     let mut cancels = 0u64;
     loop {
         let (mut out, ready) = {
@@ -456,8 +484,11 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             let mut inbox = s.inbox.lock().unwrap();
             if inbox.cancels != cancels {
                 cancels = inbox.cancels;
-                future.clear();
+                for b in future.drain(..) {
+                    recycle(s, b);
+                }
                 at = 0;
+                span = 0;
             }
             future.extend(inbox.batches.drain(..));
         }
@@ -472,29 +503,52 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         };
         // the whole block inside the front batch (Spiderweb pushes whole blocks): read where it is. Copying
         // ~370,000 messages a block (Shinki) into `taken` was most of the render thread's ~3.7 ms of preparing.
-        let inside = future.front().and_then(|b| b[at..].iter().position(|p| p.frame >= end).map(|j| at + j));
+        // (a batch read to its end: gone first, so a block starting the next one is read in place too)
+        while future.front().is_some_and(|b| at >= b.msgs.len()) {
+            let b = future.pop_front().unwrap();
+            recycle(s, b);
+            at = 0;
+            span = 0;
+        }
+        // A ranked block starting here and ending before `end` is the whole block: no search through it.
+        let ranked = future.front().and_then(|b| {
+            while span < b.spans.len() && (b.spans[span].start as usize) < at {
+                span += 1;
+            }
+            let g = b.spans.get(span).filter(|g| g.start as usize == at)?;
+            let stop = at + g.len as usize;
+            (b.msgs[at].frame < end && b.msgs.get(stop).map_or(true, |p| p.frame >= end)).then_some((stop, g.ons))
+        });
+        let inside = ranked.map(|r| r.0).or_else(|| {
+            future.front().and_then(|b| b.msgs[at..].iter().position(|p| p.frame >= end).map(|j| at + j))
+        });
         let dropped = if let Some(j) = inside {
-            let d = budget.filter(&future.front().unwrap()[at..j], lower, &mut push);
+            let d = budget.filter(&future.front().unwrap().msgs[at..j], ranked.map(|r| r.1 as usize), lower, &mut push);
             at = j;
             d
         } else {
             while let Some(batch) = future.front() {
-                while at < batch.len() && batch[at].frame < end {
-                    taken.push(batch[at]);
+                while at < batch.msgs.len() && batch.msgs[at].frame < end {
+                    taken.push(batch.msgs[at]);
                     at += 1;
                 }
-                if at < batch.len() {
+                if at < batch.msgs.len() {
                     break;
                 }
-                future.pop_front();
+                let b = future.pop_front().unwrap();
+                recycle(s, b);
                 at = 0;
+                span = 0;
             }
-            let d = budget.filter(&taken, lower, &mut push);
+            let d = budget.filter(&taken, None, lower, &mut push);
             taken.clear();
             d
         };
         let prep = t.elapsed();
+        let tp = profile_add(3, t);
+        PROFILE[6].fetch_add(1, Ordering::Relaxed);
         driver.render_live(&mut synth, &mut out)?;
+        profile_add(4, tp);
         let us = t.elapsed().as_secs_f64() * 1e6;
         let bs = synth.stats();
         budget.fix(s.fixed_allow.load(Ordering::Relaxed), !s.no_merge.load(Ordering::Relaxed));
@@ -527,6 +581,14 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             st.merge_max = budget.scale_max;
         }
         s.ring.lock().unwrap().blocks.push_back(out);
+    }
+}
+
+/// A played batch's memory back to the pool (a few kept: enough for the pushes in flight).
+fn recycle(s: &Shared, b: Batch) {
+    let mut pool = s.pool.lock().unwrap();
+    if pool.len() < 4 {
+        pool.push(b);
     }
 }
 
