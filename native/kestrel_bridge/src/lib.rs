@@ -86,6 +86,9 @@ pub struct KbStats {
     pub voice_cap: u32,
     /// Times "Lower it by itself" cut the limits (it fell behind real time).
     pub cuts: u32,
+    /// Different keys that wanted to start in a block / still started, summed over blocks.
+    pub keys_wanted: u64,
+    pub keys_kept: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -93,7 +96,13 @@ struct Pending {
     frame: u64,
     msg: u32,
     track: u16,
+    /// A note-on's length in frames, paired with its note-off in the same push; LONG = its end wasn't in it
+    /// (the budget keeps the longest start of a key: a held note beside spam on one key)
+    len: u32,
 }
+
+/// `Pending::len` of a note whose end comes in a later push (or not a note-on).
+pub(crate) const LONG: u32 = u32::MAX;
 
 struct Ring {
     blocks: VecDeque<Vec<f32>>,
@@ -125,6 +134,8 @@ struct Shared {
 
 pub struct Synth {
     shared: Arc<Shared>,
+    /// push's scratch: note-ons waiting for their off, per channel + key (indices into the batch)
+    open: Mutex<Vec<VecDeque<u32>>>,
     thread: Option<JoinHandle<()>>,
     pub block_frames: u32,
     pub sample_rate: u32,
@@ -204,7 +215,13 @@ impl Synth {
                     s.stats.lock().unwrap_or_else(|e| e.into_inner()).failed = 1;
                 }
             })?;
-        Ok(Synth { shared, thread: Some(thread), block_frames: block, sample_rate: rate })
+        Ok(Synth {
+            shared,
+            open: Mutex::new(vec![VecDeque::new(); 256 * 128]),
+            thread: Some(thread),
+            block_frames: block,
+            sample_rate: rate,
+        })
     }
 
     /// Queue messages (frames non-decreasing is best; an earlier one is played with the one queued before it).
@@ -214,8 +231,33 @@ impl Synth {
         if n == 0 {
             return;
         }
-        let batch: Vec<Pending> =
-            (0..n).map(|i| Pending { frame: frames[i], msg: msgs[i], track: tracks[i] }).collect();
+        let mut batch: Vec<Pending> =
+            (0..n).map(|i| Pending { frame: frames[i], msg: msgs[i], track: tracks[i], len: LONG }).collect();
+        // note lengths inside this push (FIFO per channel + key), worked out here on the caller's thread
+        {
+            let mut open = self.open.lock().unwrap();
+            for i in 0..n {
+                let m = batch[i].msg;
+                let status = m & 0xF0;
+                if status != 0x90 && status != 0x80 {
+                    continue;
+                }
+                let slot = ((((m >> 24) & 0x0F) << 4 | (m & 0x0F)) * 128 + ((m >> 8) & 0x7F)) as usize;
+                if status == 0x90 && (m >> 16) & 0x7F != 0 {
+                    open[slot].push_back(i as u32);
+                } else if let Some(j) = open[slot].pop_front() {
+                    let j = j as usize;
+                    batch[j].len = (batch[i].frame.saturating_sub(batch[j].frame)).min(LONG as u64 - 1) as u32;
+                }
+            }
+            for i in 0..n {
+                let m = batch[i].msg;
+                if m & 0xF0 == 0x90 {
+                    let slot = ((((m >> 24) & 0x0F) << 4 | (m & 0x0F)) * 128 + ((m >> 8) & 0x7F)) as usize;
+                    open[slot].clear();
+                }
+            }
+        }
         self.shared.inbox.lock().unwrap().batches.push_back(batch);
     }
 
@@ -376,6 +418,8 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             st.allowance = budget.allowance();
             st.voice_cap = cap;
             st.cuts = budget.cuts;
+            st.keys_wanted = budget.keys_wanted;
+            st.keys_kept = budget.keys_kept;
         }
         s.ring.lock().unwrap().blocks.push_back(out);
     }

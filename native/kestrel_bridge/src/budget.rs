@@ -15,9 +15,12 @@ use crate::Pending;
 /// more again.
 const HIGH: f64 = 0.9;
 const TARGET: f64 = 0.7;
-/// Fewest note-ons a block may take while lowered (a melody stays audible), and fewest voices.
-const LEAST: f64 = 16.0;
-const LEAST_VOICES: f64 = 256.0;
+/// Fewest note-ons a block may take while lowered (128 = one start of every key always fits: tier 1), and
+/// fewest voices.
+const LEAST: f64 = 128.0;
+/// (voices cost little under ~65k: Shinki's dense part 10.7 ms a block at 16k, 11.9 at 65k, 29 at 1M; a cap of
+/// ~4,000 stole every ringing note: the held lines in the user's reference render were gone, 2026-10-27)
+const LEAST_VOICES: f64 = 65536.0;
 /// Most a block raises the limits by, with all its time to spare.
 const CLIMB: f64 = 0.08;
 /// Weight of the newest block in the running averages.
@@ -53,7 +56,18 @@ pub struct Budget {
     gone: Vec<u32>,
     ons: Vec<usize>,
     keep: Vec<bool>,
-    // (scratch for choose: counting sorts, no per-block allocation)
+    /// Different keys that wanted to start / still started, summed over blocks (runs lost show here).
+    pub keys_wanted: u64,
+    pub keys_kept: u64,
+    // (scratch for tiers / choose: counting sorts, no per-block allocation)
+    by_slot: Vec<usize>,
+    coh: Vec<f64>,
+    pow: Vec<f64>,
+    /// New velocity of a kept note carrying merged copies (0 = as sent).
+    vel: Vec<u8>,
+    t1: Vec<usize>,
+    t2: Vec<usize>,
+    t3: Vec<usize>,
     per_track: Vec<u32>,
     tracks: Vec<u16>,
     by_track: Vec<usize>,
@@ -80,6 +94,15 @@ impl Budget {
             gone: vec![0; 256 * 128],
             ons: Vec::new(),
             keep: Vec::new(),
+            keys_wanted: 0,
+            keys_kept: 0,
+            by_slot: vec![usize::MAX; 256 * 128],
+            coh: Vec::new(),
+            pow: Vec::new(),
+            vel: Vec::new(),
+            t1: Vec::new(),
+            t2: Vec::new(),
+            t3: Vec::new(),
             per_track: vec![0; 1 << 16],
             tracks: Vec::new(),
             by_track: Vec::new(),
@@ -112,9 +135,19 @@ impl Budget {
             let allow = allow as usize;
             if self.ons.len() > allow {
                 dropped = (self.ons.len() - allow) as u64;
-                self.choose(block, allow);
+                self.tiers(block, allow);
             }
         }
+        // (how many different keys wanted to start, and how many still do: runs lost show here)
+        let mut want_keys = [false; 128];
+        let mut kept_keys = [false; 128];
+        for &i in &self.ons {
+            let key = ((block[i].msg >> 8) & 0x7F) as usize;
+            want_keys[key] = true;
+            kept_keys[key] |= self.keep[i];
+        }
+        self.keys_wanted += want_keys.iter().filter(|&&k| k).count() as u64;
+        self.keys_kept += kept_keys.iter().filter(|&&k| k).count() as u64;
         for (i, p) in block.iter().enumerate() {
             let status = p.msg & 0xF0;
             let is_on = status == 0x90 && (p.msg >> 16) & 0x7F != 0;
@@ -138,18 +171,146 @@ impl Budget {
                 }
             }
             if self.keep[i] {
-                push(p);
+                match self.vel.get(i) {
+                    // (carries the loudness of the copies merged into it)
+                    Some(&v) if v != 0 && is_on => push(&Pending { msg: p.msg & !(0x7F << 16) | (v as u32) << 16, ..*p }),
+                    _ => push(p),
+                }
             }
         }
+        self.vel.clear();
         dropped
     }
 
-    /// Mark all but `allow` note-ons as dropped: equal shares per track, loudest kept inside each (same
+    /// Keep `allow` of the block's note-ons, in tiers (user 2026-10-27: thinned by loudness alone, the runs
+    /// running up and down were gone: walls are mostly STACKED COPIES of one key): 1. the loudest start of each
+    /// key (any channel; at most 128, so every pitch keeps sounding), 2. the loudest of each key on each
+    /// channel (other instruments on that key), 3. the rest. A tier that doesn't fit whole is shared fairly
+    /// by track (`choose`); the tiers after it are dropped.
+    fn tiers(&mut self, block: &[Pending], allow: usize) {
+        let key = |i: usize| ((block[i].msg >> 8) & 0x7F) as usize;
+        let slot = |i: usize| ((((block[i].msg >> 24) & 0x0F) << 4 | (block[i].msg & 0x0F)) as usize) * 128 + key(i);
+        // the start kept for a key: the LONGEST, then the loudest (user 2026-10-27: a held note beside spam on one
+        // key lost to the louder spam: its line was gone from the spectrogram)
+        let rank = |i: usize| (block[i].len, (block[i].msg >> 16) & 0x7F);
+        let mut by_key = [usize::MAX; 128];
+        for &i in &self.ons {
+            let b = &mut by_key[key(i)];
+            if *b == usize::MAX || rank(i) > rank(*b) {
+                *b = i;
+            }
+        }
+        for &i in &self.ons {
+            let b = &mut self.by_slot[slot(i)];
+            if *b == usize::MAX || rank(i) > rank(*b) {
+                *b = i;
+            }
+        }
+        let (mut t1, mut t2, mut t3) = (std::mem::take(&mut self.t1), std::mem::take(&mut self.t2), std::mem::take(&mut self.t3));
+        t1.clear();
+        t2.clear();
+        t3.clear();
+        for &i in &self.ons {
+            if by_key[key(i)] == i {
+                t1.push(i);
+            } else if self.by_slot[slot(i)] == i {
+                t2.push(i);
+            } else {
+                t3.push(i);
+            }
+        }
+        for &i in &self.ons {
+            self.by_slot[slot(i)] = usize::MAX;
+        }
+        let mut left = allow;
+        for tier in [&t1, &t2, &t3] {
+            if tier.len() <= left {
+                left -= tier.len();
+            } else {
+                self.choose(block, tier, left);
+                left = 0;
+            }
+        }
+        (self.t1, self.t2, self.t3) = (t1, t2, t3);
+        self.merge_loudness(block);
+    }
+
+    /// MERGED, NOT JUST DROPPED (user 2026-10-27, quick version): each dropped copy's loudness goes to a kept
+    /// note of its key (same channel if there is one, else the key's tier-1 note), which is played louder:
+    /// a key stacked many times stays louder than its neighbours, as in a full render. Kestrel's velocity
+    /// curve at full tracking: amplitude = (vel / 127)^2 (bank.rs velocity_atten_cb). Copies on the same frame
+    /// add as amplitudes (the same sound starting together), on other frames as powers. At most velocity 127.
+    fn merge_loudness(&mut self, block: &[Pending]) {
+        let amp = |i: usize| {
+            let v = ((block[i].msg >> 16) & 0x7F) as f64 / 127.0;
+            v * v
+        };
+        let key = |i: usize| ((block[i].msg >> 8) & 0x7F) as usize;
+        let slot = |i: usize| ((((block[i].msg >> 24) & 0x0F) << 4 | (block[i].msg & 0x0F)) as usize) * 128 + key(i);
+        // (the longest kept note of each channel + key, and of each key, takes the loudness)
+        let rank = |i: usize| (block[i].len, (block[i].msg >> 16) & 0x7F);
+        let mut by_key = [usize::MAX; 128];
+        for &i in &self.ons {
+            if self.keep[i] {
+                let s = &mut self.by_slot[slot(i)];
+                if *s == usize::MAX || rank(i) > rank(*s) {
+                    *s = i;
+                }
+                let k = &mut by_key[key(i)];
+                if *k == usize::MAX || rank(i) > rank(*k) {
+                    *k = i;
+                }
+            }
+        }
+        // per kept note: amplitude on its own frame, power from other frames
+        self.coh.clear();
+        self.coh.resize(block.len(), 0.0);
+        self.pow.clear();
+        self.pow.resize(block.len(), 0.0);
+        let mut any = false;
+        for &i in &self.ons {
+            if self.keep[i] {
+                continue;
+            }
+            let s = self.by_slot[slot(i)];
+            let t = if s != usize::MAX { s } else { by_key[key(i)] };
+            if t == usize::MAX {
+                continue;
+            }
+            any = true;
+            if block[i].frame == block[t].frame {
+                self.coh[t] += amp(i);
+            } else {
+                self.pow[t] += amp(i) * amp(i);
+            }
+        }
+        self.vel.clear();
+        self.vel.resize(block.len(), 0);
+        if any {
+            for &i in &self.ons {
+                if self.keep[i] && (self.coh[i] > 0.0 || self.pow[i] > 0.0) {
+                    let a = ((amp(i) + self.coh[i]).powi(2) + self.pow[i]).sqrt();
+                    self.vel[i] = (127.0 * a.sqrt()).round().clamp(1.0, 127.0) as u8;
+                }
+            }
+        }
+        for &i in &self.ons {
+            self.by_slot[slot(i)] = usize::MAX;
+        }
+    }
+
+    /// Mark all but `allow` of `cands` as dropped: equal shares per track, loudest kept inside each (same
     /// velocity: the earlier one). Counting sorts only: a dense block has ~200,000 note-ons.
-    fn choose(&mut self, block: &[Pending], allow: usize) {
+    fn choose(&mut self, block: &[Pending], cands: &[usize], allow: usize) {
+        if allow == 0 {
+            for &i in cands {
+                self.keep[i] = false;
+            }
+            return;
+        }
         // note-ons grouped by track (stable: block order inside each)
         self.tracks.clear();
-        for &i in &self.ons {
+        for &i in cands {
             let t = block[i].track as usize;
             if self.per_track[t] == 0 {
                 self.tracks.push(t as u16);
@@ -162,8 +323,8 @@ impl Budget {
             at += self.per_track[t as usize];
         }
         self.by_track.clear();
-        self.by_track.resize(self.ons.len(), 0);
-        for &i in &self.ons {
+        self.by_track.resize(cands.len(), 0);
+        for &i in cands {
             let t = block[i].track as usize;
             self.by_track[self.starts[t] as usize] = i;
             self.starts[t] += 1;
@@ -297,11 +458,24 @@ mod tests {
     use super::*;
 
     fn on(track: u16, key: u32, vel: u32) -> Pending {
-        Pending { frame: 0, msg: 0x90 | key << 8 | vel << 16, track }
+        Pending { frame: 0, msg: 0x90 | key << 8 | vel << 16, track, len: crate::LONG }
     }
 
     fn off(key: u32) -> Pending {
-        Pending { frame: 0, msg: 0x80 | key << 8, track: 0 }
+        Pending { frame: 0, msg: 0x80 | key << 8, track: 0, len: crate::LONG }
+    }
+
+    #[test]
+    fn a_held_note_beats_louder_spam_on_its_key() {
+        let mut b = Budget::new(1 << 20);
+        b.allow = Some(128.0);
+        // key 60: 500 loud spam notes 100 frames long, and one quiet held note
+        let mut block: Vec<Pending> = (0..500).map(|_| Pending { len: 100, ..on(1, 60, 120) }).collect();
+        block.push(on(2, 60, 40));
+        let mut kept = Vec::new();
+        b.filter(&mut block, true, |p| kept.push((p.track, (p.msg >> 16) & 0x7F)));
+        // the held note is kept (tier 1) and carries the spam's loudness
+        assert!(kept.iter().any(|k| k.0 == 2 && k.1 == 127), "{:?}", &kept[..2]);
     }
 
     #[test]
@@ -318,6 +492,42 @@ mod tests {
         // the melody's two notes + the wall's two loudest
         let keys: Vec<u32> = kept.iter().map(|m| (m >> 8) & 0x7F).collect();
         assert_eq!(keys, vec![48, 49, 80, 81]);
+    }
+
+    #[test]
+    fn a_quiet_run_survives_a_loud_stack() {
+        let mut b = Budget::new(1 << 20);
+        b.allow = Some(128.0);
+        // track 1: 1,000 loud copies of key 60; track 2: a quiet run note on key 72; track 3: a copy of 72
+        let mut block: Vec<Pending> = (0..1000).map(|_| on(1, 60, 127)).collect();
+        block.push(on(2, 72, 30));
+        block.push(on(3, 72, 20));
+        let mut kept = Vec::new();
+        b.filter(&mut block, true, |p| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F)));
+        assert_eq!(kept.len(), 128);
+        assert!(kept.contains(&(72, 30)), "the run note was dropped");
+        assert!(!kept.contains(&(72, 20)) || kept.iter().filter(|k| k.0 == 72).count() == 2);
+        assert_eq!((b.keys_wanted, b.keys_kept), (2, 2));
+    }
+
+    #[test]
+    fn dropped_copies_make_the_kept_one_louder() {
+        let mut b = Budget::new(1 << 20);
+        b.allow = Some(128.0);
+        // 129 different keys can't happen (128 keys), so: 128 keys once + a second copy of key 0, same frame
+        let mut block: Vec<Pending> = (0..128).map(|k| on(1, k, 50)).collect();
+        block.push(on(1, 0, 50));
+        let mut kept = Vec::new();
+        assert_eq!(b.filter(&mut block, true, |p| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F))), 1);
+        // two copies at 50 on one frame = amplitude 2 x (50/127)^2 = one note at 127 x sqrt(2) x 50/127 = 71
+        assert!(kept.contains(&(0, 71)), "{:?}", &kept[..3]);
+        assert!(kept.contains(&(1, 50)));
+        // on different frames they add as powers: 2^(1/4) x 50 = 59
+        let mut block: Vec<Pending> = (0..128).map(|k| on(1, k, 50)).collect();
+        block.push(Pending { frame: 7, ..on(1, 0, 50) });
+        let mut kept = Vec::new();
+        b.filter(&mut block, true, |p| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F)));
+        assert!(kept.contains(&(0, 59)), "{:?}", &kept[..3]);
     }
 
     #[test]

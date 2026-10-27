@@ -67,6 +67,9 @@ fn realtime() {
         tracks.push(((m & 15) | ((m >> 24) & 15) << 4) as u16);
     }
     let end = end.min(frames.last().map_or(0, |f| f + 1));
+    if let Some(b) = base {
+        eprintln!("beat {from_beat} starts at {:.4} s of the song", b / rate as f64);
+    }
     eprintln!("{} events read in {:.1?}; {:.2} s of song", msgs.len(), t0.elapsed(), end as f64 / rate as f64);
 
     for lower in [true, false] {
@@ -120,7 +123,7 @@ fn realtime() {
         let notes = msgs.iter().filter(|m| *m & 0xF0 == 0x90 && (*m >> 16) & 0x7F != 0).count();
         eprintln!(
             "lower {lower:5}: {:.2} s of song took {:.2?}; heard {:.2} s, silence {:.2} s in {} late pulls; dropped {} of {notes} \
-             note-ons ({:.0} %); last allowance {}; worst push {worst_push:.2?}; voices now {}; block {:.2} ms (prep {:.2})",
+             note-ons ({:.0} %); keys kept {:.1} % ; last allowance {}; worst push {worst_push:.2?}; voices now {}; block {:.2} ms (prep {:.2})",
             end as f64 / rate as f64,
             t.elapsed(),
             st.handed as f64 / rate as f64 - start as f64 / rate as f64,
@@ -128,6 +131,7 @@ fn realtime() {
             st.late,
             st.budget_dropped,
             st.budget_dropped as f64 * 100.0 / notes.max(1) as f64,
+            st.keys_kept as f64 * 100.0 / st.keys_wanted.max(1) as f64,
             st.allowance,
             st.voices,
             block_sum as f64 / samples_n as f64 / 1000.0,

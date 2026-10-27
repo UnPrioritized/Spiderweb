@@ -35,7 +35,8 @@ class _Stats(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint64) for name in ("rendered", "handed", "silence", "late", "voices",
                                                       "budget_dropped", "kestrel_dropped", "stolen")] + \
                [(name, ctypes.c_uint32) for name in ("last_block_us", "worst_block_us", "allowance", "failed",
-                                                      "last_prep_us", "voice_cap", "cuts")]
+                                                      "last_prep_us", "voice_cap", "cuts")] + \
+               [(name, ctypes.c_uint64) for name in ("keys_wanted", "keys_kept")]
 
 
 _dll = None
