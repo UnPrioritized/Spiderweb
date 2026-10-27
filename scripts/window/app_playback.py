@@ -318,6 +318,21 @@ class Playback:
                 self._thin_seen = (lp.thinned, now)
             if not text and now - self._thin_seen[1] < 1.0:
                 text = tr("app.overloaded")
+        if self.out.name == KESTREL and self.out.handle and self.player.running:
+            # (Kestrel (GPU): notes left out to keep up, or gaps in the sound, within the last second)
+            now = time.perf_counter()
+            st = self.out.handle.k.stats()
+            seen = getattr(self, "_k_seen", (None, 0.0))
+            key = (st["late"], st["budget_dropped"])
+            if seen[0] is not None and key != seen[0]:
+                seen = (key, now)
+            elif seen[0] is None:
+                seen = (key, 0.0)
+            self._k_seen = seen
+            if not text and now - seen[1] < 1.0:
+                text = tr("app.overloaded")
+        elif not self.player.running:
+            self._k_seen = (None, 0.0)
         if text != self.overload_text:
             self.overload_text = text
             self.overload_label.config(text=text)
