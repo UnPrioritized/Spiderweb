@@ -42,6 +42,14 @@ def fonts_sig(paths):
     return "|".join(sigs) if sigs and None not in sigs else None
 
 
+def kestrel_voices_top(err):
+    """The most voices this graphics card takes, from Kestrel's refusal to open with more ("... cap --max-voices at
+    16519104 ..."), else None."""
+    import re
+    m = re.search(r"max-voices at (\d+)", str(err or ""))
+    return int(m.group(1)) if m else None
+
+
 def _same_opts(a, b):
     """Kestrel opened with settings a = with b ("lower" changes while open: never counts)."""
     return {k: v for k, v in a.items() if k != "lower"} == {k: v for k, v in b.items() if k != "lower"}
@@ -425,7 +433,17 @@ class Playback:
         try:
             if self.synth is None:
                 self.synth = Synth()
-            out = KestrelOut(self.synth, fonts, **self.kestrel_opts)
+            try:
+                out = KestrelOut(self.synth, fonts, **self.kestrel_opts)
+            except SynthError as e:
+                top = kestrel_voices_top(e)
+                if top is None or top >= self.kestrel_opts["voices"]:
+                    raise
+                self.kestrel_top = top  # (Max voices past this card's top: lowered, said, opened again)
+                self.kestrel_vars["voices"].set(str(top))
+                self.on_kestrel_opt("voices")
+                messagebox.showinfo(tr("app.spiderweb_2"), tr("ks.voices_lowered", n=f"{top:,}"), parent=self)
+                out = KestrelOut(self.synth, fonts, **self.kestrel_opts)
             errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
             return out
         finally:
@@ -497,6 +515,17 @@ class Playback:
             if self.midi_device.get() != KESTREL or not self.winfo_exists():  # (another MIDI out picked meanwhile)
                 if job["out"] is not None:
                     job["out"].close()
+                return
+            top = kestrel_voices_top(job["err"])
+            if top is not None and top < self.kestrel_opts["voices"]:
+                # (Max voices past what this graphics card takes: lowered to its top, said plainly, started again;
+                # it showed Kestrel's command-line text every Play, hunt 2026-10-28)
+                self.kestrel_top = top
+                self.kestrel_vars["voices"].set(str(top))
+                self.on_kestrel_opt("voices")
+                messagebox.showinfo(tr("app.spiderweb_2"), tr("ks.voices_lowered", n=f"{top:,}"), parent=self)
+                if job["play"]:
+                    self.kestrel_first(keep)
                 return
             self._kestrel_made = (job["out"], job["err"], fonts)
             if job["play"] and not self.player.running:
@@ -798,7 +827,8 @@ class Playback:
             e = getattr(self, "kestrel_voices_entry", None)
             try:
                 v = int(round(float(calc(var.get()))))
-                if not VOICES_RANGE[0] <= v <= VOICES_RANGE[1]:
+                # (not past this graphics card's top once known: kestrel_voices_top)
+                if not VOICES_RANGE[0] <= v <= min(VOICES_RANGE[1], getattr(self, "kestrel_top", None) or 1 << 62):
                     raise ValueError
             except (ValueError, ZeroDivisionError):
                 if e is not None and e.winfo_exists():

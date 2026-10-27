@@ -698,6 +698,7 @@
  "ks.dc": "DC blocker",
  "ks.dc_tip": "Ticked: takes out the slow drift away from the middle that thousands of notes can add up to, which otherwise eats the limiter's room and makes the bass sound off. Used from the next Play.",
  "ks.version": "Version: {v}",
+ "ks.voices_lowered": "Max voices was more than this graphics card can take, so it was lowered to {n}, the most it can take (Settings → Sound).",
  "ks.next_play": "Max voices, block size, limiter and DC blocker are used from the next Play.",
  "app.pick_soundfont_title": "Pick a soundfont for Built-in BASSMIDI",
  "app.opening_soundfont": "Opening the soundfont…",
