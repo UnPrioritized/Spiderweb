@@ -26,6 +26,9 @@ BLOCK = 512  # frames a block (~11 ms): the default delay
 AHEAD = 6  # blocks kept made ahead of the speakers (3 = every swing of the note budget was a gap, 2026-10-27)
 MAX_VOICES = 1 << 20  # Kestrel's own default
 UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
+# (one Kestrel starting at a time, whatever asks: two starting together in one program can hang on the graphics
+# card, seen in the connector's tests 2026-10-27)
+_OPENING = threading.Lock()
 
 
 class _Options(ctypes.Structure):
@@ -113,7 +116,8 @@ class Kestrel:
         opts = _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), ceiling_db,
                         int(dc_blocker), dc_blocker_hz)
         names = (ctypes.c_char_p * max(1, len(fonts)))(*[os.fsdecode(f).encode("utf-8") for f in fonts])
-        h = d.kb_open(names, len(fonts), ctypes.byref(opts))
+        with _OPENING:
+            h = d.kb_open(names, len(fonts), ctypes.byref(opts))
         if not h:
             raise SynthError("playback.kestrel_failed", err=_error(d))
         self.handle = h
