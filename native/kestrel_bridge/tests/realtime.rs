@@ -51,8 +51,27 @@ fn realtime() {
     // the last value of each per channel before it, sent at frame 0
     let mut state: std::collections::BTreeMap<(u32, u32), u32> = Default::default();
     let mut state_sent = from_beat == 0;
+    // KB_SENT=file: the stretch AS SENT (after every filter and KB_COPIES' folding) saved there once, read from it
+    // after with nothing else done (dev/harness/kestrel_check.py: a few seconds a run instead of a minute)
+    let sent_file = std::env::var("KB_SENT").ok();
+    let mut sent_copies: Vec<u32> = Vec::new();
+    let sent = match sent_file.as_ref().and_then(|p| std::fs::read(p).ok()) {
+        Some(b) => {
+            let n = u64::from_le_bytes(b[..8].try_into().unwrap()) as usize;
+            let (f, rest) = b[8..].split_at(n * 8);
+            let (m, rest) = rest.split_at(n * 4);
+            let (t, c) = rest.split_at(n * 2);
+            frames = f.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().unwrap())).collect();
+            msgs = m.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+            tracks = t.chunks_exact(2).map(|c| u16::from_le_bytes(c.try_into().unwrap())).collect();
+            sent_copies = c.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+            eprintln!("{n} events as sent, from {}", sent_file.as_deref().unwrap());
+            true
+        }
+        None => false,
+    };
     // KB_CACHE=file: the stretch's events saved there once (the MIDI isn't changed), read from it after
-    let cache = std::env::var("KB_CACHE").ok();
+    let cache = std::env::var("KB_CACHE").ok().filter(|_| !sent);
     let cached = cache.as_ref().and_then(|p| std::fs::read(p).ok());
     if let Some(b) = &cached {
         let n = u64::from_le_bytes(b[..8].try_into().unwrap()) as usize;
@@ -63,7 +82,7 @@ fn realtime() {
         tracks = t.chunks_exact(2).map(|c| u16::from_le_bytes(c.try_into().unwrap())).collect();
         eprintln!("{n} events from the cache");
     }
-    while let Some((tick, ev)) = s.next().filter(|_| cached.is_none()) {
+    while let Some((tick, ev)) = s.next().filter(|_| cached.is_none() && !sent) {
         if let Event::Tempo(us) = ev {
             clock.set_tempo(tick, us);
             continue;
@@ -116,7 +135,7 @@ fn realtime() {
     msgs.truncate(n);
     tracks.truncate(n);
     // KB_NOCC=a,b,..: those controllers left out
-    if let Ok(list) = std::env::var("KB_NOCC") {
+    if let Some(list) = std::env::var("KB_NOCC").ok().filter(|_| !sent) {
         let out: Vec<u32> = list.split(',').map(|s| s.parse().unwrap()).collect();
         let keep: Vec<bool> =
             msgs.iter().map(|&m| m & 0xF0 != 0xB0 || !out.contains(&((m >> 8) & 0x7F))).collect();
@@ -128,7 +147,7 @@ fn realtime() {
         msgs.retain(|_| *k.next().unwrap());
     }
     // KB_KEY=N or LO-HI: only those keys' notes
-    if let Ok(ks) = std::env::var("KB_KEY") {
+    if let Some(ks) = std::env::var("KB_KEY").ok().filter(|_| !sent) {
         let (lo, hi) = ks.split_once('-').unwrap_or((&ks, &ks));
         let (lo, hi): (u32, u32) = (lo.parse().unwrap(), hi.parse().unwrap());
         let keep: Vec<bool> =
@@ -144,7 +163,7 @@ fn realtime() {
     // next ones of their channel + key), as Spiderweb's feeder does
     // KB_MINVEL=N: note-ons under velocity N left out with their note-offs (the oldest-first one each)
     let minvel = env("KB_MINVEL", 0.0) as u32;
-    if minvel > 0 {
+    if minvel > 0 && !sent {
         let n0 = msgs.len();
         let mut open: Vec<std::collections::VecDeque<bool>> = vec![Default::default(); 256 * 128];
         let mut keep = vec![true; msgs.len()];
@@ -167,7 +186,7 @@ fn realtime() {
         eprintln!("min velocity {minvel}: {n0} events -> {}", msgs.len());
     }
     let mut copies: Vec<u32> = Vec::new();
-    if env("KB_COPIES", 0.0) != 0.0 {
+    if env("KB_COPIES", 0.0) != 0.0 && !sent {
         let n0 = msgs.len();
         let (mut f2, mut m2, mut t2) = (Vec::new(), Vec::new(), Vec::new());
         let mut skip = vec![0u32; 256 * 128];
@@ -198,6 +217,17 @@ fn realtime() {
         }
         (frames, msgs, tracks) = (f2, m2, t2);
         eprintln!("copies: {n0} events -> {}", msgs.len());
+    }
+    if sent {
+        copies = sent_copies;
+    } else if let Some(p) = &sent_file {
+        let mut b = (frames.len() as u64).to_le_bytes().to_vec();
+        frames.iter().for_each(|f| b.extend_from_slice(&f.to_le_bytes()));
+        msgs.iter().for_each(|m| b.extend_from_slice(&m.to_le_bytes()));
+        tracks.iter().for_each(|t| b.extend_from_slice(&t.to_le_bytes()));
+        copies.iter().for_each(|c| b.extend_from_slice(&c.to_le_bytes()));
+        std::fs::write(p, b).unwrap();
+        eprintln!("saved {} events as sent to {p}", frames.len());
     }
     let end = end.min(frames.last().map_or(0, |f| f + 1));
     // each note-on's length, from the whole stretch (FIFO per channel + key), as Spiderweb would know it;
@@ -314,6 +344,9 @@ fn realtime() {
                         i = j;
                         sent_to.store(if i == frames.len() { u64::MAX } else { horizon }, std::sync::atomic::Ordering::Relaxed);
                     } else {
+                        // (nothing up to the horizon = sent up to it too: a gap in the song left the offline
+                        // pulls waiting for it forever, 2026-10-27)
+                        sent_to.fetch_max(horizon, std::sync::atomic::Ordering::Relaxed);
                         std::thread::sleep(Duration::from_millis(1));
                     }
                 }
