@@ -81,7 +81,8 @@ def load():
                             ("kb_open", [ctypes.POINTER(ctypes.c_char_p), u32, ctypes.POINTER(_Options)], p),
                             ("kb_push", [p, p, p, p, u32], None), ("kb_push_len", [p, p, p, p, p, u32], None),
                             ("kb_push_copies", [p, p, p, p, p, p, u32], None),
-                            ("kb_cancel", [p], None),
+                            ("kb_cancel", [p], None), ("kb_song", [p, ctypes.c_double, u32], None),
+                            ("kb_cut", [p, ctypes.c_uint64], ctypes.c_uint64),
                             ("kb_set_lower", [p, u32], None), ("kb_stats", [p, ctypes.POINTER(_Stats)], None),
                             ("kb_fill", [p, p, u32], None), ("kb_close", [p], None)):
         fn = getattr(d, name)
@@ -164,6 +165,20 @@ class Kestrel:
         """Forget every message not made into sound yet (sounding notes go on: send their note-offs after)."""
         if self.handle:
             self.dll.kb_cancel(self.handle)
+
+    def cut(self, frame):
+        """What push_copies sent from frame on taken back (never sound already made): the frame it was taken back
+        from, or None (the connector didn't answer: nothing taken back)."""
+        if not self.handle:
+            return None
+        at = self.dll.kb_cut(self.handle, int(frame))
+        return None if at == 2 ** 64 - 1 else int(at)
+
+    def set_song(self, origin, song):
+        """The song being pushed (a number, 0 = none) and the output frame its second 0 falls on: each place in the
+        song keeps the note limits it had the first time it played (the same sound every play)."""
+        if self.handle:
+            self.dll.kb_song(self.handle, float(origin), int(song) & 0xFFFFFFFF)
 
     def set_lower(self, on):
         if self.handle:

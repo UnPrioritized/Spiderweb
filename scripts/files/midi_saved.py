@@ -67,6 +67,10 @@ def save_index(lm):
     data = buf.getvalue()
     os.makedirs(FOLDER, exist_ok=True)
     write_bytes(index_file(mf.path, mf.size), data)
+    d = getattr(lm, "dense", None)
+    if d is not None and d.done() and d.error is None:  # (Kestrel's read-ahead, all read already: kept with it)
+        from files.play_dense import save
+        save(d)
     return len(data)
 
 
@@ -138,9 +142,10 @@ def load_index(mf):
 
 def saved_list():
     """[(MIDI path, index file, bytes)] of every saved index, newest first."""
+    from files.play_dense import SAVED_END, saved_file
     out = []
     try:
-        names = [n for n in os.listdir(FOLDER) if n.endswith(".npz")]
+        names = [n for n in os.listdir(FOLDER) if n.endswith(".npz") and not n.endswith(SAVED_END)]
     except OSError:
         return out
     for n in names:
@@ -151,17 +156,22 @@ def saved_list():
         except Exception:  # (damaged: listed by its own name, so it can be deleted)
             path = f
         try:
-            out.append((os.path.getmtime(f), path, f, os.path.getsize(f)))
+            size = os.path.getsize(f)
+            if os.path.exists(saved_file(f)):  # (Kestrel's read-ahead kept with it: counted in its size)
+                size += os.path.getsize(saved_file(f))
+            out.append((os.path.getmtime(f), path, f, size))
         except OSError:
             continue
     return [(p, f, s) for _, p, f, s in sorted(out, reverse=True)]
 
 
 def delete_index(f):
-    try:
-        os.remove(f)
-    except OSError:
-        pass
+    from files.play_dense import saved_file
+    for g in (f, saved_file(f)):  # (its Kestrel read-ahead goes with it)
+        try:
+            os.remove(g)
+        except OSError:
+            pass
 
 
 def _declined():

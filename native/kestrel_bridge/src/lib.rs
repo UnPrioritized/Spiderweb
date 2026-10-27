@@ -12,10 +12,10 @@
 mod budget;
 mod rank;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -157,7 +157,7 @@ impl Pending {
 
 /// Measures (tests): nanoseconds summed in each step: 0 push copy, 1 push pairing, 2 push ranking, 3 render
 /// choosing + handing to Kestrel, 4 Kestrel's render_live; 5 pushes, 6 blocks.
-pub static PROFILE: [std::sync::atomic::AtomicU64; 7] = [const { std::sync::atomic::AtomicU64::new(0) }; 7];
+pub static PROFILE: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
 
 fn profile_add(step: usize, since: Instant) -> Instant {
     let now = Instant::now();
@@ -183,6 +183,8 @@ struct Batch {
     /// (not the front batch) messages taken already: a later push due sooner (own shapes 0.2 s ahead behind the
     /// loaded MIDI's 1 s) is played on time, not after the one before it (hunt 2026-10-27: 0.8 s late)
     pos: usize,
+    /// Pushed with copies (the loaded MIDI's feeder): `cut` takes these back from a frame on.
+    song: bool,
 }
 
 #[derive(Default)]
@@ -190,6 +192,10 @@ struct Inbox {
     batches: VecDeque<Batch>,
     /// kb_cancel calls so far (the render thread drops what it took before the last one)
     cancels: u64,
+    /// kb_cut: (number, frame) asked for; the render thread answers with (number, the frame it cut from).
+    cut: Option<(u64, u64)>,
+    cut_done: (u64, u64),
+    cuts: u64,
 }
 
 struct Shared {
@@ -209,6 +215,10 @@ struct Shared {
     /// Tests (`Synth::fix_allowance`): note-ons a block fixed, 0 = learned; merging off.
     fixed_allow: AtomicU32,
     no_merge: AtomicBool,
+    /// The song playing (`kb_song`: 0 = none, nothing remembered) and the output frame of its second 0 (f64 bits):
+    /// each block's limits are remembered by its place in the song and taken again on the next play there.
+    song: AtomicU32,
+    origin: AtomicU64,
     ahead: usize,
     /// Worst block since the last kb_stats call.
     worst_us: AtomicU32,
@@ -292,6 +302,8 @@ impl Synth {
             allow_now: AtomicU32::new(u32::MAX),
             fixed_allow: AtomicU32::new(0),
             no_merge: AtomicBool::new(false),
+            song: AtomicU32::new(0),
+            origin: AtomicU64::new(0),
             ahead,
             worst_us: AtomicU32::new(0),
         });
@@ -355,6 +367,7 @@ impl Synth {
         let mut whole = self.shared.pool.lock().unwrap().pop().unwrap_or_default();
         whole.spans.clear();
         whole.pos = 0;
+        whole.song = copies.is_some();
         let batch = &mut whole.msgs;
         batch.clear();
         // note lengths given, or paired below inside this push (FIFO per channel + key)
@@ -434,6 +447,28 @@ impl Synth {
         self.shared.inbox.lock().unwrap().batches.push_back(whole);
     }
 
+    /// The loaded MIDI's messages (pushed with copies) from `frame` on taken back, never one already made into
+    /// sound: returns the frame they were taken back from (`frame`, or the first block not made yet), None when the
+    /// render thread didn't answer within a second. The tempo changed while playing: Spiderweb pushes them again
+    /// at the new speed (they were pushed a second ahead).
+    pub fn cut(&self, frame: u64) -> Option<u64> {
+        let id = {
+            let mut inbox = self.shared.inbox.lock().unwrap();
+            inbox.cuts += 1;
+            inbox.cut = Some((inbox.cuts, frame));
+            inbox.cuts
+        };
+        let t = Instant::now();
+        while t.elapsed().as_secs_f64() < 1.0 {
+            let (n, at) = self.shared.inbox.lock().unwrap().cut_done;
+            if n == id {
+                return Some(at);
+            }
+            std::thread::sleep(std::time::Duration::from_micros(500));
+        }
+        None
+    }
+
     /// Forget every message not rendered yet (sounding notes go on: send note-offs after this).
     pub fn cancel(&self) {
         let mut inbox = self.shared.inbox.lock().unwrap();
@@ -447,6 +482,14 @@ impl Synth {
         self.shared.no_merge.store(!merge, Ordering::Relaxed);
         self.shared.fixed_allow.store(allow, Ordering::Relaxed);
         self.shared.allow_now.store(if allow == 0 { u32::MAX } else { allow }, Ordering::Relaxed);
+    }
+
+    /// The song being pushed (`song` 0 = none) and the output frame its second 0 falls on: the note budget plays a
+    /// place in the song with the limits it had there the first time (the same notes kept, the same sound every
+    /// play). Another song = the remembered limits go.
+    pub fn set_song(&self, origin: f64, song: u32) {
+        self.shared.origin.store(origin.to_bits(), Ordering::Relaxed);
+        self.shared.song.store(song, Ordering::Relaxed);
     }
 
     pub fn set_lower(&self, on: bool) {
@@ -554,6 +597,12 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
     // (the front batch's next span to look at)
     let mut span = 0usize;
     let mut cancels = 0u64;
+    // each song block's limits as first played (note-ons, voices): played again with them (the same sound every
+    // play, 2026-10-28)
+    let mut plan: HashMap<i64, (f32, f32)> = HashMap::new();
+    let mut plan_song = 0u32;
+    // (measuring: KB_NOPLAN = nothing remembered, as before)
+    let plan_on = std::env::var_os("KB_NOPLAN").is_none();
     // (measuring: KB_LOG = a file path, one line a block)
     let mut log = std::env::var_os("KB_LOG").and_then(|p| std::fs::File::create(p).ok()).map(std::io::BufWriter::new);
     loop {
@@ -580,9 +629,45 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
                 at = 0;
                 span = 0;
                 budget.forget();
+                budget.restart();
             }
             future.extend(inbox.batches.drain(..));
+            if let Some((id, frame)) = inbox.cut.take() {
+                // (blocks before this one are made: never taken back)
+                let from = frame.max(end - block as u64);
+                for (i, b) in future.iter_mut().enumerate() {
+                    let start = if i == 0 { at } else { b.pos }.min(b.msgs.len());
+                    if !b.song {
+                        continue;
+                    }
+                    if let Some(k) = b.msgs[start..].iter().position(|p| p.frame >= from) {
+                        b.msgs.truncate(start + k);
+                        b.spans.retain(|g| (g.start + g.len) as usize <= start + k);
+                    }
+                }
+                inbox.cut_done = (id, from);
+            }
         }
+        let song = s.song.load(Ordering::Relaxed);
+        if song != 0 && song != plan_song {  // (0 = between plays / own shapes alone: kept for the next play)
+            plan.clear();
+            plan_song = song;
+        }
+        // (the block's place in the song, in blocks)
+        let place = (song != 0 && plan_on && s.lower.load(Ordering::Relaxed) && s.fixed_allow.load(Ordering::Relaxed) == 0).then(|| {
+            (((end - block as u64) as f64 - f64::from_bits(s.origin.load(Ordering::Relaxed))) / block as f64).round() as i64
+        });
+        let had = place.and_then(|p| plan.get(&p).copied());
+        if let Some((a, c)) = had {
+            budget.follow(a, c);
+            if budget.voice_cap() != cap {
+                cap = budget.voice_cap();
+                driver.set_voice_cap(cap);
+                synth.set_voice_cap(cap);
+            }
+        }
+        let used = budget.limits();
+        let cuts = budget.cuts;
         // (a batch's frames rise, mostly: one earlier than the one before it is played with that one, as Kestrel's
         // own queue does; so a batch is read in order up to the first frame at or past the block's end)
         let lower = s.lower.load(Ordering::Relaxed);
@@ -671,6 +756,24 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         let bs = synth.stats();
         budget.fix(s.fixed_allow.load(Ordering::Relaxed), !s.no_merge.load(Ordering::Relaxed));
         budget.measured(us / block_us, ready, s.ahead, bs.active_voices, lower);
+        if let Some(p) = place.filter(|_| budget.wanted() > 0) {
+            match had {
+                // (only limits that kept up: a play's first busy block has none yet and took ~120 ms in Shinki;
+                // remembered, every play there began with that gap)
+                None if us <= block_us => {
+                    plan.insert(p, used);
+                }
+                None if budget.cuts != cuts => {
+                    plan.insert(p, budget.limits());
+                }
+                // (too much for this PC now: lower here from now on, never higher)
+                Some((a, c)) if budget.cuts != cuts => {
+                    let (a2, c2) = budget.limits();
+                    plan.insert(p, (a.min(a2), c.min(c2)));
+                }
+                _ => {}
+            }
+        }
         if budget.voice_cap() != cap {
             // (our change to Kestrel: a voice cap that moves while it plays; over it = quietest stolen)
             cap = budget.voice_cap();
@@ -680,8 +783,8 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         s.worst_us.fetch_max(us as u32, Ordering::Relaxed);
         if let Some(f) = log.as_mut() {
             use std::io::Write;
-            let _ = writeln!(f, "{} msgs {n_msgs} ranked {:?} dropped {dropped} allow {} cap {cap} voices {} ready {ready} \
-                prep {:.2} ms block {:.2} ms", end - block as u64, ranked.map(|r| r.1), budget.allowance(),
+            let _ = writeln!(f, "{} place {place:?} msgs {n_msgs} ranked {:?} dropped {dropped} allow {} cap {cap} voices {} ready {ready} \
+                prep {:.2} ms block {:.2} ms", end - block as u64, ranked.map(|r| r.1), used.0,
                 bs.active_voices, prep.as_secs_f64() * 1e3, us / 1e3);
         }
         {
@@ -874,6 +977,24 @@ pub unsafe extern "C" fn kb_push_copies(
 pub unsafe extern "C" fn kb_cancel(h: *const Synth) {
     if !h.is_null() {
         guard((), || (*h).cancel())
+    }
+}
+
+/// The loaded MIDI's messages from `frame` on taken back (`Synth::cut`): the frame they were taken back from, or
+/// u64::MAX when the render thread didn't answer.
+#[no_mangle]
+pub unsafe extern "C" fn kb_cut(h: *const Synth, frame: u64) -> u64 {
+    if h.is_null() {
+        return u64::MAX;
+    }
+    guard(u64::MAX, || (*h).cut(frame).unwrap_or(u64::MAX))
+}
+
+/// The song being pushed (0 = none) and the output frame of its second 0 (`Synth::set_song`).
+#[no_mangle]
+pub unsafe extern "C" fn kb_song(h: *const Synth, origin: f64, song: u32) {
+    if !h.is_null() {
+        guard((), || (*h).set_song(origin, song))
     }
 }
 

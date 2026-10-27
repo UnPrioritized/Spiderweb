@@ -112,6 +112,8 @@ const SMOOTH: f64 = 0.25;
 const WARM: u64 = 1;
 /// (`Budget::peak`: ~1.3 s to halve at 512 frames a block)
 const PEAK_FADE: f64 = 0.994;
+/// Blocks the learned limits rule after a real shortage while following remembered ones (~0.25 s).
+const TROUBLE_BLOCKS: u32 = 24;
 
 pub struct Budget {
     /// Note-ons a block may take; None = no limit.
@@ -174,6 +176,10 @@ pub struct Budget {
     no_merge: bool,
     /// Channel levels as the messages passed (the general way reads them as of the block's start).
     level: Level,
+    /// This block follows remembered limits (`follow`); a cut while following = trouble: the learned limits
+    /// (lower) rule until they climb back to the remembered ones, at most TROUBLE_BLOCKS blocks (counted down).
+    following: bool,
+    trouble: u32,
 }
 
 impl Budget {
@@ -217,7 +223,43 @@ impl Budget {
             fixed: 0,
             no_merge: false,
             level: Level::new(),
+            following: false,
+            trouble: 0,
         }
+    }
+
+    /// The limits for the next block: (note-ons, voices), INFINITY = none.
+    pub fn limits(&self) -> (f32, f32) {
+        (self.allow.map_or(f32::INFINITY, |a| a as f32), self.cap.map_or(f32::INFINITY, |c| c as f32))
+    }
+
+    /// Note-ons the last block asked for.
+    pub fn wanted(&self) -> usize {
+        self.wanted
+    }
+
+    /// The next block takes the limits it had on an earlier play (`limits` then): the same notes kept, the same
+    /// sound every play. After a cut while following (this PC slower now) the learned limits rule until they are
+    /// back up to the remembered ones.
+    pub fn follow(&mut self, allow: f32, cap: f32) {
+        if self.trouble > 0 {
+            // (back to them once the learned ones climbed there, or after TROUBLE_BLOCKS: climbing from a deep cut
+            // took the rest of a 6 s play in Shinki, every later block different from the first play)
+            self.trouble -= 1;
+            if self.allow.map_or(f32::INFINITY, |a| a as f32) < allow && self.trouble > 0 {
+                return;
+            }
+            self.trouble = 0;
+        }
+        self.allow = allow.is_finite().then_some(allow as f64);
+        self.cap = cap.is_finite().then_some(cap as f64);
+        self.following = true;
+    }
+
+    /// A start (Play / a jump): no trouble carried over.
+    pub fn restart(&mut self) {
+        self.trouble = 0;
+        self.following = false;
     }
 
     /// Every note's pairing forgotten: a cancel (the offs pushed ahead are gone; Spiderweb ends what sounds itself).
@@ -622,6 +664,15 @@ impl Budget {
     /// started.
     pub fn measured(&mut self, load: f64, ready: usize, ahead: usize, voices: u64, lower: bool) {
         self.ahead = ahead;
+        let cuts = self.cuts;
+        self.judge(load, ready, ahead, voices, lower);
+        if self.following && self.cuts != cuts {
+            self.trouble = TROUBLE_BLOCKS;
+        }
+        self.following = false;
+    }
+
+    fn judge(&mut self, load: f64, ready: usize, ahead: usize, voices: u64, lower: bool) {
         if self.fixed != 0 {
             self.allow = Some(self.fixed as f64);
             self.cap = None;
@@ -657,7 +708,17 @@ impl Budget {
         // took ~11 ms of 10.7 and each cut the allowance by 30 %, 7,600 down to 900 in 10 s = the melody 8 dB
         // quiet against the user's render, 2026-10-27)
         let slow = load > 1.5 || (load > 1.0 && ready + 1 < ahead.max(2));
-        if slow || self.load > HIGH || self.empty > 0.5 {
+        // (following limits that kept up on an earlier play: only a real shortage cuts, the ready blocks nearly
+        // gone; any slow block cut them, and no two plays were the same, 2026-10-28)
+        let trouble = if self.following {
+            load > 1.0 && ready <= 1
+        } else {
+            slow || self.load > HIGH || self.empty > 0.5
+        };
+        if self.following && !trouble {
+            return;
+        }
+        if trouble {
             // (in proportion to how far behind this block was: a block 2.7x too slow cuts to ~30 % at once; a
             // fixed 0.7 took ~30 slow blocks to come down from Shinki's 185,000 a block = 0.7 s of silence)
             let base = self.allow.map_or(self.wanted as f64, |a| a.min(self.wanted as f64));

@@ -109,6 +109,11 @@ def _loops():
             midi_play.order_count, midi_play.order_place, midi_play.condense, midi_play.stamp_pre)
 
 
+def _tm_arrays(tmap):
+    """A TimeMap as arrays (ticks, seconds, seconds a tick), for the compiled loops."""
+    return (np.asarray(tmap.ticks, np.int64), np.asarray(tmap.secs, np.float64), np.asarray(tmap.spt, np.float64))
+
+
 PUSH_S = 1.0  # Kestrel (GPU): events pushed this far ahead of the line (ranking a dense push takes a while)
 PIECE_BLOCKS = 8  # ... at most this many of its blocks a push
 HOLD_BLOCKS = 4  # ... a block not whole yet waits at most until it's this close to being made
@@ -842,6 +847,9 @@ class LoadedPlayer:
         table = (np.zeros(midi_play.COPY_TABLE, np.uint32), np.zeros(midi_play.COPY_TABLE, np.int64),
                  np.zeros(midi_play.COPY_TABLE, np.int64))  # (stamp's: exact copies on one tick sent once)
         tm_of = tm = None
+        song, told = 0, None
+        base = align = 0.0
+        ahead = []  # (frames, msgs, tracks, copies) pushed and maybe not played yet: a tempo change pushes them again
         gen, cur = -1, None
         checked = 0.0
         held = None  # (frames, msgs, tracks) of a block not whole yet
@@ -892,10 +900,24 @@ class LoadedPlayer:
                     gen, cur, held = self._gen, None, None
                     line.reset()
                     wall["t"], wall["floor"] = None, 0.0
+                    ahead.clear()
+                    tm_of = None
+                    # (the song's start on a block edge, < 5.3 ms later or sooner: each play puts the same notes in
+                    # the same blocks, so Kestrel's remembered limits keep the same ones, F3 2026-10-28)
+                    raw = kout._f0 + (t_c - sec - kout._t0) * K_RATE
+                    align = self.k_align = round(raw / BLOCK) * BLOCK - raw
                 if cur is None and self._queue and self._unpart is None:
                     cur = self._queue.popleft()
                     took(cur)
                 horizon = getattr(self, "_horizon", None)
+            if tm_of is not None and tmap is not tm_of:  # (the tempo changed while playing: see _retime)
+                new = _tm_arrays(tmap)
+                if not all(np.array_equal(a, b) for a, b in zip(tm, new)):
+                    base_new = kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
+                    held = self._retime(kout, ahead, held, tm, base, new, base_new)
+                    base = base_new
+                tm_of, tm = tmap, new
+                song = hash((id(self.lm), len(tm[0]), float(tm[0].sum()), float(tm[2].sum()))) | 1
             if cur is None:
                 self.prof[3] += 1
                 if horizon is not None:
@@ -905,7 +927,7 @@ class LoadedPlayer:
             parts = [] if held is None else [held]
             while cur is not None:
                 if wall["t"] is not None:
-                    f_w = max(least, kout._f0 + (t_c - sec - kout._t0) * K_RATE + tmap.sec(wall["t"]) * K_RATE)
+                    f_w = max(least, kout._f0 + (t_c - sec - kout._t0) * K_RATE + align + tmap.sec(wall["t"]) * K_RATE)
                     wall["t"], wall["floor"] = None, f_w
                     n = len(silent)
                     parts.append((np.full(n, int(f_w + 0.5), np.uint64), silent, np.zeros(n, np.uint16),
@@ -916,8 +938,9 @@ class LoadedPlayer:
                          np.searchsorted(ts, T - dense.t0, "right"))
                 if i1 > i:
                     if tm_of is not tmap:  # (the tempo map as arrays, for the compiled loop)
-                        tm_of, tm = tmap, (np.asarray(tmap.ticks, np.int64), np.asarray(tmap.secs, np.float64),
-                                           np.asarray(tmap.spt, np.float64))
+                        tm_of, tm = tmap, _tm_arrays(tmap)
+                        # (the song for Kestrel's remembered note limits: this MIDI at this tempo)
+                        song = hash((id(self.lm), len(tm[0]), float(tm[0].sum()), float(tm[2].sum()))) | 1
                     size = i1 - i if dense is None else midi_play.pre_room(ms, dense.cp, i, i1, line.st)
                     line.room(midi_play.ons_in(ms, i, i1))
                     fr = np.empty(size, np.uint64)
@@ -925,7 +948,10 @@ class LoadedPlayer:
                     tr = np.empty(size, np.uint16)
                     cp = np.empty(size, np.uint32)
                     counts[:2] = 0  # (counts[2]: the copy table's generation, kept)
-                    base = kout._f0 + (t_c - sec - kout._t0) * K_RATE
+                    base = kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
+                    if told != (song, round(base)):
+                        told = (song, round(base))
+                        kout.k.set_song(base, song)
                     t_s = time.perf_counter()
                     if dense is None:
                         n = stamp(ms, ks, i, i1, ts, self.muted, self.tport, *tm, base, float(K_RATE), least,
@@ -958,12 +984,13 @@ class LoadedPlayer:
                 # ... but only while the reading may still add to it: read past its end (a gap in the song) or
                 # about to be made = it goes now (user 2026-10-27, Septette bar 52: the offs before a 1.6 s
                 # rest waited for the next note, 0.68 s late, the chord rang on)
-                read_to = None if horizon is None else (kout._f0 + (t_c - sec - kout._t0) * K_RATE
+                read_to = None if horizon is None else (kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
                                                         + tmap.sec(horizon) * K_RATE)
                 if (read_to is None or read_to < last + BLOCK) and last > least + HOLD_BLOCKS * BLOCK:
                     edge = min(edge, last)
             cut = int(np.searchsorted(fr, edge))  # (the block still being filled waits)
             held = (fr[cut:], m[cut:], tr[cut:], cp[cut:]) if cut < len(fr) else None
+            ahead[:] = [c for c in ahead if int(c[0][-1]) >= least]  # (played: gone)
             # (in pieces of PIECE_BLOCKS, earliest first: one push of 0.4 s of a dense part took so long to rank
             # that its first blocks were made before it came, all of it then in one block)
             a = 0
@@ -971,11 +998,44 @@ class LoadedPlayer:
                 b = min(cut, int(np.searchsorted(fr, (int(fr[a]) // BLOCK + PIECE_BLOCKS) * BLOCK)))
                 t_p = time.perf_counter()
                 kout.k.push_copies(fr[a:b], m[a:b], tr[a:b], cp[a:b])
+                ahead.append((fr[a:b], m[a:b], tr[a:b], cp[a:b]))
                 self.prof[1] += time.perf_counter() - t_p
                 self.prof[2] += 1
                 a = b
         kout.cancel()
+        kout.k.set_song(0.0, 0)  # (own shapes alone next: no place in a song)
         self.silence()
+
+    @staticmethod
+    def _retime(kout, ahead, held, tm, base, new, base_new):
+        """The tempo changed while playing (Kestrel): what was pushed ahead (up to PUSH_S, at the old speed) taken
+        back from a couple of blocks on and pushed again at the new speed, with the block not pushed yet (held);
+        returns them all as the new held. Before (F8, 2026-10-28) up to a second played on at the old speed, then
+        the rest came at the new one, out of step with the line."""
+        from files.kestrel import BLOCK, RATE as K_RATE
+        at = kout.k.cut((kout.k.stats()["rendered"] // BLOCK + 2) * BLOCK)
+        if at is None:  # (no answer: it plays on as it was)
+            return held
+        got = []
+        for c in ahead + ([held] if held is not None else []):
+            k = int(np.searchsorted(c[0], at))
+            if k < len(c[0]):
+                got.append(tuple(a[k:] for a in c))
+        ahead.clear()
+        if not got:
+            return None
+        fr, m, tr, cp = (np.concatenate(a) for a in zip(*got))
+        # frame -> song second -> tick at the old tempo -> second -> frame at the new
+        ticks, secs, spt = tm
+        s = (fr.astype(np.float64) - base) / K_RATE
+        i = np.maximum(np.searchsorted(secs, s, "right") - 1, 0)
+        t = ticks[i] + (s - secs[i]) / spt[i]
+        ticks, secs, spt = new
+        j = np.maximum(np.searchsorted(ticks, t, "right") - 1, 0)
+        s = secs[j] + (t - ticks[j]) * spt[j]
+        fr = np.maximum(np.round(base_new + s * K_RATE), at).astype(np.uint64)
+        o = np.argsort(fr, kind="stable")  # (in order again: the block not pushed yet came after the rest)
+        return fr[o], m[o], tr[o], cp[o]
 
     def _read_mutes(self):
         try:

@@ -7,6 +7,8 @@ Kestrel feeder plays it from that (midi_play.stamp_pre; play_loaded's reader ste
 (lm.dense) while its hidden notes, removed tracks and track channels stay as they were. Muted tracks: that play reads
 the parts live as before (the read-ahead holds every track)."""
 
+import io
+import json
 import threading
 
 import numpy as np
@@ -19,6 +21,8 @@ EARLY_BEATS = 0.25  # each part starts this much before its first dense stretch
 PART_MOST = 1 << 26  # events a part may keep after collapsing (~1.2 GB): more = that part read live as before
 GROUP_TRACKS = 64  # one tick holding more than a reading window: its tracks read this many at a time
 SLICE = 1 << 22  # events collapsed at a time (room kept for this many more)
+SAVED_VER = 1  # (a saved read-ahead: how parts are read / collapsed changed = a new number, old ones read again)
+SAVED_END = ".dense.npz"  # (beside the saved index: <index name>.dense.npz)
 
 
 def stretches(lm, tmap):
@@ -61,11 +65,11 @@ class Part:
     budget's channel + port), cp (copies) as condense made them, every note-off kept (the feeder's line leaves out
     the ones of notes it left out); s0_q / s0_n = the file's notes sounding at t0 (their offs are in it)."""
 
-    def __init__(self, t0, t1, ts, ms, tr, cp, s0):
+    def __init__(self, t0, t1, ts, ms, tr, cp, s0=None, s0_q=None, s0_n=None):
         self.t0, self.t1 = t0, t1
         self.ts, self.ms, self.tr, self.cp = ts, ms, tr, cp
-        self.s0_q = np.flatnonzero(s0)
-        self.s0_n = s0[self.s0_q]
+        self.s0_q = np.flatnonzero(s0) if s0 is not None else s0_q
+        self.s0_n = s0[self.s0_q] if s0 is not None else s0_n
 
     def unheard(self, tick):
         """Notes sounding at tick inside the part (SKIP places): the file's from before t0 still on, then its own
@@ -133,6 +137,11 @@ class Dense:
         from concurrent.futures import ThreadPoolExecutor
         from files.play_loaded import WINDOW_MOST, LoadedPlayer, _Scratch, helper_count
         lm = self.lm
+        saved = _load(lm, self.todo)
+        if saved is not None:  # (read ahead on an earlier day, kept beside the MIDI's saved index)
+            self.failed = saved[1]
+            self.parts = saved[0]
+            return
         rd = LoadedPlayer(lm, None, None, None, "kestrel")
         path = lm.path if lm.mode != "memory" else None
         try:
@@ -149,6 +158,8 @@ class Dense:
                     self.failed += 1
                 else:
                     self.parts.append(part)
+            if not self._stop.is_set():
+                save(self)
         except Exception as e:  # (a file gone / changed: the parts not done are read live as before)
             self.error = e
             from files.errors import write_log
@@ -230,9 +241,76 @@ class Dense:
                     out[3][:n].copy(), s0)
 
 
+def saved_file(index):
+    """The saved read-ahead kept beside a MIDI's saved index file (user 2026-10-27: read once per MIDI, not once
+    each time it's loaded; Shinki ~20 s, ~210 MB)."""
+    return index[:-4] + SAVED_END
+
+
+def _as_loaded(lm):
+    """Nothing hidden, removed or put on other channels since loading (only then is a read-ahead saved / used)."""
+    return lm.mode == "file" and key_of(lm) == (0, frozenset(), None)
+
+
+def _saved_head(lm):
+    from files.midi_saved import _layout
+    mf = lm.mf
+    return {"ver": SAVED_VER, "size": mf.size, "mtime": mf.mtime, "layout": _layout(mf),
+            "rules": [DENSE_MBS, JOIN_BEATS, EARLY_BEATS, PART_MOST]}
+
+
+def save(d):
+    """Keeps d (all read) beside lm's saved index, when it has one and lm is as loaded. Quiet when it can't."""
+    lm = d.lm
+    try:
+        from files import midi_saved
+        if not _as_loaded(lm) or d.key != key_of(lm) or not midi_saved.has_index(lm.mf):
+            return
+        ps = d.parts
+        head = dict(_saved_head(lm), todo=[list(map(int, t)) for t in d.todo], failed=d.failed,
+                    parts=[[int(p.t0), int(p.t1), len(p.ts), len(p.s0_q)] for p in ps])
+        cat = lambda k, dt: np.concatenate([getattr(p, k) for p in ps]) if ps else np.zeros(0, dt)  # noqa: E731
+        arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8),
+                  "ts": cat("ts", np.int32), "ms": cat("ms", np.uint32), "tr": cat("tr", np.uint16),
+                  "cp": cat("cp", np.uint32), "s0_q": cat("s0_q", np.int64), "s0_n": cat("s0_n", np.int64)}
+        buf = io.BytesIO()
+        np.savez(buf, **arrays)
+        from files.safefile import write_bytes
+        write_bytes(saved_file(midi_saved.index_file(lm.mf.path, lm.mf.size)), buf.getvalue())
+    except Exception:  # (disk full, the folder gone: read again next time)
+        import sys
+        from files.errors import write_log
+        write_log(*sys.exc_info(), "(Kestrel: saving a read-ahead)")
+
+
+def _load(lm, todo):
+    """(parts, failed) saved for lm as it is now (its parts `todo`), else None."""
+    if not _as_loaded(lm):
+        return None
+    from files import midi_saved
+    try:
+        with np.load(saved_file(midi_saved.index_file(lm.mf.path, lm.mf.size)), allow_pickle=False) as z:
+            head = json.loads(bytes(z["head"]).decode("utf-8"))
+            if {k: head.get(k) for k in ("ver", "size", "mtime", "layout", "rules")} != \
+                    json.loads(json.dumps(_saved_head(lm))) or head.get("todo") != [list(map(int, t)) for t in todo]:
+                return None
+            a = {k: z[k] for k in ("ts", "ms", "tr", "cp", "s0_q", "s0_n")}
+    except Exception:  # (none, or damaged: read again)
+        return None
+    parts, at, s = [], 0, 0
+    for t0, t1, n, k in head["parts"]:
+        parts.append(Part(t0, t1, a["ts"][at:at + n], a["ms"][at:at + n], a["tr"][at:at + n], a["cp"][at:at + n],
+                          s0_q=a["s0_q"][s:s + k], s0_n=a["s0_n"][s:s + k]))
+        at, s = at + n, s + k
+    if at != len(a["ts"]) or s != len(a["s0_q"]):
+        return None
+    return parts, head["failed"]
+
+
 def ensure(lm):
-    """lm's read-ahead (started now if it has none, or its hidden notes / tracks / channels changed since). The
-    parts are found by the file's own tempo (Conductor changes move them a little: still the densest bytes)."""
+    """lm's read-ahead (started now if it has none, or its hidden notes / tracks / channels changed since; taken
+    from beside its saved index when kept there). The parts are found by the file's own tempo (Conductor changes
+    move them a little: still the densest bytes)."""
     d = lm.dense
     if d is not None and d.key == key_of(lm) and (d.error is None or not d.done()):
         return d
