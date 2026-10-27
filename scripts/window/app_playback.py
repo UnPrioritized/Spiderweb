@@ -74,6 +74,13 @@ class Playback:
         if dev in (BUILTIN, KESTREL) and not self.hz_preview["font"] and not self.pick_soundfont():
             return
         self.fresh_builtin()
+        made = self._kestrel_made
+        if dev == KESTREL and made is not None and made[0] is not None and not _same_opts(made[0].opts,
+                                                                                            self.kestrel_opts):
+            # (a setting changed while it started: started again with the small window, never in the main one,
+            # which froze for its seconds, hunt 2026-10-28)
+            made[0].close()
+            self._kestrel_made = None
         if dev == KESTREL and not (self.out.handle and self.out.name == dev) and self._kestrel_made is None:
             self.kestrel_first(keep)  # (plays once it's started)
             return
@@ -408,6 +415,9 @@ class Playback:
                 if err is not None:
                     raise err
                 errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
+                # (Lower it by itself changed while it started: it opened with the old one, hunt 2026-10-28)
+                out.k.set_lower(self.kestrel_opts["lower"])
+                out.opts["lower"] = self.kestrel_opts["lower"]
                 return out
             if out is not None:  # (the soundfonts / settings changed meanwhile: started again with them)
                 out.close()
