@@ -96,6 +96,12 @@ pub struct KbStats {
     /// Different keys that wanted to start in a block / still started, summed over blocks.
     pub keys_wanted: u64,
     pub keys_kept: u64,
+    /// Blocks chosen from the order made when sent (the quick way), and note-ons sent carrying merged copies.
+    pub fast_blocks: u64,
+    pub merged: u64,
+    /// The loudness factors those carried: average and largest.
+    pub merge_mean: f32,
+    pub merge_max: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -115,6 +121,10 @@ struct Pending {
     /// It starts on the same frame as its `srep` / `krep` note (its loudness adds as an amplitude there).
     s_same: bool,
     k_same: bool,
+    /// Its length against its `srep` / `krep` note's (both capped at rank::HEARD): the share of that note's time
+    /// it sounds, so a short copy adds its loudness only for as long as it lasted.
+    s_ratio: f32,
+    k_ratio: f32,
 }
 
 impl Pending {
@@ -130,6 +140,8 @@ impl Pending {
             krep: 0,
             s_same: false,
             k_same: false,
+            s_ratio: 1.0,
+            k_ratio: 1.0,
         }
     }
 }
@@ -160,6 +172,11 @@ struct Shared {
     error: Mutex<Option<String>>,
     stop: AtomicBool,
     lower: AtomicBool,
+    /// The budget's note-ons a block now (u32::MAX = no limit), for push to know which blocks to rank.
+    allow_now: AtomicU32,
+    /// Tests (`Synth::fix_allowance`): note-ons a block fixed, 0 = learned; merging off.
+    fixed_allow: AtomicU32,
+    no_merge: AtomicBool,
     ahead: usize,
     /// Worst block since the last kb_stats call.
     worst_us: AtomicU32,
@@ -231,6 +248,9 @@ impl Synth {
             error: Mutex::new(None),
             stop: AtomicBool::new(false),
             lower: AtomicBool::new(opts.lower_by_itself != 0),
+            allow_now: AtomicU32::new(u32::MAX),
+            fixed_allow: AtomicU32::new(0),
+            no_merge: AtomicBool::new(false),
             ahead,
             worst_us: AtomicU32::new(0),
         });
@@ -266,17 +286,32 @@ impl Synth {
     /// Queue messages (frames non-decreasing is best; an earlier one is played with the one queued before it).
     /// Made into one batch first: the render thread is never kept waiting while a big push copies.
     pub fn push(&self, frames: &[u64], msgs: &[u32], tracks: &[u16]) {
-        let n = frames.len().min(msgs.len()).min(tracks.len());
+        self.push_len(frames, msgs, tracks, None);
+    }
+
+    /// `push` with each note-on's length in frames (`lens[i]`, LONG = not known; other messages: anything). The
+    /// caller knows them (Spiderweb does): paired inside one push the connector only knows notes ending in it, and
+    /// pushed a block at a time nearly every note looked long, so loud spam beat held notes again.
+    pub fn push_len(&self, frames: &[u64], msgs: &[u32], tracks: &[u16], lens: Option<&[u32]>) {
+        let mut n = frames.len().min(msgs.len()).min(tracks.len());
+        if let Some(l) = lens {
+            n = n.min(l.len());
+        }
         if n == 0 {
             return;
         }
         let mut batch: Vec<Pending> = (0..n).map(|i| Pending::new(frames[i], msgs[i], tracks[i])).collect();
-        // note lengths inside this push (FIFO per channel + key), then each block's priority order: worked out
-        // here on the caller's thread, not the render thread's
+        // note lengths (given, or paired inside this push FIFO per channel + key), then each busy block's priority
+        // order: worked out here on the caller's thread, not the render thread's
         {
             let mut prep = self.prep.lock().unwrap();
             let (open, ranker) = &mut *prep;
-            for i in 0..n {
+            if let Some(l) = lens {
+                for (p, &len) in batch.iter_mut().zip(l) {
+                    p.len = len;
+                }
+            }
+            for i in (0..n).filter(|_| lens.is_none()) {
                 let m = batch[i].msg;
                 let status = m & 0xF0;
                 if status != 0x90 && status != 0x80 {
@@ -290,14 +325,17 @@ impl Synth {
                     batch[j].len = (batch[i].frame.saturating_sub(batch[j].frame)).min(LONG as u64 - 1) as u32;
                 }
             }
-            for i in 0..n {
+            for i in (0..n).filter(|_| lens.is_none()) {
                 let m = batch[i].msg;
                 if m & 0xF0 == 0x90 {
                     let slot = ((((m >> 24) & 0x0F) << 4 | (m & 0x0F)) * 128 + ((m >> 8) & 0x7F)) as usize;
                     open[slot].clear();
                 }
             }
-            ranker.rank(&mut batch, self.block_frames as u64);
+            // only blocks that may go over the allowance are worth ranking (it may halve before they play; and
+            // past RANK_ALWAYS note-ons a block is ranked anyway: a cut must not find a wall unranked)
+            let allow = self.shared.allow_now.load(Ordering::Relaxed) as usize;
+            ranker.rank(&mut batch, self.block_frames as u64, (allow / 2).min(rank::RANK_ALWAYS));
         }
         self.shared.inbox.lock().unwrap().batches.push_back(batch);
     }
@@ -307,6 +345,14 @@ impl Synth {
         let mut inbox = self.shared.inbox.lock().unwrap();
         inbox.batches.clear();
         inbox.cancels += 1;
+    }
+
+    /// Tests: note-ons a block fixed at `allow` (0 = learned again), the voice cap at Max voices: the choice and
+    /// merging measured with no real-time timing in it.
+    pub fn fix_allowance(&self, allow: u32, merge: bool) {
+        self.shared.no_merge.store(!merge, Ordering::Relaxed);
+        self.shared.fixed_allow.store(allow, Ordering::Relaxed);
+        self.shared.allow_now.store(if allow == 0 { u32::MAX } else { allow }, Ordering::Relaxed);
     }
 
     pub fn set_lower(&self, on: bool) {
@@ -451,6 +497,7 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         driver.render_live(&mut synth, &mut out)?;
         let us = t.elapsed().as_secs_f64() * 1e6;
         let bs = synth.stats();
+        budget.fix(s.fixed_allow.load(Ordering::Relaxed), !s.no_merge.load(Ordering::Relaxed));
         budget.measured(us / block_us, ready, s.ahead, bs.active_voices, lower);
         if budget.voice_cap() != cap {
             // (our change to Kestrel: a voice cap that moves while it plays; over it = quietest stolen)
@@ -469,13 +516,23 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             st.last_block_us = us as u32;
             st.last_prep_us = prep.as_micros() as u32;
             st.allowance = budget.allowance();
+            s.allow_now.store(if lower { budget.allowance() } else { u32::MAX }, Ordering::Relaxed);
             st.voice_cap = cap;
             st.cuts = budget.cuts;
             st.keys_wanted = budget.keys_wanted;
             st.keys_kept = budget.keys_kept;
+            st.fast_blocks = budget.fast;
+            st.merged = budget.merged;
+            st.merge_mean = if budget.merged > 0 { (budget.scale_sum / budget.merged as f64) as f32 } else { 1.0 };
+            st.merge_max = budget.scale_max;
         }
         s.ring.lock().unwrap().blocks.push_back(out);
     }
+}
+
+/// Tests: frames a note sounds after its off, as the merging counts it (rank::TAIL).
+pub fn set_tail(frames: u32) {
+    rank::TAIL.store(frames, Ordering::Relaxed);
 }
 
 // ---- C ABI (Spiderweb's files/kestrel.py) ----
@@ -556,6 +613,32 @@ pub unsafe extern "C" fn kb_push(h: *const Synth, frames: *const u64, msgs: *con
             std::slice::from_raw_parts(frames, n),
             std::slice::from_raw_parts(msgs, n),
             std::slice::from_raw_parts(tracks, n),
+        )
+    })
+}
+
+/// `kb_push` with each note-on's length in frames (lens[i]; 0xFFFFFFFF = not known): the note budget keeps the
+/// longest start of a key (a held note beside spam on one key).
+#[no_mangle]
+pub unsafe extern "C" fn kb_push_len(
+    h: *const Synth,
+    frames: *const u64,
+    msgs: *const u32,
+    tracks: *const u16,
+    lens: *const u32,
+    n: u32,
+) {
+    if h.is_null() || n == 0 {
+        return;
+    }
+    guard((), || {
+        let n = n as usize;
+        let lens = (!lens.is_null()).then(|| std::slice::from_raw_parts(lens, n));
+        (*h).push_len(
+            std::slice::from_raw_parts(frames, n),
+            std::slice::from_raw_parts(msgs, n),
+            std::slice::from_raw_parts(tracks, n),
+            lens,
         )
     })
 }

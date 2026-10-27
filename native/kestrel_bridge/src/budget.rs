@@ -1,7 +1,7 @@
 //! "Lower it by itself": how many note-ons a block may take, learned from whether blocks keep up with real time,
 //! and which ones go when there are more. FAIR BY TRACK (user 2026-10-27): every track with notes in the block
 //! gets an equal share (a track needing less leaves the rest to the others); inside a track the quietest go
-//! first. A dropped note-on's note-off is dropped too (counted per channel + key: kept notes take offs first).
+//! first. A dropped note-on's note-off is dropped too (paired in order per channel + key).
 //!
 //! Block time alone misleads (measured 2026-10-27, RTX 3080 Ti): a lightly used graphics card slows itself down,
 //! so easy blocks paced in real time take ~4 ms of 10.7 against ~1.2 ms back to back; a busy one runs at full
@@ -10,6 +10,46 @@
 //! alone fill a block's time, so dropping new notes is what keeps real time.
 
 use crate::Pending;
+
+/// Each channel's volume (CC 7) and expression (CC 11) as the messages pass, so a merged copy counts with its
+/// OWN channel's level (user 2026-10-27: Shinki has layers at volume 0; merged into an audible channel's note
+/// they came out at full volume). GM defaults 100 / 127; Kestrel's curve: gain = (cc / 127)^2 each.
+#[derive(Clone, Copy)]
+pub struct Level {
+    vol: [u8; 256],
+    expr: [u8; 256],
+}
+
+impl Level {
+    fn new() -> Self {
+        Level { vol: [100; 256], expr: [127; 256] }
+    }
+
+    fn ch(msg: u32) -> usize {
+        ((((msg >> 24) & 0x0F) << 4) | (msg & 0x0F)) as usize
+    }
+
+    /// A control change passing.
+    pub fn cc(&mut self, msg: u32) {
+        let v = ((msg >> 16) & 0x7F) as u8;
+        match (msg >> 8) & 0x7F {
+            7 => self.vol[Self::ch(msg)] = v,
+            11 => self.expr[Self::ch(msg)] = v,
+            121 => {
+                // (Reset All Controllers: expression back; volume stays, as in GM)
+                self.expr[Self::ch(msg)] = 127;
+            }
+            _ => {}
+        }
+    }
+
+    /// Amplitude factor of the message's channel.
+    pub fn gain(&self, msg: u32) -> f64 {
+        let c = Self::ch(msg);
+        let (v, e) = (self.vol[c] as f64 / 127.0, self.expr[c] as f64 / 127.0);
+        v * v * e * e
+    }
+}
 
 /// Block time as a share of its real-time length (running average): over HIGH = fewer notes, under TARGET =
 /// more again.
@@ -51,9 +91,11 @@ pub struct Budget {
     /// Voices Kestrel may sound now (None = the user's Max voices), and that Max.
     cap: Option<f64>,
     max_voices: u32,
-    /// Per channel (0..256) x key: note-ons sounding that were kept, and dropped ones still waiting for an off.
-    kept: Vec<u32>,
-    gone: Vec<u32>,
+    /// Per channel (0..256) x key: each note-on still waiting for its off, in order, and whether it was dropped.
+    /// PAIRED IN ORDER (as a MIDI file is read): counters ("a kept note takes the next off") gave a stack's
+    /// LONG kept note the first short copy's off, cutting it short on the most stacked keys (D#7 in Shinki
+    /// -9 dB against every note played, user heard "note cutting everywhere", 2026-10-27).
+    held: Vec<std::collections::VecDeque<bool>>,
     ons: Vec<usize>,
     keep: Vec<bool>,
     /// Different keys that wanted to start / still started, summed over blocks (runs lost show here).
@@ -72,9 +114,17 @@ pub struct Budget {
     tracks: Vec<u16>,
     by_track: Vec<usize>,
     starts: Vec<u32>,
-    by_rank: Vec<usize>,
-    /// Blocks chosen from the push-time order (`ranked`), not by `tiers`.
+    /// Blocks chosen from the push-time order (`ranked`), not by `tiers`; kept note-ons sent carrying merged
+    /// copies (factor over 1).
     pub fast: u64,
+    pub merged: u64,
+    pub scale_sum: f64,
+    pub scale_max: f32,
+    /// Tests: a fixed allowance (`fix`), 0 = none; merging off.
+    fixed: u32,
+    no_merge: bool,
+    /// Channel levels as the messages passed (the general way reads them as of the block's start).
+    level: Level,
 }
 
 impl Budget {
@@ -93,8 +143,7 @@ impl Budget {
             ahead: 2,
             cap: None,
             max_voices,
-            kept: vec![0; 256 * 128],
-            gone: vec![0; 256 * 128],
+            held: vec![std::collections::VecDeque::new(); 256 * 128],
             ons: Vec::new(),
             keep: Vec::new(),
             keys_wanted: 0,
@@ -110,13 +159,25 @@ impl Budget {
             tracks: Vec::new(),
             by_track: Vec::new(),
             starts: vec![0; 1 << 16],
-            by_rank: Vec::new(),
             fast: 0,
+            merged: 0,
+            scale_sum: 0.0,
+            scale_max: 0.0,
+            fixed: 0,
+            no_merge: false,
+            level: Level::new(),
         }
     }
 
     pub fn allowance(&self) -> u32 {
         self.allow.map_or(u32::MAX, |a| a as u32)
+    }
+
+    /// Tests: a fixed allowance (0 = learned as usual), the voice cap left at Max voices; `merge` false = dropped
+    /// notes' loudness not carried (to measure what the merging itself does).
+    pub fn fix(&mut self, allow: u32, merge: bool) {
+        self.fixed = allow;
+        self.no_merge = !merge;
     }
 
     /// Voices Kestrel may sound now (the user's Max voices when not lowered).
@@ -148,9 +209,7 @@ impl Budget {
             let allow = allow as usize;
             if self.ons.len() > allow {
                 dropped = (self.ons.len() - allow) as u64;
-                if !self.ranked(block, allow) {
-                    self.tiers(block, allow);
-                }
+                self.tiers(block, allow);
             }
         }
         // (how many different keys wanted to start, and how many still do: runs lost show here)
@@ -171,19 +230,12 @@ impl Budget {
                 let ch = ((((p.msg >> 24) & 0x0F) << 4) | (p.msg & 0x0F)) as usize;
                 let k = ch * 128 + ((p.msg >> 8) & 0x7F) as usize;
                 if is_on {
-                    if self.keep[i] {
-                        self.kept[k] += 1;
-                    } else {
-                        self.gone[k] += 1;
-                    }
-                } else if self.kept[k] > 0 {
-                    // (a sounding kept note takes the off first: every kept note gets exactly one, none stuck;
-                    // overlapping notes on one key may swap ends while notes are being dropped)
-                    self.kept[k] -= 1;
-                } else if self.gone[k] > 0 {
-                    self.gone[k] -= 1;
+                    self.held[k].push_back(!self.keep[i]);
+                } else if self.held[k].pop_front() == Some(true) {
                     continue; // (its note-on was dropped)
                 }
+            } else if status == 0xB0 {
+                self.level.cc(p.msg);
             }
             if self.keep[i] {
                 // (a kept note-on carries the loudness of the copies merged into it)
@@ -202,14 +254,20 @@ impl Budget {
             let v = ((p.msg >> 16) & 0x7F) as f64 / 127.0;
             v * v
         };
-        // pass 1: one group with ranks 0..n; each dropped note's loudness to the same channel + key's kept note,
-        // else the key's tier-1 note (always kept), as an amplitude when on its frame (known from push)
+        // pass 1: one group with ranks 0..n; each dropped note's loudness (with its own channel's volume) to the
+        // same channel + key's kept note, else the key's tier-1 note (always kept), as an amplitude when it is the
+        // same sound (known from push)
         self.coh.clear();
         self.coh.resize(allow, 0.0);
         self.pow.clear();
         self.pow.resize(allow, 0.0);
+        let mut level = self.level;
         let (mut n, mut group, mut top) = (0usize, crate::rank::NO_GROUP, 0u32);
         for p in block {
+            if p.msg & 0xF0 == 0xB0 {
+                level.cc(p.msg);
+                continue;
+            }
             if !is_on(p) {
                 continue;
             }
@@ -221,15 +279,20 @@ impl Budget {
             n += 1;
             top = top.max(p.rank);
             if p.rank as usize >= allow {
-                let (to, same) = if (p.srep as usize) < allow { (p.srep, p.s_same) } else { (p.krep, p.k_same) };
+                let (to, same, ratio) = if (p.srep as usize) < allow {
+                    (p.srep, p.s_same, p.s_ratio)
+                } else {
+                    (p.krep, p.k_same, p.k_ratio)
+                };
                 let to = to as usize;
                 if to >= allow {
                     return None; // (can't be: tier 1 always fits; the general way then)
                 }
-                if same {
-                    self.coh[to] += amp(p);
+                let a = amp(p) * level.gain(p.msg);
+                if same && ratio >= crate::rank::COHERENT {
+                    self.coh[to] += a;
                 } else {
-                    self.pow[to] += amp(p) * amp(p);
+                    self.pow[to] += a * a * ratio as f64;
                 }
             }
         }
@@ -246,6 +309,9 @@ impl Budget {
             let on = is_on(p);
             let off = status == 0x80 || (status == 0x90 && !on);
             if !on && !off {
+                if status == 0xB0 {
+                    self.level.cc(p.msg);
+                }
                 push(p, 1.0);
                 continue;
             }
@@ -257,84 +323,31 @@ impl Budget {
                 want_keys[key] = true;
                 if r < allow {
                     kept_keys[key] = true;
-                    self.kept[k] += 1;
+                    self.held[k].push_back(false);
                     let (c, w) = (self.coh[r], self.pow[r]);
-                    let scale = if c > 0.0 || w > 0.0 {
-                        let a = amp(p);
+                    let a = amp(p) * self.level.gain(p.msg);
+                    // (a kept note on a silent channel can't carry anything: as sent)
+                    let scale = if (c > 0.0 || w > 0.0) && a > 1e-9 && !self.no_merge {
                         (((a + c).powi(2) + w).sqrt() / a) as f32
                     } else {
                         1.0
                     };
+                    if scale > 1.0 {
+                        self.merged += 1;
+                        self.scale_sum += scale as f64;
+                        self.scale_max = self.scale_max.max(scale);
+                    }
                     push(p, scale);
                 } else {
-                    self.gone[k] += 1;
+                    self.held[k].push_back(true);
                 }
-            } else if self.kept[k] > 0 {
-                self.kept[k] -= 1;
-                push(p, 1.0);
-            } else if self.gone[k] > 0 {
-                self.gone[k] -= 1;
-            } else {
-                push(p, 1.0);
+            } else if self.held[k].pop_front() != Some(true) {
+                push(p, 1.0); // (its own note-on was kept, or one from before Kestrel heard of it)
             }
         }
         self.keys_wanted += want_keys.iter().filter(|&&k| k).count() as u64;
         self.keys_kept += kept_keys.iter().filter(|&&k| k).count() as u64;
         Some((n - allow) as u64)
-    }
-
-    /// The block's note-ons all ranked together at push (rank.rs): keep the first `allow` of that order and merge
-    /// the rest into their kept notes, with no sorting here. False = not one ranked group (pushed in two parts,
-    /// or late into this block): `tiers` chooses instead.
-    fn ranked(&mut self, block: &[Pending], allow: usize) -> bool {
-        let n = self.ons.len();
-        let group = block[self.ons[0]].group;
-        if group == crate::rank::NO_GROUP
-            || self.ons.iter().any(|&i| block[i].group != group || block[i].rank as usize >= n)
-        {
-            return false;
-        }
-        self.by_rank.clear();
-        self.by_rank.resize(n, usize::MAX);
-        for &i in &self.ons {
-            self.by_rank[block[i].rank as usize] = i;
-        }
-        if self.by_rank.contains(&usize::MAX) {
-            return false;
-        }
-        self.fast += 1;
-        let amp = |i: usize| {
-            let v = ((block[i].msg >> 16) & 0x7F) as f64 / 127.0;
-            v * v
-        };
-        self.coh.clear();
-        self.coh.resize(block.len(), 0.0);
-        self.pow.clear();
-        self.pow.resize(block.len(), 0.0);
-        for &i in &self.ons {
-            let p = &block[i];
-            if (p.rank as usize) < allow {
-                continue;
-            }
-            self.keep[i] = false;
-            // (its loudness to the same channel + key's kept note, else the key's tier-1 note: always kept)
-            let to = if (p.srep as usize) < allow { p.srep } else { p.krep };
-            let t = self.by_rank[to as usize];
-            if p.frame == block[t].frame {
-                self.coh[t] += amp(i);
-            } else {
-                self.pow[t] += amp(i) * amp(i);
-            }
-        }
-        self.scale.clear();
-        self.scale.resize(block.len(), 1.0);
-        for &i in &self.ons {
-            if self.keep[i] && (self.coh[i] > 0.0 || self.pow[i] > 0.0) {
-                let a = ((amp(i) + self.coh[i]).powi(2) + self.pow[i]).sqrt();
-                self.scale[i] = (a / amp(i)) as f32;
-            }
-        }
-        true
     }
 
     /// Keep `allow` of the block's note-ons, in tiers (user 2026-10-27: thinned by loudness alone, the runs
@@ -396,9 +409,11 @@ impl Budget {
     /// amplitude = (vel / 127)^2 (bank.rs velocity_atten_cb). Copies on the same frame add as amplitudes (the
     /// same sound starting together), on other frames as powers.
     fn merge_loudness(&mut self, block: &[Pending]) {
+        // (channel levels as of the block's start: this way is for blocks split over pushes, rare)
+        let level = self.level;
         let amp = |i: usize| {
             let v = ((block[i].msg >> 16) & 0x7F) as f64 / 127.0;
-            v * v
+            v * v * level.gain(block[i].msg)
         };
         let key = |i: usize| ((block[i].msg >> 8) & 0x7F) as usize;
         let slot = |i: usize| ((((block[i].msg >> 24) & 0x0F) << 4 | (block[i].msg & 0x0F)) as usize) * 128 + key(i);
@@ -433,17 +448,20 @@ impl Budget {
                 continue;
             }
             any = true;
-            if block[i].frame == block[t].frame {
+            // (shared by time, as rank.rs COHERENT says)
+            let ratio = crate::rank::len_ratio(block[i].len, block[t].len);
+            let same_vel = (block[i].msg >> 16) & 0x7F == (block[t].msg >> 16) & 0x7F;
+            if block[i].frame == block[t].frame && same_vel && ratio >= crate::rank::COHERENT {
                 self.coh[t] += amp(i);
             } else {
-                self.pow[t] += amp(i) * amp(i);
+                self.pow[t] += amp(i) * amp(i) * ratio as f64;
             }
         }
         self.scale.clear();
         self.scale.resize(block.len(), 1.0);
         if any {
             for &i in &self.ons {
-                if self.keep[i] && (self.coh[i] > 0.0 || self.pow[i] > 0.0) {
+                if self.keep[i] && (self.coh[i] > 0.0 || self.pow[i] > 0.0) && amp(i) > 1e-9 {
                     // (FULL merging, user 2026-10-27: our Kestrel change push_scaled multiplies the voice's gain,
                     // no velocity-127 ceiling and the note's own velocity layer; the quick version's raised
                     // velocity left the most stacked keys 14-19 dB short)
@@ -538,6 +556,11 @@ impl Budget {
     /// started.
     pub fn measured(&mut self, load: f64, ready: usize, ahead: usize, voices: u64, lower: bool) {
         self.ahead = ahead;
+        if self.fixed != 0 {
+            self.allow = Some(self.fixed as f64);
+            self.cap = None;
+            return;
+        }
         if self.blocks == 0 && self.wanted == 0 && voices == 0 {
             return; // (silence before the first note: nothing to learn)
         }
@@ -647,7 +670,7 @@ mod tests {
                 .collect();
             block.sort_by_key(|p| p.frame);
             let mut ranked = block.clone();
-            crate::rank::Ranker::new().rank(&mut ranked, 512);
+            crate::rank::Ranker::new().rank(&mut ranked, 512, 0);
             for allow in [128usize, 200, 700, n.saturating_sub(1)] {
                 if allow >= n {
                     continue; // (nothing to drop: neither way runs)
@@ -683,6 +706,29 @@ mod tests {
         }
     }
 
+    /// Offs are paired in order: a dropped copy's off is dropped even while a kept note on its key sounds (the
+    /// kept note then ends at its own off, not the copy's).
+    #[test]
+    fn a_dropped_copys_off_never_ends_the_kept_note() {
+        let mut b = Budget::new(1 << 20);
+        b.allow = Some(127.0);
+        // key 60: a short copy first (dropped: the held note is longer), then the held note
+        let mut block: Vec<Pending> = (0..127).map(|k| on(1, k, 50)).collect();
+        block.push(Pending { len: 10, ..on(1, 60, 50) });
+        block[60].len = crate::LONG;
+        // (block[60] = the held note, block[127] = the short copy, sent after it)
+        let mut kept = Vec::new();
+        b.filter(&block, true, |p, _| kept.push(p.len));
+        assert!(!kept.contains(&10), "the short copy was kept");
+        // the next block: the FIRST off on key 60 belongs to the held note (it started first), the second to the
+        // dropped copy: in order, the held note ends at the first, the second is dropped
+        let offs = vec![off(60), off(60)];
+        let mut sent = 0;
+        b.allow = None;
+        b.filter(&offs, true, |_, _| sent += 1);
+        assert_eq!(sent, 1);
+    }
+
     #[test]
     fn a_held_note_beats_louder_spam_on_its_key() {
         let mut b = Budget::new(1 << 20);
@@ -692,10 +738,16 @@ mod tests {
         block.push(on(2, 60, 40));
         let mut kept = Vec::new();
         b.filter(&mut block, true, |p, s| kept.push((p.track, (p.msg >> 16) & 0x7F, s)));
-        // the held note is kept (tier 1) and carries the spam's loudness: 500 x (120/127)^2 / (40/127)^2 + 1
+        // the held note is kept (tier 1) and carries the spam's loudness FOR THE TIME IT SOUNDED (length + release
+        // tail, rank::len_ratio): 127 of the spam are kept themselves (allowance 128), 373 merged:
+        // sqrt(a^2 + 373 x b^2 x ratio) / a with a = (40/127)^2, b = (120/127)^2 (not all of it at once: ~3,900)
         let held = kept.iter().find(|k| k.0 == 2).expect("the held note was dropped");
         assert_eq!(held.1, 40);
-        assert!(held.2 > 1000.0, "{held:?}");
+        let (a, b) = ((40.0f64 / 127.0).powi(2), (120.0f64 / 127.0).powi(2));
+        let ratio = crate::rank::len_ratio(100, crate::LONG) as f64;
+        assert!(ratio > 0.1 && ratio < 0.5, "{ratio}");
+        let want = ((a * a + 373.0 * b * b * ratio).sqrt() / a) as f32;
+        assert!((held.2 - want).abs() < 0.01, "{held:?}, want {want}");
     }
 
     #[test]
@@ -806,7 +858,7 @@ mod tests {
         }
         block.sort_by_key(|p| p.frame);
         let offs: Vec<Pending> = block.iter().map(|p| Pending { msg: p.msg & !0xF0 & !(0x7F << 16) | 0x80, ..*p }).collect();
-        crate::rank::Ranker::new().rank(&mut block, 4096);
+        crate::rank::Ranker::new().rank(&mut block, 4096, 0);
         let mut all = block.clone();
         all.extend(offs);
         let mut b = Budget::new(1 << 20);

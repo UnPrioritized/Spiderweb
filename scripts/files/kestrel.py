@@ -23,6 +23,7 @@ DLL_NAME = "kestrel_bridge.dll"
 BLOCK = 512  # frames a block (~11 ms): the default delay
 AHEAD = 6  # blocks kept made ahead of the speakers (3 = every swing of the note budget was a gap, 2026-10-27)
 MAX_VOICES = 1 << 20  # Kestrel's own default
+UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
 
 
 class _Options(ctypes.Structure):
@@ -37,7 +38,8 @@ class _Stats(ctypes.Structure):
                                                       "budget_dropped", "kestrel_dropped", "stolen")] + \
                [(name, ctypes.c_uint32) for name in ("last_block_us", "worst_block_us", "allowance", "failed",
                                                       "last_prep_us", "voice_cap", "cuts")] + \
-               [(name, ctypes.c_uint64) for name in ("keys_wanted", "keys_kept")]
+               [(name, ctypes.c_uint64) for name in ("keys_wanted", "keys_kept", "fast_blocks", "merged")] + \
+               [(name, ctypes.c_float) for name in ("merge_mean", "merge_max")]
 
 
 _dll = None
@@ -71,7 +73,8 @@ def load():
     p, u32 = ctypes.c_void_p, ctypes.c_uint32
     for name, args, res in (("kb_version", [], ctypes.c_char_p), ("kb_error", [p], ctypes.c_char_p),
                             ("kb_open", [ctypes.POINTER(ctypes.c_char_p), u32, ctypes.POINTER(_Options)], p),
-                            ("kb_push", [p, p, p, p, u32], None), ("kb_cancel", [p], None),
+                            ("kb_push", [p, p, p, p, u32], None), ("kb_push_len", [p, p, p, p, p, u32], None),
+                            ("kb_cancel", [p], None),
                             ("kb_set_lower", [p, u32], None), ("kb_stats", [p, ctypes.POINTER(_Stats)], None),
                             ("kb_fill", [p, p, u32], None), ("kb_close", [p], None)):
         fn = getattr(d, name)
@@ -122,16 +125,23 @@ class Kestrel:
         self.bass.BASS_ChannelSetAttribute(self.stream, _ATTRIB_BUFFER, 0.0)
         self.bass.BASS_ChannelPlay(self.stream, 0)
 
-    def push(self, frames, msgs, tracks):
+    def push(self, frames, msgs, tracks, lens=None):
         """Queue messages: frames (output frame each), msgs (status | data1 << 8 | data2 << 16 | port << 24),
-        tracks (the track each belongs to: the note budget shares by it). Arrays or lists of the same length."""
+        tracks (the track each belongs to: the note budget shares by it), lens (each note-on's length in frames,
+        UNKNOWN_LEN = not known; the note budget keeps the longest start of a key). Arrays or lists of the same
+        length. Push whole blocks (frames up to a multiple of block), well ahead: busy blocks are put in order
+        here, on the caller's thread."""
         n = len(msgs)
         if not n or not self.handle:
             return
         f = np.ascontiguousarray(frames, np.uint64)
         m = np.ascontiguousarray(msgs, np.uint32)
         t = np.ascontiguousarray(tracks, np.uint16)
-        self.dll.kb_push(self.handle, f.ctypes.data, m.ctypes.data, t.ctypes.data, n)
+        if lens is None:
+            self.dll.kb_push(self.handle, f.ctypes.data, m.ctypes.data, t.ctypes.data, n)
+        else:
+            ln = np.ascontiguousarray(lens, np.uint32)
+            self.dll.kb_push_len(self.handle, f.ctypes.data, m.ctypes.data, t.ctypes.data, ln.ctypes.data, n)
 
     def cancel(self):
         """Forget every message not made into sound yet (sounding notes go on: send their note-offs after)."""

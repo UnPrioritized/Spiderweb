@@ -14,8 +14,33 @@
 
 use crate::Pending;
 
-/// `Pending::group` of an event that wasn't ranked (not a note-on).
+/// `Pending::group` of an event that wasn't ranked (not a note-on, or its block wasn't busy enough).
 pub const NO_GROUP: u64 = 0;
+/// Note-ons in a block past which it is ranked whatever the allowance is now (a wall arriving while there is no
+/// limit yet must be ranked when the first cut comes).
+pub const RANK_ALWAYS: usize = 20_000;
+/// Frames of a note counted when a dropped copy's loudness is shared by length (~2 s at 48 kHz: a piano note
+/// has faded by then; a note whose end isn't known counts this long).
+pub const HEARD: u32 = 96_000;
+
+/// Frames a note keeps sounding after its note-off (its release): a 2 ms spam note still makes ~0.5 s of sound.
+/// Counted by note length alone, spam copies merged into a long note added almost nothing (Shinki: merging on
+/// or off measured the same, 2026-10-27).
+pub static TAIL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24_000);
+
+/// A copy's sounding time (length + TAIL) against the note it is merged into (both capped at HEARD + TAIL): 1 =
+/// as long.
+pub fn len_ratio(copy: u32, into: u32) -> f32 {
+    let tail = TAIL.load(std::sync::atomic::Ordering::Relaxed);
+    let (c, t) = (copy.min(HEARD) + tail, into.min(HEARD) + tail);
+    (c.max(1) as f32 / t.max(1) as f32).min(1.0)
+}
+
+/// MERGED BY TIME (user 2026-10-27, after the low keys came out 4-6 dB too loud): all of a stack's loudness on
+/// its longest note for that note's whole length gave long-ringing low notes far too much. A copy adds as an
+/// amplitude only on the same frame, at the same velocity AND about as long (`COHERENT`), else as power times
+/// its share of the time.
+pub const COHERENT: f32 = 0.9;
 
 pub struct Ranker {
     serial: u64,
@@ -53,8 +78,9 @@ impl Ranker {
         }
     }
 
-    /// Rank every block's note-ons in `batch` (frames in a row of one block = one group).
-    pub fn rank(&mut self, batch: &mut [Pending], block_frames: u64) {
+    /// Rank the note-ons of every block in `batch` with more than `over` of them (frames in a row of one block =
+    /// one group; the others stay unranked: chosen on the render thread if they ever need choosing).
+    pub fn rank(&mut self, batch: &mut [Pending], block_frames: u64, over: usize) {
         let mut a = 0;
         while a < batch.len() {
             let block = batch[a].frame / block_frames;
@@ -62,8 +88,11 @@ impl Ranker {
             while b < batch.len() && batch[b].frame / block_frames == block {
                 b += 1;
             }
-            self.serial += 1;
-            self.rank_group(&mut batch[a..b], self.serial);
+            let ons = batch[a..b].iter().filter(|p| p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0).count();
+            if ons > over {
+                self.serial += 1;
+                self.rank_group(&mut batch[a..b], self.serial);
+            }
             a = b;
         }
     }
@@ -121,8 +150,14 @@ impl Ranker {
             let (s, k) = (self.by_slot[slot(&g[i])], self.by_key[key(&g[i])]);
             g[i].srep = g[s].rank;
             g[i].krep = g[k].rank;
-            g[i].s_same = g[s].frame == g[i].frame;
-            g[i].k_same = g[k].frame == g[i].frame;
+            // (the same sound = same frame AND same velocity: other velocities may be other samples, which add
+            // as powers; adding all same-frame copies as amplitudes left Shinki's F#2 / G2 6 dB too loud against
+            // every note played with 4 M voices, 2026-10-27)
+            let vel = |p: &Pending| (p.msg >> 16) & 0x7F;
+            g[i].s_same = g[s].frame == g[i].frame && vel(&g[s]) == vel(&g[i]);
+            g[i].k_same = g[k].frame == g[i].frame && vel(&g[k]) == vel(&g[i]);
+            g[i].s_ratio = len_ratio(g[i].len, g[s].len);
+            g[i].k_ratio = len_ratio(g[i].len, g[k].len);
         }
         for &i in &self.ons {
             self.by_key[key(&g[i])] = usize::MAX;
