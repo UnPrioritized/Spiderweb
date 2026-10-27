@@ -90,24 +90,39 @@ fn realtime() {
         // pulls of 480 frames (10 ms, like a sound device) at real time; events pushed one block ahead of the pull
         let pull = 480usize;
         let mut buf = vec![0.0f32; pull * 2];
-        let mut i = 0;
         let mut pulled = 0u64;
         let t = Instant::now();
-        let (mut worst_push, mut ticks) = (Duration::ZERO, 0u64);
+        let mut ticks = 0u64;
         let (mut prep_sum, mut block_sum, mut samples_n) = (0u64, 0u64, 0u64);
         // KB_WAV = a folder: what was pulled (stutters included) saved as live-<lower>.wav there
         let wav_dir = std::env::var("KB_WAV").ok();
         let mut heard: Option<Vec<f32>> = wav_dir.as_ref().map(|_| Vec::new());
+        let done = std::sync::atomic::AtomicBool::new(false);
+        let worst_push = std::thread::scope(|sc| {
+            // the sender, on its own thread as in Spiderweb: whole blocks a push (a block ranked in one push is
+            // chosen the fast way), KB_CHUNK blocks at a time (note ends inside a push are known), ahead of what
+            // was handed out
+            let sender = sc.spawn(|| {
+                let chunk = env("KB_CHUNK", 1.0) as u64;
+                let (mut i, mut worst) = (0usize, Duration::ZERO);
+                while !done.load(std::sync::atomic::Ordering::Relaxed) && i < frames.len() {
+                    let at = synth.stats().handed.saturating_sub(start);
+                    // (a whole chunk ahead: ranking one takes time, its notes must not arrive late)
+                    let horizon = ((at / block + opts.ahead_blocks as u64 + 1) / chunk + 2) * chunk * block;
+                    let j = frames[i..].partition_point(|&f| f < horizon) + i;
+                    if j > i {
+                        let fr: Vec<u64> = frames[i..j].iter().map(|f| f + start).collect();
+                        let tp = Instant::now();
+                        synth.push(&fr, &msgs[i..j], &tracks[i..j]);
+                        worst = worst.max(tp.elapsed());
+                        i = j;
+                    } else {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                worst
+            });
         while pulled < end {
-            let horizon = pulled + (opts.ahead_blocks as u64 + 1) * block;
-            let j = frames[i..].partition_point(|&f| f < horizon) + i;
-            if j > i {
-                let fr: Vec<u64> = frames[i..j].iter().map(|f| f + start).collect();
-                let tp = Instant::now();
-                synth.push(&fr, &msgs[i..j], &tracks[i..j]);
-                worst_push = worst_push.max(tp.elapsed());
-                i = j;
-            }
             synth.fill(&mut buf);
             if let Some(w) = heard.as_mut() {
                 w.extend_from_slice(&buf);
@@ -127,6 +142,9 @@ fn realtime() {
                 std::thread::sleep(wait);
             }
         }
+            done.store(true, std::sync::atomic::Ordering::Relaxed);
+            sender.join().unwrap()
+        });
         let st = synth.stats();
         let notes = msgs.iter().filter(|m| *m & 0xF0 == 0x90 && (*m >> 16) & 0x7F != 0).count();
         eprintln!(

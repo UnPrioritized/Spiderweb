@@ -72,6 +72,9 @@ pub struct Budget {
     tracks: Vec<u16>,
     by_track: Vec<usize>,
     starts: Vec<u32>,
+    by_rank: Vec<usize>,
+    /// Blocks chosen from the push-time order (`ranked`), not by `tiers`.
+    pub fast: u64,
 }
 
 impl Budget {
@@ -107,6 +110,8 @@ impl Budget {
             tracks: Vec::new(),
             by_track: Vec::new(),
             starts: vec![0; 1 << 16],
+            by_rank: Vec::new(),
+            fast: 0,
         }
     }
 
@@ -121,7 +126,14 @@ impl Budget {
 
     /// Hand `push` the block's messages that stay, each with its loudness factor (amplitude: copies merged into
     /// a note-on); returns how many note-ons were dropped.
-    pub fn filter(&mut self, block: &mut [Pending], lower: bool, mut push: impl FnMut(&Pending, f32)) -> u64 {
+    pub fn filter(&mut self, block: &[Pending], lower: bool, mut push: impl FnMut(&Pending, f32)) -> u64 {
+        // one ranked group over the allowance: the lean way (no arrays the size of the block: a Shinki block of
+        // ~370,000 messages took 1.75 ms the general way, mostly zeroing them)
+        if let Some(allow) = self.allow.filter(|_| lower) {
+            if let Some(d) = self.filter_ranked(block, allow as usize, &mut push) {
+                return d;
+            }
+        }
         self.ons.clear();
         for (i, p) in block.iter().enumerate() {
             if p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0 {
@@ -136,7 +148,9 @@ impl Budget {
             let allow = allow as usize;
             if self.ons.len() > allow {
                 dropped = (self.ons.len() - allow) as u64;
-                self.tiers(block, allow);
+                if !self.ranked(block, allow) {
+                    self.tiers(block, allow);
+                }
             }
         }
         // (how many different keys wanted to start, and how many still do: runs lost show here)
@@ -178,6 +192,149 @@ impl Budget {
         }
         self.scale.clear();
         dropped
+    }
+
+    /// `filter` for a block whose note-ons were all ranked together at push and are more than `allow`: kept =
+    /// rank < allow, the merged loudness kept in arrays the size of `allow`. None = not such a block.
+    fn filter_ranked(&mut self, block: &[Pending], allow: usize, push: &mut impl FnMut(&Pending, f32)) -> Option<u64> {
+        let is_on = |p: &Pending| p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0;
+        let amp = |p: &Pending| {
+            let v = ((p.msg >> 16) & 0x7F) as f64 / 127.0;
+            v * v
+        };
+        // pass 1: one group with ranks 0..n; each dropped note's loudness to the same channel + key's kept note,
+        // else the key's tier-1 note (always kept), as an amplitude when on its frame (known from push)
+        self.coh.clear();
+        self.coh.resize(allow, 0.0);
+        self.pow.clear();
+        self.pow.resize(allow, 0.0);
+        let (mut n, mut group, mut top) = (0usize, crate::rank::NO_GROUP, 0u32);
+        for p in block {
+            if !is_on(p) {
+                continue;
+            }
+            if n == 0 {
+                group = p.group;
+            } else if p.group != group {
+                return None;
+            }
+            n += 1;
+            top = top.max(p.rank);
+            if p.rank as usize >= allow {
+                let (to, same) = if (p.srep as usize) < allow { (p.srep, p.s_same) } else { (p.krep, p.k_same) };
+                let to = to as usize;
+                if to >= allow {
+                    return None; // (can't be: tier 1 always fits; the general way then)
+                }
+                if same {
+                    self.coh[to] += amp(p);
+                } else {
+                    self.pow[to] += amp(p) * amp(p);
+                }
+            }
+        }
+        if n <= allow || group == crate::rank::NO_GROUP || top as usize >= n {
+            return None;
+        }
+        self.fast += 1;
+        self.wanted = n;
+        // pass 2: send, offs of dropped notes dropped (counted per channel + key), keys counted
+        let mut want_keys = [false; 128];
+        let mut kept_keys = [false; 128];
+        for p in block {
+            let status = p.msg & 0xF0;
+            let on = is_on(p);
+            let off = status == 0x80 || (status == 0x90 && !on);
+            if !on && !off {
+                push(p, 1.0);
+                continue;
+            }
+            let ch = ((((p.msg >> 24) & 0x0F) << 4) | (p.msg & 0x0F)) as usize;
+            let key = ((p.msg >> 8) & 0x7F) as usize;
+            let k = ch * 128 + key;
+            if on {
+                let r = p.rank as usize;
+                want_keys[key] = true;
+                if r < allow {
+                    kept_keys[key] = true;
+                    self.kept[k] += 1;
+                    let (c, w) = (self.coh[r], self.pow[r]);
+                    let scale = if c > 0.0 || w > 0.0 {
+                        let a = amp(p);
+                        (((a + c).powi(2) + w).sqrt() / a) as f32
+                    } else {
+                        1.0
+                    };
+                    push(p, scale);
+                } else {
+                    self.gone[k] += 1;
+                }
+            } else if self.kept[k] > 0 {
+                self.kept[k] -= 1;
+                push(p, 1.0);
+            } else if self.gone[k] > 0 {
+                self.gone[k] -= 1;
+            } else {
+                push(p, 1.0);
+            }
+        }
+        self.keys_wanted += want_keys.iter().filter(|&&k| k).count() as u64;
+        self.keys_kept += kept_keys.iter().filter(|&&k| k).count() as u64;
+        Some((n - allow) as u64)
+    }
+
+    /// The block's note-ons all ranked together at push (rank.rs): keep the first `allow` of that order and merge
+    /// the rest into their kept notes, with no sorting here. False = not one ranked group (pushed in two parts,
+    /// or late into this block): `tiers` chooses instead.
+    fn ranked(&mut self, block: &[Pending], allow: usize) -> bool {
+        let n = self.ons.len();
+        let group = block[self.ons[0]].group;
+        if group == crate::rank::NO_GROUP
+            || self.ons.iter().any(|&i| block[i].group != group || block[i].rank as usize >= n)
+        {
+            return false;
+        }
+        self.by_rank.clear();
+        self.by_rank.resize(n, usize::MAX);
+        for &i in &self.ons {
+            self.by_rank[block[i].rank as usize] = i;
+        }
+        if self.by_rank.contains(&usize::MAX) {
+            return false;
+        }
+        self.fast += 1;
+        let amp = |i: usize| {
+            let v = ((block[i].msg >> 16) & 0x7F) as f64 / 127.0;
+            v * v
+        };
+        self.coh.clear();
+        self.coh.resize(block.len(), 0.0);
+        self.pow.clear();
+        self.pow.resize(block.len(), 0.0);
+        for &i in &self.ons {
+            let p = &block[i];
+            if (p.rank as usize) < allow {
+                continue;
+            }
+            self.keep[i] = false;
+            // (its loudness to the same channel + key's kept note, else the key's tier-1 note: always kept)
+            let to = if (p.srep as usize) < allow { p.srep } else { p.krep };
+            let t = self.by_rank[to as usize];
+            if p.frame == block[t].frame {
+                self.coh[t] += amp(i);
+            } else {
+                self.pow[t] += amp(i) * amp(i);
+            }
+        }
+        self.scale.clear();
+        self.scale.resize(block.len(), 1.0);
+        for &i in &self.ons {
+            if self.keep[i] && (self.coh[i] > 0.0 || self.pow[i] > 0.0) {
+                let a = ((amp(i) + self.coh[i]).powi(2) + self.pow[i]).sqrt();
+                self.scale[i] = (a / amp(i)) as f32;
+            }
+        }
+        true
     }
 
     /// Keep `allow` of the block's note-ons, in tiers (user 2026-10-27: thinned by loudness alone, the runs
@@ -459,11 +616,71 @@ mod tests {
     use super::*;
 
     fn on(track: u16, key: u32, vel: u32) -> Pending {
-        Pending { frame: 0, msg: 0x90 | key << 8 | vel << 16, track, len: crate::LONG }
+        Pending::new(0, 0x90 | key << 8 | vel << 16, track)
     }
 
     fn off(key: u32) -> Pending {
-        Pending { frame: 0, msg: 0x80 | key << 8, track: 0, len: crate::LONG }
+        Pending::new(0, 0x80 | key << 8, 0)
+    }
+
+    /// The same blocks chosen from the push-time order give what the render-thread choice gives (both ways,
+    /// every allowance), merged loudness included.
+    #[test]
+    fn ranked_at_push_chooses_the_same() {
+        let mut seed = 7u64;
+        let mut rnd = |n: u32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as u32
+        };
+        for case in 0..40 {
+            let n = 50 + rnd(3000) as usize;
+            let mut block: Vec<Pending> = (0..n)
+                .map(|_| {
+                    let mut p = on(rnd(9) as u16, 30 + rnd(24), 1 + rnd(127));
+                    p.msg |= rnd(3) << 24 | rnd(2);
+                    p.frame = rnd(4) as u64;
+                    p.len = if rnd(3) == 0 { crate::LONG } else { rnd(5000) };
+                    p
+                })
+                .collect();
+            block.sort_by_key(|p| p.frame);
+            let mut ranked = block.clone();
+            crate::rank::Ranker::new().rank(&mut ranked, 512);
+            for allow in [128usize, 200, 700, n.saturating_sub(1)] {
+                if allow >= n {
+                    continue; // (nothing to drop: neither way runs)
+                }
+                let (mut a, mut b) = (Budget::new(1 << 20), Budget::new(1 << 20));
+                a.allow = Some(allow as f64);
+                b.allow = Some(allow as f64);
+                let (mut x, mut y) = (Vec::new(), Vec::new());
+                a.filter(&mut block.clone(), true, |p, s| x.push((p.msg, p.track, p.frame, (s * 1e4).round() as i64)));
+                b.filter(&mut ranked.clone(), true, |p, s| y.push((p.msg, p.track, p.frame, (s * 1e4).round() as i64)));
+                assert!(b.fast > 0, "case {case}: the ranked block wasn't taken the fast way");
+                x.sort();
+                y.sort();
+                assert_eq!(x.len(), y.len(), "case {case} allow {allow}");
+                // (which copy of a velocity is kept may differ: counts per channel + key + velocity + track agree,
+                // and every key's merged loudness)
+                let tally = |v: &[(u32, u16, u64, i64)]| {
+                    let mut t: Vec<(u32, u16)> = v.iter().map(|e| (e.0, e.1)).collect();
+                    t.sort();
+                    t
+                };
+                assert_eq!(tally(&x), tally(&y), "case {case} allow {allow}");
+                let loud = |v: &[(u32, u16, u64, i64)]| {
+                    let mut per = std::collections::BTreeMap::new();
+                    for e in v {
+                        let a = ((e.0 >> 16) & 0x7F) as f64 / 127.0;
+                        *per.entry((e.0 >> 8) & 0x7F).or_insert(0.0) += a * a * e.3 as f64 / 1e4;
+                    }
+                    per.into_iter().map(|(k, v)| (k, (v * 1e3).round() as i64)).collect::<Vec<_>>()
+                };
+                assert_eq!(loud(&x), loud(&y), "case {case} allow {allow}: merged loudness per key");
+            }
+        }
     }
 
     #[test]
@@ -573,6 +790,36 @@ mod tests {
         let mut n = 0;
         assert_eq!(b.filter(&mut block, false, |_, _| n += 1), 0);
         assert_eq!(n, 5);
+    }
+
+    /// Measures (ignored): one Shinki-sized ranked block through `filter`, by part.
+    #[test]
+    #[ignore = "measures"]
+    fn shinki_block_time() {
+        let mut block = Vec::new();
+        for i in 0..185_000u32 {
+            let mut p = on((i % 3000) as u16, 20 + i % 88, 1 + (i * 7) % 127);
+            p.msg |= (i % 4) << 24 | (i % 16);
+            p.frame = (i % 512) as u64;
+            p.len = 50 + i % 400;
+            block.push(p);
+        }
+        block.sort_by_key(|p| p.frame);
+        let offs: Vec<Pending> = block.iter().map(|p| Pending { msg: p.msg & !0xF0 & !(0x7F << 16) | 0x80, ..*p }).collect();
+        crate::rank::Ranker::new().rank(&mut block, 4096);
+        let mut all = block.clone();
+        all.extend(offs);
+        let mut b = Budget::new(1 << 20);
+        b.allow = Some(4500.0);
+        for round in 0..3 {
+            let t = std::time::Instant::now();
+            let mut n = 0;
+            b.filter(&all, true, |_, _| n += 1);
+            eprintln!("round {round}: {} messages, {n} kept, filter {:.2?} (fast {})", all.len(), t.elapsed(), b.fast);
+        }
+        let t = std::time::Instant::now();
+        let _ = all.clone();
+        eprintln!("copying the block: {:.2?}", t.elapsed());
     }
 
     #[test]

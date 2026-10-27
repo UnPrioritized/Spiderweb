@@ -10,6 +10,7 @@
 //! next block (Kestrel's live rule).
 
 mod budget;
+mod rank;
 
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -105,6 +106,32 @@ struct Pending {
     /// A note-on's length in frames, paired with its note-off in the same push; LONG = its end wasn't in it
     /// (the budget keeps the longest start of a key: a held note beside spam on one key)
     len: u32,
+    /// Ranked at push (rank.rs): the block group it was ranked in (NO_GROUP = not), its place in that group's
+    /// priority order, and the ranks of the notes its loudness goes to if it is dropped.
+    group: u64,
+    rank: u32,
+    srep: u32,
+    krep: u32,
+    /// It starts on the same frame as its `srep` / `krep` note (its loudness adds as an amplitude there).
+    s_same: bool,
+    k_same: bool,
+}
+
+impl Pending {
+    fn new(frame: u64, msg: u32, track: u16) -> Self {
+        Pending {
+            frame,
+            msg,
+            track,
+            len: LONG,
+            group: rank::NO_GROUP,
+            rank: 0,
+            srep: 0,
+            krep: 0,
+            s_same: false,
+            k_same: false,
+        }
+    }
 }
 
 /// `Pending::len` of a note whose end comes in a later push (or not a note-on).
@@ -140,8 +167,8 @@ struct Shared {
 
 pub struct Synth {
     shared: Arc<Shared>,
-    /// push's scratch: note-ons waiting for their off, per channel + key (indices into the batch)
-    open: Mutex<Vec<VecDeque<u32>>>,
+    /// push's scratch: note-ons waiting for their off, per channel + key (indices into the batch), and the ranker
+    prep: Mutex<(Vec<VecDeque<u32>>, rank::Ranker)>,
     thread: Option<JoinHandle<()>>,
     pub block_frames: u32,
     pub sample_rate: u32,
@@ -229,7 +256,7 @@ impl Synth {
             })?;
         Ok(Synth {
             shared,
-            open: Mutex::new(vec![VecDeque::new(); 256 * 128]),
+            prep: Mutex::new((vec![VecDeque::new(); 256 * 128], rank::Ranker::new())),
             thread: Some(thread),
             block_frames: block,
             sample_rate: rate,
@@ -243,11 +270,12 @@ impl Synth {
         if n == 0 {
             return;
         }
-        let mut batch: Vec<Pending> =
-            (0..n).map(|i| Pending { frame: frames[i], msg: msgs[i], track: tracks[i], len: LONG }).collect();
-        // note lengths inside this push (FIFO per channel + key), worked out here on the caller's thread
+        let mut batch: Vec<Pending> = (0..n).map(|i| Pending::new(frames[i], msgs[i], tracks[i])).collect();
+        // note lengths inside this push (FIFO per channel + key), then each block's priority order: worked out
+        // here on the caller's thread, not the render thread's
         {
-            let mut open = self.open.lock().unwrap();
+            let mut prep = self.prep.lock().unwrap();
+            let (open, ranker) = &mut *prep;
             for i in 0..n {
                 let m = batch[i].msg;
                 let status = m & 0xF0;
@@ -269,6 +297,7 @@ impl Synth {
                     open[slot].clear();
                 }
             }
+            ranker.rank(&mut batch, self.block_frames as u64);
         }
         self.shared.inbox.lock().unwrap().batches.push_back(batch);
     }
@@ -388,25 +417,36 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         }
         // (a batch's frames rise, mostly: one earlier than the one before it is played with that one, as Kestrel's
         // own queue does; so a batch is read in order up to the first frame at or past the block's end)
-        while let Some(batch) = future.front() {
-            while at < batch.len() && batch[at].frame < end {
-                taken.push(batch[at]);
-                at += 1;
-            }
-            if at < batch.len() {
-                break;
-            }
-            future.pop_front();
-            at = 0;
-        }
         let lower = s.lower.load(Ordering::Relaxed);
-        let dropped = budget.filter(&mut taken, lower, |p, scale| {
+        let mut push = |p: &Pending, scale: f32| {
             if let Some(ev) = decode(p.msg) {
                 // (our Kestrel change: a note-on carrying the copies merged into it)
                 driver.push_scaled(p.frame, ev, scale);
             }
-        });
-        taken.clear();
+        };
+        // the whole block inside the front batch (Spiderweb pushes whole blocks): read where it is. Copying
+        // ~370,000 messages a block (Shinki) into `taken` was most of the render thread's ~3.7 ms of preparing.
+        let inside = future.front().and_then(|b| b[at..].iter().position(|p| p.frame >= end).map(|j| at + j));
+        let dropped = if let Some(j) = inside {
+            let d = budget.filter(&future.front().unwrap()[at..j], lower, &mut push);
+            at = j;
+            d
+        } else {
+            while let Some(batch) = future.front() {
+                while at < batch.len() && batch[at].frame < end {
+                    taken.push(batch[at]);
+                    at += 1;
+                }
+                if at < batch.len() {
+                    break;
+                }
+                future.pop_front();
+                at = 0;
+            }
+            let d = budget.filter(&taken, lower, &mut push);
+            taken.clear();
+            d
+        };
         let prep = t.elapsed();
         driver.render_live(&mut synth, &mut out)?;
         let us = t.elapsed().as_secs_f64() * 1e6;
