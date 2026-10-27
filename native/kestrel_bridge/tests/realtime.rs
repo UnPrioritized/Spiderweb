@@ -115,6 +115,18 @@ fn realtime() {
     frames.truncate(n);
     msgs.truncate(n);
     tracks.truncate(n);
+    // KB_NOCC=a,b,..: those controllers left out
+    if let Ok(list) = std::env::var("KB_NOCC") {
+        let out: Vec<u32> = list.split(',').map(|s| s.parse().unwrap()).collect();
+        let keep: Vec<bool> =
+            msgs.iter().map(|&m| m & 0xF0 != 0xB0 || !out.contains(&((m >> 8) & 0x7F))).collect();
+        let mut k = keep.iter();
+        frames.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        tracks.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        msgs.retain(|_| *k.next().unwrap());
+    }
     // KB_KEY=N or LO-HI: only those keys' notes
     if let Ok(ks) = std::env::var("KB_KEY") {
         let (lo, hi) = ks.split_once('-').unwrap_or((&ks, &ks));
@@ -335,10 +347,10 @@ fn realtime() {
             pulled += pull as u64;
             ticks += 1;
             let st = synth.stats();
-            if offline > 0 && ticks % 100 == 0 {
-                eprintln!("offline {}: pulled {:.2} s in {:.1?}, sent to {:.2} s", if lower { "on" } else { "off" },
+            if offline > 0 && ticks % 25 == 0 {
+                eprintln!("offline {}: pulled {:.2} s in {:.1?}, sent to {:.2} s, voices {}", if lower { "on" } else { "off" },
                     pulled as f64 / rate as f64, t.elapsed(),
-                    sent_to.load(std::sync::atomic::Ordering::Relaxed).min(u64::MAX / 2) as f64 / rate as f64);
+                    sent_to.load(std::sync::atomic::Ordering::Relaxed).min(u64::MAX / 2) as f64 / rate as f64, st.voices);
             }
             if lower && ticks % 25 == 0 {
                 eprint!("{:.2}s: allow {} cap {} voices {} block {:.1}ms cuts {} | ", pulled as f64 / rate as f64, st.allowance,
