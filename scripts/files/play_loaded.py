@@ -919,8 +919,12 @@ class LoadedPlayer:
                 new = _tm_arrays(tmap)
                 if not all(np.array_equal(a, b) for a, b in zip(tm, new)):
                     base_new = kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
-                    held = self._retime(kout, ahead, held, tm, base, new, base_new)
-                    base = base_new
+                    held, base = self._retime(kout, ahead, held, tm, base, new, base_new)
+                    if base != base_new:  # (the clock moved so the line, own shapes and these notes stay together)
+                        clock = self.player._clock
+                        if clock is not None and clock[2] is tmap:
+                            self.player._clock = clock = (clock[0] + (base - base_new) / K_RATE, clock[1], clock[2])
+                            t_c = clock[0]
                 tm_of, tm = tmap, new
             if cur is None:
                 self.prof[3] += 1
@@ -1038,13 +1042,28 @@ class LoadedPlayer:
     def _retime(kout, ahead, held, tm, base, new, base_new):
         """The tempo changed while playing (Kestrel): what was pushed ahead (up to PUSH_S, at the old speed) taken
         back from a couple of blocks on and pushed again at the new speed, with the block not pushed yet (held);
-        returns them all as the new held. Before (F8, 2026-10-28) up to a second played on at the old speed, then
-        the rest came at the new one, out of step with the line."""
+        returns (the new held, the song's start frame from now on). Before (F8, 2026-10-28) up to a second played on
+        at the old speed, then the rest came at the new one, out of step with the line.
+        The new tempo starts EXACTLY where the sound made at the old one ends (frame `at`): the song's start frame is
+        set so, not by the clock (the hunt, 2026-10-28: by the clock, a big speed-up had every note of the ~80 ms
+        between the line and `at` start at `at` at once); the caller moves the clock by the difference."""
         from files.kestrel import RATE as K_RATE
         BLOCK = kout.k.block
         at = kout.k.cut((kout.k.stats()["rendered"] // BLOCK + 2) * BLOCK)
         if at is None:  # (no answer: it plays on as it was)
-            return held
+            return held, base_new
+
+        def tick_of(f):  # (frame -> tick at the old tempo)
+            ticks, secs, spt = tm
+            s = (np.asarray(f, np.float64) - base) / K_RATE
+            i = np.maximum(np.searchsorted(secs, s, "right") - 1, 0)
+            return ticks[i] + (s - secs[i]) / spt[i]
+
+        def sec_new(t):  # (tick -> song second at the new tempo)
+            ticks, secs, spt = new
+            j = np.maximum(np.searchsorted(ticks, t, "right") - 1, 0)
+            return secs[j] + (t - ticks[j]) * spt[j]
+        anchor = at - float(sec_new(tick_of([at]))[0]) * K_RATE
         got = []
         for c in ahead + ([held] if held is not None else []):
             k = int(np.searchsorted(c[0], at))
@@ -1052,19 +1071,11 @@ class LoadedPlayer:
                 got.append(tuple(a[k:] for a in c))
         ahead.clear()
         if not got:
-            return None
+            return None, anchor
         fr, m, tr, cp = (np.concatenate(a) for a in zip(*got))
-        # frame -> song second -> tick at the old tempo -> second -> frame at the new
-        ticks, secs, spt = tm
-        s = (fr.astype(np.float64) - base) / K_RATE
-        i = np.maximum(np.searchsorted(secs, s, "right") - 1, 0)
-        t = ticks[i] + (s - secs[i]) / spt[i]
-        ticks, secs, spt = new
-        j = np.maximum(np.searchsorted(ticks, t, "right") - 1, 0)
-        s = secs[j] + (t - ticks[j]) * spt[j]
-        fr = np.maximum(np.round(base_new + s * K_RATE), at).astype(np.uint64)
+        fr = np.maximum(np.round(anchor + sec_new(tick_of(fr)) * K_RATE), at).astype(np.uint64)
         o = np.argsort(fr, kind="stable")  # (in order again: the block not pushed yet came after the rest)
-        return fr[o], m[o], tr[o], cp[o]
+        return (fr[o], m[o], tr[o], cp[o]), anchor
 
     def _read_mutes(self):
         try:
