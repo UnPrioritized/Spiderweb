@@ -66,13 +66,47 @@ WINDOW_MOST = 4 * WANT  # a window holding more events is read again shorter (on
 QUEUE_MOST = 8 * WANT  # events read ahead at most (hunt 2026-10-25: a wall's offs read ahead took 16-30 GB)
 NO_COUNT = np.zeros(1, np.int64)
 READY_S = 0.5  # seconds of the song read before the play line starts
+SIDE_SPAN = 1 << 18  # a window of more ticks is put in order on one thread (the side by side way's tables: ticks x
+# threads)
+
+
+def helper_count():
+    """Threads reading a loaded MIDI beside the reader: a quarter of the cores, 0-3 (Kestrel's own rankers, its
+    render thread, BASS and the window need theirs)."""
+    return max(0, min(3, (os.cpu_count() or 4) // 4 - 1))
+
+
+class _Scratch:
+    """One reading thread's own memory: the bytes read, the events found (grown, never made anew for each window:
+    fresh memory cost more than the reading itself), its own handle on the file."""
+
+    def __init__(self, path=None):
+        self.buf = None
+        self.file = open(path, "rb") if path else None
+        self.t, self.m, self.k = np.empty(0, np.int64), np.empty(0, np.int32), np.empty(0, np.int32)
+
+    def room(self, n, more):
+        """The arrays hold n events + more."""
+        if n + more > len(self.t):
+            size = max(n + more, 2 * len(self.t), 1 << 20)
+
+            def grow(a, kind):
+                return np.concatenate([a[:n], np.empty(size - n, kind)])
+            self.t, self.m, self.k = grow(self.t, np.int64), grow(self.m, np.int32), grow(self.k, np.int32)
+        return n
+
+    def close(self):
+        if self.file is not None:
+            self.file.close()
 
 
 def _loops():
     fast = speed.loops()
     if fast is not None:
-        return fast.play_read, fast.play_order, fast.play_hist, fast.play_emit, fast.play_programs, fast.play_stamp
-    return midi_play.read, midi_play.order, midi_play.hist, midi_play.emit, midi_play.programs, midi_play.stamp
+        return (fast.play_read, fast.play_order, fast.play_hist, fast.play_emit, fast.play_programs, fast.play_stamp,
+                fast.play_order_count, fast.play_order_place)
+    return (midi_play.read, midi_play.order, midi_play.hist, midi_play.emit, midi_play.programs, midi_play.stamp,
+            midi_play.order_count, midi_play.order_place)
 
 
 PUSH_S = 1.0  # Kestrel (GPU): events pushed this far ahead of the line (ranking a dense push takes a while)
@@ -145,6 +179,8 @@ class LoadedPlayer:
         self.prof = [0.0, 0.0, 0, 0, 0.0]  # (Kestrel feeder, measuring: seconds stamping, pushing, pushes, steps with
         # nothing read, how far the reading was short of the push)
         self._place_s = 0.0  # (seconds finding every track's place took last time: a jump goes that much further)
+        # (the reader's own memory + file, its helper threads': made when it starts)
+        self._sc, self._helpers, self._pool_x, self._file = _Scratch(), [], None, None
 
     # --- the reader ---------------------------------------------------------------------------------------------
 
@@ -175,10 +211,11 @@ class LoadedPlayer:
         self.sk = lm.skip_all
         self.sk_end = lm.skip_at[self.num + 1] if len(num) else np.zeros(0, np.int64)
 
-    def _fill(self, buf, slots, at, size):
-        """buf[at[j]:at[j] + size[j]] = slot j's bytes from its place (file: one read each; kept bytes: copied)."""
+    def _fill(self, buf, slots, at, size, f=None):
+        """buf[at[j]:at[j] + size[j]] = slot j's bytes from its place (file: one read each, from f or the reader's
+        own; kept bytes: copied)."""
         if self.mode_file:
-            f = self._file
+            f = f or self._file
             view = memoryview(buf)
             for s, a, z in zip(slots.tolist(), at.tolist(), size.tolist()):
                 f.seek(int(self.start_of[s] + self.pos[s]))
@@ -190,11 +227,13 @@ class LoadedPlayer:
             p = int(self.pos[s])
             buf[a:a + z] = self.lm.tracks[int(self.num[s])].data[p:p + z]
 
-    def _read(self, slots, t1, most=None, count=None):
+    def _read(self, slots, t1, most=None, count=None, sc=None):
         """Slots' events up to tick t1 (their places moved on): (ticks, messages, track numbers), track by track.
         most: more events than this = None (stopped part way: the caller puts the places back and reads less).
-        count = the notes sounding per slot x channel x key, notes only counted there (not kept)."""
+        count = the notes sounding per slot x channel x key, notes only counted there (not kept). sc = the
+        _Scratch read into (a helper thread's; else the reader's own), the arrays returned are its."""
         read = _loops()[0]
+        sc = sc or self._sc
         n = 0
         counting = count is not None
         if count is None:
@@ -222,15 +261,15 @@ class LoadedPlayer:
                     more.append(slots[lo:lo + 4096][cut:])
                 at = np.concatenate([[0], np.cumsum(zz)[:-1]]).astype(np.int64)
                 total = int(zz.sum())
-                if self._buf is None or len(self._buf) < total:
-                    self._buf = np.empty(max(total, 1 << 22), np.uint8)
-                self._fill(self._buf, ss, at, zz)
+                if sc.buf is None or len(sc.buf) < total:
+                    sc.buf = np.empty(max(total, 1 << 22), np.uint8)
+                self._fill(sc.buf, ss, at, zz, sc.file)
                 tick, run = self.tick[ss].copy(), self.run[ss].copy()
                 nxt, used = np.empty(len(ss), np.int64), np.empty(len(ss), np.int64)
                 sk_i = self.sk_i[ss].copy()
-                n = self._room(n, total // 2 + 2 * len(ss))
-                n = read(self._buf, at, zz, t1, tick, run, nxt, used, self.num32[ss], self._sc_t, self._sc_m,
-                         self._sc_k, n, self.pos[ss], self.sk, sk_i, self.sk_end[ss], counting, count, ss)
+                n = sc.room(n, total // 2 + 2 * len(ss))
+                n = read(sc.buf, at, zz, t1, tick, run, nxt, used, self.num32[ss], sc.t, sc.m, sc.k, n,
+                         self.pos[ss], self.sk, sk_i, self.sk_end[ss], counting, count, ss)
                 self.tick[ss], self.run[ss], self.nxt[ss], self.sk_i[ss] = tick, run, nxt, sk_i
                 self.pos[ss] += used
                 # what this window still needs of them: cut short by the chunk / an event longer than read
@@ -247,8 +286,29 @@ class LoadedPlayer:
                 if most is not None and n > most:  # (too many for one window: read less)
                     return None
             slots = np.concatenate(more) if more else np.zeros(0, np.int64)
-        self._rechannel(self._sc_m[:n], self._sc_k[:n])
-        return self._sc_t[:n], self._sc_m[:n], self._sc_k[:n]
+        self._rechannel(sc.m[:n], sc.k[:n])
+        return sc.t[:n], sc.m[:n], sc.k[:n]
+
+    def _read_side(self, slots, t1, most):
+        """_read on the reader's helper threads side by side (a dense part: one thread read Shinki's beat 1124 at a
+        third of real time, 2026-10-27), the slots shared out by about how many bytes each still has before t1:
+        a list of each part's (ticks, messages, tracks), slots in order; None = more than `most` in all."""
+        helpers = self._helpers
+        if len(slots) < 64 or not helpers:
+            got = self._read(slots, t1, most)
+            return None if got is None else [got]
+        j2 = np.searchsorted(self.cp_key, slots * self.M + t1, "left") if len(self.cp_key) else None
+        end = (np.where(j2 < self.seg1[slots], self.cp_off[np.minimum(j2, len(self.cp_off) - 1)], self.limit[slots])
+               if j2 is not None else self.limit[slots])
+        left = np.cumsum(np.maximum(end - self.pos[slots], 256))
+        parts = len(helpers) + 1
+        cuts = np.searchsorted(left, left[-1] * np.arange(1, parts) / parts)
+        groups = [g for g in np.split(slots, cuts) if len(g)]
+        jobs = [self._pool_x.submit(self._read, g, t1, most, None, sc) for g, sc in zip(groups[1:], helpers)]
+        out = [self._read(groups[0], t1, most)] + [j.result() for j in jobs]
+        if any(o is None for o in out) or sum(len(o[0]) for o in out) > most:
+            return None
+        return out
 
     def _rechannel(self, ms, ks):
         """Messages of tracks given a new channel in Track Properties (lm.rechannel, as playing started) moved onto
@@ -262,28 +322,30 @@ class LoadedPlayer:
         if on.any():
             ms[on] = (ms[on] & ~0xF) | ch[on].astype(ms.dtype)
 
-    def _room(self, n, more):
-        """The reading's own arrays hold n events + more (grown, never made anew for each window: fresh memory
-        cost more than the reading itself)."""
-        if n + more > len(self._sc_t):
-            size = max(n + more, 2 * len(self._sc_t), 1 << 20)
-
-            def grow(a, kind):
-                return np.concatenate([a[:n], np.empty(size - n, kind)])
-            self._sc_t, self._sc_m, self._sc_k = (grow(self._sc_t, np.int64), grow(self._sc_m, np.int32),
-                                                  grow(self._sc_k, np.int32))
-        return n
-
-    def _sorted(self, ts, ms, ks, w0, w1):
-        """A window's events in tick order, in arrays from the pool (the feeder gives them back once played)."""
-        n = len(ts)
+    def _sorted(self, parts, w0, w1):
+        """A window's events (parts: _read_side's list) in tick order, in arrays from the pool (the feeder gives
+        them back once played). Several parts: counted and placed side by side on the helper threads."""
+        n = sum(len(p[0]) for p in parts)
         with self._lock:
             i = next((i for i, b in enumerate(self._pool) if len(b[0]) >= n), None)
             got = None if i is None else self._pool.pop(i)  # (by place: remove() compares the arrays)
         if got is None:
             size = 1 << max(16, (n - 1).bit_length())
             got = (np.empty(size, np.int64), np.empty(size, np.int32), np.empty(size, np.int32))
-        _loops()[1](ts, ms, ks, w0, max(1, w1 - w0), got[0], got[1], got[2])
+        span = max(1, w1 - w0)
+        if len(parts) == 1 or span > SIDE_SPAN:
+            ts, ms, ks = parts[0] if len(parts) == 1 else (np.concatenate(a) for a in zip(*parts))
+            _loops()[1](ts, ms, ks, w0, span, got[0], got[1], got[2])
+            return got[0][:n], got[1][:n], got[2][:n], got
+        count, place = _loops()[6], _loops()[7]
+        h = np.zeros((len(parts), span), np.int64)
+        list(self._pool_x.map(lambda j: count(parts[j][0], w0, h[j]), range(len(parts))))
+        # (each part's place on each tick: every earlier tick's events, then the earlier parts' on this tick)
+        tot = h.sum(0)
+        start = np.cumsum(tot) - tot
+        at = np.cumsum(h, 0) - h + start
+        list(self._pool_x.map(lambda j: place(parts[j][0], parts[j][1], parts[j][2], w0, at[j], got[0], got[1],
+                                              got[2]), range(len(parts))))
         return got[0][:n], got[1][:n], got[2][:n], got
 
     def _place(self, t0):
@@ -408,11 +470,14 @@ class LoadedPlayer:
         return st
 
     def _reader(self, t0):
-        self._buf, self._file = None, None
-        self._sc_t, self._sc_m, self._sc_k = np.empty(0, np.int64), np.empty(0, np.int32), np.empty(0, np.int32)
+        from concurrent.futures import ThreadPoolExecutor
+        path = self.lm.path if self.lm.mode != "memory" else None
+        self._sc, self._helpers, self._pool_x = _Scratch(), [], None
         try:
-            if self.lm.mode != "memory":
-                self._file = open(self.lm.path, "rb")
+            self._sc = _Scratch(path)
+            self._file = self._sc.file
+            self._helpers = [_Scratch(path) for _ in range(helper_count())]
+            self._pool_x = ThreadPoolExecutor(max(1, len(self._helpers)), thread_name_prefix="loaded-read")
             self._table()
             start = t0
             while not self._stop.is_set():
@@ -456,7 +521,7 @@ class LoadedPlayer:
                     todo = np.flatnonzero(~self.done & (self.nxt < w1))
                     kept = [a.copy() for a in (self.pos, self.tick, self.run, self.nxt, self.want, self.done,
                                                self.sk_i)]
-                    got = self._read(todo, w1, most=WINDOW_MOST)
+                    got = self._read_side(todo, w1, WINDOW_MOST)
                     if got is None:  # (too many events in it: a shorter window from the same place)
                         self.pos, self.tick, self.run, self.nxt, self.want, self.done, self.sk_i = kept
                         if w1 - w0 > 1:
@@ -473,8 +538,7 @@ class LoadedPlayer:
                         self.walls += 1
                         w0 = w1
                         continue
-                    ts, ms, ks = got
-                    ts, ms, ks, base = self._sorted(ts, ms, ks, w0, w1)
+                    ts, ms, ks, base = self._sorted(got, w0, w1)
                     with self._lock:
                         if self._gen != gen or self._jump is not None:
                             break
@@ -501,8 +565,10 @@ class LoadedPlayer:
             write_log(*sys.exc_info(), "(playing a loaded MIDI)")
         finally:
             self.ready.set()
-            if self._file is not None:
-                self._file.close()
+            if self._pool_x is not None:
+                self._pool_x.shutdown(wait=True)
+            for sc in [self._sc] + self._helpers:
+                sc.close()
 
     def _queued(self):
         """Events read and not played yet."""

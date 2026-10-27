@@ -4,6 +4,7 @@ very same functions with Numba (play_read / play_order / play_hist / play_emit),
 read   many tracks' channel events from their bytes, up to a tick (what playing needs)
 programs  a track's program / bank state at a byte place (where playing starts: the instruments in effect there)
 order  events of many tracks put in tick order (counting sort: each track's own order kept, earlier tracks first)
+order_count / order_place  the same in halves, for a window read on several threads
 hist   how many note-ons each synth gets in one step, by velocity (the note budget's thinning)
 emit   one step's events as raw MIDI bytes for each synth: thinned, muted and late notes left out together with
        their note-offs (a key's counter of offs still to skip), controllers to every synth of their channel"""
@@ -210,6 +211,24 @@ def order(ticks, ms, ks, base, span, out_t, out_m, out_k):
         out_m[j] = ms[i]
         out_k[j] = ks[i]
         count[k] = j + 1
+
+
+def order_count(ticks, base, count):
+    """order's first half for one part of a window read on several threads: count[tick - base] += 1."""
+    for i in range(len(ticks)):
+        count[ticks[i] - base] += 1
+
+
+def order_place(ticks, ms, ks, base, at, out_t, out_m, out_k):
+    """order's second half for one part: each event to at[its tick - base] (moved on), its places worked out from
+    every part's order_count (the parts side by side; earlier parts first on a tick)."""
+    for i in range(len(ticks)):
+        k = ticks[i] - base
+        j = at[k]
+        out_t[j] = ticks[i]
+        out_m[j] = ms[i]
+        out_k[j] = ks[i]
+        at[k] = j + 1
 
 
 def hist(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, h):

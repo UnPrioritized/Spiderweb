@@ -34,8 +34,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_gather    midi_scan.gather (Extract: a loaded track's notes in a box), the very same function compiled
   midi_index, midi_close, midi_grid, midi_halve   midi_index's functions (Load MIDI's pass: notes paired, the index
                  to read a track from anywhere, the overview picture), the very same functions compiled
-  play_read, play_order, play_hist, play_emit, play_programs, play_stamp   midi_play's functions (playing a loaded MIDI),
-                 compiled
+  play_read, play_order, play_order_count, play_order_place, play_hist, play_emit, play_programs, play_stamp
+                 midi_play's functions (playing a loaded MIDI), compiled
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
 
@@ -1688,6 +1688,8 @@ midi_cover = njit(cache=CACHE, nogil=True)(_index.cover)
 midi_merge_loud = njit(cache=CACHE, nogil=True)(_index.merge_loud)
 play_read = njit(cache=CACHE, nogil=True)(midi_play.read)
 play_order = njit(cache=CACHE, nogil=True)(midi_play.order)
+play_order_count = njit(cache=CACHE, nogil=True)(midi_play.order_count)
+play_order_place = njit(cache=CACHE, nogil=True)(midi_play.order_place)
 play_hist = njit(cache=CACHE, nogil=True)(midi_play.hist)
 play_emit = njit(cache=CACHE, nogil=True)(midi_play.emit)
 play_programs = njit(cache=CACHE, nogil=True)(midi_play.programs)
@@ -1797,6 +1799,8 @@ def warm():
     play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),
               i32.copy(), 0, i1.copy(), i1[:0], i1.copy(), i1.copy(), False, i1.copy(), i1.copy())
     play_order(i1, i32, i32, 0, 1, i1.copy(), i32.copy(), i32.copy())
+    play_order_count(i1, 0, i1.copy())
+    play_order_place(i1, i32, i32, 0, i1.copy(), i1.copy(), i32.copy(), i32.copy())
     h2 = np.zeros((1, 128), np.int64)
     play_hist(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, h2)
     play_emit(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, i1, i1.copy(), np.zeros(1 << 17, np.int64), np.zeros((1, 3), np.uint8),
