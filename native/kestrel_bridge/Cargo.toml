@@ -1,0 +1,20 @@
+[package]
+name = "kestrel_bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Spiderweb's live connection to the Kestrel GPU synth: a C ABI over Kestrel's live render"
+
+[lib]
+# cdylib = the DLL Spiderweb loads with ctypes; rlib = for this crate's own tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1"
+# mbms's fork of Kestrel (live interface + "runs inside another process" fix), pinned. Kestrel's files are used
+# as they are: everything Spiderweb-specific lives in this crate. Updating: see the kestrel-update skill.
+kestrel = { git = "https://github.com/mbms0/kestrel-midi", rev = "844b0027cffa2949e0f6181c99c83a4a7f01b4e1", default-features = false, features = ["dx12-dxc"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
