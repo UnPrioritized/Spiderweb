@@ -180,6 +180,9 @@ struct Ring {
 struct Batch {
     msgs: Vec<Pending>,
     spans: Vec<rank::Span>,
+    /// (not the front batch) messages taken already: a later push due sooner (own shapes 0.2 s ahead behind the
+    /// loaded MIDI's 1 s) is played on time, not after the one before it (hunt 2026-10-27: 0.8 s late)
+    pos: usize,
 }
 
 #[derive(Default)]
@@ -351,6 +354,7 @@ impl Synth {
         PROFILE[5].fetch_add(1, Ordering::Relaxed);
         let mut whole = self.shared.pool.lock().unwrap().pop().unwrap_or_default();
         whole.spans.clear();
+        whole.pos = 0;
         let batch = &mut whole.msgs;
         batch.clear();
         // note lengths given, or paired below inside this push (FIFO per channel + key)
@@ -575,6 +579,7 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
                 }
                 at = 0;
                 span = 0;
+                budget.forget();
             }
             future.extend(inbox.batches.drain(..));
         }
@@ -593,11 +598,13 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         while future.front().is_some_and(|b| at >= b.msgs.len()) {
             let b = future.pop_front().unwrap();
             recycle(s, b);
-            at = 0;
+            at = future.front().map_or(0, |b| b.pos);
             span = 0;
         }
+        // (a later batch with messages due in this block too: all read the general way below)
+        let others = future.iter().skip(1).any(|b| b.msgs.get(b.pos).is_some_and(|p| p.frame < end));
         // A ranked block starting here and ending before `end` is the whole block: no search through it.
-        let ranked = future.front().and_then(|b| {
+        let ranked = future.front().filter(|_| !others).and_then(|b| {
             while span < b.spans.len() && (b.spans[span].start as usize) < at {
                 span += 1;
             }
@@ -606,7 +613,7 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             (b.msgs[at].frame < end && b.msgs.get(stop).map_or(true, |p| p.frame >= end)).then_some((stop, g.ons))
         });
         let inside = ranked.map(|r| r.0).or_else(|| {
-            future.front().and_then(|b| b.msgs[at..].iter().position(|p| p.frame >= end).map(|j| at + j))
+            future.front().filter(|_| !others).and_then(|b| b.msgs[at..].iter().position(|p| p.frame >= end).map(|j| at + j))
         });
         let n_msgs;
         let dropped = if let Some(j) = inside {
@@ -615,18 +622,40 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             at = j;
             d
         } else {
-            while let Some(batch) = future.front() {
-                while at < batch.msgs.len() && batch.msgs[at].frame < end {
-                    taken.push(batch.msgs[at]);
-                    at += 1;
+            // every batch's messages due in this block, each read from where it is; several batches = put together
+            // by frame, each one's own order kept (sorted by its running highest frame: as Kestrel plays a batch)
+            let mut keys: Vec<u64> = Vec::new();
+            for (i, batch) in future.iter_mut().enumerate() {
+                let mut k = if i == 0 { at } else { batch.pos };
+                let mut high = 0u64;
+                while k < batch.msgs.len() && batch.msgs[k].frame < end {
+                    taken.push(batch.msgs[k]);
+                    if others {
+                        high = high.max(batch.msgs[k].frame);
+                        keys.push(high);
+                    }
+                    k += 1;
                 }
-                if at < batch.msgs.len() {
-                    break;
+                if i == 0 {
+                    at = k;
+                } else {
+                    batch.pos = k;
                 }
-                let b = future.pop_front().unwrap();
-                recycle(s, b);
-                at = 0;
-                span = 0;
+            }
+            if others {
+                let mut order: Vec<usize> = (0..taken.len()).collect();
+                order.sort_by_key(|&i| keys[i]);
+                taken = order.iter().map(|&i| taken[i]).collect();
+            }
+            // (batches read to their end go; the front one at the next block)
+            let mut i = 1;
+            while i < future.len() {
+                if future[i].pos >= future[i].msgs.len() {
+                    let b = future.remove(i).unwrap();
+                    recycle(s, b);
+                } else {
+                    i += 1;
+                }
             }
             n_msgs = taken.len();
             let d = budget.filter(&taken, None, lower, &mut push);

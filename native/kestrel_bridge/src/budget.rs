@@ -220,6 +220,27 @@ impl Budget {
         }
     }
 
+    /// Every note's pairing forgotten: a cancel (the offs pushed ahead are gone; Spiderweb ends what sounds itself).
+    /// Kept, an old "dropped" ate a later kept note's off and it rang on, every key then an off behind (hunt
+    /// 2026-10-27: Stop + Play in Shinki's busy part, notes piled up).
+    pub fn forget(&mut self) {
+        for r in &mut self.held {
+            r.0.clear();
+        }
+    }
+
+    /// A channel's pairing forgotten at its all notes off / all sound off (CC 123 / 120): nothing sounds there now
+    /// (a wall's silence: Spiderweb leaves its notes' offs out).
+    fn forget_channel(&mut self, msg: u32) {
+        if msg & 0xF0 != 0xB0 || !matches!((msg >> 8) & 0x7F, 120 | 123) {
+            return;
+        }
+        let ch = ((((msg >> 24) & 0x0F) << 4) | (msg & 0x0F)) as usize;
+        for r in &mut self.held[ch * 128..ch * 128 + 128] {
+            r.0.clear();
+        }
+    }
+
     pub fn allowance(&self) -> u32 {
         self.allow.map_or(u32::MAX, |a| a as u32)
     }
@@ -288,6 +309,7 @@ impl Budget {
                 }
             } else if status == 0xB0 {
                 self.level.cc(p.msg);
+                self.forget_channel(p.msg);
             }
             if self.keep[i] {
                 // (a kept note-on carries the loudness of the copies merged into it)
@@ -322,6 +344,7 @@ impl Budget {
             if !on && !off {
                 if status == 0xB0 {
                     self.level.cc(p.msg);
+                    self.forget_channel(p.msg);
                 }
                 self.stay.push((i as u32, 0.0, 1));
                 continue;
@@ -884,6 +907,31 @@ mod tests {
         b.allow = None;
         b.filter(&mut block, None, true, |p, _| kept.push(p.msg));
         assert_eq!(kept.len(), 1);
+    }
+
+    /// Hunt 2026-10-27: a dropped note still waiting for its off when the sound was stopped (cancel / all notes
+    /// off) ate the off of the next KEPT note on its key: it rang on.
+    #[test]
+    fn a_stop_forgets_dropped_notes() {
+        for how in ["cancel", "cc123", "cc120"] {
+            let mut b = Budget::new(1 << 20);
+            b.allow = Some(1.0);
+            // (the quiet one first: dropped, its "dropped" left at the front of the key's queue)
+            let mut block = vec![on(1, 60, 5), on(1, 60, 100)];
+            b.filter(&mut block, None, true, |_, _| {});
+            b.allow = None;
+            match how {
+                "cancel" => b.forget(),
+                _ => {
+                    let cc = Pending::new(0, 0xB0 | if how == "cc123" { 123 } else { 120 } << 8, 0);
+                    b.filter(&[cc], None, true, |_, _| {});
+                }
+            }
+            let mut block = vec![on(1, 60, 100), off(60)];
+            let mut kept = Vec::new();
+            b.filter(&mut block, None, true, |p, _| kept.push(p.msg));
+            assert_eq!(kept.len(), 2, "{how}: the new note's off was eaten");
+        }
     }
 
     #[test]
