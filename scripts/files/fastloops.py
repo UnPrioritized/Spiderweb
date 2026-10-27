@@ -1809,14 +1809,15 @@ def warm():
               i1.copy(), False)
     play_programs(u8, 0, 0, np.zeros(midi_play.PS_SIZE, np.int64))
     f1 = np.zeros(1, np.float64)
-    play_stamp(i32, i32, 0, 0, i1, u8, i1, np.zeros(1 << 17, np.int64), i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0,
+    line = midi_play.Line(4)
+    play_stamp(i32, i32, 0, 0, i1, u8, i1, i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0,
                np.zeros(1, np.uint64), np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(3, np.int64),
                np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64), np.zeros(1, np.int64),
-               np.zeros(midi_play.OPEN, np.int64))
-    play_condense(i1, i32, i32, i1.copy(), np.zeros(1 << 17, np.int64), 0, i1.copy(), np.zeros(1, np.uint32),
+               *line.arrays())
+    play_condense(i1, i32, i32, i1.copy(), 0, i1.copy(), np.zeros(1, np.uint32),
                   np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64),
                   np.zeros(1, np.int64), np.zeros(4, np.int64), np.full(1 << 17, -1, np.int64))
     play_stamp_pre(i32, np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), 0, 0, 0,
-                   np.zeros(1 << 17, np.int64), i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0, np.zeros(1, np.uint64),
+                   i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0, np.zeros(1, np.uint64),
                    np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(3, np.int64), False,
-                   np.zeros(midi_play.OPEN, np.int64))
+                   *line.arrays())

@@ -607,18 +607,15 @@ class LoadedPlayer:
     def _leave_part(self):
         """(The reader) the part read ahead the feeder stopped playing at tick tm (a track muted meanwhile: a part
         holds every track, hunt 2026-10-27): what was read past it dropped, the reading placed at tm, live from
-        there. Its notes sounding at tm were heard (copies as one, the file's from before it in full): their offs
-        go; the file's extra copies' offs are left out. Returns tm."""
+        there. Nothing to leave out: the feeder's line holds every note before tm, copies too. Returns tm."""
         with self._lock:
             gen, p, tm = self._unpart
             self._queue.clear()
-        heard = p.unheard(tm)  # (as the part counts them)
-        skip, _ = self._place(tm)  # (as the file does)
-        np.maximum(skip - heard, 0, out=skip)
+        self._place(tm)
         with self._lock:
             self._unpart = None
             if self._gen == gen:
-                self._queue.append([np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32), 0, skip,
+                self._queue.append([np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32), 0, None,
                                     None])
                 self._horizon = tm
         return tm
@@ -840,9 +837,7 @@ class LoadedPlayer:
         from files.kestrel import BLOCK, RATE as K_RATE
         stamp = _loops()[5]
         kout = self.out.handle
-        skip = np.zeros(SKIP, np.int64)
-        # (notes sent and not ended, by port % 16 x channel x key: a part read ahead ends at most those)
-        opened = self._opened = np.zeros(midi_play.OPEN, np.int64)
+        line = midi_play.Line()  # (each key's notes in Kestrel's order: the offs of notes left out go too)
         counts = np.zeros(3, np.int64)
         table = (np.zeros(midi_play.COPY_TABLE, np.uint32), np.zeros(midi_play.COPY_TABLE, np.int64),
                  np.zeros(midi_play.COPY_TABLE, np.int64))  # (stamp's: exact copies on one tick sent once)
@@ -857,12 +852,13 @@ class LoadedPlayer:
         silent = np.array(self._kestrel_silence(), np.uint32)
 
         def took(cur):
+            """A window taken: a wall stepped over = every sound stopped, the notes sounding after it left out;
+            notes sounding where playing starts (the reader's counts) left out."""
             if isinstance(cur[4], tuple) and cur[4][0] == "wall":
-                skip[:] = cur[4][1]
-                opened[:] = 0
+                line.reset(cur[4][1])
                 wall["t"] = cur[4][2]
-            else:
-                self._took(cur, skip)
+            elif cur[4] is not None and not isinstance(cur[4], tuple):
+                line.add(cur[4])
         while not self._stop.is_set():
             time.sleep(STEP_S)
             clock = self.player._clock
@@ -894,8 +890,7 @@ class LoadedPlayer:
                         kout.cancel()
                         self.silence(reset=True)
                     gen, cur, held = self._gen, None, None
-                    skip[:] = 0
-                    opened[:] = 0
+                    line.reset()
                     wall["t"], wall["floor"] = None, 0.0
                 if cur is None and self._queue and self._unpart is None:
                     cur = self._queue.popleft()
@@ -923,7 +918,8 @@ class LoadedPlayer:
                     if tm_of is not tmap:  # (the tempo map as arrays, for the compiled loop)
                         tm_of, tm = tmap, (np.asarray(tmap.ticks, np.int64), np.asarray(tmap.secs, np.float64),
                                            np.asarray(tmap.spt, np.float64))
-                    size = i1 - i if dense is None else midi_play.pre_room(ms, dense.cp, i, i1, opened)
+                    size = i1 - i if dense is None else midi_play.pre_room(ms, dense.cp, i, i1, line.st)
+                    line.room(midi_play.ons_in(ms, i, i1))
                     fr = np.empty(size, np.uint64)
                     m = np.empty(size, np.uint32)
                     tr = np.empty(size, np.uint16)
@@ -932,11 +928,11 @@ class LoadedPlayer:
                     base = kout._f0 + (t_c - sec - kout._t0) * K_RATE
                     t_s = time.perf_counter()
                     if dense is None:
-                        n = stamp(ms, ks, i, i1, ts, self.muted, self.tport, skip, *tm, base, float(K_RATE), least,
-                                  fr, m, tr, counts, cp, *table, opened)
+                        n = stamp(ms, ks, i, i1, ts, self.muted, self.tport, *tm, base, float(K_RATE), least,
+                                  fr, m, tr, counts, cp, *table, *line.arrays())
                     else:  # (read ahead: copies collapsed already)
-                        n = _loops()[9](ts, ms, ks, dense.cp, dense.t0, i, i1, skip, *tm, base, float(K_RATE),
-                                        least, fr, m, tr, cp, counts, False, opened)
+                        n = _loops()[9](ts, ms, ks, dense.cp, dense.t0, i, i1, *tm, base, float(K_RATE),
+                                        least, fr, m, tr, cp, counts, False, *line.arrays())
                     self.prof[0] += time.perf_counter() - t_s
                     if wall["floor"]:  # (a wall's controllers: after its silence, never before it)
                         np.maximum(fr[:n], np.uint64(int(wall["floor"] + 0.5)), out=fr[:n])
@@ -945,8 +941,6 @@ class LoadedPlayer:
                     self.thinned += int(counts[0] - counts[1])  # (muted / too late: as _feeder counts them)
                     cur[3] = i = i1
                 if i >= len(ts):
-                    if dense is not None:  # (copies sounding on past the part: their offs left out still)
-                        skip[dense.skip_q] += dense.skip_n
                     with self._lock:
                         if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
                             self._pool.append(cur[5])
@@ -1002,8 +996,6 @@ class LoadedPlayer:
         if isinstance(cur[4], tuple):
             self.silence()
             skip[:] = cur[4][1]
-            if getattr(self, "_opened", None) is not None:  # (every sound stopped: none open)
-                self._opened[:] = 0
         else:
             skip += cur[4]
 

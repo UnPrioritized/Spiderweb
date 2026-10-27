@@ -58,35 +58,31 @@ def key_of(lm):
 
 class Part:
     """One part read ahead: ticks t0..t1; ts (int32, from t0), ms (message, port in the top byte), tr (the note
-    budget's channel + port), cp (copies) as condense made them; skip_q / skip_n = note-offs still to leave out at
-    its end (copies sounding on past it); s0_q / s0_n = the file's notes sounding at t0 (their offs are in it)."""
+    budget's channel + port), cp (copies) as condense made them, every note-off kept (the feeder's line leaves out
+    the ones of notes it left out); s0_q / s0_n = the file's notes sounding at t0 (their offs are in it)."""
 
-    def __init__(self, t0, t1, ts, ms, tr, cp, skip, s0):
+    def __init__(self, t0, t1, ts, ms, tr, cp, s0):
         self.t0, self.t1 = t0, t1
         self.ts, self.ms, self.tr, self.cp = ts, ms, tr, cp
-        self.skip_q = np.flatnonzero(skip)
-        self.skip_n = skip[self.skip_q]
         self.s0_q = np.flatnonzero(s0)
         self.s0_n = s0[self.s0_q]
 
     def unheard(self, tick):
-        """Notes sounding at tick inside the part as its own note-offs count them (SKIP places): the file's from
-        before t0 still on, then its own (copies as one). Playing starts at tick: these offs are left out (hunt
-        2026-10-27: counting only its own, the earlier notes' offs came through and ended other notes early)."""
+        """Notes sounding at tick inside the part (SKIP places): the file's from before t0 still on, then its own
+        (copies counted). Playing starts at tick: these offs are left out (hunt 2026-10-27: counting only its own,
+        the earlier notes' offs came through and ended other notes early)."""
         from files.play_loaded import SKIP
         skip = np.zeros(SKIP, np.int64)
         skip[self.s0_q] = self.s0_n
-        self.sounding(tick, skip)
-        return skip
-
-    def sounding(self, tick, skip):
-        """skip += the part's notes sounding at tick (playing starts there: their offs left out)."""
+        line = midi_play.Line(midi_play.OPEN + 1)  # (dry: every note left out, a key's runs one node)
+        line.add(skip)
         i = int(np.searchsorted(self.ts, tick - self.t0, "left"))
-        if i:  # (dry: every note-on counted into skip, its own offs taking it back)
-            _stamp_pre()(self.ts, self.ms, self.tr, self.cp, self.t0, 0, i, skip, np.zeros(1, np.int64),
+        if i:
+            _stamp_pre()(self.ts, self.ms, self.tr, self.cp, self.t0, 0, i, np.zeros(1, np.int64),
                          np.zeros(1, np.float64), np.zeros(1, np.float64), 0.0, 0.0, 0.0, np.zeros(0, np.uint64),
                          np.zeros(0, np.uint32), np.zeros(0, np.uint16), np.zeros(0, np.uint32),
-                         np.zeros(3, np.int64), True, np.zeros(midi_play.OPEN, np.int64))
+                         np.zeros(3, np.int64), True, *line.arrays())
+        return line.left_out()
 
 
 def _stamp_pre():
@@ -168,8 +164,7 @@ class Dense:
         """One part read and collapsed (None: stopped, or too much kept)."""
         from files.play_loaded import SKIP
         condense = _condense()
-        s0, _ = rd._place(t0)  # (its skip left out: the notes sounding at t0 were played live, their offs go)
-        skip = np.zeros(SKIP, np.int64)
+        s0, _ = rd._place(t0)  # (the notes sounding at t0: only for a play starting inside the part, unheard)
         last_on = np.full(SKIP, -1, np.int64)
         counts = np.array([0, 0, 0, -1], np.int64)
         tab = (np.zeros(midi_play.COPY_TABLE, np.uint32), np.zeros(midi_play.COPY_TABLE, np.int64),
@@ -197,8 +192,7 @@ class Dense:
                 z = min(SLICE, len(ts) - s)
                 if not room(n, z):
                     return False
-                n = condense(ts[s:s + z], ms[s:s + z], ks[s:s + z], rd.tport, skip, n, *out, *tab, counts,
-                             last_on)
+                n = condense(ts[s:s + z], ms[s:s + z], ks[s:s + z], rd.tport, n, *out, *tab, counts, last_on)
             return True
         while w0 < t1:
             if self._stop.is_set():
@@ -233,7 +227,7 @@ class Dense:
                 span *= 2
             w0 = w1
         return Part(t0, t1, (out[0][:n] - t0).astype(np.int32), out[1][:n].copy(), out[2][:n].copy(),
-                    out[3][:n].copy(), skip, s0)
+                    out[3][:n].copy(), s0)
 
 
 def ensure(lm):

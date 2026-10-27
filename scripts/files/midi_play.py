@@ -253,18 +253,18 @@ COPY_TABLE = 1 << 20  # (stamp's table of note-ons on the tick being read: power
 COPY_PROBES = 64  # ... places looked at for one; none free = sent on its own
 
 
-def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate, least, fr, out, tr, counts, cp,
-          tab_key, tab_gen, tab_at, opened):
+def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least, fr, out, tr, counts, cp,
+          tab_key, tab_gen, tab_at, head, tail, val, nxt, st):
     """Kestrel (GPU): events i0..i1 into fr / out / tr (the frame each sounds at, the message with its port in the top
     byte, what the note budget shares by: channel + port) from 0; returns how many. Frame = base + rate x song
     seconds (tempo map mt ticks / ms_ seconds / mspt seconds a tick, playback.TimeMap's). A note-on of a muted track, or for a frame before `least` (too late:
-    the sound is made already), is left out with the next note-off of its key (skip, as emit); other late events go
+    the sound is made already), is left out with ITS note-off (the line: head ... st, see Line); other late events go
     at `least` (a whole block's start); everything else goes: Kestrel's own note budget chooses. counts[0] +=
     note-ons wanted, counts[1] += note-ons sent.
     EXACT COPIES (same tick, message and port; Shinki's dense part: 4.5 note-ons for each different one) go ONCE,
-    cp[k] = how many (kb_push_copies: their loudness adds as amplitudes); the copies' note-offs are left out
-    (skip): one off ends the note. tab_* = a table over the tick being read, counts[2] = its generation.
-    opened[port % 16, channel, key] (OPEN places) = notes sent and not ended yet (stamp_pre: offs past them go)."""
+    cp[k] = how many (kb_push_copies: their loudness adds as amplitudes); the copies' note-offs are left out: the
+    first one's off ends the note. tab_* = a table over the tick being read, counts[2] = its generation. The line
+    needs room for a node per note-on (Line.room)."""
     n = 0
     j = 0
     while j + 1 < len(mt) and mt[j + 1] <= ticks[i0]:
@@ -287,37 +287,65 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate,
             # read ahead and the live reading counted under different ports)
             q = ((port % 16) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
             if hi == 0x9 and (m >> 16) & 127 > 0:
-                if muted[trk[i]]:  # (not wanted: never counted as thinned, it showed "Overloaded", hunt 2026-10-27)
-                    skip[q] += 1
+                d = 1  # (left out)
+                # (muted = not wanted: never counted as thinned, it showed "Overloaded", hunt 2026-10-27)
+                if not muted[trk[i]]:
+                    counts[0] += 1
+                    if f >= least:
+                        counts[1] += 1
+                        key = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
+                        h = (int(key) * 2654435761) & (COPY_TABLE - 1)
+                        found = -1
+                        for _ in range(COPY_PROBES):
+                            if tab_gen[h] != counts[2]:
+                                tab_gen[h] = counts[2]
+                                tab_key[h] = key
+                                tab_at[h] = n
+                                break
+                            if tab_key[h] == key:
+                                found = tab_at[h]
+                                break
+                            h = (h + 1) & (COPY_TABLE - 1)
+                        if found >= 0:
+                            cp[found] += 1  # (its off left out: the copy sent first ends with the first one)
+                        else:
+                            d = -1
+                # (at the back of its key's line: Line)
+                b = tail[q]
+                if b >= 0 and (val[b] > 0) == (d > 0):
+                    val[b] += d
+                else:
+                    k = st[0]
+                    if k >= 0:
+                        st[0] = nxt[k]
+                    else:
+                        k = st[2]
+                        st[2] += 1
+                    val[k] = d
+                    nxt[k] = -1
+                    if b >= 0:
+                        nxt[b] = k
+                    else:
+                        head[q] = k
+                    tail[q] = k
+                if d > 0:
                     continue
-                counts[0] += 1
-                if f < least:
-                    skip[q] += 1
-                    continue
-                counts[1] += 1
-                key = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
-                h = (int(key) * 2654435761) & (COPY_TABLE - 1)
-                found = -1
-                for _ in range(COPY_PROBES):
-                    if tab_gen[h] != counts[2]:
-                        tab_gen[h] = counts[2]
-                        tab_key[h] = key
-                        tab_at[h] = n
-                        break
-                    if tab_key[h] == key:
-                        found = tab_at[h]
-                        break
-                    h = (h + 1) & (COPY_TABLE - 1)
-                if found >= 0:
-                    cp[found] += 1
-                    skip[q] += 1  # (its off: the copy sent first ends with the first one)
-                    continue
-                opened[q % OPEN] += 1
-            elif skip[q] > 0:
-                skip[q] -= 1
-                continue
-            elif opened[q % OPEN] > 0:
-                opened[q % OPEN] -= 1
+                st[3] += 1
+            else:
+                # (ends its key's oldest note: left out = this off too; nothing there = it goes, ending nothing)
+                k = head[q]
+                if k >= 0:
+                    v = val[k]
+                    val[k] = v - 1 if v > 0 else v + 1
+                    if val[k] == 0:
+                        head[q] = nxt[k]
+                        if nxt[k] < 0:
+                            tail[q] = -1
+                        nxt[k] = st[0]
+                        st[0] = k
+                    if v > 0:
+                        continue
+                    st[3] -= 1
         # (a late note-off / controller: at `least`, the first block not made yet; for a frame made already it went
         # into the block being made with the ones before it and that block no longer matched its ranking)
         fr[n] = np.uint64((least if f < least else f) + 0.5)
@@ -331,14 +359,14 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate,
     return n
 
 
-def condense(ts, ms, ks, tport, skip, n, out_t, out_m, out_tr, out_cp, tab_key, tab_gen, tab_at, counts, last_on):
+def condense(ts, ms, ks, tport, n, out_t, out_m, out_tr, out_cp, tab_key, tab_gen, tab_at, counts, last_on):
     """Kestrel (GPU)'s read-ahead of a part too dense to read live (files/play_dense.py): events in tick order into
     out_* from n (tick, message with its port in the top byte, the note budget's channel + port, copies), the EXACT
-    COPIES collapsed and their offs left out as stamp does (nothing muted or late here). Note-offs alike on one tick
-    collapse too (cp = how many; a wall's 900 M note ends in Shinki, beat 1156, would stay 900 M events), never
-    across a note-on of that key (last_on[q] = where its latest one went, -1 at first): stamp_pre hands out only as
-    many as are left after its skips. Called piece after piece (one giant tick in groups of tracks too): counts[3] =
-    the tick read last, counts[2] = the table's generation, counts[0] += note-ons read. Returns n."""
+    COPIES collapsed as stamp does (cp = how many; nothing muted or late here). Note-offs alike on one tick collapse
+    too, the copies' ones among them (cp = how many; a wall's 900 M note ends in Shinki, beat 1156, would stay 900 M
+    events), never across a note-on of that key (last_on[q] = where its latest one went, -1 at first): stamp_pre's
+    line hands out the ones of notes sent. Called piece after piece (one giant tick in groups of tracks too):
+    counts[3] = the tick read last, counts[2] = the table's generation, counts[0] += note-ons read. Returns n."""
     for i in range(len(ts)):
         t = ts[i]
         if t != counts[3]:
@@ -366,13 +394,9 @@ def condense(ts, ms, ks, tport, skip, n, out_t, out_m, out_tr, out_cp, tab_key, 
                     h = (h + 1) & (COPY_TABLE - 1)
                 if found >= 0:
                     out_cp[found] += 1
-                    skip[q] += 1
                     continue
                 last_on[q] = n
-            elif skip[q] > 0:
-                skip[q] -= 1
-                continue
-            else:  # (an off that goes: offs alike on its tick collapsed too, never past a note-on of the key)
+            else:  # (offs alike on its tick collapsed too, never past a note-on of the key)
                 key = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
                 h = (int(key) * 2654435761) & (COPY_TABLE - 1)
                 found = -1
@@ -399,13 +423,13 @@ def condense(ts, ms, ks, tport, skip, n, out_t, out_m, out_tr, out_cp, tab_key, 
     return n
 
 
-def stamp_pre(ts, ms, trs, cps, t0, i0, i1, skip, mt, ms_, mspt, base, rate, least, fr, out, tr, cp, counts, dry,
-              opened):
+def stamp_pre(ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr, out, tr, cp, counts, dry,
+              head, tail, val, nxt, st):
     """stamp for a part read ahead (condense's arrays, ticks from t0): events i0..i1 into fr / out / tr / cp from 0,
-    returns how many (room: pre_room). A note-on for a frame before `least` is left out with the next off of its
-    key (skip); other late events go at `least`. dry: nothing written, every note-on left out (skip = the notes
-    sounding where playing starts inside the part). counts[0] / [1] += note-ons wanted / sent (copies counted).
-    opened = stamp's (a run of offs ends at most the notes sounding on its key)."""
+    returns how many (room: pre_room). A note-on for a frame before `least` is left out with its offs (the line, as
+    stamp); other late events go at `least`. dry: nothing written, every note-on left out (the line then holds the
+    notes sounding where playing starts inside the part). counts[0] / [1] += note-ons wanted / sent (copies
+    counted). A run of cps[i] offs alike ends that many of its key's oldest notes: one off goes for each sent."""
     n = 0
     j = 0
     while j + 1 < len(mt) and mt[j + 1] <= ts[i0] + t0:
@@ -420,24 +444,61 @@ def stamp_pre(ts, ms, trs, cps, t0, i0, i1, skip, mt, ms_, mspt, base, rate, lea
         hi = (m & 0xFF) >> 4
         if hi == 0x8 or hi == 0x9:
             q = (((m >> 24) & 15) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
+            c = np.int64(cps[i])
             if hi == 0x9 and (m >> 16) & 127 > 0:
-                counts[0] += cps[i]
-                if dry or f < least:
-                    skip[q] += 1
+                counts[0] += c
+                sent = not dry and f >= least
+                if sent:
+                    counts[1] += c
+                    st[3] += 1
+                # (at the back of its key's line, Line: sent = one sent then its copies left out)
+                for part in range(2):
+                    d = (-1 if part == 0 else c - 1) if sent else (c if part == 0 else 0)
+                    if d == 0:
+                        continue
+                    b = tail[q]
+                    if b >= 0 and (val[b] > 0) == (d > 0):
+                        val[b] += d
+                    else:
+                        k = st[0]
+                        if k >= 0:
+                            st[0] = nxt[k]
+                        else:
+                            k = st[2]
+                            st[2] += 1
+                        val[k] = d
+                        nxt[k] = -1
+                        if b >= 0:
+                            nxt[b] = k
+                        else:
+                            head[q] = k
+                        tail[q] = k
+                if not sent:
                     continue
-                counts[1] += cps[i]
-                opened[q] += 1
-            else:  # (cps[i] offs alike: the skips take theirs, then one for each note still sounding there)
-                c = np.int64(cps[i])
-                take = skip[q] if skip[q] < c else c
-                skip[q] -= take
-                c -= take
-                c = opened[q] if opened[q] < c else c
-                if c == 0 or dry:
+            else:  # (c offs alike: each ends its key's oldest note; one goes for each sent)
+                s = 0
+                while c > 0 and head[q] >= 0:
+                    k = head[q]
+                    v = val[k]
+                    if v > 0:
+                        take = v if v < c else c
+                        val[k] = v - take
+                    else:
+                        take = -v if -v < c else c
+                        val[k] = v + take
+                        s += take
+                    c -= take
+                    if val[k] == 0:
+                        head[q] = nxt[k]
+                        if nxt[k] < 0:
+                            tail[q] = -1
+                        nxt[k] = st[0]
+                        st[0] = k
+                st[3] -= s
+                if s == 0 or dry:
                     continue
-                opened[q] -= c
                 g = np.uint64((least if f < least else f) + 0.5)
-                for _ in range(c):
+                for _ in range(s):
                     fr[n] = g
                     out[n] = m
                     tr[n] = trs[i]
@@ -454,17 +515,89 @@ def stamp_pre(ts, ms, trs, cps, t0, i0, i1, skip, mt, ms_, mspt, base, rate, lea
     return n
 
 
-OPEN = 16 * 16 * 128  # (stamp / stamp_pre's opened: port % 16 x channel x key)
+OPEN = 16 * 16 * 128  # (the line's places: port % 16 x channel x key)
 
 
-def pre_room(ms, cps, i0, i1, opened):
+class Line:
+    """Kestrel (GPU)'s note-off line. Kestrel ends a key's notes OLDEST FIRST (port % 16 x channel x key, OPEN
+    places). The feeder leaves notes out (muted, too late, an exact copy sent as one) and must leave out exactly
+    THEIR note-offs: leaving out the key's next ones (2026-10-27) ended the wrong notes, in Shinki's build-up ~40,000
+    wait on a key, the older ones rang on (beats 834-846: 3.6x the notes sounding, its fade 1.3 s late; caught by
+    dev/harness/app_check.py). So each place keeps the file's notes in order as runs, one a node of a linked list:
+    val > 0 = that many left out, < 0 = that many sent; an off takes the oldest. head / tail per place, nxt per node
+    (-1 = none); st = [first free node, -, next node never used, notes sent and not ended]. arrays() = stamp's /
+    stamp_pre's last 5 arguments; room(n) before a call adding up to n nodes (one per note-on)."""
+
+    def __init__(self, nodes=1 << 16):
+        self.head = np.full(OPEN, -1, np.int64)
+        self.tail = np.full(OPEN, -1, np.int64)
+        self.val = np.zeros(nodes, np.int64)
+        self.nxt = np.full(nodes, -1, np.int64)
+        self.st = np.array([-1, 0, 0, 0], np.int64)
+
+    def arrays(self):
+        return self.head, self.tail, self.val, self.nxt, self.st
+
+    def room(self, more):
+        if self.st[2] + more > len(self.val):
+            size = max(2 * len(self.val), int(self.st[2] + more))
+            self.val = np.concatenate([self.val, np.zeros(size - len(self.val), np.int64)])
+            self.nxt = np.concatenate([self.nxt, np.full(size - len(self.nxt), -1, np.int64)])
+
+    def reset(self, skip=None):
+        """Every line empty (every sound stopped); skip (SKIP places, port x channel x key) = notes left out first."""
+        self.head[:] = -1
+        self.tail[:] = -1
+        self.st[:] = (-1, 0, 0, 0)
+        if skip is not None:
+            self.add(skip)
+
+    def add(self, skip):
+        """skip[port x channel x key] notes left out, at the back of their lines."""
+        c = np.asarray(skip, np.int64).reshape(-1, OPEN).sum(0)
+        qs = np.flatnonzero(c > 0)
+        self.room(len(qs))
+        head, tail, val, nxt, st = self.arrays()
+        for q in qs.tolist():
+            b = int(tail[q])
+            if b >= 0 and val[b] > 0:
+                val[b] += c[q]
+                continue
+            k = int(st[2])
+            st[2] += 1
+            val[k], nxt[k] = c[q], -1
+            if b >= 0:
+                nxt[b] = k
+            else:
+                head[q] = k
+            tail[q] = k
+
+    def left_out(self):
+        """Notes waiting in the lines that were left out, per SKIP place (port % 16 x channel x key)."""
+        out = np.zeros(OPEN * 4, np.int64)
+        for q in np.flatnonzero(self.head >= 0).tolist():
+            k = int(self.head[q])
+            while k >= 0:
+                if self.val[k] > 0:
+                    out[q] += self.val[k]
+                k = int(self.nxt[k])
+        return out
+
+
+def pre_room(ms, cps, i0, i1, st):
     """Room stamp_pre needs for events i0..i1: each, plus each run of offs' extra ones (never more than the notes
-    sounding: a play started after a wall gets its billion note ends as nothing)."""
+    sent and sounding, st[3]: a play started after a wall gets its billion note ends as nothing)."""
     m = ms[i0:i1]
     hi = (m & 0xF0) >> 4
     off = (hi == 0x8) | ((hi == 0x9) & (((m >> 16) & 127) == 0))
     on = (hi == 0x9) & ~off
-    return int(i1 - i0 + min(np.int64(cps[i0:i1][off].astype(np.int64).sum()), int(opened.sum()) + int(on.sum())))
+    return int(i1 - i0 + min(np.int64(cps[i0:i1][off].astype(np.int64).sum()), int(st[3]) + int(on.sum())))
+
+
+def ons_in(ms, i0, i1):
+    """Note-ons among events i0..i1 (the line's room: a node each at most)."""
+    m = ms[i0:i1]
+    return int((((m & 0xF0) == 0x90) & (((m >> 16) & 127) > 0)).sum())
 
 
 def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room, skip, out, lens, three):
