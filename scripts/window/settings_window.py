@@ -9,7 +9,7 @@ from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
 from files import lang, settings
 from files.lang import tr
-from files.playback import BUILTIN, devices
+from files.playback import BUILTIN, KESTREL, devices
 from files.system import WINDOWS, open_path, work_area
 from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
@@ -409,10 +409,14 @@ class SettingsWindow(tk.Toplevel):
 
     def show_builtin(self):
         """Built-in BASSMIDI's settings while it's the MIDI out, else a line saying they're for it."""
-        on = self.app.midi_device.get() == BUILTIN
+        dev = self.app.midi_device.get()
+        on = dev in (BUILTIN, KESTREL)
         for w in (self.builtin_title, self.app.builtin_window):
             w.grid() if on else w.grid_remove()
         self.builtin_off.grid_remove() if on else self.builtin_off.grid()
+        if on:  # (Kestrel (GPU): its own rows instead, the soundfont list shared)
+            self.builtin_title.config(text=tr("ks.title" if dev == KESTREL else "bs.title"))
+            self.app.builtin_window.show_for(dev == KESTREL)
 
     # ------------------------------------------------------------ size, font, text size (look.apply_size)
 

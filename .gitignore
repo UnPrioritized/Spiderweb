@@ -14,6 +14,7 @@ icon.png
 /*.json
 cliplist.txt
 CLAUDE.md
+/PLAN.md
 # BASS download kits (only the DLLs in scripts/bass/ are shipped; the kits live in dev/sdk/)
 /bass/
 /bassmidi/

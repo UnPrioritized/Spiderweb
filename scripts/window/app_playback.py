@@ -42,6 +42,11 @@ def fonts_sig(paths):
     return "|".join(sigs) if sigs and None not in sigs else None
 
 
+def _same_opts(a, b):
+    """Kestrel opened with settings a = with b ("lower" changes while open: never counts)."""
+    return {k: v for k, v in a.items() if k != "lower"} == {k: v for k, v in b.items() if k != "lower"}
+
+
 READY_AFTER_MS = 1500  # Built-in BASSMIDI made ready this long after the start (ready_builtin); None = never (tests)
 LIVE_SETTLE_S = 0.4  # a synth opened right at Space runs this long before the notes (hunt 2026-10-25: a new BASSMIDI
 # stream lost its first 12-46 ms; notes 0.4 s after it opened lost none)
@@ -384,18 +389,18 @@ class Playback:
         made, self._kestrel_made = self._kestrel_made, None
         if made is not None:  # (started by kestrel_first)
             out, err, for_fonts = made
-            if for_fonts == fonts:
+            if for_fonts == fonts and (out is None or _same_opts(out.opts, self.kestrel_opts)):
                 if err is not None:
                     raise err
                 errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
                 return out
-            if out is not None:  # (the soundfonts changed meanwhile: started again with them)
+            if out is not None:  # (the soundfonts / settings changed meanwhile: started again with them)
                 out.close()
         self.busy(tr("app.opening_kestrel"))  # (seconds: Kestrel reads the whole soundfonts)
         try:
             if self.synth is None:
                 self.synth = Synth()
-            out = KestrelOut(self.synth, fonts)
+            out = KestrelOut(self.synth, fonts, **self.kestrel_opts)
             errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
             return out
         finally:
@@ -416,6 +421,7 @@ class Playback:
                 job["win"].destroy()
             return
         fonts = font_list(self.hz_preview)
+        opts = dict(self.kestrel_opts)
         try:
             if self.synth is None:
                 self.synth = Synth()
@@ -448,7 +454,7 @@ class Playback:
 
         def work():
             try:
-                job["out"] = KestrelOut(synth, fonts)
+                job["out"] = KestrelOut(synth, fonts, **opts)
             except SynthError as e:
                 job["err"] = e
             except Exception as e:  # (anything else: said like a failed start)
@@ -514,8 +520,8 @@ class Playback:
         self.after(100, done)
 
     def sync_builtin(self):
-        """Settings → Sound shows Built-in BASSMIDI's settings only while it's the MIDI out."""
-        on = self.midi_device.get() == BUILTIN
+        """Settings → Sound shows Built-in BASSMIDI's / Kestrel's settings only while it's the MIDI out."""
+        on = self.midi_device.get() in (BUILTIN, KESTREL)
         w = self.builtin_window  # (in Settings → Sound while that's open)
         if w is not None and w.winfo_exists():
             if on:
@@ -586,6 +592,8 @@ class Playback:
         opened = getattr(live, "font_paths", None) or [p for p in [getattr(live, "font_path", None)] if p]
         if self.out.name in (BUILTIN, KESTREL) and live and list(opened) != font_list(self.hz_preview):
             self.out.close()
+        elif self.out.name == KESTREL and live and not _same_opts(live.opts, self.kestrel_opts):
+            self.out.close()  # (Settings → Sound changed one of Kestrel's: opened again with it)
 
     def soundfont_changed(self, again=True, added=None):
         """The shared soundfonts were changed (set_soundfonts): Built-in BASSMIDI opens them at the next note. again
@@ -754,6 +762,52 @@ class Playback:
             self.loaded_group.set_limiter(self.play_limiter.get())
         self.note_builtin()
         self.schedule_autosave()
+
+    def on_kestrel_opt(self, key):
+        """A Kestrel (GPU) row in Settings → Sound changed (app.kestrel_vars[key]): Lower it by itself is heard at
+        once, the others from the next Play (Kestrel opened again with them: fresh_builtin). Max voices typed wrong
+        = back to the one in use."""
+        from files.kestrel import BLOCKS, VOICES_RANGE
+        var = self.kestrel_vars[key]
+        if key == "voices":
+            e = getattr(self, "kestrel_voices_entry", None)
+            try:
+                v = int(round(float(calc(var.get()))))
+                if not VOICES_RANGE[0] <= v <= VOICES_RANGE[1]:
+                    raise ValueError
+            except (ValueError, ZeroDivisionError):
+                if e is not None and e.winfo_exists():
+                    bad(e)
+                return
+            if e is not None and e.winfo_exists():
+                good(e)
+            var.set(str(v))
+        elif key == "block":
+            v = BLOCKS[max(0, min(len(BLOCKS) - 1, int(var.get())))]
+        else:
+            v = bool(var.get())
+        if v == self.kestrel_opts[key]:
+            return
+        self.kestrel_opts[key] = v
+        if key == "lower" and self.out.name == KESTREL and self.out.handle:
+            self.out.handle.k.set_lower(v)
+        errors.note("Kestrel (GPU)", ", ".join(f"{k} {v}" for k, v in self.kestrel_opts.items()))
+        self.schedule_autosave()
+
+    def take_kestrel_opts(self, opts):
+        """The saved Kestrel settings (autosave window / settings.ini), each checked; wrong ones = defaults."""
+        from files.kestrel import BLOCKS, KESTREL_DEFAULTS, VOICES_RANGE
+        for k, d in KESTREL_DEFAULTS.items():
+            v = opts.get(k)
+            if k == "voices":
+                ok = isinstance(v, int) and not isinstance(v, bool) and VOICES_RANGE[0] <= v <= VOICES_RANGE[1]
+            elif k == "block":
+                ok = v in BLOCKS and not isinstance(v, bool)
+            else:
+                ok = isinstance(v, bool)
+            self.kestrel_opts[k] = v if ok else d
+        for k, v in self.kestrel_opts.items():
+            self.kestrel_vars[k].set(str(v) if k == "voices" else BLOCKS.index(v) if k == "block" else v)
 
     def note_builtin(self):
         """Built-in BASSMIDI's settings in the logs (errors.note), once it has been opened."""

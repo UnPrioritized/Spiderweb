@@ -25,6 +25,10 @@ DLL_NAME = "kestrel_bridge.dll"
 BLOCK = 512  # frames a block (~11 ms): the default delay
 AHEAD = 6  # blocks kept made ahead of the speakers (3 = every swing of the note budget was a gap, 2026-10-27)
 MAX_VOICES = 1 << 20  # Kestrel's own default
+BLOCKS = (256, 512, 1024, 2048)  # (Settings → Sound's block sizes)
+VOICES_RANGE = (1024, 1 << 26)  # (Settings → Sound's Max voices)
+# Settings → Sound's rows (App.kestrel_opts = Kestrel's keywords): "lower" changes while open, the rest at the next open
+KESTREL_DEFAULTS = {"voices": MAX_VOICES, "lower": True, "block": BLOCK, "limiter": True, "dc_blocker": True}
 UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
 # (one Kestrel starting at a time, whatever asks: two starting together in one program can hang on the graphics
 # card, seen in the connector's tests 2026-10-27)
@@ -236,6 +240,7 @@ class KestrelOut:
 
     def __init__(self, synth, fonts, **kw):
         self.k = Kestrel(synth, fonts, **kw)
+        self.opts = dict(kw)  # (App.fresh_builtin: other settings = opened again)
         self.font_paths = list(fonts)  # (App.fresh_builtin: another list picked = opened again)
         self._lock = threading.Lock()
         self._frames, self._msgs, self._lens = [], [], []

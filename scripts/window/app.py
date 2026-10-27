@@ -69,6 +69,7 @@ from window.strum_window import open_strum
 from window.chop_window import open_chop, quick_chop
 from window.hz_preview import clean_settings as clean_preview
 from window.builtin_settings import Overload
+from files.kestrel import BLOCKS as KESTREL_BLOCKS, KESTREL_DEFAULTS
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
@@ -477,6 +478,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
         self.loud_on_top = tk.BooleanVar(self, value=False)  # Settings → Look: a loaded MIDI's louder notes drawn on top
+        # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
+        # when it opens (a change = opened again at the next Play: fresh_builtin)
+        self.kestrel_opts = dict(KESTREL_DEFAULTS)
+        self.kestrel_vars = {"voices": tk.StringVar(self, value=f"{KESTREL_DEFAULTS['voices']}"),
+                             **{k: tk.BooleanVar(self, value=KESTREL_DEFAULTS[k]) for k in ("lower", "limiter",
+                                                                                            "dc_blocker")},
+                             "block": tk.IntVar(self, value=KESTREL_BLOCKS.index(KESTREL_DEFAULTS["block"]))}
         self.overload, self.overload_text = Overload(), ""  # (red on the status line while it can't keep up)
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None

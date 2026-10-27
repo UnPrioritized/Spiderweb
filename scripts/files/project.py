@@ -565,6 +565,7 @@ class ProjectFiles:
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "loaded_synths": self.loaded_synths,
+                              **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
                               "domino_256": self.domino256.get(), "keep_colours": self.keep_colours.get(),
                               "loud_on_top": self.loud_on_top.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
@@ -755,6 +756,7 @@ class ProjectFiles:
             if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 16:
                 self.loaded_synths = v
                 self.synths_var.set(str(v))
+            self.take_kestrel_opts({k: win.get("kestrel_" + k) for k in self.kestrel_opts})
             self.domino256.set(win.get("domino_256") is True)
             self.keep_colours.set(win.get("keep_colours") is True)
             self.loud_on_top.set(win.get("loud_on_top") is True)

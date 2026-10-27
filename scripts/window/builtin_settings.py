@@ -39,6 +39,7 @@ class BuiltinPanel(ttk.Frame):
         self.fonts = FontList(box, app)  # (shared with the Hz bass preview)
         self.fonts.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
         r += 1
+        first = set(box.grid_slaves())  # (rows from here on: Built-in BASSMIDI's own)
 
         lb = ttk.Label(box, text=tr("ps.voices"))
         lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
@@ -74,11 +75,76 @@ class BuiltinPanel(ttk.Frame):
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(c, tr("bs.limiter_tip") + (tr("bs.limiter_slow") if speed.without_loops() else ""))
         r += 1
+        self.bass_rows = [w for w in box.grid_slaves() if w not in first]
+        r = self.kestrel_rows(r)
 
         self.state = ttk.Label(box, text="", foreground=look.ERROR)
         self.state.grid(row=r, column=1, columnspan=2, sticky="w", pady=(3, 0))
 
         self.refresh()
+
+    def kestrel_rows(self, r):
+        """Kestrel (GPU)'s own rows (shown instead of Built-in BASSMIDI's while it's the MIDI out; the soundfont
+        list is shared): Max voices, Lower it by itself, Block size, Limiter, DC blocker, its version."""
+        from files import kestrel
+        app, box = self.app, self
+        vars_ = app.kestrel_vars
+        before = set(box.grid_slaves())
+        lb = ttk.Label(box, text=tr("ks.voices"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        e = app.kestrel_voices_entry = ttk.Entry(box, textvariable=vars_["voices"], width=10)
+        e.grid(row=r, column=1, sticky="w", pady=3)
+        e.bind("<Return>", lambda ev: (app.on_kestrel_opt("voices"), "break")[1])
+        e.bind("<FocusOut>", lambda ev: app.on_kestrel_opt("voices"))
+        Scrub(app, [(e, vars_["voices"], lambda: app.on_kestrel_opt("voices"))], (65536, 1048576, 1024),
+              *kestrel.VOICES_RANGE, label=lb, no_undo=True)
+        Tooltip(e, tr("ks.voices_tip"))
+        Tooltip(lb, tr("ks.voices_tip"))
+        r += 1
+
+        c = ttk.Checkbutton(box, text=tr("ks.lower"), variable=vars_["lower"],
+                            command=lambda: app.on_kestrel_opt("lower"), takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("ks.lower_tip"))
+        r += 1
+
+        lb = ttk.Label(box, text=tr("ks.block"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        names = [tr("ks.block_n", n=b, ms=f"{b / kestrel.RATE * 1000:.0f}") for b in kestrel.BLOCKS]
+        cb = ttk.Combobox(box, values=names, state="readonly", width=14)
+        cb.current(vars_["block"].get())
+        cb.grid(row=r, column=1, sticky="w", pady=3)
+
+        def picked(ev=None):
+            vars_["block"].set(cb.current())  # (by place: translated names)
+            app.on_kestrel_opt("block")
+        cb.bind("<<ComboboxSelected>>", picked)
+        vars_["block"].trace_add("write", lambda *a: cb.winfo_exists() and cb.current(vars_["block"].get()))
+        Tooltip(cb, tr("ks.block_tip"))
+        Tooltip(lb, tr("ks.block_tip"))
+        r += 1
+
+        for key, text in (("limiter", "ks.limiter"), ("dc_blocker", "ks.dc")):
+            c = ttk.Checkbutton(box, text=tr(text), variable=vars_[key],
+                                command=lambda k=key: app.on_kestrel_opt(k), takefocus=False)
+            c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+            Tooltip(c, tr(text + "_tip"))
+            r += 1
+
+        v = kestrel.version()
+        hint = ttk.Label(box, text=tr("ks.next_play") + ("\n" + tr("ks.version", v=v) if v else ""),
+                         foreground=look.HINT, font=look.font(8), wraplength=round(320 * app.scale), justify="left")
+        hint.grid(row=r, column=1, columnspan=2, sticky="w", pady=(2, 0))
+        r += 1
+        self.k_rows = [w for w in box.grid_slaves() if w not in before]
+        return r
+
+    def show_for(self, kestrel):
+        """Kestrel's rows (kestrel True) or Built-in BASSMIDI's; the soundfont list stays."""
+        for w in self.bass_rows:
+            w.grid_remove() if kestrel else w.grid()
+        for w in self.k_rows:
+            w.grid() if kestrel else w.grid_remove()
 
     def take_voices(self):
         """Settings closed (Esc, X) or another MIDI out picked: a voice limit typed without Enter is taken, a wrong
@@ -90,6 +156,10 @@ class BuiltinPanel(ttk.Frame):
         app.on_loaded_synths()
         if app.synths_var.get() != str(app.loaded_synths):
             app.synths_var.set(str(app.loaded_synths))
+        app.on_kestrel_opt("voices")  # (Kestrel's Max voices the same way)
+        v = app.kestrel_vars["voices"]
+        if v.get() != str(app.kestrel_opts["voices"]):
+            v.set(str(app.kestrel_opts["voices"]))
 
     def refresh(self):
         if not self.winfo_exists():
