@@ -585,6 +585,11 @@ impl Drop for Synth {
     }
 }
 
+/// A remembered song block's limits go up by PLAN_RISE after a play where it left notes out with time to spare
+/// (made in under PLAN_ROOM of its real-time length).
+const PLAN_ROOM: f64 = 0.6;
+const PLAN_RISE: f32 = 1.1;
+
 fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, rate: u32, max_voices: u32) -> Result<()> {
     let samples = block as usize * 2;
     let block_us = block as f64 * 1e6 / rate as f64;
@@ -770,6 +775,11 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
                 Some((a, c)) if budget.cuts != cuts => {
                     let (a2, c2) = budget.limits();
                     plan.insert(p, (a.min(a2), c.min(c2)));
+                }
+                // (notes left out though this block had time to spare: a little more there next play. One slow
+                // moment (the card waking, Windows busy) kept a spot thinned for the whole session, hunt 2026-10-28)
+                Some((a, c)) if dropped > 0 && us < block_us * PLAN_ROOM => {
+                    plan.insert(p, (a * PLAN_RISE + 1.0, (c * PLAN_RISE).min(max_voices as f32)));
                 }
                 _ => {}
             }
