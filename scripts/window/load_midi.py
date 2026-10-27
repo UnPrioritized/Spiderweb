@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from files import midi_saved as saved
+from files.play_dense import kept_bytes
 from files.lang import tr, trn
 from files.midi_read import Cancelled, FileChanged, MidiError, MidiFile, M_SMPTE
 from files.project import OUTPUT_DIR
@@ -91,7 +92,7 @@ def offer_index(app, lm):
     if app.loaded is not lm or not saved.offer(lm):
         return
     answer = ask_choice(app, tr("load.title"), tr("load.index_ask", s=f"{lm.seconds:.0f}",
-                                                  size=size_text(lm.index_bytes())),
+                                                  size=size_text(lm.index_bytes() + kept_bytes(lm))),
                         [("save", tr("load.index_save")), ("never", tr("load.index_never")),
                          ("later", tr("load.index_later"))])
     if answer == "never":
@@ -424,7 +425,7 @@ class LoadWindow(tk.Toplevel):
         """The summary's question: save the index (its size), or never ask for this file. Returns the tick's var."""
         box = ttk.Frame(self.body)
         box.pack(anchor="w", fill="x", pady=(12, 0))
-        ttk.Label(box, text=tr("load.index_ask", s=f"{lm.seconds:.0f}", size=size_text(lm.index_bytes())),
+        ttk.Label(box, text=tr("load.index_ask", s=f"{lm.seconds:.0f}", size=size_text(lm.index_bytes() + kept_bytes(lm))),
                   wraplength=460, justify="left").pack(anchor="w")
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(6, 0))

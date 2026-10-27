@@ -67,11 +67,13 @@ def save_index(lm):
     data = buf.getvalue()
     os.makedirs(FOLDER, exist_ok=True)
     write_bytes(index_file(mf.path, mf.size), data)
-    d = getattr(lm, "dense", None)
-    if d is not None and d.done() and d.error is None:  # (Kestrel's read-ahead, all read already: kept with it)
-        from files.play_dense import save
-        save(d)
-    return len(data)
+    from files.play_dense import kept_bytes, save
+    more = kept_bytes(lm)
+    if more:  # (Kestrel's read-ahead, all read already: kept with it, written in the background: Shinki's ~3 GB
+        # held the window, hunt 2026-10-28; counted in the size said)
+        import threading
+        threading.Thread(target=save, args=(lm.dense,), daemon=True, name="kestrel-dense-save").start()
+    return len(data) + more
 
 
 def _fits(head, mf):

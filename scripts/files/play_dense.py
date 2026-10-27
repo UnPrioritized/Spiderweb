@@ -298,6 +298,15 @@ def _saved_head(lm):
             "rules": [DENSE_MBS, JOIN_BEATS, EARLY_BEATS, PART_MOST, PART_MB]}
 
 
+def kept_bytes(lm):
+    """About the bytes Save Index also writes for lm's read-ahead (all read, as loaded), else 0 (hunt 2026-10-28: the
+    question showed the index alone, ~120 MB of Shinki's ~3.1 GB)."""
+    d = getattr(lm, "dense", None)
+    if d is None or not d.done() or d.error is not None or not _as_loaded(lm) or d.key != key_of(lm):
+        return 0
+    return sum(getattr(p, k).nbytes for p in d.parts for k in PART_ARRAYS)
+
+
 def save(d):
     """Keeps d (all read) beside lm's saved index, when it has one and lm is as loaded. Quiet when it can't."""
     lm = d.lm
