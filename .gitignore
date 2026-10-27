@@ -25,3 +25,5 @@ scripts/bass/**/*.h
 user/
 /lang/
 *.lnk
+# Kestrel connector DLL (built from native/kestrel_bridge; how it ships is decided at release)
+scripts/kestrel/**/*.dll

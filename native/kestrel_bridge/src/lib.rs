@@ -62,9 +62,9 @@ pub struct KbStats {
     pub rendered: u64,
     /// Kestrel frames handed to the output.
     pub handed: u64,
-    /// Frames of silence handed out because nothing was ready (each one = a stutter).
+    /// Frames of silence handed out because nothing was ready (each one = a stutter), after the first sound.
     pub silence: u64,
-    /// Times the output found nothing ready.
+    /// Times the output found nothing ready, after the first sound.
     pub late: u64,
     pub voices: u64,
     /// Note-ons the budget dropped (with their note-offs).
@@ -79,8 +79,11 @@ pub struct KbStats {
     pub allowance: u32,
     /// 1 = the render thread stopped on an error (`kb_error` says which); the output is silent.
     pub failed: u32,
+    /// Of last_block_us: taking the block's messages, the budget, handing them to Kestrel.
+    pub last_prep_us: u32,
 }
 
+#[derive(Clone, Copy)]
 struct Pending {
     frame: u64,
     msg: u32,
@@ -94,8 +97,15 @@ struct Ring {
     spare: Vec<Vec<f32>>,
 }
 
+#[derive(Default)]
+struct Inbox {
+    batches: VecDeque<Vec<Pending>>,
+    /// kb_cancel calls so far (the render thread drops what it took before the last one)
+    cancels: u64,
+}
+
 struct Shared {
-    inbox: Mutex<VecDeque<Pending>>,
+    inbox: Mutex<Inbox>,
     ring: Mutex<Ring>,
     /// Signalled when the output took a block (room to render) or on close.
     room: Condvar,
@@ -159,7 +169,7 @@ impl Synth {
         let driver = Driver::live(&cfg, bank)?;
         let ahead = opts.ahead_blocks.max(2) as usize;
         let shared = Arc::new(Shared {
-            inbox: Mutex::new(VecDeque::new()),
+            inbox: Mutex::new(Inbox::default()),
             ring: Mutex::new(Ring { blocks: VecDeque::new(), pos: 0, spare: Vec::new() }),
             room: Condvar::new(),
             stats: Mutex::new(KbStats { allowance: u32::MAX, ..Default::default() }),
@@ -192,16 +202,22 @@ impl Synth {
     }
 
     /// Queue messages (frames non-decreasing is best; an earlier one is played with the one queued before it).
+    /// Made into one batch first: the render thread is never kept waiting while a big push copies.
     pub fn push(&self, frames: &[u64], msgs: &[u32], tracks: &[u16]) {
-        let mut q = self.shared.inbox.lock().unwrap();
-        for i in 0..frames.len().min(msgs.len()).min(tracks.len()) {
-            q.push_back(Pending { frame: frames[i], msg: msgs[i], track: tracks[i] });
+        let n = frames.len().min(msgs.len()).min(tracks.len());
+        if n == 0 {
+            return;
         }
+        let batch: Vec<Pending> =
+            (0..n).map(|i| Pending { frame: frames[i], msg: msgs[i], track: tracks[i] }).collect();
+        self.shared.inbox.lock().unwrap().batches.push_back(batch);
     }
 
     /// Forget every message not rendered yet (sounding notes go on: send note-offs after this).
     pub fn cancel(&self) {
-        self.shared.inbox.lock().unwrap().clear();
+        let mut inbox = self.shared.inbox.lock().unwrap();
+        inbox.batches.clear();
+        inbox.cancels += 1;
     }
 
     pub fn set_lower(&self, on: bool) {
@@ -246,8 +262,10 @@ impl Synth {
         }
         self.shared.room.notify_one();
         let mut st = self.shared.stats.lock().unwrap();
+        // (silence before the first block was ready isn't a stutter)
+        let started = st.handed > 0;
         st.handed += handed;
-        if silent > 0 {
+        if silent > 0 && started {
             st.silence += silent;
             st.late += 1;
         }
@@ -280,8 +298,12 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
     let block_us = block as f64 * 1e6 / rate as f64;
     let mut budget = Budget::new();
     let mut taken: Vec<Pending> = Vec::new();
+    // batches taken from the inbox, not due yet (front batch read from `at`)
+    let mut future: VecDeque<Vec<Pending>> = VecDeque::new();
+    let mut at = 0usize;
+    let mut cancels = 0u64;
     loop {
-        let mut out = {
+        let (mut out, ready) = {
             let mut r = s.ring.lock().unwrap();
             while r.blocks.len() >= s.ahead && !s.stop.load(Ordering::Relaxed) {
                 r = s.room.wait(r).unwrap();
@@ -289,14 +311,32 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             if s.stop.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            r.spare.pop().unwrap_or_else(|| vec![0.0; samples])
+            let ready = r.blocks.len();
+            (r.spare.pop().unwrap_or_else(|| vec![0.0; samples]), ready)
         };
+        let t = Instant::now();
         let end = driver.next_frame() + block as u64;
         {
-            let mut q = s.inbox.lock().unwrap();
-            while q.front().is_some_and(|p| p.frame < end) {
-                taken.push(q.pop_front().unwrap());
+            let mut inbox = s.inbox.lock().unwrap();
+            if inbox.cancels != cancels {
+                cancels = inbox.cancels;
+                future.clear();
+                at = 0;
             }
+            future.extend(inbox.batches.drain(..));
+        }
+        // (a batch's frames rise, mostly: one earlier than the one before it is played with that one, as Kestrel's
+        // own queue does; so a batch is read in order up to the first frame at or past the block's end)
+        while let Some(batch) = future.front() {
+            while at < batch.len() && batch[at].frame < end {
+                taken.push(batch[at]);
+                at += 1;
+            }
+            if at < batch.len() {
+                break;
+            }
+            future.pop_front();
+            at = 0;
         }
         let lower = s.lower.load(Ordering::Relaxed);
         let dropped = budget.filter(&mut taken, lower, |p| {
@@ -305,10 +345,10 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             }
         });
         taken.clear();
-        let t = Instant::now();
+        let prep = t.elapsed();
         driver.render_live(&mut synth, &mut out)?;
         let us = t.elapsed().as_secs_f64() * 1e6;
-        budget.measured(us / block_us, lower);
+        budget.measured(us / block_us, ready, s.ahead, lower);
         s.worst_us.fetch_max(us as u32, Ordering::Relaxed);
         let bs = synth.stats();
         {
@@ -319,6 +359,7 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             st.stolen = bs.stolen;
             st.budget_dropped += dropped;
             st.last_block_us = us as u32;
+            st.last_prep_us = prep.as_micros() as u32;
             st.allowance = budget.allowance();
         }
         s.ring.lock().unwrap().blocks.push_back(out);
