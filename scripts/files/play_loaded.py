@@ -705,7 +705,7 @@ class LoadedPlayer:
         out = np.zeros((K, OUT), np.uint8)
         lens = np.zeros(K, np.int64)
         h = np.zeros((K, 128), np.int64)
-        skip = np.zeros(SKIP, np.int64)
+        line = midi_play.Line(places=SKIP)  # (each key's notes in file order: the offs of notes left out go too)
         thr, room = np.zeros(K, np.int64), np.zeros(K, np.int64)
         three = not self.sinks
         gen, cur = -1, None
@@ -778,10 +778,10 @@ class LoadedPlayer:
                     if gen >= 0:
                         self.silence(reset=True)
                     gen, cur = self._gen, None
-                    skip[:] = 0
+                    line.reset()
                 if cur is None and self._queue:
                     cur = self._queue.popleft()
-                    self._took(cur, skip)
+                    self._took(cur, line)
                 horizon = getattr(self, "_horizon", None)
             if cur is None:
                 if horizon is not None and tmap.sec(horizon) < s_now - BEHIND_S and self._jump is None:
@@ -813,9 +813,10 @@ class LoadedPlayer:
                             v = int(np.argmax(fits))  # (the lowest velocity whose ons all fit; one below: the rest)
                             thr[r], room[r] = v, budget - int(above[r, v])
                     ons = int(h.sum())
+                    line.room(midi_play.ons_in(ms, i, i1))
                     while i < i1:
-                        j = emit(ms, ks, i, i1, ts, t_late, self.muted, self.tport, self.ports, K, thr, room, skip,
-                                 out, lens, three)
+                        j = emit(ms, ks, i, i1, ts, t_late, self.muted, self.tport, self.ports, K, thr, room,
+                                 out, lens, three, *line.arrays())
                         self._send(out, lens)
                         i = j
                     cur[3] = i
@@ -829,7 +830,7 @@ class LoadedPlayer:
                             self._pool.append(cur[5])  # (its arrays: for a later window; a wall's go)
                         cur = self._queue.popleft() if self._queue and self._gen == gen else None
                         if cur is not None:
-                            self._took(cur, skip)
+                            self._took(cur, line)
                     continue
                 break
         self.silence()
@@ -1047,17 +1048,18 @@ class LoadedPlayer:
         except Exception:  # (the list changing meanwhile: next time)
             pass
 
-    def _took(self, cur, skip):
-        """A window taken by the feeder: its note-offs to leave out added; a wall stepped over (the reader's
-        ("wall", counts)): every sound stopped, the offs to leave out = the notes sounding after it."""
+    def _took(self, cur, line):
+        """A window taken by the feeder: the notes left out at its start (their note-offs too) at the back of their
+        keys' lines; a wall stepped over (the reader's ("wall", counts)): every sound stopped, the lines = the notes
+        sounding after it, all left out."""
         if cur[4] is None or isinstance(cur[4], tuple) and cur[4][0] == "dense":  # (a part read ahead: its own
             # skips come at its end)
             return
         if isinstance(cur[4], tuple):
             self.silence()
-            skip[:] = cur[4][1]
+            line.reset(cur[4][1])
         else:
-            skip += cur[4]
+            line.add(cur[4])
 
     # --- start / stop -------------------------------------------------------------------------------------------
 

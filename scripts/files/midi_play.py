@@ -528,9 +528,11 @@ class Line:
     (-1 = none); st = [first free node, -, next node never used, notes sent and not ended]. arrays() = stamp's /
     stamp_pre's last 5 arguments; room(n) before a call adding up to n nodes (one per note-on)."""
 
-    def __init__(self, nodes=1 << 16):
-        self.head = np.full(OPEN, -1, np.int64)
-        self.tail = np.full(OPEN, -1, np.int64)
+    def __init__(self, nodes=1 << 16, places=OPEN):
+        """places: OPEN for Kestrel; Built-in BASSMIDI's emit = SKIP's (port % 64 x channel x key)."""
+        self.places = places
+        self.head = np.full(places, -1, np.int64)
+        self.tail = np.full(places, -1, np.int64)
         self.val = np.zeros(nodes, np.int64)
         self.nxt = np.full(nodes, -1, np.int64)
         self.st = np.array([-1, 0, 0, 0], np.int64)
@@ -554,7 +556,7 @@ class Line:
 
     def add(self, skip):
         """skip[port x channel x key] notes left out, at the back of their lines."""
-        c = np.asarray(skip, np.int64).reshape(-1, OPEN).sum(0)
+        c = np.asarray(skip, np.int64).reshape(-1, self.places).sum(0)
         qs = np.flatnonzero(c > 0)
         self.room(len(qs))
         head, tail, val, nxt, st = self.arrays()
@@ -600,10 +602,14 @@ def ons_in(ms, i0, i1):
     return int((((m & 0xF0) == 0x90) & (((m >> 16) & 127) > 0)).sum())
 
 
-def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room, skip, out, lens, three):
+def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room, out, lens, three,
+         head, tail, val, nxt, st):
     """Events i0..i1 as raw MIDI bytes into out[synth] from lens[synth]. A note-on goes out when not muted, not late
     (tick before t_late) and loud enough: velocity >= thr[synth], or one below it while room[synth] lasts (the note
-    budget, hist's counts); else its key's skip counter grows and the next note-off there is left out with it.
+    budget, hist's counts); else it's left out with ITS note-off: the line (head ... st, Line with SKIP places: port %
+    64 x channel x key) keeps each key's notes in file order, an off takes the oldest. Was a counter ("the key's NEXT
+    off goes"): kept notes rang on past their own off, Shinki bar 209 91 % of them (dev/scratch/bm_offs.py,
+    2026-10-28). Needs room for a node per note-on (Line.room).
     Controllers / bends / channel pressure go to every synth of their channel's block. three: every message 3 bytes (a
     device that takes whole messages). Stops before an event that wouldn't fit; returns where it stopped."""
     cap = out.shape[1]
@@ -631,13 +637,40 @@ def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room,
                     go = v == thr[r] - 1 and room[r] > 0
                     if go:
                         room[r] -= 1
+                d = -1 if go else 1
+                b = tail[q]
+                if b >= 0 and (val[b] > 0) == (d > 0):
+                    val[b] += d
+                else:
+                    k = st[0]
+                    if k >= 0:
+                        st[0] = nxt[k]
+                    else:
+                        k = st[2]
+                        st[2] += 1
+                    val[k] = d
+                    nxt[k] = -1
+                    if b >= 0:
+                        nxt[b] = k
+                    else:
+                        head[q] = k
+                    tail[q] = k
                 if not go:
-                    skip[q] += 1
                     continue
             elif hi != 0xA:
-                if skip[q] > 0:
-                    skip[q] -= 1
-                    continue
+                # (ends its key's oldest note: left out = this off too; nothing there = it goes)
+                k = head[q]
+                if k >= 0:
+                    v = val[k]
+                    val[k] = v - 1 if v > 0 else v + 1
+                    if val[k] == 0:
+                        head[q] = nxt[k]
+                        if nxt[k] < 0:
+                            tail[q] = -1
+                        nxt[k] = st[0]
+                        st[0] = k
+                    if v > 0:
+                        continue
             o = lens[r]
             out[r, o] = s
             out[r, o + 1] = (m >> 8) & 127

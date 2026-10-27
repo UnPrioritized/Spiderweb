@@ -1805,8 +1805,9 @@ def warm():
     play_order_place(i1, i32, i32, 0, i1.copy(), i1.copy(), i32.copy(), i32.copy())
     h2 = np.zeros((1, 128), np.int64)
     play_hist(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, h2)
-    play_emit(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, i1, i1.copy(), np.zeros(1 << 17, np.int64), np.zeros((1, 3), np.uint8),
-              i1.copy(), False)
+    line = midi_play.Line(4, midi_play.OPEN * 4)
+    play_emit(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, i1, i1.copy(), np.zeros((1, 3), np.uint8), i1.copy(), False,
+              *line.arrays())
     play_programs(u8, 0, 0, np.zeros(midi_play.PS_SIZE, np.int64))
     f1 = np.zeros(1, np.float64)
     line = midi_play.Line(4)
