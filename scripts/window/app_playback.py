@@ -69,6 +69,9 @@ class Playback:
         if dev in (BUILTIN, KESTREL) and not self.hz_preview["font"] and not self.pick_soundfont():
             return
         self.fresh_builtin()
+        if dev == KESTREL and not (self.out.handle and self.out.name == dev) and self._kestrel_made is None:
+            self.kestrel_first(keep)  # (plays once it's started)
+            return
         fresh = dev == BUILTIN and not (self.out.handle and self.out.name == dev)
         err = self.out.open(dev)
         while err and dev in (BUILTIN, KESTREL) and self.font_failed:  # (moved, gone, broken: offer another)
@@ -378,6 +381,16 @@ class Playback:
         fonts = font_list(self.hz_preview)
         if not fonts:
             raise SynthError("synth.no_font")
+        made, self._kestrel_made = self._kestrel_made, None
+        if made is not None:  # (started by kestrel_first)
+            out, err, for_fonts = made
+            if for_fonts == fonts:
+                if err is not None:
+                    raise err
+                errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
+                return out
+            if out is not None:  # (the soundfonts changed meanwhile: started again with them)
+                out.close()
         self.busy(tr("app.opening_kestrel"))  # (seconds: Kestrel reads the whole soundfonts)
         try:
             if self.synth is None:
@@ -387,6 +400,79 @@ class Playback:
             return out
         finally:
             self.busy(None)
+
+    def kestrel_first(self, keep):
+        """Kestrel (GPU) started on a thread for a play, a small window saying so meanwhile (user 2026-10-27: the
+        first Play froze the window for seconds, the status line was easy to miss); it closes and playing starts
+        once Kestrel is ready. Play again / the window's X while it starts = that play is off (Kestrel still starts,
+        kept open for the next one)."""
+        import tkinter as tk
+        from tkinter import ttk
+        from files.kestrel import KestrelOut
+        job = self._kestrel_job
+        if job is not None:  # (Play again while it starts: no play)
+            job["play"] = False
+            if job["win"].winfo_exists():
+                job["win"].destroy()
+            return
+        fonts = font_list(self.hz_preview)
+        try:
+            if self.synth is None:
+                self.synth = Synth()
+        except SynthError as e:
+            messagebox.showerror(tr("app.spiderweb_2"), str(e))
+            return
+        synth = self.synth
+        win = tk.Toplevel(self)
+        win.withdraw()
+        win.title(tr("app.spiderweb_2"))
+        win.transient(self)
+        win.resizable(False, False)
+        box = ttk.Frame(win, padding=16)
+        box.pack(fill="both", expand=True)
+        ttk.Label(box, text=tr("app.opening_kestrel")).pack(anchor="w")
+        bar = ttk.Progressbar(box, mode="indeterminate", length=280)
+        bar.pack(fill="x", pady=(10, 0))
+        bar.start(15)
+        job = self._kestrel_job = {"play": True, "win": win, "out": None, "err": None}
+
+        def closed():
+            job["play"] = False
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", closed)
+        win.update_idletasks()  # (over the middle of the main window)
+        x = self.winfo_rootx() + (self.winfo_width() - win.winfo_reqwidth()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - win.winfo_reqheight()) // 3
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        win.deiconify()
+
+        def work():
+            try:
+                job["out"] = KestrelOut(synth, fonts)
+            except SynthError as e:
+                job["err"] = e
+            except Exception as e:  # (anything else: said like a failed start)
+                job["err"] = SynthError("playback.kestrel_failed", err=e)
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+
+        def done():
+            if thread.is_alive():
+                self.after(30, done)
+                return
+            self._kestrel_job = None
+            if win.winfo_exists():
+                win.destroy()
+            if self.midi_device.get() != KESTREL or not self.winfo_exists():  # (another MIDI out picked meanwhile)
+                if job["out"] is not None:
+                    job["out"].close()
+                return
+            self._kestrel_made = (job["out"], job["err"], fonts)
+            if job["play"] and not self.player.running:
+                self.start_play(keep)
+            elif job["err"] is None:  # (no play: opened as after one, the next Play starts at once)
+                self.out.open(KESTREL)
+        self.after(30, done)
 
     def ready_builtin(self):
         """Built-in BASSMIDI made ready before the first Space (user 2026-10-25: "the first play after the app is

@@ -608,6 +608,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.loaded_play = None  # the loaded MIDI playing along (files.play_loaded.LoadedPlayer)
         self.loaded_group = None  # ... its synths on Built-in BASSMIDI (files.synth.LiveGroup)
         self._instruments_job = None  # ... its instruments loading before it plays (start_loaded)
+        self._kestrel_job = None  # Kestrel (GPU) starting on a thread for a play (kestrel_first)
+        self._kestrel_made = None  # ... started, waiting for MidiOut.open: (out, error, soundfonts)
         self._thin_seen = (0, 0.0)  # (its thinned count, when it last grew: "Overloaded")
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
