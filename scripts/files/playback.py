@@ -384,6 +384,8 @@ class Player:
         self._lock = threading.Lock()
         self._gen = 0  # one for each start (a sort left from an earlier play is thrown away)
         self.ready = None  # a threading.Event the line waits for before it starts (play_loaded.LoadedPlayer.ready)
+        self.notes_ver = 0  # (+1 each time other notes are handed over: Kestrel's remembered note limits start over)
+        self._notes_of = None
 
     @property
     def running(self):
@@ -397,6 +399,7 @@ class Player:
         the notes'). tempo = [(tick, us)] tempo changes instead of the one bpm (the Tempo pane's)."""
         self.ports = 0 if self.out.tuned else ports
         self.stop()
+        self._new_notes(notes)
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
         self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
         self.map = TimeMap(ppq, tempo or [(0, 60_000_000 / bpm)])
@@ -413,6 +416,7 @@ class Player:
         they would have; new notes starting before the line aren't played (like a start from the line)."""
         if not self.running:
             return
+        self._new_notes(notes)
         self.ports = 0 if self.tune else ports
         self.stop_beat = stop_beat
         new = TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)])
@@ -427,6 +431,12 @@ class Player:
             if not self._sorting:
                 self._sorting = True
                 threading.Thread(target=self._sort, daemon=True).start()
+
+    def _new_notes(self, notes):
+        """notes_ver goes up when these notes aren't the ones handed over last (the same array = unchanged)."""
+        if notes is not self._notes_of:
+            self._notes_of = notes
+            self.notes_ver += 1
 
     def set_tempo(self, bpm, tempo=None):
         """Only the tempo changed while playing: on at the new speed from the same spot, the notes untouched."""

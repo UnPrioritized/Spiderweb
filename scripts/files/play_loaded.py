@@ -109,6 +109,9 @@ def _loops():
             midi_play.order_count, midi_play.order_place, midi_play.condense, midi_play.stamp_pre)
 
 
+_SONGS = 0  # (loaded MIDIs numbered as Kestrel first plays them: LoadedPlayer._song)
+
+
 def _tm_arrays(tmap):
     """A TimeMap as arrays (ticks, seconds, seconds a tick), for the compiled loops."""
     return (np.asarray(tmap.ticks, np.int64), np.asarray(tmap.secs, np.float64), np.asarray(tmap.spt, np.float64))
@@ -918,7 +921,6 @@ class LoadedPlayer:
                     held = self._retime(kout, ahead, held, tm, base, new, base_new)
                     base = base_new
                 tm_of, tm = tmap, new
-                song = hash((id(self.lm), len(tm[0]), float(tm[0].sum()), float(tm[2].sum()))) | 1
             if cur is None:
                 self.prof[3] += 1
                 if horizon is not None:
@@ -940,8 +942,6 @@ class LoadedPlayer:
                 if i1 > i:
                     if tm_of is not tmap:  # (the tempo map as arrays, for the compiled loop)
                         tm_of, tm = tmap, _tm_arrays(tmap)
-                        # (the song for Kestrel's remembered note limits: this MIDI at this tempo)
-                        song = hash((id(self.lm), len(tm[0]), float(tm[0].sum()), float(tm[2].sum()))) | 1
                     size = i1 - i if dense is None else midi_play.pre_room(ms, dense.cp, i, i1, line.st)
                     line.room(midi_play.ons_in(ms, i, i1))
                     fr = np.empty(size, np.uint64)
@@ -950,6 +950,7 @@ class LoadedPlayer:
                     cp = np.empty(size, np.uint32)
                     counts[:2] = 0  # (counts[2]: the copy table's generation, kept)
                     base = kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
+                    song = self._song(tm)
                     if told != (song, round(base)):
                         told = (song, round(base))
                         kout.k.set_song(base, song)
@@ -1006,6 +1007,31 @@ class LoadedPlayer:
         kout.cancel()
         kout.k.set_song(0.0, 0)  # (own shapes alone next: no place in a song)
         self.silence()
+
+    def _feeding(self, feeder):
+        """A feeder's thread: a failure stops playing with the reader's message (it went silent while the play line
+        ran on, only errors.log knew: hunt 2026-10-28)."""
+        try:
+            feeder()
+        except Exception as e:
+            self.error = e
+            from files.errors import write_log
+            import sys
+            write_log(*sys.exc_info(), "(playing a loaded MIDI)")
+
+    def _song(self, tm):
+        """Kestrel's song number: its note limits remembered by place are kept only while it stays the same. This
+        loaded MIDI (its own number: a memory address came back for a later MIDI, hunt 2026-10-28) at this tempo,
+        with these mutes, hidden / removed / rechannelled notes and own shapes (soloing after a full play kept the
+        full play's low limits, same hunt)."""
+        global _SONGS
+        no = getattr(self.lm, "_kb_no", None)
+        if no is None:
+            _SONGS += 1
+            no = self.lm._kb_no = _SONGS
+        from files.play_dense import key_of
+        return hash((no, len(tm[0]), float(tm[0].sum()), float(tm[2].sum()), self.muted.tobytes(), key_of(self.lm),
+                     getattr(self.player, "notes_ver", 0))) | 1
 
     @staticmethod
     def _retime(kout, ahead, held, tm, base, new, base_new):
@@ -1073,7 +1099,7 @@ class LoadedPlayer:
         self.silence(reset=True)
         feeder = self._feeder_kestrel if self.kind == "kestrel" else self._feeder
         self.threads = [threading.Thread(target=self._reader, args=(int(t0),), daemon=True),
-                        threading.Thread(target=feeder, daemon=True)]
+                        threading.Thread(target=self._feeding, args=(feeder,), daemon=True)]
         for th in self.threads:
             th.start()
 
