@@ -880,6 +880,7 @@ class ProjectFiles:
             r.fit_view()
         r.request_redraw()
         self.schedule_autosave()
+        self.read_ahead()
 
     def reattach_midi(self, lm, retempo=False):
         """An opened project's MIDI loaded again (window/load_midi.find_loaded): drawn under its shapes as when it was
@@ -903,6 +904,7 @@ class ProjectFiles:
         self.sync_panel()
         self.roll.request_redraw()
         self.schedule_autosave()
+        self.read_ahead()
 
     def drop_finding(self):
         """Another project / New: a MIDI still being loaded again for the one before stops (hunt 2026-10-24)."""

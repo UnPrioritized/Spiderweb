@@ -336,6 +336,14 @@ class Playback:
         self.schedule_autosave()
         if READY_AFTER_MS is not None:
             self.after(300, self.ready_builtin)
+        self.read_ahead()
+
+    def read_ahead(self):
+        """Kestrel (GPU) picked with a MIDI loaded: its densest parts read ahead now, in the background (files/
+        play_dense.py; ~20 s for Shinki), so the FIRST play has them too (user 2026-10-27; it was started by Play)."""
+        if self.loaded is not None and self.midi_device.get() == KESTREL:
+            from files.play_dense import ensure
+            ensure(self.loaded)
 
     def make_live(self):
         """(MidiOut.open) The built-in synth started for playing, with the soundfont (the Hz bass preview's) and
