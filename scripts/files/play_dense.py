@@ -7,27 +7,38 @@ Kestrel feeder plays it from that (midi_play.stamp_pre; play_loaded's reader ste
 (lm.dense) while its hidden notes, removed tracks and track channels stay as they were. Muted tracks: that play reads
 the parts live as before (the read-ahead holds every track)."""
 
-import io
 import json
+import os
 import threading
 
 import numpy as np
 
 from files import midi_play, speed
 
-DENSE_MBS = 200  # MB of the file a song second past which a part is read ahead (the live reader fell behind ~250)
+DENSE_MBS = 100  # MB of the file a song second past which a part is read ahead (2026-10-28: the live feeder falls
+# behind from ~100: Shinki's spam before its wall, 120-200, reached Kestrel in late lumps; was 200)
+PART_MB = 600  # MB of the file a part holds at most (cut there: the spam and the wall joined went past PART_MOST)
+DENSE_SHARE = 0.25  # of the free memory when it starts, the read-ahead keeps at most this (user 2026-10-28: "capped";
+# the densest parts first, the rest read live as before)
 JOIN_BEATS = 1.0  # dense stretches closer than this are one part
 EARLY_BEATS = 0.25  # each part starts this much before its first dense stretch
 PART_MOST = 1 << 26  # events a part may keep after collapsing (~1.2 GB): more = that part read live as before
 GROUP_TRACKS = 64  # one tick holding more than a reading window: its tracks read this many at a time
 SLICE = 1 << 22  # events collapsed at a time (room kept for this many more)
-SAVED_VER = 1  # (a saved read-ahead: how parts are read / collapsed changed = a new number, old ones read again)
+SAVED_VER = 3  # (a saved read-ahead: how parts are read / collapsed changed = a new number, old ones read again)
 SAVED_END = ".dense.npz"  # (beside the saved index: <index name>.dense.npz)
+PART_ARRAYS = ("ts", "ms", "tr", "cp", "s0_q", "s0_n")  # (each part's, saved as <name><part number>)
 
 
 def stretches(lm, tmap):
-    """[(t0, t1)] ticks of the parts to read ahead: bytes of each track between its checkpoints (64 KB apart)
-    spread evenly over their ticks, summed per 1/16 beat, over DENSE_MBS a song second."""
+    """[(t0, t1)] ticks of the parts to read ahead (plan's)."""
+    return plan(lm, tmap)[0]
+
+
+def plan(lm, tmap):
+    """([(t0, t1)] ticks of the parts to read ahead, [MB of file a song second each]): bytes of each track between
+    its checkpoints (64 KB apart) spread evenly over their ticks, summed per 1/16 beat, over DENSE_MBS a song
+    second; stretches closer than JOIN_BEATS joined, then cut so none holds more than PART_MB."""
     G = max(1, lm.ppq // 16)
     nb = lm.last_tick // G + 2
     dens = np.zeros(nb + 1, np.float64)
@@ -52,7 +63,22 @@ def stretches(lm, tmap):
         else:
             out.append([t0, t1])
     early = int(EARLY_BEATS * lm.ppq)
-    return [(max(0, a - early), b) for a, b in out]
+    parts, rates = [], []
+    for a, b in out:
+        a = max(0, a - early)
+        k0, k1 = a // G, max(a // G + 1, b // G)
+        cum = np.cumsum(per_g[k0:k1])
+        start, used = a, 0.0
+        for j in range(k1 - k0):
+            if cum[j] - used > PART_MB * 1e6 and (k0 + j) * G > start:  # (cut before this 1/16 beat)
+                cut = (k0 + j) * G
+                parts.append((start, cut))
+                start, used = cut, cum[j - 1] if j else 0.0
+        parts.append((start, b))
+    for a, b in parts:
+        k0, k1 = a // G, max(a // G + 1, b // G)
+        rates.append(float(per_g[k0:k1].sum()) / 1e6 / max(1e-9, float(edges[k1] - edges[k0])))
+    return parts, rates
 
 
 def key_of(lm):
@@ -105,9 +131,10 @@ class Dense:
 
     def __init__(self, lm, tmap):
         self.lm, self.key = lm, key_of(lm)
-        self.todo = stretches(lm, tmap)
+        self.todo, self.rates = plan(lm, tmap)
         self.parts = []
-        self.failed = 0  # (parts left to be read live: too many events kept, or reading failed)
+        self.failed = 0  # (parts left to be read live: too many events kept, reading failed, or over the memory cap)
+        self.capped = 0  # (... of them over the memory cap)
         self.error = None
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True, name="kestrel-dense")
@@ -150,14 +177,26 @@ class Dense:
             rd._helpers = [_Scratch(path) for _ in range(helper_count())]
             rd._pool_x = ThreadPoolExecutor(max(1, len(rd._helpers)), thread_name_prefix="kestrel-dense")
             rd._table()
-            for t0, t1 in self.todo:
+            from files.system import free_memory
+            free = free_memory()
+            cap = DENSE_SHARE * free if free else float("inf")  # (not known: no cap, as before)
+            used = 0
+            # the densest first (the wall before the spam leading to it): the memory cap leaves the lighter ones live
+            for k in sorted(range(len(self.todo)), key=lambda k: -self.rates[k]):
+                t0, t1 = self.todo[k]
                 if self._stop.is_set():
                     return
+                if used >= cap:
+                    self.failed += 1
+                    self.capped += 1
+                    continue
                 part = self._part(rd, t0, t1, WINDOW_MOST)
                 if part is None:
                     self.failed += 1
                 else:
-                    self.parts.append(part)
+                    used += sum(a.nbytes for a in (part.ts, part.ms, part.tr, part.cp))
+                    # (in song order; a whole new list: the player's reader never sees one half made)
+                    self.parts = sorted(self.parts + [part], key=lambda p: p.t0)
             if not self._stop.is_set():
                 save(self)
         except Exception as e:  # (a file gone / changed: the parts not done are read live as before)
@@ -256,7 +295,7 @@ def _saved_head(lm):
     from files.midi_saved import _layout
     mf = lm.mf
     return {"ver": SAVED_VER, "size": mf.size, "mtime": mf.mtime, "layout": _layout(mf),
-            "rules": [DENSE_MBS, JOIN_BEATS, EARLY_BEATS, PART_MOST]}
+            "rules": [DENSE_MBS, JOIN_BEATS, EARLY_BEATS, PART_MOST, PART_MB]}
 
 
 def save(d):
@@ -269,14 +308,26 @@ def save(d):
         ps = d.parts
         head = dict(_saved_head(lm), todo=[list(map(int, t)) for t in d.todo], failed=d.failed,
                     parts=[[int(p.t0), int(p.t1), len(p.ts), len(p.s0_q)] for p in ps])
-        cat = lambda k, dt: np.concatenate([getattr(p, k) for p in ps]) if ps else np.zeros(0, dt)  # noqa: E731
-        arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8),
-                  "ts": cat("ts", np.int32), "ms": cat("ms", np.uint32), "tr": cat("tr", np.uint16),
-                  "cp": cat("cp", np.uint32), "s0_q": cat("s0_q", np.int64), "s0_n": cat("s0_n", np.int64)}
-        buf = io.BytesIO()
-        np.savez(buf, **arrays)
-        from files.safefile import write_bytes
-        write_bytes(saved_file(midi_saved.index_file(lm.mf.path, lm.mf.size)), buf.getvalue())
+        arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8)}
+        for i, p in enumerate(ps):  # (each part's own arrays: never all of them joined into one more copy)
+            for k in PART_ARRAYS:
+                arrays[f"{k}{i}"] = getattr(p, k)
+        # straight into a file beside it, then put in place (safefile's way): built in memory first, a 3 GB
+        # read-ahead took two more copies and the PC ran out of memory (2026-10-28)
+        path = saved_file(midi_saved.index_file(lm.mf.path, lm.mf.size))
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                np.savez(f, **arrays)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
     except Exception:  # (disk full, the folder gone: read again next time)
         import sys
         from files.errors import write_log
@@ -294,15 +345,13 @@ def _load(lm, todo):
             if {k: head.get(k) for k in ("ver", "size", "mtime", "layout", "rules")} != \
                     json.loads(json.dumps(_saved_head(lm))) or head.get("todo") != [list(map(int, t)) for t in todo]:
                 return None
-            a = {k: z[k] for k in ("ts", "ms", "tr", "cp", "s0_q", "s0_n")}
+            parts = []
+            for i, (t0, t1, n, k) in enumerate(head["parts"]):
+                a = {key: z[f"{key}{i}"] for key in PART_ARRAYS}
+                if any(len(a[key]) != n for key in ("ts", "ms", "tr", "cp")) or len(a["s0_q"]) != k:
+                    return None
+                parts.append(Part(t0, t1, a["ts"], a["ms"], a["tr"], a["cp"], s0_q=a["s0_q"], s0_n=a["s0_n"]))
     except Exception:  # (none, or damaged: read again)
-        return None
-    parts, at, s = [], 0, 0
-    for t0, t1, n, k in head["parts"]:
-        parts.append(Part(t0, t1, a["ts"][at:at + n], a["ms"][at:at + n], a["tr"][at:at + n], a["cp"][at:at + n],
-                          s0_q=a["s0_q"][s:s + k], s0_n=a["s0_n"][s:s + k]))
-        at, s = at + n, s + k
-    if at != len(a["ts"]) or s != len(a["s0_q"]):
         return None
     return parts, head["failed"]
 
