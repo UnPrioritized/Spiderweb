@@ -22,6 +22,8 @@ from files.synth import RATE, SynthError, _ATTRIB_BUFFER, _SAMPLE_FLOAT, _STREAM
 from files.system import WINDOWS
 
 DLL_NAME = "kestrel_bridge.dll"
+# (Linux: the same connector built there, Vulkan; "untested" on a real Linux PC: built + loaded in WSL 2026-10-28)
+SO_NAME = "libkestrel_bridge.so"
 BLOCK = 512  # frames a block (~11 ms): the default delay
 AHEAD = 6  # blocks kept made ahead of the speakers (3 = every swing of the note budget was a gap, 2026-10-27)
 MAX_VOICES = 1 << 20  # Kestrel's own default
@@ -56,12 +58,15 @@ _dll = None
 
 
 def dll_path():
-    return os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "kestrel", "x64", DLL_NAME)
+    base = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "kestrel")
+    return os.path.join(base, "x64", DLL_NAME) if WINDOWS else os.path.join(base, "linux-x64", SO_NAME)
 
 
 def available():
-    """None when Kestrel can be used here, else the text key saying why not."""
-    if not WINDOWS or struct.calcsize("P") != 8:
+    """None when Kestrel can be used here, else the text key saying why not (64-bit Windows / Linux on x86-64)."""
+    import platform
+    if not (WINDOWS or sys.platform.startswith("linux")) or struct.calcsize("P") != 8 or \
+            platform.machine().lower() not in ("amd64", "x86_64"):
         return "playback.kestrel_not_here"
     if not os.path.isfile(dll_path()):
         return "playback.kestrel_missing"

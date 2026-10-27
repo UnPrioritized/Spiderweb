@@ -14,7 +14,13 @@ anyhow = "1"
 # Kestrel = mbms's fork (live interface + "runs inside another process" fix) + our own change on its branch
 # "spiderweb" (a voice cap that moves while it plays). LOCAL COPY until our public fork is up (group E of
 # dev/data/kestrel-plan.md), then a git dependency on it, pinned. Updating: see the kestrel-update skill.
+
+# (Windows: DirectX 12 through its shader compiler, as Kestrel's own builds; Linux: Vulkan)
+[target.'cfg(windows)'.dependencies]
 kestrel = { path = "../../../kestrel-live/kestrel-midi", default-features = false, features = ["dx12-dxc"] }
+
+[target.'cfg(not(windows))'.dependencies]
+kestrel = { path = "../../../kestrel-live/kestrel-midi", default-features = false }
 
 [profile.release]
 opt-level = 3
