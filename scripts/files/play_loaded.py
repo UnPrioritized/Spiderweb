@@ -774,6 +774,8 @@ class LoadedPlayer:
             if not parts:
                 continue
             fr, m, tr, cp = (np.concatenate(a) for a in zip(*parts)) if len(parts) > 1 else parts[0]
+            if cur is None and len(fr):  # (read only up to its last window: that window's last block waits too,
+                edge = min(edge, int(fr[-1]) // BLOCK * BLOCK)  # else it went half now, half in the next push)
             cut = int(np.searchsorted(fr, edge))  # (the block still being filled waits)
             held = (fr[cut:], m[cut:], tr[cut:], cp[cut:]) if cut < len(fr) else None
             # (in pieces of PIECE_BLOCKS, earliest first: one push of 0.4 s of a dense part took so long to rank

@@ -618,7 +618,11 @@ impl Budget {
             self.cooldown -= 1;
             return;
         }
-        if load > 1.0 || self.load > HIGH || self.empty > 0.5 {
+        // (one slow block with every ready block still waiting = harmless: in the real window one block a second
+        // took ~11 ms of 10.7 and each cut the allowance by 30 %, 7,600 down to 900 in 10 s = the melody 8 dB
+        // quiet against the user's render, 2026-10-27)
+        let slow = load > 1.5 || (load > 1.0 && ready + 1 < ahead.max(2));
+        if slow || self.load > HIGH || self.empty > 0.5 {
             // (in proportion to how far behind this block was: a block 2.7x too slow cuts to ~30 % at once; a
             // fixed 0.7 took ~30 slow blocks to come down from Shinki's 185,000 a block = 0.7 s of silence)
             let base = self.allow.map_or(self.wanted as f64, |a| a.min(self.wanted as f64));
