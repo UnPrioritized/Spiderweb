@@ -28,7 +28,8 @@ MAX_VOICES = 1 << 20  # Kestrel's own default
 class _Options(ctypes.Structure):
     _fields_ = [("size", ctypes.c_uint32), ("sample_rate", ctypes.c_uint32), ("block_frames", ctypes.c_uint32),
                 ("ahead_blocks", ctypes.c_uint32), ("max_voices", ctypes.c_uint32),
-                ("lower_by_itself", ctypes.c_uint32)]
+                ("lower_by_itself", ctypes.c_uint32), ("limiter", ctypes.c_uint32),
+                ("limiter_ceiling_db", ctypes.c_float)]
 
 
 class _Stats(ctypes.Structure):
@@ -97,11 +98,12 @@ class Kestrel:
     soundfont list, top first (each overrides the ones above it). synth = files.synth.Synth (BASS + the sound
     device). Opening takes seconds (the soundfonts load): not on the window's thread. SynthError when it can't."""
 
-    def __init__(self, synth, fonts, block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True):
+    def __init__(self, synth, fonts, block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True, limiter=True,
+                 ceiling_db=0.0):
         d = self.dll = load()
         self.bass = synth.bass
         self.block = block
-        opts = _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower))
+        opts = _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), ceiling_db)
         names = (ctypes.c_char_p * max(1, len(fonts)))(*[os.fsdecode(f).encode("utf-8") for f in fonts])
         h = d.kb_open(names, len(fonts), ctypes.byref(opts))
         if not h:

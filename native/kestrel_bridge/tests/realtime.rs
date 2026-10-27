@@ -74,7 +74,15 @@ fn realtime() {
 
     for lower in [true, false] {
         let ahead = env("KB_AHEAD", KbOptions::default().ahead_blocks as f64) as u32;
-        let opts = KbOptions { max_voices: voices, lower_by_itself: lower as u32, ahead_blocks: ahead, ..Default::default() };
+        // KB_CEILING: the limiter's ceiling in dBFS (the user's reference: -1)
+        let ceiling = env("KB_CEILING", 0.0) as f32;
+        let opts = KbOptions {
+            max_voices: voices,
+            lower_by_itself: lower as u32,
+            ahead_blocks: ahead,
+            limiter_ceiling_db: ceiling,
+            ..Default::default()
+        };
         let block = opts.block_frames as u64;
         let synth = Synth::open(&[PathBuf::from(&sf)], &opts).unwrap();
         synth.wait_ready(opts.ahead_blocks as usize);

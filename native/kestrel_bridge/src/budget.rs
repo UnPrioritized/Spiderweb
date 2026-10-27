@@ -63,8 +63,8 @@ pub struct Budget {
     by_slot: Vec<usize>,
     coh: Vec<f64>,
     pow: Vec<f64>,
-    /// New velocity of a kept note carrying merged copies (0 = as sent).
-    vel: Vec<u8>,
+    /// Loudness factor of a kept note carrying merged copies (1 = as sent).
+    scale: Vec<f32>,
     t1: Vec<usize>,
     t2: Vec<usize>,
     t3: Vec<usize>,
@@ -99,7 +99,7 @@ impl Budget {
             by_slot: vec![usize::MAX; 256 * 128],
             coh: Vec::new(),
             pow: Vec::new(),
-            vel: Vec::new(),
+            scale: Vec::new(),
             t1: Vec::new(),
             t2: Vec::new(),
             t3: Vec::new(),
@@ -119,8 +119,9 @@ impl Budget {
         self.cap.map_or(self.max_voices, |c| c as u32)
     }
 
-    /// Hand `push` the block's messages that stay; returns how many note-ons were dropped.
-    pub fn filter(&mut self, block: &mut [Pending], lower: bool, mut push: impl FnMut(&Pending)) -> u64 {
+    /// Hand `push` the block's messages that stay, each with its loudness factor (amplitude: copies merged into
+    /// a note-on); returns how many note-ons were dropped.
+    pub fn filter(&mut self, block: &mut [Pending], lower: bool, mut push: impl FnMut(&Pending, f32)) -> u64 {
         self.ons.clear();
         for (i, p) in block.iter().enumerate() {
             if p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0 {
@@ -171,14 +172,11 @@ impl Budget {
                 }
             }
             if self.keep[i] {
-                match self.vel.get(i) {
-                    // (carries the loudness of the copies merged into it)
-                    Some(&v) if v != 0 && is_on => push(&Pending { msg: p.msg & !(0x7F << 16) | (v as u32) << 16, ..*p }),
-                    _ => push(p),
-                }
+                // (a kept note-on carries the loudness of the copies merged into it)
+                push(p, if is_on { self.scale.get(i).copied().unwrap_or(1.0) } else { 1.0 });
             }
         }
-        self.vel.clear();
+        self.scale.clear();
         dropped
     }
 
@@ -235,11 +233,11 @@ impl Budget {
         self.merge_loudness(block);
     }
 
-    /// MERGED, NOT JUST DROPPED (user 2026-10-27, quick version): each dropped copy's loudness goes to a kept
-    /// note of its key (same channel if there is one, else the key's tier-1 note), which is played louder:
-    /// a key stacked many times stays louder than its neighbours, as in a full render. Kestrel's velocity
-    /// curve at full tracking: amplitude = (vel / 127)^2 (bank.rs velocity_atten_cb). Copies on the same frame
-    /// add as amplitudes (the same sound starting together), on other frames as powers. At most velocity 127.
+    /// MERGED, NOT JUST DROPPED (user 2026-10-27): each dropped copy's loudness goes to a kept note of its key
+    /// (same channel if there is one, else the key's tier-1 note), which is played louder: a key stacked many
+    /// times stays louder than its neighbours, as in a full render. Kestrel's velocity curve at full tracking:
+    /// amplitude = (vel / 127)^2 (bank.rs velocity_atten_cb). Copies on the same frame add as amplitudes (the
+    /// same sound starting together), on other frames as powers.
     fn merge_loudness(&mut self, block: &[Pending]) {
         let amp = |i: usize| {
             let v = ((block[i].msg >> 16) & 0x7F) as f64 / 127.0;
@@ -284,13 +282,16 @@ impl Budget {
                 self.pow[t] += amp(i) * amp(i);
             }
         }
-        self.vel.clear();
-        self.vel.resize(block.len(), 0);
+        self.scale.clear();
+        self.scale.resize(block.len(), 1.0);
         if any {
             for &i in &self.ons {
                 if self.keep[i] && (self.coh[i] > 0.0 || self.pow[i] > 0.0) {
+                    // (FULL merging, user 2026-10-27: our Kestrel change push_scaled multiplies the voice's gain,
+                    // no velocity-127 ceiling and the note's own velocity layer; the quick version's raised
+                    // velocity left the most stacked keys 14-19 dB short)
                     let a = ((amp(i) + self.coh[i]).powi(2) + self.pow[i]).sqrt();
-                    self.vel[i] = (127.0 * a.sqrt()).round().clamp(1.0, 127.0) as u8;
+                    self.scale[i] = (a / amp(i)) as f32;
                 }
             }
         }
@@ -473,9 +474,11 @@ mod tests {
         let mut block: Vec<Pending> = (0..500).map(|_| Pending { len: 100, ..on(1, 60, 120) }).collect();
         block.push(on(2, 60, 40));
         let mut kept = Vec::new();
-        b.filter(&mut block, true, |p| kept.push((p.track, (p.msg >> 16) & 0x7F)));
-        // the held note is kept (tier 1) and carries the spam's loudness
-        assert!(kept.iter().any(|k| k.0 == 2 && k.1 == 127), "{:?}", &kept[..2]);
+        b.filter(&mut block, true, |p, s| kept.push((p.track, (p.msg >> 16) & 0x7F, s)));
+        // the held note is kept (tier 1) and carries the spam's loudness: 500 x (120/127)^2 / (40/127)^2 + 1
+        let held = kept.iter().find(|k| k.0 == 2).expect("the held note was dropped");
+        assert_eq!(held.1, 40);
+        assert!(held.2 > 1000.0, "{held:?}");
     }
 
     #[test]
@@ -487,7 +490,7 @@ mod tests {
         block.push(on(2, 80, 100));
         block.push(on(2, 81, 90));
         let mut kept = Vec::new();
-        let dropped = b.filter(&mut block, true, |p| kept.push(p.msg));
+        let dropped = b.filter(&mut block, true, |p, _| kept.push(p.msg));
         assert_eq!(dropped, 8);
         // the melody's two notes + the wall's two loudest
         let keys: Vec<u32> = kept.iter().map(|m| (m >> 8) & 0x7F).collect();
@@ -503,7 +506,7 @@ mod tests {
         block.push(on(2, 72, 30));
         block.push(on(3, 72, 20));
         let mut kept = Vec::new();
-        b.filter(&mut block, true, |p| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F)));
+        b.filter(&mut block, true, |p, _| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F)));
         assert_eq!(kept.len(), 128);
         assert!(kept.contains(&(72, 30)), "the run note was dropped");
         assert!(!kept.contains(&(72, 20)) || kept.iter().filter(|k| k.0 == 72).count() == 2);
@@ -518,16 +521,17 @@ mod tests {
         let mut block: Vec<Pending> = (0..128).map(|k| on(1, k, 50)).collect();
         block.push(on(1, 0, 50));
         let mut kept = Vec::new();
-        assert_eq!(b.filter(&mut block, true, |p| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F))), 1);
-        // two copies at 50 on one frame = amplitude 2 x (50/127)^2 = one note at 127 x sqrt(2) x 50/127 = 71
-        assert!(kept.contains(&(0, 71)), "{:?}", &kept[..3]);
-        assert!(kept.contains(&(1, 50)));
-        // on different frames they add as powers: 2^(1/4) x 50 = 59
+        assert_eq!(b.filter(&mut block, true, |p, s| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F, s))), 1);
+        // two copies on one frame = the kept one at its own velocity, twice the amplitude
+        assert!(kept.contains(&(0, 50, 2.0)), "{:?}", &kept[..3]);
+        assert!(kept.contains(&(1, 50, 1.0)));
+        // on different frames they add as powers: sqrt(2)
         let mut block: Vec<Pending> = (0..128).map(|k| on(1, k, 50)).collect();
         block.push(Pending { frame: 7, ..on(1, 0, 50) });
         let mut kept = Vec::new();
-        b.filter(&mut block, true, |p| kept.push(((p.msg >> 8) & 0x7F, (p.msg >> 16) & 0x7F)));
-        assert!(kept.contains(&(0, 59)), "{:?}", &kept[..3]);
+        b.filter(&mut block, true, |p, s| kept.push(((p.msg >> 8) & 0x7F, s)));
+        let s = kept.iter().find(|k| k.0 == 0).unwrap().1;
+        assert!((s - std::f32::consts::SQRT_2).abs() < 1e-5, "{s}");
     }
 
     #[test]
@@ -536,12 +540,12 @@ mod tests {
         b.allow = Some(3.0);
         let mut block: Vec<Pending> = (0..6).map(|k| on(7, 40 + k, 64)).collect();
         let mut kept = Vec::new();
-        b.filter(&mut block, true, |p| kept.push((p.msg >> 8) & 0x7F));
+        b.filter(&mut block, true, |p, _| kept.push((p.msg >> 8) & 0x7F));
         assert_eq!(kept, vec![40, 41, 42]);
         // (scratch left clean for the next block)
         let mut block: Vec<Pending> = (0..2).map(|k| on(7, 60 + k, 64)).collect();
         let mut kept = Vec::new();
-        b.filter(&mut block, true, |p| kept.push((p.msg >> 8) & 0x7F));
+        b.filter(&mut block, true, |p, _| kept.push((p.msg >> 8) & 0x7F));
         assert_eq!(kept, vec![60, 61]);
     }
 
@@ -551,13 +555,13 @@ mod tests {
         b.allow = Some(1.0);
         let mut block = vec![on(1, 60, 100), on(1, 60, 5)];
         let mut kept = Vec::new();
-        b.filter(&mut block, true, |p| kept.push(p.msg));
+        b.filter(&mut block, true, |p, _| kept.push(p.msg));
         assert_eq!(kept.len(), 1);
         // first off pairs with the kept (first) note-on, the second with the dropped one
         let mut block = vec![off(60), off(60)];
         let mut kept = Vec::new();
         b.allow = None;
-        b.filter(&mut block, true, |p| kept.push(p.msg));
+        b.filter(&mut block, true, |p, _| kept.push(p.msg));
         assert_eq!(kept.len(), 1);
     }
 
@@ -567,7 +571,7 @@ mod tests {
         b.allow = Some(1.0);
         let mut block: Vec<Pending> = (0..5).map(|k| on(1, 40 + k, 50)).collect();
         let mut n = 0;
-        assert_eq!(b.filter(&mut block, false, |_| n += 1), 0);
+        assert_eq!(b.filter(&mut block, false, |_, _| n += 1), 0);
         assert_eq!(n, 5);
     }
 
@@ -580,7 +584,7 @@ mod tests {
             (0..200_000u32).map(|i| on((i % 5000) as u16, i % 128, 1 + (i * 7) % 127)).collect();
         let t = std::time::Instant::now();
         let mut n = 0;
-        let dropped = b.filter(&mut block, true, |_| n += 1);
+        let dropped = b.filter(&mut block, true, |_, _| n += 1);
         assert_eq!(dropped, 180_000);
         assert_eq!(n, 20_000);
         eprintln!("200,000 note-ons chosen in {:.2?}", t.elapsed());

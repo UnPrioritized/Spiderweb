@@ -39,6 +39,10 @@ pub struct KbOptions {
     pub max_voices: u32,
     /// 1 = drop new notes (fair by track, quietest first) to stay in real time; 0 = never (it stutters instead).
     pub lower_by_itself: u32,
+    /// Kestrel's limiter on the output: 1 = on (its default, as in its file renders), 0 = off; and its ceiling
+    /// in dBFS (0 = Kestrel's default; the user's reference renders use -1).
+    pub limiter: u32,
+    pub limiter_ceiling_db: f32,
 }
 
 impl Default for KbOptions {
@@ -51,6 +55,8 @@ impl Default for KbOptions {
             ahead_blocks: 6,
             max_voices: 1 << 20,
             lower_by_itself: 1,
+            limiter: 1,
+            limiter_ceiling_db: 0.0,
         }
     }
 }
@@ -176,6 +182,12 @@ impl Synth {
             block_frames: block,
             max_voices: opts.max_voices.max(1),
             steal_fade_frames: Config::default().steal_fade_frames.min(block - 1),
+            limiter: opts.limiter != 0,
+            limiter_ceiling_db: if opts.limiter_ceiling_db.is_finite() {
+                opts.limiter_ceiling_db.min(0.0) as _
+            } else {
+                0.0
+            },
             ..Config::default()
         };
         cfg.validate()?;
@@ -388,9 +400,10 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             at = 0;
         }
         let lower = s.lower.load(Ordering::Relaxed);
-        let dropped = budget.filter(&mut taken, lower, |p| {
+        let dropped = budget.filter(&mut taken, lower, |p, scale| {
             if let Some(ev) = decode(p.msg) {
-                driver.push(p.frame, ev);
+                // (our Kestrel change: a note-on carrying the copies merged into it)
+                driver.push_scaled(p.frame, ev, scale);
             }
         });
         taken.clear();
