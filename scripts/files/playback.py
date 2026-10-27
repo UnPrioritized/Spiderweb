@@ -19,6 +19,7 @@ from notes.hz_settings import CC_NUMBER, CC_START
 MAPPER_NAME = "Windows default (MIDI Mapper)"
 BUILTIN = "Built-in BASSMIDI"  # (the user's name for it; like a device's name it's saved, so not translated)
 KDMAPI = "OmniMIDI (KDMAPI)"  # (OmniMIDI's own direct way in, skipping Windows' MIDI layers; user's name, saved)
+KESTREL = "Kestrel (GPU)"  # (the GPU synth through files/kestrel.py; user 2026-10-27: its name may show; saved)
 DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
 MAPPER = 0xFFFFFFFF
 
@@ -110,7 +111,9 @@ def _load_kdmapi():
 def devices():
     """Names of the MIDI-OUT devices: Windows' default first, then the built-in synth, OmniMIDI's direct way when
     it's installed, then Windows' devices."""
+    from files import kestrel
     kd = [KDMAPI] if _kdmapi_path() else []
+    kd += [KESTREL] if kestrel.available() is None else []
     return [MAPPER_NAME, BUILTIN] + kd + _winmm_devices() if _winmm else [BUILTIN] + kd
 
 
@@ -123,10 +126,11 @@ def keep_saved(name):
 class MidiOut:
     """One open MIDI-OUT device, kept open until another is picked. handle = winmm's, or the built-in synth's Live."""
 
-    def __init__(self, make_live=None):
+    def __init__(self, make_live=None, make_kestrel=None):
         self.handle = None
         self.name = None
         self.make_live = make_live  # () -> a started synth.Live (or raises SynthError)
+        self.make_kestrel = make_kestrel  # () -> a playing kestrel.KestrelOut (or raises SynthError)
         self.edo = False  # the project's notes played in 31-EDO (the app's 31-EDO + Audio ticks): see tuned
 
     @property
@@ -144,11 +148,30 @@ class MidiOut:
         errors.note("MIDI out", name if err is None else f"{name} (couldn't open)")
         return err
 
+    @property
+    def lead(self):
+        """Seconds early a player sends (send_at), 0 = at the time itself (send)."""
+        return self.handle.lead if self.name == KESTREL and self.handle else 0
+
+    def send_at(self, msg, when, length=None):
+        """(lead > 0) msg to sound at perf_counter time `when`; length = a note-on's in seconds."""
+        self.handle.send_at(msg, when, length)
+
+    def flush(self):
+        """(lead > 0) what send_at queued, pushed in whole blocks."""
+        if self.name == KESTREL and self.handle:
+            self.handle.flush()
+
+    def cancel(self):
+        """(lead > 0) what was sent ahead forgotten (its note-offs sound now)."""
+        if self.name == KESTREL and self.handle:
+            self.handle.cancel()
+
     def _open(self, name):
-        if name == BUILTIN:
+        if name in (BUILTIN, KESTREL):
             from files.synth import SynthError
             try:
-                self.handle = self.make_live()
+                self.handle = (self.make_live if name == BUILTIN else self.make_kestrel)()
             except SynthError as e:
                 return str(e)
             self.name = name
@@ -192,7 +215,7 @@ class MidiOut:
     def send(self, msg):
         h = self.handle
         if h:
-            if self.name == BUILTIN:
+            if self.name in (BUILTIN, KESTREL):
                 h.send(msg)
             elif self.name == KDMAPI:
                 h.SendDirectData(msg)
@@ -209,7 +232,7 @@ class MidiOut:
 
     def close(self):
         if self.handle:
-            if self.name == BUILTIN:
+            if self.name in (BUILTIN, KESTREL):
                 self.handle.close()
             elif self.name == KDMAPI:
                 self.handle.ResetKDMAPIStream()
@@ -434,11 +457,22 @@ class Player:
         if clock is None:
             return self.start_beat
         t, sec, tmap = clock
-        return min(self.stop_beat, tmap.tick(sec + time.perf_counter() - t) / self.ppq)
+        return min(self.stop_beat, tmap.tick(sec + max(0.0, time.perf_counter() - t)) / self.ppq)
 
     def _run(self, notes, use10, ccs=()):
         clock, sleep, stop = time.perf_counter, time.sleep, self._stop
-        send = self.out.send
+        out = self.out
+        send = out.send
+        # (Kestrel: each message sent `lead` seconds early, stamped with when it sounds: exact times, whole blocks)
+        lead = getattr(out, "lead", 0)
+        if lead:
+            emit, flush = out.send_at, out.flush
+        else:
+            def emit(m, when, length=None):
+                send(m)
+
+            def flush():
+                pass
         t0 = self.start_beat * self.ppq
         tune = self.tune
         shared = tune or self.shared
@@ -448,11 +482,14 @@ class Player:
         while ready is not None and not ready.wait(0.01):
             if stop.is_set():
                 return
-        self._clock = (clock(), self.map.sec(t0), self.map)
+        if lead:
+            out.handle.resync()
+        # (Kestrel: the line starts `lead` from now, so the first notes are sent ahead too)
+        self._clock = (clock() + lead, self.map.sec(t0), self.map)
         held = self.held = {}
         sent = self.cc_sent = set()
         for m in cc_before(ccs, t0):  # (the CC lines' values where it starts)
-            send(m)
+            emit(m, self._clock[0])
             sent.add(_cc_kind(m))
         j = next((n for n, (t, _) in enumerate(ccs) if t >= t0), len(ccs))
         offs = []  # (end tick, channel | key << 8) of the notes sounding
@@ -476,11 +513,13 @@ class Player:
                 now = cc_before(ccs, done + 1)
                 kinds = {_cc_kind(m) for _, m in ccs}
                 kinds |= {(ch, None) for ch, kind in kinds if kind == "bend"}
+                t_now, sec_now, tmap = self._clock
+                when = t_now + tmap.sec(done) - sec_now
                 for m in cc_reset({kind for kind in sent - kinds if kind[1] is not None}):
-                    send(m)
+                    emit(m, when)
                 sent &= kinds
                 for m in now:
-                    send(m)
+                    emit(m, when)
                     sent.add(_cc_kind(m))
             if k == len(batch) and i < len(ons):
                 batch, k = ons.batch(i), 0
@@ -497,15 +536,18 @@ class Player:
                 wait = t_now + tmap.sec(t1) - sec_now - clock()
                 if wait <= 0:
                     return
+                flush()
                 sleep(min(wait, 0.01))
                 continue
-            wait = t_now + tmap.sec(tick) - sec_now - clock()
-            if wait > 0:
-                sleep(min(wait, 0.01))
+            when = t_now + tmap.sec(tick) - sec_now
+            wait = when - clock()
+            if wait > lead:
+                flush()
+                sleep(min(wait - lead, 0.01))
                 continue  # (stopped, new notes or a new tempo meanwhile: looked at again)
             done = tick
             if other:
-                send(c[1])
+                emit(c[1], when)
                 sent.add(_cc_kind(c[1]))
                 j += 1
                 continue
@@ -515,7 +557,7 @@ class Player:
                 # (31-EDO: every colour's notes on a row share its one channel, so the row sounds until its last
                 # note ends, like the colours' own channels do in 12-tone; shapes keeping their colours the same)
                 if n <= 0 or not shared:
-                    send(0x80 | key)
+                    emit(0x80 | key, when)
                 if n > 0:
                     held[key] = n
                 else:
@@ -526,7 +568,8 @@ class Player:
             if wait < -0.1:
                 continue  # far behind (too many notes at once): skip late notes instead of smearing them
             s, e, key, vel = on
-            send(0x90 | key | vel << 16)
+            # (its length: Kestrel's note budget keeps the longest start of a key, a held note beside spam)
+            emit(0x90 | key | vel << 16, when, tmap.sec(e) - tmap.sec(s) if lead else None)
             held[key] = held.get(key, 0) + 1
             heapq.heappush(offs, (e, key))
 
@@ -535,6 +578,7 @@ class Player:
             self._stop.set()
             self.thread.join()
             self.thread = None
+            getattr(self.out, "cancel", lambda: None)()  # (Kestrel: what was sent ahead goes)
             # ordinary note-offs for what's still sounding, so the synth plays its release (a reset cuts it off);
             # one for each note on a key (overlapping notes there each got a note-on). A channel with very many
             # (Sustain's stacked notes: sustain.py) gets one "all notes off" instead, also a release: one by one, a

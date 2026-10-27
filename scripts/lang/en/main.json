@@ -687,6 +687,7 @@
  "bs.limiter_slow": "\nWithout the optional speed-up Numba, playback may break up for a moment while you edit with it on.",
  "app.pick_soundfont_title": "Pick a soundfont for Built-in BASSMIDI",
  "app.opening_soundfont": "Opening the soundfont…",
+ "app.opening_kestrel": "Starting Kestrel (GPU) with the soundfonts…",
  "app.loading_instruments": "Loading the MIDI's instruments…",
  "app.domino_start": "Domino start",
  "app.where_copied_and_pasted_notes_start": "Where copied and pasted notes start:\nFirst note at tick 0: the first note lands right on the cursor / play line.\nFrom the bar line: the empty space from the bar line before the first note\ncomes along, so the notes keep their place in the bar.",

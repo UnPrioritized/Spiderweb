@@ -463,7 +463,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.own_domino_copy = None  # ... and at its last Copy to Domino (paste_from_domino)
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
-        self.out = MidiOut(self.make_live)
+        self.out = MidiOut(self.make_live, self.make_kestrel)
         self.font_failed = None  # (make_live: the soundfont that couldn't be read)
         self.player = Player(self.out)
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)

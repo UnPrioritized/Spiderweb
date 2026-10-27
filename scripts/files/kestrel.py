@@ -12,6 +12,8 @@ import ctypes
 import os
 import struct
 import sys
+import threading
+import time
 
 import numpy as np
 
@@ -169,6 +171,20 @@ class Kestrel:
         """The render's error text once it failed, else None."""
         return _error(self.dll, self.handle) if self.handle and self.stats()["failed"] else None
 
+    def anchor(self, ms=30):
+        """Which frame the speakers get at which perf_counter time: (time, frame), from the counter of frames handed
+        out read for `ms` (it jumps a device pull at a time: the reading right after a pull is the truest)."""
+        best = None
+        end = time.perf_counter() + ms / 1000
+        while True:
+            now = time.perf_counter()
+            f = self.frame()
+            if best is None or f - (now - best[0]) * RATE > best[1]:
+                best = (now, f)
+            if now >= end:
+                return best
+            time.sleep(0.001)
+
     def close(self):
         """Stream freed first (it calls into the connector), then the connector."""
         if self.stream:
@@ -177,3 +193,83 @@ class Kestrel:
         if self.handle:
             self.dll.kb_close(self.handle)
             self.handle = None
+
+
+LEAD = 0.2  # seconds the player sends ahead of the sound (more than the blocks made ahead: AHEAD x BLOCK = 64 ms)
+
+
+class KestrelOut:
+    """Kestrel as a MIDI out (playback.MidiOut's handle): send() = sounds now (Stop's note-offs); a player that knows
+    what comes sends `lead` seconds early with send_at(msg, when) = the exact perf_counter time it should sound,
+    stamped with that frame, so notes keep their exact time (not one block's). Messages are pushed in whole blocks
+    (flush): a busy block's note-ons ranked together. track = the channel + port (the note budget shares by it)."""
+
+    lead = LEAD
+
+    def __init__(self, synth, fonts, **kw):
+        self.k = Kestrel(synth, fonts, **kw)
+        self.font_paths = list(fonts)  # (App.fresh_builtin: another list picked = opened again)
+        self._lock = threading.Lock()
+        self._frames, self._msgs, self._lens = [], [], []
+        self._offs = []  # (frame, msg) note-offs pushed ahead: sent again by cancel()
+        self.late = 0  # messages that came for a frame already made (send() = now: Stop's, mostly)
+        self.resync()
+
+    def resync(self):
+        """Frames against the clock again (each play's start: the sound card's clock drifts from perf_counter)."""
+        self._t0, self._f0 = self.k.anchor()
+
+    def frame_at(self, when):
+        return max(0, int(round(self._f0 + (when - self._t0) * RATE)))
+
+    def send(self, msg):
+        self.send_at(msg, time.perf_counter())
+        self.flush(everything=True)
+
+    def send_at(self, msg, when, length=None):
+        """msg sounds at perf_counter time `when`; length = a note-on's length in seconds (None: not known)."""
+        f = self.frame_at(when)
+        with self._lock:
+            self._frames.append(f)
+            self._msgs.append(msg)
+            self._lens.append(UNKNOWN_LEN if length is None else min(int(length * RATE), UNKNOWN_LEN - 1))
+            if msg & 0xF0 == 0x80 or (msg & 0xF0 == 0x90 and not (msg >> 16) & 0x7F):
+                self._offs.append((f, msg))
+
+    def flush(self, everything=False):
+        """Push what was sent, up to the last whole block (everything: all of it)."""
+        with self._lock:
+            if not self._msgs:
+                return
+            if everything:
+                n = len(self._msgs)
+            else:
+                edge = self.frame_at(time.perf_counter() + self.lead) // BLOCK * BLOCK
+                n = next((i for i, f in enumerate(self._frames) if f >= edge), len(self._frames))
+                if not n:
+                    return
+            fr, ms, ln = self._frames[:n], self._msgs[:n], self._lens[:n]
+            del self._frames[:n], self._msgs[:n], self._lens[:n]
+            if len(self._offs) > 4096:  # (only the ones still ahead are ever needed)
+                now = self.k.frame()
+                self._offs = [o for o in self._offs if o[0] >= now]
+        tracks = [(m & 15) | ((m >> 24) & 15) << 4 for m in ms]
+        made = self.k.stats()["rendered"]
+        if fr[0] < made:  # (for a frame already made: sounds at the next block's start, a little late)
+            self.late += sum(f < made for f in fr)
+        self.k.push(fr, ms, tracks, ln)
+
+    def cancel(self):
+        """Everything sent ahead forgotten (Stop): its note-offs sound now instead (the player counted those notes
+        as ended), so nothing is left ringing."""
+        with self._lock:
+            offs = [m for f, m in self._offs if f >= self.k.frame()]
+            offs += [m for m in self._msgs if m & 0xF0 == 0x80 or (m & 0xF0 == 0x90 and not (m >> 16) & 0x7F)]
+            self._frames, self._msgs, self._lens, self._offs = [], [], [], []
+        self.k.cancel()
+        now = self.frame_at(time.perf_counter())
+        if offs:
+            self.k.push([now] * len(offs), offs, [(m & 15) | ((m >> 24) & 15) << 4 for m in offs])
+
+    def close(self):
+        self.k.close()

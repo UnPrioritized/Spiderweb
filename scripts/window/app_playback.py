@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox
 from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
-from files.playback import BUILTIN, cc_list
+from files.playback import BUILTIN, KESTREL, cc_list
 from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
@@ -66,12 +66,12 @@ class Playback:
             messagebox.showerror(tr("app.spiderweb_2"), str(e))
             return
         dev = self.midi_device.get()
-        if dev == BUILTIN and not self.hz_preview["font"] and not self.pick_soundfont():
+        if dev in (BUILTIN, KESTREL) and not self.hz_preview["font"] and not self.pick_soundfont():
             return
         self.fresh_builtin()
         fresh = dev == BUILTIN and not (self.out.handle and self.out.name == dev)
         err = self.out.open(dev)
-        while err and dev == BUILTIN and self.font_failed:  # (moved, gone or broken: offer another, hunt 2026-10-09)
+        while err and dev in (BUILTIN, KESTREL) and self.font_failed:  # (moved, gone, broken: offer another)
             if not messagebox.askyesno(tr("app.spiderweb_2"), err + "\n\n" + tr("synth.pick_other"), parent=self) \
                     or not self.pick_soundfont(self.font_failed):
                 return
@@ -247,7 +247,7 @@ class Playback:
         heard = self.track_list.unmuted(self.rendered)  # (tracks muted in the track list: not played)
         if not per_shape and not any(pasted.values()):
             return heard, {}, 0
-        ports = LIVE_PORTS if (device or self.out.name) == BUILTIN else 0
+        ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL) else 0
         rendered, msgs = cc_apart(heard, per_shape, self.picture_use10, ports) if per_shape else (heard, {})
         for s, ms in pasted.items():
             if ms:
@@ -290,7 +290,7 @@ class Playback:
         piano on every channel, at every play's start and stop: a loaded MIDI's instruments never stay on for the
         shapes (hunt 2026-10-25; user: own shapes always the piano). Built-in BASSMIDI plays a loaded MIDI on synths
         of its own."""
-        if self.out.handle is None or self.out.name == BUILTIN:
+        if self.out.handle is None or self.out.name in (BUILTIN, KESTREL):
             return
         for ch in range(16):
             for m in (0xB0 | ch, 0xB0 | ch | 32 << 8, 0xC0 | ch):
@@ -355,6 +355,25 @@ class Playback:
             self.note_builtin()
             self.ring_check()  # (Auto's CC run-on: measured from it now if it isn't known)
             return live
+        finally:
+            self.busy(None)
+
+    def make_kestrel(self):
+        """(MidiOut.open) Kestrel (GPU) started with the shared soundfonts (each overrides the ones above it, as
+        in Built-in BASSMIDI), playing through BASS's sound device. Raises SynthError (font_failed: as make_live).
+        Its own settings (Settings → Sound) come later: Kestrel's defaults, "Lower it by itself" on."""
+        from files.kestrel import KestrelOut
+        self.font_failed = None
+        fonts = font_list(self.hz_preview)
+        if not fonts:
+            raise SynthError("synth.no_font")
+        self.busy(tr("app.opening_kestrel"))  # (seconds: Kestrel reads the whole soundfonts)
+        try:
+            if self.synth is None:
+                self.synth = Synth()
+            out = KestrelOut(self.synth, fonts)
+            errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
+            return out
         finally:
             self.busy(None)
 
@@ -468,16 +487,19 @@ class Playback:
         window, e.g. the Hz window asking when its file is gone): closed, so it opens the new one."""
         live = self.out.handle
         opened = getattr(live, "font_paths", None) or [p for p in [getattr(live, "font_path", None)] if p]
-        if self.out.name == BUILTIN and live and list(opened) != font_list(self.hz_preview):
+        if self.out.name in (BUILTIN, KESTREL) and live and list(opened) != font_list(self.hz_preview):
             self.out.close()
 
     def soundfont_changed(self, again=True, added=None):
         """The shared soundfonts were changed (set_soundfonts): Built-in BASSMIDI opens them at the next note. again
         = opened anew even if open (picked again); added = the new ones (None: the top one) checked (.sfz)."""
-        if self.out.name == BUILTIN:
+        if self.out.name in (BUILTIN, KESTREL):
             self.stop_play()
             self.scrub_end()
             self.out.close()
+        if getattr(self, "_scrub_side", None) is not None:  # (Kestrel's listening synth: opens them anew)
+            self.scrub_end()
+            self._scrub_side.close()
         self.sync_builtin()
         if self.synth is not None and again:
             self.synth.stale = True  # (picked again = opened again: samples put back since then are found)
@@ -651,8 +673,9 @@ class Playback:
     def scrub(self, t_from, t_to):
         """Right-drag listening: sound the notes under the mouse (tick t_to) and any it just swept past."""
         self.fresh_builtin()
-        if not self.out.handle:
-            err = self.out.open(self.midi_device.get())
+        out = self.scrub_out()
+        if not out.handle:
+            err = out.open(BUILTIN if self.midi_device.get() == KESTREL else self.midi_device.get())
             if err:
                 self.status.config(text=err)
                 return False
@@ -661,7 +684,7 @@ class Playback:
         near = self.roll.visible_notes(lo, hi)
         near = near[near[:, 3] >= -1]  # (the track list's faint tracks: shown only, not listened to)
         s_, e_ = near[:, 0], near[:, 1]
-        tuned = self.out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
+        tuned = out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
             k = (0 if tuned else slot_track_channel(slot, self.picture_use10)[1], p)
             if k not in now or s > now[k][0]:
@@ -674,31 +697,44 @@ class Playback:
                 order = tuple(n for n in order if n not in faint)
             ppq_lm = self.loaded.ppq / self.ppq  # (its own ticks)
             got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm, loud_on(self))
-            drums = self.out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
+            drums = out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
             for (ch, p), (s, v) in got.items():  # own drum channel; other MIDI outs' channel 10 is drums already)
                 k = (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
                 if k not in now:  # (sounding without a start in this sweep: held on as it is, a new key sounds)
                     now[k] = (held.get(k, -1) if s is None else -2 - s, v)
             if rough:  # (too many notes to read in time: every key drawn, one loudness; user 2026-10-25)
                 self.status.config(text=tr("app.scrub_rough"))
-        if self.out.edo and self.out.name != BUILTIN and now and not held:
+        if out.edo and out.name != BUILTIN and now and not held:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
         for k in [k for k in held if k not in now]:
-            self.out.note(*k, 0, rows=True)
+            out.note(*k, 0, rows=True)
             del held[k]
         for (ch, p), (s, v) in now.items():
             if held.get((ch, p)) != s:  # a new note on this key (back-to-back spam notes each sound)
                 if (ch, p) in held:
-                    self.out.note(ch, p, 0, rows=True)
-                self.out.note(ch, p, v, rows=True)
+                    out.note(ch, p, 0, rows=True)
+                out.note(ch, p, v, rows=True)
                 held[(ch, p)] = s
         self.roll.scrub_t = t_to / self.ppq  # (a line of its own: the play line stays where it is, user)
         self.roll.draw_playhead()
         return True
 
+    def scrub_out(self):
+        """Right-drag listening's MIDI out: the one picked, but with Kestrel (GPU) picked Built-in BASSMIDI's own
+        synth (user 2026-10-27: listening stays on BASSMIDI; Kestrel sounds ~0.1 s late)."""
+        if self.midi_device.get() != KESTREL:
+            return self.out
+        side = getattr(self, "_scrub_side", None)
+        if side is None:
+            from files.playback import MidiOut
+            side = self._scrub_side = MidiOut(self.make_live)
+        side.edo = self.out.edo  # (31-EDO's sound works there)
+        return side
+
     def scrub_end(self):
+        out = self.scrub_out()
         for ch, p in self._scrub_held:
-            self.out.note(ch, p, 0, rows=True)
+            out.note(ch, p, 0, rows=True)
         self._scrub_held.clear()
         if self.roll.scrub_t is not None:
             self.roll.scrub_t = None
