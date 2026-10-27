@@ -168,6 +168,7 @@ class LoadedPlayer:
         self._pool = []  # (arrays of windows played: used again, never made anew each window)
         self._gen = 0  # (a jump: windows read before it are thrown away)
         self._jump = None  # tick the reader starts again from (asked by the feeder)
+        self._unpart = None  # (Kestrel) (generation, part, tick): a part read ahead stopped there (_leave_part)
         self.thinned = 0  # note-ons left out (budget / late), so far
         self.sent = 0  # note-ons sent
         self.jumps = 0
@@ -399,7 +400,7 @@ class LoadedPlayer:
         skip = np.zeros(SKIP, np.int64)
         live = np.flatnonzero(opened)
         if len(live):
-            port = self.tport[self.num[live // 2048]] % 64
+            port = self.tport[self.num[live // 2048]] % (16 if self.kind == "kestrel" else 64)  # (Kestrel: 16)
             np.add.at(skip, port * 2048 + live % 2048, opened[live])
         o = np.argsort(ts, kind="stable")
         return skip, (ts[o].copy(), ms[o].copy(), ks[o].copy())
@@ -489,22 +490,27 @@ class LoadedPlayer:
                 skip, chase = self._place(start)
                 self._place_s = time.perf_counter() - began
                 p = self._dense_part(start)
-                if p is not None and p.t0 < start:  # (inside a part read ahead: ITS notes sounding there are left
-                    skip = np.zeros(SKIP, np.int64)  # out, the file's count would eat the part's own offs)
-                    p.sounding(start, skip)
+                if p is not None and p.t0 < start:  # (inside a part read ahead: its notes sounding there are left
+                    skip = p.unheard(start)  # out as it counts them, the file's count would eat its own offs)
                 with self._lock:
                     self._gen += 1
                     gen = self._gen
                     self._queue.clear()
                     self._queue.append([chase[0], chase[1], chase[2], 0, skip, None])  # (controllers before the start)
                     self._jump = None
+                    self._unpart = None
                     # (read up to here now: the feeder measures from the new place, hunt 2026-10-25: a jump that
                     # took long to place asked for another at once, over and over, and playing went silent)
                     self._horizon = start
                 span = max(1, self.lm.ppq // 8)
                 w0 = start
+                fresh = True  # (a part read ahead is taken part-way only where playing starts: its unheard offs
+                # counted above; joined part-way later (done meanwhile, a track unmuted) = read live to its end)
                 last = int(max((self.lm.tracks[int(n)].last_tick for n in self.num), default=0))
                 while not self._stop.is_set() and self._jump is None:
+                    if self._unpart is not None:  # (a mute changed while a part played: live from where it was)
+                        w0, span, fresh = self._leave_part(), max(1, self.lm.ppq // 8), False
+                        continue
                     if w0 > last:
                         self.ready.set()
                         time.sleep(0.02)
@@ -526,10 +532,14 @@ class LoadedPlayer:
                         time.sleep(0.005)
                         continue
                     p = self._dense_part(w0)
-                    if p is not None:  # (Kestrel: a part read ahead plays from there, the reading goes on past it)
+                    if p is not None and (p.t0 == w0 or fresh):  # (Kestrel: a part read ahead plays from there,
+                        # the reading goes on past it)
+                        fresh = False
                         with self._lock:
                             if self._gen != gen or self._jump is not None:
                                 break
+                            if self._unpart is not None:
+                                continue
                             self._queue.append([p.ts, p.ms, p.tr, int(np.searchsorted(p.ts, w0 - p.t0, "left")),
                                                 ("dense", p), None])
                             self._horizon = p.t1
@@ -567,6 +577,7 @@ class LoadedPlayer:
                             break
                         self._queue.append([ts, ms, ks, 0, None, base])
                         self._horizon = w1
+                    fresh = False
                     if tmap.sec(w1) - tmap.sec(start) >= READY_S:  # (the play line may start: the Player waits
                         self.ready.set()  # for it; a head start, else a dense part ran dry at once, hunt 10-25)
                     self.windows += 1
@@ -592,6 +603,25 @@ class LoadedPlayer:
                 self._pool_x.shutdown(wait=True)
             for sc in [self._sc] + self._helpers:
                 sc.close()
+
+    def _leave_part(self):
+        """(The reader) the part read ahead the feeder stopped playing at tick tm (a track muted meanwhile: a part
+        holds every track, hunt 2026-10-27): what was read past it dropped, the reading placed at tm, live from
+        there. Its notes sounding at tm were heard (copies as one, the file's from before it in full): their offs
+        go; the file's extra copies' offs are left out. Returns tm."""
+        with self._lock:
+            gen, p, tm = self._unpart
+            self._queue.clear()
+        heard = p.unheard(tm)  # (as the part counts them)
+        skip, _ = self._place(tm)  # (as the file does)
+        np.maximum(skip - heard, 0, out=skip)
+        with self._lock:
+            self._unpart = None
+            if self._gen == gen:
+                self._queue.append([np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32), 0, skip,
+                                    None])
+                self._horizon = tm
+        return tm
 
     def _dense_now(self):
         """Kestrel (GPU): the loaded MIDI's read-ahead of its densest parts (files/play_dense.py) when it may be
@@ -841,7 +871,17 @@ class LoadedPlayer:
             now = time.perf_counter()
             if now - checked > 0.1:
                 checked = now
+                was = self.muted
                 self._read_mutes()
+                # (a part read ahead holds every track: a mute changing while it plays = it stops where it is,
+                # the rest read live with the mutes, hunt 2026-10-27: heard to the part's end, seconds)
+                if cur is not None and isinstance(cur[4], tuple) and cur[4][0] == "dense" and \
+                        not np.array_equal(was, self.muted):
+                    p = cur[4][1]
+                    with self._lock:
+                        if self._gen == gen and self._unpart is None:
+                            self._unpart = (gen, p, p.t0 + int(cur[0][cur[3]]) if cur[3] < len(cur[0]) else p.t1)
+                            cur = None
             t_c, sec, tmap = clock
             s_now = sec + now - t_c
             T = tmap.tick(s_now + PUSH_S)
@@ -857,7 +897,7 @@ class LoadedPlayer:
                     skip[:] = 0
                     opened[:] = 0
                     wall["t"], wall["floor"] = None, 0.0
-                if cur is None and self._queue:
+                if cur is None and self._queue and self._unpart is None:
                     cur = self._queue.popleft()
                     took(cur)
                 horizon = getattr(self, "_horizon", None)
@@ -910,7 +950,7 @@ class LoadedPlayer:
                     with self._lock:
                         if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
                             self._pool.append(cur[5])
-                        cur = self._queue.popleft() if self._queue and self._gen == gen else None
+                        cur = self._queue.popleft() if self._queue and self._gen == gen and self._unpart is None else None
                         wall["floor"] = 0.0
                         if cur is not None:
                             took(cur)
@@ -975,6 +1015,7 @@ class LoadedPlayer:
         self._stop.clear()
         self.ready.clear()
         self._horizon = None
+        self._unpart = None
         self.silence(reset=True)
         feeder = self._feeder_kestrel if self.kind == "kestrel" else self._feeder
         self.threads = [threading.Thread(target=self._reader, args=(int(t0),), daemon=True),

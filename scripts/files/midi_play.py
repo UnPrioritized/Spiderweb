@@ -283,14 +283,19 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate,
         hi = (m & 0xFF) >> 4
         port = tport[trk[i]]
         if hi == 0x8 or hi == 0x9:
-            q = ((port % 64) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
+            # (port % 16 as Kestrel has it, in every skip / opened of its path: hunt 2026-10-27, past 16 ports a part
+            # read ahead and the live reading counted under different ports)
+            q = ((port % 16) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
             if hi == 0x9 and (m >> 16) & 127 > 0:
+                if muted[trk[i]]:  # (not wanted: never counted as thinned, it showed "Overloaded", hunt 2026-10-27)
+                    skip[q] += 1
+                    continue
                 counts[0] += 1
-                if muted[trk[i]] or f < least:
+                if f < least:
                     skip[q] += 1
                     continue
                 counts[1] += 1
-                key =np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
+                key = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
                 h = (int(key) * 2654435761) & (COPY_TABLE - 1)
                 found = -1
                 for _ in range(COPY_PROBES):
@@ -343,7 +348,7 @@ def condense(ts, ms, ks, tport, skip, n, out_t, out_m, out_tr, out_cp, tab_key, 
         hi = (m & 0xFF) >> 4
         port = tport[ks[i]]
         if hi == 0x8 or hi == 0x9:
-            q = ((port % 64) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
+            q = ((port % 16) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
             if hi == 0x9 and (m >> 16) & 127 > 0:
                 counts[0] += 1
                 key = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)

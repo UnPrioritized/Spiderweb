@@ -59,13 +59,25 @@ def key_of(lm):
 class Part:
     """One part read ahead: ticks t0..t1; ts (int32, from t0), ms (message, port in the top byte), tr (the note
     budget's channel + port), cp (copies) as condense made them; skip_q / skip_n = note-offs still to leave out at
-    its end (copies sounding on past it)."""
+    its end (copies sounding on past it); s0_q / s0_n = the file's notes sounding at t0 (their offs are in it)."""
 
-    def __init__(self, t0, t1, ts, ms, tr, cp, skip):
+    def __init__(self, t0, t1, ts, ms, tr, cp, skip, s0):
         self.t0, self.t1 = t0, t1
         self.ts, self.ms, self.tr, self.cp = ts, ms, tr, cp
         self.skip_q = np.flatnonzero(skip)
         self.skip_n = skip[self.skip_q]
+        self.s0_q = np.flatnonzero(s0)
+        self.s0_n = s0[self.s0_q]
+
+    def unheard(self, tick):
+        """Notes sounding at tick inside the part as its own note-offs count them (SKIP places): the file's from
+        before t0 still on, then its own (copies as one). Playing starts at tick: these offs are left out (hunt
+        2026-10-27: counting only its own, the earlier notes' offs came through and ended other notes early)."""
+        from files.play_loaded import SKIP
+        skip = np.zeros(SKIP, np.int64)
+        skip[self.s0_q] = self.s0_n
+        self.sounding(tick, skip)
+        return skip
 
     def sounding(self, tick, skip):
         """skip += the part's notes sounding at tick (playing starts there: their offs left out)."""
@@ -156,7 +168,7 @@ class Dense:
         """One part read and collapsed (None: stopped, or too much kept)."""
         from files.play_loaded import SKIP
         condense = _condense()
-        rd._place(t0)  # (its skip left out: the notes sounding at t0 were played live, their offs go)
+        s0, _ = rd._place(t0)  # (its skip left out: the notes sounding at t0 were played live, their offs go)
         skip = np.zeros(SKIP, np.int64)
         last_on = np.full(SKIP, -1, np.int64)
         counts = np.array([0, 0, 0, -1], np.int64)
@@ -221,7 +233,7 @@ class Dense:
                 span *= 2
             w0 = w1
         return Part(t0, t1, (out[0][:n] - t0).astype(np.int32), out[1][:n].copy(), out[2][:n].copy(),
-                    out[3][:n].copy(), skip)
+                    out[3][:n].copy(), skip, s0)
 
 
 def ensure(lm):
