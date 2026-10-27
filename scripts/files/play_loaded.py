@@ -111,6 +111,7 @@ def _loops():
 
 PUSH_S = 1.0  # Kestrel (GPU): events pushed this far ahead of the line (ranking a dense push takes a while)
 PIECE_BLOCKS = 8  # ... at most this many of its blocks a push
+HOLD_BLOCKS = 4  # ... a block not whole yet waits at most until it's this close to being made
 
 
 def instruments(lm):
@@ -892,7 +893,14 @@ class LoadedPlayer:
                 continue
             fr, m, tr, cp = (np.concatenate(a) for a in zip(*parts)) if len(parts) > 1 else parts[0]
             if cur is None and len(fr):  # (read only up to its last window: that window's last block waits too,
-                edge = min(edge, int(fr[-1]) // BLOCK * BLOCK)  # else it went half now, half in the next push)
+                last = int(fr[-1]) // BLOCK * BLOCK  # else it went half now, half in the next push)
+                # ... but only while the reading may still add to it: read past its end (a gap in the song) or
+                # about to be made = it goes now (user 2026-10-27, Septette bar 52: the offs before a 1.6 s
+                # rest waited for the next note, 0.68 s late, the chord rang on)
+                read_to = None if horizon is None else (kout._f0 + (t_c - sec - kout._t0) * K_RATE
+                                                        + tmap.sec(horizon) * K_RATE)
+                if (read_to is None or read_to < last + BLOCK) and last > least + HOLD_BLOCKS * BLOCK:
+                    edge = min(edge, last)
             cut = int(np.searchsorted(fr, edge))  # (the block still being filled waits)
             held = (fr[cut:], m[cut:], tr[cut:], cp[cut:]) if cut < len(fr) else None
             # (in pieces of PIECE_BLOCKS, earliest first: one push of 0.4 s of a dense part took so long to rank
