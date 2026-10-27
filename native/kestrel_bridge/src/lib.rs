@@ -589,6 +589,8 @@ impl Drop for Synth {
 /// (made in under PLAN_ROOM of its real-time length).
 const PLAN_ROOM: f64 = 0.6;
 const PLAN_RISE: f32 = 1.1;
+/// Messages other batches may have due in a block for its front batch to still be read the fast way (`apart`).
+const FEW_OTHERS: usize = 4096;
 
 fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, rate: u32, max_voices: u32) -> Result<()> {
     let samples = block as usize * 2;
@@ -596,6 +598,9 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
     let mut budget = Budget::new(max_voices);
     let mut cap = max_voices;
     let mut taken: Vec<Pending> = Vec::new();
+    // (a block's kept messages when its few others are chosen apart: frame, message, loudness factor)
+    let mut kept_a: Vec<(u64, u32, f32)> = Vec::new();
+    let mut kept_b: Vec<(u64, u32, f32)> = Vec::new();
     // batches taken from the inbox, not due yet (front batch read from `at`)
     let mut future: VecDeque<Batch> = VecDeque::new();
     let mut at = 0usize;
@@ -691,10 +696,24 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             at = future.front().map_or(0, |b| b.pos);
             span = 0;
         }
-        // (a later batch with messages due in this block too: all read the general way below)
-        let others = future.iter().skip(1).any(|b| b.msgs.get(b.pos).is_some_and(|p| p.frame < end));
+        // (a later batch with messages due in this block too: all read the general way below; unless they're few
+        // (own shapes' notes beside a loaded MIDI's busy block): then the busy block keeps its fast way, the few are
+        // chosen apart, both put together by frame. A note every 20 ms beside Shinki sent 394 of 690 blocks the slow
+        // way and the note limit fell from ~7,000 a block to ~200, C6 2026-10-28)
+        let mut few = 0usize;
+        let mut others = false;
+        for b in future.iter().skip(1) {
+            let mut k = b.pos;
+            while k < b.msgs.len() && b.msgs[k].frame < end && few <= FEW_OTHERS {
+                few += 1;
+                k += 1;
+            }
+            others |= k > b.pos;
+        }
+        let apart = others && few <= FEW_OTHERS;
+        let alone = !others || apart;
         // A ranked block starting here and ending before `end` is the whole block: no search through it.
-        let ranked = future.front().filter(|_| !others).and_then(|b| {
+        let ranked = future.front().filter(|_| alone).and_then(|b| {
             while span < b.spans.len() && (b.spans[span].start as usize) < at {
                 span += 1;
             }
@@ -703,10 +722,42 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             (b.msgs[at].frame < end && b.msgs.get(stop).map_or(true, |p| p.frame >= end)).then_some((stop, g.ons))
         });
         let inside = ranked.map(|r| r.0).or_else(|| {
-            future.front().filter(|_| !others).and_then(|b| b.msgs[at..].iter().position(|p| p.frame >= end).map(|j| at + j))
+            future.front().filter(|_| alone).and_then(|b| b.msgs[at..].iter().position(|p| p.frame >= end).map(|j| at + j))
         });
         let n_msgs;
-        let dropped = if let Some(j) = inside {
+        let dropped = if let Some(j) = inside.filter(|_| apart) {
+            n_msgs = j - at + few;
+            kept_a.clear();
+            kept_b.clear();
+            let mut d = budget.filter(&future.front().unwrap().msgs[at..j], ranked.map(|r| r.1 as usize), lower,
+                                      |p: &Pending, sc: f32| kept_a.push((p.frame, p.msg, sc)));
+            let wanted = budget.wanted();
+            for b in future.iter_mut().skip(1) {
+                while b.pos < b.msgs.len() && b.msgs[b.pos].frame < end {
+                    taken.push(b.msgs[b.pos]);
+                    b.pos += 1;
+                }
+            }
+            d += budget.filter(&taken, None, lower, |p: &Pending, sc: f32| kept_b.push((p.frame, p.msg, sc)));
+            budget.add_wanted(wanted);
+            taken.clear();
+            // (by frame, each one's own order kept)
+            let (mut a, mut b) = (0, 0);
+            while a < kept_a.len() || b < kept_b.len() {
+                let (f, m, sc) = if b >= kept_b.len() || (a < kept_a.len() && kept_a[a].0 <= kept_b[b].0) {
+                    a += 1;
+                    kept_a[a - 1]
+                } else {
+                    b += 1;
+                    kept_b[b - 1]
+                };
+                if let Some(ev) = decode(m) {
+                    driver.push_scaled(f, ev, sc);
+                }
+            }
+            at = j;
+            d
+        } else if let Some(j) = inside {
             n_msgs = j - at;
             let d = budget.filter(&future.front().unwrap().msgs[at..j], ranked.map(|r| r.1 as usize), lower, &mut push);
             at = j;

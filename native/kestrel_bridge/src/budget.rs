@@ -238,6 +238,11 @@ impl Budget {
         self.wanted
     }
 
+    /// A block chosen in two calls (render_loop `apart`): the first call's note-ons counted with the second's.
+    pub fn add_wanted(&mut self, n: usize) {
+        self.wanted += n;
+    }
+
     /// The next block takes the limits it had on an earlier play (`limits` then): the same notes kept, the same
     /// sound every play. After a cut while following (this PC slower now) the learned limits rule until they are
     /// back up to the remembered ones.
