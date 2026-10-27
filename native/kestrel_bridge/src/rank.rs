@@ -3,11 +3,17 @@
 //! 10.7 ms block in Shinki's dense part (185,000 note-ons a block), which held the allowance at its floor.
 //!
 //! The order (budget.rs has the user's rules): tier 1 = one start of each key (the longest, then the loudest),
-//! tier 2 = one of each key on each channel, tier 3 = the rest. Inside tiers 2 and 3 the tracks take TURNS, each
-//! track loudest first (earlier first at one velocity): any first N of a round-robin is the fair split (a
-//! track with fewer notes runs out and leaves its turns to the others). Each note-on also gets the ranks of its
-//! key's two kept candidates, where its loudness goes if it is dropped (`srep` same channel + key, `krep` the
-//! key's tier-1 note, always kept).
+//! tier 2 = one of each key on each channel, tier 3 = one of each key at each frame (the loudest there), tier 4
+//! = the rest. Inside tiers 2 to 4 the tracks take TURNS, each track loudest first (earlier first at one
+//! velocity): any first N of a round-robin is the fair split (a track with fewer notes runs out and leaves its
+//! turns to the others). Each note-on also gets the ranks of its key's two kept candidates, where its loudness
+//! goes if it is dropped (`srep` the same key at the same frame, `krep` the key's tier-1 note, always kept).
+//!
+//! TIER 3 KEEPS THE RHYTHM (2026-10-27): Shinki's spam starts stacks ~94 times a second; with every note playing,
+//! the quiet stacks between the loud ones cancel part of the loud ones' low buzz. Loudest-first dropped the quiet
+//! stacks, and their loudness carried to a note at ANOTHER frame can't cancel anything: 60-120 Hz came out
+//! +2.7 dB (F#2 +6) against every note played. One note per key per frame, carrying its frame's dropped copies:
+//! -0.1 dB (dev/data/kestrel-plan.md).
 //!
 //! A block is ranked from the events of ONE push with frames in it, in a row. A block whose note-ons came in
 //! two pushes, or late into a later block, doesn't match its `Span` and is chosen on the render thread instead.
@@ -52,6 +58,8 @@ struct On {
     i: u32,
     len: u32,
     slot: u16,
+    /// its frame inside the block
+    at: u16,
     track: u16,
     key: u8,
     vel: u8,
@@ -73,10 +81,13 @@ pub struct Ranker {
     // (below: indices into `ons`)
     by_key: [u32; 128],
     by_slot: Vec<u32>,
+    /// (frame inside the block x 128 + key)
+    by_frame: Vec<u32>,
     ons: Vec<On>,
     t1: Vec<u32>,
     t2: Vec<u32>,
     t3: Vec<u32>,
+    t4: Vec<u32>,
     order: Vec<u32>,
     rank_of: Vec<u32>,
     // round-robin scratch
@@ -92,10 +103,12 @@ impl Ranker {
         Ranker {
             by_key: [NONE; 128],
             by_slot: vec![NONE; 256 * 128],
+            by_frame: Vec::new(),
             ons: Vec::new(),
             t1: Vec::new(),
             t2: Vec::new(),
             t3: Vec::new(),
+            t4: Vec::new(),
             order: Vec::new(),
             rank_of: Vec::new(),
             per_track: vec![0; 1 << 16],
@@ -111,6 +124,9 @@ impl Ranker {
     /// group's place is added to `spans`, in order.
     pub fn rank(&mut self, batch: &mut [Pending], block_frames: u64, over: usize, spans: &mut Vec<Span>) {
         let mut a = 0;
+        if self.by_frame.len() < block_frames as usize * 128 {
+            self.by_frame = vec![NONE; block_frames as usize * 128];
+        }
         while a < batch.len() {
             // (block bounds compared, not each frame divided: a division per message was ~1/3 of the ranking)
             let start = batch[a].frame / block_frames * block_frames;
@@ -126,6 +142,7 @@ impl Ranker {
                         i: (b - a) as u32,
                         len: p.len,
                         slot: ((((p.msg >> 24) & 0x0F) << 4 | (p.msg & 0x0F)) as u16) * 128 + key as u16,
+                        at: (p.frame - start) as u16,
                         track: p.track,
                         key,
                         vel: ((p.msg >> 16) & 0x7F) as u8,
@@ -153,18 +170,25 @@ impl Ranker {
             if *s == NONE || rank(o) > rank(&ons[*s as usize]) {
                 *s = j as u32;
             }
+            let f = &mut self.by_frame[o.at as usize * 128 + o.key as usize];
+            if *f == NONE || rank(o) > rank(&ons[*f as usize]) {
+                *f = j as u32;
+            }
         }
         self.t1.clear();
         self.t2.clear();
         self.t3.clear();
+        self.t4.clear();
         for (j, o) in ons.iter().enumerate() {
             let j = j as u32;
             if self.by_key[o.key as usize] == j {
                 self.t1.push(j);
             } else if self.by_slot[o.slot as usize] == j {
                 self.t2.push(j);
-            } else {
+            } else if self.by_frame[o.at as usize * 128 + o.key as usize] == j {
                 self.t3.push(j);
+            } else {
+                self.t4.push(j);
             }
         }
         self.order.clear();
@@ -177,6 +201,9 @@ impl Ranker {
         let t3 = std::mem::take(&mut self.t3);
         self.round_robin(&ons, &t3);
         self.t3 = t3;
+        let t4 = std::mem::take(&mut self.t4);
+        self.round_robin(&ons, &t4);
+        self.t4 = t4;
         self.rank_of.clear();
         self.rank_of.resize(ons.len(), 0);
         for (r, &j) in self.order.iter().enumerate() {
@@ -184,7 +211,9 @@ impl Ranker {
         }
         let tail = TAIL.load(std::sync::atomic::Ordering::Relaxed);
         for (j, o) in ons.iter().enumerate() {
-            let (s, k) = (self.by_slot[o.slot as usize] as usize, self.by_key[o.key as usize] as usize);
+            // (a dropped note's loudness goes to its own frame's note of the key: it sounds when it did)
+            let s = self.by_frame[o.at as usize * 128 + o.key as usize] as usize;
+            let k = self.by_key[o.key as usize] as usize;
             let (so, ko) = (&ons[s], &ons[k]);
             let p = &mut g[o.i as usize];
             p.rank = self.rank_of[j];
@@ -201,6 +230,7 @@ impl Ranker {
         self.by_key = [NONE; 128];
         for o in &ons {
             self.by_slot[o.slot as usize] = NONE;
+            self.by_frame[o.at as usize * 128 + o.key as usize] = NONE;
         }
         self.ons = ons;
     }

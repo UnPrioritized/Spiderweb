@@ -51,7 +51,19 @@ fn realtime() {
     // the last value of each per channel before it, sent at frame 0
     let mut state: std::collections::BTreeMap<(u32, u32), u32> = Default::default();
     let mut state_sent = from_beat == 0;
-    while let Some((tick, ev)) = s.next() {
+    // KB_CACHE=file: the stretch's events saved there once (the MIDI isn't changed), read from it after
+    let cache = std::env::var("KB_CACHE").ok();
+    let cached = cache.as_ref().and_then(|p| std::fs::read(p).ok());
+    if let Some(b) = &cached {
+        let n = u64::from_le_bytes(b[..8].try_into().unwrap()) as usize;
+        let (f, rest) = b[8..].split_at(n * 8);
+        let (m, t) = rest.split_at(n * 4);
+        frames = f.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().unwrap())).collect();
+        msgs = m.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+        tracks = t.chunks_exact(2).map(|c| u16::from_le_bytes(c.try_into().unwrap())).collect();
+        eprintln!("{n} events from the cache");
+    }
+    while let Some((tick, ev)) = s.next().filter(|_| cached.is_none()) {
         if let Event::Tempo(us) = ev {
             clock.set_tempo(tick, us);
             continue;
@@ -89,6 +101,91 @@ fn realtime() {
         msgs.push(m);
         // (the reader doesn't say which track: the channel + port stands in for it here)
         tracks.push(((m & 15) | ((m >> 24) & 15) << 4) as u16);
+    }
+    if let (Some(p), None) = (&cache, &cached) {
+        let mut b = (frames.len() as u64).to_le_bytes().to_vec();
+        frames.iter().for_each(|f| b.extend_from_slice(&f.to_le_bytes()));
+        msgs.iter().for_each(|m| b.extend_from_slice(&m.to_le_bytes()));
+        tracks.iter().for_each(|t| b.extend_from_slice(&t.to_le_bytes()));
+        std::fs::write(p, b).unwrap();
+        eprintln!("saved {} events to {p}", frames.len());
+    }
+    // (a cache longer than this run: cut at its end)
+    let n = frames.partition_point(|&f| f < end);
+    frames.truncate(n);
+    msgs.truncate(n);
+    tracks.truncate(n);
+    // KB_KEY=N or LO-HI: only those keys' notes
+    if let Ok(ks) = std::env::var("KB_KEY") {
+        let (lo, hi) = ks.split_once('-').unwrap_or((&ks, &ks));
+        let (lo, hi): (u32, u32) = (lo.parse().unwrap(), hi.parse().unwrap());
+        let keep: Vec<bool> =
+            msgs.iter().map(|&m| m & 0xE0 != 0x80 || (lo..=hi).contains(&((m >> 8) & 0x7F))).collect();
+        let mut k = keep.iter();
+        frames.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        tracks.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        msgs.retain(|_| *k.next().unwrap());
+    }
+    // KB_COPIES=1: exact copies (same frame + message) sent once with their count, their note-offs left out (the
+    // next ones of their channel + key), as Spiderweb's feeder does
+    // KB_MINVEL=N: note-ons under velocity N left out with their note-offs (the oldest-first one each)
+    let minvel = env("KB_MINVEL", 0.0) as u32;
+    if minvel > 0 {
+        let n0 = msgs.len();
+        let mut open: Vec<std::collections::VecDeque<bool>> = vec![Default::default(); 256 * 128];
+        let mut keep = vec![true; msgs.len()];
+        for (i, &m) in msgs.iter().enumerate() {
+            let slot = (((m >> 24) & 15) << 4 | (m & 15)) as usize * 128 + ((m >> 8) & 0x7F) as usize;
+            if m & 0xF0 == 0x90 && (m >> 16) & 0x7F != 0 {
+                let out = (m >> 16) & 0x7F < minvel;
+                open[slot].push_back(out);
+                keep[i] = !out;
+            } else if m & 0xF0 == 0x80 || m & 0xF0 == 0x90 {
+                keep[i] = open[slot].pop_front() != Some(true);
+            }
+        }
+        let mut k = keep.iter();
+        frames.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        tracks.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        msgs.retain(|_| *k.next().unwrap());
+        eprintln!("min velocity {minvel}: {n0} events -> {}", msgs.len());
+    }
+    let mut copies: Vec<u32> = Vec::new();
+    if env("KB_COPIES", 0.0) != 0.0 {
+        let n0 = msgs.len();
+        let (mut f2, mut m2, mut t2) = (Vec::new(), Vec::new(), Vec::new());
+        let mut skip = vec![0u32; 256 * 128];
+        let mut here: std::collections::HashMap<u32, usize> = Default::default();
+        let mut at = u64::MAX;
+        for i in 0..msgs.len() {
+            let (f, m) = (frames[i], msgs[i]);
+            if f != at {
+                here.clear();
+                at = f;
+            }
+            let slot = (((m >> 24) & 15) << 4 | (m & 15)) as usize * 128 + ((m >> 8) & 0x7F) as usize;
+            if m & 0xF0 == 0x90 && (m >> 16) & 0x7F != 0 {
+                if let Some(&j) = here.get(&m) {
+                    copies[j] += 1;
+                    skip[slot] += 1;
+                    continue;
+                }
+                here.insert(m, m2.len());
+            } else if (m & 0xF0 == 0x80 || m & 0xF0 == 0x90) && skip[slot] > 0 {
+                skip[slot] -= 1;
+                continue;
+            }
+            f2.push(f);
+            m2.push(m);
+            t2.push(tracks[i]);
+            copies.push(1);
+        }
+        (frames, msgs, tracks) = (f2, m2, t2);
+        eprintln!("copies: {n0} events -> {}", msgs.len());
     }
     let end = end.min(frames.last().map_or(0, |f| f + 1));
     // each note-on's length, from the whole stretch (FIFO per channel + key), as Spiderweb would know it;
@@ -148,6 +245,8 @@ fn realtime() {
             lower_by_itself: lower as u32,
             ahead_blocks: ahead,
             limiter_ceiling_db: ceiling,
+            // KB_LIMITER=0: no limiter (what the notes themselves add up to)
+            limiter: env("KB_LIMITER", 1.0) as u32,
             ..Default::default()
         };
         let block = opts.block_frames as u64;
@@ -197,7 +296,8 @@ fn realtime() {
                     if j > i {
                         let fr: Vec<u64> = frames[i..j].iter().map(|f| f + start).collect();
                         let tp = Instant::now();
-                        synth.push_len(&fr, &msgs[i..j], &tracks[i..j], give_lens.then(|| &lens[i..j]));
+                        synth.push_full(&fr, &msgs[i..j], &tracks[i..j], give_lens.then(|| &lens[i..j]),
+                            (!copies.is_empty()).then(|| &copies[i..j]));
                         worst = worst.max(tp.elapsed());
                         i = j;
                         sent_to.store(if i == frames.len() { u64::MAX } else { horizon }, std::sync::atomic::Ordering::Relaxed);
@@ -259,7 +359,7 @@ fn realtime() {
         let notes = msgs.iter().filter(|m| *m & 0xF0 == 0x90 && (*m >> 16) & 0x7F != 0).count();
         eprintln!(
             "lower {lower:5}: {:.2} s of song took {:.2?}; heard {:.2} s, silence {:.2} s in {} late pulls; dropped {} of {notes} \
-             note-ons ({:.0} %); keys kept {:.1} % ; last allowance {}; worst push {worst_push:.2?}; voices now {}; block {:.2} ms (prep {:.2})",
+             note-ons ({:.0} %); keys kept {:.1} % ; last allowance {}; worst push {worst_push:.2?}; voices now {}, stolen {}, kestrel dropped {}; block {:.2} ms (prep {:.2})",
             end as f64 / rate as f64,
             t.elapsed(),
             st.handed as f64 / rate as f64 - start as f64 / rate as f64,
@@ -270,6 +370,8 @@ fn realtime() {
             st.keys_kept as f64 * 100.0 / st.keys_wanted.max(1) as f64,
             st.allowance,
             st.voices,
+            st.stolen,
+            st.kestrel_dropped,
             block_sum as f64 / samples_n as f64 / 1000.0,
             prep_sum as f64 / samples_n as f64 / 1000.0
         );

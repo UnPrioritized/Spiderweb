@@ -120,7 +120,8 @@ struct Pending {
     /// (the budget keeps the longest start of a key: a held note beside spam on one key)
     len: u32,
     /// Ranked at push (rank.rs; the batch's `spans` say which blocks were): its place in its block's priority
-    /// order, and the ranks of the notes its loudness goes to if it is dropped.
+    /// order, and the ranks of the notes its loudness goes to if it is dropped (`srep` its key's note on its
+    /// frame, `krep` its key's tier-1 note).
     rank: u32,
     srep: u32,
     krep: u32,

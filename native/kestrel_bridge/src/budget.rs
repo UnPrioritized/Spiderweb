@@ -337,7 +337,7 @@ impl Budget {
                     self.stay.push((i as u32, (amp(p) * self.level.gain(p.msg)) as f32, p.copies));
                 } else {
                     self.held[k].push_back(true);
-                    // its loudness (with its own channel's volume) to the same channel + key's kept note, else the
+                    // its loudness (with its own channel's volume) to its key's kept note on its frame, else the
                     // key's tier-1 note, as an amplitude when it is the same sound (known from push)
                     let (to, same, ratio) = if (p.srep as usize) < allow {
                         (p.srep, p.s_same, p.s_ratio)
@@ -385,7 +385,8 @@ impl Budget {
     /// Keep `allow` of the block's note-ons, in tiers (user 2026-10-27: thinned by loudness alone, the runs
     /// running up and down were gone: walls are mostly STACKED COPIES of one key): 1. the loudest start of each
     /// key (any channel; at most 128, so every pitch keeps sounding), 2. the loudest of each key on each
-    /// channel (other instruments on that key), 3. the rest. A tier that doesn't fit whole is shared fairly
+    /// channel (other instruments on that key), 3. one of each key at each frame (the rhythm), 4. the rest. A
+    /// tier that doesn't fit whole is shared fairly
     /// by track (`choose`); the tiers after it are dropped.
     fn tiers(&mut self, block: &[Pending], allow: usize) {
         let key = |i: usize| ((block[i].msg >> 8) & 0x7F) as usize;
@@ -406,7 +407,10 @@ impl Budget {
                 *b = i;
             }
         }
+        // (3. one of each key at each frame: rank.rs "TIER 3 KEEPS THE RHYTHM")
+        let by_frame = Self::frame_reps(block, &self.ons);
         let (mut t1, mut t2, mut t3) = (std::mem::take(&mut self.t1), std::mem::take(&mut self.t2), std::mem::take(&mut self.t3));
+        let mut t4 = Vec::new();
         t1.clear();
         t2.clear();
         t3.clear();
@@ -415,15 +419,17 @@ impl Budget {
                 t1.push(i);
             } else if self.by_slot[slot(i)] == i {
                 t2.push(i);
-            } else {
+            } else if by_frame[&(block[i].frame, key(i))] == i {
                 t3.push(i);
+            } else {
+                t4.push(i);
             }
         }
         for &i in &self.ons {
             self.by_slot[slot(i)] = usize::MAX;
         }
         let mut left = allow;
-        for tier in [&t1, &t2, &t3] {
+        for tier in [&t1, &t2, &t3, &t4] {
             if tier.len() <= left {
                 left -= tier.len();
             } else {
@@ -435,8 +441,21 @@ impl Budget {
         self.merge_loudness(block);
     }
 
+    /// Each (frame, key)'s note that rank.rs puts in tier 3: the longest, then the loudest.
+    fn frame_reps(block: &[Pending], ons: &[usize]) -> std::collections::HashMap<(u64, usize), usize> {
+        let rank = |i: usize| (block[i].len, (block[i].msg >> 16) & 0x7F);
+        let mut reps = std::collections::HashMap::new();
+        for &i in ons {
+            let b = reps.entry((block[i].frame, ((block[i].msg >> 8) & 0x7F) as usize)).or_insert(i);
+            if rank(i) > rank(*b) {
+                *b = i;
+            }
+        }
+        reps
+    }
+
     /// MERGED, NOT JUST DROPPED (user 2026-10-27): each dropped copy's loudness goes to a kept note of its key
-    /// (same channel if there is one, else the key's tier-1 note), which is played louder: a key stacked many
+    /// (its frame's if that one is kept, else the key's tier-1 note), which is played louder: a key stacked many
     /// times stays louder than its neighbours, as in a full render. Kestrel's velocity curve at full tracking:
     /// amplitude = (vel / 127)^2 (bank.rs velocity_atten_cb). Copies on the same frame add as amplitudes (the
     /// same sound starting together), on other frames as powers.
@@ -448,16 +467,12 @@ impl Budget {
             v * v * level.gain(block[i].msg)
         };
         let key = |i: usize| ((block[i].msg >> 8) & 0x7F) as usize;
-        let slot = |i: usize| ((((block[i].msg >> 24) & 0x0F) << 4 | (block[i].msg & 0x0F)) as usize) * 128 + key(i);
-        // (the longest kept note of each channel + key, and of each key, takes the loudness)
+        // (its frame's note of the key if kept, else the longest kept note of the key takes the loudness)
         let rank = |i: usize| (block[i].len, (block[i].msg >> 16) & 0x7F);
+        let by_frame = Self::frame_reps(block, &self.ons);
         let mut by_key = [usize::MAX; 128];
         for &i in &self.ons {
             if self.keep[i] {
-                let s = &mut self.by_slot[slot(i)];
-                if *s == usize::MAX || rank(i) > rank(*s) {
-                    *s = i;
-                }
                 let k = &mut by_key[key(i)];
                 if *k == usize::MAX || rank(i) > rank(*k) {
                     *k = i;
@@ -474,8 +489,8 @@ impl Budget {
             if self.keep[i] {
                 continue;
             }
-            let s = self.by_slot[slot(i)];
-            let t = if s != usize::MAX { s } else { by_key[key(i)] };
+            let s = by_frame[&(block[i].frame, key(i))];
+            let t = if self.keep[s] { s } else { by_key[key(i)] };
             if t == usize::MAX {
                 continue;
             }
@@ -500,9 +515,6 @@ impl Budget {
                 let (c, w) = if any { (self.coh[i], self.pow[i]) } else { (0.0, 0.0) };
                 self.scale[i] = merged_scale(amp(i), block[i].copies, c, w, false);
             }
-        }
-        for &i in &self.ons {
-            self.by_slot[slot(i)] = usize::MAX;
         }
     }
 
