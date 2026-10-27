@@ -11,16 +11,20 @@
 
 use crate::Pending;
 
-/// Block time as a share of its real-time length (running average): over HIGH = fewer notes, under LOW = more.
+/// Block time as a share of its real-time length (running average): over HIGH = fewer notes, under TARGET =
+/// more again.
 const HIGH: f64 = 0.9;
-const LOW: f64 = 0.6;
-/// Fewest note-ons a block may take while lowered (a melody stays audible).
+const TARGET: f64 = 0.7;
+/// Fewest note-ons a block may take while lowered (a melody stays audible), and fewest voices.
 const LEAST: f64 = 16.0;
+const LEAST_VOICES: f64 = 256.0;
+/// Most a block raises the limits by, with all its time to spare.
+const CLIMB: f64 = 0.08;
 /// Weight of the newest block in the running averages.
 const SMOOTH: f64 = 0.25;
-/// Blocks not judged at the start (the graphics card starting up; the first blocks are made before any notes
-/// come, so few are needed).
-const WARM: u64 = 4;
+/// Blocks with sound not judged at the start: the first one sounding does the graphics card's one-time setup
+/// and took ~10x a normal block (Shinki: judged, its one cut took 185,000 note-ons a block down to 39).
+const WARM: u64 = 1;
 
 pub struct Budget {
     /// Note-ons a block may take; None = no limit.
@@ -31,6 +35,19 @@ pub struct Budget {
     load: f64,
     empty: f64,
     blocks: u64,
+    /// Note-ons a block may take that last proved too many (climbed past slowly), and blocks left before
+    /// another cut may come.
+    ceiling: Option<f64>,
+    cooldown: u32,
+    /// The limit was raised since the last cut; the averages start over after the cut's wait.
+    raised: bool,
+    fresh: bool,
+    /// Cuts so far.
+    pub cuts: u32,
+    ahead: usize,
+    /// Voices Kestrel may sound now (None = the user's Max voices), and that Max.
+    cap: Option<f64>,
+    max_voices: u32,
     /// Per channel (0..256) x key: note-ons sounding that were kept, and dropped ones still waiting for an off.
     kept: Vec<u32>,
     gone: Vec<u32>,
@@ -44,13 +61,21 @@ pub struct Budget {
 }
 
 impl Budget {
-    pub fn new() -> Self {
+    pub fn new(max_voices: u32) -> Self {
         Budget {
             allow: None,
             wanted: 0,
             load: 0.0,
             empty: 0.0,
             blocks: 0,
+            ceiling: None,
+            cooldown: 0,
+            raised: true,
+            fresh: false,
+            cuts: 0,
+            ahead: 2,
+            cap: None,
+            max_voices,
             kept: vec![0; 256 * 128],
             gone: vec![0; 256 * 128],
             ons: Vec::new(),
@@ -64,6 +89,11 @@ impl Budget {
 
     pub fn allowance(&self) -> u32 {
         self.allow.map_or(u32::MAX, |a| a as u32)
+    }
+
+    /// Voices Kestrel may sound now (the user's Max voices when not lowered).
+    pub fn voice_cap(&self) -> u32 {
+        self.cap.map_or(self.max_voices, |c| c as u32)
     }
 
     /// Hand `push` the block's messages that stay; returns how many note-ons were dropped.
@@ -187,21 +217,31 @@ impl Budget {
 
     /// A block took `load` of its real-time length to make, with `ready` of `ahead` blocks waiting when it
     /// started.
-    pub fn measured(&mut self, load: f64, ready: usize, ahead: usize, lower: bool) {
+    pub fn measured(&mut self, load: f64, ready: usize, ahead: usize, voices: u64, lower: bool) {
+        self.ahead = ahead;
+        if self.blocks == 0 && self.wanted == 0 && voices == 0 {
+            return; // (silence before the first note: nothing to learn)
+        }
         self.blocks += 1;
         // (one block is always being taken by the output: ahead - 1 ready = all well)
         let empty = 1.0 - (ready as f64 / (ahead.max(2) - 1) as f64).min(1.0);
-        if self.blocks == 1 {
+        if self.blocks == 1 || (self.fresh && self.cooldown == 0) {
             (self.load, self.empty) = (load, empty);
+            self.fresh = false;
         } else {
             self.load += (load - self.load) * SMOOTH;
             self.empty += (empty - self.empty) * SMOOTH;
         }
         if !lower {
             self.allow = None;
+            self.cap = None;
             return;
         }
         if self.blocks <= WARM {
+            return;
+        }
+        if self.cooldown > 0 {
+            self.cooldown -= 1;
             return;
         }
         if load > 1.0 || self.load > HIGH || self.empty > 0.5 {
@@ -209,12 +249,44 @@ impl Budget {
             // fixed 0.7 took ~30 slow blocks to come down from Shinki's 185,000 a block = 0.7 s of silence)
             let base = self.allow.map_or(self.wanted as f64, |a| a.min(self.wanted as f64));
             let factor = (HIGH * 0.9 / load.max(1e-6)).min(0.7);
+            // the level that was too much: climbed past only slowly from now on (it swung every ~75 ms
+            // otherwise, each swing a 5-9 ms gap: user heard it, 2026-10-27). Only a level that was CLIMBED
+            // to counts: cuts in a row for one problem pushed it down to nothing.
+            if self.raised {
+                self.ceiling = Some(base * 0.9);
+            }
+            self.raised = false;
             self.allow = Some((base * factor).max(LEAST));
-        } else if self.load < LOW && self.empty < 0.2 {
+            // and the voices sounding: notes already ringing kept blocks slow after every new note was dropped
+            // (Shinki: ~1 M voices from the first blocks); Kestrel steals the quietest down to the cap
+            let sounding = self.cap.map_or(voices as f64, |c| c.min(voices as f64));
+            self.cap = Some((sounding * factor).max(LEAST_VOICES));
+            // notes already started keep blocks slow for a while (a piano note rings on): let the cut show
+            // before judging again (= the blocks kept ready), and judge only blocks made after it (the average
+            // still held the slow blocks: three cuts in a row took Shinki from 185,000 note-ons a block to 36)
+            self.cooldown = self.ahead as u32;
+            self.fresh = true;
+            self.cuts += 1;
+        } else if self.load < TARGET && self.empty < 0.2 {
             if let Some(a) = self.allow {
-                // back up while blocks keep up; no limit once it's far above what blocks ask for
-                let next = a * 1.05 + 1.0;
+                // in proportion to the time to spare: up to 8 % a block far below TARGET (~2x a quarter
+                // second; 3 % climbed ~2x a second), slower near it; past the last trouble level a tenth of that
+                let spare = (TARGET - self.load) / TARGET;
+                let step = CLIMB * spare * if self.ceiling.is_some_and(|c| a >= c) { 0.1 } else { 1.0 };
+                let next = a * (1.0 + step) + 1.0;
+                self.raised = true;
+                // no limit once it's far above what blocks ask for
                 self.allow = if next > (self.wanted.max(1) as f64) * 4.0 { None } else { Some(next) };
+            }
+            if let Some(c) = self.cap {
+                // the voice cap back up the same way, up to the user's Max voices
+                let spare = (TARGET - self.load) / TARGET;
+                let next = c * (1.0 + CLIMB * spare) + 16.0;
+                self.cap = if next >= self.max_voices as f64 { None } else { Some(next) };
+            }
+            // the old trouble level is forgotten slowly (a lighter part may follow)
+            if let Some(c) = self.ceiling.as_mut() {
+                *c *= 1.0005;
             }
         }
     }
@@ -234,7 +306,7 @@ mod tests {
 
     #[test]
     fn fair_shares_and_loudest_kept() {
-        let mut b = Budget::new();
+        let mut b = Budget::new(1 << 20);
         b.allow = Some(4.0);
         // track 1: a wall of 10 quiet notes; track 2: two loud melody notes
         let mut block: Vec<Pending> = (0..10).map(|k| on(1, 40 + k, 10 + k)).collect();
@@ -250,7 +322,7 @@ mod tests {
 
     #[test]
     fn same_velocity_keeps_the_earlier() {
-        let mut b = Budget::new();
+        let mut b = Budget::new(1 << 20);
         b.allow = Some(3.0);
         let mut block: Vec<Pending> = (0..6).map(|k| on(7, 40 + k, 64)).collect();
         let mut kept = Vec::new();
@@ -265,7 +337,7 @@ mod tests {
 
     #[test]
     fn a_dropped_note_loses_its_off() {
-        let mut b = Budget::new();
+        let mut b = Budget::new(1 << 20);
         b.allow = Some(1.0);
         let mut block = vec![on(1, 60, 100), on(1, 60, 5)];
         let mut kept = Vec::new();
@@ -281,7 +353,7 @@ mod tests {
 
     #[test]
     fn off_means_everything_plays() {
-        let mut b = Budget::new();
+        let mut b = Budget::new(1 << 20);
         b.allow = Some(1.0);
         let mut block: Vec<Pending> = (0..5).map(|k| on(1, 40 + k, 50)).collect();
         let mut n = 0;
@@ -292,7 +364,7 @@ mod tests {
     #[test]
     fn many_tracks_quickly() {
         // a Shinki-sized block: 200,000 note-ons over 5,000 tracks
-        let mut b = Budget::new();
+        let mut b = Budget::new(1 << 20);
         b.allow = Some(20_000.0);
         let mut block: Vec<Pending> =
             (0..200_000u32).map(|i| on((i % 5000) as u16, i % 128, 1 + (i * 7) % 127)).collect();

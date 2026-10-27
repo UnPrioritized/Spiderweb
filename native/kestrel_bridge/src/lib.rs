@@ -47,7 +47,8 @@ impl Default for KbOptions {
             size: std::mem::size_of::<KbOptions>() as u32,
             sample_rate: 48_000,
             block_frames: 512,
-            ahead_blocks: 3,
+            // 6 x 512 = 64 ms of cushion: with 3 every swing of the note budget was a gap
+            ahead_blocks: 6,
             max_voices: 1 << 20,
             lower_by_itself: 1,
         }
@@ -81,6 +82,10 @@ pub struct KbStats {
     pub failed: u32,
     /// Of last_block_us: taking the block's messages, the budget, handing them to Kestrel.
     pub last_prep_us: u32,
+    /// Voices Kestrel may sound now (Max voices unless "Lower it by itself" lowered it).
+    pub voice_cap: u32,
+    /// Times "Lower it by itself" cut the limits (it fell behind real time).
+    pub cuts: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -181,12 +186,13 @@ impl Synth {
         });
         let s = shared.clone();
         let rate = cfg.sample_rate;
+        let max_voices = cfg.max_voices;
         let thread = std::thread::Builder::new()
             .name("kestrel render".into())
             .spawn(move || {
                 let s2 = s.clone();
                 let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                    render_loop(&s2, driver, synth, block, rate)
+                    render_loop(&s2, driver, synth, block, rate, max_voices)
                 }));
                 let err = match run {
                     Ok(Ok(())) => None,
@@ -293,10 +299,11 @@ impl Drop for Synth {
     }
 }
 
-fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, rate: u32) -> Result<()> {
+fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, rate: u32, max_voices: u32) -> Result<()> {
     let samples = block as usize * 2;
     let block_us = block as f64 * 1e6 / rate as f64;
-    let mut budget = Budget::new();
+    let mut budget = Budget::new(max_voices);
+    let mut cap = max_voices;
     let mut taken: Vec<Pending> = Vec::new();
     // batches taken from the inbox, not due yet (front batch read from `at`)
     let mut future: VecDeque<Vec<Pending>> = VecDeque::new();
@@ -348,9 +355,15 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         let prep = t.elapsed();
         driver.render_live(&mut synth, &mut out)?;
         let us = t.elapsed().as_secs_f64() * 1e6;
-        budget.measured(us / block_us, ready, s.ahead, lower);
-        s.worst_us.fetch_max(us as u32, Ordering::Relaxed);
         let bs = synth.stats();
+        budget.measured(us / block_us, ready, s.ahead, bs.active_voices, lower);
+        if budget.voice_cap() != cap {
+            // (our change to Kestrel: a voice cap that moves while it plays; over it = quietest stolen)
+            cap = budget.voice_cap();
+            driver.set_voice_cap(cap);
+            synth.set_voice_cap(cap);
+        }
+        s.worst_us.fetch_max(us as u32, Ordering::Relaxed);
         {
             let mut st = s.stats.lock().unwrap();
             st.rendered = driver.next_frame();
@@ -361,6 +374,8 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             st.last_block_us = us as u32;
             st.last_prep_us = prep.as_micros() as u32;
             st.allowance = budget.allowance();
+            st.voice_cap = cap;
+            st.cuts = budget.cuts;
         }
         s.ring.lock().unwrap().blocks.push_back(out);
     }

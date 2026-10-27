@@ -70,7 +70,8 @@ fn realtime() {
     eprintln!("{} events read in {:.1?}; {:.2} s of song", msgs.len(), t0.elapsed(), end as f64 / rate as f64);
 
     for lower in [true, false] {
-        let opts = KbOptions { max_voices: voices, lower_by_itself: lower as u32, ..Default::default() };
+        let ahead = env("KB_AHEAD", KbOptions::default().ahead_blocks as f64) as u32;
+        let opts = KbOptions { max_voices: voices, lower_by_itself: lower as u32, ahead_blocks: ahead, ..Default::default() };
         let block = opts.block_frames as u64;
         let synth = Synth::open(&[PathBuf::from(&sf)], &opts).unwrap();
         synth.wait_ready(opts.ahead_blocks as usize);
@@ -103,6 +104,10 @@ fn realtime() {
             pulled += pull as u64;
             ticks += 1;
             let st = synth.stats();
+            if lower && ticks % 25 == 0 {
+                eprint!("{:.2}s: allow {} cap {} voices {} block {:.1}ms cuts {} | ", pulled as f64 / rate as f64, st.allowance,
+                    st.voice_cap, st.voices, st.last_block_us as f64 / 1000.0, st.cuts);
+            }
             prep_sum += st.last_prep_us as u64;
             block_sum += st.last_block_us as u64;
             samples_n += 1;

@@ -21,7 +21,7 @@ from files.system import WINDOWS
 
 DLL_NAME = "kestrel_bridge.dll"
 BLOCK = 512  # frames a block (~11 ms): the default delay
-AHEAD = 3  # blocks kept made ahead of the speakers
+AHEAD = 6  # blocks kept made ahead of the speakers (3 = every swing of the note budget was a gap, 2026-10-27)
 MAX_VOICES = 1 << 20  # Kestrel's own default
 
 
@@ -35,7 +35,7 @@ class _Stats(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint64) for name in ("rendered", "handed", "silence", "late", "voices",
                                                       "budget_dropped", "kestrel_dropped", "stolen")] + \
                [(name, ctypes.c_uint32) for name in ("last_block_us", "worst_block_us", "allowance", "failed",
-                                                      "last_prep_us")]
+                                                      "last_prep_us", "voice_cap", "cuts")]
 
 
 _dll = None
