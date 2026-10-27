@@ -44,6 +44,11 @@ pub struct KbOptions {
     /// in dBFS (0 = Kestrel's default; the user's reference renders use -1).
     pub limiter: u32,
     pub limiter_ceiling_db: f32,
+    /// Kestrel's DC blocker ahead of the limiter: 1 = on, at `dc_blocker_hz` (0 = Kestrel's 15 Hz). Off (Kestrel's
+    /// own default), Shinki's stacked walls came out with a DC offset of -0.055 eating the limiter's room: every key
+    /// ~5 dB under the user's render, which had one on (2026-10-27).
+    pub dc_blocker: u32,
+    pub dc_blocker_hz: f32,
 }
 
 impl Default for KbOptions {
@@ -58,6 +63,8 @@ impl Default for KbOptions {
             lower_by_itself: 1,
             limiter: 1,
             limiter_ceiling_db: 0.0,
+            dc_blocker: 1,
+            dc_blocker_hz: 0.0,
         }
     }
 }
@@ -245,6 +252,12 @@ impl Synth {
             max_voices: opts.max_voices.max(1),
             steal_fade_frames: Config::default().steal_fade_frames.min(block - 1),
             limiter: opts.limiter != 0,
+            dc_blocker: opts.dc_blocker != 0,
+            dc_blocker_hz: if opts.dc_blocker_hz.is_finite() && opts.dc_blocker_hz > 0.0 {
+                (opts.dc_blocker_hz as f64).clamp(1.0, 200.0)
+            } else {
+                Config::default().dc_blocker_hz
+            },
             limiter_ceiling_db: if opts.limiter_ceiling_db.is_finite() {
                 opts.limiter_ceiling_db.min(0.0) as _
             } else {
