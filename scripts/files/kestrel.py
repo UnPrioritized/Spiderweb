@@ -118,11 +118,14 @@ class Kestrel:
     soundfont list, top first (each overrides the ones above it). synth = files.synth.Synth (BASS + the sound
     device). Opening takes seconds (the soundfonts load): not on the window's thread. SynthError when it can't."""
 
-    def __init__(self, synth, fonts, block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True, limiter=True,
+    def __init__(self, synth, fonts, block=BLOCK, ahead=None, voices=MAX_VOICES, lower=True, limiter=True,
                  ceiling_db=0.0, dc_blocker=True, dc_blocker_hz=0.0):
         d = self.dll = load()
         self.bass = synth.bass
         self.block = block
+        if ahead is None:  # (about the same time made ahead at every block size: AHEAD of 512, 3 blocks at least)
+            ahead = max(3, -(-AHEAD * BLOCK // block))
+        self.ahead = ahead
         opts = _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), ceiling_db,
                         int(dc_blocker), dc_blocker_hz)
         names = (ctypes.c_char_p * max(1, len(fonts)))(*[os.fsdecode(f).encode("utf-8") for f in fonts])
@@ -246,6 +249,9 @@ class KestrelOut:
     def __init__(self, synth, fonts, **kw):
         self.k = Kestrel(synth, fonts, **kw)
         self.opts = dict(kw)  # (App.fresh_builtin: other settings = opened again)
+        # (sent ahead past what's made ahead + 3 blocks: at block 2048 Kestrel kept ~230 ms made and own shapes sent
+        # 200 ms ahead all came late, on a 43 ms grid, hunt 2026-10-28)
+        self.lead = max(LEAD, (self.k.ahead + 3) * self.k.block / RATE)
         self.font_paths = list(fonts)  # (App.fresh_builtin: another list picked = opened again)
         self._lock = threading.Lock()
         self._frames, self._msgs, self._lens = [], [], []
@@ -282,7 +288,8 @@ class KestrelOut:
             if everything:
                 n = len(self._msgs)
             else:
-                edge = self.frame_at(time.perf_counter() + self.lead) // BLOCK * BLOCK
+                b = self.k.block
+                edge = self.frame_at(time.perf_counter() + self.lead) // b * b
                 n = next((i for i, f in enumerate(self._frames) if f >= edge), len(self._frames))
                 if not n:
                     return

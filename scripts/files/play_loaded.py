@@ -843,9 +843,10 @@ class LoadedPlayer:
         events stamped with the frame each sounds at and pushed PUSH_S ahead of the line in whole blocks (a busy
         block's note-ons ranked together; its rest waits for the next push). Note lengths are paired inside a push
         (a note ending later counts as long)."""
-        from files.kestrel import BLOCK, RATE as K_RATE
+        from files.kestrel import RATE as K_RATE
         stamp = _loops()[5]
         kout = self.out.handle
+        BLOCK = kout.k.block  # (the block size Kestrel opened with: Settings → Sound, hunt 2026-10-28)
         line = midi_play.Line()  # (each key's notes in Kestrel's order: the offs of notes left out go too)
         counts = np.zeros(3, np.int64)
         table = (np.zeros(midi_play.COPY_TABLE, np.uint32), np.zeros(midi_play.COPY_TABLE, np.int64),
@@ -1039,7 +1040,8 @@ class LoadedPlayer:
         back from a couple of blocks on and pushed again at the new speed, with the block not pushed yet (held);
         returns them all as the new held. Before (F8, 2026-10-28) up to a second played on at the old speed, then
         the rest came at the new one, out of step with the line."""
-        from files.kestrel import BLOCK, RATE as K_RATE
+        from files.kestrel import RATE as K_RATE
+        BLOCK = kout.k.block
         at = kout.k.cut((kout.k.stats()["rendered"] // BLOCK + 2) * BLOCK)
         if at is None:  # (no answer: it plays on as it was)
             return held
