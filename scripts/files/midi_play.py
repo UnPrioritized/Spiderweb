@@ -235,8 +235,8 @@ COPY_PROBES = 64  # ... places looked at for one; none free = sent on its own
 def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate, least, fr, out, tr, counts, cp,
           tab_key, tab_gen, tab_at):
     """Kestrel (GPU): events i0..i1 into fr / out / tr (the frame each sounds at, the message with its port in the top
-    byte, the track) from 0; returns how many. Frame = base + rate x song seconds (tempo map mt ticks / ms_ seconds
-    / mspt seconds a tick, playback.TimeMap's). A note-on of a muted track, or for a frame before `least` (too late:
+    byte, what the note budget shares by: channel + port) from 0; returns how many. Frame = base + rate x song
+    seconds (tempo map mt ticks / ms_ seconds / mspt seconds a tick, playback.TimeMap's). A note-on of a muted track, or for a frame before `least` (too late:
     the sound is made already), is left out with the next note-off of its key (skip, as emit); other late events go
     at `least` (a whole block's start); everything else goes: Kestrel's own note budget chooses. counts[0] +=
     note-ons wanted, counts[1] += note-ons sent.
@@ -268,7 +268,7 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate,
                     skip[q] += 1
                     continue
                 counts[1] += 1
-                key = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
+                key =np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
                 h = (int(key) * 2654435761) & (COPY_TABLE - 1)
                 found = -1
                 for _ in range(COPY_PROBES):
@@ -292,7 +292,10 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate,
         # into the block being made with the ones before it and that block no longer matched its ranking)
         fr[n] = np.uint64((least if f < least else f) + 0.5)
         out[n] = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
-        tr[n] = trk[i]
+        # (Kestrel's note budget shares by CHANNEL + PORT, not the file's track: user 2026-10-27 took my pick.
+        # Shared by Shinki's 2,788 tracks, every track kept 1-2 notes a block and its stacked lines lost their
+        # loudness: the loudest 12 keys 7.5-9.3 dB off the user's render, by channel + port 1.5-5.8)
+        tr[n] = (m & 15) | (port % 16) << 4
         cp[n] = 1
         n += 1
     return n

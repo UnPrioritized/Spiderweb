@@ -693,7 +693,7 @@ class LoadedPlayer:
         self.silence()
 
     def _feeder_kestrel(self):
-        """Kestrel (GPU)'s feeder: no budget here (Kestrel's own chooses, fair by TRACK: the file's real tracks), the
+        """Kestrel (GPU)'s feeder: no budget here (Kestrel's own chooses, fair by channel + port, midi_play.stamp), the
         events stamped with the frame each sounds at and pushed PUSH_S ahead of the line in whole blocks (a busy
         block's note-ons ranked together; its rest waits for the next push). Note lengths are paired inside a push
         (a note ending later counts as long)."""

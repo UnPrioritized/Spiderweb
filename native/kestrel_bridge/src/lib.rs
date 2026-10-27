@@ -215,6 +215,8 @@ pub struct Synth {
     /// push's scratch: note-ons waiting for their off, per channel + key (indices into the batch), and the ranker
     prep: Mutex<(Vec<VecDeque<u32>>, Vec<rank::Ranker>)>,
     thread: Option<JoinHandle<()>>,
+    /// Measuring (KB_RECORD set): every sample handed to the output, saved as a WAV when closed.
+    record: Option<Mutex<Vec<f32>>>,
     pub block_frames: u32,
     pub sample_rate: u32,
 }
@@ -313,6 +315,7 @@ impl Synth {
             shared,
             prep: Mutex::new((vec![VecDeque::new(); 256 * 128], rankers())),
             thread: Some(thread),
+            record: std::env::var_os("KB_RECORD").map(|_| Mutex::new(Vec::new())),
             block_frames: block,
             sample_rate: rate,
         })
@@ -482,6 +485,9 @@ impl Synth {
             }
         }
         self.shared.room.notify_one();
+        if let Some(rec) = self.record.as_ref() {
+            rec.lock().unwrap().extend_from_slice(out);
+        }
         let mut st = self.shared.stats.lock().unwrap();
         // (silence before the first block was ready isn't a stutter)
         let started = st.handed > 0;
@@ -510,6 +516,23 @@ impl Drop for Synth {
         self.shared.room.notify_all();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
+        }
+        // (measuring: KB_RECORD = a WAV file, everything handed to the output from kb_open on, 16-bit, saved here)
+        if let (Some(rec), Some(path)) = (self.record.as_ref(), std::env::var_os("KB_RECORD")) {
+            let rec = rec.lock().unwrap_or_else(|e| e.into_inner());
+            let pcm: Vec<u8> = rec.iter().flat_map(|x| ((x.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()).collect();
+            let rate = self.sample_rate;
+            let mut f = Vec::with_capacity(44 + pcm.len());
+            f.extend_from_slice(b"RIFF");
+            f.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+            f.extend_from_slice(b"WAVEfmt ");
+            for v in [16u32.to_le_bytes(), [1, 0, 2, 0], rate.to_le_bytes(), (rate * 4).to_le_bytes(), [4, 0, 16, 0]] {
+                f.extend_from_slice(&v);
+            }
+            f.extend_from_slice(b"data");
+            f.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+            f.extend_from_slice(&pcm);
+            let _ = std::fs::write(path, f);
         }
     }
 }
