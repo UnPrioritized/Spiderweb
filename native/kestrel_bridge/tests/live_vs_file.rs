@@ -88,7 +88,8 @@ fn file_render(cfg: &Config, sf: &Path, midi: &Path, blocks: usize) -> Option<Ve
 
 /// The connector's render of the same events, started after its first blocks are ready (a real start mid-run).
 fn live_render(sf: &Path, events: &[(u64, u32)], blocks: usize, lower: bool) -> Vec<f32> {
-    let opts = KbOptions { block_frames: BLOCK, lower_by_itself: lower as u32, ..Default::default() };
+    // (the DC blocker off: Kestrel's file render has it off)
+    let opts = KbOptions { block_frames: BLOCK, lower_by_itself: lower as u32, dc_blocker: 0, ..Default::default() };
     let s = Synth::open(&[sf.to_path_buf()], &opts).unwrap();
     s.wait_ready(opts.ahead_blocks as usize);
     let start = s.stats().rendered;

@@ -131,6 +131,8 @@ struct Pending {
     /// it sounds, so a short copy adds its loudness only for as long as it lasted.
     s_ratio: f32,
     k_ratio: f32,
+    /// A note-on standing for this many exact copies (kb_push_copies; 1 = itself).
+    copies: u32,
 }
 
 impl Pending {
@@ -147,6 +149,7 @@ impl Pending {
             k_same: false,
             s_ratio: 1.0,
             k_ratio: 1.0,
+            copies: 1,
         }
     }
 }
@@ -210,7 +213,7 @@ struct Shared {
 pub struct Synth {
     shared: Arc<Shared>,
     /// push's scratch: note-ons waiting for their off, per channel + key (indices into the batch), and the ranker
-    prep: Mutex<(Vec<VecDeque<u32>>, rank::Ranker)>,
+    prep: Mutex<(Vec<VecDeque<u32>>, Vec<rank::Ranker>)>,
     thread: Option<JoinHandle<()>>,
     pub block_frames: u32,
     pub sample_rate: u32,
@@ -308,7 +311,7 @@ impl Synth {
             })?;
         Ok(Synth {
             shared,
-            prep: Mutex::new((vec![VecDeque::new(); 256 * 128], rank::Ranker::new())),
+            prep: Mutex::new((vec![VecDeque::new(); 256 * 128], rankers())),
             thread: Some(thread),
             block_frames: block,
             sample_rate: rate,
@@ -325,9 +328,17 @@ impl Synth {
     /// caller knows them (Spiderweb does): paired inside one push the connector only knows notes ending in it, and
     /// pushed a block at a time nearly every note looked long, so loud spam beat held notes again.
     pub fn push_len(&self, frames: &[u64], msgs: &[u32], tracks: &[u16], lens: Option<&[u32]>) {
+        self.push_full(frames, msgs, tracks, lens, None);
+    }
+
+    /// `push_len` with each note-on standing for `copies[i]` exact copies (kb_push_copies).
+    pub fn push_full(&self, frames: &[u64], msgs: &[u32], tracks: &[u16], lens: Option<&[u32]>, copies: Option<&[u32]>) {
         let mut n = frames.len().min(msgs.len()).min(tracks.len());
         if let Some(l) = lens {
             n = n.min(l.len());
+        }
+        if let Some(c) = copies {
+            n = n.min(c.len());
         }
         if n == 0 {
             return;
@@ -342,6 +353,11 @@ impl Synth {
         match lens {
             Some(l) => batch.extend((0..n).map(|i| Pending { len: l[i], ..Pending::new(frames[i], msgs[i], tracks[i]) })),
             None => batch.extend((0..n).map(|i| Pending::new(frames[i], msgs[i], tracks[i]))),
+        }
+        if let Some(c) = copies {
+            for (p, &c) in batch.iter_mut().zip(c) {
+                p.copies = c.max(1);
+            }
         }
         let t = profile_add(0, t);
         // then each busy block's priority order: worked out here on the caller's thread, not the render thread's
@@ -373,7 +389,38 @@ impl Synth {
             // past RANK_ALWAYS note-ons a block is ranked anyway: a cut must not find a wall unranked)
             let t = profile_add(1, t);
             let allow = self.shared.allow_now.load(Ordering::Relaxed) as usize;
-            ranker.rank(batch, self.block_frames as u64, (allow / 2).min(rank::RANK_ALWAYS), &mut whole.spans);
+            let over = (allow / 2).min(rank::RANK_ALWAYS);
+            let bf = self.block_frames as u64;
+            // a big push: its blocks ranked side by side, a share of whole blocks each (Spiderweb's feeder playing
+            // Shinki's dense part: ~0.8 s of one core a second of song, it fell behind)
+            let parts = if n >= SIDE_BY_SIDE { ranker.len() } else { 1 };
+            let mut cuts = vec![0usize];
+            for k in 1..parts {
+                let mut c = (n * k / parts).max(*cuts.last().unwrap());
+                while c < n && c > 0 && batch[c].frame / bf == batch[c - 1].frame / bf {
+                    c += 1;
+                }
+                cuts.push(c);
+            }
+            cuts.push(n);
+            if parts == 1 {
+                ranker[0].rank(batch, bf, over, &mut whole.spans);
+            } else {
+                let mut found: Vec<Vec<rank::Span>> = vec![Vec::new(); parts];
+                std::thread::scope(|sc| {
+                    let mut rest: &mut [Pending] = batch;
+                    let mut at = 0;
+                    for ((r, f), w) in ranker.iter_mut().zip(found.iter_mut()).zip(cuts.windows(2)) {
+                        let (mine, more) = std::mem::take(&mut rest).split_at_mut(w[1] - at);
+                        rest = more;
+                        at = w[1];
+                        sc.spawn(move || r.rank(mine, bf, over, f));
+                    }
+                });
+                for (f, &start) in found.iter().zip(&cuts) {
+                    whole.spans.extend(f.iter().map(|s| rank::Span { start: s.start + start as u32, ..*s }));
+                }
+            }
             profile_add(2, t);
         }
         self.shared.inbox.lock().unwrap().batches.push_back(whole);
@@ -479,6 +526,8 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
     // (the front batch's next span to look at)
     let mut span = 0usize;
     let mut cancels = 0u64;
+    // (measuring: KB_LOG = a file path, one line a block)
+    let mut log = std::env::var_os("KB_LOG").and_then(|p| std::fs::File::create(p).ok()).map(std::io::BufWriter::new);
     loop {
         let (mut out, ready) = {
             let mut r = s.ring.lock().unwrap();
@@ -535,7 +584,9 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         let inside = ranked.map(|r| r.0).or_else(|| {
             future.front().and_then(|b| b.msgs[at..].iter().position(|p| p.frame >= end).map(|j| at + j))
         });
+        let n_msgs;
         let dropped = if let Some(j) = inside {
+            n_msgs = j - at;
             let d = budget.filter(&future.front().unwrap().msgs[at..j], ranked.map(|r| r.1 as usize), lower, &mut push);
             at = j;
             d
@@ -553,6 +604,7 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
                 at = 0;
                 span = 0;
             }
+            n_msgs = taken.len();
             let d = budget.filter(&taken, None, lower, &mut push);
             taken.clear();
             d
@@ -573,6 +625,12 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             synth.set_voice_cap(cap);
         }
         s.worst_us.fetch_max(us as u32, Ordering::Relaxed);
+        if let Some(f) = log.as_mut() {
+            use std::io::Write;
+            let _ = writeln!(f, "{} msgs {n_msgs} ranked {:?} dropped {dropped} allow {} cap {cap} voices {} ready {ready} \
+                prep {:.2} ms block {:.2} ms", end - block as u64, ranked.map(|r| r.1), budget.allowance(),
+                bs.active_voices, prep.as_secs_f64() * 1e3, us / 1e3);
+        }
         {
             let mut st = s.stats.lock().unwrap();
             st.rendered = driver.next_frame();
@@ -595,6 +653,16 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
         }
         s.ring.lock().unwrap().blocks.push_back(out);
     }
+}
+
+/// Pushes of this many messages or more are ranked side by side (rankers()).
+const SIDE_BY_SIDE: usize = 200_000;
+
+/// One ranker per share of a big push: a quarter of the cores, 1 to 4 (the render thread, BASS and Spiderweb's
+/// reader need theirs).
+fn rankers() -> Vec<rank::Ranker> {
+    let cores = std::thread::available_parallelism().map_or(4, |c| c.get());
+    (0..(cores / 4).clamp(1, 4)).map(|_| rank::Ranker::new()).collect()
 }
 
 /// A played batch's memory back to the pool (a few kept: enough for the pushes in flight).
@@ -714,6 +782,37 @@ pub unsafe extern "C" fn kb_push_len(
             std::slice::from_raw_parts(msgs, n),
             std::slice::from_raw_parts(tracks, n),
             lens,
+        )
+    })
+}
+
+/// `kb_push_len` (lens may be null) with each note-on standing for `copies[i]` exact copies (same frame, message,
+/// port; null = 1 each): Spiderweb's feeder sends a stack once (Shinki's dense part: 4.5x fewer note-ons). The
+/// copies sound together: their loudness adds as amplitudes. A note-on's copies have their note-offs left out by
+/// the caller (one off ends it).
+#[no_mangle]
+pub unsafe extern "C" fn kb_push_copies(
+    h: *const Synth,
+    frames: *const u64,
+    msgs: *const u32,
+    tracks: *const u16,
+    lens: *const u32,
+    copies: *const u32,
+    n: u32,
+) {
+    if h.is_null() || n == 0 {
+        return;
+    }
+    guard((), || {
+        let n = n as usize;
+        let lens = (!lens.is_null()).then(|| std::slice::from_raw_parts(lens, n));
+        let copies = (!copies.is_null()).then(|| std::slice::from_raw_parts(copies, n));
+        (*h).push_full(
+            std::slice::from_raw_parts(frames, n),
+            std::slice::from_raw_parts(msgs, n),
+            std::slice::from_raw_parts(tracks, n),
+            lens,
+            copies,
         )
     })
 }

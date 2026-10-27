@@ -71,8 +71,12 @@ READY_S = 0.5  # seconds of the song read before the play line starts
 def _loops():
     fast = speed.loops()
     if fast is not None:
-        return fast.play_read, fast.play_order, fast.play_hist, fast.play_emit, fast.play_programs
-    return midi_play.read, midi_play.order, midi_play.hist, midi_play.emit, midi_play.programs
+        return fast.play_read, fast.play_order, fast.play_hist, fast.play_emit, fast.play_programs, fast.play_stamp
+    return midi_play.read, midi_play.order, midi_play.hist, midi_play.emit, midi_play.programs, midi_play.stamp
+
+
+PUSH_S = 1.0  # Kestrel (GPU): events pushed this far ahead of the line (ranking a dense push takes a while)
+PIECE_BLOCKS = 8  # ... at most this many of its blocks a push
 
 
 def instruments(lm):
@@ -115,7 +119,8 @@ class LoadedPlayer:
         self.budgets = np.full(self.synths, {"group": BUDGET_SYNTH, "kdmapi": BUDGET_KDMAPI}.get(kind, BUDGET_DEVICE),
                                np.int64)
         self.muted_of = muted
-        if sinks:
+        self.kind = kind
+        if sinks or kind == "kestrel":  # (Kestrel has 16 ports: the file's own)
             self.tport, self.ports = track_ports(lm)
         else:  # (one device: 16 channels, every port onto them)
             self.tport, self.ports = np.zeros(len(lm.tracks), np.int64), 1
@@ -137,6 +142,8 @@ class LoadedPlayer:
         self.error = None
         self.threads = []
         self.ready = threading.Event()  # (set once the first notes are read: Player.ready, the line waits for it)
+        self.prof = [0.0, 0.0, 0, 0, 0.0]  # (Kestrel feeder, measuring: seconds stamping, pushing, pushes, steps with
+        # nothing read, how far the reading was short of the push)
         self._place_s = 0.0  # (seconds finding every track's place took last time: a jump goes that much further)
 
     # --- the reader ---------------------------------------------------------------------------------------------
@@ -537,6 +544,14 @@ class LoadedPlayer:
             buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
             for live in self.sinks:
                 live.send_raw(ctypes.addressof(buf), len(raw))
+        elif self.kind == "kestrel":  # (every port the file uses, in one push, now)
+            kout = self.out.handle
+            if kout is None:
+                return
+            ms = [m[0] | ch | m[1] << 8 | (m[2] if len(m) > 2 else 0) << 16 | port << 24
+                  for port in range(min(self.ports, 16)) for ch in range(16) for m in msgs]
+            at = kout.frame_at(time.perf_counter())
+            kout.k.push([at] * len(ms), ms, [0] * len(ms))
         else:
             for ch in range(16):
                 for m in msgs:
@@ -677,6 +692,113 @@ class LoadedPlayer:
                 break
         self.silence()
 
+    def _feeder_kestrel(self):
+        """Kestrel (GPU)'s feeder: no budget here (Kestrel's own chooses, fair by TRACK: the file's real tracks), the
+        events stamped with the frame each sounds at and pushed PUSH_S ahead of the line in whole blocks (a busy
+        block's note-ons ranked together; its rest waits for the next push). Note lengths are paired inside a push
+        (a note ending later counts as long)."""
+        from files.kestrel import BLOCK, RATE as K_RATE
+        stamp = _loops()[5]
+        kout = self.out.handle
+        skip = np.zeros(SKIP, np.int64)
+        counts = np.zeros(3, np.int64)
+        table = (np.zeros(midi_play.COPY_TABLE, np.uint32), np.zeros(midi_play.COPY_TABLE, np.int64),
+                 np.zeros(midi_play.COPY_TABLE, np.int64))  # (stamp's: exact copies on one tick sent once)
+        tm_of = tm = None
+        gen, cur = -1, None
+        checked = 0.0
+        held = None  # (frames, msgs, tracks) of a block not whole yet
+        while not self._stop.is_set():
+            time.sleep(STEP_S)
+            clock = self.player._clock
+            if clock is None:
+                continue
+            now = time.perf_counter()
+            if now - checked > 0.1:
+                checked = now
+                self._read_mutes()
+            t_c, sec, tmap = clock
+            s_now = sec + now - t_c
+            T = tmap.tick(s_now + PUSH_S)
+            edge = kout.frame_at(now + PUSH_S) // BLOCK * BLOCK  # (whole blocks only)
+            # (a note-on for sound already made, or about to be, would all pile into one block: left out)
+            least = float(kout.k.stats()["rendered"] + BLOCK)
+            with self._lock:
+                if self._gen != gen:  # (read again from a new place: what was sent ahead goes, sound stopped)
+                    if gen >= 0:
+                        kout.cancel()
+                        self.silence(reset=True)
+                    gen, cur, held = self._gen, None, None
+                    skip[:] = 0
+                if cur is None and self._queue:
+                    cur = self._queue.popleft()
+                    self._took(cur, skip)
+                horizon = getattr(self, "_horizon", None)
+            if cur is None:
+                self.prof[3] += 1
+                if horizon is not None:
+                    self.prof[4] = s_now + PUSH_S - tmap.sec(horizon)  # (seconds the reading is short of the push)
+            if cur is None and horizon is not None and tmap.sec(horizon) < s_now - BEHIND_S and self._jump is None:
+                self._jump = int(tmap.tick(s_now + JUMP_S + self._place_s)) + 1
+            parts = [] if held is None else [held]
+            while cur is not None:
+                ts, ms, ks, i = cur[0], cur[1], cur[2], cur[3]
+                i1 = int(np.searchsorted(ts, T, "right"))
+                if i1 > i:
+                    if tm_of is not tmap:  # (the tempo map as arrays, for the compiled loop)
+                        tm_of, tm = tmap, (np.asarray(tmap.ticks, np.int64), np.asarray(tmap.secs, np.float64),
+                                           np.asarray(tmap.spt, np.float64))
+                    fr = np.empty(i1 - i, np.uint64)
+                    m = np.empty(i1 - i, np.uint32)
+                    tr = np.empty(i1 - i, np.uint16)
+                    cp = np.empty(i1 - i, np.uint32)
+                    counts[:2] = 0  # (counts[2]: the copy table's generation, kept)
+                    base = kout._f0 + (t_c - sec - kout._t0) * K_RATE
+                    t_s = time.perf_counter()
+                    n = stamp(ms, ks, i, i1, ts, self.muted, self.tport, skip, *tm, base, float(K_RATE), least, fr,
+                              m, tr, counts, cp, *table)
+                    self.prof[0] += time.perf_counter() - t_s
+                    parts.append((fr[:n], m[:n], tr[:n], cp[:n]))
+                    self.sent += int(counts[1])
+                    self.thinned += int(counts[0] - counts[1])  # (muted / too late: as _feeder counts them)
+                    cur[3] = i = i1
+                if i >= len(ts):
+                    with self._lock:
+                        if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
+                            self._pool.append(cur[5])
+                        cur = self._queue.popleft() if self._queue and self._gen == gen else None
+                        if cur is not None:
+                            self._took(cur, skip)
+                    continue
+                break
+            if not parts:
+                continue
+            fr, m, tr, cp = (np.concatenate(a) for a in zip(*parts)) if len(parts) > 1 else parts[0]
+            cut = int(np.searchsorted(fr, edge))  # (the block still being filled waits)
+            held = (fr[cut:], m[cut:], tr[cut:], cp[cut:]) if cut < len(fr) else None
+            # (in pieces of PIECE_BLOCKS, earliest first: one push of 0.4 s of a dense part took so long to rank
+            # that its first blocks were made before it came, all of it then in one block)
+            a = 0
+            while a < cut:
+                b = min(cut, int(np.searchsorted(fr, (int(fr[a]) // BLOCK + PIECE_BLOCKS) * BLOCK)))
+                t_p = time.perf_counter()
+                kout.k.push_copies(fr[a:b], m[a:b], tr[a:b], cp[a:b])
+                self.prof[1] += time.perf_counter() - t_p
+                self.prof[2] += 1
+                a = b
+        kout.cancel()
+        self.silence()
+
+    def _read_mutes(self):
+        try:
+            m = np.zeros(len(self.muted), np.uint8)
+            for n in self.muted_of():
+                if 0 <= n < len(m):
+                    m[n] = 1
+            self.muted = m
+        except Exception:  # (the list changing meanwhile: next time)
+            pass
+
     def _took(self, cur, skip):
         """A window taken by the feeder: its note-offs to leave out added; a wall stepped over (the reader's
         ("wall", counts)): every sound stopped, the offs to leave out = the notes sounding after it."""
@@ -697,8 +819,9 @@ class LoadedPlayer:
         self.ready.clear()
         self._horizon = None
         self.silence(reset=True)
+        feeder = self._feeder_kestrel if self.kind == "kestrel" else self._feeder
         self.threads = [threading.Thread(target=self._reader, args=(int(t0),), daemon=True),
-                        threading.Thread(target=self._feeder, daemon=True)]
+                        threading.Thread(target=feeder, daemon=True)]
         for th in self.threads:
             th.start()
 

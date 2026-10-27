@@ -77,6 +77,7 @@ def load():
     for name, args, res in (("kb_version", [], ctypes.c_char_p), ("kb_error", [p], ctypes.c_char_p),
                             ("kb_open", [ctypes.POINTER(ctypes.c_char_p), u32, ctypes.POINTER(_Options)], p),
                             ("kb_push", [p, p, p, p, u32], None), ("kb_push_len", [p, p, p, p, p, u32], None),
+                            ("kb_push_copies", [p, p, p, p, p, p, u32], None),
                             ("kb_cancel", [p], None),
                             ("kb_set_lower", [p, u32], None), ("kb_stats", [p, ctypes.POINTER(_Stats)], None),
                             ("kb_fill", [p, p, u32], None), ("kb_close", [p], None)):
@@ -128,6 +129,14 @@ class Kestrel:
             raise SynthError("synth.failed", err=self.bass.BASS_ErrorGetCode())
         self.bass.BASS_ChannelSetAttribute(self.stream, _ATTRIB_BUFFER, 0.0)
         self.bass.BASS_ChannelPlay(self.stream, 0)
+
+    def push_copies(self, frames, msgs, tracks, copies):
+        """push, each note-on standing for copies[i] exact copies sounding together (their note-offs left out by
+        the caller); arrays of the right types already (uint64, uint32, uint16, uint32), contiguous."""
+        n = len(msgs)
+        if n and self.handle:
+            self.dll.kb_push_copies(self.handle, frames.ctypes.data, msgs.ctypes.data, tracks.ctypes.data, None,
+                                    copies.ctypes.data, n)
 
     def push(self, frames, msgs, tracks, lens=None):
         """Queue messages: frames (output frame each), msgs (status | data1 << 8 | data2 << 16 | port << 24),

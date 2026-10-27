@@ -228,6 +228,76 @@ def hist(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, h):
         h[r, v] += 1
 
 
+COPY_TABLE = 1 << 20  # (stamp's table of note-ons on the tick being read: power of two)
+COPY_PROBES = 64  # ... places looked at for one; none free = sent on its own
+
+
+def stamp(ms, trk, i0, i1, ticks, muted, tport, skip, mt, ms_, mspt, base, rate, least, fr, out, tr, counts, cp,
+          tab_key, tab_gen, tab_at):
+    """Kestrel (GPU): events i0..i1 into fr / out / tr (the frame each sounds at, the message with its port in the top
+    byte, the track) from 0; returns how many. Frame = base + rate x song seconds (tempo map mt ticks / ms_ seconds
+    / mspt seconds a tick, playback.TimeMap's). A note-on of a muted track, or for a frame before `least` (too late:
+    the sound is made already), is left out with the next note-off of its key (skip, as emit); other late events go
+    at `least` (a whole block's start); everything else goes: Kestrel's own note budget chooses. counts[0] +=
+    note-ons wanted, counts[1] += note-ons sent.
+    EXACT COPIES (same tick, message and port; Shinki's dense part: 4.5 note-ons for each different one) go ONCE,
+    cp[k] = how many (kb_push_copies: their loudness adds as amplitudes); the copies' note-offs are left out
+    (skip): one off ends the note. tab_* = a table over the tick being read, counts[2] = its generation."""
+    n = 0
+    j = 0
+    while j + 1 < len(mt) and mt[j + 1] <= ticks[i0]:
+        j += 1
+    last_t = -1
+    for i in range(i0, i1):
+        t = ticks[i]
+        if t != last_t:
+            last_t = t
+            counts[2] += 1  # (a new tick: the table starts empty)
+        while j + 1 < len(mt) and mt[j + 1] <= t:
+            j += 1
+        f = base + rate * (ms_[j] + (t - mt[j]) * mspt[j])
+        f = 0.0 if f < 0.0 else f
+        m = ms[i]
+        hi = (m & 0xFF) >> 4
+        port = tport[trk[i]]
+        if hi == 0x8 or hi == 0x9:
+            q = ((port % 64) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
+            if hi == 0x9 and (m >> 16) & 127 > 0:
+                counts[0] += 1
+                if muted[trk[i]] or f < least:
+                    skip[q] += 1
+                    continue
+                counts[1] += 1
+                key = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
+                h = (int(key) * 2654435761) & (COPY_TABLE - 1)
+                found = -1
+                for _ in range(COPY_PROBES):
+                    if tab_gen[h] != counts[2]:
+                        tab_gen[h] = counts[2]
+                        tab_key[h] = key
+                        tab_at[h] = n
+                        break
+                    if tab_key[h] == key:
+                        found = tab_at[h]
+                        break
+                    h = (h + 1) & (COPY_TABLE - 1)
+                if found >= 0:
+                    cp[found] += 1
+                    skip[q] += 1  # (its off: the copy sent first ends with the first one)
+                    continue
+            elif skip[q] > 0:
+                skip[q] -= 1
+                continue
+        # (a late note-off / controller: at `least`, the first block not made yet; for a frame made already it went
+        # into the block being made with the ones before it and that block no longer matched its ranking)
+        fr[n] = np.uint64((least if f < least else f) + 0.5)
+        out[n] = np.uint32(m & 0xFFFFFF) | np.uint32(port % 16) << np.uint32(24)
+        tr[n] = trk[i]
+        cp[n] = 1
+        n += 1
+    return n
+
+
 def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room, skip, out, lens, three):
     """Events i0..i1 as raw MIDI bytes into out[synth] from lens[synth]. A note-on goes out when not muted, not late
     (tick before t_late) and loud enough: velocity >= thr[synth], or one below it while room[synth] lasts (the note

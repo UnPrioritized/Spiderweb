@@ -34,7 +34,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_gather    midi_scan.gather (Extract: a loaded track's notes in a box), the very same function compiled
   midi_index, midi_close, midi_grid, midi_halve   midi_index's functions (Load MIDI's pass: notes paired, the index
                  to read a track from anywhere, the overview picture), the very same functions compiled
-  play_read, play_order, play_hist, play_emit, play_programs   midi_play's functions (playing a loaded MIDI),
+  play_read, play_order, play_hist, play_emit, play_programs, play_stamp   midi_play's functions (playing a loaded MIDI),
                  compiled
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
@@ -1691,6 +1691,7 @@ play_order = njit(cache=CACHE, nogil=True)(midi_play.order)
 play_hist = njit(cache=CACHE, nogil=True)(midi_play.hist)
 play_emit = njit(cache=CACHE, nogil=True)(midi_play.emit)
 play_programs = njit(cache=CACHE, nogil=True)(midi_play.programs)
+play_stamp = njit(cache=CACHE, nogil=True)(midi_play.stamp)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1801,3 +1802,7 @@ def warm():
     play_emit(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, i1, i1.copy(), np.zeros(1 << 17, np.int64), np.zeros((1, 3), np.uint8),
               i1.copy(), False)
     play_programs(u8, 0, 0, np.zeros(midi_play.PS_SIZE, np.int64))
+    f1 = np.zeros(1, np.float64)
+    play_stamp(i32, i32, 0, 0, i1, u8, i1, np.zeros(1 << 17, np.int64), i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0,
+               np.zeros(1, np.uint64), np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(3, np.int64),
+               np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64), np.zeros(1, np.int64))

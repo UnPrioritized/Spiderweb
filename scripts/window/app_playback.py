@@ -159,7 +159,7 @@ class Playback:
         from files.play_loaded import LoadedPlayer
         from files.playback import KDMAPI
         from files.synth import LiveGroup
-        sinks, kind = None, "kdmapi" if self.out.name == KDMAPI else "device"
+        sinks, kind = None, {KDMAPI: "kdmapi", KESTREL: "kestrel"}.get(self.out.name, "device")
         if self.out.name == BUILTIN and self.synth is not None:
             try:
                 self.loaded_group = LiveGroup(self.synth, self.loaded_synths, self.play_voices,

@@ -51,6 +51,20 @@ impl Level {
     }
 }
 
+/// A kept note-on's loudness factor: its own `copies` (amplitude `a` each, together as one amplitude) plus what was
+/// merged into it (`coh` amplitude, `pow` power), against its own amplitude played once. A note on a silent
+/// channel carries nothing (as sent); no_merge (tests) = only its own copies.
+fn merged_scale(a: f64, copies: u32, coh: f64, pow: f64, no_merge: bool) -> f32 {
+    let own = a * copies as f64;
+    if a <= 1e-9 {
+        1.0
+    } else if no_merge || (coh <= 0.0 && pow <= 0.0) {
+        copies as f32
+    } else {
+        (((own + coh).powi(2) + pow).sqrt() / a) as f32
+    }
+}
+
 /// A queue of yes / no kept as runs (a stack's copies are dropped in a row: thousands of entries in one run).
 #[derive(Clone, Default)]
 struct Runs(std::collections::VecDeque<(bool, u32)>);
@@ -96,12 +110,17 @@ const SMOOTH: f64 = 0.25;
 /// Blocks with sound not judged at the start: the first one sounding does the graphics card's one-time setup
 /// and took ~10x a normal block (Shinki: judged, its one cut took 185,000 note-ons a block down to 39).
 const WARM: u64 = 1;
+/// (`Budget::peak`: ~1.3 s to halve at 512 frames a block)
+const PEAK_FADE: f64 = 0.994;
 
 pub struct Budget {
     /// Note-ons a block may take; None = no limit.
     allow: Option<f64>,
     /// Note-ons the last block asked for.
     wanted: usize,
+    /// The most note-ons a block asked for lately (fading by PEAK_FADE a block): the limit goes only once far above
+    /// it (by the last block alone, a few light blocks in Shinki lifted it and the next dense one took 200 ms).
+    peak: f64,
     /// Running averages: block time / real time, and how empty the ready blocks were (0 full .. 1 none).
     load: f64,
     empty: f64,
@@ -135,8 +154,8 @@ pub struct Budget {
     pow: Vec<f64>,
     /// Loudness factor of a kept note carrying merged copies (1 = as sent).
     scale: Vec<f32>,
-    /// `filter_ranked`: the messages that stay (index in the block; a kept note-on's own amplitude).
-    stay: Vec<(u32, f32)>,
+    /// `filter_ranked`: the messages that stay (index in the block; a kept note-on's own amplitude, its copies).
+    stay: Vec<(u32, f32, u32)>,
     t1: Vec<usize>,
     t2: Vec<usize>,
     t3: Vec<usize>,
@@ -162,6 +181,7 @@ impl Budget {
         Budget {
             allow: None,
             wanted: 0,
+            peak: 0.0,
             load: 0.0,
             empty: 0.0,
             blocks: 0,
@@ -271,7 +291,7 @@ impl Budget {
             }
             if self.keep[i] {
                 // (a kept note-on carries the loudness of the copies merged into it)
-                push(p, if is_on { self.scale.get(i).copied().unwrap_or(1.0) } else { 1.0 });
+                push(p, if is_on { self.scale.get(i).copied().unwrap_or(p.copies as f32) } else { 1.0 });
             }
         }
         self.scale.clear();
@@ -303,7 +323,7 @@ impl Budget {
                 if status == 0xB0 {
                     self.level.cc(p.msg);
                 }
-                self.stay.push((i as u32, 0.0));
+                self.stay.push((i as u32, 0.0, 1));
                 continue;
             }
             let ch = ((((p.msg >> 24) & 0x0F) << 4) | (p.msg & 0x0F)) as usize;
@@ -314,7 +334,7 @@ impl Budget {
                 if (p.rank as usize) < allow {
                     kept_keys[key] = true;
                     self.held[k].push_back(false);
-                    self.stay.push((i as u32, (amp(p) * self.level.gain(p.msg)) as f32));
+                    self.stay.push((i as u32, (amp(p) * self.level.gain(p.msg)) as f32, p.copies));
                 } else {
                     self.held[k].push_back(true);
                     // its loudness (with its own channel's volume) to the same channel + key's kept note, else the
@@ -326,7 +346,8 @@ impl Budget {
                     };
                     // (tier 1 always fits a real allowance: under 128 only in tests, the loudness is lost then)
                     if let Some(to) = Some(to as usize).filter(|&t| t < allow) {
-                        let a = amp(p) * self.level.gain(p.msg);
+                        // (its copies together: one amplitude)
+                        let a = amp(p) * self.level.gain(p.msg) * p.copies as f64;
                         if same && ratio >= crate::rank::COHERENT {
                             self.coh[to] += a;
                         } else {
@@ -336,10 +357,10 @@ impl Budget {
                 }
             } else if self.held[k].pop_front() != Some(true) {
                 // (its own note-on was kept, or one from before Kestrel heard of it)
-                self.stay.push((i as u32, 0.0));
+                self.stay.push((i as u32, 0.0, 1));
             }
         }
-        for &(i, a) in &self.stay {
+        for &(i, a, copies) in &self.stay {
             let p = &block[i as usize];
             let is_on = p.msg & 0xF0 == 0x90 && (p.msg >> 16) & 0x7F != 0;
             if !is_on {
@@ -348,12 +369,7 @@ impl Budget {
             }
             let r = p.rank as usize;
             let (c, w, a) = (self.coh[r], self.pow[r], a as f64);
-            // (a kept note on a silent channel can't carry anything: as sent)
-            let scale = if (c > 0.0 || w > 0.0) && a > 1e-9 && !self.no_merge {
-                (((a + c).powi(2) + w).sqrt() / a) as f32
-            } else {
-                1.0
-            };
+            let scale = merged_scale(a, copies, c, w, self.no_merge);
             if scale > 1.0 {
                 self.merged += 1;
                 self.scale_sum += scale as f64;
@@ -467,23 +483,22 @@ impl Budget {
             // (shared by time, as rank.rs COHERENT says)
             let ratio = crate::rank::len_ratio(block[i].len, block[t].len);
             let same_vel = (block[i].msg >> 16) & 0x7F == (block[t].msg >> 16) & 0x7F;
+            let a = amp(i) * block[i].copies as f64; // (its copies together: one amplitude)
             if block[i].frame == block[t].frame && same_vel && ratio >= crate::rank::COHERENT {
-                self.coh[t] += amp(i);
+                self.coh[t] += a;
             } else {
-                self.pow[t] += amp(i) * amp(i) * ratio as f64;
+                self.pow[t] += a * a * ratio as f64;
             }
         }
         self.scale.clear();
         self.scale.resize(block.len(), 1.0);
-        if any {
-            for &i in &self.ons {
-                if self.keep[i] && (self.coh[i] > 0.0 || self.pow[i] > 0.0) && amp(i) > 1e-9 {
-                    // (FULL merging, user 2026-10-27: our Kestrel change push_scaled multiplies the voice's gain,
-                    // no velocity-127 ceiling and the note's own velocity layer; the quick version's raised
-                    // velocity left the most stacked keys 14-19 dB short)
-                    let a = ((amp(i) + self.coh[i]).powi(2) + self.pow[i]).sqrt();
-                    self.scale[i] = (a / amp(i)) as f32;
-                }
+        for &i in &self.ons {
+            if self.keep[i] {
+                // (FULL merging, user 2026-10-27: our Kestrel change push_scaled multiplies the voice's gain, no
+                // velocity-127 ceiling and the note's own velocity layer; the quick version's raised velocity left
+                // the most stacked keys 14-19 dB short)
+                let (c, w) = if any { (self.coh[i], self.pow[i]) } else { (0.0, 0.0) };
+                self.scale[i] = merged_scale(amp(i), block[i].copies, c, w, false);
             }
         }
         for &i in &self.ons {
@@ -581,6 +596,7 @@ impl Budget {
             return; // (silence before the first note: nothing to learn)
         }
         self.blocks += 1;
+        self.peak = (self.peak * PEAK_FADE).max(self.wanted as f64);
         // (one block is always being taken by the output: ahead - 1 ready = all well)
         let empty = 1.0 - (ready as f64 / (ahead.max(2) - 1) as f64).min(1.0);
         if self.blocks == 1 || (self.fresh && self.cooldown == 0) {
@@ -634,7 +650,7 @@ impl Budget {
                 let next = a * (1.0 + step) + 1.0;
                 self.raised = true;
                 // no limit once it's far above what blocks ask for
-                self.allow = if next > (self.wanted.max(1) as f64) * 4.0 { None } else { Some(next) };
+                self.allow = if next > self.peak.max(1.0) * 4.0 { None } else { Some(next) };
             }
             if let Some(c) = self.cap {
                 // the voice cap back up the same way, up to the user's Max voices
