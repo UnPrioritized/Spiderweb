@@ -104,9 +104,9 @@ def _loops():
     fast = speed.loops()
     if fast is not None:
         return (fast.play_read, fast.play_order, fast.play_hist, fast.play_emit, fast.play_programs, fast.play_stamp,
-                fast.play_order_count, fast.play_order_place)
+                fast.play_order_count, fast.play_order_place, fast.play_condense, fast.play_stamp_pre)
     return (midi_play.read, midi_play.order, midi_play.hist, midi_play.emit, midi_play.programs, midi_play.stamp,
-            midi_play.order_count, midi_play.order_place)
+            midi_play.order_count, midi_play.order_place, midi_play.condense, midi_play.stamp_pre)
 
 
 PUSH_S = 1.0  # Kestrel (GPU): events pushed this far ahead of the line (ranking a dense push takes a while)
@@ -171,6 +171,7 @@ class LoadedPlayer:
         self.sent = 0  # note-ons sent
         self.jumps = 0
         self.walls = 0  # (ticks stepped over: more events than a window may hold)
+        self.dense_parts = 0  # (Kestrel: parts played from their read-ahead)
         self.dropped = 0  # (times a jammed synth's waiting messages were thrown away)
         self.windows, self.read_s = 0, 0.0  # (windows read, seconds reading them took: measuring)
         self.error = None
@@ -359,7 +360,9 @@ class LoadedPlayer:
         slots = np.arange(S, dtype=np.int64)
         opened = np.zeros(S * 2048, np.int64)  # (slot x channel x key: notes sounding)
         if len(self.cp_key):
-            j = np.searchsorted(self.cp_key, slots * self.M + t0, "right") - 1
+            # (the last checkpoint BEFORE t0: one on t0 itself can sit amid that tick's events, the ones before it
+            # were lost: Shinki's beat 340, ~500 note-offs a key, 2026-10-27)
+            j = np.searchsorted(self.cp_key, slots * self.M + t0, "left") - 1
             has = (j >= self.seg0) & (j < self.seg1)
             jj = j[has]
             self.pos[has], self.tick[has], self.run[has] = self.cp_off[jj], self.cp_tick[jj], self.cp_run[jj]
@@ -484,6 +487,10 @@ class LoadedPlayer:
                 began = time.perf_counter()
                 skip, chase = self._place(start)
                 self._place_s = time.perf_counter() - began
+                p = self._dense_part(start)
+                if p is not None and p.t0 < start:  # (inside a part read ahead: ITS notes sounding there are left
+                    skip = np.zeros(SKIP, np.int64)  # out, the file's count would eat the part's own offs)
+                    p.sounding(start, skip)
                 with self._lock:
                     self._gen += 1
                     gen = self._gen
@@ -517,6 +524,21 @@ class LoadedPlayer:
                         self.ready.set()
                         time.sleep(0.005)
                         continue
+                    p = self._dense_part(w0)
+                    if p is not None:  # (Kestrel: a part read ahead plays from there, the reading goes on past it)
+                        with self._lock:
+                            if self._gen != gen or self._jump is not None:
+                                break
+                            self._queue.append([p.ts, p.ms, p.tr, int(np.searchsorted(p.ts, w0 - p.t0, "left")),
+                                                ("dense", p), None])
+                            self._horizon = p.t1
+                        self._place(p.t1)  # (its places only: the part's own offs and skips carry on)
+                        self.dense_parts += 1
+                        w0, span = p.t1, max(1, self.lm.ppq // 8)
+                        continue
+                    cut = self._dense_start(w0, w1)
+                    if cut is not None:
+                        w1 = cut
                     began = time.perf_counter()
                     todo = np.flatnonzero(~self.done & (self.nxt < w1))
                     kept = [a.copy() for a in (self.pos, self.tick, self.run, self.nxt, self.want, self.done,
@@ -569,6 +591,23 @@ class LoadedPlayer:
                 self._pool_x.shutdown(wait=True)
             for sc in [self._sc] + self._helpers:
                 sc.close()
+
+    def _dense_now(self):
+        """Kestrel (GPU): the loaded MIDI's read-ahead of its densest parts (files/play_dense.py) when it may be
+        used now: as made for the file as it is, no track muted (it holds every track)."""
+        d = self.lm.dense if self.kind == "kestrel" else None
+        if d is None or self.muted.any():
+            return None
+        from files.play_dense import key_of
+        return d if d.key == key_of(self.lm) else None
+
+    def _dense_part(self, tick):
+        d = self._dense_now()
+        return None if d is None else d.part_at(tick)
+
+    def _dense_start(self, t0, t1):
+        d = self._dense_now()
+        return None if d is None else d.start_in(t0, t1)
 
     def _queued(self):
         """Events read and not played yet."""
@@ -767,6 +806,8 @@ class LoadedPlayer:
         stamp = _loops()[5]
         kout = self.out.handle
         skip = np.zeros(SKIP, np.int64)
+        # (notes sent and not ended, by port % 16 x channel x key: a part read ahead ends at most those)
+        opened = self._opened = np.zeros(midi_play.OPEN, np.int64)
         counts = np.zeros(3, np.int64)
         table = (np.zeros(midi_play.COPY_TABLE, np.uint32), np.zeros(midi_play.COPY_TABLE, np.int64),
                  np.zeros(midi_play.COPY_TABLE, np.int64))  # (stamp's: exact copies on one tick sent once)
@@ -796,6 +837,7 @@ class LoadedPlayer:
                         self.silence(reset=True)
                     gen, cur, held = self._gen, None, None
                     skip[:] = 0
+                    opened[:] = 0
                 if cur is None and self._queue:
                     cur = self._queue.popleft()
                     self._took(cur, skip)
@@ -809,26 +851,35 @@ class LoadedPlayer:
             parts = [] if held is None else [held]
             while cur is not None:
                 ts, ms, ks, i = cur[0], cur[1], cur[2], cur[3]
-                i1 = int(np.searchsorted(ts, T, "right"))
+                dense = cur[4][1] if isinstance(cur[4], tuple) and cur[4][0] == "dense" else None
+                i1 = int(np.searchsorted(ts, T, "right") if dense is None else
+                         np.searchsorted(ts, T - dense.t0, "right"))
                 if i1 > i:
                     if tm_of is not tmap:  # (the tempo map as arrays, for the compiled loop)
                         tm_of, tm = tmap, (np.asarray(tmap.ticks, np.int64), np.asarray(tmap.secs, np.float64),
                                            np.asarray(tmap.spt, np.float64))
-                    fr = np.empty(i1 - i, np.uint64)
-                    m = np.empty(i1 - i, np.uint32)
-                    tr = np.empty(i1 - i, np.uint16)
-                    cp = np.empty(i1 - i, np.uint32)
+                    size = i1 - i if dense is None else midi_play.pre_room(ms, dense.cp, i, i1, opened)
+                    fr = np.empty(size, np.uint64)
+                    m = np.empty(size, np.uint32)
+                    tr = np.empty(size, np.uint16)
+                    cp = np.empty(size, np.uint32)
                     counts[:2] = 0  # (counts[2]: the copy table's generation, kept)
                     base = kout._f0 + (t_c - sec - kout._t0) * K_RATE
                     t_s = time.perf_counter()
-                    n = stamp(ms, ks, i, i1, ts, self.muted, self.tport, skip, *tm, base, float(K_RATE), least, fr,
-                              m, tr, counts, cp, *table)
+                    if dense is None:
+                        n = stamp(ms, ks, i, i1, ts, self.muted, self.tport, skip, *tm, base, float(K_RATE), least,
+                                  fr, m, tr, counts, cp, *table, opened)
+                    else:  # (read ahead: copies collapsed already)
+                        n = _loops()[9](ts, ms, ks, dense.cp, dense.t0, i, i1, skip, *tm, base, float(K_RATE),
+                                        least, fr, m, tr, cp, counts, False, opened)
                     self.prof[0] += time.perf_counter() - t_s
                     parts.append((fr[:n], m[:n], tr[:n], cp[:n]))
                     self.sent += int(counts[1])
                     self.thinned += int(counts[0] - counts[1])  # (muted / too late: as _feeder counts them)
                     cur[3] = i = i1
                 if i >= len(ts):
+                    if dense is not None:  # (copies sounding on past the part: their offs left out still)
+                        skip[dense.skip_q] += dense.skip_n
                     with self._lock:
                         if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
                             self._pool.append(cur[5])
@@ -870,11 +921,14 @@ class LoadedPlayer:
     def _took(self, cur, skip):
         """A window taken by the feeder: its note-offs to leave out added; a wall stepped over (the reader's
         ("wall", counts)): every sound stopped, the offs to leave out = the notes sounding after it."""
-        if cur[4] is None:
+        if cur[4] is None or isinstance(cur[4], tuple) and cur[4][0] == "dense":  # (a part read ahead: its own
+            # skips come at its end)
             return
         if isinstance(cur[4], tuple):
             self.silence()
             skip[:] = cur[4][1]
+            if getattr(self, "_opened", None) is not None:  # (every sound stopped: none open)
+                self._opened[:] = 0
         else:
             skip += cur[4]
 

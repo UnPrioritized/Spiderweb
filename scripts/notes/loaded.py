@@ -67,6 +67,7 @@ class LoadedMidi:
         self.hide_ver = 0
         self.rechannel = None  # (Track Properties' new channels: per track, -1 = its own; load_extract.sync_channels)
         self.gone = frozenset()  # (tracks removed in the track list: never drawn nor played; the same)
+        self.dense = None  # (Kestrel (GPU)'s read-ahead of the parts too dense to read live: files/play_dense.py)
         self._set_hidden(np.zeros(0, np.int64), *(np.zeros(0, np.int64) for _ in range(6)))
         self._level0 = None
 

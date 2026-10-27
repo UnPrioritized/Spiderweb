@@ -170,6 +170,9 @@ class Playback:
                 if gate is not None:
                     gate.set()
                 return
+        if kind == "kestrel":  # (its densest parts read ahead in the background, once: files/play_dense.py)
+            from files.play_dense import ensure
+            ensure(self.loaded)
         tl = self.track_list
         lp = self.loaded_play = LoadedPlayer(self.loaded, self.player, self.out, sinks, kind,
                                              muted=lambda: [-1 - s for s in tuple(tl.muted) if s < 0])
