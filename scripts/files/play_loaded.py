@@ -556,7 +556,7 @@ class LoadedPlayer:
                         with self._lock:
                             if self._gen != gen or self._jump is not None:
                                 break
-                            self._queue.append([chase[0], chase[1], chase[2], 0, ("wall", skip), None])
+                            self._queue.append([chase[0], chase[1], chase[2], 0, ("wall", skip, w1), None])
                             self._horizon = w1
                         self.walls += 1
                         w0 = w1
@@ -654,14 +654,18 @@ class LoadedPlayer:
             kout = self.out.handle
             if kout is None:
                 return
-            ms = [m[0] | ch | m[1] << 8 | (m[2] if len(m) > 2 else 0) << 16 | port << 24
-                  for port in range(min(self.ports, 16)) for ch in range(16) for m in msgs]
+            ms = self._kestrel_silence(msgs)
             at = kout.frame_at(time.perf_counter())
             kout.k.push([at] * len(ms), ms, [0] * len(ms))
         else:
             for ch in range(16):
                 for m in msgs:
                     self.out.send(m[0] | ch | m[1] << 8 | (m[2] if len(m) > 2 else 0) << 16)
+
+    def _kestrel_silence(self, msgs=((0xB0, 64, 0), (0xB0, 123, 0))):
+        """silence's messages for Kestrel: on every port the file uses (its port in the top byte)."""
+        return [m[0] | ch | m[1] << 8 | (m[2] if len(m) > 2 else 0) << 16 | port << 24
+                for port in range(min(self.ports, 16)) for ch in range(16) for m in msgs]
 
     def _feeder(self):
         hist, emit = _loops()[2], _loops()[3]
@@ -816,6 +820,19 @@ class LoadedPlayer:
         gen, cur = -1, None
         checked = 0.0
         held = None  # (frames, msgs, tracks) of a block not whole yet
+        # a wall stepped over: its silence goes IN ORDER, at the wall's own frame after what came before it (sent at
+        # once, notes starting just before it came after it and their offs were left out: they rang on, hunt
+        # 2026-10-27); the controllers sent again with it not before it (floor)
+        wall = {"t": None, "floor": 0.0}
+        silent = np.array(self._kestrel_silence(), np.uint32)
+
+        def took(cur):
+            if isinstance(cur[4], tuple) and cur[4][0] == "wall":
+                skip[:] = cur[4][1]
+                opened[:] = 0
+                wall["t"] = cur[4][2]
+            else:
+                self._took(cur, skip)
         while not self._stop.is_set():
             time.sleep(STEP_S)
             clock = self.player._clock
@@ -839,9 +856,10 @@ class LoadedPlayer:
                     gen, cur, held = self._gen, None, None
                     skip[:] = 0
                     opened[:] = 0
+                    wall["t"], wall["floor"] = None, 0.0
                 if cur is None and self._queue:
                     cur = self._queue.popleft()
-                    self._took(cur, skip)
+                    took(cur)
                 horizon = getattr(self, "_horizon", None)
             if cur is None:
                 self.prof[3] += 1
@@ -851,6 +869,12 @@ class LoadedPlayer:
                 self._jump = int(tmap.tick(s_now + JUMP_S + self._place_s)) + 1
             parts = [] if held is None else [held]
             while cur is not None:
+                if wall["t"] is not None:
+                    f_w = max(least, kout._f0 + (t_c - sec - kout._t0) * K_RATE + tmap.sec(wall["t"]) * K_RATE)
+                    wall["t"], wall["floor"] = None, f_w
+                    n = len(silent)
+                    parts.append((np.full(n, int(f_w + 0.5), np.uint64), silent, np.zeros(n, np.uint16),
+                                  np.ones(n, np.uint32)))
                 ts, ms, ks, i = cur[0], cur[1], cur[2], cur[3]
                 dense = cur[4][1] if isinstance(cur[4], tuple) and cur[4][0] == "dense" else None
                 i1 = int(np.searchsorted(ts, T, "right") if dense is None else
@@ -874,6 +898,8 @@ class LoadedPlayer:
                         n = _loops()[9](ts, ms, ks, dense.cp, dense.t0, i, i1, skip, *tm, base, float(K_RATE),
                                         least, fr, m, tr, cp, counts, False, opened)
                     self.prof[0] += time.perf_counter() - t_s
+                    if wall["floor"]:  # (a wall's controllers: after its silence, never before it)
+                        np.maximum(fr[:n], np.uint64(int(wall["floor"] + 0.5)), out=fr[:n])
                     parts.append((fr[:n], m[:n], tr[:n], cp[:n]))
                     self.sent += int(counts[1])
                     self.thinned += int(counts[0] - counts[1])  # (muted / too late: as _feeder counts them)
@@ -885,8 +911,9 @@ class LoadedPlayer:
                         if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
                             self._pool.append(cur[5])
                         cur = self._queue.popleft() if self._queue and self._gen == gen else None
+                        wall["floor"] = 0.0
                         if cur is not None:
-                            self._took(cur, skip)
+                            took(cur)
                     continue
                 break
             if not parts:
