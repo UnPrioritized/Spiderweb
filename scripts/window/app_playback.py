@@ -123,6 +123,7 @@ class Playback:
         self.piano_back()
         if self.loaded is not None:  # (first: the play line waits until its first notes are read)
             self.start_loaded(int(round(self.playhead * ppq)))
+        self.kestrel_parts()
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
@@ -134,6 +135,18 @@ class Playback:
         if self.loaded is not None:  # (a redraw now: the loaded notes' exact pictures start reading ahead the way
             self.roll.request_redraw()  # it plays before the first page turn, roll_loaded._keep_ahead)
         self._play_job = self.after(15, self._play_tick)
+
+    def kestrel_parts(self):
+        """Kestrel: channel 10 a normal instrument on every port, as Built-in BASSMIDI plays Spiderweb's own shapes
+        (it made them drums: a GM soundfont's snare, hunt 2026-10-28), except the ports a loaded MIDI uses: its
+        channel 10 stays drums there. Each Play: the last play's choice never carries over."""
+        if self.out.name != KESTREL or not self.out.handle:
+            return
+        from files.kestrel import PART_TYPE
+        lp = self.loaded_play
+        files_ports = set((lp.tport % 16).tolist()) if lp is not None and lp.tport is not None else set()
+        for port in range(16):
+            self.out.handle.send(PART_TYPE | 9 << 8 | (1 if port in files_ports else 0) << 16 | port << 24)
 
     def play_end(self, ppq, beats, start):
         """Where playing stops: a quarter bar after the last note ends (a loaded MIDI's too; or after the play

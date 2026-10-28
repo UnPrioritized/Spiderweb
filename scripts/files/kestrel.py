@@ -49,6 +49,7 @@ def read_voices(text):
     if not math.isfinite(v):
         raise ValueError(text)
     return int(round(v))
+PART_TYPE = 0xF5  # (the connector's own status: data1 = channel, data2 = 0 melodic / 1 drums; lib.rs PART_TYPE)
 UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
 # (one Kestrel starting at a time, whatever asks: two starting together in one program can hang on the graphics
 # card, seen in the connector's tests 2026-10-27)

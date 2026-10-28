@@ -242,12 +242,20 @@ fn set_error(text: &str) {
         Some(CString::new(text.replace('\0', " ")).unwrap_or_default());
 }
 
+/// Spiderweb's own status byte (undefined in MIDI) for "channel data1's part type is data2" (0 melodic, 1 / 2 the
+/// drum maps), what a GS drum-part SysEx does: Spiderweb's own shapes keep channel 10 melodic (hunt 2026-10-28).
+pub const PART_TYPE: u8 = 0xF5;
+
 /// One MIDI message as Spiderweb packs it: status | data1 << 8 | data2 << 16 | port << 24.
 pub fn decode(msg: u32) -> Option<Event> {
     let status = (msg & 0xFF) as u8;
     let d1 = ((msg >> 8) & 0x7F) as u8;
     let d2 = ((msg >> 16) & 0x7F) as u8;
-    let ch = (((msg >> 24) as u8 % kestrel::midi::PORTS) << 4) | (status & 0x0F);
+    let port = (msg >> 24) as u8 % kestrel::midi::PORTS;
+    if status == PART_TYPE {
+        return Some(Event::DrumPart { ch: (port << 4) | (d1 & 0x0F), map: d2 });
+    }
+    let ch = (port << 4) | (status & 0x0F);
     Some(match status & 0xF0 {
         0x80 => Event::NoteOff { ch, key: d1 },
         0x90 if d2 == 0 => Event::NoteOff { ch, key: d1 },
@@ -1100,5 +1108,18 @@ pub unsafe extern "system" fn kb_streamproc(_handle: u32, buffer: *mut c_void, l
 pub unsafe extern "C" fn kb_close(h: *mut Synth) {
     if !h.is_null() {
         guard((), || drop(Box::from_raw(h)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn part_type_message_makes_a_drum_part_event() {
+        // (Spiderweb's own shapes keep channel 10 melodic: port 2, channel 10, melodic)
+        let msg = PART_TYPE as u32 | 9 << 8 | 0 << 16 | 2 << 24;
+        assert!(matches!(decode(msg), Some(Event::DrumPart { ch: 0x29, map: 0 })));
+        assert!(matches!(decode(0x90 | 60 << 8 | 100 << 16), Some(Event::NoteOn { ch: 0, key: 60, vel: 100 })));
     }
 }
