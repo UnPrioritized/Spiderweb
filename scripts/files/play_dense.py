@@ -10,6 +10,7 @@ the parts live as before (the read-ahead holds every track)."""
 import json
 import os
 import threading
+import time
 
 import numpy as np
 
@@ -27,6 +28,7 @@ GROUP_TRACKS = 64  # one tick holding more than a reading window: its tracks rea
 SLICE = 1 << 22  # events collapsed at a time (room kept for this many more)
 SAVED_VER = 3  # (a saved read-ahead: how parts are read / collapsed changed = a new number, old ones read again)
 SAVED_END = ".dense.npz"  # (beside the saved index: <index name>.dense.npz)
+DECLINED_END = ".dense.no"  # (beside it: the user said No to keeping it)
 PART_ARRAYS = ("ts", "ms", "tr", "cp", "s0_q", "s0_n")  # (each part's, saved as <name><part number>)
 
 
@@ -136,6 +138,8 @@ class Dense:
         self.failed = 0  # (parts left to be read live: too many events kept, reading failed, or over the memory cap)
         self.capped = 0  # (... of them over the memory cap)
         self.error = None
+        self.unsaved = False  # (all read, not kept on disk yet, may be offered: the user is asked first)
+        self.took = 0.0  # (seconds the reading took)
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True, name="kestrel-dense")
         self.thread.start()
@@ -164,6 +168,7 @@ class Dense:
         from concurrent.futures import ThreadPoolExecutor
         from files.play_loaded import WINDOW_MOST, LoadedPlayer, _Scratch, helper_count
         lm = self.lm
+        began = time.perf_counter()
         saved = _load(lm, self.todo)
         if saved is not None:  # (read ahead on an earlier day, kept beside the MIDI's saved index)
             self.failed = saved[1]
@@ -197,8 +202,9 @@ class Dense:
                     used += sum(a.nbytes for a in (part.ts, part.ms, part.tr, part.cp))
                     # (in song order; a whole new list: the player's reader never sees one half made)
                     self.parts = sorted(self.parts + [part], key=lambda p: p.t0)
-            if not self._stop.is_set():
-                save(self)
+            # (kept on disk only when the user says so: App.ask_keep_ahead; it wrote 3 GB unasked, user 2026-10-28)
+            self.took = time.perf_counter() - began
+            self.unsaved = not self._stop.is_set() and may_keep(self)
         except Exception as e:  # (a file gone / changed: the parts not done are read live as before)
             self.error = e
             from files.errors import write_log
@@ -284,6 +290,36 @@ def saved_file(index):
     """The saved read-ahead kept beside a MIDI's saved index file (user 2026-10-27: read once per MIDI, not once
     each time it's loaded; Shinki ~20 s, ~210 MB)."""
     return index[:-4] + SAVED_END
+
+
+def declined_file(index):
+    """Beside a saved index: the user said No to keeping its read-ahead (never asked again for it)."""
+    return index[:-4] + DECLINED_END
+
+
+def may_keep(d):
+    """d (all read) may be offered for keeping: lm as loaded with a saved index, none kept yet, not declined."""
+    lm = d.lm
+    try:
+        from files import midi_saved
+        if d.error is not None or not d.parts or not _as_loaded(lm) or d.key != key_of(lm) \
+                or not midi_saved.has_index(lm.mf):
+            return False
+        index = midi_saved.index_file(lm.mf.path, lm.mf.size)
+        return not os.path.exists(saved_file(index)) and not os.path.exists(declined_file(index))
+    except Exception:
+        return False
+
+
+def decline(d):
+    """No to keeping d's read-ahead: not asked again for this MIDI's saved index."""
+    d.unsaved = False
+    try:
+        from files import midi_saved
+        from files.safefile import write_text
+        write_text(declined_file(midi_saved.index_file(d.lm.mf.path, d.lm.mf.size)), "")
+    except Exception:
+        pass
 
 
 def _as_loaded(lm):

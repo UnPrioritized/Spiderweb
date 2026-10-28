@@ -196,6 +196,8 @@ class Playback:
         if kind == "kestrel":  # (its densest parts read ahead in the background, once: files/play_dense.py)
             from files.play_dense import ensure
             ensure(self.loaded)
+            if getattr(self, "_ahead_job", None) is None:  # (asked after playing, never as Play is pressed)
+                self._ahead_job = self.after(1000, self.watch_ahead)
         tl = self.track_list
         lp = self.loaded_play = LoadedPlayer(self.loaded, self.player, self.out, sinks, kind,
                                              muted=lambda: [-1 - s for s in tuple(tl.muted) if s < 0])
@@ -382,6 +384,41 @@ class Playback:
         if self.loaded is not None and self.midi_device.get() == KESTREL:
             from files.play_dense import ensure
             ensure(self.loaded)
+            self.watch_ahead()
+
+    def watch_ahead(self):
+        """Once the loaded MIDI's read-ahead is all read: asks whether to keep it on disk (play_dense.may_keep;
+        never written unasked, user 2026-10-28: 3 GB). Waits while playing (a question mid-song)."""
+        if getattr(self, "_ahead_job", None) is not None:
+            self.after_cancel(self._ahead_job)
+        self._ahead_job = None
+        lm = self.loaded
+        d = lm.dense if lm is not None else None
+        if d is None:
+            return
+        if not d.done() or (d.unsaved and self.player.running):
+            self._ahead_job = self.after(1000, self.watch_ahead)
+            return
+        if not d.unsaved:
+            return
+        from files.play_dense import decline, kept_bytes, save
+        from window.load_midi import ask_choice, size_text
+        size = kept_bytes(lm)
+        answer = ask_choice(self, tr("ks.keep_title"),
+                            tr("ks.keep_ask", name=os.path.basename(lm.path), size=size_text(size),
+                               s=f"{d.took:.0f}"),
+                            [("keep", tr("ks.keep_yes")), ("never", tr("ks.keep_never")),
+                             ("later", tr("ks.keep_later"))])
+        if self.loaded is not lm or lm.dense is not d or not d.unsaved:  # (changed while asked)
+            return
+        if answer == "keep":
+            d.unsaved = False
+            threading.Thread(target=save, args=(d,), daemon=True, name="kestrel-dense-save").start()
+            self.status.config(text=tr("ks.kept_status", size=size_text(size)))
+        elif answer == "never":
+            decline(d)
+        else:
+            d.unsaved = False  # (asked again the next time the MIDI is loaded)
 
     def make_live(self):
         """(MidiOut.open) The built-in synth started for playing, with the soundfont (the Hz bass preview's) and

@@ -72,6 +72,7 @@ def save_index(lm):
     if more:  # (Kestrel's read-ahead, all read already: kept with it, written in the background: Shinki's ~3 GB
         # held the window, hunt 2026-10-28; counted in the size said)
         import threading
+        lm.dense.unsaved = False  # (the question said its size: asked)
         threading.Thread(target=save, args=(lm.dense,), daemon=True, name="kestrel-dense-save").start()
     return len(data) + more
 
@@ -168,8 +169,8 @@ def saved_list():
 
 
 def delete_index(f):
-    from files.play_dense import saved_file
-    for g in (f, saved_file(f)):  # (its Kestrel read-ahead goes with it)
+    from files.play_dense import declined_file, saved_file
+    for g in (f, saved_file(f), declined_file(f)):  # (its Kestrel read-ahead goes with it)
         try:
             os.remove(g)
         except OSError:
