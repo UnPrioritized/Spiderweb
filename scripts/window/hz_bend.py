@@ -31,7 +31,8 @@ BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = fr
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
 BEND = look.HZ_BEND
 BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: hz_sketch.py)
-BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece")  # the drags bend_drag / bend_release take (sketchpiece: Sketch's)
+BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend")  # the drags bend_drag / bend_release take (sketch*:
+# the Sketch tool's, hz_sketch.py)
 
 
 class HzBend:
@@ -86,6 +87,9 @@ class HzBend:
         """What the Bend tool would take at (x, y): ("point", tone, point number), ("curve", tone, piece number) a
         curve square, ("slide",) a slide's dot or square (those win over a note: the usual tools take them), ("note",
         tone) on a note or on its bend line, or None."""
+        i = self.sketch_end_hit(x, y) if self.sketching() else None  # (Sketch: the ">" after a note's end)
+        if i is not None:
+            return "end", i
         r = NEAR * self.s
         for px, py, i, j in reversed(self.bend_points()):
             if abs(x - px) <= r and abs(y - py) <= r:
@@ -140,6 +144,11 @@ class HzBend:
         self.sel, self.box_kept = {i}, None
         if hit[0] == "note" and self.sketching():  # (Sketch: the piece is held, sketch_piece; a point is added by a
             return self.sketch_piece(e, i, before)  # double-click, sketch_double)
+        if hit[0] == "end":  # (Sketch's ">": the note's length, sketch_end_to)
+            self.drag = {"kind": "sketchend", "i": i, "before": before, "orig": copy.deepcopy(self.tones), "x": e.x,
+                         "y": e.y, "moved": False, "name": tr("hz.step_length")}
+            self.redraw()
+            return True
         if hit[0] == "point" and not n.get("bend"):  # (Sketch: a plain note's end: its line made, at 0)
             n["bend"] = [[0.0, 0.0], [1.0, 0.0]]
         if hit[0] == "curve":  # (where the square was grabbed: it moves as far as the mouse from there)
@@ -177,6 +186,8 @@ class HzBend:
         n = self.tones[d["i"]]
         if d["kind"] == "sketchpiece":
             return self.sketch_piece_to(d, n, e)
+        if d["kind"] == "sketchend":
+            return self.sketch_end_to(d, n, e)
         if d["kind"] == "bendcurve":  # how far from the piece's first point to its second the square is dragged
             _, sy, _, j, k0, k1 = d["square"]
             y = sy + e.y - d["y"]
@@ -276,7 +287,8 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
-        cursor = ("fleur" if hit[0] == "point" else "sb_v_double_arrow" if hit[0] == "curve" or self.sketching() else
+        cursor = ("fleur" if hit[0] == "point" else "sb_h_double_arrow" if hit[0] == "end" else
+                  "sb_v_double_arrow" if hit[0] == "curve" or self.sketching() else
                   self.pencil)  # (Sketch: a press on the line holds its piece, up / down)
         self.canvas.config(cursor=cursor)
         self.show_status(e)

@@ -14,13 +14,14 @@ import copy
 import numpy as np
 
 from files.lang import tr
-from notes.hzbass import line_at, note_bend, pitch
+from notes.hzbass import bend_part, line_at, note_bend, pitch
 from roll.roll_shared import SHIFT, note_name
 from window import look
-from window.hz_bend import BEND, LINE_NEAR
+from window.hz_bend import BEND, LINE_NEAR, NEAR
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
 SKETCH_THIN, SKETCH_THICK = 3, 9
+END_GAP = 10  # px: the ">" this far after a note's end (its middle)
 
 
 class HzSketch:
@@ -103,6 +104,39 @@ class HzSketch:
         self.show_status(e)
         return True
 
+    def sketch_end_hit(self, x, y):
+        """The note whose ">" (just after its end) is at (x, y), or None. It wins over the end dot right of the
+        dot's middle (they're close: the dot is grabbed from its left half)."""
+        near, most = NEAR * self.s, self.bend_most()
+        for i in range(len(self.tones) - 1, -1, -1):
+            n = self.tones[i]
+            end = n["t"] + n["len"]
+            x1 = self.x_of(end)
+            ex, ey = x1 + END_GAP * self.s, self.pitch_y(self.bent_pitch(n, end, most))
+            if x1 < x <= ex + near and abs(y - ey) <= near:
+                return i
+        return None
+
+    def sketch_end_to(self, d, n, e):
+        """The ">" held in drag d dragged sideways: the note ends at the grid line nearest the mouse (Shift: any
+        tick), at least one step long. Its points stay on their beats: longer = the old end stays a point and a flat
+        piece goes on from it; shorter = the line is cut there."""
+        was = d["orig"][d["i"]]
+        n["len"] = max(self.shortest(e), self.snap(self.beat_at(e.x), e) - was["t"])
+        pts = was.get("bend")
+        if pts and abs(n["len"] - was["len"]) > 1e-12:
+            cut = bend_part(was, was["t"], n["len"])
+            if cut is None:  # (flat all along: its pieces kept, on their beats)
+                cut = [[p[0] * was["len"] / n["len"], 0.0] for p in pts if p[0] * was["len"] < n["len"] - 1e-9]
+                cut.append([1.0, 0.0])
+            n["bend"] = cut
+        elif pts:
+            n["bend"] = copy.deepcopy(pts)
+        self.keep_leads(d["i"], d["orig"])
+        self.redraw()
+        self.show_status(e)
+        return True
+
     def sketch_label(self):
         """(x, y, text) of the label beside what's held: the key it's at + how far from the note's own ("A2 +2.0
         st"); None when no point / piece is held."""
@@ -145,8 +179,8 @@ class HzSketch:
             c.create_line(*xy, fill=fill, width=wide, capstyle="round", joinstyle="round")
             for x, y in ((x0, ys[0]), (x1, ys[-1])):
                 c.create_oval(x - r, y - r, x + r, y + r, fill=BEND, outline=BEND)
-            x, y, a = x1 + r + 2 * s, ys[-1], 3 * s  # (">": the end, where a drag will make it longer)
-            c.create_line(x, y - a, x + a, y, x, y + a, fill=BEND, width=max(1, round(1.5 * s)))
+            x, y, a = x1 + END_GAP * s, ys[-1], 3 * s  # (">": the end, where a drag makes it longer / shorter)
+            c.create_line(x - a / 2, y - a, x + a / 2, y, x - a / 2, y + a, fill=BEND, width=max(1, round(1.5 * s)))
         label = self.sketch_label()
         if label:
             x, y, text = label

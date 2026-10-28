@@ -23,7 +23,7 @@
  "hz.bend_tip": "Gives a note its own bend: click a note to add a point to its bend line and drag it up or down.\nThe line stretches with the note and is heard on top of everything else, up to the Pitch box's Range.\nPoints snap to the grid and to whole keys (Shift: free). Right-click a point to remove it.\nDrag the small square between two points up or down to curve that piece; double-click it to make it straight.\nRight-click a note's bend line for the note's menu.\nOn empty space it works like the Select tool (box, Ctrl+box adds, a click unselects).",
  "hz.sketch": "Sketch (S)",
  "hz.sketch_label": "{key}  {keys} st",
- "hz.sketch_tip":"Shapes a note's pitch by hand: double-click a note's line to add a point, then drag points up or down.\nPoints snap to the grid and to whole keys (Shift: free). Double-click or right-click a point to remove it.\nPress on empty space and drag to the right to draw a note (Shift: free). Ctrl+drag selects with a box.",
+ "hz.sketch_tip": "Shapes a note's pitch by hand: double-click a note's line to add a point, then drag points up or down.\nDrag the line between two points to move that piece; with no points, the whole note moves.\nDrag the > after a note's end to make it longer or shorter.\nPoints snap to the grid and to whole keys (Shift: free). Double-click or right-click a point to remove it.\nPress on empty space and drag to the right to draw a note (Shift: free). Ctrl+drag selects with a box.",
  "hz.bend_keys":"Bend: {keys} keys",
  "hz.bend_keys_one": "Bend: {keys} key",
  "hz.step_note_bend": "Hz bass: bend a note",
