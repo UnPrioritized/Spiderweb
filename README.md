@@ -132,7 +132,8 @@ pip install numpy==2.5.3 numba==0.68.0 pillow==12.3.0
 ```
 
 **Playback** goes to the MIDI out picked in Settings → Sound: Windows' MIDI output, Built-in BASSMIDI (Spiderweb's own
-synth, with a soundfont you pick; the only choice on Linux), or OmniMIDI (KDMAPI) when OmniMIDI is installed. The
+synth, with a soundfont you pick; the default on Linux), Kestrel (GPU, Experimental: the same soundfonts played on
+the graphics card, 64-bit Windows and Linux), or OmniMIDI (KDMAPI) when OmniMIDI is installed. The
 Hz bass window's Preview always uses the built-in synth (no MIDI device needed).
 
 **Building the .exe yourself:** install PyInstaller once (`pip install pyinstaller`), then double-click
@@ -153,6 +154,15 @@ The Hz bass preview and the Built-in BASSMIDI playback use **BASS and BASSMIDI**
 ([un4seen.com](https://www.un4seen.com); the DLLs, Linux .so and macOS .dylib files in `scripts/bass`, the DLLs also inside the
 .exe). They are **not** covered by Spiderweb's MIT License: they are free for non-commercial use only. Anyone selling
 or otherwise making money from a copy of Spiderweb needs a BASS licence from Un4seen.
+
+Kestrel (GPU) playback uses **Kestrel**, the GPU MIDI synth by thtstickyboi
+([thtstickyboi/kestrel-midi](https://github.com/thtstickyboi/kestrel-midi)), with the live playing interface by mbms
+(mbms0, [mbms0/kestrel-midi](https://github.com/mbms0/kestrel-midi)). It's under the Mozilla Public License 2.0.
+Spiderweb talks to it through its own small connector (source in `native/kestrel_bridge`; the built files in
+`scripts/kestrel`, the Windows one also inside the .exe; they aren't in this git repository: take them from a
+release's source zip, or build the connector with `cargo build --release`). Spiderweb's copy of Kestrel has small changes of its own;
+their source is at [UnPrioritized/kestrel-midi](https://github.com/UnPrioritized/kestrel-midi). Its licence and
+those of the libraries it carries are at the end of [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
 
 The .exe also carries Python, Tcl/Tk, NumPy, Numba, llvmlite (with LLVM), Pillow and PyInstaller's starter
 program. Their licences are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
