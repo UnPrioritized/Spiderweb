@@ -602,8 +602,9 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
     cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
     before keeps the first half and the piece after starts with the second (same key and colour).
     came: "Notes by snap" steps, the line note each came from (start, end): the steps of the line note sounding at
-    the cut that start after it go to the piece after (they all share that note's spot); no step is cut in two
-    (every note stays one step long: the one across the cut stays with the piece it starts in)."""
+    the cut that start after it go to the piece after (they all share that note's spot); the step sounding at the
+    cut is cut in two like any note, the whole stack of keys there when the step is steep (user 2026-10-28: "a knife
+    sliced through")."""
     paths = paths_of(whole)
     for c in sorted(u for u in part if u):
         k = int(c // BIG)
@@ -619,6 +620,32 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
             if over.any():
                 spots = spots.copy()
                 spots[over & (spots == spots[over].max()) & (raw[:, 0] >= t)] = c
+            # the knife goes through the whole stack of keys sounding at the cut (a steep step), not one note: each
+            # cut in two, its left half before the cut, its right half after
+            col = (raw[:, 0] < t) & (raw[:, 1] > t)
+            if not col.any():
+                continue
+            ks = set(raw[col, 2].tolist())
+            k0 = min(ks, key=lambda q: abs(q - key))
+            if abs(k0 - key) > 1:
+                continue
+            lo = hi = k0
+            while lo - 1 in ks:
+                lo -= 1
+            while hi + 1 in ks:
+                hi += 1
+            idx = np.flatnonzero(col & (raw[:, 2] >= lo) & (raw[:, 2] <= hi))
+            second = raw[idx].copy()
+            second[:, 0] = t
+            raw[idx, 1] = t
+            was = spots[idx]
+            spots = spots.copy()
+            spots[idx] = np.minimum(was, np.nextafter(c, -np.inf))
+            raw = np.concatenate([raw, second])
+            spots = np.append(spots, np.maximum(was, c))
+            came = np.concatenate([came, came[idx]])
+            if tracks is not None:
+                tracks = np.append(tracks, tracks[idx])
             continue
         hit = (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
         if not hit.any():
