@@ -7,19 +7,24 @@ python make_icon.py
 if errorlevel 1 (pause & exit /b 1)
 python make_notices.py
 if errorlevel 1 (pause & exit /b 1)
+rem The Kestrel connector goes inside when it's there (not in git: built from native\kestrel_bridge, or taken from a source zip).
+set KESTREL=
+if exist "%~dp0scripts\kestrel\x64\kestrel_bridge.dll" (set KESTREL=--add-binary "%~dp0scripts\kestrel\x64;kestrel\x64") else (echo No scripts\kestrel\x64\kestrel_bridge.dll: building without Kestrel ^(GPU^) playback.)
 python -m PyInstaller --noconfirm --clean --onefile --windowed --name Spiderweb ^
   --distpath dist --workpath build --specpath build --paths "%~dp0scripts" ^
   --version-file "%~dp0build\version.txt" --icon "%~dp0scripts\icons\icon.ico" ^
-  --add-data "%~dp0scripts\icons;icons" --add-data "%~dp0scripts\lang;lang" --add-data "%~dp0LICENSE;." --add-data "%~dp0clips;clips" --add-binary "%~dp0scripts\bass\x64;bass\x64" spiderweb.py
+  --add-data "%~dp0scripts\icons;icons" --add-data "%~dp0scripts\lang;lang" --add-data "%~dp0LICENSE;." --add-data "%~dp0clips;clips" --add-binary "%~dp0scripts\bass\x64;bass\x64" %KESTREL% spiderweb.py
 if errorlevel 1 (pause & exit /b 1)
 copy /y LICENSE dist\ >nul
 copy /y README.txt dist\ >nul
 copy /y THIRD-PARTY-NOTICES.txt dist\ >nul
 if exist dist\clips rmdir /s /q dist\clips
-rem Source archive for sharing: spiderweb.py + the scripts and clips folders, launchers and license only (no autosave/shapes/output).
+rem Source archive for sharing: spiderweb.py + the scripts and clips folders, launchers, license and the Kestrel connector's source only (no autosave/shapes/output).
 if exist dist\Spiderweb-source.zip del dist\Spiderweb-source.zip
 "%SystemRoot%\System32\tar.exe" -a -cf dist\Spiderweb-source.zip --exclude=__pycache__ --exclude=CLAUDE.md spiderweb.py scripts clips ^
-  Spiderweb.bat build.bat build_version.py make_icon.py make_notices.py icon.svg LICENSE THIRD-PARTY-NOTICES.txt README.txt
+  Spiderweb.bat build.bat build_version.py make_icon.py make_notices.py icon.svg LICENSE THIRD-PARTY-NOTICES.txt README.txt ^
+  native\kestrel_bridge\src native\kestrel_bridge\tests native\kestrel_bridge\licences native\kestrel_bridge\Cargo.toml ^
+  native\kestrel_bridge\Cargo.lock native\kestrel_bridge\make_notices.py native\kestrel_bridge\NOTICES.txt
 if errorlevel 1 (pause & exit /b 1)
 echo.
 echo Done: dist\Spiderweb.exe and dist\Spiderweb-source.zip

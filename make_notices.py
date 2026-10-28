@@ -1,6 +1,7 @@
 """Writes THIRD-PARTY-NOTICES.txt: the licences of everything Spiderweb.exe carries inside it besides Spiderweb itself
 (Python, Tcl/Tk, NumPy, Numba, llvmlite with LLVM, Pillow, PyInstaller's starter), read from the copies installed here
-so the notices match the versions built in. build.bat runs it before building."""
+so the notices match the versions built in, then the Kestrel connector's (native/kestrel_bridge/NOTICES.txt, written
+by its own make_notices.py). build.bat runs it before building."""
 
 import glob
 import importlib.metadata as meta
@@ -18,6 +19,9 @@ notices to come with it, so here they are. Spiderweb's own licence is in LICENSE
 The Hz bass preview and the built-in synth use BASS and BASSMIDI by Un4seen Developments
 (un4seen.com). They aren't covered by these licences or by Spiderweb's: they are free for
 non-commercial use only (see README.txt).
+
+Kestrel (GPU) playback uses the Kestrel connector (scripts/kestrel, also inside the .exe): its
+licences, Kestrel's own among them, are at the end of this file.
 """
 
 
@@ -58,6 +62,9 @@ def main():
              package("llvmlite", "llvmlite (with LLVM)"),
              package("pillow", "Pillow"),
              package("pyinstaller", "PyInstaller (its starter program runs Spiderweb.exe)")]
+    kestrel = os.path.join(HERE, "native", "kestrel_bridge", "NOTICES.txt")
+    if os.path.isfile(kestrel):
+        parts.append(f"\n\n{LINE}\n{LINE}\n\n" + open(kestrel, encoding="utf-8").read())
     text = "".join(parts).replace("\r\n", "\n")
     with open(OUT + ".tmp", "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

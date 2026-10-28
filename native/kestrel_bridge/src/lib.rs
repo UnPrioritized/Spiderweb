@@ -915,7 +915,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.1.0; Kestrel 1.3.0 (mbms0/kestrel-midi 844b002)";
+    static V: &CStr = c"0.1.0; Kestrel 1.3.0 (mbms0/kestrel-midi 844b002 + Spiderweb's changes 9d8b191)";
     V.as_ptr()
 }
 
