@@ -112,7 +112,10 @@ def wobble_keys(runs, u, span):
         share = np.clip((u - u0) / (u1 - u0), 0.0, 1.0)
         depth = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * share
         wave = wave_of(w.get("shape"), w.get("phase", 0.0) + w["rate"] * (u - u0) * span)
-        out += np.where((u >= u0) & (u <= u1), depth * wave * (-1.0 if w.get("flip") else 1.0), 0.0)
+        # (up to its end, not on it: the piece after takes over there, user's picture 2026-10-28: a square's last
+        # instant added to the next piece's wobble; the note's own end is the last run's)
+        inside = (u >= u0) & ((u < u1) | (u1 >= 1.0) & (u <= u1))
+        out += np.where(inside, depth * wave * (-1.0 if w.get("flip") else 1.0), 0.0)
     return out
 
 
