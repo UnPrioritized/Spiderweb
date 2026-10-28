@@ -31,6 +31,8 @@ WATCH_MS = 250
 WORDS = {"burst": ("melody.w_from", "melody.w_to", "melody.bpm"), "jump": ("melody.w_jump", None, "melody.bpm"),
          "updown": (None, "melody.w_and", "melody.bpm"), "random": ("melody.w_between", "melody.w_and", "melody.bpm"),
          "drawn": ("melody.w_between", "melody.w_and", "melody.bpm")}  # (its graph: lower box to higher box)
+PREVIEW_MOST = 500  # jumps: more = no faint preview line (each change would wait on it)
+PREVIEW_CATCH = 200  # the same for the catch-up way (each catch-up worked out, tried up to 3 times)
 MOST_LOADED = 5_000_000  # a loaded track's notes read for one area at most (a denser area: refused, said why)
 
 
@@ -77,6 +79,7 @@ class MelodyWindow(tk.Toplevel):
                                          command=self.sync)
         self.at_clicks.pack(anchor="w", padx=(10, 0), pady=(4, 0))
         self.chain = None  # the click chain being made (JumpChain), None = none
+        self.preview_seed = random.randrange(1 << 30)  # (Random's picks: the preview's = what Fill makes)
         self.snap_starts = np.zeros(0)  # the melody's note starts in beats (sorted): edges go onto them
         self.rules = []  # (label, box) of the melody's rules: greyed with Every snap step
         self.shortest = self.length_row(box, "melody.shortest", getattr(app, "melody_shortest", "1/32"))
@@ -398,7 +401,8 @@ class MelodyWindow(tk.Toplevel):
         made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get(),
                 str(graph_pts(app, "shape")), str(graph_pts(app, "strength")))
         seen = (box, area, track, ch, at, only, has_sel, step, self.shortest.get(), self.rest.get(),
-                tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"], made)
+                tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"],
+                None if clicks else getattr(app, "tempo_count", 0), self.preview_seed, made)
         if seen == self.seen:
             return
         if chain is not None and self.seen is not None and self.seen[-1] != made and chain.grab is None:
@@ -496,12 +500,33 @@ class MelodyWindow(tk.Toplevel):
             self.hint.config(text=text, foreground=look.HINT)
         else:
             self.hint.config(text=problem, foreground=look.WARN)
+        self.make_preview(None if problem else area)
         app.roll.request_redraw()  # (the notes it follows light up)
+
+    def make_preview(self, area):
+        """What Fill would lay, as a faint line in the Conductor pane (user 2026-10-29: Fill had to be pressed to see
+        anything): worked out on a copy of the line with the same random as Fill; none past PREVIEW_MOST jumps (the
+        line there is a wall of jumps anyway) or with nothing to fill."""
+        pane = self.app.tempo_pane
+        old = pane.fill_preview
+        pane.fill_preview = None
+        most = PREVIEW_MOST if self.how.get() == "audio" else PREVIEW_CATCH
+        if area is not None and anchor_count(self.runs) <= most and pane.box.mode == "visual":
+            a, b = area
+            clip, _ = self.make_clip(self.app.tempo, self.runs, a, b, seed=self.preview_seed)
+            if clip is not None:
+                trial = copy.deepcopy(self.app.tempo)
+                pane.lay_copies(trial, clip, a, pane.ed_base(), teal=False)
+                pane.fill_preview = {"tempo": trial, "worked": plans(trial, pane.base(), self.app.ppq),
+                                     "span": (a, b)}
+        if old is not None or pane.fill_preview is not None:
+            pane.request_redraw()
 
     def sync_clicks(self, box, area, moved, melody_ok, only, lkey):
         """sync's "Where I click" part: the notes edges go onto (the melody's starts), what the chain makes. Fill
         greyed: the areas are laid as they're clicked."""
         app, pane = self.app, self.app.tempo_pane
+        self.make_preview(None)  # (the chain lays its areas as they're clicked: no preview)
         notes, lines = None, []
         if melody_ok:
             s, e, k = self.own_notes(only)
@@ -562,11 +587,12 @@ class MelodyWindow(tk.Toplevel):
         if pane.box.mode != "visual":  # (jumps are the visual tempo's, like a Domino paste)
             pane.box.set_mode("visual")
         (a, b), _ = self.fill_area(pane.bands_reach())
-        clip, plain = self.make_clip(app.tempo, self.runs, a, b)
+        clip, plain = self.make_clip(app.tempo, self.runs, a, b, seed=self.preview_seed)  # (= the preview)
         if clip is None:  # (no catch-up could be made: nothing changed, no undo step)
             app.status.config(text=tr("melody.catch_none"))
             return
         pane.put_copies(clip, a, tr("melody.step"), teal=False)
+        self.preview_seed = random.randrange(1 << 30)  # (each Fill a new random: the preview shows the next one)
         n = anchor_count(self.runs)
         text = trn("melody.filled", n, n=n)
         if plain:
@@ -729,6 +755,7 @@ class MelodyWindow(tk.Toplevel):
         for g in list(self.graphs.values()):
             g.close()
         self.finish_chain()
+        self.make_preview(None)
         if self.watch:
             self.after_cancel(self.watch)
             self.watch = None

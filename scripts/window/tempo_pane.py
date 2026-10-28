@@ -717,6 +717,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.placing = None  # adding a catch-up: {"step": 1} (drag the yellow area) / {"step": 2, "a", "b", "hover"}
         self.bands = []  # the kept Select boxes [(first, last beat)]: the pane's whole height (Ctrl+drag adds one)
         self.live = None  # the line just drawn, its ends still movable: {"base", "ends", "first", "seen"}
+        self.fill_preview = None  # Fill with tempo jumps' faint preview: {"tempo", "worked", "span"} (melody_window)
         self._dense = (None, [])  # (what it was worked out for, beats where Keep timing notes are too close)
         self._limits = {"dense": [], "gave": [], "unfit": [], "moved": []}  # (the limit texts' spots, tempo_file.limit_spots)
         self._dense_job = None
@@ -3305,6 +3306,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
             xs, beats, ys = self.line_xy(worked, w, kb)
         self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), width=lw + 1,
                          fill=look.TEMPO_FADED if heard_mode else look.TEMPO_LINE)
+        fp = self.fill_preview
+        if fp is not None and not heard_mode:  # (what Fill with tempo jumps would lay: faint, over its area only)
+            px, pb, py = self.line_xy(fp["worked"], w, kb, fp["tempo"], base)
+            on = (pb >= fp["span"][0] - 1e-9) & (pb <= fp["span"][1] + 1e-9)
+            if on.sum() >= 2:
+                self.create_line(*np.column_stack([px[on], py[on]]).ravel().tolist(), fill=look.MELODY_PREVIEW,
+                                 width=lw + 1, tags="fill_preview")
         # the tempo the Keep timing notes are heard at (dashed; drawn with Heard tempo: solid)
         dash = () if heard_mode else (6, 3)
         loaded = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None

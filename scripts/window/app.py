@@ -3393,6 +3393,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if hasattr(self, "tempo_pane") and not restoring:
             self.tempo_pane.write_heard()  # (Draw: Heard tempo: the edited line back into its Keep timing part)
         tempo_edited()
+        self.tempo_count = getattr(self, "tempo_count", 0) + 1  # (Fill with tempo jumps' preview: made again)
         if not hasattr(self, "tempo_box"):
             return
         if not self.tempo_pane.drag:  # (a jump's first point nothing glides into: gone; a drag: when let go)
