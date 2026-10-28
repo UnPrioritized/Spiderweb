@@ -48,6 +48,16 @@ class HzBend:
         got = note_bend(n, np.array([beat], float), self.bend_most() if most is None else most)
         return pitch(n) + (0.0 if got is None else float(got[0]))
 
+    def bend_line(self, n, most):
+        """(beats, keys) along note n's bend line for drawing: evenly spread spots plus every point, a jump (two
+        points at one spot) drawn straight up / down (one spot per point, each with its own value)."""
+        pts = n["bend"]
+        at = [n["t"] + p[0] * n["len"] for p in pts]
+        even = np.setdiff1d(np.linspace(n["t"], n["t"] + n["len"], 49), at)
+        spots = sorted([(b, -1, float(v)) for b, v in zip(even, note_bend(n, even, most))]
+                       + [(b, j, max(-most, min(most, p[1]))) for j, (b, p) in enumerate(zip(at, pts))])
+        return np.array([b for b, _, _ in spots]), pitch(n) + np.array([v for _, _, v in spots])
+
     def bend_points(self):
         """[(x, y, tone number, point number)]: the bend points of the notes in view (Bend tool only)."""
         if not self.bending():
@@ -351,9 +361,7 @@ class HzBend:
         for n in self.tones if not self.sketching() else ():  # (Sketch: the note's own line shows it)
             if not n.get("bend") or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
                 continue
-            beats = np.union1d(np.linspace(n["t"], n["t"] + n["len"], 49),
-                               [n["t"] + p[0] * n["len"] for p in n["bend"]])
-            keys = pitch(n) + note_bend(n, beats, most)
+            beats, keys = self.bend_line(n, most)
             xy = np.column_stack([[self.x_of(b) for b in beats], self.pitch_y(keys)]).ravel().tolist()
             c.create_line(*xy, fill=BEND, width=max(1, round(1.5 * s)), dash=(4, 2))
         r = 3 * s

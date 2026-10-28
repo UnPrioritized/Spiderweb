@@ -14,7 +14,7 @@ import copy
 import numpy as np
 
 from files.lang import tr
-from notes.hzbass import bend_part, line_at, note_bend, pitch
+from notes.hzbass import bend_part, line_at, pitch
 from roll.roll_shared import SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR
@@ -182,9 +182,8 @@ class HzSketch:
             if n.get("bend"):
                 y = self.pitch_y(pitch(n))
                 c.create_line(x0, y, x1, y, fill=edge, dash=(2, 4))
-                beats = np.union1d(np.linspace(n["t"], n["t"] + n["len"], 49),
-                                   [n["t"] + p[0] * n["len"] for p in n["bend"]])
-                ys = self.pitch_y(pitch(n) + note_bend(n, beats, most))
+                beats, keys = self.bend_line(n, most)
+                ys = self.pitch_y(keys)
                 xy = np.column_stack([[self.x_of(b) for b in beats], ys]).ravel().tolist()
             else:
                 y = self.pitch_y(pitch(n))
