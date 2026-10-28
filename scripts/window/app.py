@@ -3219,7 +3219,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     self._used_tracks = (self.rendered, len(track_slots(self.rendered, False)))
                 tracks = self._used_tracks[1]
             tracks += len(self.own_written()) + len(self.waiting_rows())
-            parts.append(tr("app.one_track") if tracks == 1 else
+            # (folders: tracks holding several channels, PLAN #11; user 2026-10-28: "one channel each" misled)
+            tl = getattr(self, "track_list", None)
+            mixed = sum(len(c) > 1 for c in tl.row_chans()) if tl is not None else 0
+            parts.append(trn("app.tracks_mixed", mixed, slot_count=tracks, mixed=mixed) if mixed else
+                         tr("app.one_track") if tracks == 1 else
                          tr("app.tracks_one_channel_each", slot_count=tracks))
         if self.sels:
             shapes = tr("app.shapes_2", n=len(self.sels)) if len(self.sels) > 1 else ""

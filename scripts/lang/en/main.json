@@ -901,6 +901,8 @@
  "big_ask.out_of_memory_somewhere": "Spiderweb ran out of memory, so what you just did may not have finished. Undo (Ctrl+Z) takes it back. Closing other programs frees memory.",
  "app.shapes_notes": "{shapes} · {notes}",
  "app.tracks_one_channel_each": "{slot_count} tracks (one channel each)",
+ "app.tracks_mixed": "{slot_count} tracks ({mixed} hold several channels)",
+ "app.tracks_mixed_one": "{slot_count} tracks (1 holds several channels)",
  "app.one_track": "1 track",
  "app.shapes_2": "{n} shapes, ",
  "app.selected_notes": "selected: {shapes}{notes}",

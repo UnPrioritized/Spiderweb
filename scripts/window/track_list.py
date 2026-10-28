@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
-from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, add_tracks, among_file, clean_file_order, file_order, from_rows, full_plan, into_ids, move_rows, ordered,
+from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, add_tracks, among_file, clean_file_order, clean_name, file_order, from_rows, full_plan, into_ids, move_rows, ordered,
                               new_id, plan)
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
@@ -189,8 +189,11 @@ class TrackList(tk.Canvas):
         clicked to it (any folders between), Ctrl+Shift = added. The highlight stays on a picked one."""
         pair = (int(self.tracks()[row]), c)
         group = self.picked_chans()
-        if shift and self._sub_anchor is not None and self.line_of(*self._sub_anchor) is not None:
-            a, b = sorted((self.line_of(*self._sub_anchor), self.line_of(*pair)))
+        anchor = self._sub_anchor
+        if anchor is None or self.line_of(*anchor) is None:  # (none yet: from the highlighted sub-row)
+            anchor = (self.current, self.current_ch) if self.current_ch is not None else None
+        if shift and anchor is not None and self.line_of(*anchor) is not None:
+            a, b = sorted((self.line_of(*anchor), self.line_of(*pair)))
             rows, chs = self.lines()[:2]
             span = {(int(self._all[rows[k]]), int(chs[k])) for k in range(a, b + 1) if chs[k] >= 0}
             group = group | span if ctrl else span
@@ -679,6 +682,8 @@ class TrackList(tk.Canvas):
             name = self.app.file_tracks().get(self.file_at(row), {}).get("name")
             if name:
                 return name
+            # (unnamed: its number in the file, wherever it's dragged; user 2026-10-28: place numbers shifted)
+            return tr("tracks.name", n=self.file_at(row) + 1)
         else:
             own = self.own_track(int(self.tracks()[row]))
             if own is not None and own["name"]:
@@ -930,8 +935,9 @@ class TrackList(tk.Canvas):
         if row == CONDUCTOR_ROW:  # (the tempo's row: the highlight stays; All tracks is the row above it)
             return
         self.current = None if row < 0 else int(self.tracks()[row])
-        if c >= 0:  # (a sub-row: only that channel shown, user 2026-10-28)
+        if c >= 0:  # (a sub-row: only that channel shown, user 2026-10-28; a Shift+click's range starts here)
             self.current_ch = c
+            self._sub_anchor = (self.current, c)
         self.selected, self.anchor = set(), (self.current, self.current)
         self.shown_changed()
 
@@ -1458,9 +1464,12 @@ class TrackList(tk.Canvas):
                 to = dict(zip(clash, free))
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.into_step"))
+        app.own_tracks = self.named()  # (names stick: "Track n" as they show before tracks go)
+        if not autos and whole:  # (whole tracks going: the ones after them would shift, keep_places)
+            self.keep_places(min(self.row_of_id(s) for s, _ in parts))
         if autos:
             rows = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
-            taken = self.take_all(autos, owners, rows)[0]
+            taken = self.take_named(autos, owners, rows)[0]
             mine_now = lambda s: HAND + taken[s] if s in taken else s  # noqa: E731
             parts = [(mine_now(s), cs) for s, cs in parts]
             to = {(mine_now(s), c): n for (s, c), n in to.items()}
@@ -1511,7 +1520,8 @@ class TrackList(tk.Canvas):
             return
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.out_step"))
-        new, ids = add_tracks(app.own_tracks, self._slots, self.own_row(gap - 1) if gap > 0 else -1,
+        self.keep_places(gap)  # (Spiderweb's tracks from there on would shift: made yours when they can be)
+        new, ids = add_tracks(self.named(), self._slots, self.own_row(gap - 1) if gap > 0 else -1,
                               [c for _, c in seq], app.own_next, self._filled, app.file_rows())
         app.own_next = max(ids) + 1
         app.own_tracks = new
@@ -1523,6 +1533,7 @@ class TrackList(tk.Canvas):
         tidy_tracks(app)
         self.current = HAND + ids[0]
         self.own_changed()
+        self.name_new(ids)
 
     def reorder(self, s, chans, pos, now):
         """Sub-rows dragged among their own folder's (your track s; chans in their order; now = the folder's order):
@@ -1588,7 +1599,12 @@ class TrackList(tk.Canvas):
             autos, owners = got
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.move_step"))
-        taken, rows = self.take_all(autos, owners, rows) if autos else ({}, rows)
+        # (names stick: "Track n" as they show before the move; Spiderweb's tracks made yours when they can be)
+        if autos:
+            taken, rows = self.take_named(autos, owners, rows)
+        else:  # (from the first row whose place changes)
+            taken = self.keep_places(min([gap] + [self.row_of_id(s) for s in group if self.row_of_id(s) is not None]))
+            rows = [{"id": taken[x]} if type(x) is int and x in taken else x for x in rows]
         moved = {s - HAND for s in group if s >= HAND} | set(taken.values())
         # (a tinted track dragged = yours, like Properties)
         app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if t["id"] in moved else t
@@ -1600,9 +1616,9 @@ class TrackList(tk.Canvas):
         if taken:
             app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
 
-    def snapshot(self):
+    def snapshot(self, quiet=False):
         """Touching an automatic track makes them ALL yours (dragged, Properties): (every automatic slot, the shapes on
-        them), or None when one can't go in (status line)."""
+        them), or None when one can't go in (status line; quiet: none, keep_places)."""
         from window.app import can_go_in, placed_on
         app = self.app
         r = app.rendered
@@ -1620,9 +1636,32 @@ class TrackList(tk.Canvas):
         owners |= {i for i, sh in enumerate(app.shapes) if any(v < 0 for v in placed_on(sh, chans))}  # (pinned)
         owners = sorted(owners)
         if any(not can_go_in(app.shapes[i]) for i in owners if i < len(app.shapes)):
-            app.status.config(text=tr("tracks.cant_move"))
+            if not quiet:
+                app.status.config(text=tr("tracks.cant_move"))
             return None
         return autos, owners
+
+    def keep_places(self, first=0):
+        """Before the list's order changes from row `first` on (a move, a drag in / out, Add / Remove Track; in the
+        undo step made already): when one of Spiderweb's automatic tracks is at or after it (its place number would
+        shift), they're made yours, named "Track n" as they show (user 2026-10-28: names stick; untouched order =
+        as before). Only when every shape on them can go in (an image / mask / Hz bass can't): else they all stay
+        Spiderweb's, counted by place, and nothing is refused. Yours are named either way. {slot: new id}."""
+        app = self.app
+        if first is None or not any(0 <= int(s) < HAND for s in self.tracks()[max(first, 0):]):
+            app.own_tracks = self.named()
+            return {}
+        got = self.snapshot(quiet=True)
+        if got is None:
+            app.own_tracks = self.named()
+            return {}
+        rows = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
+        taken, rows = self.take_named(*got, rows)
+        app.own_tracks = from_rows(rows, self._slots, app.own_tracks, self._filled)  # (in their places)
+        self.tracks()
+        if taken:
+            app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
+        return taken
 
     def take_all(self, autos, owners, rows):
         """snapshot's tracks made yours (in the undo step made already): ({slot: its new id}, rows (full_plan's) with
@@ -1821,13 +1860,50 @@ class TrackList(tk.Canvas):
         self.tracks()
         self.shown_changed()
 
-    def add_own(self, row, chs):
-        """One track per channel in chs, after row (own_row), the first of them highlighted."""
+    def named(self, own=None, ids=None):
+        """own (default: the app's) with the unnamed tracks of yours listed now named "Track n" by their place now
+        (ids: only those). NAMES STICK (user 2026-10-28: place numbers shifted when tracks moved): done as a track is
+        made, and before anything moves them (older projects, tinted tracks); written into the MIDI like a
+        Properties name."""
+        own = self.app.own_tracks if own is None else own
+        rows = {int(s): k for k, s in enumerate(self.tracks())}
+        return [dict(t, name=clean_name(tr("tracks.name", n=rows[HAND + t["id"]] + 1)))
+                if not t["name"] and HAND + t["id"] in rows and (ids is None or t["id"] in ids) else t for t in own]
+
+    def take_named(self, autos, owners, rows):
+        """take_all with names that stick (user 2026-10-28): every unnamed track of yours named by its place first,
+        then Spiderweb's automatic tracks made yours named by the place they had (taking them lists them last for a
+        moment). In the undo step made already."""
         app = self.app
-        new, ids = add_tracks(app.own_tracks, self._slots, self.own_row(row), chs, app.own_next, self._filled,
+        app.own_tracks = self.named()
+        was = {int(s): k for k, s in enumerate(self.tracks())}
+        taken, rows = self.take_all(autos, owners, rows)
+        names = {v: clean_name(tr("tracks.name", n=was[s] + 1)) for s, v in taken.items() if s in was}
+        app.own_tracks = [dict(t, name=names[t["id"]]) if t["id"] in names and not t["name"] else t
+                          for t in app.own_tracks]
+        return taken, rows
+
+    def name_new(self, ids):
+        """The new tracks of yours ids named by where they show (named), in the undo step that made them."""
+        got = self.named(ids=set(ids))
+        if got != self.app.own_tracks:
+            self.app.own_tracks = got
+            self.tracks()
+            self.request_redraw()
+
+    def add_own(self, row, chs):
+        """One track per channel in chs, after row (own_row), the first of them highlighted; named where they show
+        (the others named first: none shifts)."""
+        app = self.app
+        app.push_undo(name=tr("tracks.add_step" if len(chs) == 1 else "tracks.add_many_step"))
+        # (Spiderweb's tracks after it would shift: made yours when they can be; at the end nothing shifts)
+        self.keep_places(None if row is None else max(row, -1) + 1)
+        new, ids = add_tracks(self.named(), self._slots, self.own_row(row), chs, app.own_next, self._filled,
                               app.file_rows())
         app.own_next = max(ids) + 1
-        self.set_own(new, tr("tracks.add_step" if len(chs) == 1 else "tracks.add_many_step"))
+        app.own_tracks = new
+        self.own_changed()
+        self.name_new(ids)
         self.current = HAND + ids[0]
         self.shown_changed()
         at = self.row_of_id(self.current)
@@ -1986,12 +2062,15 @@ class TrackList(tk.Canvas):
             sh["into"] = [v for v in hit[i] if v not in ids]
         gone |= set(part) - set(plain)
         app.push_undo(name=tr("tracks.remove_step" if len(owns) == 1 else "tracks.remove_many_step"))
+        # (Spiderweb's tracks after them would shift: made yours when they can be)
+        self.keep_places(min((r for r in map(self.row_of_id, ss) if r is not None), default=None))
         app.put_plain(plain)
         for i in sorted(gone, reverse=True):
             del app.shapes[i]
         rest = [i - sum(j < i for j in gone) for i in sorted(app.sels - gone)]
         app.select_many(rest, max(rest, default=None))
-        app.own_tracks = [t for t in app.own_tracks if t["id"] not in ids]
+        # (names stick: the ones after them keep the "Track n" they showed)
+        app.own_tracks = [t for t in self.named() if t["id"] not in ids]
         self.own_changed()
         said = []
         if gone:
