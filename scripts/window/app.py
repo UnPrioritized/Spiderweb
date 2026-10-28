@@ -53,6 +53,7 @@ from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
 from window.panel_colours import ColoursPanel
 from window.panel_recolour import RecolourPanel
+from window.panel_snap import SnapPanel
 from window.panel_mask import MaskPanel
 from window.panel_custom import CustomPanel
 from window.panel_nested import NestedPanel
@@ -430,7 +431,7 @@ def cc_texts(shapes, mode):
                                    for sh in shapes))
 
 
-class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, MaskPanel, PolygonPanel, FreehandPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
+class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         mac_buttons()  # (Mac's Tk 8.6: right / middle button swapped back, before any binding)
@@ -1266,13 +1267,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._build_mask()
         last = self.last_row = ttk.Frame(self.settings)
         last.pack(fill="x", pady=(4, 0))
-        ttk.Label(last, text=tr("app.last_note")).pack(side="left", anchor="n")
-        opts = ttk.Frame(last)
+        top = ttk.Frame(last)
+        top.pack(fill="x")
+        self.last_parts = [ttk.Label(top, text=tr("app.last_note"))]
+        self.last_parts[0].pack(side="left", anchor="n")
+        opts = ttk.Frame(top)
         opts.pack(side="left", padx=(5, 0))
-        ttk.Radiobutton(opts, text=tr("app.ends_on_the_last_point"), value=False,
-                        variable=self.end_dot).pack(anchor="w")
-        ttk.Radiobutton(opts, text=tr("app.starts_exactly_on_the_last_point"), value=True,
-                        variable=self.end_dot).pack(anchor="w")
+        for text, value in ((tr("app.ends_on_the_last_point"), False),
+                            (tr("app.starts_exactly_on_the_last_point"), True)):
+            b = ttk.Radiobutton(opts, text=text, value=value, variable=self.end_dot)
+            b.pack(anchor="w")
+            self.last_parts.append(b)
+        self._build_by_snap(last)
         self._build_line_fill()
         self._build_freehand()
         self._build_tumour()
@@ -1388,6 +1394,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_funnel()
         self.sync_list_selection()
         self.sync_line_fill()
+        self.sync_by_snap()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
                   self.sustain_window, self.subtract_window, self.merge_window, self.strips_window,
                   self.fill_window):
