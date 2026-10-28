@@ -515,9 +515,11 @@ class LoadedPlayer:
                 fresh = True  # (a part read ahead is taken part-way only where playing starts: its unheard offs
                 # counted above; joined part-way later (done meanwhile, a track unmuted) = read live to its end)
                 last = int(max((self.lm.tracks[int(n)].last_tick for n in self.num), default=0))
+                unplaced = None  # (a part read ahead ended here: placed only when the reading goes live again)
                 while not self._stop.is_set() and self._jump is None:
                     if self._unpart is not None:  # (a mute changed while a part played: live from where it was)
                         w0, span, fresh = self._leave_part(), max(1, self.lm.ppq // 8), False
+                        unplaced = None
                         continue
                     if w0 > last:
                         self.ready.set()
@@ -551,10 +553,16 @@ class LoadedPlayer:
                             self._queue.append([p.ts, p.ms, p.tr, int(np.searchsorted(p.ts, w0 - p.t0, "left")),
                                                 ("dense", p), None])
                             self._horizon = p.t1
-                        self._place(p.t1)  # (its places only: the part's own offs and skips carry on)
+                        # (its places only: the part's own offs and skips carry on; not between parts in a row, each
+                        # placing read through the wall up to it: 0.3-1.2 s a part of ~0.1 s, the wall dropped,
+                        # 2026-10-28)
+                        unplaced = p.t1
                         self.dense_parts += 1
                         w0, span = p.t1, max(1, self.lm.ppq // 8)
                         continue
+                    if unplaced is not None:
+                        self._place(unplaced)
+                        unplaced = None
                     cut = self._dense_start(w0, w1)
                     if cut is not None:
                         w1 = cut
