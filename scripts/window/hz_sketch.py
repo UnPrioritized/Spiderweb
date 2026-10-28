@@ -14,9 +14,9 @@ import tkinter as tk
 
 import numpy as np
 
-from files.lang import tr
-from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, bend_of, bend_part, bends, bent_part,
-                          line_at, pitch, wobble_part)
+from files.lang import tr, trn
+from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, bend_of, bend_part,
+                          bends, bent_part, line_at, pitch, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR
@@ -31,6 +31,8 @@ TOP_KEY = 127  # a whole note dragged up stops here (the notes keep keys 0..127:
 CURVE_KEYS = CTRL | SHIFT
 WOBBLE_LIFT = 12  # px: a picked piece's depth line sits this far above the piece's highest spot at depth 0
 WOBBLE_STEP = 0.1  # keys: the depth goes in these steps (Shift: 0.01)
+SPEED_POST = 12  # px: the speed post's height above the depth line
+SPEED_DOUBLE = 60  # px: the speed post dragged this far right = twice as fast (left: half)
 
 
 def split_curve(bend, t):
@@ -101,14 +103,27 @@ class HzSketch:
         x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
         return x0, base - d0 * self.sy, x1, base - d1 * self.sy, base
 
+    def speed_post(self):
+        """(x, y at its foot, y at its top) of the picked piece's speed post (an upright stick in the middle of its
+        depth line, dragged sideways = the wobble's speed), or None when it has no wobble."""
+        got, piece = self.depth_line(), self.picked_piece()
+        if not got or not self.wobble_run(self.tones[piece[0]], piece[2], piece[3]):
+            return None
+        x0, ya, x1, yb, _ = got
+        foot = (ya + yb) / 2
+        return (x0 + x1) / 2, foot, foot - SPEED_POST * self.s
+
     def depth_hit(self, x, y):
-        """"a" / "b" (the handle at its start / end: that end's depth, a fade) / "line" (both) when (x, y) is on the
-        picked piece's depth line, else None."""
+        """"speed" (the speed post's top) / "a" / "b" (the handle at its start / end: that end's depth, a fade) /
+        "line" (both) when (x, y) is on the picked piece's depth line, else None."""
         got = self.depth_line()
         if not got:
             return None
         x0, ya, x1, yb, _ = got
         r = NEAR * self.s
+        post = self.speed_post()
+        if post and abs(x - post[0]) <= r and post[2] - r <= y <= post[2] + r:
+            return "speed"
         for which, hx, hy in (("a", x0, ya), ("b", x1, yb)):
             if abs(x - hx) <= r and abs(y - hy) <= r:
                 return which
@@ -121,8 +136,10 @@ class HzSketch:
         depth (sketch_depth_to); a piece with none gets one at WOBBLE_RATE."""
         _, _, u0, u1 = self.picked_piece()
         run = self.wobble_run(self.tones[i], u0, u1)
-        self.drag = {"kind": "wobbledepth", "i": i, "which": which, "before": before, "x": e.x, "y": e.y,
-                     "moved": False, "at": [u0, u1], "name": tr("hz.step_wobble_depth"),
+        speed = which == "speed"
+        self.drag = {"kind": "wobblerate" if speed else "wobbledepth", "i": i, "which": which, "before": before,
+                     "x": e.x, "y": e.y, "moved": False, "at": [u0, u1],
+                     "name": tr("hz.step_wobble_speed" if speed else "hz.step_wobble_depth"),
                      "orig": copy.deepcopy(run) if run else {"at": [u0, u1], "depth": [0.0, 0.0], "rate": WOBBLE_RATE}}
         self.redraw()
         return True
@@ -136,6 +153,23 @@ class HzSketch:
         for end in (0, 1):
             if d["which"] == "line" or d["which"] == "ab"[end]:
                 run["depth"][end] = max(0.0, min(NOTE_BEND_MOST, round(round((run["depth"][end] + k) / step) * step, 4)))
+        was = self.wobble_run(n, *d["at"])
+        n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
+        self.redraw()
+        return True
+
+    def sketch_rate_to(self, d, n, e):
+        """The speed post held in drag d moved sideways: SPEED_DOUBLE px right = twice as fast, left = half, so the
+        piece holds a whole number of HALF waves (it ends back on its line; Ctrl: any speed, 0.01 a beat), at least
+        one half wave, at most WOBBLE_RATE_MOST a beat."""
+        beats = (d["at"][1] - d["at"][0]) * n["len"]
+        rate = d["orig"]["rate"] * 2.0 ** ((e.x - d["x"]) / (SPEED_DOUBLE * self.s))
+        if e.state & CTRL:
+            rate = round(rate, 2)
+        else:
+            rate = max(1.0, round(2.0 * rate * beats)) / (2.0 * beats)
+        rate = min(WOBBLE_RATE_MOST, max(0.5 / beats, 0.01, rate))
+        run = dict(copy.deepcopy(d["orig"]), rate=round(rate, 6))
         was = self.wobble_run(n, *d["at"])
         n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
         self.redraw()
@@ -350,11 +384,17 @@ class HzSketch:
         """(x, y, text) of the label beside what's held: the key it's at + how far from the note's own ("A2 +2.0
         st"); None when no point / piece is held."""
         d = self.drag
-        if d and d["kind"] == "wobbledepth" and d.get("moved"):  # (the depth: "Depth 2.0 st" / a fade "2.0 → 0.5")
-            got = self.depth_line()
-            run = self.wobble_run(self.tones[d["i"]], *d["at"])
+        if d and d["kind"] in ("wobbledepth", "wobblerate") and d.get("moved"):  # (the depth: "Wobble 2.0 st" / a
+            got = self.depth_line()                                               # fade "2.0 → 0.5"; the speed)
+            n = self.tones[d["i"]]
+            run = self.wobble_run(n, *d["at"])
             if got and run:
                 a, b = run["depth"]
+                if d["kind"] == "wobblerate":
+                    waves = round(run["rate"] * (run["at"][1] - run["at"][0]) * n["len"], 2)
+                    text = trn("hz.wobble_speed", waves, rate=f"{run['rate']:.2f}".rstrip("0").rstrip("."),
+                               waves=f"{waves:g}")
+                    return (got[0] + got[2]) / 2, self.speed_post()[2] - 6 * self.s, text
                 text = (tr("hz.wobble_depth", depth=f"{a:.1f}") if abs(a - b) < 1e-9 else
                         tr("hz.wobble_fade", a=f"{a:.1f}", b=f"{b:.1f}"))
                 return (got[0] + got[2]) / 2, min(got[1], got[3]) - 6 * self.s, text
@@ -410,6 +450,13 @@ class HzSketch:
             h = 3 * s
             for hx, hy in ((x0, ya), (x1, yb)):
                 c.create_rectangle(hx - h, hy - h, hx + h, hy + h, fill=look.HZ_WOBBLE, outline=look.HZ_WOBBLE)
+            post = self.speed_post()
+            if post:  # (the speed post: an upright stick, a diamond on top, dragged sideways)
+                px, foot, top = post
+                c.create_line(px, foot, px, top, fill=look.HZ_WOBBLE, width=max(1, round(2 * s)))
+                h = 4 * s
+                c.create_polygon(px, top - h, px + h, top, px, top + h, px - h, top, fill=look.HZ_WOBBLE,
+                                 outline=look.HZ_WOBBLE)
         label = self.sketch_label()
         if label:
             x, y, text = label

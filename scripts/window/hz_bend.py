@@ -32,8 +32,8 @@ BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = fr
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
 BEND = look.HZ_BEND
 BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: hz_sketch.py)
-# the drags bend_drag / bend_release take (sketch* + wobbledepth: the Sketch tool's, hz_sketch.py)
-BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth")
+# the drags bend_drag / bend_release take (sketch* + wobble*: the Sketch tool's, hz_sketch.py)
+BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth", "wobblerate")
 
 
 class HzBend:
@@ -228,6 +228,8 @@ class HzBend:
             return self.sketch_end_to(d, n, e)
         if d["kind"] == "wobbledepth":
             return self.sketch_depth_to(d, n, e)
+        if d["kind"] == "wobblerate":
+            return self.sketch_rate_to(d, n, e)
         if d["kind"] == "bendcurve":  # how far from the piece's first point to its second the square is dragged
             _, sy, _, j, k0, k1 = d["square"]
             y = sy + e.y - d["y"]
@@ -280,7 +282,7 @@ class HzBend:
         with what the drag did)."""
         d = self.drag
         self.end_drag()
-        if d["kind"] == "wobbledepth":  # (Sketch's depth line: the piece's wobble goes)
+        if d["kind"] in ("wobbledepth", "wobblerate"):  # (Sketch's depth line / speed post: the piece's wobble goes)
             self.sketch_depth_gone(d)
             self.bend_done(d, tr("hz.step_wobble_delete"))
             return
@@ -343,7 +345,8 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
-        cursor = ("fleur" if hit[0] == "point" else "sb_h_double_arrow" if hit[0] == "end" else
+        cursor = ("fleur" if hit[0] == "point" else
+                  "sb_h_double_arrow" if hit[0] == "end" or hit[0] == "wobble" and hit[2] == "speed" else
                   "sb_v_double_arrow" if hit[0] == "curve" or self.sketching() else
                   self.pencil)  # (Sketch: a press on the line holds its piece, up / down)
         self.canvas.config(cursor=cursor)
