@@ -17,7 +17,8 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
-                          bend_part, bends, bent_part, line_at, pitch, split_wobbles, wobble_keys, wobble_part)
+                          bend_part, bends, bent_part, line_at, pitch, split_wobbles, wave_end, wobble_keys,
+                          wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point
@@ -86,20 +87,19 @@ def bake_wobble(n, run):
         u = np.asarray(u, float)
         return line_at(pts, u) + wobble_keys([run], u, span)
     q = 2 if run.get("shape") in ("saw", "square") else 4
-    first, last = math.floor(phase * q) + 1, math.ceil((phase + rate * (u1 - u0) * span) * q)
+    first, last = math.floor(phase * q) + 1, math.ceil(wave_end(run, span) * q)
     breaks = u0 + (np.arange(first, last) / q - phase) / (rate * span)
-    start, end = j == 0, j + 2 == len(pts)  # (the note's own start / end: no jump, nothing before / after it)
+    start = j == 0  # (the note's own start: no jump, nothing before it; its end: the end point, as heard)
     lefts, rights = f(breaks - BAKE_GAP).tolist(), f(breaks + BAKE_GAP).tolist()
     a0, a1 = (float(v) for v in f([u0 + BAKE_GAP, u1 - BAKE_GAP]))
     nodes = ([(u0, a0 if start else pts[j][1], a0)] + list(zip(breaks.tolist(), lefts, rights))
-             + [(u1, a1, a1 if end else pts[j + 1][1])])
+             + [(u1, a1, pts[j + 1][1])])
     out = []
     for u, left, right in nodes:
         out.append([u, round(left, 4)])
         if abs(left - right) > 1e-4:  # (a jump: two points at one spot)
             out.append([u, round(right, 4)])
-    if not end:
-        out[-1] = pts[j + 1]  # (the piece's end point as it was, the curve after it kept)
+    out[-1] = pts[j + 1]  # (the piece's end point as it was, the curve after it kept)
     s = np.linspace(0.0, 1.0, 17)
     pairs = [(a, b) for a, b in zip(out, out[1:]) if b[0] - a[0] > 1e-12 and abs(b[1] - a[1]) > 1e-6]
     if pairs:

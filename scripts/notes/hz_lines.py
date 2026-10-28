@@ -100,6 +100,18 @@ def wave_of(shape, c):
 
 
 WAVE_GAP = 1e-9  # wobble_keys: a run's waves read at most this far (waves) before its end
+HALF_NEAR = 1e-6  # wave_end: a run's wave count this near a whole half wave IS that half wave (rounding)
+POINT_NEAR = 1e-7  # fit_wobbles: a wobble end this near a bend point (parts of the note) is put on it
+U_NEAR = 1e-12  # wobble_keys: this near a run's start / end (parts of the note) counts as on it
+
+
+def wave_end(w, span):
+    """Waves a wobble run has gone through at its end (+ its phase); a hair off a whole half wave = that half wave
+    (user's pictures 2026-10-28: a free note length made 8 waves 8.0000004, a sliver of a new half drawn as a
+    spike)."""
+    end = w.get("phase", 0.0) + w["rate"] * (w["at"][1] - w["at"][0]) * span
+    half = round(end * 2.0) / 2.0
+    return half if abs(end - half) < HALF_NEAR else end
 
 
 def wobble_keys(runs, u, span):
@@ -116,11 +128,11 @@ def wobble_keys(runs, u, span):
         depth = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * share
         # (never quite its end's wave count: a hair before the end must read the last half wave, not the next one
         # rounding makes of it; user's picture 2026-10-28, a square ending in a dip)
-        end = w.get("phase", 0.0) + w["rate"] * (u1 - u0) * span
+        end = wave_end(w, span)
         wave = wave_of(w.get("shape"), np.minimum(w.get("phase", 0.0) + w["rate"] * (u - u0) * span, end - WAVE_GAP))
         # (up to its end, not on it: the piece after takes over there, user's picture 2026-10-28: a square's last
-        # instant added to the next piece's wobble; the note's own end is the last run's)
-        inside = (u >= u0) & ((u < u1) | (u1 >= 1.0) & (u <= u1))
+        # instant added to the next piece's wobble; the note's own end too: its ">" sits on its end point, user)
+        inside = (u >= u0 - U_NEAR) & (u < u1 - U_NEAR)  # (a beat turned into u may land a hair off: rounding)
         out += np.where(inside, depth * wave * (-1.0 if w.get("flip") else 1.0), 0.0)
     return out
 
@@ -139,7 +151,7 @@ def wobble_edges(n, most, lo=-math.inf, hi=math.inf):
         if b <= a:
             continue
         first = math.floor((phase + rate * (a - b0)) * 4) + 1
-        last = math.ceil((phase + rate * (b - b0)) * 4)
+        last = math.ceil((wave_end(w, span) if b >= b1 else phase + rate * (b - b0)) * 4)
         if len(out) + last - first > most:
             return []
         out += [b0 + (k / 4 - phase) / rate for k in range(first, last)]
@@ -178,8 +190,13 @@ def merge_wobbles(n, lo, u, hi):
 def fit_wobbles(n):
     """Note n's wobbles each end back on their line (hunt 2026-10-28, user took A): the speed nudged so its piece
     holds whole half waves, as the speed post does; one set freely with Ctrl ("free") is left alone. A wobble going
-    on from the one before it (a split one, "phase") starts where that one now ends."""
+    on from the one before it (a split one, "phase") starts where that one now ends. An end a hair off a point is put
+    on it (user's autosave 2026-10-28: a cut's rounding left one 0.000000001 short, its wobble no longer found)."""
+    us = [p[0] for p in n.get("bend") or ([0.0], [1.0])]
     runs = sorted(n.get("wobble") or (), key=lambda w: w["at"])
+    for w in runs:
+        w["at"] = [min(us, key=lambda p: abs(p - a)) if min(abs(p - a) for p in us) < POINT_NEAR else a
+                   for a in w["at"]]
     end = None  # (where the run before ends: (u, its waves there))
     for w in runs:
         beats = (w["at"][1] - w["at"][0]) * n["len"]
@@ -192,7 +209,7 @@ def fit_wobbles(n):
         phase = w.get("phase", 0.0)
         if not w.get("free"):
             waves = max(phase + 0.5, round(2.0 * (phase + w["rate"] * beats)) / 2.0)
-            w["rate"] = round(min(WOBBLE_RATE_MOST, max(0.01, (waves - phase) / beats)), 6)
+            w["rate"] = min(WOBBLE_RATE_MOST, max(0.01, (waves - phase) / beats))  # (not rounded: whole half waves)
         end = (w["at"][1], phase + w["rate"] * beats)
 
 
