@@ -27,20 +27,25 @@ MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
 PAIR_CACHE = 4096  # gaps up to this many ticks have their tempo pair remembered (black MIDI repeats the same gaps)
 
 
-def _cut(segs, lo, hi):
-    """segs inside ticks lo..hi."""
+def _cut(segs, lo, hi, starts=None):
+    """segs (in order, not overlapping) inside ticks lo..hi. starts: their start ticks, to begin at the right one
+    (cut once per Keep timing part, a walk through all of them each time was slow with thousands, PLAN #12 B)."""
     out = []
-    for a, b, u in segs:
+    first = max(0, bisect.bisect_right(starts, lo) - 1) if starts is not None else 0
+    for k in range(first, len(segs)):
+        a, b, u = segs[k]
+        if a >= hi:
+            break
         x, y = max(a, lo), min(b, hi)
         if y > x:
             out.append((x, y, u if isinstance(u, int) else u[x - a:y - a]))
     return out
 
 
-def _per_tick(segs, lo, hi):
-    """The tempo on every tick lo..hi (int64 array)."""
+def _per_tick(segs, lo, hi, starts=None):
+    """The tempo on every tick lo..hi (int64 array). starts: as _cut's."""
     out = np.empty(hi - lo, np.int64)
-    for a, b, u in _cut(segs, lo, hi):
+    for a, b, u in _cut(segs, lo, hi, starts):
         out[a - lo:b - lo] = u
     return out
 
@@ -285,13 +290,14 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
     gaps, dense, gave, times = [], [], [], []
+    starts = [s[0] for s in segs]
     for (a, e, u), mine, part in zip(keeps, own, files):
         inside = ticks[(ticks > a) & (ticks < e)]
         marks = [np.array([a, e], np.int64), inside]
         if fit_bars:
             marks.append(bars[(bars > a) & (bars < e)])
-        drawn = _per_tick(segs, a, e)
-        sums = np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
+        drawn = _per_tick(segs, a, e, starts)
+        sums =np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
         was = None if part is None else np.concatenate([[0], np.cumsum(_per_tick(part, a, e))])
         if mine:  # (its own heard tempo line: that, also over a loaded MIDI's own tempo, even one steady value:
             # a flat line, e.g. Keep the visual's, was left to the file's tempo, hunt 2026-10-24)
@@ -382,11 +388,12 @@ def finer_parts(tempo, base, ppq, last):
     segs, _ = file_segments(tempo, base, ppq, last + 1)
     out = []
     lay = layout(tempo, base, ppq)
+    starts = [s[0] for s in segs]
     for n, (_, a, e, _) in enumerate(lay["keeps"]):
         e = last + 1 if e is None else e
         if e <= a:
             continue
-        drawn = _per_tick(segs, a, min(e, segs[-1][1]))
+        drawn = _per_tick(segs, a, min(e, segs[-1][1]), starts)
         u = keep_heard(lay, n, a, a + len(drawn))  # (the heard tempo: one, or per tick from its heard line)
         if len(drawn) and np.all(drawn <= u):
             times = min(int(np.max(-(-np.asarray(u) // drawn))), FINE_MOST, max(1, FINE_TICKS // ppq))
@@ -431,8 +438,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     pairs = _Pairs()
     file_segs, bp_n, bp_f, clocks = [], [0], [0], []
     offset, at = 0, 0
+    seg_starts = [s[0] for s in segs]
     for (a, e, u), (n, total, k, drawn), heard_t in zip(keeps, gaps, times):
-        file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, a)]
+        file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, a, seg_starts)]
         last = None
         changes = np.flatnonzero(drawn[1:] != drawn[:-1]) + 1 + a  # (ticks where the drawn tempo changes)
         curved = (k > every) & (np.searchsorted(changes, n[:-1], "right") < np.searchsorted(changes, n[1:], "left"))
@@ -538,6 +546,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         out["moved"] = [t / ppq for t in moved]
     # warnings
     starts = np.asarray(starts, np.int64).ravel()
+    seg_starts = [s[0] for s in segs]
     for st, plan in lay["worked"]:  # (a note in a jump plays off time where the time so far isn't the heard time)
         if not plan["ok"]:
             continue
@@ -545,7 +554,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         on = starts[(starts > s0) & (starts < e)]
         if not len(on):
             continue
-        real = _per_tick(segs, s0, e)
+        real = _per_tick(segs, s0, e, seg_starts)
         for a, ke, ku in keeps:
             lo, hi = max(a, s0), min(ke, e)
             if hi > lo:

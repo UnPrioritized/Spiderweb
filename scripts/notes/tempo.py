@@ -453,7 +453,21 @@ def stretches(tempo, base):
     its part curves away, else the next point). None at that BPM: the first point after the stretch before."""
     pts = tempo["points"]
     pb = [p[0] for p in pts]
-    ends = [catch_end(tempo, k) for k in range(len(tempo["catch"]))]
+    # (points in order, as they nearly always are: found by bisect, the same answers as the walks below; thousands
+    # of catch-ups walked every point each, PLAN #12 B)
+    ordered = all(x <= y for x, y in zip(pb, pb[1:]))
+    cs = tempo["catch"]
+    if ordered:
+        ends = []
+        for k, c in enumerate(cs):
+            j = bisect.bisect_right(pb, c[0])
+            after = pb[j:j + 1] + [x[0] for x in cs[k + 1:k + 2]]
+            end = min(after) if after else None
+            if catch_get(c, 4) is not None and catch_get(c, 4) > c[0]:
+                end = min([catch_get(c, 4)] + [x[0] for x in cs[k + 1:k + 2]])
+            ends.append(end)
+    else:
+        ends = [catch_end(tempo, k) for k in range(len(cs))]
     prevs, prev = [], 0.0
     for end in ends:
         prevs.append(prev)
@@ -466,7 +480,11 @@ def stretches(tempo, base):
         start, read = prev, None
         if end is not None:  # (user: the yellow area counts everything in it, at the tempo the line comes back to:
             # the next point at or after the end, also when it ends at another catch-up line or by hand mid-stop)
-            read = min([x for x in pb if x >= end - 1e-12] or [end])
+            if ordered:
+                j = bisect.bisect_left(pb, end - 1e-12)
+                read = pb[j] if j < len(pb) else end
+            else:
+                read = min([x for x in pb if x >= end - 1e-12] or [end])
             nxt = out[k + 1] if k + 1 < len(out) else None
             if nxt and nxt["read"] is not None and nxt["from"] < nxt["line"] and abs(nxt["from"] - read) <= 1e-9:
                 read = nxt["read"]  # (ending where the next stop starts: paid back to the tempo that one comes
@@ -475,7 +493,10 @@ def stretches(tempo, base):
             start = max(prev, hand)
         elif end is not None:
             on = float(drawn_bpm(tempo, base, [read])[0])
-            cands = [i for i, x in enumerate(pb) if prev <= x < b]
+            if ordered:
+                cands = list(range(bisect.bisect_left(pb, prev), bisect.bisect_left(pb, b)))
+            else:
+                cands = [i for i, x in enumerate(pb) if prev <= x < b]
             if cands:
                 start = pb[cands[0]]
             for n in range(len(cands) - 1, -1, -1):
@@ -585,40 +606,52 @@ def _first_ticks(pb, ppq):
     return out
 
 
-def _segments(tempo, base, base_u, ppq, t0, t1):
+def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
     """The drawn line's tempo from tick t0 up to t1 (exclusive) as [(a, b, us)]: us one whole number for a held
     part, an array (one per tick) for a curved one (it changes on every tick, like a line drawn in many MIDI
-    programs). Never one entry per tick of a held part (a long song would fill the memory)."""
+    programs). Never one entry per tick of a held part (a long song would fill the memory). ordered: the points
+    are in beat order (None = checked here; layout checks once for its many calls)."""
     out = []
     if t1 <= t0:
         return out
     pts = tempo["points"]
-    pb = [p[0] for p in pts]
-    first = _first_ticks(pb, ppq)
-    edges = [0] + first + [max(t1, first[-1] + 1) if first else t1]
+    # only the points whose parts can reach ticks t0..t1 (+ one each side; a tick's margin for rounding): a catch-up
+    # per jump read the whole line each time, thousands of jumps took minutes (PLAN #12 B)
+    if ordered is None:
+        ordered = all(p[0] <= q[0] for p, q in zip(pts, pts[1:]))
+    p_lo, p_hi = 0, len(pts)  # (out of order, e.g. half way through a change: every point, as before)
+    if ordered:
+        p_lo = max(0, bisect.bisect_right(pts, (t0 - 1) / ppq, key=lambda p: p[0]) - 1)
+        p_hi = min(len(pts), bisect.bisect_left(pts, (t1 + 1) / ppq, key=lambda p: p[0]) + 1)
+    near = {"points": pts[p_lo:p_hi]}  # (drawn_bpm reads only these: the beats asked are all inside their parts)
+    first = _first_ticks([p[0] for p in near["points"]], ppq)
+    # edges[k - k0] for parts k = p_lo .. p_hi (k = 0: before the first point; k = i + 1: point i's part)
+    edges = ([0] if p_lo == 0 else []) + first + ([max(t1, first[-1] + 1) if first else t1] if p_hi == len(pts) else [])
+    k0 = 0 if p_lo == 0 else p_lo + 1
     # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
-    held_bpm = drawn_bpm(tempo, base, np.maximum(edges[:-1], t0) / ppq).tolist()
-    for k in range(len(edges) - 1):  # (k = 0: before the first point; k = i + 1: point i's part)
-        a, b = max(edges[k], t0), min(edges[k + 1], t1)
+    held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq).tolist()
+    for j in range(len(edges) - 1):
+        k = k0 + j
+        a, b = max(edges[j], t0), min(edges[j + 1], t1)
         if b <= a:
             continue
         i = k - 1
         held = i < 0 or i == len(pts) - 1 or pts[i][2] == "hold" or pts[i][1] == pts[i + 1][1]
         if held:
-            bpm = held_bpm[k]
+            bpm = held_bpm[j]
             out.append((a, b, base_u if bpm == base else held_us(bpm)))
         else:  # (a new value every "every" ticks from the part's first tick; the first step the start point's
             # BPM, the last the end point's: step_shares)
             every = tempo.get("every", EVERY)
-            part = (edges[k], edges[k + 1])
+            part = (edges[j], edges[j + 1])
             jump = to_jump(pts, i)
 
             def read(starts):
                 if jump:
                     return part_bpm(tempo, i, step_shares(*part, starts, every))
-                return drawn_bpm(tempo, base, np.asarray(starts) / ppq)
+                return drawn_bpm(near, base, np.asarray(starts) / ppq)
             if every >= BLOCKS_FROM:  # (one entry per step, not per tick: long songs at a high PPQ stay quick)
-                starts = np.arange(edges[k] + (a - edges[k]) // every * every, b, every)
+                starts = np.arange(edges[j] + (a - edges[j]) // every * every, b, every)
                 bpm = read(starts)
                 us = nearest_safe(6e7 / bpm)
                 us[bpm == base] = base_u
@@ -630,7 +663,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1):
                         out.append((lo, hi, u))
                 continue
             ticks = np.arange(a, b)
-            bpm = read(edges[k] + (ticks - edges[k]) // every * every)
+            bpm = read(edges[j] + (ticks - edges[j]) // every * every)
             us = nearest_safe(6e7 / bpm)
             us[bpm == base] = base_u  # (the project's own tempo, exactly as the file starts)
             out.append((a, b, us))
@@ -817,6 +850,7 @@ def layout(tempo, base, ppq):
     if key in _layouts:
         return _layouts[key]
     tempo = json.loads(key[0])  # (its own copy: what's remembered never changes with the line)
+    ordered = all(p[0] <= q[0] for p, q in zip(tempo["points"], tempo["points"][1:]))  # (once: _segments' many reads)
     start_u = base_us(base)
     sts = stretches(tempo, base)
     kps = keep_parts(tempo, sts)
@@ -857,7 +891,7 @@ def layout(tempo, base, ppq):
                     u = keep_segs(n, t, t + 1)[0][2]
                     return u if isinstance(u, int) else int(u[0])
                 return u
-        u = _segments(tempo, base, start_u, ppq, t, t + 1)[0][2]
+        u = _segments(tempo, base, start_u, ppq, t, t + 1, ordered)[0][2]
         return u if isinstance(u, int) else int(u[0])
 
     bases, keep_u = [start_u] * len(sts), [start_u] * len(keeps_at)
@@ -875,7 +909,7 @@ def layout(tempo, base, ppq):
     keeps_out = [(i, a, e, keep_u[n]) for n, (i, a, e) in enumerate(keeps_at)]
 
     def real(a, b):
-        segs = _segments(tempo, base, start_u, ppq, a, b)
+        segs = _segments(tempo, base, start_u, ppq, a, b, ordered)
         for n, (_, ka, ke, u) in enumerate(keeps_out):
             lo, hi = max(a, ka), min(b, b if ke is None else ke)
             if hi > lo:

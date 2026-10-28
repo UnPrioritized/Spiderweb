@@ -4,6 +4,8 @@ of the track list (only its selected notes: tick); All tracks = only Every snap 
 light up in the piano roll (roll/roll_melody.py). Stays open and follows the highlight, selection and area like Fill
 gaps' window; checked every WATCH_MS (cheap) instead of being told by every place that can change them."""
 
+import copy
+import random
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -11,13 +13,15 @@ from tkinter import ttk
 import numpy as np
 
 from files.lang import tr, trn
-from files.mathexpr import calc
+from files.mathexpr import calc, fmt
 from notes.engine import snap_name, snap_name_beats
 from notes.loaded import gather_box
-from notes.melody import MOST_ANCHORS, REST, SHORTEST, anchor_count, melody_runs, snap_runs
+from notes.melody import (CATCH_SHAPES, HOLD, HOWS, MOST_ANCHORS, REST, SHAPES, SHORTEST, anchor_count, fill_clip,
+                          melody_runs, snap_runs)
+from notes.tempo import MAX_BPM, MIN_BPM, drawn_bpm, plans
 from window import look
 from window.load_extract import boxes_now
-from window.widgets import remember_place
+from window.widgets import remember_place, unhighlight
 
 WATCH_MS = 250
 MOST_LOADED = 5_000_000  # a loaded track's notes read for one area at most (a denser area: refused, said why)
@@ -57,14 +61,47 @@ class MelodyWindow(tk.Toplevel):
         self.rules = []  # (label, box) of the melody's rules: greyed with Every snap step
         self.shortest = self.length_row(box, "melody.shortest", getattr(app, "melody_shortest", "1/32"))
         self.rest = self.length_row(box, "melody.rest", getattr(app, "melody_rest", "1/4"))
-        self.hint = ttk.Label(box, text="", wraplength=int(340 * app.scale), justify="left")
+        # the tempo made (group B): shape between jumps, its BPMs, how the timing is kept
+        ttk.Label(box, text=tr("melody.between")).pack(anchor="w", pady=(10, 2))
+        row = ttk.Frame(box)
+        row.pack(anchor="w", padx=(10, 0))
+        self.shape = self.dropdown(row, SHAPES, "melody.shape_", getattr(app, "melody_shape", "burst"))
+        self.shape.pack(side="left")
+        ttk.Label(row, text=tr("melody.from")).pack(side="left", padx=(10, 0))
+        normal = self.normal()
+        self.lo = tk.StringVar(value=fmt(round(normal / 2, 2)))
+        self.hi = tk.StringVar(value=fmt(round(normal * 2, 2)))
+        for var, word in ((self.lo, "melody.to"), (self.hi, "melody.bpm")):
+            ttk.Entry(row, textvariable=var, width=7).pack(side="left", padx=(4, 0))
+            ttk.Label(row, text=tr(word)).pack(side="left", padx=(4, 0))
+            var.trace_add("write", lambda *_: self.sync())
+        ttk.Label(box, text=tr("melody.keep_with")).pack(anchor="w", pady=(10, 2))
+        self.how = tk.StringVar(value=getattr(app, "melody_how", "audio"))
+        for how in HOWS:
+            ttk.Radiobutton(box, text=tr("melody.how_" + how), value=how, variable=self.how,
+                            command=self.sync).pack(anchor="w", padx=(10, 0))
+        row = ttk.Frame(box)
+        row.pack(anchor="w", padx=(30, 0), pady=(2, 0))
+        self.catch_parts = [ttk.Label(row, text=tr("melody.hold"))]
+        self.hold = tk.StringVar(value=getattr(app, "melody_hold", fmt(HOLD)))
+        self.catch_parts += [ttk.Entry(row, textvariable=self.hold, width=5), ttk.Label(row, text=tr("melody.hold_unit"))]
+        self.hold.trace_add("write", lambda *_: self.sync())
+        for w in self.catch_parts:
+            w.pack(side="left", padx=(0, 4))
+        row = ttk.Frame(box)
+        row.pack(anchor="w", padx=(30, 0), pady=(2, 0))
+        self.catch_parts.append(ttk.Label(row, text=tr("melody.catch_shape")))
+        self.catch_parts[-1].pack(side="left")
+        self.catch_shape = self.dropdown(row, CATCH_SHAPES, "tempo.shape_", getattr(app, "melody_catch", "flat"))
+        self.catch_shape.pack(side="left", padx=(4, 0))
+        self.catch_parts.append(self.catch_shape)
+        self.hint =ttk.Label(box, text="", wraplength=int(340 * app.scale), justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(10, 0))
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(10, 0))
         ttk.Button(row, text=tr("merge_window.close"), command=self.close).pack(side="right")
         self.go = ttk.Button(row, text=tr("melody.fill"), command=self.fill)
         self.go.pack(side="right", padx=(0, 6))
-        self.go.state(["disabled"])  # (group B makes the tempo points)
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         sels = [i for i in app.sels if i < len(app.shapes)]
@@ -97,6 +134,33 @@ class MelodyWindow(tk.Toplevel):
         unit.config(text="" if snap_name(start) else tr("melody.ticks"))
         self.rules.append((lb, e))
         return var
+
+    def dropdown(self, parent, values, key, start):
+        """A read-only dropdown of values shown as tr(key + value); .value() = the picked one."""
+        names = [tr(key + v) for v in values]
+        box = ttk.Combobox(parent, values=names, state="readonly", width=max(len(n) for n in names))
+        box.set(names[values.index(start)] if start in values else names[0])
+        box.value = lambda: values[max(0, names.index(box.get()) if box.get() in names else 0)]
+        box.bind("<<ComboboxSelected>>", lambda e: (unhighlight(box), self.sync()))
+        return box
+
+    def normal(self):
+        """The BPM arriving at the area (the tempo back between runs), the project's start BPM without an area."""
+        pane = self.app.tempo_pane
+        if not pane.bands:
+            return float(pane.base())
+        a = pane.bands_reach()[0]
+        return float(drawn_bpm(self.app.tempo, pane.base(), [max(0.0, a - 1e-6)])[0])
+
+    def number(self, var, lo=None, hi=None):
+        """A box's number, None when it can't be read or is outside lo..hi."""
+        try:
+            v = float(calc(var.get().strip()))
+        except (ValueError, ZeroDivisionError, TypeError, OverflowError):
+            return None
+        if v != v or (lo is not None and v < lo) or (hi is not None and v > hi):
+            return None
+        return v
 
     def beats_of(self, var, fallback):
         """A rule box's length in beats (a note length or ticks), None when it can't be read."""
@@ -220,11 +284,19 @@ class MelodyWindow(tk.Toplevel):
         only = self.only_sel.get()
         has_sel = any(i < len(app.shapes) for i in app.sels) or bool(app.roll.kept_box())
         lkey = self.loaded_key(area[0], area[1], only) if area and track is not None and at == "melody" else None
+        how = self.how.get()
+        app.melody_shape, app.melody_how, app.melody_hold = self.shape.value(), how, self.hold.get()
+        app.melody_catch = self.catch_shape.value()
+        made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get())
         seen = (area, track, ch, at, only, has_sel, step, self.shortest.get(), self.rest.get(), tuple(sorted(app.sels)),
-                id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"])
+                id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"], made)
         if seen == self.seen:
             return
         self.seen = seen
+        for w in self.catch_parts:
+            w.state(["!disabled" if how == "catch" else "disabled"])
+        if isinstance(self.catch_shape, ttk.Combobox) and how == "catch":
+            self.catch_shape.state(["readonly"])
         snap_text = app.snap.get() if step else None
         self.at_snap.config(text=tr("melody.at_snap", step=snap_text) if snap_text else tr("melody.at_snap_plain"))
         self.at_snap.state(["!disabled"] if step else ["disabled"])
@@ -276,6 +348,12 @@ class MelodyWindow(tk.Toplevel):
             problem = tr("melody.too_many")
         elif problem is None and not n:
             problem = tr("melody.none")
+        lo, hi = self.number(self.lo, MIN_BPM, MAX_BPM), self.number(self.hi, MIN_BPM, MAX_BPM)
+        if problem is None and (lo is None or hi is None):
+            problem = tr("melody.bad_bpm", lo=fmt(round(MIN_BPM, 3)), hi=fmt(MAX_BPM))
+        elif problem is None and how == "catch" and self.number(self.hold, 1, 99) is None:
+            problem = tr("melody.bad_hold")
+        self.go.state(["disabled"] if problem else ["!disabled"])
         if problem is None:
             text = trn("melody.count", n, n=n)
             if at == "melody" and len(self.runs) > 1:
@@ -298,7 +376,47 @@ class MelodyWindow(tk.Toplevel):
         self.sync()
 
     def fill(self):
-        pass  # (group B)
+        """Fill: the jumps' tempo laid over the area (what was there replaced, one undo step). The catch-up way:
+        gaps whose catch-up can't be done are left at the normal tempo (tried on a copy first), the status line says
+        how many."""
+        self.seen = None
+        self.sync()
+        if self.go.instate(["disabled"]) or not self.runs:
+            return
+        app, pane = self.app, self.app.tempo_pane
+        if pane.box.mode != "visual":  # (jumps are the visual tempo's, like a Domino paste)
+            pane.box.set_mode("visual")
+        a, b = pane.bands_reach()
+        how = self.how.get()
+        lo, hi = self.number(self.lo), self.number(self.hi)
+        bpm_snap = pane.box.bpm_snap() or 0.0
+        seed = random.randrange(1 << 30)  # (each Fill a new random; the same for the tries below)
+
+        def clip_for(plain):
+            return fill_clip(self.runs, a, b, self.shape.value(), lo, hi, self.normal(), how,
+                             self.number(self.hold) or HOLD, self.catch_shape.value(), random.Random(seed),
+                             bpm_snap, plain)
+        plain = set()
+        clip = clip_for(plain)
+        if how == "catch":
+            for _ in range(3):  # (a gap left plain changes its neighbours' catch-ups a little: tried again)
+                trial = copy.deepcopy(app.tempo)
+                pane.lay_copies(trial, clip, a, pane.ed_base(), teal=False)
+                beats = {round(a + c[0], 9): g for c, g in zip(clip["catch"], clip["gaps"])}
+                bad = {beats[round(st["line"], 9)] for st, plan in plans(trial, pane.base(), app.ppq)
+                       if round(st["line"], 9) in beats and not plan["ok"]}
+                if not bad - plain:
+                    break
+                plain |= bad
+                clip = clip_for(plain)
+        pane.put_copies(clip, a, tr("melody.step"), teal=False)
+        n = anchor_count(self.runs)
+        text = trn("melody.filled", n, n=n)
+        if plain:
+            text += " " + trn("melody.left_plain", len(plain), n=len(plain))
+        app.status.config(text=text)
+        self.seen = None
+        self.sync()
 
     def close(self):
         if self.watch:
