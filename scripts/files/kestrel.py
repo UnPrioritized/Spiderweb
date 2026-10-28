@@ -112,7 +112,11 @@ def load():
                             ("kb_cancel", [p], None), ("kb_song", [p, ctypes.c_double, u32], None),
                             ("kb_cut", [p, ctypes.c_uint64], ctypes.c_uint64),
                             ("kb_set_lower", [p, u32], None), ("kb_stats", [p, ctypes.POINTER(_Stats)], None),
-                            ("kb_fill", [p, p, u32], None), ("kb_close", [p], None)):
+                            ("kb_fill", [p, p, u32], None), ("kb_close", [p], None),
+                            ("kb_font_load", [ctypes.c_char_p, u32], p), ("kb_font_free", [p], None),
+                            ("kb_load", [ctypes.POINTER(p), u32], p), ("kb_unload", [p], None),
+                            ("kb_voices_top", [p, ctypes.POINTER(_Options)], u32),
+                            ("kb_open_on", [p, ctypes.POINTER(_Options)], p)):
         fn = getattr(d, name)
         fn.argtypes, fn.restype = args, res
     _dll = d
@@ -139,6 +143,8 @@ def plain_reason(err):
     if key in ("playback.kestrel_missing", "playback.kestrel_not_here", "playback.kestrel_no_sound_device"):
         return key
     text = str(getattr(err, "values", {}).get("err", err)).lower()
+    if getattr(err, "path", None):  # (reading that soundfont failed: no graphics card was asked yet)
+        return "ks.why_memory" if any(w in text for w in ("out of memory", "allocat")) else "ks.why_font"
     for words, why in ((("out of memory", "outofmemory", "allocat"), "ks.why_memory"),
                        (("device lost", "devicelost", "device removed", "device reset"), "ks.why_lost"),
                        (("no usable gpu", "adapter", "no non-software", "vulkan", "dx12", "d3d12", "driver",
@@ -151,13 +157,146 @@ def plain_reason(err):
     return "ks.why_other"
 
 
+# KEPT LOADED (hot reload, 2026-10-29: reading a soundfont is ~90 % of a start, 5 s for a 390 MB piano): each
+# soundfont read once (_banks: path -> (size + time, handle)) and the list stacked on the graphics card once (_kept),
+# while Kestrel is the MIDI out; a setting change only opens a new synth on them (~20 ms). Banks are touched under
+# _BANKS (taken BEFORE _OPENING, never the other way); handles freed only there.
+_BANKS = threading.Lock()
+_banks = {}
+_kept = None
+
+
+def _stamp(path):
+    st = os.stat(path)
+    return st.st_size, st.st_mtime_ns
+
+
+def _font_bank(path):
+    """(called holding _BANKS; let go while it reads) The handle of this soundfont read into memory: the kept one while the
+    file is the same, else read now (seconds: the lock let go meanwhile). SynthError with .path when it can't be."""
+    d = load()
+    try:
+        stamp = _stamp(path)
+    except OSError as e:
+        err = SynthError("playback.kestrel_failed", err=e)
+        err.path = path
+        raise err from None
+    old = _banks.get(path)
+    if old is not None and old[0] == stamp:
+        return old[1]
+    _BANKS.release()  # (reading takes seconds: the window's thread may forget banks meanwhile)
+    try:
+        h = d.kb_font_load(os.fsdecode(path).encode("utf-8"), RATE)
+        why = None if h else _error(d)
+    finally:
+        _BANKS.acquire()
+    if not h:
+        err = SynthError("playback.kestrel_failed", err=why)
+        err.path = path
+        raise err
+    old = _banks.get(path)
+    if old is not None:
+        d.kb_font_free(old[1])
+    _banks[path] = (stamp, h)
+    return h
+
+
+class Loaded:
+    """Spiderweb's soundfont list (top first) stacked and on the graphics card: synths open on it in a moment.
+    Made by loaded_for(); SynthError when a soundfont can't be read (.path = that one) or the card can't start."""
+
+    def __init__(self, fonts):
+        d = self.dll = load()
+        self.fonts = list(fonts)
+        self.handle = None
+        with _BANKS:
+            while True:  # (each file read only if it isn't kept; again if one was freed while a later one read)
+                hs = [_font_bank(f) for f in self.fonts]
+                if all(_banks.get(f, (0, None))[1] == h for f, h in zip(self.fonts, hs)):
+                    break
+            self.stamps = [_banks[f][0] for f in self.fonts]
+            arr = (ctypes.c_void_p * max(1, len(hs)))(*hs)
+            with _OPENING:
+                h = d.kb_load(arr, len(hs))
+        if not h:
+            raise SynthError("playback.kestrel_failed", err=_error(d))
+        self.handle = h
+
+    def fits(self, fonts):
+        """Loaded for exactly these soundfonts, none changed on disk since."""
+        if self.handle is None or list(fonts) != self.fonts:
+            return False
+        try:
+            return [_stamp(f) for f in fonts] == self.stamps
+        except OSError:
+            return False
+
+    def voices_top(self, block=BLOCK):
+        """The most Max voices this graphics card takes at this block size, or None when not known."""
+        if self.handle is None:
+            return None
+        opts = _Options(ctypes.sizeof(_Options), RATE, block, 3, 1, 0, 1, 0.0, 1, 0.0)
+        with _OPENING:
+            top = self.dll.kb_voices_top(self.handle, ctypes.byref(opts)) if self.handle else 0
+        return top or None
+
+    def close(self):
+        """The graphics card's copy freed (synths open on it keep their own share)."""
+        with _OPENING:
+            if self.handle:
+                self.dll.kb_unload(self.handle)
+                self.handle = None
+
+
+def loaded_for(fonts):
+    """(any thread) The kept Loaded when it is for these soundfonts, else a new one (the old one closed FIRST: one
+    copy on the graphics card; only soundfonts not kept read; banks no longer listed freed)."""
+    global _kept
+    kept = _kept
+    if kept is not None and kept.fits(fonts):
+        return kept
+    drop_loaded()
+    forget(keep=fonts)
+    new = Loaded(fonts)
+    if _kept is not None:  # (another one made meanwhile: one kept)
+        _kept.close()
+    _kept = new
+    return new
+
+
+def drop_loaded():
+    """The graphics card's part let go (a failure, the list changed): the soundfonts stay read in memory."""
+    global _kept
+    kept, _kept = _kept, None
+    if kept is not None:
+        kept.close()
+
+
+def forget(keep=None, paths=None):
+    """Soundfonts read into memory freed: every one not in keep (None = all), or (paths) these ones."""
+    if not _banks:
+        return
+    with _BANKS:
+        for p in list(_banks):
+            if (p in paths) if paths is not None else (keep is None or p not in keep):
+                _, h = _banks.pop(p)
+                load().kb_font_free(h)
+
+
+def let_go():
+    """Everything Kestrel kept freed (another MIDI out picked)."""
+    drop_loaded()
+    forget()
+
+
 class Kestrel:
     """One Kestrel synth, playing (silence while nothing is sent) from open until close(). fonts = Spiderweb's
-    soundfont list, top first (each overrides the ones above it). synth = files.synth.Synth (BASS + the sound
-    device). Opening takes seconds (the soundfonts load): not on the window's thread. SynthError when it can't."""
+    soundfont list, top first (each overrides the ones above it); loaded = a Loaded for them (opens in a moment),
+    None = read and stacked just for this synth. synth = files.synth.Synth (BASS + the sound device). Opening
+    without loaded takes seconds (the soundfonts load): not on the window's thread. SynthError when it can't."""
 
     def __init__(self, synth, fonts, block=BLOCK, ahead=None, voices=MAX_VOICES, lower=True, limiter=True,
-                 ceiling_db=0.0, dc_blocker=True, dc_blocker_hz=0.0):
+                 ceiling_db=0.0, dc_blocker=True, dc_blocker_hz=0.0, loaded=None):
         d = self.dll = load()
         self.bass = synth.bass
         self.block = block
@@ -168,7 +307,12 @@ class Kestrel:
                         int(dc_blocker), dc_blocker_hz)
         names = (ctypes.c_char_p * max(1, len(fonts)))(*[os.fsdecode(f).encode("utf-8") for f in fonts])
         with _OPENING:
-            h = d.kb_open(names, len(fonts), ctypes.byref(opts))
+            if loaded is None:
+                h = d.kb_open(names, len(fonts), ctypes.byref(opts))
+            elif loaded.handle:
+                h = d.kb_open_on(loaded.handle, ctypes.byref(opts))
+            else:
+                raise SynthError("playback.kestrel_failed", err="the soundfonts were let go")
         if not h:
             raise SynthError("playback.kestrel_failed", err=_error(d))
         self.handle = h
@@ -284,8 +428,8 @@ class KestrelOut:
 
     lead = LEAD
 
-    def __init__(self, synth, fonts, **kw):
-        self.k = Kestrel(synth, fonts, **kw)
+    def __init__(self, synth, fonts, loaded=None, **kw):
+        self.k = Kestrel(synth, fonts, loaded=loaded, **kw)
         self.opts = dict(kw)  # (App.fresh_builtin: other settings = opened again)
         # (sent ahead past what's made ahead + 3 blocks: at block 2048 Kestrel kept ~230 ms made and own shapes sent
         # 200 ms ahead all came late, on a 43 ms grid, hunt 2026-10-28)

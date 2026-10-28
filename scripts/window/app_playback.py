@@ -23,6 +23,7 @@ RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's C
 SLOW_START_S = 15.0  # Kestrel still starting after this: "Use Built-in BASSMIDI" / "Keep waiting" (user 2026-10-28:
 # 60 s nobody waits for; its normal start 6-11 s with two soundfonts)
 STUCK_START_S = 60.0  # ... after this, with no answer, the start is given up (the backstop)
+SHOW_START_MS = 300  # Kestrel's "Starting" window only after this (soundfonts kept loaded: a start is ~20 ms)
 QUIET_S = 3.0  # (a question nobody asked for waits this long after the last key / click: quiet_now)
 GROUP_MOST = 16  # synths side by side playing a loaded MIDI at most (Settings → Sound)
 GROUP_DEFAULT = max(1, min(GROUP_MOST, (os.cpu_count() or 4) // 2))  # ... to start: half the cores (user
@@ -399,6 +400,8 @@ class Playback:
         self.out.close()
         if self._device_was != KESTREL:  # (only Kestrel uses it)
             self.drop_read_ahead()
+            from files import kestrel
+            kestrel.let_go()  # (its soundfonts kept loaded: freed, user 2026-10-28)
         self.sync_builtin()
         self.edo_warn()
         if self.hz_window:
@@ -523,6 +526,7 @@ class Playback:
         """(MidiOut.open) Kestrel (GPU) started with the shared soundfonts (each overrides the ones above it, as
         in Built-in BASSMIDI), playing through BASS's sound device. Raises SynthError (font_failed: as make_live).
         Its own settings (Settings → Sound) come later: Kestrel's defaults, "Lower it by itself" on."""
+        from files import kestrel
         from files.kestrel import KestrelOut
         self.font_failed = None
         fonts = font_list(self.hz_preview)
@@ -541,26 +545,35 @@ class Playback:
                 return out
             if out is not None:  # (the soundfonts / settings changed meanwhile: started again with them)
                 out.close()
-        self.busy(tr("app.opening_kestrel"))  # (seconds: Kestrel reads the whole soundfonts)
+        self.busy(tr("app.opening_kestrel"))  # (seconds the first time: Kestrel reads the whole soundfonts)
         try:
             if self.synth is None:
                 self.synth = Synth()
+            loaded = kestrel.loaded_for(fonts)  # (kept: a setting change opens on it in a moment)
+            top = loaded.voices_top(self.kestrel_opts["block"])
+            if top is not None and top < self.kestrel_opts["voices"]:
+                self.kestrel_lowered(top)  # (before opening: never a refused open first)
             try:
-                out = KestrelOut(self.synth, fonts, **self.kestrel_opts)
+                out = KestrelOut(self.synth, fonts, loaded=loaded, **self.kestrel_opts)
             except SynthError as e:
                 top = kestrel_voices_top(e)
                 if top is None or top >= self.kestrel_opts["voices"]:
                     raise
-                self.kestrel_top = top  # (Max voices past this card's top: lowered, said, opened again)
-                self.kestrel_vars["voices"].set(str(top))
-                self.on_kestrel_opt("voices")
-                messagebox.showinfo(tr("app.spiderweb_2"), tr("ks.voices_lowered", n=f"{top:,}"), parent=self)
-                out = KestrelOut(self.synth, fonts, **self.kestrel_opts)
+                self.kestrel_lowered(top)
+                out = KestrelOut(self.synth, fonts, loaded=loaded, **self.kestrel_opts)
             errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
             self.kestrel_ok = True  # (it works on this PC: its read-ahead may start)
             return out
         finally:
             self.busy(None)
+
+    def kestrel_lowered(self, top):
+        """Max voices past what this graphics card takes: lowered to its top and said plainly (it showed Kestrel's
+        command-line text every Play, hunt 2026-10-28)."""
+        self.kestrel_top = top
+        self.kestrel_vars["voices"].set(str(top))
+        self.on_kestrel_opt("voices")
+        messagebox.showinfo(tr("app.spiderweb_2"), tr("ks.voices_lowered", n=f"{top:,}"), parent=self)
 
     def kestrel_first(self, keep):
         """Kestrel (GPU) started on a thread for a play, a small window saying so meanwhile (user 2026-10-27: the
@@ -569,7 +582,8 @@ class Playback:
         kept open for the next one)."""
         import tkinter as tk
         from tkinter import ttk
-        from files.kestrel import KestrelOut, plain_reason
+        from files import kestrel
+        from files.kestrel import KestrelOut
         job = self._kestrel_job
         if job is not None:  # (Play again while it starts = its X: no play, the start given up)
             job["close"]()
@@ -621,23 +635,25 @@ class Playback:
         x = self.winfo_rootx() + (self.winfo_width() - win.winfo_reqwidth()) // 2
         y = self.winfo_rooty() + (self.winfo_height() - win.winfo_reqheight()) // 3
         win.geometry(f"+{max(0, x)}+{max(0, y)}")
-        win.deiconify()
+
+        def show():  # (only when it takes a while: on kept soundfonts a start is ~20 ms, no flash)
+            if not job["gone"] and self._kestrel_job is job and win.winfo_exists():
+                win.deiconify()
+        self.after(SHOW_START_MS, show)
 
         def work():
             try:
-                job["out"] = KestrelOut(synth, fonts, **opts)
+                # (kept loaded: only soundfonts not read yet are read; a broken one is named by its reading)
+                loaded = kestrel.loaded_for(fonts)
+                top = loaded.voices_top(opts["block"])
+                if top is not None and top < opts["voices"]:  # (lowered first: never a refused open)
+                    job["top"] = top
+                    return
+                job["out"] = KestrelOut(synth, fonts, loaded=loaded, **opts)
             except SynthError as e:
                 job["err"] = e
             except Exception as e:  # (anything else: said like a failed start)
                 job["err"] = SynthError("playback.kestrel_failed", err=e)
-            e = job["err"]
-            if e is not None and plain_reason(e) == "ks.why_font":  # (which one: each alone, Built-in's question)
-                for f in fonts:
-                    try:
-                        KestrelOut(synth, [f], **opts).close()
-                    except Exception:
-                        e.path = f
-                        break
         thread = threading.Thread(target=work, daemon=True)
         thread.start()
 
@@ -665,15 +681,16 @@ class Playback:
             if self.midi_device.get() != KESTREL or not self.winfo_exists():  # (another MIDI out picked meanwhile)
                 if job["out"] is not None:
                     job["out"].close()
+                kestrel.let_go()  # (what it loaded meanwhile too)
                 return
-            top = kestrel_voices_top(job["err"])
+            if job["err"] is not None and font_list(self.hz_preview) != fonts:
+                # (the soundfonts changed while it started, its loaded set let go: started again with the new ones)
+                if job["play"]:
+                    self.kestrel_first(keep)
+                return
+            top = job.get("top") or kestrel_voices_top(job["err"])
             if top is not None and top < self.kestrel_opts["voices"]:
-                # (Max voices past what this graphics card takes: lowered to its top, said plainly, started again;
-                # it showed Kestrel's command-line text every Play, hunt 2026-10-28)
-                self.kestrel_top = top
-                self.kestrel_vars["voices"].set(str(top))
-                self.on_kestrel_opt("voices")
-                messagebox.showinfo(tr("app.spiderweb_2"), tr("ks.voices_lowered", n=f"{top:,}"), parent=self)
+                self.kestrel_lowered(top)  # (then started again: on the kept soundfonts, in a moment)
                 if job["play"]:
                     self.kestrel_first(keep)
                 return
@@ -694,8 +711,9 @@ class Playback:
         common, never fail silently): the reason in plain words + a way on. Use Built-in BASSMIDI = the MIDI out
         switched (and playing, when a play was asked for); Pick another MIDI out… = Settings → Sound; Cancel = as
         it was (the next Play tries Kestrel again). A soundfont it can't read = Built-in's "pick another" question."""
-        from files.kestrel import plain_reason
+        from files.kestrel import drop_loaded, plain_reason
         from window.load_midi import ask_choice
+        drop_loaded()  # (the graphics card's part made again at the next try; the soundfonts stay read)
         why = plain_reason(err)
         errors.note("Kestrel (GPU)", f"{'stopped' if during else 'failed'}: {err}")
         self.drop_read_ahead()  # (nothing read ahead for a Kestrel that doesn't play)
@@ -841,6 +859,11 @@ class Playback:
             self.stop_play()
             self.scrub_end()
             self.out.close()
+        from files import kestrel  # (Kestrel's kept soundfonts: only ones no longer listed / picked again read anew)
+        kestrel.drop_loaded()
+        kestrel.forget(keep=font_list(self.hz_preview))
+        if again:
+            kestrel.forget(paths=added or None)
         if getattr(self, "_scrub_side", None) is not None:  # (Kestrel's listening synth: opens them anew)
             self.scrub_end()
             self._scrub_side.close()
