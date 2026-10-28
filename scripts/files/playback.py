@@ -273,7 +273,20 @@ class _Ons:
 
     def batch(self, i, size=4096):
         """Notes i.. as (start, end, channel | key << 8, velocity) tuples."""
-        part = self.notes[self.keep[i:i + size]]
+        return self._tuples(self.notes[self.keep[i:i + size]])
+
+    def sounding(self, tick):
+        """{channel | key << 8: [ends, sorted]} of the notes started at / before tick still sounding after it."""
+        idx = self.keep[:self.first_after(tick)]
+        idx = idx[self.notes[idx, 1] > tick]
+        got = {}
+        for s, e, key, vel in self._tuples(self.notes[idx]):
+            got.setdefault(key, []).append(e)
+        for ends in got.values():
+            ends.sort()
+        return got
+
+    def _tuples(self, part):
         if self.tune:
             return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), edo_code(part[:, 2]).tolist(),
                             part[:, 3].tolist()))
@@ -416,7 +429,8 @@ class Player:
 
     def update(self, notes, bpm, stop_beat, use10=False, cc=(), ports=0, tempo=None):
         """The notes / tempo changed while playing (same PPQ): play on with them. Notes already sounding end where
-        they would have; new notes starting before the line aren't played (like a start from the line)."""
+        they end NOW (deleted = at once, shortened = at the new end; hunt 2026-10-28); new notes starting before the
+        line aren't played (like a start from the line)."""
         if not self.running:
             return
         self._new_notes(notes)
@@ -541,6 +555,25 @@ class Player:
                 if ons_at[0] == done:
                     i = min(i, ons.first_after(done - 1) + ons_at[1])
                 batch, k = [], 0
+                # (notes sounding now: let go where they end NOW, a deleted one at once, a shortened one at its new
+                # end; they rang on to their old ends: "what you see is what you hear", hunt 2026-10-28)
+                if held:
+                    now_ends = ons.sounding(done)
+                    t_now, sec_now, tmap = self._clock
+                    when = t_now + tmap.sec(done) - sec_now
+                    offs.clear()
+                    for key, n in list(held.items()):
+                        ends = now_ends.get(key, [])[:n]
+                        gone = n - len(ends)
+                        if gone and (not shared or not ends):
+                            for _ in range(1 if shared else gone):
+                                emit(0x80 | key, when)
+                        if ends:
+                            held[key] = len(ends)
+                            offs.extend((e, key) for e in ends)
+                        else:
+                            del held[key]
+                    heapq.heapify(offs)
                 j = next((n for n, (t, _) in enumerate(ccs) if t > done), len(ccs))
                 # (the CC lines changed: each channel's values where it is now, heard at once; channels the lines
                 # no longer use put back, so nothing is left on them for what plays there)
