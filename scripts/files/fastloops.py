@@ -36,6 +36,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
                  to read a track from anywhere, the overview picture), the very same functions compiled
   play_read, play_order, play_order_count, play_order_place, play_hist, play_emit, play_programs, play_stamp,
   play_condense, play_stamp_pre   midi_play's functions (playing a loaded MIDI), compiled
+  all_tops       track_list.loaded_tops: a loaded MIDI's tracks in the track list's All tracks row
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
 
@@ -1731,6 +1732,65 @@ def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
                 img[y - y0, x, 2] = rgb[code, e, 2]
 
 
+@njit(cache=CACHE, nogil=True)
+def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G):
+    """track_list.loaded_tops' block for the loaded tracks ids in order (a later one over an earlier one): each key x
+    pixel of top the track whose loading-pass small picture has a note there, read like track_list.small_mask with
+    one pixel more past the block (each pixel's columns run up to the next pixel's first). The same tracks.
+    used[uoff[r] + c] = track r's picture column c has a note on any key (pixels without one skipped at once)."""
+    span, w = top.shape
+    c0 = np.empty(w + 1, np.int64)
+    c1 = np.empty(w + 1, np.int64)
+    for q in range(len(ids)):
+        r = ids[q]
+        n = cols[r]
+        if n == 0 or nrows[r] == 0:
+            continue
+        step = G * pf[r]
+        base = glo[r] * G
+        if math.floor((x0 * tpp - base) / step) >= n or math.ceil(((x0 + w) * tpp + tpp - base) / step) <= 0:
+            continue  # (its picture ends before the block / starts after it: the columns only grow along x)
+        first, last = -1, -1
+        for x in range(w + 1):
+            ta = (x0 + x) * tpp
+            a = np.int64(math.floor((ta - base) / step))
+            b = max(np.int64(math.ceil((ta + tpp - base) / step)), a + 1)
+            c0[x], c1[x] = a, b
+            if b > 0 and a < n:
+                if first < 0:
+                    first = x
+                last = x
+        if first < 0:
+            continue
+        joined = tpp >= step
+        o, nb, k0 = offs[r], nbytes[r], pklo[r]
+        for x in range(first, min(last + 1, w)):
+            a = min(max(c0[x], 0), n - 1)
+            if not joined:
+                e = a + 1
+            elif x < last:
+                e = max(min(max(c0[x + 1], 0), n - 1), a + 1)
+            else:
+                e = max(min(max(c1[last], 1), n), a + 1)
+            u = uoff[r]
+            hit = False
+            for c in range(a, e):
+                if used[u + c]:
+                    hit = True
+                    break
+            if not hit:
+                continue
+            for row in range(nrows[r]):
+                key = k0 + row
+                if key >= span:
+                    break
+                rb = o + row * nb
+                for c in range(a, e):
+                    if (data[rb + (c >> 3)] >> (7 - (c & 7))) & 1:
+                        top[key, x] = r
+                        break
+
+
 def warm():
     """Compiles (or loads) every loop with the same kinds of values the program hands them."""
     i1, f, b = np.zeros(1, np.int64), 0.0, np.zeros(1, bool)
@@ -1796,6 +1856,8 @@ def warm():
                np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
                z.copy(), z.copy())
     loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
+    all_tops(np.full((1, 1), -1, np.int32), np.zeros(1, np.uint8), i1, i1 + 1, i1 + 1, i1.copy(), i1.copy(), i1 + 1,
+             i1 + 1, np.zeros(1, bool), i1.copy(), i1.copy(), 0, 1.0, 1)
     midi_merge_loud(t2, m2, t2.copy(), m2.copy(), np.zeros((1, 3), np.int64), np.zeros(1, np.int64), 1 << 20)
     i32 = np.zeros(1, np.int32)
     play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),

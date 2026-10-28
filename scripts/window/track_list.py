@@ -56,6 +56,9 @@ TILE = 512  # px: a loaded MIDI's rows are read in blocks this wide along the so
 # the next ones read ahead in the background (user 2026-10-24, Shinki: each new picture read every row again,
 # ~100 ms stops while scrolling)
 TILES_BYTES = 128 << 20  # blocks kept at most (the oldest used go first)
+ALL_BLOCKS = 96  # the All tracks row's blocks of a loaded MIDI kept at most (keys x SQUARE each, the oldest used go)
+SQUARE = 256  # px: the rows, All tracks and Conductor rows are painted in squares this wide (paint, tiled)
+SQUARES_KEPT = 96  # squares of each picture kept at least (twice the ones in use when more)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 MOVE_PX = 5  # a press on a track's name moved this far (x scale) = dragging the tracks to another place
 EDGE_MS = 40  # how often the list scrolls while tracks are dragged past its top / bottom
@@ -117,9 +120,11 @@ class TrackList(tk.Canvas):
         self.menu_shut = 0.0  # when the right-click menu last closed (perf_counter)
         self._row_of = np.zeros(0, np.int64)  # slot -> row (-1: none)
         self._ids = []  # id() of the shapes when the tracks were worked out (their notes' owner numbers)
-        self._sheet = None  # paint's picture: {"key", "x", "y" (its first pixel), "w", "h", "photo"}
-        self._tempo_sheet = None  # (key, photo) of the Conductor row's, as wide
-        self._all_sheet = None  # (key, photo) of the All tracks row's, as wide
+        self._sheet = None  # paint's squares: {"key", "tiles" {(column, row): Photo}} (tiled; None = paint again)
+        self._tempo_sheet = None  # the same of the Conductor row's
+        self._all_sheet = None  # the same of the All tracks row's
+        self._all_place, self._all_blocks = None, OrderedDict()  # loaded_tops' blocks and what they were made for
+        self._pics = None  # (LoadedMidi, small_pics' arrays)
         # a loaded MIDI's exact rows: the zoom they're for, {(row, block): keys x TILE mask, False = unreadable}
         # (oldest used first), their bytes, the background reading
         self._row_place, self._tiles, self._tile_bytes, self._row_job = None, OrderedDict(), 0, None
@@ -1670,32 +1675,51 @@ class TrackList(tk.Canvas):
         return int(round(self.view_t * self.sx))
 
     def paint(self, w, h):
-        """The rows (stripes, the highlighted one, bar lines) and every track's notes as one picture, made twice
-        the view's size around it and only moved while scrolling (user 2026-10-23: dragging the view lagged at 100k
-        notes); made again when the view nears its edge or anything in it changes."""
+        """The rows (stripes, the highlighted one, bar lines) and every track's notes, in SQUARE x SQUARE squares
+        kept while nothing in them changes: scrolling only paints the squares coming into view (user 2026-10-28:
+        scrolling fast lagged; one picture twice the view's size was painted again at each of its edges)."""
         x0, y0 = self.area()
         aw, ah = w - x0, h - y0
         if aw < 1 or ah < 1:
             return
-        ox = self.left_px()
+        ox, top = self.left_px(), max(0, self.top)
         key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._all), self.current,
-               frozenset(self.muted), frozenset(self.selected), json.dumps(sigs_of(self.app.tempo)), aw, ah,
+               frozenset(self.muted), frozenset(self.selected), json.dumps(sigs_of(self.app.tempo)),
                self.app.ppq, self.app.keys,
                # (a loaded MIDI's notes hidden / back, read on a thread: shown at once, hunt 2026-10-26)
                self.app.loaded.hide_ver if self.app.loaded is not None else None)
-        sh = self._sheet
-        if sh is None or sh["key"] != key or not (sh["x"] <= ox and ox + aw <= sh["x"] + sh["w"]
-                                                   and sh["y"] <= self.top and self.top + ah <= sh["y"] + sh["h"]):
-            cx = max(0, ox - aw // 2)
-            if self.rows_height() <= ah:
-                cy, ch = 0, ah
-            else:
-                cy, ch = max(0, self.top - ah // 2), 2 * ah
-            img = self.paint_sheet(cx, cy, 2 * aw, ch)
-            photo = sh["photo"] if sh is not None and sh["photo"].size == (2 * aw, ch) else Photo(self, 2 * aw, ch)
-            photo.put(img)
-            sh = self._sheet = {"key": key, "x": cx, "y": cy, "w": 2 * aw, "h": ch, "photo": photo}
-        self.create_image(x0 - (ox - sh["x"]), y0 - (self.top - sh["y"]), image=sh["photo"].photo, anchor="nw")
+        (xs, xw), (ys, yw) = squares(ox, aw), squares(top, ah)
+        got = self.tiled("_sheet", key, xw, yw, SQUARE, self.paint_sheet)
+        for j in ys:
+            for i in xs:
+                self.create_image(x0 + i * SQUARE - ox, y0 + j * SQUARE - self.top, image=got[(i, j)].photo,
+                                  anchor="nw")
+
+    def tiled(self, name, key, xs, ys, th, paint):
+        """The kept squares of picture name (self.<name> = {"key", "tiles"}; None = all painted again): SQUARE wide,
+        th high, columns xs x rows ys. The missing ones painted together in one go (paint(cx, cy, cw, ch) -> image),
+        all of them again when key changes. Returns {(column, row): Photo}."""
+        st = getattr(self, name)
+        if st is None or st["key"] != key:
+            st = {"key": key, "tiles": OrderedDict()}
+            setattr(self, name, st)
+        kept = st["tiles"]
+        want = [(i, j) for j in ys for i in xs]
+        miss = [p for p in want if p not in kept]
+        if miss:
+            i0, i1 = min(p[0] for p in miss), max(p[0] for p in miss)
+            j0, j1 = min(p[1] for p in miss), max(p[1] for p in miss)
+            img = paint(i0 * SQUARE, j0 * th, (i1 - i0 + 1) * SQUARE, (j1 - j0 + 1) * th)
+            for i, j in miss:
+                photo = Photo(self, SQUARE, th)
+                photo.put(np.ascontiguousarray(img[(j - j0) * th:(j - j0 + 1) * th,
+                                                   (i - i0) * SQUARE:(i - i0 + 1) * SQUARE]))
+                kept[(i, j)] = photo
+        for p in want:
+            kept.move_to_end(p)
+        while len(kept) > max(SQUARES_KEPT, 2 * len(want)):  # (the longest unseen go)
+            kept.popitem(last=False)
+        return kept
 
     def paint_sheet(self, cx, cy, cw, ch):
         """paint's picture: cw x ch pixels from pixel cx of the song (sideways) and cy of the rows (down)."""
@@ -2047,17 +2071,18 @@ class TrackList(tk.Canvas):
         """The All tracks row (user 2026-10-26): every track's notes together, each in its track's colour, from the
         song's lowest to highest key; highlighted like a track while no track is (current None)."""
         y0, rh = self.ruler_h, self.all_h()
-        sh = self._sheet
-        if sh is not None and rh > 4:
-            lm = self.app.loaded  # (the sheet's key holds the notes, zoom, highlight, mutes)
-            key = (sh["key"], sh["x"], sh["w"], rh, lm.hide_ver if lm is not None else None)
-            got = self._all_sheet
-            if got is None or got[0] != key:
-                img = self.paint_all(sh["x"], sh["w"], rh - 1)
-                photo = got[1] if got is not None and got[1].size == (sh["w"], rh - 1) else Photo(self, sh["w"], rh - 1)
-                photo.put(img)
-                got = self._all_sheet = (key, photo)
-            self.create_image(self.name_w - (self.left_px() - sh["x"]), y0, image=got[1].photo, anchor="nw")
+        if self.sx and rh > 4 and w > self.name_w:
+            lm = self.app.loaded
+            # (only what it shows: a click / Ctrl+click on a track left it as it was but painted it again, ~0.6 s
+            # with 2788 tracks, Shinki 2026-10-28)
+            key = (id(self._made[0]) if self._made else None, id(self._all), self.current is None,
+                   frozenset(self.muted), json.dumps(sigs_of(self.app.tempo)), self.sx, self.app.ppq, self.app.keys,
+                   rh, lm.hide_ver if lm is not None else None)
+            ox = self.left_px()
+            xs, xw = squares(ox, w - self.name_w)
+            got = self.tiled("_all_sheet", key, xw, (0,), rh - 1, lambda cx, cy, cw, ch: self.paint_all(cx, cw, ch))
+            for i in xs:
+                self.create_image(self.name_w + i * SQUARE - ox, y0, image=got[(i, 0)].photo, anchor="nw")
         self.create_line(0, y0 + rh - 1, w, y0 + rh - 1, fill=look.ROLL_EDGE)
 
     def paint_all(self, cx, cw, h):
@@ -2093,15 +2118,13 @@ class TrackList(tk.Canvas):
                 ids[c] = len(colours)
                 colours.append(c)
             return ids[c]
-        top = np.full((span, cw), -1, np.int64)  # (each key x pixel: the colour painted last there, -1 none)
-        cut = set(self.cut_tracks(lm)) if loaded else set()
-        for r in loaded:
-            t = lm.tracks[r]
-            got = self.tile_mask(r, cx, cw) if r in cut else None  # (notes taken out: read exactly)
-            if got is None:
-                got = small_mask(lm, t, cx, cw, self.sx)
-            if got is not None and t.klo < span:
-                top[t.klo:t.khi + 1][got[:span - t.klo]] = colour_id(-1 - r)
+        if loaded:  # (each key x pixel: the colour painted last there, -1 none)
+            lut = np.full(len(lm.tracks) + 1, -1, np.int64)  # (track -> its colour; the last = none)
+            for r in loaded:
+                lut[r] = colour_id(-1 - r)
+            top = lut[self.loaded_tops(lm, loaded, cx, cw, span)]
+        else:
+            top = np.full((span, cw), -1, np.int64)
         if len(n):
             xa = np.clip(np.floor(n[:, 0] / ppq * self.sx).astype(np.int64) - cx, 0, cw - 1)
             xb = np.clip(np.maximum(xa, np.ceil(n[:, 1] / ppq * self.sx).astype(np.int64) - 1 - cx), 0, cw - 1)
@@ -2139,6 +2162,78 @@ class TrackList(tk.Canvas):
         img[y0:y0 + used][hit] = np.array([hex_rgb(c) for c in colours], np.uint8)[pix[hit]]
         return img
 
+    def loaded_tops(self, lm, loaded, cx, cw, span):
+        """paint_all's loaded tracks: each key x pixel of cw from pixel cx, the track painted last there (-1 none).
+        Made in SQUARE-wide blocks along the song, kept while what they show stays (Shinki 2026-10-28: a mute or a
+        scroll to the picture's edge painted all 2788 tracks again, ~0.4-0.6 s)."""
+        cut = set(self.cut_tracks(lm))  # (notes taken out: read exactly from the rows' blocks)
+        place = (id(lm), lm.hide_ver, self.sx, span, tuple(loaded), frozenset(cut))
+        if self._all_place != place:
+            self._all_place, self._all_blocks = place, OrderedDict()
+        blocks, parts = self._all_blocks, []
+        tpp = lm.ppq / self.sx  # (ticks a pixel)
+        for j in range(cx // SQUARE, (cx + cw - 1) // SQUARE + 1):
+            got = blocks.get(j)
+            if got is None:
+                got, whole = np.full((span, SQUARE), -1, np.int32), True
+                t0, t1 = j * SQUARE * tpp, (j * SQUARE + SQUARE + 2) * tpp  # (+ the one pixel more, rounding room)
+                fast, run = RL.speed.loops(), []
+                if fast is not None:  # (compiled: ~0.2 ms a track a block the plain way, user 2026-10-28 fast scrolls)
+                    pics = self.small_pics(lm)
+                for r in loaded + [None]:
+                    if fast is not None:  # (tracks in a row without notes taken out: one compiled call, in order)
+                        if r is not None and r not in cut:
+                            run.append(r)
+                            continue
+                        if run:
+                            fast.all_tops(got, *pics, np.array(run, np.int64), j * SQUARE, tpp, lm.G)
+                            run = []
+                    if r is None:
+                        break
+                    t = lm.tracks[r]
+                    if t.klo >= span:
+                        continue
+                    m = self.tile_mask(r, j * SQUARE, SQUARE) if r in cut else None
+                    if m is None:
+                        if r in cut:
+                            whole = False  # (its blocks not read yet: blocky for now, not kept)
+                        elif t.pic_cols and not (t.pic_glo * lm.G < t1 and t0 < (t.pic_glo + t.pic_cols * t.pic_pf)
+                                                 * lm.G + tpp):
+                            continue  # (nothing of it in this block)
+                        # (one pixel more: the block's last pixel reaches as far as in one wide picture)
+                        m = small_mask(lm, t, j * SQUARE, SQUARE + 1, self.sx)
+                    if m is not None:
+                        got[t.klo:t.khi + 1][m[:span - t.klo, :SQUARE]] = r
+                if whole:
+                    blocks[j] = got
+                    while len(blocks) > ALL_BLOCKS:
+                        blocks.popitem(last=False)
+            else:
+                blocks.move_to_end(j)
+            parts.append(got)
+        return np.concatenate(parts, axis=1)[:, cx % SQUARE:cx % SQUARE + cw]
+
+    def small_pics(self, lm):
+        """Every track's loading-pass small picture packed end to end for fastloops.all_tops: (data, offsets, rows,
+        bytes a row, first key, first column, columns per picture column, columns, columns with a note, their
+        offsets), kept for this MIDI."""
+        got = self._pics
+        if got is None or got[0] is not lm:
+            ts = lm.tracks
+            sizes = [t.pic.size if t.pic_cols else 0 for t in ts]
+            data = np.concatenate([t.pic.ravel() for t, n in zip(ts, sizes) if n] or [np.zeros(1, np.uint8)])
+            used = [np.unpackbits(np.bitwise_or.reduce(t.pic, axis=0), count=t.pic_cols).astype(bool)
+                    for t in ts if t.pic_cols and t.pic.shape[0]]
+            ncols = [t.pic_cols if t.pic_cols and t.pic.shape[0] else 0 for t in ts]
+            arr = lambda f: np.array([f(t) for t in ts] or [0], np.int64)  # noqa: E731
+            starts = lambda n: np.concatenate([[0], np.cumsum(n)[:-1]]).astype(np.int64) if ts \
+                else np.zeros(1, np.int64)  # noqa: E731
+            got = self._pics = (lm, (data, starts(sizes), arr(lambda t: t.pic.shape[0] if t.pic_cols else 0),
+                                     arr(lambda t: t.pic.shape[1] if t.pic_cols else 0), arr(lambda t: t.pic_klo),
+                                     arr(lambda t: t.pic_glo), arr(lambda t: t.pic_pf), arr(lambda t: t.pic_cols),
+                                     np.concatenate(used or [np.zeros(1, bool)]), starts(ncols)))
+        return got[1]
+
     def draw_conductor(self, w):
         """The Conductor row: a line at each tempo change, as tall as its BPM (the song's own slowest .. fastest,
         user 2026-10-23: Domino's 1-512 BPM wouldn't fit a MIDI file's range) and a short line at each time / key
@@ -2146,24 +2241,25 @@ class TrackList(tk.Canvas):
         s, y0 = self.scale, self.conductor_y()
         y1 = y0 + self.row_h
         x0 = self.name_w
-        sh = self._sheet
-        if sh is not None and self.row_h > 4:  # (as wide as the rows' picture, moved with it)
-            h, cx, cw = self.row_h - 1, sh["x"], sh["w"]
+        if self.sx and self.row_h > 4 and w > x0:  # (in squares like the rows' picture)
+            h = self.row_h - 1
             lo_hi = self.heard()[2:]
-            key = (self._heard[0], lo_hi, self.sx, h, cx, cw)
-            got = self._tempo_sheet
-            if got is None or got[0] != key:
+            key = (self._heard[0], lo_hi, self.sx, h)
+
+            def paint(cx, cy, cw, ch):
                 inner = self.row_h - 2 * round(PAD * s) - 1
                 tall = self.bpm_heights(np.arange(cw), inner, cx)
-                img = np.empty((h, cw, 3), np.uint8)
+                img = np.empty((ch, cw, 3), np.uint8)
                 img[:] = hex_rgb(look.TRACK_ROW)
-                ys = np.arange(h)[:, None]
-                bottom = h - round(PAD * s)
+                ys = np.arange(ch)[:, None]
+                bottom = ch - round(PAD * s)
                 img[(ys >= bottom - tall[None, :]) & (ys < bottom)] = hex_rgb(look.TRACK_TEMPO)
-                photo = got[1] if got is not None and got[1].size == (cw, h) else Photo(self, cw, h)
-                photo.put(img)
-                got = self._tempo_sheet = (key, photo)
-            self.create_image(x0 - (self.left_px() - cx), y0, image=got[1].photo, anchor="nw")
+                return img
+            ox = self.left_px()
+            xs, xw = squares(ox, w - x0)
+            got = self.tiled("_tempo_sheet", key, xw, (0,), h, paint)
+            for i in xs:
+                self.create_image(x0 + i * SQUARE - ox, y0, image=got[(i, 0)].photo, anchor="nw")
         tempo = self.app.tempo
         beats = {sg[0] for sg in sigs_of(tempo)[1:]} | {k[0] for k in tempo.get("keysigs") or []}
         for b in beats:
@@ -2306,6 +2402,13 @@ def row_mask(lm, r, ax, bx, W):
     return False if tab is None else tab >= 0
 
 
+def squares(o, n):
+    """The squares (SQUARE px) showing pixels o .. o + n - 1, and those with one more on each side (painted ahead
+    so scrolling finds them ready)."""
+    a, b = max(0, o) // SQUARE, max(0, o + n - 1) // SQUARE + 1
+    return range(a, b), range(max(0, a - 1), b + 1)
+
+
 def small_mask(lm, t, cx, aw, sx):
     """The same from the loading pass's small picture (keys klo.. x up to PIC_COLS columns), or None."""
     if not t.pic_cols:
@@ -2318,10 +2421,16 @@ def small_mask(lm, t, cx, aw, sx):
     on = np.flatnonzero((c1 > 0) & (c0 < t.pic_cols))
     if not len(on):
         return None
-    bits = np.unpackbits(t.pic, axis=1, count=t.pic_cols).astype(bool)
     a = np.clip(c0[on], 0, t.pic_cols - 1)
-    got = (np.logical_or.reduceat(bits[:, :int(np.clip(c1[on[-1]], 1, t.pic_cols))], a, axis=1)
-           if tpp >= step else bits[:, a])
+    joined = tpp >= step
+    end = int(np.clip(c1[on[-1]], 1, t.pic_cols)) if joined else int(a[-1]) + 1
+    # (only the columns shown unpacked: the whole track's every redraw was most of the All tracks row's time at
+    # 2788 tracks, Shinki 2026-10-28)
+    a0 = int(a[0])
+    b0 = a0 >> 3
+    bits = np.unpackbits(t.pic[:, b0:(end + 7) >> 3], axis=1)[:, a0 - (b0 << 3):end - (b0 << 3)].astype(bool)
+    a = a - a0
+    got = np.logical_or.reduceat(bits, a, axis=1) if joined else bits[:, a]
     out = np.zeros((t.khi - t.klo + 1, aw), bool)
     out[t.pic_klo - t.klo:t.pic_klo - t.klo + len(got), on] = got
     return out
