@@ -536,6 +536,7 @@
  "jump_graph.across_shape": "Across the gap",
  "jump_graph.across_strength": "Across the jumps",
  "jump_graph.height": "Height",
+ "jump_graph.reset": "Reset",
  "jump_graph.start_shape": "Jump",
  "jump_graph.end_shape": "Next jump",
  "jump_graph.start_strength": "First jump",

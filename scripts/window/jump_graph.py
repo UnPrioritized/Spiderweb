@@ -69,9 +69,11 @@ class JumpGraph(tk.Toplevel):
         ttk.Label(frame, text=tr("catch_graph.hint"), foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=int(440 * s)).pack(anchor="w", pady=(4, 0))
         row = ttk.Frame(frame)
-        row.pack(anchor="e", pady=(6, 0))
-        ttk.Button(row, text=tr("graph_window.ok"), command=self.close).pack(side="left")
-        ttk.Button(row, text=tr("graph_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
+        row.pack(fill="x", pady=(6, 0))
+        # (back to how a new window starts: Up / Full; user 2026-10-29)
+        ttk.Button(row, text=tr("jump_graph.reset"), command=lambda: self.set_points(START[kind])).pack(side="left")
+        ttk.Button(row, text=tr("graph_window.cancel"), command=self.cancel).pack(side="right", padx=(4, 0))
+        ttk.Button(row, text=tr("graph_window.ok"), command=self.close).pack(side="right")
 
         cv = self.canvas
         cv.bind("<ButtonPress-1>", self.press)
