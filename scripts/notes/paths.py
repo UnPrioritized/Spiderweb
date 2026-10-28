@@ -317,6 +317,13 @@ def snap_steps(notes, step, origin):
     notes = np.asarray(notes, np.int64).reshape(-1, 3)
     if not len(notes):
         return notes, np.zeros(0, np.int64)
+    # the line's time stretched to fill its steps exactly (a part step counts whole), so the keys share out evenly
+    # to the end (user 2026-10-28: a line ending just into a step left that step one lone key)
+    span = int(notes[:, 1].max()) - origin
+    if span > 0:
+        steps = max(1, math.ceil(span / step - 1e-9))
+        notes = notes.copy()
+        notes[:, :2] = origin + np.floor((notes[:, :2] - origin) * (steps * step / span) + 0.5).astype(np.int64)
     s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
 
     def edge(j):  # tick where step j starts
