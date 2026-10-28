@@ -1062,9 +1062,16 @@ class TempoPane(ConductorMarks, tk.Canvas):
     # ------------------------------------------------------------ finding things under the mouse
 
     def point_at(self, x, y):
+        """The point under (x, y), or None; none while the dots are too crowded to be drawn (draw_all: more than
+        one per 3 px; hunt 2026-10-29: hidden dots were grabbed and moved)."""
         roll, r = self.app.roll, 7 * self.scale
+        pts = self.ed()["points"]
+        kb, w = roll.kb_w, self.winfo_width()
+        i0, i1 = self.shown_points(kb - 4 * self.scale, w + 4 * self.scale, pts)
+        if (i1 - i0) * 3 > w - kb:
+            return None
         best = None
-        for i, (b, v, *_) in enumerate(self.ed()["points"]):
+        for i, (b, v, *_) in enumerate(pts):
             d = math.hypot(roll.t2x(b) - x, float(self.b2y(v)) - y)
             if d <= r and (best is None or d < best[0]):
                 best = (d, i)
@@ -1501,6 +1508,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.start_move(e, None, pushed=False)  # (Ctrl+drag inside the Select box: copies, like Domino)
             self.drag["copy"] = True
             return
+        if tool == "select" and self.in_band(e.x):  # (inside a kept Select box: the box moves, in time only, even
+            return self.start_move(e, None, pushed=False)  # pressed on a point: hunt 2026-10-29, BPMs moved)
         i, j = self.point_at(e.x, e.y), self.catch_at(e.x)
         item = tempo["points"][i] if i is not None else tempo["catch"][j] if j is not None else None
         n = self.handle_at(e.x, e.y) if item is None else None
@@ -1940,7 +1949,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         only = bool(self.placing) or bool(d) and d["kind"] in ("box", "draw", "catch1", "fill1", "view") or \
             bool(d) and d.get("pushed") is False
         self.cancel_placing()
-        if d and d["kind"] == "edge" and self.edges_on() is not None:  # (Ctrl+Z on: the chain's last edge goes)
+        if d and d["kind"] == "edge" and self.edges_on() is not None:  # (Ctrl+Z on: the chain's last edge goes;
+            ch = self.edges_on().live_chain()  # an edge only pressed, nothing added / moved: just let go, hunt)
+            only = only or ch is not None and not ch.moved
             self.edges_on().edge_release()
         if d and d["kind"] == "box":  # (the picks and boxes from before the press, hunt 10-27)
             self.sel = list(d["before"])

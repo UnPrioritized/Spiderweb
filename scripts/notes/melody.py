@@ -57,12 +57,19 @@ def step_runs(step0, step1, pts, scale, a, b, ppq):
     t0, t1 = round(a * ppq), round(b * ppq)
     if t1 <= t0:
         return []
+    # every tick's step a chunk at a time (one graph read each), then walked (hunt 2026-10-29: one read per jump
+    # froze ~1 s; a chunk keeps a huge area's memory small)
+    span, chunk, steps, c0 = t1 - t0, 1 << 20, [], None
     out, t = [], t0
     while t < t1 and len(out) <= MOST_ANCHORS:
         out.append(t)
-        h = float(graph_at(pts, [(t - t0) / (t1 - t0)])[0])
-        step = step0 * (step1 / step0) ** h if scale == "exp" else step0 + (step1 - step0) * h
-        t += max(1, round(step))
+        k = t - t0
+        if c0 is None or not c0 <= k < c0 + len(steps):
+            c0 = k
+            h = graph_at(pts, np.arange(k, min(span, k + chunk)) / span)
+            s = step0 * (step1 / step0) ** h if scale == "exp" else step0 + (step1 - step0) * h
+            steps = np.maximum(1, np.floor(s + 0.5)).astype(np.int64).tolist()  # (halves up)
+        t += steps[k - c0]
     return [(np.array(out, np.int64) / ppq, float(b))]
 
 

@@ -23,9 +23,11 @@ class JumpChain:
         self.undos, self.redos = [], []  # the edges before each click / drag (Ctrl+Z / Ctrl+Y mid-chain)
         self.base = copy.deepcopy(self.app.tempo)  # the line before the chain: laid again at every change
         self.pushed = False  # the chain's one undo step made (at the first area)
+        self.entry = None  # that step (in app.undo_stack)
         self.seen = tempo_text(self.app.tempo)  # the line as the chain left it: changed elsewhere = chain done
         self.grab = None  # the edge held (its place in edges)
         self.moved = False
+        self.made = None  # the window's settings it was laid with (MelodyWindow.made_key: changed = laid again)
 
     def sorted(self):
         return sorted(self.edges)
@@ -107,17 +109,21 @@ class JumpChain:
         app, pane = self.app, self.app.tempo_pane
         edges = self.sorted()
         clip = self.win.chain_clip(self.base, edges) if len(edges) > 1 else None
+        if self.pushed and not any(s is self.entry for s in app.undo_stack):  # (its step undone / dropped as empty
+            self.pushed = False  # after Ctrl+Z past its edges, or a History jump: the next areas get a new one, hunt
         if clip is None and not self.pushed:  # (nothing laid yet: the line stays as it is)
             return pane.request_redraw()
         if clip is not None and not self.pushed:
             app.push_undo(name=tr("melody.step_areas"))
             self.pushed = True
+            self.entry = app.undo_stack[-1] if app.undo_stack else None
         tempo = app.tempo
         tempo.clear()
         tempo.update(copy.deepcopy(self.base))
         if clip is not None:
             pane.lay_copies(tempo, clip, clip["at"], pane.ed_base(), teal=False)
-        pane.sel, pane.part, pane.bands = [], None, []
+        # (the kept Select box stays, Every / Melody notes' area, hunt 2026-10-29; it picks what's in it now)
+        pane.sel, pane.part = pane.in_spans(pane.bands) if pane.bands else [], None
         app.tempo_changed()
         self.seen = tempo_text(app.tempo)
         pane.request_redraw()

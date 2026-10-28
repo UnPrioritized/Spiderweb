@@ -89,6 +89,7 @@ class MelodyWindow(tk.Toplevel):
         self.at_clicks.pack(anchor="w", padx=(10, 0), pady=(4, 0))
         self.chain = None  # the click chain being made (JumpChain), None = none
         self.preview_seed = random.randrange(1 << 30)  # (Random's picks: the preview's = what Fill makes)
+        self.hide_next, self.hidden_for = False, None  # (no preview right after Fill: sync)
         self.snap_starts = np.zeros(0)  # the melody's note starts in beats (sorted): edges go onto them
         self.rules = []  # (label, box) of the melody's rules: greyed with Every snap step
         self.shortest = self.length_row(box, "melody.shortest", getattr(app, "melody_shortest", "1/32"))
@@ -214,15 +215,19 @@ class MelodyWindow(tk.Toplevel):
         a = pane.bands_reach()[0]
         return float(drawn_bpm(self.app.tempo, pane.base(), [max(0.0, a - 1e-6)])[0])
 
-    def normal_at(self, a, tempo):
+    def normal_at(self, a, tempo, heard):
         """The drawn line's BPM at beat a itself: a ramp crossing the area's start stays one ramp there (a point off
         its value by a hair made a jump, and a ramp ending at a jump spreads its steps differently: notes before
-        the area moved, hunt 2026-10-29). A point ON a (an earlier fill's first jump, a jump): the BPM arriving there,
-        as that point is replaced (user 2026-10-29: filling a filled area again took its old 330 jump as the normal
-        tempo, so Strength pulled every jump to 330 and they merged into one flat line)."""
+        the area moved, hunt 2026-10-29); a plain single point on a = a real tempo change the area starts with, its
+        own BPM (hunt 2026-10-29). An earlier fill's jump on a (a Keep timing point there, or a jump pair): the tempo
+        HEARD there (heard: heard_points), which a Keep the audio fill keeps as it was (user 2026-10-29: filling a
+        filled area again took its old 330 jump as normal, Strength pulled every jump to 330; the tempo arriving
+        wasn't right either, the fill had replaced the change it started on)."""
         pane = self.app.tempo_pane
-        on = a > 0 and any(abs(p[0] - a) < 1e-9 for p in tempo["points"])
-        return float(drawn_bpm(tempo, pane.base(), [max(0.0, a - 1e-6) if on else max(0.0, a)])[0])
+        on_a = [p for p in tempo["points"] if abs(p[0] - a) < 1e-9]
+        if a > 0 and (len(on_a) > 1 or any(len(p) > 5 and p[5] for p in on_a)) and heard:
+            return float(heard[0][1])
+        return float(drawn_bpm(tempo, pane.base(), [max(0.0, a)])[0])
 
     def fill_area(self, box, tempo=None):
         """((first, last beat) the fill covers, moved) for the kept box (first, last): a start inside an earlier
@@ -251,6 +256,14 @@ class MelodyWindow(tk.Toplevel):
             return t if t >= 1 else None
         v = self.number(var, 1)
         return int(v) if v is not None and v == int(v) else None
+
+    def made_key(self):
+        """Everything that changes the tempo a fill / the chain makes from the same jumps: shape, BPM boxes, way,
+        hold, catch-up shape, the graphs, Strength's tick, the pane's BPM snap (Random's picks: hunt 2026-10-29)."""
+        app = self.app
+        return (self.shape.get(), self.lo.get(), self.hi.get(), self.how.get(), self.hold.get(),
+                self.catch_shape.get(), str(graph_pts(app, "shape")), str(graph_pts(app, "strength")),
+                self.strength_on.get(), app.tempo_pane.box.bpm_snap())
 
     def step_scale(self):
         """The step graph's Linear / Exponential ("lin" / "exp"), picked in its window."""
@@ -425,19 +438,17 @@ class MelodyWindow(tk.Toplevel):
         how = self.how.get()
         app.melody_shape, app.melody_how, app.melody_hold = self.shape.value(), how, self.hold.get()
         app.melody_catch = self.catch_shape.value()
-        made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get(),
-                str(graph_pts(app, "shape")), str(graph_pts(app, "strength")), self.strength_on.get())
+        made = self.made_key()
         app.melody_strength_on = self.strength_on.get()
         seen = (box, area, track, ch, at, only, has_sel, step, stepping, self.shortest.get(), self.rest.get(),
                 tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"],
                 None if clicks else getattr(app, "tempo_count", 0), self.preview_seed, made)
+        if chain is not None and chain.grab is None and chain.made != made:
+            chain.lay()  # (the shape / BPMs / way / a graph / BPM snap changed: the areas laid again with them; the
+            chain.made = made  # chain remembers what it was laid with, hunt 2026-10-29: graph edits were missed)
+            return self.sync()
         if seen == self.seen:
             return
-        if chain is not None and self.seen is not None and self.seen[-1] != made and chain.grab is None:
-            self.seen = seen  # (the shape / BPMs / way changed: the chain's areas laid again with them)
-            chain.lay()
-            self.seen = None
-            return self.sync()
         self.seen = seen
         for w in self.catch_parts:
             w.state(["!disabled" if how == "catch" else "disabled"])
@@ -448,9 +459,12 @@ class MelodyWindow(tk.Toplevel):
         changing = at == "snap" and self.step_on.get()
         for w in (self.step_to.entry, self.step_button):
             w.state(["!disabled"] if changing else ["disabled"])
-        if not self.step_on.get() and "step" in self.graphs:  # (ticked off: its graph window goes, graph kept)
-            self.graphs["step"].close()
         shape = self.shape.value()
+        # (a graph window that no longer counts goes, its graph kept: ticked off, Every not picked, another shape;
+        # hunt 2026-10-29: they stayed open, edits there changed nothing)
+        for kind, gone in (("step", not changing), ("shape", shape != "drawn")):
+            if gone and kind in self.graphs:
+                self.graphs[kind].close()
         words = WORDS[shape]
         for w, key in zip(self.bpm_words, words):
             w.config(text=tr(key) if key else "")
@@ -503,8 +517,12 @@ class MelodyWindow(tk.Toplevel):
             if not step or self.step_on.get() and self.step_range() is None:
                 problem = tr("melody.bad_step")
             elif self.step_on.get():  # (the step changing over the area: its graph, user 2026-10-29)
-                self.runs = step_runs(*self.step_range(), graph_pts(app, "step"), self.step_scale(), area[0],
-                                      area[1], app.ppq)
+                key = (self.step_range(), str(graph_pts(app, "step")), self.step_scale(), area, app.ppq)
+                got = getattr(self, "_step_runs", None)  # (made again only when these change: BPM keys didn't
+                if got is None or got[0] != key:         # need it, hunt 2026-10-29)
+                    got = self._step_runs = (key, step_runs(*key[0], graph_pts(app, "step"), key[2], area[0],
+                                                            area[1], app.ppq))
+                self.runs = got[1]
             else:
                 self.runs = snap_runs(step, area[0], area[1], app.ppq)
         elif not melody_ok:
@@ -542,7 +560,12 @@ class MelodyWindow(tk.Toplevel):
             self.hint.config(text=text, foreground=look.HINT)
         else:
             self.hint.config(text=problem, foreground=look.WARN)
-        self.make_preview(None if problem else area)
+        # (right after Fill: no preview until a setting or the area changes, hunt 2026-10-29: it lay on top of the
+        # fill just made, which looked like it was still only a preview; the tempo and Random's new roll don't count)
+        still = seen[:16] + seen[18:]
+        if self.hide_next:
+            self.hidden_for, self.hide_next = still, False
+        self.make_preview(None if problem or still == self.hidden_for else area)
         app.roll.request_redraw()  # (the notes it follows light up)
 
     def make_preview(self, area):
@@ -626,8 +649,10 @@ class MelodyWindow(tk.Toplevel):
         if self.go.instate(["disabled"]) or not self.runs:
             return
         app, pane = self.app, self.app.tempo_pane
-        if pane.box.mode != "visual":  # (jumps are the visual tempo's, like a Domino paste)
+        if pane.box.mode != "visual":  # (jumps are the visual tempo's, like a Domino paste; the box drawn in Heard
+            bands = list(pane.bands)   # tempo kept through the switch, which drops boxes: hunt 2026-10-29)
             pane.box.set_mode("visual")
+            pane.bands = bands
         (a, b), _ = self.fill_area(pane.bands_reach())
         clip, plain = self.make_clip(app.tempo, self.runs, a, b, seed=self.preview_seed)  # (= the preview)
         if clip is None:  # (no catch-up could be made: nothing changed, no undo step)
@@ -635,6 +660,7 @@ class MelodyWindow(tk.Toplevel):
             return
         pane.put_copies(clip, a, tr("melody.step"), teal=False)
         self.preview_seed = random.randrange(1 << 30)  # (each Fill a new random: the preview shows the next one)
+        self.hide_next = True  # (once something changes)
         n = anchor_count(self.runs)
         text = trn("melody.filled", n, n=n)
         if plain:
@@ -656,7 +682,7 @@ class MelodyWindow(tk.Toplevel):
         # what was heard over the area: Keep the audio plays it (no note moves, hunt 2026-10-29); the catch-up way
         # comes back to the tempo heard at its start (not the shown one: inside a Keep timing part they differ)
         heard = heard_points(tempo, pane.base(), app.ppq, a, b)
-        normal = self.normal_at(a, tempo) if how == "audio" else heard[0][1]
+        normal = self.normal_at(a, tempo, heard) if how == "audio" else heard[0][1]
 
         def clip_for(plain):
             return fill_clip(runs, a, b, self.shape.value(), lo, hi, normal, how,
@@ -737,6 +763,7 @@ class MelodyWindow(tk.Toplevel):
             pane.box.set_mode("visual")
         if self.live_chain() is None:
             self.chain = JumpChain(self)
+            self.chain.made = self.made_key()  # (the settings it's laid with)
             self.chain_seed = random.randrange(1 << 30)  # (one random per chain: a click doesn't shuffle it)
         self.chain.press(e)
         self.seen = None
