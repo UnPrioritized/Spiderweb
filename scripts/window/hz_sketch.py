@@ -22,6 +22,7 @@ from window.hz_bend import BEND, LINE_NEAR, NEAR
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
 SKETCH_THIN, SKETCH_THICK = 3, 9
 END_GAP = 10  # px: the ">" this far after a note's end (its middle)
+HOLD_MS = 300  # a press on a line held still this long grabs the whole note (sketch_grab)
 
 
 class HzSketch:
@@ -82,12 +83,24 @@ class HzSketch:
         pts = n.get("bend")
         u = min(1.0, max(0.0, (self.beat_at(e.x) - n["t"]) / max(n["len"], 1e-12)))
         j = None if not pts or len(pts) <= 2 else min(len(pts) - 2, max(0, sum(p[0] <= u for p in pts) - 1))
-        self.drag = {"kind": "sketchpiece", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
-                     "orig": copy.deepcopy(pts), "key": n["key"],
-                     "name": tr("hz.step_move") if j is None else tr("hz.step_note_bend")}
+        d = self.drag = {"kind": "sketchpiece", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
+                         "orig": copy.deepcopy(pts), "key": n["key"],
+                         "name": tr("hz.step_move") if j is None else tr("hz.step_note_bend")}
+        self.after(HOLD_MS, lambda: self.sketch_grab(d))
         self.redraw()
         self.show_status(e)
         return True
+
+    def sketch_grab(self, d):
+        """The piece pressed in drag d held still for HOLD_MS: the whole note is grabbed instead, it moves like the
+        Pencil's (hz_mouse's "note" drag: in time and key, on the grid)."""
+        if self.drag is not d or d["moved"] or not self.winfo_exists():
+            return
+        self.drag = {"kind": "note", "i": d["i"], "before": d["before"], "beat": self.beat_at(d["x"]),
+                     "key": self.key_at(d["y"]), "orig": copy.deepcopy(self.tones), "x": d["x"], "y": d["y"],
+                     "moved": False, "slide": None, "whole": False, "name": tr("hz.step_move"), "grabbed": True}
+        self.canvas.config(cursor="fleur")
+        self.redraw()
 
     def sketch_piece_to(self, d, n, e):
         """The piece held in drag d up / down: both its points by as many keys as the mouse moved (whole keys;
@@ -159,6 +172,7 @@ class HzSketch:
         """The notes in view as lines (Sketch tool), each in its colours (fill, edge; selected ones in `selected`)."""
         c, s, most, w = self.canvas, self.s, self.bend_most(), self.canvas.winfo_width()
         wide = self.sketch_wide()
+        grabbed = self.drag and self.drag.get("grabbed")
         r = 3.5 * s
         for i, n in enumerate(self.tones):
             x0, x1 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"])
@@ -177,6 +191,9 @@ class HzSketch:
                 xy, ys = [x0, y, max(x1, x0 + 1), y], [y, y]
             c.create_line(*xy, fill=edge, width=wide + 2 * max(1, round(s)), capstyle="round", joinstyle="round")
             c.create_line(*xy, fill=fill, width=wide, capstyle="round", joinstyle="round")
+            if grabbed and i in self.sel:  # (held still: the whole note moves, a dashed box round it)
+                pad = wide / 2 + 4 * s
+                c.create_rectangle(x0 - pad, min(ys) - pad, x1 + pad, max(ys) + pad, outline=BEND, dash=(4, 3))
             for x, y in ((x0, ys[0]), (x1, ys[-1])):
                 c.create_oval(x - r, y - r, x + r, y + r, fill=BEND, outline=BEND)
             x, y, a = x1 + END_GAP * s, ys[-1], 3 * s  # (">": the end, where a drag makes it longer / shorter)
