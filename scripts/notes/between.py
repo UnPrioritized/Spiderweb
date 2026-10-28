@@ -279,6 +279,10 @@ class Pair:
         out = self.geometry(f)
         out.update(_velocity(a, b, f))
         out["end_dot"] = a.get("end_dot", False) if f < 0.5 else b.get("end_dot", False)
+        x, y = a.get("by_snap"), b.get("by_snap")  # (Notes by snap: both on = the step length blends, else halfway)
+        snap = x + (y - x) * f if x and y else x if f < 0.5 else y
+        if snap:
+            out["by_snap"] = snap
         tm = _tumour(a, b, f, rev)
         if tm:
             out["tumour"] = tm
