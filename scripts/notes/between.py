@@ -283,6 +283,9 @@ class Pair:
         snap = x + (y - x) * f if x and y else x if f < 0.5 else y
         if snap:
             out["by_snap"] = snap
+            end = next((e for e in ((a, b) if f < 0.5 else (b, a)) if e.get("by_snap") == snap), None)
+            if end and end.get("by_snap_name"):  # (a note length typed at that end: shown so)
+                out["by_snap_name"] = end["by_snap_name"]
         tm = _tumour(a, b, f, rev)
         if tm:
             out["tumour"] = tm

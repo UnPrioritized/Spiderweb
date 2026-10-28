@@ -813,7 +813,7 @@
  "app.by_snap_step": "Step",
  "app.by_snap_unit": "ticks",
  "app.by_snap_unit_one": "tick",
- "app.by_snap_tip": "Every note is one step long, so the line becomes a staircase on the grid. Each step gets the keys the line reaches in it; a flat part gets one note per step.\nSteps count from the line's start. Ticking it takes the Snap box's length; change it here after.",
+ "app.by_snap_tip": "Every note is one step long, so the line becomes a staircase on the grid. Each step gets the keys the line reaches in it; a flat part gets one note per step.\nSteps count from the line's start. Ticking it takes the Snap box's length; change it here after, in ticks or as a note length like 1/32 or 3/16.",
  "app.point": "Point",
  "app.too_many_points": "Too many points to list ({n}): drag them on the piano roll.",
  "app.tick": "Tick",

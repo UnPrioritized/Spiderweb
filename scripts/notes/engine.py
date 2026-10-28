@@ -8,6 +8,7 @@ The maths for each kind lives in its own file: paths.py (lines, polylines, freeh
 import itertools
 import json
 import math
+import re
 import threading
 from contextlib import contextmanager
 
@@ -208,6 +209,20 @@ def merges_unmade():
 BY_SNAP_MOST = 10 ** 4  # the longest "Notes by snap" step, beats
 
 
+def snap_name(text):
+    """A typed note length like "1/32" or " 3 / 16 " -> "3/16" (whole-note fraction, like the Snap list), else None."""
+    m = re.fullmatch(r"\s*(\d{1,6})\s*/\s*(\d{1,6})\s*", text) if isinstance(text, str) else None
+    if not m or not int(m.group(1)) or not int(m.group(2)):
+        return None
+    return f"{int(m.group(1))}/{int(m.group(2))}"
+
+
+def snap_name_beats(name):
+    """"3/16" -> its length in beats (quarter notes)."""
+    a, b = name.split("/")
+    return int(a) * 4 / int(b)
+
+
 def clean_by_snap(v):
     """A "Notes by snap" step length (beats) from a file, or None (off / unusable)."""
     try:
@@ -249,6 +264,9 @@ def clean_shape(sh):
     st = clean_by_snap(sh.get("by_snap")) if out["kind"] in LINE_KINDS else None
     if st:  # "Notes by snap": every note one step long, in beats (paths.snap_steps)
         out["by_snap"] = st
+        name = snap_name(sh.get("by_snap_name"))
+        if name and abs(snap_name_beats(name) - st) < 1e-9:  # (typed as a note length: shown so, follows the PPQ)
+            out["by_snap_name"] = name
     bt = clean_between(sh.get("between")) if out["kind"] in BETWEEN_KINDS else None
     if bt:  # one of an Add between group (between.py)
         out["between"] = bt

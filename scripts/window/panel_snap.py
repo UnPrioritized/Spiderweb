@@ -7,10 +7,10 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.engine import BY_SNAP_MOST
+from notes.engine import BY_SNAP_MOST, snap_name, snap_name_beats
 from notes.tumour import LINE_KINDS
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_word
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_text
 
 STEPS = (1, 10, 1)  # quick changes of the step in ticks (widgets.Scrub): step, Shift step, Ctrl step
 
@@ -31,14 +31,26 @@ class SnapPanel:
         self.by_snap_var = tk.StringVar()
         self.by_snap_entry = ttk.Entry(row, textvariable=self.by_snap_var, width=6)
         self.by_snap_entry.pack(side="left", padx=4)
-        unit_word(ttk.Label(row, foreground=look.HINT), self.by_snap_var, "app.by_snap_unit",
-                  "app.by_snap_unit_one").pack(side="left")
+        unit = ttk.Label(row, foreground=look.HINT)
+        unit.pack(side="left")
+
+        def put_unit(*_):  # ("ticks" after a number, nothing after a note length like 1/16)
+            text = self.by_snap_var.get()
+            unit.config(text="" if snap_name(text) else unit_text(text, "app.by_snap_unit", "app.by_snap_unit_one"))
+        self.by_snap_var.trace_add("write", put_unit)
+        put_unit()
         for w in (self.by_snap_tick, lb, self.by_snap_entry):
             Tooltip(w, tr("app.by_snap_tip"))
         self.by_snap_entry.bind("<Return>", lambda e: self.on_by_snap())
         leave_box(self, self.by_snap_entry, self.by_snap_var, self.on_by_snap)
-        Scrub(self, [(self.by_snap_entry, self.by_snap_var, self.on_by_snap)], STEPS, 1, BY_SNAP_MOST * self.ppq,
-              label=lb)
+        scrub = Scrub(self, [(self.by_snap_entry, self.by_snap_var, self.on_by_snap)], STEPS, 1,
+                      BY_SNAP_MOST * self.ppq, label=lb)
+        scrub.read = self.step_ticks  # (dragging / Up / Down from a note length: from its ticks)
+
+    def step_ticks(self, text):
+        """The Step box's text -> ticks: a note length ("1/32", like the Snap list) or a number of ticks."""
+        name = snap_name(text)
+        return snap_name_beats(name) * self.ppq if name else calc(text)
 
     def by_snap_targets(self):
         """The selected lines (nothing selected = none: new shapes always start without it)."""
@@ -48,10 +60,12 @@ class SnapPanel:
     def sync_by_snap(self):
         tgts = self.by_snap_targets()
         ons = [bool(t.get("by_snap")) for t in tgts]
-        steps = {math.floor(t["by_snap"] * self.ppq + 0.5) for t in tgts if t.get("by_snap")}
+        # (shown as typed: a note length's name, else whole ticks)
+        steps = {t.get("by_snap_name") or fmt(math.floor(t["by_snap"] * self.ppq + 0.5)) for t in tgts
+                 if t.get("by_snap")}
         self._loading = True
         self.by_snap_on.set(bool(ons) and all(ons))
-        self.by_snap_var.set(fmt(steps.pop()) if len(steps) == 1 else "")
+        self.by_snap_var.set(steps.pop() if len(steps) == 1 else "")
         self._loading = False
         self.by_snap_tick.state(["alternate" if any(ons) and not all(ons) else "!alternate"])
         self.by_snap_tick.state(["!disabled" if tgts else "disabled"])
@@ -72,33 +86,44 @@ class SnapPanel:
         on = self.by_snap_on.get()
         if self.sels:
             self.push_undo(name=tr("app.by_snap"))
-        step = self.snap_ticks() / self.ppq  # (turned on: the Snap box's length, whole ticks)
+        # turned on: the Snap box's length (a note length of the list keeps its name, else whole ticks)
+        name = snap_name(self.snap.get())
+        step = snap_name_beats(name) if name else self.snap_ticks() / self.ppq
         for t in tgts:
             if not on:
                 t.pop("by_snap", None)
+                t.pop("by_snap_name", None)
             elif not t.get("by_snap"):
                 t["by_snap"] = step
+                if name:
+                    t["by_snap_name"] = name
         self.shapes_changed()
         self.sync_by_snap()
 
     def on_by_snap(self, left=False):
-        """The step box (whole ticks): every ticked line takes it."""
+        """The step box (whole ticks, or a note length like 1/32 kept as one): every ticked line takes it."""
         e = self.by_snap_entry
         if self._loading or e.instate(["disabled"]) or left and unchanged(e):
             return
+        name = snap_name(self.by_snap_var.get())
         try:
-            ticks = calc(self.by_snap_var.get())
+            ticks = self.step_ticks(self.by_snap_var.get())
             if not 1 <= ticks <= BY_SNAP_MOST * self.ppq:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
             bad(e)
             return
         good(e)
-        step = math.floor(ticks + 0.5) / self.ppq
+        step = snap_name_beats(name) if name else math.floor(ticks + 0.5) / self.ppq
         tgts = [t for t in self.by_snap_targets() if t.get("by_snap")]
-        if all(t["by_snap"] == step for t in tgts):
+        if all(t["by_snap"] == step and t.get("by_snap_name") == name for t in tgts):
             return
         self.begin_edit(("by_snap", tuple(sorted(self.sels))))
         for t in tgts:
             t["by_snap"] = step
+            t.pop("by_snap_name", None)
+            if name:
+                t["by_snap_name"] = name
+        if name:
+            self.by_snap_var.set(name)  # (tidied: " 1 / 32" -> "1/32")
         self.shapes_changed()
