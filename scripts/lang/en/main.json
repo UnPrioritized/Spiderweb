@@ -613,6 +613,7 @@
  "tracks.box_cut_one": "A shape cut at the box's edge: its parts are plain notes now.",
  "tracks.add_tracks": "Add Tracks…",
  "tracks.properties": "Properties…",
+ "tracks.properties_mixed": "Properties… (holds several channels)",
  "tracks.properties_title": "Track Properties",
  "tracks.properties_name": "Name",
  "tracks.properties_channel": "Channel",

@@ -1484,8 +1484,11 @@ class TrackList(tk.Canvas):
         menu.add_separator()
         menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_tracks(gone),
                          state="normal" if gone else "disabled")
-        menu.add_command(label=tr("tracks.properties"), command=lambda: self.ask_properties(s),
-                         state="normal" if self.has_properties(s) and len(group) == 1 else "disabled")
+        # (a folder: one channel for the track would put every channel's notes on it, user 2026-10-28)
+        mixed = row is not None and row >= 0 and self.mixed(row)
+        menu.add_command(label=tr("tracks.properties_mixed" if mixed else "tracks.properties"),
+                         command=lambda: self.ask_properties(s),
+                         state="normal" if self.has_properties(s) and len(group) == 1 and not mixed else "disabled")
         try:
             menu.tk_popup(e.x_root, e.y_root)
         finally:
