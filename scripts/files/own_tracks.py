@@ -15,6 +15,10 @@ INTO_MOST = COUNT_MOST  # tracks one shape's colours go on at most (its "into": 
 # a track of yours (its notes' slot engine.own_slot(FILE0 + n, its channel)); the track list's id stays -1 - n
 FILE0 = ID_MOST
 FILE_MOST = FILE0 + COUNT_MOST  # into entries below this
+# a PART of loaded track n (PLAN #11 D, user 2026-10-28: its channels pulled out, the notes stay the file's): its
+# place in file_order n + PART * (part id + 1), its track list id -1 - that (the track's own row keeps -1 - n)
+PART = 1 << 20
+PARTS_MOST = 15  # parts of one track at most (16 channels)
 
 
 def clean_name(text):
@@ -111,9 +115,13 @@ def plan(slots, own, filled=None):
 
 def clean_file_order(raw):
     """A project's "file_order" as read (the loaded MIDI's track numbers in the order they're listed, D4): a list of
-    every number 0..n-1 once, else None (the file's own order)."""
-    if (not isinstance(raw, list) or not 0 < len(raw) <= COUNT_MOST or any(type(n) is not int for n in raw)
-            or sorted(raw) != list(range(len(raw)))):
+    every number 0..n-1 once (+ parts' part_key, PLAN #11 D), else None (the file's own order)."""
+    if (not isinstance(raw, list) or not 0 < len(raw) <= COUNT_MOST * 2 or any(type(n) is not int or n < 0
+                                                                             for n in raw)
+            or len(set(raw)) != len(raw)):
+        return None
+    plain = [n for n in raw if n < PART]
+    if sorted(plain) != list(range(len(plain))) or any(key_track(n) >= len(plain) for n in raw):
         return None
     return None if raw == list(range(len(raw))) else list(raw)
 
@@ -141,19 +149,67 @@ def clean_file_props(raw):
             continue
         name = v.get("name") if isinstance(v.get("name"), str) else None
         ch = v.get("ch") if type(v.get("ch")) is int and 0 <= v["ch"] <= 15 else None
-        if name is not None or ch is not None:
-            out[n] = {"name": name[:NAME_MOST] if name is not None else None, "ch": ch}
+        parts = clean_parts(v.get("parts")) if n < PART else []
+        if name is not None or ch is not None or parts:
+            out[n] = {"name": name[:NAME_MOST] if name is not None else None, "ch": ch,
+                      **({"parts": parts} if parts else {})}
     return out
 
 
-def file_order(lm, order=None, gone=()):
+def clean_parts(raw):
+    """A loaded track's "parts" as read (PLAN #11 D: channels pulled out into rows of their own): [{"id" 0.., "chs"
+    [channels in row order]}], ids and channels each once; anything else left out."""
+    out, ids, used = [], set(), set()
+    for p in raw if isinstance(raw, list) else []:
+        if not isinstance(p, dict) or type(p.get("id")) is not int or not 0 <= p["id"] < PART // 2 \
+                or p["id"] in ids or not isinstance(p.get("chs"), list):
+            continue
+        chs = [c for c in dict.fromkeys(p["chs"]) if type(c) is int and 0 <= c <= 15 and c not in used]
+        if chs and len(out) < PARTS_MOST:
+            ids.add(p["id"])
+            used |= set(chs)
+            out.append({"id": p["id"], "chs": chs})
+    return out
+
+
+def part_key(n, j):
+    """Loaded track n's part j as a file_order entry (its list id: -1 - this)."""
+    return n + PART * (j + 1)
+
+
+def key_track(k):
+    """A file_order entry's track number in the file (a part's = its track's)."""
+    return k % PART
+
+
+def key_part(k):
+    """A file_order entry's part id, -1 = the track's own row."""
+    return k // PART - 1
+
+
+def part_keys(props, n_tracks):
+    """Every part's file_order entry (props = app.file_props), by track then their row order."""
+    return [part_key(n, p["id"]) for n in sorted(props) if n < n_tracks for p in props[n].get("parts", ())]
+
+
+def file_order(lm, order=None, gone=(), props=None):
     """A loaded MIDI's track numbers in the order they're listed and written (none loaded: []): order (dragged in the
     track list, D4) when it fits the file, else the file's own; the ones in gone (removed, group E) left out. The
-    piano roll keeps drawing in the file's order (user 2026-10-26 picked B)."""
+    piano roll keeps drawing in the file's order (user 2026-10-26 picked B). Parts (props' "parts", PLAN #11 D) are
+    listed by their part_key: where order has them, else right after their track."""
     if lm is None:
         return []
     n = len(lm.tracks)
-    rows = list(order) if order is not None and len(order) == n else list(range(n))
+    parts = part_keys(props or {}, n)
+    plain = [k for k in order if k < PART] if order is not None else []
+    rows = [k for k in order if k < PART or k in parts] if order is not None and len(plain) == n \
+        else list(range(n))
+    for k in parts:
+        if k not in rows:
+            at = rows.index(key_track(k)) + 1
+            while at < len(rows) and rows[at] >= PART and key_track(rows[at]) == key_track(k):
+                at += 1
+            rows.insert(at, k)
     return [k for k in rows if k not in gone] if gone else rows
 
 

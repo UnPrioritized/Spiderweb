@@ -222,7 +222,8 @@ RW_TICK, RW_RUN, RW_DONE, RW_WRUN, RW_EOT, RW_INS, RW_SKIP = range(7)
 RW_SIZE = 7
 
 
-def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st, base, skip, chan=-1):
+def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st, base, skip, chan=-1,
+            keep=0xFFFF, meta=1):
     """Writes the whole events in b[p:end] (a track walk() read without BAD) into out from o. use_map: each event's
     tick moved through the Keep timing map (bp_n -> bp_f: tempo_file.file_plan's to_file, the very same rule:
     anchors exactly, between two the same share of the way). drop[type] = 1: meta events of that type left
@@ -230,7 +231,9 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
     in order; event k = ins_b[ins_at[k]:ins_at[k + 1]]), each before the first event at or after its tick; the
     ones past the track's end before its End of Track (which then moves later). Hidden events (Extract: skip, b[0]
     = the track's byte base) left out, their time carried on. chan 0-15: every channel event written on that channel
-    (Track Properties on a loaded track, group E; -1 = as it is). Stops at the first event not wholly in b, or one
+    (Track Properties on a loaded track, group E; -1 = as it is). keep = bits of the channels whose events are
+    written, meta 0 = no meta / SysEx events but its End of Track (a loaded track's PART, PLAN #11 D: the track
+    written once per part, each with its own channels; the left out ones' time carried on). Stops at the first event not wholly in b, or one
     that wouldn't fit in out. Returns (where it stopped in b, where it stopped in out)."""
     tick = st[RW_TICK]
     run = st[RW_RUN]
@@ -359,6 +362,12 @@ def rewrite(b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, o
             si += 1
         if si < len(skip) and skip[si] == base + p and s < 0xF0:  # (an extracted note's on / off: left out too)
             if explicit:
+                run = s
+            tick = t
+            p = q
+            continue
+        if (s < 0xF0 and not (keep >> (s & 15)) & 1) or (s >= 0xF0 and meta == 0 and not eot):  # (another part's)
+            if explicit and s < 0xF0:
                 run = s
             tick = t
             p = q

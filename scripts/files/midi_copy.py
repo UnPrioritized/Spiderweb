@@ -15,6 +15,7 @@ import numpy as np
 from files import midi_scan, safefile, speed
 from files.midi_out import name_event
 from files.midi_read import BIGGEST_EVENT, PIECE, SCAN_WORKERS, Cancelled, FileChanged, MidiError
+from files.own_tracks import PART, key_track
 
 NAME = 0x03  # a track name's meta event type (Track Properties' new name goes in its place)
 
@@ -48,7 +49,8 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
     one order puts there, anything between tracks stays where it is; tracks left out of it aren't written (removed,
     group E). props: {track number: {"name": its new name or None, "ch": its new channel 0-15 or None}} (Track
     Properties, group E): those tracks written again, the name in place of theirs at tick 0, every channel event on
-    that channel."""
+    that channel. PARTS (PLAN #11 D): order may hold own_tracks.part_key entries = that track written again; props
+    of an entry may hold "keep" (channel bits written) and "meta" 0 (no meta / SysEx: a part's)."""
     if not mf.scanned:
         raise ValueError("scan() the file first")
     if same_file(mf.path, dst) or same_file(mf.path, dst + ".tmp"):  # (safefile's temp file: writing it would
@@ -76,13 +78,22 @@ class _Work:
         self.added = added
         tracks = [what[0] for kind, *what in mf.pieces if kind == "track"]
         by = {t.number: t for t in tracks}
-        if order is not None and (len(set(order)) != len(order) or not set(order) <= set(by)
+        props = dict(props or {})
+        if order is not None:  # (a damaged track's parts: never written, the track copied whole)
+            broken = {k for k in order if k >= PART and (key_track(k) not in by or not by[key_track(k)].whole)}
+            order = [k for k in order if k not in broken]
+            for k in broken:
+                props.pop(k, None)
+                if key_track(k) in props:
+                    props[key_track(k)] = {x: v for x, v in props[key_track(k)].items() if x != "keep"}
+        if order is not None and (len(set(order)) != len(order) or not {key_track(k) for k in order} <= set(by)
                                   or list(order) == [t.number for t in tracks]):
             order = None  # (not some of these tracks once each / the file's own: copied as it is)
-        # (tracks left out of order = removed in the track list, group E: not written, the header counts the rest)
-        self.order = None if order is None else [by[n] for n in order]
+        # (tracks left out of order = removed in the track list, group E: not written, the header counts the rest;
+        # a part (PLAN #11 D) = its track written again with only its channels: (track, its order entry))
+        self.order = None if order is None else [(by[key_track(k)], k) for k in order]
         self.hidden = hidden or (lambda n: NO_SKIP)
-        self.props = props or {}
+        self.props = props
         self.done, self.written = 0, 0
         self.buf = bytearray(PIECE)
         self.out = None
@@ -196,54 +207,62 @@ class _Work:
                         yield piece
                     continue
                 pos += 1
-                if added is not None and pos in added.before:  # (your tracks placed before the pos-th one)
-                    yield from self.own(added.before[pos])
-                if self.order is not None and pos >= len(self.order):  # (tracks removed: fewer written)
-                    continue
-                t = what[0] if self.order is None else self.order[pos]
-                head = self.read_exact(f, t.head, 8)
-                rest.update(head)
-                rt = self.retime
-                changed = t.whole and ((rt is not None and (rt.bp is not None or t.number in rt.tracks))
-                                       or len(self.hidden(t.number)) > 0 or t.number in self.props)
-                if (self.walk or changed) and t.whole:
-                    # a changed track: its bytes READ are checked (it comes out different); else what's written
-                    h = hashlib.blake2b(digest_size=16)
-                    hin = h if changed else None
-                    if t.size <= HELD_TRACK:  # (written into memory once: its length known)
-                        pieces = list(self.rewritten(f, t, None if changed else h, hin))
-                        yield b"MTrk" + sum(len(p) for p in pieces).to_bytes(4, "big")
-                        self.written += 8
-                        yield from pieces
-                    else:  # (a big track: once to count its bytes, once to write them)
-                        size = self.rewritten(f, t, None, None, count=True)
-                        yield b"MTrk" + size.to_bytes(4, "big")
-                        self.written += 8
-                        yield from self.rewritten(f, t, None if changed else h, hin)
-                    if changed and h.hexdigest() != t.hash:  # (read differently than when loaded)
-                        raise FileChanged()
-                    if h.hexdigest() != t.hash:
-                        raise MidiError("midi.check_failed", track=t.number + 1)
-                else:  # (a damaged track is only ever copied, its length as the file has it)
-                    yield head
-                    self.written += 8
-                    if t.size < CHECK_APART:  # (handing a tiny track over costs more than its hash)
-                        h = hashlib.blake2b(digest_size=16)
-                        for piece in self.raw(f, t.start, t.size):
-                            h.update(piece)
-                            yield piece
-                        if h.hexdigest() != t.hash:
-                            raise MidiError("midi.check_failed", track=t.number + 1)
+                # (the order's entries past the file's track count, parts: after its last track)
+                for at in range(pos, max(pos + 1, len(self.order)) if self.order is not None and i == last
+                                else pos + 1):
+                    if added is not None and at in added.before:  # (your tracks placed before the at-th one)
+                        yield from self.own(added.before[at])
+                    if self.order is not None and at >= len(self.order):  # (tracks removed: fewer written)
                         continue
-                    job = checks.start(t)  # (checked on another core while the copy goes on)
-                    for piece in self.raw(f, t.start, t.size):
-                        checks.put(job, piece)
-                        yield piece
-                    checks.end(job)
-                    if checks.bad:  # (stopped at the next track, like before)
+                    t, key = (what[0], what[0].number) if self.order is None else self.order[at]
+                    if not (yield from self._track(f, t, key, rest, checks)):
                         return
             if last == len(mf.pieces) - 1 and added is not None:
                 yield from self.own(added.chunks)
+
+    def _track(self, f, t, key, rest, checks):
+        """Track t written (key: its order entry, a part's own); False = a check failed (stop)."""
+        head = self.read_exact(f, t.head, 8)
+        rest.update(head)
+        rt = self.retime
+        changed = t.whole and ((rt is not None and (rt.bp is not None or t.number in rt.tracks))
+                               or len(self.hidden(t.number)) > 0 or key in self.props)
+        if (self.walk or changed) and t.whole:
+            # a changed track: its bytes READ are checked (it comes out different); else what's written
+            h = hashlib.blake2b(digest_size=16)
+            hin = h if changed else None
+            if t.size <= HELD_TRACK:  # (written into memory once: its length known)
+                pieces = list(self.rewritten(f, t, key, None if changed else h, hin))
+                yield b"MTrk" + sum(len(p) for p in pieces).to_bytes(4, "big")
+                self.written += 8
+                yield from pieces
+            else:  # (a big track: once to count its bytes, once to write them)
+                size = self.rewritten(f, t, key, None, None, count=True)
+                yield b"MTrk" + size.to_bytes(4, "big")
+                self.written += 8
+                yield from self.rewritten(f, t, key, None if changed else h, hin)
+            if changed and h.hexdigest() != t.hash:  # (read differently than when loaded)
+                raise FileChanged()
+            if h.hexdigest() != t.hash:
+                raise MidiError("midi.check_failed", track=t.number + 1)
+            return True
+        # (a damaged track is only ever copied, its length as the file has it)
+        yield head
+        self.written += 8
+        if t.size < CHECK_APART:  # (handing a tiny track over costs more than its hash)
+            h = hashlib.blake2b(digest_size=16)
+            for piece in self.raw(f, t.start, t.size):
+                h.update(piece)
+                yield piece
+            if h.hexdigest() != t.hash:
+                raise MidiError("midi.check_failed", track=t.number + 1)
+            return True
+        job = checks.start(t)  # (checked on another core while the copy goes on)
+        for piece in self.raw(f, t.start, t.size):
+            checks.put(job, piece)
+            yield piece
+        checks.end(job)
+        return not checks.bad  # (stopped at the next track, like before)
 
     def own(self, chunks):
         for piece in chunks:
@@ -270,12 +289,12 @@ class _Work:
             self.step(n)
             yield piece
 
-    def rewritten(self, f, t, h, hin, count=False):
+    def rewritten(self, f, t, key, h, hin, count=False):
         """count: how many bytes t comes to (an int); else a generator of its bytes, each put into h too (when
         given), the bytes read into hin."""
         if count:
-            return sum(len(p) for p in self._rewrite(f, t, False, None))
-        return self._hashed(self._rewrite(f, t, True, hin), h)
+            return sum(len(p) for p in self._rewrite(f, t, key, False, None))
+        return self._hashed(self._rewrite(f, t, key, True, hin), h)
 
     def _hashed(self, pieces, h):
         for p in pieces:
@@ -293,7 +312,7 @@ class _Work:
             self.out = bytearray(need)
         return self.out
 
-    def _rewrite(self, f, t, report, hin):
+    def _rewrite(self, f, t, key, report, hin):
         loops = speed.loops()
         rewrite = loops.midi_rewrite if loops else midi_scan.rewrite
         rt = self.retime
@@ -302,16 +321,19 @@ class _Work:
         use_map = rt is not None and rt.bp is not None
         drop = rt.drop if rt is not None else np.zeros(128, np.uint8)
         ins_t, ins_at, ins_b = (rt.inserts.get(t.number) if rt is not None else None) or NO_INSERTS
-        prop = self.props.get(t.number) or {}
+        prop = self.props.get(key) or {}  # (its order entry: a part has its own)
+        keep, meta = int(prop.get("keep", 0xFFFF)), int(prop.get("meta", 1))
         chan = -1 if prop.get("ch") is None else int(prop["ch"])
-        if prop.get("name") is not None:  # (its name events out, the new one first)
+        if (keep != 0xFFFF or not meta) and len(ins_t):  # (a part: only the events put in on its channels)
+            ins_t, ins_at, ins_b = keep_inserts(ins_t, ins_at, ins_b, keep, meta)
+        if prop.get("name") is not None:  # (its name events out, the new one first; a part's own name)
             drop = drop.copy()
             drop[NAME] = 1
             ev = name_event(prop["name"])[1:]  # (without its time: put in at tick 0)
             ins_t = np.concatenate([np.zeros(1, np.int64), np.asarray(ins_t, np.int64)])
             ins_at = np.concatenate([np.zeros(1, np.int64), np.asarray(ins_at, np.int64) + len(ev)])
             ins_b = np.concatenate([np.frombuffer(ev, np.uint8), np.asarray(ins_b, np.uint8)])
-        skip = np.ascontiguousarray(self.hidden(t.number), np.int64)
+        skip =np.ascontiguousarray(self.hidden(t.number), np.int64)
         buf = self.buf
         out = self.out_for(min(len(buf), t.size))
         st = np.zeros(midi_scan.RW_SIZE, np.int64)
@@ -324,7 +346,7 @@ class _Work:
             else:
                 view, oview = memoryview(buf)[:filled], out
             used, o = rewrite(view, 0, filled, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, oview, 0, st,
-                              taken, skip, chan)
+                              taken, skip, chan, keep, meta)
             del view, oview
             if hin is not None and used:
                 hin.update(memoryview(buf)[:used])
@@ -419,6 +441,17 @@ class _Checks:
             self.end(self.open)
         for _ in self.threads:
             self.jobs.put(None)
+
+
+def keep_inserts(ins_t, ins_at, ins_b, keep, meta):
+    """Events put in (rewrite's ins_*) left with only those on keep's channels (+ the rest when meta)."""
+    ins_t, ins_at, ins_b = (np.asarray(a, np.int64 if k < 2 else np.uint8) for k, a in enumerate((ins_t, ins_at,
+                                                                                                    ins_b)))
+    s = ins_b[ins_at[:-1]].astype(np.int64)
+    ok = np.where(s < 0xF0, (keep >> (s & 15)) & 1 == 1, bool(meta))
+    sizes = np.diff(ins_at)[ok]
+    take = np.repeat(ok, np.diff(ins_at))
+    return ins_t[ok], np.concatenate([[0], np.cumsum(sizes)]).astype(np.int64), ins_b[take]
 
 
 def vlq(n):

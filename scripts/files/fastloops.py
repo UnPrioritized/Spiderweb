@@ -1834,7 +1834,7 @@ def warm():
     mu = np.zeros(1, np.uint16)  # (LoadedPlayer.muted: each track's channels muted, a bit each)
     midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
     midi_rewrite(u8, 0, 0, True, i1, i1.copy(), False, np.zeros(128, np.uint8), i1[:0], np.zeros(1, np.int64),
-                 u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64), 0, i1[:0], -1)
+                 u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64), 0, i1[:0], -1, 0xFFFF, 1)
     midi_note_ticks(u8, 0, 0, True, u8.copy(), 0, np.zeros(midi_scan.NT_SIZE, np.int64))
     midi_busy_hits(u8, 0, 0, 0, i1[:0], 1, np.zeros(midi_scan.BH_SIZE, np.int64), i1.copy(), i1.copy(),
                    np.zeros(2, np.int64), i1.copy(), i1.copy(), i1.copy(), u8.copy())

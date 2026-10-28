@@ -2002,7 +2002,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def file_rows(self):
         """The loaded MIDI's track numbers in the order they're listed (own_tracks.full_plan's files); none while
         it isn't loaded (waiting_rows)."""
-        return file_order(self.loaded, self.file_order, self.file_gone)
+        return file_order(self.loaded, self.file_order, self.file_gone, self.file_props)
 
     def waiting_rows(self):
         """Its MIDI not loaded (not found): the file's track numbers shapes are drawn into, listed first as tracks

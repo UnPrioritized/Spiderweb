@@ -44,7 +44,7 @@ from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
-from files.own_tracks import ID_MOST, clean_file_gone, clean_file_order, clean_file_props, clean_file_tracks, clean_own_tracks, new_id
+from files.own_tracks import ID_MOST, part_key, clean_file_gone, clean_file_order, clean_file_props, clean_file_tracks, clean_own_tracks, new_id
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_inserts, note_tracks, track_slots, write_midi
 from files.playback import OLD_NAMES, keep_saved
 from files.about import HERE, USER, VERSION
@@ -1041,6 +1041,20 @@ class ProjectFiles:
         if path:
             self.pvar["output"].set(os.path.normpath(path))
 
+    def copy_props(self):
+        """midi_copy's props: Track Properties' (app.file_props) + each PART (PLAN #11 D) as its own entry (its
+        channels alone, no meta events, its track's name) and its track without those channels."""
+        props, names = {}, self.file_tracks()
+        for n, p in self.file_props.items():
+            props[n] = {"name": p.get("name"), "ch": p.get("ch")}
+            parts = p.get("parts") or ()
+            if parts:
+                props[n]["keep"] = 0xFFFF & ~sum(1 << c for q in parts for c in q["chs"])
+            for q in parts:
+                props[part_key(n, q["id"])] = {"name": names.get(n, {}).get("name") or "", "ch": None,
+                                               "keep": sum(1 << c for c in q["chs"]), "meta": 0}
+        return props
+
     def export_loaded(self):
         """Export MIDI with a loaded MIDI: the file written out from itself (midi_copy: every byte copied and
         checked). The Conductor line still the file's own = exactly as it was loaded; changed (group C step 8) =
@@ -1127,7 +1141,7 @@ class ProjectFiles:
                           np.column_stack([hid.h_s, hid.h_e, hid.h_lane]))
         before = notes
         order = self.file_rows()  # (the file's tracks as the track list shows them: dragged, D4)
-        props = copy.deepcopy(self.file_props)  # (Track Properties' new names / channels: those tracks written again)
+        props = self.copy_props()  # (Track Properties' new names / channels: those tracks written again; parts)
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
         heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
