@@ -237,10 +237,11 @@ class HzSketch:
     def sketch_end_to(self, d, n, e):
         """The ">" held in drag d dragged sideways: the note ends at the grid line nearest the mouse (Shift: any
         tick), at least one step long. Its points stay on their beats: longer = the old end stays a point and a flat
-        piece goes on from it; shorter = the line is cut there."""
+        piece goes on from it (a plain note too: its line made, like the plugin's); shorter = the line is cut there."""
         was = d["orig"][d["i"]]
         n["len"] = max(self.shortest(e), self.snap(self.beat_at(e.x), e) - was["t"])
-        pts = was.get("bend")
+        pts = was.get("bend") or (n["len"] > was["len"] + 1e-12 and [[0.0, 0.0], [1.0, 0.0]])
+        n.pop("bend", None)  # (made again from the note as it was: dragged back, a plain note stays plain)
         if pts and abs(n["len"] - was["len"]) > 1e-12:
             cut = bend_part(was, was["t"], n["len"])
             if cut is None:  # (flat all along: its pieces kept, on their beats)
