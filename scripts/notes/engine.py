@@ -208,12 +208,15 @@ def merges_unmade():
 
 
 BY_SNAP_MOST = 10 ** 4  # the longest "Notes by snap" step, beats
+BY_SNAP_LEAST = 1 / 65535  # the shortest, beats (a tick at the highest PPQ; notes use at least a tick anyway)
 
 
 def snap_name(text):
     """A typed note length like "1/32" or " 3 / 16 " -> "3/16" (whole-note fraction, like the Snap list), else None."""
-    m = re.fullmatch(r"\s*(\d{1,6})\s*/\s*(\d{1,6})\s*", text) if isinstance(text, str) else None
-    if not m or not int(m.group(1)) or not int(m.group(2)):
+    m = re.fullmatch(r"\s*(\d{1,3})\s*/\s*(\d{1,3})\s*", text) if isinstance(text, str) else None
+    # (only what looks like a note: top 1-100, bottom 1-128 like the Snap list's own; "480/2" = a sum of ticks,
+    # hunt 2026-10-28)
+    if not m or not 1 <= int(m.group(1)) <= 100 or not 1 <= int(m.group(2)) <= 128:
         return None
     return f"{int(m.group(1))}/{int(m.group(2))}"
 
@@ -230,7 +233,7 @@ def clean_by_snap(v):
         v = float(v)
     except (TypeError, ValueError):
         return None
-    return min(v, BY_SNAP_MOST) if math.isfinite(v) and v > 0 else None
+    return min(max(v, BY_SNAP_LEAST), BY_SNAP_MOST) if math.isfinite(v) and v > 0 else None
 
 
 def clean_shape(sh):

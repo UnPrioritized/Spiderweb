@@ -117,7 +117,10 @@ def shared_settings(shapes):
             keep[key] = json.loads(json.dumps(vals[0]))
         else:
             lost.append(tr(name))
-    return keep, [tr("convert.settings_dropped", names=", ".join(lost))] if lost else []
+    names = {sh.get("by_snap_name") for sh in shapes}
+    if "by_snap" in keep and len(names) == 1 and None not in names:  # (Notes by snap's "1/32": kept too, hunt)
+        keep["by_snap_name"] = names.pop()
+    return keep,[tr("convert.settings_dropped", names=", ".join(lost))] if lost else []
 
 
 def to_live(shapes, paths, defaults, custom_defaults, k=None):

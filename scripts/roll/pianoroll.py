@@ -763,7 +763,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             knives = piece_knives(sh)  # (a piece: only the ones on its side, like its drawing)
             if knives:
                 out = [hd for hd in out if on_side(knives, hd[0], hd[1])]
-        elif sh.get("by_snap") and sh.get("cut"):  # (a Notes by snap piece the same: sliced.snap_piece)
+        elif sh.get("cut"):  # (a piece cut while it had Notes by snap the same: sliced.snap_piece)
             knives = piece_knives(sh)
             if knives:
                 out = [hd for hd in out if on_side(knives, hd[0], hd[1])]

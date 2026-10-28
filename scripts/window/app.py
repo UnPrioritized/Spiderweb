@@ -45,6 +45,7 @@ from notes.sustain import is_sustained
 from notes.strips import gap_of, has_strips, strip_colours, strip_laps, strip_spans
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
+from notes.tumour import LINE_KINDS
 from notes.polygon import POLYGON_DEFAULTS
 from notes.ripples import grows_free
 from notes.sliced import completed, fresh_marks, moved_by, steps_kept, turned_piece
@@ -1597,6 +1598,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.image_window.show_settings()  # (its Keys inside the new key range; One step in the new ticks)
         if self.ppq != before[0] and getattr(self, "tempo_box", None) is not None:
             self.tempo_box.sync()  # (the catch-up result is worked out in ticks, hunt 10-27)
+        if self.ppq != before[0] and hasattr(self, "by_snap_entry"):
+            self.sync_by_snap()  # (a step typed in ticks follows the PPQ: the box shows the new count, hunt 10-28)
 
     def all16(self):
         """True while Multi channel uses channel 10 too ("Use channel 10", shown only under Multi channel)."""
@@ -3081,6 +3084,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         n = (None if sh.get("merge") else  # (turned / slanted: made again from its shapes, merge.py)
              custom_note_count(sh, ppq) if sh["kind"] == "custom" else
              funnel_note_count(sh, ppq) if sh["kind"] == "funnel" else None)
+        if n is None and sh.get("by_snap") and sh["kind"] in LINE_KINDS:
+            # Notes by snap: at most the line's own notes + one per step (never made just to count: a 1-tick step on a
+            # long line is millions, hunt 2026-10-28)
+            plain = {k: v for k, v in sh.items() if k not in ("by_snap", "by_snap_name", "by_snap_end")}
+            ts = np.concatenate(cached_arrays(sh))[:, 0] * ppq
+            return len(self.notes_of(plain)) + int((ts.max() - ts.min()) / max(1.0, sh["by_snap"] * ppq)) + 2
         return len(self.notes_of(sh)) if n is None else n
 
     def notes_about(self, sh, ppq=None):

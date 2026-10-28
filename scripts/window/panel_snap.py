@@ -11,7 +11,8 @@ from notes.engine import BY_SNAP_MOST, snap_name, snap_name_beats
 from notes.paths import SNAP_ENDS
 from notes.tumour import LINE_KINDS
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_text
+from files.snap import DEFAULT_SNAP
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, unchanged, unit_text
 
 STEPS = (1, 10, 1)  # quick changes of the step in ticks (widgets.Scrub): step, Shift step, Ctrl step
 
@@ -74,11 +75,12 @@ class SnapPanel:
         tgts = self.by_snap_targets()
         ons = [bool(t.get("by_snap")) for t in tgts]
         # (shown as typed: a note length's name, else whole ticks)
-        steps = {t.get("by_snap_name") or fmt(math.floor(t["by_snap"] * self.ppq + 0.5)) for t in tgts
-                 if t.get("by_snap")}
+        steps = [t.get("by_snap_name") or fmt(math.floor(t["by_snap"] * self.ppq + 0.5)) for t in tgts
+                 if t.get("by_snap")]
         self._loading = True
         self.by_snap_on.set(bool(ons) and all(ons))
-        self.by_snap_var.set(steps.pop() if len(steps) == 1 else "")
+        # (different steps: empty + the shared tip, stepping from the first one's, like other boxes; hunt)
+        same_or_blank(self.by_snap_entry, self.by_snap_var, steps)
         self._loading = False
         self.by_snap_tick.state(["alternate" if any(ons) and not all(ons) else "!alternate"])
         self.by_snap_tick.state(["!disabled" if tgts else "disabled"])
@@ -104,11 +106,15 @@ class SnapPanel:
         if not tgts:
             return
         on = self.by_snap_on.get()
+        # turned on: the Snap box's length (a note length of the list keeps its name, else whole ticks); Snap off =
+        # 1/16 (hunt 2026-10-28: a note on every tick is rarely meant; 1 typed in Step still gives it)
+        name = snap_name(DEFAULT_SNAP if self.snap.get() == "off" else self.snap.get())
+        step = snap_name_beats(name) if name else self.snap_ticks() / self.ppq
+        if on and not self.confirm_big([dict(t, by_snap=step) if not t.get("by_snap") else t for t in tgts]):
+            self.sync_by_snap()  # (too many notes, No: the tick back)
+            return
         if self.sels:
             self.push_undo(name=tr("app.by_snap"))
-        # turned on: the Snap box's length (a note length of the list keeps its name, else whole ticks)
-        name = snap_name(self.snap.get())
-        step = snap_name_beats(name) if name else self.snap_ticks() / self.ppq
         for t in tgts:
             if not on:
                 t.pop("by_snap", None)
@@ -153,6 +159,9 @@ class SnapPanel:
         step = snap_name_beats(name) if name else math.floor(ticks + 0.5) / self.ppq
         tgts = [t for t in self.by_snap_targets() if t.get("by_snap")]
         if all(t["by_snap"] == step and t.get("by_snap_name") == name for t in tgts):
+            return
+        if not self.confirm_big([dict(t, by_snap=step) for t in tgts]):
+            self.sync_by_snap()  # (too many notes, No: the box back)
             return
         self.begin_edit(("by_snap", tuple(sorted(self.sels))))
         for t in tgts:

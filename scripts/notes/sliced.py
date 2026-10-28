@@ -42,11 +42,12 @@ def keys_of(sh):
 
 
 def snap_piece(sh):
-    """A Notes by snap line cut through its notes (knife_in_two), with no pages / glue of its own: drawn and picked
-    on its side of the knife only, like a funnel piece (pages pieces keep the whole drawing, user 2026-10-06)."""
+    """A line cut through its notes while it had Notes by snap (knife_in_two marks it "sided"): drawn and picked on
+    its side of the knife only, like a funnel piece, also once unticked (hunt 2026-10-28: it drew the whole line over
+    the other piece); pages pieces keep the whole drawing (user 2026-10-06)."""
     from notes.tumour import LINE_KINDS
-    return (sh["kind"] in LINE_KINDS and bool(sh.get("by_snap")) and bool((sh.get("cut") or {}).get("knife"))
-            and not (sh.get("fx") or sh.get("glue")))
+    cut = sh.get("cut") or {}
+    return sh["kind"] in LINE_KINDS and bool(cut.get("knife")) and bool(cut.get("sided"))
 
 
 def piece_knives(sh):
@@ -565,6 +566,8 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
             h["cut"]["gate"] = velocity(h, GATE)
         else:
             h["cut"]["knife"] = knife
+            if sh.get("by_snap") or (sh.get("cut") or {}).get("sided"):
+                h["cut"]["sided"] = True  # (drawn on its side only: snap_piece)
         if mould:
             h["cut"]["mould"] = json.loads(json.dumps(mould))
         if own:
@@ -1031,6 +1034,8 @@ def clean_cut(c):
         out["gate"] = snaps["gate"]
     elif knife:
         out["knife"] = knife
+        if c.get("sided") is True:
+            out["sided"] = True
     if c.get("mould"):
         from notes.mould import clean_mould
         try:

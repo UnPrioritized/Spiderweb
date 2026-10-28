@@ -322,11 +322,16 @@ def snap_steps(notes, step, origin, end=None, how="cut"):
     notes = np.asarray(notes, np.int64).reshape(-1, 3)
     if not len(notes):
         return notes, np.zeros(0, np.int64)
+    # at least a tick (a step typed in ticks shrinks with a lower PPQ: under a tick made empty notes, hunt
+    # 2026-10-28); the saved step is left alone, so the PPQ back = the step back
+    step = max(float(step), 1.0)
     # the line's time stretched to fill its steps exactly, so the keys share out evenly to the end (user 2026-10-28: a
     # line ending just into a step left that step one lone key). end = the line's last tick: a steep end's keys run a
     # tick past it, which made a line ending ON a step line take one more step (user)
     span = (int(notes[:, 1].max()) if end is None else int(end)) - origin
     stop = None  # (cut: where the last step ends)
+    if span <= 0 and how != "full":  # (an upright line, no time at all: a 1-tick stack, ending on its point)
+        stop = origin + 1
     if span > 0:
         if how == "whole":
             steps = max(1, math.floor(span / step + 1e-9))
