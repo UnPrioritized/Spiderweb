@@ -84,10 +84,10 @@ class Playback:
             return
         self.fresh_builtin()
         made = self._kestrel_made
-        if dev == KESTREL and made is not None and made[0] is not None and not _same_opts(made[0].opts,
-                                                                                            self.kestrel_opts):
-            # (a setting changed while it started: started again with the small window, never in the main one,
-            # which froze for its seconds, hunt 2026-10-28)
+        if dev == KESTREL and made is not None and made[0] is not None and (
+                not _same_opts(made[0].opts, self.kestrel_opts) or list(made[2]) != font_list(self.hz_preview)):
+            # (a setting / the soundfonts changed while it started: started again with the small window, never in
+            # the main one, which froze for its seconds, hunts 2026-10-28)
             made[0].close()
             self._kestrel_made = None
         if dev == KESTREL and not (self.out.handle and self.out.name == dev) and self._kestrel_made is None:
