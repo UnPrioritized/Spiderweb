@@ -556,7 +556,13 @@ class LoadedPlayer:
                         # (its places only: the part's own offs and skips carry on; not between parts in a row, each
                         # placing read through the wall up to it: 0.3-1.2 s a part of ~0.1 s, the wall dropped,
                         # 2026-10-28)
-                        unplaced = p.t1
+                        # ... but the LAST of a run right away, as before: placed as the reading went live, 1 s before
+                        # its end, the notes after it came late (hunt 2026-10-28)
+                        if self._dense_part(p.t1) is None:
+                            self._place(p.t1)
+                            unplaced = None
+                        else:
+                            unplaced = p.t1
                         self.dense_parts += 1
                         w0, span = p.t1, max(1, self.lm.ppq // 8)
                         continue
