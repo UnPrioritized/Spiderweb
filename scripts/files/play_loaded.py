@@ -151,9 +151,20 @@ def playable(mt):
                                  + c[C_BEND]) > 0
 
 
+def mute_masks(muted, n):
+    """LoadedPlayer.muted from its muted() list: each track's channels muted, one bit each (a whole track: all)."""
+    m = np.zeros(n, np.uint16)
+    for x in muted:
+        t, bit = (x[0], 1 << x[1]) if isinstance(x, tuple) else (x, 0xFFFF)
+        if 0 <= t < n:
+            m[t] |= bit
+    return m
+
+
 class LoadedPlayer:
     """Plays lm along with player (its clock). sinks: a LiveGroup's Lives (raw bytes each) or None = out (a MidiOut,
-    one message at a time). muted() = the track numbers not to play now (asked every 100 ms)."""
+    one message at a time). muted() = the track numbers not to play now, or (track number, channel) for one
+    channel of it (asked every 100 ms)."""
 
     def __init__(self, lm, player, out, sinks=None, kind="device", muted=lambda: ()):
         self.lm, self.player, self.out, self.sinks = lm, player, out, sinks
@@ -167,7 +178,7 @@ class LoadedPlayer:
             self.tport, self.ports = track_ports(lm)
         else:  # (one device: 16 channels, every port onto them)
             self.tport, self.ports = np.zeros(len(lm.tracks), np.int64), 1
-        self.muted = np.zeros(len(lm.tracks), np.uint8)
+        self.muted = np.zeros(len(lm.tracks), np.uint16)  # (each track's channels muted, a bit each: mute_masks)
         moved = lm.rechannel  # (Track Properties' channels, per track: -1 = as written)
         self.chans = None if moved is None else np.asarray(moved, np.int64).copy()
         self._stop = threading.Event()
@@ -750,11 +761,7 @@ class LoadedPlayer:
             if now - checked > 0.1:  # (mutes; the synths' load sets the budget)
                 checked = now
                 try:
-                    m = np.zeros(len(self.muted), np.uint8)
-                    for n in self.muted_of():
-                        if 0 <= n < len(m):
-                            m[n] = 1
-                    self.muted = m
+                    self.muted = mute_masks(self.muted_of(), len(self.muted))
                 except Exception:  # (the list changing meanwhile: next time)
                     pass
                 if self.sinks:  # (each synth's own budget by the sound it lost and its load)
@@ -1103,11 +1110,7 @@ class LoadedPlayer:
 
     def _read_mutes(self):
         try:
-            m = np.zeros(len(self.muted), np.uint8)
-            for n in self.muted_of():
-                if 0 <= n < len(m):
-                    m[n] = 1
-            self.muted = m
+            self.muted = mute_masks(self.muted_of(), len(self.muted))
         except Exception:  # (the list changing meanwhile: next time)
             pass
 

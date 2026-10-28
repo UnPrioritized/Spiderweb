@@ -234,14 +234,15 @@ def order_place(ticks, ms, ks, base, at, out_t, out_m, out_k):
 
 
 def hist(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, h):
-    """h[synth, velocity] += the note-ons of events i0..i1 that would be played (not muted, not late)."""
+    """h[synth, velocity] += the note-ons of events i0..i1 that would be played (not muted, not late). muted[track] =
+    its channels muted, one bit each (every bit: the whole track; a folder's sub-row: one)."""
     per = 1 if ports >= synths else synths // ports
     for i in range(i0, i1):
         m = ms[i]
         if (m & 0xF0) != 0x90:
             continue
         v = (m >> 16) & 127
-        if v == 0 or muted[trk[i]] or ticks[i] < t_late:
+        if v == 0 or (muted[trk[i]] >> (m & 15)) & 1 or ticks[i] < t_late:
             continue
         port = tport[trk[i]]  # (its synth: as emit's)
         ch = m & 15
@@ -289,7 +290,7 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least
             if hi == 0x9 and (m >> 16) & 127 > 0:
                 d = 1  # (left out)
                 # (muted = not wanted: never counted as thinned, it showed "Overloaded", hunt 2026-10-27)
-                if not muted[trk[i]]:
+                if not (muted[trk[i]] >> (m & 15)) & 1:
                     counts[0] += 1
                     if f >= least:
                         counts[1] += 1
@@ -639,7 +640,7 @@ def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room,
             q = ((port % 64) * 16 + ch) * 128 + key
             v = (m >> 16) & 127
             if hi == 0x9 and v > 0:
-                go = not muted[trk[i]] and ticks[i] >= t_late
+                go = not (muted[trk[i]] >> ch) & 1 and ticks[i] >= t_late
                 if go and v < thr[r]:
                     go = v == thr[r] - 1 and room[r] > 0
                     if go:

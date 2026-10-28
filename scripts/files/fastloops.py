@@ -1831,6 +1831,7 @@ def warm():
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
     smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
     u8 = np.zeros(1, np.uint8)
+    mu = np.zeros(1, np.uint16)  # (LoadedPlayer.muted: each track's channels muted, a bit each)
     midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
     midi_rewrite(u8, 0, 0, True, i1, i1.copy(), False, np.zeros(128, np.uint8), i1[:0], np.zeros(1, np.int64),
                  u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64), 0, i1[:0], -1)
@@ -1866,14 +1867,14 @@ def warm():
     play_order_count(i1, 0, i1.copy())
     play_order_place(i1, i32, i32, 0, i1.copy(), i1.copy(), i32.copy(), i32.copy())
     h2 = np.zeros((1, 128), np.int64)
-    play_hist(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, h2)
+    play_hist(i32, i32, 0, 0, i1, 0, mu, i1, 1, 1, h2)
     line = midi_play.Line(4, midi_play.OPEN * 4)
-    play_emit(i32, i32, 0, 0, i1, 0, u8, i1, 1, 1, i1, i1.copy(), np.zeros((1, 3), np.uint8), i1.copy(), False,
+    play_emit(i32, i32, 0, 0, i1, 0, mu, i1, 1, 1, i1, i1.copy(), np.zeros((1, 3), np.uint8), i1.copy(), False,
               *line.arrays())
     play_programs(u8, 0, 0, np.zeros(midi_play.PS_SIZE, np.int64))
     f1 = np.zeros(1, np.float64)
     line = midi_play.Line(4)
-    play_stamp(i32, i32, 0, 0, i1, u8, i1, i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0,
+    play_stamp(i32, i32, 0, 0, i1, mu, i1, i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0,
                np.zeros(1, np.uint64), np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(3, np.int64),
                np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64), np.zeros(1, np.int64),
                *line.arrays())
