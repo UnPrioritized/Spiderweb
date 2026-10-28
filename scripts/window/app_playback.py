@@ -20,6 +20,9 @@ from window.hz_preview import VOICES, font_list
 from window.widgets import bad, good
 
 RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's CC run-on (the longest counts)
+SLOW_START_S = 15.0  # Kestrel still starting after this: "Use Built-in BASSMIDI" / "Keep waiting" (user 2026-10-28:
+# 60 s nobody waits for; its normal start 6-11 s with two soundfonts)
+STUCK_START_S = 60.0  # ... after this, with no answer, the start is given up (the backstop)
 QUIET_S = 3.0  # (a question nobody asked for waits this long after the last key / click: quiet_now)
 GROUP_MOST = 16  # synths side by side playing a loaded MIDI at most (Settings → Sound)
 GROUP_DEFAULT = max(1, min(GROUP_MOST, (os.cpu_count() or 4) // 2))  # ... to start: half the cores (user
@@ -295,6 +298,16 @@ class Playback:
             self.stop_play()
             messagebox.showerror(tr("app.spiderweb_2"), tr("app.loaded_play_failed"), parent=self)
             return
+        live = self.out.handle if self.out.name == KESTREL else None
+        now = time.perf_counter()
+        if live is not None and now - getattr(self, "_k_checked", 0.0) > 0.25:  # (its engine dead: hunt 10-28)
+            self._k_checked = now
+            why = live.k.error()
+            if why is not None:  # (silence with "Overloaded" flickering, every later Play too: stopped, said)
+                self.stop_play()
+                self.out.close()
+                self.kestrel_failed(SynthError("playback.kestrel_failed", err=why), during=True)
+                return
         self.roll.show_playhead()
         self.show_overload()
         self._play_job = self.after(15, self._play_tick)
@@ -383,8 +396,9 @@ class Playback:
 
     def read_ahead(self):
         """Kestrel (GPU) picked with a MIDI loaded: its densest parts read ahead now, in the background (files/
-        play_dense.py; ~20 s for Shinki), so the FIRST play has them too (user 2026-10-27; it was started by Play)."""
-        if self.loaded is not None and self.midi_device.get() == KESTREL:
+        play_dense.py; ~20 s for Shinki), so the FIRST play has them too (user 2026-10-27; it was started by Play).
+        Only once Kestrel has started on this PC (hunt 2026-10-28: a minute and ~3 GB for one that never could)."""
+        if self.loaded is not None and self.midi_device.get() == KESTREL and getattr(self, "kestrel_ok", False):
             from files.play_dense import ensure
             ensure(self.loaded)
             self.watch_ahead()
@@ -529,6 +543,7 @@ class Playback:
                 messagebox.showinfo(tr("app.spiderweb_2"), tr("ks.voices_lowered", n=f"{top:,}"), parent=self)
                 out = KestrelOut(self.synth, fonts, **self.kestrel_opts)
             errors.note("Kestrel (GPU)", f"{len(fonts)} soundfont(s)")
+            self.kestrel_ok = True  # (it works on this PC: its read-ahead may start)
             return out
         finally:
             self.busy(None)
@@ -540,12 +555,10 @@ class Playback:
         kept open for the next one)."""
         import tkinter as tk
         from tkinter import ttk
-        from files.kestrel import KestrelOut
+        from files.kestrel import KestrelOut, plain_reason
         job = self._kestrel_job
-        if job is not None:  # (Play again while it starts: no play)
-            job["play"] = False
-            if job["win"].winfo_exists():
-                job["win"].destroy()
+        if job is not None:  # (Play again while it starts = its X: no play, the start given up)
+            job["close"]()
             return
         fonts = font_list(self.hz_preview)
         opts = dict(self.kestrel_opts)
@@ -567,12 +580,29 @@ class Playback:
         bar = ttk.Progressbar(box, mode="indeterminate", length=280)
         bar.pack(fill="x", pady=(10, 0))
         bar.start(15)
-        job = self._kestrel_job = {"play": True, "win": win, "out": None, "err": None}
+        job = self._kestrel_job = {"play": True, "win": win, "out": None, "err": None, "gone": False,
+                                   "began": time.perf_counter()}
 
-        def closed():
+        def closed():  # (X = this start given up: Play starts another; it never swallowed every later Play, hunt)
             job["play"] = False
-            win.destroy()
+            job["gone"] = True
+            if self._kestrel_job is job:
+                self._kestrel_job = None
+            if win.winfo_exists():
+                win.destroy()
+        job["close"] = closed
         win.protocol("WM_DELETE_WINDOW", closed)
+        slow = ttk.Frame(box)  # (shown after SLOW_START_S: the user picks, never made to wait for a limit)
+        ttk.Label(slow, text=tr("ks.slow_start")).pack(anchor="w", pady=(10, 4))
+        buttons = ttk.Frame(slow)
+        buttons.pack(anchor="e")
+
+        def use_builtin():
+            closed()
+            self.midi_device.set(BUILTIN)
+            self.start_play(keep)
+        ttk.Button(buttons, text=tr("ks.use_builtin"), command=use_builtin).pack(side="left", padx=(0, 6))
+        ttk.Button(buttons, text=tr("ks.keep_waiting"), command=lambda: slow.pack_forget()).pack(side="left")
         win.update_idletasks()  # (over the middle of the main window)
         x = self.winfo_rootx() + (self.winfo_width() - win.winfo_reqwidth()) // 2
         y = self.winfo_rooty() + (self.winfo_height() - win.winfo_reqheight()) // 3
@@ -586,12 +616,34 @@ class Playback:
                 job["err"] = e
             except Exception as e:  # (anything else: said like a failed start)
                 job["err"] = SynthError("playback.kestrel_failed", err=e)
+            e = job["err"]
+            if e is not None and plain_reason(e) == "ks.why_font":  # (which one: each alone, Built-in's question)
+                for f in fonts:
+                    try:
+                        KestrelOut(synth, [f], **opts).close()
+                    except Exception:
+                        e.path = f
+                        break
         thread = threading.Thread(target=work, daemon=True)
         thread.start()
 
         def done():
-            if thread.is_alive():
+            waited = time.perf_counter() - job["began"]
+            if thread.is_alive() and not job["gone"]:
+                if waited > SLOW_START_S and not job.get("slow") and win.winfo_exists():
+                    job["slow"] = True
+                    slow.pack(fill="x")
+                if waited > STUCK_START_S:  # (the backstop: nobody answered, the start is given up)
+                    closed()
+                    self.kestrel_failed(SynthError("playback.kestrel_failed", err="timed out"), play=False)
+                    return
                 self.after(30, done)
+                return
+            if job["gone"]:  # (given up: a start still on its way is closed when it ends)
+                if thread.is_alive():
+                    self.after(500, done)
+                elif job["out"] is not None:
+                    job["out"].close()
                 return
             self._kestrel_job = None
             if win.winfo_exists():
@@ -611,12 +663,47 @@ class Playback:
                 if job["play"]:
                     self.kestrel_first(keep)
                 return
+            if job["err"] is not None:  # (said in plain words with a way on, hunt 2026-10-28)
+                self.kestrel_failed(job["err"], play=job["play"], keep=keep)
+                return
+            self.kestrel_ok = True  # (it works on this PC: its read-ahead may start)
+            self.read_ahead()
             self._kestrel_made = (job["out"], job["err"], fonts)
             if job["play"] and not self.player.running:
                 self.start_play(keep)
             elif job["err"] is None:  # (no play: opened as after one, the next Play starts at once)
                 self.out.open(KESTREL)
         self.after(30, done)
+
+    def kestrel_failed(self, err, play=False, keep=False, during=False):
+        """Kestrel couldn't start / stopped while playing (hunt 2026-10-28, user: old graphics cards and drivers are
+        common, never fail silently): the reason in plain words + a way on. Use Built-in BASSMIDI = the MIDI out
+        switched (and playing, when a play was asked for); Pick another MIDI out… = Settings → Sound; Cancel = as
+        it was (the next Play tries Kestrel again). A soundfont it can't read = Built-in's "pick another" question."""
+        from files.kestrel import plain_reason
+        from window.load_midi import ask_choice
+        why = plain_reason(err)
+        errors.note("Kestrel (GPU)", f"{'stopped' if during else 'failed'}: {err}")
+        self.drop_read_ahead()  # (nothing read ahead for a Kestrel that doesn't play)
+        path = getattr(err, "path", None)
+        if why == "ks.why_font" and path and not during:
+            text = tr("ks.why_font") + "\n" + os.path.basename(path) + "\n\n" + tr("synth.pick_other")
+            if messagebox.askyesno(tr("ks.fail_title"), text, parent=self) and self.pick_soundfont(path) and play:
+                self.start_play(keep)
+            return
+        head = tr("ks.fail_during" if during else "ks.fail_start")
+        reason = tr(why) if why.startswith("ks.") else str(err)
+        text = f"{head}\n\n{reason}\n\n" + tr("ks.fail_details", err=str(err))
+        answer = ask_choice(self, tr("ks.fail_title"), text,
+                            [("builtin", tr("ks.use_builtin")), ("pick", tr("ks.pick_out")),
+                             ("cancel", tr("ks.cancel"))], icon="warning")
+        if answer == "builtin":
+            self.midi_device.set(BUILTIN)
+            if play or during:
+                self.start_play(keep)
+        elif answer == "pick":
+            from window.settings_window import open_settings
+            open_settings(self, "sound")
 
     def ready_builtin(self):
         """Built-in BASSMIDI made ready before the first Space (user 2026-10-25: "the first play after the app is

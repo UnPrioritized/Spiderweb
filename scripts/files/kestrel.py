@@ -131,6 +131,25 @@ def _error(d, h=None):
     return text.decode("utf-8", "replace") if text else "?"
 
 
+def plain_reason(err):
+    """Why Kestrel couldn't start / stopped, as a lang key in plain words (hunt 2026-10-28: the connector's text
+    said "render with --backend cpu"; old graphics cards and drivers are the usual cause on other PCs)."""
+    key = getattr(err, "key", None)
+    if key in ("playback.kestrel_missing", "playback.kestrel_not_here", "playback.kestrel_no_sound_device"):
+        return key
+    text = str(getattr(err, "values", {}).get("err", err)).lower()
+    for words, why in ((("out of memory", "outofmemory", "allocat"), "ks.why_memory"),
+                       (("device lost", "devicelost", "device removed", "device reset"), "ks.why_lost"),
+                       (("no usable gpu", "adapter", "no non-software", "vulkan", "dx12", "d3d12", "driver",
+                         "request_device", "requestdevice", "gpu"), "ks.why_no_gpu"),
+                       (("soundfont", "smpl", ".sf2", ".sfz", "riff", "sample"), "ks.why_font"),
+                       (("winerror", "not found", "function", "dll", ".so"), "ks.why_connector"),
+                       (("in time", "timed out"), "ks.why_slow")):
+        if any(w in text for w in words):
+            return why
+    return "ks.why_other"
+
+
 class Kestrel:
     """One Kestrel synth, playing (silence while nothing is sent) from open until close(). fonts = Spiderweb's
     soundfont list, top first (each overrides the ones above it). synth = files.synth.Synth (BASS + the sound
