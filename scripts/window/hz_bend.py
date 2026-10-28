@@ -21,11 +21,12 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from notes.hzbass import NOTE_BEND_MOST, SLIDE_BEND, line_at, note_bend, pitch
+from notes.hzbass import NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, note_bend, pitch
 from roll.roll_shared import SHIFT
 from window import look
 
 NEAR = 6  # px: a press this near a bend point grabs it
+WOBBLE_SPOTS = 4000  # bend_line: spots along a wobbling note at most
 LINE_NEAR = 4  # px: ... this near a note's bend line adds a point to it
 BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = free), as a slide's
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
@@ -51,10 +52,12 @@ class HzBend:
 
     def bend_line(self, n, most):
         """(beats, keys) along note n's bend line for drawing: evenly spread spots plus every point, a jump (two
-        points at one spot) drawn straight up / down (one spot per point, each with its own value)."""
-        pts = n["bend"]
+        points at one spot) drawn straight up / down (one spot per point, each with its own value); a wobble's waves
+        16 spots each (WOBBLE_SPOTS at most)."""
+        pts = n.get("bend") or ()
         at = [n["t"] + p[0] * n["len"] for p in pts]
-        even = np.setdiff1d(np.linspace(n["t"], n["t"] + n["len"], 49), at)
+        waves = sum(w["rate"] * (w["at"][1] - w["at"][0]) * n["len"] for w in n.get("wobble") or ())
+        even = np.setdiff1d(np.linspace(n["t"], n["t"] + n["len"], int(min(WOBBLE_SPOTS, max(49, 16 * waves)))), at)
         spots = sorted([(b, -1, float(v)) for b, v in zip(even, note_bend(n, even, most))]
                        + [(b, j, max(-most, min(most, p[1]))) for j, (b, p) in enumerate(zip(at, pts))])
         return np.array([b for b, _, _ in spots]), pitch(n) + np.array([v for _, _, v in spots])
@@ -140,7 +143,7 @@ class HzBend:
                 continue
             if not x0 - 1 <= x <= max(x1, x0 + 2) + 1:
                 continue
-            if y0 <= y < y0 + self.sy or n.get("bend") and abs(y - self.pitch_y(self.bent_pitch(n, beat, most))) <= \
+            if y0 <= y < y0 + self.sy or bends(n) and abs(y - self.pitch_y(self.bent_pitch(n, beat, most))) <= \
                     LINE_NEAR * self.s:
                 return "note", i
         i = self.sketch_end_hit(x, y) if self.sketching() else None
@@ -238,6 +241,7 @@ class HzBend:
             lo = pts[j - 1][0] if j > 0 else 0.0
             hi = pts[j + 1][0] if j + 1 < len(pts) else 1.0
             pts[j][0] = min(hi, max(lo, u))
+            follow_wobble(n, d["before"][d["i"]], j)
         pts[j][1] = k
         self.redraw()
         self.show_status(e)
@@ -421,9 +425,23 @@ WOBBLE = (4.0, 0.5)  # waves a beat, keys each way
 WOBBLE_MOST = 4096  # quarter waves at most on one note (256 beats at 4 a beat)
 
 
+def follow_wobble(n, was, j):
+    """Note n's wobbles after its bend point j moved sideways (was = the note before the drag): a wobble's end that
+    was on that point stays on it."""
+    old = (was.get("bend") or ())[j][0] if j < len(was.get("bend") or ()) else None
+    if old is None or not n.get("wobble") or len(n["wobble"]) != len(was.get("wobble") or ()):
+        return
+    for w, w0 in zip(n["wobble"], was["wobble"]):
+        w["at"] = sorted(n["bend"][j][0] if abs(a - old) < ON_POINT else a for a in w0["at"])
+
+
 def tidy_bend(n, pieces=False):
     """A note's bend line after a change: rounded; none left when every point is back at 0 (pieces: the Sketch
-    tool's, a flat line keeps the points between its ends, they're its pieces)."""
+    tool's, a flat line keeps the points between its ends, they're its pieces). Wobbles with no length left go."""
+    if "wobble" in n:
+        n["wobble"] = [w for w in n["wobble"] if w["at"][1] - w["at"][0] > 1e-9]
+        if not n["wobble"]:
+            del n["wobble"]
     pts = n.get("bend")
     if pts is None:
         return

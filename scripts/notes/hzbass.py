@@ -384,6 +384,10 @@ def shifted_hz(hz, d):
             n["bend"] = bend_part(dict(n, t=n["t"] + d), 0.0, end)
             if n["bend"] is None:
                 del n["bend"]
+        if t < 0 and n.get("wobble"):  # (... and its wobbles, in step)
+            n["wobble"] = wobble_part(dict(n, t=n["t"] + d), 0.0, end)
+            if n["wobble"] is None:
+                del n["wobble"]
         n["t"], n["len"] = max(0.0, t), max(MIN_LEN, end - max(0.0, t))
         tones.append(n)
     if "tones" in hz:
@@ -450,7 +454,8 @@ def shortest_gate(hz, ppq):
         return min(shortest_gate(l, ppq) for l in heard_layers(hz) or layers_of(hz))
     played = live(hz)  # (the Arpeggio box's octaves go higher)
     # (each note bent up by its own bend line)
-    top = max((pitch(n) + max(0.0, min(NOTE_BEND_MOST, max((p[1] for p in n.get("bend") or ()), default=0.0)))
+    top = max((pitch(n) + max(0.0, min(NOTE_BEND_MOST, max((p[1] for p in n.get("bend") or ()), default=0.0)
+                                        + max((max(w["depth"]) for w in n.get("wobble") or ()), default=0.0)))
                for n in played.get("tones") or ()), default=hz["key"])
     pts = (played.get("fx") or {}).get("pitch") if hz.get("tones") else None
     if pts:  # (the amount line only ever weakens it; the MOD tab's links push it up as far as they reach)

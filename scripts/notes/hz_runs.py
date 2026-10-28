@@ -11,7 +11,7 @@ import numpy as np
 from notes.hz_settings import (ADSR_KNOBS, FILTER_KNOBS, FILTER_START, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE,
                                NEUTRAL, NOTE_BEND_MOST, VIBRATO, VIBRATO_RATE, bend_range, clean_tempo_steps, hz_of, tempo_at,
                                tempo_changes, tempo_key, keyed_tempo)
-from notes.hz_lines import adsr_line, filter_line, note_bend
+from notes.hz_lines import adsr_line, bends, filter_line, note_bend
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
 from notes.hz_modulate import fx_at, longest_fall, plain_base, rack_tail, setting_at
 from notes.hz_arp import arpeggiated
@@ -248,7 +248,7 @@ def tone_runs(hz, left, ppq, keys=None):
     pitched = "pitch" in (hz.get("fx") or {})
     most = NOTE_BEND_MOST  # (a note's own bend: no Range knob, hz_settings)
     moving = bool(hz.get("tempo"))  # (made under a changing tempo: each wave at the tempo where it starts)
-    bend = pitched or keys is not None or any(n.get("bend") for n in tones) or moving
+    bend = pitched or keys is not None or any(bends(n) for n in tones) or moving
 
     def bpm(t):  # (the tempo at tick t; None = hz["bpm"], as without a tempo line)
         return tempo_at(hz, t / ppq - left) if moving else None
@@ -265,7 +265,7 @@ def tone_runs(hz, left, ppq, keys=None):
         starts, nexts = np.asarray(starts, float), np.asarray(nexts, float)
         if pitched:
             starts, nexts = bent(hz, left, ppq, starts, nexts, whose[0])
-        mine = whose[0] if whose[1] is None and whose[0].get("bend") else None  # (a slide's: in its own pitches)
+        mine = whose[0] if whose[1] is None and bends(whose[0]) else None  # (a slide's: in its own pitches)
         if keys is not None or mine is not None:
             starts, nexts = bent(hz, left, ppq, starts, nexts, keys=lambda b: (
                 (keys(b, whose[0]) if keys is not None else 0.0)

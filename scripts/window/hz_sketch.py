@@ -15,7 +15,7 @@ import tkinter as tk
 import numpy as np
 
 from files.lang import tr
-from notes.hzbass import SLIDE_BEND, bend_of, bend_part, bent_part, line_at, pitch
+from notes.hzbass import SLIDE_BEND, bend_of, bend_part, bends, bent_part, line_at, pitch, wobble_part
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR
@@ -71,7 +71,7 @@ class HzSketch:
     def sketch_near(self, n, x, y, reach, most):
         """True when (x, y) is within reach px of note n's line AS DRAWN: its pieces, a jump's upright stroke and a
         steep slope too (hunt 2026-10-28: only up / down at the mouse's beat counted)."""
-        if n.get("bend"):
+        if bends(n):
             beats, keys = self.bend_line(n, most)
             xs, ys = np.array([self.x_of(b) for b in beats]), np.asarray(self.pitch_y(keys), float)
         else:
@@ -249,6 +249,10 @@ class HzSketch:
             n["bend"] = cut
         elif pts:
             n["bend"] = copy.deepcopy(pts)
+        if was.get("wobble"):  # (its wobbles stay on their beats too)
+            n["wobble"] = wobble_part(was, was["t"], n["len"]) or []
+            if not n["wobble"]:
+                del n["wobble"]
         self.keep_leads(d["i"], d["orig"])
         self.redraw()
         self.show_status(e)
@@ -283,7 +287,7 @@ class HzSketch:
             if x1 < self.kb_w or x0 > w:
                 continue
             fill, edge = selected if i in self.sel else colours
-            if n.get("bend"):
+            if bends(n):
                 y = self.pitch_y(pitch(n))
                 c.create_line(x0, y, x1, y, fill=edge, dash=(2, 4))
                 beats, keys = self.bend_line(n, most)

@@ -88,6 +88,9 @@ FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the use
 GROUPS = 6  # "groups" at 1
 NOTE_BEND_MOST = 127.0  # keys a note's own bend line (tone["bend"]) goes each way at most: the Range knob is the
 # Pitch line's only (user 2026-10-28: a bend is repeat spacing, no pitch wheel to limit it)
+WOBBLE_SHAPES = ("sine", "triangle", "saw", "square")  # a wobble's wave (hz_lines.wave_of; missing = sine)
+WOBBLE_RATE = 4.0  # a new wobble's waves a beat (the plugin's default, user 2026-10-28)
+WOBBLE_RATE_MOST = 64.0  # waves a beat at most
 PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed), unless hz["lfo"]["bend_range"]
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
 HEIGHT_MOST = 4.0  # "height" at 1: the drawn wave shape this many times as tall (0.5 = as drawn, 0 = flat)
@@ -314,6 +317,34 @@ def clean_bend(pts):
     except (TypeError, ValueError, IndexError):
         return None
     return sorted(out, key=lambda p: p[0]) or None
+
+
+def clean_wobble(runs):
+    """A note's wobbles checked (tone["wobble"], the Sketch tool's; heard in hz_lines.note_bend until baked):
+    [{"at": [u0, u1] along the note, "depth": [keys at u0, at u1] each way, "rate": waves a beat(, "shape":
+    WOBBLE_SHAPES but sine, "flip": True = going down first, "phase": waves gone before u0)}] in order; runs with
+    no length or depth left out; None when none is left."""
+    out = []
+    for w in runs or ():
+        try:
+            u0, u1 = sorted(min(1.0, max(0.0, float(u))) for u in w["at"][:2])
+            d = [min(NOTE_BEND_MOST, max(0.0, float(k))) for k in w["depth"][:2]]
+            rate = min(WOBBLE_RATE_MOST, float(w["rate"]))
+            phase = float(w.get("phase", 0.0)) % 1.0
+        except (TypeError, ValueError, KeyError, IndexError, AttributeError):
+            continue
+        if not (len(d) == 2 and all(map(math.isfinite, d + [u0, u1, rate, phase]))) or u1 - u0 <= 1e-9 \
+                or rate <= 0 or max(d) <= 0:
+            continue
+        run = {"at": [u0, u1], "depth": d, "rate": rate}
+        if w.get("shape") in WOBBLE_SHAPES[1:]:
+            run["shape"] = w["shape"]
+        if w.get("flip") is True:
+            run["flip"] = True
+        if phase:
+            run["phase"] = phase
+        out.append(run)
+    return sorted(out, key=lambda w: w["at"]) or None
 
 
 def clean_fx(fx):
@@ -1102,6 +1133,9 @@ def clean_tones(tones):
             bend = clean_bend(n.get("bend")) if n.get("bend") else None
             if bend:
                 tone["bend"] = bend
+            wobble = clean_wobble(n.get("wobble")) if n.get("wobble") else None
+            if wobble:
+                tone["wobble"] = wobble
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
         ok = all(math.isfinite(v) for v in [tone["t"], tone["len"], tone["cents"], tone.get("auto", 0.0), *leads]

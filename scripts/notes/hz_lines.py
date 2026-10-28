@@ -65,16 +65,75 @@ def vel_part(n, t, span):
             + [[1.0, float(b)]])
 
 
+def bends(n):
+    """True when note n has a bend line or a wobble of its own (note_bend moves it)."""
+    return bool(n.get("bend") or n.get("wobble"))
+
+
 def note_bend(n, beat, most):
-    """Keys a note's own bend line (tone["bend"]) moves its tone at beat (an array, counted like its "t"; before its
-    start / after its end: as at them), no further than `most` (NOTE_BEND_MOST) each way; None when it has none.
-    "bend_at" = (start, length) the line is spread over when it's another note's (an arpeggio's step: by time)."""
-    pts = n.get("bend")
-    if not pts:
+    """Keys a note's own bend line (tone["bend"]) and wobbles (tone["wobble"]) move its tone at beat (an array,
+    counted like its "t"; before its start / after its end: as at them), no further than `most` (NOTE_BEND_MOST)
+    each way; None when it has none. "bend_at" = (start, length) the line is spread over when it's another note's (an
+    arpeggio's step: by time)."""
+    pts, wob = n.get("bend"), n.get("wobble")
+    if not pts and not wob:
         return None
     t, span = n.get("bend_at") or (n["t"], n["len"])
     u = np.clip((np.asarray(beat, float) - t) / max(span, 1e-12), 0.0, 1.0)
-    return np.clip(line_at(pts, u), -most, most)
+    got = line_at(pts, u) if pts else np.zeros(np.shape(u))
+    if wob:
+        got = got + wobble_keys(wob, u, span)
+    return np.clip(got, -most, most)
+
+
+def wave_of(shape, c):
+    """A wobble's wave (-1..1) at c cycles from its start (an array): starts at 0 going up (a square: up first),
+    WOBBLE_SHAPES."""
+    f = np.asarray(c, float) % 1.0
+    if shape == "triangle":
+        return np.where(f < 0.25, 4.0 * f, np.where(f < 0.75, 2.0 - 4.0 * f, 4.0 * f - 4.0))
+    if shape == "saw":
+        return np.where(f < 0.5, 2.0 * f, 2.0 * f - 2.0)
+    if shape == "square":
+        return np.where(f < 0.5, 1.0, -1.0)
+    return np.sin(2.0 * math.pi * f)
+
+
+def wobble_keys(runs, u, span):
+    """Keys a note's wobbles (tone["wobble"], hz_settings.clean_wobble) add at u (0..1 along it, an array) when it's
+    span beats long: each run's wave from u0 to u1, its depth (keys each way) going from the first to the second,
+    `rate` waves a beat counted from its start (+ "phase" waves: a run cut at its start goes on in step)."""
+    u = np.asarray(u, float)
+    out = np.zeros(u.shape)
+    for w in runs:
+        u0, u1 = w["at"]
+        if u1 - u0 <= 1e-12:
+            continue
+        share = np.clip((u - u0) / (u1 - u0), 0.0, 1.0)
+        depth = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * share
+        wave = wave_of(w.get("shape"), w.get("phase", 0.0) + w["rate"] * (u - u0) * span)
+        out += np.where((u >= u0) & (u <= u1), depth * wave * (-1.0 if w.get("flip") else 1.0), 0.0)
+    return out
+
+
+def wobble_part(n, t, span):
+    """The part of note n's wobbles from beat t for span beats, laid over that part (u 0..1), or None when none is
+    left in it: each run cut to it, the depth where it's cut, a run cut at its start going on in step ("phase")."""
+    size, off = max(n["len"], 1e-12), t - n["t"]
+    out = []
+    for w in n.get("wobble") or ():
+        a, b = w["at"][0] * size, w["at"][1] * size  # (beats from the note's start)
+        lo, hi = max(a, off), min(b, off + span)
+        if hi - lo <= 1e-9 or b - a <= 1e-12:
+            continue
+
+        def depth(x):
+            return round(w["depth"][0] + (w["depth"][1] - w["depth"][0]) * (x - a) / (b - a), 4)
+        run = dict(w, at=[round((lo - off) / span, 9), round((hi - off) / span, 9)], depth=[depth(lo), depth(hi)])
+        if lo > a + 1e-12:
+            run["phase"] = round((w.get("phase", 0.0) + w["rate"] * (lo - a)) % 1.0, 9)
+        out.append(run)
+    return out or None
 
 
 ON_POINT = 1e-9  # bend_part: a cut this near a point (in parts of the note) is on it (points are saved to 9 places)
@@ -126,10 +185,11 @@ def bend_part(n, t, span):
 
 
 def bend_from(n):
-    """The fields a note made from note n (an arpeggio's step) takes to play n's bend line by time."""
-    if not n.get("bend"):
+    """The fields a note made from note n (an arpeggio's step) takes to play n's bend line (and wobbles) by time."""
+    if not bends(n):
         return {}
-    return {"bend": n["bend"], "bend_at": list(n.get("bend_at") or (n["t"], n["len"]))}
+    return dict({f: n[f] for f in ("bend", "wobble") if n.get(f)},
+                bend_at=list(n.get("bend_at") or (n["t"], n["len"])))
 
 
 def line_arrays(pts, every=None):
