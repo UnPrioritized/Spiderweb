@@ -15,7 +15,8 @@ import tkinter as tk
 import numpy as np
 
 from files.lang import tr
-from notes.hzbass import SLIDE_BEND, bend_of, bend_part, bends, bent_part, line_at, pitch, wobble_part
+from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, bend_of, bend_part, bends, bent_part,
+                          line_at, pitch, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR
@@ -28,6 +29,8 @@ TOP_KEY = 127  # a whole note dragged up stops here (the notes keep keys 0..127:
 # Alt+drag curves a piece; Ctrl+Shift+drag too, everywhere: many Linux desktops take Alt+drag to move the window
 # (hunt 2026-10-28, untested on Linux; its tip says so, system.WINDOWS / MAC don't)
 CURVE_KEYS = CTRL | SHIFT
+WOBBLE_LIFT = 12  # px: a picked piece's depth line sits this far above the piece's highest spot at depth 0
+WOBBLE_STEP = 0.1  # keys: the depth goes in these steps (Shift: 0.01)
 
 
 def split_curve(bend, t):
@@ -59,6 +62,90 @@ def nearest_bend(want, s):
 
 class HzSketch:
     sketch_alt = False  # (Alt held: every piece shows its curve square, hz_bend.bend_squares)
+    sketch_pick = None  # (tone id, u0, u1): the piece clicked last; its wobble's depth line shows above it
+
+    def picked_piece(self):
+        """(tone number, piece number, u0, u1) of the piece picked with a click, or None: nothing picked, its note no
+        longer the only one selected, its points gone / moved."""
+        p = self.sketch_pick
+        if not p or not self.sketching() or len(self.sel) != 1:
+            return None
+        i = next(iter(self.sel))
+        n = self.tones[i] if i < len(self.tones) else None
+        if n is None or n.get("id") != p[0]:
+            return None
+        pts = n.get("bend") or ([0.0, 0.0], [1.0, 0.0])
+        for j in range(len(pts) - 1):
+            if abs(pts[j][0] - p[1]) < ON_POINT and abs(pts[j + 1][0] - p[2]) < ON_POINT and pts[j + 1][0] > pts[j][0]:
+                return i, j, pts[j][0], pts[j + 1][0]
+        return None
+
+    @staticmethod
+    def wobble_run(n, u0, u1):
+        """Note n's wobble on the piece from u0 to u1, or None."""
+        return next((w for w in n.get("wobble") or ()
+                     if abs(w["at"][0] - u0) < ON_POINT and abs(w["at"][1] - u1) < ON_POINT), None)
+
+    def depth_line(self):
+        """(x0, y at its start, x1, y at its end, y at depth 0) of the picked piece's depth line (amber): above the
+        piece's highest spot, higher by its wobble's depth (keys) at each end; None when nothing's picked."""
+        got = self.picked_piece()
+        if not got:
+            return None
+        i, _, u0, u1 = got
+        n = self.tones[i]
+        top = pitch(n) + (float(np.max(line_at(n["bend"], np.linspace(u0, u1, 17)))) if n.get("bend") else 0.0)
+        base = self.pitch_y(top) - WOBBLE_LIFT * self.s - self.sketch_wide() / 2
+        run = self.wobble_run(n, u0, u1)
+        d0, d1 = run["depth"] if run else (0.0, 0.0)
+        x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
+        return x0, base - d0 * self.sy, x1, base - d1 * self.sy, base
+
+    def depth_hit(self, x, y):
+        """"a" / "b" (the handle at its start / end: that end's depth, a fade) / "line" (both) when (x, y) is on the
+        picked piece's depth line, else None."""
+        got = self.depth_line()
+        if not got:
+            return None
+        x0, ya, x1, yb, _ = got
+        r = NEAR * self.s
+        for which, hx, hy in (("a", x0, ya), ("b", x1, yb)):
+            if abs(x - hx) <= r and abs(y - hy) <= r:
+                return which
+        if x0 <= x <= x1 and abs(y - (ya + (yb - ya) * (x - x0) / max(x1 - x0, 1e-9))) <= r:
+            return "line"
+        return None
+
+    def sketch_depth(self, e, i, which, before):
+        """A press on the picked piece's depth line (depth_hit's which): held, dragged up / down = the wobble's
+        depth (sketch_depth_to); a piece with none gets one at WOBBLE_RATE."""
+        _, _, u0, u1 = self.picked_piece()
+        run = self.wobble_run(self.tones[i], u0, u1)
+        self.drag = {"kind": "wobbledepth", "i": i, "which": which, "before": before, "x": e.x, "y": e.y,
+                     "moved": False, "at": [u0, u1], "name": tr("hz.step_wobble_depth"),
+                     "orig": copy.deepcopy(run) if run else {"at": [u0, u1], "depth": [0.0, 0.0], "rate": WOBBLE_RATE}}
+        self.redraw()
+        return True
+
+    def sketch_depth_to(self, d, n, e):
+        """The depth line held in drag d moved up / down: its handle's end (a fade) or both ends by as many keys as
+        the mouse moved, in WOBBLE_STEP steps (Shift: 0.01), never below 0 (0 at both = no wobble once let go)."""
+        k = (d["y"] - e.y) / self.sy
+        step = 0.01 if e.state & SHIFT else WOBBLE_STEP
+        run = copy.deepcopy(d["orig"])
+        for end in (0, 1):
+            if d["which"] == "line" or d["which"] == "ab"[end]:
+                run["depth"][end] = max(0.0, min(NOTE_BEND_MOST, round(round((run["depth"][end] + k) / step) * step, 4)))
+        was = self.wobble_run(n, *d["at"])
+        n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
+        self.redraw()
+        return True
+
+    def sketch_depth_gone(self, d):
+        """Delete while the depth line is held: the piece's wobble goes."""
+        n = self.tones[d["i"]]
+        was = self.wobble_run(n, *d["at"])
+        n["wobble"] = [w for w in n.get("wobble") or () if w is not was]
 
     def sketching(self):
         return self.tool.get() == "sketch"
@@ -263,6 +350,14 @@ class HzSketch:
         """(x, y, text) of the label beside what's held: the key it's at + how far from the note's own ("A2 +2.0
         st"); None when no point / piece is held."""
         d = self.drag
+        if d and d["kind"] == "wobbledepth" and d.get("moved"):  # (the depth: "Depth 2.0 st" / a fade "2.0 → 0.5")
+            got = self.depth_line()
+            run = self.wobble_run(self.tones[d["i"]], *d["at"])
+            if got and run:
+                a, b = run["depth"]
+                text = (tr("hz.wobble_depth", depth=f"{a:.1f}") if abs(a - b) < 1e-9 else
+                        tr("hz.wobble_fade", a=f"{a:.1f}", b=f"{b:.1f}"))
+                return (got[0] + got[2]) / 2, min(got[1], got[3]) - 6 * self.s, text
         if not d or d["kind"] not in ("bendpt", "sketchpiece") or not d.get("moved"):
             return None
         n = self.tones[d["i"]]
@@ -306,6 +401,15 @@ class HzSketch:
                 c.create_oval(x - r, y - r, x + r, y + r, fill=BEND, outline=BEND)
             x, y, a = x1 + END_GAP * s, ys[-1], 3 * s  # (">": the end, where a drag makes it longer / shorter)
             c.create_line(x - a / 2, y - a, x + a / 2, y, x - a / 2, y + a, fill=BEND, width=max(1, round(1.5 * s)))
+        got = self.depth_line()
+        if got:  # (the picked piece's wobble depth: a line above it, a handle at each end; dashed = depth 0)
+            x0, ya, x1, yb, base = got
+            if max(base - ya, base - yb) > 0.5:
+                c.create_line(x0, base, x1, base, fill=look.HZ_WOBBLE, dash=(2, 3))
+            c.create_line(x0, ya, x1, yb, fill=look.HZ_WOBBLE, width=max(1, round(2 * s)))
+            h = 3 * s
+            for hx, hy in ((x0, ya), (x1, yb)):
+                c.create_rectangle(hx - h, hy - h, hx + h, hy + h, fill=look.HZ_WOBBLE, outline=look.HZ_WOBBLE)
         label = self.sketch_label()
         if label:
             x, y, text = label

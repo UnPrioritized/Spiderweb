@@ -988,7 +988,8 @@ class HzMouse:
             return
         if d["kind"] == "new":
             return self.cancel_drag()
-        if d["kind"] in ("bendpt", "bendcurve"):  # (a bend point held: it goes; a curve square: straight again)
+        if d["kind"] in ("bendpt", "bendcurve", "wobbledepth"):  # (a bend point held: it goes; a curve square:
+            #                                                    straight again; a wobble depth line: no wobble)
             return self.bend_delete_dragged()
         self.end_drag()
         if d["kind"] in DOTS:

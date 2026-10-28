@@ -32,8 +32,8 @@ BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = fr
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
 BEND = look.HZ_BEND
 BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: hz_sketch.py)
-BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend")  # the drags bend_drag / bend_release take (sketch*:
-# the Sketch tool's, hz_sketch.py)
+# the drags bend_drag / bend_release take (sketch* + wobbledepth: the Sketch tool's, hz_sketch.py)
+BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth")
 
 
 class HzBend:
@@ -116,7 +116,11 @@ class HzBend:
         """What the Bend tool would take at (x, y): ("point", tone, point number), ("curve", tone, piece number) a
         curve square, ("slide",) a slide's dot or square (those win over a note: the usual tools take them), ("note",
         tone) on a note or on its bend line, ("end", tone) Sketch's ">" after a note's end (only where nothing
-        else is: the next note's start, a slide's dot just after the end come first; hunt 2026-10-28), or None."""
+        else is: the next note's start, a slide's dot just after the end come first; hunt 2026-10-28), ("wobble", tone,
+        "a" / "b" / "line") Sketch's depth line over the picked piece (first: it sits above the notes), or None."""
+        which = self.depth_hit(x, y) if self.sketching() else None
+        if which:
+            return "wobble", self.picked_piece()[0], which
         r = NEAR * self.s
         slides = [max(abs(x - dx), abs(y - dy)) for dx, dy, *_ in self.dots() + self.handles()]
         for px, py, i, j in reversed(self.bend_points()):
@@ -174,6 +178,8 @@ class HzBend:
         self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before)))
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
+        if hit[0] == "wobble":  # (Sketch: the picked piece's wobble depth, sketch_depth_to)
+            return self.sketch_depth(e, i, hit[2], before)
         if hit[0] == "note" and self.sketching():  # (Sketch: the piece is held, sketch_piece, Alt: curved,
             return self.sketch_piece(e, i, before)  # sketch_curve; a point is added by a double-click, sketch_double)
         if hit[0] == "end":  # (Sketch's ">": the note's length, sketch_end_to)
@@ -220,6 +226,8 @@ class HzBend:
             return self.sketch_piece_to(d, n, e)
         if d["kind"] == "sketchend":
             return self.sketch_end_to(d, n, e)
+        if d["kind"] == "wobbledepth":
+            return self.sketch_depth_to(d, n, e)
         if d["kind"] == "bendcurve":  # how far from the piece's first point to its second the square is dragged
             _, sy, _, j, k0, k1 = d["square"]
             y = sy + e.y - d["y"]
@@ -252,6 +260,10 @@ class HzBend:
         if not d or d["kind"] not in BEND_DRAGS:
             return False
         self.drop_drag()
+        if d["kind"] == "sketchpiece" and not d["moved"]:  # (Sketch: a click picks the piece: its depth line shows)
+            pts = d["orig"] or ([0.0, 0.0], [1.0, 0.0])
+            j = d["j"] or 0
+            self.sketch_pick = (self.tones[d["i"]].get("id"), pts[j][0], pts[j + 1][0])
         self.bend_done(d)
         return True
 
@@ -268,6 +280,10 @@ class HzBend:
         with what the drag did)."""
         d = self.drag
         self.end_drag()
+        if d["kind"] == "wobbledepth":  # (Sketch's depth line: the piece's wobble goes)
+            self.sketch_depth_gone(d)
+            self.bend_done(d, tr("hz.step_wobble_delete"))
+            return
         pts = self.tones[d["i"]]["bend"]
         if d["kind"] == "bendcurve":
             del pts[d["j"]][2:]
@@ -439,7 +455,7 @@ def tidy_bend(n, pieces=False):
     """A note's bend line after a change: rounded; none left when every point is back at 0 (pieces: the Sketch
     tool's, a flat line keeps the points between its ends, they're its pieces). Wobbles with no length left go."""
     if "wobble" in n:
-        n["wobble"] = [w for w in n["wobble"] if w["at"][1] - w["at"][0] > 1e-9]
+        n["wobble"] = [w for w in n["wobble"] if w["at"][1] - w["at"][0] > 1e-9 and max(w["depth"]) > 0]
         if not n["wobble"]:
             del n["wobble"]
     pts = n.get("bend")
