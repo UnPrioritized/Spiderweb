@@ -9,3 +9,5 @@ When the computer can't keep up, a red "Overloaded" shows at the right end of th
 Right-drag (any tool) = listen to the notes under the mouse, like scrubbing: a second line follows the mouse, the play line stays where it is.
 
 OmniMIDI (KDMAPI) shows in the MIDI out list when OmniMIDI is installed. It plays straight through OmniMIDI with your own OmniMIDI settings, skipping Windows' MIDI layers, so many notes play more smoothly.
+
+Kestrel (GPU, Experimental) in the MIDI out list makes the sound on your graphics card with the same soundfonts, so very busy black MIDIs keep far more notes ringing. See Kestrel (GPU) playback.

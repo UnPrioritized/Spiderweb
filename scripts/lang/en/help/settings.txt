@@ -16,6 +16,6 @@ Look tab:
 
 • Shape lines: how thick shapes' lines are on the piano roll. This one shows at once.
 
-Sound tab: the MIDI out used for playback, and with Built-in BASSMIDI its soundfonts (several can be stacked, each overriding the ones above it: see Playback), voice limit, lowering it by itself when it can't keep up, and Use OmniMIDI Limiter.
+Sound tab: the MIDI out used for playback, and with Built-in BASSMIDI its soundfonts (several can be stacked, each overriding the ones above it: see Playback), voice limit, lowering it by itself when it can't keep up, and Use OmniMIDI Limiter. With Kestrel (GPU, Experimental) picked: the same soundfonts list, Max voices, Block size, Limiter and DC blocker (see Kestrel (GPU) playback).
 
 Language tab: the language of every text, shown after a restart. Start a translation saves a copy of the English texts to fill in.

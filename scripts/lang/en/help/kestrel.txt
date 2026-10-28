@@ -1,0 +1,18 @@
+Kestrel (GPU, Experimental) is a MIDI out that makes the sound on your graphics card instead of the processor. It can keep hundreds of thousands of notes ringing at once, so very busy black MIDIs sound much fuller than they do through Built-in BASSMIDI. Pick it in Settings (Help menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see Playback).
+
+It needs 64-bit Windows or Linux and a fairly recent graphics card with an up-to-date driver. The first Play starts Kestrel, which takes a few seconds ("Starting Kestrel…" on the status line). If it can't start, or stops while playing, a window says why and offers Built-in BASSMIDI instead.
+
+With a loaded MIDI, Kestrel reads its busiest parts ahead in the background, so walls of notes don't stutter. For a very big MIDI this can take a minute and a few GB of memory the first time. When it's done, Spiderweb asks whether to keep the read-ahead next to the MIDI's saved index: kept, the next load is ready in a moment.
+
+Settings (Help menu) → Sound, while Kestrel is picked:
+• Max voices: the most notes that can sound at once (300,000 to start; type 300k, 1m and so on). More = fuller busy parts, but each block takes the graphics card longer. If the card can't take that many, Spiderweb lowers it and says so.
+• Lower it by itself when it can't keep up: ticked, the quietest notes are left out when the card falls behind, so playback never stops. Off, every note plays and it stutters where it can't keep up.
+• Block size: how much sound is made at a time. Bigger = easier in busy parts, but the sound starts a little later after Play.
+• Limiter and DC blocker: keep very loud parts from clipping and the bass from drifting, as in Kestrel's own renders.
+Changing them while playing starts Kestrel again from the play line (a few seconds).
+
+When the card can't keep up, a red "Overloaded" shows at the right end of the status line: lower Max voices, pick a bigger Block size, or tick "Lower it by itself".
+
+For now, the Hz bass preview, the synth window and the live keys still play through Built-in BASSMIDI, and 31-EDO keys above 127 need Built-in BASSMIDI to be heard.
+
+Kestrel is made by thtstickyboi, with the live playing part by mbms (mbms0). It's free and open source (Mozilla Public License 2.0): see THIRD-PARTY-NOTICES.txt next to Spiderweb.
