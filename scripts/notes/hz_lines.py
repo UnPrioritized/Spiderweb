@@ -94,17 +94,21 @@ def bend_part(n, t, span):
     else:
         xs = [p[0] for p in pts]
         first = int(np.searchsorted(xs, u0, side="right")) - 1  # (the piece the cut starts in; -1: before the line)
-        # (the cut's start, every point inside (both of a jump's), its end; each with the curve of the piece after it
-        # and True when that piece is a whole one of the line's)
-        nodes = [(u0, at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0, False, ())]
+        # (the cut's start, every point inside (both of a jump's), its end; each with the curve of the piece after it,
+        # that curve as the point has it, and True when it's ON one of the line's points: a piece between two of
+        # those is a whole one, its curve kept; a cut on a point = that point, its curve too: a note made longer /
+        # shorter from its start keeps its first piece's curve)
+        on = 0 <= first < len(pts) - 1 and abs(xs[first] - u0) < 1e-12
+        nodes = [(u0, at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0, on,
+                  pts[first][2:] if on else ())]
         inside = [j for j, x in enumerate(xs) if u0 < x < u1]
-        for k, j in enumerate(inside):
-            nodes.append((xs[j], pts[j][1], bend_of(pts[j]) if j < len(pts) - 1 else 0.0, k + 1 < len(inside),
+        for j in inside:
+            nodes.append((xs[j], pts[j][1], bend_of(pts[j]) if j < len(pts) - 1 else 0.0, True,
                           pts[j][2:] if j < len(pts) - 1 else ()))
-        nodes.append((u1, at(u1), 0.0, True, ()))
+        nodes.append((u1, at(u1), 0.0, any(abs(x - u1) < 1e-12 for x in xs), ()))
         out = []
-        for (a, va, curve, whole, tail), (b, *_) in zip(nodes, nodes[1:]):
-            if curve and not whole and b > a:  # (a curve cut through: sampled)
+        for (a, va, curve, on_a, tail), (b, _, _, on_b, _) in zip(nodes, nodes[1:]):
+            if curve and not (on_a and on_b) and b > a:  # (a curve cut through: sampled)
                 out.append([a, va])
                 out += [[a + (b - a) * i / 8, at(a + (b - a) * i / 8)] for i in range(1, 8)]
             else:

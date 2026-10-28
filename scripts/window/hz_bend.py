@@ -422,5 +422,8 @@ def tidy_bend(n, pieces=False):
     if pts is None:
         return
     pts[:] = [[round(p[0], 9), round(p[1], 4), *p[2:]] for p in pts]
+    # two points on one spot at one pitch do nothing: one (user 2026-10-28), the later kept (its curve is the
+    # piece after); at different pitches they're a jump and stay
+    pts[:] = [p for p, q in zip(pts, pts[1:] + [None]) if not (q and q[0] == p[0] and q[1] == p[1])]
     if not pts or all(abs(p[1]) < 1e-9 for p in pts) and not (pieces and len(pts) > 2):
         n.pop("bend")
