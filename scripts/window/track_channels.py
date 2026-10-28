@@ -81,7 +81,8 @@ def tidy_tracks(app):
         else:
             t.pop("order", None)
         new.append(t)
-    app.own_tracks = new
+    if new != app.own_tracks:  # (the list is replaced on a change only: App.shapes_changed runs this each time)
+        app.own_tracks = new
     ch_of = {t["id"]: t["ch"] for t in new}
     for sh in app.shapes:
         if "into_ch" not in sh:

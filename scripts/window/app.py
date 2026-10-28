@@ -24,6 +24,7 @@ from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
+from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
@@ -1848,6 +1849,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             else:
                 self.pad_tick.pack_forget()
         self.sync_channels_fold()  # (", empty tracks" comes and goes with Channel per strip, hunt 10-27)
+        if any("into_ch" in sh for sh in self.shapes):  # (a track's own channel gone with its shapes: it takes one it
+            tidy_tracks(self)                           # still holds, PLAN #11 C; found by the track sweep)
         made = self.notes_made(any_spot=now == "follow")
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
