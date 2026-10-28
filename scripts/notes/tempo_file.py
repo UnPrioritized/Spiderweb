@@ -291,24 +291,30 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
     gaps, dense, gave, times = [], [], [], []
     starts = [s[0] for s in segs]
+    # (sorted once, each part takes its own slice: every part looked through every note of the song, thousands of
+    # jumps x 300k notes froze for seconds, PLAN #12 hunt; the same answers)
+    ts = np.unique(ticks)
+    bs = np.sort(bars) if fit_bars else None
+    ls = np.sort(loose)
     for (a, e, u), mine, part in zip(keeps, own, files):
-        inside = ticks[(ticks > a) & (ticks < e)]
+        near = ts[np.searchsorted(ts, a, "left"):np.searchsorted(ts, e, "right")]  # (a <= tick <= e)
+        inside = near[(near > a) & (near < e)]
         marks = [np.array([a, e], np.int64), inside]
         if fit_bars:
-            marks.append(bars[(bars > a) & (bars < e)])
+            marks.append(bs[np.searchsorted(bs, a, "right"):np.searchsorted(bs, e, "left")])
         drawn = _per_tick(segs, a, e, starts)
         sums =np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
         was = None if part is None else np.concatenate([[0], np.cumsum(_per_tick(part, a, e))])
         if mine:  # (its own heard tempo line: that, also over a loaded MIDI's own tempo, even one steady value:
             # a flat line, e.g. Keep the visual's, was left to the file's tempo, hunt 2026-10-24)
             was = None if isinstance(u, int) else np.concatenate([[0], np.cumsum(u)])
-        lo = loose[(loose > a) & (loose < e)]
+        lo = ls[np.searchsorted(ls, a, "right"):np.searchsorted(ls, e, "left")]
         while True:
             n = np.unique(np.concatenate(marks + [lo]))
             d = np.diff(n)
             total = d * u if was is None else was[n[1:] - a] - was[n[:-1] - a]
             exact = total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)  # (file ticks each gap needs at the tempo)
-            note = np.isin(n, ticks)
+            note = np.isin(n, near)  # (n is inside a..e: the notes there are all it can meet)
             real = note | np.isin(n, lo)
             close = real[:-1] & real[1:] & (exact < 1)  # (two under a tick apart at that tempo)
             if not len(lo):

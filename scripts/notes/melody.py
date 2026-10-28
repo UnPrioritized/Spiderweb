@@ -4,11 +4,15 @@ together count once). Notes shorter than "shortest" are skipped (fast runs / tri
 longer than "rest" ends a RUN (the tempo goes back to normal there). Every snap step = anchors on the grid instead,
 no melody needed (also with All tracks). All in beats."""
 
+import bisect
+
 import numpy as np
 
 SHORTEST = 0.125  # beats: "Skip notes shorter than" to start with (1/32)
 REST = 1.0  # beats: "Back to the normal tempo after a rest longer than" to start with
-MOST_ANCHORS = 1_000_000  # more jumps than this in one area = refused (each is a tempo point or more)
+MOST_ANCHORS = 100_000  # more jumps than this in one area = refused (each is a tempo point or more; a million froze
+# for minutes, hunt 2026-10-29)
+CATCH_LEAST = 4  # ticks: the shortest gap a catch-up can be fitted into (1-2 ticks never fit, hunt 2026-10-29)
 
 
 def melody_runs(starts, ends, a, b, shortest=SHORTEST, rest=REST):
@@ -30,15 +34,51 @@ def melody_runs(starts, ends, a, b, shortest=SHORTEST, rest=REST):
     return out
 
 
-def snap_runs(step, a, b):
-    """Every step: one run with an anchor every step FROM THE AREA'S START (user 2026-10-29: counted from beat 0, a
-    490-tick step started part way in) up to b, ending at b."""
-    if not step or step <= 0 or b <= a:
+def snap_runs(step, a, b, ppq):
+    """Every step (whole ticks, at least 1): one run with an anchor every step FROM THE AREA'S START (user
+    2026-10-29: counted from beat 0, a 490-tick step started part way in) up to b, ending at b. Worked out in ticks
+    (in beats some landed a tick off: hunt 2026-10-29)."""
+    step = int(step)
+    t0, t1 = round(a * ppq), round(b * ppq)
+    if step < 1 or t1 <= t0:
         return []
-    n = int(np.floor((b - a - 1e-9) / step)) + 1
+    n = (t1 - t0 - 1) // step + 1
     if n > MOST_ANCHORS:
         n = MOST_ANCHORS + 1  # (counted as too many: never made)
-    return [(a + np.arange(n) * step, float(b))]
+    return [((t0 + np.arange(n, dtype=np.int64) * step) / ppq, float(b))]
+
+
+def heard_points(tempo, base, ppq, a, b):
+    """What was really heard over beats a..b (the file's tempo with catch-ups, Keep timing parts at their heard
+    tempo) as a heard tempo line: [[beat, bpm, "hold", ...]] held points, each BPM exactly a whole number of
+    microseconds (so it plays back exactly). Keep the audio's runs play it (hunt 2026-10-29: the area's own tempo
+    changes were lost, notes after it moved)."""
+    from notes.tempo import BEND, _put_all, base_us, beat_tick, file_segments, layout
+    ta, tb = beat_tick(a, ppq), max(beat_tick(b, ppq), beat_tick(a, ppq) + 1)
+    if not tempo["points"] and not tempo["catch"]:  # (no tempo line: the project's BPM all along)
+        return [[ta / ppq, 60_000_000 / base_us(base), "hold", "", "lin", False, list(BEND)]]
+    lay = layout(tempo, base, ppq)
+    segs, _ = file_segments(tempo, base, ppq, tb)
+    for n, (_, ka, ke, _) in enumerate(lay["keeps"]):
+        ke = tb if ke is None else min(ke, tb)
+        if ke > ka:
+            segs = _put_all(segs, ka, ke, lay["keep_segs"](n, ka, ke))
+    out, last = [], None
+    for a0, b0, u in segs:
+        s, e = max(a0, ta), min(b0, tb)
+        if e <= s:
+            continue
+        if isinstance(u, (int, np.integer)):
+            spots = [(s, int(u))]
+        else:  # (one value per tick: a point where it changes)
+            vals = np.asarray(u, np.int64)[s - a0:e - a0]
+            change = np.flatnonzero(np.diff(vals)) + 1
+            spots = [(s, int(vals[0]))] + [(s + int(k), int(vals[k])) for k in change]
+        for t, us in spots:
+            if us != last:
+                out.append([t / ppq, 60_000_000 / us, "hold", "", "lin", False, list(BEND)])
+                last = us
+    return out
 
 
 def anchor_count(runs):
@@ -55,56 +95,55 @@ HOLD = 50.0  # %: the catch-up way, how much of each gap the show tempo holds be
 CATCH_SHAPES = ("flat", "ease", "rise", "ramp")  # the catch-ups' shapes offered (the pane's, without drawn / formula)
 
 
-def gap_values(shape, k, lo, hi, rng):
-    """(BPM leaving the jump, BPM arriving at the next one or None = held) for gap k."""
+def gap_values(shape, k, lo, hi, rng, snap=0.0):
+    """(BPM leaving the jump, BPM arriving at the next one or None = held) for gap k. snap: the BPM snap, for
+    Random's picks only (typed BPMs stay exact: hunt 2026-10-29, 82.5 came out 82)."""
     if shape == "burst":
         return lo, hi
     if shape == "updown":
         return (lo if k % 2 == 0 else hi), None
     if shape == "random":
-        return lo + (hi - lo) * rng.random(), None
+        v = lo + (hi - lo) * rng.random()
+        return (max(snap, round(v / snap) * snap) if snap else v), None
     return lo, None  # (jump: the first box only)
 
 
 def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_shape="flat", rng=None,
-              snap=0.0, plain=()):
+              snap=0.0, plain=(), heard=None):
     """The tempo the fill lays over beats a..b, as a Conductor pane copy (TempoPane.put_copies replaces what's in
     the area with it): {"length", "points", "catch", "spans"}, beats from a. runs: melody_runs / snap_runs. normal:
-    the BPM back between runs (the tempo arriving at the area). Keep the audio: every part of a run Keep timing (no
-    heard line: the tempo heard before the run). Catch-up: each gap = the show tempo up to hold % of it, then a
-    catch-up (its yellow area from the jump, so back-to-back catch-ups all pay back to the tempo after the run:
-    every jump on time). plain: gaps (run, k) left at the normal tempo (their catch-up can't be done). snap: BPM
-    snap for random values."""
+    the BPM between runs.
+    Keep the audio: the WHOLE AREA one Keep timing run playing heard (heard_points: what was heard there before, in
+    song beats), so no note moves, inside or after it (hunt 2026-10-29); normal = the drawn tempo arriving there.
+    Catch-up: each gap = the show tempo up to hold % of it, then a catch-up (its yellow area from the jump, so
+    back-to-back catch-ups all pay back to the tempo after the run: every jump on time); normal = the tempo heard
+    at the area's start. plain: gaps (run, k) left at the normal tempo (their catch-up can't be done). snap: BPM
+    snap for Random's values."""
     import random
     from notes.tempo import BEND, catch_set, clamp_bpm
     rng = rng or random.Random()
     keep = how == "audio"
     pts, cs, gaps = [], [], []  # (gaps: each catch-up's (run, gap))
+    line = [[q[0] - a] + list(q[1:]) for q in heard or ()]
 
-    heard = [None]  # (Keep the audio: the run's own heard tempo line = the normal tempo all along)
-
-    def point(x, bpm, curve="hold", kept=keep):
-        if snap and curve == "hold":
-            bpm = max(snap, round(bpm / snap) * snap)
-        p = [x - a, clamp_bpm(bpm), curve, "", "exp" if curve == "line" else "lin", kept, list(BEND)]
-        if kept and heard[0]:
-            p.append({"line": [list(q) for q in heard[0]]})
+    def point(x, bpm, curve="hold"):
+        p = [x - a, clamp_bpm(bpm), curve, "", "exp" if curve == "line" else "lin", keep, list(BEND)]
+        if keep and line:
+            p.append({"line": [list(q) for q in line]})
         pts.append(p)
 
+    if keep and (not runs or runs[0][0][0] > a + 1e-9):  # (from the area's start: its audio kept too)
+        point(a, normal)
     for r, (xs, end) in enumerate(runs):
         xs = [float(x) for x in xs]
-        # (a run from the song's very start: heard at the normal tempo by its own line, else "the tempo heard
-        # before" was the project's first BPM there, not the line's; elsewhere the tempo heard before IS the normal
-        # one, and a line on every part made the pane slow to draw, user 2026-10-29: every 1 tick lagged)
-        heard[0] = [[xs[0] - a, clamp_bpm(normal), "hold", "", "lin", False, list(BEND)]] if xs[0] <= 1e-9 else []
         for k, x in enumerate(xs):
             nxt = xs[k + 1] if k + 1 < len(xs) else end
             if nxt <= x + 1e-9:
                 continue
             if (r, k) in plain:
-                point(x, normal, kept=False)
+                point(x, normal)
                 continue
-            v0, v1 = gap_values(shape, k, lo, hi, rng)
+            v0, v1 = gap_values(shape, k, lo, hi, rng, snap)
             stop = nxt if keep else x + (nxt - x) * min(max(hold, 1.0), 99.0) / 100.0
             if shape == "jump" and keep:
                 point(x, v0)
@@ -119,6 +158,14 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
                 catch_set(item, 3, x - a)  # (its yellow area from the jump: back-to-back stretches chain)
                 cs.append(item)
                 gaps.append((r, k))
-        point(end, normal, kept=False)  # (the run's end: back to the normal tempo)
+        point(end, normal)  # (the run's end: back to the normal tempo)
     pts.sort(key=lambda p: p[0])  # (stable: an arriving point stays before the one leaving the same beat)
-    return {"length": b - a, "points": pts, "catch": cs, "spans": [(0.0, b - a)], "gaps": gaps}
+    held = []  # (a held point the same as the one before: nothing changes there, left out: gaps left plain; never
+    lines = sorted(c[0] for c in cs)  # one a catch-up ends on: back-to-back catch-ups chain through those)
+    for p in pts:
+        q = held[-1] if held else None
+        if q is not None and q[2] == "hold" and p[2] == "hold" and q[1] == p[1] and q[0] < p[0] \
+                and bisect.bisect_right(lines, q[0]) == bisect.bisect_right(lines, p[0]):
+            continue
+        held.append(p)
+    return {"length": b - a, "points": held, "catch": cs, "spans": [(0.0, b - a)], "gaps": gaps}

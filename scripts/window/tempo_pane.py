@@ -3183,14 +3183,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
                        math.inf if e is None else e / ppq, i) for i, a, e, u in layout(tempo, base, ppq)["keeps"]]
         keep_spans = [s for s in keep_spans if s[1] > s[0]]
         run_of = {k: n for n, (s, t) in enumerate(keep_runs(tempo)) for k in range(s, t + 1)}
-        if app.loaded is None and not self.drag:  # (parts side by side in one run, heard flat at one tempo: drawn
-            # as one, the same picture; thousands of jumps drew a box + line + word check each, user 2026-10-29)
+        if app.loaded is None and not self.drag:  # (parts side by side in one run (one heard line: keep_runs) and
+            # heard at one tempo before it: drawn as one, the same picture; thousands of jumps drew a box + line +
+            # word check each, user 2026-10-29)
             joined_spans = []
             for s in keep_spans:
                 p = joined_spans[-1] if joined_spans else None
-                if p is not None and run_of.get(p[5]) == run_of.get(s[5]) and abs(p[4] - s[3]) < 1e-9 \
-                        and p[2] == s[2] and not heard_line(tempo["points"][p[5]]) \
-                        and not heard_line(tempo["points"][s[5]]):
+                if p is not None and run_of.get(p[5]) is not None and run_of.get(p[5]) == run_of.get(s[5]) \
+                        and abs(p[4] - s[3]) < 1e-9 and p[2] == s[2]:
                     joined_spans[-1] = (p[0], s[1], p[2], p[3], s[4], p[5])
                 else:
                     joined_spans.append(s)
