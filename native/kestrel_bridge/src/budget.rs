@@ -737,9 +737,13 @@ impl Budget {
             self.raised = false;
             self.allow = Some((base * factor).max(LEAST));
             // and the voices sounding: notes already ringing kept blocks slow after every new note was dropped
-            // (Shinki: ~1 M voices from the first blocks); Kestrel steals the quietest down to the cap
-            let sounding = self.cap.map_or(voices as f64, |c| c.min(voices as f64));
-            self.cap = Some((sounding * factor).max(LEAST_VOICES));
+            // (Shinki: ~1 M voices from the first blocks); Kestrel steals the quietest down to the cap. Only once
+            // the ready blocks are being used up: one slow block with them all waiting (Shinki's wall ending,
+            // 516,000 note-offs in one block, 19 ms) cut 300,000 ringing notes at once, heard (user 2026-10-28)
+            if ready + 1 < ahead.max(2) || self.empty > 0.5 {
+                let sounding = self.cap.map_or(voices as f64, |c| c.min(voices as f64));
+                self.cap = Some((sounding * factor).max(LEAST_VOICES));
+            }
             // notes already started keep blocks slow for a while (a piano note rings on): let the cut show
             // before judging again (= the blocks kept ready), and judge only blocks made after it (the average
             // still held the slow blocks: three cuts in a row took Shinki from 185,000 note-ons a block to 36)
