@@ -1,17 +1,21 @@
 """The Hz bass window's Sketch tool (S; user, 2026-10-28): a note drawn and shaped as a pitch line by hand, its
 points and pieces dragged, a wobble on a piece. Everything it makes is the note's own bend line (tone["bend"], see
-hz_bend.py), so the Bend tool, Copy / Paste bend and presets go on working with it. On a note it works like the
-Bend tool for now (hz_bend.BEND_TOOLS). On empty space a press starts a new note there (grid; Shift free) and the
+hz_bend.py), so the Bend tool, Copy / Paste bend and presets go on working with it. Points and curve squares
+work like the Bend tool's (hz_bend.BEND_TOOLS), but a press on a note's line only picks the note: a DOUBLE-click
+there adds a point (sketch_double), a double-click on a point takes it away. On empty space a press starts a new note there (grid; Shift free) and the
 drag sets its end (hz_mouse's "new" drag, sketch_new_to); Ctrl+drag = a Select box.
 
 While it's on, each note shows as a thick line where it's heard (its tune and bend; not the Pitch line / vibrato,
 those are the red line's), with a dot at its start and end, a small ">" after its end and, when it bends, a faint
 dashed line at its own key."""
 
+import copy
+
 import numpy as np
 
-from notes.hzbass import note_bend, pitch
-from window.hz_bend import BEND
+from files.lang import tr
+from notes.hzbass import line_at, note_bend, pitch
+from window.hz_bend import BEND, LINE_NEAR
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
 SKETCH_THIN, SKETCH_THICK = 3, 9
@@ -29,10 +33,49 @@ class HzSketch:
         d["moved"] = True
         n["len"] = max(self.shortest(e), self.snap(self.beat_at(e.x), e) - n["t"])
 
+    def sketch_wide(self):
+        """How thick a note's line is (px)."""
+        return max(SKETCH_THIN * self.s, min(SKETCH_THICK * self.s, SKETCH_WIDE * self.sy))
+
+    def sketch_reach(self):
+        """How near a note's line (px, up / down) a press takes the note."""
+        return max(LINE_NEAR * self.s, self.sketch_wide() / 2 + 2 * self.s)
+
+    def sketch_double(self, e, hit):
+        """A double-click on a note's line ("note", tone): a point there (on the grid, on the line as it is, so
+        nothing changes yet), held like a pressed one; on a point ("point", tone, point): it goes (never the
+        first / last: the note's start and end). One undo step each."""
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        i, n = hit[1], self.tones[hit[1]]
+        self.sel, self.box_kept = {i}, None
+        if hit[0] == "point":
+            if 0 < hit[2] < len(n["bend"]) - 1:
+                del n["bend"][hit[2]]
+                self.bend_done({"i": i, "before": before}, tr("hz.step_note_bend_delete"))
+                self.point_again()
+            else:
+                self.redraw()
+            return True
+        u = self.bend_spot(n, e)[0]
+        pts = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
+        if any(abs(p[0] - u) < 1e-9 for p in pts):  # (one there already)
+            self.redraw()
+            return True
+        j = sum(p[0] <= u for p in pts)
+        pts.insert(j, [u, round(float(line_at(pts, u)), 2)])
+        n["bend"] = pts
+        self.drag = {"kind": "bendpt", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
+                     "pinned": False, "name": tr("hz.step_note_bend")}
+        self.redraw()
+        self.show_status(e)
+        return True
+
     def draw_sketch_notes(self, colours, selected):
         """The notes in view as lines (Sketch tool), each in its colours (fill, edge; selected ones in `selected`)."""
         c, s, most, w = self.canvas, self.s, self.bend_most(), self.canvas.winfo_width()
-        wide = max(SKETCH_THIN * s, min(SKETCH_THICK * s, SKETCH_WIDE * self.sy))
+        wide = self.sketch_wide()
         r = 3.5 * s
         for i, n in enumerate(self.tones):
             x0, x1 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"])

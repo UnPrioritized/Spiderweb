@@ -102,6 +102,10 @@ class HzBend:
             x0, x1, y0 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             if not x0 - 1 <= x <= max(x1, x0 + 2) + 1:
                 continue
+            if self.sketching():  # (only the line counts: the note's row isn't shown)
+                if abs(y - self.pitch_y(self.bent_pitch(n, beat, most))) <= self.sketch_reach():
+                    return "note", i
+                continue
             if y0 <= y < y0 + self.sy or n.get("bend") and abs(y - self.pitch_y(self.bent_pitch(n, beat, most))) <= \
                     LINE_NEAR * self.s:
                 return "note", i
@@ -132,6 +136,9 @@ class HzBend:
         self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before)))
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
+        if hit[0] == "note" and self.sketching():  # (Sketch: a point is added by a double-click, sketch_double)
+            self.redraw()
+            return True
         if hit[0] == "curve":  # (where the square was grabbed: it moves as far as the mouse from there)
             square = next(q for q in self.bend_squares() if q[2:4] == (i, hit[2]))
             self.drag = {"kind": "bendcurve", "i": i, "j": hit[2], "before": before, "x": e.x, "y": e.y,
@@ -199,7 +206,7 @@ class HzBend:
 
     def bend_done(self, d, name=None):
         """The bend held / changed in drag d is done: tidied, one undo step when anything changed."""
-        tidy_bend(self.tones[d["i"]])
+        tidy_bend(self.tones[d["i"]], self.sketching())
         if self.tones != d["before"]:
             self.commit(name or d["name"], d["before"])
         else:
@@ -227,6 +234,8 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
+        if self.sketching() and hit[0] in ("note", "point"):  # (hz_sketch.py: a point added / taken away)
+            return self.sketch_double(e, hit)
         if hit[0] != "curve":
             self.on_press(e)
             return True
@@ -244,6 +253,8 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] != "point":
             return False
+        if self.sketching() and hit[2] in (0, len(self.tones[hit[1]]["bend"]) - 1):  # (Sketch: the note's start
+            return False                                                              # and end stay: its menu)
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
         del self.tones[hit[1]]["bend"][hit[2]]
@@ -358,11 +369,12 @@ WOBBLE = (4.0, 0.5)  # waves a beat, keys each way
 WOBBLE_MOST = 4096  # quarter waves at most on one note (256 beats at 4 a beat)
 
 
-def tidy_bend(n):
-    """A note's bend line after a change: rounded; none left when every point is back at 0."""
+def tidy_bend(n, pieces=False):
+    """A note's bend line after a change: rounded; none left when every point is back at 0 (pieces: the Sketch
+    tool's, a flat line keeps the points between its ends, they're its pieces)."""
     pts = n.get("bend")
     if pts is None:
         return
     pts[:] = [[round(p[0], 9), round(p[1], 4), *p[2:]] for p in pts]
-    if not pts or all(abs(p[1]) < 1e-9 for p in pts):
+    if not pts or all(abs(p[1]) < 1e-9 for p in pts) and not (pieces and len(pts) > 2):
         n.pop("bend")
