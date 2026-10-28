@@ -21,6 +21,7 @@ from notes.melody import (CATCH_LEAST, CATCH_SHAPES, HOLD, HOWS, MOST_ANCHORS, R
                           melody_runs, snap_runs)
 from notes.tempo import MAX_BPM, MIN_BPM, drawn_bpm, plans
 from window import look
+from window.jump_areas import JumpChain
 from window.load_extract import boxes_now
 from window.widgets import Scrub, remember_place, unhighlight
 
@@ -69,6 +70,12 @@ class MelodyWindow(tk.Toplevel):
         snap = app.snap.get()
         start = snap if snap_name(snap) else fmt(app.snap_ticks())
         self.step = self.length_box(row, getattr(app, "melody_step", start))
+        # Jump areas (group C): each click in the pane an edge, two neighbouring edges an area (window/jump_areas.py)
+        self.at_clicks = ttk.Radiobutton(box, text=tr("melody.at_clicks"), value="clicks", variable=self.at,
+                                         command=self.sync)
+        self.at_clicks.pack(anchor="w", padx=(10, 0), pady=(4, 0))
+        self.chain = None  # the click chain being made (JumpChain), None = none
+        self.snap_starts = np.zeros(0)  # the melody's note starts in beats (sorted): edges go onto them
         self.rules = []  # (label, box) of the melody's rules: greyed with Every snap step
         self.shortest = self.length_row(box, "melody.shortest", getattr(app, "melody_shortest", "1/32"))
         self.rest = self.length_row(box, "melody.rest", getattr(app, "melody_rest", "1/4"))
@@ -180,22 +187,23 @@ class MelodyWindow(tk.Toplevel):
         a = pane.bands_reach()[0]
         return float(drawn_bpm(self.app.tempo, pane.base(), [max(0.0, a - 1e-6)])[0])
 
-    def normal_at(self, a):
+    def normal_at(self, a, tempo):
         """The drawn line's BPM at beat a itself: a ramp crossing the area's start stays one ramp there (a point off
         its value by a hair made a jump, and a ramp ending at a jump spreads its steps differently: notes before
         the area moved, hunt 2026-10-29); a jump on a: the BPM leaving it, as before."""
         pane = self.app.tempo_pane
-        return float(drawn_bpm(self.app.tempo, pane.base(), [max(0.0, a)])[0])
+        return float(drawn_bpm(tempo, pane.base(), [max(0.0, a)])[0])
 
-    def fill_area(self, box):
+    def fill_area(self, box, tempo=None):
         """((first, last beat) the fill covers, moved) for the kept box (first, last): a start inside an earlier
         catch-up's teal area moves to where it ends (hunt 2026-10-29: the fill cut it short, it turned red); None
-        when nothing is left."""
+        when nothing is left. tempo: the line it goes on (the project's)."""
         a, b = box
         moved = False
         pane = self.app.tempo_pane
-        for _ in range(len(self.app.tempo["catch"]) + 1):
-            hit = next((st["end"] for st, _ in plans(self.app.tempo, pane.base(), self.app.ppq)
+        tempo = self.app.tempo if tempo is None else tempo
+        for _ in range(len(tempo["catch"]) + 1):
+            hit = next((st["end"] for st, _ in plans(tempo, pane.base(), self.app.ppq)
                         if st["end"] is not None and st["line"] < a - 1e-9 and a < st["end"] - 1e-9), None)
             if hit is None:
                 break
@@ -347,21 +355,41 @@ class MelodyWindow(tk.Toplevel):
         at = self.at.get()
         app.melody_at = at
         app.melody_shortest, app.melody_rest, app.melody_step = self.shortest.get(), self.rest.get(), self.step.get()
-        box = pane.bands_reach() if pane.bands else None
-        area, moved = self.fill_area(box) if box else (None, False)
+        clicks = at == "clicks"
+        chain = self.live_chain()
+        if clicks:  # (the area = the clicked edges' first .. last)
+            edges = chain.sorted() if chain else []
+            box = (edges[0], edges[-1]) if len(edges) > 1 else None
+            base = chain.base if chain else app.tempo
+        else:
+            if chain:  # (another choice picked: the chain is done)
+                self.finish_chain()
+                chain = None
+            box = pane.bands_reach() if pane.bands else None
+            base = app.tempo
+        area, moved = self.fill_area(box, base) if box else (None, False)
         track, ch, name = self.track_now()
         step = self.step_ticks()
         only = self.only_sel.get()
         has_sel = any(i < len(app.shapes) for i in app.sels) or bool(app.roll.kept_box())
-        lkey = self.loaded_key(area[0], area[1], only) if area and track is not None and at == "melody" else None
+        if clicks and track is not None:  # (edges go onto the melody's starts anywhere: the whole track read)
+            lm = app.loaded
+            lkey = self.loaded_key(0.0, (lm.end / max(1, lm.ppq) + 1) if lm else 1.0, only)
+        else:
+            lkey = self.loaded_key(area[0], area[1], only) if area and track is not None and at == "melody" else None
         how = self.how.get()
         app.melody_shape, app.melody_how, app.melody_hold = self.shape.value(), how, self.hold.get()
         app.melody_catch = self.catch_shape.value()
-        made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get())
+        made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get())
         seen = (box, area, track, ch, at, only, has_sel, step, self.shortest.get(), self.rest.get(),
                 tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"], made)
         if seen == self.seen:
             return
+        if chain is not None and self.seen is not None and self.seen[-1] != made and chain.grab is None:
+            self.seen = seen  # (the shape / BPMs / way changed: the chain's areas laid again with them)
+            chain.lay()
+            self.seen = None
+            return self.sync()
         self.seen = seen
         for w in self.catch_parts:
             w.state(["!disabled" if how == "catch" else "disabled"])
@@ -381,7 +409,7 @@ class MelodyWindow(tk.Toplevel):
             for w in self.bpm_row[2:4]:
                 w.pack(side="left", padx=(4, 0), before=self.bpm_row[4])
         self.area.config(text=tr("melody.area", a=pane.place_text(box[0]), b=pane.place_text(box[1]))
-                         if box else tr("melody.no_area"))
+                         if box else tr("melody.no_clicks" if clicks else "melody.no_area"))
         self.follow.config(text=tr("melody.follows", name=name))
         melody_ok = track is not None
         self.at_melody.state(["!disabled"] if melody_ok else ["disabled"])
@@ -389,7 +417,7 @@ class MelodyWindow(tk.Toplevel):
             self.at.set("snap")
             return self.sync()
         on_melody = at == "melody" and melody_ok
-        self.only_tick.state(["!disabled"] if on_melody and has_sel else ["disabled"])
+        self.only_tick.state(["!disabled"] if (on_melody or clicks and melody_ok) and has_sel else ["disabled"])
         if not has_sel and only:
             self.only_sel.set(False)
             only = False
@@ -398,6 +426,8 @@ class MelodyWindow(tk.Toplevel):
                 w.state(["!disabled"] if on_melody else ["disabled"])
         self.runs, self.lit, problem = [], None, None
         shortest, rest = self.beats_of(self.shortest, SHORTEST), self.beats_of(self.rest, REST)
+        if clicks:
+            return self.sync_clicks(box, area, moved, track is not None, only, lkey)
         if box is None:
             problem = tr("melody.need_area")
         elif area is None:  # (all of it inside a catch-up's area)
@@ -449,6 +479,46 @@ class MelodyWindow(tk.Toplevel):
             self.hint.config(text=problem, foreground=look.WARN)
         app.roll.request_redraw()  # (the notes it follows light up)
 
+    def sync_clicks(self, box, area, moved, melody_ok, only, lkey):
+        """sync's "Where I click" part: the notes edges go onto (the melody's starts), what the chain makes. Fill
+        greyed: the areas are laid as they're clicked."""
+        app, pane = self.app, self.app.tempo_pane
+        notes, lines = None, []
+        if melody_ok:
+            s, e, k = self.own_notes(only)
+            if lkey is not None:
+                got = self.loaded_notes(lkey)
+                if got is None:
+                    lines.append(tr("melody.reading"))
+                elif got[0] is None:
+                    lines.append(tr("melody.loaded_dense" if got[1] else "melody.loaded_bad"))
+                else:
+                    s, e, k = np.concatenate([s, got[0]]), np.concatenate([e, got[1]]), np.concatenate([k, got[2]])
+            notes = (s, e, k)
+        self.lit = notes
+        self.snap_starts = np.unique(notes[0]) if notes is not None else np.zeros(0)
+        self.go.state(["disabled"])
+        problem = None
+        if box is None:
+            lines.insert(0, tr("melody.clicks_how"))
+        elif area is None:
+            problem = tr("melody.in_catch_all")
+        else:
+            got = self.chain_runs(self.chain.base, self.chain.sorted())
+            self.runs = got[1] if got else []
+            problem = self.chain_problem(self.runs) if self.runs else tr("melody.in_catch_all")
+            if problem is None:
+                n = anchor_count(self.runs)
+                lines.insert(0, trn("melody.areas", n, n=n))
+                if moved:
+                    lines.append(tr("melody.in_catch", at=pane.place_text(area[0])))
+        if problem is not None:
+            self.hint.config(text=problem, foreground=look.WARN)
+        else:
+            self.hint.config(text="\n".join(lines), foreground=look.HINT)
+        pane.request_redraw()
+        app.roll.request_redraw()
+
     def watching(self):
         self.watch = None
         try:
@@ -473,36 +543,10 @@ class MelodyWindow(tk.Toplevel):
         if pane.box.mode != "visual":  # (jumps are the visual tempo's, like a Domino paste)
             pane.box.set_mode("visual")
         (a, b), _ = self.fill_area(pane.bands_reach())
-        how = self.how.get()
-        lo, hi = self.number(self.lo), self.number(self.hi)
-        hi = lo if hi is None else hi  # (one box only: Jump and come back)
-        bpm_snap = pane.box.bpm_snap() or 0.0
-        seed = random.randrange(1 << 30)  # (each Fill a new random; the same for the tries below)
-        # what was heard over the area: Keep the audio plays it (no note moves, hunt 2026-10-29); the catch-up way
-        # comes back to the tempo heard at its start (not the shown one: inside a Keep timing part they differ)
-        heard = heard_points(app.tempo, pane.base(), app.ppq, a, b)
-        normal = self.normal_at(a) if how == "audio" else heard[0][1]
-
-        def clip_for(plain):
-            return fill_clip(self.runs, a, b, self.shape.value(), lo, hi, normal, how,
-                             self.number(self.hold) or HOLD, self.catch_shape.value(), random.Random(seed),
-                             bpm_snap, plain, heard if how == "audio" else None)
-        plain = set()
-        clip = clip_for(plain)
-        if how == "catch":
-            for _ in range(3):  # (a gap left plain changes its neighbours' catch-ups a little: tried again)
-                trial = copy.deepcopy(app.tempo)
-                pane.lay_copies(trial, clip, a, pane.ed_base(), teal=False)
-                beats = {round(a + c[0], 9): g for c, g in zip(clip["catch"], clip["gaps"])}
-                bad = {beats[round(st["line"], 9)] for st, plan in plans(trial, pane.base(), app.ppq)
-                       if round(st["line"], 9) in beats and not plan["ok"]}
-                if not bad - plain:
-                    break
-                plain |= bad
-                clip = clip_for(plain)
-            if not clip["gaps"] and plain:  # (no catch-up could be made: nothing changed, no undo step)
-                app.status.config(text=tr("melody.catch_none"))
-                return
+        clip, plain = self.make_clip(app.tempo, self.runs, a, b)
+        if clip is None:  # (no catch-up could be made: nothing changed, no undo step)
+            app.status.config(text=tr("melody.catch_none"))
+            return
         pane.put_copies(clip, a, tr("melody.step"), teal=False)
         n = anchor_count(self.runs)
         text = trn("melody.filled", n, n=n)
@@ -512,7 +556,142 @@ class MelodyWindow(tk.Toplevel):
         self.seen = None
         self.sync()
 
+    def make_clip(self, tempo, runs, a, b, seed=None):
+        """(the copy Fill lays over a..b of the line tempo, the gaps left plain): the window's shape, BPMs and way.
+        The catch-up way: gaps whose catch-up can't be done are left at the normal tempo (tried on a copy first);
+        none could = (None, plain). seed: the random's (None = a new one)."""
+        app, pane = self.app, self.app.tempo_pane
+        how = self.how.get()
+        lo, hi = self.number(self.lo), self.number(self.hi)
+        hi = lo if hi is None else hi  # (one box only: Jump and come back)
+        bpm_snap = pane.box.bpm_snap() or 0.0
+        seed = random.randrange(1 << 30) if seed is None else seed  # (the same for the tries below)
+        # what was heard over the area: Keep the audio plays it (no note moves, hunt 2026-10-29); the catch-up way
+        # comes back to the tempo heard at its start (not the shown one: inside a Keep timing part they differ)
+        heard = heard_points(tempo, pane.base(), app.ppq, a, b)
+        normal = self.normal_at(a, tempo) if how == "audio" else heard[0][1]
+
+        def clip_for(plain):
+            return fill_clip(runs, a, b, self.shape.value(), lo, hi, normal, how,
+                             self.number(self.hold) or HOLD, self.catch_shape.value(), random.Random(seed),
+                             bpm_snap, plain, heard if how == "audio" else None)
+        plain = set()
+        clip = clip_for(plain)
+        if how == "catch":
+            for _ in range(3):  # (a gap left plain changes its neighbours' catch-ups a little: tried again)
+                trial = copy.deepcopy(tempo)
+                pane.lay_copies(trial, clip, a, pane.ed_base(), teal=False)
+                beats = {round(a + c[0], 9): g for c, g in zip(clip["catch"], clip["gaps"])}
+                bad = {beats[round(st["line"], 9)] for st, plan in plans(trial, pane.base(), app.ppq)
+                       if round(st["line"], 9) in beats and not plan["ok"]}
+                if not bad - plain:
+                    break
+                plain |= bad
+                clip = clip_for(plain)
+            if not clip["gaps"] and plain:
+                return None, plain
+        return clip, plain
+
+    # ------------------------------------------------------------ Jump areas (group C)
+
+    def chain_runs(self, tempo, edges):
+        """((a, b), runs) of the clicked edges (sorted) on the line tempo: one run, a jump at every edge but the
+        last; a start inside an earlier catch-up's teal area moves to its end (as Fill's). None when nothing's
+        left."""
+        area, _ = self.fill_area((edges[0], edges[-1]), tempo)
+        if area is None:
+            return None
+        a, b = area
+        xs = [x for x in edges[:-1] if x >= a - 1e-9]
+        return (a, b), ([(np.array(xs, float), float(b))] if xs else [])
+
+    def chain_clip(self, tempo, edges):
+        """The copy the chain lays over tempo (its "at" = where), None when the boxes can't make one."""
+        got = self.chain_runs(tempo, edges)
+        if got is None or not got[1] or self.chain_problem(got[1]):
+            return None
+        (a, b), runs = got
+        clip, _ = self.make_clip(tempo, runs, a, b, seed=self.chain_seed)
+        if clip is not None:
+            clip["at"] = a
+        return clip
+
+    def chain_problem(self, runs):
+        """What stops the boxes making areas (None = fine)."""
+        lo, hi = self.number(self.lo, MIN_BPM, MAX_BPM), self.number(self.hi, MIN_BPM, MAX_BPM)
+        if lo is None or (hi is None and WORDS[self.shape.value()][1] is not None):
+            return tr("melody.bad_bpm", lo=fmt(round(MIN_BPM, 3)), hi=fmt(MAX_BPM))
+        if self.how.get() == "catch" and self.number(self.hold, 1, 99) is None:
+            return tr("melody.bad_hold")
+        old, self.runs = self.runs, runs
+        short = self.how.get() == "catch" and self.shortest_gap() < CATCH_LEAST
+        self.runs = old
+        return tr("melody.catch_short", n=CATCH_LEAST) if short else None
+
+    def edge_window(self):
+        """True while clicks in the Conductor pane make edges ("Where I click" picked)."""
+        return self.at.get() == "clicks"
+
+    def live_chain(self):
+        """The chain being made, if the tempo line is still as it left it (else it's done)."""
+        ch = self.chain
+        if ch is not None and not ch.alive():
+            self.chain = ch = None
+            self.app.tempo_pane.request_redraw()
+        return ch
+
+    def edge_press(self, e):
+        pane = self.app.tempo_pane
+        if pane.box.mode != "visual":
+            pane.box.set_mode("visual")
+        if self.live_chain() is None:
+            self.chain = JumpChain(self)
+            self.chain_seed = random.randrange(1 << 30)  # (one random per chain: a click doesn't shuffle it)
+        self.chain.press(e)
+        self.seen = None
+        self.sync()
+
+    def edge_drag(self, e):
+        ch = self.live_chain()
+        if ch is not None:
+            ch.drag(e)
+            self.seen = None
+
+    def edge_release(self):
+        ch = self.live_chain()
+        if ch is not None:
+            ch.release()
+        self.seen = None
+        self.sync()
+
+    def finish_chain(self):
+        """Enter / Esc / right-click / another tool: the chain done (its tempo stays, ordinary points). True if
+        there was one."""
+        ch = self.live_chain()
+        self.chain = None
+        if ch is None:
+            return False
+        n = max(0, len(set(ch.edges)) - 1)
+        if n:
+            self.app.status.config(text=trn("melody.areas_done", n, n=n))
+        self.app.tempo_pane.request_redraw()
+        self.seen = None
+        self.sync()
+        return True
+
+    def chain_step(self, redo=False):
+        """Ctrl+Z / Ctrl+Y mid-chain: its own steps first (the last edge). True when it took one."""
+        ch = self.live_chain()
+        if ch is None or ch.grab is not None:
+            return False
+        if not ch.step(redo):
+            return False
+        self.seen = None
+        self.sync()
+        return True
+
     def close(self):
+        self.finish_chain()
         if self.watch:
             self.after_cancel(self.watch)
             self.watch = None

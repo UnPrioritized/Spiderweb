@@ -430,7 +430,10 @@ class HistoryPanel:
 
     def undo_roll(self, redo=False):
         """Ctrl+Z / Ctrl+Y on the piano roll and the toolbar's Undo / Redo: the Path / Sustain window's own steps
-        first (their points / stops are dragged on the piano roll)."""
+        first (their points / stops are dragged on the piano roll); a Jump areas chain's edges too."""
+        melody = getattr(self, "melody_window", None)
+        if melody and melody.chain_step(redo):
+            return "break"
         if self.path_window and self.path_window.local_step(redo):
             return "break"
         if self.sustain_window and self.sustain_window.local_step(redo):

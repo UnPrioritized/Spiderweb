@@ -66,6 +66,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     fill_window.py   the Fill gaps window (stretch left / right / meet in the middle, same-start notes)
     melody_window.py the Fill with tempo jumps window (Conductor pane: jumps at the melody's notes / snap steps)
+    jump_areas.py   Jump areas: that window's "Where I click" chain (each click an edge, two edges an area)
     shares_window.py Recolour's Shares window (how many colours, a knob + box per colour's share)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it

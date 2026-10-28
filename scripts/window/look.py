@@ -230,6 +230,7 @@ MASKED_LINE = pick("#f0c8c8", "#6a5a5a")  # the line of a shape a mask covers: f
 CUT, CUT_UNDER = pick("#d00000", "#ff5050"), pick("#ffffff")  # Slice line, cut marks, scissors (+ the white under a mark)
 PATH_LINE = pick("#0d8f46", "#62d996")  # Copy along a path: the path on the piano roll, its points A / middle / B
 MELODY_LIT = pick("#111111", "#ffffff")  # Fill with tempo jumps: outline round the notes it follows (roll_melody.py)
+MELODY_EDGE = pick("#c2410c", "#fb923c")  # Jump areas: the clicked edges + "Area n" words (jump_areas.py)
 SUSTAIN_STOP = pick("#b0179a", "#f07ae0")  # Sustain: its stops put by hand, lines on the piano roll (roll_sustain.py)
 FAINT_CUT = pick("#f0c8c8", "#8a5a5a")  # the really faint line from a piece's cut end to the other piece's (user)
 LABEL_BG, LABEL_EDGE = pick("#fffbe6"), pick("#c9b26b")  # a placed picture's name above it (dark text: stays light)

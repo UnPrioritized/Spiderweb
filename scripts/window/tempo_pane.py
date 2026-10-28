@@ -1188,8 +1188,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
 
     def start_fill(self):
         """Fill with tempo jumps…: its window (window/melody_window.py) over the kept Select box; none = drag one
-        first (the window opens when it's let go)."""
-        if self.bands:
+        first (the window opens when it's let go). Jump areas picked last time: no box needed."""
+        if self.bands or getattr(self.app, "melody_at", None) == "clicks":
             return open_melody(self.app)
         self.placing = {"step": 1, "fill": True}
         self.box.hint.config(text=tr("melody.hint_area"))
@@ -1453,6 +1453,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if e.x < roll.kb_w:  # the numbers: drag to scroll up / down
             self.drag = {"kind": "view", "y": e.y, "view": self.view}
             return
+        w = self.edges_on()
+        if w is not None:  # Jump areas: a press = an edge (or the one near it grabbed), held = it follows
+            self.cancel_placing()
+            if self.live_line() is not None:
+                self.live = None
+            self.drag = {"kind": "edge"}
+            w.edge_press(e)
+            return
         if self.placing:  # adding a catch-up: the yellow area dragged, then the teal one
             if self.placing["step"] == 1:
                 kind = "fill1" if self.placing.get("fill") else "catch1"  # (Fill with tempo jumps' area)
@@ -1641,6 +1649,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
                                                                             any(s is o for o in d["before"]))]
             self.box.sync()
             return self.request_redraw()
+        if d["kind"] == "edge":
+            w = self.edges_on()
+            if w is not None:
+                w.edge_drag(e)
+            return self.show_position(e)
         if d["kind"] == "live_end":
             if self.live_line() is not None:
                 self.live_end_to(d["end"], e)
@@ -1853,7 +1866,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.app.tempo_changed()
         if live is not None and d["kind"] in ("live_end", "bend"):
             self.live_seen()
-        if d["kind"] == "box":
+        if d["kind"] == "edge":
+            w = self.edges_on()
+            if w is not None:
+                w.edge_release()
+        elif d["kind"] == "box":
             if d["span"] is None:  # a click: the part there (or nothing), the play line there (user 2026-10-21)
                 part = self.part_at(self.app.roll.x2t(e.x))
                 pts = self.ed()["points"]
@@ -1922,6 +1939,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         only = bool(self.placing) or bool(d) and d["kind"] in ("box", "draw", "catch1", "fill1", "view") or \
             bool(d) and d.get("pushed") is False
         self.cancel_placing()
+        if d and d["kind"] == "edge" and self.edges_on() is not None:  # (Ctrl+Z on: the chain's last edge goes)
+            self.edges_on().edge_release()
         if d and d["kind"] == "box":  # (the picks and boxes from before the press, hunt 10-27)
             self.sel = list(d["before"])
             self.bands, self.part = d["was"]
@@ -1935,6 +1954,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         roll = self.app.roll
         if roll.sx is None or self.view is None or e.x < roll.kb_w:
             return
+        if self.edges_on() is not None:  # (Jump areas: a press like any other, never a point's box)
+            return self.on_press(e)
         i = self.point_at(e.x, e.y)
         n = self.handle_at(e.x, e.y) if i is None else None
         if n is not None:  # (the bend handle: straight / the catch-up's own curve again)
@@ -2223,8 +2244,18 @@ class TempoPane(ConductorMarks, tk.Canvas):
         else:
             self._dense_job = self.after(100, lambda: self.read_anchors(lm))
 
+    def edges_on(self):
+        """The Fill with tempo jumps window while "Where I click" is picked (Jump areas: clicks here make edges),
+        else None."""
+        w = getattr(self.app, "melody_window", None)
+        return w if w is not None and w.edge_window() else None
+
     def confirm(self):
-        """Done with the live line (Enter, Esc, a click elsewhere): its squares go. True if there was one."""
+        """Done with the live line (Enter, Esc, a click elsewhere): its squares go; a Jump areas chain too. True if
+        there was one."""
+        w = self.edges_on()
+        if w is not None and w.finish_chain():
+            return True
         if self.live_line() is None:
             self.live = None
             return False
@@ -2250,6 +2281,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         if self.placing:  # (adding a catch-up: right-click calls it off)
             return self.cancel_placing()
+        w = self.edges_on()
+        if w is not None and w.finish_chain():  # (Jump areas: right-click = the chain done)
+            return
         self.app.key_pane = self
         if self.box.mode == "heard":  # (another part's heard line: that one picked first)
             run = self.run_at(roll.x2t(e.x))
@@ -2721,8 +2755,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
         hint = None
         handle = self.handle_at(e.x, e.y)
         self.handle_hover(None if self.point_at(e.x, e.y) is not None or self.placing else handle, e)
+        w = self.edges_on()
         if e.x < roll.kb_w:
             want, hint = "sb_v_double_arrow", "numbers"
+        elif w is not None:  # (Jump areas: clicks make edges, near one = drag it)
+            ch = w.live_chain()
+            want, hint = ("sb_h_double_arrow", "on_area_edge") if ch and ch.edge_near(e.x) is not None else \
+                (PENCIL_CURSOR, "areas")
         elif self.placing:
             want = "sb_h_double_arrow"  # (the catch-up being added keeps its own hint)
         elif self.live_end_at(e.x, e.y) is not None:
@@ -3351,6 +3390,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.itemconfig(item, anchor="e")                     # line instead, hunt 2026-10-24)
                 self.coords(item, x - 4 * self.scale, top + 8 * self.scale)
         self.draw_drag(lw)
+        mw = self.edges_on()
+        if mw is not None and mw.live_chain() is not None:  # (Jump areas: the edges + "Area 1, 2…")
+            mw.chain.draw(self, lw)
         ends = {st["end"] for st, _ in worked if st["end"] is not None}
         r = 4 * self.scale
         if heard_mode:  # (every run's heard points; the run being edited's can be picked)
