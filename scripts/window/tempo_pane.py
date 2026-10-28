@@ -1461,6 +1461,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if e.x < roll.kb_w:  # the numbers: drag to scroll up / down
             self.drag = {"kind": "view", "y": e.y, "view": self.view}
             return
+        got = self.off_mark_at(e.x, e.y)
+        if got is not None:  # an arrow to the line out of view: scrolled there
+            return self.scroll_to_off(got)
         w = self.edges_on()
         if w is not None:  # Jump areas: a press = an edge (or the one near it grabbed), held = it follows
             self.cancel_placing()
@@ -2770,6 +2773,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         w = self.edges_on()
         if e.x < roll.kb_w:
             want, hint = "sb_v_double_arrow", "numbers"
+        elif self.off_mark_at(e.x, e.y) is not None:
+            want, hint = "hand2", "off_view"
         elif w is not None:  # (Jump areas: clicks make edges, near one = drag it)
             ch = w.live_chain()
             want, hint = ("sb_h_double_arrow", "on_area_edge") if ch and ch.edge_near(e.x) is not None else \
@@ -3082,6 +3087,60 @@ class TempoPane(ConductorMarks, tk.Canvas):
         return (bisect.bisect_left(pts, b0 - 1e-9, key=lambda p: p[0]),
                 bisect.bisect_right(pts, b1 + 1e-9, key=lambda p: p[0]))
 
+    def draw_off_marks(self, lines, w, kb, h, base):
+        """A small arrow at the top / bottom edge where the tempo line (or Fill's faint preview) goes out of view
+        above / below (user 2026-10-29: scrolled up, the preview looked missing; like the piano roll's arrows for
+        shapes above its top key): one per stretch out of view, only where there is one. Clicking it scrolls there
+        (off_mark_at). lines: [(xs, beats, ys, tempo, worked, preview)]."""
+        s, ppq = self.scale, self.app.ppq
+        marks = []
+        for up in (True, False):
+            spots = []  # (x, beat, line number)
+            for n, (xs, beats, ys, *_) in enumerate(lines):
+                off = np.flatnonzero(ys < 0 if up else ys > h)
+                spots += [(float(xs[k]), float(beats[k]), n) for k in off.tolist()]
+            spots.sort()
+            group = []
+            for spot in spots + [None]:
+                if group and (spot is None or spot[0] - group[-1][0] > 30 * s):
+                    us = []
+                    for n in {g[2] for g in group}:  # (how far out it goes: the BPMs themselves, ys stop at the edge)
+                        _, _, _, tempo, worked, _ = lines[n]
+                        bs = [g[1] for g in group if g[2] == n]
+                        us += self.ax(shown_bpm(tempo, base, bs, worked, ppq)).tolist()
+                    x = min(max((group[0][0] + group[-1][0]) / 2, kb + 8 * s), w - 8 * s)
+                    marks.append((x, up, max(us) if up else min(us), all(g[2] and lines[g[2]][5] for g in group)))
+                    group = []
+                if spot is not None:
+                    group.append(spot)
+        self._off_marks = marks
+        for x, up, _, faint in marks:
+            y0, y1 = (2 * s, 11 * s) if up else (h - 2 * s, h - 11 * s)
+            self.create_polygon(x, y0, x + 6 * s, y1, x - 6 * s, y1, outline=look.ABOVE_EDGE, tags="off_mark",
+                                fill=look.MELODY_PREVIEW if faint else look.TEMPO_LINE)
+
+    def off_mark_at(self, x, y):
+        """(up, the farthest BPM out on the pane's scale) of the arrow (draw_off_marks) at x, y; None."""
+        s, h = self.scale, self.winfo_height()
+        for mx, up, u, _ in getattr(self, "_off_marks", ()):
+            if abs(mx - x) <= 8 * s and (0 <= y <= 14 * s if up else h - 14 * s <= y <= h):
+                return up, u
+        return None
+
+    def scroll_to_off(self, got):
+        """An arrow clicked: the view moved up / down (same zoom) so the farthest part of that stretch shows, a
+        little room past it."""
+        up, u = got
+        lo, hi = self.view
+        span = hi - lo
+        top, bot = self.area()
+        room = span * 12 * self.scale / max(1, bot - top) + span * 0.05
+        if up:
+            self.set_view(u + room - span, u + room)
+        else:
+            self.set_view(u - room, u - room + span)
+        self.request_redraw()
+
     def line_xy(self, worked, w, kb, tempo=None, base=None):
         """The tempo line (tempo: this one, base its BPM before the first point; else the project's) from x = kb
         to w as (xs, beats, ys): every 2 px, plus each jump drawn exactly upright (the beat just before and the
@@ -3191,6 +3250,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if not self.winfo_ismapped():
             return
         self.delete("all")
+        self._off_marks = []  # (draw_off_marks: none until drawn)
         roll, app = self.app.roll, self.app
         w, h = self.winfo_width(), self.winfo_height()
         kb = int(roll.kb_w)
@@ -3312,18 +3372,23 @@ class TempoPane(ConductorMarks, tk.Canvas):
         preview = self.drag_preview()  # (a line being drawn: the tempo as letting go gives it)
         if preview and "tempo" in preview:
             pt = preview["tempo"]
-            xs, beats, ys = self.line_xy(plans(pt, base, self.app.ppq), w, kb, pt, base)
+            line_of = (pt, plans(pt, base, self.app.ppq))
+            xs, beats, ys = self.line_xy(line_of[1], w, kb, pt, base)
         else:
+            line_of = (tempo, worked)
             xs, beats, ys = self.line_xy(worked, w, kb)
         self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), width=lw + 1,
                          fill=look.TEMPO_FADED if heard_mode else look.TEMPO_LINE)
         fp = self.fill_preview
+        lines = [(xs, beats, ys, *line_of, False)]  # (for the arrows to parts out of view)
         if fp is not None and not heard_mode:  # (what Fill with tempo jumps would lay: faint, over its area only)
             px, pb, py = self.line_xy(fp["worked"], w, kb, fp["tempo"], base)
             on = (pb >= fp["span"][0] - 1e-9) & (pb <= fp["span"][1] + 1e-9)
             if on.sum() >= 2:
                 self.create_line(*np.column_stack([px[on], py[on]]).ravel().tolist(), fill=look.MELODY_PREVIEW,
                                  width=lw + 1, tags="fill_preview")
+                lines.append((px[on], pb[on], py[on], fp["tempo"], fp["worked"], True))
+        self.draw_off_marks(lines, w, kb, h, base)
         # the tempo the Keep timing notes are heard at (dashed; drawn with Heard tempo: solid)
         dash = () if heard_mode else (6, 3)
         loaded = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None

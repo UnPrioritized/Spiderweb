@@ -506,6 +506,7 @@
  "tempo.hint_on_edge": "Drag: change the time the catch-up counts (yellow) / where it stops (teal) · Right-click: menu",
  "tempo.hint_on_band": "Drag: move what the box picked (time and BPM) · Ctrl+drag: copy · Click: the play line here · Delete",
  "tempo.hint_numbers": "Wheel: zoom · Shift+wheel or drag: scroll",
+ "tempo.hint_off_view": "The tempo goes out of view here · Click: scroll to it",
  "tempo.fit": "Fit",
  "tempo.fit_tip": "Zoom up or down to show the whole tempo line",
  "tempo.graph": "Graph",
