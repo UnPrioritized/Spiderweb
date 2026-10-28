@@ -784,6 +784,36 @@ class TrackList(tk.Canvas):
                 return own["name"]
         return tr("tracks.name", n=row + 1)
 
+    def mixed_written(self, own_only=False):
+        """(names, any order dragged) of the tracks the export writes holding notes on 2+ channels BY YOUR DOING
+        (PLAN #11 E1): yours, a loaded track's part / a loaded track with parts or channels you added; a loaded
+        track left as the file had it isn't named (its MIDI was like that). Order dragged = a folder's Ch rows not
+        in channel order (a MIDI keeps none inside a track). own_only: yours alone (Domino exports: no loaded notes)."""
+        lm, names, moved = self.app.loaded, [], False
+        for row, (s, chs) in enumerate(zip(self.tracks().tolist(), self.row_chans())):
+            if len(chs) < 2 or (own_only and s < HAND):
+                continue
+            if s < 0 and lm is not None:
+                n, only = self.file_part(s)
+                t = lm.tracks[n] if n < len(lm.tracks) else None
+                re = lm.rechannel
+                had = set() if t is None else {int(re[n])} if re is not None and n < len(re) and re[n] >= 0 \
+                    else set(np.flatnonzero(t.chn).tolist())
+                if only is None and set(chs) <= had and list(chs) == sorted(chs):
+                    continue
+            names.append(self.name_of(row))
+            moved |= list(chs) != sorted(chs)
+        return names, moved
+
+    def mixed_note(self, domino=False):
+        """The export message's lines about mixed tracks (mixed_written), "" for none."""
+        names, moved = self.mixed_written(own_only=domino)
+        if not names:
+            return ""
+        shown = ", ".join(names[:10]) + (", …" if len(names) > 10 else "")
+        return (tr("tracks.mixed_dms" if domino else "tracks.mixed_export", names=shown)
+                + (tr("tracks.mixed_order") if moved and not domino else ""))
+
     def own_track(self, s):
         """The own track (added by hand) of track id s, or None."""
         if s is None or s < HAND:

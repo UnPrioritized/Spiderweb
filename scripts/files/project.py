@@ -1149,6 +1149,7 @@ class ProjectFiles:
         before = notes
         order = self.file_rows()  # (the file's tracks as the track list shows them: dragged, D4)
         props = self.copy_props()  # (Track Properties' new names / channels: those tracks written again; parts)
+        mixed = self.track_list.mixed_note()  # (tracks holding several channels by your doing, PLAN #11 E1)
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
         heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
@@ -1233,12 +1234,12 @@ class ProjectFiles:
                 messagebox.showinfo(tr("project.spiderweb"), tr(
                     "load.exported_tempo" if targets else "load.exported_sigs", path=path, notes=trn("n.notes", left, n=left),
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
-                    note=self.tempo_notes(job["plan"]) + own_note()))
+                    note=self.tempo_notes(job["plan"]) + own_note() + mixed))
             elif e is None:
                 messagebox.showinfo(tr("project.spiderweb"), tr(
                     ("load.exported_own_extracted" if len(hid.h_s) else "load.exported_own") if len(notes) else
                     "load.exported", path=path, notes=trn("n.notes", left, n=left))
-                                    + own_note())
+                                    + own_note() + mixed)
             elif isinstance(e, MidiError):
                 messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info))
             elif isinstance(e, OSError):
@@ -1384,9 +1385,10 @@ class ProjectFiles:
             note += tr("project.it_has_keys_above_127_256")
         if slot_ports(auto_count(self.rendered[:, 4]), cc, self.picture_use10):  # (as write_midi decides)
             note += tr("project.ports_midi")
-        note += self.tempo_notes(plan) + self.cc_note(cc, True)
+        mixed = self.track_list.mixed_note()  # (tracks holding several channels: no longer one each, PLAN #11 E1)
+        note += mixed + self.tempo_notes(plan) + self.cc_note(cc, True)
         messagebox.showinfo(tr("project.spiderweb"),
-                            tr("project.saved_notes_on_track_s_one", notes=trn("n.notes", len(notes),
+                            tr("project.saved_notes_mixed" if mixed else "project.saved_notes_on_track_s_one", notes=trn("n.notes", len(notes),
                                                                                n=len(notes)),  # (as written)
                                tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
 
@@ -1622,7 +1624,8 @@ class ProjectFiles:
                 + (tr("project.dms_keys_256") if mod else
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                 + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else "")
-                + (tr("project.ports_dms") if ports else "") + self.loaded_left_out())
+                + (tr("project.ports_dms") if ports else "") + self.track_list.mixed_note(domino=True)
+                + self.loaded_left_out())
         slow = tempo_items(tempo)[1] if tempo else 0
         warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "") + self.cc_note(cc)
         (messagebox.showwarning if long or ports or warn else messagebox.showinfo)(tr("project.spiderweb"),
