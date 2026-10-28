@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
-from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, add_tracks, among_file, clean_file_order, file_order, from_rows, full_plan, into_ids, move_rows,
+from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, add_tracks, among_file, clean_file_order, file_order, from_rows, full_plan, into_ids, move_rows, ordered,
                               new_id, plan)
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
@@ -247,9 +247,10 @@ class TrackList(tk.Canvas):
         return int(self._row_of[s]) if s < len(self._row_of) and self._row_of[s] >= 0 else None
 
     def row_chans(self):
-        """Each row's channels with notes, as sorted tuples: a loaded MIDI's track from the loading pass's counts
+        """Each row's channels with notes, as tuples: a loaded MIDI's track from the loading pass's counts
         (Track Properties' channel: that one) + Spiderweb's notes drawn into it, Spiderweb's tracks from their notes.
-        2 or more = a mixed track (a folder)."""
+        2 or more = a mixed track (a folder). Sorted, but a track of yours in its "order" (sub-rows dragged, PLAN
+        #11: own_tracks.ordered)."""
         self.tracks()
         lm, use10 = self.app.loaded, self.app.picture_use10
         key = (id(self._made[0]), id(self._all), id(lm), lm.hide_ver if lm is not None else None, use10)
@@ -273,7 +274,7 @@ class TrackList(tk.Canvas):
                     sets[row].add(int(moved[k]))
                 else:
                     sets[row] |= set(np.flatnonzero(lm.tracks[k].chn).tolist())
-        out = [tuple(sorted(x)) for x in sets]
+        out = [tuple(ordered(self._hand.get(int(s), {}).get("order"), x)) for s, x in zip(self._all.tolist(), sets)]
         self._chans = (key, out)
         return out
 

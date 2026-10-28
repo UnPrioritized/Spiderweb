@@ -33,14 +33,15 @@ def vlq(value):
 
 def track_events(notes, ch):
     """One track's events (a note-on and a note-off per note) as byte pieces (uint8 arrays), end-of-track not
-    included. Events in time order, note-offs first on a shared tick, otherwise in the notes' order."""
+    included. Events in time order, note-offs first on a shared tick, otherwise in the notes' order. ch: the
+    channel, or each note's (a track of yours holding several: a folder in the track list)."""
     n = len(notes)
     tick = np.empty(2 * n, np.int64)  # on, off, on, off, ... as tick * 2, + 1 on a note-on (so offs come first)
     tick[0::2] = notes[:, 0] * 2 + 1
     tick[1::2] = notes[:, 1] * 2
     order = np.argsort(tick, kind="stable")  # (one number sorts in half the time of three)
     fast = loops()
-    if fast is not None:  # (the bytes in one pass: ~3x quicker)
+    if fast is not None and np.ndim(ch) == 0:  # (the bytes in one pass: ~3x quicker)
         del tick
         return [fast.midi_events(np.ascontiguousarray(notes), np.arange(n), order, ch, MAX_DELTA)]
     # (in pieces: the NumPy way makes many arrays per event)
@@ -68,6 +69,8 @@ def note_inserts(notes):
 def _events(notes, order, tick, last, ch):
     """track_events' bytes for some events in time order; last = the tick before the first of them."""
     tick, on, note = tick[order] >> 1, (order & 1) ^ 1, order >> 1
+    if np.ndim(ch):  # (each note's own channel)
+        ch = ch[note]
     key = notes[note, 2]
     vel = notes[note, 3] * on
     return _encode(tick, np.where(on == 1, 0x90 | ch, 0x80 | ch), key, vel, last)
@@ -183,23 +186,41 @@ def track_slots(notes, pad=True, least=0):
     return slots if len(slots) >= least else np.arange(least, dtype=np.int64)
 
 
-def own_compact(notes, own=(), floor=0):
+def own_compact(notes, own=(), floor=0, chans=False):
     """notes with the slots of tracks added by hand (engine.OWN0 + ...) numbered just past the automatic ones, in
     own's order (the rest after): (notes, automatic slots, slots in all, {own track id: its slot}); notes unchanged
-    (not copied) without any. floor: automatic slots at least (an empty Track 1 written: track_slots' least)."""
+    (not copied) without any. floor: automatic slots at least (an empty Track 1 written: track_slots' least).
+    chans: ONE slot per track of yours even when it holds several channels (a folder, PLAN #11) + a 5th answer =
+    each note's channel there (-1 on the automatic ones)."""
     autos = max(auto_count(notes[:, 4]), floor)
     if not len(notes) or notes[:, 4].max() < OWN0:
-        return notes, autos, autos, {}
+        return (notes, autos, autos, {}) + ((np.full(len(notes), -1, np.int64),) if chans else ())
     s = notes[:, 4]
     mine = s >= OWN0
-    ids = np.unique(s[mine])
+    key = (s[mine] - OWN0) >> 4 << 4 if chans else s[mine] - OWN0  # (a track's channels together: channel bits off)
+    ids = np.unique(key)
     place = {t["id"]: k for k, t in enumerate(own)}
-    ranked = sorted(range(len(ids)), key=lambda k: (place.get(own_id(int(ids[k])), len(place)), k))
+    ranked = sorted(range(len(ids)), key=lambda k: (place.get(int(ids[k]) >> 4, len(place)), k))
     new = np.empty(len(ids), np.int64)
     new[ranked] = autos + np.arange(len(ids))
+    every = np.full(len(notes), -1, np.int64) if chans else None
+    if chans:
+        every[mine] = s[mine] & 15
     notes = notes.copy()
-    notes[mine, 4] = new[np.searchsorted(ids, s[mine])]
-    return notes, autos, autos + len(ids), {own_id(int(v)): int(new[k]) for k, v in enumerate(ids.tolist())}
+    notes[mine, 4] = new[np.searchsorted(ids, key)]
+    at = {}
+    for k, v in enumerate(ids.tolist()):  # (several channels without chans: the first one's, own_parts the rest)
+        at.setdefault(int(v) >> 4, int(new[k]))
+    return (notes, autos, autos + len(ids), at) + ((every,) if chans else ())
+
+
+def own_parts(at, count):
+    """{own track id: its slots after own_compact (chans off), one per channel it holds} from at: a track's
+    channels are numbered side by side from its first (at[id]) up to the next track's (Domino's track = one
+    channel: a folder of yours goes out as one track per channel)."""
+    firsts = sorted(at.values())
+    after = dict(zip(firsts, firsts[1:] + [count]))
+    return {i: list(range(s, after[s])) for i, s in at.items()}
 
 
 def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
@@ -280,7 +301,8 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
     after each track too (track_chunks)."""
     yield start
     # (an empty Track 1 among them, track_slots' least: the own tracks' notes numbered past it)
-    notes, autos, count, at = own_compact(notes, floor=max((t + 1 for t in tracks if type(t) is not dict), default=0))
+    notes, autos, count, at, chans = own_compact(notes, floor=max((t + 1 for t in tracks if type(t) is not dict),
+                                                                  default=0), chans=True)
     if count > 1:  # (one sort finds every track's notes, in their own order)
         slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
         order = np.argsort(slots, kind="stable")
@@ -303,6 +325,11 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
             channel, track = track["ch"], at.get(track["id"])
             if track is None:
                 return head + [empty_track(channel)]
+            rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
+            mine = chans[rows]
+            if mine.min() != mine.max():  # (several channels: a folder, each note on its own)
+                return head + track_events(notes[rows], mine)
+            channel = int(mine[0])  # (its colours' own channel: moved in from another track)
         else:
             channel = slot_track_channel(track, use10)[1]
             if every or track in ports:

@@ -24,7 +24,7 @@ from window import big_ask, look
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
-from notes.engine import (BEATS_FAR, CLASH, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
+from notes.engine import (BEATS_FAR, CLASH, aligned_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
 from files.own_tracks import FILE0, HAND, file_order, from_rows, full_plan, into_ids, new_id, next_channel
@@ -190,17 +190,18 @@ def entry_slot(v, own, rule, use10):
 
 
 def laid_slots_of(sh, ids, own, use10):
-    """Each placed_on entry's slot now (entry_slot), in order; an Extract's colours in a loaded MIDI's track keep
-    their own channel there (sh["into_ch"]: a track may hold notes on several, group D) while they're on the track
-    they came from (sh["into_home"]) and it has no channel of its own from Track Properties (own.fixed); else the
-    track's channel, like your shapes' (hunt 2026-10-26: the export held two channels in one track)."""
+    """Each placed_on entry's slot now (entry_slot), in order; a colour keeps its own channel (sh["into_ch"], -1 =
+    none: the track's) while it's on the track it was given it on (sh["into_home"]) and that track has no channel
+    of its own from Track Properties (own.fixed): an Extract's colours in a loaded MIDI's track (group D), a channel
+    dragged into a track of yours or a loaded one (a folder, PLAN #11); else the track's channel (hunt 2026-10-26:
+    an Extract laid elsewhere held two channels in one track)."""
     rule = sh.get("slots10") if isinstance(sh.get("slots10"), bool) else None
     chs = sh.get("into_ch") if isinstance(sh.get("into_ch"), list) else []
     home = sh.get("into_home") if isinstance(sh.get("into_home"), list) else None
     fixed = getattr(own, "fixed", ())
 
     def own_ch(k, v):
-        return (v >= FILE0 and k < len(chs) and v not in fixed
+        return (v >= 0 and k < len(chs) and chs[k] >= 0 and v not in fixed
                 and (home is None or k < len(home) and home[k] == v))
     return [own_slot(v, chs[k]) if own_ch(k, v) else entry_slot(v, own, rule, use10) for k, v in enumerate(ids)]
 
@@ -2133,9 +2134,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if inserted:  # (tracks put in the middle: every track's place worked out again from the rows)
             own = from_rows([-1 - r if r < 0 else FILE0 - 1 - r if r >= FILE0 else {"id": r} for r in rows], slots,
                             own, filled)
+        for sh in self.shapes:  # (each colour's own channel kept beside its track: one per "into" entry)
+            if "into_ch" in sh:
+                sh.update(aligned_ch(sh))
         # (a colour gone for now keeps its tinted track, hidden while empty: own_written; it comes back on it,
         # hunt 2026-10-26: Repeated colours off / on put them into your own track)
-        used = {v for sh in self.shapes for key in ("into", "into_gap", "into_rest") for v in (sh.get(key) or [])
+        used ={v for sh in self.shapes for key in ("into", "into_gap", "into_rest") for v in (sh.get(key) or [])
                 if type(v) is int}
         kept = [t for t in own if not t.get("auto") or t["id"] in used]
         if kept != self.own_tracks:

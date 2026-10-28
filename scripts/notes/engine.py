@@ -236,6 +236,20 @@ def clean_by_snap(v):
     return min(max(v, BY_SNAP_LEAST), BY_SNAP_MOST) if math.isfinite(v) and v > 0 else None
 
 
+def aligned_ch(sh):
+    """{"into_ch", "into_home"} kept one per "into" entry (colours laid again change into's length: App.fit_into):
+    cut to it, or filled with -1 (= the track's channel); a shape without into_ch: {}. Without into_home: none."""
+    chs, into = sh.get("into_ch"), sh.get("into")
+    if not isinstance(chs, list) or not isinstance(into, list):
+        return {}
+    n = len(into)
+    out = {"into_ch": (list(chs) + [-1] * n)[:n]}
+    home = sh.get("into_home")
+    if isinstance(home, list):
+        out["into_home"] = (list(home) + [-1] * n)[:n]
+    return out
+
+
 def clean_shape(sh):
     """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support or has a number that
     can't be used."""
@@ -292,14 +306,14 @@ def clean_shape(sh):
         got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < high]
         if got:
             out[key] = got
-    chs = sh.get("into_ch")  # (an Extract: each colour's own channel in the loaded MIDI's track it came from)
-    if "into" in out and isinstance(chs, list) and len(chs) == len(out["into"]) and all(
-            type(c) is int and 0 <= c <= 15 for c in chs):
-        out["into_ch"] = list(chs)
-        home = sh.get("into_home")  # (... and that track: on another one the colour takes its channel)
-        if isinstance(home, list) and len(home) == len(chs) and all(type(v) is int and 0 <= v < FILE_MOST
-                                                                    for v in home):
-            out["into_home"] = list(home)
+    # (each colour's own channel in its track, -1 = the track's: an Extract's in the loaded MIDI's track it came
+    # from, a channel dragged into a folder, PLAN #11)
+    chs = sh.get("into_ch")
+    if "into" in out and isinstance(chs, list) and all(type(c) is int and -1 <= c <= 15 for c in chs):
+        out.update(aligned_ch({"into": out["into"], "into_ch": chs, "into_home": sh.get("into_home")}))
+        home = out.get("into_home")  # (... and that track: on another one the colour takes its channel)
+        if home is not None and not all(type(v) is int and -1 <= v < FILE_MOST for v in home):
+            out.pop("into_home")
     if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
         out["slots10"] = sh["slots10"]
     if "into" in out and sh.get("into_new") is True:  # (just drawn / pasted, colours not laid yet: App.fit_into)

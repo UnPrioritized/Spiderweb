@@ -24,7 +24,7 @@ import numpy as np
 
 from files import clipboard
 from files.lang import tr
-from files.midi_out import own_compact, track_slots
+from files.midi_out import own_compact, own_parts, track_slots
 from files.own_tracks import plan
 from files.speed import loops
 from notes.engine import slot_port, slot_ports, slot_track_channel
@@ -174,10 +174,11 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
     end = item(2009, item(1001, struct.pack("<I", length)))
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
         notes, autos, count, at = own_compact(notes, own)
+        parts = own_parts(at, count)  # (a folder of yours: one Domino track per channel)
         order, cuts = track_orders(notes, count, z.pool)
-        slots = [at[t["id"]] if type(t) is dict else t
-                 for t in plan(range(autos), [t for t in own if t["id"] in at], np.unique(notes[:, 4]))] + sorted(
-                     set(range(autos, count)) - {at[t["id"]] for t in own if t["id"] in at})
+        slots = [s for t in plan(range(autos), [t for t in own if t["id"] in at], np.unique(notes[:, 4]))
+                 for s in (parts[t["id"]] if type(t) is dict else [t])] + sorted(
+                     set(range(autos, count)) - {s for t in own if t["id"] in at for s in parts[t["id"]]})
 
         def events(s, a, b):
             rows = note_rows(notes[order[a:b]], first)
@@ -416,17 +417,22 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
     feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]
                                               + [r[0] for r in (keys or [])]))))
     tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]))
+    was = notes[:, 4]  # (a track of yours: each part's channel)
     notes, autos, count, hand = own_compact(notes, own, max((t + 1 for t in tracks if type(t) is not dict), default=0))
     order, cuts = track_orders(notes, count, z.pool)
+    parts = own_parts(hand, count)
+    # (a folder of yours = one Domino track per channel, under its name: a Domino track holds one channel)
+    tracks = [(t, s) for t in tracks for s in (parts.get(t["id"], [None]) if type(t) is dict else [t])]
     ports = slot_ports(autos, cc, use10)  # (Output port A, B, ... as the MIDI export's)
-    for slot in tracks:
+    for own_t, slot in tracks:
         name, port = b"", 0
-        if type(slot) is dict:  # (a track added by hand: its name in Domino's own text bytes, port A)
-            name, channel, slot = slot["name"].encode("cp932", "replace"), slot["ch"], hand.get(slot["id"])
+        if type(own_t) is dict:  # (a track added by hand: its name in Domino's own text bytes, port A)
+            name, channel = own_t["name"].encode("cp932", "replace"), own_t["ch"]
             if slot is None:
                 track_head(channel, name, 0)
                 feed(track_tail(0))
                 continue
+            channel = int(was[order[cuts[slot]]]) & 15  # (its notes' own: moved in from another track)
         else:
             channel = slot_track_channel(slot, use10)[1]
             port = slot_port(slot, use10) if ports else 0

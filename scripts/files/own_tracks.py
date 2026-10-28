@@ -39,7 +39,18 @@ def clean_own_tracks(raw):
             out[-1]["auto"] = True
         if type(t.get("file")) is int and 0 <= t["file"] <= COUNT_MOST:  # (among a loaded MIDI's tracks)
             out[-1]["file"] = t["file"]
+        order = t.get("order")  # (a folder's sub-rows as dragged: ordered)
+        if isinstance(order, list) and all(type(c) is int and 0 <= c <= 15 for c in order) \
+                and len(set(order)) == len(order) > 1:
+            out[-1]["order"] = list(order)
     return out
+
+
+def ordered(order, chans):
+    """A track's channels (a set) in its sub-rows' order: the ones in order (a list, the user's drag; None = none)
+    first as there, the rest by number after (PLAN #11 decision 8: the order is kept in the save only)."""
+    order = [c for c in order or () if c in chans]
+    return order + sorted(set(chans) - set(order))
 
 
 def clean_file_tracks(raw):
