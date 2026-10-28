@@ -250,7 +250,7 @@ class HzMouse:
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
-        empty = (SELECT_CURSOR if inside and self.tool.get() in ("select", *BEND_TOOLS) else
+        empty = (SELECT_CURSOR if inside and self.tool.get() in ("select", "bend") else
                  self.pencil if inside and self.can_place() and not e.state & CTRL else "")
         on_box = self.on_kept_box(self.kept_box(), e, hit)
         if on_box or self.ruler_band(e, self.kept_box()):  # (the bar numbers' band: moves in time)
@@ -308,7 +308,7 @@ class HzMouse:
                 return self.ruler_press(e, kept, before)
             if e.x < self.kb_w or e.y < self.ruler_h:
                 return
-            if e.state & CTRL or self.tool.get() in ("select", *BEND_TOOLS):  # a box that selects the notes it touches
+            if e.state & CTRL or self.tool.get() in ("select", "bend"):  # a box that selects the notes it touches
                 add = e.state & CTRL and self.tool.get() in ("select", *BEND_TOOLS)  # (Ctrl: added to the selection and the
                 base = set(self.sel) if add else set()  # boxes kept; the bar numbers' bands go once it's a box)
                 self.sel = set(base)
@@ -319,12 +319,14 @@ class HzMouse:
                 return self.redraw()
             if not self.can_place():
                 return
-            # a new note, there at once: it follows the mouse until the button is let go
+            # a new note, there at once: it follows the mouse until the button is let go (Sketch: it starts there
+            # and the drag sets where it ends, hz_sketch.py)
             tone = {"t": self.snap(self.beat_at(e.x), e), "len": self.last_len, "key": self.key_at(e.y),
                     "cents": 0.0, "id": next_id(self.tones), "to": []}
             self.tones.append(tone)
             self.sel = {len(self.tones) - 1}
-            self.drag = {"kind": "new", "i": len(self.tones) - 1, "before": before, "name": tr("hz.step_place")}
+            self.drag = {"kind": "new", "i": len(self.tones) - 1, "before": before, "name": tr("hz.step_place"),
+                         "sketch": self.sketching(), "x": e.x}
             if kept:  # (the Select boxes stay while drawing: drawn_into on let go)
                 self.sel |= sel0
                 self.box_kept = (kept, set(self.sel))
@@ -414,7 +416,7 @@ class HzMouse:
             return self.reset_tune(hit[1])
         if hit and hit[0] == "bend":  # a slide's handle: its own bend goes, it follows the Glide curve again
             return self.slide_curve(hit[2], bend=None)
-        if (self.tool.get() in ("select", *BEND_TOOLS) and hit is None and (self.app.hz_clip or self.domino_newer())
+        if (self.tool.get() in ("select", "bend") and hit is None and (self.app.hz_clip or self.domino_newer())
                 and not e.state & CTRL and e.x >= self.kb_w and e.y >= self.ruler_h
                 and not self.on_kept_box(self.kept_box(), e, hit)):
             self.drop_drag()
@@ -456,7 +458,9 @@ class HzMouse:
             return
         n = self.tones[d["i"]]
         beat, short = self.beat_at(e.x), self.shortest(e)
-        if d["kind"] == "new":
+        if d["kind"] == "new" and d["sketch"]:
+            self.sketch_new_to(d, n, e)
+        elif d["kind"] == "new":
             n["t"], n["key"] = self.snap(beat, e), self.key_at(e.y)
             self.sound(n["key"])
         elif d["kind"] in ("left", "right"):  # the other end stays; the grid lines short of it, and where the end
@@ -726,7 +730,7 @@ class HzMouse:
             return self.delete_selected()
         if d["kind"] == "note" and not d["moved"] and len(self.sel) > 1 and not d.get("inside"):
             self.sel = {d["i"]}  # one of several clicked without dragging: just that one
-        if d["kind"] in ("left", "right"):
+        if d["kind"] in ("left", "right") or d["kind"] == "new" and d["sketch"]:
             self.last_len = self.tones[d["i"]]["len"]
         placed = self.tones[d["i"]]["id"] if d["kind"] == "new" else None
         if d.get("into") is not None:

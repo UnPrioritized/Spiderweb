@@ -1,7 +1,8 @@
 """The Hz bass window's Sketch tool (S; user, 2026-10-28): a note drawn and shaped as a pitch line by hand, its
 points and pieces dragged, a wobble on a piece. Everything it makes is the note's own bend line (tone["bend"], see
-hz_bend.py), so the Bend tool, Copy / Paste bend and presets go on working with it. Until its own mouse is made it
-works like the Bend tool (hz_bend.BEND_TOOLS).
+hz_bend.py), so the Bend tool, Copy / Paste bend and presets go on working with it. On a note it works like the
+Bend tool for now (hz_bend.BEND_TOOLS). On empty space a press starts a new note there (grid; Shift free) and the
+drag sets its end (hz_mouse's "new" drag, sketch_new_to); Ctrl+drag = a Select box.
 
 While it's on, each note shows as a thick line where it's heard (its tune and bend; not the Pitch line / vibrato,
 those are the red line's), with a dot at its start and end, a small ">" after its end and, when it bends, a faint
@@ -19,6 +20,14 @@ SKETCH_THIN, SKETCH_THICK = 3, 9
 class HzSketch:
     def sketching(self):
         return self.tool.get() == "sketch"
+
+    def sketch_new_to(self, d, n, e):
+        """A new note being drawn (drag d, note n): it starts where the press was and ends at the grid line nearest
+        the mouse (Shift: any tick), at least one step long. A click without dragging keeps the last length used."""
+        if not d.get("moved") and abs(e.x - d["x"]) < 4:
+            return
+        d["moved"] = True
+        n["len"] = max(self.shortest(e), self.snap(self.beat_at(e.x), e) - n["t"])
 
     def draw_sketch_notes(self, colours, selected):
         """The notes in view as lines (Sketch tool), each in its colours (fill, edge; selected ones in `selected`)."""
