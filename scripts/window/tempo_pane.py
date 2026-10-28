@@ -52,6 +52,7 @@ NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 
 LABEL_GAP = 15  # px between two numbers on the left (times the window's scale)
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
+OFF_CLICK_S = 0.5  # a press this soon on the spot of an out-of-view arrow just clicked = its double-click's second
 AREA_SHADE = 0.08  # how far a tick line on a coloured area is from that colour (at full strength)
 KEEP_SHADE = 0.14  # on the Keep timing parts' purple (user 2026-10-24: 0.08 still too faint there)
 
@@ -1463,7 +1464,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         got = self.off_mark_at(e.x, e.y)
         if got is not None:  # an arrow to the line out of view: scrolled there
+            self._off_click = (time.perf_counter(), e.x, e.y)
             return self.scroll_to_off(got)
+        if self.after_off_click(e):  # (its second click: nothing under it now, hunt 2026-10-29)
+            return
         w = self.edges_on()
         if w is not None:  # Jump areas: a press = an edge (or the one near it grabbed), held = it follows
             self.cancel_placing()
@@ -1969,6 +1973,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         roll = self.app.roll
         if roll.sx is None or self.view is None or e.x < roll.kb_w:
             return
+        if self.off_mark_at(e.x, e.y) is not None or self.after_off_click(e):  # (a double-click on an out-of-view
+            return  # arrow only scrolls: the 2nd click drew a point / pasted the copy there, hunt 2026-10-29)
         if self.edges_on() is not None:  # (Jump areas: a press like any other, never a point's box)
             return self.on_press(e)
         i = self.point_at(e.x, e.y)
@@ -3126,6 +3132,16 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if abs(mx - x) <= 8 * s and (0 <= y <= 14 * s if up else h - 14 * s <= y <= h):
                 return up, u
         return None
+
+    def after_off_click(self, e):
+        """e is the second click of a double-click on an out-of-view arrow (same spot, soon after): ignored."""
+        at = getattr(self, "_off_click", None)
+        s = 8 * self.scale
+        if at is not None and time.perf_counter() - at[0] < OFF_CLICK_S and abs(e.x - at[1]) <= s \
+                and abs(e.y - at[2]) <= s:
+            self._off_click = None  # (once: a later click there is a click again)
+            return True
+        return False
 
     def scroll_to_off(self, got):
         """An arrow clicked: the view moved up / down (same zoom) so the farthest part of that stretch shows, a

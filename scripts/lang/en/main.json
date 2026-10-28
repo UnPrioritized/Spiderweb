@@ -621,7 +621,7 @@
  "melody.left_plain_one": "1 gap stays at the normal tempo: too short for its catch-up.",
  "melody.need_area": "Drag a Select box in the Conductor pane over the time to fill.",
  "melody.snap_off": "Snap is off: pick a snap step in the toolbar.",
- "melody.need_track": "Highlight a track in the track list to follow its notes.",
+ "melody.need_track": "Highlight a track in the track list to follow its notes, or pick Follows: Top note of all tracks.",
  "melody.bad_length": "A length box can't be read: type ticks, or a note length like 1/32.",
  "melody.reading": "Reading the track's notes…",
  "melody.loaded_bad": "The MIDI's notes couldn't be read.",

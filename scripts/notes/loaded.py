@@ -526,12 +526,15 @@ def boxes_meet(a, b):
         not a[5] or not b[5] or bool(set(a[5]) & set(b[5])))
 
 
-def gather_box(lm, box, cancel=None, progress=None, most=None):
+def gather_box(lm, box, cancel=None, progress=None, most=None, held=False):
     """The notes an Extract box takes (note-on in ticks t0 .. t1 - 1, keys k0..k1, its tracks), each whole:
     {"trk", "s", "e", "lane" (channel x 256 + key), "vel", "on", "off" (byte places; off -1 = never let go, e =
     its track's end)} sorted by start; notes hidden already (another box) left out. Each track read from its
     checkpoint before t0 until every note it took has ended. most: stops soon after taking more than this many
-    in all (Extract refuses then: a box over a dense part never fills the memory first)."""
+    in all (Extract refuses then: a box over a dense part never fills the memory first).
+    held: also what's still sounding at t0 (Fill with tempo jumps' Top note, hunt 2026-10-29: a note held from
+    before the area hid nothing): each track's notes taken from its checkpoint before t0 on, and the keys sounding
+    at that checkpoint as "held_s" (the checkpoint's tick), "held_e" (their latest end), "held_lane"."""
     t0, t1, k0, k1, tracks, only = box_key(box)
     loops = speed.loops()
     run = loops.midi_gather if loops else midi_scan.gather
@@ -540,20 +543,27 @@ def gather_box(lm, box, cancel=None, progress=None, most=None):
     if only:  # (some channels alone: a part / Ch row shown, PLAN #11 D hunt)
         chans[:] = 0
         chans[list(only)] = 1
-    jobs = []
+    jobs, hold = [], []
     for n in tracks:
         t = lm.tracks[n] if 0 <= n < len(lm.tracks) else None
         if (t is None or not t.notes or t.end <= t0 or t.first >= t1 or t.khi < k0 or t.klo > k1
                 or not len(t.cp_off) or not mf.tracks[n].whole):  # (a damaged track is only ever copied whole)
             continue
         j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
-        jobs.append((n, t, j, int(t.cp_off[j])))
-    total, done = sum(t.limit - start for _, t, _, start in jobs), 0
+        jobs.append((n, t, j, int(t.cp_off[j]), int(t.cp_tick[j]) if held else t0))
+        if held:
+            e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
+            lane, end = t.e_q[e0:e1].astype(np.int64), t.e_end[e0:e1].astype(np.int64)
+            lane, end = lane[t.e_cnt[e0:e1] > 0], end[t.e_cnt[e0:e1] > 0]
+            ok = (chans[lane >> 8] > 0) & ((lane & 255) >= k0) & ((lane & 255) <= k1)
+            end = np.where(end < 0, t.last_tick, end)[ok]
+            hold.append((np.full(len(end), int(t.cp_tick[j]), np.int64), end, lane[ok]))
+    total, done = sum(t.limit - start for _, t, _, start, _ in jobs), 0
     got, taken = [], 0
     buf = bytearray(PIECE)
     with open(mf.path, "rb") as f:
         watch = mf.watch()
-        for n, t, j, start in jobs:
+        for n, t, j, start, tt0 in jobs:
             old, newer = np.zeros(QS, np.int64), np.zeros(QS, np.int64)
             e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
             old[t.e_q[e0:e1].astype(np.int64)] = t.e_cnt[e0:e1]  # (hidden ones too: gather pairs with every note)
@@ -579,7 +589,7 @@ def gather_box(lm, box, cancel=None, progress=None, most=None):
                     view = t.data[start + at:t.limit]
                 else:
                     view = np.frombuffer(buf, np.uint8, filled) if loops else memoryview(buf)[:filled]
-                used = run(view, 0, len(view), start + at, skip, t0, t1, k0, k1, chans, st, old, newer, head, tail,
+                used = run(view, 0, len(view), start + at, skip, tt0, t1, k0, k1, chans, st, old, newer, head, tail,
                            o[6], o[0], o[1], o[2], o[3], o[4], o[5], o[7])
                 del view
                 at += used
@@ -614,11 +624,15 @@ def gather_box(lm, box, cancel=None, progress=None, most=None):
                 break
     mf.same()
     keys = ("trk", "s", "e", "lane", "vel", "on", "off")
-    if not got:
-        return {k: np.zeros(0, np.int64) for k in keys}
-    cols = [np.concatenate([g[i] for g in got]) for i in range(7)]
-    o = np.argsort(cols[1], kind="stable")
-    return {k: c[o] for k, c in zip(keys, cols)}
+    out = {k: np.zeros(0, np.int64) for k in keys}
+    if got:
+        cols = [np.concatenate([g[i] for g in got]) for i in range(7)]
+        o = np.argsort(cols[1], kind="stable")
+        out = {k: c[o] for k, c in zip(keys, cols)}
+    if held:
+        for i, k in enumerate(("held_s", "held_e", "held_lane")):
+            out[k] = np.concatenate([h[i] for h in hold]) if hold else np.zeros(0, np.int64)
+    return out
 
 
 def set_boxes(lm, boxes, found=None):

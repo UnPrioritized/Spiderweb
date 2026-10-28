@@ -256,6 +256,7 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
             size[0] = float(sizes[r][k]) if sizes is not None else 1.0
             v0, v1 = gap_values(shape, k, lo, hi, rng, snap)
             stop = nxt if keep else x + (nxt - x) * min(max(hold, 1.0), 99.0) / 100.0
+            made = len(pts)
             if shape == "drawn" and drawn:
                 bl, bh = min(lo, hi), max(lo, hi)
                 for j, (u, p, m) in enumerate(drawn):
@@ -270,6 +271,10 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
             else:
                 point(x, v0, "line")
                 point(stop, v1)  # (arriving: the next jump / the catch-up line leaves from the same beat)
+            if not keep and all(p[1] == clamp_bpm(normal) for p in pts[made:]):  # (no jump left at all: 0 %
+                del pts[made:]  # Strength / lowest note; no catch-up to pay back, hunt 2026-10-29: it was counted
+                point(x, normal)  # "too short" or got one doing nothing)
+                continue
             if not keep:
                 item = [stop - a, catch_shape, ""]
                 catch_set(item, 3, x - a)  # (its yellow area from the jump: back-to-back stretches chain)

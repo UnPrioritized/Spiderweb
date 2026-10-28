@@ -5,6 +5,7 @@ light up in the piano roll (roll/roll_melody.py). Stays open and follows the hig
 gaps' window; checked every WATCH_MS (cheap) instead of being told by every place that can change them."""
 
 import copy
+import math
 import random
 import threading
 import tkinter as tk
@@ -318,13 +319,53 @@ class MelodyWindow(tk.Toplevel):
         v = self.number(self.every, 1)
         return int(v) if v is not None and v == int(v) else None
 
-    def top_of(self, s, e, k, area, shortest):
+    def top_of(self, s, e, k, area, shortest, cover=None):
         """(starts, ends, keys) of the top notes (melody.top_notes) among the notes that can hide one starting in
-        area: those sounding there, short ones left out (they don't count as melody)."""
+        area: those sounding there, short ones left out (they don't count as melody). cover: (starts, ends, keys) of
+        a loaded MIDI's notes still sounding where its read began (hunt 2026-10-29): they hide, never count."""
         keep = np.flatnonzero((e - s >= shortest - 1e-9) & (s < area[1]) & (e > area[0]))
         s, e, k = s[keep], e[keep], k[keep]
-        t = top_notes(s, e, k)
-        return s[t], e[t], k[t]
+        n = len(s)
+        if cover is not None and len(cover[0]):
+            s, e, k = (np.concatenate([a, np.asarray(c, a.dtype)]) for a, c in zip((s, e, k), cover))
+        t = top_notes(s, e, k)[:n]
+        return s[:n][t], e[:n][t], k[:n][t]
+
+    def followed(self, only, top, lkey, area, shortest):
+        """(starts, ends, keys) in beats of the notes followed (the highlighted track's, or the top notes), or the
+        text saying why there are none yet. Kept until the notes, the read, the selection or the rules change (hunt
+        2026-10-29: Top note worked them out again at every BPM key / click, 0.6 s on a 1 M-note MIDI)."""
+        app = self.app
+        got = self.loaded_notes(lkey) if lkey is not None else None
+        if lkey is not None:
+            if got is None:
+                return tr("melody.reading")
+            if got[0] is None:
+                return tr("melody.loaded_dense" if got[1] else "melody.loaded_bad")
+        key = (only, top, tuple(sorted(app.sels)), id(app.rendered if top else app.drawn), len(app.shapes), lkey,
+               area if top else None, shortest if top else None)
+        had = getattr(self, "_followed", None)
+        if had is not None and had[0] == key:
+            return had[1]
+        s, e, k = self.own_notes(only, top)
+        if got is not None:
+            s, e, k = np.concatenate([s, got[0]]), np.concatenate([e, got[1]]), np.concatenate([k, got[2]])
+        if top:
+            cover = self.loaded_got[4] if lkey is not None and lkey != () and self.loaded_got else None
+            s, e, k = self.top_of(s, e, k, area, shortest, cover)
+        self._followed = (key, (s, e, k))
+        return s, e, k
+
+    def near_view(self):
+        """(first, last beat) read for Jump areas: the piano roll's view and one view's width each side, in whole
+        view widths (hunt 2026-10-29: the whole song refused past 5 M notes; edges are clicked where you look)."""
+        roll = self.app.roll
+        if roll.sx is None:
+            return 0.0, 1.0
+        t0, t1 = roll.x2t(roll.kb_w), roll.x2t(max(roll.winfo_width(), roll.kb_w + 1))
+        w = max(t1 - t0, 1.0)
+        a = (math.floor(t0 / w) - 1) * w
+        return max(0.0, a), a + 4 * w
 
     def shortest_gap(self):
         """The shortest gap between jumps (and to a run's end) in ticks."""
@@ -396,8 +437,10 @@ class MelodyWindow(tk.Toplevel):
         lm = app.loaded
         if lm is None or tl is None or getattr(lm, "changed", False):
             return None
-        if top:
+        if top and (not only or tl.current is None):
             n, chs = tuple(range(len(lm.tracks))), []
+        elif top and tl.shown_file() is None:  # (Only the selected notes: the box picked Spiderweb's shapes only,
+            return ()  # hunt 2026-10-29: Top note took every track's notes in it, picked or not)
         else:
             got = tl.shown_file()
             if got is None:
@@ -411,41 +454,45 @@ class MelodyWindow(tk.Toplevel):
                 return ()
         else:
             boxes = [(max(0, round(a * app.ppq * scale)), round(b * app.ppq * scale), 0, lm.keys - 1)]
-        return (id(lm), lm.hide_ver, tuple(boxes), n, tuple(chs))
+        return (id(lm), lm.hide_ver, tuple(boxes), n, tuple(chs), top)
 
     def loaded_notes(self, key):
         """(starts, ends, keys) in beats of the loaded track's notes for key; None = still being read (on a
-        thread: the window checks again)."""
+        thread: the window checks again). Top note: the notes still sounding where each box starts too
+        (held_notes)."""
         if key == ():
             return np.zeros(0), np.zeros(0), np.zeros(0, np.int64)
         if self.loaded_got is not None and self.loaded_got[0] == key:
-            return self.loaded_got[1:]
+            return self.loaded_got[1:4]
         job = self.reading
         if job is not None and job["key"] == key:
             if not job["finished"]:
                 return None
             self.reading = None
             if job["error"] is not None:
-                self.loaded_got = (key, None, isinstance(job["error"], MemoryError), None)
-                return self.loaded_got[1:]
+                self.loaded_got = (key, None, isinstance(job["error"], MemoryError), None, None)
+                return self.loaded_got[1:4]
             got = job["got"]
             scale = self.app.loaded.ppq
-            s = np.concatenate([g["s"] for g in got]) / scale if got else np.zeros(0)
-            e = np.concatenate([g["e"] for g in got]) / scale if got else np.zeros(0)
-            k = np.concatenate([g["lane"] for g in got]) & 255 if got else np.zeros(0, np.int64)
-            self.loaded_got = (key, s, e, k)
+
+            def joined(name, by=None):
+                v = np.concatenate([g[name] for g in got]) if got else np.zeros(0, np.int64)
+                return v / scale if by is None else v & 255
+            s, e, k = joined("s"), joined("e"), joined("lane", 255)
+            held = (joined("held_s"), joined("held_e"), joined("held_lane", 255)) if key[5] else None
+            self.loaded_got = (key, s, e, k, held)
             return s, e, k
         if job is not None:
             job["cancel"] = True
         lm = self.app.loaded
-        _, _, boxes, n, chs = key
+        _, _, boxes, n, chs, top = key
         job = self.reading = {"key": key, "got": None, "error": None, "finished": False, "cancel": False}
 
         def run():
             try:
                 job["got"] = [gather_box(lm, {"t0": t0, "t1": t1, "k0": k0, "k1": k1, "tracks": list(n),
                                               **({"chans": list(chs)} if chs else {})},
-                                         cancel=lambda: job["cancel"], most=MOST_LOADED)
+                                         cancel=lambda: job["cancel"], most=MOST_LOADED, held=top)
                               for t0, t1, k0, k1 in boxes]
                 if sum(len(g["s"]) for g in job["got"]) > MOST_LOADED:
                     raise MemoryError
@@ -489,9 +536,8 @@ class MelodyWindow(tk.Toplevel):
         app.melody_follow, app.melody_every = self.follow_mode, self.every.get()
         app.melody_pitch_on, app.melody_pitch_low = self.pitch_on.get(), self.pitch_low.get()
         melody_ok = track is not None or top  # (Top note: every track's notes, also with All tracks)
-        if clicks and melody_ok:  # (edges go onto the melody's starts anywhere: the whole track read)
-            lm = app.loaded
-            lkey = self.loaded_key(0.0, (lm.end / max(1, lm.ppq) + 1) if lm else 1.0, only, top)
+        if clicks and melody_ok:  # (edges go onto the melody's starts: read round the view, near_view)
+            lkey = self.loaded_key(*self.near_view(), only, top)
         else:
             lkey = self.loaded_key(area[0], area[1], only, top) if area and melody_ok and at == "melody" else None
         how = self.how.get()
@@ -558,11 +604,9 @@ class MelodyWindow(tk.Toplevel):
         self.follow.state(["disabled"] if at == "snap" else ["!disabled"])
         if self.follow.current() != int(top):
             self.follow.current(int(top))
-        self.at_melody.state(["!disabled"] if melody_ok else ["disabled"])
-        if at == "melody" and not melody_ok:  # (All tracks: only the snap steps)
-            self.at.set("snap")
-            return self.sync()
-        on_melody = at == "melody" and melody_ok
+        # (All tracks: Melody notes stays, for Follows: Top note; the hint asks for a track or Top note, hunt
+        # 2026-10-29: it was greyed with the Follows list, Top note only reachable through Where I click)
+        on_melody = at == "melody"
         self.only_tick.state(["!disabled"] if (on_melody or clicks and melody_ok) and has_sel else ["disabled"])
         if not has_sel and only:
             self.only_sel.set(False)
@@ -602,18 +646,11 @@ class MelodyWindow(tk.Toplevel):
         elif pitch and self.number(self.pitch_low, 0, 100) is None:
             problem = tr("melody.bad_pitch")
         else:
-            s, e, k = self.own_notes(only, top)
-            if lkey is not None:
-                got = self.loaded_notes(lkey)
-                if got is None:
-                    problem = tr("melody.reading")
-                elif got[0] is None:
-                    problem = tr("melody.loaded_dense" if got[1] else "melody.loaded_bad")
-                else:
-                    s, e, k = np.concatenate([s, got[0]]), np.concatenate([e, got[1]]), np.concatenate([k, got[2]])
-            if problem is None:
-                if top:
-                    s, e, k = self.top_of(s, e, k, area, shortest)
+            got = self.followed(only, top, lkey, area, shortest)
+            if isinstance(got, str):
+                problem = got
+            else:
+                s, e, k = got
                 self.runs = melody_runs(s, e, area[0], area[1], shortest, rest, self.every_n())
                 inside = (s >= area[0]) & (s < area[1]) & (e - s >= shortest - 1e-9)
                 self.lit = (s[inside], e[inside], k[inside])
@@ -672,20 +709,16 @@ class MelodyWindow(tk.Toplevel):
         notes, lines = None, []
         if melody_ok:
             top = self.follow_mode == "top"
-            s, e, k = self.own_notes(only, top)
-            if lkey is not None:
-                got = self.loaded_notes(lkey)
-                if got is None:
-                    lines.append(tr("melody.reading"))
-                elif got[0] is None:
-                    lines.append(tr("melody.loaded_dense" if got[1] else "melody.loaded_bad"))
-                else:
-                    s, e, k = np.concatenate([s, got[0]]), np.concatenate([e, got[1]]), np.concatenate([k, got[2]])
-            if top:  # (edges go onto the top notes' starts)
-                s, e, k = self.top_of(s, e, k, (-np.inf, np.inf), 0.0)
-            notes = (s, e, k)
+            got = self.followed(only, top, lkey, (-np.inf, np.inf), 0.0)  # (Top note: edges onto the top notes)
+            if isinstance(got, str):
+                lines.append(got)
+                got = self.own_notes(only, top) if not top else None  # (Spiderweb's own meanwhile)
+            notes = got
         self.lit = notes
-        self.snap_starts = np.unique(notes[0]) if notes is not None else np.zeros(0)
+        if notes is None or len(notes[0]) == 0:
+            self.snap_starts = np.zeros(0)
+        elif getattr(self, "_starts_of", None) is not notes[0]:  # (once per set of notes, not every click)
+            self._starts_of, self.snap_starts = notes[0], np.unique(notes[0])
         self.go.state(["disabled"])
         problem = None
         if box is None:
