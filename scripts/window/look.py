@@ -181,6 +181,7 @@ PLAY_LINE = pick("#0a50e0", "#d6e8ff")  # (dark: pale blue, the bright notes' bl
 # below the last track, the line under each row, bar lines, the Conductor row's marks, the names' column
 TRACK_ROW, TRACK_ROW_ALT = pick("#ffffff", "#3c3c3f"), pick("#eef3fb", "#38383b")
 TRACK_PICKED, TRACK_EMPTY = pick("#d6e4fa", "#444a56"), pick("#f0f0f0", "#2f2f31")
+TRACK_LOADING = pick("#c8c8cc", "#5a5a60")  # (a folder's Ch row still being read from the file: grey, PLAN #11)
 TRACK_LINE, TRACK_BAR = pick("#dfe6f2", "#333336"), pick("#c4ccd8", "#55555a")
 TRACK_CONDUCTOR = pick("#8a8a8a", "#a0a0a4")
 TRACK_MUTED = pick("#b8b8b8", "#6c6c70")  # a muted track's notes

@@ -150,9 +150,12 @@ def clean_file_props(raw):
         name = v.get("name") if isinstance(v.get("name"), str) else None
         ch = v.get("ch") if type(v.get("ch")) is int and 0 <= v["ch"] <= 15 else None
         parts = clean_parts(v.get("parts")) if n < PART else []
-        if name is not None or ch is not None or parts:
+        # (its Ch rows' order as dragged, PLAN #11 D: the list only, a MIDI has no order inside a track)
+        order = [c for c in dict.fromkeys(v.get("order") if isinstance(v.get("order"), list) else [])
+                 if type(c) is int and 0 <= c <= 15]
+        if name is not None or ch is not None or parts or len(order) > 1:
             out[n] = {"name": name[:NAME_MOST] if name is not None else None, "ch": ch,
-                      **({"parts": parts} if parts else {})}
+                      **({"parts": parts} if parts else {}), **({"order": order} if len(order) > 1 else {})}
     return out
 
 

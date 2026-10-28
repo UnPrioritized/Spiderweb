@@ -332,8 +332,10 @@ class TrackList(tk.Canvas):
                     got = set(np.flatnonzero(lm.tracks[k].chn).tolist())
                 sets[row] |= got if only is None else got & only
         # (a track of yours: its order's channels listed even without notes, empty "Ch n" rows: check-in C)
-        orders = [self._hand.get(int(s), {}).get("order") or () for s in self._all.tolist()]
-        out = [tuple(ordered(o, x | set(o))) for o, x in zip(orders, sets)]
+        orders = [self._hand.get(int(s), {}).get("order") or () if s >= 0 else self.loaded_order(int(s))
+                  for s in self._all.tolist()]
+        # (a loaded row's order: only the channels it holds, never listed empty)
+        out = [tuple(ordered(o, x | set(o) if s >= 0 else x)) for o, x, s in zip(orders, sets, self._all.tolist())]
         self._chans = (key, out)
         return out
 
@@ -458,6 +460,14 @@ class TrackList(tk.Canvas):
         """LoadedPlayer's muted(): the loaded MIDI's track numbers muted, (track number, channel) for one channel."""
         whole, pairs = self.mutes_by_track()
         return [-1 - s for s in whole if s < 0] + [(-1 - s, c) for s, c in pairs if s < 0]
+
+    def loaded_order(self, s):
+        """A loaded row's Ch rows' order as dragged (a part: its channels' list; the track's own row: its "order")."""
+        n, j = self.file_part(s)[0], key_part(-1 - s)
+        p = self.app.file_props.get(n) or {}
+        if j >= 0:
+            return next((q["chs"] for q in p.get("parts", ()) if q["id"] == j), ())
+        return p.get("order") or ()
 
     def row_only(self, row):
         """The channels a loaded row's picture reads: None = its whole track, a part / a track with parts (PLAN #11
@@ -1459,7 +1469,7 @@ class TrackList(tk.Canvas):
         got = self.loaded_drag(m)
         if got:  # (a loaded track's channels: only among its own track's rows, PLAN #11 D)
             n = got[0][1]
-            return dst < 0 and self.file_part(dst)[0] == n and not (m["ch"] is None and dst == m["s"])                 and any(s != dst for s, _, _ in got)
+            return dst < 0 and self.file_part(dst)[0] == n and not (m["ch"] is None and dst == m["s"])                 and (any(s != dst for s, _, _ in got) or self.mixed(row))  # (its own folder's: a new order)
         parts = self.drag_parts(m)
         if not parts:
             return False
@@ -1516,7 +1526,10 @@ class TrackList(tk.Canvas):
         row, pos = m["into"]
         dst = int(self._all[row])
         if parts is None and self.loaded_drag(m):
-            return self.parts_into(self.loaded_drag(m), dst)
+            got = self.loaded_drag(m)
+            if all(s == dst for s, _, _ in got):  # (Ch rows moved among their own folder's: only the order)
+                return self.reorder_loaded(dst, [c for _, _, cs in got for c in cs], pos)
+            return self.parts_into(got, dst)
         parts = self.drag_parts(m) if parts is None else parts  # (Join: given)
         now = list(self.row_chans()[row])
         whole = m["ch"] is None
@@ -1750,6 +1763,28 @@ class TrackList(tk.Canvas):
                 self.open.add(dst)  # (so you see where they went)
             self.request_redraw()
 
+    def reorder_loaded(self, s, chans, pos):
+        """A loaded folder's Ch rows dragged among themselves (chans in their order, to place pos; None = the end):
+        a new order kept in the project only (a MIDI has none inside a track; channels and notes unchanged). One
+        undo step; dropped where they were = nothing."""
+        app = self.app
+        now = list(self.row_chans()[self.row_of_id(s)])
+        rest = [c for c in now if c not in chans]
+        at = len(rest) if pos is None else sum(1 for c in now[:pos] if c not in chans)
+        order = rest[:at] + list(chans) + rest[at:]
+        if order == now:
+            return
+        n, j = self.file_part(s)[0], key_part(-1 - s)
+        props = dict(app.file_props)
+        p = dict(props.get(n) or {"name": None, "ch": None})
+        if j >= 0:
+            p["parts"] = [dict(q, chs=order + [c for c in q["chs"] if c not in order]) if q["id"] == j else q
+                          for q in p.get("parts", ())]
+        else:
+            p["order"] = order
+        props[n] = p
+        self.set_parts(props, [], None, tr("tracks.order_step"))
+
     def set_parts(self, props, new, gap, step):
         """app.file_props = props (parts changed) as one undo step: the new parts' rows (their file_order entries)
         put above row gap (None: right after their track), parts gone left out; your tracks keep their places
@@ -1761,13 +1796,15 @@ class TrackList(tk.Canvas):
         ids = [r if type(r) is int else HAND + r["id"] for r in full]
         at = None if gap is None else (ids.index(int(self._all[gap])) if gap < len(self._all)
                                        and int(self._all[gap]) in ids else len(full))
+        live = set(part_keys(props, len(app.loaded.tracks)))
+        gone = [r for r in (self.row_of_id(-1 - k) for k in self._part_row if k not in live) if r is not None]
+        first = gap if new else min(gone) if gone else None  # (the first row whose place changes, if any)
         app.roll.end_typing()
         app.push_undo(name=step)
-        self.keep_places(0 if gap is None else gap)  # (rows after it shift: Spiderweb's made yours when they can)
+        self.keep_places(first)  # (rows after it shift: Spiderweb's made yours when they can)
         rows = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
         if at is not None:
             rows = rows[:at] + [-1 - k for k in new] + rows[at:]
-        live = set(part_keys(props, len(app.loaded.tracks)))
         rows = [r for r in rows if not (type(r) is int and r <= -1 - PART and -1 - r not in live)]
         app.file_props = props
         app.file_order = clean_file_order([-1 - r for r in rows if type(r) is int and r < 0] + app.file_gone)
@@ -2848,6 +2885,12 @@ class TrackList(tk.Canvas):
                 got = np.concatenate(parts, axis=1)[:, cx - j0 * TILE:cx - j0 * TILE + aw]
             else:  # (blocks not read yet / unreadable (False): the small picture there, a sub-row nothing)
                 small = small_mask(lm, t, cx, aw, self.sx) if c is None else None
+                if c is not None:  # (a Ch row / part still being read: grey there meanwhile, user 2026-10-28)
+                    band = img[max(0, line * self.row_h - cy + pad):max(0, line * self.row_h - cy + pad + inner)]
+                    for j, p in enumerate(parts, j0):
+                        if p is None:
+                            a, b = max(cx, j * TILE), min(cx + aw, (j + 1) * TILE)
+                            band[:, a - cx:b - cx] = hex_rgb(look.TRACK_LOADING)
                 if small is None:
                     if not any(isinstance(p, np.ndarray) for p in parts):
                         continue
@@ -2967,15 +3010,42 @@ class TrackList(tk.Canvas):
             self._row_job.stop = True
             self._row_job = None
 
+    def repaint_read(self, done):
+        """Rows just read from the file (done = {(track number, channel / channels / None)}): only the squares of
+        their lines painted again (user 2026-10-28: the whole list repainted at once flashed); the All tracks row
+        too when a whole track came."""
+        if any(c is None for _, c in done):
+            self._all_sheet = None
+        st = self._sheet
+        if st is None:
+            return
+        rows, chs = self.lines()[:2]
+        js = set()
+        for line in range(len(rows)):
+            row = int(rows[line])
+            r = self.file_at(row)
+            if r is None:
+                continue
+            c = int(chs[line]) if chs[line] >= 0 else self.row_only(row)
+            if (r, c) in done:
+                js |= set(range(line * self.row_h // SQUARE, ((line + 1) * self.row_h - 1) // SQUARE + 1))
+        for p in [p for p in st["tiles"] if p[1] in js]:
+            del st["tiles"][p]
+
     def _poll_rows(self):
         job = self._row_job
         if job is None:
             return
         self.take_rows()
-        if job.shown and all(k in self._tiles for k in job.shown):  # (the blocky ones all read: painted again
-            job.shown = set()  # once, the reading ahead goes on)
-            self._sheet = self._all_sheet = None
-            self.request_redraw()
+        if job.shown:  # (a row's blocky / grey blocks all read: that row painted again, the reading goes on)
+            groups = {}
+            for k in job.shown:
+                groups.setdefault((k[0], k[2]), []).append(k)
+            done = {g for g, ks in groups.items() if all(k in self._tiles for k in ks)}
+            if done:
+                job.shown = {k for k in job.shown if (k[0], k[2]) not in done}
+                self.repaint_read(done)
+                self.request_redraw()
         if not job.done:
             self.after(RL.POLL_MS, self._poll_rows)
             return

@@ -1046,8 +1046,10 @@ class ProjectFiles:
         channels alone, no meta events, its track's name) and its track without those channels."""
         props, names = {}, self.file_tracks()
         for n, p in self.file_props.items():
-            props[n] = {"name": p.get("name"), "ch": p.get("ch")}
             parts = p.get("parts") or ()
+            if p.get("name") is None and p.get("ch") is None and not parts:
+                continue  # (only its Ch rows' order: the track copied as it is)
+            props[n] = {"name": p.get("name"), "ch": p.get("ch")}
             if parts:
                 props[n]["keep"] = 0xFFFF & ~sum(1 << c for q in parts for c in q["chs"])
             for q in parts:
