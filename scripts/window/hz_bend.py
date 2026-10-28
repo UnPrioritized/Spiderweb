@@ -30,7 +30,8 @@ LINE_NEAR = 4  # px: ... this near a note's bend line adds a point to it
 BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = free), as a slide's
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
 BEND = look.HZ_BEND
-BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: until its own mouse is made)
+BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: hz_sketch.py)
+BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece")  # the drags bend_drag / bend_release take (sketchpiece: Sketch's)
 
 
 class HzBend:
@@ -52,7 +53,8 @@ class HzBend:
             return []
         most, w, out = self.bend_most(), self.canvas.winfo_width(), []
         for i, n in enumerate(self.tones):
-            pts = n.get("bend")
+            # (Sketch: a plain note's ends too, bend_press makes its line when one is grabbed)
+            pts = n.get("bend") or (self.sketching() and ([0.0, 0.0], [1.0, 0.0]))
             if not pts or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
                 continue
             for j, p in enumerate(pts):
@@ -64,12 +66,12 @@ class HzBend:
         """[(x, y, tone number, piece number, keys at its start, at its end)]: the curve squares of the notes in view,
         half way along each piece whose two points differ (Bend tool only). None on a piece the Range cuts (a point
         past it: the square would sit where the clipped line isn't, and a nudge would bend it a lot)."""
-        if not self.bending():
+        if not self.bending() or self.sketching():  # (Sketch: a press there holds the piece; curves come with Alt)
             return []
         most, out = self.bend_most(), []
         for i, j in {(i, j) for _, _, i, j in self.bend_points()}:
             n = self.tones[i]
-            pts = n["bend"]
+            pts = n.get("bend") or ()
             if j + 1 >= len(pts):
                 continue
             (u0, k0), (u1, k1) = pts[j][:2], pts[j + 1][:2]
@@ -136,9 +138,10 @@ class HzBend:
         self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before)))
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
-        if hit[0] == "note" and self.sketching():  # (Sketch: a point is added by a double-click, sketch_double)
-            self.redraw()
-            return True
+        if hit[0] == "note" and self.sketching():  # (Sketch: the piece is held, sketch_piece; a point is added by a
+            return self.sketch_piece(e, i, before)  # double-click, sketch_double)
+        if hit[0] == "point" and not n.get("bend"):  # (Sketch: a plain note's end: its line made, at 0)
+            n["bend"] = [[0.0, 0.0], [1.0, 0.0]]
         if hit[0] == "curve":  # (where the square was grabbed: it moves as far as the mouse from there)
             square = next(q for q in self.bend_squares() if q[2:4] == (i, hit[2]))
             self.drag = {"kind": "bendcurve", "i": i, "j": hit[2], "before": before, "x": e.x, "y": e.y,
@@ -166,12 +169,14 @@ class HzBend:
 
     def bend_drag(self, e):
         d = self.drag
-        if not d or d["kind"] not in ("bendpt", "bendcurve"):
+        if not d or d["kind"] not in BEND_DRAGS:
             return False
         if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
             return True  # (a click with a wobble changes nothing)
         d["moved"] = True
         n = self.tones[d["i"]]
+        if d["kind"] == "sketchpiece":
+            return self.sketch_piece_to(d, n, e)
         if d["kind"] == "bendcurve":  # how far from the piece's first point to its second the square is dragged
             _, sy, _, j, k0, k1 = d["square"]
             y = sy + e.y - d["y"]
@@ -198,7 +203,7 @@ class HzBend:
 
     def bend_release(self, e):
         d = self.drag
-        if not d or d["kind"] not in ("bendpt", "bendcurve"):
+        if not d or d["kind"] not in BEND_DRAGS:
             return False
         self.drop_drag()
         self.bend_done(d)
@@ -253,7 +258,7 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] != "point":
             return False
-        if self.sketching() and hit[2] in (0, len(self.tones[hit[1]]["bend"]) - 1):  # (Sketch: the note's start
+        if self.sketching() and hit[2] in (0, len(self.tones[hit[1]].get("bend") or "..") - 1):  # (Sketch: its start
             return False                                                              # and end stay: its menu)
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
@@ -271,7 +276,8 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
-        cursor = "fleur" if hit[0] == "point" else "sb_v_double_arrow" if hit[0] == "curve" else self.pencil
+        cursor = ("fleur" if hit[0] == "point" else "sb_v_double_arrow" if hit[0] == "curve" or self.sketching() else
+                  self.pencil)  # (Sketch: a press on the line holds its piece, up / down)
         self.canvas.config(cursor=cursor)
         self.show_status(e)
         return True

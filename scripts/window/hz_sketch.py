@@ -15,6 +15,8 @@ import numpy as np
 
 from files.lang import tr
 from notes.hzbass import line_at, note_bend, pitch
+from roll.roll_shared import SHIFT, note_name
+from window import look
 from window.hz_bend import BEND, LINE_NEAR
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
@@ -51,7 +53,7 @@ class HzSketch:
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
         if hit[0] == "point":
-            if 0 < hit[2] < len(n["bend"]) - 1:
+            if 0 < hit[2] < len(n.get("bend") or "..") - 1:
                 del n["bend"][hit[2]]
                 self.bend_done({"i": i, "before": before}, tr("hz.step_note_bend_delete"))
                 self.point_again()
@@ -71,6 +73,53 @@ class HzSketch:
         self.redraw()
         self.show_status(e)
         return True
+
+    def sketch_piece(self, e, i, before):
+        """A press on note i's line between two points: that piece is held (sketch_piece_to). A line with no points
+        between its ends is all one piece: the whole note goes up / down (its key)."""
+        n = self.tones[i]
+        pts = n.get("bend")
+        u = min(1.0, max(0.0, (self.beat_at(e.x) - n["t"]) / max(n["len"], 1e-12)))
+        j = None if not pts or len(pts) <= 2 else min(len(pts) - 2, max(0, sum(p[0] <= u for p in pts) - 1))
+        self.drag = {"kind": "sketchpiece", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
+                     "orig": copy.deepcopy(pts), "key": n["key"],
+                     "name": tr("hz.step_move") if j is None else tr("hz.step_note_bend")}
+        self.redraw()
+        self.show_status(e)
+        return True
+
+    def sketch_piece_to(self, d, n, e):
+        """The piece held in drag d up / down: both its points by as many keys as the mouse moved (whole keys;
+        Shift: to the cent), no further than the Range; the whole note: its key."""
+        k = (d["y"] - e.y) / self.sy
+        if d["j"] is None:
+            n["key"] = max(0, d["key"] + round(k))
+        else:
+            k = round(k, 2) if e.state & SHIFT else float(round(k))
+            most = self.bend_most()
+            for j in (d["j"], d["j"] + 1):
+                n["bend"][j][1] = max(-most, min(most, d["orig"][j][1] + k))
+        self.redraw()
+        self.show_status(e)
+        return True
+
+    def sketch_label(self):
+        """(x, y, text) of the label beside what's held: the key it's at + how far from the note's own ("A2 +2.0
+        st"); None when no point / piece is held."""
+        d = self.drag
+        if not d or d["kind"] not in ("bendpt", "sketchpiece") or not d.get("moved"):
+            return None
+        n = self.tones[d["i"]]
+        if d["kind"] == "sketchpiece" and d["j"] is None:
+            k, u = n["key"] - d["key"], 0.5
+        else:
+            j = d["j"]
+            pts = n["bend"]
+            k = pts[j][1]
+            u = pts[j][0] if d["kind"] == "bendpt" else (pts[j][0] + pts[j + 1][0]) / 2
+        at = pitch(n) + (k if d["kind"] == "bendpt" or d["j"] is not None else 0.0)
+        text = tr("hz.sketch_label", key=note_name(round(at)), keys=("+" if k > 0 else "") + f"{k:.1f}")
+        return self.x_of(n["t"] + u * n["len"]), self.pitch_y(at) - 14 * self.s, text
 
     def draw_sketch_notes(self, colours, selected):
         """The notes in view as lines (Sketch tool), each in its colours (fill, edge; selected ones in `selected`)."""
@@ -98,3 +147,10 @@ class HzSketch:
                 c.create_oval(x - r, y - r, x + r, y + r, fill=BEND, outline=BEND)
             x, y, a = x1 + r + 2 * s, ys[-1], 3 * s  # (">": the end, where a drag will make it longer)
             c.create_line(x, y - a, x + a, y, x, y + a, fill=BEND, width=max(1, round(1.5 * s)))
+        label = self.sketch_label()
+        if label:
+            x, y, text = label
+            t = c.create_text(x, y, text=text, anchor="s", fill=look.LABEL, font=look.font(8, "bold"))
+            box = c.bbox(t)
+            c.create_rectangle(box[0] - 3 * s, box[1] - s, box[2] + 3 * s, box[3] + s, fill=look.HZ_DOT, outline=BEND)
+            c.tag_raise(t)
