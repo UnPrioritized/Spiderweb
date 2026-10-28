@@ -1747,7 +1747,10 @@ class RollDrawing:
         if tl is None or tl.current is None:
             return tr("tracks.all")
         row = tl.row_of_id(tl.current)
-        return "" if row is None else tl.name_of(row)
+        if row is None:
+            return ""
+        ch = tl.shown_ch()  # (one channel of it: a folder's sub-row clicked)
+        return tl.name_of(row) if ch is None else tr("tracks.mark_ch", name=tl.name_of(row), ch=ch + 1)
 
     def bar_y(self):
         """The bar numbers' middle: the ruler's bottom half, by their ticks (the tempo changes go above them)."""

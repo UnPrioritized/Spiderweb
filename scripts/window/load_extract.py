@@ -194,6 +194,10 @@ def extract_loaded(app):
     if getattr(app, "_extracting", None):
         app.status.config(text=tr("extract.busy"))
         return
+    tl = getattr(app, "track_list", None)
+    if tl is not None and tl.shown_ch() is not None:  # (it would take the channels not shown too)
+        app.status.config(text=tr("extract.one_channel"))
+        return
     lm = app.loaded
     order, faint = shown_tracks(app, lm)
     if order is not None and TRACK_FADE[0] == 0:  # (picked-behind tracks drawn at 0 %: not seen, not taken)

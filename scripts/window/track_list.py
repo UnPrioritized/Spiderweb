@@ -597,8 +597,9 @@ class TrackList(tk.Canvas):
             self.owners = set()
             return drawn, None
         # (the shapes it shows now: follow keeps showing them when channels are handed out again)
-        self.owners = shape_ids(self.app.shapes, drawn[slot == self.current, 5])
-        out = [drawn[slot == self.current]]
+        mine = self.shown_mask(drawn, slot)
+        self.owners = shape_ids(self.app.shapes, drawn[mine, 5])
+        out = [drawn[mine]]
         behind = sorted(self.behind - {self.current}) if self.faint > 0 and self.onion.get() else []
         if behind:
             faint = drawn[np.isin(slot, behind)].copy()
@@ -609,6 +610,15 @@ class TrackList(tk.Canvas):
                 out.insert(0, faint)
                 return np.concatenate(out), back
         return out[0], None
+
+    def shown_mask(self, drawn, slot):
+        """Which of drawn's notes the highlighted track shows in full: its own, only the channel picked (a folder's
+        sub-row clicked, user 2026-10-28). slot: each note's real track."""
+        mine = slot == self.current
+        ch = self.shown_ch()
+        if ch is not None:
+            mine &= channels_of(drawn[:, 4], self.app.picture_use10) == ch
+        return mine
 
     def open_picker(self):
         if self.picker:

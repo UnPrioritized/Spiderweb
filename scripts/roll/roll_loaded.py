@@ -67,7 +67,7 @@ class LoadedNotes:
         pal = getattr(self.app, "picture_pal", None)
         order, faint = shown_tracks(self.app, lm)
         key = (id(lm), lm.hide_ver, W, kb, top, h, round(ax, 12), round(bx, 6), p_lo, p_hi, tuple(pal or ()), order,
-               frozenset(faint), TRACK_FADE[0], loud_on(self.app))
+               frozenset(faint), TRACK_FADE[0], shown_only(self.app, lm), loud_on(self.app))
         return lm, key, (ax, bx, W, p_lo, p_hi, kb, top, order, faint)
 
     def loaded_mark(self):
@@ -77,7 +77,7 @@ class LoadedNotes:
             return None
         order, faint = shown_tracks(self.app, lm)
         return (id(lm), lm.hide_ver, getattr(self, "loaded_version", 0), order, faint, TRACK_FADE[0],
-                loud_on(self.app))
+                shown_only(self.app, lm), loud_on(self.app))
 
     def paint_loaded(self, img, region):
         """The loaded notes into img, the picture of region = (x0, y0, x1, y1) of the screen (paint_region)."""
@@ -112,8 +112,9 @@ class LoadedNotes:
 
     def loaded_style(self, lm, order, faint):
         """What an exact picture depends on besides its place (Exact.style; the velocity pane looks pictures up by
-        it too, hunt 2026-10-25). loud_on stays LAST (ExactJob reads style[-1])."""
-        return id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0], loud_on(self.app)
+        it too, hunt 2026-10-25). loud_on stays LAST (ExactJob reads style[-1]), the one channel shown just before it
+        (style_only)."""
+        return id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0], shown_only(self.app, lm), loud_on(self.app)
 
     def loaded_tabs(self, lm, key, ax, bx, W, p_lo, nk, order, faint):
         """(tab, marks) of the view: keys p_lo .. + nk x W columns."""
@@ -189,7 +190,7 @@ class LoadedNotes:
             began, took = time.perf_counter(), [0]
             try:
                 tab, marks = exact_tab(lm, ax, e.bx - s0, s1 - s0, 0, lm.keys, tracks=order, faint=faint, took=took,
-                                       loud=style[-1])
+                                       loud=style[-1], only=style_only(style))
             except Exception:
                 write_log_now()
                 return None
@@ -216,7 +217,8 @@ class LoadedNotes:
     def _make_now(self, lm, style, ax, bx, W, order, faint):
         began, took = time.perf_counter(), [0]
         try:
-            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, faint=faint, took=took, loud=style[-1])
+            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, faint=faint, took=took, loud=style[-1],
+                                   only=style_only(style))
         except Exception:  # (a file that changed / went: the overview stays; told when exporting)
             write_log_now()
             return None
@@ -426,6 +428,21 @@ def loud_on(app):
     return bool(var is not None and var.get())
 
 
+def shown_only(app, lm):
+    """((track number, channel),) when the track list highlights one channel of a loaded track (a folder's sub-row,
+    user 2026-10-28: the piano roll shows just it), else ()."""
+    tl = getattr(app, "track_list", None)
+    ch = tl.shown_ch() if tl is not None else None
+    if ch is None or tl.current >= 0 or -tl.current - 1 >= len(lm.tracks):
+        return ()
+    return ((-tl.current - 1, ch),)
+
+
+def style_only(style):
+    """An exact picture's style -> exact_tab's only (the one channel read of its track) or None."""
+    return dict(style[-2]) or None
+
+
 def shown_tracks(app, lm):
     """(order, faint) of the loaded tracks the piano roll shows: order None = every track (nothing highlighted in
     the track list), else the track numbers drawn, the highlighted one first (on top), then the ones picked behind
@@ -534,7 +551,7 @@ SCRUB_S = 0.04  # ... exactly when that's guessed this quick, else from the over
 _GROUP_CH = np.argsort(COLOURS_16)  # (channel colour group -> channel)
 
 
-def scrub_notes(lm, order, lo, hi, at, loud=False):
+def scrub_notes(lm, order, lo, hi, at, loud=False, only=()):
     """Right-drag listening on a loaded MIDI (user 2026-10-25): {(channel, key): (start, velocity)} of what's drawn
     on top: the keys sounding at tick `at` (start None) and notes starting in ticks lo..hi (start = about their
     tick; the latest per key). order = the tracks shown (shown_tracks, faint ones left out), None = all; loud =
@@ -550,7 +567,7 @@ def scrub_notes(lm, order, lo, hi, at, loud=False):
     slow = speed.loops() is None or guess_bytes(lm, order, ax, bx, W) / rate_of(lm) > SCRUB_S
     try:
         if not slow:
-            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, loud=loud)
+            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, loud=loud, only=dict(only) or None)
         elif order is None:
             tab, marks = overview_tab(lm, ax, bx, W, 0, lm.keys)
         else:
@@ -626,7 +643,8 @@ class ExactJob:
             for bx, W in self.parts:
                 began, took = time.perf_counter(), [0]
                 tab, marks = exact_tab(self.lm, self.ax, bx, W, 0, self.lm.keys, stop=lambda: self.stop,
-                                       tracks=self.order, faint=self.faint, took=took, loud=self.style[-1])
+                                       tracks=self.order, faint=self.faint, took=took, loud=self.style[-1],
+                                       only=style_only(self.style))
                 if tab is None or self.stop:
                     break
                 learn_rate(self.lm, took[0], time.perf_counter() - began)

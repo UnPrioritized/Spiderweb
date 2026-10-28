@@ -947,7 +947,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             shown = list(self.track_list.shown_slots())
             n = len(self.shapes) + 1
             some = np.bincount(d[:, 5], minlength=n) > 0
-            seen = np.bincount(d[np.isin(slots, shown), 5], minlength=n) > 0
+            # (one channel of it highlighted: the shapes with notes only on its other channels hidden too)
+            see = (np.isin(slots, [s for s in shown if s != self.track_list.current])
+                   | self.track_list.shown_mask(d, slots))
+            seen = np.bincount(d[see, 5], minlength=n) > 0
             hidden = set(np.flatnonzero(some & ~seen).tolist())
         if hidden != self.hidden_shapes:
             self.hidden_shapes = hidden
