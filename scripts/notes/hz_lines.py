@@ -77,6 +77,9 @@ def note_bend(n, beat, most):
     return np.clip(line_at(pts, u), -most, most)
 
 
+ON_POINT = 1e-9  # bend_part: a cut this near a point (in parts of the note) is on it (points are saved to 9 places)
+
+
 def bend_part(n, t, span):
     """The part of note n's bend line from beat t for span beats, as a line of its own (u 0..1 over that part), or
     None when it has none or it's at 0 all along: for a note cut at the left edge. A curved piece cut through becomes
@@ -93,19 +96,23 @@ def bend_part(n, t, span):
         out = [[0.0, at(u0)]]
     else:
         xs = [p[0] for p in pts]
-        first = int(np.searchsorted(xs, u0, side="right")) - 1  # (the piece the cut starts in; -1: before the line)
+        # (the piece the cut starts in; -1: before the line. ON_POINT: saved points are rounded, a cut on a third
+        # must still count as on it)
+        first = int(np.searchsorted(xs, u0 + ON_POINT, side="right")) - 1
         # (the cut's start, every point inside (both of a jump's), its end; each with the curve of the piece after it,
         # that curve as the point has it, and True when it's ON one of the line's points: a piece between two of
         # those is a whole one, its curve kept; a cut on a point = that point, its curve too: a note made longer /
         # shorter from its start keeps its first piece's curve)
-        on = 0 <= first < len(pts) - 1 and abs(xs[first] - u0) < 1e-12
-        nodes = [(u0, at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0, on,
-                  pts[first][2:] if on else ())]
-        inside = [j for j, x in enumerate(xs) if u0 < x < u1]
+        on = 0 <= first < len(pts) - 1 and abs(xs[first] - u0) < ON_POINT
+        nodes = [(u0, pts[first][1] if on else at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0,
+                  on, pts[first][2:] if on else ())]
+        inside = [j for j, x in enumerate(xs) if u0 + ON_POINT < x < u1 - ON_POINT]
         for j in inside:
             nodes.append((xs[j], pts[j][1], bend_of(pts[j]) if j < len(pts) - 1 else 0.0, True,
                           pts[j][2:] if j < len(pts) - 1 else ()))
-        nodes.append((u1, at(u1), 0.0, any(abs(x - u1) < 1e-12 for x in xs), ()))
+        # (ending ON a point: its pitch; on a jump the first one's, the pitch arriving there, not the one after)
+        last = next((p for p in pts if abs(p[0] - u1) < ON_POINT), None)
+        nodes.append((u1, at(u1) if last is None else last[1], 0.0, last is not None, ()))
         out = []
         for (a, va, curve, on_a, tail), (b, _, _, on_b, _) in zip(nodes, nodes[1:]):
             if curve and not (on_a and on_b) and b > a:  # (a curve cut through: sampled)

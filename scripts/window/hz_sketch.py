@@ -15,8 +15,8 @@ import tkinter as tk
 import numpy as np
 
 from files.lang import tr
-from notes.hzbass import bend_part, line_at, pitch
-from roll.roll_shared import ALT, SHIFT, note_name
+from notes.hzbass import SLIDE_BEND, bend_of, bend_part, bent_part, line_at, pitch
+from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR
 
@@ -24,6 +24,37 @@ SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKE
 SKETCH_THIN, SKETCH_THICK = 3, 9
 END_GAP = 10  # px: the ">" this far after a note's end (its middle)
 HOLD_MS = 300  # a press on a line held still this long grabs the whole note (sketch_grab)
+TOP_KEY = 127  # a whole note dragged up stops here (the notes keep keys 0..127: one past = gone, hunt 2026-10-28)
+# Alt+drag curves a piece; Ctrl+Shift+drag too, everywhere: many Linux desktops take Alt+drag to move the window
+# (hunt 2026-10-28, untested on Linux; its tip says so, system.WINDOWS / MAC don't)
+CURVE_KEYS = CTRL | SHIFT
+
+
+def split_curve(bend, t):
+    """A curved piece (bend_of number, an S too) split t of the way along (0..1): (first part's bend, second part's
+    bend, how far up the piece the split is 0..1), each bend the one nearest the old curve over its part (a power
+    curve cut isn't one again, so nearest, not exact; an S cut in its middle is exact). 0 = straight. None when the
+    piece doesn't move there (flat to the split)."""
+    g = float(bent_part(np.array([t]), np.array([bend]))[0])
+    if not 1e-6 < g < 1 - 1e-6:
+        return None
+    s = np.linspace(0.0, 1.0, 33)
+    first = bent_part(t * s, np.full(s.shape, bend)) / g
+    second = (bent_part(t + (1.0 - t) * s, np.full(s.shape, bend)) - g) / (1.0 - g)
+    return nearest_bend(first, s), nearest_bend(second, s), g
+
+
+def nearest_bend(want, s):
+    """The single curve (-SLIDE_BEND..SLIDE_BEND) whose shape over s is nearest want; 0 when straight is."""
+    bs = np.linspace(-SLIDE_BEND, SLIDE_BEND, 381)
+    err = ((bent_part(s[None, :], bs[:, None]) - want[None, :]) ** 2).sum(1)
+    lo, hi = bs[max(0, err.argmin() - 1)], bs[min(len(bs) - 1, err.argmin() + 1)]
+    for _ in range(30):  # (narrowed down between its neighbours: golden section)
+        m1, m2 = hi - (hi - lo) * 0.618, lo + (hi - lo) * 0.618
+        e1, e2 = (((bent_part(s, np.full(s.shape, m)) - want) ** 2).sum() for m in (m1, m2))
+        lo, hi = (lo, m2) if e1 < e2 else (m1, hi)
+    b = round(float((lo + hi) / 2), 4)
+    return 0.0 if abs(b) < 1e-3 else b
 
 
 class HzSketch:
@@ -31,6 +62,25 @@ class HzSketch:
 
     def sketching(self):
         return self.tool.get() == "sketch"
+
+    @staticmethod
+    def curving(state):
+        """True when a press / the mouse with these keys held curves a piece: Alt, or Ctrl+Shift (CURVE_KEYS)."""
+        return bool(state & ALT) or state & CURVE_KEYS == CURVE_KEYS
+
+    def sketch_near(self, n, x, y, reach, most):
+        """True when (x, y) is within reach px of note n's line AS DRAWN: its pieces, a jump's upright stroke and a
+        steep slope too (hunt 2026-10-28: only up / down at the mouse's beat counted)."""
+        if n.get("bend"):
+            beats, keys = self.bend_line(n, most)
+            xs, ys = np.array([self.x_of(b) for b in beats]), np.asarray(self.pitch_y(keys), float)
+        else:
+            y0 = self.pitch_y(pitch(n))
+            xs, ys = np.array([self.x_of(n["t"]), self.x_of(n["t"] + n["len"])]), np.array([y0, y0])
+        ax, ay, dx, dy = xs[:-1], ys[:-1], np.diff(xs), np.diff(ys)
+        long = dx * dx + dy * dy
+        f = np.clip(((x - ax) * dx + (y - ay) * dy) / np.where(long > 0, long, 1.0), 0.0, 1.0)
+        return bool((np.hypot(ax + f * dx - x, ay + f * dy - y) <= reach).any())
 
     def sketch_alt_to(self, held):
         """Alt pressed / let go (a key or the mouse's state): the squares shown on every piece while it's held."""
@@ -44,9 +94,10 @@ class HzSketch:
         p = self.tones[i]["bend"][j]
         kind = tk.StringVar(self, value="double" if len(p) > 3 and p[3] == "s" else "single")
         menu = tk.Menu(self, tearoff=0)
-        menu.add_radiobutton(label=tr("hz.curve_single"), variable=kind, value="single",
+        curved = "normal" if len(p) > 2 else "disabled"  # (a straight piece: no curve to make one or an S, hunt)
+        menu.add_radiobutton(label=tr("hz.curve_single"), variable=kind, value="single", state=curved,
                              command=lambda: self.sketch_curve_kind(i, j, False))
-        menu.add_radiobutton(label=tr("hz.curve_double"), variable=kind, value="double",
+        menu.add_radiobutton(label=tr("hz.curve_double"), variable=kind, value="double", state=curved,
                              command=lambda: self.sketch_curve_kind(i, j, True))
         menu.add_command(label=tr("hz.sketch_straight"), command=lambda: self.sketch_curve_kind(i, j, None))
         menu.kind = kind  # (kept while the menu shows)
@@ -104,7 +155,15 @@ class HzSketch:
             self.redraw()
             return True
         j = sum(p[0] <= u for p in pts)
-        pts.insert(j, [u, round(float(line_at(pts, u)), 2)])
+        a, b = pts[j - 1], pts[min(j, len(pts) - 1)]
+        curves = (split_curve(bend_of(a), (u - a[0]) / (b[0] - a[0]))
+                  if 0 < j < len(pts) and len(a) > 2 and a[1] != b[1] and b[0] > a[0] else None)
+        if curves:  # (a curved piece: each part gets the curve nearest the old one's there, hunt 2026-10-28)
+            del a[2:]
+            a += [curves[0]] if curves[0] else []
+            pts.insert(j, [u, a[1] + (b[1] - a[1]) * curves[2]] + ([curves[1]] if curves[1] else []))
+        else:
+            pts.insert(j, [u, round(float(line_at(pts, u)), 2)])
         n["bend"] = pts
         self.drag = {"kind": "bendpt", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
                      "pinned": False, "name": tr("hz.step_note_bend")}
@@ -118,8 +177,10 @@ class HzSketch:
         n = self.tones[i]
         pts = n.get("bend")
         u = min(1.0, max(0.0, (self.beat_at(e.x) - n["t"]) / max(n["len"], 1e-12)))
-        if e.state & ALT:  # (Alt: the piece curved, like its square dragged; a flat / jump piece: nothing to curve)
-            square = self.piece_square(i, min(len(pts) - 2, max(0, sum(p[0] <= u for p in pts) - 1))) if pts else None
+        if self.curving(e.state):  # (Alt: the piece curved, like its square dragged, at any width; a flat / jump
+            # piece: nothing to curve)
+            j = min(len(pts) - 2, max(0, sum(p[0] <= u for p in pts) - 1)) if pts else 0
+            square = self.piece_square(i, j, room=False) if pts else None
             if square:
                 self.drag = {"kind": "bendcurve", "i": i, "j": square[3], "before": before, "x": e.x, "y": e.y,
                              "moved": False, "square": square, "name": tr("hz.step_note_bend_curve")}
@@ -150,7 +211,7 @@ class HzSketch:
         Shift: to the cent), no further than the Range; the whole note: its key."""
         k = (d["y"] - e.y) / self.sy
         if d["j"] is None:
-            n["key"] = max(0, d["key"] + round(k))
+            n["key"] = max(0, min(TOP_KEY, d["key"] + round(k)))
         else:
             k = round(k, 2) if e.state & SHIFT else float(round(k))
             most = self.bend_most()

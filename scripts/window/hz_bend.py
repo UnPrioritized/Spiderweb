@@ -22,7 +22,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import fmt
 from notes.hzbass import NOTE_BEND_MOST, SLIDE_BEND, line_at, note_bend, pitch
-from roll.roll_shared import ALT, SHIFT
+from roll.roll_shared import SHIFT
 from window import look
 
 NEAR = 6  # px: a press this near a bend point grabs it
@@ -91,9 +91,10 @@ class HzBend:
                 out.append(q)
         return out
 
-    def piece_square(self, i, j):
+    def piece_square(self, i, j, room=True):
         """(x, y, i, j, keys at its start, at its end): where piece j of note i's bend line has its curve square, or
-        None when it has none (no such piece, its two points alike, too narrow, past bend_most)."""
+        None when it has none (no such piece, its two points alike, too narrow (room=False: any width, Sketch's
+        Alt+drag, hunt 2026-10-28), past bend_most)."""
         n = self.tones[i]
         pts = n.get("bend") or ()
         if j + 1 >= len(pts):
@@ -101,7 +102,8 @@ class HzBend:
         (u0, k0), (u1, k1) = pts[j][:2], pts[j + 1][:2]
         x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
         most = self.bend_most()
-        if abs(k1 - k0) < 1e-9 or x1 - x0 < SQUARE_ROOM * self.s or max(abs(k0), abs(k1)) > most + 1e-9:
+        if (abs(k1 - k0) < 1e-9 or room and x1 - x0 < SQUARE_ROOM * self.s or u1 <= u0
+                or max(abs(k0), abs(k1)) > most + 1e-9):
             return None
         at = 0.25 if len(pts[j]) > 3 and pts[j][3] == "s" else 0.5  # (an S: its first half's middle, like a slide)
         k = float(line_at(pts, u0 + (u1 - u0) * at))
@@ -110,13 +112,14 @@ class HzBend:
     def bend_hit(self, x, y):
         """What the Bend tool would take at (x, y): ("point", tone, point number), ("curve", tone, piece number) a
         curve square, ("slide",) a slide's dot or square (those win over a note: the usual tools take them), ("note",
-        tone) on a note or on its bend line, or None."""
-        i = self.sketch_end_hit(x, y) if self.sketching() else None  # (Sketch: the ">" after a note's end)
-        if i is not None:
-            return "end", i
+        tone) on a note or on its bend line, ("end", tone) Sketch's ">" after a note's end (only where nothing
+        else is: the next note's start, a slide's dot just after the end come first; hunt 2026-10-28), or None."""
         r = NEAR * self.s
+        slides = [max(abs(x - dx), abs(y - dy)) for dx, dy, *_ in self.dots() + self.handles()]
         for px, py, i, j in reversed(self.bend_points()):
-            if abs(x - px) <= r and abs(y - py) <= r:
+            if abs(x - px) <= r and abs(y - py) <= r:  # (a slide's dot nearer still wins: one just after a note's
+                if min(slides, default=r + 1) < max(abs(x - px), abs(y - py)):  # end, hunt 2026-10-28)
+                    return ("slide",)
                 return "point", i, j
         for sx, sy, i, j, *_ in self.bend_squares():
             if abs(x - sx) <= r and abs(y - sy) <= r:
@@ -127,19 +130,21 @@ class HzBend:
         if x < self.kb_w or y < self.ruler_h:
             return None
         most, beat = self.bend_most(), self.beat_at(x)
+        reach = self.sketch_reach()
         for i in range(len(self.tones) - 1, -1, -1):
             n = self.tones[i]
             x0, x1, y0 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
-            if not x0 - 1 <= x <= max(x1, x0 + 2) + 1:
-                continue
-            if self.sketching():  # (only the line counts: the note's row isn't shown)
-                if abs(y - self.pitch_y(self.bent_pitch(n, beat, most))) <= self.sketch_reach():
+            if self.sketching():  # (only the line counts, as drawn: a jump's upright stroke too; the row isn't shown)
+                if x0 - reach <= x <= max(x1, x0 + 2) + reach and self.sketch_near(n, x, y, reach, most):
                     return "note", i
+                continue
+            if not x0 - 1 <= x <= max(x1, x0 + 2) + 1:
                 continue
             if y0 <= y < y0 + self.sy or n.get("bend") and abs(y - self.pitch_y(self.bent_pitch(n, beat, most))) <= \
                     LINE_NEAR * self.s:
                 return "note", i
-        return None
+        i = self.sketch_end_hit(x, y) if self.sketching() else None
+        return None if i is None else ("end", i)
 
     def bend_spot(self, n, e):
         """[u, keys] at the mouse for note n: the grid line nearest it (in the note) and whole keys (Shift: any
@@ -276,8 +281,9 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
-        if self.sketching() and hit[0] in ("note", "point"):  # (hz_sketch.py: a point added / taken away)
-            return self.sketch_double(e, hit)
+        if self.sketching() and hit[0] in ("note", "point", "curve"):  # (hz_sketch.py: a point added / taken away;
+            return self.sketch_double(e, hit[:2] if hit[0] == "curve" else hit)  # on a square too: hunt 2026-10-28,
+            # Straight is in its right-click menu)
         if hit[0] != "curve":
             self.on_press(e)
             return True
@@ -313,7 +319,7 @@ class HzBend:
         empty space)."""
         if not self.bending():
             return False
-        self.sketch_alt_to(e.state & ALT)
+        self.sketch_alt_to(self.curving(e.state))
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False

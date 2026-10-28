@@ -27,6 +27,7 @@ from tkinter import ttk
 from files.about import ICONS
 from files.lang import tr, trn
 from files.mathexpr import fmt
+from files.system import MAC, WINDOWS
 from notes.engine import CLASH, PORTS, auto_count, slot_ports
 from notes.hz_cc import sharers
 from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, has_cc, left_edge, own_channels
@@ -131,7 +132,8 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzMouse, HzGates, HzSound, HzView, tk.T
             b = ttk.Radiobutton(f, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton",
                                 takefocus=False)
             b.pack(side="left")
-            Tooltip(b, tr(f"hz.{key}_tip"))
+            linux = key == "sketch" and not (WINDOWS or MAC)  # (Linux desktops often take Alt+drag: CURVE_KEYS)
+            Tooltip(b, tr(f"hz.{key}_tip") + ("\n" + tr("hz.sketch_tip_linux") if linux else ""))
         # the drawing tools (hz_draw.py): the one picked last + ▾ list + pinned ones, like the main toolbar's (user)
         self.draft, self.last_tool = None, "pencil"  # (the path being drawn; what a double right-click goes back to)
         self.picker = ToolPicker(app, f, self.draw_tools(), var=self.tool, owner=self, tips=self.draw_tips(),
