@@ -427,6 +427,7 @@ class ProjectFiles:
         self.roll.drop_lasso()  # (a waiting loop would cut the opened project, hunt 2026-10-23)
         self.shapes = shapes
         self.stop_loaded()  # (still playing: its MIDI stops, the shapes play on)
+        self.drop_read_ahead()  # (its read-ahead stopped and let go: hunt 2026-10-28, read on for a minute)
         self.loaded = None  # (another project: its loaded MIDI goes; attach_midi puts a new one in after this)
         self.midi_link = link
         self.midi_missing = False  # (looked for now: "not found" only once that fails, load_midi.said_without)

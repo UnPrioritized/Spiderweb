@@ -2577,6 +2577,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.midi_link = None
             self.drop_finding()
             self.stop_loaded()
+            self.drop_read_ahead()
             self.loaded = None
             self.roll.forget_loaded()
         self.roll.cancel_draft()  # first: it refreshes the panel, which must still see the old shapes

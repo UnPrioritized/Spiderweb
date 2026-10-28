@@ -370,6 +370,8 @@ class Playback:
         self._device_was = self.midi_device.get()
         self.stop_play()
         self.out.close()
+        if self._device_was != KESTREL:  # (only Kestrel uses it)
+            self.drop_read_ahead()
         self.sync_builtin()
         self.edo_warn()
         if self.hz_window:
@@ -386,6 +388,19 @@ class Playback:
             from files.play_dense import ensure
             ensure(self.loaded)
             self.watch_ahead()
+
+    def drop_read_ahead(self):
+        """The loaded MIDI's read-ahead stopped and let go (its MIDI going, or another MIDI out picked): it read on
+        for a minute and kept up to 3 GB after New / another MIDI / Built-in BASSMIDI (hunt 2026-10-28). Kestrel
+        picked again = read again (a second when kept on disk)."""
+        job = getattr(self, "_ahead_job", None)
+        if job is not None:
+            self.after_cancel(job)
+            self._ahead_job = None
+        lm = self.loaded
+        if getattr(lm, "dense", None) is not None:
+            lm.dense.stop()
+            lm.dense = None
 
     def quiet_now(self):
         """A good moment for a question nobody asked for (hunt 2026-10-28: it popped up as Space was pressed, mid-drag,
