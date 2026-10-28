@@ -267,10 +267,12 @@ class HzView:
                 for n in layer.get("tones") or ():
                     x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
                     c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
-        for i, n in enumerate(self.tones):  # notes
+        for i, n in enumerate(self.tones if not self.sketching() else ()):  # notes (Sketch: lines, hz_sketch.py)
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
             fill, edge = SELECTED_COLOR if i in self.sel else own
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
+        if self.sketching():
+            self.draw_sketch_notes(own, SELECTED_COLOR)
         if self.app.hz_line.get():
             self.draw_line(w)
         red = self.slide_red()  # (faded while the Arpeggio leaves the slides out)

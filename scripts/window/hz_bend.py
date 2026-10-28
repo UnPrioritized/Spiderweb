@@ -319,7 +319,7 @@ class HzBend:
         if not self.bending():
             return
         c, s, most, w = self.canvas, self.s, self.bend_most(), self.canvas.winfo_width()
-        for n in self.tones:
+        for n in self.tones if not self.sketching() else ():  # (Sketch: the note's own line shows it)
             if not n.get("bend") or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
                 continue
             beats = np.union1d(np.linspace(n["t"], n["t"] + n["len"], 49),
