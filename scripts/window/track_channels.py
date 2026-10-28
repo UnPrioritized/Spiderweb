@@ -67,11 +67,12 @@ def track_channels(app):
 def tidy_tracks(app):
     """After channels moved: a track of yours whose own channel left takes the first one it still holds (Track
     Properties shows it, empty tracks are written on it), the colours on it then marked as on the track's channel
-    (-1); its sub-row order kept only while it holds 2+ (own_tracks "order")."""
+    (-1); its sub-row order kept only while it holds 2+ (own_tracks "order"). A channel in its order holds even
+    without notes: an empty "Ch n" row (an empty track dragged in, check-in C 2026-10-28), until dragged out."""
     have = track_channels(app)
     new, changed = [], {}
     for t in app.own_tracks:
-        cs = have.get(t["id"], set())
+        cs = have.get(t["id"], set()) | set(t.get("order") or ())
         t = dict(t)
         if cs and t["ch"] not in cs:
             t["ch"] = ordered(t.get("order"), cs)[0]
@@ -104,21 +105,23 @@ def free_channels(app, used, n):
     return ok[:n]
 
 
-def ask_clash(app, name, clash, free, merge_first):
-    """The same-channel question (PLAN #11 decision 5): channels clash (sorted) are in track `name` already. Merge
-    into them / Move to free channels (free: as many as clash, else Move isn't offered) / Cancel; merge_first =
-    Merge is the button Enter presses (nothing would sound different). "Don't ask again until Spiderweb is closed"
-    = the answer remembered (App.big_skip "same_channel", app.same_channel). "merge" / "move" / "cancel"."""
+def ask_clash(app, name, clash, free, merge_first, need=None):
+    """The same-channel question (PLAN #11 decisions 5 + 10, one for all): channels clash (sorted) are in track
+    `name` already. Merge into them / Move to free channels (free: need of them, need = how many clash (several
+    tracks may bring the same one), default one each; fewer = Move isn't offered) / Cancel; merge_first = Merge is
+    the button Enter presses (nothing would sound different). "Don't ask again until Spiderweb is closed" = the
+    answer remembered (App.big_skip "same_channel", app.same_channel). "merge" / "move" / "cancel"."""
     from files.lang import tr
     from window.load_midi import ask_choice
+    need = len(clash) if need is None else need
     if "same_channel" in app.big_skip:
         kept = getattr(app, "same_channel", "merge")
-        return kept if kept == "merge" or len(free) == len(clash) else "merge"
+        return kept if kept == "merge" or len(free) == need else "merge"
     chs = ", ".join(tr("tracks.channel", ch=c + 1) for c in clash)
     lines = [tr("tracks.clash_one" if len(clash) == 1 else "tracks.clash_many", chs=chs, name=name),
              tr("tracks.clash_merge_why")]
     buttons = [("merge", tr("tracks.clash_merge"))]
-    if len(free) == len(clash):
+    if len(free) == need:
         lines.append(tr("tracks.clash_move_why"))
         to = ", ".join(tr("tracks.channel", ch=c + 1) for c in free)
         buttons.append(("move", tr("tracks.clash_move", chs=to)))
@@ -136,11 +139,19 @@ def ask_clash(app, name, clash, free, merge_first):
 
 
 def set_order(app, dst, chans, pos, now):
-    """Track dst's sub-rows (yours; now = their order before the drop) with chans put at place pos (None = the
-    end)."""
+    """Track dst's sub-rows (yours; now = their order before the drop) with chans (a list, in its order) put at
+    place pos (None = the end)."""
     if dst < HAND:
         return
     rest = [c for c in now if c not in chans]
     pos = len(rest) if pos is None else sum(1 for c in now[:pos] if c not in chans)
-    order = rest[:pos] + [c for c in now if c in chans] + [c for c in sorted(chans) if c not in now] + rest[pos:]
+    order = rest[:pos] + list(chans) + rest[pos:]
     app.own_tracks = [dict(t, order=order) if HAND + t["id"] == dst else t for t in app.own_tracks]
+
+
+def forget_channels(app, src, chans):
+    """Channels moved out of your track src: no longer in its sub-rows' order (an empty one would stay listed)."""
+    if src < HAND:
+        return
+    app.own_tracks = [dict(t, order=[c for c in t["order"] if c not in chans])
+                      if HAND + t["id"] == src and t.get("order") else t for t in app.own_tracks]

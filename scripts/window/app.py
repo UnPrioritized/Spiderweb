@@ -2248,6 +2248,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return True
         sh["into"] = [target]
         sh["into_new"] = True  # (its colours go down the rows like Domino's paste: fit_into)
+        ch = self.track_list.shown_ch()  # (a folder's "Ch n" row highlighted: on that channel there, check-in C)
+        if ch is not None and target >= 0:
+            sh["into_ch"], sh["into_home"] = [ch], [target]
         return False
 
     def laid_slots(self, sh):
