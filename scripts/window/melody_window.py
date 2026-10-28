@@ -21,9 +21,12 @@ from notes.melody import (CATCH_SHAPES, HOLD, HOWS, MOST_ANCHORS, REST, SHAPES, 
 from notes.tempo import MAX_BPM, MIN_BPM, drawn_bpm, plans
 from window import look
 from window.load_extract import boxes_now
-from window.widgets import remember_place, unhighlight
+from window.widgets import Scrub, remember_place, unhighlight
 
 WATCH_MS = 250
+# the words round the two BPM boxes, by shape (None = one box: the second hidden)
+WORDS = {"burst": ("melody.w_from", "melody.w_to", "melody.bpm"), "jump": ("melody.w_jump", None, "melody.bpm"),
+         "updown": (None, "melody.w_and", "melody.bpm"), "random": ("melody.w_between", "melody.w_and", "melody.bpm")}
 MOST_LOADED = 5_000_000  # a loaded track's notes read for one area at most (a denser area: refused, said why)
 
 
@@ -56,25 +59,40 @@ class MelodyWindow(tk.Toplevel):
         self.only_tick = ttk.Checkbutton(box, text=tr("melody.only_selected"), variable=self.only_sel,
                                          command=self.sync)
         self.only_tick.pack(anchor="w", padx=(30, 0))
-        self.at_snap = ttk.Radiobutton(box, text="", value="snap", variable=self.at, command=self.sync)
-        self.at_snap.pack(anchor="w", padx=(10, 0), pady=(4, 0))
+        # every snap step: its own step (user 2026-10-29), a note length or ticks, from the toolbar's Snap to start
+        row = ttk.Frame(box)
+        row.pack(anchor="w", padx=(10, 0), pady=(4, 0))
+        self.at_snap = ttk.Radiobutton(row, text=tr("melody.at_every"), value="snap", variable=self.at,
+                                       command=self.sync)
+        self.at_snap.pack(side="left")
+        snap = app.snap.get()
+        start = snap if snap_name(snap) else fmt(app.snap_ticks())
+        self.step = self.length_box(row, getattr(app, "melody_step", start))
         self.rules = []  # (label, box) of the melody's rules: greyed with Every snap step
         self.shortest = self.length_row(box, "melody.shortest", getattr(app, "melody_shortest", "1/32"))
         self.rest = self.length_row(box, "melody.rest", getattr(app, "melody_rest", "1/4"))
-        # the tempo made (group B): shape between jumps, its BPMs, how the timing is kept
+        # the tempo made (group B): shape between jumps, its BPMs (the words round the boxes by the shape), how the
+        # timing is kept
         ttk.Label(box, text=tr("melody.between")).pack(anchor="w", pady=(10, 2))
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(10, 0))
         self.shape = self.dropdown(row, SHAPES, "melody.shape_", getattr(app, "melody_shape", "burst"))
         self.shape.pack(side="left")
-        ttk.Label(row, text=tr("melody.from")).pack(side="left", padx=(10, 0))
         normal = self.normal()
-        self.lo = tk.StringVar(value=fmt(round(normal / 2, 2)))
-        self.hi = tk.StringVar(value=fmt(round(normal * 2, 2)))
-        for var, word in ((self.lo, "melody.to"), (self.hi, "melody.bpm")):
-            ttk.Entry(row, textvariable=var, width=7).pack(side="left", padx=(4, 0))
-            ttk.Label(row, text=tr(word)).pack(side="left", padx=(4, 0))
+        self.lo = tk.StringVar(value=fmt(round(normal * 2, 2)))  # (the first box: Burst's "from", the jump's BPM)
+        self.hi = tk.StringVar(value=fmt(round(normal / 2, 2)))
+        self.bpm_words = [ttk.Label(row) for _ in range(3)]
+        self.bpm_boxes = [ttk.Entry(row, textvariable=var, width=8) for var in (self.lo, self.hi)]
+        self.bpm_row = [self.bpm_words[0], self.bpm_boxes[0], self.bpm_words[1], self.bpm_boxes[1], self.bpm_words[2]]
+        for w in self.bpm_row:
+            w.pack(side="left", padx=(4, 0))
+        self.about = ttk.Label(box, foreground=look.HINT, wraplength=int(420 * app.scale), justify="left")
+        self.about.pack(anchor="w", padx=(10, 0), pady=(2, 0))  # (what the shape does: user found them unclear)
+        for var in (self.lo, self.hi):
             var.trace_add("write", lambda *_: self.sync())
+        # (the boxes themselves drag sideways, user 2026-10-29: 1 BPM, Shift 10, Ctrl 0.1; no undo step)
+        Scrub(app, [(e, var, None) for e, var in zip(self.bpm_boxes, (self.lo, self.hi))], (1, 10, 0.1),
+              round(MIN_BPM, 3), MAX_BPM, drag_box=True, no_undo=True)
         ttk.Label(box, text=tr("melody.keep_with")).pack(anchor="w", pady=(10, 2))
         self.how = tk.StringVar(value=getattr(app, "melody_how", "audio"))
         for how in HOWS:
@@ -116,13 +134,20 @@ class MelodyWindow(tk.Toplevel):
         self.watch = self.after(WATCH_MS, self.watching)
 
     def length_row(self, parent, key, start):
-        """A rule row: words + a box taking ticks or a note length ("1/32", like the Snap list)."""
+        """A rule row: words + a length box (length_box)."""
         row = ttk.Frame(parent)
         row.pack(anchor="w", pady=(6, 0))
         lb = ttk.Label(row, text=tr(key))
         lb.pack(side="left")
+        var = self.length_box(row, start)
+        self.rules.append((lb, var.entry))
+        return var
+
+    def length_box(self, row, start):
+        """A box taking ticks or a note length ("1/32", like the Snap list), "ticks" after a number; the box drags
+        sideways in ticks (1, Shift 10). Returns its variable (.entry = the box)."""
         var = tk.StringVar(value=start)
-        e = ttk.Entry(row, textvariable=var, width=7)
+        e = var.entry = ttk.Entry(row, textvariable=var, width=7)
         e.pack(side="left", padx=(6, 0))
         unit = ttk.Label(row, foreground=look.HINT)
         unit.pack(side="left", padx=(4, 0))
@@ -132,7 +157,9 @@ class MelodyWindow(tk.Toplevel):
             self.sync()
         var.trace_add("write", put_unit)
         unit.config(text="" if snap_name(start) else tr("melody.ticks"))
-        self.rules.append((lb, e))
+        scrub = Scrub(self.app, [(e, var, None)], (1, 10, 1), 0, None, drag_box=True, no_undo=True)
+        # (dragging / Up / Down from a note length: from its ticks)
+        scrub.read = lambda text: snap_name_beats(snap_name(text)) * self.app.ppq if snap_name(text) else calc(text)
         return var
 
     def dropdown(self, parent, values, key, start):
@@ -277,10 +304,10 @@ class MelodyWindow(tk.Toplevel):
         app, pane = self.app, self.app.tempo_pane
         at = self.at.get()
         app.melody_at = at
-        app.melody_shortest, app.melody_rest = self.shortest.get(), self.rest.get()
+        app.melody_shortest, app.melody_rest, app.melody_step = self.shortest.get(), self.rest.get(), self.step.get()
         area = pane.bands_reach() if pane.bands else None
         track, ch, name = self.track_now()
-        step = app.snap_beats()
+        step = self.beats_of(self.step, None)
         only = self.only_sel.get()
         has_sel = any(i < len(app.shapes) for i in app.sels) or bool(app.roll.kept_box())
         lkey = self.loaded_key(area[0], area[1], only) if area and track is not None and at == "melody" else None
@@ -297,15 +324,25 @@ class MelodyWindow(tk.Toplevel):
             w.state(["!disabled" if how == "catch" else "disabled"])
         if isinstance(self.catch_shape, ttk.Combobox) and how == "catch":
             self.catch_shape.state(["readonly"])
-        snap_text = app.snap.get() if step else None
-        self.at_snap.config(text=tr("melody.at_snap", step=snap_text) if snap_text else tr("melody.at_snap_plain"))
-        self.at_snap.state(["!disabled"] if step else ["disabled"])
+        self.step.entry.state(["!disabled"] if at == "snap" else ["disabled"])
+        shape = self.shape.value()
+        words = WORDS[shape]
+        for w, key in zip(self.bpm_words, words):
+            w.config(text=tr(key) if key else "")
+        self.about.config(text=tr("melody.about_" + shape))
+        one = words[1] is None  # (one BPM: the second box and its word hidden)
+        if one and self.bpm_boxes[1].winfo_manager():
+            for w in self.bpm_row[2:4]:
+                w.pack_forget()
+        elif not one and not self.bpm_boxes[1].winfo_manager():
+            for w in self.bpm_row[2:4]:
+                w.pack(side="left", padx=(4, 0), before=self.bpm_row[4])
         self.area.config(text=tr("melody.area", a=pane.place_text(area[0]), b=pane.place_text(area[1]))
                          if area else tr("melody.no_area"))
         self.follow.config(text=tr("melody.follows", name=name))
         melody_ok = track is not None
         self.at_melody.state(["!disabled"] if melody_ok else ["disabled"])
-        if at == "melody" and not melody_ok and step:  # (All tracks: only the snap steps)
+        if at == "melody" and not melody_ok:  # (All tracks: only the snap steps)
             self.at.set("snap")
             return self.sync()
         on_melody = at == "melody" and melody_ok
@@ -322,7 +359,7 @@ class MelodyWindow(tk.Toplevel):
             problem = tr("melody.need_area")
         elif at == "snap":
             if not step:
-                problem = tr("melody.snap_off")
+                problem = tr("melody.bad_step")
             else:
                 self.runs = snap_runs(step, area[0], area[1])
         elif not melody_ok:
@@ -349,7 +386,7 @@ class MelodyWindow(tk.Toplevel):
         elif problem is None and not n:
             problem = tr("melody.none")
         lo, hi = self.number(self.lo, MIN_BPM, MAX_BPM), self.number(self.hi, MIN_BPM, MAX_BPM)
-        if problem is None and (lo is None or hi is None):
+        if problem is None and (lo is None or (hi is None and not one)):
             problem = tr("melody.bad_bpm", lo=fmt(round(MIN_BPM, 3)), hi=fmt(MAX_BPM))
         elif problem is None and how == "catch" and self.number(self.hold, 1, 99) is None:
             problem = tr("melody.bad_hold")
@@ -389,6 +426,7 @@ class MelodyWindow(tk.Toplevel):
         a, b = pane.bands_reach()
         how = self.how.get()
         lo, hi = self.number(self.lo), self.number(self.hi)
+        hi = lo if hi is None else hi  # (one box only: Jump and come back)
         bpm_snap = pane.box.bpm_snap() or 0.0
         seed = random.randrange(1 << 30)  # (each Fill a new random; the same for the tries below)
 

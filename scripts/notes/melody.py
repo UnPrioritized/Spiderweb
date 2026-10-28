@@ -49,8 +49,9 @@ def anchor_count(runs):
 
 # ---------------------------------------------------------------- the tempo made (group B)
 
-SHAPES = ("burst", "reverse", "jump", "updown", "random")  # between two jumps: slow -> fast, fast -> slow, jump
-# to High and back to the normal tempo halfway (catch-up way: held up to the catch-up), High / Low in turns, random
+SHAPES = ("burst", "jump", "updown", "random")  # between two jumps (lo = the first box, hi = the second): lo -> hi
+# (higher first = a reverse burst), lo then back to the normal tempo halfway (catch-up way: held up to the
+# catch-up), lo / hi in turns, random between them
 HOWS = ("audio", "catch")  # Keep the audio (the area's notes keep their sound time) / a catch-up after each jump
 HOLD = 50.0  # %: the catch-up way, how much of each gap the show tempo holds before its catch-up starts
 CATCH_SHAPES = ("flat", "ease", "rise", "ramp")  # the catch-ups' shapes offered (the pane's, without drawn / formula)
@@ -60,13 +61,11 @@ def gap_values(shape, k, lo, hi, rng):
     """(BPM leaving the jump, BPM arriving at the next one or None = held) for gap k."""
     if shape == "burst":
         return lo, hi
-    if shape == "reverse":
-        return hi, lo
     if shape == "updown":
-        return (hi if k % 2 == 0 else lo), None
+        return (lo if k % 2 == 0 else hi), None
     if shape == "random":
         return lo + (hi - lo) * rng.random(), None
-    return hi, None  # (jump)
+    return lo, None  # (jump: the first box only)
 
 
 def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_shape="flat", rng=None,
