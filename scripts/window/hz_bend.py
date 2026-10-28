@@ -30,11 +30,12 @@ LINE_NEAR = 4  # px: ... this near a note's bend line adds a point to it
 BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = free), as a slide's
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
 BEND = look.HZ_BEND
+BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: until its own mouse is made)
 
 
 class HzBend:
     def bending(self):
-        return self.tool.get() == "bend"
+        return self.tool.get() in BEND_TOOLS
 
     def bend_most(self):
         """Keys a note's bend goes at most each way (the Pitch box's Range)."""

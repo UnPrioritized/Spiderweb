@@ -51,6 +51,7 @@ from window.hz_gates import GATE_MODES, HzGates, gate_mode, hz_keys, hz_made
 from window.hz_mouse import DOUBLE_MS, HzMouse  # noqa: F401
 from window.hz_draw import DRAW, HzDraw
 from window.hz_bend import HzBend
+from window.hz_sketch import HzSketch
 
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 
@@ -66,7 +67,7 @@ def open_hz(app):
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
 
 
-class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
+class HzWindow(HzDraw, HzSketch, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -126,7 +127,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
 
         self.tool = tk.StringVar(value="pencil")
         f = piece()
-        for key in ("select", "pencil", "bend"):
+        for key in ("select", "pencil", "bend", "sketch"):
             b = ttk.Radiobutton(f, text=tr("hz." + key), value=key, variable=self.tool, style="Toolbutton",
                                 takefocus=False)
             b.pack(side="left")
@@ -142,9 +143,9 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
         pins = app.hz_tools.get("pins")
         if isinstance(pins, list):
             self.picker.pins = [k for k in dict.fromkeys(p for p in pins if isinstance(p, str)) if k in self.picker.label]
-        if kept.get("tool") in ("select", "pencil", "bend", *DRAW):
+        if kept.get("tool") in ("select", "pencil", "bend", "sketch", *DRAW):
             self.tool.set(kept["tool"])
-        if kept.get("last") in ("pencil", "bend", *DRAW):
+        if kept.get("last") in ("pencil", "bend", "sketch", *DRAW):
             self.last_tool = kept["last"]
         self.picker.show()
         self.tool.trace_add("write", lambda *a: self.on_tool())
@@ -266,6 +267,7 @@ class HzWindow(HzDraw, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
                           for k in ("<Control-a>", "<Control-A>"))):                                # key_elsewhere)
             self.bind(seq, lambda e, seq=seq, fn=fn: self.key_elsewhere(e, seq, fn))
         for k, tool in (("p", "pencil"), ("P", "pencil"), ("v", "select"), ("V", "select"), ("b", "bend"), ("B", "bend"),
+                        ("s", "sketch"), ("S", "sketch"),
                         *((h, t) for t, _, hot in self.draw_tools() for h in (hot, hot.upper()))):
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: None if e.state & CTRL else  # (Ctrl+Y: redo, the
                    "break" if self.drag or self.loudness.held() else  # program's own shortcuts; the mouse holding
