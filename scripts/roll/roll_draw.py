@@ -567,6 +567,7 @@ class RollDrawing:
         self.draw_lasso()
         self.draw_copy_path()
         self.draw_centre_dots()
+        self.draw_melody_lit()
         self.draw_sustain_stops()
         if self._frame_key is None:
             self.draw_keyboard(h)

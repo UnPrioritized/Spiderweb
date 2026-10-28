@@ -43,6 +43,7 @@ from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR
                               set_cursor)
 from window import look
 from window.conductor_marks import ROW, ConductorMarks
+from window.melody_window import open_melody
 from window.widgets import Scrub, ShortLabel, Tooltip, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
@@ -1185,6 +1186,16 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self.app.roll.focus_set()  # (Esc reaches it, whatever box had the keyboard)
         self.request_redraw()
 
+    def start_fill(self):
+        """Fill with tempo jumps…: its window (window/melody_window.py) over the kept Select box; none = drag one
+        first (the window opens when it's let go)."""
+        if self.bands:
+            return open_melody(self.app)
+        self.placing = {"step": 1, "fill": True}
+        self.box.hint.config(text=tr("melody.hint_area"))
+        self.app.roll.focus_set()
+        self.request_redraw()
+
     def catch_free(self, a, b):
         """True when beats a..b touch no catch-up's yellow / teal area (user 2026-10-24: one catch-up per area, a
         second one inside it is refused); else the status line says so."""
@@ -1200,7 +1211,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if self.placing:
             self.bands = self.placing.get("bands") or self.bands
             self.placing = None
-            if self.drag and self.drag["kind"] == "catch1":
+            if self.drag and self.drag["kind"] in ("catch1", "fill1"):
                 self.drag = None
             self.box.pick_tool_hint()
             self.request_redraw()
@@ -1444,7 +1455,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         if self.placing:  # adding a catch-up: the yellow area dragged, then the teal one
             if self.placing["step"] == 1:
-                self.drag = {"kind": "catch1", "x": e.x, "x1": e.x, "b0": roll.x2t(e.x),
+                kind = "fill1" if self.placing.get("fill") else "catch1"  # (Fill with tempo jumps' area)
+                self.drag = {"kind": kind, "x": e.x, "x1": e.x, "b0": roll.x2t(e.x),
                              "shift0": bool(e.state & SHIFT), "span": None}
             else:
                 self.place_catch(e)
@@ -1647,6 +1659,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 d["span"] = (lo, hi) if hi - lo > 1e-9 else None
             elif d["span"]:
                 d["span"] = None
+            return self.request_redraw()
+        if d["kind"] == "fill1":  # (Fill with tempo jumps' area: anywhere, catch-ups too: they're replaced)
+            d["x1"] = e.x
+            d["span"] = self.box_span(d, e)
             return self.request_redraw()
         if d["kind"] == "bend":
             if not d["pushed"]:
@@ -1857,6 +1873,12 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 self.placing = {"step": 2, "a": d["span"][0], "b": d["span"][1], "hover": None}
                 self.box.hint.config(text=tr("tempo.hint_catch2"))
             self.request_redraw()
+        elif d["kind"] == "fill1":
+            if d["span"] is not None:  # (the area = a kept Select box; a click waits for a drag)
+                self.placing, self.bands, self.sel, self.part = None, [d["span"]], [], None
+                self.box.pick_tool_hint()
+                self.request_redraw()
+                open_melody(self.app)
         elif d["kind"] in ("start", "end", "bend"):
             if d["pushed"]:
                 self.app.settle_history()
@@ -1882,7 +1904,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
                     self.bands = []
                     self.set_sel([d["grab"]])
                 self.move_line(e)
-        if d["kind"] not in ("box", "view", "catch1"):
+        if d["kind"] not in ("box", "view", "catch1", "fill1"):
             self.app.let_go()  # (Hz bass "Tempo changed" in the side panel / Hz window, hunt 10-27)
 
     def move_line(self, e):
@@ -1897,7 +1919,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         called off something that made no undo step yet (a catch-up being added, a press not moved): Ctrl+Z / Ctrl+Y
         stop there."""
         d, self.drag = self.drag, None
-        only = bool(self.placing) or bool(d) and d["kind"] in ("box", "draw", "catch1", "view") or \
+        only = bool(self.placing) or bool(d) and d["kind"] in ("box", "draw", "catch1", "fill1", "view") or \
             bool(d) and d.get("pushed") is False
         self.cancel_placing()
         if d and d["kind"] == "box":  # (the picks and boxes from before the press, hunt 10-27)
@@ -2286,7 +2308,9 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if not on_mark and self.box.mode == "visual" and zone is None:  # (catch-ups: the visual tempo's only; never
             sep()                                                       # inside another one's area, user)
             menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
-        edge = self.edge_at(e.x) if item is None else None
+        if not on_mark and item is None and self.box.mode == "visual":  # (tempo jumps that follow the melody,
+            menu.add_command(label=tr("melody.menu"), command=self.start_fill)  # PLAN #12)
+        edge =self.edge_at(e.x) if item is None else None
         worked = plans(tempo, self.base(), self.app.ppq) if edge else []
         for k, kind, key in ((3, "start", "tempo.catch_auto"), (4, "end", "tempo.catch_end_auto")):
             n = edge[1] if edge and edge[0] == kind else None
@@ -3437,6 +3461,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             for x in (x0, x1):
                 self.create_line(x, 0, x, h, fill=edge, width=2, dash=(4, 3))
         spans = d["more"] + [d["span"]] * bool(d["span"]) if d and d["kind"] == "box" else self.bands
+        if d and d["kind"] == "fill1":  # (Fill with tempo jumps' area: drawn as the Select box it becomes)
+            spans = [d["span"]] if d["span"] else []
         if d and d["kind"] == "move" and d.get("copies") is not None and d.get("laid"):
             spans = [(a, b) for a, b in d["laid"] if b > a]
         if spans:  # (the whole height, like the box many MIDI programs show in their lanes)

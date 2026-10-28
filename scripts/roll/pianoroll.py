@@ -36,6 +36,7 @@ from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_centre import CentreDots
+from roll.roll_melody import MelodyMarks
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
                               RULER_TOP, VEL_TOP, bind_double_right, black_bands, box_kind, boxes_side, boxes_upright,
@@ -50,7 +51,7 @@ EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                PathEditing, SustainStops, LassoDrawing, CentreDots, tk.Canvas):
+                PathEditing, SustainStops, LassoDrawing, CentreDots, MelodyMarks, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app

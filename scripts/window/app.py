@@ -535,6 +535,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.merge_window = None  # Gate sensitive merge… (merge_window.py)
         self.shares_window = None  # Recolour's Shares… (shares_window.py)
         self.fill_window = None  # Fill gaps… (fill_window.py)
+        self.melody_window = None  # Fill with tempo jumps… (melody_window.py)
         self.strips_window = None  # Channel per strip… (strips_window.py)
         self.path_pos = ""
         self.hz_window = None  # the Hz bass window (hz_window.py)
@@ -1614,7 +1615,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_tumour()
         self.sync_text()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
-                  self.sustain_window, self.subtract_window, self.merge_window, self.fill_window):
+                  self.sustain_window, self.subtract_window, self.merge_window, self.fill_window, self.melody_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
         if self.image_window and (self.ppq, self.keys) != before:

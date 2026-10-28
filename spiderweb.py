@@ -65,6 +65,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     strips_window.py the Channel per strip window (on / off, notes between, the count, strip colours)
     merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     fill_window.py   the Fill gaps window (stretch left / right / meet in the middle, same-start notes)
+    melody_window.py the Fill with tempo jumps window (Conductor pane: jumps at the melody's notes / snap steps)
     shares_window.py Recolour's Shares window (how many colours, a knob + box per colour's share)
     between_window.py  the Add between window (preview, steps, graph) + a group in the main window (list row, menu)
     image_window.py  image to notes: the picture, its sliders, the player-look preview, placing it
@@ -84,6 +85,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_hz.py       the Hz bass tool: picking where a Hz bass starts
     roll_path.py     Copy along a path: the path drawn, B placed and its points dragged
     roll_centre.py   Recolour's Split: Clumps centre point dot, dragged on the piano roll
+    roll_melody.py   Fill with tempo jumps: the notes it follows outlined on the piano roll
     roll_shared.py   colours, key names, modifier keys, outline caches
     tiles.py         the notes' picture on screen as tiles (moved along when the view scrolls)
     zoombar.py       the piano roll's scrollbars (drag an end to zoom) and zoom buttons
@@ -131,6 +133,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     tempo.py         the project's tempo line: curves, catch-ups, exact Domino-safe tempo changes for the MIDI
     loaded.py        a loaded MIDI file (Load MIDI): the loading pass's results, run on several cores
     tempo_file.py    the tempo line in a MIDI file: Keep timing moves notes exactly, bar lines fitted, warnings
+    melody.py        Fill with tempo jumps: where the jumps go (melody note starts, rests, snap steps)
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
