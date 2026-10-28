@@ -86,6 +86,8 @@ LOOP_SHAPES = {"sine": None, "triangle": [(0, 0), (0.5, 1), (1, 0)], "saw_up": [
 ENVELOPES = ("drop", "rise", "pluck")
 FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the user heard best)
 GROUPS = 6  # "groups" at 1
+NOTE_BEND_MOST = 127.0  # keys a note's own bend line (tone["bend"]) goes each way at most: the Range knob is the
+# Pitch line's only (user 2026-10-28: a bend is repeat spacing, no pitch wheel to limit it)
 PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed), unless hz["lfo"]["bend_range"]
 OFF_PITCH = 0.02  # "offpitch" at 1: the highest key's tone is this much (x the tone) below the lowest key's
 HEIGHT_MOST = 4.0  # "height" at 1: the drawn wave shape this many times as tall (0.5 = as drawn, 0 = flat)
@@ -293,9 +295,9 @@ def clean_vel(pts):
 
 def clean_bend(pts):
     """A note's own bend line checked (tone["bend"]): [[u, keys(, curve)], ...] in order, u = 0..1 along the note,
-    keys up (below 0: down) as far as the Range knob goes, curve = how the piece to the next point bends
+    keys up (below 0: down) as far as NOTE_BEND_MOST, curve = how the piece to the next point bends
     (-SLIDE_BEND..SLIDE_BEND, hz_lines.bent_part; missing = straight); None when it's no good or empty."""
-    most = LFO["bend_range"][1]
+    most = NOTE_BEND_MOST
     out = []
     try:
         for p in pts or ():

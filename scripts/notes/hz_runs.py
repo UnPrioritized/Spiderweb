@@ -9,7 +9,7 @@ import math
 import numpy as np
 
 from notes.hz_settings import (ADSR_KNOBS, FILTER_KNOBS, FILTER_START, GLIDE_CURVE, MOD_BOXES, MOD_NEED_LINE,
-                               NEUTRAL, VIBRATO, VIBRATO_RATE, bend_range, clean_tempo_steps, hz_of, tempo_at,
+                               NEUTRAL, NOTE_BEND_MOST, VIBRATO, VIBRATO_RATE, bend_range, clean_tempo_steps, hz_of, tempo_at,
                                tempo_changes, tempo_key, keyed_tempo)
 from notes.hz_lines import adsr_line, filter_line, note_bend
 from notes.hz_glide import cached, chains, glide, glide_left, legato_links, links, note_span, pitch, slide_part
@@ -246,7 +246,7 @@ def tone_runs(hz, left, ppq, keys=None):
         ins.setdefault(b["id"], []).append(min(s["in"], b["len"]))
         outs.setdefault(a["id"], []).append(i)
     pitched = "pitch" in (hz.get("fx") or {})
-    most = bend_range(hz)
+    most = NOTE_BEND_MOST  # (a note's own bend: no Range knob, hz_settings)
     moving = bool(hz.get("tempo"))  # (made under a changing tempo: each wave at the tempo where it starts)
     bend = pitched or keys is not None or any(n.get("bend") for n in tones) or moving
 

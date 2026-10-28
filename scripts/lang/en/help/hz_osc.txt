@@ -25,7 +25,7 @@ Growl = every other wave lands a bit late: a lower tone under it.
 
 Bitcrush = the notes moved onto a coarse grid: rough and gritty.
 
-Pitch: each note starts Amount keys up (or down) and glides to its own tone in Time. Range = how far the Pitch line and note bends can go (1 to 48 keys); turning it keeps the line's shape, so the whole bend gets bigger or smaller.
+Pitch: each note starts Amount keys up (or down) and glides to its own tone in Time. Range = how far the Pitch line can go (1 to 48 keys; note bends aren't limited by it); turning it keeps the line's shape, so the whole bend gets bigger or smaller.
 
 Vibrato and Tremolo (the LFOs, as synths call them) wobble the tone and the loudness: Rate = how many times a beat, Depth = how much. Delay = how long each note stays plain before the wobble starts, Rise = how long the wobble then takes to grow to full Depth.
 

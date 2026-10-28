@@ -1,5 +1,5 @@
 """The Hz bass window's Bend tool (B; user, 2026-10-10): each note's own bend line (tone["bend"] = [[u, keys], ...],
-u 0..1 along the note, so it stretches with it; heard on top of everything else, up to the Range knob:
+u 0..1 along the note, so it stretches with it; heard on top of everything else, any distance (not the Range knob):
 notes/hz_lines.note_bend), edited right on the note.
 
 A click on a note (or on its bend line, wherever it has gone) adds a point there and holds it; a point dragged moves
@@ -21,7 +21,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from notes.hzbass import SLIDE_BEND, bend_range, line_at, note_bend, pitch
+from notes.hzbass import NOTE_BEND_MOST, SLIDE_BEND, line_at, note_bend, pitch
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -40,8 +40,9 @@ class HzBend:
         return self.tool.get() in BEND_TOOLS
 
     def bend_most(self):
-        """Keys a note's bend goes at most each way (the Pitch box's Range)."""
-        return bend_range(self.line_hz())
+        """Keys a note's bend goes at most each way (not the Pitch box's Range: that's the Pitch line's, user
+        2026-10-28)."""
+        return NOTE_BEND_MOST
 
     def bent_pitch(self, n, beat, most=None):
         """Note n's pitch at beat with its own bend line (keys)."""
@@ -75,7 +76,7 @@ class HzBend:
 
     def bend_squares(self):
         """[(x, y, tone number, piece number, keys at its start, at its end)]: the curve squares of the notes in view,
-        half way along each piece whose two points differ (Bend tool only). None on a piece the Range cuts (a point
+        half way along each piece whose two points differ (Bend tool only). None on a piece bend_most cuts (a point
         past it: the square would sit where the clipped line isn't, and a nudge would bend it a lot)."""
         if not self.bending() or self.sketching():  # (Sketch: a press there holds the piece; curves come with Alt)
             return []
@@ -129,7 +130,7 @@ class HzBend:
 
     def bend_spot(self, n, e):
         """[u, keys] at the mouse for note n: the grid line nearest it (in the note) and whole keys (Shift: any
-        tick, keys to the cent), no further than the Range."""
+        tick, keys to the cent), no further than bend_most."""
         u = (self.snap(self.beat_at(e.x), e) - n["t"]) / max(n["len"], 1e-12)
         k = self.top + 0.5 - (e.y - self.ruler_h) / self.sy - pitch(n)  # (pitch_y turned round)
         k = round(k, 2) if e.state & SHIFT else float(round(k))

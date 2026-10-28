@@ -14,7 +14,7 @@ With three or more notes selected, Slide between the selected notes makes a chai
 A note can also bend on its own, with the Bend tool (B): click a note to add a point to its bend line and drag it up or down. Points snap to the grid and to whole keys (Shift = free); the points at the note's two ends only move up and down. Right-click a point to remove it.
 [clip:hz_slides-bend]
 
-A small square sits half way between two points: drag it up or down to curve that piece (it sticks where the piece is straight, Shift = free; double-click it to make it straight again). The line stretches with the note, and it bends the note on top of everything else, as far as the Pitch box's Range. A slide leaves from the bent pitch and arrives at the bent pitch.
+A small square sits half way between two points: drag it up or down to curve that piece (it sticks where the piece is straight, Shift = free; double-click it to make it straight again). The line stretches with the note, and it bends the note on top of everything else, as far as you drag it (the Pitch box's Range doesn't limit it). A slide leaves from the bent pitch and arrives at the bent pitch.
 
 Right-click a note → Bend: Copy bend copies its bend line, Paste bend gives it to the note (or to all the selected notes, if it's one of them; the line stretches to each note), Clear bend takes it away.
 

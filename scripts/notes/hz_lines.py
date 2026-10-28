@@ -52,7 +52,7 @@ def vel_part(n, t, span):
 
 def note_bend(n, beat, most):
     """Keys a note's own bend line (tone["bend"]) moves its tone at beat (an array, counted like its "t"; before its
-    start / after its end: as at them), no further than `most` (the Range knob) each way; None when it has none.
+    start / after its end: as at them), no further than `most` (NOTE_BEND_MOST) each way; None when it has none.
     "bend_at" = (start, length) the line is spread over when it's another note's (an arpeggio's step: by time)."""
     pts = n.get("bend")
     if not pts:
