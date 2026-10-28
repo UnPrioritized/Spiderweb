@@ -321,6 +321,8 @@ class HzBend:
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
+        if hit and hit[0] == "wobble":  # (Sketch's depth line: the wobble's shape, Upside down, Bake, Remove)
+            return self.sketch_wobble_menu(e, hit[1])
         if hit and hit[0] == "curve" and self.sketching():  # (Sketch: Single curve / S-curve / Straight)
             self.sketch_curve_menu(e, hit[1], hit[2])
             return True

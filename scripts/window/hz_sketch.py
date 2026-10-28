@@ -10,13 +10,14 @@ those are the red line's), with a dot at its start and end, a small ">" after it
 dashed line at its own key."""
 
 import copy
+import math
 import tkinter as tk
 
 import numpy as np
 
 from files.lang import tr, trn
-from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, bend_of, bend_part,
-                          bends, bent_part, line_at, pitch, wobble_part)
+from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
+                          bend_part, bends, bent_part, line_at, pitch, wobble_keys, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR
@@ -60,6 +61,46 @@ def nearest_bend(want, s):
         lo, hi = (lo, m2) if e1 < e2 else (m1, hi)
     b = round(float((lo + hi) / 2), 4)
     return 0.0 if abs(b) < 1e-3 else b
+
+
+BAKE_GAP = 1e-10  # bake_wobble: a jump's two sides read this far (parts of the note) before / after it
+
+
+def bake_wobble(n, run):
+    """Note n's bend line with its wobble run (on one piece, point to point) made into ordinary bend points: a point
+    at every quarter wave (saw / square: every half, with their jumps as two points at one spot), each piece the
+    curve nearest the wave there (on the line under it, its fade too); a wave not back at its line where the run
+    starts / ends = a jump there, as heard."""
+    pts = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
+    u0, u1 = run["at"]
+    j = next(j for j in range(len(pts) - 1) if abs(pts[j][0] - u0) < ON_POINT and abs(pts[j + 1][0] - u1) < ON_POINT)
+    span, rate, phase = n["len"], run["rate"], run.get("phase", 0.0)
+
+    def f(u):  # (as heard: the line + the wave)
+        return float(line_at(pts, np.array([u]))[0] + wobble_keys([run], np.array([u]), span)[0])
+    q = 2 if run.get("shape") in ("saw", "square") else 4
+    first, last = math.floor(phase * q) + 1, math.ceil((phase + rate * (u1 - u0) * span) * q)
+    breaks = [u0 + (k / q - phase) / (rate * span) for k in range(first, last)]
+    start, end = j == 0, j + 2 == len(pts)  # (the note's own start / end: no jump, nothing before / after it)
+    nodes = ([(u0, f(u0 + BAKE_GAP) if start else pts[j][1], f(u0 + BAKE_GAP))]
+             + [(u, f(u - BAKE_GAP), f(u + BAKE_GAP)) for u in breaks]
+             + [(u1, f(u1 - BAKE_GAP), f(u1 - BAKE_GAP) if end else pts[j + 1][1])])
+    out = []
+    for u, left, right in nodes:
+        out.append([u, round(left, 4)])
+        if abs(left - right) > 1e-4:  # (a jump: two points at one spot)
+            out.append([u, round(right, 4)])
+    if not end:
+        out[-1] = pts[j + 1]  # (the piece's end point as it was, the curve after it kept)
+    s = np.linspace(0.0, 1.0, 17)
+    for a, b in zip(out, out[1:]):
+        if b[0] - a[0] > 1e-12 and abs(b[1] - a[1]) > 1e-6:
+            got = np.array([f(a[0] + (b[0] - a[0]) * x) for x in s[1:-1]])
+            want = np.concatenate([[0.0], (got - a[1]) / (b[1] - a[1]), [1.0]])
+            curve = nearest_bend(want, s)
+            if curve:
+                a[2:] = [curve]
+    return pts[:j] + [[round(p[0], 9), *p[1:]] for p in out[:-1]] + [out[-1]] + pts[j + 2:]
 
 
 class HzSketch:
@@ -180,6 +221,52 @@ class HzSketch:
         n = self.tones[d["i"]]
         was = self.wobble_run(n, *d["at"])
         n["wobble"] = [w for w in n.get("wobble") or () if w is not was]
+
+    def sketch_wobble_menu(self, e, i):
+        """Right-click on the picked piece's depth line / speed post: the wave's shape (WOBBLE_SHAPES), Upside down,
+        Bake into points (bake_wobble), Remove wobble. False when the piece has no wobble (the usual menu)."""
+        _, _, u0, u1 = self.picked_piece()
+        run = self.wobble_run(self.tones[i], u0, u1)
+        if not run:
+            return False
+        shape = tk.StringVar(self, value=run.get("shape", "sine"))
+        flip = tk.BooleanVar(self, value=bool(run.get("flip")))
+        menu = tk.Menu(self, tearoff=0)
+        for kind in WOBBLE_SHAPES:
+            menu.add_radiobutton(label=tr(f"hz.wobble_{kind}"), variable=shape, value=kind,
+                                 command=lambda kind=kind: self.wobble_edit(i, u0, u1, "shape", kind))
+        menu.add_checkbutton(label=tr("hz.wobble_flip"), variable=flip,
+                             command=lambda: self.wobble_edit(i, u0, u1, "flip", flip.get()))
+        menu.add_separator()
+        menu.add_command(label=tr("hz.wobble_bake"), command=lambda: self.wobble_edit(i, u0, u1, "bake", None))
+        menu.add_command(label=tr("hz.wobble_remove"), command=lambda: self.wobble_edit(i, u0, u1, "remove", None))
+        menu.vars = (shape, flip)  # (kept while the menu shows)
+        menu.tk_popup(e.x_root, e.y_root)
+        return True
+
+    def wobble_edit(self, i, u0, u1, what, value):
+        """The wobble on note i's piece u0..u1: its "shape" / "flip" set to value, "bake"d into bend points or
+        "remove"d. One undo step."""
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        n = self.tones[i]
+        run = self.wobble_run(n, u0, u1)
+        if run is None:
+            return
+        name = "hz.step_wobble_shape"
+        if what in ("bake", "remove"):
+            n["wobble"] = [w for w in n["wobble"] if w is not run]
+            if what == "bake":
+                n["bend"] = bake_wobble(n, run)
+                self.sketch_pick = None  # (the piece is many now)
+            name = f"hz.step_wobble_{what}"
+        elif what == "shape" and value == "sine":
+            run.pop("shape", None)
+        elif what == "flip" and not value:
+            run.pop("flip", None)
+        else:
+            run[what] = value
+        self.bend_done({"i": i, "before": before}, tr(name))
 
     def sketching(self):
         return self.tool.get() == "sketch"
