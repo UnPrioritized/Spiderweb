@@ -6,7 +6,7 @@ import math
 import numpy as np
 
 from notes.envelope import env_values
-from notes.hz_settings import FAST, LOOP, LOOP_SHAPES
+from notes.hz_settings import FAST, LOOP, LOOP_SHAPES, WOBBLE_RATE_MOST
 
 
 def bent_part(u, bend):
@@ -119,19 +119,75 @@ def wobble_keys(runs, u, span):
     return out
 
 
-def wobble_edges(n, most):
-    """Beats where note n's wobbles turn or jump (every quarter wave and each run's ends), at most `most` of them
-    (more: none), for drawing a wobble exactly: its tops, corners and jumps on the spot."""
+def wobble_edges(n, most, lo=-math.inf, hi=math.inf):
+    """Beats from lo to hi where note n's wobbles turn or jump (every quarter wave and each run's ends), at most
+    `most` of them (more: none), for drawing a wobble exactly: its tops, corners and jumps on the spot."""
     t, span = n.get("bend_at") or (n["t"], n["len"])
     out = []
     for w in n.get("wobble") or ():
         u0, u1 = w["at"]
+        b0, b1 = t + u0 * span, t + u1 * span
         phase, rate = w.get("phase", 0.0), w["rate"]
-        first, last = math.floor(phase * 4) + 1, math.ceil((phase + rate * (u1 - u0) * span) * 4)
+        out += [b for b in (b0, b1) if lo <= b <= hi]
+        a, b = max(b0, lo), min(b1, hi)
+        if b <= a:
+            continue
+        first = math.floor((phase + rate * (a - b0)) * 4) + 1
+        last = math.ceil((phase + rate * (b - b0)) * 4)
         if len(out) + last - first > most:
             return []
-        out += [t + u0 * span, t + u1 * span] + [t + u0 * span + (k / 4 - phase) / rate for k in range(first, last)]
+        out += [b0 + (k / 4 - phase) / rate for k in range(first, last)]
     return out
+
+
+def split_wobbles(n, u):
+    """A point put at u (0..1) on note n: a wobble across it becomes two, the second going on in step (hunt
+    2026-10-28: one wobble over two pieces couldn't be reached)."""
+    out = []
+    for w in n.get("wobble") or ():
+        u0, u1 = w["at"]
+        if not u0 + ON_POINT < u < u1 - ON_POINT:
+            out.append(w)
+            continue
+        d = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * (u - u0) / (u1 - u0)
+        first = dict(w, at=[u0, u], depth=[w["depth"][0], round(d, 4)])
+        second = dict(w, at=[u, u1], depth=[round(d, 4), w["depth"][1]],
+                      phase=round((w.get("phase", 0.0) + w["rate"] * (u - u0) * n["len"]) % 1.0, 9))
+        out += [first, second]
+    if out:
+        n["wobble"] = out
+
+
+def merge_wobbles(n, lo, u, hi):
+    """The point at u on note n is gone (its pieces lo..u and u..hi are one now): the first of their wobbles goes
+    over the whole piece, the other is dropped (hunt 2026-10-28, user took A)."""
+    runs = n.get("wobble") or ()
+    mine = [w for w in runs if abs(w["at"][1] - u) < ON_POINT or abs(w["at"][0] - u) < ON_POINT]
+    if not mine:
+        return
+    kept = dict(min(mine, key=lambda w: w["at"][0]), at=[lo, hi])
+    n["wobble"] = sorted([w for w in runs if not any(w is m for m in mine)] + [kept], key=lambda w: w["at"])
+
+
+def fit_wobbles(n):
+    """Note n's wobbles each end back on their line (hunt 2026-10-28, user took A): the speed nudged so its piece
+    holds whole half waves, as the speed post does; one set freely with Ctrl ("free") is left alone. A wobble going
+    on from the one before it (a split one, "phase") starts where that one now ends."""
+    runs = sorted(n.get("wobble") or (), key=lambda w: w["at"])
+    end = None  # (where the run before ends: (u, its waves there))
+    for w in runs:
+        beats = (w["at"][1] - w["at"][0]) * n["len"]
+        if beats <= 1e-12:
+            continue
+        if w.get("phase") and end and abs(end[0] - w["at"][0]) < ON_POINT:
+            w["phase"] = round(end[1] % 1.0, 9)
+            if not w["phase"]:
+                del w["phase"]
+        phase = w.get("phase", 0.0)
+        if not w.get("free"):
+            waves = max(phase + 0.5, round(2.0 * (phase + w["rate"] * beats)) / 2.0)
+            w["rate"] = round(min(WOBBLE_RATE_MOST, max(0.01, (waves - phase) / beats)), 6)
+        end = (w["at"][1], phase + w["rate"] * beats)
 
 
 def wobble_part(n, t, span):

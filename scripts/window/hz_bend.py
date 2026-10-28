@@ -21,7 +21,8 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from notes.hzbass import NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, note_bend, pitch, wobble_edges
+from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, merge_wobbles, note_bend, pitch,
+                          split_wobbles, wobble_edges)
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -56,24 +57,40 @@ class HzBend:
         points at one spot) drawn straight up / down (one spot per point, each with its own value). With a wobble
         the line is drawn EXACTLY (user 2026-10-28: it's the shape asked for, the red line is how near the sound gets):
         a spot every 2 px (WOBBLE_SPOTS at most) + a spot on each side of every top / corner / jump (wobble_edges), so
-        tops stay round, corners sharp, jumps upright."""
+        tops stay round, corners sharp, jumps upright. Only the part in view is worked out that finely (hunt
+        2026-10-28: a long fast one zoomed in was rough); each note's line is remembered until it or the view changes
+        (many wobbling notes lagged)."""
         pts = n.get("bend") or ()
-        at = [n["t"] + p[0] * n["len"] for p in pts]
-        count, edges = 49, []
+        lo, hi, count = n["t"], n["t"] + n["len"], 49
         if n.get("wobble"):
-            wide = abs(self.x_of(n["t"] + n["len"]) - self.x_of(n["t"]))
-            count = int(min(WOBBLE_SPOTS, max(49, wide / 2)))
-            edges = wobble_edges(n, WOBBLE_SPOTS)
-        even = np.setdiff1d(np.linspace(n["t"], n["t"] + n["len"], count), at + edges)
-        # (beat, order, point, keys): on one beat the line arriving, then the points in order, then the line leaving
-        spots = ([(b, 1, -1, float(v)) for b, v in zip(even, note_bend(n, even, most))]
-                 + [(b, 1, j, max(-most, min(most, p[1]))) for j, (b, p) in enumerate(zip(at, pts))])
-        if edges:
-            edges = np.array(edges)
-            spots += [(b, 0, -1, float(v)) for b, v in zip(edges, note_bend(n, edges - EDGE_GAP, most))]
-            spots += [(b, 2, -1, float(v)) for b, v in zip(edges, note_bend(n, edges + EDGE_GAP, most))]
-        spots.sort()
-        return np.array([s[0] for s in spots]), pitch(n) + np.array([s[3] for s in spots])
+            pad = 4 / max(self.sx, 1e-9)
+            lo = max(lo, self.beat_at(self.kb_w) - pad)
+            hi = min(hi, self.beat_at(self.canvas.winfo_width()) + pad)
+            if hi <= lo:
+                lo, hi = n["t"], n["t"] + n["len"]
+            count = int(min(WOBBLE_SPOTS, max(49, (hi - lo) * self.sx / 2)))
+        key = (n["t"], n["len"], n["key"], n.get("cents"), repr(pts), repr(n.get("wobble")), repr(n.get("bend_at")),
+               most, lo, hi, count)
+        cache = self.__dict__.setdefault("_bend_lines", {})
+        if key in cache:
+            return cache[key]
+        at = np.array([n["t"] + p[0] * n["len"] for p in pts], float)
+        edges = np.array(wobble_edges(n, WOBBLE_SPOTS, lo, hi) if n.get("wobble") else [], float)
+        even = np.setdiff1d(np.linspace(lo, hi, count), np.concatenate([at, edges]))
+        # (beat, order, point number): on one beat the line arriving, then the points in order, then the line leaving
+        beats = np.concatenate([even, at, edges, edges])
+        order = np.concatenate([np.ones(len(even)), np.ones(len(at)), np.zeros(len(edges)), np.full(len(edges), 2.0)])
+        number = np.concatenate([np.full(len(even), -1.0), np.arange(len(at), dtype=float),
+                                 np.full(2 * len(edges), -1.0)])
+        keys = np.concatenate([note_bend(n, even, most) if len(even) else [],
+                               np.clip([p[1] for p in pts], -most, most) if pts else [],
+                               note_bend(n, edges - EDGE_GAP, most) if len(edges) else [],
+                               note_bend(n, edges + EDGE_GAP, most) if len(edges) else []])
+        sort = np.lexsort((number, order, beats))
+        if len(cache) > 1000:
+            cache.clear()
+        got = cache[key] = (beats[sort], pitch(n) + keys[sort])
+        return got
 
     def bend_points(self):
         """[(x, y, tone number, point number)]: the bend points of the notes in view (Bend tool only)."""
@@ -217,12 +234,14 @@ class HzBend:
             if j is None:  # (after the points at the same spot: the new one is the last there)
                 j = sum(p[0] <= u for p in pts)
                 pts.insert(j, [u, k])
+                split_wobbles(n, u)  # (a wobble across it: two, hunt 2026-10-28)
             else:
                 pts[j][1] = k
             n["bend"] = pts
         p = n["bend"][j]
         self.drag = {"kind": "bendpt", "i": i, "j": j, "before": before, "x": e.x, "y": e.y,
-                     "moved": hit[0] == "note", "pinned": p[0] in (0.0, 1.0), "name": tr("hz.step_note_bend")}
+                     "moved": hit[0] == "note", "pinned": p[0] in (0.0, 1.0), "name": tr("hz.step_note_bend"),
+                     "wob": copy.deepcopy(n.get("wobble") or []), "old": p[0]}
         self.redraw()
         self.show_status(e)
         return True
@@ -264,7 +283,8 @@ class HzBend:
             lo = pts[j - 1][0] if j > 0 else 0.0
             hi = pts[j + 1][0] if j + 1 < len(pts) else 1.0
             pts[j][0] = min(hi, max(lo, u))
-            follow_wobble(n, d["before"][d["i"]], j)
+            if "wob" in d:  # (a wobble end on it follows: only its own two pieces', hunt 2026-10-28)
+                follow_wobble(n, d["wob"], j, d["old"])
         pts[j][1] = k
         self.redraw()
         self.show_status(e)
@@ -303,7 +323,7 @@ class HzBend:
         if d["kind"] == "bendcurve":
             del pts[d["j"]][2:]
         else:
-            del pts[d["j"]]
+            drop_point(self.tones[d["i"]], d["j"])  # (its wobbles merged, hunt 2026-10-28)
         self.bend_done(d, tr("hz.step_note_bend_delete") if d["kind"] == "bendpt" else None)
         self.point_again()
 
@@ -345,7 +365,7 @@ class HzBend:
             return False                                                              # and end stay: its menu)
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
-        del self.tones[hit[1]]["bend"][hit[2]]
+        drop_point(self.tones[hit[1]], hit[2])
         self.bend_done({"i": hit[1], "before": before}, tr("hz.step_note_bend_delete"))
         self.point_again()
         return True
@@ -434,7 +454,7 @@ class HzBend:
             if not n.get("bend") or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
                 continue
             beats, keys = self.bend_line(n, most)
-            xy = np.column_stack([[self.x_of(b) for b in beats], self.pitch_y(keys)]).ravel().tolist()
+            xy = np.column_stack([self.x_of(beats), self.pitch_y(keys)]).ravel().tolist()
             c.create_line(*xy, fill=BEND, width=max(1, round(1.5 * s)), dash=(4, 2))
         r = 3 * s
         for x, y, i, j, *_ in self.bend_squares():  # (filled = curved)
@@ -467,14 +487,34 @@ WOBBLE = (4.0, 0.5)  # waves a beat, keys each way
 WOBBLE_MOST = 4096  # quarter waves at most on one note (256 beats at 4 a beat)
 
 
-def follow_wobble(n, was, j):
-    """Note n's wobbles after its bend point j moved sideways (was = the note before the drag): a wobble's end that
-    was on that point stays on it."""
-    old = (was.get("bend") or ())[j][0] if j < len(was.get("bend") or ()) else None
-    if old is None or not n.get("wobble") or len(n["wobble"]) != len(was.get("wobble") or ()):
-        return
-    for w, w0 in zip(n["wobble"], was["wobble"]):
-        w["at"] = sorted(n["bend"][j][0] if abs(a - old) < ON_POINT else a for a in w0["at"])
+def follow_wobble(n, wob, j, old):
+    """Note n's wobbles after its bend point j moved sideways from `old` (wob = its wobbles when it was pressed):
+    the wobbles on ITS two pieces (point before .. it, it .. point after) follow it; one on the far side of a jump
+    (another point on the same spot) stays (hunt 2026-10-28)."""
+    pts, out = n["bend"], []
+    lo = pts[j - 1][0] if j > 0 else None
+    hi = pts[j + 1][0] if j + 1 < len(pts) else None
+    for w in copy.deepcopy(wob):
+        u0, u1 = w["at"]
+        if lo is not None and abs(u0 - lo) < ON_POINT and abs(u1 - old) < ON_POINT:
+            w["at"] = [u0, pts[j][0]]
+        elif hi is not None and abs(u0 - old) < ON_POINT and abs(u1 - hi) < ON_POINT:
+            w["at"] = [pts[j][0], u1]
+        out.append(w)
+    if out:
+        n["wobble"] = out
+
+
+def drop_point(n, j):
+    """Note n's bend point j taken away: the two pieces it parted are one, so are their wobbles (merge_wobbles;
+    hunt 2026-10-28). One of a jump (another point on its spot) parts nothing."""
+    pts = n["bend"]
+    u = pts[j][0]
+    lo = pts[j - 1][0] if j > 0 else None
+    hi = pts[j + 1][0] if j + 1 < len(pts) else None
+    del pts[j]
+    if lo is not None and hi is not None and not any(abs(p[0] - u) < ON_POINT for p in pts):
+        merge_wobbles(n, lo, u, hi)
 
 
 def tidy_bend(n, pieces=False):
@@ -491,5 +531,10 @@ def tidy_bend(n, pieces=False):
     # two points on one spot at one pitch do nothing: one (user 2026-10-28), the later kept (its curve is the
     # piece after); at different pitches they're a jump and stay
     pts[:] = [p for p, q in zip(pts, pts[1:] + [None]) if not (q and q[0] == p[0] and q[1] == p[1])]
+    if pts and all(abs(p[1]) < 1e-9 for p in pts) and not pieces and n.get("wobble"):
+        # (flat, Bend tool: the points a wobble starts / ends on stay, its piece with them; hunt 2026-10-28)
+        ends = {u for w in n["wobble"] for u in w["at"]} | {0.0, 1.0}
+        pts[:] = [p for p in pts if any(abs(p[0] - u) < ON_POINT for u in ends)]
+        pieces = True
     if not pts or all(abs(p[1]) < 1e-9 for p in pts) and not (pieces and len(pts) > 2):
         n.pop("bend")

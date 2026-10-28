@@ -17,10 +17,10 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
-                          bend_part, bends, bent_part, line_at, pitch, wobble_keys, wobble_part)
+                          bend_part, bends, bent_part, line_at, pitch, split_wobbles, wobble_keys, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
-from window.hz_bend import BEND, LINE_NEAR, NEAR
+from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
 SKETCH_THIN, SKETCH_THICK = 3, 9
@@ -52,15 +52,21 @@ def split_curve(bend, t):
 
 def nearest_bend(want, s):
     """The single curve (-SLIDE_BEND..SLIDE_BEND) whose shape over s is nearest want; 0 when straight is."""
+    return nearest_bends(np.asarray(want, float)[None, :], s)[0]
+
+
+def nearest_bends(wants, s):
+    """nearest_bend for each row of wants at once (a list of curves; Bake's quarter waves, hunt 2026-10-28)."""
     bs = np.linspace(-SLIDE_BEND, SLIDE_BEND, 381)
-    err = ((bent_part(s[None, :], bs[:, None]) - want[None, :]) ** 2).sum(1)
-    lo, hi = bs[max(0, err.argmin() - 1)], bs[min(len(bs) - 1, err.argmin() + 1)]
+    shapes = bent_part(s[None, :], bs[:, None])
+    best = np.array([((shapes - w[None, :]) ** 2).sum(1).argmin() for w in wants], int).reshape(-1)
+    lo, hi = bs[np.maximum(0, best - 1)], bs[np.minimum(len(bs) - 1, best + 1)]
     for _ in range(30):  # (narrowed down between its neighbours: golden section)
         m1, m2 = hi - (hi - lo) * 0.618, lo + (hi - lo) * 0.618
-        e1, e2 = (((bent_part(s, np.full(s.shape, m)) - want) ** 2).sum() for m in (m1, m2))
-        lo, hi = (lo, m2) if e1 < e2 else (m1, hi)
-    b = round(float((lo + hi) / 2), 4)
-    return 0.0 if abs(b) < 1e-3 else b
+        e1 = ((bent_part(s[None, :], m1[:, None]) - wants) ** 2).sum(1)
+        e2 = ((bent_part(s[None, :], m2[:, None]) - wants) ** 2).sum(1)
+        lo, hi = np.where(e1 < e2, lo, m1), np.where(e1 < e2, m2, hi)
+    return [0.0 if abs(b) < 1e-3 else b for b in (round(float(b), 4) for b in (lo + hi) / 2)]
 
 
 BAKE_GAP = 1e-10  # bake_wobble: a jump's two sides read this far (parts of the note) before / after it
@@ -76,15 +82,17 @@ def bake_wobble(n, run):
     j = next(j for j in range(len(pts) - 1) if abs(pts[j][0] - u0) < ON_POINT and abs(pts[j + 1][0] - u1) < ON_POINT)
     span, rate, phase = n["len"], run["rate"], run.get("phase", 0.0)
 
-    def f(u):  # (as heard: the line + the wave)
-        return float(line_at(pts, np.array([u]))[0] + wobble_keys([run], np.array([u]), span)[0])
+    def f(u):  # (as heard: the line + the wave; u an array, all at once: hunt 2026-10-28, Bake froze for seconds)
+        u = np.asarray(u, float)
+        return line_at(pts, u) + wobble_keys([run], u, span)
     q = 2 if run.get("shape") in ("saw", "square") else 4
     first, last = math.floor(phase * q) + 1, math.ceil((phase + rate * (u1 - u0) * span) * q)
-    breaks = [u0 + (k / q - phase) / (rate * span) for k in range(first, last)]
+    breaks = u0 + (np.arange(first, last) / q - phase) / (rate * span)
     start, end = j == 0, j + 2 == len(pts)  # (the note's own start / end: no jump, nothing before / after it)
-    nodes = ([(u0, f(u0 + BAKE_GAP) if start else pts[j][1], f(u0 + BAKE_GAP))]
-             + [(u, f(u - BAKE_GAP), f(u + BAKE_GAP)) for u in breaks]
-             + [(u1, f(u1 - BAKE_GAP), f(u1 - BAKE_GAP) if end else pts[j + 1][1])])
+    lefts, rights = f(breaks - BAKE_GAP).tolist(), f(breaks + BAKE_GAP).tolist()
+    a0, a1 = (float(v) for v in f([u0 + BAKE_GAP, u1 - BAKE_GAP]))
+    nodes = ([(u0, a0 if start else pts[j][1], a0)] + list(zip(breaks.tolist(), lefts, rights))
+             + [(u1, a1, a1 if end else pts[j + 1][1])])
     out = []
     for u, left, right in nodes:
         out.append([u, round(left, 4)])
@@ -93,11 +101,13 @@ def bake_wobble(n, run):
     if not end:
         out[-1] = pts[j + 1]  # (the piece's end point as it was, the curve after it kept)
     s = np.linspace(0.0, 1.0, 17)
-    for a, b in zip(out, out[1:]):
-        if b[0] - a[0] > 1e-12 and abs(b[1] - a[1]) > 1e-6:
-            got = np.array([f(a[0] + (b[0] - a[0]) * x) for x in s[1:-1]])
-            want = np.concatenate([[0.0], (got - a[1]) / (b[1] - a[1]), [1.0]])
-            curve = nearest_bend(want, s)
+    pairs = [(a, b) for a, b in zip(out, out[1:]) if b[0] - a[0] > 1e-12 and abs(b[1] - a[1]) > 1e-6]
+    if pairs:
+        ua, ub = np.array([a[0] for a, _ in pairs]), np.array([b[0] for _, b in pairs])
+        va, vb = np.array([a[1] for a, _ in pairs]), np.array([b[1] for _, b in pairs])
+        got = f((ua[:, None] + (ub - ua)[:, None] * s[None, 1:-1]).ravel()).reshape(len(pairs), -1)
+        wants = np.column_stack([np.zeros(len(pairs)), (got - va[:, None]) / (vb - va)[:, None], np.ones(len(pairs))])
+        for (a, _), curve in zip(pairs, nearest_bends(wants, s)):
             if curve:
                 a[2:] = [curve]
     return pts[:j] + [[round(p[0], 9), *p[1:]] for p in out[:-1]] + [out[-1]] + pts[j + 2:]
@@ -109,18 +119,18 @@ class HzSketch:
 
     def picked_piece(self):
         """(tone number, piece number, u0, u1) of the piece picked with a click, or None: nothing picked, its note no
-        longer the only one selected, its points gone / moved."""
+        longer the only one selected, its points gone / moved. Once it's none of those it's FORGOTTEN (hunt
+        2026-10-28: a new note given the deleted one's number showed the line; another Hz bass / layer too)."""
         p = self.sketch_pick
-        if not p or not self.sketching() or len(self.sel) != 1:
+        if not p:
             return None
-        i = next(iter(self.sel))
-        n = self.tones[i] if i < len(self.tones) else None
-        if n is None or n.get("id") != p[0]:
-            return None
-        pts = n.get("bend") or ([0.0, 0.0], [1.0, 0.0])
+        i = next(iter(self.sel)) if len(self.sel) == 1 else None
+        n = self.tones[i] if i is not None and i < len(self.tones) and self.sketching() else None
+        pts = (n.get("bend") or ([0.0, 0.0], [1.0, 0.0])) if n is not None and n.get("id") == p[0] else ()
         for j in range(len(pts) - 1):
             if abs(pts[j][0] - p[1]) < ON_POINT and abs(pts[j + 1][0] - p[2]) < ON_POINT and pts[j + 1][0] > pts[j][0]:
                 return i, j, pts[j][0], pts[j + 1][0]
+        self.sketch_pick = None
         return None
 
     @staticmethod
@@ -211,6 +221,9 @@ class HzSketch:
             rate = max(1.0, round(2.0 * rate * beats)) / (2.0 * beats)
         rate = min(WOBBLE_RATE_MOST, max(0.5 / beats, 0.01, rate))
         run = dict(copy.deepcopy(d["orig"]), rate=round(rate, 6))
+        run.pop("free", None)
+        if e.state & CTRL:  # (set freely: kept as it is when its piece's length changes, hz_lines.fit_wobbles)
+            run["free"] = True
         was = self.wobble_run(n, *d["at"])
         n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
         self.redraw()
@@ -281,7 +294,7 @@ class HzSketch:
         steep slope too (hunt 2026-10-28: only up / down at the mouse's beat counted)."""
         if bends(n):
             beats, keys = self.bend_line(n, most)
-            xs, ys = np.array([self.x_of(b) for b in beats]), np.asarray(self.pitch_y(keys), float)
+            xs, ys = np.asarray(self.x_of(beats), float), np.asarray(self.pitch_y(keys), float)
         else:
             y0 = self.pitch_y(pitch(n))
             xs, ys = np.array([self.x_of(n["t"]), self.x_of(n["t"] + n["len"])]), np.array([y0, y0])
@@ -351,7 +364,7 @@ class HzSketch:
         self.sel, self.box_kept = {i}, None
         if hit[0] == "point":
             if 0 < hit[2] < len(n.get("bend") or "..") - 1:
-                del n["bend"][hit[2]]
+                drop_point(n, hit[2])  # (its wobbles merged, hunt 2026-10-28)
                 self.bend_done({"i": i, "before": before}, tr("hz.step_note_bend_delete"))
                 self.point_again()
             else:
@@ -373,8 +386,10 @@ class HzSketch:
         else:
             pts.insert(j, [u, round(float(line_at(pts, u)), 2)])
         n["bend"] = pts
+        split_wobbles(n, u)  # (a wobble across it: two, the second going on in step; hunt 2026-10-28)
         self.drag = {"kind": "bendpt", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
-                     "pinned": False, "name": tr("hz.step_note_bend")}
+                     "pinned": False, "name": tr("hz.step_note_bend"), "old": u,
+                     "wob": copy.deepcopy(n.get("wobble") or [])}
         self.redraw()
         self.show_status(e)
         return True
@@ -515,7 +530,7 @@ class HzSketch:
                 c.create_line(x0, y, x1, y, fill=edge, dash=(2, 4))
                 beats, keys = self.bend_line(n, most)
                 ys = self.pitch_y(keys)
-                xy = np.column_stack([[self.x_of(b) for b in beats], ys]).ravel().tolist()
+                xy = np.column_stack([self.x_of(beats), ys]).ravel().tolist()
             else:
                 y = self.pitch_y(pitch(n))
                 xy, ys = [x0, y, max(x1, x0 + 1), y], [y, y]

@@ -322,7 +322,8 @@ def clean_bend(pts):
 def clean_wobble(runs):
     """A note's wobbles checked (tone["wobble"], the Sketch tool's; heard in hz_lines.note_bend until baked):
     [{"at": [u0, u1] along the note, "depth": [keys at u0, at u1] each way, "rate": waves a beat(, "shape":
-    WOBBLE_SHAPES but sine, "flip": True = going down first, "phase": waves gone before u0)}] in order; runs with
+    WOBBLE_SHAPES but sine, "flip": True = going down first, "phase": waves gone before u0, "free": True = speed set
+    with Ctrl)}] in order; runs with
     no length or depth left out; None when none is left."""
     out = []
     for w in runs or ():
@@ -341,6 +342,8 @@ def clean_wobble(runs):
             run["shape"] = w["shape"]
         if w.get("flip") is True:
             run["flip"] = True
+        if w.get("free") is True:  # (its speed set freely with Ctrl: hz_lines.fit_wobbles leaves it alone)
+            run["free"] = True
         if phase:
             run["phase"] = phase
         out.append(run)

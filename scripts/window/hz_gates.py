@@ -11,7 +11,7 @@ from files.mathexpr import calc, fmt
 from notes.custom import BOX_STROKE, SPAM_FILLS, box_frame, custom_settings
 from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LENGTH_BEATS, LENGTH_WAVE, START_TRACE, TUNE,
                           all_tones, clean_fit, clean_from, clean_extra, clean_fx, clean_length, clean_lfo, clean_line, clean_loop, clean_off,
-                          clean_sustain, clean_tones, fit_length, held_fixed, left_edge, length_ticks, sound_span)
+                          clean_sustain, clean_tones, fit_length, fit_wobbles, held_fixed, left_edge, length_ticks, sound_span)
 from window import look
 from window.history import load_state
 from window.hz_effects import AMOUNT
@@ -647,6 +647,8 @@ class HzGates:
         self.sel_before = None
         picked = {id(self.tones[i]) for i in self.sel if i < len(self.tones)}
         boxed = self.box_kept is not None and self.box_kept[1] == self.sel
+        for n in self.tones:  # (each wobble ends back on its line, whatever changed its length: hunt 2026-10-28)
+            fit_wobbles(n)
         self.tones.sort(key=lambda n: (n["t"], n["key"]))
         self.sel = {i for i, n in enumerate(self.tones) if id(n) in picked}
         if boxed:  # (the same notes, numbered anew: the Select box stays, user)
