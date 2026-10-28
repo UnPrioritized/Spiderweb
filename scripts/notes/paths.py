@@ -306,24 +306,43 @@ def parts_notes(r, first, tails, counts=False, spot=None):
     return out if len(out) > 1 else notes
 
 
-def snap_steps(notes, step, origin):
+SNAP_ENDS = ("cut", "full", "whole", "fit")  # "Line's end" choices (snap_steps how), the first = default
+
+
+def snap_steps(notes, step, origin, end=None, how="cut"):
     """
     "Notes by snap" (a line's notes made a staircase on a grid, a user's request): line notes (start, end, key) ->
-    every note exactly one step long, on steps of `step` ticks counted from tick `origin` (the line's start), and
-    which line note each came from. A key goes into the step where the line reaches it (2.5 keys a step = 2, 3, 2,
-    3); a key the line stays on gets one note in every later step it covers wholly, and the line's last key also in
-    the step it ends partway through (user: the last note gets the full step). Same key + step twice = once.
+    every note one step long, on steps of `step` ticks counted from tick `origin` (the line's start), and which line
+    note each came from. A key goes into the step where the line reaches it (2.5 keys a step = 2, 3, 2, 3); a key the
+    line stays on gets one note in every later step it covers wholly. Same key + step twice = once.
+    A line that isn't a whole number of steps long (user 2026-10-28 picked a choice, they can't all hold at once),
+    how: "cut" = the last step ends on the line's last point (default); "full" = the last step a full one, past the
+    point; "whole" = only the whole steps that fit, keys squeezed in; "fit" = the steps stretched to fill it exactly.
     """
     notes = np.asarray(notes, np.int64).reshape(-1, 3)
     if not len(notes):
         return notes, np.zeros(0, np.int64)
-    # the line's time stretched to fill its steps exactly (a part step counts whole), so the keys share out evenly
-    # to the end (user 2026-10-28: a line ending just into a step left that step one lone key)
-    span = int(notes[:, 1].max()) - origin
+    # the line's time stretched to fill its steps exactly, so the keys share out evenly to the end (user 2026-10-28: a
+    # line ending just into a step left that step one lone key). end = the line's last tick: a steep end's keys run a
+    # tick past it, which made a line ending ON a step line take one more step (user)
+    span = (int(notes[:, 1].max()) if end is None else int(end)) - origin
+    stop = None  # (cut: where the last step ends)
     if span > 0:
-        steps = max(1, math.ceil(span / step - 1e-9))
+        if how == "whole":
+            steps = max(1, math.floor(span / step + 1e-9))
+            if span < step - 1e-9:  # (shorter than one step: that one step ends on the last point)
+                stop = origin + span
+        elif how == "fit":
+            steps = max(1, round(span / step))
+            step = span / steps
+        else:
+            steps = max(1, math.ceil(span / step - 1e-9))
+            stop = origin + span if how == "cut" else None
         notes = notes.copy()
-        notes[:, :2] = origin + np.floor((notes[:, :2] - origin) * (steps * step / span) + 0.5).astype(np.int64)
+        notes[:, :2] = origin + np.floor((np.minimum(notes[:, :2], origin + span) - origin) * (steps * step / span)
+                                         + 0.5).astype(np.int64)
+        notes[:, 1] = np.maximum(notes[:, 1], notes[:, 0] + 1)  # (keys on the very last tick: still a note)
+        notes[:, 0] = np.minimum(notes[:, 0], origin + steps * step - 1)
     s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
 
     def edge(j):  # tick where step j starts
@@ -344,6 +363,8 @@ def snap_steps(notes, step, origin):
     src = np.repeat(np.arange(len(notes)), n)
     j = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
     out = np.column_stack([edge(j), edge(j + 1), k[src]])
+    if stop is not None:
+        out[:, 1] = np.maximum(np.minimum(out[:, 1], stop), out[:, 0] + 1)
     _, once = np.unique(out[:, [0, 2]], axis=0, return_index=True)
     once = np.sort(once)
     return out[once], src[once]

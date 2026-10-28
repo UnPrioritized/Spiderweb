@@ -8,6 +8,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.engine import BY_SNAP_MOST, snap_name, snap_name_beats
+from notes.paths import SNAP_ENDS
 from notes.tumour import LINE_KINDS
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_text
@@ -46,6 +47,18 @@ class SnapPanel:
         scrub = Scrub(self, [(self.by_snap_entry, self.by_snap_var, self.on_by_snap)], STEPS, 1,
                       BY_SNAP_MOST * self.ppq, label=lb)
         scrub.read = self.step_ticks  # (dragging / Up / Down from a note length: from its ticks)
+        # a line that isn't a whole number of steps long: how its end goes (user 2026-10-28: their choice)
+        end = ttk.Frame(parent)
+        end.pack(fill="x", pady=(2, 0))
+        self.by_snap_end_word = ttk.Label(end, text=tr("app.by_snap_end"))
+        self.by_snap_end_word.pack(side="left", padx=(20, 0))
+        self.by_snap_end_box = ttk.Combobox(end, values=[tr("app.by_snap_end_" + h) for h in SNAP_ENDS],
+                                            state="readonly", width=max(len(tr("app.by_snap_end_" + h))
+                                                                        for h in SNAP_ENDS))
+        self.by_snap_end_box.pack(side="left", padx=(5, 0))
+        self.by_snap_end_box.bind("<<ComboboxSelected>>", lambda e: (self.on_by_snap_end(), self.roll.focus_set()))
+        for w in (self.by_snap_end_word, self.by_snap_end_box):
+            Tooltip(w, tr("app.by_snap_end_tip"))
 
     def step_ticks(self, text):
         """The Step box's text -> ticks: a note length ("1/32", like the Snap list) or a number of ticks."""
@@ -72,6 +85,13 @@ class SnapPanel:
         self.by_snap_entry.state(["!disabled" if any(ons) else "disabled"])
         self.by_snap_entry.config(style="TEntry")
         self.by_snap_word.config(foreground="" if any(ons) else look.FAINT_TEXT)
+        ends = {t.get("by_snap_end", SNAP_ENDS[0]) for t in tgts if t.get("by_snap")}
+        if len(ends) == 1:
+            self.by_snap_end_box.current(SNAP_ENDS.index(ends.pop()))
+        else:
+            self.by_snap_end_box.set(tr("widgets.mixed") if ends else "")
+        self.by_snap_end_box.state(["!disabled" if any(ons) else "disabled"])
+        self.by_snap_end_word.config(foreground="" if any(ons) else look.FAINT_TEXT)
         # Last note does nothing while every picked line steps (the last note always gets the full step)
         off = bool(ons) and all(ons)
         for w in self.last_parts:
@@ -99,6 +119,22 @@ class SnapPanel:
                     t["by_snap_name"] = name
         self.shapes_changed()
         self.sync_by_snap()
+
+    def on_by_snap_end(self):
+        """Line's end dropdown: every ticked line takes it."""
+        i = self.by_snap_end_box.current()
+        if self._loading or i < 0:
+            return
+        how = SNAP_ENDS[i]
+        tgts = [t for t in self.by_snap_targets() if t.get("by_snap")]
+        if all(t.get("by_snap_end", SNAP_ENDS[0]) == how for t in tgts):
+            return
+        self.push_undo(name=tr("app.by_snap_end"))
+        for t in tgts:
+            t.pop("by_snap_end", None)
+            if how != SNAP_ENDS[0]:
+                t["by_snap_end"] = how
+        self.shapes_changed()
 
     def on_by_snap(self, left=False):
         """The step box (whole ticks, or a note length like 1/32 kept as one): every ticked line takes it."""

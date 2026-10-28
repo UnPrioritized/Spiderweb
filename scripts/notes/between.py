@@ -286,6 +286,9 @@ class Pair:
             end = next((e for e in ((a, b) if f < 0.5 else (b, a)) if e.get("by_snap") == snap), None)
             if end and end.get("by_snap_name"):  # (a note length typed at that end: shown so)
                 out["by_snap_name"] = end["by_snap_name"]
+            near = (a if f < 0.5 else b) if (a if f < 0.5 else b).get("by_snap") else end
+            if near and near.get("by_snap_end"):  # (Line's end: the nearer end's, switching halfway)
+                out["by_snap_end"] = near["by_snap_end"]
         tm = _tumour(a, b, f, rev)
         if tm:
             out["tumour"] = tm

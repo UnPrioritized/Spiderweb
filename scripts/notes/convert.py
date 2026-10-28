@@ -77,7 +77,8 @@ def losses(shapes):
         out.append(tr("convert.pieces_become_complete"))
     if any(sh["kind"] in LINE_KINDS and sh.get("by_snap") for sh in shapes):  # (lines only: a live shape can't)
         out.append(tr("convert.by_snap_dropped"))
-    return out + shared_settings([{k: v for k, v in sh.items() if k != "by_snap"} for sh in shapes])[1]
+    return out + shared_settings([{k: v for k, v in sh.items() if k not in ("by_snap", "by_snap_end")}
+                                  for sh in shapes])[1]
 
 
 def keeps_notes(sh):
@@ -89,7 +90,7 @@ def keeps_notes(sh):
 
 NOTE_SETTINGS = (("glue", "convert.glue"), ("fx", "convert.fx"), ("cycle", "colours.colours"),
                  ("sustain", "sustain.title"), ("subtract", "subtract.title"), ("gate_flip", "roll_menu.gate_flip"), ("mask", "mask.panel_tick"),
-                 ("strips", "strips.title"), ("by_snap", "app.by_snap"))
+                 ("strips", "strips.title"), ("by_snap", "app.by_snap"), ("by_snap_end", "app.by_snap_end"))
 
 
 def shared_settings(shapes):
@@ -152,6 +153,7 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
     join_velocity(new, shapes, spans, (min(mine), max(mine)))  # (each keeps its velocities)
     new.update(shared_settings(shapes)[0])
     new.pop("by_snap", None)  # (Notes by snap: lines only, losses says so)
+    new.pop("by_snap_end", None)
     if first:  # (its own inside settings, not the ones for new shapes)
         for key in OWN_SETTINGS:
             new.pop(key, None)

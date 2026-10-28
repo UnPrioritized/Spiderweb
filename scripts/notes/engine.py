@@ -49,7 +49,7 @@ from notes.recolour import box_of, clean_recolour, is_recoloured, recoloured, ru
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
-from notes.paths import dedupe, dot_segment_notes, path_notes, snap_steps
+from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
 from notes.custom import ROUND, frame_upright, notes_resampled, pack_notes, path_colours
 from notes.picture import clean_picture, turned_notes
@@ -268,6 +268,8 @@ def clean_shape(sh):
         name = snap_name(sh.get("by_snap_name"))
         if name and abs(snap_name_beats(name) - st) < 1e-9:  # (typed as a note length: shown so, follows the PPQ)
             out["by_snap_name"] = name
+        if sh.get("by_snap_end") in SNAP_ENDS[1:]:  # ("Line's end": missing = the last step cut short)
+            out["by_snap_end"] = sh["by_snap_end"]
     bt = clean_between(sh.get("between")) if out["kind"] in BETWEEN_KINDS else None
     if bt:  # one of an Add between group (between.py)
         out["between"] = bt
@@ -1169,9 +1171,10 @@ def _kind_notes_tracks(sh, ppq, keys):
     if piece:
         raw, spots = spotted_notes(sh, ppq, end_dot)
         if by_snap:  # (the whole's steps, from the whole's start)
-            start = float(np.concatenate(cached_arrays(sh))[:, 0].min()) * ppq
+            whole_t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
             raw = note_array(raw, 3)
-            got, src = snap_steps(raw, by_snap * ppq, int(np.floor(start + 0.5)))
+            got, src = snap_steps(raw, by_snap * ppq, int(np.floor(whole_t.min() + 0.5)),
+                                  int(np.floor(whole_t.max() + 0.5)), sh.get("by_snap_end", "cut"))
             raw, spots, came = got, spots[src], raw[src, :2]
     elif sh["kind"] == "custom" and "notes" in sh:
         # (a merged shape turned / slanted / stretched: its parts the same way, merged again; else a turned / skewed
@@ -1216,7 +1219,8 @@ def _kind_notes_tracks(sh, ppq, keys):
     else:
         raw = path_notes(path, end_dot)
     if by_snap and not piece:
-        raw = snap_steps(note_array(raw, 3), by_snap * ppq, int(np.floor(float(path[:, 0].min()) + 0.5)))[0]
+        raw = snap_steps(note_array(raw, 3), by_snap * ppq, int(np.floor(float(path[:, 0].min()) + 0.5)),
+                         int(np.floor(float(path[:, 0].max()) + 0.5)), sh.get("by_snap_end", "cut"))[0]
     t_lo = float(path[:, 0].min())
     t_hi = float(path[:, 0].max())
     if grows_free(vel_sh):  # (Ripples rings past the drawing: the velocity line runs over them, velocity.time_span)
