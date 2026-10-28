@@ -189,7 +189,7 @@ class HzSketch:
         run = self.wobble_run(self.tones[i], u0, u1)
         speed = which == "speed"
         self.drag = {"kind": "wobblerate" if speed else "wobbledepth", "i": i, "which": which, "before": before,
-                     "x": e.x, "y": e.y, "moved": False, "at": [u0, u1],
+                     "x": e.x, "y": e.y, "moved": False, "at": [u0, u1], "p0": self.pitch_at(e.y),
                      "name": tr("hz.step_wobble_speed" if speed else "hz.step_wobble_depth"),
                      "orig": copy.deepcopy(run) if run else {"at": [u0, u1], "depth": [0.0, 0.0], "rate": WOBBLE_RATE}}
         self.redraw()
@@ -198,7 +198,7 @@ class HzSketch:
     def sketch_depth_to(self, d, n, e):
         """The depth line held in drag d moved up / down: its handle's end (a fade) or both ends by as many keys as
         the mouse moved, in WOBBLE_STEP steps (Shift: 0.01), never below 0 (0 at both = no wobble once let go)."""
-        k = (d["y"] - e.y) / self.sy
+        k = self.pitch_at(e.y) - d["p0"]  # (keys under the mouse: a wheel turn mid-drag moves it too, hunt 2026-10-28)
         step = 0.01 if e.state & SHIFT else WOBBLE_STEP
         run = copy.deepcopy(d["orig"])
         for end in (0, 1):
@@ -411,7 +411,7 @@ class HzSketch:
             return True
         j = None if not pts or len(pts) <= 2 else min(len(pts) - 2, max(0, sum(p[0] <= u for p in pts) - 1))
         d = self.drag = {"kind": "sketchpiece", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
-                         "orig": copy.deepcopy(pts), "key": n["key"],
+                         "orig": copy.deepcopy(pts), "key": n["key"], "p0": self.pitch_at(e.y),
                          "name": tr("hz.step_move") if j is None else tr("hz.step_note_bend")}
         self.after(HOLD_MS, lambda: self.sketch_grab(d))
         self.redraw()
@@ -432,7 +432,7 @@ class HzSketch:
     def sketch_piece_to(self, d, n, e):
         """The piece held in drag d up / down: both its points by as many keys as the mouse moved (whole keys;
         Shift: to the cent), no further than the Range; the whole note: its key."""
-        k = (d["y"] - e.y) / self.sy
+        k = self.pitch_at(e.y) - d["p0"]  # (keys under the mouse: a wheel turn mid-drag moves it too, hunt 2026-10-28)
         if d["j"] is None:
             n["key"] = max(0, min(TOP_KEY, d["key"] + round(k)))
         else:
@@ -564,5 +564,10 @@ class HzSketch:
             x, y, text = label
             t = c.create_text(x, y, text=text, anchor="s", fill=look.LABEL, font=look.font(8, "bold"))
             box = c.bbox(t)
-            c.create_rectangle(box[0] - 3 * s, box[1] - s, box[2] + 3 * s, box[3] + s, fill=look.HZ_DOT, outline=BEND)
+            under = self.ruler_h + 2 * s - box[1]  # (never under the bar numbers: a top-key note, hunt 2026-10-28)
+            if under > 0:
+                c.move(t, 0, under)
+                box = c.bbox(t)
+            c.create_rectangle(box[0] - 3 * s, box[1] - s, box[2] + 3 * s, box[3] + s, fill=look.HZ_LABEL_BOX,
+                               outline=BEND)
             c.tag_raise(t)

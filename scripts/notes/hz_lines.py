@@ -70,6 +70,15 @@ def bends(n):
     return bool(n.get("bend") or n.get("wobble"))
 
 
+def tone_keys(n):
+    """(lowest, highest) pitch (keys) note n reaches with its own bend line and wobbles (its points: pieces never
+    overshoot them; each wobble's deepest each way)."""
+    k = n["key"] + n.get("cents", 0.0) / 100.0
+    vals = [p[1] for p in n.get("bend") or ()] or [0.0]
+    deep = max((max(w["depth"]) for w in n.get("wobble") or ()), default=0.0)
+    return k + min(vals) - deep, k + max(vals) + deep
+
+
 def note_bend(n, beat, most):
     """Keys a note's own bend line (tone["bend"]) and wobbles (tone["wobble"]) move its tone at beat (an array,
     counted like its "t"; before its start / after its end: as at them), no further than `most` (NOTE_BEND_MOST)

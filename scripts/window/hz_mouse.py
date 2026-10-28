@@ -173,19 +173,22 @@ class HzMouse:
 
     def sel_state(self):
         """The selected notes as the main window's undo step keeps them (App.sel_state): (their numbers, the kept
-        Select boxes or None, how many notes there are), or None (no Hz bass shown)."""
+        Select boxes or None, how many notes there are, the Sketch tool's clicked piece), or None (no Hz bass
+        shown)."""
         if self.pushing:
             return self.pushing
         if self.target() is None:
             return None
         boxes = self.kept_box()
-        return sorted(self.sel), boxes and list(boxes), len(self.tones)
+        return sorted(self.sel), boxes and list(boxes), len(self.tones), self.sketch_pick
 
     def restore_sel(self, state):
-        """Undo / redo put the shapes back (after_restore): the notes selected then and their Select boxes too."""
+        """Undo / redo put the shapes back (after_restore): the notes selected then, their Select boxes and the
+        Sketch tool's clicked piece too (its orange line stays, hunt 2026-10-28)."""
         if state and self.target() is not None and len(self.tones) == state[2]:
             self.sel = set(state[0])
             self.box_kept = (state[1], set(self.sel)) if state[1] else None
+            self.sketch_pick = state[3] if len(state) > 3 else None
             self.redraw()
 
     def kept_box(self):

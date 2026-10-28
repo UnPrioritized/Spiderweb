@@ -29,6 +29,7 @@ from window import look
 NEAR = 6  # px: a press this near a bend point grabs it
 WOBBLE_SPOTS = 4000  # bend_line: spots along a wobbling note at most
 EDGE_GAP = 1e-9  # beats: bend_line reads a wobble's jump this far before / after it
+DOT_GAP = 4  # px: bend_points leaves out a point this near the one shown before (zoom in to see it)
 LINE_NEAR = 4  # px: ... this near a note's bend line adds a point to it
 BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = free), as a slide's
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
@@ -98,18 +99,31 @@ class HzBend:
         return got
 
     def bend_points(self):
-        """[(x, y, tone number, point number)]: the bend points of the notes in view (Bend tool only)."""
+        """[(x, y, tone number, point number)]: the bend points of the notes in view (Bend tool only). Points closer
+        sideways than DOT_GAP px to the one shown before are left out (shown when zoomed in; hunt 2026-10-28: a baked
+        fast wobble's thousands of dots lagged), never a note's ends, the point held or the other half of a jump
+        shown."""
         if not self.bending():
             return []
         most, w, out = self.bend_most(), self.canvas.winfo_width(), []
+        gap = DOT_GAP * self.s
+        held = self.drag and self.drag.get("kind") == "bendpt" and (self.drag["i"], self.drag["j"])
         for i, n in enumerate(self.tones):
             # (Sketch: a plain note's ends too, bend_press makes its line when one is grabbed)
             pts = n.get("bend") or (self.sketching() and ([0.0, 0.0], [1.0, 0.0]))
             if not pts or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
                 continue
-            for j, p in enumerate(pts):
-                out.append((self.x_of(n["t"] + p[0] * n["len"]), self.pitch_y(pitch(n) + max(-most, min(most, p[1]))),
-                            i, j))
+            xs = self.x_of(n["t"] + np.array([p[0] for p in pts]) * n["len"])
+            ys = self.pitch_y(pitch(n) + np.clip([p[1] for p in pts], -most, most))
+            last = None  # (the point shown before: its number, x)
+            for j, (x, y) in enumerate(zip(xs.tolist(), ys.tolist())):
+                end = j in (0, len(pts) - 1) or held == (i, j)
+                jump = last is not None and last[0] == j - 1 and pts[j][0] == pts[j - 1][0]  # (its partner's shown)
+                if not end and not jump and (last is not None and abs(x - last[1]) < gap
+                                             or not self.kb_w - gap <= x <= w + gap):
+                    continue
+                out.append((x, y, i, j))
+                last = (j, x)
         return out
 
     def bend_squares(self):
@@ -210,7 +224,7 @@ class HzBend:
         self.press_was = (set(self.sel), kept)  # (what Esc / Ctrl+Z while held go back to: cancel_drag)
         self.drop_drag()
         before = copy.deepcopy(self.tones)
-        self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before)))
+        self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before), self.sketch_pick))
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
         if hit[0] == "wobble":  # (Sketch: the picked piece's wobble depth, sketch_depth_to)

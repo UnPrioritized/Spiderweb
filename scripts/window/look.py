@@ -332,6 +332,7 @@ HZ_NOTE_BAR = pick("#bfe5cb", "#3d5e47")  # Hz shape window: each key's note, fa
 HZ_NOTE_BAR_EDGE = pick("#7fc496", "#5f8a6b")  # ... its edge (notes touching stay apart)
 HZ_BEND = pick("#7a3cff", "#b08cff")  # the Bend tool: a note's own bend line and its points
 HZ_WOBBLE = pick("#e08a00", "#ffb340")  # the Sketch tool: a picked piece's wobble depth line (amber)
+HZ_LABEL_BOX = pick("white", "#2f2f31")  # the Sketch tool: the box under a drag's label (LABEL text on it; hunt 10-28)
 HZ_UNMADE = pick("#8a8a8a", "#1f1f21")  # over what the preview hasn't made yet
 HZ_BAND_FIXED = (pick("#8ee0a4"), pick("#18a048"))
 HZ_BAND_MIXED = (pick("#ffc27a"), pick("#c06000"))

@@ -9,7 +9,7 @@ import numpy as np
 from files.lang import tr, trn, trnum
 from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, NOTE_BEND_MOST, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
-                          funnel_box, left_edge, links, pitch, slide_knob, slide_part)
+                          bends, funnel_box, left_edge, links, pitch, slide_knob, slide_part, tone_keys)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
                               ruler_boxes)
 from notes.meter import bar_lines, beat_lines, sigs_of
@@ -50,9 +50,10 @@ class HzView:
         if h < 50:
             return
         self.fitted = True
-        keys = [n["key"] for n in self.every_tone()]
+        keys = [k for n in self.every_tone() for k in tone_keys(n)]  # (bends too: they may go past keys 0 / 127)
         rows = max(1.0, (h - self.ruler_h) / self.sy)
-        self.top = min(127.0, max(rows - 1, (max(keys) + min(keys)) / 2 + rows / 2))
+        self.top = (max(keys) + min(keys)) / 2 + rows / 2
+        self.clamp_view()
 
     def view_state(self):
         """Zoom + scroll as kept on the app between openings and in the autosave (app.hz_view)."""
@@ -92,9 +93,21 @@ class HzView:
     def key_at(self, y):
         return max(0, min(127, math.ceil(self.top - (y - self.ruler_h) / self.sy)))
 
+    def key_room(self):
+        """(lowest, highest) key the view scrolls to: 0..127, further where a note's bend / wobble goes past them,
+        with room above for the Sketch tool's depth line (bends aren't limited, user; hunt 2026-10-28: a bend below
+        key 0 couldn't be scrolled to, a top-key note's depth line sat under the bar numbers)."""
+        lo, hi = 0.0, 127.0
+        pad = max(2.0, 30 * self.s / self.sy)
+        for n in self.tones:
+            a, b = tone_keys(n)  # (plain notes too: a top-key note's depth line needs the room above)
+            lo, hi = min(lo, a - pad), max(hi, b + pad)
+        return lo, hi
+
     def clamp_view(self):
         rows = max(1.0, (self.canvas.winfo_height() - self.ruler_h) / self.sy)
-        self.top = min(127.0, max(min(127.0, rows - 1), self.top))
+        lo, hi = self.key_room()
+        self.top = min(hi, max(min(hi, lo + rows - 1), self.top))
         self.t0 = max(-0.25, self.t0)
 
     def on_wheel(self, e):
@@ -143,8 +156,8 @@ class HzView:
         span = max(hi - lo, 1.0)
         self.sx, self.t0 = w / (span * 1.06), lo - span * 0.03
         if tones:
-            keys = [n["key"] for n in tones]
-            rows = max(keys) - min(keys) + 1 + 4  # (two keys of room above and below)
+            keys = [k for n in tones for k in tone_keys(n)]  # (bends too: they may go past keys 0 / 127)
+            rows = math.ceil(max(keys) - min(keys)) + 1 + 4  # (two keys of room above and below)
             self.sy = min(12.0 * self.s, max(1.0, h / rows))  # (a few notes: not huge rows)
             self.top = (max(keys) + min(keys)) / 2 + h / self.sy / 2
         self.clamp_view()
@@ -171,15 +184,17 @@ class HzView:
             tones = self.every_tone()
             end = (max(n["t"] + n["len"] for n in tones) if tones else 0.0) + 0.25 + 8 * self.app.beats
             return a, a + span, max(end, a + span)
-        a, span = 127.0 - self.top, max(1, c.winfo_height() - self.ruler_h) / self.sy
-        return a, a + span, max(128.0, a + span)
+        lo, hi = self.key_room()  # (past keys 0 / 127 where a bend goes)
+        a, span = hi - self.top, max(1, c.winfo_height() - self.ruler_h) / self.sy
+        return a, a + span, max(hi - lo + 1.0, a + span)
 
     def bar_move(self, across, a):
         """A scrollbar was dragged to a (by whole pixels)."""
         if across:
             self.t0 = self.t0 + round((a - 0.25 - self.t0) * self.sx) / self.sx if a > 0 else -0.25
         else:
-            self.top = self.top + round((127.0 - a - self.top) * self.sy) / self.sy if a > 0 else 127.0
+            hi = self.key_room()[1]
+            self.top = self.top + round((hi - a - self.top) * self.sy) / self.sy if a > 0 else hi
         self.clamp_view()
         self.redraw()
 
@@ -193,7 +208,7 @@ class HzView:
         else:
             px = max(1, c.winfo_height() - self.ruler_h)
             self.sy = min(60.0 * self.s, max(1.0, px / (b - a)))
-            self.top = 127.0 - (a if which == "end" else b - px / self.sy)
+            self.top = self.key_room()[1] - (a if which == "end" else b - px / self.sy)
         self.clamp_view()
         self.redraw()
 
@@ -347,6 +362,10 @@ class HzView:
     def pitch_y(self, key):
         """Where a pitch (in keys, not whole) is: a key's exact tone is the middle of its row."""
         return self.ruler_h + (self.top - key + 0.5) * self.sy
+
+    def pitch_at(self, y):
+        """The pitch (keys, not whole, not limited to 0..127) at canvas y: pitch_y turned round."""
+        return self.top + 0.5 - (y - self.ruler_h) / self.sy
 
     def draw_line(self, w):
         """The red line: the tone that's really heard. Each repeat lasts a whole number of ticks, so the line sits
