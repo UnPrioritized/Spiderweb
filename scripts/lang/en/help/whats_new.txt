@@ -24,6 +24,8 @@ What's new:
 
 • Fill gaps (right-click → Fill gaps…): on each key, the empty space between the selected notes is closed, across all their colours. Stretch notes right, left or both ways until they meet, and pick which note stays when two start on the same tick. See Help → Fill gaps.
 
+• Notes by snap (side panel, for lines, polylines, freehand, curves and arcs): every note is one step long, so the line becomes a staircase on the grid, with steep slopes stacking keys in each step. Type the step in ticks or as a note length like 1/32, and pick how the line's last step ends. The Slice tool cuts through its notes like a knife. See Help → Notes by snap.
+
 • Recolour (side panel, under Colours): changes which colour each note has, while the notes stay exactly where they are. Shuffle the colours a shape already has, or split it into new ones, Scattered at random or in Clumps: bands, swirls or wedges you can turn, twist, centre and push. Shares… sets how many colours and how much of each. It works on pasted notes too, and the colours stay put when you move, copy, flip or slice the shape. See Help → Recolour.
 
 • Several soundfonts, stacked (Settings → Sound → Soundfonts): order matters, each one overrides the ones above it, so a General MIDI soundfont and your piano can play together. A loaded MIDI now plays the instruments it asks for. See Help → Playback.

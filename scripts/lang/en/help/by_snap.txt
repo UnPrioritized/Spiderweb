@@ -1,0 +1,38 @@
+Notes by snap turns a line into a staircase on the grid: every note is exactly one step long, like lines drawn by hand in many MIDI programs. It works on lines, polylines, freehand lines, curves and arcs.
+
+Select one or more lines and tick Notes by snap in the side panel (under Last note). Left: a normal line. Right: the same line by 1/16 steps.
+[clip:by_snap-stairs]
+
+## How the notes are made
+
+Each step gets the keys the line reaches in it. A gentle slope makes one key a step; a steep one stacks several keys in each step, and an uneven slope takes turns (2.5 keys a step = 2, 3, 2, 3...). A flat part makes one note on its key in every step. The keys are shared out evenly all the way to the line's end.
+
+The steps count from the line's start: a line that starts on a grid line stays on the grid lines, and one that starts between them takes the same grid moved to its start. Moving the line moves the steps with it.
+
+## Step
+
+Ticking it takes the Snap box's length (1/16 when Snap is off). Change it in the Step box: type a number of ticks, or a note length like 1/32, 1/12 or 3/16 (parts of a whole note, like the Snap list). A note length stays one: the box keeps showing it and the steps follow when the PPQ changes. Drag the word Step, or press Up / Down in the box, to try other lengths quickly.
+[clip:by_snap-panel]
+
+## Line's end
+
+A line is rarely a whole number of steps long, so the last step can't both be full and end on the line's last point. Pick what you'd like (pictures, left to right then top to bottom):
+
+• Last step cut short (the default): every step is full, the last one ends exactly on the line's last point.
+
+• Full last step: the last step is full too, so it can go past the last point.
+
+• Whole steps only: only the whole steps that fit, the keys squeezed into them; it can end before the last point.
+
+• Steps stretched to fit: every step a little longer or shorter so they end exactly on the last point (the steps are then off the grid).
+[clip:by_snap-ends]
+
+## Working with it
+
+Last note does nothing while Notes by snap is on (it's greyed). Colours By step gives each step its own colour.
+
+Slicing: the Slice tool cuts through the notes, like a knife through the staircase. Each row is cut where the knife crosses it, slanted or not, and each piece keeps the part of the line on its side. Split here (right-click) cuts along the line itself: a stack of keys goes by key, a key held on its own is cut in two.
+
+Join keeps Notes by snap when every line has the same settings. Add between changes the step bit by bit from one end to the other. Turn into live shape (Ctrl+R) turns it off: a custom shape can't step.
+
+A tiny step on a long line can make millions of notes: Spiderweb asks first, like other settings that make a lot of notes.
