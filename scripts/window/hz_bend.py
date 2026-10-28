@@ -76,7 +76,12 @@ class HzBend:
             return cache[key]
         at = np.array([n["t"] + p[0] * n["len"] for p in pts], float)
         edges = np.array(wobble_edges(n, WOBBLE_SPOTS, lo, hi) if n.get("wobble") else [], float)
-        even = np.setdiff1d(np.linspace(lo, hi, count), np.concatenate([at, edges]))
+        even = np.linspace(lo, hi, count)
+        fixed = np.sort(np.concatenate([at, edges]))  # (spots a hair from a point / edge left out: it's drawn exactly)
+        if len(fixed):
+            k = np.clip(np.searchsorted(fixed, even), 1, len(fixed)) - 1
+            near = np.minimum(np.abs(even - fixed[k]), np.abs(even - fixed[np.minimum(k + 1, len(fixed) - 1)]))
+            even = even[near > 1e-7]
         # (beat, order, point number): on one beat the line arriving, then the points in order, then the line leaving
         beats = np.concatenate([even, at, edges, edges])
         order = np.concatenate([np.ones(len(even)), np.ones(len(at)), np.zeros(len(edges)), np.full(len(edges), 2.0)])

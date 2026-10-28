@@ -99,6 +99,9 @@ def wave_of(shape, c):
     return np.sin(2.0 * math.pi * f)
 
 
+WAVE_GAP = 1e-9  # wobble_keys: a run's waves read at most this far (waves) before its end
+
+
 def wobble_keys(runs, u, span):
     """Keys a note's wobbles (tone["wobble"], hz_settings.clean_wobble) add at u (0..1 along it, an array) when it's
     span beats long: each run's wave from u0 to u1, its depth (keys each way) going from the first to the second,
@@ -111,7 +114,10 @@ def wobble_keys(runs, u, span):
             continue
         share = np.clip((u - u0) / (u1 - u0), 0.0, 1.0)
         depth = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * share
-        wave = wave_of(w.get("shape"), w.get("phase", 0.0) + w["rate"] * (u - u0) * span)
+        # (never quite its end's wave count: a hair before the end must read the last half wave, not the next one
+        # rounding makes of it; user's picture 2026-10-28, a square ending in a dip)
+        end = w.get("phase", 0.0) + w["rate"] * (u1 - u0) * span
+        wave = wave_of(w.get("shape"), np.minimum(w.get("phase", 0.0) + w["rate"] * (u - u0) * span, end - WAVE_GAP))
         # (up to its end, not on it: the piece after takes over there, user's picture 2026-10-28: a square's last
         # instant added to the next piece's wobble; the note's own end is the last run's)
         inside = (u >= u0) & ((u < u1) | (u1 >= 1.0) & (u <= u1))
