@@ -211,7 +211,7 @@ class HzMouse:
                 return which, i, s
         handle = next((("bend", i, s) for dx, dy, i, s, *_ in self.handles() if abs(x - dx) <= r and abs(y - dy) <= r),
                       None)
-        if x < self.kb_w or y < self.ruler_h:
+        if x < self.kb_w or y < self.ruler_h or self.sketching():  # (Sketch: a note is only its line, bend_hit)
             return handle
         for i in range(len(self.tones) - 1, -1, -1):
             n = self.tones[i]
