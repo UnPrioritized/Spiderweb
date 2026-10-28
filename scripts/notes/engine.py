@@ -1212,8 +1212,10 @@ def _kind_notes_tracks(sh, ppq, keys):
     tracks = None
     if spots is not None:  # (Colours count over the whole's notes, then the piece keeps its own)
         spots = spots[keep]
+        came = came[keep] if came is not None else None
         keep = unique_index(raw)
         raw, spots = raw[keep], spots[keep]
+        came = came[keep] if came is not None else None
         if cycling(sh) and len(raw):
             tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
         if sh.get("glue") or sh.get("fx"):  # the whole's glue / note tool pages first, on all its notes (sliced.py)
