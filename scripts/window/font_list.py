@@ -102,7 +102,8 @@ class FontList(ttk.Frame):
         again = any(same_file(p) in have for p in got)  # (one already listed = opened again: put-back samples found)
         added = [p for p in got if same_file(p) not in have]
         new = font_list({"font": "", "more_fonts": paths + added})  # (each file once)
-        self.put(new, len(new) - 1, again, added)
+        picked = {same_file(p) for p in got}  # (the listed ones picked again too, as listed: Kestrel reads exactly them anew)
+        self.put(new, len(new) - 1, again, added + [p for p in paths if same_file(p) in picked])
 
     def remove(self):
         i = self.picked()

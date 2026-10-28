@@ -115,6 +115,8 @@ fn reopened_on_kept_soundfonts_sounds_the_same() {
         };
         let banks: Vec<FontBank> = fonts.iter().map(|f| FontBank::load(f, 48_000).unwrap()).collect();
         let loaded = Loaded::new(&banks.iter().collect::<Vec<_>>()).unwrap();
+        // a stack keeps no PC copy of its samples (the files' banks hold them): ~1x memory
+        assert_eq!(loaded.pc_sample_bytes() == 0, fonts.len() > 1, "{}", loaded.pc_sample_bytes());
         // the files' banks can go: the loaded set keeps what it needs
         drop(banks);
         for (k, voices) in [1 << 20, 4096, 1 << 20].into_iter().enumerate() {

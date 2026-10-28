@@ -164,6 +164,30 @@ def plain_reason(err):
 _BANKS = threading.Lock()
 _banks = {}
 _kept = None
+# ONE START AT A TIME (hunt 2026-10-29: a 2nd start beside a running one read every soundfont twice and put two
+# copies on the graphics card): loaded_for holds _STARTING, a later one waits and finds the first one's kept.
+# GIVEN UP: stop_starts() bumps _era; a start begun before it stops between soundfonts (never stacked / kept).
+_STARTING = threading.Lock()
+_era = 0
+
+
+def _given_up(era):
+    """A start begun at era stops: SynthError marked .cancelled (said to nobody)."""
+    if era != _era:
+        err = SynthError("playback.kestrel_failed", err="start given up")
+        err.cancelled = True
+        raise err
+
+
+def stop_starts():
+    """Starts on their way give up (another MIDI out, the soundfont list changed)."""
+    global _era
+    _era += 1
+
+
+def starting():
+    """A start is reading / stacking now."""
+    return _STARTING.locked()
 
 
 def _stamp(path):
@@ -205,15 +229,20 @@ class Loaded:
     """Spiderweb's soundfont list (top first) stacked and on the graphics card: synths open on it in a moment.
     Made by loaded_for(); SynthError when a soundfont can't be read (.path = that one) or the card can't start."""
 
-    def __init__(self, fonts):
+    def __init__(self, fonts, era=None):
         d = self.dll = load()
         self.fonts = list(fonts)
         self.handle = None
+        era = _era if era is None else era
         with _BANKS:
             while True:  # (each file read only if it isn't kept; again if one was freed while a later one read)
-                hs = [_font_bank(f) for f in self.fonts]
+                hs = []
+                for f in self.fonts:
+                    _given_up(era)  # (between soundfonts: a given-up start reads no more)
+                    hs.append(_font_bank(f))
                 if all(_banks.get(f, (0, None))[1] == h for f, h in zip(self.fonts, hs)):
                     break
+            _given_up(era)
             self.stamps = [_banks[f][0] for f in self.fonts]
             arr = (ctypes.c_void_p * max(1, len(hs)))(*hs)
             with _OPENING:
@@ -252,16 +281,26 @@ def loaded_for(fonts):
     """(any thread) The kept Loaded when it is for these soundfonts, else a new one (the old one closed FIRST: one
     copy on the graphics card; only soundfonts not kept read; banks no longer listed freed)."""
     global _kept
+    era = _era
+    with _STARTING:  # (one start at a time: a later one finds the earlier one's kept)
+        _given_up(era)
+        kept = _kept
+        if kept is not None and kept.fits(fonts):
+            return kept
+        drop_loaded()
+        forget(keep=fonts)
+        new = Loaded(fonts, era)
+        if era != _era:  # (given up while it was sent to the graphics card: nothing kept)
+            new.close()
+            _given_up(era)
+        _kept = new
+        return new
+
+
+def kept_for(fonts):
+    """The kept Loaded when it is for these soundfonts, else None (never reads)."""
     kept = _kept
-    if kept is not None and kept.fits(fonts):
-        return kept
-    drop_loaded()
-    forget(keep=fonts)
-    new = Loaded(fonts)
-    if _kept is not None:  # (another one made meanwhile: one kept)
-        _kept.close()
-    _kept = new
-    return new
+    return kept if kept is not None and kept.fits(fonts) else None
 
 
 def drop_loaded():
@@ -284,7 +323,8 @@ def forget(keep=None, paths=None):
 
 
 def let_go():
-    """Everything Kestrel kept freed (another MIDI out picked)."""
+    """Everything Kestrel kept freed (another MIDI out picked); starts on their way give up."""
+    stop_starts()
     drop_loaded()
     forget()
 
@@ -311,8 +351,10 @@ class Kestrel:
                 h = d.kb_open(names, len(fonts), ctypes.byref(opts))
             elif loaded.handle:
                 h = d.kb_open_on(loaded.handle, ctypes.byref(opts))
-            else:
-                raise SynthError("playback.kestrel_failed", err="the soundfonts were let go")
+            else:  # (let go meanwhile: a start given up, said to nobody)
+                err = SynthError("playback.kestrel_failed", err="start given up")
+                err.cancelled = True
+                raise err
         if not h:
             raise SynthError("playback.kestrel_failed", err=_error(d))
         self.handle = h

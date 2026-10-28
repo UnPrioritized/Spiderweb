@@ -315,7 +315,21 @@ impl Loaded {
         // (the device + the samples only: each synth's own buffers come with its Max voices, as Kestrel's stems)
         let probe = Config { max_voices: 1, ..cfg };
         let gpu = GpuShared::new(&probe, &bank, &phase).context("the graphics card couldn't start Kestrel")?;
+        drop(phase);
+        let mut bank = bank;
+        if !rest.is_empty() {
+            // the stacked copy's samples live on the graphics card now: the PC copy freed (only the upload and
+            // Kestrel's CPU renderer read them), so 2+ soundfonts take ~1x memory, not 2x (hunt 2026-10-29)
+            if let Some(b) = Arc::get_mut(&mut bank) {
+                b.pool = Vec::new();
+            }
+        }
         Ok(Loaded { bank, gpu, sample_rate })
+    }
+
+    /// Samples kept in the PC's memory for this set (0 for a stack: they're on the graphics card).
+    pub fn pc_sample_bytes(&self) -> u64 {
+        self.bank.pool_bytes()
     }
 
     /// The most Max voices this graphics card takes at `opts` (what a bigger open is refused with).

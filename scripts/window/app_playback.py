@@ -401,6 +401,8 @@ class Playback:
         if self._device_was != KESTREL:  # (only Kestrel uses it)
             self.drop_read_ahead()
             from files import kestrel
+            if self._kestrel_job is not None:  # (a start on its way: its window closes at once, it gives up)
+                self._kestrel_job["close"]()
             kestrel.let_go()  # (its soundfonts kept loaded: freed, user 2026-10-28)
         self.sync_builtin()
         self.edo_warn()
@@ -545,11 +547,16 @@ class Playback:
                 return out
             if out is not None:  # (the soundfonts / settings changed meanwhile: started again with them)
                 out.close()
-        self.busy(tr("app.opening_kestrel"))  # (seconds the first time: Kestrel reads the whole soundfonts)
+        loaded = kestrel.kept_for(fonts)
+        if loaded is None:  # (it would read for seconds: never on the window's thread, e.g. an Hz window key; hunt
+            # 2026-10-29: it froze the window and read beside a start already on its way)
+            if self._kestrel_job is None:
+                self.kestrel_first(False, play=False)
+            raise SynthError("ks.still_starting")
+        self.busy(tr("app.opening_kestrel"))
         try:
             if self.synth is None:
                 self.synth = Synth()
-            loaded = kestrel.loaded_for(fonts)  # (kept: a setting change opens on it in a moment)
             top = loaded.voices_top(self.kestrel_opts["block"])
             if top is not None and top < self.kestrel_opts["voices"]:
                 self.kestrel_lowered(top)  # (before opening: never a refused open first)
@@ -575,11 +582,11 @@ class Playback:
         self.on_kestrel_opt("voices")
         messagebox.showinfo(tr("app.spiderweb_2"), tr("ks.voices_lowered", n=f"{top:,}"), parent=self)
 
-    def kestrel_first(self, keep):
+    def kestrel_first(self, keep, play=True):
         """Kestrel (GPU) started on a thread for a play, a small window saying so meanwhile (user 2026-10-27: the
         first Play froze the window for seconds, the status line was easy to miss); it closes and playing starts
-        once Kestrel is ready. Play again / the window's X while it starts = that play is off (Kestrel still starts,
-        kept open for the next one)."""
+        once Kestrel is ready (play False: only opened). Play again / the window's X while it starts = that play is
+        off (Kestrel still starts, kept for the next one; a new start waits for it: files.kestrel one at a time)."""
         import tkinter as tk
         from tkinter import ttk
         from files import kestrel
@@ -608,7 +615,7 @@ class Playback:
         bar = ttk.Progressbar(box, mode="indeterminate", length=280)
         bar.pack(fill="x", pady=(10, 0))
         bar.start(15)
-        job = self._kestrel_job = {"play": True, "win": win, "out": None, "err": None, "gone": False,
+        job = self._kestrel_job = {"play": play, "win": win, "out": None, "err": None, "gone": False,
                                    "began": time.perf_counter()}
 
         def closed():  # (X = this start given up: Play starts another; it never swallowed every later Play, hunt)
@@ -630,7 +637,10 @@ class Playback:
             self.midi_device.set(BUILTIN)
             self.start_play(keep)
         ttk.Button(buttons, text=tr("ks.use_builtin"), command=use_builtin).pack(side="left", padx=(0, 6))
-        ttk.Button(buttons, text=tr("ks.keep_waiting"), command=lambda: slow.pack_forget()).pack(side="left")
+        def keep_waiting():  # (an answer: no "timed out" later, hunt 2026-10-29)
+            job["waiting"] = True
+            slow.pack_forget()
+        ttk.Button(buttons, text=tr("ks.keep_waiting"), command=keep_waiting).pack(side="left")
         win.update_idletasks()  # (over the middle of the main window)
         x = self.winfo_rootx() + (self.winfo_width() - win.winfo_reqwidth()) // 2
         y = self.winfo_rooty() + (self.winfo_height() - win.winfo_reqheight()) // 3
@@ -663,17 +673,21 @@ class Playback:
                 if waited > SLOW_START_S and not job.get("slow") and win.winfo_exists():
                     job["slow"] = True
                     slow.pack(fill="x")
-                if waited > STUCK_START_S:  # (the backstop: nobody answered, the start is given up)
+                if waited > STUCK_START_S and not job.get("waiting"):  # (the backstop: nobody answered, given up)
                     closed()
                     self.kestrel_failed(SynthError("playback.kestrel_failed", err="timed out"), play=False)
+                    self.after(500, done)  # (its synth closed when it comes: never left running unseen)
                     return
                 self.after(30, done)
                 return
             if job["gone"]:  # (given up: a start still on its way is closed when it ends)
                 if thread.is_alive():
                     self.after(500, done)
-                elif job["out"] is not None:
+                    return
+                if job["out"] is not None:
                     job["out"].close()
+                if self.midi_device.get() != KESTREL:  # (Use Built-in BASSMIDI / another out: what it loaded too)
+                    kestrel.let_go()
                 return
             self._kestrel_job = None
             if win.winfo_exists():
@@ -683,10 +697,16 @@ class Playback:
                     job["out"].close()
                 kestrel.let_go()  # (what it loaded meanwhile too)
                 return
-            if job["err"] is not None and font_list(self.hz_preview) != fonts:
-                # (the soundfonts changed while it started, its loaded set let go: started again with the new ones)
+            if job["err"] is not None and (getattr(job["err"], "cancelled", False)
+                                           or font_list(self.hz_preview) != fonts):
+                # (the soundfonts changed while it started, it gave up: started again with the new ones)
                 if job["play"]:
                     self.kestrel_first(keep)
+                return
+            if job["out"] is not None and self.out.handle is not None and self.out.name == KESTREL:
+                job["out"].close()  # (opened meanwhile another way: one Kestrel, never a second one left open)
+                if job["play"] and not self.player.running:
+                    self.start_play(keep)
                 return
             top = job.get("top") or kestrel_voices_top(job["err"])
             if top is not None and top < self.kestrel_opts["voices"]:
@@ -860,10 +880,11 @@ class Playback:
             self.scrub_end()
             self.out.close()
         from files import kestrel  # (Kestrel's kept soundfonts: only ones no longer listed / picked again read anew)
+        kestrel.stop_starts()  # (a start reading the old list: given up, never read again for nothing)
         kestrel.drop_loaded()
         kestrel.forget(keep=font_list(self.hz_preview))
-        if again:
-            kestrel.forget(paths=added or None)
+        if again and added:
+            kestrel.forget(paths=added)
         if getattr(self, "_scrub_side", None) is not None:  # (Kestrel's listening synth: opens them anew)
             self.scrub_end()
             self._scrub_side.close()

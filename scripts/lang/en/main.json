@@ -880,6 +880,7 @@
  "ks.use_builtin": "Use Built-in BASSMIDI",
  "ks.pick_out": "Pick another MIDI out…",
  "ks.slow_start": "This is taking longer than usual.",
+ "ks.still_starting": "Kestrel (GPU, Experimental) is still starting…",
  "ks.keep_waiting": "Keep waiting",
  "ks.cancel": "Cancel",
  "ks.keep_title": "Kestrel (GPU, Experimental) read-ahead",
