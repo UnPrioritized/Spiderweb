@@ -294,9 +294,10 @@ def clean_vel(pts):
 
 
 def clean_bend(pts):
-    """A note's own bend line checked (tone["bend"]): [[u, keys(, curve)], ...] in order, u = 0..1 along the note,
-    keys up (below 0: down) as far as NOTE_BEND_MOST, curve = how the piece to the next point bends
-    (-SLIDE_BEND..SLIDE_BEND, hz_lines.bent_part; missing = straight); None when it's no good or empty."""
+    """A note's own bend line checked (tone["bend"]): [[u, keys(, curve(, "s"))], ...] in order, u = 0..1 along the
+    note, keys up (below 0: down) as far as NOTE_BEND_MOST, curve = how the piece to the next point bends
+    (-SLIDE_BEND..SLIDE_BEND, hz_lines.bent_part; missing = straight), "s" = that curve as an S (each half, the
+    Sketch tool's); None when it's no good or empty."""
     most = NOTE_BEND_MOST
     out = []
     try:
@@ -307,6 +308,8 @@ def clean_bend(pts):
                 got = [min(1.0, max(0.0, u)), min(most, max(-most, k))]
                 if curve:
                     got.append(min(SLIDE_BEND, max(-SLIDE_BEND, curve)))
+                    if len(p) > 3 and p[3] == "s":  # (an S: hz_lines.S_CURVE)
+                        got.append("s")
                 out.append(got)
     except (TypeError, ValueError, IndexError):
         return None

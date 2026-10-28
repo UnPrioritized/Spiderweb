@@ -12,7 +12,15 @@ from notes.hz_settings import FAST, LOOP, LOOP_SHAPES
 def bent_part(u, bend):
     """How far along (0..1) the line from a point to the next has come at u (0..1 of the way) with that bend
     (arrays; nan = hold: none of the way until the next point). Bend b puts the middle at (1 + b) / 2 of the way:
-    0 = straight, above 0 = bulging towards the next point's value early, below 0 = late."""
+    0 = straight, above 0 = bulging towards the next point's value early, below 0 = late. S_CURVE + b = an S: that
+    curve on each half, the second turned round (below 0: slow at both ends, like a slide's "double")."""
+    bend = np.asarray(bend, float)
+    double = bend >= S_CURVE - 1.0  # (an S: bend_of's number S_CURVE + b, b's curve on each half)
+    if np.any(double):
+        b = np.where(double, bend - S_CURVE, bend)
+        u = np.asarray(u, float)
+        one = bent_part(np.where(u < 0.5, 2.0 * u, 2.0 - 2.0 * u), b)  # (the second half turned round)
+        return np.where(double, np.where(u < 0.5, 0.5 * one, 1.0 - 0.5 * one), bent_part(u, b))
     m = (1.0 + np.nan_to_num(bend)) / 2.0
     with np.errstate(divide="ignore", invalid="ignore"):
         early = 1.0 - (1.0 - u) ** (np.log(1.0 - m) / np.log(0.5))
@@ -21,9 +29,16 @@ def bent_part(u, bend):
     return np.where(np.isnan(bend), (u >= 1.0).astype(float), out)
 
 
+S_CURVE = 4.0  # bend_of: a point whose piece is an S ([u, value, b, "s"]: a note bend's) = S_CURVE + b
+
+
 def bend_of(p):
-    """A point's bend as a number (nan = hold)."""
-    return (math.nan if p[2] == "hold" else float(p[2])) if len(p) > 2 else 0.0
+    """A point's bend as a number (nan = hold; an S: S_CURVE + its bend, for bent_part)."""
+    if len(p) <= 2:
+        return 0.0
+    if p[2] == "hold":
+        return math.nan
+    return float(p[2]) + (S_CURVE if len(p) > 3 and p[3] == "s" else 0.0)
 
 
 def note_vel(n, beat):
@@ -81,18 +96,19 @@ def bend_part(n, t, span):
         first = int(np.searchsorted(xs, u0, side="right")) - 1  # (the piece the cut starts in; -1: before the line)
         # (the cut's start, every point inside (both of a jump's), its end; each with the curve of the piece after it
         # and True when that piece is a whole one of the line's)
-        nodes = [(u0, at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0, False)]
+        nodes = [(u0, at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0, False, ())]
         inside = [j for j, x in enumerate(xs) if u0 < x < u1]
         for k, j in enumerate(inside):
-            nodes.append((xs[j], pts[j][1], bend_of(pts[j]) if j < len(pts) - 1 else 0.0, k + 1 < len(inside)))
-        nodes.append((u1, at(u1), 0.0, True))
+            nodes.append((xs[j], pts[j][1], bend_of(pts[j]) if j < len(pts) - 1 else 0.0, k + 1 < len(inside),
+                          pts[j][2:] if j < len(pts) - 1 else ()))
+        nodes.append((u1, at(u1), 0.0, True, ()))
         out = []
-        for (a, va, curve, whole), (b, _, _, _) in zip(nodes, nodes[1:]):
+        for (a, va, curve, whole, tail), (b, *_) in zip(nodes, nodes[1:]):
             if curve and not whole and b > a:  # (a curve cut through: sampled)
                 out.append([a, va])
                 out += [[a + (b - a) * i / 8, at(a + (b - a) * i / 8)] for i in range(1, 8)]
             else:
-                out.append([a, va] + ([curve] if curve else []))
+                out.append([a, va] + (list(tail) if curve else []))  # (its own curve, an S too)
         out.append([u1, nodes[-1][1]])
         out = [[(p[0] - u0) / (u1 - u0), *p[1:]] for p in out]
     return out if any(abs(p[1]) > 1e-9 for p in out) else None

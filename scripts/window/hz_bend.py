@@ -22,7 +22,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import fmt
 from notes.hzbass import NOTE_BEND_MOST, SLIDE_BEND, line_at, note_bend, pitch
-from roll.roll_shared import SHIFT
+from roll.roll_shared import ALT, SHIFT
 from window import look
 
 NEAR = 6  # px: a press this near a bend point grabs it
@@ -76,23 +76,36 @@ class HzBend:
 
     def bend_squares(self):
         """[(x, y, tone number, piece number, keys at its start, at its end)]: the curve squares of the notes in view,
-        half way along each piece whose two points differ (Bend tool only). None on a piece bend_most cuts (a point
-        past it: the square would sit where the clipped line isn't, and a nudge would bend it a lot)."""
-        if not self.bending() or self.sketching():  # (Sketch: a press there holds the piece; curves come with Alt)
+        half way along each piece whose two points differ (an S: a quarter of the way). None on a piece bend_most
+        cuts (a point past it: the square would sit where the clipped line isn't, and a nudge would bend it a lot).
+        Sketch tool (user 2026-10-28): only on curved pieces, on every piece while Alt is held (sketch_alt)."""
+        if not self.bending():
             return []
-        most, out = self.bend_most(), []
+        out = []
         for i, j in {(i, j) for _, _, i, j in self.bend_points()}:
-            n = self.tones[i]
-            pts = n.get("bend") or ()
-            if j + 1 >= len(pts):
+            pts = self.tones[i].get("bend") or ()
+            if self.sketching() and not self.sketch_alt and not (j + 1 < len(pts) and len(pts[j]) > 2):
                 continue
-            (u0, k0), (u1, k1) = pts[j][:2], pts[j + 1][:2]
-            x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
-            if abs(k1 - k0) < 1e-9 or x1 - x0 < SQUARE_ROOM * self.s or max(abs(k0), abs(k1)) > most + 1e-9:
-                continue
-            k = float(line_at(pts, (u0 + u1) / 2))
-            out.append(((x0 + x1) / 2, self.pitch_y(pitch(n) + k), i, j, k0, k1))
+            q = self.piece_square(i, j)
+            if q:
+                out.append(q)
         return out
+
+    def piece_square(self, i, j):
+        """(x, y, i, j, keys at its start, at its end): where piece j of note i's bend line has its curve square, or
+        None when it has none (no such piece, its two points alike, too narrow, past bend_most)."""
+        n = self.tones[i]
+        pts = n.get("bend") or ()
+        if j + 1 >= len(pts):
+            return None
+        (u0, k0), (u1, k1) = pts[j][:2], pts[j + 1][:2]
+        x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
+        most = self.bend_most()
+        if abs(k1 - k0) < 1e-9 or x1 - x0 < SQUARE_ROOM * self.s or max(abs(k0), abs(k1)) > most + 1e-9:
+            return None
+        at = 0.25 if len(pts[j]) > 3 and pts[j][3] == "s" else 0.5  # (an S: its first half's middle, like a slide)
+        k = float(line_at(pts, u0 + (u1 - u0) * at))
+        return x0 + (x1 - x0) * at, self.pitch_y(pitch(n) + k), i, j, k0, k1
 
     def bend_hit(self, x, y):
         """What the Bend tool would take at (x, y): ("point", tone, point number), ("curve", tone, piece number) a
@@ -153,8 +166,8 @@ class HzBend:
         self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before)))
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
-        if hit[0] == "note" and self.sketching():  # (Sketch: the piece is held, sketch_piece; a point is added by a
-            return self.sketch_piece(e, i, before)  # double-click, sketch_double)
+        if hit[0] == "note" and self.sketching():  # (Sketch: the piece is held, sketch_piece, Alt: curved,
+            return self.sketch_piece(e, i, before)  # sketch_curve; a point is added by a double-click, sketch_double)
         if hit[0] == "end":  # (Sketch's ">": the note's length, sketch_end_to)
             self.drag = {"kind": "sketchend", "i": i, "before": before, "orig": copy.deepcopy(self.tones), "x": e.x,
                          "y": e.y, "moved": False, "name": tr("hz.step_length")}
@@ -203,13 +216,15 @@ class HzBend:
             _, sy, _, j, k0, k1 = d["square"]
             y = sy + e.y - d["y"]
             part = (self.top + 0.5 - (y - self.ruler_h) / self.sy - pitch(n) - k0) / (k1 - k0)  # (pitch_y turned round)
-            straight = self.pitch_y(pitch(n) + (k0 + k1) / 2)
             p = n["bend"][j]
+            s = d.setdefault("s", len(p) > 3 and p[3] == "s")  # (an S stays one: its square a quarter of the way,
+            at = 0.25 if s else 0.5                              # where it's (1 + b) / 4 up)
+            straight = self.pitch_y(pitch(n) + k0 + (k1 - k0) * at)
             del p[2:]
             if abs(y - straight) > BEND_STICK * self.s or e.state & SHIFT:  # (else it sticks to straight)
-                b = min(SLIDE_BEND, max(-SLIDE_BEND, 2.0 * part - 1.0))
+                b = min(SLIDE_BEND, max(-SLIDE_BEND, (4.0 if s else 2.0) * part - 1.0))
                 if b:
-                    p.append(b)
+                    p += [b, "s"] if s else [b]
             self.redraw()
             return True
         pts, j = n["bend"], d["j"]
@@ -278,6 +293,9 @@ class HzBend:
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
+        if hit and hit[0] == "curve" and self.sketching():  # (Sketch: Single curve / S-curve / Straight)
+            self.sketch_curve_menu(e, hit[1], hit[2])
+            return True
         if not hit or hit[0] != "point":
             return False
         if self.sketching() and hit[2] in (0, len(self.tones[hit[1]].get("bend") or "..") - 1):  # (Sketch: its start
@@ -295,6 +313,7 @@ class HzBend:
         empty space)."""
         if not self.bending():
             return False
+        self.sketch_alt_to(e.state & ALT)
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False

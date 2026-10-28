@@ -10,12 +10,13 @@ those are the red line's), with a dot at its start and end, a small ">" after it
 dashed line at its own key."""
 
 import copy
+import tkinter as tk
 
 import numpy as np
 
 from files.lang import tr
 from notes.hzbass import bend_part, line_at, pitch
-from roll.roll_shared import SHIFT, note_name
+from roll.roll_shared import ALT, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR
 
@@ -26,8 +27,43 @@ HOLD_MS = 300  # a press on a line held still this long grabs the whole note (sk
 
 
 class HzSketch:
+    sketch_alt = False  # (Alt held: every piece shows its curve square, hz_bend.bend_squares)
+
     def sketching(self):
         return self.tool.get() == "sketch"
+
+    def sketch_alt_to(self, held):
+        """Alt pressed / let go (a key or the mouse's state): the squares shown on every piece while it's held."""
+        if bool(held) != self.sketch_alt:
+            self.sketch_alt = bool(held)
+            if self.sketching() and not self.drag:
+                self.redraw()
+
+    def sketch_curve_menu(self, e, i, j):
+        """Right-click on piece j's curve square (note i): Single curve / S-curve (like a slide's) and Straight."""
+        p = self.tones[i]["bend"][j]
+        kind = tk.StringVar(self, value="double" if len(p) > 3 and p[3] == "s" else "single")
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_radiobutton(label=tr("hz.curve_single"), variable=kind, value="single",
+                             command=lambda: self.sketch_curve_kind(i, j, False))
+        menu.add_radiobutton(label=tr("hz.curve_double"), variable=kind, value="double",
+                             command=lambda: self.sketch_curve_kind(i, j, True))
+        menu.add_command(label=tr("hz.sketch_straight"), command=lambda: self.sketch_curve_kind(i, j, None))
+        menu.kind = kind  # (kept while the menu shows)
+        menu.tk_popup(e.x_root, e.y_root)
+
+    def sketch_curve_kind(self, i, j, s):
+        """Piece j of note i: an S (s True), one curve (False), straight (None). One undo step."""
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        p = self.tones[i]["bend"][j]
+        if s is None:
+            del p[2:]
+        else:
+            del p[3:]
+            if s and len(p) > 2:
+                p.append("s")
+        self.bend_done({"i": i, "before": before}, tr("hz.step_note_bend_curve"))
 
     def sketch_new_to(self, d, n, e):
         """A new note being drawn (drag d, note n): it starts where the press was and ends at the grid line nearest
@@ -82,6 +118,13 @@ class HzSketch:
         n = self.tones[i]
         pts = n.get("bend")
         u = min(1.0, max(0.0, (self.beat_at(e.x) - n["t"]) / max(n["len"], 1e-12)))
+        if e.state & ALT:  # (Alt: the piece curved, like its square dragged; a flat / jump piece: nothing to curve)
+            square = self.piece_square(i, min(len(pts) - 2, max(0, sum(p[0] <= u for p in pts) - 1))) if pts else None
+            if square:
+                self.drag = {"kind": "bendcurve", "i": i, "j": square[3], "before": before, "x": e.x, "y": e.y,
+                             "moved": False, "square": square, "name": tr("hz.step_note_bend_curve")}
+            self.redraw()
+            return True
         j = None if not pts or len(pts) <= 2 else min(len(pts) - 2, max(0, sum(p[0] <= u for p in pts) - 1))
         d = self.drag = {"kind": "sketchpiece", "i": i, "j": j, "before": before, "x": e.x, "y": e.y, "moved": False,
                          "orig": copy.deepcopy(pts), "key": n["key"],
