@@ -654,12 +654,13 @@ def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled, ghost):
         tfilled[k] = 0
 
 
-def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=(), took=None, loud=False):
+def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=(), took=None, loud=False, only=None):
     """(tab, marks) of every note on screen: tracks (numbers, the one drawn on top first; default all, the last
     track on top), read from their checkpoints before the view. None if stopped. took = [bytes read] (added to).
-    loud: louder notes on top (Settings → Look; each track painted alone, then merge_loud)."""
+    loud: louder notes on top (Settings → Look; each track painted alone, then merge_loud). only = {track: channel}:
+    those tracks read with that channel alone (the others left out as if not there)."""
     if loud:
-        return loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took)
+        return loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took, only)
     fast = speed.loops()
     t0 = int(np.floor((-0.5 - bx) / ax))
     t1 = int(np.ceil((W + 0.5 - bx) / ax))
@@ -671,7 +672,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     if lm.mode != "memory" and not still_same(lm):
         return None, None
     covered = []  # (tracks whose every row is painted already: they only shade, read on other cores)
-    rd = TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint)
+    rd = TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint, only)
     try:
         for n in order:
             if stop():
@@ -695,7 +696,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     return tab, marks
 
 
-def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took):
+def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took, only=None):
     """exact_tab with louder notes on top: each track painted alone into its own tables, then merged in. Blocks of
     neighbouring tracks (about the same bytes each) merged on several cores, the blocks then merged in order (the
     same picture: merging is the same in any grouping, kept in track order)."""
@@ -715,7 +716,7 @@ def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took):
         blocks = [b for b in np.split(np.array(busy, np.int64), cut) if len(b)]
     else:
         blocks = [busy]
-    readers = [TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint) for _ in blocks]
+    readers = [TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint, only) for _ in blocks]
     made = [None] * len(blocks)
     bad = []
 
@@ -778,7 +779,8 @@ def read_covered(lm, covered, first, tab, marks, stop):
             if stop() or not rd.read(n, tab, full, dummy, own):
                 bad.append(True)
                 return
-    readers = [first] + [TrackReader(lm, first.ax, first.bx, W, first.k_lo, first.t0, first.t1, first.faint)
+    readers = [first] + [TrackReader(lm, first.ax, first.bx, W, first.k_lo, first.t0, first.t1, first.faint,
+                                     first.only)
                          for _ in range(n_threads - 1)]
     owns = [marks] + [np.zeros_like(marks) for _ in range(n_threads - 1)]
     threads = [threading.Thread(target=work, args=(rd, own), daemon=True, name="loaded notes")
@@ -804,8 +806,9 @@ class TrackReader:
     """One track at a time painted into an exact picture's tables (cover from its checkpoint before t0), with its
     own scratch arrays and file handle, so several can read side by side."""
 
-    def __init__(self, lm, ax, bx, W, k_lo, t0, t1, faint):
+    def __init__(self, lm, ax, bx, W, k_lo, t0, t1, faint, only=None):
         self.lm, self.ax, self.bx, self.W, self.k_lo, self.t0, self.t1, self.faint = lm, ax, bx, W, k_lo, t0, t1, faint
+        self.only = only or {}  # {track: the one channel read} (exact_tab)
         fast = speed.loops()
         self.cover = fast.midi_cover if fast else midi_index.cover
         self.cnt_q, self.first_q, self.vel_q = np.zeros(QS, np.int64), np.zeros(QS, np.int64), np.zeros(QS, np.int64)
@@ -859,6 +862,8 @@ class TrackReader:
         moved = lm.rechannel
         if moved is not None and n < len(moved) and moved[n] >= 0:  # (Track Properties' channel: every note on it)
             colour = colour[np.full(16, moved[n])]
+        if n in self.only:  # (one channel alone: the others' spans left out, midi_index.cover)
+            colour = np.where((np.arange(16) == self.only[n])[:, None], colour, -1)
         args =(self.ax, self.bx, self.W, self.k_lo, colour, tab, nx, filled, marks, self.sq, self.sa, self.sb, self.sv)
         p = self.cover(b, 0, len(b), start, skip, st, cnt_q, first_q, vel_q, t1, -1, *args)
         close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)

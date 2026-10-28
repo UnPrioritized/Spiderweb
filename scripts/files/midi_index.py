@@ -317,7 +317,8 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
     marks: 1 = a note starts at that pixel, 2 = a span ends there, 4 = a hidden note starts / ends there (under a
     track above, or one of a stack ending while the key sounds on). Pixel x of tick t = round(t * ax + bx).
     Reads up to tick t1; close_at >= 0 = the end: what still sounds is painted up to that tick. b[0] = the track's
-    byte base; skip = its hidden events (Extract, midi_scan). Returns where it stopped in b."""
+    byte base; skip = its hidden events (Extract, midi_scan). Returns where it stopped in b. A colour < 0 = that
+    channel's spans left out (not painted, not covering anything)."""
     tick = st[C_TICK]
     run = st[C_RUN]
     si = st[C_SKIP]
@@ -444,6 +445,8 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
             if xb > W:
                 xb = W
             code = colour[qq >> 8, min(sv[i], 127) // 4]
+            if code < 0:  # (a channel left out: one channel of a track read alone, the track list's sub-rows)
+                continue
             x = xa
             last = -1
             while True:
