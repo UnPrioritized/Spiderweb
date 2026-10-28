@@ -908,8 +908,30 @@ class Playback:
         self.kestrel_opts[key] = v
         if key == "lower" and self.out.name == KESTREL and self.out.handle:
             self.out.handle.k.set_lower(v)
+        elif self.out.name == KESTREL and self.player.running:
+            self.kestrel_again()
         errors.note("Kestrel (GPU)", ", ".join(f"{k} {v}" for k, v in self.kestrel_opts.items()))
         self.schedule_autosave()
+
+    def kestrel_again(self):
+        """A Kestrel row changed while it plays (hunt 2026-10-28, user: they never took effect until the next Play):
+        playing started again from the line, Kestrel opened with the new settings (its small window, a few seconds).
+        A number box's label drag: once it's let go (else a restart at every step)."""
+        job = getattr(self, "_again_job", None)
+        if job is not None:
+            self.after_cancel(job)
+        self._again_job = None
+        if getattr(self, "scrubbing", False) or getattr(self, "held_scrub", None) is not None:
+            self._again_job = self.after(150, self.kestrel_again)
+            return
+        if self.out.name != KESTREL or not self.player.running:
+            return
+        live = self.out.handle
+        if live is not None and _same_opts(live.opts, self.kestrel_opts):
+            return
+        self.stop_play()
+        self.status.config(text=tr("ks.restarting"))
+        self.start_play(keep=True)
 
     def take_kestrel_opts(self, opts):
         """The saved Kestrel settings (autosave window / settings.ini), each checked; wrong ones = defaults."""
