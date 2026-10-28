@@ -369,7 +369,7 @@ class HzBend:
         bass; it stretches to each note), Clear bend."""
         sub = tk.Menu(menu, tearoff=0)
         picked = sorted(self.sel) if i in self.sel else [i]
-        own = next((j for j in [i] + picked if self.tones[j].get("bend")), None)
+        own = next((j for j in [i] + picked if bends(self.tones[j])), None)
         sub.add_command(label=tr("hz.bend_copy"), command=lambda: self.copy_bend(own),
                         state="normal" if own is not None else "disabled")
         sub.add_command(label=tr("hz.bend_paste"), command=lambda: self.set_bends(picked, self.app.hz_bend_clip,
@@ -377,7 +377,7 @@ class HzBend:
                         state="normal" if self.app.hz_bend_clip else "disabled")
         sub.add_command(label=tr("hz.bend_clear"), command=lambda: self.set_bends(picked, None,
                                                                                    tr("hz.step_note_bend_clear")),
-                        state="normal" if any(self.tones[j].get("bend") for j in picked) else "disabled")
+                        state="normal" if any(bends(self.tones[j]) for j in picked) else "disabled")
         sub.add_separator()
         for kind in SHAPES:
             sub.add_command(label=tr(f"hz.bend_{kind}"),
@@ -386,21 +386,29 @@ class HzBend:
         menu.bend_sub = sub  # (kept while the menu shows)
 
     def copy_bend(self, i):
-        self.app.hz_bend_clip = copy.deepcopy(self.tones[i].get("bend"))
+        """Note i's bend line and wobbles kept in app.hz_bend_clip ({"bend", "wobble"}: both stretch to a note
+        pasted on, the wobbles' speed stays per beat)."""
+        self.app.hz_bend_clip = copy.deepcopy({f: self.tones[i][f] for f in ("bend", "wobble") if self.tones[i].get(f)})
         self.say(tr("hz.bend_copied"))
 
     def set_bends(self, picked, pts, name):
         """The notes numbered `picked` get bend line pts (None: none; a SHAPES name: that shape, made for each note's
-        length), one undo step."""
+        length; a copy_bend clip: its line and wobbles), one undo step. Their wobbles go with the old line."""
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
         for j in picked:
             n = self.tones[j]
-            if pts:
-                n["bend"] = shaped(pts, n["len"]) if pts in SHAPES else copy.deepcopy(pts)
-                tidy_bend(n)
+            n.pop("wobble", None)
+            if isinstance(pts, list):  # (a clip from before wobbles: the line alone)
+                pts = {"bend": pts}
+            if pts in SHAPES:
+                n["bend"] = shaped(pts, n["len"])
+            elif pts:
+                n.pop("bend", None)
+                n.update(copy.deepcopy(pts))
             else:
                 n.pop("bend", None)
+            tidy_bend(n, self.sketching())
         if self.tones != before:
             self.commit(name, before)
 
