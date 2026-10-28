@@ -597,10 +597,12 @@ def in_part(u, part):
     return (u >= a) & (u < b) if b is not None else u >= a
 
 
-def cut_through(whole, raw, spots, tracks, part, ppq):
+def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
     """A line piece's notes (the whole's, before its part is kept): the note sounding at each of the piece's cuts is
     cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
-    before keeps the first half and the piece after starts with the second (same key and colour)."""
+    before keeps the first half and the piece after starts with the second (same key and colour).
+    came: "Notes by snap" steps, the line note each came from (start, end): the steps of the line note sounding at
+    the cut that start after it go to the piece after (they all share that note's spot)."""
     paths = paths_of(whole)
     for c in sorted(u for u in part if u):
         k = int(c // BIG)
@@ -611,6 +613,11 @@ def cut_through(whole, raw, spots, tracks, part, ppq):
         i = max(0, min(int(r), len(a) - 2))
         beat, key = a[i] + (a[i + 1] - a[i]) * (r - i)
         t = int(round(float(beat) * ppq))
+        if came is not None:
+            over = (spots < c) & (came[:, 0] < t) & (came[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
+            if over.any():
+                spots = spots.copy()
+                spots[over & (spots == spots[over].max()) & (raw[:, 0] >= t)] = c
         hit = (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
         if not hit.any():
             continue
@@ -620,6 +627,8 @@ def cut_through(whole, raw, spots, tracks, part, ppq):
         raw = np.concatenate([raw, second])
         raw[j, 1] = t
         spots = np.append(spots, c)
+        if came is not None:
+            came = np.concatenate([came, came[j:j + 1]])
         if tracks is not None:
             tracks = np.append(tracks, tracks[j])
     return raw, spots, tracks

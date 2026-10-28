@@ -48,7 +48,7 @@ from notes.recolour import box_of, clean_recolour, is_recoloured, recoloured, ru
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
-from notes.paths import dedupe, dot_segment_notes, path_notes
+from notes.paths import dedupe, dot_segment_notes, path_notes, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
 from notes.custom import ROUND, frame_upright, notes_resampled, pack_notes, path_colours
 from notes.picture import clean_picture, turned_notes
@@ -205,6 +205,18 @@ def merges_unmade():
         _unmade.on = kept
 
 
+BY_SNAP_MOST = 10 ** 4  # the longest "Notes by snap" step, beats
+
+
+def clean_by_snap(v):
+    """A "Notes by snap" step length (beats) from a file, or None (off / unusable)."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return min(v, BY_SNAP_MOST) if math.isfinite(v) and v > 0 else None
+
+
 def clean_shape(sh):
     """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support or has a number that
     can't be used."""
@@ -234,6 +246,9 @@ def clean_shape(sh):
     tm = clean_tumour(sh.get("tumour")) if out["kind"] in LINE_KINDS else None
     if tm:
         out["tumour"] = tm
+    st = clean_by_snap(sh.get("by_snap")) if out["kind"] in LINE_KINDS else None
+    if st:  # "Notes by snap": every note one step long, in beats (paths.snap_steps)
+        out["by_snap"] = st
     bt = clean_between(sh.get("between")) if out["kind"] in BETWEEN_KINDS else None
     if bt:  # one of an Add between group (between.py)
         out["between"] = bt
@@ -1110,7 +1125,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         return voiced_notes(sh, ppq, keys)
     if sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("layers"):
         return layered_notes(sh, ppq, keys)
-    end_dot = sh.get("end_dot", False)
+    by_snap = sh.get("by_snap") if sh["kind"] in LINE_KINDS else None  # ("Notes by snap": one step each, paths.py)
+    end_dot = sh.get("end_dot", False) and not by_snap
     piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
     vel_sh = sh  # (whose velocities, over whose time)
     if piece:  # cut from another shape (sliced.py): its notes are made as that one's, then its own part kept
@@ -1127,8 +1143,14 @@ def _kind_notes_tracks(sh, ppq, keys):
     own = None  # pasted notes' own velocities and tracks
     groups = None  # a custom shape made of other shapes (convert.py): which of them each note came from
     spots = None  # a piece's: where on the whole's path each note starts
+    came = None  # a piece's stepped notes: the line note each came from (start, end), for its cuts
     if piece:
         raw, spots = spotted_notes(sh, ppq, end_dot)
+        if by_snap:  # (the whole's steps, from the whole's start)
+            start = float(np.concatenate(cached_arrays(sh))[:, 0].min()) * ppq
+            raw = note_array(raw, 3)
+            got, src = snap_steps(raw, by_snap * ppq, int(np.floor(start + 0.5)))
+            raw, spots, came = got, spots[src], raw[src, :2]
     elif sh["kind"] == "custom" and "notes" in sh:
         # (a merged shape turned / slanted / stretched: its parts the same way, merged again; else a turned / skewed
         # picture or merged shape: each key row sampled across it, not its notes tilted)
@@ -1171,6 +1193,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = dot_segment_notes(path)
     else:
         raw = path_notes(path, end_dot)
+    if by_snap and not piece:
+        raw = snap_steps(note_array(raw, 3), by_snap * ppq, int(np.floor(float(path[:, 0].min()) + 0.5)))[0]
     t_lo = float(path[:, 0].min())
     t_hi = float(path[:, 0].max())
     if grows_free(vel_sh):  # (Ripples rings past the drawing: the velocity line runs over them, velocity.time_span)
@@ -1194,7 +1218,8 @@ def _kind_notes_tracks(sh, ppq, keys):
             tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
         if sh.get("glue") or sh.get("fx"):  # the whole's glue / note tool pages first, on all its notes (sliced.py)
             raw, spots, tracks = whole_tools(sh, raw, spots, tracks, ppq)
-        raw, spots, tracks = cut_through(sh, raw, spots, tracks, part, ppq)
+            came = None  # (the pages' notes aren't the steps any more)
+        raw, spots, tracks = cut_through(sh, raw, spots, tracks, part, ppq, came)
         mine = in_part(spots, part)
         raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
         if knife:

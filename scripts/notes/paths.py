@@ -306,6 +306,42 @@ def parts_notes(r, first, tails, counts=False, spot=None):
     return out if len(out) > 1 else notes
 
 
+def snap_steps(notes, step, origin):
+    """
+    "Notes by snap" (a line's notes made a staircase on a grid, a user's request): line notes (start, end, key) ->
+    every note exactly one step long, on steps of `step` ticks counted from tick `origin` (the line's start), and
+    which line note each came from. A key goes into the step where the line reaches it (2.5 keys a step = 2, 3, 2,
+    3); a key the line stays on gets one note in every later step it covers wholly, and the line's last key also in
+    the step it ends partway through (user: the last note gets the full step). Same key + step twice = once.
+    """
+    notes = np.asarray(notes, np.int64).reshape(-1, 3)
+    if not len(notes):
+        return notes, np.zeros(0, np.int64)
+    s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
+
+    def edge(j):  # tick where step j starts
+        return origin + np.floor(j * step + 0.5).astype(np.int64)
+
+    def step_of(x):  # the step tick x is in
+        j = np.floor((x - origin) / step).astype(np.int64)
+        j -= edge(j) > x
+        j += edge(j + 1) <= x
+        return j
+
+    # the line goes on from a note's end when the next key's note starts there (crossings go one key at a time)
+    code = s * 4096 + (k + 1024)
+    goes_on = np.isin(e * 4096 + (k + 1025), code) | np.isin(e * 4096 + (k + 1023), code)
+    first = step_of(s)
+    last = np.maximum(first, np.where(goes_on, step_of(e) - 1, step_of(np.maximum(e - 1, s))))
+    n = last - first + 1
+    src = np.repeat(np.arange(len(notes)), n)
+    j = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    out = np.column_stack([edge(j), edge(j + 1), k[src]])
+    _, once = np.unique(out[:, [0, 2]], axis=0, return_index=True)
+    once = np.sort(once)
+    return out[once], src[once]
+
+
 def dot_segment_notes(path, where=False):
     """
     Polyline with "starts exactly on the last point": every segment works like its own line,
