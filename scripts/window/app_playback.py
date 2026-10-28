@@ -218,8 +218,7 @@ class Playback:
                 self._ahead_job = self.after(1000, self.watch_ahead)
         tl = self.track_list
         lp = self.loaded_play = LoadedPlayer(self.loaded, self.player, self.out, sinks, kind,
-                                             muted=lambda: [-1 - s for s in tl.muted_tracks() if s < 0]
-                                             + [(-1 - s, c) for s, c in tl.muted_chans() if s < 0])
+                                             muted=tl.loaded_mutes)
         if gate is None:
             self.player.ready = lp.ready
         else:  # (the line already waits on gate: opened once this one's first notes are read, or it's stopped)

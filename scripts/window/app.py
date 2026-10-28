@@ -28,7 +28,7 @@ from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
-from files.own_tracks import FILE0, HAND, file_order, from_rows, full_plan, into_ids, new_id, next_channel
+from files.own_tracks import FILE0, HAND, file_order, key_track, from_rows, full_plan, into_ids, new_id, next_channel
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -2063,7 +2063,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         slots, filled = track_slots(rendered, self.pad_tracks(), self.least_tracks()), np.unique(rendered[:, 4])
         # (every row: an automatic slot s as -1 - s, yours by id, a loaded MIDI's track n as FILE0 + n; group D)
         files = self.file_tracks()
-        rows = [(-1 - r if r >= 0 else FILE0 - 1 - r) if type(r) is int else r["id"]
+        rows = [(-1 - r if r >= 0 else FILE0 + key_track(-1 - r)) if type(r) is int else r["id"]  # (a part: its track)
                 for r in full_plan(self.file_rows(), slots, own, filled)]
         inserted = []
 
@@ -2250,7 +2250,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if own is not None:
             return own["id"]
         if s < 0:
-            n, lm = -1 - s, self.loaded
+            n, lm = tl.file_part(s)[0], self.loaded  # (a part: its track, PLAN #11 D)
             whole = lm is None or n >= len(lm.mf.tracks) or lm.mf.tracks[n].whole
             return FILE0 + n if whole and n in self.file_tracks() else None
         return -1 - s if s < HAND else None
@@ -2278,7 +2278,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return True
         sh["into"] = [target]
         sh["into_new"] = True  # (its colours go down the rows like Domino's paste: fit_into)
-        ch = self.track_list.shown_ch()  # (a folder's "Ch n" row highlighted: on that channel there, check-in C)
+        tl = self.track_list
+        ch = tl.shown_ch()  # (a folder's "Ch n" row highlighted: on that channel there, check-in C)
+        if ch is None and tl.current is not None and tl.current < 0 and tl.file_part(tl.current)[1] is not None:
+            ch = tl.part_channel(tl.current)  # (a loaded track's part: on its channel, PLAN #11 D)
         if ch is not None and target >= 0:
             sh["into_ch"], sh["into_home"] = [ch], [target]
         return False

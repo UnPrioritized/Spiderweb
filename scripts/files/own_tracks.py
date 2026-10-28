@@ -18,7 +18,7 @@ FILE_MOST = FILE0 + COUNT_MOST  # into entries below this
 # a PART of loaded track n (PLAN #11 D, user 2026-10-28: its channels pulled out, the notes stay the file's): its
 # place in file_order n + PART * (part id + 1), its track list id -1 - that (the track's own row keeps -1 - n)
 PART = 1 << 20
-PARTS_MOST = 15  # parts of one track at most (16 channels)
+PARTS_MOST = 16  # parts of one track at most (16 channels: its own row may keep none)
 
 
 def clean_name(text):

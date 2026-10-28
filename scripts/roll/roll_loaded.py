@@ -430,12 +430,16 @@ def loud_on(app):
 
 def shown_only(app, lm):
     """((track number, channel),) when the track list highlights one channel of a loaded track (a folder's sub-row,
-    user 2026-10-28: the piano roll shows just it), else ()."""
+    user 2026-10-28: the piano roll shows just it), or a PART / a track with parts (PLAN #11 D: (track number, its
+    channels as a frozenset)), else ()."""
     tl = getattr(app, "track_list", None)
-    ch = tl.shown_ch() if tl is not None else None
-    if ch is None or tl.current >= 0 or -tl.current - 1 >= len(lm.tracks):
+    if tl is None or tl.current is None or tl.current >= 0:
         return ()
-    return ((-tl.current - 1, ch),)
+    n, chs = tl.file_part(tl.current)
+    ch = tl.shown_ch()
+    if n >= len(lm.tracks) or (ch is None and chs is None):
+        return ()
+    return ((n, ch if ch is not None else next(iter(chs)) if len(chs) == 1 else chs),)
 
 
 def style_only(style):
@@ -451,8 +455,9 @@ def shown_tracks(app, lm):
     if tl is None or tl.current is None:
         return None, frozenset()
     shown = tl.shown_slots()
-    faint = sorted((-s - 1 for s in shown if s < 0 and s != tl.current), reverse=True)
-    order = ([-tl.current - 1] if tl.current < 0 else []) + faint
+    top = tl.file_part(tl.current)[0] if tl.current < 0 else None  # (a part: its track, PLAN #11 D)
+    faint = sorted({tl.file_part(s)[0] for s in shown if s < 0 and s != tl.current} - {top}, reverse=True)
+    order = ([top] if top is not None else []) + faint
     order = tuple(n for n in order if n < len(lm.tracks))
     return order, frozenset(n for n in faint if n < len(lm.tracks))
 
@@ -826,7 +831,7 @@ class TrackReader:
 
     def __init__(self, lm, ax, bx, W, k_lo, t0, t1, faint, only=None):
         self.lm, self.ax, self.bx, self.W, self.k_lo, self.t0, self.t1, self.faint = lm, ax, bx, W, k_lo, t0, t1, faint
-        self.only = only or {}  # {track: the one channel read} (exact_tab)
+        self.only = only or {}  # {track: the one channel read, or a frozenset of them (a part)} (exact_tab)
         fast = speed.loops()
         self.cover = fast.midi_cover if fast else midi_index.cover
         self.cnt_q, self.first_q, self.vel_q = np.zeros(QS, np.int64), np.zeros(QS, np.int64), np.zeros(QS, np.int64)
@@ -881,7 +886,9 @@ class TrackReader:
         if moved is not None and n < len(moved) and moved[n] >= 0:  # (Track Properties' channel: every note on it)
             colour = colour[np.full(16, moved[n])]
         if n in self.only:  # (one channel alone: the others' spans left out, midi_index.cover)
-            colour = np.where((np.arange(16) == self.only[n])[:, None], colour, -1)
+            want = self.only[n]
+            colour = np.where(np.isin(np.arange(16), list(want) if isinstance(want, frozenset) else [want])[:, None],
+                              colour, -1)
         args =(self.ax, self.bx, self.W, self.k_lo, colour, tab, nx, filled, marks, self.sq, self.sa, self.sb, self.sv)
         p = self.cover(b, 0, len(b), start, skip, st, cnt_q, first_q, vel_q, t1, -1, *args)
         close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)

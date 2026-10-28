@@ -21,7 +21,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
-from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, add_tracks, among_file, clean_file_order, clean_name, file_order, from_rows, full_plan, into_ids, move_rows, ordered,
+from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, PART, add_tracks, key_part, key_track, part_key, part_keys, among_file, clean_file_order, clean_name, file_order, from_rows, full_plan, into_ids, move_rows, ordered,
                               new_id, plan)
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
@@ -132,6 +132,7 @@ class TrackList(tk.Canvas):
         self._all = self._slots  # every row's track: a loaded MIDI's (-1 - its number), yours (HAND + id), slots
         self.lead = 0  # rows before Spiderweb's own part (a loaded MIDI's tracks and yours among them)
         self._file_row = np.zeros(0, np.int64)  # a loaded MIDI's track number -> its row
+        self._part_row = {}  # a loaded track's part (its file_order entry, PLAN #11 D) -> its row
         self._hand = {}  # id -> the own track (added by hand, files/own_tracks.py) of each such row
         self.menu_shut = 0.0  # when the right-click menu last closed (perf_counter)
         self._row_of = np.zeros(0, np.int64)  # slot -> row (-1: none)
@@ -230,7 +231,7 @@ class TrackList(tk.Canvas):
         """The slots written as tracks, in order (worked out again only when the notes change)."""
         app = self.app
         n, pad, use10, lm, own = app.rendered, app.pad_tracks(), app.picture_use10, app.loaded, app.own_written()
-        waiting, order = app.waiting_rows(), (app.file_order, tuple(app.file_gone), app.least_tracks())
+        waiting, order = app.waiting_rows(), (app.file_order, tuple(app.file_gone), app.least_tracks(), app.file_props)
         made = self._made
         if made is None or made[0] is not n or made[1:] != (pad, use10, id(lm), own, waiting, order):
             slots = track_slots(n, pad, order[2]).astype(np.int64)  # (a new project's empty Track 1 too)
@@ -245,7 +246,9 @@ class TrackList(tk.Canvas):
             row_of = np.full(size, -1, np.int64)
             row_of[slots] = np.flatnonzero((every >= 0) & (every < HAND))
             file_row = np.full(len(lm.tracks) if lm is not None else max(waiting, default=-1) + 1, -1, np.int64)
-            file_row[-1 - every[every < 0]] = np.flatnonzero(every < 0)
+            plain = (every < 0) & (every > -1 - PART)  # (a part's row: _part_row, PLAN #11 D)
+            file_row[-1 - every[plain]] = np.flatnonzero(plain)
+            self._part_row = {int(-1 - every[r]): int(r) for r in np.flatnonzero(every <= -1 - PART).tolist()}
             # muted / picked tracks keep their music when the tracks are handed out again (like the highlight:
             # follow; hunt 10-23, user picked A), else they're let go, never moved onto other music
             shapes = self.app.shapes
@@ -271,6 +274,8 @@ class TrackList(tk.Canvas):
             def there(s):
                 if s >= HAND:
                     return s in self._hand
+                if s <= -1 - PART:
+                    return -1 - s in self._part_row
                 return -s - 1 < len(file_row) and file_row[-s - 1] >= 0 if s < 0 else s < size and row_of[s] >= 0
             if self.current is not None and not there(self.current):
                 self.current = None  # (its track is gone)
@@ -287,6 +292,8 @@ class TrackList(tk.Canvas):
         self.tracks()
         if s is None:
             return None
+        if s <= -1 - PART:  # (a loaded track's part, PLAN #11 D)
+            return self._part_row.get(-1 - s)
         if s < 0:  # (-1: not listed, e.g. removed)
             return int(self._file_row[-s - 1]) if -s - 1 < len(self._file_row) and self._file_row[-s - 1] >= 0 \
                 else None
@@ -316,13 +323,14 @@ class TrackList(tk.Canvas):
         if lm is not None:
             moved = lm.rechannel
             for row in np.flatnonzero(self._all < 0).tolist():
-                k = -1 - int(self._all[row])
+                k, only = self.file_part(int(self._all[row]))  # (a part / a track with parts: their channels)
                 if k >= len(lm.tracks) or not lm.tracks[k].notes:
                     continue
                 if moved is not None and k < len(moved) and moved[k] >= 0:
-                    sets[row].add(int(moved[k]))
+                    got = {int(moved[k])}
                 else:
-                    sets[row] |= set(np.flatnonzero(lm.tracks[k].chn).tolist())
+                    got = set(np.flatnonzero(lm.tracks[k].chn).tolist())
+                sets[row] |= got if only is None else got & only
         # (a track of yours: its order's channels listed even without notes, empty "Ch n" rows: check-in C)
         orders = [self._hand.get(int(s), {}).get("order") or () for s in self._all.tolist()]
         out = [tuple(ordered(o, x | set(o))) for o, x in zip(orders, sets)]
@@ -380,7 +388,7 @@ class TrackList(tk.Canvas):
     def file_at(self, row):
         """The loaded MIDI's track number in row (a row number), else None."""
         s = int(self._all[row]) if 0 <= row < len(self._all) else 0
-        return -1 - s if s < 0 else None
+        return key_track(-1 - s) if s < 0 else None  # (a part's: its track's, PLAN #11 D)
 
     def note_rows(self):
         """Each of Spiderweb's notes' row (-1: none), worked out when asked."""
@@ -394,6 +402,11 @@ class TrackList(tk.Canvas):
             out[ok] = self._row_of[tid[ok]]
             inside = (tid < 0) & (-1 - tid < len(self._file_row))  # (drawn into a loaded MIDI's track: its row)
             out[inside] = self._file_row[-1 - tid[inside]]
+            if self._part_row and inside.any():  # (on a part's channel: the part's row, PLAN #11 D)
+                ch = channels_of(n[:, 4], self.app.picture_use10)
+                for k, row in self._part_row.items():
+                    _, chs = self.file_part(-1 - k)
+                    out[inside & (tid == -1 - key_track(k)) & np.isin(ch, list(chs))] = row
             hand_rows = np.flatnonzero(mine >= HAND)
             if not auto.all() and len(hand_rows):  # (a track added by hand: its row)
                 o = np.argsort(mine[hand_rows])
@@ -420,12 +433,51 @@ class TrackList(tk.Canvas):
         if not self.muted or not len(notes):
             return notes
         tid = track_ids(notes[:, 4])
-        out = np.isin(tid, list(self.muted_tracks()))
-        pairs = self.muted_chans()
+        whole, pairs = self.mutes_by_track()
+        out = np.isin(tid, list(whole))
         if pairs:  # (a folder's sub-row muted: that channel of the track)
             ch = channels_of(notes[:, 4], self.app.picture_use10)
             out |= np.isin(tid * 16 + ch, [s * 16 + c for s, c in pairs])
         return notes[~out]
+
+    def mutes_by_track(self):
+        """(whole tracks muted, {(track id, channel)}) with a loaded track's PARTS (PLAN #11 D) as the channels of its
+        track (-1 - its number) they hold."""
+        whole, pairs = set(), set()
+        for m in self.muted:
+            s, c = m if isinstance(m, tuple) else (m, None)
+            n, chs = self.file_part(s) if s < 0 else (None, None)
+            if chs is None:
+                (whole.add(s) if c is None else pairs.add((s, c))) if n is None else \
+                    (whole.add(-1 - n) if c is None else pairs.add((-1 - n, c)))
+            else:
+                pairs |= {(-1 - n, x) for x in (chs if c is None else {c} & chs)}
+        return whole, pairs
+
+    def loaded_mutes(self):
+        """LoadedPlayer's muted(): the loaded MIDI's track numbers muted, (track number, channel) for one channel."""
+        whole, pairs = self.mutes_by_track()
+        return [-1 - s for s in whole if s < 0] + [(-1 - s, c) for s, c in pairs if s < 0]
+
+    def row_only(self, row):
+        """The channels a loaded row's picture reads: None = its whole track, a part / a track with parts (PLAN #11
+        D) its channels (one = that channel, so it shares a sub-row's read blocks)."""
+        _, chs = self.file_part(int(self._all[row]))
+        if chs is None:
+            return None
+        return next(iter(chs)) if len(chs) == 1 else chs
+
+    def file_part(self, s):
+        """(track number in the file, the channels its row shows: None = all) of loaded track list id s: a PART
+        (PLAN #11 D) its channels, a track with parts the channels left to it."""
+        k = -1 - s
+        n, j = key_track(k), key_part(k)
+        parts = (self.app.file_props.get(n) or {}).get("parts") or ()
+        if j >= 0:
+            return n, frozenset(next((p["chs"] for p in parts if p["id"] == j), ()))
+        if parts:
+            return n, frozenset(range(16)) - {c for p in parts for c in p["chs"]}
+        return n, None
 
     def muted_tracks(self):
         """The whole tracks muted (track ids)."""
@@ -667,6 +719,11 @@ class TrackList(tk.Canvas):
     def shown_mask(self, drawn, slot):
         """Which of drawn's notes the highlighted track shows in full: its own, only the channel picked (a folder's
         sub-row clicked, user 2026-10-28). slot: each note's real track."""
+        n, chs = self.file_part(self.current) if self.current < 0 else (None, None)
+        if chs is not None:  # (a loaded track's part / a track with parts: its channels of the track, PLAN #11 D)
+            mine = (slot == -1 - n) & np.isin(channels_of(drawn[:, 4], self.app.picture_use10), list(chs))
+            ch = self.shown_ch()
+            return mine & (channels_of(drawn[:, 4], self.app.picture_use10) == ch) if ch is not None else mine
         mine = slot == self.current
         ch = self.shown_ch()
         if ch is not None:
@@ -709,9 +766,18 @@ class TrackList(tk.Canvas):
             return new if new is not None else lm.tracks[n].channel if n < len(lm.tracks) else None
         return self.app.file_tracks().get(n, {}).get("ch")
 
+    def part_channel(self, s):
+        """A loaded row's channel: file_channel; a part / a track with parts (PLAN #11 D): its first one with notes."""
+        n, chs = self.file_part(s)
+        if chs is None:
+            return self.file_channel(n)
+        row = self.row_of_id(s)
+        got = self.row_chans()[row] if row is not None else ()
+        return got[0] if got else min(chs, default=None)
+
     def channel_of(self, slot):
-        if slot < 0:  # (a loaded MIDI's track: its main channel; none without notes)
-            ch = self.file_channel(-1 - slot)
+        if slot < 0:  # (a loaded MIDI's track: its main channel; none without notes; a part's: its first)
+            ch = self.part_channel(slot)
             return "" if ch is None else tr("tracks.channel", ch=ch + 1)
         if slot >= HAND:
             return tr("tracks.channel", ch=self._hand[slot]["ch"] + 1)
@@ -925,9 +991,11 @@ class TrackList(tk.Canvas):
                           "job": None, "ch": None, "into": None, "mid": None}
             if self._move["keep"]:
                 return
-        if row >= 0 and e.x < self.name_w and c >= 0 and int(self.tracks()[row]) >= HAND:
+        if row >= 0 and e.x < self.name_w and c >= 0 and (int(self.tracks()[row]) >= HAND or (
+                int(self.tracks()[row]) < 0 and self.app.loaded is not None)):
             # (a sub-row of your track: that channel (+ the others picked with it) dragged into another track / out on
-            # its own, PLAN #11 C2; pressed on one of several picked: a click without a drag picks it alone)
+            # its own, PLAN #11 C2; a loaded track's: into its own track's rows / out as a part, D; pressed on one of
+            # several picked: a click without a drag picks it alone)
             s, group = int(self.tracks()[row]), self.picked_chans()
             self._move = {"y": e.y, "on": False, "gap": None, "keep": (s, c) in group and len(group) > 1, "s": s,
                           "job": None, "ch": c, "into": None, "mid": None}
@@ -1304,7 +1372,9 @@ class TrackList(tk.Canvas):
             if m["into"] is not None:
                 self.drop_into(m)
             elif m["gap"] is not None:
-                if m["ch"] is not None:
+                if self.loaded_drag(m):
+                    self.parts_out(self.loaded_drag(m), m["gap"])
+                elif m["ch"] is not None:
                     self.channels_out(self.drag_parts(m), m["gap"])
                 else:
                     self.move_tracks(m["gap"])
@@ -1386,6 +1456,10 @@ class TrackList(tk.Canvas):
         if not 0 <= row < len(self._all):
             return False
         dst = int(self._all[row])
+        got = self.loaded_drag(m)
+        if got:  # (a loaded track's channels: only among its own track's rows, PLAN #11 D)
+            n = got[0][1]
+            return dst < 0 and self.file_part(dst)[0] == n and not (m["ch"] is None and dst == m["s"])                 and any(s != dst for s, _, _ in got)
         parts = self.drag_parts(m)
         if not parts:
             return False
@@ -1441,6 +1515,8 @@ class TrackList(tk.Canvas):
         app = self.app
         row, pos = m["into"]
         dst = int(self._all[row])
+        if self.loaded_drag(m):
+            return self.parts_into(self.loaded_drag(m), dst)
         parts = self.drag_parts(m)
         now = list(self.row_chans()[row])
         whole = m["ch"] is None
@@ -1547,6 +1623,106 @@ class TrackList(tk.Canvas):
         self.current = HAND + ids[0]
         self.own_changed()
         self.name_new(ids)
+
+    # ------------------------------------------------------------ a loaded track's parts (PLAN #11 D)
+
+    def loaded_drag(self, m):
+        """What m drags when it's a loaded MIDI's channels (user 2026-10-28: they keep the file's notes): [(track
+        list id, track number, [channels])] top down: picked sub-rows of loaded tracks, or dragged PART rows whole;
+        [] = anything else (yours, a loaded track's own row: moved as tracks)."""
+        if self.app.loaded is None:
+            return []
+        chans = self.row_chans()
+        if m["ch"] is not None:
+            group = self.picked_chans()
+            pairs = group if (m["s"], m["ch"]) in group and len(group) > 1 else {(m["s"], m["ch"])}
+            if any(s >= 0 or self.line_of(s, c) is None for s, c in pairs):
+                return []
+            out = {}
+            for s, c in sorted(pairs, key=lambda p: self.line_of(*p)):
+                out.setdefault(s, []).append(c)
+            return [(s, self.file_part(s)[0], cs) for s, cs in out.items()]
+        group = self.moving()
+        group = group if m["s"] in group else [m["s"]]
+        if not group or any(s > -1 - PART or self.row_of_id(s) is None for s in group):
+            return []
+        group = sorted(group, key=self.row_of_id)
+        return [(s, self.file_part(s)[0], list(chans[self.row_of_id(s)])) for s in group]
+
+    def parts_out(self, got, gap):
+        """A loaded track's channels (loaded_drag's) dragged out above row gap: each a PART row of its own there, in
+        that order (one track each, like yours), the file's notes staying the file's; one undo step."""
+        app = self.app
+        props = {n: dict(p, parts=[dict(q, chs=list(q["chs"])) for q in p.get("parts", ())])
+                 for n, p in app.file_props.items()}
+        new, mutes = [], set()
+        for s, n, cs in got:
+            p = props.setdefault(n, {"name": None, "ch": None})
+            parts = p.setdefault("parts", [])
+            for q in parts:  # (out of the part it was in)
+                q["chs"] = [c for c in q["chs"] if c not in cs]
+            parts[:] = [q for q in parts if q["chs"]]
+            for c in cs:
+                j = max((q["id"] for q in parts), default=-1) + 1
+                parts.append({"id": j, "chs": [c]})
+                new.append(part_key(n, j))
+                if s in self.muted or (s, c) in self.muted:  # (its mute goes along)
+                    mutes.add(-1 - part_key(n, j))
+        if self.set_parts(props, new, gap, tr("tracks.out_step")):
+            self.muted = {x for x in self.muted if not (isinstance(x, tuple) and any(
+                x[0] == s and x[1] in cs for s, _, cs in got))} | mutes
+            self.current = -1 - new[0]
+
+    def parts_into(self, got, dst):
+        """A loaded track's channels (loaded_drag's) dropped INTO another row of the same track: into that part, or
+        back onto the track's own row; parts left empty go. One undo step."""
+        app = self.app
+        n, j = self.file_part(dst)[0], key_part(-1 - dst)
+        p = app.file_props.get(n) or {}
+        parts = [dict(q, chs=list(q["chs"])) for q in p.get("parts", ())]
+        moving = [c for s, _, cs in got if s != dst for c in cs]
+        for q in parts:
+            q["chs"] = [c for c in q["chs"] if c not in moving] + (moving if q["id"] == j else [])
+        props = dict(app.file_props)
+        props[n] = dict(p, parts=[q for q in parts if q["chs"]])
+        if not props[n]["parts"]:
+            props[n].pop("parts")
+            if props[n].get("name") is None and props[n].get("ch") is None:
+                props.pop(n)
+        muted = {(s, c) for s, _, cs in got for c in cs if s in self.muted or (s, c) in self.muted}
+        if self.set_parts(props, [], None, tr("tracks.into_step")):
+            self.muted = {x for x in self.muted if not (isinstance(x, tuple) and (x[0], x[1]) in muted)} | {
+                (dst, c) for _, c in muted}
+            if self.current in [s for s, _, _ in got] and self.row_of_id(self.current) is None:
+                self.current = dst
+            if len(self.row_chans()[self.row_of_id(dst)]) > 1:
+                self.open.add(dst)  # (so you see where they went)
+            self.request_redraw()
+
+    def set_parts(self, props, new, gap, step):
+        """app.file_props = props (parts changed) as one undo step: the new parts' rows (their file_order entries)
+        put above row gap (None: right after their track), parts gone left out; your tracks keep their places
+        among the file's rows (from_rows). False = nothing changed."""
+        app = self.app
+        if props == app.file_props:
+            return False
+        full = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
+        ids = [r if type(r) is int else HAND + r["id"] for r in full]
+        at = None if gap is None else (ids.index(int(self._all[gap])) if gap < len(self._all)
+                                       and int(self._all[gap]) in ids else len(full))
+        app.roll.end_typing()
+        app.push_undo(name=step)
+        self.keep_places(0 if gap is None else gap)  # (rows after it shift: Spiderweb's made yours when they can)
+        rows = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
+        if at is not None:
+            rows = rows[:at] + [-1 - k for k in new] + rows[at:]
+        live = set(part_keys(props, len(app.loaded.tracks)))
+        rows = [r for r in rows if not (type(r) is int and r <= -1 - PART and -1 - r not in live)]
+        app.file_props = props
+        app.file_order = clean_file_order([-1 - r for r in rows if type(r) is int and r < 0] + app.file_gone)
+        app.own_tracks = from_rows(rows, self._slots, app.own_tracks, self._filled)
+        self.own_changed()
+        return True
 
     def reorder(self, s, chans, pos, now):
         """Sub-rows dragged among their own folder's (your track s; chans in their order; now = the folder's order):
@@ -1927,7 +2103,7 @@ class TrackList(tk.Canvas):
             return None
         s = int(self.tracks()[row])
         if s < 0:
-            return self.file_channel(-1 - s)
+            return self.part_channel(s)
         if s >= HAND:
             return self._hand[s]["ch"]
         return slot_track_channel(s, self.app.picture_use10)[1]
@@ -2027,6 +2203,8 @@ class TrackList(tk.Canvas):
         if s >= 0:
             return True
         lm, n = self.app.loaded, -1 - s
+        if self.file_part(s)[1] is not None:  # (a part / a track with parts: their channels are fixed, PLAN #11 D)
+            return False
         return lm is not None and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole
 
     def ask_properties(self, s):
@@ -2115,6 +2293,8 @@ class TrackList(tk.Canvas):
         lm, n = self.app.loaded, -1 - s
         if lm is None:  # (waiting for its MIDI: shapes drawn into it)
             return True
+        if self.file_part(s)[1] is not None:  # (a part / a track with parts: dragged back first, PLAN #11 D)
+            return False
         return (n < len(lm.mf.tracks) and lm.mf.tracks[n].whole
                 and n not in tempo_tracks(lm, (TEMPO, TIME_SIG, KEY_SIG)))
 
@@ -2231,9 +2411,9 @@ class TrackList(tk.Canvas):
             mine = self.note_rows() == row
             count += int((channels_of(n[mine, 4], self.app.picture_use10) == ch).sum())
         lm = self.app.loaded
-        if slot < 0 and lm is not None and -1 - slot < len(lm.tracks):
+        if slot < 0 and lm is not None and self.file_part(slot)[0] < len(lm.tracks):
             moved = lm.rechannel
-            k = -1 - slot
+            k = self.file_part(slot)[0]
             if moved is not None and k < len(moved) and moved[k] >= 0:
                 count += lm.tracks[k].notes if moved[k] == ch else 0
             else:
@@ -2259,9 +2439,11 @@ class TrackList(tk.Canvas):
             lines = ["  ·  ".join(x for x in (self.name_of(row), self.channel_of(slot)) if x)]
             lm = self.app.loaded
             if lm is not None:
-                t = lm.tracks[-slot - 1]
-                lines.append(trn("tracks.notes", t.notes, n=f"{t.notes:,}"))
-                used = int((t.chn > 0).sum())
+                k, chs = self.file_part(slot)  # (a part / a track with parts: its channels' notes, PLAN #11 D)
+                t = lm.tracks[k]
+                count = t.notes if chs is None else int(sum(int(t.chn[c]) for c in chs))
+                lines.append(trn("tracks.notes", count, n=f"{count:,}"))
+                used = int((t.chn > 0).sum()) if chs is None else len(self.row_chans()[row])
                 if used > 1:
                     lines.append(trn("tracks.channels", used, n=used))
                 lines.append(tr("tracks.from_file"))
@@ -2566,7 +2748,7 @@ class TrackList(tk.Canvas):
         for line in range(first, last + 1):
             r = self.file_at(int(line_row[line]))
             if r is not None and lm.tracks[r].notes:
-                shown.append((line, r, None if line_ch[line] < 0 else int(line_ch[line])))
+                shown.append((line, r, int(line_ch[line]) if line_ch[line] >= 0 else self.row_only(int(line_row[line]))))
         pad = round(PAD * self.scale)
         inner = max(1, self.row_h - 2 * pad - 1)
         ax = self.sx / lm.ppq  # (pixel c of the song = tick t * ax)
@@ -3194,7 +3376,7 @@ def row_mask(lm, r, ax, bx, W, ch=None):
     t = lm.tracks[r]
     try:
         tab, _ = RL.exact_tab(lm, ax, bx, W, t.klo, t.khi - t.klo + 1, tracks=(r,),
-                              only=None if ch is None else {r: ch})
+                              only=None if ch is None else {r: ch})  # (ch: a channel or a part's set)
     except Exception:  # (a file that changed / went: the small picture stays)
         RL.write_log_now()
         return False

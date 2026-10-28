@@ -13,7 +13,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.midi_read import Cancelled, MidiError
-from files.own_tracks import FILE0, HAND
+from files.own_tracks import FILE0, HAND, key_track
 from notes.custom import notes_shape
 from notes.engine import slot_track_channel, track_ids
 from notes.loaded import (EXTRACT_MOST, box_key, boxes_meet, drop_extract, extract_groups, gather_box,
@@ -27,7 +27,7 @@ def row_entry(app, s):
     if s >= HAND:
         return s - HAND
     if s < 0:
-        n, lm = -1 - s, app.loaded
+        n, lm = key_track(-1 - s), app.loaded  # (a part: its track, PLAN #11 D)
         whole = lm is None or n >= len(lm.mf.tracks) or lm.mf.tracks[n].whole
         return FILE0 + n if whole else None
     return -1 - s
