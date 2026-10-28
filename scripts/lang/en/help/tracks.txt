@@ -28,6 +28,24 @@ Dragging one of Spiderweb's own tracks makes all of Spiderweb's tracks yours, em
 
 A loaded MIDI's own tracks can be dragged too, and your tracks can go above or between them. The track list and Export MIDI follow the new order, and each of the file's tracks is still copied exactly. The piano roll keeps drawing the file's tracks in the file's own order (a later track covers an earlier one), so what covers what stays the same while you edit; other players draw the exported file in its new order, so there it can differ.
 
+## Tracks holding several channels
+
+A track whose notes are on two or more channels gets a ▸ before its name. Click the ▸ to open it: one "Ch n" row per channel shows under it, slightly indented, each with its own picture in that channel's colour. Click the ▾ to close it again. Closed, the track's picture shows each note in its channel's colour.
+
+• Click a Ch row and the piano roll shows only that channel. Drawing or pasting with it highlighted puts the notes on that channel of the track.
+• Each Ch row has its own speaker. The track's speaker mutes or un-mutes all of its channels; while only some are muted, its icon shows that. Right-click a Ch row's speaker to hear only that channel.
+• Drag a track (or a Ch row) onto the middle of another track and rest there for half a second: the row lights up, and letting go puts its channels into that track. Passing over a row without resting never does this, so a track never ends up mixed by accident. Into an open track, a short indented line shows where the channel lands among its Ch rows. Several picked tracks or Ch rows go in together.
+• When a channel is already in that track, Spiderweb asks once for all of them: Merge (share the channel) or Move to a free channel. Merge is the default when it changes nothing you'd hear, else Move. Tick "Don't ask again" to keep your answer until Spiderweb closes.
+• Drag a Ch row out between two tracks and it becomes a track of its own there. Several picked Ch rows become one track each. An empty track dragged in stays as an empty Ch row until you drag it out.
+• Drag Ch rows up or down inside their track to change their order. The order is kept in the project only: each channel keeps its notes and its colour, and a MIDI file keeps no order inside a track.
+• Right-click a track → Split into tracks: one track per channel, right where it was, in its Ch rows' order. Pick two or more tracks, right-click → Join into a mixed track: all of them go into the topmost one.
+• Ctrl+click and Shift+click pick several Ch rows, like tracks. Tracks and Ch rows are never picked together. Right-click picked Ch rows → Remove channel to delete your notes on them.
+• Properties… is greyed on a track holding several channels: one channel for the whole track would put all its notes on it.
+
+A loaded MIDI's track works the same way, but its notes stay the file's. A Ch row dragged out becomes a part of that track: a row of its own that Export MIDI writes as a separate track holding only those channels, named like the track. It's instant at any size. Drag it back onto any row of the same track to put it back. Delete loaded notes and Extract take only the channels the highlighted row shows. Two different tracks of a loaded MIDI can't be joined yet, and a loaded MIDI's notes never go into your own tracks (Extract them first). Properties… and Remove Track are greyed on a part and on the track it came from until its parts are back.
+
+Export MIDI writes a track holding several channels as it is, and its message names the ones you made that way, since some MIDI programs can't open such a file. Export to Domino and Copy to Domino write one Domino track per channel instead, because Domino needs one channel a track.
+
 ## Drawing into a track
 
 Highlight a track, then draw or paste: the new shape is laid on that track, like pasting in Domino. Its notes play on the track's channel and take its colour, whatever the Channels setting is, and they never move to another track when they overlap other shapes. Two shapes in one track may overlap on the same keys, as in many MIDI programs.
