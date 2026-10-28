@@ -709,6 +709,8 @@
  "ks.keep_never": "Don't keep it",
  "ks.keep_later": "Not now",
  "ks.kept_status": "Kestrel's read-ahead was kept ({size}).",
+ "ks.keeping_status": "Keeping Kestrel's read-ahead ({size})…",
+ "ks.keep_failed": "Kestrel's read-ahead couldn't be kept (the disk may be full, or the MIDI's saved index was deleted). It's read again next time.",
  "app.pick_soundfont_title": "Pick a soundfont for Built-in BASSMIDI",
  "app.opening_soundfont": "Opening the soundfont…",
  "app.opening_kestrel": "Starting Kestrel (GPU, Experimental) with the soundfonts…",

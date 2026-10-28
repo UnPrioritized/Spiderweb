@@ -140,6 +140,7 @@ class Dense:
         self.error = None
         self.unsaved = False  # (all read, not kept on disk yet, may be offered: the user is asked first)
         self.took = 0.0  # (seconds the reading took)
+        self.stale = False  # (read here, not from a kept one: a kept file beside the index is out of date)
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True, name="kestrel-dense")
         self.thread.start()
@@ -174,6 +175,7 @@ class Dense:
             self.failed = saved[1]
             self.parts = saved[0]
             return
+        self.stale = True  # (one kept beside it, if any, can't be used: may_keep offers it again)
         rd = LoadedPlayer(lm, None, None, None, "kestrel")
         path = lm.path if lm.mode != "memory" else None
         try:
@@ -306,7 +308,9 @@ def may_keep(d):
                 or not midi_saved.has_index(lm.mf):
             return False
         index = midi_saved.index_file(lm.mf.path, lm.mf.size)
-        return not os.path.exists(saved_file(index)) and not os.path.exists(declined_file(index))
+        # (one kept that couldn't be used, an older format: offered again, kept over it, hunt 2026-10-28)
+        kept = os.path.exists(saved_file(index)) and not getattr(d, "stale", False)
+        return not kept and not os.path.exists(declined_file(index))
     except Exception:
         return False
 
@@ -343,13 +347,33 @@ def kept_bytes(lm):
     return sum(getattr(p, k).nbytes for p in d.parts for k in PART_ARRAYS)
 
 
+def leftovers(folder):
+    """Half-written read-aheads (Spiderweb closed while keeping one, up to 3 GB, hidden from Settings' list) deleted,
+    not ones being written now (hunt 2026-10-28)."""
+    try:
+        names = [n for n in os.listdir(folder) if n.endswith(SAVED_END + ".tmp")]
+    except OSError:
+        return
+    for n in names:
+        f = os.path.join(folder, n)
+        if f not in SAVING:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
+SAVING = set()  # (temp files being written now: never deleted as leftovers)
+
+
 def save(d):
-    """Keeps d (all read) beside lm's saved index, when it has one and lm is as loaded. Quiet when it can't."""
+    """Keeps d (all read) beside lm's saved index, when it has one and lm is as loaded. True when kept; quiet when it
+    can't (errors.log)."""
     lm = d.lm
     try:
         from files import midi_saved
         if not _as_loaded(lm) or d.key != key_of(lm) or not midi_saved.has_index(lm.mf):
-            return
+            return False
         ps = d.parts
         head = dict(_saved_head(lm), todo=[list(map(int, t)) for t in d.todo], failed=d.failed,
                     parts=[[int(p.t0), int(p.t1), len(p.ts), len(p.s0_q)] for p in ps])
@@ -359,13 +383,18 @@ def save(d):
                 arrays[f"{k}{i}"] = getattr(p, k)
         # straight into a file beside it, then put in place (safefile's way): built in memory first, a 3 GB
         # read-ahead took two more copies and the PC ran out of memory (2026-10-28)
-        path = saved_file(midi_saved.index_file(lm.mf.path, lm.mf.size))
+        index = midi_saved.index_file(lm.mf.path, lm.mf.size)
+        path = saved_file(index)
         tmp = path + ".tmp"
+        SAVING.add(tmp)
         try:
             with open(tmp, "wb") as f:
                 np.savez(f, **arrays)
                 f.flush()
                 os.fsync(f.fileno())
+            if not os.path.exists(index):  # (its index deleted meanwhile: kept, it was a hidden 3 GB, hunt 10-28)
+                os.remove(tmp)
+                return False
             os.replace(tmp, path)
         except BaseException:
             try:
@@ -373,10 +402,14 @@ def save(d):
             except OSError:
                 pass
             raise
+        finally:
+            SAVING.discard(tmp)
+        return True
     except Exception:  # (disk full, the folder gone: read again next time)
         import sys
         from files.errors import write_log
         write_log(*sys.exc_info(), "(Kestrel: saving a read-ahead)")
+        return False
 
 
 def _load(lm, todo):

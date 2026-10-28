@@ -145,7 +145,8 @@ def load_index(mf):
 
 def saved_list():
     """[(MIDI path, index file, bytes)] of every saved index, newest first."""
-    from files.play_dense import SAVED_END, saved_file
+    from files.play_dense import SAVED_END, leftovers, saved_file
+    leftovers(FOLDER)
     out = []
     try:
         names = [n for n in os.listdir(FOLDER) if n.endswith(".npz") and not n.endswith(SAVED_END)]
@@ -169,8 +170,9 @@ def saved_list():
 
 
 def delete_index(f):
-    from files.play_dense import declined_file, saved_file
-    for g in (f, saved_file(f), declined_file(f)):  # (its Kestrel read-ahead goes with it)
+    from files.play_dense import SAVING, declined_file, saved_file
+    half = saved_file(f) + ".tmp"  # (one being written now: its save drops it once it sees the index gone)
+    for g in (f, saved_file(f), declined_file(f)) + (() if half in SAVING else (half,)):  # (its read-ahead too)
         try:
             os.remove(g)
         except OSError:
