@@ -106,9 +106,12 @@ class MelodyWindow(tk.Toplevel):
         # how far each jump goes, over the area (user 2026-10-29): 0 % = the normal tempo, 100 % = the whole jump
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(10, 0), pady=(6, 0))
-        ttk.Label(row, text=tr("melody.strength")).pack(side="left")
-        ttk.Button(row, text=tr("path.graph"), command=lambda: self.open_graph("strength")).pack(side="left",
-                                                                                               padx=(6, 0))
+        # (a tick switches it on, user 2026-10-29; off = every jump whole, its graph kept for later)
+        self.strength_on = tk.BooleanVar(value=getattr(app, "melody_strength_on", False))
+        ttk.Checkbutton(row, text=tr("melody.strength"), variable=self.strength_on,
+                        command=self.sync).pack(side="left")
+        self.strength_button = ttk.Button(row, text=tr("path.graph"), command=lambda: self.open_graph("strength"))
+        self.strength_button.pack(side="left", padx=(6, 0))
         self.strength_text = ttk.Label(row, foreground=look.HINT)
         self.strength_text.pack(side="left", padx=(6, 0))
         for var in (self.lo, self.hi):
@@ -399,7 +402,8 @@ class MelodyWindow(tk.Toplevel):
         app.melody_shape, app.melody_how, app.melody_hold = self.shape.value(), how, self.hold.get()
         app.melody_catch = self.catch_shape.value()
         made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get(),
-                str(graph_pts(app, "shape")), str(graph_pts(app, "strength")))
+                str(graph_pts(app, "shape")), str(graph_pts(app, "strength")), self.strength_on.get())
+        app.melody_strength_on = self.strength_on.get()
         seen = (box, area, track, ch, at, only, has_sel, step, self.shortest.get(), self.rest.get(),
                 tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"],
                 None if clicks else getattr(app, "tempo_count", 0), self.preview_seed, made)
@@ -431,9 +435,14 @@ class MelodyWindow(tk.Toplevel):
                 w.pack(side="left", padx=(4, 0))
         strength = graph_pts(app, "strength")
         hs = [p[1] for p in strength]
-        self.strength_text.config(text=tr("melody.strength_flat", p=fmt(round(hs[0] * 100, 1))) if max(hs) == min(hs)
+        on = self.strength_on.get()
+        self.strength_button.state(["!disabled"] if on else ["disabled"])
+        self.strength_text.config(text=tr("melody.strength_off") if not on else
+                                  tr("melody.strength_flat", p=fmt(round(hs[0] * 100, 1))) if max(hs) == min(hs)
                                   else tr("melody.strength_range", lo=fmt(round(min(hs) * 100, 1)),
                                           hi=fmt(round(max(hs) * 100, 1))))
+        if not on and "strength" in self.graphs:  # (switched off: its graph window goes, the graph kept)
+            self.graphs["strength"].close()
         for g in self.graphs.values():  # (the BPMs beside My drawn one's graph follow the boxes)
             g.draw()
         self.area.config(text=tr("melody.area", a=pane.place_text(box[0]), b=pane.place_text(box[1]))
@@ -622,7 +631,8 @@ class MelodyWindow(tk.Toplevel):
                              bpm_snap, plain, heard if how == "audio" else None,
                              graph_pts(app, "shape"), strength)
         strength = graph_pts(app, "strength")
-        strength = None if all(p[1] == 1.0 for p in strength) else strength  # (100 % all along: as before)
+        strength = None if not self.strength_on.get() or all(p[1] == 1.0 for p in strength) else strength  # (off /
+        # 100 % all along: every jump whole)
         plain = set()
         clip = clip_for(plain)
         if how == "catch":

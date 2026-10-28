@@ -527,6 +527,7 @@
  "melody.shape_drawn": "My drawn one",
  "melody.about_drawn": "Your own shape from Graph…, stretched over each gap: its bottom is the lower BPM, its top the higher one.",
  "melody.strength": "Strength over the area:",
+ "melody.strength_off": "off: every jump whole",
  "melody.strength_flat": "{p} % all along",
  "melody.strength_range": "from {lo} % to {hi} %",
  "jump_graph.title_shape": "My drawn one",
