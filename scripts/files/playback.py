@@ -487,7 +487,9 @@ class Player:
                 pass
         t0 = self.start_beat * self.ppq
         tune = self.tune
-        shared = tune or self.shared
+        # (Kestrel ends one note per note-off, oldest first: every note gets its own, else the later one rang on, hunt
+        # 2026-10-28; BASSMIDI ends every note of the key at one)
+        shared = (tune or self.shared) and getattr(out, "name", None) != KESTREL
         ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune, self.ports)
         del notes
         ready = self.ready  # (a loaded MIDI playing along: the line waits until its first notes are read)
