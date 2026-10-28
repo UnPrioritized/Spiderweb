@@ -1505,7 +1505,7 @@ class TrackList(tk.Canvas):
         m["into"], m["gap"] = (m["mid"][0], None), None
         self.request_redraw()
 
-    def drop_into(self, m):
+    def drop_into(self, m, parts=None, step=None):
         """m's channels (drag_parts: picked sub-rows, or the dragged tracks' every channel) put into m["into"]'s
         track in their top-down order (C2; check-in C: several at once): one undo step, ONE same-channel question
         for every clash (decision 10). Automatic tracks touched = all made yours first (like a drag). Whole tracks
@@ -1515,9 +1515,9 @@ class TrackList(tk.Canvas):
         app = self.app
         row, pos = m["into"]
         dst = int(self._all[row])
-        if self.loaded_drag(m):
+        if parts is None and self.loaded_drag(m):
             return self.parts_into(self.loaded_drag(m), dst)
-        parts = self.drag_parts(m)
+        parts = self.drag_parts(m) if parts is None else parts  # (Join: given)
         now = list(self.row_chans()[row])
         whole = m["ch"] is None
         if not parts:
@@ -1552,7 +1552,7 @@ class TrackList(tk.Canvas):
             if got == "move":
                 to = dict(zip(clash, free))
         app.roll.end_typing()
-        app.push_undo(name=tr("tracks.into_step"))
+        app.push_undo(name=step or tr("tracks.into_step"))
         app.own_tracks = self.named()  # (names stick: "Track n" as they show before tracks go)
         if not autos and whole:  # (whole tracks going: the ones after them would shift, keep_places)
             self.keep_places(min(self.row_of_id(s) for s, _ in parts))
@@ -1597,7 +1597,7 @@ class TrackList(tk.Canvas):
         """Channel ch of your track src dragged out to above row gap (channels_out)."""
         self.channels_out([(src, [ch])], gap)
 
-    def channels_out(self, parts, gap):
+    def channels_out(self, parts, gap, step=None):
         """Sub-rows of your tracks (parts: [(track, [channels])] top down) dragged out to above row gap: ONE TRACK
         EACH there, side by side in that order (check-in C, user picked), its colours moved in (C2); the first
         highlighted. One undo step."""
@@ -1608,7 +1608,7 @@ class TrackList(tk.Canvas):
         if not seq:
             return
         app.roll.end_typing()
-        app.push_undo(name=tr("tracks.out_step"))
+        app.push_undo(name=step or tr("tracks.out_step"))
         self.keep_places(gap)  # (Spiderweb's tracks from there on would shift: made yours when they can be)
         new, ids = add_tracks(self.named(), self._slots, self.own_row(gap - 1) if gap > 0 else -1,
                               [c for _, c in seq], app.own_next, self._filled, app.file_rows())
@@ -1623,6 +1623,57 @@ class TrackList(tk.Canvas):
         self.current = HAND + ids[0]
         self.own_changed()
         self.name_new(ids)
+
+    # ------------------------------------------------------------ Split / Join (PLAN #11 D)
+
+    def split_track(self, s):
+        """Split into tracks: a mixed track = one track per channel where it was, in its sub-rows' order (the first
+        stays this track, the rest right after it); a loaded one's = parts (the file's notes stay). One undo step."""
+        row = self.row_of_id(s)
+        if row is None or not self.mixed(row):
+            return
+        rest = list(self.row_chans()[row][1:])
+        if s < 0:
+            return self.parts_out([(s, self.file_part(s)[0], rest)], row + 1, tr("tracks.split_step"))
+        self.channels_out([(s, rest)], row + 1, tr("tracks.split_step"))
+        self.current = s
+
+    def join_why(self, group):
+        """Join into a mixed track on group: None = it can, else the menu's label saying why not."""
+        if len(group) < 2 or any(self.row_of_id(s) is None for s in group):
+            return tr("tracks.join")
+        top, *rest = sorted(group, key=self.row_of_id)
+        loaded = [s for s in group if s < 0]
+        if loaded and self.app.loaded is None:
+            return tr("tracks.join")
+        if top >= 0 and loaded:
+            return tr("tracks.join_into_yours")
+        if top < 0 and len({self.file_part(s)[0] for s in loaded}) > 1:
+            return tr("tracks.join_loaded")
+        return None
+
+    def join_tracks(self, group):
+        """Join into a mixed track: the picked tracks' channels into the topmost, in the list's top-down order (a
+        mixed one's sub-rows together), ONE same-channel question for all (drop_into); a loaded track's rows = its
+        parts joined (parts_into). One undo step."""
+        if self.join_why(group) is not None:
+            return
+        top, *rest = sorted(group, key=self.row_of_id)
+        row = self.row_of_id(top)
+        if all(s < 0 for s in group):
+            n = self.file_part(top)[0]
+            return self.parts_into([(s, n, list(self.row_chans()[self.row_of_id(s)])) for s in rest], top,
+                                   tr("tracks.join_step"))
+        chans = self.row_chans()
+        parts = []
+        for s in rest:
+            own = self.own_track(s)
+            got = list(chans[self.row_of_id(s)]) or ([own["ch"]] if own is not None else
+                                                     [slot_track_channel(s, self.app.picture_use10)[1]])
+            parts.append((s, got))
+        m = {"into": (row, None), "ch": None, "s": rest[0]}
+        self.drop_into(m, parts, tr("tracks.join_step"))
+        self.selected = set()
 
     # ------------------------------------------------------------ a loaded track's parts (PLAN #11 D)
 
@@ -1649,7 +1700,7 @@ class TrackList(tk.Canvas):
         group = sorted(group, key=self.row_of_id)
         return [(s, self.file_part(s)[0], list(chans[self.row_of_id(s)])) for s in group]
 
-    def parts_out(self, got, gap):
+    def parts_out(self, got, gap, step=None):
         """A loaded track's channels (loaded_drag's) dragged out above row gap: each a PART row of its own there, in
         that order (one track each, like yours), the file's notes staying the file's; one undo step."""
         app = self.app
@@ -1668,12 +1719,12 @@ class TrackList(tk.Canvas):
                 new.append(part_key(n, j))
                 if s in self.muted or (s, c) in self.muted:  # (its mute goes along)
                     mutes.add(-1 - part_key(n, j))
-        if self.set_parts(props, new, gap, tr("tracks.out_step")):
+        if self.set_parts(props, new, gap, step or tr("tracks.out_step")):
             self.muted = {x for x in self.muted if not (isinstance(x, tuple) and any(
                 x[0] == s and x[1] in cs for s, _, cs in got))} | mutes
             self.current = -1 - new[0]
 
-    def parts_into(self, got, dst):
+    def parts_into(self, got, dst, step=None):
         """A loaded track's channels (loaded_drag's) dropped INTO another row of the same track: into that part, or
         back onto the track's own row; parts left empty go. One undo step."""
         app = self.app
@@ -1690,7 +1741,7 @@ class TrackList(tk.Canvas):
             if props[n].get("name") is None and props[n].get("ch") is None:
                 props.pop(n)
         muted = {(s, c) for s, _, cs in got for c in cs if s in self.muted or (s, c) in self.muted}
-        if self.set_parts(props, [], None, tr("tracks.into_step")):
+        if self.set_parts(props, [], None, step or tr("tracks.into_step")):
             self.muted = {x for x in self.muted if not (isinstance(x, tuple) and (x[0], x[1]) in muted)} | {
                 (dst, c) for _, c in muted}
             if self.current in [s for s, _, _ in got] and self.row_of_id(self.current) is None:
@@ -1988,6 +2039,14 @@ class TrackList(tk.Canvas):
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
         menu.add_command(label=tr("tracks.add_tracks"), command=lambda: self.ask_add(row))
+        menu.add_separator()
+        # (PLAN #11 D: Split on a folder alone, Join on 2+ picked)
+        menu.add_command(label=tr("tracks.split"), command=lambda: self.split_track(s),
+                         state="normal" if len(group) == 1 and row is not None and row >= 0 and self.mixed(row)
+                         else "disabled")
+        why = self.join_why([t for t in group if t is not None])
+        menu.add_command(label=why or tr("tracks.join"), command=lambda: self.join_tracks(group),
+                         state="disabled" if why else "normal")
         menu.add_separator()
         menu.add_command(label=tr("tracks.remove_track"), command=lambda: self.remove_tracks(gone),
                          state="normal" if gone else "disabled")
