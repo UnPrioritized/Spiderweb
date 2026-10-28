@@ -87,9 +87,9 @@ def anchor_count(runs):
 
 # ---------------------------------------------------------------- the tempo made (group B)
 
-SHAPES = ("burst", "jump", "updown", "random")  # between two jumps (lo = the first box, hi = the second): lo -> hi
-# (higher first = a reverse burst), lo then back to the normal tempo halfway (catch-up way: held up to the
-# catch-up), lo / hi in turns, random between them
+SHAPES = ("burst", "jump", "updown", "random", "drawn")  # between two jumps (lo = the first box, hi = the second):
+# lo -> hi (higher first = a reverse burst), lo then back to the normal tempo halfway (catch-up way: held up to the
+# catch-up), lo / hi in turns, random between them, the user's drawn piece (drawn_shape) stretched over each gap
 HOWS = ("audio", "catch")  # Keep the audio (the area's notes keep their sound time) / a catch-up after each jump
 HOLD = 50.0  # %: the catch-up way, how much of each gap the show tempo holds before its catch-up starts
 CATCH_SHAPES = ("flat", "ease", "rise", "ramp")  # the catch-ups' shapes offered (the pane's, without drawn / formula)
@@ -108,8 +108,23 @@ def gap_values(shape, k, lo, hi, rng, snap=0.0):
     return lo, None  # (jump: the first box only)
 
 
+def drawn_shape(clip):
+    """A Conductor pane copy (TempoPane.clip_of of one Select box) as a jump shape: [[share 0..1 of the gap, bpm,
+    curve, formula, scale, bend]] (BPMs as drawn; Keep timing, heard lines and catch-ups left out). None when it
+    has no length or no points."""
+    if not clip or clip["length"] <= 1e-9 or not clip["points"]:
+        return None
+    from notes.tempo import BEND
+    n = clip["length"]
+    out = [[min(1.0, max(0.0, p[0] / n)), float(p[1]), p[2], p[3] if len(p) > 3 else "",
+            p[4] if len(p) > 4 else "lin", list(p[6]) if len(p) > 6 and p[6] else list(BEND)] for p in clip["points"]]
+    if out[0][0] > 1e-9:  # (the box started before the first point: that point's BPM from the start)
+        out.insert(0, [0.0, out[0][1], "hold", "", "lin", list(BEND)])
+    return out
+
+
 def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_shape="flat", rng=None,
-              snap=0.0, plain=(), heard=None):
+              snap=0.0, plain=(), heard=None, drawn=None):
     """The tempo the fill lays over beats a..b, as a Conductor pane copy (TempoPane.put_copies replaces what's in
     the area with it): {"length", "points", "catch", "spans"}, beats from a. runs: melody_runs / snap_runs. normal:
     the BPM between runs.
@@ -118,7 +133,8 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
     Catch-up: each gap = the show tempo up to hold % of it, then a catch-up (its yellow area from the jump, so
     back-to-back catch-ups all pay back to the tempo after the run: every jump on time); normal = the tempo heard
     at the area's start. plain: gaps (run, k) left at the normal tempo (their catch-up can't be done). snap: BPM
-    snap for Random's values."""
+    snap for Random's values. drawn: drawn_shape's points, for shape "drawn" (stretched over each gap, up to the
+    catch-up)."""
     import random
     from notes.tempo import BEND, catch_set, clamp_bpm
     rng = rng or random.Random()
@@ -126,8 +142,9 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
     pts, cs, gaps = [], [], []  # (gaps: each catch-up's (run, gap))
     line = [[q[0] - a] + list(q[1:]) for q in heard or ()]
 
-    def point(x, bpm, curve="hold"):
-        p = [x - a, clamp_bpm(bpm), curve, "", "exp" if curve == "line" else "lin", keep, list(BEND)]
+    def point(x, bpm, curve="hold", formula="", scale=None, bend=BEND):
+        scale = scale or ("exp" if curve == "line" else "lin")
+        p = [x - a, clamp_bpm(bpm), curve, formula, scale, keep, list(bend)]
         if keep and line:
             p.append({"line": [list(q) for q in line]})
         pts.append(p)
@@ -145,7 +162,10 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
                 continue
             v0, v1 = gap_values(shape, k, lo, hi, rng, snap)
             stop = nxt if keep else x + (nxt - x) * min(max(hold, 1.0), 99.0) / 100.0
-            if shape == "jump" and keep:
+            if shape == "drawn" and drawn:
+                for share, bpm, curve, formula, scale, bend in drawn:
+                    point(x + (stop - x) * share, bpm, curve, formula, scale, bend)
+            elif shape == "jump" and keep:
                 point(x, v0)
                 point(x + (nxt - x) / 2, normal)
             elif v1 is None:

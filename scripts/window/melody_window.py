@@ -28,7 +28,8 @@ from window.widgets import Scrub, remember_place, unhighlight
 WATCH_MS = 250
 # the words round the two BPM boxes, by shape (None = one box: the second hidden)
 WORDS = {"burst": ("melody.w_from", "melody.w_to", "melody.bpm"), "jump": ("melody.w_jump", None, "melody.bpm"),
-         "updown": (None, "melody.w_and", "melody.bpm"), "random": ("melody.w_between", "melody.w_and", "melody.bpm")}
+         "updown": (None, "melody.w_and", "melody.bpm"), "random": ("melody.w_between", "melody.w_and", "melody.bpm"),
+         "drawn": (None, None, None)}  # (the drawn one: BPMs as drawn, no boxes)
 MOST_LOADED = 5_000_000  # a loaded track's notes read for one area at most (a denser area: refused, said why)
 
 
@@ -380,7 +381,8 @@ class MelodyWindow(tk.Toplevel):
         how = self.how.get()
         app.melody_shape, app.melody_how, app.melody_hold = self.shape.value(), how, self.hold.get()
         app.melody_catch = self.catch_shape.value()
-        made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get())
+        made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get(),
+                id(getattr(app, "melody_drawn", None)))
         seen = (box, area, track, ch, at, only, has_sel, step, self.shortest.get(), self.rest.get(),
                 tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"], made)
         if seen == self.seen:
@@ -401,13 +403,13 @@ class MelodyWindow(tk.Toplevel):
         for w, key in zip(self.bpm_words, words):
             w.config(text=tr(key) if key else "")
         self.about.config(text=tr("melody.about_" + shape))
-        one = words[1] is None  # (one BPM: the second box and its word hidden)
-        if one and self.bpm_boxes[1].winfo_manager():
-            for w in self.bpm_row[2:4]:
+        one = words[1] is None  # (one BPM: the second box and its word hidden; a drawn one: no boxes, as drawn)
+        want = [] if shape == "drawn" else self.bpm_row[:2] + self.bpm_row[4:] if one else self.bpm_row
+        if [w for w in self.bpm_row if w.winfo_manager()] != want:
+            for w in self.bpm_row:
                 w.pack_forget()
-        elif not one and not self.bpm_boxes[1].winfo_manager():
-            for w in self.bpm_row[2:4]:
-                w.pack(side="left", padx=(4, 0), before=self.bpm_row[4])
+            for w in want:
+                w.pack(side="left", padx=(4, 0))
         self.area.config(text=tr("melody.area", a=pane.place_text(box[0]), b=pane.place_text(box[1]))
                          if box else tr("melody.no_clicks" if clicks else "melody.no_area"))
         self.follow.config(text=tr("melody.follows", name=name))
@@ -460,13 +462,8 @@ class MelodyWindow(tk.Toplevel):
             problem = tr("melody.too_many")
         elif problem is None and not n:
             problem = tr("melody.none")
-        lo, hi = self.number(self.lo, MIN_BPM, MAX_BPM), self.number(self.hi, MIN_BPM, MAX_BPM)
-        if problem is None and (lo is None or (hi is None and not one)):
-            problem = tr("melody.bad_bpm", lo=fmt(round(MIN_BPM, 3)), hi=fmt(MAX_BPM))
-        elif problem is None and how == "catch" and self.number(self.hold, 1, 99) is None:
-            problem = tr("melody.bad_hold")
-        elif problem is None and how == "catch" and self.shortest_gap() < CATCH_LEAST:
-            problem = tr("melody.catch_short", n=CATCH_LEAST)  # (a catch-up can't fit: none would be made)
+        if problem is None:
+            problem = self.shape_problem(self.runs)
         self.go.state(["disabled"] if problem else ["!disabled"])
         if problem is None:
             text = trn("melody.count", n, n=n)
@@ -506,7 +503,7 @@ class MelodyWindow(tk.Toplevel):
         else:
             got = self.chain_runs(self.chain.base, self.chain.sorted())
             self.runs = got[1] if got else []
-            problem = self.chain_problem(self.runs) if self.runs else tr("melody.in_catch_all")
+            problem = self.shape_problem(self.runs) if self.runs else tr("melody.in_catch_all")
             if problem is None:
                 n = anchor_count(self.runs)
                 lines.insert(0, trn("melody.areas", n, n=n))
@@ -574,7 +571,8 @@ class MelodyWindow(tk.Toplevel):
         def clip_for(plain):
             return fill_clip(runs, a, b, self.shape.value(), lo, hi, normal, how,
                              self.number(self.hold) or HOLD, self.catch_shape.value(), random.Random(seed),
-                             bpm_snap, plain, heard if how == "audio" else None)
+                             bpm_snap, plain, heard if how == "audio" else None,
+                             getattr(app, "melody_drawn", None))
         plain = set()
         clip = clip_for(plain)
         if how == "catch":
@@ -608,7 +606,7 @@ class MelodyWindow(tk.Toplevel):
     def chain_clip(self, tempo, edges):
         """The copy the chain lays over tempo (its "at" = where), None when the boxes can't make one."""
         got = self.chain_runs(tempo, edges)
-        if got is None or not got[1] or self.chain_problem(got[1]):
+        if got is None or not got[1] or self.shape_problem(got[1]):
             return None
         (a, b), runs = got
         clip, _ = self.make_clip(tempo, runs, a, b, seed=self.chain_seed)
@@ -616,10 +614,13 @@ class MelodyWindow(tk.Toplevel):
             clip["at"] = a
         return clip
 
-    def chain_problem(self, runs):
-        """What stops the boxes making areas (None = fine)."""
+    def shape_problem(self, runs):
+        """What stops the shape / BPM boxes / way making the jumps of runs (None = fine)."""
         lo, hi = self.number(self.lo, MIN_BPM, MAX_BPM), self.number(self.hi, MIN_BPM, MAX_BPM)
-        if lo is None or (hi is None and WORDS[self.shape.value()][1] is not None):
+        if self.shape.value() == "drawn":
+            if not getattr(self.app, "melody_drawn", None):  # (none picked yet: how to)
+                return tr("melody.no_drawn")
+        elif lo is None or (hi is None and WORDS[self.shape.value()][1] is not None):
             return tr("melody.bad_bpm", lo=fmt(round(MIN_BPM, 3)), hi=fmt(MAX_BPM))
         if self.how.get() == "catch" and self.number(self.hold, 1, 99) is None:
             return tr("melody.bad_hold")
