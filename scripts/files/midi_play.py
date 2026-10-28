@@ -526,7 +526,8 @@ class Line:
     dev/harness/app_check.py). So each place keeps the file's notes in order as runs, one a node of a linked list:
     val > 0 = that many left out, < 0 = that many sent; an off takes the oldest. head / tail per place, nxt per node
     (-1 = none); st = [first free node, -, next node never used, notes sent and not ended]. arrays() = stamp's /
-    stamp_pre's last 5 arguments; room(n) before a call adding up to n nodes (one per note-on)."""
+    stamp_pre's last 5 arguments; room(n) before a call adding up to n nodes (stamp / emit: one per note-on;
+    stamp_pre: two, one sent + its copies left out)."""
 
     def __init__(self, nodes=1 << 16, places=OPEN):
         """places: OPEN for Kestrel; Built-in BASSMIDI's emit = SKIP's (port % 64 x channel x key)."""
@@ -597,9 +598,15 @@ def pre_room(ms, cps, i0, i1, st):
 
 
 def ons_in(ms, i0, i1):
-    """Note-ons among events i0..i1 (the line's room: a node each at most)."""
+    """Note-ons among events i0..i1 (the line's room for stamp / emit: a node each at most)."""
     m = ms[i0:i1]
     return int((((m & 0xF0) == 0x90) & (((m >> 16) & 127) > 0)).sum())
+
+
+def pre_nodes(ms, i0, i1):
+    """The line's room for stamp_pre over events i0..i1: two nodes a note-on, one sent + its copies left out (room
+    for one wrote past the line's end: the app closed without a word inside Shinki's wall, 2026-10-28)."""
+    return 2 * ons_in(ms, i0, i1)
 
 
 def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room, out, lens, three,

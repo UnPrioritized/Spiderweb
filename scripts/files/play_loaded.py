@@ -956,7 +956,7 @@ class LoadedPlayer:
                     if tm_of is not tmap:  # (the tempo map as arrays, for the compiled loop)
                         tm_of, tm = tmap, _tm_arrays(tmap)
                     size = i1 - i if dense is None else midi_play.pre_room(ms, dense.cp, i, i1, line.st)
-                    line.room(midi_play.ons_in(ms, i, i1))
+                    line.room(midi_play.ons_in(ms, i, i1) if dense is None else midi_play.pre_nodes(ms, i, i1))
                     fr = np.empty(size, np.uint64)
                     m = np.empty(size, np.uint32)
                     tr = np.empty(size, np.uint16)
