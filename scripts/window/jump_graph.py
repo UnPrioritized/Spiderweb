@@ -18,15 +18,19 @@ from files.mathexpr import fmt
 from notes.melody import GRAPH_POINTS, graph_at
 from window import look
 from window.speed_graph import BEND_SNAP, FLAT, SNAP, PointDialog
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, chart_edges, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, chart_edges, remember_place
 
 PRESETS = {"shape": [("up", [[0.0, 0.0, 0.5], [1.0, 1.0, 0.5]]), ("down", [[0.0, 1.0, 0.5], [1.0, 0.0, 0.5]]),
                      ("arch", [[0.0, 0.0, 0.5], [0.5, 1.0, 0.5], [1.0, 0.0, 0.5]]),
                      ("drop", [[0.0, 1.0, 0.0], [1.0, 0.0, 0.5]])],
            "strength": [("full", [[0.0, 1.0, 0.5], [1.0, 1.0, 0.5]]), ("grow", [[0.0, 0.0, 0.5], [1.0, 1.0, 0.5]]),
                         ("fade", [[0.0, 1.0, 0.5], [1.0, 0.0, 0.5]]),
-                        ("swell", [[0.0, 0.0, 0.5], [0.5, 1.0, 0.5], [1.0, 0.0, 0.5]])]}
-START = {"shape": PRESETS["shape"][0][1], "strength": PRESETS["strength"][0][1]}
+                        ("swell", [[0.0, 0.0, 0.5], [0.5, 1.0, 0.5], [1.0, 0.0, 0.5]])],
+           "step": [("up", [[0.0, 0.0, 0.5], [1.0, 1.0, 0.5]]), ("down", [[0.0, 1.0, 0.5], [1.0, 0.0, 0.5]]),
+                    ("arch", [[0.0, 0.0, 0.5], [0.5, 1.0, 0.5], [1.0, 0.0, 0.5]]),
+                    ("dip", [[0.0, 1.0, 0.5], [0.5, 0.0, 0.5], [1.0, 1.0, 0.5]])]}
+START = {kind: presets[0][1] for kind, presets in PRESETS.items()}
+SCALES = ("lin", "exp")  # the step graph's: the length straight / on the doubling scale (melody.step_runs)
 MID = 0.25  # (a stretch's middle sits at 0.25 + bend / 2 of its height: tempo.bent with the control point halfway)
 
 
@@ -57,6 +61,16 @@ class JumpGraph(tk.Toplevel):
         frame = ttk.Frame(self, padding=8)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text=tr("jump_graph.info_" + kind), wraplength=int(440 * s), justify="left").pack(anchor="w")
+        if kind == "step":  # (Linear / Exponential, the names the Conductor pane's Graph uses; user 2026-10-29)
+            row = ttk.Frame(frame)
+            row.pack(anchor="w", pady=(4, 0))
+            ttk.Label(row, text=tr("jump_graph.scale")).pack(side="left")
+            names = [tr("jump_graph.scale_" + k) for k in SCALES]
+            self.scale_box = ttk.Combobox(row, state="readonly", values=names, width=max(len(n) for n in names))
+            self.scale_box.current(SCALES.index(win.step_scale()))
+            self.scale_box.pack(side="left", padx=(4, 0))
+            self.scale_box.bind("<<ComboboxSelected>>", lambda e: self.pick_scale())
+            Tooltip(self.scale_box, tr("jump_graph.scale_tip"))
         self.canvas = tk.Canvas(frame, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
                                 highlightbackground=look.CHART_BORDER, cursor="crosshair")
         self.canvas.pack(pady=(4, 4))
@@ -103,6 +117,12 @@ class JumpGraph(tk.Toplevel):
         setattr(self.app, "melody_%s_pts" % self.kind, [list(p) for p in self.pts])
         self.win.seen = None
         self.win.sync()
+
+    def pick_scale(self):
+        self.app.melody_step_scale = SCALES[self.scale_box.current()]
+        self.win.seen = None
+        self.win.sync()
+        self.draw()
 
     def changed(self):
         self.store()
@@ -167,6 +187,13 @@ class JumpGraph(tk.Toplevel):
         """A height as the left side shows it: a BPM between the boxes (shape) / a percentage (strength)."""
         if self.kind == "strength":
             return f"{fmt(round(p * 100, 1))} %"
+        if self.kind == "step":  # (the step there in ticks, as the jumps get it)
+            got = self.win.step_range()
+            if got is None:
+                return f"{fmt(round(p * 100, 1))} %"
+            s0, s1 = got
+            t = s0 * (s1 / s0) ** p if self.win.step_scale() == "exp" else s0 + (s1 - s0) * p
+            return tr("jump_graph.ticks", n=fmt(max(1, round(t))))
         lo, hi = self.win.graph_bpms()
         if lo is None:
             return f"{fmt(round(p * 100, 1))} %"

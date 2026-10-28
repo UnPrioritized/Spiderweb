@@ -48,6 +48,24 @@ def snap_runs(step, a, b, ppq):
     return [((t0 + np.arange(n, dtype=np.int64) * step) / ppq, float(b))]
 
 
+def step_runs(step0, step1, pts, scale, a, b, ppq):
+    """Every step changing over the area (user 2026-10-29): one run from a, each next jump one step later, the step
+    read from the graph pts (graph_at) at the jump before: height 0 = step0, 1 = step1 (whole ticks); scale "lin" =
+    the length straight between them, "exp" = on the doubling scale (each halving takes the same room). Steps
+    rounded to whole ticks, at least 1."""
+    step0, step1 = max(1, int(step0)), max(1, int(step1))
+    t0, t1 = round(a * ppq), round(b * ppq)
+    if t1 <= t0:
+        return []
+    out, t = [], t0
+    while t < t1 and len(out) <= MOST_ANCHORS:
+        out.append(t)
+        h = float(graph_at(pts, [(t - t0) / (t1 - t0)])[0])
+        step = step0 * (step1 / step0) ** h if scale == "exp" else step0 + (step1 - step0) * h
+        t += max(1, round(step))
+    return [(np.array(out, np.int64) / ppq, float(b))]
+
+
 def heard_points(tempo, base, ppq, a, b):
     """What was really heard over beats a..b (the file's tempo with catch-ups, Keep timing parts at their heard
     tempo) as a heard tempo line: [[beat, bpm, "hold", ...]] held points, each BPM exactly a whole number of

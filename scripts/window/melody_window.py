@@ -18,7 +18,7 @@ from notes.engine import snap_name, snap_name_beats
 from notes.loaded import gather_box
 from notes.melody import (CATCH_LEAST, CATCH_SHAPES, HOLD, HOWS, MOST_ANCHORS, REST, SHAPES, SHORTEST, anchor_count,
                           fill_clip, heard_points,
-                          melody_runs, snap_runs)
+                          melody_runs, snap_runs, step_runs)
 from notes.tempo import MAX_BPM, MIN_BPM, drawn_bpm, plans
 from window import look
 from window.jump_areas import JumpChain
@@ -74,6 +74,15 @@ class MelodyWindow(tk.Toplevel):
         snap = app.snap.get()
         start = snap if snap_name(snap) else fmt(app.snap_ticks())
         self.step = self.length_box(row, getattr(app, "melody_step", start))
+        # the step changing over the area (user 2026-10-29): a tick, the step it changes to, its graph
+        row = ttk.Frame(box)
+        row.pack(anchor="w", padx=(30, 0), pady=(2, 0))
+        self.step_on = tk.BooleanVar(value=getattr(app, "melody_step_on", False))
+        self.step_tick = ttk.Checkbutton(row, text=tr("melody.step_to"), variable=self.step_on, command=self.sync)
+        self.step_tick.pack(side="left")
+        self.step_to = self.length_box(row, getattr(app, "melody_step_to", "1/64"))
+        self.step_button = ttk.Button(row, text=tr("path.graph"), command=lambda: self.open_graph("step"))
+        self.step_button.pack(side="left", padx=(6, 0))
         # Jump areas (group C): each click in the pane an edge, two neighbouring edges an area (window/jump_areas.py)
         self.at_clicks = ttk.Radiobutton(box, text=tr("melody.at_clicks"), value="clicks", variable=self.at,
                                          command=self.sync)
@@ -231,15 +240,28 @@ class MelodyWindow(tk.Toplevel):
             a, moved = hit, True
         return ((a, b) if b - a > 1e-9 else None), moved
 
-    def step_ticks(self):
-        """Every [step]: whole ticks, at least 1 (a note length: its ticks at this PPQ, rounded); None when it can't
-        be (hunt 2026-10-29: "0.5" made half-tick jumps, a tiny number an error)."""
-        name = snap_name(self.step.get().strip())
+    def step_ticks(self, var=None):
+        """Every [step] (var: another such box, the "to" one): whole ticks, at least 1 (a note length: its ticks at
+        this PPQ, rounded); None when it can't be (hunt 2026-10-29: "0.5" made half-tick jumps, a tiny number an
+        error)."""
+        var = self.step if var is None else var
+        name = snap_name(var.get().strip())
         if name:
             t = round(snap_name_beats(name) * self.app.ppq)
             return t if t >= 1 else None
-        v = self.number(self.step, 1)
+        v = self.number(var, 1)
         return int(v) if v is not None and v == int(v) else None
+
+    def step_scale(self):
+        """The step graph's Linear / Exponential ("lin" / "exp"), picked in its window."""
+        return getattr(self.app, "melody_step_scale", "exp")
+
+    def step_range(self):
+        """(Every's ticks, "to" ticks) while the step changes over the area and both can be read, else None."""
+        if not self.step_on.get():
+            return None
+        s0, s1 = self.step_ticks(), self.step_ticks(self.step_to)
+        return None if s0 is None or s1 is None else (s0, s1)
 
     def shortest_gap(self):
         """The shortest gap between jumps (and to a run's end) in ticks."""
@@ -376,6 +398,8 @@ class MelodyWindow(tk.Toplevel):
         at = self.at.get()
         app.melody_at = at
         app.melody_shortest, app.melody_rest, app.melody_step = self.shortest.get(), self.rest.get(), self.step.get()
+        app.melody_step_on, app.melody_step_to = self.step_on.get(), self.step_to.get()
+        stepping = (self.step_on.get(), self.step_to.get(), str(graph_pts(app, "step")), self.step_scale())
         clicks = at == "clicks"
         chain = self.live_chain()
         if clicks:  # (the area = the clicked edges' first .. last)
@@ -404,7 +428,7 @@ class MelodyWindow(tk.Toplevel):
         made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get(),
                 str(graph_pts(app, "shape")), str(graph_pts(app, "strength")), self.strength_on.get())
         app.melody_strength_on = self.strength_on.get()
-        seen = (box, area, track, ch, at, only, has_sel, step, self.shortest.get(), self.rest.get(),
+        seen = (box, area, track, ch, at, only, has_sel, step, stepping, self.shortest.get(), self.rest.get(),
                 tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"],
                 None if clicks else getattr(app, "tempo_count", 0), self.preview_seed, made)
         if seen == self.seen:
@@ -420,6 +444,12 @@ class MelodyWindow(tk.Toplevel):
         if isinstance(self.catch_shape, ttk.Combobox) and how == "catch":
             self.catch_shape.state(["readonly"])
         self.step.entry.state(["!disabled"] if at == "snap" else ["disabled"])
+        self.step_tick.state(["!disabled"] if at == "snap" else ["disabled"])
+        changing = at == "snap" and self.step_on.get()
+        for w in (self.step_to.entry, self.step_button):
+            w.state(["!disabled"] if changing else ["disabled"])
+        if not self.step_on.get() and "step" in self.graphs:  # (ticked off: its graph window goes, graph kept)
+            self.graphs["step"].close()
         shape = self.shape.value()
         words = WORDS[shape]
         for w, key in zip(self.bpm_words, words):
@@ -470,8 +500,11 @@ class MelodyWindow(tk.Toplevel):
         elif area is None:  # (all of it inside a catch-up's area)
             problem = tr("melody.in_catch_all")
         elif at == "snap":
-            if not step:
+            if not step or self.step_on.get() and self.step_range() is None:
                 problem = tr("melody.bad_step")
+            elif self.step_on.get():  # (the step changing over the area: its graph, user 2026-10-29)
+                self.runs = step_runs(*self.step_range(), graph_pts(app, "step"), self.step_scale(), area[0],
+                                      area[1], app.ppq)
             else:
                 self.runs = snap_runs(step, area[0], area[1], app.ppq)
         elif not melody_ok:
