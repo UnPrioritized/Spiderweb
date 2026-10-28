@@ -488,6 +488,8 @@ class HistoryPanel:
             return
         hz_was = self.hz_window and self.hz_window.before_restore()
         self.roll.cancel_draft()
+        tl = getattr(self, "track_list", None)
+        mutes = tl.mute_marks() if tl is not None else []  # (mutes follow their music, never undone: hunt E3)
         now, sel_now = undo_state(self.shapes), self.sel_state()
         ch10 = None
         boxes = was_boxes = (self.pvar["bpm"].get(), self.project_file)
@@ -566,6 +568,8 @@ class HistoryPanel:
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()
+        if mutes:
+            tl.remute(mutes)
         if ch10 is not None:
             self.sync_colours()
             self.show_colour_limit()

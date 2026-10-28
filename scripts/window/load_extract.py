@@ -206,15 +206,8 @@ def extract_loaded(app):
     if not tracks:
         app.status.config(text=tr("extract.no_tracks"))
         return
-    # (a part / a Ch row highlighted: its track's shown channels alone, the ones picked behind it whole)
-    chans = shown_chans(app)
-    groups = [(tracks, [])]
-    if chans:
-        top = app.track_list.shown_file()[0]
-        behind = [n for n in tracks if n != top]
-        groups = [([top], chans)] + ([(behind, [])] if behind else [])
-    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": ts, **({"chans": cs} if cs else {})}
-           for ts, cs in groups for a, b, c, d in boxes]
+    # (parts / Ch rows shown: their tracks' shown channels alone, the ones picked behind it whole)
+    new = box_list(boxes, shown_groups(app, tracks))
     if any(boxes_meet(a, b) for a in new for b in hidden_boxes(app)):
         messagebox.showerror(tr("app.spiderweb_2"), tr("extract.overlap"), parent=app)
         return
@@ -321,16 +314,15 @@ def box_notes(app):
     boxes = boxes_now(app) if tracks else []
     if not boxes:
         return None
-    chans = shown_chans(app)
-    key = (id(lm), lm.hide_ver, tuple(map(tuple, boxes)), tuple(tracks), tuple(chans), app.ppq)
+    groups = shown_groups(app, tracks)
+    key = (id(lm), lm.hide_ver, tuple(map(tuple, boxes)), repr(groups), app.ppq)
     job = getattr(app, "_box_notes", None)
     if job is not None and job["key"] == key:
         return job["cols"]
     if job is not None:
         job["cancel"] = True
     job = app._box_notes = {"key": key, "cols": None, "cancel": False, "finished": False, "many": 0}
-    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks, **({"chans": chans} if chans else {})}
-           for a, b, c, d in boxes]
+    new = box_list(boxes, groups)
     scale = app.ppq / lm.ppq
 
     def run():
@@ -372,8 +364,25 @@ def delete_tracks(app, lm):
     whole = [n for n, t in enumerate(lm.tracks) if t.notes and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole]
     if cur is None:
         return whole
-    got = app.track_list.shown_file()  # (a part / a Ch row: its track, shown_chans says which channels)
-    return [got[0]] if got is not None and got[0] in whole else []
+    # (parts / Ch rows shown, several picked too: their tracks, shown_groups says which channels)
+    return sorted(n for n in app.track_list.shown_files() if n in whole)
+
+
+def shown_groups(app, tracks):
+    """tracks as [(track numbers, channels: [] = every one)]: the ones whose parts / Ch rows the piano roll shows
+    get only those channels (several Ch rows picked: each track its picked ones, E3 hunt), the rest whole."""
+    tl = getattr(app, "track_list", None)
+    files = tl.shown_files() if tl is not None else {}
+    by = {}
+    for n in tracks:
+        by.setdefault(tuple(files.get(n, ())), []).append(n)
+    return [(ts, list(cs)) for cs, ts in by.items()]
+
+
+def box_list(boxes, groups):
+    """Extract boxes for the kept boxes (t0, t1, k0, k1) over each group of shown_groups."""
+    return [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": ts, **({"chans": cs} if cs else {})}
+            for ts, cs in groups for a, b, c, d in boxes]
 
 
 def shown_chans(app):
@@ -402,9 +411,7 @@ def delete_loaded(app, shapes_too=False):
     if getattr(app, "_extracting", None):
         app.status.config(text=tr("extract.busy"))
         return
-    chans = shown_chans(app)
-    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks, **({"chans": chans} if chans else {})}
-           for a, b, c, d in boxes]
+    new = box_list(boxes, shown_groups(app, tracks))
     staying = shape_boxes([sh for i, sh in enumerate(app.shapes) if i not in gone])
     if any(boxes_meet(a, b) for a in new for b in staying):
         messagebox.showerror(tr("app.spiderweb_2"), tr("delete_loaded.overlap"), parent=app)

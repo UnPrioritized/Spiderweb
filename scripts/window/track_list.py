@@ -72,6 +72,14 @@ INTO_UP = 3  # px (x scale): the line INTO an open folder sits this much higher 
 FILL_TILE = 256  # px: a Select box's see-through fill is put on in squares this big (one small picture per size)
 
 
+MARK_NOTES = 32  # notes a mute remembers its music by across an undo / redo (TrackList.mute_marks)
+
+
+def note_keys(notes):
+    """One number per note (its shape, start, key) to find it again after the notes are made anew."""
+    return notes[:, 5] * (1 << 44) + (notes[:, 2] & 0xFFF) * (1 << 32) + (notes[:, 0] & 0xFFFFFFFF)
+
+
 def hex_rgb(colour):
     colour = colour.lstrip("#")
     if len(colour) == 3:
@@ -388,9 +396,13 @@ class TrackList(tk.Canvas):
     def toggle_open(self, s):
         """A folder opened / shut (its ▾); kept with the view (state)."""
         self.open ^= {s}
-        if s not in self.open and self.current == s and self.current_ch is not None:  # (its channel can't show)
-            self.current_ch = None
-            self.shown_changed()
+        if s not in self.open:  # (its Ch rows can't show: unpicked, E3 hunt; picks stay tracks OR Ch rows)
+            if self.current == s and self.current_ch is not None:
+                self.current = s  # (the track alone: the other picked Ch rows go too)
+                self.shown_changed()
+            elif any(p[0] == s for p in self.sel_ch):
+                self.sel_ch = {p for p in self.sel_ch if p[0] != s}
+                self.shown_changed()
         self.request_redraw()
         self.app.schedule_autosave()
 
@@ -449,6 +461,56 @@ class TrackList(tk.Canvas):
             out |= np.isin(tid * 16 + ch, [s * 16 + c for s, c in pairs])
         return notes[~out]
 
+    def mute_marks(self):
+        """Before an undo / redo: each mute with the music it covers (user 2026-10-28, E3 hunt: like Domino, undo never
+        mutes or un-mutes, but a mute goes along with its music when a step moves it back): a loaded row = its file
+        track's channels, else up to MARK_NOTES of its notes (shape number, start, key); None = nothing to follow."""
+        if not self.muted:
+            return []
+        self.tracks()
+        r, rows, chans = self.app.rendered, self.note_rows(), self.row_chans()
+        ch = channels_of(r[:, 4], self.app.picture_use10) if len(r) else r[:0, 0]
+        out = []
+        for m in self.muted:
+            s, c = m if isinstance(m, tuple) else (m, None)
+            row = self.row_of_id(s)
+            if row is None:
+                out.append((m, None))
+            elif s < 0 and self.app.loaded is not None:
+                out.append((m, ("file", self.file_part(s)[0], chans[row] if c is None else (c,))))
+            else:
+                pick = rows == row if len(r) else np.zeros(0, bool)
+                if c is not None and len(r):
+                    pick &= ch == c
+                at = np.flatnonzero(pick)[:MARK_NOTES]
+                out.append((m, ("notes", note_keys(r[at])) if len(at) else None))
+        return out
+
+    def remute(self, marks):
+        """After an undo / redo: mute_marks' mutes put on wherever their music is now (a track whose every channel
+        ends up muted = the whole track); a mute with nothing to follow stays on its track."""
+        self.tracks()
+        r, rows, chans = self.app.rendered, self.note_rows(), self.row_chans()
+        keys = note_keys(r) if len(r) else np.zeros(0, np.int64)
+        ch = channels_of(r[:, 4], self.app.picture_use10) if len(r) else r[:0, 0]
+        whole, pairs = set(), set()
+        for m, key in marks:
+            if key is None:
+                (pairs.add(m) if isinstance(m, tuple) else whole.add(m))
+            elif key[0] == "file":
+                pairs |= {(int(s), c) for row, s in enumerate(self._all.tolist()) if s < 0
+                          and self.file_part(s)[0] == key[1] for c in key[2] if c in chans[row]}
+            else:
+                at = np.flatnonzero(np.isin(keys, key[1]) & (rows >= 0))
+                pairs |= {(int(self._all[rows[i]]), int(ch[i])) for i in at.tolist()}
+        for s in {s for s, _ in pairs}:  # (every channel of a track muted: the track's own mute)
+            got = {c for x, c in pairs if x == s}
+            row = self.row_of_id(s)
+            if row is not None and chans[row] and got >= set(chans[row]):
+                whole.add(s)
+        self.muted = whole | {p for p in pairs if p[0] not in whole}
+        self.request_redraw()
+
     def mutes_by_track(self):
         """(whole tracks muted, {(track id, channel)}) with a loaded track's PARTS (PLAN #11 D) as the channels of its
         track (-1 - its number) they hold."""
@@ -486,6 +548,19 @@ class TrackList(tk.Canvas):
         if ch is not None:
             chs = frozenset({ch})
         return n, sorted(chs) if chs is not None and len(chs) < 16 else []
+
+    def shown_files(self):
+        """{track number: its channels shown (sorted, [] = every one)} of the loaded tracks the piano roll shows in
+        full: every picked Ch row's (E3 hunt), else the highlighted row's (shown_file); {} = none."""
+        pairs = self.shown_pairs()
+        if pairs:
+            out = {}
+            for s, c in pairs:
+                if s < 0:
+                    out.setdefault(self.file_part(s)[0], set()).add(c)
+            return {n: sorted(cs) for n, cs in out.items()}
+        got = self.shown_file()
+        return {got[0]: got[1]} if got is not None else {}
 
     def rows_chans(self, rows):
         """{track number: its channels in rows (a sorted list, [] = every one)} of the loaded tracks there."""
@@ -599,7 +674,8 @@ class TrackList(tk.Canvas):
             self.view_t = min(BEATS_FAR, max(0.0, float(data["t"]))) if num(data.get("t")) else 0.0
             self.top = min(10 ** 9, max(0, round(data["top"] * self.scale))) if num(data.get("top")) else 0
         if isinstance(data.get("open"), list):
-            self.open = {v for v in data["open"][:OPEN_MOST] if type(v) is int and -1 - COUNT_MOST <= v < HAND + ID_MOST}
+            self.open = {v for v in data["open"][:OPEN_MOST]  # (parts' ids too, E3 hunt)
+                         if type(v) is int and -HAND < v < HAND + ID_MOST}
 
     def on_faint(self, e):
         """The Faint % box typed / stepped: the tracks behind drawn again that faint (0 = not drawn)."""
@@ -807,7 +883,8 @@ class TrackList(tk.Canvas):
                 re = lm.rechannel
                 had = set() if t is None else {int(re[n])} if re is not None and n < len(re) and re[n] >= 0 \
                     else set(np.flatnonzero(t.chn).tolist())
-                if only is None and set(chs) <= had and list(chs) == sorted(chs):
+                if only is None and set(chs) <= had:  # (as the file had it: only its order may be yours, E3 hunt)
+                    moved |= list(chs) != sorted(chs)
                     continue
             names.append(self.name_of(row))
             moved |= list(chs) != sorted(chs)
@@ -816,10 +893,8 @@ class TrackList(tk.Canvas):
     def mixed_note(self, domino=False):
         """The export message's lines about mixed tracks (mixed_written), "" for none."""
         names, moved = self.mixed_written(own_only=domino)
-        if not names:
-            return ""
         shown = ", ".join(names[:10]) + (", …" if len(names) > 10 else "")
-        return (tr("tracks.mixed_dms" if domino else "tracks.mixed_export", names=shown)
+        return ((tr("tracks.mixed_dms" if domino else "tracks.mixed_export", names=shown) if names else "")
                 + (tr("tracks.mixed_order") if moved and not domino else ""))
 
     def own_track(self, s):
@@ -1632,10 +1707,9 @@ class TrackList(tk.Canvas):
         to = {}
         if clash:  # (those channels are there already: Merge / Move / Cancel, C3)
             mine = {entry_of(s) for s, _ in parts if s >= HAND}
-            # (Merge is pressed by Enter when nothing would sound different: into a track of yours, no CC lines;
-            # a loaded track's channel may play another instrument)
-            calm = dst >= HAND and not any("cc" in sh or "hz" in sh for sh in app.shapes
-                                           if mine & set(into_ids(sh)))
+            # (Merge is pressed by Enter when nothing would sound different: into a track of yours or Spiderweb's
+            # (made yours on the way), no CC lines; a loaded track's channel may play another instrument)
+            calm = dst >= 0 and not any("cc" in sh or "hz" in sh for sh in app.shapes if mine & set(into_ids(sh)))
             free = free_channels(app, held, len(clash))
             got = ask_clash(app, self.name_of(row), sorted({c for _, c in clash}), free, calm, need=len(clash))
             if got == "cancel":
@@ -1655,7 +1729,9 @@ class TrackList(tk.Canvas):
             to = {(mine_now(s), c): n for (s, c), n in to.items()}
             was = {mine_now(s): w for s, w in was.items()}
             seq = [(mine_now(s), c) for s, c in seq]
-            dst = mine_now(dst)
+            dst, target = mine_now(dst), mine_now(target)  # (Spiderweb's track made yours: its new id, E3 hunt)
+        if target in self.muted:  # (a muted track taking channels: its own stay muted, the ones coming keep theirs)
+            self.muted = (self.muted - {target}) | {(target, c) for c in now}
         srcs = [s for s, _ in parts]
         # (a tinted track touched = yours, like a drag)
         app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if HAND + t["id"] in srcs + [dst] else t
@@ -1838,6 +1914,8 @@ class TrackList(tk.Canvas):
             if props[n].get("name") is None and props[n].get("ch") is None and not props[n].get("order"):
                 props.pop(n)  # (its Ch rows' order stays, hunt D)
         muted = {(s, c) for s, _, cs in got for c in cs if s in self.muted or (s, c) in self.muted}
+        if dst in self.muted:  # (a muted row taking channels: its own stay muted, the ones coming keep theirs)
+            self.muted = (self.muted - {dst}) | {(dst, c) for c in self.row_chans()[self.row_of_id(dst)]}
         if self.set_parts(props, [], None, step or tr("tracks.into_step")):
             self.muted = {x for x in self.muted if not (isinstance(x, tuple) and (x[0], x[1]) in muted)} | {
                 (dst, c) for _, c in muted}
@@ -2197,8 +2275,7 @@ class TrackList(tk.Canvas):
         menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
         menu.add_command(label=tr("tracks.add_tracks"), command=lambda: self.ask_add(row))
         menu.add_separator()
-        menu.add_command(label=trn("tracks.remove_chans", max(len(self.picked_chans()), 1),
-                                   n=len(self.picked_chans())),
+        menu.add_command(label=trn("tracks.remove_chans", max(len(pairs), 1), n=len(pairs)),  # (yours only)
                          command=lambda: self.remove_chans(pairs), state="normal" if pairs else "disabled")
         menu.add_command(label=tr("tracks.properties"), state="disabled")
         try:

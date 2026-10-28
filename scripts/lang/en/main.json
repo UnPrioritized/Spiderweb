@@ -615,7 +615,7 @@
  "tracks.into_step": "Move channel into track",
  "tracks.out_step": "Move channel out of track",
  "tracks.mixed_export": "\n\nTracks holding notes on several channels: {names}. Some MIDI programs can't open a MIDI like that.",
- "tracks.mixed_order": "\n\nThe order of their Ch rows stays in the project only: a MIDI keeps no order inside a track.",
+ "tracks.mixed_order": "\n\nThe order you dragged Ch rows into stays in the project only: a MIDI keeps no order inside a track.",
  "tracks.mixed_dms": "\n\nTracks holding several channels went out as one Domino track per channel: {names}.",
  "tracks.split": "Split into tracks",
  "tracks.split_step": "Split into tracks",
