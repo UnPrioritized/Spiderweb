@@ -195,6 +195,7 @@ class MelodyWindow(tk.Toplevel):
         self.go = ttk.Button(row, text=tr("melody.fill"), command=self.fill)
         self.go.pack(side="right", padx=(0, 6))
         self.bind("<Escape>", lambda e: self.close())
+        self.bind("<F1>", lambda e: (app.open_help("fill_tempo"), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)
         sels = [i for i in app.sels if i < len(app.shapes)]
         self.only_sel.set(bool(sels) or bool(app.roll.kept_box()))  # (something selected: only that, to start with)

@@ -98,6 +98,7 @@ class JumpGraph(tk.Toplevel):
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))
         self.bind("<Escape>", lambda e: self.cancel())
+        self.bind("<F1>", lambda e: (win.app.open_help("fill_tempo"), "break")[1])
         self.bind("<Return>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.hist = LocalUndo(self, lambda: json.dumps(self.pts), self.put_state)

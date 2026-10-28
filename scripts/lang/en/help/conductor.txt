@@ -40,7 +40,12 @@ Ctrl+C copies the picked stretch, Ctrl+X cuts it, Ctrl+V pastes it at the play l
 
 Interval: curved parts change the tempo every this many ticks (24 like many MIDI programs; 1 = every tick). The pane draws the steps the file will have.
 
-Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with every step up, so huge spikes and very slow stops fit on one screen. Fit shows the whole line. The wheel over the numbers on the left zooms, Shift+wheel or a drag there scrolls.
+Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with every step up, so huge spikes and very slow stops fit on one screen. Fit shows the whole line. The wheel over the numbers on the left zooms, Shift+wheel or a drag there scrolls. Where the tempo goes higher or lower than the pane shows, a small arrow at its top or bottom edge points to it: click the arrow to scroll there.
+[clip:conductor-arrows]
+
+Above: the 600 BPM stop is above the view and the 40 BPM one below it.
+
+To draw a jumpy tempo that follows the melody for you, make a Select box and right-click → Fill with tempo jumps…. See Help → Fill with tempo jumps.
 
 The ruler above the piano roll shows each tempo change ("120 → 60", "60 ↗ 180"); rest the mouse on one for the exact BPMs. Changes of the heard tempo inside Keep timing parts show in purple. The number in the pane's top row is the exact tempo at the play line, with the heard tempo after it in purple brackets where the two differ.
 [clip:conductor-ruler]

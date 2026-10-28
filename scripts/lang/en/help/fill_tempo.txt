@@ -1,0 +1,96 @@
+Fill with tempo jumps draws a jumpy tempo line for you in the Conductor pane: a jump at every melody note, on a steady grid, or where you click. With Keep the audio the notes still sound exactly as before, so only how the piano roll scrolls in other programs changes.
+
+Make a Select box over the area in the Conductor pane, then right-click → Fill with tempo jumps… (or pick the menu item first and drag over the area). The window stays open while you change settings: a faint orange line in the pane shows what Fill will lay, and Fill lays it as one undo step. What was in the area before is replaced. Undo and fill again to try other settings.
+[clip:melody-window]
+
+## Where the jumps go
+
+• Melody notes: a jump at each note start of the notes you follow (notes starting together count once). The notes followed are outlined in the piano roll.
+
+• Follows: the track highlighted in the track list (a Ch row = only that channel), or Top note of all tracks: the highest note playing at each moment, across every track, often the melody in a black MIDI. A note under a higher note that is still held doesn't count, so a chord gives only its top note.
+
+• Only the selected notes: only the notes of the selected shapes (or what a Select box in the piano roll picked).
+
+• Every: a jump every step from the area's start, no melody needed (also with All tracks highlighted). Type ticks or a note length like 1/16.
+
+• Where I click (Jump areas): click in the pane to set the jumps yourself, see below.
+
+The rules under them shape which melody notes count:
+
+• Skip notes shorter than: fast runs and trills would make wild jumps.
+
+• Back to the normal tempo after a rest longer than: a longer rest ends the run, and the tempo goes back to normal until the next note.
+
+• Jump every [n] notes: only every 2nd, 3rd... note jumps. The count starts again after each rest.
+
+[clip:melody-preview]
+
+Above: before Fill, the faint orange line shows the jumps over the melody. The rest before beat 7 goes back to 120.
+
+[clip:melody-top]
+
+Above, Top note of all tracks: the high chord held over beats 4 and 5 hides the melody notes under it, so only the chord's start jumps there.
+
+## The tempo between jumps
+
+Pick a shape and its BPMs. The grey line under them says what the shape does.
+
+• Burst: each gap glides from the first BPM to the second (put the higher one first for a reverse burst).
+[clip:melody-burst]
+
+• Jump and come back: the tempo jumps to the BPM at each note, then goes back to the normal tempo halfway to the next one.
+[clip:melody-jump]
+
+• Up and down in turns: one gap at the first BPM, the next at the second, and so on.
+[clip:melody-updown]
+
+• Random: each gap gets a BPM between the two (the BPM snap rounds them). Every Fill is a new roll; the faint line always shows the one Fill will make.
+[clip:melody-random]
+
+• My drawn one: draw the shape of each gap yourself. Graph… opens a small window: left to right is one gap, from its jump to the next one; bottom to top runs from the lower BPM box to the higher one. Click to add points, drag them, drag a round handle to bend a piece, or start from Up, Down, Arch or Drop. Reset puts it back.
+[clip:melody-drawn-graph]
+[clip:melody-drawn]
+
+Above: a fast drop after each jump, then a slow slide below the normal tempo.
+
+## How strong each jump is
+
+Strength over the area (tick it, then Graph…): how far each jump goes, from the first jump to the last. 0 % = the normal tempo (no jump), 50 % = halfway, 100 % = the whole jump. For example a jump from 120 to 240 at 50 % goes to 180. Start from Full, Grow, Fade or Swell, or draw your own.
+[clip:melody-strength-graph]
+[clip:melody-strength]
+
+Above: Grow, so the jumps get bigger along the melody.
+
+Higher notes jump further: the area's highest note jumps the whole way, its lowest note jumps the % you type, and the notes between are spread evenly by pitch, so the tempo line traces the melody. It works together with Strength (both make the jumps smaller).
+[clip:melody-pitch]
+
+## Keeping the timing
+
+• Keep the audio: the whole area becomes one Keep timing part (see Help → Conductor pane), so every note keeps its sound time, inside the area and after it.
+• A catch-up BPM after each jump: the jumps are real tempo changes and each jump lands on time. Each gap holds the jump's tempo for the % you type, then a catch-up brings the music back on time before the next note. Gaps too short for a catch-up stay at the normal tempo; the status line says how many. When no catch-up can make up the time (for example a long stop at a very slow tempo), nothing is laid and the status line says so.
+[clip:melody-catch]
+
+Above: each jump drops to 90 BPM, then a catch-up at 180 BPM brings the next note back on time.
+
+## A steady grid
+
+With Every, the jumps come every step, melody or not.
+[clip:melody-every]
+
+Changing to: tick it to let the step change over the area, from the Every step to this one. Graph… sets how it changes (left to right: across the area; bottom to top: from the first step to the second), and its Scale picks Linear (the length changes evenly) or Exponential (each halving of the step takes the same room, so it speeds up smoothly).
+[clip:melody-step]
+
+Above: from 1/4 to 1/32, Exponential: the jumps come closer and closer.
+
+## Where I click (Jump areas)
+
+Pick Where I click, then click in the Conductor pane: each click is an edge, and two edges make an area with one jump at its start. The tempo is laid as you click, so you see it at once. Clicks snap onto the followed notes' starts nearby (Shift: free). Drag an edge to move it. Ctrl+Z / Ctrl+Y undo and redo single edges while you click. Enter, Esc, right-click or another tool finishes: all the areas together are one undo step, and they become ordinary tempo points.
+[clip:melody-areas]
+
+Above: four clicks, three areas, each with a Burst from 240 to 120. The shape, the BPMs and the graphs work across the areas like across Fill's gaps.
+
+## Tips
+
+• The window keeps its settings while Spiderweb runs. Changing a box re-draws the faint line at once; drag the BPM and length boxes sideways to try values quickly.
+• When the tempo goes higher or lower than the pane shows, a small arrow at its top or bottom edge points to it; click the arrow to scroll there.
+• Judge the result by playing it in Spiderweb, not in other programs: some MIDI programs skip very short tempo changes.
