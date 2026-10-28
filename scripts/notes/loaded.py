@@ -426,12 +426,21 @@ def _clean_group(v):
     if not boxes or not tracks:
         return None
     out = {"boxes": boxes, "tracks": tracks}
+    chans = clean_chans(v.get("chans"))
+    if chans:  # (only these channels of its tracks: a part / a Ch row was shown, PLAN #11 D hunt)
+        out["chans"] = chans
     if v.get("ports") is True:  # (some notes came from tracks on another port: the export writes ports)
         out["ports"] = True
     sig = v.get("sig")  # (its notes as made: load_extract.untouched)
     if isinstance(sig, str) and len(sig) == 32 and all(c in "0123456789abcdef" for c in sig):
         out["sig"] = sig
     return out
+
+
+def clean_chans(v):
+    """A box group's "chans" as read: sorted channels 0-15, each once; none / all 16 = [] (every channel)."""
+    chans = sorted({c for c in v if type(c) is int and 0 <= c <= 15}) if isinstance(v, (list, tuple)) else []
+    return chans if len(chans) < 16 else []
 
 
 def extract_groups(v):
@@ -484,7 +493,17 @@ def shape_boxes(shapes):
 def group_boxes(groups):
     """The boxes of Extract-like groups ({"boxes", "tracks"}), as shape_boxes gives them (also App.deleted's: Delete
     loaded notes, group D)."""
-    return [{"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": g["tracks"]} for g in groups for b in g["boxes"]]
+    return [{"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": g["tracks"],
+             **({"chans": g["chans"]} if g.get("chans") else {})} for g in groups for b in g["boxes"]]
+
+
+def box_groups(boxes):
+    """Boxes (box dicts) as Extract-like groups {"boxes", "tracks"(, "chans")}: one per tracks + channels."""
+    out = {}
+    for b in boxes:
+        k = (tuple(b["tracks"]), tuple(clean_chans(b.get("chans"))))
+        out.setdefault(k, []).append([b["t0"], b["t1"], b["k0"], b["k1"]])
+    return [{"boxes": bs, "tracks": list(t), **({"chans": list(c)} if c else {})} for (t, c), bs in out.items()]
 
 
 def extract_ports(shapes):
@@ -494,14 +513,17 @@ def extract_ports(shapes):
 
 
 def box_key(box):
-    """An Extract box (a shape's "extract": t0, t1 ticks, k0, k1 keys, tracks) as something to compare."""
-    return int(box["t0"]), int(box["t1"]), int(box["k0"]), int(box["k1"]), tuple(sorted(box["tracks"]))
+    """An Extract box (a shape's "extract": t0, t1 ticks, k0, k1 keys, tracks, chans: () = every channel) as
+    something to compare."""
+    return (int(box["t0"]), int(box["t1"]), int(box["k0"]), int(box["k1"]), tuple(sorted(box["tracks"])),
+            tuple(clean_chans(box.get("chans"))))
 
 
 def boxes_meet(a, b):
     """Two Extract boxes could hold the same notes (time, keys and tracks all overlap)."""
     a, b = box_key(a), box_key(b)
-    return a[0] < b[1] and b[0] < a[1] and a[2] <= b[3] and b[2] <= a[3] and bool(set(a[4]) & set(b[4]))
+    return a[0] < b[1] and b[0] < a[1] and a[2] <= b[3] and b[2] <= a[3] and bool(set(a[4]) & set(b[4])) and (
+        not a[5] or not b[5] or bool(set(a[5]) & set(b[5])))
 
 
 def gather_box(lm, box, cancel=None, progress=None, most=None):
@@ -510,11 +532,14 @@ def gather_box(lm, box, cancel=None, progress=None, most=None):
     its track's end)} sorted by start; notes hidden already (another box) left out. Each track read from its
     checkpoint before t0 until every note it took has ended. most: stops soon after taking more than this many
     in all (Extract refuses then: a box over a dense part never fills the memory first)."""
-    t0, t1, k0, k1, tracks = box_key(box)
+    t0, t1, k0, k1, tracks, only = box_key(box)
     loops = speed.loops()
     run = loops.midi_gather if loops else midi_scan.gather
     mf = lm.mf
     chans = np.ones(16, np.uint8)
+    if only:  # (some channels alone: a part / Ch row shown, PLAN #11 D hunt)
+        chans[:] = 0
+        chans[list(only)] = 1
     jobs = []
     for n in tracks:
         t = lm.tracks[n] if 0 <= n < len(lm.tracks) else None

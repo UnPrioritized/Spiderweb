@@ -16,7 +16,7 @@ from files.midi_read import Cancelled, MidiError
 from files.own_tracks import FILE0, HAND, key_track
 from notes.custom import notes_shape
 from notes.engine import slot_track_channel, track_ids
-from notes.loaded import (EXTRACT_MOST, box_key, boxes_meet, drop_extract, extract_groups, gather_box,
+from notes.loaded import (EXTRACT_MOST, box_groups, box_key, boxes_meet, drop_extract, extract_groups, gather_box,
                           held_extract)
 from window.load_extract import hidden_boxes, sync_extract
 
@@ -190,16 +190,21 @@ def loaded_boxes(app, boxes):
     lm = app.loaded
     if lm is None or getattr(lm, "changed", False):
         return []
-    ids = app.track_list.tracks()
+    tl = app.track_list
+    ids = tl.tracks()
     out = []
     for b in boxes:
         rows = range(len(ids)) if b["rows"] is None else range(b["rows"][0], b["rows"][1] + 1)
-        tracks = sorted(-1 - int(ids[k]) for k in rows if int(ids[k]) < 0)
-        tracks = [n for n in tracks if n < len(lm.tracks) and lm.tracks[n].notes and n < len(lm.mf.tracks)
-                  and lm.mf.tracks[n].whole]
+        # (a part's row / a track with parts: only its channels, PLAN #11 D hunt; one box per channel set)
+        by = {}
+        for n, chans in tl.rows_chans(rows).items():
+            if n < len(lm.tracks) and lm.tracks[n].notes and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole:
+                by.setdefault(tuple(chans), []).append(n)
         t0, t1 = max(0, round(b["t0"] * lm.ppq)), round(b["t1"] * lm.ppq)
-        if tracks and t1 > t0:
-            out.append({"t0": t0, "t1": t1, "k0": 0, "k1": lm.keys - 1, "tracks": tracks})
+        for chans, tracks in by.items():
+            if t1 > t0:
+                out.append({"t0": t0, "t1": t1, "k0": 0, "k1": lm.keys - 1, "tracks": sorted(tracks),
+                            **({"chans": list(chans)} if chans else {})})
     for h in hidden_boxes(app):
         out = [p for x in out for p in carve(x, h)]
     return out
@@ -215,6 +220,12 @@ def carve(box, hole):
     others = [t for t in box["tracks"] if t not in hole["tracks"]]
     if others:
         out.append(dict(box, tracks=others))
+    # (channels: the box's ones the hole hasn't stay whole; the carving below is of the shared ones)
+    mine, its = set(box.get("chans") or range(16)), set(hole.get("chans") or range(16))
+    if mine - its:
+        out.append(dict(box, tracks=both, chans=sorted(mine - its)))
+    if mine & its != set(range(16)):
+        box = dict(box, chans=sorted(mine & its))
     if box["t0"] < hole["t0"]:
         out.append(dict(box, tracks=both, t1=hole["t0"]))
     if hole["t1"] < box["t1"]:
@@ -243,7 +254,7 @@ def loaded_shape(app, lm, files, got, copying):
     sh.update(own_slots=True, held=True, into=[FILE0 + int(p) // 16 for p in pairs],
               into_ch=[int(p) % 16 for p in pairs], into_home=[FILE0 + int(p) // 16 for p in pairs])
     if not copying:
-        sh["extract"] = [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]]], "tracks": b["tracks"]} for b in files]
+        sh["extract"] = box_groups(files)
     return sh
 
 
@@ -395,15 +406,15 @@ def delete_boxed(app, boxes, lm, files, got, name, extra=None):
             app.shapes[i] = rest
     # (an Extract deleted here: the notes it hid stay gone, user 2026-10-26 (hunt): moved loaded notes deleted in
     # the list came back at their old place; the piano roll's Delete still gives them back)
-    taken = [{"boxes": [list(b) for b in g["boxes"]], "tracks": list(g["tracks"])}
+    taken = [{"boxes": [list(b) for b in g["boxes"]], "tracks": list(g["tracks"]),
+              **({"chans": list(g["chans"])} if g.get("chans") else {})}
              for i in gone for g in extract_groups(held_extract(app.shapes[i]))]
     for i in sorted(gone, reverse=True):
         del app.shapes[i]
     if taken:
         app.deleted = app.deleted + taken
     if got:
-        app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]]], "tracks": b["tracks"]}
-                                     for b in files]
+        app.deleted = app.deleted + box_groups(files)
         sync_extract(app, {box_key(b): g for b, g in zip(files, got)})
     if extra is not None:  # (Remove Track: the tracks go too)
         if extra["own"]:

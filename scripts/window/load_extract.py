@@ -19,7 +19,7 @@ from files.midi_read import Cancelled, MidiError
 from files.own_tracks import FILE0
 from notes.custom import notes_shape
 from notes.engine import own_slot
-from notes.loaded import (EXTRACT_ASK, EXTRACT_MOST, box_key, boxes_meet, gather_box, group_boxes, set_boxes,
+from notes.loaded import (EXTRACT_ASK, EXTRACT_MOST, box_groups, box_key, boxes_meet, gather_box, group_boxes, set_boxes,
                           shape_boxes)
 from roll.roll_draw import TRACK_FADE
 from roll.roll_loaded import shown_tracks
@@ -49,7 +49,8 @@ def untouched(shapes, rendered):
             continue
         mine = rendered[rendered[:, 5] == i, :5]
         if len(mine) and notes_sig(mine) == ex["sig"]:
-            keys += [box_key({"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": ex["tracks"]})
+            keys += [box_key({"t0": b[0], "t1": b[1], "k0": b[2], "k1": b[3], "tracks": ex["tracks"],
+                              "chans": ex.get("chans")})
                      for b in ex["boxes"]]
             owners.append(i)
     return keys, owners
@@ -194,10 +195,6 @@ def extract_loaded(app):
     if getattr(app, "_extracting", None):
         app.status.config(text=tr("extract.busy"))
         return
-    tl = getattr(app, "track_list", None)
-    if tl is not None and tl.shown_ch() is not None:  # (it would take the channels not shown too)
-        app.status.config(text=tr("extract.one_channel"))
-        return
     lm = app.loaded
     order, faint = shown_tracks(app, lm)
     if order is not None and TRACK_FADE[0] == 0:  # (picked-behind tracks drawn at 0 %: not seen, not taken)
@@ -209,7 +206,15 @@ def extract_loaded(app):
     if not tracks:
         app.status.config(text=tr("extract.no_tracks"))
         return
-    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks} for a, b, c, d in boxes]
+    # (a part / a Ch row highlighted: its track's shown channels alone, the ones picked behind it whole)
+    chans = shown_chans(app)
+    groups = [(tracks, [])]
+    if chans:
+        top = app.track_list.shown_file()[0]
+        behind = [n for n in tracks if n != top]
+        groups = [([top], chans)] + ([(behind, [])] if behind else [])
+    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": ts, **({"chans": cs} if cs else {})}
+           for ts, cs in groups for a, b, c, d in boxes]
     if any(boxes_meet(a, b) for a in new for b in hidden_boxes(app)):
         messagebox.showerror(tr("app.spiderweb_2"), tr("extract.overlap"), parent=app)
         return
@@ -286,10 +291,11 @@ def finish(app, lm, new, got):
     sh = notes_shape(rows, app.ppq, tr("extract.name"))
     sh.update(own_slots=True, held=True, into=[FILE0 + int(p) // 16 for p in pairs],
               into_ch=[int(p) % 16 for p in pairs], into_home=[FILE0 + int(p) // 16 for p in pairs])
-    sh["extract"] = {"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new], "tracks": new[0]["tracks"],
-                     # (its notes as made: left as they are, the export keeps the file's own bytes, user 2026-10-26)
-                     "sig": notes_sig(np.column_stack([rows[:, 0], rows[:, 0] + rows[:, 1], rows[:, 2], rows[:, 3],
-                                                       own_slots_of(pairs)[colour.ravel()]]))}
+    groups = box_groups(new)  # (a part / Ch row's channels + the tracks behind it whole: two groups)
+    # (its notes as made: left as they are, the export keeps the file's own bytes, user 2026-10-26)
+    sig = notes_sig(np.column_stack([rows[:, 0], rows[:, 0] + rows[:, 1], rows[:, 2], rows[:, 3],
+                                     own_slots_of(pairs)[colour.ravel()]]))
+    sh["extract"] = dict(groups[0], sig=sig) if len(groups) == 1 else groups
     found = {box_key(b): g for b, g in zip(new, got)}
     app.push_undo(name=tr("extract.step"))
     app.shapes.append(sh)
@@ -315,14 +321,16 @@ def box_notes(app):
     boxes = boxes_now(app) if tracks else []
     if not boxes:
         return None
-    key = (id(lm), lm.hide_ver, tuple(map(tuple, boxes)), tuple(tracks), app.ppq)
+    chans = shown_chans(app)
+    key = (id(lm), lm.hide_ver, tuple(map(tuple, boxes)), tuple(tracks), tuple(chans), app.ppq)
     job = getattr(app, "_box_notes", None)
     if job is not None and job["key"] == key:
         return job["cols"]
     if job is not None:
         job["cancel"] = True
     job = app._box_notes = {"key": key, "cols": None, "cancel": False, "finished": False, "many": 0}
-    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks} for a, b, c, d in boxes]
+    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks, **({"chans": chans} if chans else {})}
+           for a, b, c, d in boxes]
     scale = app.ppq / lm.ppq
 
     def run():
@@ -364,7 +372,16 @@ def delete_tracks(app, lm):
     whole = [n for n, t in enumerate(lm.tracks) if t.notes and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole]
     if cur is None:
         return whole
-    return [-1 - cur] if cur < 0 and -1 - cur in whole else []
+    got = app.track_list.shown_file()  # (a part / a Ch row: its track, shown_chans says which channels)
+    return [got[0]] if got is not None and got[0] in whole else []
+
+
+def shown_chans(app):
+    """The channels of the highlighted loaded row Extract / Delete loaded notes take (a part, a track with parts,
+    one Ch row: only what the piano roll shows, PLAN #11 D hunt), [] = every channel."""
+    tl = getattr(app, "track_list", None)
+    got = tl.shown_file() if tl is not None else None
+    return got[1] if got is not None else []
 
 
 def delete_loaded(app, shapes_too=False):
@@ -385,7 +402,9 @@ def delete_loaded(app, shapes_too=False):
     if getattr(app, "_extracting", None):
         app.status.config(text=tr("extract.busy"))
         return
-    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks} for a, b, c, d in boxes]
+    chans = shown_chans(app)
+    new = [{"t0": a, "t1": b, "k0": c, "k1": d, "tracks": tracks, **({"chans": chans} if chans else {})}
+           for a, b, c, d in boxes]
     staying = shape_boxes([sh for i, sh in enumerate(app.shapes) if i not in gone])
     if any(boxes_meet(a, b) for a in new for b in staying):
         messagebox.showerror(tr("app.spiderweb_2"), tr("delete_loaded.overlap"), parent=app)
@@ -451,8 +470,7 @@ def finish_delete(app, lm, new, got, step=None):
         app.roll.end_typing()  # (first: it refreshes the panel, which must still see the old shapes)
         app.push_undo(name=tr("delete_loaded.step"))
     if n:
-        app.deleted = app.deleted + [{"boxes": [[b["t0"], b["t1"], b["k0"], b["k1"]] for b in new],
-                                      "tracks": new[0]["tracks"]}]
+        app.deleted = app.deleted + box_groups(new)
     sync_extract(app, {box_key(b): g for b, g in zip(new, got)})
     app.roll.box_kept = None  # (the box goes with its notes, like deleting shapes in it; undo brings it back, user)
     app.shapes_changed()

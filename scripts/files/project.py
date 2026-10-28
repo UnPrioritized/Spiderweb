@@ -1082,13 +1082,18 @@ class ProjectFiles:
                 str(t.number + 1) for t in lm.mf.damaged()[:10])), parent=self)
             return
         notes, cc, why, own = self.rendered[:0], {}, None, []
+        written = len(self.file_rows())  # (the file's tracks written: a part = one more, removed ones fewer)
+        if written > MAX_TRACKS + 1:
+            messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=written,
+                                                              most=MAX_TRACKS + 1), parent=self)
+            return
         if len(self.rendered) or self.own_written():  # (own tracks without notes are written too)
             why = ("load.shapes_damaged" if lm.mf.damaged() or M_CUT in lm.mf.marks else
                    "load.shapes_format" if lm.mf.format > 1 or M_RMID in lm.mf.marks else None)
             tracks = len(track_slots(self.rendered, self.pad_tracks())) + len(self.own_written())
-            if why is None and len(lm.mf.tracks) + tracks > MAX_TRACKS + 1:
-                messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=len(
-                    lm.mf.tracks) + tracks, most=MAX_TRACKS + 1), parent=self)
+            if why is None and written + tracks > MAX_TRACKS + 1:
+                messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=written + tracks,
+                                                                  most=MAX_TRACKS + 1), parent=self)
                 return
             if why is not None:
                 if not messagebox.askyesno(tr("project.spiderweb"), tr("load.shapes_cant", why=tr(why)),
@@ -1205,7 +1210,7 @@ class ProjectFiles:
             out = tr("load.own_added", notes=trn("n.notes", len(notes), n=len(notes)),
                      tracks=trn("n.tracks", job["tracks"], n=job["tracks"])) if len(notes) or own else ""
             if inside:
-                out += tr("load.own_inside", notes=trn("n.notes", inside, n=f"{inside:,}"))
+                out += tr("load.own_inside", notes=trn("n.notes", inside, n=inside))
             if job["hits"]:
                 out += trn("load.own_hits", job["hits"], n=job["hits"])
             if len(hid.h_s):

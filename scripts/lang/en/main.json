@@ -2192,7 +2192,6 @@
  "extract.ask_one": "Extract {n} loaded note into a new shape?\n\nIt leaves the loaded MIDI (drawn, heard and exported from the shape now) and comes back if you delete the shape or undo.\n\nIt stays in its track, on its channel. Left as it is, the export keeps the file exactly as it was. Once you change it, its track is written again: its note-off velocity may change. Its key, length and velocity stay.",
  "extract.ask_many": "\n\nThat's a lot of notes: Spiderweb may be slow with them.",
  "extract.no_tracks": "No loaded track is shown here: nothing to extract.",
- "extract.one_channel": "Extract takes whole tracks: click the track's own row in the track list first (one channel of it is shown now).",
  "extract.busy": "Still reading the loaded notes: wait a moment.",
  "load.export_reading": "Still reading the loaded notes your shapes took: export when it's done.",
  "load.extract_released": "The MIDI file changed, so the notes your {n} extracted shapes took can't be found in it any more.\n\nThose shapes keep their notes but no longer hide anything in the file. If the file still has those notes, they're now there twice: delete the shapes if so.",

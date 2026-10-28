@@ -469,6 +469,29 @@ class TrackList(tk.Canvas):
             return next((q["chs"] for q in p.get("parts", ()) if q["id"] == j), ())
         return p.get("order") or ()
 
+    def shown_file(self):
+        """(track number, its channels shown: a sorted list, [] = every one) of the highlighted loaded row: a part,
+        a track with parts, one Ch row (PLAN #11 D hunt: Extract / Delete take only what shows); None = none."""
+        if self.current is None or self.current >= 0:
+            return None
+        n, chs = self.file_part(self.current)
+        ch = self.shown_ch()
+        if ch is not None:
+            chs = frozenset({ch})
+        return n, sorted(chs) if chs is not None and len(chs) < 16 else []
+
+    def rows_chans(self, rows):
+        """{track number: its channels in rows (a sorted list, [] = every one)} of the loaded tracks there."""
+        out = {}
+        for k in rows:
+            s = int(self._all[k])
+            if s >= 0:
+                continue
+            n, chs = self.file_part(s)
+            had = out.get(n, set())
+            out[n] = None if had is None or chs is None else had | chs
+        return {n: sorted(c) if c is not None and len(c) < 16 else [] for n, c in out.items()}
+
     def row_only(self, row):
         """The channels a loaded row's picture reads: None = its whole track, a part / a track with parts (PLAN #11
         D) its channels (one = that channel, so it shares a sub-row's read blocks)."""
@@ -1382,7 +1405,7 @@ class TrackList(tk.Canvas):
             if m["into"] is not None:
                 self.drop_into(m)
             elif m["gap"] is not None:
-                if self.loaded_drag(m):
+                if m["ch"] is not None and self.loaded_drag(m):  # (a part row whole: moved like a track, hunt D)
                     self.parts_out(self.loaded_drag(m), m["gap"])
                 elif m["ch"] is not None:
                     self.channels_out(self.drag_parts(m), m["gap"])
@@ -1537,8 +1560,16 @@ class TrackList(tk.Canvas):
             return
         if all(s == dst for s, _ in parts):  # (sub-rows moved among their folder's: only the order)
             return self.reorder(dst, [c for _, cs in parts for c in cs], pos, now)
+        # (into a loaded track's PART / a track with parts, hunt D: the file's track takes them, each channel shown
+        # on the row holding it; the whole track's channels count for the same-channel question)
+        target, every = dst, set(now)
+        if dst < 0 and self.file_part(dst)[1] is not None:
+            n = self.file_part(dst)[0]
+            dst = -1 - n
+            every = {c for r, x in enumerate(self.row_chans()) if int(self._all[r]) < 0
+                     and self.file_part(int(self._all[r]))[0] == n for c in x}
         seq = [(s, c) for s, cs in parts for c in cs]
-        held, clash = set(now), []
+        held, clash = set(every), []
         for s, c in seq:  # (its own folder's channels only take a place)
             if s != dst:
                 if c in held:
@@ -1590,20 +1621,26 @@ class TrackList(tk.Canvas):
         arrived = []
         for s, c in seq:
             n = to.get((s, c), c)
-            if (s == dst or (s, c) in to or c not in now) and n not in arrived:
+            if (s == dst or (s, c) in to or c not in every) and n not in arrived:
                 arrived.append(n)
         set_order(app, dst, arrived, pos, now)
+        if target != dst and key_part(-1 - target) >= 0 and arrived:  # (a part: the new channels shown on it)
+            k, j = self.file_part(target)[0], key_part(-1 - target)
+            p, props = app.file_props[k], dict(app.file_props)
+            props[k] = dict(p, parts=[dict(q, chs=q["chs"] + [c for c in arrived if c not in q["chs"]])
+                                      if q["id"] == j else q for q in p["parts"]])
+            app.file_props = props
         if whole:  # (whole tracks of yours moved in: empty now, gone like Domino's merge)
             app.own_tracks = [t for t in app.own_tracks if HAND + t["id"] not in srcs or HAND + t["id"] == dst]
         tidy_tracks(app)
         # (mutes go along: each channel muted there stays muted where it went)
-        moved = {(dst, to.get((s, c), c)) for s, c in seq if s != dst and (was.get(s) or (s, c) in self.muted)}
+        moved = {(target, to.get((s, c), c)) for s, c in seq if s != dst and (was.get(s) or (s, c) in self.muted)}
         self.muted = {x for x in self.muted if not (whole and x in srcs)
                       and not (isinstance(x, tuple) and (x[0], x[1]) in set(seq) and x[0] != dst)} | moved
         if whole and self.current in srcs:
-            self.current = dst
-        if dst in self.open or len(set(now) | set(arrived)) > 1:
-            self.open.add(dst)  # (so you see where it went)
+            self.current = target
+        if target in self.open or len(set(now) | set(arrived)) > 1:
+            self.open.add(target)  # (so you see where it went)
         self.own_changed()
 
     def channel_out(self, src, ch, gap):
@@ -1751,8 +1788,8 @@ class TrackList(tk.Canvas):
         props[n] = dict(p, parts=[q for q in parts if q["chs"]])
         if not props[n]["parts"]:
             props[n].pop("parts")
-            if props[n].get("name") is None and props[n].get("ch") is None:
-                props.pop(n)
+            if props[n].get("name") is None and props[n].get("ch") is None and not props[n].get("order"):
+                props.pop(n)  # (its Ch rows' order stays, hunt D)
         muted = {(s, c) for s, _, cs in got for c in cs if s in self.muted or (s, c) in self.muted}
         if self.set_parts(props, [], None, step or tr("tracks.into_step")):
             self.muted = {x for x in self.muted if not (isinstance(x, tuple) and (x[0], x[1]) in muted)} | {

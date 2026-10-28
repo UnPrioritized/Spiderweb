@@ -202,8 +202,9 @@ class _Work:
                         if start == 0 and k == 0:  # (the header)
                             if added is not None:
                                 piece = added.header(piece, written)
-                            elif written != len(mf.tracks):
-                                piece = piece[:10] + written.to_bytes(2, "big") + piece[12:]
+                            elif written != len(mf.tracks):  # (more than one: format 1, a split format 0 too)
+                                fmt = piece[8:10] if written < 2 or piece[8:10] != b"\x00\x00" else b"\x00\x01"
+                                piece = piece[:8] + fmt + written.to_bytes(2, "big") + piece[12:]
                         yield piece
                     continue
                 pos += 1

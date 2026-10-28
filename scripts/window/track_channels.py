@@ -3,7 +3,7 @@ whole track dragged INTO another track, or a sub-row dragged out into a track of
 colour laid on the track keeps its channel there (sh["into_ch"] + "into_home", App.laid_slots_of), so a track holds
 several. A loaded MIDI's tracks can take channels in; their own channels never move (stage D)."""
 
-from files.own_tracks import FILE0, HAND, ordered
+from files.own_tracks import FILE0, HAND, key_track, ordered
 from notes.engine import aligned_ch
 
 
@@ -12,7 +12,7 @@ def entry_of(s):
     track (>= 0, < HAND) = None (made yours first: TrackList.take_all)."""
     if s >= HAND:
         return s - HAND
-    return FILE0 - 1 - s if s < 0 else None
+    return FILE0 + key_track(-1 - s) if s < 0 else None  # (a part: its track, PLAN #11 D)
 
 
 def laid_channels(app, sh, ids, own):

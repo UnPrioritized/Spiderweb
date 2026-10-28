@@ -213,7 +213,8 @@ def file_order(lm, order=None, gone=(), props=None):
             while at < len(rows) and rows[at] >= PART and key_track(rows[at]) == key_track(k):
                 at += 1
             rows.insert(at, k)
-    return [k for k in rows if k not in gone] if gone else rows
+    # (a removed track's parts go with it, hunt D: removed while its MIDI was missing)
+    return [k for k in rows if k not in gone and key_track(k) not in gone] if gone else rows
 
 
 def among_file(own, files):
