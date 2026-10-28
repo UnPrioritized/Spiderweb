@@ -188,6 +188,10 @@ class TrackList(tk.Canvas):
         channels picked and dragged together): Ctrl = that one in / out, Shift = the sub-rows from the last one
         clicked to it (any folders between), Ctrl+Shift = added. The highlight stays on a picked one."""
         pair = (int(self.tracks()[row]), c)
+        if self.current_ch is None:  # (tracks picked: tracks OR Ch rows, never both: a new pick, hunt C B)
+            self.current, self.selected, self.anchor = pair[0], set(), None
+            self.current_ch, self._sub_anchor = c, pair
+            return self.shown_changed()
         group = self.picked_chans()
         anchor = self._sub_anchor
         if anchor is None or self.line_of(*anchor) is None:  # (none yet: from the highlighted sub-row)
@@ -938,6 +942,8 @@ class TrackList(tk.Canvas):
         if c >= 0:  # (a sub-row: only that channel shown, user 2026-10-28; a Shift+click's range starts here)
             self.current_ch = c
             self._sub_anchor = (self.current, c)
+        else:  # (a track: a Ch rows' Shift range starts again from a Ch row clicked next, hunt C)
+            self._sub_anchor = None
         self.selected, self.anchor = set(), (self.current, self.current)
         self.shown_changed()
 
@@ -950,6 +956,9 @@ class TrackList(tk.Canvas):
         Leaving out the highlighted track gives its deep blue to the first selected one left (never none)."""
         rows = [int(s) for s in self.tracks()]
         slot = rows[row]
+        if self.current_ch is not None:  # (Ch rows picked: tracks OR Ch rows, never both: a new pick, hunt C B)
+            self.current, self.selected, self.anchor, self._sub_anchor = slot, set(), (slot, slot), None
+            return self.shown_changed()
         group = set(self.picked_tracks())
         if shift:
             # (the anchor counts while the highlight is the one it was set with: moved by Ctrl+wheel, a menu... =
@@ -1251,7 +1260,11 @@ class TrackList(tk.Canvas):
             self.request_redraw()
 
     def picked_tracks(self):
-        """The highlighted track and the ones selected with it, in the list's order (the right-click menu's)."""
+        """The highlighted track and the ones selected with it, in the list's order (the right-click menu's). Ch rows
+        picked (a folder's sub-row highlighted) = no track: picks are tracks OR Ch rows, never both (hunt C,
+        user 2026-10-28 picked B: a lit "Ch 2" never takes its whole folder along)."""
+        if self.current_ch is not None:
+            return [int(s) for s in self.tracks() if int(s) in self.selected]
         group = self.selected | ({self.current} if self.current is not None else set())
         return [int(s) for s in self.tracks() if int(s) in group]
 
@@ -1738,7 +1751,12 @@ class TrackList(tk.Canvas):
         if row is None or row < 0:
             return
         slot, every = int(self.tracks()[row]), {int(s) for s in self.tracks()}
-        self.muted = set() if self.muted == every - {slot} else every - {slot}
+        line = self.line_at(e.y)
+        c = int(self.lines()[1][line]) if line is not None else -1
+        alone = every - {slot}
+        if c >= 0:  # (a folder's Ch row: only that channel heard, its folder's other channels muted too; hunt C)
+            alone |= {(slot, x) for x in self.row_chans()[row] if x != c}
+        self.muted = set() if self.muted == alone else alone
         self.tip.hide()
         self.request_redraw()
         self.app.play_changed()
@@ -1780,6 +1798,9 @@ class TrackList(tk.Canvas):
         stays put."""
         self.tip.hide()
         s = int(self.tracks()[row]) if row is not None and row >= 0 else None
+        line = self.line_at(e.y) if getattr(e, "y", None) is not None and s is not None else None
+        if line is not None and int(self.lines()[1][line]) >= 0:  # (a folder's Ch row: the channels' menu)
+            return self.ch_menu(e, row, int(self.lines()[1][line]))
         # (on one of several selected tracks: they stay selected and the menu works on them all, like Domino's;
         # else highlighted first, like a click; user 2026-10-26)
         if row not in (None, CONDUCTOR_ROW) and s not in self.picked_tracks():
@@ -1804,6 +1825,84 @@ class TrackList(tk.Canvas):
         finally:
             menu.grab_release()
             self.menu_shut = time.perf_counter()  # (the click that closed it does nothing: on_press)
+
+    def ch_menu(self, e, row, c):
+        """Right-click on a folder's Ch row (hunt C, user 2026-10-28): picked like a click unless it's one of the Ch rows
+        picked; Add Track / Add Tracks… (after its track), Remove channel(s) = the picked Ch rows of your tracks
+        (remove_chans; a loaded MIDI's own channels move in stage D), Properties greyed (a channel isn't a track)."""
+        pair = (int(self.tracks()[row]), c)
+        if pair not in self.picked_chans():
+            self.current, self.selected = pair[0], set()
+            self.current_ch, self._sub_anchor = c, pair
+            self.shown_changed()
+            self.update_idletasks()
+        pairs = [p for p in self.picked_chans() if p[0] >= HAND]
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label=tr("tracks.add_track"), command=lambda: self.add_own(row, [self.next_channel(row)]))
+        menu.add_command(label=tr("tracks.add_tracks"), command=lambda: self.ask_add(row))
+        menu.add_separator()
+        menu.add_command(label=trn("tracks.remove_chans", max(len(self.picked_chans()), 1),
+                                   n=len(self.picked_chans())),
+                         command=lambda: self.remove_chans(pairs), state="normal" if pairs else "disabled")
+        menu.add_command(label=tr("tracks.properties"), state="disabled")
+        try:
+            menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            menu.grab_release()
+            self.menu_shut = time.perf_counter()
+
+    def remove_chans(self, pairs):
+        """Remove channel(s): the picked Ch rows (pairs (your track, channel)) gone with your notes on them, like
+        Remove Track for a track (remove_own): a shape wholly on them goes, one with other colours elsewhere keeps
+        those as plain notes on their tracks; an empty Ch row just goes. The tracks stay. One undo step."""
+        from window.app import placed_on
+        from window.track_channels import forget_channels, laid_channels, tidy_tracks
+        app = self.app
+        want = {(s - HAND, c) for s, c in pairs if s >= HAND}
+        if not want:
+            return
+        own, multi = app.own_channels(), app.channel_mode.get() == "auto"
+        hit = {}
+        for i, sh in enumerate(app.shapes):
+            ids = placed_on(sh, own)
+            if not ids:
+                continue
+            drop = [k for k, vc in enumerate(zip(ids, laid_channels(app, sh, ids, own))) if vc in want]
+            if not multi:  # (Single channel / As drawn: every colour on the first one)
+                drop = list(range(len(ids))) if 0 in drop else []
+            if drop:
+                hit[i] = (ids, drop)
+        gone = {i for i, (ids, drop) in hit.items() if len(drop) == len(ids)}
+        part = sorted(set(hit) - gone)
+
+        def keep_rows(rows_of):  # (plain_copies' rows: the 5th column = each note's colour's place in its list)
+            return {i: rows[~np.isin(np.minimum(rows[:, 4], len(hit[i][0]) - 1), hit[i][1])]
+                    for i, rows in rows_of.items()}
+        app.roll.end_typing()
+        plain = app.plain_copies(part, together=keep_rows) if part else {}
+        for i, sh in plain.items():  # (its colours left, in order: each on the track + channel it was on)
+            ids, drop = hit[i]
+            old = app.shapes[i]
+            laid = laid_channels(app, old, ids, own)
+            kept = [k for k in range(len(ids)) if k not in drop]
+            sh["into"] = [ids[k] for k in kept]
+            sh["into_ch"], sh["into_home"] = [laid[k] for k in kept], [ids[k] for k in kept]
+        gone |= set(part) - set(plain)
+        app.push_undo(name=trn("tracks.remove_chans_step", len(want), n=len(want)))
+        app.put_plain(plain)
+        for i in sorted(gone, reverse=True):
+            del app.shapes[i]
+        rest = [i - sum(j < i for j in gone) for i in sorted(app.sels - gone)]
+        app.select_many(rest, max(rest, default=None))
+        for s, c in pairs:
+            forget_channels(app, s, [c])
+        tidy_tracks(app)
+        self.current_ch, self.sel_ch = None, set()
+        self.own_changed()
+        if gone or plain:
+            said = ([trn("tracks.removed_ch_shapes", len(gone), n=len(gone))] if gone else []) + (
+                [trn("tracks.removed_ch_plain", len(plain), n=len(plain))] if plain else [])
+            app.status.config(text=" ".join(said))
 
     def own_row(self, row):
         """A track list row as own_tracks.add_tracks' row (-1 = before them all: the Conductor / All tracks row;
@@ -2003,7 +2102,9 @@ class TrackList(tk.Canvas):
         double-click binding the press instead of <ButtonPress-1>)."""
         self.on_press(e)
         row = self.row_at(e.y)
-        if row is not None and row >= 0 and e.x < self.name_w and not self.on_speaker(e.x):
+        if row is not None and row >= 0 and e.x < self.name_w and not self.on_speaker(e.x) and e.x > FOLD_W * self.scale:
+            if self.mixed(row):  # (a folder / its Ch rows: as the menu's greyed item says, hunt C)
+                return self.app.status.config(text=tr("tracks.properties_mixed_why"))
             self.ask_properties(int(self.tracks()[row]))
 
     def removable(self, s):

@@ -25,7 +25,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
-from notes.engine import (BEATS_FAR, CLASH, aligned_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
+from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count)
 from files.own_tracks import FILE0, HAND, file_order, from_rows, full_plan, into_ids, new_id, next_channel
@@ -205,6 +205,24 @@ def laid_slots_of(sh, ids, own, use10):
         return (v >= 0 and k < len(chs) and chs[k] >= 0 and v not in fixed
                 and (home is None or k < len(home) and home[k] == v))
     return [own_slot(v, chs[k]) if own_ch(k, v) else entry_slot(v, own, rule, use10) for k, v in enumerate(ids)]
+
+
+def own_chs(sh):
+    """(channels, homes) one per "into" entry (aligned_ch; -1 = the track's channel; no home given = the track it's
+    on: its channel holds there), for fit_into to carry with its colours."""
+    into = into_ids(sh)
+    got = aligned_ch(dict(sh, into=into)) if "into_ch" in sh else {}
+    chs = got.get("into_ch", [-1] * len(into))
+    return chs, got.get("into_home", [v if c >= 0 else -1 for v, c in zip(into, chs)])
+
+
+def put_rest_ch(sh, chs, homes):
+    """The colours gone for now's channels (engine.rest_ch) kept on the shape, or dropped when none has one."""
+    if any(c >= 0 for c in chs):
+        sh["into_rest_ch"], sh["into_rest_home"] = list(chs), list(homes)
+    else:
+        sh.pop("into_rest_ch", None)
+        sh.pop("into_rest_home", None)
 
 
 def keep_home(sh):
@@ -2088,23 +2106,35 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             fresh = sh.pop("into_new", False)  # (just drawn / pasted: down the rows, like Domino's paste)
             have, cols = placed_on(sh, known), sh.get("cols")
             if n <= 0 or not have or (len(have) >= n and not cols):
-                if have and len(have) > max(n, 1):  # (colours gone for now: their tracks kept aside, hunt 10-26)
-                    sh["into_rest"] = have[max(n, 1):] + list(sh.get("into_rest") or [])
-                    sh["into"] = have[:max(n, 1)]
+                if have and len(have) > max(n, 1):  # (colours gone for now: their tracks kept aside, hunt 10-26;
+                    cut = max(n, 1)                 # their channels in a folder too, hunt C 2026-10-28: rest_ch)
+                    chs, homes = own_chs(sh)
+                    rchs, rhomes = rest_ch(sh)
+                    sh["into_rest"] = have[cut:] + list(sh.get("into_rest") or [])
+                    put_rest_ch(sh, chs[cut:len(have)] + rchs, homes[cut:len(have)] + rhomes)
+                    sh["into"] = have[:cut]
                     changed = True
                 continue
             rest = list(sh.get("into_rest") or []) if not cols else []
+            rchs, rhomes = rest_ch(sh) if not cols else ([], [])
+            chs, homes = own_chs(sh)
+            chs, homes = chs[:len(have)], homes[:len(have)]
             while len(have) < n and rest and (rest[0] < 0 or rest[0] in known) and rest[0] not in have:
-                have.append(rest.pop(0))  # (a colour back: on the track it had, while that track is still there)
+                have.append(rest.pop(0))  # (a colour back: on the track it had, while that track is still there,
+                chs.append(rchs.pop(0))   # on the channel it had there)
+                homes.append(rhomes.pop(0))
             if not cols:
                 if rest and len(have) < n:  # (its track went meanwhile: the rest laid as new ones)
-                    rest = []
+                    rest, rchs, rhomes = [], [], []
                 if rest:
                     sh["into_rest"] = rest
                 else:
                     sh.pop("into_rest", None)
+                put_rest_ch(sh, rchs, rhomes)
                 if len(have) >= n:
                     sh["into"] = have
+                    if any(c >= 0 for c in chs):
+                        sh["into_ch"], sh["into_home"] = chs, homes
                     changed = True
                     continue
             if have[0] not in rows:

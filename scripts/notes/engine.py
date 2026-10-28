@@ -250,6 +250,17 @@ def aligned_ch(sh):
     return out
 
 
+def rest_ch(sh):
+    """(channels, homes) of the colours gone for now (sh["into_rest"], App.fit_into), one per entry like aligned_ch
+    (-1 = the track's channel): kept so a colour coming back plays on the channel it had in a folder (hunt C
+    2026-10-28). Missing / stale ones (into_rest cleared elsewhere) cut or filled to its length."""
+    n = len(sh.get("into_rest") or []) if isinstance(sh.get("into_rest"), list) else 0
+    chs, home = sh.get("into_rest_ch"), sh.get("into_rest_home")
+    chs = [c if type(c) is int and -1 <= c <= 15 else -1 for c in chs] if isinstance(chs, list) else []
+    home = [v if type(v) is int else -1 for v in home] if isinstance(home, list) else []
+    return (chs + [-1] * n)[:n], (home + [-1] * n)[:n]
+
+
 def clean_shape(sh):
     """Shape loaded from a file -> valid shape, or None if it's a kind we no longer support or has a number that
     can't be used."""
@@ -314,6 +325,11 @@ def clean_shape(sh):
         home = out.get("into_home")  # (... and that track: on another one the colour takes its channel)
         if home is not None and not all(type(v) is int and -1 <= v < FILE_MOST for v in home):
             out.pop("into_home")
+    if "into_rest" in out:  # (... and the colours gone for now: their channels kept, rest_ch)
+        rchs, rhome = rest_ch(dict(sh, into_rest=out["into_rest"]))
+        if any(c >= 0 for c in rchs):
+            out["into_rest_ch"] = rchs
+            out["into_rest_home"] = [v if -1 <= v < FILE_MOST else -1 for v in rhome]
     if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
         out["slots10"] = sh["slots10"]
     if "into" in out and sh.get("into_new") is True:  # (just drawn / pasted, colours not laid yet: App.fit_into)
