@@ -46,9 +46,10 @@ def load_midi(app):
     LoadWindow(app, mf)
 
 
-def ask_choice(parent, title, text, buttons, icon="question", focus=None):
+def ask_choice(parent, title, text, buttons, icon="question", focus=None, skip=None):
     """A question with named buttons [(answer, label)], the first one picked by Enter (focus = the answer whose
-    button has the keyboard instead: Enter / Space press that one); Esc / X = the last one's answer."""
+    button has the keyboard instead: Enter / Space press that one); Esc / X = the last one's answer. skip: a list
+    = a "Don't ask again until Spiderweb is closed" tick under the text, its state appended to it."""
     win = tk.Toplevel(parent)
     win.withdraw()
     win.title(title)
@@ -58,6 +59,10 @@ def ask_choice(parent, title, text, buttons, icon="question", focus=None):
     body.pack(fill="both", expand=True)
     ttk.Label(body, image=f"::tk::icons::{icon}").grid(row=0, column=0, sticky="n", padx=(0, 12))
     ttk.Label(body, text=text, wraplength=460, justify="left").grid(row=0, column=1, sticky="w")
+    ticked = tk.BooleanVar(win, value=False)
+    if skip is not None:
+        ttk.Checkbutton(body, text=tr("big_ask.dont_ask"), variable=ticked).grid(row=1, column=1, sticky="w",
+                                                                                 pady=(12, 0))
     row = ttk.Frame(win, padding=(14, 4, 14, 12))
     row.pack(fill="x")
     answer = [buttons[-1][0]]
@@ -86,6 +91,8 @@ def ask_choice(parent, title, text, buttons, icon="question", focus=None):
     win.grab_set()
     (first or made[-1]).focus_set()
     win.wait_window()
+    if skip is not None:
+        skip.append(ticked.get())
     return answer[0]
 
 

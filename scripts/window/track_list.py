@@ -1336,7 +1336,8 @@ class TrackList(tk.Canvas):
     def drop_into(self, m):
         """m's channels (a sub-row's, or the dragged track's every one) put into m["into"]'s track (C2): one undo
         step. Automatic tracks touched = all made yours first (like a drag). A whole track of yours emptied goes."""
-        from window.track_channels import move_channels, set_order, tidy_tracks
+        from window.track_channels import (ask_clash, entry_of, free_channels, move_channels, set_order,
+                                           tidy_tracks)
         app = self.app
         row, pos = m["into"]
         src, dst = m["s"], int(self._all[row])
@@ -1353,6 +1354,19 @@ class TrackList(tk.Canvas):
             if got is None:
                 return
             autos, owners = got
+        to, clash = {}, sorted(chans & set(now))
+        if clash:  # (that channel is there already: Merge / Move / Cancel, C3)
+            a = entry_of(src) if src >= HAND else None
+            # (Merge is pressed by Enter when nothing would sound different: into a track of yours, no CC lines;
+            # a loaded track's channel may play another instrument)
+            calm = dst >= HAND and not any("cc" in sh or "hz" in sh for sh in app.shapes
+                                           if a is not None and a in into_ids(sh))
+            free = free_channels(app, set(now) | chans, len(clash))
+            got = ask_clash(app, self.name_of(row), clash, free, calm)
+            if got == "cancel":
+                return
+            if got == "move":
+                to = dict(zip(clash, free))
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.into_step"))
         if autos:
@@ -1362,14 +1376,16 @@ class TrackList(tk.Canvas):
         # (a tinted track touched = yours, like a drag)
         app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if HAND + t["id"] in (src, dst) else t
                           for t in app.own_tracks]
-        move_channels(app, src, chans, dst)
-        set_order(app, dst, chans, pos, now)
+        move_channels(app, src, chans, dst, to)
+        # (a Moved clash keeps its place, only its number changes; a Merged one is the sub-row there already)
+        arrived = {to.get(c, c) for c in chans} - (set(now) if not to else set())
+        set_order(app, dst, arrived, pos, now)
         if m["ch"] is None and src >= HAND:  # (a whole track moved in: it's empty now, gone like Domino's merge)
             app.own_tracks = [t for t in app.own_tracks if HAND + t["id"] != src]
         tidy_tracks(app)
         # (its mutes go along: each channel muted there stays muted where it went)
         whole = m["ch"] is None
-        moved = {(dst, c) for c in chans if was or (src, c) in self.muted}
+        moved = {(dst, to.get(c, c)) for c in chans if was or (src, c) in self.muted}
         self.muted = {x for x in self.muted if not (x == src and whole)
                       and not (isinstance(x, tuple) and x[0] == src and x[1] in chans)} | moved
         if self.current == src and m["ch"] is None:

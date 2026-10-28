@@ -21,9 +21,9 @@ def laid_channels(app, sh, ids, own):
     return [s & 15 for s in laid_slots_of(sh, ids, own, app.picture_use10)]
 
 
-def move_channels(app, src, chans, dst):
+def move_channels(app, src, chans, dst, to=None):
     """Every colour of your shapes on track src (a track list id) playing on one of chans laid on dst, keeping its
-    channel there. True if any moved."""
+    channel there (to: {channel: the one it takes instead}, the same-channel ask's Move). True if any moved."""
     from window.app import placed_on
     a, b = entry_of(src), entry_of(dst)
     if a is None or b is None or a == b:
@@ -41,7 +41,7 @@ def move_channels(app, src, chans, dst):
         home = got.get("into_home", [v if c >= 0 else -1 for v, c in zip(into, chs)])
         for k, v in enumerate(ids):
             if v == a and laid[k] in chans:
-                into[k], chs[k], home[k] = b, laid[k], b
+                into[k], chs[k], home[k] = b, (to or {}).get(laid[k], laid[k]), b
                 moved = True
         sh["into"], sh["into_ch"], sh["into_home"] = into, chs, home
     return moved
@@ -94,6 +94,44 @@ def tidy_tracks(app):
         if all(c < 0 for c in chs):
             sh.pop("into_ch", None)
             sh.pop("into_home", None)
+
+
+def free_channels(app, used, n):
+    """n channels none of used (a track's), lowest first; channel 10 only with Use channel 10 (picture_use10).
+    Fewer when there aren't that many."""
+    ok = [c for c in range(16) if c not in used and (c != 9 or app.picture_use10)]
+    return ok[:n]
+
+
+def ask_clash(app, name, clash, free, merge_first):
+    """The same-channel question (PLAN #11 decision 5): channels clash (sorted) are in track `name` already. Merge
+    into them / Move to free channels (free: as many as clash, else Move isn't offered) / Cancel; merge_first =
+    Merge is the button Enter presses (nothing would sound different). "Don't ask again until Spiderweb is closed"
+    = the answer remembered (App.big_skip "same_channel", app.same_channel). "merge" / "move" / "cancel"."""
+    from files.lang import tr
+    from window.load_midi import ask_choice
+    if "same_channel" in app.big_skip:
+        kept = getattr(app, "same_channel", "merge")
+        return kept if kept == "merge" or len(free) == len(clash) else "merge"
+    chs = ", ".join(tr("tracks.channel", ch=c + 1) for c in clash)
+    lines = [tr("tracks.clash_one" if len(clash) == 1 else "tracks.clash_many", chs=chs, name=name),
+             tr("tracks.clash_merge_why")]
+    buttons = [("merge", tr("tracks.clash_merge"))]
+    if len(free) == len(clash):
+        lines.append(tr("tracks.clash_move_why"))
+        to = ", ".join(tr("tracks.channel", ch=c + 1) for c in free)
+        buttons.append(("move", tr("tracks.clash_move", chs=to)))
+    else:
+        lines.append(tr("tracks.clash_full", name=name))
+    buttons.append(("cancel", tr("tracks.clash_cancel")))
+    if not merge_first and len(buttons) == 3:
+        buttons[:2] = buttons[1::-1]
+    skip = []
+    got = ask_choice(app, tr("tracks.clash_title"), "\n\n".join(lines), buttons, skip=skip)
+    if got != "cancel" and skip and skip[0]:
+        app.big_skip.add("same_channel")
+        app.same_channel = got
+    return got
 
 
 def set_order(app, dst, chans, pos, now):
