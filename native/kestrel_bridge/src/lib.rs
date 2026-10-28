@@ -21,9 +21,9 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
-use kestrel::gpu::GpuSynth;
+use kestrel::gpu::{GpuShared, GpuSynth};
 use kestrel::midi::Event;
-use kestrel::{Backend, Config, Driver};
+use kestrel::{Backend, Bank, Config, Driver};
 
 use budget::Budget;
 
@@ -267,35 +267,110 @@ pub fn decode(msg: u32) -> Option<Event> {
     })
 }
 
+/// The settings a bank is loaded with: only the sample rate is Spiderweb's (Kestrel's defaults for the rest), so a
+/// loaded bank serves every Max voices / block / limiter setting.
+fn bank_config(sample_rate: u32) -> Config {
+    Config { sample_rate, ..Config::default() }
+}
+
+/// One soundfont read into memory, no graphics card (`kb_font_load`): Spiderweb keeps these by file, so a changed
+/// soundfont list reads only the new file (reading is ~90 % of a start: 5 s for a 390 MB piano, 2026-10-29).
+pub struct FontBank {
+    bank: Arc<Bank>,
+    sample_rate: u32,
+}
+
+impl FontBank {
+    pub fn load(path: &std::path::Path, sample_rate: u32) -> Result<FontBank> {
+        let bank = kestrel::load_bank(path, &bank_config(sample_rate))?;
+        Ok(FontBank { bank: Arc::new(bank), sample_rate })
+    }
+}
+
+/// Soundfonts stacked and their samples sent to the graphics card (`kb_load`): synths open on it in a moment
+/// (`kb_open_on`), so a setting change never reads the soundfonts again.
+pub struct Loaded {
+    bank: Arc<Bank>,
+    gpu: GpuShared,
+    sample_rate: u32,
+}
+
+impl Loaded {
+    /// `fonts` top of Spiderweb's list first: each overrides the ones before it.
+    pub fn new(fonts: &[&FontBank]) -> Result<Loaded> {
+        let (first, rest) = fonts.split_first().context("no soundfont given")?;
+        let sample_rate = first.sample_rate;
+        if rest.iter().any(|f| f.sample_rate != sample_rate) {
+            bail!("the soundfonts were read at different sample rates");
+        }
+        let cfg = bank_config(sample_rate);
+        // one soundfont = its own bank (no copy); more = copies stacked (the files' banks stay as they were)
+        let bank = if rest.is_empty() {
+            first.bank.clone()
+        } else {
+            let copies = rest.iter().map(|f| Ok(Bank::clone(&f.bank)));
+            Arc::new(kestrel::session::stack(Bank::clone(&first.bank), rest.len(), copies, None, &cfg)?)
+        };
+        let phase = kestrel::phase::PhaseBank::prepare(&bank, &cfg.phase)?;
+        // (the device + the samples only: each synth's own buffers come with its Max voices, as Kestrel's stems)
+        let probe = Config { max_voices: 1, ..cfg };
+        let gpu = GpuShared::new(&probe, &bank, &phase).context("the graphics card couldn't start Kestrel")?;
+        Ok(Loaded { bank, gpu, sample_rate })
+    }
+
+    /// The most Max voices this graphics card takes at `opts` (what a bigger open is refused with).
+    pub fn voices_top(&self, opts: &KbOptions) -> Result<u32> {
+        Ok(self.gpu.max_voices(&config(opts)?))
+    }
+}
+
+/// A synth's Kestrel settings from Spiderweb's options.
+fn config(opts: &KbOptions) -> Result<Config> {
+    let block = opts.block_frames.clamp(64, 16384);
+    let cfg = Config {
+        sample_rate: opts.sample_rate,
+        block_frames: block,
+        max_voices: opts.max_voices.max(1),
+        steal_fade_frames: Config::default().steal_fade_frames.min(block - 1),
+        limiter: opts.limiter != 0,
+        dc_blocker: opts.dc_blocker != 0,
+        dc_blocker_hz: if opts.dc_blocker_hz.is_finite() && opts.dc_blocker_hz > 0.0 {
+            (opts.dc_blocker_hz as f64).clamp(1.0, 200.0)
+        } else {
+            Config::default().dc_blocker_hz
+        },
+        limiter_ceiling_db: if opts.limiter_ceiling_db.is_finite() {
+            opts.limiter_ceiling_db.min(0.0) as _
+        } else {
+            0.0
+        },
+        ..Config::default()
+    };
+    cfg.validate()?;
+    Ok(cfg)
+}
+
 impl Synth {
+    /// Read, stack, start the graphics card and open, all in one (`Loaded` + `open_on`).
     pub fn open(fonts: &[PathBuf], opts: &KbOptions) -> Result<Synth> {
         if fonts.is_empty() {
             bail!("no soundfont given");
         }
-        let block = opts.block_frames.clamp(64, 16384);
-        let cfg = Config {
-            sample_rate: opts.sample_rate,
-            block_frames: block,
-            max_voices: opts.max_voices.max(1),
-            steal_fade_frames: Config::default().steal_fade_frames.min(block - 1),
-            limiter: opts.limiter != 0,
-            dc_blocker: opts.dc_blocker != 0,
-            dc_blocker_hz: if opts.dc_blocker_hz.is_finite() && opts.dc_blocker_hz > 0.0 {
-                (opts.dc_blocker_hz as f64).clamp(1.0, 200.0)
-            } else {
-                Config::default().dc_blocker_hz
-            },
-            limiter_ceiling_db: if opts.limiter_ceiling_db.is_finite() {
-                opts.limiter_ceiling_db.min(0.0) as _
-            } else {
-                0.0
-            },
-            ..Config::default()
-        };
-        cfg.validate()?;
-        // Each soundfont overrides the ones before it (Spiderweb's list order, top first).
-        let bank = Arc::new(kestrel::session::load_layered(fonts, None, &cfg)?);
-        let synth = GpuSynth::new(&cfg, bank.clone()).context("the graphics card couldn't start Kestrel")?;
+        let banks = fonts.iter().map(|f| FontBank::load(f, opts.sample_rate)).collect::<Result<Vec<_>>>()?;
+        let loaded = Loaded::new(&banks.iter().collect::<Vec<_>>())?;
+        drop(banks);
+        Synth::open_on(&loaded, opts)
+    }
+
+    /// A synth on soundfonts already loaded: only its own buffers + render thread (~20 ms).
+    pub fn open_on(loaded: &Loaded, opts: &KbOptions) -> Result<Synth> {
+        let cfg = config(opts)?;
+        if cfg.sample_rate != loaded.sample_rate {
+            bail!("the soundfonts were loaded at {} Hz, not {}", loaded.sample_rate, cfg.sample_rate);
+        }
+        let bank = loaded.bank.clone();
+        let synth = GpuSynth::on_shared(&cfg, bank.clone(), &loaded.gpu)
+            .context("the graphics card couldn't start Kestrel")?;
         let driver = Driver::live(&cfg, bank)?;
         let ahead = opts.ahead_blocks.max(2) as usize;
         let shared = Arc::new(Shared {
@@ -315,6 +390,11 @@ impl Synth {
             ahead,
             worst_us: AtomicU32::new(0),
         });
+        Synth::start(shared, driver, synth, &cfg)
+    }
+
+    fn start(shared: Arc<Shared>, driver: Driver, synth: GpuSynth, cfg: &Config) -> Result<Synth> {
+        let block = cfg.block_frames;
         let s = shared.clone();
         let rate = cfg.sample_rate;
         let max_voices = cfg.max_voices;
@@ -915,7 +995,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.1.0; Kestrel 1.3.0 (mbms0/kestrel-midi 844b002 + Spiderweb's changes 9d8b191)";
+    static V: &CStr = c"0.2.0; Kestrel 1.3.0 (mbms0/kestrel-midi 844b002 + Spiderweb's changes 450306c)";
     V.as_ptr()
 }
 
@@ -932,18 +1012,103 @@ pub extern "C" fn kb_error(h: *const Synth) -> *const c_char {
     })
 }
 
+/// The caller's options; a shorter (older) struct: only the fields it has, defaults for the rest.
+unsafe fn read_opts(opts: *const KbOptions) -> KbOptions {
+    let mut o = KbOptions::default();
+    if !opts.is_null() {
+        let size = (*opts).size as usize;
+        let len = size.min(std::mem::size_of::<KbOptions>());
+        std::ptr::copy_nonoverlapping(opts as *const u8, &mut o as *mut KbOptions as *mut u8, len);
+    }
+    o
+}
+
+/// Null on failure, its text kept for kb_error.
+fn or_null<T>(r: Result<T>) -> *mut T {
+    match r {
+        Ok(v) => Box::into_raw(Box::new(v)),
+        Err(e) => {
+            set_error(&format!("{e:#}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Read one soundfont (UTF-8 path) into memory at `sample_rate`, no graphics card. Null on failure (kb_error).
+/// Takes seconds: off the window's thread. Free with kb_font_free (synths and loaded sets keep what they need).
+#[no_mangle]
+pub unsafe extern "C" fn kb_font_load(path: *const c_char, sample_rate: u32) -> *mut FontBank {
+    guard(std::ptr::null_mut(), || {
+        if path.is_null() {
+            set_error("no soundfont given");
+            return std::ptr::null_mut();
+        }
+        match CStr::from_ptr(path).to_str() {
+            Ok(s) => or_null(FontBank::load(std::path::Path::new(s), sample_rate)),
+            Err(_) => {
+                set_error("a soundfont path isn't UTF-8");
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn kb_font_free(f: *mut FontBank) {
+    if !f.is_null() {
+        guard((), || drop(Box::from_raw(f)))
+    }
+}
+
+/// Stack `n` read soundfonts (top of Spiderweb's list first) and send them to the graphics card. Null on failure.
+/// Under a second (the upload): still off the window's thread.
+#[no_mangle]
+pub unsafe extern "C" fn kb_load(fonts: *const *const FontBank, n: u32) -> *mut Loaded {
+    guard(std::ptr::null_mut(), || {
+        let list: Vec<&FontBank> = (0..n as usize).filter_map(|i| (*fonts.add(i)).as_ref()).collect();
+        or_null(Loaded::new(&list))
+    })
+}
+
+/// Free a loaded set; synths opened on it keep working (they hold their own share).
+#[no_mangle]
+pub unsafe extern "C" fn kb_unload(l: *mut Loaded) {
+    if !l.is_null() {
+        guard((), || drop(Box::from_raw(l)))
+    }
+}
+
+/// The most Max voices this graphics card takes at `opts` (0 = not known, see kb_error).
+#[no_mangle]
+pub unsafe extern "C" fn kb_voices_top(l: *const Loaded, opts: *const KbOptions) -> u32 {
+    if l.is_null() {
+        return 0;
+    }
+    guard(0, || match (*l).voices_top(&read_opts(opts)) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(&format!("{e:#}"));
+            0
+        }
+    })
+}
+
+/// Open a synth on a loaded set (~20 ms). Null on failure (kb_error).
+#[no_mangle]
+pub unsafe extern "C" fn kb_open_on(l: *const Loaded, opts: *const KbOptions) -> *mut Synth {
+    if l.is_null() {
+        set_error("no soundfonts loaded");
+        return std::ptr::null_mut();
+    }
+    guard(std::ptr::null_mut(), || or_null(Synth::open_on(&*l, &read_opts(opts))))
+}
+
 /// Open a synth: `fonts` = `n` UTF-8 paths, top of Spiderweb's list first. Null on failure (see kb_error).
-/// Takes seconds (soundfonts load): call it off the window's thread.
+/// Takes seconds (soundfonts load): call it off the window's thread. (= kb_font_load each + kb_load + kb_open_on)
 #[no_mangle]
 pub unsafe extern "C" fn kb_open(fonts: *const *const c_char, n: u32, opts: *const KbOptions) -> *mut Synth {
     guard(std::ptr::null_mut(), || {
-        let mut o = KbOptions::default();
-        if !opts.is_null() {
-            // A caller's shorter (older) struct: only the fields it has.
-            let size = (*opts).size as usize;
-            let len = size.min(std::mem::size_of::<KbOptions>());
-            std::ptr::copy_nonoverlapping(opts as *const u8, &mut o as *mut KbOptions as *mut u8, len);
-        }
+        let o = read_opts(opts);
         let mut paths = Vec::new();
         for i in 0..n as usize {
             let p = *fonts.add(i);
