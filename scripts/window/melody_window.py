@@ -202,9 +202,12 @@ class MelodyWindow(tk.Toplevel):
     def normal_at(self, a, tempo):
         """The drawn line's BPM at beat a itself: a ramp crossing the area's start stays one ramp there (a point off
         its value by a hair made a jump, and a ramp ending at a jump spreads its steps differently: notes before
-        the area moved, hunt 2026-10-29); a jump on a: the BPM leaving it, as before."""
+        the area moved, hunt 2026-10-29). A point ON a (an earlier fill's first jump, a jump): the BPM arriving there,
+        as that point is replaced (user 2026-10-29: filling a filled area again took its old 330 jump as the normal
+        tempo, so Strength pulled every jump to 330 and they merged into one flat line)."""
         pane = self.app.tempo_pane
-        return float(drawn_bpm(tempo, pane.base(), [max(0.0, a)])[0])
+        on = a > 0 and any(abs(p[0] - a) < 1e-9 for p in tempo["points"])
+        return float(drawn_bpm(tempo, pane.base(), [max(0.0, a - 1e-6) if on else max(0.0, a)])[0])
 
     def fill_area(self, box, tempo=None):
         """((first, last beat) the fill covers, moved) for the kept box (first, last): a start inside an earlier
