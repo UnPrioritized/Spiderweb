@@ -46,9 +46,9 @@ def load_midi(app):
     LoadWindow(app, mf)
 
 
-def ask_choice(parent, title, text, buttons, icon="question"):
-    """A question with named buttons [(answer, label)], the first one picked by Enter; Esc / X = the last one's
-    answer."""
+def ask_choice(parent, title, text, buttons, icon="question", focus=None):
+    """A question with named buttons [(answer, label)], the first one picked by Enter (focus = the answer whose
+    button has the keyboard instead: Enter / Space press that one); Esc / X = the last one's answer."""
     win = tk.Toplevel(parent)
     win.withdraw()
     win.title(title)
@@ -66,10 +66,13 @@ def ask_choice(parent, title, text, buttons, icon="question"):
         answer[0] = how
         win.destroy()
     made = []
+    first = None
     for how, label in reversed(buttons):
         b = ttk.Button(row, text=label, command=lambda how=how: close(how))
         b.pack(side="right", padx=(6, 0))
         made.append(b)
+        if how == focus:
+            first = b
     win.bind("<Return>", lambda e: e.widget.invoke() if isinstance(e.widget, ttk.Button) else close(buttons[0][0]))
     win.bind("<Escape>", lambda e: close(buttons[-1][0]))
     win.protocol("WM_DELETE_WINDOW", lambda: close(buttons[-1][0]))
@@ -81,7 +84,7 @@ def ask_choice(parent, title, text, buttons, icon="question"):
     remember_place(win, "load_ask")
     win.deiconify()
     win.grab_set()
-    made[-1].focus_set()
+    (first or made[-1]).focus_set()
     win.wait_window()
     return answer[0]
 

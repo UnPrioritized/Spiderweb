@@ -20,6 +20,7 @@ from window.hz_preview import VOICES, font_list
 from window.widgets import bad, good
 
 RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's CC run-on (the longest counts)
+QUIET_S = 3.0  # (a question nobody asked for waits this long after the last key / click: quiet_now)
 GROUP_MOST = 16  # synths side by side playing a loaded MIDI at most (Settings → Sound)
 GROUP_DEFAULT = max(1, min(GROUP_MOST, (os.cpu_count() or 4) // 2))  # ... to start: half the cores (user
 # 2026-10-24: every core would halt the PC)
@@ -386,6 +387,27 @@ class Playback:
             ensure(self.loaded)
             self.watch_ahead()
 
+    def quiet_now(self):
+        """A good moment for a question nobody asked for (hunt 2026-10-28: it popped up as Space was pressed, mid-drag,
+        as Kestrel started): not playing or starting Kestrel, no mouse button held, no key / click for QUIET_S."""
+        if not getattr(self, "_quiet_bound", False):
+            self._quiet_bound = True
+            self._input_at, self._buttons_down = time.perf_counter(), 0
+
+            def press(e):
+                self._input_at = time.perf_counter()
+                self._buttons_down += 1
+
+            def release(e):
+                self._input_at = time.perf_counter()
+                self._buttons_down = max(0, self._buttons_down - 1)
+            self.bind_all("<ButtonPress>", press, add="+")
+            self.bind_all("<ButtonRelease>", release, add="+")
+            self.bind_all("<KeyPress>", lambda e: setattr(self, "_input_at", time.perf_counter()), add="+")
+            return False
+        return (not self.player.running and self._kestrel_job is None and self._kestrel_made is None
+                and not self._buttons_down and time.perf_counter() - self._input_at >= QUIET_S)
+
     def watch_ahead(self):
         """Once the loaded MIDI's read-ahead is all read: asks whether to keep it on disk (play_dense.may_keep;
         never written unasked, user 2026-10-28: 3 GB). Waits while playing (a question mid-song)."""
@@ -396,7 +418,7 @@ class Playback:
         d = lm.dense if lm is not None else None
         if d is None:
             return
-        if not d.done() or (d.unsaved and self.player.running):
+        if not d.done() or (d.unsaved and not self.quiet_now()):
             self._ahead_job = self.after(1000, self.watch_ahead)
             return
         if not d.unsaved:
@@ -408,7 +430,7 @@ class Playback:
                             tr("ks.keep_ask", name=os.path.basename(lm.path), size=size_text(size),
                                s=f"{d.took:.0f}"),
                             [("keep", tr("ks.keep_yes")), ("never", tr("ks.keep_never")),
-                             ("later", tr("ks.keep_later"))])
+                             ("later", tr("ks.keep_later"))], focus="later")  # (Space / Enter never keep 3 GB)
         if self.loaded is not lm or lm.dense is not d or not d.unsaved:  # (changed while asked)
             return
         if answer == "keep":
