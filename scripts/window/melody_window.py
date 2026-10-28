@@ -22,6 +22,7 @@ from notes.melody import (CATCH_LEAST, CATCH_SHAPES, HOLD, HOWS, MOST_ANCHORS, R
 from notes.tempo import MAX_BPM, MIN_BPM, drawn_bpm, plans
 from window import look
 from window.jump_areas import JumpChain
+from window.jump_graph import JumpGraph, graph_pts
 from window.load_extract import boxes_now
 from window.widgets import Scrub, remember_place, unhighlight
 
@@ -29,7 +30,7 @@ WATCH_MS = 250
 # the words round the two BPM boxes, by shape (None = one box: the second hidden)
 WORDS = {"burst": ("melody.w_from", "melody.w_to", "melody.bpm"), "jump": ("melody.w_jump", None, "melody.bpm"),
          "updown": (None, "melody.w_and", "melody.bpm"), "random": ("melody.w_between", "melody.w_and", "melody.bpm"),
-         "drawn": (None, None, None)}  # (the drawn one: BPMs as drawn, no boxes)
+         "drawn": ("melody.w_between", "melody.w_and", "melody.bpm")}  # (its graph: lower box to higher box)
 MOST_LOADED = 5_000_000  # a loaded track's notes read for one area at most (a denser area: refused, said why)
 
 
@@ -95,8 +96,18 @@ class MelodyWindow(tk.Toplevel):
         self.bpm_row = [self.bpm_words[0], self.bpm_boxes[0], self.bpm_words[1], self.bpm_boxes[1], self.bpm_words[2]]
         for w in self.bpm_row:
             w.pack(side="left", padx=(4, 0))
+        self.graphs = {}  # the small graph windows open (window/jump_graph.py): {"shape" / "strength": JumpGraph}
+        self.shape_graph = ttk.Button(row, text=tr("path.graph"), command=lambda: self.open_graph("shape"))
         self.about = ttk.Label(box, foreground=look.HINT, wraplength=int(420 * app.scale), justify="left")
         self.about.pack(anchor="w", padx=(10, 0), pady=(2, 0))  # (what the shape does: user found them unclear)
+        # how far each jump goes, over the area (user 2026-10-29): 0 % = the normal tempo, 100 % = the whole jump
+        row = ttk.Frame(box)
+        row.pack(anchor="w", padx=(10, 0), pady=(6, 0))
+        ttk.Label(row, text=tr("melody.strength")).pack(side="left")
+        ttk.Button(row, text=tr("path.graph"), command=lambda: self.open_graph("strength")).pack(side="left",
+                                                                                               padx=(6, 0))
+        self.strength_text = ttk.Label(row, foreground=look.HINT)
+        self.strength_text.pack(side="left", padx=(6, 0))
         for var in (self.lo, self.hi):
             var.trace_add("write", lambda *_: self.sync())
         # (the boxes themselves drag sideways, user 2026-10-29: 1 BPM, Shift 10, Ctrl 0.1; no undo step)
@@ -382,7 +393,7 @@ class MelodyWindow(tk.Toplevel):
         app.melody_shape, app.melody_how, app.melody_hold = self.shape.value(), how, self.hold.get()
         app.melody_catch = self.catch_shape.value()
         made = (self.shape.get(), self.lo.get(), self.hi.get(), how, self.hold.get(), self.catch_shape.get(),
-                id(getattr(app, "melody_drawn", None)))
+                str(graph_pts(app, "shape")), str(graph_pts(app, "strength")))
         seen = (box, area, track, ch, at, only, has_sel, step, self.shortest.get(), self.rest.get(),
                 tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"], made)
         if seen == self.seen:
@@ -403,13 +414,21 @@ class MelodyWindow(tk.Toplevel):
         for w, key in zip(self.bpm_words, words):
             w.config(text=tr(key) if key else "")
         self.about.config(text=tr("melody.about_" + shape))
-        one = words[1] is None  # (one BPM: the second box and its word hidden; a drawn one: no boxes, as drawn)
-        want = [] if shape == "drawn" else self.bpm_row[:2] + self.bpm_row[4:] if one else self.bpm_row
-        if [w for w in self.bpm_row if w.winfo_manager()] != want:
-            for w in self.bpm_row:
+        one = words[1] is None  # (one BPM: the second box and its word hidden; My drawn one: + its Graph… button)
+        want = (self.bpm_row[:2] + self.bpm_row[4:] if one else self.bpm_row) + [self.shape_graph] * (
+            shape == "drawn")
+        if [w for w in self.bpm_row + [self.shape_graph] if w.winfo_manager()] != want:
+            for w in self.bpm_row + [self.shape_graph]:
                 w.pack_forget()
             for w in want:
                 w.pack(side="left", padx=(4, 0))
+        strength = graph_pts(app, "strength")
+        hs = [p[1] for p in strength]
+        self.strength_text.config(text=tr("melody.strength_flat", p=fmt(round(hs[0] * 100, 1))) if max(hs) == min(hs)
+                                  else tr("melody.strength_range", lo=fmt(round(min(hs) * 100, 1)),
+                                          hi=fmt(round(max(hs) * 100, 1))))
+        for g in self.graphs.values():  # (the BPMs beside My drawn one's graph follow the boxes)
+            g.draw()
         self.area.config(text=tr("melody.area", a=pane.place_text(box[0]), b=pane.place_text(box[1]))
                          if box else tr("melody.no_clicks" if clicks else "melody.no_area"))
         self.follow.config(text=tr("melody.follows", name=name))
@@ -572,7 +591,9 @@ class MelodyWindow(tk.Toplevel):
             return fill_clip(runs, a, b, self.shape.value(), lo, hi, normal, how,
                              self.number(self.hold) or HOLD, self.catch_shape.value(), random.Random(seed),
                              bpm_snap, plain, heard if how == "audio" else None,
-                             getattr(app, "melody_drawn", None))
+                             graph_pts(app, "shape"), strength)
+        strength = graph_pts(app, "strength")
+        strength = None if all(p[1] == 1.0 for p in strength) else strength  # (100 % all along: as before)
         plain = set()
         clip = clip_for(plain)
         if how == "catch":
@@ -617,10 +638,7 @@ class MelodyWindow(tk.Toplevel):
     def shape_problem(self, runs):
         """What stops the shape / BPM boxes / way making the jumps of runs (None = fine)."""
         lo, hi = self.number(self.lo, MIN_BPM, MAX_BPM), self.number(self.hi, MIN_BPM, MAX_BPM)
-        if self.shape.value() == "drawn":
-            if not getattr(self.app, "melody_drawn", None):  # (none picked yet: how to)
-                return tr("melody.no_drawn")
-        elif lo is None or (hi is None and WORDS[self.shape.value()][1] is not None):
+        if lo is None or (hi is None and WORDS[self.shape.value()][1] is not None):
             return tr("melody.bad_bpm", lo=fmt(round(MIN_BPM, 3)), hi=fmt(MAX_BPM))
         if self.how.get() == "catch" and self.number(self.hold, 1, 99) is None:
             return tr("melody.bad_hold")
@@ -691,7 +709,22 @@ class MelodyWindow(tk.Toplevel):
         self.sync()
         return True
 
+    def open_graph(self, kind):
+        """My drawn one's / Strength's small graph window (window/jump_graph.py); open already: brought up."""
+        g = self.graphs.get(kind)
+        if g is not None and g.winfo_exists():
+            return g.lift()
+        self.graphs[kind] = JumpGraph(self, kind)
+
+    def graph_bpms(self):
+        """(lower, higher) of the two BPM boxes, the bottom and top of My drawn one's graph; (None, None) when one
+        can't be read."""
+        lo, hi = self.number(self.lo, MIN_BPM, MAX_BPM), self.number(self.hi, MIN_BPM, MAX_BPM)
+        return (None, None) if lo is None or hi is None else (min(lo, hi), max(lo, hi))
+
     def close(self):
+        for g in list(self.graphs.values()):
+            g.close()
         self.finish_chain()
         if self.watch:
             self.after_cancel(self.watch)

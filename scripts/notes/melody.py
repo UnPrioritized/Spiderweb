@@ -108,23 +108,24 @@ def gap_values(shape, k, lo, hi, rng, snap=0.0):
     return lo, None  # (jump: the first box only)
 
 
-def drawn_shape(clip):
-    """A Conductor pane copy (TempoPane.clip_of of one Select box) as a jump shape: [[share 0..1 of the gap, bpm,
-    curve, formula, scale, bend]] (BPMs as drawn; Keep timing, heard lines and catch-ups left out). None when it
-    has no length or no points."""
-    if not clip or clip["length"] <= 1e-9 or not clip["points"]:
-        return None
-    from notes.tempo import BEND
-    n = clip["length"]
-    out = [[min(1.0, max(0.0, p[0] / n)), float(p[1]), p[2], p[3] if len(p) > 3 else "",
-            p[4] if len(p) > 4 else "lin", list(p[6]) if len(p) > 6 and p[6] else list(BEND)] for p in clip["points"]]
-    if out[0][0] > 1e-9:  # (the box started before the first point: that point's BPM from the start)
-        out.insert(0, [0.0, out[0][1], "hold", "", "lin", list(BEND)])
+GRAPH_POINTS = 200  # the most points a jump graph (My drawn one / Strength, window/jump_graph.py) keeps
+
+
+def graph_at(pts, t):
+    """A jump graph's height (0..1) at t (0..1, array): points [along, height, bend] joined by stretches bent like a
+    Conductor pane part (tempo.bent, control point [0.5, bend]: 0.5 = straight); two points on one spot = a jump
+    (the later one from there)."""
+    from notes.tempo import bent
+    t = np.clip(np.asarray(t, float), 0.0, 1.0)
+    out = np.full(t.shape, float(pts[-1][1]))
+    for (u0, p0, m), (u1, p1, _) in zip(pts, pts[1:]):
+        inside = (t >= u0) & (t < u1) if u1 > u0 else np.zeros(t.shape, bool)
+        out[inside] = p0 + (p1 - p0) * bent((t[inside] - u0) / (u1 - u0), [0.5, m])
     return out
 
 
 def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_shape="flat", rng=None,
-              snap=0.0, plain=(), heard=None, drawn=None):
+              snap=0.0, plain=(), heard=None, drawn=None, strength=None):
     """The tempo the fill lays over beats a..b, as a Conductor pane copy (TempoPane.put_copies replaces what's in
     the area with it): {"length", "points", "catch", "spans"}, beats from a. runs: melody_runs / snap_runs. normal:
     the BPM between runs.
@@ -133,8 +134,10 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
     Catch-up: each gap = the show tempo up to hold % of it, then a catch-up (its yellow area from the jump, so
     back-to-back catch-ups all pay back to the tempo after the run: every jump on time); normal = the tempo heard
     at the area's start. plain: gaps (run, k) left at the normal tempo (their catch-up can't be done). snap: BPM
-    snap for Random's values. drawn: drawn_shape's points, for shape "drawn" (stretched over each gap, up to the
-    catch-up)."""
+    snap for Random's values. drawn: My drawn one's graph (graph_at), for shape "drawn": stretched over each gap
+    (up to the catch-up), bottom = the lower of lo / hi, top = the higher, each stretch one part. strength: a graph
+    over the whole area (None = 100 % all along): every BPM made goes only that share of the way from the normal
+    tempo (straight BPMs, user 2026-10-29: 120 -> 240 at 50 % = 180)."""
     import random
     from notes.tempo import BEND, catch_set, clamp_bpm
     rng = rng or random.Random()
@@ -144,6 +147,8 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
 
     def point(x, bpm, curve="hold", formula="", scale=None, bend=BEND):
         scale = scale or ("exp" if curve == "line" else "lin")
+        if strength is not None and b > a:
+            bpm = normal + (bpm - normal) * float(graph_at(strength, [(x - a) / (b - a)])[0])
         p = [x - a, clamp_bpm(bpm), curve, formula, scale, keep, list(bend)]
         if keep and line:
             p.append({"line": [list(q) for q in line]})
@@ -163,8 +168,11 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
             v0, v1 = gap_values(shape, k, lo, hi, rng, snap)
             stop = nxt if keep else x + (nxt - x) * min(max(hold, 1.0), 99.0) / 100.0
             if shape == "drawn" and drawn:
-                for share, bpm, curve, formula, scale, bend in drawn:
-                    point(x + (stop - x) * share, bpm, curve, formula, scale, bend)
+                bl, bh = min(lo, hi), max(lo, hi)
+                for j, (u, p, m) in enumerate(drawn):
+                    nxt_p = drawn[j + 1][1] if j + 1 < len(drawn) else p
+                    point(x + (stop - x) * u, bl + (bh - bl) * p, "line" if nxt_p != p else "hold", "", "lin",
+                          [0.5, m])
             elif shape == "jump" and keep:
                 point(x, v0)
                 point(x + (nxt - x) / 2, normal)

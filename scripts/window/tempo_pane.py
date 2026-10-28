@@ -44,7 +44,6 @@ from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR
 from window import look
 from window.conductor_marks import ROW, ConductorMarks
 from window.melody_window import open_melody
-from notes.melody import drawn_shape
 from window.widgets import Scrub, ShortLabel, Tooltip, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
@@ -2245,23 +2244,6 @@ class TempoPane(ConductorMarks, tk.Canvas):
         else:
             self._dense_job = self.after(100, lambda: self.read_anchors(lm))
 
-    def use_drawn(self, x):
-        """Right-click in a Select box → Use as the jump shape: the line inside the box clicked becomes Fill with
-        tempo jumps' "My drawn one" (app.melody_drawn, while Spiderweb runs), picked in its window."""
-        beat = self.app.roll.x2t(x)
-        span = next(((lo, hi) for lo, hi in self.bands if lo <= beat <= hi), None)
-        got = drawn_shape(self.clip_of([span])) if span else None
-        if got is None:
-            return self.app.status.config(text=tr("melody.drawn_none"))
-        self.app.melody_drawn = got
-        self.app.melody_shape = "drawn"
-        w = getattr(self.app, "melody_window", None)
-        if w is not None:
-            w.shape.set(tr("melody.shape_drawn"))
-            w.seen = None
-            w.sync()
-        self.app.status.config(text=tr("melody.drawn_set"))
-
     def edges_on(self):
         """The Fill with tempo jumps window while "Where I click" is picked (Jump areas: clicks here make edges),
         else None."""
@@ -2362,8 +2344,6 @@ class TempoPane(ConductorMarks, tk.Canvas):
             menu.add_command(label=tr("tempo.add_catch"), command=self.start_placing)
         if not on_mark and item is None and self.box.mode == "visual":  # (tempo jumps that follow the melody,
             menu.add_command(label=tr("melody.menu"), command=self.start_fill)  # PLAN #12)
-            if self.in_band(e.x):  # (the Select box's piece of line = Fill's / Jump areas' "My drawn one", C4)
-                menu.add_command(label=tr("melody.use_drawn"), command=lambda x=e.x: self.use_drawn(x))
         edge =self.edge_at(e.x) if item is None else None
         worked = plans(tempo, self.base(), self.app.ppq) if edge else []
         for k, kind, key in ((3, "start", "tempo.catch_auto"), (4, "end", "tempo.catch_end_auto")):
