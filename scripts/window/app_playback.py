@@ -858,12 +858,15 @@ class Playback:
         """A Kestrel (GPU) row in Settings → Sound changed (app.kestrel_vars[key]): Lower it by itself is heard at
         once, the others from the next Play (Kestrel opened again with them: fresh_builtin). Max voices typed wrong
         = back to the one in use."""
-        from files.kestrel import BLOCKS, VOICES_RANGE
+        from files.kestrel import BLOCKS, VOICES_RANGE, read_voices
         var = self.kestrel_vars[key]
         if key == "voices":
             e = getattr(self, "kestrel_voices_entry", None)
             try:
-                v = int(round(float(calc(var.get()))))
+                try:
+                    v = read_voices(var.get())  # ("300k", "1m")
+                except ValueError:
+                    v = int(round(float(calc(var.get()))))
                 # (not past this graphics card's top once known: kestrel_voices_top)
                 if not VOICES_RANGE[0] <= v <= min(VOICES_RANGE[1], getattr(self, "kestrel_top", None) or 1 << 62):
                     raise ValueError

@@ -92,14 +92,23 @@ class BuiltinPanel(ttk.Frame):
         before = set(box.grid_slaves())
         lb = ttk.Label(box, text=tr("ks.voices"))
         lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
-        e = app.kestrel_voices_entry = ttk.Entry(box, textvariable=vars_["voices"], width=10)
-        e.grid(row=r, column=1, sticky="w", pady=3)
+        row = ttk.Frame(box)  # (the box + its Default button side by side)
+        row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        e = app.kestrel_voices_entry = ttk.Entry(row, textvariable=vars_["voices"], width=10)
+        e.pack(side="left")
         e.bind("<Return>", lambda ev: (app.on_kestrel_opt("voices"), "break")[1])
         e.bind("<FocusOut>", lambda ev: app.on_kestrel_opt("voices"))
         Scrub(app, [(e, vars_["voices"], lambda: app.on_kestrel_opt("voices"))], (65536, 1048576, 1024),
               *kestrel.VOICES_RANGE, label=lb, no_undo=True)
         Tooltip(e, tr("ks.voices_tip"))
         Tooltip(lb, tr("ks.voices_tip"))
+
+        def default():  # (this box only: user 2026-10-28, never mistaken for resetting every setting)
+            vars_["voices"].set(str(kestrel.LIVE_VOICES))
+            app.on_kestrel_opt("voices")
+        b = ttk.Button(row, text=tr("ks.voices_default"), command=default, takefocus=False)
+        b.pack(side="left", padx=(6, 0))
+        Tooltip(b, tr("ks.voices_default_tip", n=f"{kestrel.LIVE_VOICES:,}"))
         r += 1
 
         c = ttk.Checkbutton(box, text=tr("ks.lower"), variable=vars_["lower"],

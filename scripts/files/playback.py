@@ -19,7 +19,9 @@ from notes.hz_settings import CC_NUMBER, CC_START
 MAPPER_NAME = "Windows default (MIDI Mapper)"
 BUILTIN = "Built-in BASSMIDI"  # (the user's name for it; like a device's name it's saved, so not translated)
 KDMAPI = "OmniMIDI (KDMAPI)"  # (OmniMIDI's own direct way in, skipping Windows' MIDI layers; user's name, saved)
-KESTREL = "Kestrel (GPU)"  # (the GPU synth through files/kestrel.py; user 2026-10-27: its name may show; saved)
+KESTREL = "Kestrel (GPU, Experimental)"  # (the GPU synth through files/kestrel.py; user 2026-10-27: its name may
+# show; saved. "Experimental" user 2026-10-28: still rough on the heaviest MIDIs)
+OLD_NAMES = {"Kestrel (GPU)": KESTREL}  # (saved MIDI outs under an earlier name)
 DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
 MAPPER = 0xFFFFFFFF
 
@@ -120,7 +122,7 @@ def devices():
 def keep_saved(name):
     """A saved MIDI out to pick again: on Windows any (an unplugged device is told about at Play), elsewhere only
     what's there (a Windows device saved in a settings file brought over is dropped)."""
-    return bool(_winmm) or name in devices()
+    return bool(_winmm) or OLD_NAMES.get(name, name) in devices()
 
 
 class MidiOut:

@@ -30,7 +30,18 @@ MAX_VOICES = 1 << 20  # Kestrel's own default
 BLOCKS = (256, 512, 1024, 2048)  # (Settings → Sound's block sizes)
 VOICES_RANGE = (1024, 1 << 26)  # (Settings → Sound's Max voices)
 # Settings → Sound's rows (App.kestrel_opts = Kestrel's keywords): "lower" changes while open, the rest at the next open
-KESTREL_DEFAULTS = {"voices": MAX_VOICES, "lower": True, "block": BLOCK, "limiter": True, "dc_blocker": True}
+LIVE_VOICES = 300_000  # (Max voices to start with: user 2026-10-28, Kestrel's own 1 M fell behind on heavy MIDIs)
+KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limiter": True, "dc_blocker": True}
+
+
+def read_voices(text):
+    """Max voices as typed: a number, "300k", "1m", "1mil", "1.5M", "1,000,000" (user 2026-10-28), else ValueError."""
+    import re
+    t = text.strip().lower().replace(",", "").replace("_", "").replace(" ", "")
+    m = re.fullmatch(r"(\d+(?:\.\d*)?|\.\d+)(k|m|mil|million)?", t)
+    if not m:
+        raise ValueError(text)
+    return int(round(float(m.group(1)) * {None: 1, "k": 1e3}.get(m.group(2), 1e6)))
 UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
 # (one Kestrel starting at a time, whatever asks: two starting together in one program can hang on the graphics
 # card, seen in the connector's tests 2026-10-27)

@@ -46,7 +46,7 @@ from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, cli
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
 from files.own_tracks import ID_MOST, clean_file_gone, clean_file_order, clean_file_props, clean_file_tracks, clean_own_tracks, new_id
 from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_inserts, note_tracks, track_slots, write_midi
-from files.playback import keep_saved
+from files.playback import OLD_NAMES, keep_saved
 from files.about import HERE, USER, VERSION
 from files.errors import write_log
 from files.midi_copy import Added, Retime
@@ -703,7 +703,7 @@ class ProjectFiles:
 
         def ticks():
             if win.get("midi_device") and keep_saved(str(win["midi_device"])):
-                self.midi_device.set(str(win["midi_device"]))
+                self.midi_device.set(OLD_NAMES.get(str(win["midi_device"]), str(win["midi_device"])))
             self.live.set(win.get("live") is True)
             self.mask.set(win.get("mask") is True)
             self.mask_preview.set(win.get("mask_preview") is not False)
