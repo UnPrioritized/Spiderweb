@@ -2185,13 +2185,16 @@ class TrackList(tk.Canvas):
             return
         # the background reading: the blocks shown blocky first, then the ones around the picture (half its width
         # each way along the song, half its height up and down) so scrolling finds them read
-        rows_shown = sorted({int(line_row[line]) for line, _, _ in shown}) or [int(line_row[first])]
-        a, b = rows_shown[0], rows_shown[-1]
-        half = (b - a) // 2
+        # (a square painted ahead below the last line: no rows of its own)
+        rows_shown = sorted({int(line_row[line]) for line, _, _ in shown}) or (
+            [int(line_row[first])] if first < len(line_row) else [])
         ahead = [(r, j, c) for _, r, c in shown
                  for j in range(max(0, (cx - aw // 2) // TILE), min((cx + aw + aw // 2) // TILE + 1, end_j))]
-        ahead += [(r, j, None) for _, r in files_in(a - half, a) + files_in(b + 1, b + half + 1)
-                  for j in range(j0, min(j1 + 1, end_j))]
+        if rows_shown:
+            a, b = rows_shown[0], rows_shown[-1]
+            half = (b - a) // 2
+            ahead += [(r, j, None) for _, r in files_in(a - half, a) + files_in(b + 1, b + half + 1)
+                      for j in range(j0, min(j1 + 1, end_j))]
         todo = list(dict.fromkeys(waiting + [k for k in ahead if k not in self._tiles]))
         job = self._row_job
         if todo and (job is None or waiting):  # (blocks shown blocky: read those first, now)
