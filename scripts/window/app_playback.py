@@ -409,13 +409,13 @@ class Playback:
             self._quiet_bound = True
             self._input_at, self._buttons_down = time.perf_counter(), 0
 
-            def press(e):
+            def press(e):  # (getattr: the watch outlives its counts when the window is set back as new, tests)
                 self._input_at = time.perf_counter()
-                self._buttons_down += 1
+                self._buttons_down = getattr(self, "_buttons_down", 0) + 1
 
             def release(e):
                 self._input_at = time.perf_counter()
-                self._buttons_down = max(0, self._buttons_down - 1)
+                self._buttons_down = max(0, getattr(self, "_buttons_down", 0) - 1)
             self.bind_all("<ButtonPress>", press, add="+")
             self.bind_all("<ButtonRelease>", release, add="+")
             self.bind_all("<KeyPress>", lambda e: setattr(self, "_input_at", time.perf_counter()), add="+")
