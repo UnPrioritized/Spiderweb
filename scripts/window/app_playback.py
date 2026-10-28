@@ -917,7 +917,7 @@ class Playback:
                 # (not past this graphics card's top once known: kestrel_voices_top)
                 if not VOICES_RANGE[0] <= v <= min(VOICES_RANGE[1], getattr(self, "kestrel_top", None) or 1 << 62):
                     raise ValueError
-            except (ValueError, ZeroDivisionError):
+            except (ValueError, ZeroDivisionError, OverflowError):  # (overflow: a huge pasted number, hunt 10-28)
                 if e is not None and e.winfo_exists():
                     bad(e)
                 return

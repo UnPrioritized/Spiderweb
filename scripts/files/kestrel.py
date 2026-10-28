@@ -36,12 +36,19 @@ KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limit
 
 def read_voices(text):
     """Max voices as typed: a number, "300k", "1m", "1mil", "1.5M", "1,000,000" (user 2026-10-28), else ValueError."""
+    import math
     import re
-    t = text.strip().lower().replace(",", "").replace("_", "").replace(" ", "")
+    t = text.strip().lower().replace("_", "").replace(" ", "")
+    # (a comma before exactly three digits groups thousands, any other is the decimal point: "1,5m" = 1.5 million,
+    # was 15 million, hunt 2026-10-28)
+    t = re.sub(r",(?=\d{3}(?!\d))", "", t).replace(",", ".")
     m = re.fullmatch(r"(\d+(?:\.\d*)?|\.\d+)(k|m|mil|million)?", t)
-    if not m:
+    if not m or len(m.group(1)) > 30:  # (a pasted 300-digit number overflowed into an error message)
         raise ValueError(text)
-    return int(round(float(m.group(1)) * {None: 1, "k": 1e3}.get(m.group(2), 1e6)))
+    v = float(m.group(1)) * {None: 1, "k": 1e3}.get(m.group(2), 1e6)
+    if not math.isfinite(v):
+        raise ValueError(text)
+    return int(round(v))
 UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
 # (one Kestrel starting at a time, whatever asks: two starting together in one program can hang on the graphics
 # card, seen in the connector's tests 2026-10-27)
