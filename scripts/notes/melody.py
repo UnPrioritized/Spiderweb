@@ -31,16 +31,14 @@ def melody_runs(starts, ends, a, b, shortest=SHORTEST, rest=REST):
 
 
 def snap_runs(step, a, b):
-    """Every snap step: one run with an anchor on each grid line (from beat 0) in a..b, ending at b."""
+    """Every step: one run with an anchor every step FROM THE AREA'S START (user 2026-10-29: counted from beat 0, a
+    490-tick step started part way in) up to b, ending at b."""
     if not step or step <= 0 or b <= a:
         return []
-    first = np.ceil(a / step - 1e-9)
-    n = int(np.floor((b - 1e-9) / step) - first) + 1
-    if n <= 0:
-        return []
+    n = int(np.floor((b - a - 1e-9) / step)) + 1
     if n > MOST_ANCHORS:
         n = MOST_ANCHORS + 1  # (counted as too many: never made)
-    return [((first + np.arange(n)) * step, float(b))]
+    return [(a + np.arange(n) * step, float(b))]
 
 
 def anchor_count(runs):
@@ -89,15 +87,16 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
         if snap and curve == "hold":
             bpm = max(snap, round(bpm / snap) * snap)
         p = [x - a, clamp_bpm(bpm), curve, "", "exp" if curve == "line" else "lin", kept, list(BEND)]
-        if kept:
+        if kept and heard[0]:
             p.append({"line": [list(q) for q in heard[0]]})
         pts.append(p)
 
     for r, (xs, end) in enumerate(runs):
         xs = [float(x) for x in xs]
-        # (heard at the normal tempo by its own line, not "the tempo heard before": a run from the song's start
-        # was heard at the project's first BPM there, not the line's)
-        heard[0] = [[xs[0] - a, clamp_bpm(normal), "hold", "", "lin", False, list(BEND)]]
+        # (a run from the song's very start: heard at the normal tempo by its own line, else "the tempo heard
+        # before" was the project's first BPM there, not the line's; elsewhere the tempo heard before IS the normal
+        # one, and a line on every part made the pane slow to draw, user 2026-10-29: every 1 tick lagged)
+        heard[0] = [[xs[0] - a, clamp_bpm(normal), "hold", "", "lin", False, list(BEND)]] if xs[0] <= 1e-9 else []
         for k, x in enumerate(xs):
             nxt = xs[k + 1] if k + 1 < len(xs) else end
             if nxt <= x + 1e-9:

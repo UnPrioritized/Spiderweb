@@ -3182,6 +3182,19 @@ class TempoPane(ConductorMarks, tk.Canvas):
         keep_spans = [(max(kb, roll.t2x(a / ppq)), w if e is None else min(w, roll.t2x(e / ppq)), u, a / ppq,
                        math.inf if e is None else e / ppq, i) for i, a, e, u in layout(tempo, base, ppq)["keeps"]]
         keep_spans = [s for s in keep_spans if s[1] > s[0]]
+        run_of = {k: n for n, (s, t) in enumerate(keep_runs(tempo)) for k in range(s, t + 1)}
+        if app.loaded is None and not self.drag:  # (parts side by side in one run, heard flat at one tempo: drawn
+            # as one, the same picture; thousands of jumps drew a box + line + word check each, user 2026-10-29)
+            joined_spans = []
+            for s in keep_spans:
+                p = joined_spans[-1] if joined_spans else None
+                if p is not None and run_of.get(p[5]) == run_of.get(s[5]) and abs(p[4] - s[3]) < 1e-9 \
+                        and p[2] == s[2] and not heard_line(tempo["points"][p[5]]) \
+                        and not heard_line(tempo["points"][s[5]]):
+                    joined_spans[-1] = (p[0], s[1], p[2], p[3], s[4], p[5])
+                else:
+                    joined_spans.append(s)
+            keep_spans = joined_spans
         for x0, x1, *_ in keep_spans:  # Keep timing parts (purple), their notes keep the tempo heard before
             self.create_rectangle(x0, 0, x1, h, fill=look.TEMPO_KEEP_BG, outline="")
             areas.append((x0, x1, look.TEMPO_KEEP_BG))
@@ -3226,7 +3239,6 @@ class TempoPane(ConductorMarks, tk.Canvas):
         y = float(self.b2y(base))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         dense = self.dense_now()
-        run_of = {k: n for n, (s, t) in enumerate(keep_runs(tempo)) for k in range(s, t + 1)}
         words = []  # [x0, x1, too close, run, end beat]: a run's pieces side by side = one part, one word (user)
         for x0, x1, u, b0, b1, i in keep_spans:
             # notes too close for its tempo (user 2026-10-22: shown while editing, not only after the export): a
@@ -3352,6 +3364,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
             groups = [(preview["tempo"]["points"] if preview and "tempo" in preview else tempo["points"], None)]
         for pts, col in groups:
             i0, i1 = self.shown_points(kb - r, w + r, pts)
+            drawn = set()  # (dots landing on the same pixel look the same: drawn once, thousands of jumps)
+            # more dots than one per 3 px: none until zoomed in (like crowded curves on the piano roll; the line
+            # and a Select box still show them; every 1 tick jumps drew thousands each redraw, user 2026-10-29)
+            if (i1 - i0) * 3 > w - kb:
+                continue
             for p in pts[i0:i1]:
                 b, v = p[0], p[1]
                 x, y = roll.t2x(b), float(self.b2y(v))
@@ -3359,6 +3376,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
                     continue
                 on = self.is_sel(p)
                 edge = col or (look.TEMPO_CATCH if b in ends else look.TEMPO_LINE)
+                spot = (round(x), round(y), on, edge)
+                if spot in drawn:
+                    continue
+                drawn.add(spot)
                 self.create_oval(x - r, y - r, x + r, y + r, fill=look.TEMPO_PICKED if on else look.CHART_POINT,
                                  outline=edge, width=lw + 1)
         got = self.handles()
