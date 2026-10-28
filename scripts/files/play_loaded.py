@@ -938,7 +938,7 @@ class LoadedPlayer:
                 new = _tm_arrays(tmap)
                 if not all(np.array_equal(a, b) for a, b in zip(tm, new)):
                     base_new = kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
-                    held, base = self._retime(kout, ahead, held, tm, base, new, base_new)
+                    held, base = self._retime(kout, ahead, held, tm, base, new, base_new, align)
                     if base != base_new:  # (the clock moved so the line, own shapes and these notes stay together)
                         clock = self.player._clock
                         if clock is not None and clock[2] is tmap:
@@ -1059,7 +1059,7 @@ class LoadedPlayer:
                      getattr(self.player, "notes_ver", 0))) | 1
 
     @staticmethod
-    def _retime(kout, ahead, held, tm, base, new, base_new):
+    def _retime(kout, ahead, held, tm, base, new, base_new, align=0.0):
         """The tempo changed while playing (Kestrel): what was pushed ahead (up to PUSH_S, at the old speed) taken
         back from a couple of blocks on and pushed again at the new speed, with the block not pushed yet (held);
         returns (the new held, the song's start frame from now on). Before (F8, 2026-10-28) up to a second played on
@@ -1084,6 +1084,10 @@ class LoadedPlayer:
             j = np.maximum(np.searchsorted(ticks, t, "right") - 1, 0)
             return secs[j] + (t - ticks[j]) * spt[j]
         anchor = at - float(sec_new(tick_of([at]))[0]) * K_RATE
+        # (own shapes' notes sent ahead went with the cut: again at the new tempo, hunt 2026-10-28. Their frames
+        # lack the song start's block alignment: the same mapping shifted by it)
+        if hasattr(kout, "retime"):
+            kout.retime(at, lambda f: float(sec_new(tick_of([f + align]))[0]) * K_RATE + anchor - align)
         got = []
         for c in ahead + ([held] if held is not None else []):
             k = int(np.searchsorted(c[0], at))

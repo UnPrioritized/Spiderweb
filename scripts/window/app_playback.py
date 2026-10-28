@@ -113,6 +113,7 @@ class Playback:
             self.hz_window.draw_preview()
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
+        self.player.along = self.loaded is not None
         rendered, ccs, ports = self.play_parts(ppq, bpm)
         end = self.play_end(ppq, beats, self.playhead)
         self.player.ready = None

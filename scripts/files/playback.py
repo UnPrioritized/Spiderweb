@@ -377,6 +377,7 @@ class Player:
         self.cc_sent = set()  # (channel, CC number or "bend") a Hz bass's CC lines sent a value on: put back at stop
         self.tune = False  # (31-EDO: see start)
         self.shared = False  # (set before start: overlapping notes may share a channel, a key sounds until its last)
+        self.along = False  # (set before start: a loaded MIDI plays along, its feeder re-times Kestrel's pushes)
         self.ports = False  # (see start)
         self._clock = None
         self.map = None  # the tempo as a TimeMap (start; None until the first start)
@@ -449,8 +450,27 @@ class Player:
         if clock is not None:
             now = time.perf_counter()
             t, sec, old = clock
-            self._clock = (now, new.sec(old.tick(sec + now - t)), new)
+            k = self.out.handle if getattr(self.out, "name", None) == KESTREL and not self.along else None
+            # (alone: the loaded MIDI's feeder does this when one plays along, play_loaded._retime)
+            if k is None or not self._kestrel_retime(k, clock, new):
+                self._clock = (now, new.sec(old.tick(sec + now - t)), new)
         self.map = new
+
+    def _kestrel_retime(self, k, clock, new):
+        """Kestrel (own shapes alone): what was sent ahead at the old tempo taken back from a couple of blocks on
+        and sent again at the new one; the new tempo starts exactly where the sound made at the old one ends, the
+        clock set to match (as play_loaded._retime; hunt 2026-10-28: ~0.2 s at the old speed, a note rang on)."""
+        from files.kestrel import RATE
+        B = k.k.block
+        at = k.k.cut((k.k.stats()["rendered"] // B + 2) * B)
+        if at is None:  # (no answer: on as before, the clock alone)
+            return False
+        t, sec, old = clock
+        base = k._f0 + (t - sec - k._t0) * RATE  # (frame of song second 0 at the old tempo)
+        anchor = at - new.sec(old.tick((at - base) / RATE)) * RATE
+        k.retime(at, lambda f: round(anchor + new.sec(old.tick((f - base) / RATE)) * RATE))
+        self._clock = (k._t0 + (anchor - k._f0) / RATE, 0.0, new)
+        return True
 
     def _sort(self):
         while True:

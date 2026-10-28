@@ -293,6 +293,7 @@ class KestrelOut:
         self._lock = threading.Lock()
         self._frames, self._msgs, self._lens = [], [], []
         self._offs = []  # (frame, msg) note-offs pushed ahead: sent again by cancel()
+        self._own = []  # (frame, msg, length) pushed ahead: taken back and pushed again at a new tempo (retime)
         self.late = 0  # messages that came for a frame already made (send() = now: Stop's, mostly)
         self.resync()
 
@@ -335,11 +336,33 @@ class KestrelOut:
             if len(self._offs) > 4096:  # (only the ones still ahead are ever needed)
                 now = self.k.frame()
                 self._offs = [o for o in self._offs if o[0] >= now]
+            made = self.k.stats()["rendered"]
+            self._own = [o for o in self._own if o[0] >= made] + list(zip(fr, ms, ln))
         tracks = [(m & 15) | ((m >> 24) & 15) << 4 for m in ms]
         made = self.k.stats()["rendered"]
         if fr[0] < made:  # (for a frame already made: sounds at the next block's start, a little late)
             self.late += sum(f < made for f in fr)
         self.k.push(fr, ms, tracks, ln)
+
+    def retime(self, at, convert):
+        """The tempo changed while playing (hunt 2026-10-28: own shapes kept ~0.2 s at the old speed, a note-off
+        could land before its note-on and ring on; a loaded MIDI's retime took them back for good): what this out
+        sent for frame `at` on, pushed ahead (Kestrel.cut has taken it back) or not yet, again at convert(frame) (in
+        order: a note's off stays after its on)."""
+        with self._lock:
+            got = [o for o in self._own if o[0] >= at]
+            self._own = [o for o in self._own if o[0] < at]
+            got += list(zip(self._frames, self._msgs, self._lens))
+            self._frames, self._msgs, self._lens = [], [], []
+            moved = sorted(((max(at, int(convert(f))), m, ln) for f, m, ln in got), key=lambda o: o[0])
+            self._offs = [o for o in self._offs if o[0] < at]
+            for f, m, ln in moved:
+                self._frames.append(f)
+                self._msgs.append(m)
+                self._lens.append(ln)
+                if m & 0xF0 == 0x80 or (m & 0xF0 == 0x90 and not (m >> 16) & 0x7F):
+                    self._offs.append((f, m))
+        self.flush()
 
     def cancel(self):
         """Everything sent ahead forgotten (Stop): its note-offs sound now instead (the player counted those notes
@@ -347,7 +370,7 @@ class KestrelOut:
         with self._lock:
             offs = [m for f, m in self._offs if f >= self.k.frame()]
             offs += [m for m in self._msgs if m & 0xF0 == 0x80 or (m & 0xF0 == 0x90 and not (m >> 16) & 0x7F)]
-            self._frames, self._msgs, self._lens, self._offs = [], [], [], []
+            self._frames, self._msgs, self._lens, self._offs, self._own = [], [], [], [], []
         self.k.cancel()
         now = self.frame_at(time.perf_counter())
         if offs:
