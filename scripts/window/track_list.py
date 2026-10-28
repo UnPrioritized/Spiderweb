@@ -65,6 +65,8 @@ SQUARES_KEPT = 96  # squares of each picture kept at least (twice the ones in us
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 MOVE_PX = 5  # a press on a track's name moved this far (x scale) = dragging the tracks to another place
 EDGE_MS = 40  # how often the list scrolls while tracks are dragged past its top / bottom
+HOVER_MS = 300  # a dragged channel / track rested this long on a row's middle = lit: dropped INTO that track (user
+#                 2026-10-28: passing over never makes a mixed track by accident)
 FILL_TILE = 256  # px: a Select box's see-through fill is put on in squares this big (one small picture per size)
 
 
@@ -301,8 +303,9 @@ class TrackList(tk.Canvas):
                     chs += list(chans[row])
             rows, chs = np.array(rows, np.int64), np.array(chs, np.int64)
             sub = np.flatnonzero(chs >= 0)
-            got = self._lines = (key, (rows, chs, np.array(first + [len(rows)], np.int64), rows[sub] * 16 + chs[sub],
-                                       sub))
+            keys = rows[sub] * 16 + chs[sub]
+            by = np.argsort(keys, kind="stable")  # (sorted for searchsorted: a folder's own order isn't, C1)
+            got = self._lines = (key, (rows, chs, np.array(first + [len(rows)], np.int64), keys[by], sub[by]))
         return got[1]
 
     def line_of(self, s, ch=None):
@@ -866,9 +869,13 @@ class TrackList(tk.Canvas):
             # (on one of several selected: they stay selected for the drag; let go without one = that track alone,
             # like a file list)
             self._move = {"y": e.y, "on": False, "gap": None, "keep": s in group and len(group) > 1, "s": s,
-                          "job": None}
+                          "job": None, "ch": None, "into": None, "mid": None}
             if self._move["keep"]:
                 return
+        if row >= 0 and e.x < self.name_w and c >= 0 and int(self.tracks()[row]) >= HAND:
+            # (a sub-row of your track: that channel dragged into another track / out on its own, PLAN #11 C2)
+            self._move = {"y": e.y, "on": False, "gap": None, "keep": False, "s": int(self.tracks()[row]),
+                          "job": None, "ch": c, "into": None, "mid": None}
         if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
             beat = max(0.0, self.x2t(e.x))  # (Shift: free, as the Select box's corner)
             self.app.set_playhead(self.ticked(beat) if e.state & 0x1 else self.snapped(beat))
@@ -1227,8 +1234,13 @@ class TrackList(tk.Canvas):
             return
         self.end_move()
         if m["on"]:
-            if m["gap"] is not None:
-                self.move_tracks(m["gap"])
+            if m["into"] is not None:
+                self.drop_into(m)
+            elif m["gap"] is not None:
+                if m["ch"] is not None:
+                    self.channel_out(m["s"], m["ch"], m["gap"])
+                else:
+                    self.move_tracks(m["gap"])
         elif m["keep"]:  # (a click on one of several selected tracks: that one alone, like a file list)
             self.current, self.selected, self.anchor = m["s"], set(), (m["s"], m["s"])
             self.shown_changed()
@@ -1260,17 +1272,147 @@ class TrackList(tk.Canvas):
         if not m["on"]:
             if abs(y - m["y"]) < MOVE_PX * self.scale:
                 return
-            if not self.moving():
+            if m["ch"] is None and not self.moving():
                 self._move = None
                 return
             m["on"] = True
             self.tip.hide()
         m["last"] = y
         top, h = self.area()[1], self.winfo_height()
-        m["gap"] = min(max(self.gap_at(y - top + self.top), 0), len(self.tracks()))
+        self.drop_spot(m, y - top + self.top)
         if (y < top or y > h) and m["job"] is None:
             m["job"] = self.after(EDGE_MS, self.move_edge)
         self.request_redraw()
+
+    def can_take(self, m, row):
+        """May what m drags go INTO the track in row (PLAN #11 C2)? Your channels only (a sub-row of yours, or one
+        track of yours / Spiderweb's, not a loaded MIDI's: its channels move in stage D) into any other track; a
+        sub-row into its own folder = a new place among its channels."""
+        if not 0 <= row < len(self._all):
+            return False
+        dst = int(self._all[row])
+        if m["ch"] is not None:
+            return True
+        group = self.moving()
+        return len(group) == 1 and group[0] >= 0 and group[0] != dst
+
+    def drop_spot(self, m, ly):
+        """Where a drag at ly (pixels in the rows) lands: m["gap"] = a row it goes above as a track (Domino's line),
+        or m["into"] = (row, place among its sub-rows or None = the end) = INTO that track. An open folder: between
+        its Ch rows / the upper half at its end = into (decision 7); its track line's lower half = its first place.
+        Any other track: the middle of its row rested on HOVER_MS = into (lit), so passing over never mixes one by
+        accident (user 2026-10-28); its edges = the line above / below."""
+        rows, chs, first = self.lines()[:3]
+        li = int(ly // self.row_h)
+        f = ly / self.row_h - li
+        m["into"], mid = None, None
+        m["gap"] = min(max(self.gap_at(ly), 0), len(self.tracks()))
+        if 0 <= li < len(rows) and self.can_take(m, int(rows[li])):
+            row, c = int(rows[li]), int(chs[li])
+            folder = first[row + 1] - first[row] > 1  # (open, sub-rows listed)
+            if c >= 0:  # (between an open folder's Ch rows)
+                m["into"] = (row, li - int(first[row]) - 1 + (f >= 0.5))
+            elif folder and f >= 0.5:
+                m["into"] = (row, 0)
+            elif not folder and 0.25 <= f <= 0.75 and int(self._all[row]) != m["s"]:
+                mid = row
+                m["gap"] = row + (f >= 0.5)
+        if mid is None or m["mid"] is None or m["mid"][0] != mid:
+            if m["mid"] is not None:
+                self.after_cancel(m["mid"][1])
+            m["mid"] = None if mid is None else [mid, self.after(HOVER_MS, self.light_row), False]
+        elif m["mid"][2]:
+            m["into"], m["gap"] = (mid, None), None
+
+    def light_row(self):
+        """The row rested on long enough while dragging: lit = the drop goes into it."""
+        m = self._move
+        if m is None or m["mid"] is None:
+            return
+        m["mid"][2] = True
+        m["into"], m["gap"] = (m["mid"][0], None), None
+        self.request_redraw()
+
+    def drop_into(self, m):
+        """m's channels (a sub-row's, or the dragged track's every one) put into m["into"]'s track (C2): one undo
+        step. Automatic tracks touched = all made yours first (like a drag). A whole track of yours emptied goes."""
+        from window.track_channels import move_channels, set_order, tidy_tracks
+        app = self.app
+        row, pos = m["into"]
+        src, dst = m["s"], int(self._all[row])
+        chans = {m["ch"]} if m["ch"] is not None else set(self.row_chans()[self.row_of_id(src)])
+        now = list(self.row_chans()[row])
+        if not chans:
+            return
+        if src == dst:  # (a sub-row moved among its folder's: only the order)
+            return self.reorder(dst, chans, pos, now)
+        was = self.mute_state(src) == 2
+        autos, owners = [], []
+        if 0 <= src < HAND or 0 <= dst < HAND:
+            got = self.snapshot()
+            if got is None:
+                return
+            autos, owners = got
+        app.roll.end_typing()
+        app.push_undo(name=tr("tracks.into_step"))
+        if autos:
+            rows = full_plan(app.file_rows(), self._slots, app.own_tracks, self._filled)
+            taken = self.take_all(autos, owners, rows)[0]
+            src, dst = (HAND + taken[s] if s in taken else s for s in (src, dst))
+        # (a tinted track touched = yours, like a drag)
+        app.own_tracks = [{k: v for k, v in t.items() if k != "auto"} if HAND + t["id"] in (src, dst) else t
+                          for t in app.own_tracks]
+        move_channels(app, src, chans, dst)
+        set_order(app, dst, chans, pos, now)
+        if m["ch"] is None and src >= HAND:  # (a whole track moved in: it's empty now, gone like Domino's merge)
+            app.own_tracks = [t for t in app.own_tracks if HAND + t["id"] != src]
+        tidy_tracks(app)
+        # (its mutes go along: each channel muted there stays muted where it went)
+        whole = m["ch"] is None
+        moved = {(dst, c) for c in chans if was or (src, c) in self.muted}
+        self.muted = {x for x in self.muted if not (x == src and whole)
+                      and not (isinstance(x, tuple) and x[0] == src and x[1] in chans)} | moved
+        if self.current == src and m["ch"] is None:
+            self.current = dst
+        if dst in self.open or len(set(now) | chans) > 1:
+            self.open.add(dst)  # (so you see where it went)
+        self.own_changed()
+
+    def channel_out(self, src, ch, gap):
+        """Channel ch of your track src dragged out to above row gap: a new track of yours on it there, its colours
+        moved in (C2); highlighted. One undo step."""
+        from window.track_channels import move_channels, tidy_tracks
+        app = self.app
+        row = self.row_of_id(src)
+        if row is None or ch not in self.row_chans()[row]:
+            return
+        app.roll.end_typing()
+        app.push_undo(name=tr("tracks.out_step"))
+        new, ids = add_tracks(app.own_tracks, self._slots, self.own_row(gap - 1) if gap > 0 else -1, [ch],
+                              app.own_next, self._filled, app.file_rows())
+        app.own_next = max(ids) + 1
+        app.own_tracks = new
+        move_channels(app, src, {ch}, HAND + ids[0])
+        tidy_tracks(app)
+        if (src, ch) in self.muted or src in self.muted:  # (its mute goes along)
+            self.muted = (self.muted - {(src, ch)}) | {HAND + ids[0]}
+        self.current = HAND + ids[0]
+        self.own_changed()
+
+    def reorder(self, s, chans, pos, now):
+        """A sub-row dragged among its own folder's (your track s; now = their order): a new place, kept in the save
+        only (PLAN #11 decision 8). One undo step; dropped where it was = nothing."""
+        from window.track_channels import set_order
+        app = self.app
+        if s < HAND:
+            return
+        old = list(app.own_tracks)
+        set_order(app, s, chans, pos, now)
+        new, app.own_tracks = app.own_tracks, old
+        if next((t.get("order") for t in new if HAND + t["id"] == s), None) == now:
+            return
+        app.roll.end_typing()
+        self.set_own(new, tr("tracks.order_step"))
 
     def move_edge(self):
         m = self._move
@@ -1291,6 +1433,8 @@ class TrackList(tk.Canvas):
         if m is not None:
             if m["job"] is not None:
                 self.after_cancel(m["job"])
+            if m.get("mid") is not None:
+                self.after_cancel(m["mid"][1])
             if m["on"]:
                 self.request_redraw()
 
@@ -1878,9 +2022,19 @@ class TrackList(tk.Canvas):
         self.draw_conductor(w)
         self.draw_names(h)
         m = self._move
+        thick = max(2, round(2 * self.scale))
         if m is not None and m["on"] and m["gap"] is not None:  # (where dragged tracks land, Domino's black line)
             y = self.area()[1] + self.row_y(m["gap"]) - self.top
-            self.create_line(0, y, w, y, fill=look.TRACK_TEXT, width=max(2, round(2 * self.scale)))
+            self.create_line(0, y, w, y, fill=look.TRACK_TEXT, width=thick)
+        elif m is not None and m["on"] and m["into"] is not None:  # (INTO a track, PLAN #11 C2)
+            row, pos = m["into"]
+            y = self.area()[1] + self.row_y(row) - self.top
+            if pos is None:  # (the row rested on: lit all along)
+                self.create_rectangle(thick // 2, y + thick // 2, w - thick // 2, y + self.row_h - thick // 2,
+                                      outline=look.TRACK_TEXT, width=thick)
+            else:  # (between an open folder's Ch rows: short and indented, like them; decision 7)
+                y += (pos + 1) * self.row_h
+                self.create_line(round(INDENT * 2 * self.scale), y, w, y, fill=look.TRACK_TEXT, width=thick)
         self.draw_playhead()
         for bar in self.bars:
             bar.refresh()
