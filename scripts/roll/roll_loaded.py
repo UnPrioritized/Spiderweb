@@ -435,11 +435,17 @@ def shown_only(app, lm):
     tl = getattr(app, "track_list", None)
     if tl is None or tl.current is None or tl.current >= 0:
         return ()
+    pairs = tl.shown_pairs()
+    if pairs:  # (Ch rows picked: each loaded track's picked channels, E3)
+        by = {}
+        for s, c in pairs:
+            if s < 0 and tl.file_part(s)[0] < len(lm.tracks):
+                by.setdefault(tl.file_part(s)[0], set()).add(c)
+        return tuple((n, next(iter(cs)) if len(cs) == 1 else frozenset(cs)) for n, cs in sorted(by.items()))
     n, chs = tl.file_part(tl.current)
-    ch = tl.shown_ch()
-    if n >= len(lm.tracks) or (ch is None and chs is None):
+    if n >= len(lm.tracks) or chs is None:
         return ()
-    return ((n, ch if ch is not None else next(iter(chs)) if len(chs) == 1 else chs),)
+    return ((n, next(iter(chs)) if len(chs) == 1 else chs),)
 
 
 def style_only(style):
@@ -456,8 +462,11 @@ def shown_tracks(app, lm):
         return None, frozenset()
     shown = tl.shown_slots()
     top = tl.file_part(tl.current)[0] if tl.current < 0 else None  # (a part: its track, PLAN #11 D)
-    faint = sorted({tl.file_part(s)[0] for s in shown if s < 0 and s != tl.current} - {top}, reverse=True)
-    order = ([top] if top is not None else []) + faint
+    # (Ch rows of other tracks picked with it: drawn in full too, E3)
+    also = sorted({tl.file_part(s)[0] for s, _ in tl.shown_pairs() or () if s < 0} - {top})
+    faint = sorted({tl.file_part(s)[0] for s in shown if s < 0 and s != tl.current} - {top} - set(also),
+                   reverse=True)
+    order = ([top] if top is not None else []) + also + faint
     order = tuple(n for n in order if n < len(lm.tracks))
     return order, frozenset(n for n in faint if n < len(lm.tracks))
 

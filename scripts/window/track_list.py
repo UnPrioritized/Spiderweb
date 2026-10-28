@@ -184,6 +184,13 @@ class TrackList(tk.Canvas):
             out.add((self.current, self.current_ch))
         return out
 
+    def shown_pairs(self):
+        """The Ch rows the piano roll shows when Ch rows are picked (user 2026-10-28, E3: every picked one while its
+        folder is open): {(track id, channel)}, None = no Ch row highlighted."""
+        if self.shown_ch() is None:
+            return None
+        return {p for p in self.picked_chans() if self.line_of(*p) is not None}
+
     def sub_click(self, row, c, ctrl, shift):
         """Ctrl / Shift click on a folder's sub-row, like select_click for tracks (check-in C 2026-10-28: several
         channels picked and dragged together): Ctrl = that one in / out, Shift = the sub-rows from the last one
@@ -752,16 +759,17 @@ class TrackList(tk.Canvas):
     def shown_mask(self, drawn, slot):
         """Which of drawn's notes the highlighted track shows in full: its own, only the channel picked (a folder's
         sub-row clicked, user 2026-10-28). slot: each note's real track."""
+        pairs = self.shown_pairs()
+        if pairs:  # (Ch rows picked: each of them, also other tracks' ones, E3)
+            ch = channels_of(drawn[:, 4], self.app.picture_use10)
+            mine = np.zeros(len(drawn), bool)
+            for s, c in pairs:
+                mine |= (slot == (-1 - self.file_part(s)[0] if s < 0 else s)) & (ch == c)
+            return mine
         n, chs = self.file_part(self.current) if self.current < 0 else (None, None)
         if chs is not None:  # (a loaded track's part / a track with parts: its channels of the track, PLAN #11 D)
-            mine = (slot == -1 - n) & np.isin(channels_of(drawn[:, 4], self.app.picture_use10), list(chs))
-            ch = self.shown_ch()
-            return mine & (channels_of(drawn[:, 4], self.app.picture_use10) == ch) if ch is not None else mine
-        mine = slot == self.current
-        ch = self.shown_ch()
-        if ch is not None:
-            mine &= channels_of(drawn[:, 4], self.app.picture_use10) == ch
-        return mine
+            return (slot == -1 - n) & np.isin(channels_of(drawn[:, 4], self.app.picture_use10), list(chs))
+        return slot == self.current
 
     def open_picker(self):
         if self.picker:
@@ -1368,16 +1376,25 @@ class TrackList(tk.Canvas):
         rows = self.tracks()
         if not len(rows):
             return
-        slots = [None] + [int(s) for s in rows]
-        at = slots.index(self.current) if self.current in slots else 0
-        row = min(max(at + way, 0), len(slots) - 1)
-        if slots[row] != self.current:
-            self.current, self.selected = slots[row], set()
+        # (an open folder's Ch rows are steps too, user 2026-10-28 E3; a shut one = the track as one)
+        line_row, line_ch = self.lines()[:2]
+        steps = [(None, None)] + [(int(rows[r]), None if c < 0 else int(c)) for r, c in zip(line_row.tolist(),
+                                                                                           line_ch.tolist())]
+        now = (self.current, self.current_ch)
+        at = steps.index(now) if now in steps else (steps.index((self.current, None))
+                                                    if (self.current, None) in steps else 0)
+        k = min(max(at + way, 0), len(steps) - 1)
+        if steps[k] != now:
+            self.current, self.selected = steps[k][0], set()
+            self.current_ch = steps[k][1]
             self.shown_changed()
-        if row == 0:
+        if k == 0:
             return self.app.status.config(text=tr("tracks.all"))
-        ch = self.channel_of(slots[row])
-        name = self.name_of(row - 1)
+        s, c = steps[k]
+        name = self.name_of(self.row_of_id(s))
+        if c is not None:
+            return self.app.status.config(text=tr("tracks.mark_ch", name=name, ch=c + 1))
+        ch = self.channel_of(s)
         self.app.status.config(text=tr("tracks.stepped", name=name, ch=ch) if ch else name)
 
     def show_all(self):

@@ -575,6 +575,8 @@
  "tracks.channels": "{n} channels",
  "tracks.folder_ch": "{n} Ch",
  "tracks.mark_ch": "{name} · Ch {ch}",
+ "tracks.mark_more": "{mark} + {n} more tracks",
+ "tracks.mark_more_one": "{mark} + 1 more track",
  "tracks.fold_tip": "This track holds notes on {n} channels: click to show each channel on a row of its own.",
  "tracks.unfold_tip": "Click to hide this track's channel rows.",
  "tracks.sub_tip": "Channel {ch} of {name}  ·  {notes}\nClick: the piano roll shows only this channel.",

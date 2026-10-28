@@ -1750,7 +1750,13 @@ class RollDrawing:
         if row is None:
             return ""
         ch = tl.shown_ch()  # (one channel of it: a folder's sub-row clicked)
-        return tl.name_of(row) if ch is None else tr("tracks.mark_ch", name=tl.name_of(row), ch=ch + 1)
+        if ch is None:
+            return tl.name_of(row)
+        pairs = tl.shown_pairs() or set()  # (several Ch rows picked, E3: this track's channels + how many others)
+        mine = sorted(c for s, c in pairs if s == tl.current) or [ch]
+        mark = tr("tracks.mark_ch", name=tl.name_of(row), ch=", ".join(str(c + 1) for c in mine))
+        others = len({s for s, _ in pairs} - {tl.current})
+        return trn("tracks.mark_more", others, mark=mark, n=others) if others else mark
 
     def bar_y(self):
         """The bar numbers' middle: the ruler's bottom half, by their ticks (the tempo changes go above them)."""

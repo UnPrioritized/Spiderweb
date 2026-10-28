@@ -32,7 +32,7 @@ A loaded MIDI's own tracks can be dragged too, and your tracks can go above or b
 
 A track whose notes are on two or more channels gets a ▸ before its name. Click the ▸ to open it: one "Ch n" row per channel shows under it, slightly indented, each with its own picture in that channel's colour. Click the ▾ to close it again. Closed, the track's picture shows each note in its channel's colour.
 
-• Click a Ch row and the piano roll shows only that channel. Drawing or pasting with it highlighted puts the notes on that channel of the track.
+• Click a Ch row and the piano roll shows only that channel; with several Ch rows picked it shows all of them. Ctrl+wheel steps through an open track's Ch rows too. Drawing or pasting with it highlighted puts the notes on that channel of the track.
 • Each Ch row has its own speaker. The track's speaker mutes or un-mutes all of its channels; while only some are muted, its icon shows that. Right-click a Ch row's speaker to hear only that channel.
 • Drag a track (or a Ch row) onto the middle of another track and rest there for half a second: the row lights up, and letting go puts its channels into that track. Passing over a row without resting never does this, so a track never ends up mixed by accident. Into an open track, a short indented line shows where the channel lands among its Ch rows. Several picked tracks or Ch rows go in together.
 • When a channel is already in that track, Spiderweb asks once for all of them: Merge (share the channel) or Move to a free channel. Merge is the default when it changes nothing you'd hear, else Move. Tick "Don't ask again" to keep your answer until Spiderweb closes.
