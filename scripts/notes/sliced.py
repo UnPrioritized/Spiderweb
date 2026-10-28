@@ -41,12 +41,20 @@ def keys_of(sh):
     return {"custom": CUSTOM_OUTLINE, "funnel": FUNNEL_OUTLINE}.get(sh["kind"], OUTLINE)
 
 
+def snap_piece(sh):
+    """A Notes by snap line cut through its notes (knife_in_two), with no pages / glue of its own: drawn and picked
+    on its side of the knife only, like a funnel piece (pages pieces keep the whole drawing, user 2026-10-06)."""
+    from notes.tumour import LINE_KINDS
+    return (sh["kind"] in LINE_KINDS and bool(sh.get("by_snap")) and bool((sh.get("cut") or {}).get("knife"))
+            and not (sh.get("fx") or sh.get("glue")))
+
+
 def piece_knives(sh):
     """A funnel piece's Slice cuts where they are now [[b0, k0, db, dk, side]] (it keeps the whole funnel's notes
     on its side of them, knife_cut), else None (not a funnel piece, or its outline changed). Flipped / turned (a
     flip / turn step, steps_kept): the cuts flipped / turned along with its drawing."""
     cut = sh.get("cut")
-    if not cut or sh["kind"] != "funnel":
+    if not cut or not (sh["kind"] == "funnel" or snap_piece(sh)):
         return None
     made = sh
     if sh.get("fx"):
@@ -405,9 +413,10 @@ def knife_cut(notes, tracks, halves, d, ppq):
 def tooled(sh):
     """Do sh's notes come from glue / note tool pages or a Ripples fill (its own, or its whole's for a piece)? Then
     the Slice tool cuts its notes, not its drawing (user, 2026-10-06: they can sit far off the drawing; Ripples: its
-    rings grow past it, and half a drawn heart would grow other rings)."""
+    rings grow past it, and half a drawn heart would grow other rings). Notes by snap too (user 2026-10-28: a knife
+    through a staircase cuts its notes where it goes, slanted or flat; each piece drawn on its side only)."""
     def notes_apart(s):
-        return bool(s.get("fx") or s.get("glue") or s.get("ripples"))
+        return bool(s.get("fx") or s.get("glue") or s.get("ripples") or s.get("by_snap"))
     if notes_apart(sh):
         return True
     got = source(sh) if sh.get("cut") else None

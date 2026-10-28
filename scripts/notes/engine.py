@@ -59,7 +59,8 @@ from notes.passengers import check_cc
 from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved, moved_by,
-                          piece_knives, piece_notes, run_origins, source, spotted_notes, steps_kept, whole_made)
+                          piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
+                          whole_made)
 from notes.smooth import clean_level, smooth_path
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -543,7 +544,10 @@ def shape_strokes(sh):
         return clip_strokes(funnel_strokes(sh), knives) if knives else funnel_strokes(sh)
     paths = joined_paths(sh, tumour_path) if is_joined(sh) else [shape_path(sh)]  # (joined: one path per piece)
     got = piece_loops(sh) if sh.get("cut") else None  # (cut with a shape: only its side, mould.py)
-    return clip_to(paths, *got) if got else paths
+    if got:
+        return clip_to(paths, *got)
+    knives = piece_knives(sh) if sh.get("cut") else None  # (a Notes by snap piece: only its side, sliced.snap_piece)
+    return [np.asarray(p, float) for p in clip_strokes(paths, knives)] if knives else paths
 
 
 _paths = {}
@@ -556,7 +560,7 @@ def _cached(sh):
     key = (sh["kind"], tuple(map(tuple, sh["pts"])), json.dumps(sh.get("strokes")),
            json.dumps([sh.get(k) for k in SHAPE_KEYS]),
            json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m"), sh["cut"].get("mould")])
-           if sh.get("cut") and (sh["kind"] == "funnel" or sh["cut"].get("mould")) else None)
+           if sh.get("cut") and (sh["kind"] == "funnel" or sh["cut"].get("mould") or snap_piece(sh)) else None)
     got = _paths.get(key)
     if got is None:
         if len(_paths) > 3000:
