@@ -136,7 +136,8 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
     at the area's start. plain: gaps (run, k) left at the normal tempo (their catch-up can't be done). snap: BPM
     snap for Random's values. drawn: My drawn one's graph (graph_at), for shape "drawn": stretched over each gap
     (up to the catch-up), bottom = the lower of lo / hi, top = the higher, each stretch one part. strength: a graph
-    over the whole area (None = 100 % all along): every BPM made goes only that share of the way from the normal
+    from the first jump to the last (None = 100 % all along; past the last: its end value): every BPM made goes only
+    that share of the way from the normal
     tempo (straight BPMs, user 2026-10-29: 120 -> 240 at 50 % = 180)."""
     import random
     from notes.tempo import BEND, catch_set, clamp_bpm
@@ -145,10 +146,15 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
     pts, cs, gaps = [], [], []  # (gaps: each catch-up's (run, gap))
     line = [[q[0] - a] + list(q[1:]) for q in heard or ()]
 
+    # Strength runs from the first jump to the last (user 2026-10-29: Grow's last jump stopped at 75 %, it sat
+    # three quarters across the area); one jump: across the area
+    jumps = [float(x) for xs, _ in runs for x in xs]
+    s0, s1 = (min(jumps), max(jumps)) if len(jumps) > 1 and max(jumps) > min(jumps) else (a, b)
+
     def point(x, bpm, curve="hold", formula="", scale=None, bend=BEND):
         scale = scale or ("exp" if curve == "line" else "lin")
-        if strength is not None and b > a:
-            bpm = normal + (bpm - normal) * float(graph_at(strength, [(x - a) / (b - a)])[0])
+        if strength is not None and s1 > s0:
+            bpm = normal + (bpm - normal) * float(graph_at(strength, [(x - s0) / (s1 - s0)])[0])
         p = [x - a, clamp_bpm(bpm), curve, formula, scale, keep, list(bend)]
         if keep and line:
             p.append({"line": [list(q) for q in line]})
