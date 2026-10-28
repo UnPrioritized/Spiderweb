@@ -21,12 +21,13 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from notes.hzbass import NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, note_bend, pitch
+from notes.hzbass import NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, note_bend, pitch, wobble_edges
 from roll.roll_shared import SHIFT
 from window import look
 
 NEAR = 6  # px: a press this near a bend point grabs it
 WOBBLE_SPOTS = 4000  # bend_line: spots along a wobbling note at most
+EDGE_GAP = 1e-9  # beats: bend_line reads a wobble's jump this far before / after it
 LINE_NEAR = 4  # px: ... this near a note's bend line adds a point to it
 BEND_STICK = 5  # px: a curve square this near straight sticks to it (Shift = free), as a slide's
 SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' grab areas would cover it)
@@ -52,15 +53,27 @@ class HzBend:
 
     def bend_line(self, n, most):
         """(beats, keys) along note n's bend line for drawing: evenly spread spots plus every point, a jump (two
-        points at one spot) drawn straight up / down (one spot per point, each with its own value); a wobble's waves
-        16 spots each (WOBBLE_SPOTS at most)."""
+        points at one spot) drawn straight up / down (one spot per point, each with its own value). With a wobble
+        the line is drawn EXACTLY (user 2026-10-28: it's the shape asked for, the red line is how near the sound gets):
+        a spot every 2 px (WOBBLE_SPOTS at most) + a spot on each side of every top / corner / jump (wobble_edges), so
+        tops stay round, corners sharp, jumps upright."""
         pts = n.get("bend") or ()
         at = [n["t"] + p[0] * n["len"] for p in pts]
-        waves = sum(w["rate"] * (w["at"][1] - w["at"][0]) * n["len"] for w in n.get("wobble") or ())
-        even = np.setdiff1d(np.linspace(n["t"], n["t"] + n["len"], int(min(WOBBLE_SPOTS, max(49, 16 * waves)))), at)
-        spots = sorted([(b, -1, float(v)) for b, v in zip(even, note_bend(n, even, most))]
-                       + [(b, j, max(-most, min(most, p[1]))) for j, (b, p) in enumerate(zip(at, pts))])
-        return np.array([b for b, _, _ in spots]), pitch(n) + np.array([v for _, _, v in spots])
+        count, edges = 49, []
+        if n.get("wobble"):
+            wide = abs(self.x_of(n["t"] + n["len"]) - self.x_of(n["t"]))
+            count = int(min(WOBBLE_SPOTS, max(49, wide / 2)))
+            edges = wobble_edges(n, WOBBLE_SPOTS)
+        even = np.setdiff1d(np.linspace(n["t"], n["t"] + n["len"], count), at + edges)
+        # (beat, order, point, keys): on one beat the line arriving, then the points in order, then the line leaving
+        spots = ([(b, 1, -1, float(v)) for b, v in zip(even, note_bend(n, even, most))]
+                 + [(b, 1, j, max(-most, min(most, p[1]))) for j, (b, p) in enumerate(zip(at, pts))])
+        if edges:
+            edges = np.array(edges)
+            spots += [(b, 0, -1, float(v)) for b, v in zip(edges, note_bend(n, edges - EDGE_GAP, most))]
+            spots += [(b, 2, -1, float(v)) for b, v in zip(edges, note_bend(n, edges + EDGE_GAP, most))]
+        spots.sort()
+        return np.array([s[0] for s in spots]), pitch(n) + np.array([s[3] for s in spots])
 
     def bend_points(self):
         """[(x, y, tone number, point number)]: the bend points of the notes in view (Bend tool only)."""

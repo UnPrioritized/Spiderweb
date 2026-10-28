@@ -116,6 +116,21 @@ def wobble_keys(runs, u, span):
     return out
 
 
+def wobble_edges(n, most):
+    """Beats where note n's wobbles turn or jump (every quarter wave and each run's ends), at most `most` of them
+    (more: none), for drawing a wobble exactly: its tops, corners and jumps on the spot."""
+    t, span = n.get("bend_at") or (n["t"], n["len"])
+    out = []
+    for w in n.get("wobble") or ():
+        u0, u1 = w["at"]
+        phase, rate = w.get("phase", 0.0), w["rate"]
+        first, last = math.floor(phase * 4) + 1, math.ceil((phase + rate * (u1 - u0) * span) * 4)
+        if len(out) + last - first > most:
+            return []
+        out += [t + u0 * span, t + u1 * span] + [t + u0 * span + (k / 4 - phase) / rate for k in range(first, last)]
+    return out
+
+
 def wobble_part(n, t, span):
     """The part of note n's wobbles from beat t for span beats, laid over that part (u 0..1), or None when none is
     left in it: each run cut to it, the depth where it's cut, a run cut at its start going on in step ("phase")."""
