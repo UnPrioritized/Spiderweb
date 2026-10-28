@@ -880,6 +880,17 @@ class LoadedPlayer:
                 wall["t"] = cur[4][2]
             elif cur[4] is not None and not isinstance(cur[4], tuple):
                 line.add(cur[4])
+
+        def unmuted(cur):
+            """(lock held) A part read ahead holds every track: with any track muted it's left where it is, the rest
+            read live with the mutes (hunt 2026-10-28: muted before Play, every queued part played them all).
+            Returns cur, or None when left."""
+            if cur is None or not isinstance(cur[4], tuple) or cur[4][0] != "dense" or not self.muted.any():
+                return cur
+            if self._gen == gen and self._unpart is None:
+                p = cur[4][1]
+                self._unpart = (gen, p, p.t0 + int(cur[0][cur[3]]) if cur[3] < len(cur[0]) else p.t1)
+            return None
         while not self._stop.is_set():
             time.sleep(STEP_S)
             clock = self.player._clock
@@ -888,17 +899,10 @@ class LoadedPlayer:
             now = time.perf_counter()
             if now - checked > 0.1:
                 checked = now
-                was = self.muted
                 self._read_mutes()
-                # (a part read ahead holds every track: a mute changing while it plays = it stops where it is,
-                # the rest read live with the mutes, hunt 2026-10-27: heard to the part's end, seconds)
-                if cur is not None and isinstance(cur[4], tuple) and cur[4][0] == "dense" and \
-                        not np.array_equal(was, self.muted):
-                    p = cur[4][1]
-                    with self._lock:
-                        if self._gen == gen and self._unpart is None:
-                            self._unpart = (gen, p, p.t0 + int(cur[0][cur[3]]) if cur[3] < len(cur[0]) else p.t1)
-                            cur = None
+                # (a mute changing while a part plays = it stops where it is, hunt 2026-10-27: heard to its end)
+                with self._lock:
+                    cur = unmuted(cur)
             t_c, sec, tmap = clock
             s_now = sec + now - t_c
             T = tmap.tick(s_now + PUSH_S)
@@ -920,8 +924,9 @@ class LoadedPlayer:
                     raw = kout._f0 + (t_c - sec - kout._t0) * K_RATE
                     align = self.k_align = round(raw / BLOCK) * BLOCK - raw
                 if cur is None and self._queue and self._unpart is None:
-                    cur = self._queue.popleft()
-                    took(cur)
+                    cur = unmuted(self._queue.popleft())
+                    if cur is not None:
+                        took(cur)
                 horizon = getattr(self, "_horizon", None)
             if tm_of is not None and tmap is not tm_of:  # (the tempo changed while playing: see _retime)
                 new = _tm_arrays(tmap)
@@ -985,7 +990,8 @@ class LoadedPlayer:
                     with self._lock:
                         if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
                             self._pool.append(cur[5])
-                        cur = self._queue.popleft() if self._queue and self._gen == gen and self._unpart is None else None
+                        cur = unmuted(self._queue.popleft()) if self._queue and self._gen == gen and \
+                            self._unpart is None else None
                         wall["floor"] = 0.0
                         if cur is not None:
                             took(cur)
@@ -1117,6 +1123,7 @@ class LoadedPlayer:
         self.ready.clear()
         self._horizon = None
         self._unpart = None
+        self._read_mutes()  # (before the reader picks parts read ahead: they hold every track, hunt 2026-10-28)
         self.silence(reset=True)
         feeder = self._feeder_kestrel if self.kind == "kestrel" else self._feeder
         self.threads = [threading.Thread(target=self._reader, args=(int(t0),), daemon=True),
