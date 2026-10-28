@@ -15,10 +15,11 @@ MOST_ANCHORS = 100_000  # more jumps than this in one area = refused (each is a 
 CATCH_LEAST = 4  # ticks: the shortest gap a catch-up can be fitted into (1-2 ticks never fit, hunt 2026-10-29)
 
 
-def melody_runs(starts, ends, a, b, shortest=SHORTEST, rest=REST):
+def melody_runs(starts, ends, a, b, shortest=SHORTEST, rest=REST, every=1):
     """[(anchors: sorted unique start beats, run end beat)] of the notes starting in a..b (beats; starts / ends
     arrays), notes shorter than shortest left out; a new run where the time from the latest end so far to the next
-    start is more than rest. A run ends where its last note ends (at most b)."""
+    start is more than rest. A run ends where its last note ends (at most b). every: only every n-th anchor of each
+    run jumps, its first one too (user 2026-10-29: "Jump every [2] notes", counted again after each rest)."""
     starts, ends = np.asarray(starts, float), np.asarray(ends, float)
     keep = (starts >= a) & (starts < b) & (ends - starts >= shortest - 1e-9)
     s, e = starts[keep], ends[keep]
@@ -29,9 +30,59 @@ def melody_runs(starts, ends, a, b, shortest=SHORTEST, rest=REST):
     reach = np.maximum.accumulate(e)
     cut = np.flatnonzero(s[1:] - reach[:-1] > rest + 1e-9) + 1  # (the first note of each new run)
     out = []
+    every = max(1, int(every))
     for lo, hi in zip(np.r_[0, cut], np.r_[cut, len(s)]):
-        out.append((np.unique(s[lo:hi]), min(float(reach[hi - 1]), b)))
+        out.append((np.unique(s[lo:hi])[::every], min(float(reach[hi - 1]), b)))
     return out
+
+
+def top_notes(starts, ends, keys):
+    """Which notes are the TOP NOTE at their start (user 2026-10-29, "Top note of all tracks"): no higher note is
+    sounding then (started at or before it, not ended yet), so of a chord only its highest note counts. Worked out
+    one key at a time from the top: each key's notes joined into stretches, the lower notes' starts looked up in
+    them (300k notes: one pass per key used)."""
+    s, e, k = np.asarray(starts, float), np.asarray(ends, float), np.asarray(keys, np.int64)
+    top = np.ones(len(s), bool)
+    if len(s) < 2:
+        return top
+    for key in np.unique(k)[::-1]:
+        mine = k == key
+        lower = np.flatnonzero((k < key) & top)
+        if not len(lower):
+            break
+        ms, me = s[mine], e[mine]
+        o = np.argsort(ms, kind="stable")
+        ms, me = ms[o], np.maximum.accumulate(me[o])  # (furthest reach so far: overlapping notes as one stretch)
+        q = s[lower]
+        j = np.searchsorted(ms, q, "right") - 1  # (the last of this key's notes starting at or before it)
+        covered = (j >= 0) & (me[np.maximum(j, 0)] > q)
+        top[lower[covered]] = False
+    return top
+
+
+def anchor_keys(starts, ends, keys, runs, shortest=SHORTEST):
+    """[keys array per run]: the highest key starting on each anchor (a chord's top note) of melody_runs' runs,
+    notes shorter than shortest left out as there."""
+    s, k = np.asarray(starts, float), np.asarray(keys, np.int64)
+    ok = np.asarray(ends, float) - s >= shortest - 1e-9
+    s, k = s[ok], k[ok]
+    o = np.lexsort((-k, s))  # (by start, highest key first)
+    s, k = s[o], k[o]
+    out = []
+    for xs, _ in runs:
+        j = np.searchsorted(s, np.asarray(xs, float), "left")
+        out.append(k[np.minimum(j, len(k) - 1)] if len(k) else np.zeros(len(xs), np.int64))
+    return out
+
+
+def pitch_sizes(run_keys, lowest):
+    """[shares per run] for "Higher notes jump further" (user 2026-10-29): the area's highest anchor note jumps the
+    whole way (1), its lowest lowest (0..1), the ones between straight by key; all on one key = whole jumps."""
+    every = np.concatenate([np.asarray(r, float) for r in run_keys]) if run_keys else np.zeros(0)
+    if not len(every) or every.max() == every.min():
+        return [np.ones(len(r)) for r in run_keys]
+    k0, k1 = every.min(), every.max()
+    return [lowest + (1.0 - lowest) * (np.asarray(r, float) - k0) / (k1 - k0) for r in run_keys]
 
 
 def snap_runs(step, a, b, ppq):
@@ -150,7 +201,7 @@ def graph_at(pts, t):
 
 
 def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_shape="flat", rng=None,
-              snap=0.0, plain=(), heard=None, drawn=None, strength=None):
+              snap=0.0, plain=(), heard=None, drawn=None, strength=None, sizes=None):
     """The tempo the fill lays over beats a..b, as a Conductor pane copy (TempoPane.put_copies replaces what's in
     the area with it): {"length", "points", "catch", "spans"}, beats from a. runs: melody_runs / snap_runs. normal:
     the BPM between runs.
@@ -163,7 +214,8 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
     (up to the catch-up), bottom = the lower of lo / hi, top = the higher, each stretch one part. strength: a graph
     from the first jump to the last (None = 100 % all along; past the last: its end value): every BPM made goes only
     that share of the way from the normal
-    tempo (straight BPMs, user 2026-10-29: 120 -> 240 at 50 % = 180)."""
+    tempo (straight BPMs, user 2026-10-29: 120 -> 240 at 50 % = 180). sizes: [shares per run] (pitch_sizes), each
+    gap's BPMs the same way by its jump's share, on top of Strength (None = whole)."""
     import random
     from notes.tempo import BEND, catch_set, clamp_bpm
     rng = rng or random.Random()
@@ -176,10 +228,15 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
     jumps = [float(x) for xs, _ in runs for x in xs]
     s0, s1 = (min(jumps), max(jumps)) if len(jumps) > 1 and max(jumps) > min(jumps) else (a, b)
 
+    size = [1.0]  # (the gap being made's pitch share)
+
     def point(x, bpm, curve="hold", formula="", scale=None, bend=BEND):
         scale = scale or ("exp" if curve == "line" else "lin")
+        share = size[0]
         if strength is not None and s1 > s0:
-            bpm = normal + (bpm - normal) * float(graph_at(strength, [(x - s0) / (s1 - s0)])[0])
+            share *= float(graph_at(strength, [(x - s0) / (s1 - s0)])[0])
+        if share != 1.0:
+            bpm = normal + (bpm - normal) * share
         p = [x - a, clamp_bpm(bpm), curve, formula, scale, keep, list(bend)]
         if keep and line:
             p.append({"line": [list(q) for q in line]})
@@ -196,6 +253,7 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
             if (r, k) in plain:
                 point(x, normal)
                 continue
+            size[0] = float(sizes[r][k]) if sizes is not None else 1.0
             v0, v1 = gap_values(shape, k, lo, hi, rng, snap)
             stop = nxt if keep else x + (nxt - x) * min(max(hold, 1.0), 99.0) / 100.0
             if shape == "drawn" and drawn:
@@ -217,6 +275,7 @@ def fill_clip(runs, a, b, shape, lo, hi, normal, how="audio", hold=HOLD, catch_s
                 catch_set(item, 3, x - a)  # (its yellow area from the jump: back-to-back stretches chain)
                 cs.append(item)
                 gaps.append((r, k))
+        size[0] = 1.0
         point(end, normal)  # (the run's end: back to the normal tempo)
     pts.sort(key=lambda p: p[0])  # (stable: an arriving point stays before the one leaving the same beat)
     held = []  # (a held point the same as the one before: nothing changes there, left out: gaps left plain; never
