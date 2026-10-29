@@ -776,9 +776,8 @@ class BetweenGroups:
         """The Shapes list from scratch (counts / chans: per shape; many: the channel count shown orange; tints: per
         shape the colours used, App.colours_used: with repeats on new channels the orange goes by these)."""
         self._list_args = (counts, chans, many, tints)  # (filled again as it is: App.meter_changed)
-        top = self.listbox.yview()[0]  # (emptying it scrolls to the top: put back below)
-        self.listbox.delete(0, "end")
         rendered = getattr(self, "rendered", None)
+        want = []
         for r, row in enumerate(self.shape_rows()):
             i = row[0]
             sh = self.shapes[i]
@@ -811,7 +810,30 @@ class BetweenGroups:
                     label = tr("app.with_cc_list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
                           shape_label=label, counts=counts[i], uses=uses)
-            self.listbox.insert("end", text)
-            if warn > many:  # (past this the note colours and channel numbers repeat)
-                self.listbox.itemconfig(r, foreground=look.WARN, selectforeground=look.GAP_PICKED)
-        self.listbox.yview_moveto(top)
+            want.append((text, warn > many))  # (past many the note colours and channel numbers repeat)
+        lb, shown = self.listbox, getattr(self, "_list_shown", None)
+        if shown is None or lb.size() != len(shown):
+            shown = []
+        same = sum(a == b for a, b in zip(shown, want))
+        if same * 2 >= len(want):  # (mostly as shown: only the rows that changed written again; 4,000 shapes
+            # rewritten whole took ~0.1 s an edit, speed hunt 2026-10-29)
+            for r, row in enumerate(want[:len(shown)]):
+                if row != shown[r]:
+                    lb.delete(r)
+                    self.list_row(r, *row)
+            if len(shown) > len(want):
+                lb.delete(len(want), "end")
+            for r in range(len(shown), len(want)):
+                self.list_row(r, *want[r])
+        else:
+            top = lb.yview()[0]  # (emptying it scrolls to the top: put back below)
+            lb.delete(0, "end")
+            for r, row in enumerate(want):
+                self.list_row(r, *row)
+            lb.yview_moveto(top)
+        self._list_shown = want
+
+    def list_row(self, r, text, warn):
+        self.listbox.insert(r, text)
+        if warn:
+            self.listbox.itemconfig(r, foreground=look.WARN, selectforeground=look.GAP_PICKED)
