@@ -314,6 +314,72 @@ def rename_shape(old, new):
         os.remove(path)
 
 
+def free_name(name):
+    """`name`, or "name (2)", "name (3)"... when the library (built-ins too) already has it."""
+    taken = {n.lower() for n in library_names()}
+    out, k = name, 2
+    while out.lower() in taken:
+        out, k = f"{name} ({k})", k + 1
+    return out
+
+
+SHAPE_FILE_MOST = 256 * 2 ** 20  # (bytes: a bigger .json is never read as a shape)
+
+
+def shape_file(path):
+    """A library shape's file from elsewhere (dropped / opened, hunt 2026-10-29 idea): (name, strokes, areas);
+    False = a shape file whose drawing can't be read; None = not a shape file (a project, anything else)."""
+    from files.project import PROJECT_MARKS
+    try:
+        if os.path.getsize(path) > SHAPE_FILE_MOST:
+            return None
+        with open(path, "rb") as f:
+            # (shape files start with "name" or "strokes": a big project isn't read twice to find out)
+            if not re.match(rb'(\xef\xbb\xbf)?\s*\{\s*"(name|strokes)"', f.read(4096)):
+                return None
+            f.seek(0)
+            raw = f.read()
+        got = json.loads(raw.decode("utf-8-sig"))
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+        return None
+    if not isinstance(got, dict) or "strokes" not in got or PROJECT_MARKS & got.keys():
+        return None
+    strokes = clean_strokes(got["strokes"]) if isinstance(got["strokes"], list) else None
+    if not strokes:
+        return False
+    stem = os.path.splitext(os.path.basename(path))[0]
+    name = clean_name(got["name"]) if isinstance(got.get("name"), str) else ""
+    return name or clean_name(stem) or tr("drawer.imported_shape"), strokes, clean_areas(got.get("areas"))
+
+
+def offer_shape_file(app, path):
+    """Open project / a drop got a library shape's file: offered into the shape library (a taken name gets " (2)")
+    instead of "It isn't a Spiderweb project". True = it was one (handled here)."""
+    got = shape_file(path)
+    if got is None:
+        return False
+    if got is False:
+        messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.shape_file_broken", file=os.path.basename(path)),
+                             parent=app)
+        return True
+    old, strokes, areas = got
+    if not messagebox.askyesno(tr("drawer.spiderweb"), tr("drawer.shape_file_offer", name=old), parent=app):
+        return True
+    name = free_name(old)
+    try:
+        save_shape(name, strokes, areas)
+    except OSError as e:
+        messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=app)
+        return True
+    if app.drawer is not None:
+        app.drawer.refresh_list(select=name)
+    else:
+        app.refresh_custom_names()
+    app.status.config(text=tr("drawer.shape_file_added", name=name) if name == old else
+                      tr("drawer.shape_file_added_as", name=name, old=old))
+    return True
+
+
 def clean_name(name):
     """A shape's name: no hidden characters (like Tab or line breaks), no spaces around it, at most NAME_MAX
     letters. Any other character is fine (the file name is made safe by file_stem)."""
@@ -1638,10 +1704,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
             messagebox.showerror(tr("drawer.spiderweb"), tr(f"drawer.import_{e.why}"), parent=self)
             return
         old = clean_name(old) or tr("drawer.imported_shape")
-        taken = {n.lower() for n in library_names()}
-        name, k = old, 2
-        while name.lower() in taken:
-            name, k = f"{old} ({k})", k + 1
+        name = free_name(old)
         try:
             save_shape(name, strokes, areas)
         except OSError as e:

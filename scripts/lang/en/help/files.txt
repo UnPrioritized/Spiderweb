@@ -4,7 +4,7 @@ The File menu (top left) holds New (Ctrl+N), Open… (Ctrl+O), Save (Ctrl+S) and
 
 A .spwb file is packed, so it's much smaller than the older .json project files. Older .json projects still open, and Save keeps writing them as .json; Save as… offers .spwb.
 
-Drop a .spwb project or a MIDI file onto Spiderweb's window to open it (a MIDI opens as a new project, like Load MIDI), or onto Spiderweb's icon. Spiderweb opens one file at a time: drop several and it opens the first. To open .spwb projects by double-clicking them, press "Open .spwb files with Spiderweb" in Settings → General once (press it again if you move the Spiderweb folder). If Spiderweb is already open, the file opens in that window.
+Drop a .spwb project or a MIDI file onto Spiderweb's window to open it (a MIDI opens as a new project, like Load MIDI), or onto Spiderweb's icon. Spiderweb opens one file at a time: drop several and it opens the first. To open .spwb projects by double-clicking them, press "Open .spwb files with Spiderweb" in Settings → General once (press it again if you move the Spiderweb folder). If Spiderweb is already open, the file opens in that window. A shape file from someone's shape library (the .json files in the user folder's shapes folder) can be dropped or opened the same way: Spiderweb offers to add it to your shape library.
 
 Shapes are stored in beats, so changing PPQ doesn't move them.
 

@@ -910,6 +910,9 @@ class ProjectFiles:
         if path is None:
             path = filedialog.askopenfilename(title=tr("project.open_project"), initialdir=OUTPUT_DIR,
                                               filetypes=open_types())
+        from window.drawer import offer_shape_file
+        if path and offer_shape_file(self, path):  # (a library shape's file: offered into the library instead)
+            return
         if not path or not self.may_replace(os.path.basename(path)):
             return
         if self.load_file(path):
