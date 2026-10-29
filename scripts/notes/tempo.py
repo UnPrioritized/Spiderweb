@@ -480,7 +480,7 @@ def stretches(tempo, base):
     for end in ends:
         prevs.append(prev)
         prev = prev if end is None else end
-    out = [None] * len(ends)
+    out, arrays = [None] * len(ends), None
     for k in range(len(ends) - 1, -1, -1):  # (from the last: each may read the next one's)
         c, end, prev = tempo["catch"][k], ends[k], prevs[k]
         b, shape, text = c[:3]
@@ -500,7 +500,9 @@ def stretches(tempo, base):
         if end is not None and hand is not None and hand < b:
             start = max(prev, hand)
         elif end is not None:
-            on = float(drawn_bpm(tempo, base, [read])[0])
+            if arrays is None:  # (made once for every catch-up: 200 catch-ups x 8,000 points, speed hunt 2026-10-29)
+                arrays = point_arrays(pts)
+            on = float(drawn_bpm(tempo, base, [read], arrays)[0])
             if ordered:
                 cands = list(range(bisect.bisect_left(pb, prev), bisect.bisect_left(pb, b)))
             else:

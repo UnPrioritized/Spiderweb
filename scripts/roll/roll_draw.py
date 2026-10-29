@@ -1970,9 +1970,7 @@ class RollDrawing:
         self.delete("tempomark")
         self._tempo_key, self.tempo_tips = key, []
         font = look.font(7, fit=True)
-        if getattr(self, "_tempo_font", (None,))[0] != font:
-            self._tempo_font = (font, tkfont.Font(font=font))
-        measure = self._tempo_font[1].measure
+        measure = self.cc_measure(font)
         t0 = time.perf_counter()
         shown = self.tempo_shown(key[:3] + (self.sx, s, font), measure)
         if self._tempo_laid[0] != getattr(self, "_tempo_timed", None):  # (laid out just now, not kept: timed)
@@ -2290,9 +2288,11 @@ class RollDrawing:
         return u
 
     def cc_measure(self, font):
-        """font's text width, each text measured once (hunt 2026-10-29: ~0.2 ms a measure, dozens a pan step)."""
-        memo = getattr(self, "_cc_font", None)
-        if memo is None or memo[0] != font:
+        """font's text width, each text measured once per font (hunt 2026-10-29: ~0.2 ms a measure, dozens a pan
+        step; the tempo marks measured ~24,000 a Drawn catch-up graph step at 8,000 points, speed hunt)."""
+        fonts = self.__dict__.setdefault("_measures", {})
+        got = fonts.get(font)
+        if got is None:
             measured, widths = tkfont.Font(font=font).measure, {}
 
             def measure(text):
@@ -2302,8 +2302,8 @@ class RollDrawing:
                         widths.clear()
                     got = widths[text] = measured(text)
                 return got
-            memo = self._cc_font = (font, measure)
-        return memo[1]
+            got = fonts[font] = measure
+        return got
 
     def draw_cc_crowd(self, y, half, tags, font, measure, bands):
         """Too many CC events on screen to write: a mark on each pixel holding some (pixels side by side = one
