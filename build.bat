@@ -23,7 +23,7 @@ if exist dist\clips rmdir /s /q dist\clips
 rem Source archive for sharing: spiderweb.py + the scripts and clips folders, launchers, license and the Kestrel connector's source only (no autosave/shapes/output).
 if exist dist\Spiderweb-source.zip del dist\Spiderweb-source.zip
 "%SystemRoot%\System32\tar.exe" -a -cf dist\Spiderweb-source.zip --exclude=__pycache__ --exclude=CLAUDE.md spiderweb.py scripts clips ^
-  Spiderweb.bat build.bat build_version.py make_icon.py make_notices.py icon.svg LICENSE THIRD-PARTY-NOTICES.txt README.txt SPIDERWEB-NOTES-FORMAT.md ^
+  Spiderweb.bat build.bat build_version.py make_icon.py make_notices.py icon.svg icon-32.svg icon-tiny.svg LICENSE THIRD-PARTY-NOTICES.txt README.txt SPIDERWEB-NOTES-FORMAT.md ^
   native\kestrel_bridge\src native\kestrel_bridge\tests native\kestrel_bridge\licences native\kestrel_bridge\Cargo.toml ^
   native\kestrel_bridge\Cargo.lock native\kestrel_bridge\make_notices.py native\kestrel_bridge\NOTICES.txt
 if errorlevel 1 (pause & exit /b 1)

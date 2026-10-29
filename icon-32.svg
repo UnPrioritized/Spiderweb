@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <polygon points="32.00,2.50 57.55,17.25 57.55,46.75 32.00,61.50 6.45,46.75 6.45,17.25" fill="#0b0b14" stroke="#0b0b14" stroke-width="5" stroke-linejoin="round"/>
+  <line x1="32" y1="32" x2="32.00" y2="6.00" stroke="#565a78" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="54.52" y2="19.00" stroke="#565a78" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="54.52" y2="45.00" stroke="#565a78" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="32.00" y2="58.00" stroke="#565a78" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="9.48" y2="45.00" stroke="#565a78" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="9.48" y2="19.00" stroke="#565a78" stroke-width="2.6" stroke-linecap="round"/>
+  <polygon points="32.00,23.00 39.79,27.50 39.79,36.50 32.00,41.00 24.21,36.50 24.21,27.50" fill="none" stroke="#ff4fd8" stroke-width="3.6" stroke-linejoin="round"/>
+  <polygon points="32.00,14.50 47.16,23.25 47.16,40.75 32.00,49.50 16.84,40.75 16.84,23.25" fill="none" stroke="#a66bff" stroke-width="3.6" stroke-linejoin="round"/>
+  <polygon points="32.00,6.00 54.52,19.00 54.52,45.00 32.00,58.00 9.48,45.00 9.48,19.00" fill="none" stroke="#4f9dff" stroke-width="3.6" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="4" fill="#f4f3f7"/>
+</svg>
