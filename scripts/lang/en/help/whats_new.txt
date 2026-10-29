@@ -42,6 +42,10 @@ What's new:
 
 • Paste from Domino brings the Conductor track's tempo and signatures, and keeps the notes' CC, pitch bend and program changes: Copy / Export to Domino give them back exactly. Copy to Domino carries the tempo and signatures too.
 
+• Notes pasted from Domino into the track list land just as you copied them: from the highlighted track down, gaps kept, in every Channels setting, CC events and all. An open folder's Ch rows count as rows; a closed one takes them on its first channel.
+
+• CC events are never hidden: a CC mark in the track list on tracks that send them, and a CC row on the piano roll's ruler naming each one ("Volume 100", "Pan 64").
+
 • Settings → General → "Ctrl+C also copies for Domino": the normal Ctrl+C copies for Domino too, so you don't need Copy to Domino as a separate step.
 
 • Menu bar: File, Edit, Shape, Tools, View and Help. File → New starts a new MIDI, Save writes into the file you opened, and the title bar shows the file's name (with * while there are unsaved changes).

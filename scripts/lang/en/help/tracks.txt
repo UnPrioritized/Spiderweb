@@ -24,7 +24,7 @@ A new track is highlighted at once. Your tracks stay where you put them, among t
 
 Drag a track by its name up or down: a line between two rows shows where it lands, and it goes there when you let go. Every selected track goes along (see Highlighting a track), and tracks with gaps between them land together, in their order. Press Esc before letting go to leave them where they were. Dragging past the top or bottom of the list scrolls it. Each move can be undone with Ctrl+Z.
 
-Dragging one of Spiderweb's own tracks makes all of Spiderweb's tracks yours, empty ones too: each becomes a track you added, on the same channel, with its shapes laid on it. Only the order changes, like in Domino, and every track keeps its notes and channel. Shapes you draw later with All tracks highlighted get new tracks of Spiderweb's again. While Spiderweb's tracks hold a picture, a mask, a Hz bass, a Channel per strip shape or pasted notes with CC events, they can't be moved yet. A green tinted track you drag becomes yours too.
+Dragging one of Spiderweb's own tracks makes all of Spiderweb's tracks yours, empty ones too: each becomes a track you added, on the same channel, with its shapes laid on it. Only the order changes, like in Domino, and every track keeps its notes and channel. Shapes you draw later with All tracks highlighted get new tracks of Spiderweb's again. While Spiderweb's tracks hold a picture, a mask, a Hz bass or a Channel per strip shape, they can't be moved yet. A green tinted track you drag becomes yours too.
 
 A loaded MIDI's own tracks can be dragged too, and your tracks can go above or between them. The track list and Export MIDI follow the new order, and each of the file's tracks is still copied exactly. The piano roll keeps drawing the file's tracks in the file's own order (a later track covers an earlier one), so what covers what stays the same while you edit; other players draw the exported file in its new order, so there it can differ.
 
@@ -33,6 +33,8 @@ A loaded MIDI's own tracks can be dragged too, and your tracks can go above or b
 A track whose notes are on two or more channels gets a ▸ before its name. Click the ▸ to open it: one "Ch n" row per channel shows under it, slightly indented, each with its own picture in that channel's colour. Click the ▾ to close it again. Closed, the track's picture shows each note in its channel's colour.
 
 • Click a Ch row and the piano roll shows only that channel; with several Ch rows picked it shows all of them. Ctrl+wheel steps through an open track's Ch rows too. Drawing or pasting with it highlighted puts the notes on that channel of the track.
+• With the track's own row highlighted (open or closed), new notes go to its first channel. While it's open, that Ch row gets a blue outline, and its tip says so.
+• Pasting several tracks (copied in Domino, or with Ctrl+C in the track list) fills the rows from the highlighted one down, gaps kept. An open track's Ch rows count as rows of their own; a closed one counts as one row, on its first channel.
 • Each Ch row has its own speaker. The track's speaker mutes or un-mutes all of its channels; while only some are muted, its icon shows that. Right-click a Ch row's speaker to hear only that channel.
 • Drag a track (or a Ch row) onto the middle of another track and rest there for half a second: the row lights up, and letting go puts its channels into that track. Passing over a row without resting never does this, so a track never ends up mixed by accident. Into an open track, a short indented line shows where the channel lands among its Ch rows. Several picked tracks or Ch rows go in together.
 • When a channel is already in that track, Spiderweb asks once for all of them: Merge (share the channel) or Move to a free channel. Merge is the default when it changes nothing you'd hear, else Move. Tick "Don't ask again" to keep your answer until Spiderweb closes.
@@ -58,7 +60,8 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 • With All tracks highlighted, a pasted shape that was laid in this project stays on its tracks, and a duplicate always does.
 • Changing a track's channel in Properties… moves its shapes to the new channel.
 • One of a loaded MIDI's tracks works the same: the shape goes into that track, on its channel (see Load MIDI).
-• Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't be laid on a track yet: they keep their own channels, and the status line says so.
+• Pictures, masks, Hz basses and Channel per strip shapes can't be laid on a track yet: they keep their own channels, and the status line says so. Pasted notes with CC events go in like any: their events go along on each track's channel.
+• A small CC before a track's (or Ch row's) channel means its notes send CC events (volume, pan, pitch bend…). Its tip names them, and the piano roll's ruler shows each one in its CC row.
 
 ## Selecting notes in the track list
 
@@ -71,7 +74,7 @@ Drag on the tracks' pictures to draw a Select box over some tracks and some time
 • Ctrl+C copies the notes in the box, Ctrl+X cuts them and Delete deletes them. Ctrl+V pastes at the play line, starting from the highlighted track and going down, like in Domino; a box goes round what came in.
 • Copy to Domino (Ctrl+Shift+C) copies only the notes in the box while a box is there.
 • A click inside the box changes nothing: the play line and the highlighted track stay. Right-click the box for Cut, Copy, Paste, Delete, Copy to Domino and Select all. Right-clicking the pictures outside the box drops it; Paste and Select all still work there.
-• Every change is one step for Ctrl+Z. Pictures, masks, Hz basses, Channel per strip shapes and pasted notes with CC events can't be moved here: move them on the piano roll.
+• Every change is one step for Ctrl+Z. Pictures, masks, Hz basses and Channel per strip shapes can't be moved here: move them on the piano roll.
 
 ## Highlighting a track
 
