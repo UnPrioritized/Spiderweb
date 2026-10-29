@@ -56,6 +56,18 @@ RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas ite
 NO_CC = ()  # (loaded_cc with nothing loaded: always the same one, so what's worked out from it is kept)
 
 
+def sorted_cc(ts, ks, vs, ss):
+    """CC event parts (ticks, kinds, values, sources; each part in tick order already) joined in one tick order,
+    same-tick ones as they came."""
+    if not ts:
+        return [np.zeros(0, np.int64), np.zeros(0, np.uint8), np.zeros(0, np.int32), np.zeros(0, np.int32)]
+    arrays = [np.concatenate(a) for a in (ts, ks, vs, ss)]
+    if len(ts) > 1:
+        order = np.argsort(arrays[0], kind="stable")
+        arrays = [a[order] for a in arrays]
+    return arrays
+
+
 def file_kinds(codes):
     """A loaded MIDI's CC event codes (files/midi_index: status | data 1 << 8 | data 2 << 16) -> their kind numbers
     (midi_index CC_KINDS order: controller number, then 128 instrument, 129 bend, 130 pressure, 131 key pressure)."""
@@ -2104,6 +2116,33 @@ class RollDrawing:
                 vs.append(np.array([v for _, v in evs], np.int32))
                 ks.append(np.full(len(evs), kind_number(k), np.uint8))
                 ss.append(np.full(len(evs), len(srcs) - 1, np.int32))
+        own = sorted_cc(ts, ks, vs, ss)
+        lt, lk, lv, ls, lsrcs = self.loaded_cc_data(loaded)  # (kept apart: an edit of the shapes never sorts the
+        # loaded MIDI's again, speed hunt 2026-10-29: 0.15 s an edit on a MIDI with many CC events)
+        if not len(lt):
+            arrays = own
+        elif not len(own[0]):
+            arrays = [lt, lk, lv, ls + len(srcs)]
+        else:  # (one tick order for all, own ones first on a tick: as one stable sort of own + loaded gave)
+            at = np.searchsorted(lt, own[0], side="left") + np.arange(len(own[0]))
+            mine = np.zeros(len(lt) + len(own[0]), bool)
+            mine[at] = True
+            arrays = []
+            for o, l in zip(own, (lt, lk, lv, ls + len(srcs))):
+                a = np.empty(len(mine), o.dtype)
+                a[mine], a[~mine] = o, l
+                arrays.append(a)
+        data = (*arrays, srcs + lsrcs)
+        self._cc_data = (got, loaded, lit, data)
+        return data
+
+    def loaded_cc_data(self, loaded):
+        """cc_data's part for the loaded MIDI's events (loaded_cc), sorted, its source numbers from 0, kept while
+        loaded_cc gives the same list."""
+        memo = getattr(self, "_loaded_cc_data", None)
+        if memo is not None and memo[0] is loaded:
+            return memo[1]
+        srcs, ts, ks, vs, ss = [], [], [], [], []
         for n, ticks, codes, to in loaded:
             c = codes.astype(np.int64)
             d1, d2, hi = c >> 8 & 127, c >> 16 & 127, c & 0xF0
@@ -2113,16 +2152,9 @@ class RollDrawing:
             ks.append(file_kinds(c).astype(np.uint8))
             ss.append((len(srcs) + (c & 15)).astype(np.int32))
             srcs += [(-1 - n, ch if to is None else to) for ch in range(16)]
-        if ts:
-            arrays = [np.concatenate(a) for a in (ts, ks, vs, ss)]
-            if len(ts) > 1:  # (each part in tick order already: one tick order for all, same-tick ones as they came)
-                order = np.argsort(arrays[0], kind="stable")
-                arrays = [a[order] for a in arrays]
-        else:
-            arrays = [np.zeros(0, np.int64), np.zeros(0, np.uint8), np.zeros(0, np.int32), np.zeros(0, np.int32)]
-        data = (*arrays, srcs)
-        self._cc_data = (got, loaded, lit, data)
-        return data
+        got = (*sorted_cc(ts, ks, vs, ss), srcs)
+        self._loaded_cc_data = (loaded, got)
+        return got
 
     def cc_span(self, lo, hi):
         """(first, end) of the CC events (cc_data) on ticks lo..hi (decimal ticks: whole bounds for the search, so it
