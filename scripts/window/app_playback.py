@@ -29,6 +29,7 @@ QUIET_S = 3.0  # (a question nobody asked for waits this long after the last key
 # the red "Overloaded" text kept steady (user 2026-10-29: it flashed): on this long after the last overload, its
 # number changing at most this often, a loaded MIDI's notes left out averaged over this long
 OVER_HOLD_S, OVER_EVERY_S, OVER_AVG_S = 4.0, 1.0, 4.0  # (tries faster leave a few notes out every 2-3 s)
+EASY_S = 1.5  # Slow down: a loaded MIDI asking for almost no notes this long = its busy part is over, straight to 1x
 GROUP_MOST = 16  # synths side by side playing a loaded MIDI at most (Settings → Sound)
 GROUP_DEFAULT = max(1, min(GROUP_MOST, (os.cpu_count() or 4) // 2))  # ... to start: half the cores (user
 # 2026-10-24: every core would halt the PC)
@@ -139,6 +140,9 @@ class Playback:
         self._pace_seen = self._pace_seen_b = None  # (Kestrel's silence / BASSMIDI's notes thinned, seen)
         self._k_drops = None  # (Kestrel's notes left out by its own lowering: count, when it last grew)
         self._thin_hist = collections.deque()  # (a loaded MIDI's (time, notes left out, sent): notes_left_text)
+        # (the last play's count of notes left out forgotten: the new play's starts at 0, read as "left out" it showed
+        # a red Overloaded for ~5 s, hunt 2026-10-29); the steady text's hold too
+        self._thin_seen, self._easy_since, self._ov_last = (0, 0.0), None, float("-inf")
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
@@ -365,9 +369,11 @@ class Playback:
         if not on and self.player.speed != 1.0:
             self.player.set_speed(1.0)
         self._pace_fit = FIT  # (Kestrel: its block time; BASSMIDI: play_load)
+        self._pace_lower = True  # (play_load: False = what's overloaded is something "Lower it by itself" can't help)
         load, behind, easy, lowered, effort = self.play_load()
         if on:
-            can_lower = self.kestrel_opts["lower"] if self.out.name == KESTREL else self.play_guard.get()
+            can_lower = (self.kestrel_opts["lower"] if self.out.name == KESTREL else self.play_guard.get()) and \
+                self._pace_lower
             v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered, effort=effort, can_lower=can_lower,
                                     fit=self._pace_fit)
             if v is not None:
@@ -419,19 +425,26 @@ class Playback:
             # stuttering": from 95 % only; under 90 % with nothing lost = calm, it may speed up again (hunt: between 50
             # and 95 % it stayed slowed for good))
             c = max(loads)
-            # (never "easy": its note budget can be what limits at a low CPU, Lagtester at 17 % 2026-10-29: forgetting
-            # the speed that broke up there made it climb back at once, every 2-3 s)
             # (its work, to climb back as fast as fits (user 2026-10-29: slow, Kestrel's fast) and to see whether
-            # slowing helps: a loaded MIDI's note-ons asked for / its note budget (exactly as the speed: its budget
-            # leaves notes out at a low CPU, Lagtester at 17 %), the CPU too; own shapes alone: the CPU)
-            asked = lp.asked if lp is not None and lp.sinks else None
-            effort = c if asked is None else max(asked, c)
-            # (a loaded MIDI: chords come in one go at any speed, so the average says nothing about how much faster
-            # fits (real Lagtester: it jumped to 1x and back every 2 s); careful tries, but straight back once the song
-            # asks for almost no notes (the busy part is over))
+            # slowing helps. WHICH SIDE is busy (hunt 2026-10-29): own shapes' synth (its CPU: the measured climb, and
+            # "Lower it by itself" can lower its voices) or a loaded MIDI's note budget (note-ons asked / budget: its
+            # chords come in one go at any speed, so careful tries; "Lower it by itself" never touches those notes:
+            # no hand-over, slowing goes on to 10 %)
             from files.slow_down import FIT_CPU
-            self._pace_fit = FIT_CPU if asked is None else None
-            easy = asked is not None and asked < 0.05 and not behind
+            asked = lp.asked if lp is not None and lp.sinks else None
+            main = o.load if o.load is not None else 0.0
+            own = asked is None or main >= asked
+            effort = main if own else max(asked, lp.load or 0.0)
+            self._pace_fit = FIT_CPU if own else None
+            self._pace_lower = own
+            # (the busy part over = straight back: only after EASY_S of the loaded MIDI asking for almost nothing,
+            # none left out, own shapes' synth calm too (hunt 2026-10-29: one 0.1 s look between two chords said
+            # "over", it swung 100 % <-> 54 % every beat; over a quiet intro own spam swung too))
+            now = time.perf_counter()
+            # (own shapes' CPU as it would be at 1x: calm at 73 % speed can be overloaded at 1x)
+            quiet = asked is not None and asked < 0.05 and not behind and main / max(self.player.speed, 0.1) < FIT_CPU
+            self._easy_since = (getattr(self, "_easy_since", None) or now) if quiet else None
+            easy = quiet and now - self._easy_since >= EASY_S
             return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, easy, lowered, effort
         return None, False, False, False, None
 
@@ -1165,6 +1178,7 @@ class Playback:
                 self.loaded_group.set_voices(v)
             self.note_builtin()
             self.schedule_autosave()
+            self.after(150, self.fresh_overload_text)  # ("of M" = the new limit: once the watcher has it)
 
     def on_loaded_synths(self):
         """Synths for a loaded MIDI typed (Settings → Sound): heard from the next Play."""
@@ -1187,8 +1201,20 @@ class Playback:
 
     def on_play_guard(self):
         self.overload.set_guard(self.play_guard.get())
+        self.lower_changed()
         self.note_builtin()
         self.schedule_autosave()
+
+    def lower_changed(self):
+        """A "Lower it by itself" tick changed (either synth's): Slow down may go on to 10 % again (unticked after
+        the hand-over it stayed where it was and stuttered), the red text follows at once (hunt 2026-10-29)."""
+        self.slow_down.free_floor()
+        self.fresh_overload_text()
+
+    def fresh_overload_text(self):
+        """The red text says what's true now, not held steady (a setting it shows just changed): from the next play
+        tick (15 ms)."""
+        self._ov_last = self._ov_changed = float("-inf")
 
     def on_play_limiter(self):
         """Heard at once while Built-in BASSMIDI is open."""
@@ -1229,6 +1255,8 @@ class Playback:
         if v == self.kestrel_opts[key]:
             return
         self.kestrel_opts[key] = v
+        if key == "lower":
+            self.lower_changed()
         if key == "lower" and self.out.name == KESTREL and self.out.handle:
             self.out.handle.k.set_lower(v)
         elif self.out.name == KESTREL and self.player.running:

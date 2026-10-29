@@ -33,6 +33,11 @@ HELPED = 0.5
 FIT = 0.7  # (the synth's work known: faster only up to where it's expected to take this share of the time...)
 FIT_CPU = 0.9  # (... Built-in BASSMIDI's CPU: fine to 95 %, user 2026-10-29 "fine means no stuttering")
 FIT_S = 0.6  # (... once the last change has shown in it)
+# (the work says "no room" but the sound has been fine this long: careful tries after all, each failed one waiting
+# twice as long before the next, at most TRY_MOST_S; hunt 2026-10-29: after a wall at 500k-1 M voices Kestrel's
+# blocks take most of their time even where 1x played fine, it stayed at 10-15 %)
+FALLBACK_S = 3.0
+TRY_MOST_S = 32.0
 NEXT_S = SETTLE_S + 0.5
 SMOOTH = 0.3  # weight of the newest reading
 WARM_S = 0.5  # (the first moments of a play: the synth's start-up is slow at any load, never judged)
@@ -66,6 +71,12 @@ class SlowDown:
         self.floor = SLOWEST  # (no slower than this: raised to the speed where slowing stopped helping)
         self.effort = None  # (the synth's work, smoothed: None = not known)
         self._ref = None  # (speed, effort) at the last cut, while still in trouble
+        self._fails = 0  # (tries faster that broke up, since the last time back at 1x)
+
+    def free_floor(self):
+        """A "Lower it by itself" tick changed: slowing may go on down to 10 % again (hunt 2026-10-29: unticked
+        after the hand-over, it stayed where it was and stuttered)."""
+        self.floor, self._ref = SLOWEST, None
 
     def step(self, load, now=None, behind=False, easy=False, hold=False, effort=None, can_lower=True, fit=FIT):
         """One reading: load (None = none this time); behind = the sound already broke up (Kestrel handed out
@@ -106,6 +117,7 @@ class SlowDown:
             self._lifts = 0
             if self.ceiling < 1.0 and v >= self.ceiling * NEAR:  # (the mark was a little too fast: lower it, gently)
                 self.ceiling = max(SLOWEST, min(v, self.ceiling) * NEAR)
+                self._fails += 1  # (a try that broke up: the next one waits longer)
                 new = max(self.floor, v * NEAR)
             else:
                 self.ceiling = v
@@ -121,18 +133,23 @@ class SlowDown:
                 # that breaks up; the work taken to grow with the speed (it grew a little faster at 1 M voices), FIT
                 # of the time at most. User 2026-10-29: its tries stuttered, climbing back after a wall was slow)
                 top = min(1.0, v * fit / self.effort)
-                if top > v * 1.03 and not hold and now - self._calm >= CALM_S and now - self._rise >= FIT_S:
-                    self._rise = now
-                    self.ceiling = 1.0
-                    return self._set(top, force=True)
-                return None
+                if top > v * 1.03:
+                    if not hold and now - self._calm >= CALM_S and now - self._rise >= FIT_S:
+                        self._rise = now
+                        self.ceiling = 1.0
+                        return self._set(top, force=True)
+                    return None
+                if hold or now - self._calm < FALLBACK_S:
+                    return None
+                if self.ceiling >= 1.0:  # (no room by the work, yet the sound's fine: careful tries from here)
+                    self.ceiling = v
             if easy:  # (the busy part is over: straight back, user 2026-10-29: climbing back was slow)
                 self.ceiling = 1.0
                 if v < 1.0 and not hold and now - self._calm >= CALM_S:
                     self._rise = now
                     return self._set(1.0)
                 return None
-            if self.ceiling < 1.0 and now - max(self._calm, self._lift) >= CEIL_S:
+            if self.ceiling < 1.0 and now - max(self._calm, self._lift) >= min(TRY_MOST_S, CEIL_S * 2 ** self._fails):
                 # (tried faster: 10 %, then more each time it held, so it's back to 1x soon after the busy part; a
                 # failure starts again at 10 %. Real BASSMIDI 2026-10-29: its note budget limits at 17 % CPU, nothing
                 # says there's room but trying)
@@ -155,7 +172,7 @@ class SlowDown:
     def _set(self, new, force=False):
         new = round(new, 3)
         if new >= 1.0:  # (back to its own speed: slowing gets its chance again next time)
-            self.floor, self._ref = SLOWEST, None
+            self.floor, self._ref, self._fails = SLOWEST, None, 0
         if new != 1.0 and new != SLOWEST and abs(new - self.speed) < LEAST_STEP * self.speed and not force:
             return None
         if new == self.speed:
