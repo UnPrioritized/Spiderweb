@@ -80,7 +80,8 @@ class ExportWindow(tk.Toplevel):
             mark = "✓ " if i < at else ("▶ " if i == at else "   ")
             self.rows[key].config(text=mark + tr(STEPS[key]), foreground=look.DARK_TEXT if i <= at else look.HINT)
         took = time.perf_counter() - self.since
-        if not job["total"]:  # (a step that can't say how far it is: a moving bar + how long so far)
+        done, total = job["done"], job["total"]  # (read once: the export's thread changes them meanwhile)
+        if not total:  # (a step that can't say how far it is: a moving bar + how long so far)
             if str(self.bar.cget("mode")) != "indeterminate":
                 self.bar.config(mode="indeterminate", maximum=100)
                 self.bar.start(15)
@@ -89,7 +90,6 @@ class ExportWindow(tk.Toplevel):
         if str(self.bar.cget("mode")) != "determinate":
             self.bar.stop()
             self.bar.config(mode="determinate", maximum=1000)
-        done, total = job["done"], job["total"]
         share = min(1.0, done / total)
         self.bar.config(value=int(1000 * share))
         speed = done / took if took > 0.5 else 0

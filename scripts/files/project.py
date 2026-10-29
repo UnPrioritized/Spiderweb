@@ -1310,6 +1310,8 @@ class ProjectFiles:
             self._exporting = None
             if win.winfo_exists():
                 win.destroy()
+            # (tracks dragged, renamed, re-channelled, split or removed: not "exactly as loaded", 10-29 measure)
+            listed = order != list(range(len(lm.mf.tracks))) or bool(props)
             e = job["error"]
             if isinstance(e, Cancelled):
                 self.status.config(text=tr("export.cancelled"))
@@ -1320,10 +1322,9 @@ class ProjectFiles:
                 messagebox.showinfo(tr("project.spiderweb"), tr(
                     "load.exported_tempo" if targets else "load.exported_sigs", path=path, notes=trn("n.notes", left, n=left),
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
-                    note=self.tempo_notes(job["plan"]) + own_note() + mixed))
+                    note=self.tempo_notes(job["plan"]) + own_note() + mixed)
+                                    + (tr("load.exported_tracks_too") if listed else ""))
             elif e is None:
-                # (tracks dragged, renamed, re-channelled, split or removed: not "exactly as loaded", 10-29 measure)
-                listed = order != list(range(len(lm.mf.tracks))) or bool(props)
                 messagebox.showinfo(tr("project.spiderweb"), tr(
                     ("load.exported_own_extracted" if len(hid.h_s) else "load.exported_own") if len(notes) else
                     "load.exported_tracks" if listed else "load.exported", path=path, notes=trn("n.notes", left, n=left))
