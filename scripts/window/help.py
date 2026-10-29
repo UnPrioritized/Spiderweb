@@ -21,6 +21,7 @@ TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
 # the tips' place once dragged (window_places; "tip" was saved where the first tip showed, moved or not: left behind)
 TIP_PLACE = "tip_moved"
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
+TOPIC_LINKS = 3  # a page with this many "## " headings or more gets a line of links to them at its top (user 2026-10-29)
 
 
 def gif_frames(path):
@@ -355,7 +356,9 @@ class HelpWindow(tk.Toplevel):
         self.text.config(state="disabled")
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<F1>", lambda e: "break")  # (already open: stays on the page being read)
-        self.bind("<Control-f>", lambda e: (search.focus_set(), search.select_range(0, "end")))
+        for key in ("<Control-f>", "<Control-F>"):  # (F: Caps Lock on, user 2026-10-29)
+            self.bind(key, lambda e: (search.focus_set(), search.select_range(0, "end"), search.icursor("end"),
+                                      "break")[-1])
         self.bind("<Key>", lambda e: self.type_to_search(e, search))
         self.fill_list()
         search.focus_set()
@@ -460,6 +463,7 @@ class HelpWindow(tk.Toplevel):
             hidden = self.found_by(topic)
             if hidden:
                 t.insert("end", tr("help.found_by") + ", ".join(hidden) + "\n\n", "section")
+            top = t.index("end-1c")  # (where the topic links go)
             if topic_id == "about":
                 self.about_banner()
             if self.add_clip(topic_id):
@@ -470,12 +474,15 @@ class HelpWindow(tk.Toplevel):
                         t.insert("end", "\n")
                 else:
                     t.insert("end", part)
+            heads = []
             for i in range(1, int(t.index("end").split(".")[0])):
                 if t.get(f"{i}.0") == "•":
                     t.tag_add("bullet", f"{i}.0", f"{i}.end")
                 elif t.get(f"{i}.0", f"{i}.3") == "## ":  # ("## Name" line = a heading)
                     t.delete(f"{i}.0", f"{i}.3")
                     t.tag_add("heading", f"{i}.0", f"{i}.end")
+                    heads.append(i)
+            self.topic_links(top, heads)
             for w in set(self.query.get().lower().split()):
                 start = "1.0"
                 while True:
@@ -501,6 +508,27 @@ class HelpWindow(tk.Toplevel):
                 out += [h for h in dict.fromkeys(hidden) if w in h and h not in out]
         return out
 
+    def topic_links(self, top, heads):
+        """One line of links at the page's top (at index top) to its headings (their line numbers), when it has
+        TOPIC_LINKS or more: a click scrolls the page to that heading."""
+        t = self.text
+        if len(heads) < TOPIC_LINKS:
+            return
+        names = [t.get(f"{i}.0", f"{i}.end") for i in heads]
+        for n, i in enumerate(heads):  # (marks move along with the text put in above them)
+            t.mark_set(f"head:{n}", f"{i}.0")
+            t.mark_gravity(f"head:{n}", "left")
+        t.mark_set("links", top)
+        t.mark_gravity("links", "right")  # (each piece goes after the one before)
+        t.insert("links", tr("help.on_this_page"), "section")
+        for n, name in enumerate(names):
+            if n:
+                t.insert("links", "  ·  ", "section")
+            tag = f"head_link:{n}"
+            t.insert("links", name, ("link", tag))
+            self.bind_link(tag, lambda mark=f"head:{n}": t.yview(mark))
+        t.insert("links", "\n\n")
+
     def see_also(self, ids):
         """The clickable "See also" line: each related topic's title opens it."""
         t = self.text
@@ -512,10 +540,15 @@ class HelpWindow(tk.Toplevel):
                 t.insert("end", "  ·  ", "section")
             tag = "go:" + tid
             t.insert("end", BY_ID[tid]["title"], ("link", tag))
-            t.tag_bind(tag, "<Button-1>", lambda e, tid=tid: self.open_topic(tid))
-            t.tag_bind(tag, "<Enter>",
-                       lambda e, tag=tag: (t.config(cursor="hand2"), t.tag_add("hover", *t.tag_ranges(tag))))
-            t.tag_bind(tag, "<Leave>", lambda e: (t.config(cursor="arrow"), t.tag_remove("hover", "1.0", "end")))
+            self.bind_link(tag, lambda tid=tid: self.open_topic(tid))
+
+    def bind_link(self, tag, command):
+        """Text under tag works as a link: a hand pointer and underline under the mouse, a click = command()."""
+        t = self.text
+        t.tag_bind(tag, "<Button-1>", lambda e: command())
+        t.tag_bind(tag, "<Enter>",
+                   lambda e: (t.config(cursor="hand2"), t.tag_add("hover", *t.tag_ranges(tag))))
+        t.tag_bind(tag, "<Leave>", lambda e: (t.config(cursor="arrow"), t.tag_remove("hover", "1.0", "end")))
 
     def about_banner(self):
         """The About page's picture (half its file's size, growing with the screen scaling up to the whole file), if
