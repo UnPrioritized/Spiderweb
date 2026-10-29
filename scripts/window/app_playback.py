@@ -26,6 +26,9 @@ SLOW_START_S = 15.0  # Kestrel still starting after this: "Use Built-in BASSMIDI
 STUCK_START_S = 60.0  # ... after this, with no answer, the start is given up (the backstop)
 SHOW_START_MS = 300  # Kestrel's "Starting" window only after this (soundfonts kept loaded: a start is ~20 ms)
 QUIET_S = 3.0  # (a question nobody asked for waits this long after the last key / click: quiet_now)
+# the red "Overloaded" text kept steady (user 2026-10-29: it flashed): on this long after the last overload, its
+# number changing at most this often, a loaded MIDI's notes left out averaged over this long
+OVER_HOLD_S, OVER_EVERY_S, OVER_AVG_S = 4.0, 1.0, 4.0  # (tries faster leave a few notes out every 2-3 s)
 GROUP_MOST = 16  # synths side by side playing a loaded MIDI at most (Settings → Sound)
 GROUP_DEFAULT = max(1, min(GROUP_MOST, (os.cpu_count() or 4) // 2))  # ... to start: half the cores (user
 # 2026-10-24: every core would halt the PC)
@@ -461,11 +464,8 @@ class Playback:
     def notes_left_text(self, lp, now):
         """A loaded MIDI on Built-in BASSMIDI: "Overloaded: 12,000 notes left out a second (24 %)" over the last
         second (its note budget leaves note starts out; user 2026-10-29: the number and the share)."""
-        hist = self._thin_hist
-        hist.append((now, lp.thinned, lp.sent))
-        while len(hist) > 2 and now - hist[0][0] > 1.0:
-            hist.popleft()
-        t0, th0, se0 = hist[0]
+        hist = self._thin_hist  # (filled every play tick by show_overload: an average over OVER_AVG_S)
+        t0, th0, se0 = hist[0] if hist else (now, lp.thinned, lp.sent)
         if now - t0 < 0.2:
             return tr("app.overloaded")
         left, sent = lp.thinned - th0, lp.sent - se0
@@ -482,6 +482,10 @@ class Playback:
         lp = self.loaded_play
         if lp is not None:  # (a loaded MIDI's notes thinned for the synth within the last second: overloaded too)
             now = time.perf_counter()
+            hist = self._thin_hist
+            hist.append((now, lp.thinned, lp.sent))
+            while len(hist) > 2 and now - hist[0][0] > OVER_AVG_S:
+                hist.popleft()
             if lp.thinned != self._thin_seen[0]:
                 self._thin_seen = (lp.thinned, now)
             if not text and now - self._thin_seen[1] < 1.0:
@@ -505,6 +509,18 @@ class Playback:
                     if 0 < cap < top else tr("app.overloaded")
         elif not self.player.running:
             self._k_seen = (None, 0.0)
+        # (steady, user 2026-10-29: it flashed in and out): shown on for OVER_HOLD_S after the last overload, its
+        # wording / number changing at most every OVER_EVERY_S; Stop clears it at once
+        now, shown = time.perf_counter(), self.overload_text
+        if self.player.running:
+            if text:
+                self._ov_last = now
+            elif shown and now - getattr(self, "_ov_last", 0.0) < OVER_HOLD_S:
+                text = shown
+            if text and shown and text != shown and now - getattr(self, "_ov_changed", 0.0) < OVER_EVERY_S:
+                text = shown
+        if text != shown:
+            self._ov_changed = now
         v = self.player.speed
         slowed = tr("app.slowed", n=max(1, round(v * 100))) if self.player.running and v < 1.0 else ""
         if text != self.overload_text or slowed != self.slowed_text:
