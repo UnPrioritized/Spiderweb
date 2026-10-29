@@ -37,6 +37,7 @@ from notes.tempo import changed as tempo_edited, keep_heard, FAR
 from notes.loaded import file_tempos
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.tempo_file import FileTempo, limit_spots, loaded_part, sorted_union
+from roll.roll_draw import screen_lines
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
@@ -3401,8 +3402,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         else:
             line_of = (tempo, worked)
             xs, beats, ys = self.line_xy(worked, w, kb)
-        self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), width=lw + 1,
-                         fill=look.TEMPO_FADED if heard_mode else look.TEMPO_LINE)
+        # (only what shows, a pixel column's first / lowest / highest / last point: Windows paints a thick line of
+        # tens of thousands of points very slowly, ~1.2 s a redraw at 8,000 points, speed hunt 2026-10-29)
+        for coords, _ in screen_lines(np.column_stack([xs, ys]), 1.0, 0.0, 1.0, 0.0, (-10, -10, w + 10, h + 10)):
+            self.create_line(*coords, width=lw + 1, fill=look.TEMPO_FADED if heard_mode else look.TEMPO_LINE)
         fp = self.fill_preview
         lines = [(xs, beats, ys, *line_of, False)]  # (for the arrows to parts out of view)
         if fp is not None and not heard_mode:  # (what Fill with tempo jumps would lay: faint, over its area only)
