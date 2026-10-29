@@ -833,6 +833,9 @@ class JoinSplit:
             if self.in_own_track(sh):
                 new[i].pop("own_slots", None)
                 new[i]["into"] = into_ids(sh)
+                from window.app import pasted_notes
+                if pasted_notes(sh):  # (a laid Domino paste's copy keeps its tracks in every mode, hunt 2026-10-29)
+                    new[i]["from_paste"] = True
                 if "slots10" in sh:
                     new[i]["slots10"] = sh["slots10"]
                 else:

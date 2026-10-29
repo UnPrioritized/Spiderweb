@@ -1474,7 +1474,8 @@ class ProjectFiles:
             if slots is None and auto and "cc" in sh and sh.get("own_slots") and (only is None or i in only):
                 # (a copy whose tracks ARE its slots, made with the channel rule of then: moved like its notes, hunt)
                 ks = sorted({e[1] for e in unpack_cc(sh["cc"])})
-                slots = dict(zip(ks, as_used(ks, slot_rule(sh), self.picture_use10).tolist()))
+                slots = dict(zip(ks, np.asarray(as_used(np.asarray(ks, np.int64), slot_rule(sh),
+                                                        self.picture_use10)).tolist()))
             if not slots:
                 continue
             paste = sh.get("paste")

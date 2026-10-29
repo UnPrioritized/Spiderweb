@@ -155,8 +155,11 @@ def can_go_in(sh):
 
 
 def pasted_notes(sh):
-    """Notes pasted from Domino (or pieces of them): plain notes, not made by Spiderweb (Turn into plain notes, Apply
-    mask, merges, pictures...)."""
+    """Notes pasted from Domino (or pieces of them), or a plain copy made from one laid on tracks (Fill gaps, Remove
+    Track: sh["from_paste"], hunt 2026-10-29): not made by Spiderweb (Turn into plain notes, Apply mask, merges,
+    pictures...)."""
+    if sh.get("from_paste") is True:
+        return True
     return "notes" in sh and not sh.get("made") and "merge" not in sh and not picture_like(sh)
 
 

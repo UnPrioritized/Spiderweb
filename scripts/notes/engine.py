@@ -332,6 +332,8 @@ def clean_shape(sh):
             out["into_rest_home"] = [v if -1 <= v < FILE_MOST else -1 for v in rhome]
     if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
         out["slots10"] = sh["slots10"]
+    if "into" in out and sh.get("from_paste") is True:  # (plain copy of a laid Domino paste: keeps its tracks in
+        out["from_paste"] = True                       # every Channels mode, App.pasted_notes; hunt 2026-10-29)
     if "into" in out and sh.get("into_new") is True:  # (just drawn / pasted, colours not laid yet: App.fit_into)
         out["into_new"] = True
     if out["kind"] == "custom":

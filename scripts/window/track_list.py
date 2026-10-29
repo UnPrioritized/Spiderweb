@@ -3651,6 +3651,8 @@ class TrackList(tk.Canvas):
             self.create_rectangle(0, y0, x1, ya - 1, fill=look.TRACK_PICK, outline="")
         self.create_text(18 * s, (y0 + ya) / 2, text=tr("tracks.all"), anchor="w",
                          fill=look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT, font=look.font(9, "bold"))
+        if self.cc_rows():  # (some track sends CC events: user 2026-10-29)
+            self.draw_cc_mark(x1 - 26 * s, (y0 + ya) / 2, font, picked)
         self.create_line(0, ya - 1, x1, ya - 1, fill=look.ROLL_EDGE)
         self.create_text(18 * s, ya + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
                          font=font)
