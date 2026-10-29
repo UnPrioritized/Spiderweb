@@ -1,4 +1,4 @@
-File → Load MIDI… opens a MIDI file as a new project: its notes are drawn under your shapes, its tempos and time signatures come into the Conductor pane, and the project takes its PPQ. It's made for dense MIDIs of millions or billions of notes, so you can change their tempo, draw shapes on top, or take some notes out to work on.
+File → Load MIDI… opens a MIDI file as a new project: its notes are drawn under your shapes, its tempos and time signatures come into the Conductor pane, and the project takes its PPQ. It's made for big, dense MIDIs, so you can change their tempo, draw shapes on top, or take some notes out to work on.
 
 The MIDI file stays the boss: Spiderweb never copies its notes into shapes. The project only saves a link to the file and your changes, so it stays small. Export MIDI reads the file again and copies it byte for byte, changing only what you changed.
 

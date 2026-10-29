@@ -1250,7 +1250,7 @@ class ProjectFiles:
                         # (the shapes' notes keep their time too: anchors of their own)
                         ticks = np.union1d(ticks, np.concatenate([notes[:, 0], notes[:, 1]]))
                         loose = np.union1d(loose, np.array([m[0] for ms in cc.values() for m in ms], np.int64))
-                    job["step"] = "project.tempo_working"
+                    job.update(step="project.tempo_working", done=0, total=0)  # (no progress inside: a busy bar)
                     plan = job["plan"] = file_plan(tempo, 120, ppq, beats, ticks, ticks, None, loose, heard)
                     retime = retime_for(lm, tempo, plan, targets)
                     if keeps and len(notes):
@@ -1304,13 +1304,15 @@ class ProjectFiles:
 
         def poll():
             if not job["finished"]:
-                self.busy(tr(job["step"], pct=int(100 * job["done"] / max(1, job["total"]))))
-                self.after(100, poll)
+                win.refresh()  # (its own window now, not the status line: user 2026-10-29)
+                self.after(win_poll, poll)
                 return
             self._exporting = None
-            self.busy(None)
+            if win.winfo_exists():
+                win.destroy()
             e = job["error"]
             if isinstance(e, Cancelled):
+                self.status.config(text=tr("export.cancelled"))
                 return
             if isinstance(e, FileChanged):
                 messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
@@ -1320,9 +1322,12 @@ class ProjectFiles:
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
                     note=self.tempo_notes(job["plan"]) + own_note() + mixed))
             elif e is None:
+                # (tracks dragged, renamed, re-channelled, split or removed: not "exactly as loaded", 10-29 measure)
+                listed = order != list(range(len(lm.mf.tracks))) or bool(props)
                 messagebox.showinfo(tr("project.spiderweb"), tr(
                     ("load.exported_own_extracted" if len(hid.h_s) else "load.exported_own") if len(notes) else
-                    "load.exported", path=path, notes=trn("n.notes", left, n=left))
+                    "load.exported_tracks" if listed else "load.exported", path=path, notes=trn("n.notes", left, n=left))
+                                    + (tr("load.exported_tracks_too") if listed and len(notes) else "")
                                     + own_note() + mixed)
             elif isinstance(e, MidiError):
                 messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info))
@@ -1331,6 +1336,10 @@ class ProjectFiles:
             else:
                 write_log(type(e), e, e.__traceback__, "(exporting a loaded MIDI)")
                 messagebox.showerror(tr("project.spiderweb"), tr("load.export_failed", e=e))
+        from window.export_window import POLL_MS as win_poll, ExportWindow
+        steps = (["load.reading_ticks"] if retimed and keeps else []) + (["project.tempo_working"] if retimed else []) \
+            + (["load.checking_own"] if len(notes) or own else []) + ["load.exporting"]
+        win = ExportWindow(self, job, path, steps)  # (steps, bar, Cancel; user 2026-10-29)
         threading.Thread(target=run, daemon=True, name="export loaded midi").start()
         poll()
 
