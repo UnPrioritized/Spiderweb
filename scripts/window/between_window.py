@@ -814,26 +814,15 @@ class BetweenGroups:
         lb, shown = self.listbox, getattr(self, "_list_shown", None)
         if shown is None or lb.size() != len(shown):
             shown = []
-        same = sum(a == b for a, b in zip(shown, want))
-        if same * 2 >= len(want):  # (mostly as shown: only the rows that changed written again; 4,000 shapes
-            # rewritten whole took ~0.1 s an edit, speed hunt 2026-10-29)
-            for r, row in enumerate(want[:len(shown)]):
-                if row != shown[r]:
-                    lb.delete(r)
-                    self.list_row(r, *row)
-            if len(shown) > len(want):
-                lb.delete(len(want), "end")
-            for r in range(len(shown), len(want)):
-                self.list_row(r, *want[r])
-        else:
-            top = lb.yview()[0]  # (emptying it scrolls to the top: put back below)
-            lb.delete(0, "end")
-            for r, row in enumerate(want):
-                self.list_row(r, *row)
-            lb.yview_moveto(top)
+        var = lb.cget("listvariable")
+        if not var:
+            var = str(tk.StringVar(lb, name=f"{lb}.rows"))
+            lb.configure(listvariable=var)
+        # every text in one call (keeps the scroll place, the picked rows and the colours by row number): rows
+        # deleted one by one made Tk measure every row again each time the widest went, ~9 ms a row at 1,000
+        # shapes (speed hunt 2026-10-29)
+        lb.tk.call("set", var, tuple(text for text, _ in want))
+        for r, (_, warn) in enumerate(want):
+            if r >= len(shown) or warn != shown[r][1]:
+                lb.itemconfig(r, foreground=look.WARN if warn else "", selectforeground=look.GAP_PICKED if warn else "")
         self._list_shown = want
-
-    def list_row(self, r, text, warn):
-        self.listbox.insert(r, text)
-        if warn:
-            self.listbox.itemconfig(r, foreground=look.WARN, selectforeground=look.GAP_PICKED)
