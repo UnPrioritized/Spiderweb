@@ -1715,8 +1715,14 @@ class ProjectFiles:
             cc = self.cc_messages(ppq, bpm, only)
         if time is not None:
             time = round(time[0] * ppq), round(time[1] * ppq)
-        if boxed is not None:  # (their CC lines: only inside the boxes' time too)
-            cc = {s: [m for m in ms if time[0] <= m[0] < time[1]] for s, ms in cc.items()}
+        if boxed is not None:  # (their CC lines: only on a box's rows inside its time, hunt 2026-10-29: a box
+            # over one track took the shape's other tracks' controllers too)
+            spans = [(round(b["t0"] * ppq), round(b["t1"] * ppq), b["rows"]) for b in self.track_list.boxes]
+            slots = sorted(cc)
+            rows = dict(zip(slots, self.track_list.rows_of(slots).tolist())) if slots else {}
+            cc = {s: [m for m in ms if any(t0 <= m[0] < t1 and (r is None or r[0] <= rows[s] <= r[1])
+                                           for t0, t1, r in spans)] for s, ms in cc.items()}
+            cc = {s: ms for s, ms in cc.items() if ms}
         plan = None
         if boxed is not None:
             notes = notes[boxed]
@@ -1742,11 +1748,12 @@ class ProjectFiles:
                 time = tuple(int(t) for t in plan["map"](np.array(time, np.int64)).tolist())
         return {"notes": notes, "cc": cc, "plan": plan, "sels": sels, "heard": heard, "time": time}
 
-    def domino_copy(self, quiet=False):
+    def domino_copy(self, quiet=False, got=False):
         """Copy to Domino's clipboard bytes of what it copies -> (raw, status text, warning text), or None when
         there's nothing to put on (said why: message boxes / questions). quiet (Ctrl+C with "Ctrl+C also copies for
         Domino", App.put_clipboard): never a message box nor a question; a copy that would ask (big_ask) or can't be
-        made gives "skipped" in place of None ("" = nothing worth saying, e.g. no notes)."""
+        made gives "skipped" in place of None ("" = nothing worth saying, e.g. no notes). got: copied_music's
+        answer worked out already (Ctrl+C with Spiderweb Notes too: worked out once, hunt 2026-10-29)."""
         def fail(text, box=messagebox.showerror):
             if quiet:
                 return "skipped"
@@ -1757,7 +1764,7 @@ class ProjectFiles:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
             return fail(str(e))
-        got = self.copied_music(ppq, bpm, beats)
+        got = self.copied_music(ppq, bpm, beats) if got is False else got
         if got is None:  # (a loaded MIDI's notes in the track list's boxes: never copied, said why)
             if quiet:
                 return ""
@@ -1838,32 +1845,45 @@ class ProjectFiles:
                 warn += tr("project.dms_tempo_slow")
         return raw, text, warn
 
-    def notes_copy(self):
-        """What's copied as Spiderweb Notes bytes (files/notes_clip.py; Settings → General "Ctrl+C also copies as
-        Spiderweb Notes"), or None: off Windows, nothing to copy, mid-drag with the notes left for later (making them
-        now froze big projects), spread too far (notes_clip.LONGEST), out of memory. Never asks anything. As Export
-        MIDI writes it (copied_music); tick 0 = the time selection's start, else the first note; tracks numbered
-        from the copy's top track list row down, the rows between kept (empty)."""
-        if not clipboard.RAW or (self.roll.drag and (self.notes_late or self._late_notes)):
-            return None
+    def notes_copy(self, got=False):
+        """What's copied as Spiderweb Notes (files/notes_clip.py; Settings → General "Ctrl+C also copies as
+        Spiderweb Notes") -> (bytes or None, why: "" nothing to copy / "windows" off Windows / "long" spread too far
+        (notes_clip.LONGEST) / "memory" out of memory; hunt 2026-10-29: said in the status line). Never asks
+        anything. As Export MIDI writes it (copied_music; got = its answer worked out already); tick 0 = the time
+        selection's start, else the first note; tracks numbered from the copy's top track list row down, the rows
+        between kept (empty). Mid-drag with the notes left for later: none (making them now froze big projects)."""
+        if not clipboard.RAW:
+            return None, "windows"
+        if self.roll.drag and (self.notes_late or self._late_notes):
+            return None, ""
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError:
-            return None
-        got = self.copied_music(ppq, bpm, beats)
+            return None, ""
+        got = self.copied_music(ppq, bpm, beats) if got is False else got
         if got is None:
-            return None
+            return None, ""
         notes, cc, plan, time = got["notes"], got["cc"], got["plan"], got["time"]
         notes = notes[(notes[:, 1] > notes[:, 0]) & (notes[:, 2] >= 0) & (notes[:, 2] <= 255)]
         if not len(notes):
-            return None
+            return None, ""
         first, end = int(notes[:, 0].min()), int(notes[:, 1].max())
         if time is not None:
             first, end = min(first, time[0]), max(end, time[1])
         try:
-            return notes_clip.pack(*self._notes_parts(notes, cc, plan, first, end, ppq))
+            raw = notes_clip.pack(*self._notes_parts(notes, cc, plan, first, end, ppq))
         except MemoryError:
-            return None
+            return None, "memory"
+        return raw, "" if raw is not None else "long"
+
+    def copy_music(self):
+        """copied_music for App.put_clipboard (both Ctrl+C extras share it); False when the project's numbers can't be
+        read (each copy then says so its own way)."""
+        try:
+            ppq, bpm, beats = self.read_project()
+        except ValueError:
+            return False
+        return self.copied_music(ppq, bpm, beats)
 
     def _notes_parts(self, notes, cc, plan, first, end, ppq):
         """notes_copy's pack() arguments."""
@@ -1876,35 +1896,37 @@ class ProjectFiles:
         spare = int(known.max()) + 1 if len(known) else 0
         for k in np.flatnonzero(rows < 0).tolist():  # (not listed: after the others, a track each)
             rows[k], spare = spare, spare + 1
-        track_of = dict(zip(slots.tolist(), (rows - top).tolist()))
-        ch_of = dict(zip(slots.tolist(), channels_of(slots, use10).tolist()))
+        # (per slot, then looked up for every note at once: per-track loops over every slot froze Ctrl+C on
+        # thousands of tracks, hunt 2026-10-29)
+        slot_track, slot_ch = rows - top, channels_of(slots, use10)
         count = int(rows.max()) - top + 1
-        listed, ids = tl.row_chans(), tl.tracks()
-        chans = []
+        listed, ids, files = tl.row_chans(), tl.tracks(), self.file_tracks()
+        first_ch = np.full(count, -1, np.int64)
+        lead = np.unique(slot_track, return_index=True)  # (each track's lowest slot)
+        first_ch[lead[0]] = slot_ch[lead[1]]
+        chans, names = [], {}
         for t in range(count):  # (each track's usual channel: the list's first, else its first note's, else (an
-            shown = listed[top + t] if top + t < len(listed) else ()  # empty row between) the track's own)
-            mine = [ch_of[s] for s in slots.tolist() if track_of[s] == t]
-            if len(shown) or mine:
-                chans.append(int(shown[0]) if len(shown) else mine[0])
-                continue
-            s = int(ids[top + t]) if top + t < len(ids) else 0
+            row = top + t        # empty row between) the track's own)
+            shown = listed[row] if row < len(listed) else ()
+            s = int(ids[row]) if row < len(ids) else None
             own = tl.own_track(s)
-            chans.append(own["ch"] if own else (tl.part_channel(s) or 0) if s < 0 else
-                         int(channels_of([s], use10)[0]))
-        tracks = np.array([track_of[s] for s in notes[:, 4].tolist()], np.int64)
-        ch = np.array([ch_of[s] for s in notes[:, 4].tolist()], np.int64)
+            if len(shown) or first_ch[t] >= 0:
+                chans.append(int(shown[0]) if len(shown) else int(first_ch[t]))
+            else:
+                chans.append(own["ch"] if own else (tl.part_channel(s) or 0) if s is not None and s < 0 else
+                             int(channels_of([s or 0], use10)[0]))
+            n = tl.file_at(row) if s is not None else None
+            name = own["name"] if own else files.get(n, {}).get("name") if n is not None else None
+            if name:
+                names[t] = name
+        at = np.searchsorted(slots, notes[:, 4])
+        tracks, ch = slot_track[at], slot_ch[at]
         ch = np.where(ch == np.array(chans, np.int64)[tracks], notes_clip.OWN_CHANNEL, ch)
         shapes = np.unique(notes[:, 5])
         rows_out = np.stack([notes[:, 0] - first, notes[:, 1] - notes[:, 0], notes[:, 2],
                              np.clip(notes[:, 3], 1, 127), tracks, np.searchsorted(shapes, notes[:, 5]), ch], 1)
-        names = {}
-        for t in range(count):
-            if top + t >= len(tl.tracks()):
-                break
-            own, n = tl.own_track(int(tl.tracks()[top + t])), tl.file_at(top + t)
-            name = own["name"] if own else self.file_tracks().get(n, {}).get("name") if n is not None else None
-            if name:
-                names[t] = name
+        track_of = dict(zip(slots.tolist(), slot_track.tolist()))
+        ch_of = dict(zip(slots.tolist(), slot_ch.tolist()))
         pal, colours = self.slots_pal(), {}
         if pal:  # (Image to notes: each picture track's colour)
             pics = [i for i in shapes.tolist() if picture_like(self.shapes[i])]
@@ -1926,9 +1948,14 @@ class ProjectFiles:
                   np.array([track_of[e[1]] for e in ev], np.int64),
                   [bytes([e[2] & 0xF0 | ch_of[e[1]], e[3] & 127]) if e[2] & 0xE0 == 0xC0 else
                    bytes([e[2] & 0xF0 | ch_of[e[1]], e[3] & 127, e[4] & 127]) for e in ev]) if ev else None
+        ports = None
+        if slot_ports(auto_count(notes[:, 4]), cc, use10):  # (as the MIDI export / Copy to Domino decide: CC lines
+            ports = [0] * count                            # past one round of channels, hunt 2026-10-29)
+            for s, t in zip(slots.tolist(), slot_track.tolist()):
+                ports[t] = ports[t] or slot_port(s, use10)
         return (rows_out, ppq, chans, first - bar_line(sigs, first, ppq), end - first, names, colours,
                 channel_colours, stretch(tempo), [(t, top_, 2 ** p) for t, top_, p in stretch(sigs)],
-                stretch(plan["keys"]) if plan else [], events)
+                stretch(plan["keys"]) if plan else [], events, ports)
 
     def busy(self, text):
         """text: the status line says it and the busy cursor shows until busy(None) (the status line back)."""

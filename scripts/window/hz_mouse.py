@@ -584,6 +584,7 @@ class HzMouse:
     def copied(self, notes):
         """Something was copied here: notes (None: effect points). Notes copied in Domino after this win Ctrl+V."""
         self.app.hz_clip = notes
+        self.app.drop_own_copy()  # (Spiderweb's older copy off the clipboard, like a stroke copy: hunt 10-29)
         self.app.hz_copied = copy_count() if clipboard.RAW else None
 
     def domino_newer(self):

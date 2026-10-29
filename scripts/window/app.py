@@ -2880,27 +2880,32 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     sh["cols"] = cols[i]
             self.put_clipboard(shapes)
 
-    def put_clipboard(self, shapes):
-        """shapes (copies, their "cols" set) are what Ctrl+V pastes now (also the track list's Ctrl+C)."""
+    def put_clipboard(self, shapes, loaded=False):
+        """shapes (copies, their "cols" set) are what Ctrl+V pastes now (also the track list's Ctrl+C; loaded: its
+        boxes held a loaded MIDI's notes, which never go into a copy for other programs: said, hunt 2026-10-29)."""
         for sh in shapes:
             sh["into_from"] = self.project_token  # (its tracks are this project's: put_into_current)
         self.clipboard = shapes
         self.clip_kind = "shapes"
         line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
         msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
-        also, domino, notes = [], None, None
+        also, domino, notes, why = [], None, None, ""
+        # (what both extras copy, worked out once: a big song's Keep timing took twice as long, hunt 2026-10-29)
+        got = self.copy_music() if RAW and (self.copy_domino.get() or self.copy_notes.get()) else False
         if self.copy_domino.get():  # (Settings → General: Copy to Domino's notes beside it, never a question)
-            domino = self.domino_copy(quiet=True)
+            domino = self.domino_copy(quiet=True, got=got)
             if isinstance(domino, tuple):
                 also.append((registered(DOMINO_FORMAT), domino[0]))
         if self.copy_notes.get():  # (... and Spiderweb Notes, for other programs: files/notes_clip.py)
             try:
-                notes = self.notes_copy()
+                notes, why = self.notes_copy(got=got)
             except Exception as e:  # (the copy itself still goes on the clipboard)
                 errors.write_log(type(e), e, e.__traceback__, "notes_copy")
-                notes = False
+                notes, why = None, "error"
             if notes:
                 also.append((registered(notes_clip.NAME), notes))
+            elif loaded and not why:
+                why = "loaded"
         try:
             shared, extra = put_text_and(line, also)
         except MemoryError:
@@ -2917,9 +2922,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         elif domino:  # (no room on the clipboard / it would have asked or failed)
             msg += tr("app.not_copied_for_domino")
         if notes and extra:
-            msg += tr("app.copied_as_notes_too")
-        elif notes or notes is False:  # (no room on the clipboard / it failed: errors.log)
-            msg += tr("app.not_copied_as_notes")
+            msg += tr("app.copied_as_notes_too") + (tr("load.domino_short") if loaded else "")
+        elif notes:  # (made, but the clipboard had no room for it)
+            msg += tr("app.not_copied_as_notes_room")
+        elif why:  # (left out: off Windows, too far apart, out of memory, an error (errors.log), loaded notes only)
+            msg += tr("app.not_copied_as_notes_" + why)
         self.status.config(text=msg)
 
     def cut_selected(self, whole=False):
@@ -2945,9 +2952,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """A copy only Spiderweb keeps (a stroke, a curve's shape): with "Ctrl+C also copies…" ticked, the Windows
         clipboard is emptied if it still holds Spiderweb's last copy, so other programs don't paste those older notes
         (user's pick, 2026-10-20); something copied in another program since stays."""
+        self.drop_own_copy()
+        self.remember_clip()
+
+    def drop_own_copy(self):
+        """remember_own_copy's emptying alone (Hz window notes, Conductor pane copies: hunt 2026-10-29); what Ctrl+V
+        pastes on the piano roll stays as it was."""
         if RAW and (self.copy_domino.get() or self.copy_notes.get()) and copy_count() == self.seen_clip:
             clipboard.put_many([])  # (through the module: the tests' pretend clipboard replaces it there)
-        self.remember_clip()
 
     def shared_clip(self, shapes_only=False):
         """The Windows clipboard's text if it holds a shared line put there after Spiderweb's last copy (so it's

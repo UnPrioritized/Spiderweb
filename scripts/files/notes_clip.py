@@ -16,7 +16,7 @@ import numpy as np
 NAME = "Spiderweb Notes"  # (the registered clipboard format's name)
 TAG = b"SPWNOTES"
 VERSION = 1
-END, INFO, TRACKS, NOTES, TRACK_COLOURS, ZIPPED, NAMES, CHANNEL_COLOURS = 0, 1, 2, 3, 4, 5, 6, 7
+END, INFO, TRACKS, NOTES, TRACK_COLOURS, ZIPPED, NAMES, CHANNEL_COLOURS, PORTS = 0, 1, 2, 3, 4, 5, 6, 7, 8
 TEMPO, EVENTS, TIME_SIGS, KEY_SIGS = 16, 17, 19, 20
 ZIP_LEVEL = 6  # (measured: 9 no smaller, 1 made random sets bigger)
 LENGTH, VELOCITY, TRACK, GROUP, COLUMN, CHANNEL = 1, 2, 4, 8, 16, 32
@@ -142,13 +142,14 @@ def zipped(raw):
 
 
 def pack(notes, ppq, track_channels, from_bar=0, length=0, names=None, track_colours=None, channel_colours=None,
-         tempo=(), sigs=(), keys=(), events=None):
+         tempo=(), sigs=(), keys=(), events=None, ports=None):
     """The Spiderweb Notes bytes, or None when no note keeps the rules or they span LONGEST ticks or more.
     notes: int64 rows (start, length, key, velocity, track, group, channel), ticks from the copy's start (tick 0);
     channel 0-15 (OWN_CHANNEL when it's its track's). track_channels: each track's channel, 0.. (Tracks block).
     names {track: text}; track_colours {track: "RRGGBB"}; channel_colours: 16 "RRGGBB"; tempo [(tick, us)], sigs
     [(tick, top, bottom)], keys [(tick, sharps, minor)] from tick 0 (the one in force there first); events:
-    (tick, track arrays, [MIDI bytes]) in their order, or None. Packed PIECE records at a time, each piece its
+    (tick, track arrays, [MIDI bytes]) in their order, or None; ports: each track's port 0.. (Track ports block,
+    only when one isn't 0: as the MIDI export writes them, hunt 2026-10-29). Packed PIECE records at a time, each piece its
     own block (zipped when smaller), so a big copy never needs much memory at once."""
     a = np.asarray(notes, np.int64).reshape(-1, 7)
     order = kept_order(*a.T)
@@ -161,6 +162,8 @@ def pack(notes, ppq, track_channels, from_bar=0, length=0, names=None, track_col
         return None
     out = [TAG, bytes([VERSION]), block(INFO, varint(ppq) + varint(len(order)) + varint(from_bar) + varint(length)),
            block(TRACKS, varint(len(track_channels)) + bytes(int(c) & 15 for c in track_channels))]
+    if ports is not None and any(ports):
+        out.append(block(PORTS, varint(len(ports)) + bytes(int(p) & 0xFF for p in ports)))
     if names:
         out.append(block(NAMES, varint(len(names)) + b"".join(varint(t) + text(names[t]) for t in sorted(names))))
     if track_colours:

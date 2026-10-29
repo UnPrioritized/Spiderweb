@@ -385,7 +385,7 @@ def clip_boxed(app, boxes, loaded=None):
         for key in ("into_gap", "into_rest", "into_new"):
             piece.pop(key, None)
         piece["cols"] = [v - first for v in r]
-    app.put_clipboard(pieces)
+    app.put_clipboard(pieces, loaded=loaded is not None)
     return True
 
 

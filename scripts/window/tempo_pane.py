@@ -2521,6 +2521,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.app.status.config(text=tr("tempo.copy_nothing"))
             return False
         self.app.tempo_clip = clip
+        self.app.drop_own_copy()  # (Spiderweb's older copy off the clipboard, like a stroke copy: hunt 2026-10-29)
         n = len(clip["points"]) + len(clip["catch"])
         self.app.status.config(text=trn("tempo.copied", n, n=n))
         return True

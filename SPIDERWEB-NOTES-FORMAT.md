@@ -79,8 +79,8 @@ Block rules:
 - **A block you know may be longer than described here:** read the fields you know, then skip to the end of the
   block by its size. New fields are only ever added at the end. (Not the blocks made of records: their body is
   records to the end, so they never get new fields.)
-- **Order:** Info comes first and must be there (once; never inside a Zipped block). Tracks, Track names and Track
-  colours come before any block that names a track (Notes, Events). Blocks of the same type may come more than once; the timed ones (Notes, Tempo, Events,
+- **Order:** Info comes first and must be there (once; never inside a Zipped block). Tracks, Track ports, Track
+  names and Track colours come before any block that names a track (Notes, Events). Blocks of the same type may come more than once; the timed ones (Notes, Tempo, Events,
   Time signatures, Key signatures) each start fresh (below).
 
 | Type | Name | Body |
@@ -93,16 +93,18 @@ Block rules:
 | 5 | Zipped | unzipped size (varint), then zlib data (RFC 1950, not raw deflate or gzip) |
 | 6 | Track names | name count (varint), then per name: track (varint), text |
 | 7 | Channel colours | 16 entries, channel 0 first: red, green, blue (1 byte each) |
+| 8 | Track ports | track count (varint), then one port byte per track (0 = port A, 1 = port B ...), track 0 first |
 | 16 | Tempo | records: gap (varint), microseconds per quarter note (varint, 1 or more) |
 | 17 | Events | records: gap (varint), track (varint), a MIDI channel message (below) |
 | 19 | Time signatures | records: gap (varint), top (1 byte, 1..255), bottom (1 byte: 1, 2, 4 ... 128) |
 | 20 | Key signatures | records: gap (varint), sharps (1 byte, -7..7 as a signed byte: 0xF9 = 7 flats), minor (1 byte, 0 / 1) |
 
-Type 18 is kept for other events (system exclusive, text and marker events), not defined yet. Types 8..15 and
+Type 18 is kept for other events (system exclusive, text and marker events), not defined yet. Types 9..15 and
 21..999 are kept for this document (ask in the Spiderweb repo). Types 1000 and up are free for any program's own use
 and will never be given a meaning here.
 
-Spiderweb writes: Info, Tracks, Track names (only when a track has a name), Track colours (only when there are some),
+Spiderweb writes: Info, Tracks, Track ports (only when a track isn't on port A), Track names (only when a track has
+a name), Track colours (only when there are some),
 Channel colours, Tempo, Time signatures, Key signatures (only when there are some), Notes, Events (only when there
 are some), End. Big copies come as several Notes / Events blocks of up to a million records each, and each of those
 may be inside a Zipped block.
@@ -143,6 +145,14 @@ your tracks per track, everything by channel, or your own way.
 Spiderweb numbers the tracks from the copy's top row down, track 0 first, and lists every one of them, also empty
 ones between: a copy of Spiderweb's tracks 3, 4 and 6 comes as tracks 0, 1 and 3, with an empty track 2, so the
 gaps stay as they were. Keep or drop the empty ones as you like.
+
+### Track ports
+
+Like a MIDI file's port mark (FF 21): tracks on different ports never share a channel, so a controller on port B's
+channel 1 doesn't reach port A's channel 1. Spiderweb writes this block exactly when its MIDI export writes ports:
+when controllers go out and there are more tracks than channels. No block, or a track past its count: port A (0).
+Reading everything as one port is fine when you don't do ports, but controllers on the same channel number then
+reach each other's notes.
 
 ### Track names
 
@@ -246,7 +256,7 @@ A writer must keep every rule above. A reader meeting data that breaks one may d
 | Tempo 0; a time signature top 0 or bottom that isn't a power of 2; key signature sharps outside -7..7 or minor not 0 / 1 | drop that record |
 | An Events status below 0xA0 or above 0xEF, or a data byte above 127 | damaged: stop that block |
 | A record cut off by the end of its block (any record block) | damaged: stop that block, keep the records before it |
-| Tracks / Track names / Track colours ending before its count | keep the entries read, warn |
+| Tracks / Track ports / Track names / Track colours ending before its count | keep the entries read, warn |
 | A name that isn't UTF-8 | drop that name |
 | Channel colours shorter than 48 bytes | ignore the block |
 | Info with fewer than 4 fields | damaged (a 3-field Info from an older writer: length 0) |
@@ -395,19 +405,23 @@ def read_blocks(data, out):
                 out["names"][track], p = text(body, p)
         elif kind == 7:
             out["channel_colours"] = [tuple(body[3 * c:3 * c + 3]) for c in range(16)]
+        elif kind == 8:
+            count, p = varint(body, 0)
+            out["ports"] = list(body[p:p + count])
         elif kind in (16, 17, 19, 20):
             read_timed(body, kind, out)
 
 
 def read_spiderweb_notes(data):
-    """-> {"ppq", "count", "from_bar", "length", "channels" (per track), "names" {track: text},
+    """-> {"ppq", "count", "from_bar", "length", "channels" (per track), "ports" (per track, [] = all port A),
+    "names" {track: text},
     "colours" {track: (r, g, b)}, "channel_colours" [(r, g, b)] * 16,
     "notes" [(start, length, key, velocity, track, group, channel)] in note-number order,
     "tempo" [(tick, microseconds)], "events" [(tick, track, MIDI bytes)],
     "time_signatures" [(tick, top, bottom)], "key_signatures" [(tick, sharps, minor)]}"""
     if data[:8] != b"SPWNOTES" or data[8] != 1:
         raise ValueError("not Spiderweb Notes version 1")
-    out = {"ppq": 960, "count": 0, "from_bar": 0, "length": 0, "channels": [], "names": {}, "colours": {},
+    out = {"ppq": 960, "count": 0, "from_bar": 0, "length": 0, "channels": [], "ports": [], "names": {}, "colours": {},
            "channel_colours": [], "notes": [], "tempo": [], "events": [], "time_signatures": [],
            "key_signatures": []}
     read_blocks(data[9:], out)
