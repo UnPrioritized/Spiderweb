@@ -85,7 +85,7 @@ from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, painting_order
-from files import errors, notes_clip, speed
+from files import clipboard, errors, notes_clip, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player
 from files.midi_out import PPQ_WARN, track_slots
@@ -2940,6 +2940,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def remember_clip(self):
         """Spiderweb copied something: what the Windows clipboard holds now is older than that copy."""
         self.seen_clip = copy_count()
+
+    def remember_own_copy(self):
+        """A copy only Spiderweb keeps (a stroke, a curve's shape): with "Ctrl+C also copies…" ticked, the Windows
+        clipboard is emptied if it still holds Spiderweb's last copy, so other programs don't paste those older notes
+        (user's pick, 2026-10-20); something copied in another program since stays."""
+        if RAW and (self.copy_domino.get() or self.copy_notes.get()) and copy_count() == self.seen_clip:
+            clipboard.put_many([])  # (through the module: the tests' pretend clipboard replaces it there)
+        self.remember_clip()
 
     def shared_clip(self, shapes_only=False):
         """The Windows clipboard's text if it holds a shared line put there after Spiderweb's last copy (so it's
