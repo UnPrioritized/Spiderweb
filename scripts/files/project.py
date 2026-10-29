@@ -45,7 +45,9 @@ from files import clipboard
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
 from files.own_tracks import ID_MOST, part_key, clean_file_gone, clean_file_order, clean_file_props, clean_file_tracks, clean_own_tracks, new_id
-from files.midi_out import MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_inserts, note_tracks, track_slots, write_midi
+from files.midi_out import (MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_inserts, note_tracks, own_events,
+                            track_slots, write_midi)
+from files.own_tracks import FILE0
 from files.playback import OLD_NAMES, keep_saved
 from files.about import HERE, USER, VERSION
 from files.errors import write_log
@@ -1189,7 +1191,8 @@ class ProjectFiles:
                     if inside.any():
                         part, tid = notes[inside], tid[inside]
                         retime = (retime or Retime(None, (), {}, ())).add(
-                            {-1 - k: note_inserts(part[tid == k]) for k in np.unique(tid).tolist()})
+                            {-1 - k: note_inserts(part[tid == k], *own_events(cc, FILE0 + k))  # (+ CCs laid there)
+                             for k in np.unique(tid).tolist()})
                         job["inside"] = len(part)
                         notes = notes[~inside]
                     if len(notes) or own:

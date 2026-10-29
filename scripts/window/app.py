@@ -149,8 +149,9 @@ class Stopped(Exception):
 
 def can_go_in(sh):
     """True if the shape can be drawn into a track added by hand (Draw into a track group B: pictures, masks, Hz
-    basses, Channel per strip shapes and pasted notes with CC events keep their own channels for now)."""
-    return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh) or "cc" in sh)
+    basses and Channel per strip shapes keep their own channels for now; pasted notes with CC events go in, their
+    events on each colour's track, user 2026-10-29: "you copy from Domino is what you'll get")."""
+    return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh))
 
 
 def placed_on(sh, own):
@@ -334,7 +335,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     if stash is not None:  # (App.fit_into's laying again: lay_again)
         stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
                      all16=all16, mode=mode)
-    rendered, slots, need = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode)
+    rendered, slots, need, laid = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode)
+    voice_slots.update(laid)
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
             voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
@@ -345,10 +347,11 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
 
 def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
     """all_notes' last part: the shapes laid on tracks ({number: (notes, colours)}) put on them, after the other
-    shapes' rendered notes: (rendered, slot count, {number: how many colours it has})."""
-    need = {}
+    shapes' rendered notes: (rendered, slot count, {number: how many colours it has}, {number: {pasted track: slot}}
+    for laid pasted notes with CC events: render's voice_slots, Multi channel only, App.cc_messages)."""
+    need, laid = {}, {}
     if not inside:
-        return rendered, slots, need
+        return rendered, slots, need, laid
     parts, together = [rendered], []
     for i, (n, t) in inside.items():
         sh = shapes[i]
@@ -361,6 +364,9 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         on = np.array(laid_slots_of(sh, ids, own, use10), np.int64)
         if mode != "auto" and not pinned_slots(sh, mode):  # (Single channel / As drawn: every colour on its first
             colour = np.zeros_like(colour)                  # track, hunt 2026-10-26; an Extract keeps its channels)
+        if mode == "auto" and "cc" in sh and t is not None and len(n):  # (each pasted track's events: its colour's)
+            tracks = np.unique(np.asarray(t, np.int64))
+            laid[i] = {int(u): int(on[min(k, len(ids) - 1)]) for k, u in enumerate(tracks.tolist())}
         fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True
         if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
             together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
@@ -377,7 +383,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
             together = np.concatenate([rendered[there], together])
         parts.append(fix_rows(together))
     rendered = np.concatenate(parts)
-    return rendered, max(slots, auto_count(rendered[:, 4])), need  # (automatic tracks shapes were pinned on, B11)
+    return rendered, max(slots, auto_count(rendered[:, 4])), need, laid  # (automatic tracks shapes were pinned on, B11)
 
 
 def lay_again(made, stash, shapes, own):
@@ -390,9 +396,9 @@ def lay_again(made, stash, shapes, own):
     use10 = stash["base10"] or any(shapes[i].get("slots10") is True for i in inside)
     if (use10 or stash["all16"]) != made[1]:
         return None
-    rendered, slots, need = lay_inside(stash["rendered"], stash["slots"], inside, shapes, own, made[1],
-                                       stash["mode"])
-    return made[0], made[1], rendered, slots, made[4], need
+    rendered, slots, need, laid = lay_inside(stash["rendered"], stash["slots"], inside, shapes, own, made[1],
+                                             stash["mode"])
+    return made[0], made[1], rendered, slots, {**made[4], **laid}, need
 
 
 def in_track(notes, slots, owner, fix):

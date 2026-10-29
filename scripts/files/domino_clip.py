@@ -173,6 +173,7 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
     length = max([length] + [ev[-1][0] - first + 1 for ev in cc.values() if ev])
     end = item(2009, item(1001, struct.pack("<I", length)))
     with Packer(zlib.Z_DEFAULT_COMPRESSION) as z:
+        was = notes[:, 4]  # (a track of yours: each part's slot, its CC events', user 2026-10-29)
         notes, autos, count, at = own_compact(notes, own)
         parts = own_parts(at, count)  # (a folder of yours: one Domino track per channel)
         order, cuts = track_orders(notes, count, z.pool)
@@ -182,7 +183,8 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
 
         def events(s, a, b):
             rows = note_rows(notes[order[a:b]], first)
-            return b"".join(bytes(p) for p in with_cc(rows, cc[s], first)) if s < autos and cc.get(s) else rows.tobytes()
+            mine = cc.get(s) if s < autos else cc.get(int(was[order[a]])) if a < b else None
+            return b"".join(bytes(p) for p in with_cc(rows, mine, first)) if mine else rows.tobytes()
         tracks = b"".join(item(1003, TRACK_HEAD + events(s, a, b) + end + TRACK_TAIL)
                           for s, a, b in ((s, int(cuts[s]), int(cuts[s + 1])) for s in slots)
                           if a < b or pad_from is not None and pad_from <= s < autos)
@@ -433,6 +435,15 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
                 feed(track_tail(0))
                 continue
             channel = int(was[order[cuts[slot]]]) & 15  # (its notes' own: moved in from another track)
+            mine_cc = (cc or {}).get(int(was[order[cuts[slot]]]))  # (pasted notes' CC events laid there)
+            if mine_cc:
+                part = notes[order[cuts[slot]:cuts[slot + 1]]]
+                pieces = with_cc(note_rows(part), mine_cc)
+                track_head(channel, name, sum(len(p) for p in pieces))
+                for p in pieces:
+                    feed(bytes(p))
+                feed(track_tail(max(int(part[:, 1].max()), mine_cc[-1][0])))
+                continue
         else:
             channel = slot_track_channel(slot, use10)[1]
             port = slot_port(slot, use10) if ports else 0

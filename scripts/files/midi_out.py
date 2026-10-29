@@ -9,7 +9,7 @@ import numpy as np
 from files.safefile import write_bytes
 from files.own_tracks import among_file, plan
 from files.speed import loops
-from notes.engine import OWN0, auto_count, own_id, slot_port, slot_ports, slot_track_channel
+from notes.engine import OWN0, auto_count, own_id, own_slot, slot_port, slot_ports, slot_track_channel
 
 PPQ_WARN = 32767  # a PPQ this high or higher: many MIDI programs can't open the file; still written
 MAX_DELTA = (1 << 28) - 1  # the longest wait between two events a MIDI file can hold (4 bytes)
@@ -49,10 +49,30 @@ def track_events(notes, ch):
             for at in range(0, 2 * n, PIECE)]
 
 
-def note_inserts(notes):
+def own_events(cc, track_id):
+    """A track of yours' (or a loaded MIDI's track drawn into: FILE0 + n) MIDI messages from cc ({slot: [(tick,
+    status, data 1, data 2, ...)]}, App.cc_messages: pasted notes' CC events laid there, user 2026-10-29), every
+    channel's: (events in time order, each event's channel), or ([], []) with none."""
+    got = [(e, c) for c in range(16) for e in cc.get(own_slot(track_id, c)) or () if e[1] is not None]
+    got.sort(key=lambda g: g[0][0])  # (stable: a channel's own order kept on a shared tick)
+    return [e for e, _ in got], [c for _, c in got]
+
+
+def note_inserts(notes, events=(), chans=()):
     """Notes put into a loaded MIDI's track (group D: shapes drawn into it), as midi_copy.Retime inserts: (ticks,
     starts of each event in the bytes, bytes), every event with its status byte (channel = slot & 15), in time
-    order, note-offs first on a shared tick (like track_events)."""
+    order, note-offs first on a shared tick (like track_events). events, chans: own_events' (the CC events laid
+    there), between the note-offs and the note-ons of their tick (like cc_track)."""
+    if len(events):
+        items = [(int(s) * 3 + 2, bytes([0x90 | int(k) & 15, int(p), int(v)])) for s, _, p, v, k in notes[:, :5]]
+        items += [(int(e) * 3, bytes([0x80 | int(k) & 15, int(p), 0])) for _, e, p, _, k in notes[:, :5]]
+        for e, c in zip(events, chans):
+            short = (e[1] & 0xE0) == 0xC0  # (program change, channel pressure: one data byte)
+            items.append((e[0] * 3 + 1, bytes([e[1] | c, e[2]] if short else [e[1] | c, e[2], e[3]])))
+        items.sort(key=lambda it: it[0])
+        sizes = np.array([len(b) for _, b in items], np.int64)
+        return (np.array([k // 3 for k, _ in items], np.int64), np.concatenate([[0], np.cumsum(sizes)]),
+                np.frombuffer(b"".join(b for _, b in items), np.uint8))
     n = len(notes)
     tick = np.empty(2 * n, np.int64)
     tick[0::2] = notes[:, 0] * 2 + 1
@@ -76,17 +96,20 @@ def _events(notes, order, tick, last, ch):
     return _encode(tick, np.where(on == 1, 0x90 | ch, 0x80 | ch), key, vel, last)
 
 
-def cc_track(notes, ch, events):
+def cc_track(notes, ch, events, ev_ch=None):
     """track_events for a track with other MIDI messages too (a Hz bass's CC lines: hz_cc.slot_events, [(tick,
     status, data 1, data 2)], status without the channel): on a shared tick the note-offs first, then the messages
-    (in their order), then the note-ons (a note starts with the values set on its tick)."""
+    (in their order), then the note-ons (a note starts with the values set on its tick). ch: the channel, or each
+    note's; ev_ch: each message's channel (a track of yours with several: own_events), else ch."""
     n = len(notes)
     # (pasted notes' passengers: Domino's own events have no MIDI message (status None), left out)
-    ev = np.asarray([e[:4] for e in events if e[1] is not None], np.int64).reshape(-1, 4)
+    keep = [e[1] is not None for e in events]
+    ev = np.asarray([e[:4] for e, k in zip(events, keep) if k], np.int64).reshape(-1, 4)
+    ech = ch if ev_ch is None else np.asarray(ev_ch, np.int64)[np.array(keep, bool)] if len(keep) else 0
     tick = np.concatenate([notes[:, 1], ev[:, 0], notes[:, 0]])
     kind = np.repeat(np.arange(3), [n, len(ev), n])
     order = np.lexsort((kind, tick))  # (stable: alike ones keep their order)
-    status = np.concatenate([np.full(n, 0x80 | ch), ev[:, 1] | ch, np.full(n, 0x90 | ch)])
+    status = np.concatenate([np.full(n, 0x80) | ch, ev[:, 1] | ech, np.full(n, 0x90) | ch])
     one = np.concatenate([notes[:, 2], ev[:, 2], notes[:, 2]])
     two = np.concatenate([np.zeros(n, np.int64), ev[:, 3], notes[:, 3]])
     status = status[order]
@@ -322,11 +345,14 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
         if type(track) is dict:  # (an own track: its name first, port A, its notes if any were drawn into it)
             head = ([bytes([0, 0xFF, 0x21, 1, 0])] if every else []) + (
                 [name_event(track["name"])] if track["name"] else [])
+            evs, ev_ch = own_events(cc, track["id"])  # (pasted notes' CC events laid there, every channel's)
             channel, track = track["ch"], at.get(track["id"])
             if track is None:
                 return head + [empty_track(channel)]
             rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
             mine = chans[rows]
+            if evs:
+                return head + cc_track(notes[rows], mine if mine.min() != mine.max() else int(mine[0]), evs, ev_ch)
             if mine.min() != mine.max():  # (several channels: a folder, each note on its own)
                 return head + track_events(notes[rows], mine)
             channel = int(mine[0])  # (its colours' own channel: moved in from another track)
