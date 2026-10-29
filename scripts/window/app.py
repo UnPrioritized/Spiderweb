@@ -85,7 +85,7 @@ from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, painting_order
-from files import errors, speed
+from files import errors, notes_clip, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player
 from files.midi_out import PPQ_WARN, track_slots
@@ -516,6 +516,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.synths_entry = None  # (in Settings → Sound)
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
         self.copy_domino = tk.BooleanVar(self, value=False)  # Settings → General: Ctrl+C also copies for Domino
+        self.copy_notes = tk.BooleanVar(self, value=False)  # ... and as Spiderweb Notes (files/notes_clip.py)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
         self.loud_on_top = tk.BooleanVar(self, value=False)  # Settings → Look: a loaded MIDI's louder notes drawn on top
@@ -2887,11 +2888,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.clip_kind = "shapes"
         line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
         msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
-        also, domino = (), None
+        also, domino, notes = [], None, None
         if self.copy_domino.get():  # (Settings → General: Copy to Domino's notes beside it, never a question)
             domino = self.domino_copy(quiet=True)
             if isinstance(domino, tuple):
-                also = [(registered(DOMINO_FORMAT), domino[0])]
+                also.append((registered(DOMINO_FORMAT), domino[0]))
+        if self.copy_notes.get():  # (... and Spiderweb Notes, for other programs: files/notes_clip.py)
+            try:
+                notes = self.notes_copy()
+            except Exception as e:  # (the copy itself still goes on the clipboard)
+                errors.write_log(type(e), e, e.__traceback__, "notes_copy")
+                notes = False
+            if notes:
+                also.append((registered(notes_clip.NAME), notes))
         try:
             shared, extra = put_text_and(line, also)
         except MemoryError:
@@ -2902,11 +2911,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 msg += tr("app.too_long", chars=len(line))
         else:
             msg += tr("app.couldn_t_share")
-        if also and extra:
+        if isinstance(domino, tuple) and extra:
             self.own_domino_copy = self.seen_clip  # (pasted straight back: its tempo isn't asked about)
             msg += tr("app.copied_for_domino_too")
-        elif also or domino:  # (no room on the clipboard / it would have asked or failed)
+        elif domino:  # (no room on the clipboard / it would have asked or failed)
             msg += tr("app.not_copied_for_domino")
+        if notes and extra:
+            msg += tr("app.copied_as_notes_too")
+        elif notes or notes is False:  # (no room on the clipboard / it failed: errors.log)
+            msg += tr("app.not_copied_as_notes")
         self.status.config(text=msg)
 
     def cut_selected(self, whole=False):

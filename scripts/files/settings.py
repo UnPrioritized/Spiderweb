@@ -135,6 +135,7 @@ APP_KEYS = {
     "tips_seen": ("tips", "seen", list),
     "domino_256": ("domino", "keys_256", bool),
     "copy_domino": ("domino", "with_ctrl_c", bool),
+    "copy_notes": ("copying", "spiderweb_notes", bool),
     "keep_colours": ("channels", "keep_colours", bool),
     "loud_on_top": ("look", "louder_notes_on_top", bool),
 }

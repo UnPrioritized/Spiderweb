@@ -315,6 +315,10 @@ class SettingsWindow(tk.Toplevel):
                         command=self.app.schedule_autosave).pack(anchor="w", pady=(4, 0))
         ttk.Label(page, text=tr("settings.copy_domino_hint"), foreground=look.HINT,
                   wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
+        ttk.Checkbutton(page, text=tr("settings.copy_notes"), variable=self.app.copy_notes, takefocus=False,
+                        command=self.app.schedule_autosave).pack(anchor="w", pady=(8, 0))
+        ttk.Label(page, text=tr("settings.copy_notes_hint"), foreground=look.HINT,
+                  wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
 
     def build_domino(self, page):
         """(Experimental) Domino 256 keys: Copy / Paste / Export to Domino keep keys above 127 (off: left out)."""

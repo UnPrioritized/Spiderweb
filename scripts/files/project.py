@@ -18,7 +18,8 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, clean_cycle, notes_shape, unpack_notes
 from notes.engine import (CHANNEL_MODES, OWN0, SHAPE_DEFAULTS, SPLITS, auto_count, clean_basics, clean_kept_patterns, clean_shape,
-                          merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports, slot_track_channel, track_ids)
+                          channels_of, merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports,
+                          slot_track_channel, track_ids)
 from notes.hzbass import clean_hz
 from notes.loaded import (clean_link, conductor_line, extract_groups, extract_ports, file_tempos, own_hits, retime_for,
                           same_conductor, tempo_new, tempo_tracks)
@@ -26,7 +27,7 @@ from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
 from notes.passengers import STAY, USUAL, event_kind, midi_messages, pack_cc, placed, unpack_cc
-from notes.mask import as_used, slot_rule
+from notes.mask import as_used, picture_like, slot_rule
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -41,7 +42,7 @@ from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text
-from files import clipboard
+from files import clipboard, notes_clip
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
 from files.own_tracks import ID_MOST, part_key, clean_file_gone, clean_file_order, clean_file_props, clean_file_tracks, clean_own_tracks, new_id
@@ -570,6 +571,7 @@ class ProjectFiles:
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
                               "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
+                              "copy_notes": self.copy_notes.get(),
                               "keep_colours": self.keep_colours.get(), "loud_on_top": self.loud_on_top.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
@@ -762,6 +764,7 @@ class ProjectFiles:
             self.take_kestrel_opts({k: win.get("kestrel_" + k) for k in self.kestrel_opts})
             self.domino256.set(win.get("domino_256") is True)
             self.copy_domino.set(win.get("copy_domino") is True)
+            self.copy_notes.set(win.get("copy_notes") is True)
             self.keep_colours.set(win.get("keep_colours") is True)
             self.loud_on_top.set(win.get("loud_on_top") is True)
             self.sync_builtin()
@@ -1686,6 +1689,59 @@ class ProjectFiles:
             messagebox.showwarning(tr("project.spiderweb"), text + warn)
         self.tips.show("domino", wait=True)
 
+    def copied_music(self, ppq, bpm, beats):
+        """What a copy out (Copy to Domino, Spiderweb Notes) holds, as Export MIDI would write it: {"notes" (rows,
+        file ticks), "cc" {slot: messages}, "plan" (file_plan, None without a tempo line / signatures), "sels" (the
+        shapes copied, [] = all), "heard" (first start, last end in beats), "time" (the time selection's (start,
+        end) in file ticks, or None)}; None when the track list's boxes hold none of Spiderweb's notes."""
+        self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
+        notes = self.rendered
+        boxed = self.list_boxed()
+        if boxed is not None and not boxed.any():
+            return None
+        sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
+        only = set(sels) if sels else None
+        time, by_time = None, boxed is not None or (bool(sels) and self.time_picked())
+        if boxed is not None:
+            boxes = self.track_list.boxes
+            time = min(b["t0"] for b in boxes), max(b["t1"] for b in boxes)
+        elif by_time and self.roll.box_kept:
+            areas = self.roll.box_kept[0]  # (ruler bands: (beat, top, beat, bottom))
+            time = min(min(a[0], a[2]) for a in areas), max(max(a[0], a[2]) for a in areas)
+        if sels and not by_time:  # (shapes picked by clicking / a Select box: the pasted CC
+            # events stay behind, Domino's way, user 2026-10-29; your Hz bass CC lines go along, user 2026-10-21)
+            cc = slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
+        else:
+            cc = self.cc_messages(ppq, bpm, only)
+        if time is not None:
+            time = round(time[0] * ppq), round(time[1] * ppq)
+        if boxed is not None:  # (their CC lines: only inside the boxes' time too)
+            cc = {s: [m for m in ms if time[0] <= m[0] < time[1]] for s, ms in cc.items()}
+        plan = None
+        if boxed is not None:
+            notes = notes[boxed]
+        elif sels:
+            notes = notes[np.isin(notes[:, 5], sels)]
+        heard = (int(notes[:, 0].min()) / ppq, int(notes[:, 1].max()) / ppq) if len(notes) else (0, 0)
+        if (has_tempo(self.tempo) or sigs_of(self.tempo) != [DEFAULT_SIG] or self.tempo.get("keysigs")) \
+                and len(notes):
+            # (the tempo line + time signatures come too: Keep timing worked out on the whole song up to the copy's
+            # last note, so it lines up with Export MIDI)
+            upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
+            # (... to the end of that bar: bar fitting spreads ticks over the whole bar, the copy's last bar came out
+            # a few ticks off from Export MIDI, hunt 2026-10-24)
+            lines = bar_ticks(self.tempo, ppq, upto)
+            upto = int(lines[np.searchsorted(lines, upto)]) if upto < lines[-1] else upto
+            timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)
+            cc = timed_ticks(plan, notes[:0], cc)[1]  # (the notes as the file has them: finer Hz basses too)
+            if boxed is not None and len(timed) == len(boxed):
+                notes = timed[boxed]
+            else:  # (Hz basses made again with finer gates: whole shapes)
+                notes = timed[np.isin(timed[:, 5], sels)] if sels else timed
+            if time is not None:
+                time = tuple(int(t) for t in plan["map"](np.array(time, np.int64)).tolist())
+        return {"notes": notes, "cc": cc, "plan": plan, "sels": sels, "heard": heard, "time": time}
+
     def domino_copy(self, quiet=False):
         """Copy to Domino's clipboard bytes of what it copies -> (raw, status text, warning text), or None when
         there's nothing to put on (said why: message boxes / questions). quiet (Ctrl+C with "Ctrl+C also copies for
@@ -1701,42 +1757,13 @@ class ProjectFiles:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
             return fail(str(e))
-        self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
-        notes = self.rendered
-        boxed = self.list_boxed()
-        if boxed is not None and not boxed.any():  # (a loaded MIDI's notes in it: never copied, said why)
+        got = self.copied_music(ppq, bpm, beats)
+        if got is None:  # (a loaded MIDI's notes in the track list's boxes: never copied, said why)
             if quiet:
                 return ""
             self.status.config(text=tr("tracks.box_empty") + self.loaded_left_out(short=True))
             return
-        sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
-        cc = self.cc_messages(ppq, bpm, set(sels) if sels else None)
-        if boxed is None and sels and not self.time_picked():  # (shapes picked by clicking / a Select box: notes
-            cc = {}                                            # only, Domino's way, user 2026-10-29)
-        if boxed is not None:  # (their CC lines: only inside the boxes' time too)
-            boxes = self.track_list.boxes
-            lo, hi = round(min(b["t0"] for b in boxes) * ppq), round(max(b["t1"] for b in boxes) * ppq)
-            cc = {s: [m for m in ms if lo <= m[0] < hi] for s, ms in cc.items()}
-        plan = None
-        if boxed is not None:
-            notes = notes[boxed]
-        elif sels:
-            notes = notes[np.isin(notes[:, 5], sels)]
-        heard = (int(notes[:, 0].min()) / ppq, int(notes[:, 1].max()) / ppq) if len(notes) else (0, 0)
-        if (has_tempo(self.tempo) or sigs_of(self.tempo) != [DEFAULT_SIG] or self.tempo.get("keysigs"))                 and len(notes):
-            # (the tempo line + time signatures come too: Keep timing worked out on the whole song up to the copy's
-            # last note, so it lines up with Export MIDI)
-            upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
-            # (... to the end of that bar: bar fitting spreads ticks over the whole bar, the copy's last bar came out
-            # a few ticks off from Export MIDI, hunt 2026-10-24)
-            lines = bar_ticks(self.tempo, ppq, upto)
-            upto = int(lines[np.searchsorted(lines, upto)]) if upto < lines[-1] else upto
-            timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)
-            cc = timed_ticks(plan, notes[:0], cc)[1]  # (the notes as the file has them: finer Hz basses too)
-            if boxed is not None and len(timed) == len(boxed):
-                notes = timed[boxed]
-            else:  # (Hz basses made again with finer gates: whole shapes)
-                notes = timed[np.isin(timed[:, 5], sels)] if sels else timed
+        notes, cc, plan, sels, heard = got["notes"], got["cc"], got["plan"], got["sels"], got["heard"]
         high = int((notes[:, 2] > 127).sum())  # (256 keys: Domino only has 128)
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
         if not mod:
@@ -1810,6 +1837,98 @@ class ProjectFiles:
             if conductor and tempo_items(plan["events"])[1]:
                 warn += tr("project.dms_tempo_slow")
         return raw, text, warn
+
+    def notes_copy(self):
+        """What's copied as Spiderweb Notes bytes (files/notes_clip.py; Settings → General "Ctrl+C also copies as
+        Spiderweb Notes"), or None: off Windows, nothing to copy, mid-drag with the notes left for later (making them
+        now froze big projects), spread too far (notes_clip.LONGEST), out of memory. Never asks anything. As Export
+        MIDI writes it (copied_music); tick 0 = the time selection's start, else the first note; tracks numbered
+        from the copy's top track list row down, the rows between kept (empty)."""
+        if not clipboard.RAW or (self.roll.drag and (self.notes_late or self._late_notes)):
+            return None
+        try:
+            ppq, bpm, beats = self.read_project()
+        except ValueError:
+            return None
+        got = self.copied_music(ppq, bpm, beats)
+        if got is None:
+            return None
+        notes, cc, plan, time = got["notes"], got["cc"], got["plan"], got["time"]
+        notes = notes[(notes[:, 1] > notes[:, 0]) & (notes[:, 2] >= 0) & (notes[:, 2] <= 255)]
+        if not len(notes):
+            return None
+        first, end = int(notes[:, 0].min()), int(notes[:, 1].max())
+        if time is not None:
+            first, end = min(first, time[0]), max(end, time[1])
+        try:
+            return notes_clip.pack(*self._notes_parts(notes, cc, plan, first, end, ppq))
+        except MemoryError:
+            return None
+
+    def _notes_parts(self, notes, cc, plan, first, end, ppq):
+        """notes_copy's pack() arguments."""
+        use10, tl = self.picture_use10, self.track_list
+        ev = [(int(m[0]), int(s), m[1], m[2], m[3]) for s, ms in cc.items() for m in ms if m[1] is not None]
+        slots = np.unique(np.concatenate([notes[:, 4], np.array([e[1] for e in ev], np.int64)]))
+        rows = tl.rows_of(slots)
+        known = rows[rows >= 0]
+        top = int(known.min()) if len(known) else 0
+        spare = int(known.max()) + 1 if len(known) else 0
+        for k in np.flatnonzero(rows < 0).tolist():  # (not listed: after the others, a track each)
+            rows[k], spare = spare, spare + 1
+        track_of = dict(zip(slots.tolist(), (rows - top).tolist()))
+        ch_of = dict(zip(slots.tolist(), channels_of(slots, use10).tolist()))
+        count = int(rows.max()) - top + 1
+        listed, ids = tl.row_chans(), tl.tracks()
+        chans = []
+        for t in range(count):  # (each track's usual channel: the list's first, else its first note's, else (an
+            shown = listed[top + t] if top + t < len(listed) else ()  # empty row between) the track's own)
+            mine = [ch_of[s] for s in slots.tolist() if track_of[s] == t]
+            if len(shown) or mine:
+                chans.append(int(shown[0]) if len(shown) else mine[0])
+                continue
+            s = int(ids[top + t]) if top + t < len(ids) else 0
+            own = tl.own_track(s)
+            chans.append(own["ch"] if own else (tl.part_channel(s) or 0) if s < 0 else
+                         int(channels_of([s], use10)[0]))
+        tracks = np.array([track_of[s] for s in notes[:, 4].tolist()], np.int64)
+        ch = np.array([ch_of[s] for s in notes[:, 4].tolist()], np.int64)
+        ch = np.where(ch == np.array(chans, np.int64)[tracks], notes_clip.OWN_CHANNEL, ch)
+        shapes = np.unique(notes[:, 5])
+        rows_out = np.stack([notes[:, 0] - first, notes[:, 1] - notes[:, 0], notes[:, 2],
+                             np.clip(notes[:, 3], 1, 127), tracks, np.searchsorted(shapes, notes[:, 5]), ch], 1)
+        names = {}
+        for t in range(count):
+            if top + t >= len(tl.tracks()):
+                break
+            own, n = tl.own_track(int(tl.tracks()[top + t])), tl.file_at(top + t)
+            name = own["name"] if own else self.file_tracks().get(n, {}).get("name") if n is not None else None
+            if name:
+                names[t] = name
+        pal, colours = self.slots_pal(), {}
+        if pal:  # (Image to notes: each picture track's colour)
+            pics = [i for i in shapes.tolist() if picture_like(self.shapes[i])]
+            for s in np.unique(notes[np.isin(notes[:, 5], pics), 4]).tolist():
+                if s < len(pal):
+                    colours[track_of[s]] = pal[s]
+        from roll.roll_shared import COLOURS_16, SLOT_COLORS
+        channel_colours = [SLOT_COLORS[int(COLOURS_16[c])][0] for c in range(16)]
+        sigs = plan["sigs"] if plan else [(0, 4, 2)]
+        tempo = plan["events"] if plan else [(0, round(60_000_000 / 120))]  # (no tempo line: MIDI's 120 BPM)
+
+        def stretch(rows_in):  # (the one in force at first on tick 0, then the changes inside the copy)
+            rows_in = sorted(rows_in)
+            now = [r for r in rows_in if r[0] <= first][-1:]
+            return [(0,) + tuple(r[1:]) for r in now] + [(r[0] - first,) + tuple(r[1:]) for r in rows_in
+                                                         if first < r[0] < end]
+        ev.sort(key=lambda e: max(e[0] - first, 0))  # (stable: each track's own order kept on a tick)
+        events = (np.array([max(e[0] - first, 0) for e in ev], np.int64),
+                  np.array([track_of[e[1]] for e in ev], np.int64),
+                  [bytes([e[2] & 0xF0 | ch_of[e[1]], e[3] & 127]) if e[2] & 0xE0 == 0xC0 else
+                   bytes([e[2] & 0xF0 | ch_of[e[1]], e[3] & 127, e[4] & 127]) for e in ev]) if ev else None
+        return (rows_out, ppq, chans, first - bar_line(sigs, first, ppq), end - first, names, colours,
+                channel_colours, stretch(tempo), [(t, top_, 2 ** p) for t, top_, p in stretch(sigs)],
+                stretch(plan["keys"]) if plan else [], events)
 
     def busy(self, text):
         """text: the status line says it and the busy cursor shows until busy(None) (the status line back)."""

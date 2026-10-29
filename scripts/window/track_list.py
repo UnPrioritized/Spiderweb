@@ -415,28 +415,34 @@ class TrackList(tk.Canvas):
         """Each of Spiderweb's notes' row (-1: none), worked out when asked."""
         self.tracks()
         if self._rows_of_notes is None:
-            n, mine = self._made[0], self._all
-            tid = track_ids(n[:, 4])
-            out = np.full(len(n), -1, np.int64)
-            auto = tid < HAND
-            ok = auto & (tid >= 0) & (tid < len(self._row_of))
-            out[ok] = self._row_of[tid[ok]]
-            inside = (tid < 0) & (-1 - tid < len(self._file_row))  # (drawn into a loaded MIDI's track: its row)
-            out[inside] = self._file_row[-1 - tid[inside]]
-            if self._part_row and inside.any():  # (on a part's channel: the part's row, PLAN #11 D)
-                ch = channels_of(n[:, 4], self.app.picture_use10)
-                for k, row in self._part_row.items():
-                    _, chs = self.file_part(-1 - k)
-                    out[inside & (tid == -1 - key_track(k)) & np.isin(ch, list(chs))] = row
-            hand_rows = np.flatnonzero(mine >= HAND)
-            if not auto.all() and len(hand_rows):  # (a track added by hand: its row)
-                o = np.argsort(mine[hand_rows])
-                ids = mine[hand_rows][o]
-                at = np.searchsorted(ids, tid[~auto])
-                found = (at < len(ids)) & (ids[np.minimum(at, len(ids) - 1)] == tid[~auto])
-                out[~auto] = np.where(found, hand_rows[o][np.minimum(at, len(ids) - 1)], -1)
-            self._rows_of_notes = out
+            self._rows_of_notes = self.rows_of(self._made[0][:, 4])
         return self._rows_of_notes
+
+    def rows_of(self, slots):
+        """The row of notes on these slots (-1: none)."""
+        self.tracks()
+        mine = self._all
+        slots = np.asarray(slots, np.int64)
+        tid = track_ids(slots)
+        out = np.full(len(slots), -1, np.int64)
+        auto = tid < HAND
+        ok = auto & (tid >= 0) & (tid < len(self._row_of))
+        out[ok] = self._row_of[tid[ok]]
+        inside = (tid < 0) & (-1 - tid < len(self._file_row))  # (drawn into a loaded MIDI's track: its row)
+        out[inside] = self._file_row[-1 - tid[inside]]
+        if self._part_row and inside.any():  # (on a part's channel: the part's row, PLAN #11 D)
+            ch = channels_of(slots, self.app.picture_use10)
+            for k, row in self._part_row.items():
+                _, chs = self.file_part(-1 - k)
+                out[inside & (tid == -1 - key_track(k)) & np.isin(ch, list(chs))] = row
+        hand_rows = np.flatnonzero(mine >= HAND)
+        if not auto.all() and len(hand_rows):  # (a track added by hand: its row)
+            o = np.argsort(mine[hand_rows])
+            ids = mine[hand_rows][o]
+            at = np.searchsorted(ids, tid[~auto])
+            found = (at < len(ids)) & (ids[np.minimum(at, len(ids) - 1)] == tid[~auto])
+            out[~auto] = np.where(found, hand_rows[o][np.minimum(at, len(ids) - 1)], -1)
+        return out
 
     def forget(self):
         """Another project opened: nothing muted, highlighted or picked behind, back at its start; the zoom stays
