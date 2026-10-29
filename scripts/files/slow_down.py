@@ -21,6 +21,17 @@ WARM_S = 0.5  # (the first moments of a play: the synth's start-up is slow at an
 LEAST_STEP = 0.03  # (changes smaller than this wait: each change sends what was sent ahead again)
 
 
+def queue_load(ready, ahead):
+    """A synth that makes its sound ahead (Kestrel): its load read from how many of its `ahead` blocks are still
+    ready, not from how long a block takes (user 2026-10-29: at 500k voices each block took most of its time, the
+    sound was fine, yet it slowed down to 10 %; slower doesn't shorten a block much, voices ring as long). All
+    ready = calm (0.3), half gone = HIGH's side, none = 1.5. One block is always being handed out and the sound card
+    takes about one more at a time (read at any moment, not right after a block is made): ahead - 2 = all."""
+    full = max(1.0, ahead - 2.0)
+    empty = 1.0 - min(1.0, max(0.0, ready) / full)
+    return 0.3 + 1.2 * empty
+
+
 class SlowDown:
     def __init__(self):
         self.reset()

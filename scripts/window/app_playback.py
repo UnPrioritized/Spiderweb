@@ -363,19 +363,26 @@ class Playback:
         """(the synth's load = time making the sound / the time it lasts, None = not known; whether the sound broke
         up since the last look)."""
         if self.out.name == KESTREL and self.out.handle:
-            from files.kestrel import RATE as K_RATE
+            from files.slow_down import queue_load
             k = self.out.handle.k
             st = k.stats()
             seen, self._pace_seen = getattr(self, "_pace_seen", None), st["silence"]
             behind = seen is not None and st["silence"] > seen
-            return (st["last_block_us"] / (k.block / K_RATE * 1e6) if st["last_block_us"] else None), behind
+            # (by the blocks made ahead still waiting, as its own "Lower it by itself" judges: a slow block with
+            # every ready block still there is heard fine)
+            return queue_load((st["rendered"] - st["handed"]) / k.block, k.ahead), behind
         if self.out.name == BUILTIN:  # (read by the Overload watcher / the loaded MIDI's feeder: never BASS here)
             lp = self.loaded_play
             loads = [x for x in (self.overload.load, lp.load if lp is not None else None) if x is not None]
             mark = (self.overload.lost, lp.thinned if lp is not None else 0)
             seen, self._pace_seen_b = getattr(self, "_pace_seen_b", None), mark
             behind = seen is not None and (mark[0] > seen[0] or mark[1] > seen[1])
-            return (max(loads) if loads else None), behind
+            if not loads:
+                return None, behind
+            # (a busy synth that still makes its sound in time isn't heard: under 95 % it never slows by itself
+            # (lost sound / notes left out above do), user 2026-10-29: "fine means no stuttering")
+            c = max(loads)
+            return (c if c >= 0.95 else min(c, 0.75)), behind
         return None, False
 
     def stop_play(self):
