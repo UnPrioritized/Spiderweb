@@ -85,6 +85,12 @@ Copying to Domino
   pasted in Spiderweb (Ctrl+V) become one shape, starting at the play line.
   Only the notes come along (no controllers).
 
+Copying to other programs (Spiderweb Notes)
+- With Settings > General > "Ctrl+C also copies as Spiderweb Notes" ticked,
+  Ctrl+C also puts the finished music on the clipboard in a format any
+  program can read. If you make a MIDI program and want to paste from
+  Spiderweb, SPIDERWEB-NOTES-FORMAT.md describes it (free to use).
+
 PPQ and keys
 - Domino can't open MIDI files with a PPQ of 32767 or higher. Spiderweb
   warns you (the PPQ turns red) but still writes them.

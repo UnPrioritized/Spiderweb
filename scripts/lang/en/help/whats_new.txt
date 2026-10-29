@@ -48,6 +48,8 @@ What's new:
 
 • Settings → General → "Ctrl+C also copies for Domino": the normal Ctrl+C copies for Domino too, so you don't need Copy to Domino as a separate step.
 
+• Settings → General → "Ctrl+C also copies as Spiderweb Notes": Ctrl+C also puts the finished music (notes, tempo, signatures, CC events, track names, colours) on the clipboard in a format other MIDI programs can read, written up in SPIDERWEB-NOTES-FORMAT.md. See Help → Sharing shapes.
+
 • Menu bar: File, Edit, Shape, Tools, View and Help. File → New starts a new MIDI, Save writes into the file you opened, and the title bar shows the file's name (with * while there are unsaved changes).
 
 • A pasted shape as big as a whole song no longer covers the piano roll: click between its notes to drop the selection or place the play line. Esc drops the selection.
