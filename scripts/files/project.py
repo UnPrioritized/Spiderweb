@@ -1523,6 +1523,17 @@ class ProjectFiles:
             out[slot].sort(key=lambda e: e[0])
         return out
 
+    def shown_cc(self):
+        """cc_messages for showing them (the track list's CC marks, the ruler's CC row; user 2026-10-29: CC events
+        never silent), worked out once per notes change; {} with no shape sending any."""
+        key = (id(self.rendered), self.ppq, self.channel_mode.get())
+        got = getattr(self, "_shown_cc", None)
+        if got is None or got[0] != key:
+            from notes.hzbass import has_cc
+            sends = any("cc" in sh or sh.get("kind") is not None and has_cc(sh.get("hz") or {}) for sh in self.shapes)
+            got = self._shown_cc = (key, self.cc_messages(self.ppq, self.tempo_pane.base()) if sends else {})
+        return got[1]
+
     def cc_put_back(self, us, last, out, only=None):
         """At the end of pasted shapes us (one paste, its pieces) on each of their slots, every CC they left changed
         set back to its usual value (the pitch bend to its middle), only when other notes going out (only: these

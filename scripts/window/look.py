@@ -187,6 +187,7 @@ TRACK_CONDUCTOR = pick("#8a8a8a", "#a0a0a4")
 TRACK_MUTED = pick("#b8b8b8", "#6c6c70")  # a muted track's notes
 TRACK_TEMPO = pick("#3874d8", "#7fa8f0")  # the Conductor row's BPM bars
 TRACK_NAME_BG, TRACK_TEXT = pick("#fafafa", "#3a3a3c"), pick("#222", "#e2e2e4")
+CC_MARK = pick("#16808f", "#5cc8d6")  # (the track list's "CC" mark + the ruler's CC row: CC events ride along there)
 TRACK_ADDED = pick("#e6f4e3", "#33443a")  # (a track Spiderweb added for a shape's colours: faint green, user)
 TRACK_PICK, TRACK_PICK_TEXT = pick("#3874d8", "#2f6fd0"), pick("#ffffff", "#ffffff")
 # (tracks Ctrl+clicked along with the highlighted one: a fainter blue, like Domino's; their picture rows too)

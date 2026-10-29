@@ -2676,7 +2676,61 @@ class TrackList(tk.Canvas):
             else:
                 count += int(lm.tracks[k].chn[ch])
         text = tr("tracks.sub_tip", ch=ch + 1, name=self.name_of(row), notes=trn("n.notes", count, n=count))
+        cc = self.cc_of(row, ch)
+        if cc:  # (its CC events by name, user 2026-10-29)
+            from notes.cc_names import kinds_text
+            text += "\n" + tr("tracks.cc_line", kinds=kinds_text(cc))
         return text + "\n" + tr("tracks.new_notes_here", ch=ch + 1) if self.aimed_ch(row) == ch else text
+
+    def cc_rows(self):
+        """{(row, channel): {kind: how many}} of the CC events Spiderweb sends (App.shown_cc: pasted notes' and Hz
+        basses' lines), for the "CC" marks and tips (user 2026-10-29: never silent)."""
+        got = self.app.shown_cc()
+        memo = getattr(self, "_cc_rows", None)
+        if memo is not None and memo[0] is got and memo[1] is self._all:
+            return memo[2]
+        from notes.cc_names import kind_of
+        out = {}
+        slots = [s for s, ms in got.items() if ms]
+        if slots:
+            ids = track_ids(slots).tolist()
+            chs = channels_of(slots, self.app.picture_use10).tolist()
+            for s, lid, c in zip(slots, ids, chs):
+                row = self.row_of_id(int(lid))
+                if row is None:
+                    continue
+                counts = out.setdefault((row, int(c)), {})
+                for m in got[s]:
+                    k = kind_of(m[1], m[2]) if m[1] is not None else None
+                    if k is not None:
+                        counts[k] = counts.get(k, 0) + 1
+        out = {k: v for k, v in out.items() if v}
+        self._cc_rows = (got, self._all, out)
+        return out
+
+    def cc_of(self, row, ch=None):
+        """{kind: how many} of row's CC events (ch: that channel's only)."""
+        got = {}
+        for (r, c), counts in self.cc_rows().items():
+            if r == row and (ch is None or c == ch):
+                for k, n in counts.items():
+                    got[k] = got.get(k, 0) + n
+        return got
+
+    def cc_tip_line(self, row):
+        """[the tip's line naming row's CC events], or [] with none."""
+        cc = self.cc_of(row)
+        if not cc:
+            return []
+        from notes.cc_names import kinds_text
+        return [tr("tracks.cc_line", kinds=kinds_text(cc))]
+
+    def draw_cc_mark(self, x, mid, font, picked):
+        """The small "CC" word ending at x (right-aligned): CC events ride on this row. Returns its width."""
+        text = tr("cc.mark")
+        self.create_text(x, mid, text=text, anchor="e", font=font,
+                         fill=look.TRACK_PICK_TEXT if picked else look.CC_MARK)
+        return self.measurer(font)(text)
 
     def aimed_ch(self, row):
         """The channel shapes drawn / pasted now go to in row's folder when its TRACK row is highlighted (its first
@@ -2716,6 +2770,7 @@ class TrackList(tk.Canvas):
                 chans = self.row_chans()[row]
                 if len(chans) > 1:  # (a folder: where its track row's drawing / pasting goes, user 2026-10-29)
                     lines.append(tr("tracks.row_goes_to", ch=chans[0] + 1))
+                lines += self.cc_tip_line(row)
             else:
                 lines.append(tr("tracks.waiting_midi"))
             if len(mine):
@@ -2732,6 +2787,7 @@ class TrackList(tk.Canvas):
         chans = self.row_chans()[row]
         if len(chans) > 1:  # (a folder: where its track row's drawing / pasting goes, user 2026-10-29)
             lines.append(tr("tracks.row_goes_to", ch=chans[0] + 1))
+        lines += self.cc_tip_line(row)
         if slot >= HAND:
             lines.insert(1, tr("tracks.added_tip" if self.own_track(slot).get("auto") else "tracks.own_tip"))
         if self.app.channel_mode.get() != "auto":  # (laid shapes' other colours: on this track until Multi channel)
@@ -3550,6 +3606,8 @@ class TrackList(tk.Canvas):
                     self.create_text(18 * s + ind, mid, text=tr("tracks.channel", ch=c + 1), anchor="w", font=font,
                                      fill=look.TRACK_PICK_TEXT if picked else look.TRACK_SELECT_TEXT if chosen
                                      else self.chan_colour(c))
+                    if (row, c) in self.cc_rows():  # (its CC events, user 2026-10-29: never silent)
+                        self.draw_cc_mark(x1 - 26 * s, mid, font, picked)
                     self.draw_speaker(self.speaker_x(), mid, slot in self.muted or (slot, c) in self.muted, picked)
                 self.create_line(ind, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
                 continue
@@ -3565,7 +3623,9 @@ class TrackList(tk.Canvas):
                 colour = (look.TRACK_PICK_TEXT if picked else look.TRACK_SELECT_TEXT if chosen else look.TRACK_TEXT)
                 ch = tr("tracks.folder_ch", n=len(chans[row])) if folder else self.channel_of(slot)
                 left = 18 * s + (ind if folder else 0)  # (a folder: its ▸ / ▾ first)
-                room = x1 - 26 * s - left - measure(ch) - 8 * s
+                cc = any(r == row for r, _ in self.cc_rows())  # (CC events ride on it: a "CC" mark)
+                mark = measure(tr("cc.mark")) + 6 * s if cc else 0
+                room = x1 - 26 * s - left - measure(ch) - 8 * s - mark
                 name = cut_text(self.name_of(row), room, measure)
                 mid = (ya + yb) / 2
                 if mid > top:
@@ -3579,6 +3639,8 @@ class TrackList(tk.Canvas):
                     self.create_text(left, mid, text=name, anchor="w", fill=colour, font=font)
                     self.create_text(x1 - 26 * s, mid, text=ch, anchor="e",
                                      fill=look.TRACK_PICK_TEXT if picked else look.HINT, font=font)
+                    if cc:
+                        self.draw_cc_mark(x1 - 26 * s - measure(ch) - 6 * s, mid, font, picked)
                     state = self.mute_state(slot) if folder else 2 if slot in self.muted else 0
                     self.draw_speaker(self.speaker_x(), mid, state == 2, picked, part=state == 1)
             self.create_line(0, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
