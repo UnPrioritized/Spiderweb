@@ -147,7 +147,7 @@ class Playback:
                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
-        elif self.out.edo:
+        elif self.out.edo and not self.out.tuned:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
@@ -166,6 +166,10 @@ class Playback:
         files_ports = set((lp.tport % 16).tolist()) if lp is not None and lp.tport is not None else set()
         for port in range(16):
             self.out.handle.send(PART_TYPE | 9 << 8 | (1 if port in files_ports else 0) << 16 | port << 24)
+        # 31-EDO (13g): its channels bent for this play, else put back (a loaded MIDI may use those ports)
+        from files.playback import edo_bends
+        for msg in edo_bends(center=not self.out.tuned):
+            self.out.handle.send(msg)
 
     def play_end(self, ppq, beats, start):
         """Where playing stops: a quarter bar after the last note ends (a loaded MIDI's too; or after the play

@@ -827,10 +827,9 @@ class Live:
         synth._load_samples(h)  # (program 0: no wait at the first notes; one stream at a time, see _load_samples)
         self._rpn = {}  # (channel past 16, CC 101 / 100: the bend range being set, send)
         if not plain:
-            from files.playback import EDO_BENDS, EDO_FIRST
-            for step, bend in enumerate(EDO_BENDS):
-                ch = EDO_FIRST + step
-                self.send(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
+            from files.playback import edo_bends
+            for msg in edo_bends():
+                self.send(msg)
         if not bass.BASS_ChannelPlay(h, 0):
             err = bass.BASS_ErrorGetCode()
             self.close()

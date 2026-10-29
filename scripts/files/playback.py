@@ -38,6 +38,16 @@ _EDO_KEYS = np.array([round(s * 1200 / EDO / 100) for s in range(EDO)], np.int64
 EDO_BENDS = [8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s])) / 100 * 4096) for s in range(EDO)]
 
 
+def edo_bends(center=False):
+    """The 31 pitch-bend messages setting up 31-EDO's channels (center: put back to no bend), packed for Live.send /
+    KestrelOut.send (top byte = channel group)."""
+    out = []
+    for step, bend in enumerate(EDO_BENDS):
+        ch, bend = EDO_FIRST + step, 8192 if center else bend
+        out.append(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
+    return out
+
+
 def edo_code(rows):
     """channel | key << 8 (+ channel group << 24) of rows (a NumPy array or one int) in 31-EDO."""
     rows = np.asarray(rows, np.int64)
@@ -138,8 +148,9 @@ class MidiOut:
 
     @property
     def tuned(self):
-        """True when the piano roll's notes are played in 31-EDO now (Built-in BASSMIDI only)."""
-        return self.edo and self.name == BUILTIN
+        """True when the piano roll's notes are played in 31-EDO now (Built-in BASSMIDI, Kestrel: 13g, user
+        2026-10-29; Kestrel's channels get their bends at open and each Play, App.kestrel_parts)."""
+        return self.edo and self.name in (BUILTIN, KESTREL)
 
     def open(self, name):
         """Open the device called name. Returns an error message, or None when it's ready."""
@@ -178,6 +189,9 @@ class MidiOut:
             except SynthError as e:
                 return str(e)
             self.name = name
+            if name == KESTREL and self.edo:  # (listening before any Play: 31-EDO's channels bent already)
+                for msg in edo_bends():
+                    self.handle.send(msg)
             return None
         if name == KDMAPI:
             from files.synth import SynthError, load_dlls

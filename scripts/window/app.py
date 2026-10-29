@@ -88,7 +88,7 @@ from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, painting_order
 from files import clipboard, errors, notes_clip, speed
 from files.about import ICONS, VERSION
-from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player
+from files.playback import BUILTIN, DEFAULT_DEVICE, KESTREL, MidiOut, Player
 from files.slow_down import SlowDown
 from files.midi_out import PPQ_WARN, track_slots
 from files.domino_clip import DOMINO_STARTS, FORMAT as DOMINO_FORMAT, on_clipboard
@@ -1761,7 +1761,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def edo_warn(self):
         """The Audio tick orange (+ its tip says why) while it's on but the MIDI out can't play 31-EDO."""
-        off = self.edo() and self.edo31_audio.get() and self.midi_device.get() != BUILTIN
+        off = self.edo() and self.edo31_audio.get() and self.midi_device.get() not in (BUILTIN, KESTREL)
         self.edo_audio_tick.config(style="Warn.TCheckbutton" if off else "TCheckbutton")
         self.edo_audio_tip.text = tr("app.edo31_audio_needs_builtin" if off else "app.edo31_audio_tip")
 
