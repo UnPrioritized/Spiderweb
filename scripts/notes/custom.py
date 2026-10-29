@@ -2,6 +2,7 @@
 
 import base64
 import functools
+import heapq
 import json
 import math
 import zlib
@@ -353,39 +354,77 @@ def stroke_closed(st):
     return st["kind"] == "ellipse" or path_closed(st["pts"])
 
 
+MEET = 1e-6  # (join_paths: ends this close are one point)
+
+
 def join_paths(paths):
     """Point lists that meet end to end become one list (e.g. a curve and a line closing it)."""
     def meet(a, b):
-        return math.dist(a, b) < 1e-6
+        return math.dist(a, b) < MEET
 
     done = [list(p) for p in paths if path_closed(p)]
-    lines = [list(p) for p in paths if not path_closed(p)]
-    joined = True
-    while joined:
-        joined = False
-        heads = np.array([a[0] for a in lines], float).reshape(-1, 2)  # (all ends at once: big drawings)
-        tails = np.array([a[-1] for a in lines], float).reshape(-1, 2)
-        for i, a in enumerate(lines):
-            can = ((np.hypot(*(heads - tails[i]).T) < 2e-6) | (np.hypot(*(tails - tails[i]).T) < 2e-6) |
-                   (np.hypot(*(heads - heads[i]).T) < 2e-6))
-            can[i] = False
-            for j in np.flatnonzero(can).tolist():  # (the first that really meets, as checked one by one)
-                b = lines[j]
-                if meet(a[-1], b[0]):
-                    new = a + b[1:]
-                elif meet(a[-1], b[-1]):
-                    new = a + b[-2::-1]
-                elif meet(a[0], b[0]):
-                    new = a[::-1] + b[1:]
-                else:
-                    continue
-                lines[i] = new
-                del lines[j]
-                joined = True
-                break
-            if joined:
-                break
-    return done + lines
+    lines = {n: list(p) for n, p in enumerate(p for p in paths if not path_closed(p))}
+    # Joined in the order the one-at-a-time way found them (the first line meeting another, the first one it meets,
+    # then from the top again): ends kept in a grid of MEET cells, lines that meet one in a queue by number, only the
+    # lines near a join looked at again (from the top every time was lines x lines per join: a sliced drawing's
+    # 1,000 strokes ~19 s, speed hunt 2026-10-29; same joins: dev/scratch/join_paths_new.py)
+    grid = {}
+
+    def cell(p):
+        return math.floor(p[0] / MEET), math.floor(p[1] / MEET)
+
+    def put(n, on):
+        for end, p in ((0, lines[n][0]), (1, lines[n][-1])):
+            got = grid.setdefault(cell(p), set())
+            (got.add if on else got.discard)((n, end))
+
+    def near(p, end):
+        cu, cv = cell(p)
+        for du in (-1, 0, 1):
+            for dv in (-1, 0, 1):
+                for m, e in grid.get((cu + du, cv + dv), ()):
+                    if e == end:
+                        yield m
+
+    def partner(n):
+        """The first line n meets (as n's turn checked them: its end on their start or end, its start on theirs)."""
+        a = lines[n]
+        found = [m for m in near(a[-1], 0) if m != n and meet(a[-1], lines[m][0])]
+        found += [m for m in near(a[-1], 1) if m != n and meet(a[-1], lines[m][-1])]
+        found += [m for m in near(a[0], 0) if m != n and meet(a[0], lines[m][0])]
+        return min(found) if found else None
+
+    for n in lines:
+        put(n, True)
+    queue = [n for n in lines if partner(n) is not None]
+    heapq.heapify(queue)
+    while queue:
+        i = queue[0]
+        j = partner(i) if i in lines else None
+        if j is None:
+            heapq.heappop(queue)
+            continue
+        a, b = lines[i], lines[j]
+        if meet(a[-1], b[0]):
+            new = a + b[1:]
+        elif meet(a[-1], b[-1]):
+            new = a + b[-2::-1]
+        else:
+            new = a[::-1] + b[1:]
+        ends = [a[0], a[-1], b[0], b[-1]]
+        put(i, False)
+        put(j, False)
+        del lines[j]
+        lines[i] = new
+        put(i, True)
+        again = {i}
+        for p in ends:
+            again.update(near(p, 0))
+            again.update(near(p, 1))
+        for m in again:
+            if m in lines and partner(m) is not None:
+                heapq.heappush(queue, m)
+    return done + [lines[n] for n in sorted(lines)]
 
 
 def stroke_span(st):
