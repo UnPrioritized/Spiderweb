@@ -451,6 +451,23 @@ def _split_path(path, at):
     return pieces
 
 
+def near_edges(path, edges):
+    """The loop edges (a, b) longer than EPS whose box comes near the path's: only they can cross it (_crossings
+    allows EPS of each piece's length past its ends, so the boxes get a few times that). In their order. (250
+    strokes x 650 loop edges, every pair checked: 4 s, speed hunt 2026-10-29.)"""
+    p = np.asarray(path, float).reshape(-1, 2)
+    if not edges or len(p) < 2:
+        return [(a, b) for a, b in edges if math.dist(a, b) > EPS]
+    reach = float(np.hypot(*np.diff(p, axis=0).T).max())
+    lo, hi = p.min(0), p.max(0)
+    ab = np.array([(a, b) for a, b in edges], float)
+    elo, ehi = ab.min(1), ab.max(1)
+    pad = 4 * EPS * (np.hypot(*(ab[:, 1] - ab[:, 0]).T) + reach) + 1e-12
+    near = ((ehi[:, 0] + pad >= lo[0]) & (elo[:, 0] - pad <= hi[0]) & (ehi[:, 1] + pad >= lo[1])
+            & (elo[:, 1] - pad <= hi[1]))
+    return [edges[k] for k in np.flatnonzero(near).tolist() if math.dist(*edges[k]) > EPS]
+
+
 def lasso_stroke(st, loops, slack=0.0):
     """The drawer's Lasso: one stroke cut wherever the closed loops cross it (closed strokes too: a loop goes in and
     out) -> its pieces (keeping role, colour and layer; curves, arcs, polylines as themselves, like Slice), each
@@ -481,7 +498,7 @@ def lasso_stroke(st, loops, slack=0.0):
             pieces = [joined_curve(pieces[-1], pieces[0])] + pieces[1:-1]
     else:
         path = st["pts"] if st["kind"] == "poly" and exact(st) else poly
-        at = [j + t for a, b in edges if math.dist(a, b) > EPS for _, _, j, t in _crossings(path, a, b, False)]
+        at = [j + t for a, b in near_edges(path, edges) for _, _, j, t in _crossings(path, a, b, False)]
         at = _real_cuts(at, lambda u: _path_at(path, u), len(path) - 1, closed, status)
         parts = _split_path(path, at) if at else [path]
         if closed and len(parts) > 1 and not any(u <= 1e-9 for u in at):
