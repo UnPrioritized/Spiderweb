@@ -190,6 +190,7 @@ class LoadedPlayer:
         self._unpart = None  # (Kestrel) (generation, part, tick): a part read ahead stopped there (_leave_part)
         self.thinned = 0  # note-ons left out (budget / late), so far
         self.sent = 0  # note-ons sent
+        self.load = None  # (Built-in BASSMIDI's synths: the busiest one's CPU / 100, read by the feeder; 13f)
         self.jumps = 0
         self.walls = 0  # (ticks stepped over: more events than a window may hold)
         self.dense_parts = 0  # (Kestrel: parts played from their read-ahead)
@@ -765,6 +766,7 @@ class LoadedPlayer:
                 except Exception:  # (the list changing meanwhile: next time)
                     pass
                 if self.sinks:  # (each synth's own budget by the sound it lost and its load)
+                    self.load = max(live.cpu() for live in self.sinks) / 100  # (13f Slow down: the busiest one)
                     for r, live in enumerate(self.sinks):
                         t_at, p = time.perf_counter(), live.position()
                         lost = (t_at - pos[r][0]) - (p - pos[r][1]) / 8 / RATE  # (seconds it couldn't make)

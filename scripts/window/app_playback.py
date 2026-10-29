@@ -126,7 +126,7 @@ class Playback:
             self.start_loaded(int(round(self.playhead * ppq)))
         self.kestrel_parts()
         self.slow_down.reset()  # (each Play at the song's own speed: Player.start too)
-        self._pace_seen = None
+        self._pace_seen = self._pace_seen_b = None  # (Kestrel's silence / BASSMIDI's lost sound + thinned seen)
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
@@ -343,15 +343,21 @@ class Playback:
         self.show_overload()
 
     def pace_play(self, now):
-        """13f: the synth's load -> the speed the song plays at (files/slow_down.py), while its tick is on."""
-        if not self.slowing():
-            if self.player.speed != 1.0:
-                self.player.set_speed(1.0)
-            return
-        load, behind = self.play_load()
-        v = self.slow_down.step(load, now, behind)
-        if v is not None:
-            self.player.set_speed(v)
+        """13f: the synth's load -> the speed the song plays at (files/slow_down.py), while its tick is on.
+        Built-in BASSMIDI's "Lower it by itself" waits until it's at the slowest (user: slow down first)."""
+        on = self.slowing()
+        if not on and self.player.speed != 1.0:
+            self.player.set_speed(1.0)
+        if on:
+            load, behind = self.play_load()
+            v = self.slow_down.step(load, now, behind)
+            if v is not None:
+                self.player.set_speed(v)
+        if self.overload.running:
+            from files.slow_down import SLOWEST
+            guard = self.play_guard.get() and (not on or self.player.speed <= SLOWEST)
+            if self.overload.guard != guard:
+                self.overload.set_guard(guard)
 
     def play_load(self):
         """(the synth's load = time making the sound / the time it lasts, None = not known; whether the sound broke
@@ -363,6 +369,13 @@ class Playback:
             seen, self._pace_seen = getattr(self, "_pace_seen", None), st["silence"]
             behind = seen is not None and st["silence"] > seen
             return (st["last_block_us"] / (k.block / K_RATE * 1e6) if st["last_block_us"] else None), behind
+        if self.out.name == BUILTIN:  # (read by the Overload watcher / the loaded MIDI's feeder: never BASS here)
+            lp = self.loaded_play
+            loads = [x for x in (self.overload.load, lp.load if lp is not None else None) if x is not None]
+            mark = (self.overload.lost, lp.thinned if lp is not None else 0)
+            seen, self._pace_seen_b = getattr(self, "_pace_seen_b", None), mark
+            behind = seen is not None and (mark[0] > seen[0] or mark[1] > seen[1])
+            return (max(loads) if loads else None), behind
         return None, False
 
     def stop_play(self):

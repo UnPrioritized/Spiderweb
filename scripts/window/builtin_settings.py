@@ -70,6 +70,12 @@ class BuiltinPanel(ttk.Frame):
         Tooltip(c, tr("bs.guard_tip"))
         r += 1
 
+        c = ttk.Checkbutton(box, text=tr("bs.slow_down"), variable=app.slow_builtin, command=app.on_slow_down,
+                            takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("bs.slow_down_tip"))
+        r += 1
+
         c = ttk.Checkbutton(box, text=tr("bs.limiter"), variable=app.play_limiter, command=app.on_play_limiter,
                             takefocus=False)
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
@@ -209,6 +215,8 @@ class Overload:
         self._stop = threading.Event()
         self.text_args = None  # None, ("overloaded",) or ("lowered", the limit in use)
         self.kept = None  # (live, user's limit, limit in use) at the last stop, for a restart that keeps it
+        self.load = None  # (13f, Slow down: the synth's last CPU reading / 100, None = none yet)
+        self.lost = 0.0  # (seconds of sound missing so far this play)
 
     @property
     def running(self):
@@ -224,6 +232,7 @@ class Overload:
             self.now_limit = kept[2]
         self._sent = limit  # (a stopped synth is always at the user's limit)
         self._new_limit = False
+        self.load, self.lost = None, 0.0
         self._stop.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -262,6 +271,9 @@ class Overload:
             if t - began < self.WARM:
                 gone = 0.0
             t0, p0 = t, p
+            self.load = live.cpu() / 100  # (Slow down's reading: read here, never on the window's thread)
+            if gone > 0.003:
+                self.lost += gone
             lost.append((t, gone))  # (with its sign: a device giving its position in steps evens out)
             while lost[0][0] < t - 1:
                 lost.popleft()
