@@ -32,6 +32,8 @@ _seen = {}  # error text -> times it happened this session (an error on every mo
 # line in the crash log at once (a crash can't write anything more), and the error log's next entry gets the lines
 # changed since its last one. Lines start with NOTE so the next start can tell them from a crash's own lines.
 NOTE = "-- "
+CLOSED = "==== closed "  # (written at a normal end: a dump without it = Spiderweb really crashed)
+last_crash = None  # (the run before this one crashed: what it had in use, {topic: text}; said by say_crash)
 _state = {}
 _state_logged = {}  # what the error log was last told
 _state_lock = threading.Lock()
@@ -192,7 +194,8 @@ def watch_crashes():
     faulthandler then writes what every thread was doing into user/crash-now.log; the next start moves that into
     spiderweb-crash.log. A run that ended normally leaves only its start line and note lines (what was in use), which
     the next start drops."""
-    global _crash_file
+    global _crash_file, last_crash
+    import atexit
     import faulthandler
     try:
         with open(CRASH_NOW, encoding="utf-8", errors="replace") as f:
@@ -202,18 +205,62 @@ def watch_crashes():
     crashed = any(line.strip() and not line.startswith(("==== ", NOTE)) for line in last.splitlines())
     if crashed and not append(CRASH_LOG, OLD_CRASH_LOG, hide_folders(last) + "\n\n"):
         return  # (crash-now.log kept for the next start rather than lost)
+    if crashed and CLOSED not in last:  # (a dump in a run that closed normally = a DLL caught it: logged, not said)
+        last_crash = _in_use(last)
     try:
         _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
         _crash_file.write(f"==== started {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python "
                           f"{platform.python_version()} {platform.architecture()[0]}   {platform.platform()}\n")
         _crash_file.flush()
         faulthandler.enable(_crash_file, all_threads=True)
+        atexit.register(_closed)
     except (OSError, ValueError, RuntimeError):
         pass
     try:
         note("PC", pc_text())
     except Exception:  # (only a log line: never stops Spiderweb from starting)
         pass
+
+
+def _closed():
+    """(at a normal end) The closing line: the next start tells a crash from a dump a DLL caught itself."""
+    try:
+        _crash_file.write(f"{CLOSED}{time.strftime('%H:%M:%S')}\n")
+        _crash_file.flush()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def _in_use(text):
+    """What the crashed run's note lines say was in use last: {topic: text}."""
+    found = {}
+    for line in text.splitlines():
+        if line.startswith(NOTE):
+            topic, _, value = line[len(NOTE) + 9:].partition(": ")  # (after "HH:MM:SS ")
+            found[topic] = value
+    return found
+
+
+def say_crash(app):
+    """(the start after a crash, user 2026-10-29) Said once per crash: the next start is quiet unless it crashes
+    again, whatever is left in the logs. Open the crash log = in a text program; a crash while Kestrel played =
+    Use Built-in BASSMIDI offered too."""
+    global last_crash
+    used, last_crash = last_crash, None
+    if used is None:
+        return
+    from files.playback import BUILTIN, KESTREL
+    from files.system import open_path
+    from window.load_midi import ask_choice
+    kestrel = used.get("MIDI out") == KESTREL and used.get("playing") == "yes"
+    text = tr("errors.crashed_kestrel" if kestrel else "errors.crashed", log=CRASH_LOG)
+    buttons = [("log", tr("errors.crash_open_log"))] + [("builtin", tr("ks.use_builtin"))] * kestrel + [
+        ("ok", tr("errors.crash_ok"))]  # (OK last: Esc / X = OK too)
+    answer = ask_choice(app, tr("errors.spiderweb"), text, buttons, icon="warning", focus="ok")
+    if answer == "log" and not open_path(CRASH_LOG, text=True):
+        app.status.config(text=tr("errors.crash_log_not_opened"))
+    elif answer == "builtin":
+        app.midi_device.set(BUILTIN)
 
 
 def install(app):

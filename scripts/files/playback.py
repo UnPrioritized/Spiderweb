@@ -481,6 +481,8 @@ class Player:
         sys.setswitchinterval(0.001)  # hand the thread the processor quickly while the window redraws
         self.thread = threading.Thread(target=self._run, args=(notes, use10, () if self.tune else cc), daemon=True)
         self.thread.start()
+        from files import errors
+        errors.note("playing", "yes")  # (the next start's crash message: was it playing?)
 
     def update(self, notes, bpm, stop_beat, use10=False, cc=(), ports=0, tempo=None):
         """The notes / tempo changed while playing (same PPQ): play on with them. Notes already sounding end where
@@ -784,3 +786,5 @@ class Player:
             self.held = {}
             self._swap = self._wanted = None
             sys.setswitchinterval(self._switch)
+            from files import errors
+            errors.note("playing", "no")

@@ -428,6 +428,8 @@ if __name__ == "__main__":
         app = App()
         label_window(app)
         open_files.start(app, given)
+        if errors.last_crash is not None:  # (the run before crashed: said once)
+            app.after(400, lambda: errors.say_crash(app))
         if not_moved:  # (old files another program held: they stay beside Spiderweb, the user moves them)
             from tkinter import messagebox
             from files.about import HERE, USER

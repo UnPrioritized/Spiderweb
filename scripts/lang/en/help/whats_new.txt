@@ -29,6 +29,7 @@ What's new:
 • Notes by snap (side panel, for lines, polylines, freehand, curves and arcs): every note is one step long, so the line becomes a staircase on the grid, with steep slopes stacking keys in each step. Type the step in ticks or as a note length like 1/32, and pick how the line's last step ends. The Slice tool cuts through its notes like a knife. See Help → Notes by snap.
 
 • A new icon, and projects now save as .spwb files: packed, so much smaller (older .json projects still open). Drop a project or a MIDI file onto the window or onto Spiderweb's icon to open it, and Settings → General can make .spwb projects open with a double-click. See Help → Saving and MIDI export.
+• If Spiderweb closes by itself, the next start now says so, with a button to open spiderweb-crash.log. When it happened while Kestrel (GPU) was playing, it also offers to switch to Built-in BASSMIDI.
 
 • Recolour (side panel, under Colours): changes which colour each note has, while the notes stay exactly where they are. Shuffle the colours a shape already has, or split it into new ones, Scattered at random or in Clumps: bands, swirls or wedges you can turn, twist, centre and push. Shares… sets how many colours and how much of each. It works on pasted notes too, and the colours stay put when you move, copy, flip or slice the shape. See Help → Recolour.
 
