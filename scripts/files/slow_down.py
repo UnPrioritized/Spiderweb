@@ -31,6 +31,7 @@ NEAR = 0.85  # (breaking up again within this of the mark: the mark goes NEAR lo
 # takes over
 HELPED = 0.5
 FIT = 0.7  # (the synth's work known: faster only up to where it's expected to take this share of the time...)
+FIT_CPU = 0.9  # (... Built-in BASSMIDI's CPU: fine to 95 %, user 2026-10-29 "fine means no stuttering")
 FIT_S = 0.6  # (... once the last change has shown in it)
 NEXT_S = SETTLE_S + 0.5
 SMOOTH = 0.3  # weight of the newest reading
@@ -66,14 +67,16 @@ class SlowDown:
         self.effort = None  # (the synth's work, smoothed: None = not known)
         self._ref = None  # (speed, effort) at the last cut, while still in trouble
 
-    def step(self, load, now=None, behind=False, easy=False, hold=False, effort=None, can_lower=True):
+    def step(self, load, now=None, behind=False, easy=False, hold=False, effort=None, can_lower=True, fit=FIT):
         """One reading: load (None = none this time); behind = the sound already broke up (Kestrel handed out
         silence, BASSMIDI lost sound / left notes out); easy = clearly room to spare (the busy part is over: the
         speed that broke up is forgotten); hold = not faster yet ("Lower it by itself" still has notes / voices to
         give back first: undone in the reverse order); effort = how hard the synth works (None = not known: slowing
         counted as helping); can_lower = "Lower it by itself" is ticked (off: nothing to hand over to, so it goes on
-        slowing to 10 % however little it helps, user 2026-10-29). Returns the new speed when it should change, else
-        None."""
+        slowing to 10 % however little it helps, user 2026-10-29); fit = the share of the time the effort may take at
+        the speed climbed to (FIT Kestrel's block time, FIT_CPU BASSMIDI's CPU), None = the effort doesn't say how
+        much faster fits (a loaded MIDI's note budget: chords come in one go at any speed). Returns the new speed when
+        it should change, else None."""
         now = time.perf_counter() if now is None else now
         if now - self.began < WARM_S:
             return None
@@ -113,19 +116,23 @@ class SlowDown:
             if self._calm is None:
                 self._calm = now
             self._ref = None  # (calm: the last cut helped)
-            if self.effort is not None and self.effort > 0.01:
+            if fit and self.effort is not None and self.effort > 0.01:
                 # (the synth's work known (Kestrel's block time): as fast as it says fits, in one go, never a try
                 # that breaks up; the work taken to grow with the speed (it grew a little faster at 1 M voices), FIT
                 # of the time at most. User 2026-10-29: its tries stuttered, climbing back after a wall was slow)
-                top = min(1.0, v * FIT / self.effort)
+                top = min(1.0, v * fit / self.effort)
                 if top > v * 1.03 and not hold and now - self._calm >= CALM_S and now - self._rise >= FIT_S:
                     self._rise = now
                     self.ceiling = 1.0
                     return self._set(top, force=True)
                 return None
-            if easy:
+            if easy:  # (the busy part is over: straight back, user 2026-10-29: climbing back was slow)
                 self.ceiling = 1.0
-            elif self.ceiling < 1.0 and now - max(self._calm, self._lift) >= CEIL_S:
+                if v < 1.0 and not hold and now - self._calm >= CALM_S:
+                    self._rise = now
+                    return self._set(1.0)
+                return None
+            if self.ceiling < 1.0 and now - max(self._calm, self._lift) >= CEIL_S:
                 # (tried faster: 10 %, then more each time it held, so it's back to 1x soon after the busy part; a
                 # failure starts again at 10 %. Real BASSMIDI 2026-10-29: its note budget limits at 17 % CPU, nothing
                 # says there's room but trying)

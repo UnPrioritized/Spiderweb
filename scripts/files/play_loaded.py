@@ -191,6 +191,7 @@ class LoadedPlayer:
         self.thinned = 0  # note-ons left out (budget / late), so far
         self.sent = 0  # note-ons sent
         self.load = None  # (Built-in BASSMIDI's synths: the busiest one's CPU / 100, read by the feeder; 13f)
+        self.asked = None  # (... and note-ons asked for / its note budget, the busiest synth)
         self.jumps = 0
         self.walls = 0  # (ticks stepped over: more events than a window may hold)
         self.dense_parts = 0  # (Kestrel: parts played from their read-ahead)
@@ -750,6 +751,7 @@ class LoadedPlayer:
             pos = [(time.perf_counter(), live.position()) for live in self.sinks]
             calm = np.zeros(K, np.int64)
         warm = None  # (when the line started: the synths' first moments lose a little sound, never counted)
+        asked = np.zeros(K, np.float64)  # (note-ons each synth was asked for since the last look: Slow down)
         while not self._stop.is_set():
             time.sleep(STEP_S)
             clock = self.player._clock
@@ -760,6 +762,10 @@ class LoadedPlayer:
                 warm = now
             dt, last = min(now - last, 0.05), now
             if now - checked > 0.1:  # (mutes; the synths' load sets the budget)
+                if self.sinks and checked:  # (13f: note-ons asked for a second / the budget, the busiest synth: how
+                    # much faster the song fits, as the speed scales the note-ons exactly)
+                    self.asked = float(np.max(asked / (now - checked) / np.maximum(self.budgets, 1)))
+                asked[:] = 0
                 checked = now
                 try:
                     self.muted = mute_masks(self.muted_of(), len(self.muted))
@@ -825,6 +831,7 @@ class LoadedPlayer:
                 if i1 > i:
                     h[:] = 0
                     hist(ms, ks, i, i1, ts, t_late, self.muted, self.tport, self.ports, K, h)
+                    asked += h.sum(axis=1)
                     above = np.cumsum(h[:, ::-1], axis=1)[:, ::-1]  # (note-ons at or above each velocity)
                     for r in range(K):
                         budget = int(step[r])

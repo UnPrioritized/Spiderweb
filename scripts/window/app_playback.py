@@ -349,13 +349,16 @@ class Playback:
         stopped helping (SlowDown.floor, user 2026-10-29), and on the way
         back gives its notes / voices back BEFORE the speed climbs (hunt 2026-10-29: handed back at 11 %, the full
         limit came back at once and the stutter with it)."""
+        from files.slow_down import FIT
         on = self.slowing()
         if not on and self.player.speed != 1.0:
             self.player.set_speed(1.0)
+        self._pace_fit = FIT  # (Kestrel: its block time; BASSMIDI: play_load)
         load, behind, easy, lowered, effort = self.play_load()
         if on:
             can_lower = self.kestrel_opts["lower"] if self.out.name == KESTREL else self.play_guard.get()
-            v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered, effort=effort, can_lower=can_lower)
+            v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered, effort=effort, can_lower=can_lower,
+                                    fit=self._pace_fit)
             if v is not None:
                 self.player.set_speed(v)
         free = not on or self.slow_down.floored or lowered  # (at 10 %, or where slowing stopped helping)
@@ -407,9 +410,18 @@ class Playback:
             c = max(loads)
             # (never "easy": its note budget can be what limits at a low CPU, Lagtester at 17 % 2026-10-29: forgetting
             # the speed that broke up there made it climb back at once, every 2-3 s)
-            # (its CPU says whether slowing helps only while the CPU is what's maxed out; its note budget leaving notes
-            # out at a low CPU is always helped by slowing)
-            return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, False, lowered, c if c >= 0.9 else None
+            # (its work, to climb back as fast as fits (user 2026-10-29: slow, Kestrel's fast) and to see whether
+            # slowing helps: a loaded MIDI's note-ons asked for / its note budget (exactly as the speed: its budget
+            # leaves notes out at a low CPU, Lagtester at 17 %), the CPU too; own shapes alone: the CPU)
+            asked = lp.asked if lp is not None and lp.sinks else None
+            effort = c if asked is None else max(asked, c)
+            # (a loaded MIDI: chords come in one go at any speed, so the average says nothing about how much faster
+            # fits (real Lagtester: it jumped to 1x and back every 2 s); careful tries, but straight back once the song
+            # asks for almost no notes (the busy part is over))
+            from files.slow_down import FIT_CPU
+            self._pace_fit = FIT_CPU if asked is None else None
+            easy = asked is not None and asked < 0.05 and not behind
+            return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, easy, lowered, effort
         return None, False, False, False, None
 
     def stop_play(self):
