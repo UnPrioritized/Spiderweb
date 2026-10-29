@@ -895,6 +895,25 @@ def keep_parts(tempo, sts=()):
 
 
 _layouts = {}
+PLANS_KEPT = 50_000  # catch_plan answers remembered by everything they read (_plan_key)
+_plans = {}
+
+
+def _plan_key(st, pts, ppq, base, every, keeps_out, lines):
+    """What a catch-up's catch_plan reads in layout (2026-10-29: one point moved in a Fill of 2,000 catch-ups worked
+    every one out again): the stretch, the points whose parts its ticks can reach (_segments' own pick, a few
+    more each side), the Keep timing pieces over it with their heard lines. None when it has no end (nothing to
+    work out)."""
+    if st["end"] is None:
+        return None
+    t0, t1 = beat_tick(st["from"], ppq), max(beat_tick(st["end"], ppq), beat_tick(st["line"], ppq))
+    lo = max(0, bisect.bisect_right(pts, (t0 - 1) / ppq, key=lambda p: p[0]) - 3)
+    hi = min(len(pts), bisect.bisect_left(pts, (t1 + 1) / ppq, key=lambda p: p[0]) + 4)
+    over = [(ka, ke, u, lines[k]["points"]) for k, (_, ka, ke, u) in enumerate(keeps_out)
+            if (ke is None or ke > t0) and ka < t1]
+    text = json.dumps([st, pts[lo:hi], lo == 0, hi == len(pts), ppq, base, every, over], sort_keys=True,
+                      default=repr)
+    return hashlib.blake2b(text.encode(), digest_size=16).digest()
 
 
 def layout(tempo, base, ppq):
@@ -974,9 +993,18 @@ def layout(tempo, base, ppq):
         return _put_many(segs, puts)
 
     worked = []
+    pts, every = tempo["points"], tempo.get("every", EVERY)
     for n, st in enumerate(sts):
         st = dict(st, base_u=bases[n], base=60_000_000 / bases[n])
-        worked.append((st, catch_plan(tempo, base, st, ppq, real)))
+        pk = _plan_key(st, pts, ppq, base, every, keeps_out, lines) if ordered else None
+        plan = _plans.get(pk) if pk else None
+        if plan is None:
+            plan = catch_plan(tempo, base, st, ppq, real)
+            if pk:
+                if len(_plans) > PLANS_KEPT:
+                    _plans.clear()
+                _plans[pk] = plan
+        worked.append((st, plan))
     if len(_layouts) > 8:
         _layouts.clear()
     _layouts[key] = out = {"start_u": start_u, "keeps": keeps_out, "worked": worked, "real": real,
