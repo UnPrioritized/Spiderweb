@@ -112,16 +112,24 @@ def read_project(path):
     """A project file's contents and its text's size, packed (.spwb) or plain (a BOM, which some text editors put
     at the start, is skipped)."""
     with open(path, "rb") as f:
-        raw = f.read()
-    if raw.startswith(PACKED):
-        raw = unpack(raw)
+        packed = f.read(2) == PACKED
     try:
-        data = json.loads(raw.decode("utf-8-sig"))
+        if not packed:  # (plain: read as text, as before .spwb: no extra copy in memory)
+            with open(path, encoding="utf-8-sig") as f:
+                text = f.read()
+        else:
+            with open(path, "rb") as f:
+                raw = unpack(f.read())
+            text = raw.decode("utf-8-sig")
+            del raw  # (the bytes go before the JSON is read: big projects)
     except UnicodeDecodeError:
         raise ValueError(tr("project.not_a_spiderweb_project")) from None
+    size = len(text)
+    data = json.loads(text)
+    del text
     if not isinstance(data, dict):
         raise ValueError(tr("project.not_a_spiderweb_project"))
-    return data, len(raw)
+    return data, size
 
 
 def read_json(path):
