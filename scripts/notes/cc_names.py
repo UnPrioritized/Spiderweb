@@ -17,6 +17,12 @@ def kind_of(status, one):
     return {0xE0: "bend", 0xC0: "program", 0xD0: "pressure", 0xA0: "poly"}.get(status)
 
 
+def file_kind(k):
+    """A loaded MIDI's kind number (files/midi_index CC_KINDS: 0-127 controllers, then instrument, bend, channel
+    pressure, key pressure) as kind_of gives it."""
+    return ("cc", k) if k < 128 else ("program", "bend", "pressure", "poly")[k - 128]
+
+
 def kind_name(kind):
     """The kind's name in words ("Pan", "Pitch bend", "CC 20")."""
     if isinstance(kind, tuple):

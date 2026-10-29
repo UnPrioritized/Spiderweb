@@ -2690,13 +2690,32 @@ class TrackList(tk.Canvas):
 
     def cc_rows(self):
         """{(row, channel): {kind: how many}} of the CC events Spiderweb sends (App.shown_cc: pasted notes' and Hz
-        basses' lines), for the "CC" marks and tips (user 2026-10-29: never silent)."""
-        got = self.app.shown_cc()
+        basses' lines) and a loaded MIDI's own (its loading read's counts; Track Properties' channel, a part's
+        channels), for the "CC" marks and tips (user 2026-10-29: never silent)."""
+        got, lm = self.app.shown_cc(), self.app.loaded
+        self.tracks()
+        key = (got, self._all, lm)
+        ver = (lm.hide_ver, id(lm.rechannel)) if lm is not None else None  # (Track Properties: hide_ver bumped)
         memo = getattr(self, "_cc_rows", None)
-        if memo is not None and memo[0] is got and memo[1] is self._all:
+        if memo is not None and all(a is b for a, b in zip(memo[0], key)) and memo[1] == ver:
             return memo[2]
-        from notes.cc_names import kind_of
+        from notes.cc_names import file_kind, kind_of
         out = {}
+        if lm is not None:
+            from files.midi_index import CC_KINDS
+            moved = lm.rechannel
+            for row in np.flatnonzero(self._all < 0).tolist():
+                k, only = self.file_part(int(self._all[row]))
+                if k >= len(lm.tracks):
+                    continue
+                to = int(moved[k]) if moved is not None and k < len(moved) and moved[k] >= 0 else None
+                for i, n in lm.tracks[k].c_kinds.tolist():
+                    ch = i // CC_KINDS
+                    if only is not None and ch not in only:
+                        continue
+                    counts = out.setdefault((row, ch if to is None else to), {})
+                    kind = file_kind(i % CC_KINDS)
+                    counts[kind] = counts.get(kind, 0) + n
         slots = [s for s, ms in got.items() if ms]
         if slots:
             ids = track_ids(slots).tolist()
@@ -2711,7 +2730,7 @@ class TrackList(tk.Canvas):
                     if k is not None:
                         counts[k] = counts.get(k, 0) + 1
         out = {k: v for k, v in out.items() if v}
-        self._cc_rows = (got, self._all, out)
+        self._cc_rows = (key, ver, out)
         return out
 
     def cc_of(self, row, ch=None):
