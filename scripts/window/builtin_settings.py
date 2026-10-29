@@ -117,6 +117,12 @@ class BuiltinPanel(ttk.Frame):
         Tooltip(c, tr("ks.lower_tip"))
         r += 1
 
+        c = ttk.Checkbutton(box, text=tr("ks.slow_down"), variable=app.slow_kestrel, command=app.on_slow_down,
+                            takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("ks.slow_down_tip"))
+        r += 1
+
         lb = ttk.Label(box, text=tr("ks.block"))
         lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
         names = [tr("ks.block_n", n=b, ms=f"{b / kestrel.RATE * 1000:.0f}") for b in kestrel.BLOCKS]

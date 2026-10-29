@@ -88,6 +88,7 @@ from roll.roll_draw import GHOST_FADE, painting_order
 from files import clipboard, errors, notes_clip, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player
+from files.slow_down import SlowDown
 from files.midi_out import PPQ_WARN, track_slots
 from files.domino_clip import DOMINO_STARTS, FORMAT as DOMINO_FORMAT, on_clipboard
 from files.clipboard import RAW, copy_count, get_text, put_text, put_text_and, registered
@@ -528,6 +529,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                                                                             "dc_blocker")},
                              "block": tk.IntVar(self, value=KESTREL_BLOCKS.index(KESTREL_DEFAULTS["block"]))}
         self.overload, self.overload_text = Overload(), ""  # (red on the status line while it can't keep up)
+        # 13f: slow down to keep the sound going, a tick each (user 2026-10-29: off at first); files/slow_down.py
+        self.slow_kestrel = tk.BooleanVar(self, value=False)
+        self.slow_builtin = tk.BooleanVar(self, value=False)
+        self.slow_down, self.slowed_text = SlowDown(), ""
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None
         self._scrub_held = {}
@@ -902,6 +907,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (Built-in BASSMIDI's red "Overloaded" while it can't keep up: the status line's right end, placed only
         # then (show_overload), so nothing moves, user 2026-10-18)
         self.overload_label = ttk.Label(self.status, text="", foreground=look.ERROR, font=look.font(9))
+        # (13f: orange "Slowed to 62 %" left of it while the song plays slower to keep up)
+        self.slowed_label = ttk.Label(self.status, text="", foreground=look.WARN, font=look.font(9))
 
         side = self._build_side()
         self._build_project(side)

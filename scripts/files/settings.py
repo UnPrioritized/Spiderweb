@@ -119,6 +119,8 @@ APP_KEYS = {
     "kestrel_block": ("sound", "kestrel_block_size", int),
     "kestrel_limiter": ("sound", "kestrel_limiter", bool),
     "kestrel_dc_blocker": ("sound", "kestrel_dc_blocker", bool),
+    "kestrel_slow_down": ("sound", "kestrel_slow_down", bool),
+    "play_slow_down": ("sound", "slow_down", bool),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)
     "more_soundfonts": ("sound", "more_soundfonts", PATHS),  # (the ones under it in the list, user 2026-10-25)
     "hz_on": ("hz_preview", "on", bool),

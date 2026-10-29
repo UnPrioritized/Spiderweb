@@ -125,6 +125,8 @@ class Playback:
         if self.loaded is not None:  # (first: the play line waits until its first notes are read)
             self.start_loaded(int(round(self.playhead * ppq)))
         self.kestrel_parts()
+        self.slow_down.reset()  # (each Play at the song's own speed: Player.start too)
+        self._pace_seen = None
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
@@ -323,9 +325,45 @@ class Playback:
                 self.out.close()
                 self.kestrel_failed(SynthError("playback.kestrel_failed", err=why), during=True)
                 return
+        self.pace_play(now)
         self.roll.show_playhead()
         self.show_overload()
         self._play_job = self.after(15, self._play_tick)
+
+    def slowing(self):
+        """The Slow down tick of the MIDI out in use (13f; other MIDI outs have none)."""
+        return self.slow_kestrel.get() if self.out.name == KESTREL else \
+            self.slow_builtin.get() if self.out.name == BUILTIN else False
+
+    def on_slow_down(self):
+        """A Slow down tick changed: off = back to the song's own speed at once."""
+        if not self.slowing() and self.player.speed != 1.0:
+            self.player.set_speed(1.0)
+        self.slow_down.reset()
+        self.show_overload()
+
+    def pace_play(self, now):
+        """13f: the synth's load -> the speed the song plays at (files/slow_down.py), while its tick is on."""
+        if not self.slowing():
+            if self.player.speed != 1.0:
+                self.player.set_speed(1.0)
+            return
+        load, behind = self.play_load()
+        v = self.slow_down.step(load, now, behind)
+        if v is not None:
+            self.player.set_speed(v)
+
+    def play_load(self):
+        """(the synth's load = time making the sound / the time it lasts, None = not known; whether the sound broke
+        up since the last look)."""
+        if self.out.name == KESTREL and self.out.handle:
+            from files.kestrel import RATE as K_RATE
+            k = self.out.handle.k
+            st = k.stats()
+            seen, self._pace_seen = getattr(self, "_pace_seen", None), st["silence"]
+            behind = seen is not None and st["silence"] > seen
+            return (st["last_block_us"] / (k.block / K_RATE * 1e6) if st["last_block_us"] else None), behind
+        return None, False
 
     def stop_play(self):
         if self._play_job:
@@ -379,15 +417,25 @@ class Playback:
                 text = tr("app.overloaded")
         elif not self.player.running:
             self._k_seen = (None, 0.0)
-        if text != self.overload_text:
-            self.overload_text = text
+        v = self.player.speed
+        slowed = tr("app.slowed", n=max(1, round(v * 100))) if self.player.running and v < 1.0 else ""
+        if text != self.overload_text or slowed != self.slowed_text:
+            self.overload_text, self.slowed_text = text, slowed
             self.overload_label.config(text=text)
+            self.slowed_label.config(text=slowed)
+            free = 0
             if text:
                 self.overload_label.place(relx=1.0, rely=0.5, anchor="e", x=-6)
+                free = self.overload_label.winfo_reqwidth() + 18
             else:
                 self.overload_label.place_forget()
-            # (a long status message stops short of it with "…" instead of running under it)
-            self.status.keep_free(self.overload_label.winfo_reqwidth() + 18 if text else 0)
+            if slowed:  # (13f: orange, left of the red "Overloaded" when both show)
+                self.slowed_label.place(relx=1.0, rely=0.5, anchor="e", x=-6 - free)
+                free += self.slowed_label.winfo_reqwidth() + (12 if text else 18)
+            else:
+                self.slowed_label.place_forget()
+            # (a long status message stops short of them with "…" instead of running under them)
+            self.status.keep_free(free)
             if self.builtin_window is not None:
                 self.builtin_window.refresh()
 

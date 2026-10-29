@@ -570,6 +570,7 @@ class ProjectFiles:
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
+                              "kestrel_slow_down": self.slow_kestrel.get(), "play_slow_down": self.slow_builtin.get(),
                               "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
                               "copy_notes": self.copy_notes.get(),
                               "keep_colours": self.keep_colours.get(), "loud_on_top": self.loud_on_top.get(),
@@ -762,6 +763,8 @@ class ProjectFiles:
                 self.loaded_synths = v
                 self.synths_var.set(str(v))
             self.take_kestrel_opts({k: win.get("kestrel_" + k) for k in self.kestrel_opts})
+            self.slow_kestrel.set(win.get("kestrel_slow_down") is True)
+            self.slow_builtin.set(win.get("play_slow_down") is True)
             self.domino256.set(win.get("domino_256") is True)
             self.copy_domino.set(win.get("copy_domino") is True)
             self.copy_notes.set(win.get("copy_notes") is True)
