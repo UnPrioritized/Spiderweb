@@ -474,6 +474,15 @@ PLAN_CHARS = 20_000_000
 _spans = {}  # inside_spans, remembered
 _faces_of = {}  # shape_faces, remembered
 _inner = {}  # inner_ticks, remembered
+INNER_MOST = 4000
+
+
+def _inner_room():
+    """Room in _inner: past INNER_MOST the oldest half forgotten (100 kept, cleared whole, made 500 outline-gated
+    shapes work it out again on each of an edit's 3 passes, speed hunt 2026-10-29)."""
+    if len(_inner) > INNER_MOST:
+        for k in list(_inner)[:len(_inner) // 2]:
+            del _inner[k]
 
 
 def near_ends(p, q):
@@ -1764,8 +1773,7 @@ def area_filled_lines(sh, keys):
         on = spot_state(sh, amap, uv[:, 0], uv[:, 1])[0]
     on = np.split(on, np.cumsum([len(m) for m in mids])[:-1])
     out = [list(zip(x[:-1][o].tolist(), x[1:][o].tolist())) for x, o in zip(xs, on)]
-    if len(_inner) > 100:
-        _inner.clear()
+    _inner_room()
     got = _inner[key] = (ys, out, area_edges(sh, amap), drawn_view(sh) or
                          (0.0, shrink_proportion(fill_plan(sh)["polys"] + fill_plan(sh)["attached"] + area_cuts(sh))))
     return got
@@ -2531,8 +2539,7 @@ def inner_ticks(sh, ppq, g, spans):
         key += ("ripples", json.dumps({k: v for k, v in sh["ripples"].items() if k not in ("colours", "skip")}))
     got = _inner.get(key)
     if got is None:
-        if len(_inner) > 100:
-            _inner.clear()
+        _inner_room()
         if has_areas(sh):
             got = _inner[key] = area_inner(sh, ppq, g, keys)
         else:
@@ -2570,8 +2577,7 @@ def edge_inner(sh, ppq):
                bool(sh.get("borders")), ppq, g, drawn_view(sh))
         got = _inner.get(key)
         if got is None:
-            if len(_inner) > 100:
-                _inner.clear()
+            _inner_room()
             got = _inner[key] = outline_of_lines(*area_inner_lines(sh, ppq, g, keys), g / ppq)
         return "lines", got
     return "lines", inner_lines(loops, walled, g / ppq, drawn_view(sh))
