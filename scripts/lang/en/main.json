@@ -2249,7 +2249,7 @@
  "help.load_midi.words": "load midi open import dense midi heavy midi big file billion notes extract delete tempo index link sharing copy draw into track order",
  "help.files.title": "Saving and MIDI export",
  "help.files.tip": "Your work saves itself. Export MIDI writes the .mid file set under Project.",
- "help.files.words": "save open new export generate midi file ppq bpm autosave backup 256 keys 31edo microtonal range",
+ "help.files.words": "save open new export generate midi file ppq bpm autosave backup 256 keys 31edo microtonal range spwb json drop drag double-click icon",
  "help.edo31.title": "31-EDO",
  "help.edo31.tip": "With 256 keys, the piano roll can show and play 31 notes an octave.",
  "help.edo31.words": "31edo 31-edo edo microtonal tuning octave 31 steps quarter tone half sharp half flat 256 keys audio",

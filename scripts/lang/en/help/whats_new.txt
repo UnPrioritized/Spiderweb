@@ -28,6 +28,8 @@ What's new:
 
 • Notes by snap (side panel, for lines, polylines, freehand, curves and arcs): every note is one step long, so the line becomes a staircase on the grid, with steep slopes stacking keys in each step. Type the step in ticks or as a note length like 1/32, and pick how the line's last step ends. The Slice tool cuts through its notes like a knife. See Help → Notes by snap.
 
+• A new icon, and projects now save as .spwb files: packed, so much smaller (older .json projects still open). Drop a project or a MIDI file onto the window or onto Spiderweb's icon to open it, and Settings → General can make .spwb projects open with a double-click. See Help → Saving and MIDI export.
+
 • Recolour (side panel, under Colours): changes which colour each note has, while the notes stay exactly where they are. Shuffle the colours a shape already has, or split it into new ones, Scattered at random or in Clumps: bands, swirls or wedges you can turn, twist, centre and push. Shares… sets how many colours and how much of each. It works on pasted notes too, and the colours stay put when you move, copy, flip or slice the shape. See Help → Recolour.
 
 • Hz bass Sketch tool (S in the Hz bass window): notes show as pitch lines you shape by hand. Double-click to add points, drag them or the pieces between them, Alt+drag to curve a piece, drag the > to change the length. Click a piece and drag the orange line up for a wobble: fade it in or out, set its speed (waves a beat), pick Sine, Triangle, Saw or Square, or bake it into points. Note bends are no longer limited by the Pitch box's Range. See Help → Sketch tool.

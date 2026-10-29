@@ -111,6 +111,10 @@ Limits
   Domino cut them to that length and tell you.
 
 Autosave and problems
+- Projects save as .spwb files (packed JSON; older .json projects still
+  open). Drop a project or a MIDI onto the window or onto Spiderweb's icon
+  to open it. Settings -> General can make .spwb files open with a
+  double-click (Windows).
 - Everything you do is saved on its own (user/autosave.json). Each time
   Spiderweb starts, the previous session is also kept as
   autosave-backup.json: open it with Open... if something went wrong.
