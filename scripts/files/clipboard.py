@@ -65,23 +65,39 @@ def _open(user32, kernel32):
 
 def put(fmt, raw):
     """raw bytes -> the clipboard as format fmt (replaces what's there). Returns False if the clipboard was busy."""
+    return fmt in put_many([(fmt, raw)])
+
+
+def put_many(items):
+    """[(format, raw bytes)] -> the clipboard, all at once (replaces what's there; a program pasting picks the format
+    it knows). Returns the formats that went on ([] if the clipboard was busy). MemoryError when one doesn't fit
+    (nothing put)."""
     user32, kernel32 = _api()
-    h = kernel32.GlobalAlloc(0x0002, len(raw))  # GMEM_MOVEABLE
-    if not h:
-        raise MemoryError(tr("domino_clip.not_enough_memory_for_the_clipboard"))
-    ctypes.memmove(kernel32.GlobalLock(h), raw, len(raw))
-    kernel32.GlobalUnlock(h)
+    held = []
+    for fmt, raw in items:
+        h = kernel32.GlobalAlloc(0x0002, len(raw))  # GMEM_MOVEABLE
+        if not h:
+            for _, h in held:
+                kernel32.GlobalFree(h)
+            raise MemoryError(tr("domino_clip.not_enough_memory_for_the_clipboard"))
+        ctypes.memmove(kernel32.GlobalLock(h), raw, len(raw))
+        kernel32.GlobalUnlock(h)
+        held.append((fmt, h))
     if not _open(user32, kernel32):
-        kernel32.GlobalFree(h)
-        return False
+        for _, h in held:
+            kernel32.GlobalFree(h)
+        return []
+    put_on = []
     try:
         user32.EmptyClipboard()
-        if not user32.SetClipboardData(fmt, h):  # on success the clipboard owns h
-            kernel32.GlobalFree(h)
-            return False
+        for fmt, h in held:
+            if user32.SetClipboardData(fmt, h):  # on success the clipboard owns h
+                put_on.append(fmt)
+            else:
+                kernel32.GlobalFree(h)
     finally:
         user32.CloseClipboard()
-    return True
+    return put_on
 
 
 def get(fmt):
@@ -112,14 +128,27 @@ def _tk():
 
 def put_text(text):
     """Text -> the clipboard. False if the clipboard was busy."""
+    return put_text_and(text)[0]
+
+
+def put_text_and(text, also=()):
+    """Text -> the clipboard, also: [(format, raw bytes)] put beside it (Windows only; extras, so no room for them =
+    the text alone). Returns (text went on, the extras went on); the text didn't = the clipboard was busy."""
     if not WINDOWS:
         root = _tk()
         if root is None:
-            return False
+            return False, False
         root.clipboard_clear()
         root.clipboard_append(text)
-        return True
-    return put(TEXT, (text + "\0").encode("utf-16-le"))
+        return True, not also
+    items = [(TEXT, (text + "\0").encode("utf-16-le"))] + list(also)
+    try:
+        put_on = put_many(items)
+    except MemoryError:
+        if not also:
+            raise
+        put_on = put_many(items[:1])
+    return TEXT in put_on, len(put_on) == len(items)
 
 
 def get_text():

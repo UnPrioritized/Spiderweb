@@ -56,7 +56,7 @@ from files.settings import save_app_settings, with_app_settings
 from files.snap import clean_snap
 from files.unzip import allowance
 from files.update_check import version_tuple
-from window.big_ask import ask as ask_big, ask_drums
+from window.big_ask import ask as ask_big, ask_drums, trouble as big_trouble
 from window.tempo_pane import ask_domino
 from roll.roll_draw import GHOST_FADE
 
@@ -567,8 +567,8 @@ class ProjectFiles:
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
-                              "domino_256": self.domino256.get(), "keep_colours": self.keep_colours.get(),
-                              "loud_on_top": self.loud_on_top.get(),
+                              "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
+                              "keep_colours": self.keep_colours.get(), "loud_on_top": self.loud_on_top.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
                               "tracks": self.track_list.state(),
@@ -759,6 +759,7 @@ class ProjectFiles:
                 self.synths_var.set(str(v))
             self.take_kestrel_opts({k: win.get("kestrel_" + k) for k in self.kestrel_opts})
             self.domino256.set(win.get("domino_256") is True)
+            self.copy_domino.set(win.get("copy_domino") is True)
             self.keep_colours.set(win.get("keep_colours") is True)
             self.loud_on_top.set(win.get("loud_on_top") is True)
             self.sync_builtin()
@@ -1651,18 +1652,45 @@ class ProjectFiles:
         boxes kept: the notes starting in them) on the clipboard, for
         Ctrl+V in Domino. One track per channel that has notes; the copy starts on the first note or at the bar
         line before it (domino_start)."""
-        if not clipboard.RAW:
-            messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
+        got = self.domino_copy()
+        if got is None:
             return
+        raw, text, warn = got
+        try:
+            copied = put_on_clipboard(raw)
+        except MemoryError:
+            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
+            return
+        if not copied:
+            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
+            return
+        self.own_domino_copy = clipboard.copy_count()  # (pasted straight back: its tempo isn't asked about)
+        self.status.config(text=text)
+        if warn:
+            messagebox.showwarning(tr("project.spiderweb"), text + warn)
+        self.tips.show("domino", wait=True)
+
+    def domino_copy(self, quiet=False):
+        """Copy to Domino's clipboard bytes of what it copies -> (raw, status text, warning text), or None when
+        there's nothing to put on (said why: message boxes / questions). quiet (Ctrl+C with "Ctrl+C also copies for
+        Domino", App.put_clipboard): never a message box nor a question; a copy that would ask (big_ask) or can't be
+        made gives "skipped" in place of None ("" = nothing worth saying, e.g. no notes)."""
+        def fail(text, box=messagebox.showerror):
+            if quiet:
+                return "skipped"
+            box(tr("project.spiderweb"), text)
+        if not clipboard.RAW:
+            return "" if quiet else fail(tr("project.notes_clipboard_windows_only"), messagebox.showinfo)
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
-            messagebox.showerror(tr("project.spiderweb"), str(e))
-            return
+            return fail(str(e))
         self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
         notes = self.rendered
         boxed = self.list_boxed()
         if boxed is not None and not boxed.any():  # (a loaded MIDI's notes in it: never copied, said why)
+            if quiet:
+                return ""
             self.status.config(text=tr("tracks.box_empty") + self.loaded_left_out(short=True))
             return
         sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
@@ -1696,6 +1724,8 @@ class ProjectFiles:
         if not mod:
             notes = notes[notes[:, 2] <= 127]
         if not len(notes):
+            if quiet:
+                return fail(None) if high else ""
             messagebox.showerror(tr("project.spiderweb"), (tr("project.no_notes_to_copy_draw_something")
                                  if not sels or high else tr("project.the_selected_shapes_have_no_notes"))
                                  + self.loaded_left_out())
@@ -1716,12 +1746,9 @@ class ProjectFiles:
             span = start, length + first - start
         first = span[0] if span else clip_span(notes, beats * ppq, self.domino_start())[0]
         if int(notes[:, 1].max()) - first > LONGEST:  # (pasting it back would say "damaged")
-            messagebox.showerror(tr("project.spiderweb"), tr("project.too_long_to_copy_for_domino", longest=LONGEST))
-            return
+            return fail(tr("project.too_long_to_copy_for_domino", longest=LONGEST))
         if len(notes) > MOST_NOTES:
-            messagebox.showerror(tr("project.spiderweb"),
-                                 tr("project.too_many_to_copy_for_domino", notes=len(notes), most=MOST_NOTES))
-            return
+            return fail(tr("project.too_many_to_copy_for_domino", notes=len(notes), most=MOST_NOTES))
         tracks = len(np.unique(notes[:, 4]))
         pad_from = None
         auto = notes[:, 4][notes[:, 4] < OWN0]  # (not the tracks added by hand: their own tracks, never padded)
@@ -1729,24 +1756,21 @@ class ProjectFiles:
             step = 16 if self.picture_use10 else 15
             pad_from = int(auto.min()) // step * step
             tracks = int(auto.max()) + 1 - pad_from + tracks - len(np.unique(auto))
+        if quiet:  # (a question would be asked: left to Copy to Domino; no drums question, the hint says it)
+            if big_trouble(self, "domino", len(notes))[0]:
+                return fail(None)
         # (no channel 10 question when the project uses it on purpose: "Use channel 10")
-        if not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
+        elif not ask_big(self, "domino", len(notes)) or not (self.all16() or ask_drums(self, tracks)):
             return
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)
         try:
             raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from, cc, span, conductor,
                             self.with_file_tracks())
-            copied = put_on_clipboard(raw)
         except MemoryError:
-            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"))
-            return
+            return fail(tr("big_ask.out_of_memory"))
         finally:
             self.busy(None)
-        if not copied:
-            messagebox.showerror(tr("project.spiderweb"), tr("project.couldn_t_use_the_clipboard_another"))
-            return
-        self.own_domino_copy = clipboard.copy_count()  # (pasted straight back: its tempo isn't asked about)
         what =((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if sels else
                 trn("project.all_notes", len(notes), n=len(notes)))
         where = (tr("project.the_conductor_track") if plan else
@@ -1760,7 +1784,6 @@ class ProjectFiles:
                 + (tr("project.cc_not_written") if self.cc_note({}, shapes=[self.shapes[i] for i in sels]
                                                                  if sels else None) else "")
                 + self.loaded_left_out(short=True))
-        self.status.config(text=text)
         warn = ""
         if plan:  # (the tempo warnings as Export to Domino gives them; places only inside what was copied)
             lo, hi = heard
@@ -1768,9 +1791,7 @@ class ProjectFiles:
             warn = self.tempo_notes(dict(plan, **inside))
             if conductor and tempo_items(plan["events"])[1]:
                 warn += tr("project.dms_tempo_slow")
-        if warn:
-            messagebox.showwarning(tr("project.spiderweb"), text + warn)
-        self.tips.show("domino", wait=True)
+        return raw, text, warn
 
     def busy(self, text):
         """text: the status line says it and the busy cursor shows until busy(None) (the status line back)."""

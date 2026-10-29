@@ -89,8 +89,8 @@ from files import errors, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, MidiOut, Player
 from files.midi_out import PPQ_WARN, track_slots
-from files.domino_clip import DOMINO_STARTS, on_clipboard
-from files.clipboard import RAW, copy_count, get_text, put_text
+from files.domino_clip import DOMINO_STARTS, FORMAT as DOMINO_FORMAT, on_clipboard
+from files.clipboard import RAW, copy_count, get_text, put_text, put_text_and, registered
 from files.share import LONG_LINE, FIND, ShareError, made_by, read_shapes, shapes_line, unpack
 from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
@@ -497,6 +497,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.synths_var = tk.StringVar(self, value=str(GROUP_DEFAULT))
         self.synths_entry = None  # (in Settings → Sound)
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
+        self.copy_domino = tk.BooleanVar(self, value=False)  # Settings → General: Ctrl+C also copies for Domino
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
         self.loud_on_top = tk.BooleanVar(self, value=False)  # Settings → Look: a loaded MIDI's louder notes drawn on top
@@ -2784,13 +2785,26 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.clip_kind = "shapes"
         line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
         msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
-        if put_text(line):
-            self.remember_clip()
+        also, domino = (), None
+        if self.copy_domino.get():  # (Settings → General: Copy to Domino's notes beside it, never a question)
+            domino = self.domino_copy(quiet=True)
+            if isinstance(domino, tuple):
+                also = [(registered(DOMINO_FORMAT), domino[0])]
+        try:
+            shared, extra = put_text_and(line, also)
+        except MemoryError:
+            shared, extra = False, False
+        self.remember_clip()
+        if shared:
             if len(line) > LONG_LINE:
                 msg += tr("app.too_long", chars=len(line))
         else:
-            self.remember_clip()
             msg += tr("app.couldn_t_share")
+        if also and extra:
+            self.own_domino_copy = self.seen_clip  # (pasted straight back: its tempo isn't asked about)
+            msg += tr("app.copied_for_domino_too")
+        elif also or domino:  # (no room on the clipboard / it would have asked or failed)
+            msg += tr("app.not_copied_for_domino")
         self.status.config(text=msg)
 
     def cut_selected(self, whole=False):

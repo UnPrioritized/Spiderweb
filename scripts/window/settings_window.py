@@ -203,6 +203,7 @@ class SettingsWindow(tk.Toplevel):
             updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
         self.build_tips(page)
         self.build_keep_colours(page)
+        self.build_copying(page)
         self.build_domino(page)
         self.build_indexes(page)
         self.build_language()
@@ -305,6 +306,15 @@ class SettingsWindow(tk.Toplevel):
         fill()
         ttk.Label(page, text=tr("settings.indexes_hint"), foreground=look.HINT, wraplength=width,
                   justify="left").pack(anchor="w", pady=(4, 0))
+
+    def build_copying(self, page):
+        """Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (App.put_clipboard)."""
+        ttk.Separator(page).pack(fill="x", pady=(12, 8))
+        ttk.Label(page, text=tr("settings.copying")).pack(anchor="w")
+        ttk.Checkbutton(page, text=tr("settings.copy_domino"), variable=self.app.copy_domino, takefocus=False,
+                        command=self.app.schedule_autosave).pack(anchor="w", pady=(4, 0))
+        ttk.Label(page, text=tr("settings.copy_domino_hint"), foreground=look.HINT,
+                  wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
 
     def build_domino(self, page):
         """(Experimental) Domino 256 keys: Copy / Paste / Export to Domino keep keys above 127 (off: left out)."""

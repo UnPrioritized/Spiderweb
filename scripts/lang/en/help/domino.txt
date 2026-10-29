@@ -1,5 +1,7 @@
 Copy (on the Domino row under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or all notes when nothing is selected. In Domino, pick the track and press Ctrl+V, or double-click where the notes should go. Copying and pasting notes this way works on Windows only for now.
 
+To skip the extra step, tick "Ctrl+C also copies for Domino" in Settings → General: then the normal Ctrl+C (and Ctrl+X) copies for Domino too, without any questions. A very big copy is left out of it (the status line says so): use Copy for those.
+
 The Domino start dropdown above the row sets where the notes start, for copying and pasting both:
 
 • First note at tick 0: the first note lands right on Domino's cursor (or on the play line here).
