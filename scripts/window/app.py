@@ -527,14 +527,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.kestrel_opts = dict(KESTREL_DEFAULTS)
         self.kestrel_vars = {"voices": tk.StringVar(self, value=f"{KESTREL_DEFAULTS['voices']}"),
                              **{k: tk.BooleanVar(self, value=KESTREL_DEFAULTS[k]) for k in ("lower", "limiter",
-                                                                                            "dc_blocker", "filter",
-                                                                                            "lfo", "mod_env")},
+                                                                                            "dc_blocker")},
                              "block": tk.IntVar(self, value=KESTREL_BLOCKS.index(KESTREL_DEFAULTS["block"])),
-                             # (13g: lists by place, number boxes as text, the card as cards()' "backend:name")
-                             **{k: tk.IntVar(self, value=KESTREL_DEFAULTS[k]) for k in ("interpolation", "steal",
-                                                                                        "admit")},
-                             **{k: tk.StringVar(self, value=str(KESTREL_DEFAULTS[k]))
-                                for k in ("release_floor", "min_velocity", "max_steal", "max_layers")},
+                             # (13g: a list by place, a number box as text, the card as cards()' "backend:name")
+                             "interpolation": tk.IntVar(self, value=KESTREL_DEFAULTS["interpolation"]),
+                             "min_velocity": tk.StringVar(self, value=str(KESTREL_DEFAULTS["min_velocity"])),
                              "card": tk.StringVar(self, value="")}
         self.overload, self.overload_text = Overload(), ""  # (red on the status line while it can't keep up)
         # 13f: slow down to keep the sound going, a tick each (user 2026-10-29: off at first); files/slow_down.py

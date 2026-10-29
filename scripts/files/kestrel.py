@@ -33,12 +33,16 @@ VOICES_RANGE = (1024, 1 << 26)  # (Settings → Sound's Max voices)
 LIVE_VOICES = 300_000  # (Max voices to start with: user 2026-10-28, Kestrel's own 1 M fell behind on heavy MIDIs)
 KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limiter": True, "dc_blocker": True,
                     # (13g, user 2026-10-29: Kestrel's own defaults; "card" = "backend:name" of cards(), "" = its
-                    # pick; card + filter = the soundfonts sent to the card / read again)
-                    "card": "", "interpolation": 1, "steal": 2, "release_floor": -100, "min_velocity": 0,
-                    "admit": 0, "max_steal": 25, "max_layers": 16, "filter": True, "lfo": True, "mod_env": True}
-# (the lists' places = the connector's numbers: Nearest / Linear / Cubic, Oldest / Drop new / Quietest, Loudest / Even)
-CHOICES = {"interpolation": 3, "steal": 3, "admit": 2}
-RANGES = {"release_floor": (-160, -20), "min_velocity": (0, 127), "max_steal": (1, 100), "max_layers": (1, 64)}
+                    # pick: changing it sends the soundfonts to the card again)
+                    "card": "", "interpolation": 1, "min_velocity": 0}
+# (user 2026-10-29, after trying them: When voices run out, Release floor and an Advanced fold (admit, max steal,
+# max layers, filter, LFO, mod envelope) were rows too, REMOVED as player settings; _options still takes them
+# (steal, release_floor, admit, max_steal, max_layers, filter, lfo, mod_env) at Kestrel's defaults, the connector
+# + its bit-exact test (loaded.rs the_sound_rows_*) kept: a row back = its KESTREL_DEFAULTS key, CHOICES / RANGES
+# entry, settings.APP_KEYS line, BuiltinPanel row, texts (git: d292586). Filter would also need loaded_for's filter.)
+# (the lists' places = the connector's numbers: Nearest / Linear / Cubic)
+CHOICES = {"interpolation": 3}
+RANGES = {"min_velocity": (0, 127)}
 
 
 def card_id(name, backend):

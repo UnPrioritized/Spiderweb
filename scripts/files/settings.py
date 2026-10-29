@@ -121,15 +121,7 @@ APP_KEYS = {
     "kestrel_dc_blocker": ("sound", "kestrel_dc_blocker", bool),
     "kestrel_card": ("sound", "kestrel_graphics_card", str),  # (13g: "backend:name", empty = Kestrel's pick)
     "kestrel_interpolation": ("sound", "kestrel_interpolation", int),
-    "kestrel_steal": ("sound", "kestrel_steal_rule", int),
-    "kestrel_release_floor": ("sound", "kestrel_release_floor_db", int),
     "kestrel_min_velocity": ("sound", "kestrel_velocity_threshold", int),
-    "kestrel_admit": ("sound", "kestrel_admit_rule", int),
-    "kestrel_max_steal": ("sound", "kestrel_max_steal_percent", int),
-    "kestrel_max_layers": ("sound", "kestrel_max_layers", int),
-    "kestrel_filter": ("sound", "kestrel_filter", bool),
-    "kestrel_lfo": ("sound", "kestrel_lfo", bool),
-    "kestrel_mod_env": ("sound", "kestrel_mod_envelope", bool),
     "kestrel_slow_down": ("sound", "kestrel_slow_down", bool),
     "play_slow_down": ("sound", "slow_down", bool),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)

@@ -735,7 +735,7 @@ class Playback:
                 return out
             if out is not None:  # (the soundfonts / settings changed meanwhile: started again with them)
                 out.close()
-        loaded = kestrel.kept_for(fonts, self.kestrel_opts["card"], self.kestrel_opts["filter"])
+        loaded = kestrel.kept_for(fonts, self.kestrel_opts["card"])
         if loaded is None:  # (it would read for seconds: never on the window's thread, e.g. an Hz window key; hunt
             # 2026-10-29: it froze the window and read beside a start already on its way)
             if self._kestrel_job is None:
@@ -859,7 +859,7 @@ class Playback:
         def work():
             try:
                 # (kept loaded: only soundfonts not read yet are read; a broken one is named by its reading)
-                loaded = kestrel.loaded_for(fonts, opts["card"], opts["filter"])
+                loaded = kestrel.loaded_for(fonts, opts["card"])
                 if loaded.card_why == "missing":  # (the picked graphics card isn't there now: Kestrel's own pick)
                     job["card_gone"] = opts["card"]
                     opts["card"] = loaded.card
