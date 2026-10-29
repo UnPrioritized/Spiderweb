@@ -398,6 +398,7 @@ class Player:
         self._wanted = None  # new notes waiting to be put in order (notes, use10)
         self._sorting = False  # a thread is putting them in order (cleared by it under _lock as it ends)
         self._lock = threading.Lock()
+        self._clock_lock = threading.Lock()  # (_kestrel_wait vs the window's tempo / note changes moving the clock)
         self._gen = 0  # one for each start (a sort left from an earlier play is thrown away)
         self.ready = None  # a threading.Event the line waits for before it starts (play_loaded.LoadedPlayer.ready)
         self.notes_ver = 0  # (+1 each time other notes are handed over: Kestrel's remembered note limits start over)
@@ -437,11 +438,12 @@ class Player:
         self.ports = 0 if self.tune else ports
         self.stop_beat = stop_beat
         new = TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)])
-        clock = self._clock
-        if clock is not None:  # (the same spot in the song now, at the new speed)
-            now = time.perf_counter()
-            t, sec, old = clock
-            self._clock = (now, new.sec(old.tick(sec + now - t)), new)
+        with self._clock_lock:
+            clock = self._clock
+            if clock is not None:  # (the same spot in the song now, at the new speed)
+                now = time.perf_counter()
+                t, sec, old = clock
+                self._clock = (now, new.sec(old.tick(sec + now - t)), new)
         self.map = new
         with self._lock:  # (a thread just ending would miss these notes: it says it's done under the same lock)
             self._wanted = (self._gen, notes, use10, () if self.tune else cc)
@@ -460,15 +462,26 @@ class Player:
         if not self.running:
             return
         new = TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)])
-        clock = self._clock
-        if clock is not None:
-            now = time.perf_counter()
-            t, sec, old = clock
-            k = self.out.handle if getattr(self.out, "name", None) == KESTREL and not self.along else None
-            # (alone: the loaded MIDI's feeder does this when one plays along, play_loaded._retime)
-            if k is None or not self._kestrel_retime(k, clock, new):
-                self._clock = (now, new.sec(old.tick(sec + now - t)), new)
+        with self._clock_lock:
+            clock = self._clock
+            if clock is not None:
+                now = time.perf_counter()
+                t, sec, old = clock
+                k = self.out.handle if getattr(self.out, "name", None) == KESTREL and not self.along else None
+                # (alone: the loaded MIDI's feeder does this when one plays along, play_loaded._retime)
+                if k is None or not self._kestrel_retime(k, clock, new):
+                    self._clock = (now, new.sec(old.tick(sec + now - t)), new)
         self.map = new
+
+    def kestrel_wait(self, k):
+        """Kestrel fell behind (handed out silence while it caught up, so all later sound comes later): the play line
+        waits as long, so it stays with the sound (13e, always on; Built-in BASSMIDI never falls behind). k = the
+        KestrelOut; called by the thread that sends to it (the loaded MIDI's feeder when one plays along)."""
+        with self._clock_lock:
+            d = k.waited()
+            clock = self._clock
+            if d and clock is not None:
+                self._clock = (clock[0] + d, clock[1], clock[2])
 
     def _kestrel_retime(self, k, clock, new):
         """Kestrel (own shapes alone): what was sent ahead at the old tempo taken back from a couple of blocks on
@@ -532,6 +545,8 @@ class Player:
                 return
         if lead:
             out.handle.resync()
+        # (Kestrel falling behind = the line waits: here when alone, else the loaded MIDI's feeder does it)
+        behind = out.handle if lead and not self.along else None
         # (Kestrel: the line starts `lead` from now, so the first notes are sent ahead too)
         self._clock = (clock() + lead, self.map.sec(t0), self.map)
         held = self.held = {}
@@ -547,6 +562,8 @@ class Player:
         while True:
             if stop.is_set():
                 return
+            if behind is not None:
+                self.kestrel_wait(behind)
             if self._swap is not None:
                 (ons, ccs), self._swap = self._swap, None
                 # (on from the notes of the tick it's on that weren't sent yet, not the next tick: a big chord

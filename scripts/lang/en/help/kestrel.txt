@@ -11,7 +11,7 @@ Settings (Help menu) → Sound, while Kestrel is picked:
 • Limiter and DC blocker: keep very loud parts from clipping and the bass from drifting, as in Kestrel's own renders.
 Changing them while playing starts Kestrel again from the play line, in a moment (the soundfonts aren't read again).
 
-When the card can't keep up, a red "Overloaded" shows at the right end of the status line: lower Max voices, pick a bigger Block size, or tick "Lower it by itself".
+When the card can't keep up, a red "Overloaded" shows at the right end of the status line: lower Max voices, pick a bigger Block size, or tick "Lower it by itself". Where the sound stutters, the play line waits with it, so the line always stays on what you hear.
 
 For now, the Hz bass preview, the synth window and the live keys still play through Built-in BASSMIDI, and 31-EDO keys above 127 need Built-in BASSMIDI to be heard.
 

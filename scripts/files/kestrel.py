@@ -460,6 +460,7 @@ class Kestrel:
 
 
 LEAD = 0.2  # seconds the player sends ahead of the sound (more than the blocks made ahead: AHEAD x BLOCK = 64 ms)
+GAP_S = 0.01  # (KestrelOut.waited: how often it asks the connector for the silence handed out)
 
 
 class KestrelOut:
@@ -487,6 +488,23 @@ class KestrelOut:
     def resync(self):
         """Frames against the clock again (each play's start: the sound card's clock drifts from perf_counter)."""
         self._t0, self._f0 = self.k.anchor()
+        self._gaps, self._gap_at = self.k.stats()["silence"], 0.0
+
+    def waited(self):
+        """Seconds of silence Kestrel handed out since the last look (it fell behind: every later sound comes that much
+        later), the frames' clock moved on by as much, so messages sent for a time keep their frames. The caller moves
+        the play line on by the same (13e, user 2026-10-28: the line waits too, always). Looks every GAP_S at most."""
+        now = time.perf_counter()
+        if now - self._gap_at < GAP_S:
+            return 0.0
+        self._gap_at = now
+        got = self.k.stats()["silence"]
+        if got <= self._gaps:
+            return 0.0
+        d = (got - self._gaps) / RATE
+        self._gaps = got
+        self._t0 += d
+        return d
 
     def frame_at(self, when):
         return max(0, int(round(self._f0 + (when - self._t0) * RATE)))

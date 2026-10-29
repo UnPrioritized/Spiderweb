@@ -906,6 +906,8 @@ class LoadedPlayer:
             return None
         while not self._stop.is_set():
             time.sleep(STEP_S)
+            if self.player._clock is not None:  # (Kestrel fell behind: the line waits as long, 13e)
+                self.player.kestrel_wait(kout)
             clock = self.player._clock
             if clock is None:
                 continue
@@ -947,10 +949,12 @@ class LoadedPlayer:
                     base_new = kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
                     held, base = self._retime(kout, ahead, held, tm, base, new, base_new, align)
                     if base != base_new:  # (the clock moved so the line, own shapes and these notes stay together)
-                        clock = self.player._clock
-                        if clock is not None and clock[2] is tmap:
-                            self.player._clock = clock = (clock[0] + (base - base_new) / K_RATE, clock[1], clock[2])
-                            t_c = clock[0]
+                        with self.player._clock_lock:
+                            clock = self.player._clock
+                            if clock is not None and clock[2] is tmap:
+                                self.player._clock = clock = (clock[0] + (base - base_new) / K_RATE, clock[1],
+                                                              clock[2])
+                                t_c = clock[0]
                 tm_of, tm = tmap, new
             if cur is None:
                 self.prof[3] += 1
