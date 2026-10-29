@@ -28,11 +28,12 @@ def size_text(n):
     return tr("load.gb", n=f"{n / 1e9:.1f}") if n >= 1e9 else tr("load.mb", n=f"{max(n, 1e5) / 1e6:.1f}")
 
 
-def load_midi(app):
-    """The File menu's Load MIDI…."""
-    path = filedialog.askopenfilename(title=tr("load.pick"), initialdir=OUTPUT_DIR,
-                                      filetypes=[(tr("load.midi_files"), "*.mid *.midi *.rmi *.smf"),
-                                                 (tr("project.all_files"), "*.*")])
+def load_midi(app, path=None):
+    """The File menu's Load MIDI…; path = a file dropped / opened with Spiderweb (window/open_files.py)."""
+    if path is None:
+        path = filedialog.askopenfilename(title=tr("load.pick"), initialdir=OUTPUT_DIR,
+                                          filetypes=[(tr("load.midi_files"), "*.mid *.midi *.rmi *.smf"),
+                                                     (tr("project.all_files"), "*.*")])
     if not path or not app.may_replace(os.path.basename(path)):
         return
     try:

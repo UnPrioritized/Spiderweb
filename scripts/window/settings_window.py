@@ -202,6 +202,7 @@ class SettingsWindow(tk.Toplevel):
             status.config(text=tr("updates.checking")),
             updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
         self.build_tips(page)
+        self.build_file_link(page)
         self.build_keep_colours(page)
         self.build_copying(page)
         self.build_domino(page)
@@ -261,6 +262,35 @@ class SettingsWindow(tk.Toplevel):
             note.config(text=tr("help.done_every_tip_shows_again_the"))
         ttk.Button(row, text=tr("help.show_all_tips_again"), takefocus=False, command=again).pack(side="left")
         note.pack(side="left", padx=(6, 0))
+
+    def build_file_link(self, page):
+        """"Open .spwb files with Spiderweb" (14, user 2026-10-29): Windows told that double-clicking a .spwb opens
+        this Spiderweb. Pressed again after the folder moved = linked to the new place. Windows only."""
+        from files.about import HERE
+        from files.project import PROJECT_EXT
+        from files.system import file_link, link_files
+        ttk.Separator(page).pack(fill="x", pady=(12, 8))
+        row = ttk.Frame(page)
+        row.pack(anchor="w")
+        note = self.link_note = ttk.Label(page, text="", foreground=look.HINT, wraplength=round(360 * self.app.scale),
+                                          justify="left")
+
+        def show():
+            now = file_link(PROJECT_EXT, HERE)
+            note.config(text=tr("settings.link_" + (now or "windows_only")),
+                        foreground=look.GOOD if now == "here" else look.HINT)
+
+        def link():
+            if link_files(PROJECT_EXT, HERE, tr("project.spiderweb_project")):
+                show()
+            else:
+                note.config(text=tr("settings.link_failed"), foreground=look.ERROR)
+        b = ttk.Button(row, text=tr("settings.link_button"), takefocus=False, command=link)
+        b.pack(side="left")
+        if file_link(PROJECT_EXT, HERE) is None:
+            b.state(["disabled"])
+        note.pack(anchor="w", pady=(6, 0))
+        show()
 
     def build_keep_colours(self, page):
         """Multi channel: a shape overlapping an earlier one moves whole to the next row of channels (render keep)."""

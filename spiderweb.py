@@ -8,6 +8,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     app.py           main window: toolbar, side panel, shapes
     menubar.py       the menu bar (File, Edit, Shape, Tools, View, Help)
     load_midi.py     Load MIDI: the window (how to hold the notes, reading with each step, the summary)
+    open_files.py    files given from outside: dropped, double-clicked, handed over by a second start
     app_playback.py  playing the notes, right-drag listening, MIDI out + Built-in BASSMIDI's settings
     app_pictures.py  placed pictures (Image to notes): placing, editing, notes made again
     panel_custom.py  the panel's custom shape settings, opening the drawer
@@ -139,7 +140,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
   files/            saving, MIDI, sound
-    project.py       project files, autosave (+ its backup), MIDI export
+    project.py       project files (.spwb packed, old .json plain), autosave (+ its backup), MIDI export
+    dropfiles.py     files dragged in from Explorer onto the main window (Windows' OLE drop target)
     safefile.py      saving without half-written files
     saved_lists.py   the user's lists kept in one file (patterns, rhythms, colour formats): a damaged one loses nothing
     errors.py        spiderweb-error.log and the "something went wrong" message; spiderweb-crash.log when the
@@ -378,8 +380,12 @@ if __name__ == "__main__":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Spiderweb")
     except (AttributeError, OSError):
         pass
+    given = [os.path.abspath(a) for a in sys.argv[1:] if os.path.isfile(a)]  # (opened with Spiderweb / dropped on it)
     try:
         if not first_instance():
+            if given:  # (the open Spiderweb opens them)
+                from window.open_files import hand_over
+                hand_over(given)
             sys.exit(0)
     except (AttributeError, OSError):  # not Windows: no lock
         pass
@@ -397,6 +403,8 @@ if __name__ == "__main__":
         from window.app import App
         app = App()
         label_window(app)
+        from window import open_files
+        open_files.start(app, given)
         if not_moved:  # (old files another program held: they stay beside Spiderweb, the user moves them)
             from tkinter import messagebox
             from files.about import HERE, USER

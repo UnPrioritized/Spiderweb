@@ -183,6 +183,63 @@ def open_path(path, text=False):
         return False
 
 
+FILE_KIND = "Spiderweb.Project"  # (the name Windows files .spwb under)
+
+
+def file_link_command(here):
+    """-> (command, icon) Windows runs for a double-clicked file: the exe, or pythonw + spiderweb.py from source."""
+    import os
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}" "%1"', f'"{sys.executable}",0'
+    exe = sys.executable
+    quiet = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    if os.path.isfile(quiet):
+        exe = quiet
+    return (f'"{exe}" "{os.path.join(here, "spiderweb.py")}" "%1"',
+            os.path.join(here, "scripts", "icons", "icon.ico"))
+
+
+def file_link(ext, here):
+    """What a double-clicked file of ext opens now: "here" (this Spiderweb), "other" (another one / program),
+    "none", or None where it can't be asked (not Windows)."""
+    if not WINDOWS:
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}") as key:
+            kind = winreg.QueryValueEx(key, "")[0]
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{kind}\shell\open\command") as key:
+            command = winreg.QueryValueEx(key, "")[0]
+    except OSError:
+        return "none"
+    return "here" if command == file_link_command(here)[0] else "other"
+
+
+def link_files(ext, here, name):
+    """Tells Windows that double-clicking an ext file opens this Spiderweb (the user's own part of the registry, no
+    installer; its icon = Spiderweb's). True when done."""
+    if not WINDOWS:
+        return False
+    command, icon = file_link_command(here)
+    try:
+        import winreg
+        root = winreg.HKEY_CURRENT_USER
+        with winreg.CreateKey(root, rf"Software\Classes\{ext}") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, FILE_KIND)
+        with winreg.CreateKey(root, rf"Software\Classes\{ext}\OpenWithProgids") as key:
+            winreg.SetValueEx(key, FILE_KIND, 0, winreg.REG_NONE, b"")
+        with winreg.CreateKey(root, rf"Software\Classes\{FILE_KIND}") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, name)
+        with winreg.CreateKey(root, rf"Software\Classes\{FILE_KIND}\DefaultIcon") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, icon)
+        with winreg.CreateKey(root, rf"Software\Classes\{FILE_KIND}\shell\open\command") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)  # (SHCNE_ASSOCCHANGED: icons redrawn)
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
 def error_box(title, msg):
     """An error message that works without a Spiderweb window (e.g. it couldn't start). Nothing if it can't show."""
     if WINDOWS:

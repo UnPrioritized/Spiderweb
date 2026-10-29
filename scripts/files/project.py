@@ -72,13 +72,62 @@ def backup_path(autosave):
     return os.path.splitext(autosave)[0] + "-backup.json"
 
 
-def read_json(path):
-    """A project file's contents (a BOM, which some text editors put at the start, is skipped)."""
-    with open(path, encoding="utf-8-sig") as f:
-        data = json.load(f)
+PROJECT_EXT = ".spwb"  # (the project's JSON packed with gzip; old projects are plain .json, autosave stays .json)
+PACKED = b"\x1f\x8b"  # (a packed project's first bytes: told by them, whatever the file is called)
+MOST_UNPACKED = 1 << 30  # (a packed file unpacking to more isn't a project: never fills the memory)
+
+
+def is_packed_name(path):
+    return os.path.splitext(path)[1].lower() == PROJECT_EXT
+
+
+def as_packed_name(path):
+    """Save as…'s suggestion: an old .json project offered as .spwb (user 2026-10-29: Ctrl+S keeps the .json)."""
+    stem, ext = os.path.splitext(path)
+    return stem + PROJECT_EXT if ext.lower() == ".json" else path
+
+
+def unpack(raw):
+    """A packed project's bytes -> its text bytes (ValueError when damaged or far too big)."""
+    import zlib
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        out = d.decompress(raw, MOST_UNPACKED + 1)
+    except zlib.error:
+        raise ValueError(tr("project.packed_damaged")) from None
+    if len(out) > MOST_UNPACKED:
+        raise ValueError(tr("project.packed_too_big"))
+    if not d.eof:
+        raise ValueError(tr("project.packed_damaged"))
+    return out
+
+
+def read_project(path):
+    """A project file's contents and its text's size, packed (.spwb) or plain (a BOM, which some text editors put
+    at the start, is skipped)."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    if raw.startswith(PACKED):
+        raw = unpack(raw)
+    try:
+        data = json.loads(raw.decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        raise ValueError(tr("project.not_a_spiderweb_project")) from None
     if not isinstance(data, dict):
         raise ValueError(tr("project.not_a_spiderweb_project"))
-    return data
+    return data, len(raw)
+
+
+def read_json(path):
+    return read_project(path)[0]
+
+
+def open_types():
+    return [(tr("project.spiderweb_project"), "*" + PROJECT_EXT + " *.json"), (tr("project.all_files"), "*.*")]
+
+
+def save_types():
+    return [(tr("project.spiderweb_project"), "*" + PROJECT_EXT), (tr("project.spiderweb_project_plain"), "*.json")]
 
 
 def keep_aside(path, name, move=False):
@@ -278,7 +327,7 @@ class ProjectFiles:
         text: the project as text instead of the file at path (put_back)."""
         self.load_notes = []
         try:
-            data, size = (read_json(path), os.path.getsize(path)) if text is None else (json.loads(text), len(text))
+            data, size = read_project(path) if text is None else (json.loads(text), len(text))
             if not isinstance(data.get("shapes", []), list):
                 raise ValueError(tr("project.not_a_spiderweb_project"))
         except (OSError, ValueError) as e:
@@ -599,7 +648,12 @@ class ProjectFiles:
                         data["loaded"]["rel"] = rel
                 except ValueError:  # (another drive)
                     pass
-        write_text(path, project_json(data))
+        text = project_json(data)
+        if is_packed_name(path):
+            import gzip
+            write_bytes(path, gzip.compress(text.encode("utf-8"), compresslevel=6, mtime=0))
+        else:
+            write_text(path, text)
 
     def fits_memory(self, shapes, ppq):
         """Open project: asked only when its notes won't fit in the free memory (user 2026-10-20: never just for
@@ -837,10 +891,11 @@ class ProjectFiles:
                                                icon="warning", default="yes", parent=self)
         return answer is False or answer is True and self.save_project()
 
-    def open_project(self):
-        path = filedialog.askopenfilename(title=tr("project.open_project"), initialdir=OUTPUT_DIR,
-                                          filetypes=[(tr("project.spiderweb_project"), "*.json"),
-                                                     (tr("project.all_files"), "*.*")])
+    def open_project(self, path=None):
+        """path = a file dropped / opened with Spiderweb (window/open_files.py); None = asks."""
+        if path is None:
+            path = filedialog.askopenfilename(title=tr("project.open_project"), initialdir=OUTPUT_DIR,
+                                              filetypes=open_types())
         if not path or not self.may_replace(os.path.basename(path)):
             return
         if self.load_file(path):
@@ -1023,9 +1078,8 @@ class ProjectFiles:
             os.makedirs(OUTPUT_DIR, exist_ok=True)
             path = filedialog.asksaveasfilename(title=tr("project.save_project"),
                                                 initialdir=os.path.dirname(path) if path else OUTPUT_DIR,
-                                                initialfile=os.path.basename(path) if path else "",
-                                                defaultextension=".json",
-                                                filetypes=[(tr("project.spiderweb_project"), "*.json")])
+                                                initialfile=os.path.basename(as_packed_name(path)) if path else "",
+                                                defaultextension=PROJECT_EXT, filetypes=save_types())
         if not path:
             return False
         try:
@@ -1266,10 +1320,10 @@ class ProjectFiles:
         lm = self.loaded
         if lm is None or getattr(self, "_exporting", None):
             return
-        path = filedialog.asksaveasfilename(title=tr("load.share_title"), defaultextension=".json",
+        path = filedialog.asksaveasfilename(title=tr("load.share_title"), defaultextension=PROJECT_EXT,
                                             initialdir=os.path.dirname(self.project_file or "") or OUTPUT_DIR,
-                                            initialfile=os.path.basename(self.project_file or "") or "song.json",
-                                            filetypes=[(tr("project.spiderweb_project"), "*.json")])
+                                            initialfile=os.path.basename(as_packed_name(self.project_file or ""))
+                                            or "song" + PROJECT_EXT, filetypes=save_types())
         if not path:
             return
         midi = os.path.join(os.path.dirname(os.path.abspath(path)), os.path.basename(lm.path))
