@@ -36,7 +36,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
 from notes.tempo import changed as tempo_edited, keep_heard, FAR
 from notes.loaded import file_tempos
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
-from notes.tempo_file import limit_spots, loaded_part
+from notes.tempo_file import FileTempo, limit_spots, loaded_part
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
@@ -3411,6 +3411,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         loaded = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None
         heard = self.heard_lines(keep_spans, w, kb, preview and preview.get("heard"))
         lay = layout(tempo, base, ppq) if loaded is not None else None
+        known = FileTempo(loaded, lay) if loaded is not None else None  # (one reading for every part shown)
         for hx, hb, hy, i in heard:
             if loaded is not None and not heard_line(tempo["points"][i]) and len(hb):
                 # (a loaded MIDI: the file's own tempo, from the tempo before the part when that was changed)
@@ -3419,7 +3420,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 if n is None:
                     continue
                 e = lay["keeps"][n][2]
-                part = loaded_part(loaded, lay, n, 2 ** 62 if e is None else e)
+                part = loaded_part(loaded, lay, n, 2 ** 62 if e is None else e, known)
                 events = [(0, part[0][2])] + [(x, u) for x, _, u in part[1:]] if part else loaded
                 x0, x1 = max(kb, hx[0]), hx[-1]
                 self.create_line(*self.heard_xy(events, x0, x1), fill=look.TEMPO_KEEP, dash=dash, width=lw + 1)

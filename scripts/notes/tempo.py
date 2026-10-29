@@ -37,6 +37,7 @@ import bisect
 import copy
 import functools
 import json
+import hashlib
 import math
 import os
 import re
@@ -440,6 +441,25 @@ def catch_end(tempo, k):
     return end
 
 
+def catch_ends(tempo):
+    """catch_end of every catch-up line, in order. Points in order, as they nearly always are: found by bisect, the
+    same answers as catch_end's walk (thousands of catch-ups walked every point each, PLAN #12 B; keep_parts too,
+    2026-10-29)."""
+    pb = [p[0] for p in tempo["points"]]
+    cs = tempo["catch"]
+    if not all(x <= y for x, y in zip(pb, pb[1:])):
+        return [catch_end(tempo, k) for k in range(len(cs))]
+    ends = []
+    for k, c in enumerate(cs):
+        j = bisect.bisect_right(pb, c[0])
+        after = pb[j:j + 1] + [x[0] for x in cs[k + 1:k + 2]]
+        end = min(after) if after else None
+        if catch_get(c, 4) is not None and catch_get(c, 4) > c[0]:
+            end = min([catch_get(c, 4)] + [x[0] for x in cs[k + 1:k + 2]])
+        ends.append(end)
+    return ends
+
+
 def stretches(tempo, base):
     """The catch-up lines' stretches: [{"from": beat the stretch (the yellow area + the catch-up) starts, "read":
     the beat whose tempo it's paid back to (= "end"; None when there's no end), "manual": "from" set by hand,
@@ -453,21 +473,9 @@ def stretches(tempo, base):
     its part curves away, else the next point). None at that BPM: the first point after the stretch before."""
     pts = tempo["points"]
     pb = [p[0] for p in pts]
-    # (points in order, as they nearly always are: found by bisect, the same answers as the walks below; thousands
-    # of catch-ups walked every point each, PLAN #12 B)
     ordered = all(x <= y for x, y in zip(pb, pb[1:]))
     cs = tempo["catch"]
-    if ordered:
-        ends = []
-        for k, c in enumerate(cs):
-            j = bisect.bisect_right(pb, c[0])
-            after = pb[j:j + 1] + [x[0] for x in cs[k + 1:k + 2]]
-            end = min(after) if after else None
-            if catch_get(c, 4) is not None and catch_get(c, 4) > c[0]:
-                end = min([catch_get(c, 4)] + [x[0] for x in cs[k + 1:k + 2]])
-            ends.append(end)
-    else:
-        ends = [catch_end(tempo, k) for k in range(len(cs))]
+    ends = catch_ends(tempo)
     prevs, prev = [], 0.0
     for end in ends:
         prevs.append(prev)
@@ -546,8 +554,23 @@ def drawn_bpm(tempo, base, beats):
 
 def _solve_push(st, beats, seconds, base, n=512):
     """The push A that makes a catch-up of the stretch's shape (BPM = base x 2^(A x weight)) last `seconds` over
-    `beats`. None when it can't (a shape with no push anywhere, or past what a MIDI file can hold)."""
+    `beats`. None when it can't (a shape with no push anywhere, or past what a MIDI file can hold). Remembered by
+    its inputs (2026-10-29: after any edit the pane worked out all 2,000 catch-ups of a Fill again, 1.3 ms each)."""
     w = weight(st, (np.arange(n) + 0.5) / n)
+    key = (hashlib.blake2b(w.tobytes(), digest_size=16).digest(), beats, seconds, base, n)  # (the shape's fingerprint)
+    if key in _pushes:
+        return _pushes[key]
+    if len(_pushes) > PUSHES_KEPT:
+        _pushes.clear()
+    got = _pushes[key] = _push_of(w, beats, seconds, base, n)
+    return got
+
+
+PUSHES_KEPT = 100_000  # _solve_push's answers remembered (~200 bytes each)
+_pushes = {}
+
+
+def _push_of(w, beats, seconds, base, n):
     if not np.any(w > 1e-9) or np.any(w < -1e-9) or seconds <= 0:
         return None
     lo_b, hi_b = math.log2(MIN_BPM / base), math.log2(MAX_BPM / base)
@@ -720,6 +743,33 @@ def _put_all(segs, ra, rb, news):
     return sorted(out + [s for s in news if s[1] > s[0]], key=lambda s: s[0])
 
 
+def _put_many(segs, puts):
+    """_put_all for each (ra, rb, news) of puts in turn, in ONE pass when the puts come in order without
+    overlapping and segs are in order without overlapping (2026-10-29: 6,500 Keep timing parts each went through
+    every piece = a minute before Play); anything else = one at a time, as before. The same answer."""
+    def sane(spans):
+        return all(b > a for a, b in spans) and all(b0 <= a1 for (_, b0), (a1, _) in zip(spans, spans[1:]))
+    if not sane([(ra, rb) for ra, rb, _ in puts]) or not sane([(a, b) for a, b, _ in segs]):
+        for ra, rb, news in puts:
+            segs = _put_all(segs, ra, rb, news)
+        return segs
+    out, j = [], 0
+    for a, b, u in segs:
+        while j < len(puts) and puts[j][1] <= a:  # (puts ending before this piece: done with)
+            j += 1
+        at, k = a, j
+        while k < len(puts) and puts[k][0] < b:
+            ra, rb = puts[k][0], puts[k][1]
+            if ra > at:
+                out.append((at, ra, u if isinstance(u, int) else u[at - a:ra - a]))
+            at = max(at, rb)
+            k += 1
+        if b > at:
+            out.append((at, b, u if isinstance(u, int) else u[at - a:b - a]))
+    out += [s for _, _, news in puts for s in news if s[1] > s[0]]
+    return sorted(out, key=lambda s: s[0])
+
+
 def catch_plan(tempo, base, st, ppq, real=None):
     """A stretch's catch-up worked out in the file's own whole numbers (ticks x microseconds), so the pane and the
     export always agree: {"ok", "push", "bpm" (flat: its BPM; else its fastest / slowest), "target" (the catch-up's
@@ -817,7 +867,7 @@ def keep_parts(tempo, sts=()):
     catch-ups' own areas (line to end: a catch-up never moves notes) and the yellow areas of sts (stretches) they're
     off in (keep_off), so a part may come in pieces."""
     pts = tempo["points"]
-    spans = [(c[0], catch_end(tempo, k)) for k, c in enumerate(tempo["catch"])] + keep_off(tempo, sts)
+    spans = [(c[0], end) for c, end in zip(tempo["catch"], catch_ends(tempo))] + keep_off(tempo, sts)
     out = []
     for i, p in enumerate(pts):
         if not keeps(p):
@@ -910,11 +960,12 @@ def layout(tempo, base, ppq):
 
     def real(a, b):
         segs = _segments(tempo, base, start_u, ppq, a, b, ordered)
+        puts = []
         for n, (_, ka, ke, u) in enumerate(keeps_out):
             lo, hi = max(a, ka), min(b, b if ke is None else ke)
             if hi > lo:
-                segs = _put_all(segs, lo, hi, keep_segs(n, lo, hi))
-        return segs
+                puts.append((lo, hi, keep_segs(n, lo, hi)))
+        return _put_many(segs, puts)
 
     worked = []
     for n, st in enumerate(sts):
@@ -1548,7 +1599,28 @@ def _near_pair(n, target):
 
 def _flat_pair(n, target):
     """n Domino-safe values adding up to exactly target, all one value or a run of A then a run of B (one or two
-    tempo changes); the pair nearest the average first. None if no such pair is near."""
+    tempo changes); the pair nearest the average first. None if no such pair is near. Remembered as (A, B, ticks
+    of A) by (n, target) (2026-10-29: a Keep the audio export searched the same gaps again, thousands of times)."""
+    key = (int(n), int(target))
+    got = _pairs.get(key, _FAR)
+    if got is _FAR:
+        made = _flat_pair_search(n, target)
+        got = None if made is None else (int(made[0]), int(made[-1]), int(np.count_nonzero(made == made[0])))
+        if len(_pairs) > PAIRS_KEPT:
+            _pairs.clear()
+        _pairs[key] = got
+    if got is None:
+        return None
+    a, b, k = got
+    return np.full(key[0], a, np.int64) if k == key[0] else \
+        np.concatenate([np.full(k, a, np.int64), np.full(key[0] - k, b, np.int64)])
+
+
+PAIRS_KEPT = 200_000  # _flat_pair's answers remembered (a few dozen bytes each)
+_pairs = {}
+
+
+def _flat_pair_search(n, target):
     a, r = divmod(int(target), int(n))  # (most often: the two whole numbers round the average, both safe; that's
     if r == 0 and _safe1(a):  # the nearest pair, as the search below finds; hunt 2026-10-24: export speed)
         return np.full(n, a, np.int64)
@@ -1597,14 +1669,16 @@ def file_segments(tempo, base, ppq, end=0):
     last = max([p[0] for p in pts] + [x for c in tempo["catch"] for x in (c[0], catch_get(c, 4)) if x is not None])
     end = max(end, beat_tick(last, ppq) + 1)
     segs = _segments(tempo, base, base_u, ppq, 0, end)
-    bad = []
+    bad, puts = [], []
     for st, plan in plans(tempo, base, ppq):
         if not plan["ok"]:
             bad.append(st["line"])
             continue
-        # (the drawn pieces cut where the catch-up goes; its values worked out with the pane's check)
-        segs = _put(segs, beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), plan["fit"])
-    return segs, bad
+        # (the drawn pieces cut where the catch-up goes; its values worked out with the pane's check; _put's
+        # answer, all in one pass)
+        ra, rb = beat_tick(st["line"], ppq), beat_tick(st["end"], ppq)
+        puts.append((ra, rb, [(ra, rb, plan["fit"])] if rb > ra else []))
+    return _put_many(segs, puts), bad
 
 
 def bpm_text(v):

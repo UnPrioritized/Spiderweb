@@ -20,7 +20,7 @@ import bisect
 import numpy as np
 
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
-from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put_all, _runs, base_us, beat_tick, domino_safe,
+from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put_all, _put_many, _runs, base_us, beat_tick, domino_safe,
                          file_segments, has_tempo, keep_heard, layout, tempo_text)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
@@ -246,23 +246,60 @@ def heard_segs(events, end):
     return [s for s in out if s[1] > s[0]]
 
 
-def loaded_part(heard, lay, n, end):
+class FileTempo:
+    """A loaded MIDI's own tempo read once for every Keep timing piece of one layout (loaded_part), each piece's
+    answer remembered: thousands of pieces each read the whole file's tempo and the piece before them again
+    (2026-10-29: 6,500 pieces on a 13,000-tempo song = hours; the same answers)."""
+
+    def __init__(self, heard, lay):
+        self.lay = lay
+        self.full = heard_segs(heard, 1 << 62)  # (cut at each piece's end: what heard_segs up to it gives)
+        self.xs = [x for x, _, _ in self.full]
+        self.ys = [y for _, y, _ in self.full]
+        self.after = {}  # (a piece's end -> the first piece without its own line ending there)
+        for k, (_, _, e, _) in enumerate(lay["keeps"]):
+            if not lay["own_line"][k]:
+                self.after.setdefault(e, k)
+        self.known = {}
+
+    def part(self, n, end):
+        # (the pieces right before it worked out first, oldest first: one asked for in the middle of thousands
+        # back to back went that deep in calls and failed)
+        chain, seen, key = [], set(), (n, end)
+        while key not in self.known and key not in seen:
+            chain.append(key)
+            seen.add(key)
+            prev = self.after.get(self.lay["keeps"][key[0]][1])
+            if prev is None:
+                break
+            key = (prev, self.lay["keeps"][key[0]][1])
+        for k in reversed(chain):
+            self.known[k] = self._part(*k)
+        return self.known[(n, end)]
+
+    def _part(self, n, end):
+        a, before = self.lay["keeps"][n][1], self.lay["keeps"][n][3]
+        prev = self.after.get(a)
+        if prev is not None:  # (right after another piece: what that one plays at its end, not its own start tempo)
+            got = self.part(prev, a)
+            before = got[-1][2] if got else before
+        i = bisect.bisect_right(self.ys, a)  # (the file's pieces ending after a ...)
+        j = bisect.bisect_left(self.xs, end)  # (... and starting before end)
+        segs = [(max(x, a), min(y, end), u) for x, y, u in self.full[i:j]]
+        if a > 0 and segs:
+            x0 = self.full[i][0]
+            if x0 < a and int(before) != segs[0][2]:  # (the file's tempo runs on across the start: was it changed?)
+                segs[0] = (segs[0][0], segs[0][1], int(before))
+        return segs
+
+
+def loaded_part(heard, lay, n, end, known=None):
     """A loaded MIDI's Keep timing piece n (layout's keeps) heard at the file's own tempo [(a, b, us)] up to tick
     end, but STARTING at the tempo heard just before it when the Conductor line there was changed (user
     2026-10-26: their 135 before the part, the file's 136 in it, was unintuitive); the file's changes inside it
-    still come. A file change right on its start: the file's."""
-    a, before = lay["keeps"][n][1], lay["keeps"][n][3]
-    prev = [k for k, (_, _, e, _) in enumerate(lay["keeps"]) if e == a and not lay["own_line"][k]]
-    if prev:  # (right after another piece: what that one plays at its end, not its own start tempo)
-        got = loaded_part(heard, lay, prev[0], a)
-        before = got[-1][2] if got else before
-    full = heard_segs(heard, end)
-    segs = [(max(x, a), min(y, end), u) for x, y, u in full if y > a]
-    if a > 0 and segs:
-        x0 = next(x for x, y, _ in full if y > a)
-        if x0 < a and int(before) != segs[0][2]:  # (the file's tempo runs on across the start: was it changed?)
-            segs[0] = (segs[0][0], segs[0][1], int(before))
-    return segs
+    still come. A file change right on its start: the file's. known: a FileTempo of the same heard + lay, for
+    many pieces."""
+    return (known or FileTempo(heard, lay)).part(n, end)
 
 
 def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None):
@@ -283,7 +320,8 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     # tempo: one whole number, or one per tick from its heard tempo line
     keeps = [(n, a, last_tick if e is None else e) for n, (_, a, e, _) in enumerate(lay["keeps"])]
     own = [lay["own_line"][n] for n, a, e in keeps if e > a]  # (a part with its own heard line: that, always)
-    files = [None if heard is None else loaded_part(heard, lay, n, e) for n, a, e in keeps if e > a]
+    known = None if heard is None else FileTempo(heard, lay)
+    files = [None if heard is None else known.part(n, e) for n, a, e in keeps if e > a]
     keeps = [(a, e, keep_heard(lay, n, a, e)) for n, a, e in keeps if e > a]
     fit_bars = tempo.get("bars", True)
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
@@ -592,12 +630,15 @@ def heard_tempo(tempo, base, ppq, end=0, heard=None):
         return _heard[key]
     segs, _ = file_segments(tempo, base, ppq, end)
     lay = layout(tempo, base, ppq)
+    known = None if heard is None else FileTempo(heard, lay)
+    puts = []
     for n, (_, a, e, _) in enumerate(lay["keeps"]):
         e = segs[-1][1] if e is None else e
         if heard is not None and not lay["own_line"][n]:
-            segs = _put_all(segs, a, e, loaded_part(heard, lay, n, e))
+            puts.append((a, e, known.part(n, e)))
             continue
-        segs = _put_all(segs, a, e, lay["keep_segs"](n, a, e))  # (its heard tempo line, if any)
+        puts.append((a, e, lay["keep_segs"](n, a, e)))  # (its heard tempo line, if any)
+    segs = _put_many(segs, puts)
     if len(_heard) > 4:
         _heard.clear()
     _heard[key] = out = _runs(segs)

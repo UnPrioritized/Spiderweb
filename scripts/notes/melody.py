@@ -129,16 +129,18 @@ def heard_points(tempo, base, ppq, a, b):
     tempo) as a heard tempo line: [[beat, bpm, "hold", ...]] held points, each BPM exactly a whole number of
     microseconds (so it plays back exactly). Keep the audio's runs play it (hunt 2026-10-29: the area's own tempo
     changes were lost, notes after it moved)."""
-    from notes.tempo import BEND, _put_all, base_us, beat_tick, file_segments, layout
+    from notes.tempo import BEND, _put_many, base_us, beat_tick, file_segments, layout
     ta, tb = beat_tick(a, ppq), max(beat_tick(b, ppq), beat_tick(a, ppq) + 1)
     if not tempo["points"] and not tempo["catch"]:  # (no tempo line: the project's BPM all along)
         return [[ta / ppq, 60_000_000 / base_us(base), "hold", "", "lin", False, list(BEND)]]
     lay = layout(tempo, base, ppq)
     segs, _ = file_segments(tempo, base, ppq, tb)
+    puts = []
     for n, (_, ka, ke, _) in enumerate(lay["keeps"]):
         ke = tb if ke is None else min(ke, tb)
         if ke > ka:
-            segs = _put_all(segs, ka, ke, lay["keep_segs"](n, ka, ke))
+            puts.append((ka, ke, lay["keep_segs"](n, ka, ke)))
+    segs = _put_many(segs, puts)
     out, last = [], None
     for a0, b0, u in segs:
         s, e = max(a0, ta), min(b0, tb)
