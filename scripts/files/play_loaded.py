@@ -987,7 +987,9 @@ class LoadedPlayer:
                     cp = np.empty(size, np.uint32)
                     counts[:2] = 0  # (counts[2]: the copy table's generation, kept)
                     base = kout._f0 + (t_c - sec - kout._t0) * K_RATE + align
-                    song = self._song(tm)
+                    # (slowed down, 13f: no song, so what earlier plays at its own speed learned is kept, never
+                    # followed or wiped; hunt 2026-10-29: each speed step was a new song and cleared it)
+                    song = self._song(tm) if getattr(self.player, "speed", 1.0) == 1.0 else 0
                     if told != (song, round(base)):
                         told = (song, round(base))
                         kout.k.set_song(base, song)

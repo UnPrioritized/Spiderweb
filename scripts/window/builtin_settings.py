@@ -216,7 +216,7 @@ class Overload:
         self.text_args = None  # None, ("overloaded",) or ("lowered", the limit in use)
         self.kept = None  # (live, user's limit, limit in use) at the last stop, for a restart that keeps it
         self.load = None  # (13f, Slow down: the synth's last CPU reading / 100, None = none yet)
-        self.lost = 0.0  # (seconds of sound missing so far this play)
+        self.over = False  # (... and sound missing within the last second, as "Overloaded" judges it)
 
     @property
     def running(self):
@@ -232,7 +232,7 @@ class Overload:
             self.now_limit = kept[2]
         self._sent = limit  # (a stopped synth is always at the user's limit)
         self._new_limit = False
-        self.load, self.lost = None, 0.0
+        self.load, self.over = None, False
         self._stop.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -272,8 +272,6 @@ class Overload:
                 gone = 0.0
             t0, p0 = t, p
             self.load = live.cpu() / 100  # (Slow down's reading: read here, never on the window's thread)
-            if gone > 0.003:
-                self.lost += gone
             lost.append((t, gone))  # (with its sign: a device giving its position in steps evens out)
             while lost[0][0] < t - 1:
                 lost.popleft()
@@ -283,8 +281,8 @@ class Overload:
                 busy.popleft()
             free = max(v for _, v in busy) < self.now_limit * self.FREE
             since_drop += gone
-            over = missing > self.TOO_MUCH
-            if over:
+            over = self.over = missing > self.TOO_MUCH  # (Slow down's "broke up" too: a device giving its
+            if over:  # position in steps swings both ways, only the sum counts, hunt 2026-10-29)
                 last_over = t
             limit = self.limit
             if self._new_limit:

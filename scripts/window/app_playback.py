@@ -126,7 +126,8 @@ class Playback:
             self.start_loaded(int(round(self.playhead * ppq)))
         self.kestrel_parts()
         self.slow_down.reset()  # (each Play at the song's own speed: Player.start too)
-        self._pace_seen = self._pace_seen_b = None  # (Kestrel's silence / BASSMIDI's lost sound + thinned seen)
+        self._pace_seen = self._pace_seen_b = None  # (Kestrel's silence / BASSMIDI's notes thinned, seen)
+        self._k_drops = None  # (Kestrel's notes left out by its own lowering: count, when it last grew)
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
@@ -344,46 +345,64 @@ class Playback:
 
     def pace_play(self, now):
         """13f: the synth's load -> the speed the song plays at (files/slow_down.py), while its tick is on.
-        Built-in BASSMIDI's "Lower it by itself" waits until it's at the slowest (user: slow down first)."""
+        "Lower it by itself" (both synths) waits until it's at the slowest (user: slow down first), and on the way
+        back gives its notes / voices back BEFORE the speed climbs (hunt 2026-10-29: handed back at 11 %, the full
+        limit came back at once and the stutter with it)."""
+        from files.slow_down import SLOWEST
         on = self.slowing()
         if not on and self.player.speed != 1.0:
             self.player.set_speed(1.0)
+        load, behind, easy, lowered = self.play_load()
         if on:
-            load, behind = self.play_load()
-            v = self.slow_down.step(load, now, behind)
+            v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered)
             if v is not None:
                 self.player.set_speed(v)
+        free = not on or self.player.speed <= SLOWEST or lowered
         if self.overload.running:
-            from files.slow_down import SLOWEST
-            guard = self.play_guard.get() and (not on or self.player.speed <= SLOWEST)
+            guard = self.play_guard.get() and free
             if self.overload.guard != guard:
                 self.overload.set_guard(guard)
+        if self.out.name == KESTREL and self.out.handle and self.player.running:
+            self.out.handle.k.set_lower(self.kestrel_opts["lower"] and free)  # (a flag the render thread reads)
 
     def play_load(self):
         """(the synth's load = time making the sound / the time it lasts, None = not known; whether the sound broke
-        up since the last look)."""
+        up lately; clearly room to spare; "Lower it by itself" still holding notes / voices back)."""
         if self.out.name == KESTREL and self.out.handle:
+            from files.kestrel import RATE as K_RATE
             from files.slow_down import queue_load
             k = self.out.handle.k
             st = k.stats()
             seen, self._pace_seen = getattr(self, "_pace_seen", None), st["silence"]
             behind = seen is not None and st["silence"] > seen
+            block_us = k.block / K_RATE * 1e6
+            easy = bool(st.get("last_block_us")) and st["last_block_us"] < 0.5 * block_us
+            # (its own lowering never goes back to "no limit" while on, only climbs past what's asked: holding back =
+            # notes left out within the last second)
+            drops = st.get("budget_dropped", 0)
+            was = getattr(self, "_k_drops", None) or (drops, float("-inf"))
+            now = time.perf_counter()
+            self._k_drops = (drops, now if drops > was[0] else was[1])
+            lowered = now - self._k_drops[1] < 1.0
             # (by the blocks made ahead still waiting, as its own "Lower it by itself" judges: a slow block with
             # every ready block still there is heard fine)
-            return queue_load((st["rendered"] - st["handed"]) / k.block, k.ahead), behind
+            return queue_load((st["rendered"] - st["handed"]) / k.block, k.ahead), behind, easy, lowered
         if self.out.name == BUILTIN:  # (read by the Overload watcher / the loaded MIDI's feeder: never BASS here)
-            lp = self.loaded_play
-            loads = [x for x in (self.overload.load, lp.load if lp is not None else None) if x is not None]
-            mark = (self.overload.lost, lp.thinned if lp is not None else 0)
-            seen, self._pace_seen_b = getattr(self, "_pace_seen_b", None), mark
-            behind = seen is not None and (mark[0] > seen[0] or mark[1] > seen[1])
+            lp, o = self.loaded_play, self.overload
+            loads = [x for x in (o.load, lp.load if lp is not None else None) if x is not None]
+            thinned = lp.thinned if lp is not None else 0
+            seen, self._pace_seen_b = getattr(self, "_pace_seen_b", None), thinned
+            # (sound missing within the last second, judged as "Overloaded" is; or notes left out since the last look)
+            behind = bool(getattr(o, "over", False)) or (seen is not None and thinned > seen)
+            lowered = bool(getattr(o, "guard", False)) and getattr(o, "now_limit", 0) < getattr(o, "limit", 0)
             if not loads:
-                return None, behind
-            # (a busy synth that still makes its sound in time isn't heard: under 95 % it never slows by itself
-            # (lost sound / notes left out above do), user 2026-10-29: "fine means no stuttering")
+                return None, behind, False, lowered
+            # (a busy synth that still makes its sound in time isn't heard, user 2026-10-29: "fine means no
+            # stuttering": from 95 % only; under 90 % with nothing lost = calm, it may speed up again (hunt: between 50
+            # and 95 % it stayed slowed for good))
             c = max(loads)
-            return (c if c >= 0.95 else min(c, 0.75)), behind
-        return None, False
+            return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, c < 0.4, lowered
+        return None, False, False, False
 
     def stop_play(self):
         if self._play_job:

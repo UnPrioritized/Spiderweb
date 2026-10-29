@@ -30,6 +30,7 @@ MAPPER = 0xFFFFFFFF
 # so any number of notes can sound at once and the note colours' channels don't matter. A message to channel 16
 # or past carries its group of 16's number in its top byte (synth.Live.send). Channels 16-95 = ports 2-6's
 # (a Hz bass's own channel per note: synth.LIVE_PORTS), so 31-EDO's come after them.
+PACE_EVERY = 2048  # (Kestrel alone: messages in a burst between looks at "fell behind" / a new speed, Player._run)
 STACKED = 512  # notes still sounding on one channel at Stop past which it gets one "all notes off" (Player.stop)
 EDO = 31
 EDO_FIRST = 96  # (synth.LIVE_PORTS x 16)
@@ -395,6 +396,7 @@ class Player:
         self._clock = None
         self.map = None  # the tempo as a TimeMap (start; None until the first start), slowed down by speed
         self.speed = 1.0  # (13f: under 1 = the song plays that much slower, every tempo's beat longer; set_speed)
+        self._speed_wanted = None  # (Kestrel alone: a speed the playing thread takes up, _take_speed)
         self._tempo = (120, None)  # (bpm, tempo) as handed over, before the speed
         self._swap = None  # new notes ready for the playing thread (_Ons)
         self._wanted = None  # new notes waiting to be put in order (notes, use10)
@@ -421,7 +423,7 @@ class Player:
         self._new_notes(notes)
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
         self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
-        self.speed = 1.0
+        self.speed, self._speed_wanted = 1.0, None
         self.map = self._time_map(bpm, tempo)
         self._clock = None  # (the line waits at the start while the notes are put in order)
         self._gen += 1
@@ -468,11 +470,24 @@ class Player:
 
     def set_speed(self, v):
         """13f: play on from the same spot at v times the song's speed (1 = as written), the pitch unchanged. Goes
-        the way of a tempo change while playing (Kestrel: what was sent ahead sent again at the new speed)."""
-        if v == self.speed:
+        the way of a tempo change while playing (Kestrel: what was sent ahead sent again at the new speed). Kestrel
+        playing own shapes alone: done by the playing thread (hunt 2026-10-29: Kestrel's take-back waits for its next
+        block, longest while overloaded, and the window waited with it)."""
+        if v == (self._speed_wanted if self._speed_wanted is not None else self.speed):
             return
+        if self.running and getattr(self.out, "name", None) == KESTREL and not self.along:
+            self._speed_wanted = v
+            return
+        self._speed_wanted = None
         self.speed = v
         if self.running:
+            self.set_tempo(*self._tempo)
+
+    def _take_speed(self):
+        """(the playing thread) A speed asked for by set_speed, now."""
+        v, self._speed_wanted = self._speed_wanted, None
+        if v is not None and v != self.speed:
+            self.speed = v
             self.set_tempo(*self._tempo)
 
     def set_tempo(self, bpm, tempo=None):
@@ -577,11 +592,22 @@ class Player:
         batch, k, i = [], 0, 0
         done = t0 - 1  # the last tick played
         ons_at = [done, 0]  # (the tick of the last note-on handled, how many on it so far)
+        def pace():
+            """Kestrel alone: the line waits where it fell behind (13e); a speed asked for is taken up (13f)."""
+            self.kestrel_wait(behind)
+            if self._speed_wanted is not None:
+                self._take_speed()
+        # (asked when about to sleep, and every PACE_EVERY messages in a burst that never sleeps: asked at every
+        # message it cost dense own shapes most of their notes, hunt 2026-10-29)
+        busy = 0
         while True:
             if stop.is_set():
                 return
             if behind is not None:
-                self.kestrel_wait(behind)
+                busy += 1
+                if busy >= PACE_EVERY:
+                    busy = 0
+                    pace()
             if self._swap is not None:
                 (ons, ccs), self._swap = self._swap, None
                 # (on from the notes of the tick it's on that weren't sent yet, not the next tick: a big chord
@@ -639,12 +665,16 @@ class Player:
                 if wait <= 0:
                     return
                 flush()
+                if behind is not None:
+                    pace()
                 sleep(min(wait, 0.01))
                 continue
             when = t_now + tmap.sec(tick) - sec_now
             wait = when - clock()
             if wait > lead:
                 flush()
+                if behind is not None:
+                    pace()
                 sleep(min(wait - lead, 0.01))
                 continue  # (stopped, new notes or a new tempo meanwhile: looked at again)
             done = tick
