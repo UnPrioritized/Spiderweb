@@ -369,14 +369,14 @@ class Playback:
         """(the synth's load = time making the sound / the time it lasts, None = not known; whether the sound broke
         up lately; clearly room to spare; "Lower it by itself" still holding notes / voices back)."""
         if self.out.name == KESTREL and self.out.handle:
-            from files.kestrel import RATE as K_RATE
             from files.slow_down import queue_load
             k = self.out.handle.k
             st = k.stats()
             seen, self._pace_seen = getattr(self, "_pace_seen", None), st["silence"]
             behind = seen is not None and st["silence"] > seen
-            block_us = k.block / K_RATE * 1e6
-            easy = bool(st.get("last_block_us")) and st["last_block_us"] < 0.5 * block_us
+            # (never "easy" either: quick blocks at 10 % say nothing about 30 %, real Lagtester at 1 M voices
+            # 2026-10-29: it forgot the speed that broke up, climbed to 31 % and broke up again)
+            easy = False
             # (its own lowering never goes back to "no limit" while on, only climbs past what's asked: holding back =
             # notes left out within the last second)
             drops = st.get("budget_dropped", 0)
@@ -401,7 +401,9 @@ class Playback:
             # stuttering": from 95 % only; under 90 % with nothing lost = calm, it may speed up again (hunt: between 50
             # and 95 % it stayed slowed for good))
             c = max(loads)
-            return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, c < 0.4, lowered
+            # (never "easy": its note budget can be what limits at a low CPU, Lagtester at 17 % 2026-10-29: forgetting
+            # the speed that broke up there made it climb back at once, every 2-3 s)
+            return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, False, lowered
         return None, False, False, False
 
     def stop_play(self):

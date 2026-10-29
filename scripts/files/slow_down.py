@@ -52,6 +52,7 @@ class SlowDown:
         self._down = self._rise = self._lift = float("-inf")
         self._calm = None  # (since when the load stayed under LOW)
         self.ceiling = 1.0  # (the speed that last broke up; 1 = none)
+        self._lifts = 0  # (tries faster in a row that held)
 
     def step(self, load, now=None, behind=False, easy=False, hold=False):
         """One reading: load (None = none this time); behind = the sound already broke up (Kestrel handed out
@@ -73,6 +74,7 @@ class SlowDown:
             if now - self._down < SETTLE_S or v <= SLOWEST:
                 return None
             self._down = now
+            self._lifts = 0
             if self.ceiling < 1.0 and v >= self.ceiling * NEAR:  # (the mark was a little too fast: lower it, gently)
                 self.ceiling = max(SLOWEST, min(v, self.ceiling) * NEAR)
                 new = max(SLOWEST, v * NEAR)
@@ -87,8 +89,12 @@ class SlowDown:
             if easy:
                 self.ceiling = 1.0
             elif self.ceiling < 1.0 and now - max(self._calm, self._lift) >= CEIL_S:
+                # (tried faster: 10 %, then more each time it held, so it's back to 1x soon after the busy part; a
+                # failure starts again at 10 %. Real BASSMIDI 2026-10-29: its note budget limits at 17 % CPU, nothing
+                # says there's room but trying)
                 self._lift = now
-                self.ceiling = min(1.0, self.ceiling * CEIL_RISE)
+                self.ceiling = min(1.0, self.ceiling * CEIL_RISE ** (1 + self._lifts))
+                self._lifts += 1
             top = 1.0 if self.ceiling >= 1.0 else max(SLOWEST, self.ceiling * UNDER)
             if v < top and not hold and now - self._calm >= CALM_S and now - self._rise >= RISE_S:
                 self._rise = now
