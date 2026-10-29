@@ -369,6 +369,15 @@ def first_instance():
     return False
 
 
+def close_lock():
+    """Lets go of this start's handle on the lock (a retry after the open Spiderweb closed: while any handle is
+    open, the lock still counts as taken)."""
+    global _lock
+    if _lock:
+        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_lock))
+        _lock = None
+
+
 if __name__ == "__main__":
     # Tell Windows we handle display scaling ourselves, so the window isn't stretched (blurry)
     try:
@@ -380,15 +389,30 @@ if __name__ == "__main__":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Spiderweb")
     except (AttributeError, OSError):
         pass
+    import time
+    started = time.time()
     given = [os.path.abspath(a) for a in sys.argv[1:] if os.path.isfile(a)]  # (opened with Spiderweb / dropped on it)
     try:
         if not first_instance():
-            if given:  # (the open Spiderweb opens them)
-                from window.open_files import hand_over
-                hand_over(given)
-            sys.exit(0)
+            if not given:
+                sys.exit(0)
+            from window.open_files import hand_over, handed_taken
+            handed = hand_over(given)  # (the open Spiderweb opens them)
+            if handed is None or handed_taken(handed):
+                sys.exit(0)
+            # not taken: that Spiderweb is closing (or stuck): this one starts once it has gone
+            for _ in range(50):
+                time.sleep(0.1)
+                close_lock()
+                if first_instance():
+                    break
+            else:
+                sys.exit(0)
     except (AttributeError, OSError):  # not Windows: no lock
         pass
+    from window import open_files
+    open_files.STARTED = started
+    open_files.HOLD[0] = bool(given)  # (the last session's MIDI isn't read again before the given file opens)
     from files.about import move_old_files
     not_moved = move_old_files()
     errors.move_old_logs()
@@ -403,7 +427,6 @@ if __name__ == "__main__":
         from window.app import App
         app = App()
         label_window(app)
-        from window import open_files
         open_files.start(app, given)
         if not_moved:  # (old files another program held: they stay beside Spiderweb, the user moves them)
             from tkinter import messagebox

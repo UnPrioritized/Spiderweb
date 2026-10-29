@@ -74,7 +74,10 @@ def backup_path(autosave):
 
 PROJECT_EXT = ".spwb"  # (the project's JSON packed with gzip; old projects are plain .json, autosave stays .json)
 PACKED = b"\x1f\x8b"  # (a packed project's first bytes: told by them, whatever the file is called)
-MOST_UNPACKED = 1 << 30  # (a packed file unpacking to more isn't a project: never fills the memory)
+MOST_UNPACKED = 1 << 30  # (a packed file that doesn't start like a project and unpacks to more: refused, never
+#                           fills the memory; a project's own start = no limit: Spiderweb opens all it saves)
+PROJECT_MARKS = {"shapes", "version", "app_version"}  # (a JSON file without any = not a project: shape files...)
+HEAD = 1 << 16
 
 
 def is_packed_name(path):
@@ -92,10 +95,13 @@ def unpack(raw):
     import zlib
     d = zlib.decompressobj(16 + zlib.MAX_WBITS)
     try:
-        out = d.decompress(raw, MOST_UNPACKED + 1)
+        head = d.decompress(raw, HEAD)
+        ours = head.lstrip(b"\xef\xbb\xbf \r\n\t").startswith(b"{") and (b'"app_version"' in head
+                                                                         or b'"version"' in head)
+        out = head + (d.decompress(d.unconsumed_tail) if ours else d.decompress(d.unconsumed_tail, MOST_UNPACKED + 1))
     except zlib.error:
         raise ValueError(tr("project.packed_damaged")) from None
-    if len(out) > MOST_UNPACKED:
+    if not ours and len(out) > MOST_UNPACKED:
         raise ValueError(tr("project.packed_too_big"))
     if not d.eof:
         raise ValueError(tr("project.packed_damaged"))
@@ -328,7 +334,7 @@ class ProjectFiles:
         self.load_notes = []
         try:
             data, size = read_project(path) if text is None else (json.loads(text), len(text))
-            if not isinstance(data.get("shapes", []), list):
+            if not isinstance(data.get("shapes", []), list) or not PROJECT_MARKS & data.keys():  # (a shape file, palette...)
                 raise ValueError(tr("project.not_a_spiderweb_project"))
         except (OSError, ValueError) as e:
             if not quiet:
@@ -398,7 +404,7 @@ class ProjectFiles:
         old_bpm = get(lambda: calc(str(data["bpm"]))) if isinstance(data.get("bpm"), (int, float, str)) else None
         out = text("output")
         if out is not None and out.strip():
-            folder = os.path.dirname(os.path.abspath(out))
+            folder = os.path.dirname(output_path(out))  # (as Export reads it: not from wherever Spiderweb started)
             if not os.path.isdir(folder) and os.path.normcase(folder) != os.path.normcase(os.path.abspath(OUTPUT_DIR)):
                 # (made on another PC, or the folder is gone): Spiderweb's own output folder, same file name
                 out = os.path.join(OUTPUT_DIR, os.path.basename(out) or "spiderweb.mid")
@@ -651,7 +657,7 @@ class ProjectFiles:
         text = project_json(data)
         if is_packed_name(path):
             import gzip
-            write_bytes(path, gzip.compress(text.encode("utf-8"), compresslevel=6, mtime=0))
+            write_bytes(path, gzip.compress(text.encode("utf-8"), compresslevel=1, mtime=0))
         else:
             write_text(path, text)
 
@@ -987,6 +993,9 @@ class ProjectFiles:
     def find_loaded_later(self):
         """After a project with a MIDI link opened: the MIDI is loaded again (asked about when it's missing)."""
         if self.midi_link is not None and self.loaded is None:
+            from window import open_files
+            if open_files.hold_reload(self):  # (started with a file: the last session's MIDI waits, hunt 2026-10-29)
+                return
             from window.load_midi import find_loaded
             self.after(300, lambda: find_loaded(self))
 

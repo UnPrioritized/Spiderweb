@@ -201,9 +201,19 @@ def file_link_command(here):
 
 def file_link(ext, here):
     """What a double-clicked file of ext opens now: "here" (this Spiderweb), "other" (another one / program),
-    "none", or None where it can't be asked (not Windows)."""
+    "picked" (the user's own "Always use this app" in Windows names another program: it wins, and only the user can
+    change it), "none", or None where it can't be asked (not Windows)."""
     if not WINDOWS:
         return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            rf"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{ext}\UserChoice") as key:
+            chosen = winreg.QueryValueEx(key, "ProgId")[0]
+        if chosen and chosen != FILE_KIND:
+            return "picked"
+    except OSError:
+        pass
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}") as key:
