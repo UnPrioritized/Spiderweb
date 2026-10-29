@@ -2675,7 +2675,16 @@ class TrackList(tk.Canvas):
                 count += lm.tracks[k].notes if moved[k] == ch else 0
             else:
                 count += int(lm.tracks[k].chn[ch])
-        return tr("tracks.sub_tip", ch=ch + 1, name=self.name_of(row), notes=trn("n.notes", count, n=count))
+        text = tr("tracks.sub_tip", ch=ch + 1, name=self.name_of(row), notes=trn("n.notes", count, n=count))
+        return text + "\n" + tr("tracks.new_notes_here", ch=ch + 1) if self.aimed_ch(row) == ch else text
+
+    def aimed_ch(self, row):
+        """The channel shapes drawn / pasted now go to in row's folder when its TRACK row is highlighted (its first
+        channel: App.first_ch, user 2026-10-29), else None."""
+        if self.current is None or self.current_ch is not None or row >= len(self._all):
+            return None
+        chans = self.row_chans()
+        return chans[row][0] if int(self._all[row]) == self.current and len(chans[row]) > 1 else None
 
     def row_tip(self, row):
         """A row's whole name, channel, note count and the shapes whose notes are on it."""
@@ -2704,6 +2713,9 @@ class TrackList(tk.Canvas):
                 if used > 1:
                     lines.append(trn("tracks.channels", used, n=used))
                 lines.append(tr("tracks.from_file"))
+                chans = self.row_chans()[row]
+                if len(chans) > 1:  # (a folder: where its track row's drawing / pasting goes, user 2026-10-29)
+                    lines.append(tr("tracks.row_goes_to", ch=chans[0] + 1))
             else:
                 lines.append(tr("tracks.waiting_midi"))
             if len(mine):
@@ -2717,6 +2729,9 @@ class TrackList(tk.Canvas):
             return "\n".join(lines)
         lines = [f"{self.name_of(row)}  ·  {self.channel_of(slot)}",
                  trn("tracks.notes", len(mine), n=f"{len(mine):,}")]
+        chans = self.row_chans()[row]
+        if len(chans) > 1:  # (a folder: where its track row's drawing / pasting goes, user 2026-10-29)
+            lines.append(tr("tracks.row_goes_to", ch=chans[0] + 1))
         if slot >= HAND:
             lines.insert(1, tr("tracks.added_tip" if self.own_track(slot).get("auto") else "tracks.own_tip"))
         if self.app.channel_mode.get() != "auto":  # (laid shapes' other colours: on this track until Multi channel)
@@ -3526,6 +3541,10 @@ class TrackList(tk.Canvas):
                 if picked or chosen:
                     self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK if picked else look.TRACK_SELECT,
                                           outline="")
+                elif self.aimed_ch(row) == c:  # (its track row highlighted: new notes go here, user 2026-10-29)
+                    w = max(1, round(2 * s))
+                    self.create_rectangle(w / 2, max(ya, top) + w / 2, x1 - w / 2, yb - w / 2, outline=look.TRACK_PICK,
+                                          width=w)
                 mid = (ya + yb) / 2
                 if self.row_h >= 12 * s and mid > top:
                     self.create_text(18 * s + ind, mid, text=tr("tracks.channel", ch=c + 1), anchor="w", font=font,

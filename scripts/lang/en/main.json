@@ -702,6 +702,8 @@
  "tracks.fold_tip": "This track holds notes on {n} channels: click to show each channel on a row of its own.",
  "tracks.unfold_tip": "Click to hide this track's channel rows.",
  "tracks.sub_tip": "Channel {ch} of {name}  ·  {notes}\nClick: the piano roll shows only this channel.",
+ "tracks.new_notes_here": "New notes go to Ch {ch} (the track's row is highlighted).",
+ "tracks.row_goes_to": "Drawing or pasting with this row highlighted: Ch {ch} (its first channel).",
  "tracks.mute_ch_tip": "Mute this channel while playing (the saved files keep it).",
  "tracks.unmute_ch_tip": "Muted: click to hear this channel again.",
  "tracks.mute_all_tip": "Some of this track's channels are muted: click to mute them all.",
