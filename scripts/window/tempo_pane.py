@@ -1073,7 +1073,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if (i1 - i0) * 3 > w - kb:
             return None
         best = None
-        for i, (b, v, *_) in enumerate(pts):
+        j0, j1 = self.shown_points(x - r - 2, x + r + 2, pts)  # (only those near enough sideways: every point per
+        # mouse move was ~28 ms at 8,000 points, speed hunt 2026-10-29)
+        for i in range(j0, j1):
+            b, v = pts[i][0], pts[i][1]
             d = math.hypot(roll.t2x(b) - x, float(self.b2y(v)) - y)
             if d <= r and (best is None or d < best[0]):
                 best = (d, i)
