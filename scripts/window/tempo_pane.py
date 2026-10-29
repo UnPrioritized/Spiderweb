@@ -3412,10 +3412,14 @@ class TempoPane(ConductorMarks, tk.Canvas):
         heard = self.heard_lines(keep_spans, w, kb, preview and preview.get("heard"))
         lay = layout(tempo, base, ppq) if loaded is not None else None
         known = FileTempo(loaded, lay) if loaded is not None else None  # (one reading for every part shown)
+        by_point = {}  # (each point's pieces, in order: looking through all of them per part shown was parts x
+        # pieces a redraw, 6,500 on the giant MIDI, speed hunt 2026-10-29)
+        for n, (j, a, e, _) in enumerate(lay["keeps"] if lay is not None else ()):
+            by_point.setdefault(j, []).append((n, a, e))
         for hx, hb, hy, i in heard:
             if loaded is not None and not heard_line(tempo["points"][i]) and len(hb):
                 # (a loaded MIDI: the file's own tempo, from the tempo before the part when that was changed)
-                n = next((n for n, (j, a, e, _) in enumerate(lay["keeps"]) if j == i and a / ppq <= hb[0] + 1e-9
+                n = next((n for n, a, e in by_point.get(i, ()) if a / ppq <= hb[0] + 1e-9
                           and (e is None or hb[0] < e / ppq)), None)
                 if n is None:
                     continue
