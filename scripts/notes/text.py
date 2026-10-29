@@ -445,18 +445,34 @@ def to_custom(sh):
         sh["areas"] = empty_areas(loops)
 
 
+CROSS_ROWS = 64  # pieces of an outline checked at a time by parts_overlap
+
+
 def parts_overlap(loops, glyphs):
     """Whether two outlines of one letter overlap with the same turn (the letter's parts drawn on top of each
     other: the text fills them, a custom shape's even-odd fill would empty them)."""
     def crosses(a, b):  # (any piece of a properly crossing a piece of b; pieces sharing an end don't count)
         a, b = np.asarray(a, float), np.asarray(b, float)
-        ax, ay, bx, by = a[:-1, 0, None], a[:-1, 1, None], a[1:, 0, None], a[1:, 1, None]  # (pieces of a: rows)
-        cx, cy, dx, dy = b[None, :-1, 0], b[None, :-1, 1], b[None, 1:, 0], b[None, 1:, 1]  # (of b: columns)
-        d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx)
-        d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx)
-        d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
-        d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax)
-        return bool(((d1 * d2 < 0) & (d3 * d4 < 0)).any())
+        if len(a) < 2 or len(b) < 2:
+            return False
+        lo, hi = np.minimum(b[:-1], b[1:]), np.maximum(b[:-1], b[1:])
+        for s in range(0, len(a) - 1, CROSS_ROWS):  # (a run of a's pieces against only b's pieces near it: a
+            # letter's outline has thousands of points, all against all took ~1 s a letter, speed hunt 2026-10-29)
+            p = a[s:s + CROSS_ROWS + 1]
+            plo, phi = p.min(0), p.max(0)
+            near = np.flatnonzero((hi[:, 0] >= plo[0]) & (lo[:, 0] <= phi[0]) & (hi[:, 1] >= plo[1])
+                                  & (lo[:, 1] <= phi[1]))
+            if not len(near):
+                continue
+            ax, ay, bx, by = p[:-1, 0, None], p[:-1, 1, None], p[1:, 0, None], p[1:, 1, None]  # (pieces of a: rows)
+            cx, cy, dx, dy = b[None, near, 0], b[None, near, 1], b[None, near + 1, 0], b[None, near + 1, 1]
+            d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx)
+            d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx)
+            d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax)
+            if ((d1 * d2 < 0) & (d3 * d4 < 0)).any():
+                return True
+        return False
 
     box = [(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in loops]
     if any(crosses(p, p) for p in loops):  # (one outline crossing itself: some fonts' A)
