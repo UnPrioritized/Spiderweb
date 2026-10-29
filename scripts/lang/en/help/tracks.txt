@@ -61,7 +61,7 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 • Changing a track's channel in Properties… moves its shapes to the new channel.
 • One of a loaded MIDI's tracks works the same: the shape goes into that track, on its channel (see Load MIDI).
 • Pictures, masks, Hz basses and Channel per strip shapes can't be laid on a track yet: they keep their own channels, and the status line says so. Pasted notes with CC events go in like any: their events go along on each track's channel.
-• A small CC before a track's (or Ch row's) channel means its notes send CC events (volume, pan, pitch bend…). Its tip names them, and the piano roll's ruler shows each one in its CC row.
+• A small CC before a track's (or Ch row's) channel means it sends CC events (volume, pan, pitch bend…): your notes' or a loaded MIDI's own. Its tip names them, and the piano roll's ruler shows each one in its CC row. The same event on many tracks at once shows once, like "Volume 127 (200 tracks)". Where they're too close together to read, the row says how many, like "1,234 CC events": zoom in to read each one.
 
 ## Selecting notes in the track list
 

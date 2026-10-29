@@ -44,7 +44,7 @@ What's new:
 
 • Notes pasted from Domino into the track list land just as you copied them: from the highlighted track down, gaps kept, in every Channels setting, CC events and all. An open folder's Ch rows count as rows; a closed one takes them on its first channel.
 
-• CC events are never hidden: a CC mark in the track list on tracks that send them, and a CC row on the piano roll's ruler naming each one ("Volume 100", "Pan 64").
+• CC events are never hidden: a CC mark in the track list on tracks that send them, and a CC row on the piano roll's ruler naming each one ("Volume 100", "Pan 64"). A loaded MIDI's own CC events show there too.
 
 • Settings → General → "Ctrl+C also copies for Domino": the normal Ctrl+C copies for Domino too, so you don't need Copy to Domino as a separate step.
 
