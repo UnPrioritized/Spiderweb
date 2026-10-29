@@ -1,5 +1,7 @@
 Tick Velocity pane (top) to show or hide it. The pane under the piano roll shows every note's velocity. Draw over the bars with Linear, Curve, Pencil or Formula. With a shape selected, only its notes change (the others fade); with nothing selected, every note under the drag.
 
+Select (the first button): drag across the pane to pick the shapes in that time, like dragging along the bar numbers. Drag inside the box to move them in time (Ctrl = copy, Shift = free); a click outside drops it.
+
 Formula: drag it like Linear; a pattern (Wave, Zigzag, Bounce or one you saved) swings the velocity up and down around the line. Pick the pattern, its Loops and height (in velocity steps) next to the tool buttons: changing them changes the line you just drew, until Enter or a click elsewhere.
 
 Linear / Curve: drag it, then drag its end squares to move the ends (Ctrl = level with the other end) or a curve's round handle to bend it. Ctrl while drawing = flat. Lines are drawn on whole ticks. Moving an end square afterwards snaps it onto a nearby note start (hold Shift for whole ticks only). Enter, Esc or a click outside the pane = done (Esc or Ctrl+Z while the mouse is still held throws the line away).

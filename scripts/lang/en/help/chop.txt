@@ -19,4 +19,4 @@ Follow the song's grid (Absolute): on, the rhythm lines up with the song's beats
 
 Like the Claw machine, you can keep working in the main window while it's open, and the chop is a page kept with the shape: moving or reshaping it chops the new notes the same way. Opened on a shape that has no Chop page yet, the window chops at once; otherwise it starts on +, a new page (it's added once a setting changes). Click a tab on top to change a page the shape has, or the small × beside a tab to take it off. Quick chop adds a page too.
 
-Order on one shape: Glue first, then the Claw machine, Strum, Chop and Copy along a path pages in the order they were added.
+Order on one shape: Glue first, then the Claw machine, Strum, Chop, Gate trim and Copy along a path pages in the order they were added.

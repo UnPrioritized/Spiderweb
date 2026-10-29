@@ -1,6 +1,6 @@
 The lines under the "MIDI CC" row in the Effects pane make no notes. They go into the MIDI as messages, and the player changes the sound with them:
 
-Cutoff (CC 74): brighter or darker. The soundfont does the filtering, and some soundfonts don't react to it.
+Cutoff (CC 74): darker, like a synth's filter (64 = as it is; most players only make it darker, not brighter). The soundfont does the filtering, and some soundfonts don't react to it.
 
 Expression (CC 11) and Channel volume (CC 7): louder or quieter, without changing the notes' velocity.
 

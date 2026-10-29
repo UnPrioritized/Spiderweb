@@ -16,7 +16,7 @@ Drag to draw a line. It replaces only its own stretch: the tempo before it stays
 
 Formula: drawn like Line, but the part follows the formula in the box next to it (x goes from 0 at its first point to 1 at the next).
 
-Points and line ends snap onto note starts and ends nearby and onto other tempo points; otherwise they sit on whole ticks. Hold Shift for whole ticks only. BPM snap rounds the BPM (Off for any BPM).
+New points sit on whole ticks (no grid), or on a tempo point right next to them. Points and line ends you move afterwards snap onto note starts and ends nearby and onto other tempo points. Hold Shift for whole ticks only. BPM snap rounds the BPM (Off for any BPM).
 
 A click on the beat where a curved part arrives (or within one Interval step of it) makes a jump: the curve arrives there, and the tempo goes on from the second point at the same moment.
 
@@ -59,7 +59,7 @@ Right-click → Add catch-up BPM here, then two drags: first over the time it co
 
 Above: 120 BPM, a stop at 60 for one beat, then the catch-up runs at 140 BPM until the music is back on time when the line returns to 120.
 
-Drag the catch-up line to change how long the slow part holds, and the edges of the yellow and teal areas to change them (right-click an edge to set it back to automatic). An edge you set stays put when you drag the line past it: a thick line shows where the area comes back to when the line returns; right-click it → Forget this edge to drop it. Shapes: Flat, Fast, then slow, Slow, then fast, Up and down, Drawn or Formula; the first two have a round handle to bend them (double-click it, or right-click → Its own curve again, to undo the bend). Drawn opens a small window where you draw the shape yourself with points and round bend handles, starting from the shape it had before (Graph… opens it again). You only draw how hard it pushes at each moment: Spiderweb still works out the BPM, so it always lands on time. The bar shows a catch-up's shape when you click its line, when a Select box holds it, or when the play line stands inside its yellow or teal area (while stopped, with nothing picked).
+Drag the catch-up line to change how long the slow part holds, and the edges of the yellow and teal areas to change them (right-click an edge to set it back to automatic). An edge you set stays put when you drag the line past it: a thick line shows where the area comes back to when the line returns; right-click it → Forget this edge to drop it. Shapes: Flat, Fast, then slow, Slow, then fast, Up and down, Drawn or Formula; Fast, then slow and Slow, then fast have a round handle to bend them (double-click it, or right-click → Its own curve again, to undo the bend). Drawn opens a small window where you draw the shape yourself with points and round bend handles, starting from the shape it had before (Graph… opens it again). You only draw how hard it pushes at each moment: Spiderweb still works out the BPM, so it always lands on time. The bar shows a catch-up's shape when you click its line, when a Select box holds it, or when the play line stands inside its yellow or teal area (while stopped, with nothing picked).
 
 The line below the tools says the BPM the catch-up needs. In red it can't work: "Not possible" says why (for example "catch-up BPM too high"), and resting the mouse on the red area tells you what to change.
 

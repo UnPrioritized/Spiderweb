@@ -1,4 +1,4 @@
-Tools: V Select, K Slice, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass, I Image. G = Live shape on / off. M = Mask on / off.
+Tools: V Select, K Slice, J Lasso, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass, I Image. G = Live shape on / off. M = Mask on / off.
 
 Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Esc = cancel what's half drawn. Enter, double-click or right-click = finish a polyline (right-click drops an unfinished arc or a shape started with a click).
 

@@ -3,7 +3,7 @@ Select one or more shapes, then right-click one: Claw machine… (or press Alt+W
 
 Pages: each time you open the window it starts on +, a new page. Change a setting and the page goes on top of the shape's other pages, working on the notes they left, so the same tool can be used again and again.
 
-The row at the top has a tab for each page this shape has (numbered by its place among all its Claw machine, Strum, Chop and Copy along a path pages; the tab's tooltip shows the whole order). Click a tab to change that page, untick On to switch it off for now, or click the small × beside its tab to take it off (right-clicking a tab does both too).
+The row at the top has a tab for each page this shape has (numbered by its place among all its Claw machine, Strum, Chop, Gate trim and Copy along a path pages; the tab's tooltip shows the whole order). Click a tab to change that page, untick On to switch it off for now, or click the small × beside its tab to take it off (right-clicking a tab does both too).
 
 You can keep working in the main window while it's open. It follows the selection: select other shapes to work on them. When you select other shapes or change something in the main window, the claw tried so far is kept (as its own Ctrl+Z step).
 

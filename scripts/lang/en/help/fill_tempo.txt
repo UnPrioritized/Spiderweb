@@ -41,7 +41,7 @@ Pick a shape and its BPMs. The grey line under them says what the shape does.
 • Jump and come back: the tempo jumps to the BPM at each note, then goes back to the normal tempo halfway to the next one.
 [clip:melody-jump]
 
-• Up and down in turns: one gap at the first BPM, the next at the second, and so on.
+• Up / down in turns: one gap at the first BPM, the next at the second, and so on.
 [clip:melody-updown]
 
 • Random: each gap gets a BPM between the two (the BPM snap rounds them). Every Fill is a new roll; the faint line always shows the one Fill will make.
@@ -67,7 +67,7 @@ Higher notes jump further: the area's highest note jumps the whole way, its lowe
 ## Keeping the timing
 
 • Keep the audio: the whole area becomes one Keep timing part (see Help → Conductor pane), so every note keeps its sound time, inside the area and after it.
-• A catch-up BPM after each jump: the jumps are real tempo changes and each jump lands on time. Each gap holds the jump's tempo for the % you type, then a catch-up brings the music back on time before the next note. Gaps too short for a catch-up stay at the normal tempo; the status line says how many. When no catch-up can make up the time (for example a long stop at a very slow tempo), nothing is laid and the status line says so.
+• A catch-up BPM after each jump: the jumps are real tempo changes and each jump lands on time. Each gap holds the jump's tempo for the % you type, then a catch-up brings the music back on time before the next note. Catch-up shape picks how the catch-up runs (Flat, Fast, then slow, Slow, then fast, or Up and down; see Help → Conductor pane). Gaps too short for a catch-up stay at the normal tempo; the status line says how many. When no catch-up can make up the time (for example a long stop at a very slow tempo), nothing is laid and the status line says so.
 [clip:melody-catch]
 
 Above: each jump drops to 90 BPM, then a catch-up at 180 BPM brings the next note back on time.

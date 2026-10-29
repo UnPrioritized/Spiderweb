@@ -30,7 +30,7 @@ The menu item has a tick while a selected shape has a side in use, and the Shape
 
 ## With other features
 
-Gate subtract comes last, after everything else that makes the notes: the outline gate, Colours, Gate aware flip, glue, the Claw machine / Strum / Chop / Copy along a path pages and Sustain. They all work on the notes at full length, so Gate subtract never changes what they do.
+Gate subtract comes after everything else that makes the notes: the outline gate, Colours, Gate aware flip, glue, the Claw machine / Strum / Chop / Copy along a path pages and Sustain. Only Recolour comes after it (it only changes colours). They all work on the notes at full length, so Gate subtract never changes what they do.
 
 Flipping the shape sideways swaps the two sides: a note end becomes a note start, so a flipped copy is the mirror image of the original, gaps included. Switching Gate aware flip on or off swaps them too. A graph turns round with the shape when it runs across that way.
 
