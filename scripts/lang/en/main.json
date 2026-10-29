@@ -2247,7 +2247,7 @@
  "help.playback.words": "play sound listen midi out scrub audio",
  "help.kestrel.title": "Kestrel (GPU) playback",
  "help.kestrel.tip": "A MIDI out that makes the sound on your graphics card, so very dense MIDIs keep far more notes ringing. Settings (Help menu) → Sound.",
- "help.kestrel.words": "kestrel gpu graphics card synth midi out playback dense midi heavy midi voices max voices block size limiter dc blocker overloaded read-ahead soundfont experimental",
+ "help.kestrel.words": "kestrel gpu graphics card synth midi out playback dense midi heavy midi voices max voices block size limiter dc blocker overloaded read-ahead soundfont experimental graphics card vulkan directx interpolation cubic steal release floor velocity threshold layers filter vibrato tremolo modulation envelope advanced 31-edo",
  "help.channels.title": "Channels",
  "help.channels.tip": "As drawn = everything kept. Single = one channel, overlaps fixed. Multi = overlapping shapes on different channels (each its own track).",
  "help.channels.words": "channel track overlap colour color cycle take turns rainbow diagonal slant stripes",
