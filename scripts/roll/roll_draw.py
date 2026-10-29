@@ -33,6 +33,8 @@ TIP_MARKS = 10  # a ruler tempo mark's tip lists at most this many changes, then
 CC_CROWD = 2000  # the ruler's CC row: past this many events only those on screen are laid out, and past this many
 #                  on screen plain marks (one per pixel) + a count per stretch (hunt 2026-10-29: 300,000 froze each
 #                  zoom 1.3 s; user 2026-10-29: "1,234 CC events" where they're too close to read)
+CC_MERGE_MOST = 20000  # ... up to this many on screen the row counts them as written (one per tick + kind + value,
+#                        the same setup on many tracks once) before deciding: more = counts at once
 TICK_FROM, TICK_FULL = 8, 16  # px per tick: a line each tick shows faintly from here, full colour from here
 HANDLE_COLOR = look.HANDLE
 STROKE_POINT_COLOR = look.STROKE_POINT
@@ -51,6 +53,9 @@ RING_GAP = 4  # px: notes in a row closer than this count as touching for the ri
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
 
 
+NO_CC = ()  # (loaded_cc with nothing loaded: always the same one, so what's worked out from it is kept)
+
+
 def file_kinds(codes):
     """A loaded MIDI's CC event codes (files/midi_index: status | data 1 << 8 | data 2 << 16) -> their kind numbers
     (midi_index CC_KINDS order: controller number, then 128 instrument, 129 bend, 130 pressure, 131 key pressure)."""
@@ -64,18 +69,24 @@ def kind_number(kind):
 
 
 def same_merged(items):
-    """One tick's CC marks [(text, tip, end, track)]: the same text + end on several tracks = once, "Volume 127 (2,000
-    tracks)" (user 2026-10-29: songs set every track up at the start). Returns [(text, tip, end)] in first-met order."""
+    """One tick's CC marks [(text, tip, end, (track, channel))]: the same text + end on several tracks = once, "Volume
+    127 (2,000 tracks)" (user 2026-10-29: songs set every track up at the start), on several channels of one track =
+    "Volume 127 (16 channels)", the very same one twice (one track + channel) = once (hunt 2026-10-29). Returns
+    [(text, tip, end)] in first-met order."""
     groups = {}
-    for text, tip, end, track in items:
-        groups.setdefault((text, end), []).append((tip, track))
+    for text, tip, end, where in items:
+        groups.setdefault((text, end), {}).setdefault(where, tip)
     out = []
     for (text, end), got in groups.items():
-        n = len({t for _, t in got})
-        if n > 1:
-            out.append((tr("cc.on_tracks", text=text, n=f"{n:,}"), tr("cc.tip_tracks", text=text, n=f"{n:,}"), end))
+        tracks = len({t for t, _ in got})
+        if tracks > 1:
+            n = f"{tracks:,}"
+            out.append((tr("cc.on_tracks", text=text, n=n), tr("cc.tip_tracks", text=text, n=n), end))
+        elif len(got) > 1:
+            n = f"{len(got):,}"
+            out.append((tr("cc.on_channels", text=text, n=n), tr("cc.tip_channels", text=text, n=n), end))
         else:
-            out += [(text, tip, end) for tip, _ in got]
+            out.append((text, next(iter(got.values())), end))
     return out
 CUT_MARK = 12  # px each side of a sliced piece's cut end: its stretch of the Slice line (draw_cut_marks)
 FAINT_CUT = look.FAINT_CUT
@@ -2022,7 +2033,8 @@ class RollDrawing:
         listed track, a loaded track / part / Ch row highlighted = its own (that channel's), any other = none."""
         lm, tl = self.app.loaded, getattr(self.app, "track_list", None)
         if lm is None or tl is None:
-            return []
+            self._loaded_cc = None  # (never holding a MIDI let go of: New, Open; hunt 2026-10-29)
+            return NO_CC
         rows = tl.tracks()
         key = (lm, rows, tl.current, tl.shown_ch(), lm.hide_ver, id(lm.rechannel))
         memo = getattr(self, "_loaded_cc", None)
@@ -2055,32 +2067,76 @@ class RollDrawing:
         lm, tl = self.app.loaded, getattr(self.app, "track_list", None)
         return bool(lm is not None and lm.cc_over and (tl is None or tl.current is None or tl.current < 0))
 
-    def cc_sources(self, lo=None, hi=None):
-        """[(track, channel, kind, [(tick, value)])] the CC row shows: Spiderweb's own (cc_shown_slots; track = its
-        track id) and the loaded MIDI's (loaded_cc; track = -1 - its number), ticks lo..hi only when given."""
-        from notes.cc_names import file_kind
+    def cc_data(self):
+        """Every CC event the row shows, Spiderweb's own (cc_shown_slots) and the loaded MIDI's (loaded_cc), as one list
+        sorted by tick: (ticks, kind numbers (file_kinds'), values, source numbers, [(track, channel)] per source
+        number; track = a track id, or -1 - a loaded track's number). Worked out once per change of them or the
+        highlight and kept (hunt 2026-10-29: worked out at each pan step it took 100-190 ms with busy MIDIs)."""
+        got, loaded = self.app.shown_cc(), self.loaded_cc()
+        tl = getattr(self.app, "track_list", None)
+        lit = (tl.current, tl.shown_ch()) if tl is not None else None
+        memo = getattr(self, "_cc_data", None)
+        if memo is not None and memo[0] is got and memo[1] is loaded and memo[2] == lit:
+            return memo[3]
         by, chans = self.cc_events()
-        out = []
+        srcs, ts, ks, vs, ss = [], [], [], [], []
         slots = self.cc_shown_slots(list(by))
-        for s, tid in zip(slots, track_ids(slots).tolist() if slots else []):
-            for k, evs in by[s].items():
-                if lo is not None:
-                    a = bisect.bisect_left(evs, (lo, -math.inf))
-                    evs = evs[a:bisect.bisect_right(evs, (hi, math.inf))]
-                out.append((tid, chans[s], k, evs))
-        for n, ticks, codes, to in self.loaded_cc():
-            if lo is not None:
-                a, b = np.searchsorted(ticks, lo, "left"), np.searchsorted(ticks, hi, "right")
-                ticks, codes = ticks[a:b], codes[a:b]
+        for sl, tid in zip(slots, track_ids(slots).tolist() if slots else []):
+            srcs.append((tid, chans[sl]))
+            for k, evs in by[sl].items():
+                ts.append(np.array([t for t, _ in evs], np.int64))
+                vs.append(np.array([v for _, v in evs], np.int32))
+                ks.append(np.full(len(evs), kind_number(k), np.uint8))
+                ss.append(np.full(len(evs), len(srcs) - 1, np.int32))
+        for n, ticks, codes, to in loaded:
             c = codes.astype(np.int64)
-            d1, d2 = c >> 8 & 127, c >> 16 & 127
-            vals = np.select([c & 0xF0 == 0xE0, c & 0xF0 == 0xC0, c & 0xF0 == 0xD0], [(d1 | d2 << 7) - 8192, d1 + 1, d1], d2)
-            runs = {}
-            for t, ch, k, v in zip(ticks.tolist(), (c & 15 if to is None else np.full(len(c), to)).tolist(),
-                                   file_kinds(c).tolist(), vals.tolist()):
-                runs.setdefault((ch, k), []).append((t, v))
-            out += [(-1 - n, ch, file_kind(k), evs) for (ch, k), evs in runs.items()]
-        return out
+            d1, d2, hi = c >> 8 & 127, c >> 16 & 127, c & 0xF0
+            ts.append(ticks)
+            vs.append(np.select([hi == 0xE0, hi == 0xC0, hi == 0xD0], [(d1 | d2 << 7) - 8192, d1 + 1, d1], d2)
+                      .astype(np.int32))
+            ks.append(file_kinds(c).astype(np.uint8))
+            ss.append((len(srcs) + (c & 15)).astype(np.int32))
+            srcs += [(-1 - n, ch if to is None else to) for ch in range(16)]
+        if ts:
+            arrays = [np.concatenate(a) for a in (ts, ks, vs, ss)]
+            if len(ts) > 1:  # (each part in tick order already: one tick order for all, same-tick ones as they came)
+                order = np.argsort(arrays[0], kind="stable")
+                arrays = [a[order] for a in arrays]
+        else:
+            arrays = [np.zeros(0, np.int64), np.zeros(0, np.uint8), np.zeros(0, np.int32), np.zeros(0, np.int32)]
+        data = (*arrays, srcs)
+        self._cc_data = (got, loaded, lit, data)
+        return data
+
+    def cc_span(self, lo, hi):
+        """(first, end) of the CC events (cc_data) on ticks lo..hi (decimal ticks: whole bounds for the search, so it
+        never turns the whole list into decimals)."""
+        t = self.cc_data()[0]
+        return (int(np.searchsorted(t, np.int64(math.ceil(lo)), "left")),
+                int(np.searchsorted(t, np.int64(math.floor(hi)), "right")))
+
+    def cc_entries(self, span):
+        """How many different events (tick + kind + value) the CC events first..end (cc_data) hold: the same one on
+        many tracks / channels is written once (same_merged), so 2,000 tracks setting up on tick 0 are 3 entries, not
+        6,000 (hunt 2026-10-29). Kept while the same ones are on screen."""
+        t, k, v, _, _ = self.cc_data()
+        memo = getattr(self, "_cc_entries", None)
+        if memo is not None and memo[0] is t and memo[1] == span:
+            return memo[2]
+        a, b = span
+        n = len(np.unique(t[a:b] << 22 | k[a:b].astype(np.int64) << 14 | (v[a:b].astype(np.int64) + 8192)))
+        self._cc_entries = (t, span, n)
+        return n
+
+    def cc_sources(self, lo=None, hi=None):
+        """[(track, channel, kind, [(tick, value)])] the CC row shows (cc_data), ticks lo..hi only when given."""
+        from notes.cc_names import file_kind
+        t, k, v, s, srcs = self.cc_data()
+        a, b = (0, len(t)) if lo is None else self.cc_span(lo, hi)
+        runs = {}
+        for tt, kk, vv, ss in zip(t[a:b].tolist(), k[a:b].tolist(), v[a:b].tolist(), s[a:b].tolist()):
+            runs.setdefault((ss, kk), []).append((tt, vv))
+        return [(srcs[ss][0], srcs[ss][1], file_kind(kk), evs) for (ss, kk), evs in runs.items()]
 
     def cc_layout(self, lo=None, hi=None):
         """[(x from the song's start, text, [tip lines], x its faint line runs to or None)] of the CC events Spiderweb
@@ -2091,7 +2147,7 @@ class RollDrawing:
         tracks)" (user 2026-10-29: songs set every track up at the start)."""
         from notes.cc_names import kind_name
         ppq = self.app.ppq
-        at = {}  # tick -> [(text, tip, end tick or None, track)]
+        at = {}  # tick -> [(text, tip, end tick or None, (track, channel))]
         for tid, ch, k, evs in self.cc_sources(lo, hi):
             name, ch = kind_name(k), ch + 1
             i = 0
@@ -2105,11 +2161,11 @@ class RollDrawing:
                     way = "↗" if b > a else "↘"
                     at.setdefault(evs[i][0], []).append(
                         (f"{name} {a} {way} {b}", tr("cc.tip_run", ch=ch, name=name, a=a, way=way, b=b, n=j - i),
-                         evs[j - 1][0], tid))
+                         evs[j - 1][0], (tid, ch)))
                     i = j
                     continue
                 t, v = evs[i]
-                at.setdefault(t, []).append((f"{name} {v}", tr("cc.tip_one", ch=ch, name=name, v=v), None, tid))
+                at.setdefault(t, []).append((f"{name} {v}", tr("cc.tip_one", ch=ch, name=name, v=v), None, (tid, ch)))
                 i += 1
         out = []
         for t in sorted(at):
@@ -2119,35 +2175,68 @@ class RollDrawing:
                         max(ends) / ppq * self.sx if ends else None))
         return out
 
-    def draw_cc_crowd(self, ts, ks, y, half, tags, font, measure):
-        """Too many CC events on screen to write (ticks ts, kind numbers ks): a line on each pixel holding some, and per
-        stretch as wide as its text one "1,234 CC events" + a tip naming their kinds (user 2026-10-29). Stretches
-        counted from the song's start, so scrolling only slides them."""
+    def cc_pixels(self):
+        """Each CC event's pixel from the song's start at this zoom (cc_data's order: sorted too), worked out once per
+        zoom (hunt 2026-10-29: per pan step it was most of the lag)."""
+        t = self.cc_data()[0]
+        memo = getattr(self, "_cc_px", None)
+        if memo is not None and memo[0] is t and memo[1] == (self.sx, self.app.ppq):
+            return memo[2]
+        u = np.floor(t * (self.sx / self.app.ppq)).astype(np.int64)
+        self._cc_px = (t, (self.sx, self.app.ppq), u)
+        return u
+
+    def cc_measure(self, font):
+        """font's text width, each text measured once (hunt 2026-10-29: ~0.2 ms a measure, dozens a pan step)."""
+        memo = getattr(self, "_cc_font", None)
+        if memo is None or memo[0] != font:
+            measured, widths = tkfont.Font(font=font).measure, {}
+
+            def measure(text):
+                got = widths.get(text)
+                if got is None:
+                    if len(widths) > 20000:
+                        widths.clear()
+                    got = widths[text] = measured(text)
+                return got
+            memo = self._cc_font = (font, measure)
+        return memo[1]
+
+    def draw_cc_crowd(self, y, half, tags, font, measure, bands):
+        """Too many CC events on screen to write: a mark on each pixel holding some (pixels side by side = one
+        stretch: a few canvas items, not thousands, hunt 2026-10-29), and per stretch as wide as its text one "1,234
+        CC events" + a tip naming their kinds (user 2026-10-29). Stretches counted from the song's start, so scrolling
+        only slides them; inside a ruler band they're white on its black, like the written marks."""
         from notes.cc_names import file_kind, kinds_text
         from files.midi_index import CC_KINDS
-        w, s = self.winfo_width(), self.scale
-        kb = int(math.ceil(self.kb_w))  # (kb_w ends part way into a pixel)
-        xs = np.round(self.t2x(ts / self.app.ppq)).astype(np.int64)
-        on = (xs >= kb) & (xs <= w)
-        xs, ks = xs[on], ks[on]
-        if not len(xs):
+        w, s, kb = self.winfo_width(), self.scale, self.kb_w
+        u, kinds = self.cc_pixels(), self.cc_data()[1]
+        off = int(round(kb - self.view_t * self.sx))  # (screen x = u + off)
+        # (from one pixel left of the keyboard's edge, like the written marks: an edge ending early in a pixel dropped
+        # the song's first tick, hunt 2026-10-29)
+        a = int(np.searchsorted(u, math.floor(kb) - 1 - off, "left"))
+        b = int(np.searchsorted(u, w - off, "right"))
+        us = u[a:b]
+        if not len(us):
             return
-        per_px = np.bincount(xs - kb, minlength=w - kb + 1)
-        for x in (np.flatnonzero(per_px) + kb).tolist():
-            self.create_line(x, y - half, x, y + half, fill=look.CC_MARK, tags=tags)
+        pick = lambda px: any(x0 <= px < x1 for x0, x1 in bands)  # noqa: E731
+        edges = sorted({math.ceil(e) for band in bands for e in band})
+        cut = np.flatnonzero(np.diff(us) > 1) + 1
+        for x0, x1 in zip((us[np.r_[0, cut]] + off).tolist(), (us[np.r_[cut - 1, len(us) - 1]] + off + 1).tolist()):
+            stops = [x0] + [e for e in edges if x0 < e < x1] + [x1]
+            for p0, p1 in zip(stops, stops[1:]):
+                self.create_rectangle(p0, y - half, p1, y + half, outline="", tags=tags,
+                                      fill=look.RULER_PICK_TEXT if pick(p0) else look.CC_MARK)
         width = max(1, int(measure(trn("cc.packed", 88888, n="88,888")) + 8 * s))
-        at = int(round(self.t2x(0)))
-        cols = (xs - at) // width
-        c0 = int(cols.min())
-        kinds = np.bincount((cols - c0) * CC_KINDS + ks).tolist()
-        px = np.arange(kb, w + 1)
-        px_cols = (px - at) // width
         shown, end = [], -math.inf  # [[x, count, {kind: n}]]
-        for c in np.unique(cols).tolist():
-            x0 = int(px[(px_cols == c) & (per_px > 0)][0])
-            row = kinds[(c - c0) * CC_KINDS:(c - c0 + 1) * CC_KINDS]
-            counts = {file_kind(k): n for k, n in enumerate(row) if n}
-            n = sum(counts.values())
+        for c in range(int(us[0]) // width, int(us[-1]) // width + 1):
+            ca, cb = (int(i) for i in np.searchsorted(us, [c * width, (c + 1) * width], "left"))
+            if cb <= ca:
+                continue
+            x0 = int(us[ca]) + off
+            row = np.bincount(kinds[a + ca:a + cb], minlength=CC_KINDS)
+            counts = {file_kind(k): int(row[k]) for k in np.flatnonzero(row).tolist()}
+            n = cb - ca
             if shown and x0 < end:  # (onto the text before: counted there)
                 shown[-1][1] += n
                 for k, m in counts.items():
@@ -2157,10 +2246,12 @@ class RollDrawing:
             end = x0 + 3 * s + measure(trn("cc.packed", n, n=f"{n:,}")) + 4 * s
         for i, (x0, n, counts) in enumerate(shown):
             text = trn("cc.packed", n, n=f"{n:,}")
-            # (on the ruler's own colour: the lines under it run together into a bar)
-            self.create_rectangle(x0 + 2 * s, y - half, x0 + 4 * s + measure(text), y + half, fill=look.RULER_BG,
-                                  outline="", tags=tags)
-            self.create_text(x0 + 3 * s, y, text=text, anchor="w", fill=look.CC_MARK, font=font, tags=tags)
+            inside = pick(x0 + 3 * s)
+            # (on the ruler's own colour, or the band's: the marks under it run together into a bar)
+            self.create_rectangle(x0 + 2 * s, y - half, x0 + 4 * s + measure(text), y + half, outline="", tags=tags,
+                                  fill=look.RULER_PICK if inside else look.RULER_BG)
+            self.create_text(x0 + 3 * s, y, text=text, anchor="w", font=font, tags=tags,
+                             fill=look.RULER_PICK_TEXT if inside else look.CC_MARK)
             x1 = shown[i + 1][0] if i + 1 < len(shown) else w
             self.cc_tips.append((max(kb, x0 - 4 * s), max(x1, x0 + 4 * s),
                                  trn("cc.crowded", n, n=f"{n:,}") + "\n" + kinds_text(counts)))
@@ -2184,41 +2275,32 @@ class RollDrawing:
         self._cc_key, self.cc_tips = key, []
         if not (got or loaded or over):
             return
-        by, _ = self.cc_events()
-        slots = self.cc_shown_slots(list(by))
         y, half, tags = self.cc_y(), 5 * s, ("frame", "ccmark")
         font = look.font(7, fit=True)
-        measure = tkfont.Font(font=font).measure
+        measure = self.cc_measure(font)
         if over:  # (more than are kept: said, user 2026-10-29; the track list still counts them)
             text = tr("cc.too_many")
             self.create_text(kb + 3 * s, y, text=text, anchor="w", fill=look.CC_MARK, font=font, tags=tags)
             self.cc_tips.append((kb, kb + 3 * s + measure(text), tr("cc.too_many_tip", n=f"{CC_MOST:,}")))
         ppq = self.app.ppq
         lo, hi = self.x2t(kb) * ppq, self.x2t(w) * ppq
-        total = sum(len(e) for sl in slots for e in by[sl].values()) + sum(len(t) for _, t, _, _ in loaded)
-        # (many events: only the ones on screen laid out, and past CC_CROWD of those plain marks, one per pixel,
-        # hunt 2026-10-29: 300,000 events froze every zoom step 1.3 s)
-        near = None
+        total = len(self.cc_data()[0])
+        # (many events: only the ones on screen laid out, and past CC_CROWD of those plain marks + counts, hunt
+        # 2026-10-29: 300,000 events froze every zoom step 1.3 s)
+        near = span = None
         if total > CC_CROWD:
-            ts, ks = [np.zeros(0, np.int64)], [np.zeros(0, np.int64)]
-            for sl in slots:
-                for k, evs in by[sl].items():
-                    evs = evs[bisect.bisect_left(evs, (lo, -math.inf)):bisect.bisect_right(evs, (hi, math.inf))]
-                    ts.append(np.array([t for t, _ in evs], np.int64))
-                    ks.append(np.full(len(evs), kind_number(k), np.int64))
-            for _, ticks, codes, _ in loaded:
-                a, b = np.searchsorted(ticks, lo, "left"), np.searchsorted(ticks, hi, "right")
-                ts.append(ticks[a:b])
-                ks.append(file_kinds(codes[a:b].astype(np.int64)))
-            ts, ks = np.concatenate(ts), np.concatenate(ks)
-            near = len(ts)
+            span = self.cc_span(lo, hi)
+            near = span[1] - span[0]
+            if CC_CROWD < near <= CC_MERGE_MOST:  # (the same setup on many tracks writes as one: count those)
+                near = self.cc_entries(span)
         if near is not None and near > CC_CROWD:
-            self.draw_cc_crowd(ts, ks, y, half, tags, font, measure)
+            self.draw_cc_crowd(y, half, tags, font, measure, bands)
             self.create_rectangle(0, y - half - 1, kb, y + half + 1, fill=look.RULER_BG, outline="", tags=tags)
             self.tag_raise("trackmark")
             return
         laid = getattr(self, "_cc_laid", (None,))
-        lay_key = key[:4] + (self.sx, s, lit) + ((self.view_t, w) if near is not None else ())
+        # (laid out from the song's start: kept while the same events are on screen)
+        lay_key = key[:4] + (self.sx, s, lit, id(self.cc_data()[0])) + ((span,) if near is not None else ())
         if laid[0] != lay_key:  # (few events: laid out from the song's start, kept while only scrolling)
             shown, end = [], -math.inf
             for x, text, tips, ux in (self.cc_layout() if near is None else self.cc_layout(lo, hi)):

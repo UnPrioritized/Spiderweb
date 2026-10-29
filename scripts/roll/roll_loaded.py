@@ -306,6 +306,13 @@ class LoadedNotes:
         self._loaded_job = self._loaded_timer = self._loaded_over = self._loaded_now = None
         self._loaded_exact = []
         self.loaded_version = getattr(self, "loaded_version", 0) + 1
+        # (nothing kept that still holds the old one, so its memory goes: hunt 2026-10-29, a "Keep in memory" MIDI
+        # stayed after New) the CC row's, the file tracks' names, the track list's small pictures
+        self._loaded_cc = self._cc_data = self._cc_px = None
+        self.app._file_tracks = None
+        tl = getattr(self.app, "track_list", None)
+        if tl is not None:
+            tl._pics = None
 
 
 def cut(e, rows, d, W):

@@ -745,6 +745,8 @@
  "cc.packed_one": "1 CC event",
  "cc.on_tracks": "{text} ({n} tracks)",
  "cc.tip_tracks": "{text} on {n} tracks",
+ "cc.on_channels": "{text} ({n} channels)",
+ "cc.tip_channels": "{text} on {n} channels",
  "cc.too_many": "Too many CC events to show",
  "cc.too_many_tip": "This MIDI has more CC events than Spiderweb keeps ({n} at most), so none are shown here.\nThey still play and export, and the track list still counts them.",
  "tracks.cc_line": "CC events: {kinds}",
