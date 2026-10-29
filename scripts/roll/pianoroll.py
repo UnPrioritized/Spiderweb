@@ -56,7 +56,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
         self.scale = scale
-        self.kb_w, self.ruler_h = 56 * scale, 28 * scale  # (ruler: bar numbers, the tempo changes under them)
+        # (ruler: the tempo changes, the CC events (user 2026-10-29), the bar numbers, top down)
+        self.kb_w, self.ruler_h = 56 * scale, 38 * scale
         # view: beat at left edge, pitch at top edge, pixels per beat, pixels per pitch row
         self.view_t, self.view_top, self.sx, self.sy = 0.0, 127.5, None, None
         self.draft = None  # shape being drawn
@@ -112,6 +113,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self._late_redraw = None  # request_redraw(delay)'s timer
         self._grid_key = self._frame_key = self._playhead_x = None  # what the kept canvas items show (redraw)
         self._tempo_key, self.tempo_tips = None, []  # the ruler's tempo marks (draw_tempo_marks): [(x0, x1, tip)]
+        self.cc_tips = []  # ... and its CC row's (draw_cc_marks)
         self.mark_full = ""  # (the corner's track name when it was cut short: draw_ruler, its tip)
         self.tempo_tip = Tooltip(self, "")  # (their full BPMs while the mouse rests on one)
         self.scrub_t = None  # right-drag listening: where its own line is (beats), roll_draw.draw_playhead
@@ -1737,7 +1739,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def tempo_hover(self, e):
         """The full BPMs of the ruler's tempo mark under the mouse in a tip box (none elsewhere)."""
         tip = self.tempo_tip
-        text = next((t for x0, x1, t in self.tempo_tips if x0 <= e.x <= x1), "") if e.y < self.ruler_h else ""
+        tips = self.cc_tips if abs(e.y - self.cc_y()) <= 5 * self.scale else self.tempo_tips  # (the CC row's own)
+        text = next((t for x0, x1, t in tips if x0 <= e.x <= x1), "") if e.y < self.ruler_h else ""
         if e.y < self.ruler_h and e.x < self.kb_w and self.mark_full:  # (a long track name cut in the corner)
             text = self.mark_full
         if text != tip.text:

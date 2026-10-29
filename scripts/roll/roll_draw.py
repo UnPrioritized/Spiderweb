@@ -12,7 +12,7 @@ import numpy as np
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
 from files.lang import tr, trn
 from files.speed import key_sort, loops
-from notes.engine import cached_arrays, shape_key, shape_notes_tracks
+from notes.engine import cached_arrays, channels_of, shape_key, shape_notes_tracks
 from notes.joined import all_tumours
 from notes.mask import mask_joined, mask_units, unit_of
 from notes.merge import preview_parts, slid_preview
@@ -1943,6 +1943,112 @@ class RollDrawing:
                         self.create_text(cx, self.bar_y(), text=ch, anchor="w", font=font, tags=tags,
                                          fill=look.RULER_PICK_TEXT if pick(cx + measure(ch) / 2) else look.RULER_TEXT)
         self.draw_tempo_marks(boxes)
+        self.draw_cc_marks(boxes)
         self.tag_raise("tempomark")
+        self.tag_raise("ccmark")
         self.tag_raise("trackmark")  # (over the corner's patch: a Select box drag hid the track's name, user 10-26)
         self.tag_raise("playhead")
+
+    def cc_y(self):
+        """The ruler's CC row's middle: under the tempo changes, over the bar numbers (user 2026-10-29)."""
+        return 18 * self.scale
+
+    def cc_layout(self):
+        """[(x from the song's start, text, [tip lines], x its faint line runs to or None)] of the CC events Spiderweb
+        sends (App.shown_cc; user 2026-10-29, CC events never silent): one mark per tick, the 2nd and later events
+        listed after the first ("Volume 100, Pan 64"); a run of 3+ events of one kind on one track going one way, each
+        within a beat of the one before = ONE mark "Volume 100 ↘ 40" (like the tempo stairs)."""
+        from notes.cc_names import kind_name, kind_of, value_of
+        app = self.app
+        got, ppq = app.shown_cc(), app.ppq
+        slots = [s for s, ms in got.items() if ms]
+        chans = dict(zip(slots, channels_of(slots, app.picture_use10).tolist())) if slots else {}
+        at = {}  # tick -> [(text, tip, end tick or None)]
+        for s in slots:
+            runs = {}
+            for m in got[s]:
+                k = kind_of(m[1], m[2]) if m[1] is not None else None
+                if k is not None:
+                    runs.setdefault(k, []).append((m[0], value_of(m[1], m[2], m[3])))
+            for k, evs in runs.items():
+                name, ch = kind_name(k), chans[s] + 1
+                i = 0
+                while i < len(evs):
+                    j = i + 1  # (a run: one way, each within a beat of the one before)
+                    while (j < len(evs) and evs[j][0] - evs[j - 1][0] <= ppq and evs[j][1] != evs[j - 1][1]
+                           and (j == i + 1 or (evs[j][1] > evs[j - 1][1]) == (evs[i + 1][1] > evs[i][1]))):
+                        j += 1
+                    if j - i >= 3:
+                        a, b = evs[i][1], evs[j - 1][1]
+                        way = "↗" if b > a else "↘"
+                        at.setdefault(evs[i][0], []).append(
+                            (f"{name} {a} {way} {b}", tr("cc.tip_run", ch=ch, name=name, a=a, way=way, b=b, n=j - i),
+                             evs[j - 1][0]))
+                        i = j
+                        continue
+                    t, v = evs[i]
+                    at.setdefault(t, []).append((f"{name} {v}", tr("cc.tip_one", ch=ch, name=name, v=v), None))
+                    i += 1
+        out = []
+        for t in sorted(at):
+            items = at[t]
+            ends = [e for _, _, e in items if e is not None]
+            out.append((t / ppq * self.sx, ", ".join(x for x, _, _ in items), [tip for _, tip, _ in items],
+                        max(ends) / ppq * self.sx if ends else None))
+        return out
+
+    def draw_cc_marks(self, boxes):
+        """The CC row of the ruler: a short line on each CC event's tick, its name + value right of it, a faint line
+        while a run goes on; one landing on the text before isn't drawn (its tip joins that one's). Kept while
+        nothing they show changed (laid out from the song's start: scrolling only slides them)."""
+        if self.sx is None:
+            return
+        w, top, s, kb = self.winfo_width(), self.ruler_h, self.scale, self.kb_w
+        bands = tuple(sorted(sorted((self.t2x(a[0]), self.t2x(a[2]))) for a in black_bands(boxes)))
+        got = self.app.shown_cc()
+        key = (id(got), self.app.ppq, w, top, kb, self.sx, self.view_t, s, bands)
+        if key == getattr(self, "_cc_key", None) and (not got or self.find_withtag("ccmark")):
+            return  # (the frame redrawn deletes them: drawn again then)
+        self.delete("ccmark")
+        self._cc_key, self.cc_tips = key, []
+        if not got:
+            return
+        font = look.font(7, fit=True)
+        measure = tkfont.Font(font=font).measure
+        laid = getattr(self, "_cc_laid", (None,))
+        if laid[0] != key[:2] + (self.sx, s):  # (the layout from the song's start: kept while only scrolling)
+            shown, end = [], -math.inf
+            for x, text, tips, ux in self.cc_layout():
+                if shown and x < end:  # (on the text before: joins its tip, its line runs on)
+                    shown[-1][2].extend(tips)
+                    if ux is not None:
+                        shown[-1][4] = ux if shown[-1][4] is None else max(shown[-1][4], ux)
+                    continue
+                right = x + 3 * s + measure(text)
+                shown.append([x, text, list(tips), right, ux])
+                end = right + 4 * s
+            laid = self._cc_laid = (key[:2] + (self.sx, s), shown)
+        shown, at = laid[1], self.t2x(0)
+        y, half, tags = self.cc_y(), 5 * s, ("frame", "ccmark")
+        pick = lambda px: any(x0 <= px < x1 for x0, x1 in bands)  # noqa: E731
+        first = max(0, bisect.bisect_left([m[3] for m in shown], kb - at) - 1)
+        for i in range(first, len(shown)):
+            u, text, tips, right, ux = shown[i]
+            x, right = u + at, right + at
+            if x > w:
+                break
+            colour = look.RULER_PICK_TEXT if pick(x) else look.CC_MARK
+            if x >= kb - 1:
+                self.create_line(x, y - half, x, y + half, fill=colour, tags=tags)
+            self.create_text(x + 3 * s, y, text=text, anchor="w", fill=colour, font=font, tags=tags)
+            tip = "\n".join(tips[:TIP_MARKS])
+            if len(tips) > TIP_MARKS:
+                tip += "\n" + trn("cc.more", len(tips) - TIP_MARKS, n=f"{len(tips) - TIP_MARKS:,}")
+            self.cc_tips.append((max(kb, x - 4 * s), max(right, x + 4 * s), tip))
+            if ux is not None:
+                nxt = shown[i + 1][0] + at if i + 1 < len(shown) else None
+                x1 = min(w, ux + at if nxt is None or ux + at < nxt else nxt - 3 * s)
+                if x1 > right + 3 * s:
+                    self.create_line(right + 3 * s, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
+        self.create_rectangle(0, y - half - 1, kb, y + half + 1, fill=look.RULER_BG, outline="", tags=tags)
+        self.tag_raise("trackmark")
