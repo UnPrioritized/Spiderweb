@@ -505,8 +505,9 @@ class Playback:
                 # (its own lowering cut the voices: how many it lets sound now, as Built-in BASSMIDI's text)
                 top = self.out.handle.opts.get("voices", self.kestrel_opts["voices"])
                 cap = st.get("voice_cap", 0)
-                text = (tr("app.overloaded_1") if cap == 1 else tr("app.overloaded_n", n=f"{readable(cap):,}")) \
-                    if 0 < cap < top else tr("app.overloaded")
+                m = f"{top:,}"  # (of your Max voices, user 2026-10-29)
+                text = (tr("app.overloaded_1", m=m) if cap == 1 else
+                        tr("app.overloaded_n", n=f"{readable(cap):,}", m=m)) if 0 < cap < top else tr("app.overloaded")
         elif not self.player.running:
             self._k_seen = (None, 0.0)
         # (steady, user 2026-10-29: it flashed in and out): shown on for OVER_HOLD_S after the last overload, its

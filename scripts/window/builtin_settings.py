@@ -318,4 +318,5 @@ class Overload:
             return ""
         if a[0] == "overloaded":
             return tr("app.overloaded")
-        return tr("app.overloaded_1") if a[1] == 1 else tr("app.overloaded_n", n=f"{a[1]:,}")
+        m = f"{self.limit:,}"  # (of the limit you set, user 2026-10-29)
+        return tr("app.overloaded_1", m=m) if a[1] == 1 else tr("app.overloaded_n", n=f"{a[1]:,}", m=m)
