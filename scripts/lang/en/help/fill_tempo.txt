@@ -7,7 +7,7 @@ Make a Select box over the area in the Conductor pane, then right-click → Fill
 
 • Melody notes: a jump at each note start of the notes you follow (notes starting together count once). The notes followed are outlined in the piano roll.
 
-• Follows: the track highlighted in the track list (a Ch row = only that channel), or Top note of all tracks: the highest note playing at each moment, across every track, often the melody in a black MIDI. A note under a higher note that is still held doesn't count, so a chord gives only its top note.
+• Follows: the track highlighted in the track list (a Ch row = only that channel), or Top note of all tracks: the highest note playing at each moment, across every track, often the melody in a dense MIDI. A note under a higher note that is still held doesn't count, so a chord gives only its top note.
 
 • Only the selected notes: only the notes of the selected shapes (or what a Select box in the piano roll picked).
 
