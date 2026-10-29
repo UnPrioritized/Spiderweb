@@ -67,6 +67,74 @@ def reversed_tumour(tm):
     return tm
 
 
+class NearEnds:
+    """The pieces join_shapes still has to put on the chain, found by their two ends (a, b) in a grid. pick gives
+    the piece the one-by-one look through every piece gave (speed hunt 2026-10-29: 4,000 lines ~5 s): the first
+    one found nearer than the best so far by more than TIE, in the pieces' order, each piece's ends in the order
+    tail-a, tail-b, head-b, head-a. Only distances in the nearest run (each within TIE of the one before) can take
+    part in that, so only those are looked at, in that order."""
+    TIE = 1e-12
+
+    def __init__(self, ends):
+        self.ends, self.left = ends, len(ends)
+        pts = [p for ab in ends for p in ab]
+        span = max(max(p[0] for p in pts) - min(p[0] for p in pts), max(p[1] for p in pts) - min(p[1] for p in pts),
+                   1e-9) if pts else 1.0
+        self.cell = span / max(1.0, math.sqrt(len(pts)))
+        self.grid = {}
+        for n, ab in enumerate(ends):
+            for p in ab:
+                self.grid.setdefault(self.key(p), set()).add(n)
+
+    def key(self, p):
+        return math.floor(p[0] / self.cell), math.floor(p[1] / self.cell)
+
+    def pick(self, head, tail):
+        """(piece number, at_end, flip) for the chain's head and tail, and that piece taken out."""
+        found = set()
+        keys = [self.key(head), self.key(tail)]
+        r = 0
+        while True:
+            if 8 * r > len(self.grid):  # (rings wider than the pieces left: all of them)
+                found = {n for got in self.grid.values() for n in got}
+                every = True
+            else:
+                every = False
+                for cu, cv in keys:
+                    for du in range(-r, r + 1):
+                        for dv in ((-r, r) if abs(du) != r else range(-r, r + 1)):
+                            found.update(self.grid.get((cu + du, cv + dv), ()))
+            if found:
+                ds = sorted(d for n in found for d in self.dists(n, head, tail))
+                top = ds[0]
+                for d in ds[1:]:
+                    if d > top + self.TIE:
+                        break
+                    top = d
+                if every or (r - 1) * self.cell > top + self.TIE:  # (pieces not found are further than that)
+                    break
+            r += 1
+        best = None
+        for n in sorted(found):
+            for d, at_end, flip in zip(self.dists(n, head, tail), (True, True, False, False),
+                                       (False, True, False, True)):
+                if d <= top and (best is None or d < best[0] - self.TIE):
+                    best = (d, n, at_end, flip)
+        n = best[1]
+        for p in self.ends[n]:
+            got = self.grid.get(self.key(p))
+            if got is not None:  # (both ends in one cell: gone with the first)
+                got.discard(n)
+                if not got:
+                    del self.grid[self.key(p)]
+        self.left -= 1
+        return best[1:]
+
+    def dists(self, n, head, tail):
+        a, b = self.ends[n]
+        return math.dist(tail, a), math.dist(tail, b), math.dist(head, b), math.dist(head, a)
+
+
 def join_shapes(shapes, k, touch):
     """One Curve shape from the shapes (in the order they're listed; the first one's velocity and last-note
     settings). touch(p, q): whether two ends count as touching. None if fewer than two can be joined."""
@@ -78,19 +146,12 @@ def join_shapes(shapes, k, touch):
         pts, sharp = to_bezier(sh, k)
         tm = sh.get("tumour")
         parts.append({"pts": pts, "sharp": sharp, "tm": json.loads(json.dumps(tm)) if tm else None})
-    chain, rest = [parts[0]], parts[1:]
-    while rest:
+    chain = [parts[0]]
+    ends = NearEnds([(p["pts"][0], p["pts"][-1]) for p in parts[1:]])
+    while ends.left:
         # the nearest end to either end of the chain (turned round if that's nearer)
-        head, tail = chain[0]["pts"][0], chain[-1]["pts"][-1]
-        best = None
-        for i, p in enumerate(rest):
-            a, b = p["pts"][0], p["pts"][-1]
-            for d, at_end, flip in ((math.dist(tail, a), True, False), (math.dist(tail, b), True, True),
-                                    (math.dist(head, b), False, False), (math.dist(head, a), False, True)):
-                if best is None or d < best[0] - 1e-12:
-                    best = (d, i, at_end, flip)
-        _, i, at_end, flip = best
-        p = rest.pop(i)
+        i, at_end, flip = ends.pick(chain[0]["pts"][0], chain[-1]["pts"][-1])
+        p = parts[1 + i]
         if flip:
             p["pts"], p["sharp"] = reversed_bezier(p["pts"], p["sharp"])
             p["tm"] = reversed_tumour(p["tm"])
