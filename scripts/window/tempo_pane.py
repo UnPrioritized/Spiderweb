@@ -36,7 +36,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
 from notes.tempo import changed as tempo_edited, keep_heard, FAR
 from notes.loaded import file_tempos
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
-from notes.tempo_file import FileTempo, limit_spots, loaded_part
+from notes.tempo_file import FileTempo, limit_spots, loaded_part, sorted_union
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
@@ -2228,8 +2228,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
                 return
             # (its export writes the file's notes and CC messages + the shapes' (Load MIDI step 10), as there)
             cc = app.cc_messages(app.ppq, self.base())
-            ticks = np.union1d(lm._anchors[0], ticks)
-            loose = np.union1d(lm._anchors[1], np.array([m[0] for ms in cc.values() for m in ms], np.int64))
+            ticks = sorted_union([lm._anchors[0], ticks.astype(np.int64)])  # (= np.union1d, quicker when sorted)
+            loose = sorted_union([lm._anchors[1], np.array([m[0] for ms in cc.values() for m in ms], np.int64)])
         limits = {"dense": [], "gave": [], "unfit": [], "moved": []}
         if any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
             try:

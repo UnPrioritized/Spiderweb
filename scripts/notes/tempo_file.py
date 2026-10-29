@@ -302,6 +302,24 @@ def loaded_part(heard, lay, n, end, known=None):
     return (known or FileTempo(heard, lay)).part(n, end)
 
 
+def sorted_union(parts):
+    """np.unique of the int64 arrays joined (np.unique hashes: ~0.15 s on a 17 GB MIDI's 2 M note ticks, where
+    the Conductor pane hands them over sorted already; a sort + repeats dropped = the same array)."""
+    x = np.concatenate(parts) if len(parts) > 1 else np.asarray(parts[0], np.int64)
+    if len(x) < 2 or bool(np.all(x[1:] > x[:-1])):
+        return x
+    x = np.sort(x)
+    return x[np.concatenate([[True], x[1:] != x[:-1]])]
+
+
+def _member(x, s):
+    """np.isin(x, s) for a sorted s."""
+    if not len(s):
+        return np.zeros(len(x), bool)
+    at = np.minimum(np.searchsorted(s, x), len(s) - 1)
+    return s[at] == x
+
+
 def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None):
     """The Keep timing parts' gaps between anchors: (layout, segs, bad catch-ups, keeps [(a, e, us)], gaps [[n,
     total, file ticks, drawn]], dense = beats of EVERY gap whose two notes are under a tick apart at the part's
@@ -312,7 +330,13 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     loaded MIDI's own tempo [(tick, us)]: its notes keep the time they have in the file (user 2026-10-24: no
     unexpected BPM changes), not the time at the tempo heard before the part."""
     lay = layout(tempo, base, ppq)
-    loose = np.zeros(0, np.int64) if loose is None else np.setdiff1d(loose, ticks)
+    ts = sorted_union([ticks])
+    if loose is None:
+        loose = np.zeros(0, np.int64)
+    else:  # (= np.setdiff1d(loose, ticks))
+        loose = sorted_union([np.asarray(loose, np.int64)])
+        at = np.searchsorted(ts, loose)
+        loose = loose[(at >= len(ts)) | (ts[np.minimum(at, len(ts) - 1)] != loose)] if len(ts) else loose
     every_tick = np.concatenate([ticks, loose])
     segs, bad = file_segments(tempo, base, ppq, int(every_tick.max()) + 1 if len(every_tick) else 0)
     last_tick = int(every_tick.max()) if len(every_tick) else 0
@@ -331,8 +355,7 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     starts = [s[0] for s in segs]
     # (sorted once, each part takes its own slice: every part looked through every note of the song, thousands of
     # jumps x 300k notes froze for seconds, PLAN #12 hunt; the same answers)
-    ts = np.unique(ticks)
-    bs = np.sort(bars) if fit_bars else None
+    bs =np.sort(bars) if fit_bars else None
     ls = np.sort(loose)
     for (a, e, u), mine, part in zip(keeps, own, files):
         near = ts[np.searchsorted(ts, a, "left"):np.searchsorted(ts, e, "right")]  # (a <= tick <= e)
@@ -348,12 +371,12 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
             was = None if isinstance(u, int) else np.concatenate([[0], np.cumsum(u)])
         lo = ls[np.searchsorted(ls, a, "right"):np.searchsorted(ls, e, "left")]
         while True:
-            n = np.unique(np.concatenate(marks + [lo]))
+            n = sorted_union(marks + [lo])
             d = np.diff(n)
             total = d * u if was is None else was[n[1:] - a] - was[n[:-1] - a]
             exact = total / ((sums[n[1:] - a] - sums[n[:-1] - a]) / d)  # (file ticks each gap needs at the tempo)
-            note = np.isin(n, near)  # (n is inside a..e: the notes there are all it can meet)
-            real = note | np.isin(n, lo)
+            note = _member(n, near)  # (n is inside a..e: the notes there are all it can meet)
+            real = note | _member(n, lo)
             close = real[:-1] & real[1:] & (exact < 1)  # (two under a tick apart at that tempo)
             if not len(lo):
                 break
