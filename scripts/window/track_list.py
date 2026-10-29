@@ -80,6 +80,18 @@ def note_keys(notes):
     return notes[:, 5] * (1 << 44) + (notes[:, 2] & 0xFFF) * (1 << 32) + (notes[:, 0] & 0xFFFFFFFF)
 
 
+def lone_keys(notes, keys, at):
+    """Which of the notes at (indexes) have a note_keys number no other note has: a shape laid on two tracks (a
+    layered paste) has the same note on both, and following such a note moved a mute onto the other track too
+    (speed hunt 2026-10-29, undo muted a track). Counted among the notes of those notes' shapes only."""
+    if not len(at):
+        return np.zeros(0, bool)
+    mine = keys[np.isin(notes[:, 5], np.unique(notes[at, 5]))]
+    srt = np.sort(mine)
+    want = keys[at]
+    return np.searchsorted(srt, want, "right") - np.searchsorted(srt, want, "left") == 1
+
+
 def hex_rgb(colour):
     colour = colour.lstrip("#")
     if len(colour) == 3:
@@ -476,6 +488,7 @@ class TrackList(tk.Canvas):
         self.tracks()
         r, rows, chans = self.app.rendered, self.note_rows(), self.row_chans()
         ch = channels_of(r[:, 4], self.app.picture_use10) if len(r) else r[:0, 0]
+        keys = note_keys(r) if len(r) else np.zeros(0, np.int64)
         out = []
         for m in self.muted:
             s, c = m if isinstance(m, tuple) else (m, None)
@@ -488,8 +501,12 @@ class TrackList(tk.Canvas):
                 pick = rows == row if len(r) else np.zeros(0, bool)
                 if c is not None and len(r):
                     pick &= ch == c
-                at = np.flatnonzero(pick)[:MARK_NOTES]
-                out.append((m, ("notes", note_keys(r[at])) if len(at) else None))
+                at = np.flatnonzero(pick)
+                got = at[:MARK_NOTES * 4]  # (only notes found on this row alone: lone_keys)
+                got = got[lone_keys(r, keys, got)][:MARK_NOTES]
+                if not len(got) and len(at) > MARK_NOTES * 4:
+                    got = at[lone_keys(r, keys, at)][:MARK_NOTES]
+                out.append((m, ("notes", keys[got]) if len(got) else None))
         return out
 
     def remute(self, marks):
@@ -508,6 +525,7 @@ class TrackList(tk.Canvas):
                           and self.file_part(s)[0] == key[1] for c in key[2] if c in chans[row]}
             else:
                 at = np.flatnonzero(np.isin(keys, key[1]) & (rows >= 0))
+                at = at[lone_keys(r, keys, at)]  # (a note now on two tracks shows neither: lone_keys)
                 pairs |= {(int(self._all[rows[i]]), int(ch[i])) for i in at.tolist()}
         for s in {s for s, _ in pairs}:  # (every channel of a track muted: the track's own mute)
             got = {c for x, c in pairs if x == s}
