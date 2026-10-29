@@ -367,6 +367,7 @@
  "tempo.tempo": "Tempo",
  "tempo.play_bpm_tip": "The exact tempo (BPM) at the play line, as the MIDI file holds it.",
  "tempo.mark_heard": "Heard:",
+ "tempo.mark_kept": "Heard at {bpm} BPM (Keep timing)",
  "tempo.play_heard_tip": "Inside a Keep timing part: the tempo really heard at the play line (the notes keep their time at it).",
  "tempo.mark_catch": "Catch-up: {bpm} BPM",
  "conductor.ok": "OK",

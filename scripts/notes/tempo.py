@@ -1695,6 +1695,23 @@ def heard_marks(tempo, base, ppq, bar=4):
     return out
 
 
+def kept_bpms(tempo, base, ppq, beats):
+    """The BPM heard at each beat inside a Keep timing part, None outside one (or where a catch-up's yellow area
+    switches it off): the ruler's purple brackets after a visual mark (user 2026-10-29, "120 → 60 (120)")."""
+    lay, out = layout(tempo, base, ppq), []
+    keeps = lay["keeps"]
+    starts = [a for _, a, _, _ in keeps]  # (in the points' order = by tick)
+    for b in beats:
+        t = beat_tick(b, ppq)
+        n = bisect.bisect_right(starts, t) - 1
+        if n < 0 or (keeps[n][2] is not None and t >= keeps[n][2]):
+            out.append(None)
+            continue
+        u = keep_heard(lay, n, t, t + 1)
+        out.append(60_000_000 / (u if isinstance(u, int) else int(u[0])))
+    return out
+
+
 def _stairs(marks, k, pts, lines, bar):
     """The marks from k on that make stairs (held steps in a row, one way, small, within a bar of each other, no
     catch-up line between them); fewer than STAIR_MIN = not stairs."""
