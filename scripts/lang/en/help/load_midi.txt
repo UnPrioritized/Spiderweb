@@ -30,7 +30,7 @@ The PPQ box is greyed: the project uses the file's PPQ.
 
 Zoomed out, the notes show from an overview made while loading. Zoomed in, the exact notes are read from the file. Each track's notes are in their channel's colour, and a track higher in the file is drawn on top.
 
-Press Tab for the track list: one row per track of the file, then the tracks of your own shapes. Click a track and press Tab to see only it (see Track list). Drag the file's tracks by their names to change the order Export MIDI writes them in; the piano roll keeps drawing them in the file's own order.
+Press Tab for the track list: one row per track of the file, then the tracks of your own shapes. Click a track and press Tab to see only it (see Track list). Drag the file's tracks by their names to change the order Export MIDI writes them in; the piano roll draws them in that order too (lower in the list = on top).
 
 The velocity pane shows the loaded notes' velocities faded behind your own. They can't be changed there.
 

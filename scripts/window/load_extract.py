@@ -199,7 +199,8 @@ def extract_loaded(app):
     order, faint = shown_tracks(app, lm)
     if order is not None and TRACK_FADE[0] == 0:  # (picked-behind tracks drawn at 0 %: not seen, not taken)
         order = [n for n in order if n not in faint]
-    tracks = sorted(order) if order is not None else [n for n, t in enumerate(lm.tracks) if t.notes]
+    tracks = sorted(n for n in order if lm.tracks[n].notes) if order is not None else [
+        n for n, t in enumerate(lm.tracks) if t.notes]  # (order = every track when dragged, B+: empty ones left out)
     boxes = boxes_now(app)
     if not boxes:
         return

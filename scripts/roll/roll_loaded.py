@@ -22,6 +22,7 @@ import numpy as np
 from files import midi_index, speed
 from files.midi_index import C_SIZE, C_STOP, C_TICK, C_RUN, QS
 from files.midi_read import MidiError
+from files.own_tracks import key_track
 from roll.roll_draw import GHOST_BASE, TRACK_FADE, note_tables
 from roll.roll_shared import COLOURS_16
 
@@ -460,19 +461,33 @@ def style_only(style):
     return dict(style[-2]) or None
 
 
+def paint_order(app, lm):
+    """The loaded tracks top first as the track list has them (B+, user 2026-10-29: lower in the list = drawn on
+    top, like the file's own order; every file size), or None while that's the file's own order (not dragged)."""
+    if getattr(app, "file_order", None) is None:
+        return None
+    rows = dict.fromkeys(key_track(k) for k in app.file_rows())  # (a part's row = its track's place, first one)
+    order = tuple(n for n in reversed(list(rows)) if n < len(lm.tracks))
+    return None if order == tuple(range(len(lm.tracks) - 1, -1, -1)) else order
+
+
 def shown_tracks(app, lm):
-    """(order, faint) of the loaded tracks the piano roll shows: order None = every track (nothing highlighted in
-    the track list), else the track numbers drawn, the highlighted one first (on top), then the ones picked behind
-    it (faint: drawn faint), () = none of the loaded tracks."""
+    """(order, faint) of the loaded tracks the piano roll shows: order None = every track in the file's order
+    (nothing highlighted in the track list, not dragged), else the track numbers drawn, top first: every track as
+    dragged (paint_order), or the highlighted one, then the ones picked behind it (faint: drawn faint); () = none of
+    the loaded tracks."""
     tl = getattr(app, "track_list", None)
+    dragged = paint_order(app, lm)
     if tl is None or tl.current is None:
-        return None, frozenset()
+        return dragged, frozenset()
+    rank = {n: i for i, n in enumerate(dragged or range(len(lm.tracks) - 1, -1, -1))}
     shown = tl.shown_slots()
     top = tl.file_part(tl.current)[0] if tl.current < 0 else None  # (a part: its track, PLAN #11 D)
     # (Ch rows of other tracks picked with it: drawn in full too, E3)
-    also = sorted({tl.file_part(s)[0] for s, _ in tl.shown_pairs() or () if s < 0} - {top})
+    also = sorted({tl.file_part(s)[0] for s, _ in tl.shown_pairs() or () if s < 0} - {top},
+                  key=(lambda n: n) if dragged is None else (lambda n: rank.get(n, n)))
     faint = sorted({tl.file_part(s)[0] for s in shown if s < 0 and s != tl.current} - {top} - set(also),
-                   reverse=True)
+                   key=lambda n: rank.get(n, n))
     order = ([top] if top is not None else []) + also + faint
     order = tuple(n for n in order if n < len(lm.tracks))
     return order, frozenset(n for n in faint if n < len(lm.tracks))

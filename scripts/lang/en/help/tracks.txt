@@ -26,7 +26,7 @@ Drag a track by its name up or down: a line between two rows shows where it land
 
 Dragging one of Spiderweb's own tracks makes all of Spiderweb's tracks yours, empty ones too: each becomes a track you added, on the same channel, with its shapes laid on it. Only the order changes, like in Domino, and every track keeps its notes and channel. Shapes you draw later with All tracks highlighted get new tracks of Spiderweb's again. While Spiderweb's tracks hold a picture, a mask, a Hz bass or a Channel per strip shape, they can't be moved yet. A green tinted track you drag becomes yours too.
 
-A loaded MIDI's own tracks can be dragged too, and your tracks can go above or between them. The track list and Export MIDI follow the new order, and each of the file's tracks is still copied exactly. The piano roll keeps drawing the file's tracks in the file's own order (a later track covers an earlier one), so what covers what stays the same while you edit; other players draw the exported file in its new order, so there it can differ.
+A loaded MIDI's own tracks can be dragged too, and your tracks can go above or between them. The track list and Export MIDI follow the new order, and each of the file's tracks is still copied exactly. The piano roll draws them in the new order too: a track lower in the list covers the ones above it, as a later track in the file does, so what you see matches the exported file. On a very big MIDI zoomed far out, the quick rough picture is a little blockier once its tracks are dragged.
 
 ## Tracks holding several channels
 
