@@ -11,6 +11,7 @@ when every piece is one whole shape and they all had the same tumours (or none) 
 (each piece gets its own row of bumps anyway). Changing any tumour setting of the joined curve gives it one
 setting for all (tumour_window.py drops "tumours" / "splits"): then the bumps run on across the joints."""
 
+import heapq
 import json
 import math
 
@@ -377,9 +378,18 @@ def join_velocity(new, olds, spans, new_span):
     times = sorted({t for a, b in spans for t in (a, b)} |
                    {a + (b - a) * u for (a, b), env in zip(spans, envs) for u, _ in env})
     pts = []
+    # (the first listed shape covering each middle: shapes started so far kept by list number, ones ended dropped
+    # as the middles go on; looking through every shape for each took 1.3 s at 4,000 lines, speed hunt 2026-10-29)
+    starts = sorted(range(len(spans)), key=lambda i: spans[i][0] - 1e-12)
+    live, k = [], 0
     for ta, tb in zip(times, times[1:]):
         m = (ta + tb) / 2
-        owner = next((i for i, (a, b) in enumerate(spans) if a - 1e-12 <= m <= b + 1e-12), None)
+        while k < len(starts) and spans[starts[k]][0] - 1e-12 <= m:
+            heapq.heappush(live, starts[k])
+            k += 1
+        while live and not m <= spans[live[0]][1] + 1e-12:
+            heapq.heappop(live)
+        owner = live[0] if live else None
         if owner is None:  # (no shape here: straight on to the next one)
             continue
         for t in (ta, tb):

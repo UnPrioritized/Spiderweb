@@ -15,7 +15,7 @@ import math
 
 from files.lang import tr
 from notes.bezier import anchor_count
-from notes.custom import (CENTRE_KEYS, CUSTOM_FLAGS, add_stroke, cycle_effect,custom_strokes, drawn_view, frame_to_bp,
+from notes.custom import (CENTRE_KEYS, CUSTOM_FLAGS, add_strokes, cycle_effect,custom_strokes, drawn_view, frame_to_bp,
                           frame_to_uv, moved_at, new_live_shape, stroke_bp)
 from notes.hzbass import left_edge, shifted_hz
 from notes.joined import is_joined, join_velocity
@@ -135,7 +135,7 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
     if first:
         new.update(name=first.get("name") or new["name"], fill=first["fill"], gate=first["gate"],
                    align=first.get("align", "auto"), ends=first.get("ends", "drop"))
-    src = 0
+    src, strokes = 0, []
     for sh, path in zip(shapes, paths):
         if sh["kind"] == "custom":
             ids = {}  # (a shape turned into a live shape before keeps its groups apart)
@@ -145,12 +145,13 @@ def to_live(shapes, paths, defaults, custom_defaults, k=None):
                 if key not in ids:
                     ids[key], src = src, src + 1
                 got["src"] = ids[key]
-                add_stroke(new, got)
+                strokes.append(got)
             continue
         for st in line_strokes(sh, path):
             st["src"] = src
-            add_stroke(new, st)
+            strokes.append(st)
         src += 1
+    add_strokes(new, strokes)
     spans = [(min(b for p in ps for b, _ in p), max(b for p in ps for b, _ in p)) for ps in paths]
     mine = [b for p in custom_strokes(new) for b, _ in p]
     join_velocity(new, shapes, spans, (min(mine), max(mine)))  # (each keeps its velocities)

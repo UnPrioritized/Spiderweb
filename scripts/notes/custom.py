@@ -900,6 +900,113 @@ def add_stroke(sh, st, at=None):
     return at
 
 
+JOIN_CELL = 1e-3  # (add_strokes' grid, in beats / keys: where to look for points to join onto)
+
+
+def plain_poly(st):
+    """A stroke whose points are all there is to it (no formula, freehand, polygon or curve): add_strokes can
+    take it the quick way."""
+    return st["kind"] == "poly" and not st.get("free") and not st.get("smooth") and not st.get("sides") \
+        and not has_formula(st)
+
+
+def add_strokes(sh, strokes):
+    """add_stroke for each of strokes in turn (Turn into live shape), with EXACTLY the same numbers: one by one,
+    every add fitted every stroke before it again and searched all their points (4,000 lines ~56 s, speed hunt
+    2026-10-29). Plain polylines into an empty plain shape: each fit is the same map of every point so far
+    ((u - left) / width, (v - bottom) / height), so the maps are only listed, the lowest / highest point followed
+    through them (they never change order), ends joined onto points found through a beats / keys grid and brought
+    up to date map by map, and at the end every point goes through the maps it missed in the same order (NumPy:
+    the same sums one by one). Anything else: add_stroke one by one. Check: dev/scratch/live_compare.py."""
+    if sh["strokes"] or not all(plain_poly(st) for st in strokes) or any(
+            sh.get(key) for key in ("hz", "areas", "fit") + CENTRE_KEYS):
+        for st in strokes:
+            add_stroke(sh, st)
+        return
+    bps = [[list(map(float, p)) for p in st["pts"]] for st in strokes]
+    if bps:
+        flat = [p for pts in bps for p in pts]
+        reach = max(max(b for b, _ in flat) - min(b for b, _ in flat), max(p for _, p in flat) - min(p for _, p in flat))
+        if reach * 1e-6 > JOIN_CELL:  # (the joining distance, 1e-7 of the box, could pass a grid cell)
+            for st in strokes:
+                add_stroke(sh, st)
+            return
+    maps = []  # (left, width, bottom, height) of each fit that moved the points
+    made = []  # per stroke: its points in u, v as put in (after joining) + how many maps there were then
+    low = high = None  # [u, v] lowest / highest of all points now
+    grid = {}  # beats / keys cell -> [(order, stroke, point number)]
+    cur = {}  # (stroke, point) -> [u, v, maps done]
+    order = 0
+
+    def now(j, i):
+        c = cur.get((j, i))
+        if c is None:
+            u, v = made[j][0][i]
+            c = cur[(j, i)] = [u, v, made[j][1]]
+        for ul, w, vl, h in maps[c[2]:]:
+            c[0], c[1] = (c[0] - ul) / w, (c[1] - vl) / h
+        c[2] = len(maps)
+        return c
+
+    for j, st in enumerate(strokes):
+        to_uv = frame_to_uv(sh["pts"])
+        pts = [list(to_uv(u, v)) for u, v in st["pts"]]
+        for i, p in enumerate(pts):  # (add_stroke's joining: the nearest point of the strokes before, within 1e-7)
+            b, k = bps[j][i]
+            cb, ck = math.floor(b / JOIN_CELL), math.floor(k / JOIN_CELL)
+            best = None
+            for db in (-1, 0, 1):
+                for dk in (-1, 0, 1):
+                    for o, jj, ii in grid.get((cb + db, ck + dk), ()):
+                        q = now(jj, ii)
+                        d = math.dist(p, q[:2])
+                        if best is None or (d, o) < best[:2]:
+                            best = (d, o, q)
+            if best is not None and best[0] < 1e-7:
+                pts[i] = [best[2][0], best[2][1]]
+        if len(pts) >= 3 and math.dist(pts[0], pts[-1]) < 1e-7:
+            pts[-1] = list(pts[0])
+        made.append((pts, len(maps)))
+        for i in range(len(pts)):
+            b, k = bps[j][i]
+            grid.setdefault((math.floor(b / JOIN_CELL), math.floor(k / JOIN_CELL)), []).append((order, j, i))
+            order += 1
+        # refit, as it does it: the box round every point (the old ones' lowest / highest followed through the maps)
+        us = [p[0] for p in pts] + ([low[0], high[0]] if low else [])
+        vs = [p[1] for p in pts] + ([low[1], high[1]] if low else [])
+        if not us:
+            continue
+        ul, vl = min(us), min(vs)
+        w, h = max(us) - ul, max(vs) - vl
+        low, high = [ul, vl], [max(us), max(vs)]
+        if w < 1e-9:
+            ul, w = ul - 0.5, 1.0
+        if h < 1e-9:
+            vl, h = vl - 0.5, 1.0
+        if abs(ul) < 1e-12 and abs(vl) < 1e-12 and abs(w - 1) < 1e-12 and abs(h - 1) < 1e-12:
+            continue
+        to_bp = frame_to_bp(sh["pts"])
+        sh["pts"] = [list(to_bp(ul, vl)), list(to_bp(ul + w, vl)), list(to_bp(ul, vl + h))]
+        maps.append((ul, w, vl, h))
+        low = [(low[0] - ul) / w, (low[1] - vl) / h]
+        high = [(high[0] - ul) / w, (high[1] - vl) / h]
+        r = sh.get("round")
+        if r:
+            sh["round"] = r * h / w if isinstance(r, (int, float)) else [x * h / w for x in r]
+    sizes = [len(pts) for pts, _ in made]
+    at = np.array([p for pts, _ in made for p in pts], float).reshape(-1, 2)
+    first = np.array([m for (pts, m) in made for _ in pts], np.int64)  # (never going down)
+    for m, (ul, w, vl, h) in enumerate(maps):  # (map m reaches the points put in before it)
+        e = int(np.searchsorted(first, m, "right"))
+        at[:e, 0] = (at[:e, 0] - ul) / w
+        at[:e, 1] = (at[:e, 1] - vl) / h
+    rows = at.tolist()
+    k = 0
+    for st, n in zip(strokes, sizes):
+        sh["strokes"].append(dict(st, pts=rows[k:k + n]))
+        k += n
+
+
 def new_live_shape(defaults, custom_defaults, k=None):
     """An empty custom shape to draw into (its box: 1 beat by 1 key at 0, fitted once something is drawn). k: beats
     per key on screen now (the view it's drawn in: drawn_view; in this box one v is k u), or a drawn_view (a, c)."""
