@@ -619,6 +619,20 @@ def cached_arrays(sh):
     return got["arrays"]
 
 
+def cached_reach(sh):
+    """(first beat, lowest key, highest key, last beat) of cached_arrays, None when nothing's drawn; remembered with
+    them (every redraw asks it of every shape: 4,000 shapes ~70 ms a redraw, speed hunt 2026-10-29)."""
+    got = _cached(sh)
+    if "reach" not in got:
+        arrays = [a for a in cached_arrays(sh) if len(a)]
+        if arrays:
+            a = np.concatenate(arrays)
+            got["reach"] = (a[:, 0].min(), a[:, 1].min(), a[:, 1].max(), a[:, 0].max())
+        else:
+            got["reach"] = None
+    return got["reach"]
+
+
 def cached_path(sh):
     """The shape as one list of (beat, pitch) points (a custom shape: all its strokes one after another)."""
     strokes = cached_strokes(sh)

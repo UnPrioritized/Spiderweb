@@ -16,7 +16,7 @@ from files.lang import tr, trn
 from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
-from notes.engine import cached_arrays, make_shape, shape_key
+from notes.engine import cached_reach, make_shape, shape_key
 from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
@@ -371,13 +371,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     @staticmethod
     def reach(shapes):
         """(first beat, lowest key, highest key, last beat) the shapes' lines reach, or None (nothing drawn)."""
-        got = []
-        for sh in shapes:
-            arrays = [a for a in cached_arrays(sh) if len(a)]
-            if not arrays:
-                continue
-            a = np.concatenate(arrays)
-            got.append((a[:, 0].min(), a[:, 1].min(), a[:, 1].max(), a[:, 0].max()))
+        got = [r for r in map(cached_reach, shapes) if r is not None]
         if not got:
             return None
         return (float(min(g[0] for g in got)), float(min(g[1] for g in got)), float(max(g[2] for g in got)),
