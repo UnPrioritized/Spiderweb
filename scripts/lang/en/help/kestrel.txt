@@ -7,7 +7,7 @@ With a loaded MIDI, Kestrel reads its busiest parts ahead in the background, so 
 Settings (Help menu) → Sound, while Kestrel is picked:
 • Max voices: the most notes that can sound at once (300,000 to start; type 300k, 1m and so on). More = fuller busy parts, but each block takes the graphics card longer. If the card can't take that many, Spiderweb lowers it and says so.
 • Lower it by itself when it can't keep up: ticked, the quietest notes are left out when the card falls behind, so playback never stops. Off, every note plays and it stutters where it can't keep up.
-• Slow down to keep up (off at first): ticked, the song plays slower instead when the card can't keep up (down to 10 %, the pitch the same) and goes back to its own speed once it can. With "Lower it by itself" ticked too, notes are left out only once it's at the slowest.
+• Slow down to keep up (off at first): ticked, the song plays slower instead when the card can't keep up (down to 10 %, the pitch the same) and goes back to its own speed once it can. With "Lower it by itself" ticked too, notes are left out only once it's at the slowest, or once playing slower stops helping (very many notes ringing at once).
 • Block size: how much sound is made at a time. Bigger = easier in busy parts, but the sound starts a little later after Play.
 • Limiter and DC blocker: keep very loud parts from clipping and the bass from drifting, as in Kestrel's own renders.
 Changing them while playing starts Kestrel again from the play line, in a moment (the soundfonts aren't read again).

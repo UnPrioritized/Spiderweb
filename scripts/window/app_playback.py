@@ -345,19 +345,19 @@ class Playback:
 
     def pace_play(self, now):
         """13f: the synth's load -> the speed the song plays at (files/slow_down.py), while its tick is on.
-        "Lower it by itself" (both synths) waits until it's at the slowest (user: slow down first), and on the way
+        "Lower it by itself" (both synths) waits until it's at the slowest (user: slow down first), or where slowing
+        stopped helping (SlowDown.floor, user 2026-10-29), and on the way
         back gives its notes / voices back BEFORE the speed climbs (hunt 2026-10-29: handed back at 11 %, the full
         limit came back at once and the stutter with it)."""
-        from files.slow_down import SLOWEST
         on = self.slowing()
         if not on and self.player.speed != 1.0:
             self.player.set_speed(1.0)
-        load, behind, easy, lowered = self.play_load()
+        load, behind, easy, lowered, effort = self.play_load()
         if on:
-            v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered)
+            v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered, effort=effort)
             if v is not None:
                 self.player.set_speed(v)
-        free = not on or self.player.speed <= SLOWEST or lowered
+        free = not on or self.slow_down.floored or lowered  # (at 10 %, or where slowing stopped helping)
         if self.overload.running:
             guard = self.play_guard.get() and free
             if self.overload.guard != guard:
@@ -367,8 +367,10 @@ class Playback:
 
     def play_load(self):
         """(the synth's load = time making the sound / the time it lasts, None = not known; whether the sound broke
-        up lately; clearly room to spare; "Lower it by itself" still holding notes / voices back)."""
+        up lately; clearly room to spare; "Lower it by itself" still holding notes / voices back; how hard the synth
+        works, to see whether slowing helps, None = not known)."""
         if self.out.name == KESTREL and self.out.handle:
+            from files.kestrel import RATE as K_RATE
             from files.slow_down import queue_load
             k = self.out.handle.k
             st = k.stats()
@@ -386,7 +388,8 @@ class Playback:
             lowered = now - self._k_drops[1] < 1.0
             # (by the blocks made ahead still waiting, as its own "Lower it by itself" judges: a slow block with
             # every ready block still there is heard fine)
-            return queue_load((st["rendered"] - st["handed"]) / k.block, k.ahead), behind, easy, lowered
+            effort = st["last_block_us"] / (k.block / K_RATE * 1e6) if st.get("last_block_us") else None
+            return queue_load((st["rendered"] - st["handed"]) / k.block, k.ahead), behind, easy, lowered, effort
         if self.out.name == BUILTIN:  # (read by the Overload watcher / the loaded MIDI's feeder: never BASS here)
             lp, o = self.loaded_play, self.overload
             loads = [x for x in (o.load, lp.load if lp is not None else None) if x is not None]
@@ -396,15 +399,17 @@ class Playback:
             behind = bool(getattr(o, "over", False)) or (seen is not None and thinned > seen)
             lowered = bool(getattr(o, "guard", False)) and getattr(o, "now_limit", 0) < getattr(o, "limit", 0)
             if not loads:
-                return None, behind, False, lowered
+                return None, behind, False, lowered, None
             # (a busy synth that still makes its sound in time isn't heard, user 2026-10-29: "fine means no
             # stuttering": from 95 % only; under 90 % with nothing lost = calm, it may speed up again (hunt: between 50
             # and 95 % it stayed slowed for good))
             c = max(loads)
             # (never "easy": its note budget can be what limits at a low CPU, Lagtester at 17 % 2026-10-29: forgetting
             # the speed that broke up there made it climb back at once, every 2-3 s)
-            return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, False, lowered
-        return None, False, False, False
+            # (its CPU says whether slowing helps only while the CPU is what's maxed out; its note budget leaving notes
+            # out at a low CPU is always helped by slowing)
+            return (c if c >= 0.95 else 0.75 if c >= 0.9 else 0.3), behind, False, lowered, c if c >= 0.9 else None
+        return None, False, False, False, None
 
     def stop_play(self):
         if self._play_job:

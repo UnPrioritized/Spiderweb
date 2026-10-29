@@ -24,6 +24,13 @@ UNDER = 0.95
 CEIL_S = 4.0
 CEIL_RISE = 1.1
 NEAR = 0.85  # (breaking up again within this of the mark: the mark goes NEAR lower, the cut is a gentle NEAR too)
+# Slowing that isn't helping (user 2026-10-29, after real Lagtester at 1 M voices crawled at 15 % and still
+# stuttered: ringing voices don't get fewer by playing slower): the synth's work (effort: Kestrel's block time,
+# BASSMIDI's CPU while that's what's maxed out) measured again at the next cut, still in trouble (within NEXT_S): it
+# should have dropped by at least HELPED of the speed's share; if not, no slower from here, "Lower it by itself"
+# takes over
+HELPED = 0.5
+NEXT_S = SETTLE_S + 0.5
 SMOOTH = 0.3  # weight of the newest reading
 WARM_S = 0.5  # (the first moments of a play: the synth's start-up is slow at any load, never judged)
 LEAST_STEP = 0.03  # (changes smaller than this wait: each change sends what was sent ahead again)
@@ -53,17 +60,23 @@ class SlowDown:
         self._calm = None  # (since when the load stayed under LOW)
         self.ceiling = 1.0  # (the speed that last broke up; 1 = none)
         self._lifts = 0  # (tries faster in a row that held)
+        self.floor = SLOWEST  # (no slower than this: raised to the speed where slowing stopped helping)
+        self.effort = None  # (the synth's work, smoothed: None = not known)
+        self._ref = None  # (speed, effort) at the last cut, while still in trouble
 
-    def step(self, load, now=None, behind=False, easy=False, hold=False):
+    def step(self, load, now=None, behind=False, easy=False, hold=False, effort=None):
         """One reading: load (None = none this time); behind = the sound already broke up (Kestrel handed out
         silence, BASSMIDI lost sound / left notes out); easy = clearly room to spare (the busy part is over: the
         speed that broke up is forgotten); hold = not faster yet ("Lower it by itself" still has notes / voices to
-        give back first: undone in the reverse order). Returns the new speed when it should change, else None."""
+        give back first: undone in the reverse order); effort = how hard the synth works (None = not known: slowing
+        counted as helping). Returns the new speed when it should change, else None."""
         now = time.perf_counter() if now is None else now
         if now - self.began < WARM_S:
             return None
         if load is not None:
             self.load = load if self.load is None else self.load + SMOOTH * (load - self.load)
+        if effort is not None:
+            self.effort = effort if self.effort is None else self.effort + SMOOTH * (effort - self.effort)
         if behind:
             self.load = max(self.load or 0.0, 1.2)
         if self.load is None:
@@ -71,21 +84,28 @@ class SlowDown:
         v = self.speed
         if self.load > HIGH:
             self._calm = None
-            if now - self._down < SETTLE_S or v <= SLOWEST:
+            if now - self._down < SETTLE_S or v <= self.floor:
                 return None
+            if self._ref is not None and now - self._down <= NEXT_S and self.effort is not None:
+                v0, e0 = self._ref
+                if self.effort > e0 * (1 - HELPED * (1 - v / v0)):  # (slowing isn't helping: Lower it by itself's
+                    self.floor = v  # turn, from this speed)
+                    return None
+            self._ref = (v, self.effort) if self.effort is not None else None
             self._down = now
             self._lifts = 0
             if self.ceiling < 1.0 and v >= self.ceiling * NEAR:  # (the mark was a little too fast: lower it, gently)
                 self.ceiling = max(SLOWEST, min(v, self.ceiling) * NEAR)
-                new = max(SLOWEST, v * NEAR)
+                new = max(self.floor, v * NEAR)
             else:
                 self.ceiling = v
-                new = max(SLOWEST, v * max(0.5, TARGET / self.load))
+                new = max(self.floor, v * max(0.5, TARGET / self.load))
             self.load = TARGET  # (as it will be once the slower speed shows)
             return self._set(new, force=True)
         if self.load < LOW:
             if self._calm is None:
                 self._calm = now
+            self._ref = None  # (calm: the last cut helped)
             if easy:
                 self.ceiling = 1.0
             elif self.ceiling < 1.0 and now - max(self._calm, self._lift) >= CEIL_S:
@@ -103,8 +123,15 @@ class SlowDown:
         self._calm = None
         return None
 
+    @property
+    def floored(self):
+        """At the slowest it goes: 10 %, or where slowing stopped helping ("Lower it by itself" may work then)."""
+        return self.speed <= self.floor
+
     def _set(self, new, force=False):
         new = round(new, 3)
+        if new >= 1.0:  # (back to its own speed: slowing gets its chance again next time)
+            self.floor, self._ref = SLOWEST, None
         if new != 1.0 and new != SLOWEST and abs(new - self.speed) < LEAST_STEP * self.speed and not force:
             return None
         if new == self.speed:
