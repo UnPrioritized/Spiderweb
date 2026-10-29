@@ -96,7 +96,7 @@ from files.project import AUTOSAVE, OUTPUT_DIR, ProjectFiles
 from files.snap import DEFAULT_SNAP, snap_beats
 from notes.tempo import changed as tempo_edited, drop_loose, empty as empty_tempo, watch as watch_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, first_bar_beats, sigs_of, where
-from roll.roll_shared import cached_path
+from roll.roll_shared import box_kind, cached_path
 from roll.zoombar import add_zoom_bars
 from window.snap_picker import SnapPicker
 from window import palettes
@@ -2746,7 +2746,21 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not self.sels:
             return
         shift = max(self.snap_beats(), 1 / self.ppq) if self.snap_beats() else 1.0  # (a step under a tick: on top)
-        self.add_copies([self.shapes[i] for i in sorted(self.sels)], shift, tr("app.duplicate"), relay=False)
+        self.add_copies([self.without_cc(dict(self.shapes[i])) for i in sorted(self.sels)], shift,
+                        tr("app.duplicate"), relay=False)
+
+    def time_picked(self):
+        """Were the selected shapes picked by a ruler band (a time selection)? Then copies take their CC events
+        along; picked by clicking / a Select box: notes only (user 2026-10-29, Domino's way)."""
+        kept = getattr(self.roll, "box_kept", None)
+        areas = kept[0] if kept else []
+        return bool(areas) and all(box_kind(a) == "ruler" for a in areas)
+
+    def without_cc(self, sh):
+        """sh (a copy about to be made) without its CC events unless the shapes were picked by time (time_picked)."""
+        if "cc" in sh and not self.time_picked():
+            sh.pop("cc", None)
+        return sh
 
     def add_copies(self, shapes, shift, name=tr("app.paste"), relay=True):
         """Add copies of shapes moved shift beats later, and select them. Returns how many had 16 colours brought
@@ -2833,9 +2847,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         k = self.roll.picked_stroke(sh) if len(self.sels) == 1 else None
         return None if k is None else (sh, k)
 
-    def copy_selected(self, whole=False):
+    def copy_selected(self, whole=False, cut=False):
         """Ctrl+C: the selected shapes (or with curves highlighted: the curve's shape; a stroke picked: it). The
-        Tempo pane clicked last: its points and catch-ups."""
+        Tempo pane clicked last: its points and catch-ups. Their CC events only when picked by time (without_cc);
+        cut: always (cut + paste = a move, the CC events would be gone with the shape)."""
         if not whole and getattr(self, "key_pane", None) is self.tempo_pane:
             return self.tempo_pane.copy()
         if not whole and self.roll.curve_parts():
@@ -2843,7 +2858,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not whole and self.picked():
             return self.roll.copy_stroke(*self.picked())
         if self.sels:
-            shapes = copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])
+            shapes = [sh if cut else self.without_cc(sh)
+                      for sh in copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])]
             cols = self.copy_columns(sorted(self.sels))  # (each colour's row: pasted the same way, like Domino)
             for i, sh in zip(sorted(self.sels), shapes):
                 sh.pop("cols", None)
@@ -2893,7 +2909,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.roll.copy_stroke(*self.picked())
             return self.roll.delete_stroke(*self.picked())
         if self.sels:
-            self.copy_selected(whole=True)
+            self.copy_selected(whole=True, cut=True)
             self.delete_selected(name=tr("app.cut"))
 
     def remember_clip(self):

@@ -1711,6 +1711,8 @@ class ProjectFiles:
             return
         sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
         cc = self.cc_messages(ppq, bpm, set(sels) if sels else None)
+        if boxed is None and sels and not self.time_picked():  # (shapes picked by clicking / a Select box: notes
+            cc = {}                                            # only, Domino's way, user 2026-10-29)
         if boxed is not None:  # (their CC lines: only inside the boxes' time too)
             boxes = self.track_list.boxes
             lo, hi = round(min(b["t0"] for b in boxes) * ppq), round(max(b["t1"] for b in boxes) * ppq)

@@ -1486,7 +1486,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         they're what moves (the shapes stay). orig for the copies."""
         app = self.app
         first = len(app.shapes)
-        app.shapes += [copy.deepcopy(app.shapes[j]) for j in sorted(orig)]
+        app.shapes += [app.without_cc(copy.deepcopy(app.shapes[j])) for j in sorted(orig)]
         fresh_marks(app.shapes[first:])
         between_copied(app.shapes, first)  # (a whole Add between group: a new group; parts of one: plain shapes)
         new = {first + k: orig[j] for k, j in enumerate(sorted(orig))}
