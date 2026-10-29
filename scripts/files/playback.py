@@ -393,7 +393,9 @@ class Player:
         self.along = False  # (set before start: a loaded MIDI plays along, its feeder re-times Kestrel's pushes)
         self.ports = False  # (see start)
         self._clock = None
-        self.map = None  # the tempo as a TimeMap (start; None until the first start)
+        self.map = None  # the tempo as a TimeMap (start; None until the first start), slowed down by speed
+        self.speed = 1.0  # (13f: under 1 = the song plays that much slower, every tempo's beat longer; set_speed)
+        self._tempo = (120, None)  # (bpm, tempo) as handed over, before the speed
         self._swap = None  # new notes ready for the playing thread (_Ons)
         self._wanted = None  # new notes waiting to be put in order (notes, use10)
         self._sorting = False  # a thread is putting them in order (cleared by it under _lock as it ends)
@@ -419,7 +421,8 @@ class Player:
         self._new_notes(notes)
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
         self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
-        self.map = TimeMap(ppq, tempo or [(0, 60_000_000 / bpm)])
+        self.speed = 1.0
+        self.map = self._time_map(bpm, tempo)
         self._clock = None  # (the line waits at the start while the notes are put in order)
         self._gen += 1
         self._swap = self._wanted = None
@@ -437,7 +440,7 @@ class Player:
         self._new_notes(notes)
         self.ports = 0 if self.tune else ports
         self.stop_beat = stop_beat
-        new = TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)])
+        new = self._time_map(bpm, tempo)
         with self._clock_lock:
             clock = self._clock
             if clock is not None:  # (the same spot in the song now, at the new speed)
@@ -457,11 +460,26 @@ class Player:
             self._notes_of = notes
             self.notes_ver += 1
 
+    def _time_map(self, bpm, tempo):
+        """The TimeMap played: the tempo handed over (kept for set_speed), each beat 1 / speed as long."""
+        self._tempo = (bpm, tempo)
+        v = self.speed
+        return TimeMap(self.ppq, [(t, u / v) for t, u in tempo or [(0, 60_000_000 / bpm)]])
+
+    def set_speed(self, v):
+        """13f: play on from the same spot at v times the song's speed (1 = as written), the pitch unchanged. Goes
+        the way of a tempo change while playing (Kestrel: what was sent ahead sent again at the new speed)."""
+        if v == self.speed:
+            return
+        self.speed = v
+        if self.running:
+            self.set_tempo(*self._tempo)
+
     def set_tempo(self, bpm, tempo=None):
         """Only the tempo changed while playing: on at the new speed from the same spot, the notes untouched."""
         if not self.running:
             return
-        new = TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)])
+        new = self._time_map(bpm, tempo)
         with self._clock_lock:
             clock = self._clock
             if clock is not None:
