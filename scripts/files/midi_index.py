@@ -20,10 +20,16 @@ import numpy as np
 
 # ix: one track's state, kept across its pieces
 (X_TICK, X_RUN, X_STOP, X_USED, X_FREE, X_NOPEN, X_NOTES, X_ZERO, X_ORPHAN, X_HANG, X_LASTCP, X_NCP, X_NENT,
- X_KLO, X_KHI, X_FIRST, X_END, X_NMETA, X_GLO, X_GHI, X_EOT, X_LONG) = range(22)
-X_SIZE = 22
+ X_KLO, X_KHI, X_FIRST, X_END, X_NMETA, X_GLO, X_GHI, X_EOT, X_LONG, X_NCC, X_CCOVER) = range(24)
+X_SIZE = 24
 # what index() needs when it stops early (Python makes it room and calls it again from where it stopped)
-GO, MORE_POOL, MORE_CP, MORE_ENT, MORE_META, MORE_GRID, MORE_KEYS = range(7)
+GO, MORE_POOL, MORE_CP, MORE_ENT, MORE_META, MORE_GRID, MORE_KEYS, MORE_CC = range(8)
+# CC-type events (user 2026-10-29: a loaded MIDI's own shown on the ruler / track list): kept in memory, tick +
+# code = the status byte (with its channel) | data 1 << 8 | data 2 << 16; counted per channel x kind (CC_KINDS:
+# controllers 0-127, then instrument, bend, channel pressure, key pressure) always
+CC_KINDS = 132
+K_PROGRAM, K_BEND, K_PRESSURE, K_POLY = 128, 129, 130, 131
+CC_MOST = 20_000_000  # events kept at most for the whole MIDI (~240 MB; Hypernova has 4 M): past it none are kept
 CP_LEAST = 64 << 10  # bytes between checkpoints at least
 CP_PER_KEY = 4 << 10  # ... and this many more for each channel + key sounding there (their entries' cost)
 META_KEEP = 64  # bytes kept of each kept meta event's data
@@ -45,11 +51,12 @@ def new_state():
 
 
 def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, pw, cp_off, cp_tick, cp_run, cp_ent,
-          e_q, e_cnt, e_end, e_vel, e_nx, cov, edg, chn, m_tick, m_type, m_len, m_data):
+          e_q, e_cnt, e_end, e_vel, e_nx, cov, edg, chn, m_tick, m_type, m_len, m_data, c_tick, c_code, ccn):
     """Reads the whole events in b[p:end] (bytes midi_scan.walk found good; b[0] = the track's byte at) into the
     index. Returns (GO or what it needs more room for, where it stopped). q_vel / e_vel = the velocity of the note
     that began a key's sounding (cover's colour for it, the same wherever a read starts). edg (cov's size) = 1 in
-    each bucket where a note starts or has its last tick (the overview's note edges)."""
+    each bucket where a note starts or has its last tick (the overview's note edges). CC-type events: kept in
+    c_tick / c_code (CC_MOST at most, then X_CCOVER), counted in ccn[channel * CC_KINDS + kind]."""
     tick = ix[X_TICK]
     run = ix[X_RUN]
     nk = cov.shape[0]
@@ -205,6 +212,23 @@ def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, 
                         q_pos[last] = j
                         q_pos[qq] = -1
                         ix[X_NOPEN] = nopen - 1
+            else:
+                kind = np.int64(b[q]) if hi == 0xB else (
+                    K_PROGRAM if hi == 0xC else K_BEND if hi == 0xE else K_PRESSURE if hi == 0xD else K_POLY)
+                c = ix[X_NCC]
+                if c < CC_MOST:
+                    if c >= len(c_tick):
+                        status = MORE_CC
+                        break
+                    c_tick[c] = t
+                    code = s | np.int64(b[q]) << 8
+                    if need == 2:
+                        code |= np.int64(b[q + 1]) << 16
+                    c_code[c] = code
+                    ix[X_NCC] = c + 1
+                else:
+                    ix[X_CCOVER] = 1
+                ccn[(s & 15) * CC_KINDS + kind] += 1
             if explicit:
                 run = s
             q += need

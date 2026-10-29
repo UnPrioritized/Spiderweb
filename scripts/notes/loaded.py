@@ -15,9 +15,9 @@ import time
 import numpy as np
 
 from files import midi_index, midi_scan, speed
-from files.midi_index import (CP_LEAST, GO, GRID_MOST, MORE_CP, MORE_ENT, MORE_GRID, MORE_KEYS, MORE_META, MORE_POOL, META_KEEP,
-                              QS, X_END, X_FIRST, X_GHI, X_GLO, X_HANG, X_KHI, X_KLO, X_LONG, X_NCP, X_NENT, X_NMETA,
-                              X_NOTES, X_ORPHAN, X_STOP, X_TICK, X_ZERO)
+from files.midi_index import (CC_KINDS, CC_MOST, CP_LEAST, GO, GRID_MOST, MORE_CC, MORE_CP, MORE_ENT, MORE_GRID, MORE_KEYS,
+                              MORE_META, MORE_POOL, META_KEEP, QS, X_CCOVER, X_END, X_FIRST, X_GHI, X_GLO, X_HANG, X_KHI,
+                              X_KLO, X_LONG, X_NCC, X_NCP, X_NENT, X_NMETA, X_NOTES, X_ORPHAN, X_STOP, X_TICK, X_ZERO)
 from files.midi_read import PIECE, Cancelled, MidiError, MidiFile
 
 PIC_COLS = 1024  # a track's own picture: this many columns at most across its notes (+ its key range)
@@ -36,7 +36,9 @@ class TrackInfo:
     __slots__ = ("number", "notes", "zero", "hang", "orphan", "long", "klo", "khi", "first", "end", "last_tick",
                  "chn", "channel", "cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end", "e_vel", "m_tick",
                  "m_type", "m_len", "m_data", "name", "pic", "pic_klo", "pic_glo", "pic_pf", "pic_cols", "data",
-                 "limit", "stopped")
+                 "limit", "stopped", "c_tick", "c_code", "c_kinds", "cc_over")
+    # c_tick / c_code: its CC-type events (midi_index: code = status | data 1 << 8 | data 2 << 16), empty when
+    # cc_over (more in the MIDI than CC_MOST: none kept); c_kinds = [[channel * CC_KINDS + kind, how many]] always
 
     def metas(self, kind):
         """[(tick, data bytes)] of this track's kept meta events of one kind (first META_KEEP bytes)."""
@@ -68,6 +70,7 @@ class LoadedMidi:
         self.rechannel = None  # (Track Properties' new channels: per track, -1 = its own; load_extract.sync_channels)
         self.gone = frozenset()  # (tracks removed in the track list: never drawn nor played; the same)
         self.dense = None  # (Kestrel (GPU)'s read-ahead of the parts too dense to read live: files/play_dense.py)
+        self.cc_over = any(t.cc_over for t in infos)  # (more CC events than CC_MOST: none kept, only counted)
         self._set_hidden(np.zeros(0, np.int64), *(np.zeros(0, np.int64) for _ in range(6)))
         self._level0 = None
 
@@ -89,7 +92,8 @@ class LoadedMidi:
         n = sum(a.nbytes for c, t in self.levels for a in (c, t)) + sum(e.nbytes for e in self.edges)
         for t in self.tracks:
             n += sum(getattr(t, k).nbytes for k in ("cp_off", "cp_tick", "cp_run", "cp_ent", "e_q", "e_cnt", "e_end",
-                                                    "e_vel", "m_tick", "m_type", "m_len", "m_data", "pic"))
+                                                    "e_vel", "m_tick", "m_type", "m_len", "m_data", "pic", "c_tick",
+                                                    "c_code", "c_kinds"))
         return n
 
     def held_bytes(self):
@@ -781,6 +785,7 @@ class _Thread:
         self.cov = np.zeros((nk, ng), np.int32)
         self.edg = np.zeros((nk, ng), np.uint8)
         self.chn = np.zeros(16, np.int64)
+        self.ccn = np.zeros(16 * CC_KINDS, np.int64)
 
     def clear(self):
         self.q_hd.fill(-1)
@@ -788,6 +793,7 @@ class _Thread:
         self.q_rl.fill(0)
         self.q_pos.fill(-1)
         self.chn.fill(0)
+        self.ccn.fill(0)
 
 
 class Loader:
@@ -813,6 +819,8 @@ class Loader:
         self.top = np.full((nk, 1024), -1, np.int32)
         self.etop = np.full((nk, 1024), -1, np.int32)
         self.started = time.perf_counter()
+        self.cc_kept = 0  # (CC events kept so far, all tracks: past CC_MOST none are kept)
+        self.cc_over = False
 
     def run(self):
         try:
@@ -846,6 +854,9 @@ class Loader:
         if self.cancelled:
             raise Cancelled()
         levels, edges = self._levels(loops)
+        if self.cc_over:  # (tracks done before it went over kept theirs: none kept, the same for every track)
+            for i in self._infos:
+                i.c_tick, i.c_code, i.cc_over = np.zeros(0, np.int64), np.zeros(0, np.int32), True
         return LoadedMidi(self.mf, "memory" if self.keep else "file", self.G, self._infos, levels,
                           time.perf_counter() - self.started, edges)
 
@@ -908,6 +919,8 @@ class _TrackPass:
         self.m_type = np.zeros(8, np.int64)
         self.m_len = np.zeros(8, np.int64)
         self.m_data = np.zeros((8, META_KEEP), np.uint8)
+        self.c_tick = np.zeros(16, np.int64)
+        self.c_code = np.zeros(16, np.int32)
         self.data = np.empty(t.size, np.uint8) if loader.keep else None
         self.limit = 0
 
@@ -923,8 +936,8 @@ class _TrackPass:
             status, p = self.L._index(view, p, used, at, self.L.G, ix, th.q_hd, th.q_tl, th.q_rl, th.q_pos, th.q_vel, th.opened,
                                       th.pt, th.pn, th.pw, self.cp_off, self.cp_tick, self.cp_run, self.cp_ent,
                                       self.e_q, self.e_cnt, self.e_end, self.e_vel, self.e_nx, th.cov, th.edg, th.chn,
-                                      self.m_tick,
-                                      self.m_type, self.m_len, self.m_data)
+                                      self.m_tick, self.m_type, self.m_len, self.m_data, self.c_tick, self.c_code,
+                                      th.ccn)
             if status == GO:
                 break
             self.grow(status)
@@ -952,6 +965,10 @@ class _TrackPass:
             self.m_tick, self.m_type, self.m_len = (np.concatenate([a, np.zeros(n - len(a), np.int64)])
                                                     for a in (self.m_tick, self.m_type, self.m_len))
             self.m_data = np.concatenate([self.m_data, np.zeros((n - len(self.m_data), META_KEEP), np.uint8)])
+        elif status == MORE_CC:
+            n = min(len(self.c_tick) * 2, midi_index.CC_MOST)  # (the read's own limit: it stops asking there)
+            self.c_tick = np.concatenate([self.c_tick, np.zeros(n - len(self.c_tick), np.int64)])
+            self.c_code = np.concatenate([self.c_code, np.zeros(n - len(self.c_code), np.int32)])
         elif status in (MORE_GRID, MORE_KEYS):
             self.cover(256 if status == MORE_KEYS else th.cov.shape[0], min(th.cov.shape[1] * 2, GRID_MOST))
 
@@ -992,6 +1009,16 @@ class _TrackPass:
         i.e_vel = self.e_vel[:nent].astype(np.uint8)
         i.m_tick, i.m_type, i.m_len = self.m_tick[:nmeta].copy(), self.m_type[:nmeta].copy(), self.m_len[:nmeta].copy()
         i.m_data = self.m_data[:nmeta].copy()
+        ncc = int(ix[X_NCC])
+        kinds = np.flatnonzero(th.ccn)
+        i.c_kinds = np.stack([kinds, th.ccn[kinds]], 1).astype(np.int64)
+        with L._lock:
+            L.cc_kept += ncc
+            L.cc_over = L.cc_over or bool(ix[X_CCOVER]) or L.cc_kept > CC_MOST
+            i.cc_over = L.cc_over
+        i.c_tick = np.zeros(0, np.int64) if i.cc_over else self.c_tick[:ncc].copy()
+        i.c_code = np.zeros(0, np.int32) if i.cc_over else self.c_code[:ncc].copy()
+        self.c_tick = self.c_code = None
         names = i.metas(NAME)
         i.name = names[0][1].decode("latin-1").strip("\0 ") if names else ""
         i.data = self.data
