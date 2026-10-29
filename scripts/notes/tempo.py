@@ -524,17 +524,22 @@ def stretches(tempo, base):
     return out
 
 
-def drawn_bpm(tempo, base, beats):
+def point_arrays(pts):
+    """(beats, BPMs, log2 BPMs) of the points as arrays: drawn_bpm's, made once for many reads (2026-10-29: a Fill's
+    2,000 catch-ups made them again for every curved part, 4,000 points x 4,000 parts)."""
+    vs = np.array([p[1] for p in pts])
+    return np.array([p[0] for p in pts]), vs, np.log2(vs)
+
+
+def drawn_bpm(tempo, base, beats, arrays=None):
     """The drawn line's BPM at beats (array): the points' curves, the project's BPM before the first point. A
-    catch-up's part shows the drawn line here (catch_bpm has its own)."""
+    catch-up's part shows the drawn line here (catch_bpm has its own). arrays: point_arrays(tempo["points"])."""
     beats = np.asarray(beats, float)
     pts = tempo["points"]
     out = np.full(beats.shape, float(base))
     if not pts:
         return out
-    pb = np.array([p[0] for p in pts])
-    vs = np.array([p[1] for p in pts])
-    lv = np.log2(vs)
+    pb, vs, lv = arrays or point_arrays(pts)
     idx = np.searchsorted(pb, beats, "right") - 1  # the point at or before each beat (-1: before the first)
     has = idx >= 0
     out[has] = vs[idx[has]]
@@ -652,7 +657,8 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
     edges = ([0] if p_lo == 0 else []) + first + ([max(t1, first[-1] + 1) if first else t1] if p_hi == len(pts) else [])
     k0 = 0 if p_lo == 0 else p_lo + 1
     # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
-    held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq).tolist()
+    arrays = point_arrays(near["points"]) if near["points"] else None
+    held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq, arrays).tolist()
     for j in range(len(edges) - 1):
         k = k0 + j
         a, b = max(edges[j], t0), min(edges[j + 1], t1)
@@ -672,7 +678,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             def read(starts):
                 if jump:
                     return part_bpm(tempo, i, step_shares(*part, starts, every))
-                return drawn_bpm(near, base, np.asarray(starts) / ppq)
+                return drawn_bpm(near, base, np.asarray(starts) / ppq, arrays)
             if every >= BLOCKS_FROM:  # (one entry per step, not per tick: long songs at a high PPQ stay quick)
                 starts = np.arange(edges[j] + (a - edges[j]) // every * every, b, every)
                 bpm = read(starts)
