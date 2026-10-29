@@ -128,7 +128,7 @@ Running from source
 -------------------
 You need:
 - Windows or Linux. A Linux user reports it works; copying notes to and
-  from Domino works on Windows only. macOS is untested: start it with
+  from Domino is tested on Windows only. macOS is untested: start it with
   "python3 spiderweb.py" (Python from python.org, not Apple's: its Tk is
   old). If macOS blocks the sound files, run this once:
     xattr -d com.apple.quarantine scripts/bass/mac/*.dylib

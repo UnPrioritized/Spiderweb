@@ -14,6 +14,6 @@ Enter, right-click or another tool makes the notes; Esc throws the path away. Po
 
 Ctrl+C copies the selected notes, Ctrl+X cuts them (copies, then deletes) and Ctrl+V pastes them at the play line (the preview's, or the main window's when the preview is off); with Select, double-click empty space to paste them there. With the preview on, a click on empty space with Select moves the play line there.
 
-Notes copied in Domino after that paste the same way (Windows only): each copied track goes into its own layer, the first into the picked layer and the next ones into the layers under it (new layers are added as needed). A note's velocity becomes its own loudness line. Ticks are taken as they are: use the same PPQ.
+Notes copied in Domino after that paste the same way (untested on Linux): each copied track goes into its own layer, the first into the picked layer and the next ones into the layers under it (new layers are added as needed). A note's velocity becomes its own loudness line. Ticks are taken as they are: use the same PPQ.
 
 The window has its own Snap (Shift = no snap). The mouse wheel scrolls, Shift+wheel goes sideways, Ctrl+wheel zooms, the middle button drags the view. Fit view (top of the window) shows every note of every layer.
