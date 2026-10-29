@@ -286,6 +286,59 @@ def note_tables(pal):
     return got
 
 
+SHORT_PATH = 32  # paths of at most this many points: screen_lines in plain Python (NumPy's fixed cost per call
+# was most of a redraw with thousands of small shapes, speed hunt 2026-10-29)
+
+
+def _pixel(v):
+    """np.round(v) as screen_lines does it (halves to even, -0.0 kept), as a float."""
+    r = float(round(v))
+    return -0.0 if r == 0 and math.copysign(1.0, v) < 0 else r
+
+
+def short_screen_lines(pts, ax, bx, ay, by, view):
+    """screen_lines for a short [[beat, pitch]] list: the same steps one point at a time, the same answer."""
+    x0, y0, x1, y1 = view
+    xs, ys = [b * ax + bx for b, _ in pts], [p * ay + by for _, p in pts]
+    out, n, k = [], len(pts), 0
+    while k < n - 1:
+        xa, xb, ya, yb = xs[k], xs[k + 1], ys[k], ys[k + 1]
+        if (xa < x0 and xb < x0) or (xa > x1 and xb > x1) or (ya < y0 and yb < y0) or (ya > y1 and yb > y1):
+            k += 1
+            continue
+        first = k  # (a piece: segments first .. k on screen, points first .. k + 1)
+        while k + 1 < n - 1:
+            xa, xb, ya, yb = xs[k + 1], xs[k + 2], ys[k + 1], ys[k + 2]
+            if (xa < x0 and xb < x0) or (xa > x1 and xb > x1) or (ya < y0 and yb < y0) or (ya > y1 and yb > y1):
+                break
+            k += 1
+        idx = range(first, k + 2)
+        k += 1
+        keep, run = [], []
+        for i in idx:  # (each pixel column's run: its first, first lowest, first highest and last point)
+            if run and math.trunc(xs[i]) != math.trunc(xs[run[0]]):
+                keep.append(run)
+                run = []
+            run.append(i)
+        keep.append(run)
+        kept = []
+        for run in keep:
+            lo = min(run, key=lambda i: (ys[i], i))
+            hi = min(run, key=lambda i: (-ys[i], i))
+            kept += sorted({run[0], lo, hi, run[-1]})
+        far = any(xs[i] < -999 or xs[i] > 30999 or ys[i] < -999 or ys[i] > 30999 for i in kept)
+        coords, last = [], None
+        for m, i in enumerate(kept):
+            rx, ry = ((v if far or abs(abs(v - math.trunc(v)) - 0.5) < 1e-6 else _pixel(v)) for v in (xs[i], ys[i]))
+            if last == (rx, ry) and m < len(kept) - 1:
+                continue
+            coords += (rx, ry)
+            last = (rx, ry)
+        if len(kept) >= 2:
+            out.append((coords, len(kept)))
+    return out
+
+
 def screen_lines(path, ax, bx, ay, by, view):
     """
     A (beat, pitch) path as screen coordinate lists for create_line (x = beat * ax + bx, y = pitch * ay + by).
@@ -301,6 +354,8 @@ def screen_lines(path, ax, bx, ay, by, view):
     """
     x0, y0, x1, y1 = view
     pts = np.asarray(path, float).reshape(-1, 2)
+    if len(pts) <= SHORT_PATH:
+        return short_screen_lines(pts.tolist(), ax, bx, ay, by, view)
     x, y = pts[:, 0] * ax + bx, pts[:, 1] * ay + by
     xa, xb, ya, yb = x[:-1], x[1:], y[:-1], y[1:]
     on = ~(((xa < x0) & (xb < x0)) | ((xa > x1) & (xb > x1)) | ((ya < y0) & (yb < y0)) | ((ya > y1) & (yb > y1)))
