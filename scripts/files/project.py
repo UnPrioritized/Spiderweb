@@ -1551,7 +1551,8 @@ class ProjectFiles:
         mine = [sh for sh in (self.shapes if shapes is None else shapes) if "cc" in sh]
         if not mine:
             return ""
-        if self.channel_mode.get() != "auto":
+        laid = {id(self.shapes[i]) for i in self.voice_slots if isinstance(i, int) and i < len(self.shapes)}
+        if self.channel_mode.get() != "auto" and any(id(sh) not in laid for sh in mine):  # (laid on tracks: written)
             return tr("project.cc_single_channel")
         own = sum(1 for ms in cc.values() for e in ms if e[1] is None) if midi else 0
         return trn("project.cc_left_out_midi", own, n=own) if own else ""
@@ -1913,7 +1914,7 @@ class ProjectFiles:
         note = (tr("project.they_were_copied_at_ppq_ticks", their_ppq=their_ppq) if their_ppq and their_ppq != self.ppq
                 else "") + (trn("project.notes_above_key_127_left_out", high, high=high) if high else "") + (
             tr("project.pasted_from_copy_start") if from_bar else "") + (
-            tr("project.cc_not_written") if sh is not None and "cc" in sh and self.channel_mode.get() != "auto" else "")
+            tr("project.cc_not_written") if sh is not None and "cc" in sh and self.cc_note({}, shapes=[sh]) else "")
         if sh is None:
             self.status.config(text=trn("project.pasted_tempo_from_domino", len(tempos), n=len(tempos)) + note)
         else:

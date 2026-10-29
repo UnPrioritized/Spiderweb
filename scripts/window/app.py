@@ -154,6 +154,12 @@ def can_go_in(sh):
     return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh))
 
 
+def pasted_notes(sh):
+    """Notes pasted from Domino (or pieces of them): plain notes, not made by Spiderweb (Turn into plain notes, Apply
+    mask, merges, pictures...)."""
+    return "notes" in sh and not sh.get("made") and "merge" not in sh and not picture_like(sh)
+
+
 def placed_on(sh, own):
     """The tracks the shape was laid on (Draw into a track; own: {id: channel} of the tracks added by hand): its
     into_ids up to the first track added by hand that's gone (from there on: laid again, App.fit_into). Each a
@@ -362,9 +368,12 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         if not ids:
             continue
         on = np.array(laid_slots_of(sh, ids, own, use10), np.int64)
-        if mode != "auto" and not pinned_slots(sh, mode):  # (Single channel / As drawn: every colour on its first
-            colour = np.zeros_like(colour)                  # track, hunt 2026-10-26; an Extract keeps its channels)
-        if mode == "auto" and "cc" in sh and t is not None and len(n):  # (each pasted track's events: its colour's)
+        # (Single channel / As drawn: every colour on its first track, hunt 2026-10-26; an Extract keeps its channels,
+        # pasted notes their tracks: user 2026-10-29, "you copy from Domino is what you'll get")
+        kept = mode == "auto" or pinned_slots(sh, mode) or pasted_notes(sh)
+        if not kept:
+            colour = np.zeros_like(colour)
+        if kept and "cc" in sh and t is not None and len(n):  # (each pasted track's events: its colour's)
             tracks = np.unique(np.asarray(t, np.int64))
             laid[i] = {int(u): int(on[min(k, len(ids) - 1)]) for k, u in enumerate(tracks.tolist())}
         fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True
