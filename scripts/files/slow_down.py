@@ -30,6 +30,8 @@ NEAR = 0.85  # (breaking up again within this of the mark: the mark goes NEAR lo
 # should have dropped by at least HELPED of the speed's share; if not, no slower from here, "Lower it by itself"
 # takes over
 HELPED = 0.5
+FIT = 0.7  # (the synth's work known: faster only up to where it's expected to take this share of the time...)
+FIT_S = 0.6  # (... once the last change has shown in it)
 NEXT_S = SETTLE_S + 0.5
 SMOOTH = 0.3  # weight of the newest reading
 WARM_S = 0.5  # (the first moments of a play: the synth's start-up is slow at any load, never judged)
@@ -64,12 +66,14 @@ class SlowDown:
         self.effort = None  # (the synth's work, smoothed: None = not known)
         self._ref = None  # (speed, effort) at the last cut, while still in trouble
 
-    def step(self, load, now=None, behind=False, easy=False, hold=False, effort=None):
+    def step(self, load, now=None, behind=False, easy=False, hold=False, effort=None, can_lower=True):
         """One reading: load (None = none this time); behind = the sound already broke up (Kestrel handed out
         silence, BASSMIDI lost sound / left notes out); easy = clearly room to spare (the busy part is over: the
         speed that broke up is forgotten); hold = not faster yet ("Lower it by itself" still has notes / voices to
         give back first: undone in the reverse order); effort = how hard the synth works (None = not known: slowing
-        counted as helping). Returns the new speed when it should change, else None."""
+        counted as helping); can_lower = "Lower it by itself" is ticked (off: nothing to hand over to, so it goes on
+        slowing to 10 % however little it helps, user 2026-10-29). Returns the new speed when it should change, else
+        None."""
         now = time.perf_counter() if now is None else now
         if now - self.began < WARM_S:
             return None
@@ -84,9 +88,12 @@ class SlowDown:
         v = self.speed
         if self.load > HIGH:
             self._calm = None
-            if now - self._down < SETTLE_S or v <= self.floor:
+            # (the work known: a cut shows in it at once, the next may come sooner, real 1 M voices 2026-10-29: the
+            # wall's first stutter lasted the 3 s the cuts took)
+            settle = SETTLE_S / 2 if self.effort is not None else SETTLE_S
+            if now - self._down < settle or v <= self.floor:
                 return None
-            if self._ref is not None and now - self._down <= NEXT_S and self.effort is not None:
+            if can_lower and self._ref is not None and now - self._down <= NEXT_S and self.effort is not None:
                 v0, e0 = self._ref
                 if self.effort > e0 * (1 - HELPED * (1 - v / v0)):  # (slowing isn't helping: Lower it by itself's
                     self.floor = v  # turn, from this speed)
@@ -106,6 +113,16 @@ class SlowDown:
             if self._calm is None:
                 self._calm = now
             self._ref = None  # (calm: the last cut helped)
+            if self.effort is not None and self.effort > 0.01:
+                # (the synth's work known (Kestrel's block time): as fast as it says fits, in one go, never a try
+                # that breaks up; the work taken to grow with the speed (it grew a little faster at 1 M voices), FIT
+                # of the time at most. User 2026-10-29: its tries stuttered, climbing back after a wall was slow)
+                top = min(1.0, v * FIT / self.effort)
+                if top > v * 1.03 and not hold and now - self._calm >= CALM_S and now - self._rise >= FIT_S:
+                    self._rise = now
+                    self.ceiling = 1.0
+                    return self._set(top, force=True)
+                return None
             if easy:
                 self.ceiling = 1.0
             elif self.ceiling < 1.0 and now - max(self._calm, self._lift) >= CEIL_S:

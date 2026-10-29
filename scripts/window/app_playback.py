@@ -354,7 +354,8 @@ class Playback:
             self.player.set_speed(1.0)
         load, behind, easy, lowered, effort = self.play_load()
         if on:
-            v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered, effort=effort)
+            can_lower = self.kestrel_opts["lower"] if self.out.name == KESTREL else self.play_guard.get()
+            v = self.slow_down.step(load, now, behind, easy=easy, hold=lowered, effort=effort, can_lower=can_lower)
             if v is not None:
                 self.player.set_speed(v)
         free = not on or self.slow_down.floored or lowered  # (at 10 %, or where slowing stopped helping)
