@@ -36,23 +36,35 @@ EDO = 31
 EDO_FIRST = 96  # (synth.LIVE_PORTS x 16)
 _EDO_KEYS = np.array([round(s * 1200 / EDO / 100) for s in range(EDO)], np.int64)  # nearest key above C, per step
 EDO_BENDS = [8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s])) / 100 * 4096) for s in range(EDO)]
+# Kestrel (13g): 16 ports of its own and no Hz bass channels, so 31-EDO goes on the TOP two ports (15-16), or the
+# highest two a loaded MIDI leaves free (hunt 2026-10-29: Lagtester's 8 ports shared 7-8 = drums + bends clashed)
+EDO_KESTREL = 14 * 16
 
 
-def edo_bends(center=False):
-    """The 31 pitch-bend messages setting up 31-EDO's channels (center: put back to no bend), packed for Live.send /
-    KestrelOut.send (top byte = channel group)."""
+def edo_ports(used):
+    """Kestrel's first 31-EDO channel: the highest two ports in a row a loaded MIDI doesn't use (`used`: its ports
+    0..15), else the top two."""
+    for p in range(14, -1, -1):
+        if p not in used and p + 1 not in used:
+            return p * 16
+    return EDO_KESTREL
+
+
+def edo_bends(center=False, first=EDO_FIRST):
+    """The 31 pitch-bend messages setting up 31-EDO's channels from `first` (center: put back to no bend), packed for
+    Live.send / KestrelOut.send (top byte = channel group)."""
     out = []
     for step, bend in enumerate(EDO_BENDS):
-        ch, bend = EDO_FIRST + step, 8192 if center else bend
+        ch, bend = first + step, 8192 if center else bend
         out.append(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
     return out
 
 
-def edo_code(rows):
-    """channel | key << 8 (+ channel group << 24) of rows (a NumPy array or one int) in 31-EDO."""
+def edo_code(rows, first=EDO_FIRST):
+    """channel | key << 8 (+ channel group << 24) of rows (a NumPy array or one int) in 31-EDO, channels from first."""
     rows = np.asarray(rows, np.int64)
     step = rows % EDO
-    ch = EDO_FIRST + step
+    ch = first + step
     return (ch & 15) | (12 + 12 * (rows // EDO) + _EDO_KEYS[step]) << 8 | (ch >> 4) << 24
 
 try:
@@ -145,6 +157,8 @@ class MidiOut:
         self.make_live = make_live  # () -> a started synth.Live (or raises SynthError)
         self.make_kestrel = make_kestrel  # () -> a playing kestrel.KestrelOut (or raises SynthError)
         self.edo = False  # the project's notes played in 31-EDO (the app's 31-EDO + Audio ticks): see tuned
+        self.edo_first = EDO_FIRST  # (its first channel on this out: Kestrel's moves, App.kestrel_parts)
+        self.edo_bent = None  # (Kestrel: the first channel its 31-EDO bends were sent from, None = none bent)
 
     @property
     def tuned(self):
@@ -161,6 +175,23 @@ class MidiOut:
         from files import errors
         errors.note("MIDI out", name if err is None else f"{name} (couldn't open)")
         return err
+
+    def bend_edo(self, first=None):
+        """(Kestrel) 31-EDO's channels bent from `first` (None = keep edo_first), the ones bent before put back first
+        when they were others; first False = only put back (not tuned now)."""
+        if self.name != KESTREL or not self.handle:
+            return
+        new = self.edo_first if first is None else first
+        if self.edo_bent is not None and self.edo_bent != new:
+            for msg in edo_bends(center=True, first=self.edo_bent):
+                self.handle.send(msg)
+            self.edo_bent = None
+        if new is False:
+            return
+        self.edo_first = new
+        for msg in edo_bends(first=new):  # (sent again each time: a restart / reset may have put them back)
+            self.handle.send(msg)
+        self.edo_bent = new
 
     @property
     def lead(self):
@@ -189,9 +220,10 @@ class MidiOut:
             except SynthError as e:
                 return str(e)
             self.name = name
+            self.edo_first = EDO_KESTREL if name == KESTREL else EDO_FIRST
+            self.edo_bent = None
             if name == KESTREL and self.edo:  # (listening before any Play: 31-EDO's channels bent already)
-                for msg in edo_bends():
-                    self.handle.send(msg)
+                self.bend_edo()
             return None
         if name == KDMAPI:
             from files.synth import SynthError, load_dlls
@@ -243,7 +275,7 @@ class MidiOut:
         """Note on (vel 0 = note off). Keys above 127 (256 keys) can't be sent: skipped. rows = pitch is a piano
         roll row: played in 31-EDO while tuned (every row, ch not used)."""
         if rows and self.tuned:
-            self.send(0x90 | int(edo_code(pitch)) | vel << 16)
+            self.send(0x90 | int(edo_code(pitch, self.edo_first)) | vel << 16)
         elif pitch <= 127:
             self.send(0x90 | ch | pitch << 8 | vel << 16)
 
@@ -264,7 +296,7 @@ class _Ons:
     """The notes to play, in the order they start: only the order is worked out (the notes stay where they are, so
     millions take little memory), and they're turned into Python numbers a batch at a time as they're played."""
 
-    def __init__(self, notes, t0, t1, use10, tune=False, ports=0):
+    def __init__(self, notes, t0, t1, use10, tune=False, ports=0, edo_first=EDO_FIRST):
         s = notes[:, 0]
         if tune:  # (31-EDO: every row fits in the synth's 128 keys)
             keep = np.flatnonzero((s >= t0) & (s < t1))
@@ -276,6 +308,7 @@ class _Ons:
             keep, starts = keep[order], starts[order]
             del order
         self.notes, self.keep, self.starts, self.use10, self.tune = notes, keep, starts, use10, tune
+        self.edo_first = edo_first  # (31-EDO's first channel on this out: MidiOut.edo_first)
         self.ports = ports  # (the synth's ports, 0 = none: each slot on its port's channels as the MIDI
         # export writes them, engine.slot_ports, round again past the last)
 
@@ -303,7 +336,7 @@ class _Ons:
 
     def _tuples(self, part):
         if self.tune:
-            return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), edo_code(part[:, 2]).tolist(),
+            return list(zip(part[:, 0].tolist(), part[:, 1].tolist(), edo_code(part[:, 2], self.edo_first).tolist(),
                             part[:, 3].tolist()))
         slot = part[:, 4]
         ch = channels_of(slot, self.use10)
@@ -404,6 +437,7 @@ class Player:
         self.held = {}  # (channel | key << 8) -> how many notes on it are sounding right now
         self.cc_sent = set()  # (channel, CC number or "bend") a Hz bass's CC lines sent a value on: put back at stop
         self.tune = False  # (31-EDO: see start)
+        self.edo_first = EDO_FIRST
         self.shared = False  # (set before start: overlapping notes may share a channel, a key sounds until its last)
         self.along = False  # (set before start: a loaded MIDI plays along, its feeder re-times Kestrel's pushes)
         self.ports = False  # (see start)
@@ -437,6 +471,7 @@ class Player:
         self._new_notes(notes)
         self.ppq, self.start_beat, self.stop_beat = ppq, start_beat, stop_beat
         self.tune = self.out.tuned  # (31-EDO: kept until the next start, so note-offs match their note-ons)
+        self.edo_first = getattr(self.out, "edo_first", EDO_FIRST)  # (outs without 31-EDO: the usual)
         self.speed, self._speed_wanted = 1.0, None
         self.map = self._time_map(bpm, tempo)
         self._clock = None  # (the line waits at the start while the notes are put in order)
@@ -553,7 +588,8 @@ class Player:
                     self._sorting = False
                     return
                 (gen, notes, use10, cc), self._wanted = self._wanted, None
-            ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10, self.tune, self.ports)
+            ons = _Ons(notes, self.start_beat * self.ppq, self.stop_beat * self.ppq, use10, self.tune, self.ports,
+                       self.edo_first)
             if self._wanted is None and gen == self._gen:  # (changed again meanwhile: those first)
                 self._swap = (ons, cc)
 
@@ -584,7 +620,7 @@ class Player:
         # (Kestrel ends one note per note-off, oldest first: every note gets its own, else the later one rang on, hunt
         # 2026-10-28; BASSMIDI ends every note of the key at one)
         shared = (tune or self.shared) and getattr(out, "name", None) != KESTREL
-        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune, self.ports)
+        ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune, self.ports, self.edo_first)
         del notes
         ready = self.ready  # (a loaded MIDI playing along: the line waits until its first notes are read)
         while ready is not None and not ready.wait(0.01):

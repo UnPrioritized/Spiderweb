@@ -18,6 +18,20 @@ from window.hz_preview import VOICES
 from window.widgets import Scrub, Tooltip, keep_width
 
 
+def follow(widget, var, fn):
+    """fn called when var changes, for as long as widget lives (Settings opened again = a new row: the old one's
+    watch goes with it, hunt 2026-10-29: they piled up)."""
+    tid = var.trace_add("write", fn)
+
+    def gone(ev):
+        if ev.widget is widget:
+            try:
+                var.trace_remove("write", tid)
+            except Exception:  # (already gone)
+                pass
+    widget.bind("<Destroy>", gone, add="+")
+
+
 def open_builtin_settings(app):
     """The "Settings…" button under MIDI out: the Settings window on its Sound tab (user, 2026-10-11)."""
     from window.settings_window import open_settings
@@ -140,7 +154,7 @@ class BuiltinPanel(ttk.Frame):
             vars_["block"].set(cb.current())  # (by place: translated names)
             app.on_kestrel_opt("block")
         cb.bind("<<ComboboxSelected>>", picked)
-        vars_["block"].trace_add("write", lambda *a: cb.winfo_exists() and cb.current(vars_["block"].get()))
+        follow(cb, vars_["block"], lambda *a: cb.winfo_exists() and cb.current(vars_["block"].get()))
         Tooltip(cb, tr("ks.block_tip"))
         Tooltip(lb, tr("ks.block_tip"))
         r += 1
@@ -218,7 +232,9 @@ class BuiltinPanel(ttk.Frame):
             ids[:] = [""] + [kestrel.card_id(n, b) for n, b, _ in (found or [])]
             if var.get() not in ids:
                 ids.append(var.get())
-            cb.config(values=[kestrel.card_name(c) or tr("ks.card_auto") for c in ids])
+            names = [kestrel.card_name(c) or tr("ks.card_auto") for c in ids]
+            # (a long laptop card's name whole: hunt 2026-10-29; letters + room for the arrow, at most 70)
+            cb.config(values=names, width=min(70, max(34, max(len(n) for n in names) + 4)))
             cb.current(ids.index(var.get()))
 
         def picked(ev=None):
@@ -226,7 +242,7 @@ class BuiltinPanel(ttk.Frame):
                 var.set(ids[cb.current()])
                 app.on_kestrel_opt("card")
         cb.bind("<<ComboboxSelected>>", picked)
-        var.trace_add("write", lambda *a: ids and cb.winfo_exists() and fill(kestrel.seen_cards()))
+        follow(cb, var, lambda *a: ids and cb.winfo_exists() and fill(kestrel.seen_cards()))
         if kestrel.seen_cards() is not None:
             fill(kestrel.seen_cards())
         else:
@@ -259,7 +275,7 @@ class BuiltinPanel(ttk.Frame):
             var.set(order[cb.current()])  # (by place: translated names)
             app.on_kestrel_opt(key)
         cb.bind("<<ComboboxSelected>>", picked)
-        var.trace_add("write", lambda *a: cb.winfo_exists() and cb.current(order.index(var.get())))
+        follow(cb, var, lambda *a: cb.winfo_exists() and cb.current(order.index(var.get())))
         Tooltip(cb, tr(text + "_tip"))
         Tooltip(lb, tr(text + "_tip"))
         return r + 1
@@ -305,10 +321,12 @@ class BuiltinPanel(ttk.Frame):
         app.on_loaded_synths()
         if app.synths_var.get() != str(app.loaded_synths):
             app.synths_var.set(str(app.loaded_synths))
-        app.on_kestrel_opt("voices")  # (Kestrel's Max voices the same way)
-        v = app.kestrel_vars["voices"]
-        if v.get() != str(app.kestrel_opts["voices"]):
-            v.set(str(app.kestrel_opts["voices"]))
+        from files.kestrel import RANGES
+        for key in ("voices", *RANGES):  # (Kestrel's number boxes the same way: hunt 2026-10-29, Esc lost them)
+            app.on_kestrel_opt(key)
+            v = app.kestrel_vars[key]
+            if v.get() != str(app.kestrel_opts[key]):
+                v.set(str(app.kestrel_opts[key]))
 
     def refresh(self):
         if not self.winfo_exists():

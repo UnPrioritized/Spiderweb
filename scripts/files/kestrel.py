@@ -39,7 +39,6 @@ KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limit
 # (the lists' places = the connector's numbers: Nearest / Linear / Cubic, Oldest / Drop new / Quietest, Loudest / Even)
 CHOICES = {"interpolation": 3, "steal": 3, "admit": 2}
 RANGES = {"release_floor": (-160, -20), "min_velocity": (0, 127), "max_steal": (1, 100), "max_layers": (1, 64)}
-LOADED_KEYS = ("card", "filter")  # (decide the Loaded, not just the synth)
 
 
 def card_id(name, backend):
@@ -212,6 +211,8 @@ def plain_reason(err):
     if key in ("playback.kestrel_missing", "playback.kestrel_not_here", "playback.kestrel_no_sound_device"):
         return key
     text = str(getattr(err, "values", {}).get("err", err)).lower()
+    if text == "stuck":  # (App.kestrel_stuck: no new sound while playing, no error from it)
+        return "ks.why_stuck"
     if getattr(err, "path", None):  # (reading that soundfont failed: no graphics card was asked yet)
         return "ks.why_memory" if any(w in text for w in ("out of memory", "allocat")) else "ks.why_font"
     for words, why in ((("out of memory", "outofmemory", "allocat"), "ks.why_memory"),
@@ -304,6 +305,7 @@ class Loaded:
         d = self.dll = load()
         self.fonts = list(fonts)
         self.card, self.filter = card or "", bool(filter)
+        self.card_wanted, self.card_why = self.card, None  # (loaded_for: the picked card, why it isn't this one)
         self.handle = None
         era = _era if era is None else era
         with _BANKS:
@@ -358,6 +360,7 @@ def loaded_for(fonts, card="", filter=True):
     era = _era
     with _STARTING:  # (one start at a time: a later one finds the earlier one's kept)
         _given_up(era)
+        wanted, card = card, card_in_use(card)
         kept = _kept
         if kept is not None and kept.fits(fonts, card, filter):
             return kept
@@ -365,10 +368,18 @@ def loaded_for(fonts, card="", filter=True):
         forget(keep=fonts)
         try:
             new = Loaded(fonts, era, card, filter)
-        except SynthError as e:  # (that card isn't on this PC now: Kestrel's own pick; the caller sees .card "")
-            if not card or "no gpu adapter matched" not in str(getattr(e, "values", {}).get("err", "")):
+        except SynthError as e:
+            # (the picked card isn't on this PC now, or it can't start (hunt 2026-10-29: "update the driver" at
+            # every Play): Kestrel's own pick; the caller sees .card "" and .card_why)
+            if not card or getattr(e, "cancelled", False):
                 raise
+            why = str(e.values.get("err", ""))
+            missing = "no gpu adapter matched" in why
+            if not missing:
+                _bad_cards[card] = why
             new = Loaded(fonts, era, "", filter)
+            new.card_why = "missing" if missing else "failed"
+        new.card_wanted = wanted
         if era != _era:  # (given up while it was sent to the graphics card: nothing kept)
             new.close()
             _given_up(era)
@@ -379,7 +390,15 @@ def loaded_for(fonts, card="", filter=True):
 def kept_for(fonts, card="", filter=True):
     """The kept Loaded when it is for these soundfonts (+ card, Filter), else None (never reads)."""
     kept = _kept
-    return kept if kept is not None and kept.fits(fonts, card, filter) else None
+    return kept if kept is not None and kept.fits(fonts, card_in_use(card), filter) else None
+
+
+_bad_cards = {}  # picked cards that couldn't start Kestrel this run: card -> why (tried again next Spiderweb start)
+
+
+def card_in_use(card):
+    """The card Kestrel starts on for this picked one: "" (its own pick) when it failed this run."""
+    return "" if card in _bad_cards else card or ""
 
 
 def drop_loaded():

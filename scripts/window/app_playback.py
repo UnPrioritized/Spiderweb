@@ -25,6 +25,8 @@ SLOW_START_S = 15.0  # Kestrel still starting after this: "Use Built-in BASSMIDI
 # 60 s nobody waits for; its normal start 6-11 s with two soundfonts)
 STUCK_START_S = 60.0  # ... after this, with no answer, the start is given up (the backstop)
 SHOW_START_MS = 300  # Kestrel's "Starting" window only after this (soundfonts kept loaded: a start is ~20 ms)
+AGAIN_WAIT_MS = 400  # (a Kestrel number box stepped while playing: started again once the steps stop this long)
+STUCK_PLAY_S = 5.0  # Kestrel made no new sound this long while playing: stopped and said (its driver stuck)
 QUIET_S = 3.0  # (a question nobody asked for waits this long after the last key / click: quiet_now)
 # the red "Overloaded" text kept steady (user 2026-10-29: it flashed): on this long after the last overload, its
 # number changing at most this often, a loaded MIDI's notes left out averaged over this long
@@ -155,6 +157,20 @@ class Playback:
             self.roll.request_redraw()  # it plays before the first page turn, roll_loaded._keep_ahead)
         self._play_job = self.after(15, self._play_tick)
 
+    def kestrel_stuck(self, live, now):
+        """Kestrel made no new sound for STUCK_PLAY_S while the speakers kept taking it (silence handed out): its
+        render is stuck (a hung graphics driver never reports an error; the play line would wait forever, user
+        2026-10-29). The speakers not taking any (the sound device) doesn't count."""
+        st = live.k.stats()
+        seen = getattr(self, "_k_made", None)
+        if seen is None or seen[0] is not live or st["rendered"] != seen[1] or st["handed"] == seen[2]:
+            self._k_made = (live, st["rendered"], st["handed"], now)  # (making sound, or nothing taken: reset)
+            return False
+        if st["handed"] < seen[2]:
+            self._k_made = None
+            return False
+        return now - seen[3] > STUCK_PLAY_S
+
     def kestrel_parts(self):
         """Kestrel: channel 10 a normal instrument on every port, as Built-in BASSMIDI plays Spiderweb's own shapes
         (it made them drums: a GM soundfont's snare, hunt 2026-10-28), except the ports a loaded MIDI uses: its
@@ -166,10 +182,10 @@ class Playback:
         files_ports = set((lp.tport % 16).tolist()) if lp is not None and lp.tport is not None else set()
         for port in range(16):
             self.out.handle.send(PART_TYPE | 9 << 8 | (1 if port in files_ports else 0) << 16 | port << 24)
-        # 31-EDO (13g): its channels bent for this play, else put back (a loaded MIDI may use those ports)
-        from files.playback import edo_bends
-        for msg in edo_bends(center=not self.out.tuned):
-            self.out.handle.send(msg)
+        # 31-EDO (13g): its channels bent for this play on the highest two ports the loaded MIDI leaves free (hunt
+        # 2026-10-29: on its ports they played as drums / bent its notes), else the last ones put back
+        from files.playback import edo_ports
+        self.out.bend_edo(edo_ports(files_ports) if self.out.tuned else False)
 
     def play_end(self, ppq, beats, start):
         """Where playing stops: a quarter bar after the last note ends (a loaded MIDI's too; or after the play
@@ -340,6 +356,8 @@ class Playback:
         if live is not None and now - getattr(self, "_k_checked", 0.0) > 0.25:  # (its engine dead: hunt 10-28)
             self._k_checked = now
             why = live.k.error()
+            if why is None and self.kestrel_stuck(live, now):  # (its graphics driver hung: no error ever comes)
+                why = "stuck"
             if why is not None:  # (silence with "Overloaded" flickering, every later Play too: stopped, said)
                 self.stop_play()
                 self.out.close()
@@ -744,11 +762,20 @@ class Playback:
         finally:
             self.busy(None)
 
+    def card_news(self, job):
+        """A start played on Kestrel's own pick instead of the picked graphics card: missing = the setting back to
+        Automatic; failed = kept (tried again at the next Spiderweb start), said on the status line."""
+        if job.get("card_gone") and self.kestrel_opts["card"] == job["card_gone"]:
+            self.kestrel_card_gone(job["card_gone"])
+        elif job.get("card_failed") and self.kestrel_opts["card"] == job["card_failed"]:
+            self.status.config(text=tr("ks.card_failed", card=job["card_failed"].partition(":")[2]))
+
     def kestrel_card_gone(self, card):
         """The graphics card picked in Settings → Sound isn't on this PC now (another PC, a laptop's card turned off):
         Kestrel played on its own pick, the setting back to Automatic, said on the status line."""
         self.kestrel_opts["card"] = ""
         self.kestrel_vars["card"].set("")
+        self.kestrel_top = None
         self.status.config(text=tr("ks.card_gone", card=card.partition(":")[2]))
         self.schedule_autosave()
 
@@ -833,9 +860,11 @@ class Playback:
             try:
                 # (kept loaded: only soundfonts not read yet are read; a broken one is named by its reading)
                 loaded = kestrel.loaded_for(fonts, opts["card"], opts["filter"])
-                if loaded.card != opts["card"]:  # (the picked graphics card isn't there now: Kestrel's own pick)
+                if loaded.card_why == "missing":  # (the picked graphics card isn't there now: Kestrel's own pick)
                     job["card_gone"] = opts["card"]
                     opts["card"] = loaded.card
+                elif loaded.card_why == "failed" and loaded.card_wanted == opts["card"]:  # (there, can't start: its
+                    job["card_failed"] = opts["card"]  # own pick this run, the setting kept, said once)
                 top = loaded.voices_top(opts["block"])
                 if top is not None and top < opts["voices"]:  # (lowered first: never a refused open)
                     job["top"] = top
@@ -869,12 +898,12 @@ class Playback:
                     job["out"].close()
                 if self.midi_device.get() != KESTREL:  # (Use Built-in BASSMIDI / another out: what it loaded too)
                     kestrel.let_go()
+                self.card_news(job)  # (said even so: else the next start sends the soundfonts again, hunt 10-29)
                 return
             self._kestrel_job = None
             if win.winfo_exists():
                 win.destroy()
-            if job.get("card_gone") and self.kestrel_opts["card"] == job["card_gone"]:
-                self.kestrel_card_gone(job["card_gone"])
+            self.card_news(job)
             if self.midi_device.get() != KESTREL or not self.winfo_exists():  # (another MIDI out picked meanwhile)
                 if job["out"] is not None:
                     job["out"].close()
@@ -1290,16 +1319,18 @@ class Playback:
         if v == self.kestrel_opts[key]:
             return
         self.kestrel_opts[key] = v
+        if key == "card":  # (the old card's most voices doesn't hold for this one: learned again, hunt 2026-10-29)
+            self.kestrel_top = None
         if key == "lower":
             self.lower_changed()
         if key == "lower" and self.out.name == KESTREL and self.out.handle:
             self.out.handle.k.set_lower(v)
         elif self.out.name == KESTREL and self.player.running:
-            self.kestrel_again()
+            self.kestrel_again(wait=key == "voices" or key in RANGES)
         errors.note("Kestrel (GPU)", ", ".join(f"{k} {v}" for k, v in self.kestrel_opts.items()))
         self.schedule_autosave()
 
-    def kestrel_again(self):
+    def kestrel_again(self, wait=False):
         """A Kestrel row changed while it plays (hunt 2026-10-28, user: they never took effect until the next Play):
         playing started again from the line, Kestrel opened with the new settings (its small window, a few seconds).
         A number box's label drag: once it's let go (else a restart at every step)."""
@@ -1309,6 +1340,9 @@ class Playback:
         self._again_job = None
         if getattr(self, "scrubbing", False) or getattr(self, "held_scrub", None) is not None:
             self._again_job = self.after(150, self.kestrel_again)
+            return
+        if wait:  # (a number box's Up / Down / wheel step: once the steps stop, hunt 2026-10-29)
+            self._again_job = self.after(AGAIN_WAIT_MS, self.kestrel_again)
             return
         if self.out.name != KESTREL or not self.player.running:
             return
