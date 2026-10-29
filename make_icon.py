@@ -1,5 +1,5 @@
 """Makes Spiderweb's icons from its three drawings (no packages): scripts/icons/icon.ico (the .exe's and .spwb files'
-icon, every size Windows asks for) and icon-<size>.png (the windows' title bar / taskbar icon, set by the program).
+icon, every size Windows asks for) and icon-<size>.png (the taskbar icon, set by the program) + icon-small.ico (title bars: the two-ring drawing).
 
 Each size is drawn from its own drawing: icon-tiny.svg for 16 to 24 px (two thick rings: three blend there),
 icon-32.svg up to 40 px, icon.svg above. The drawings hold only polygons, lines and circles (fill, stroke, round
@@ -18,6 +18,7 @@ DRAWINGS = [(24, "icon-tiny.svg"), (40, "icon-32.svg"), (10 ** 9, "icon.svg")]  
 OUT = os.path.join(HERE, "scripts", "icons")
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 PNG_SIZES = [16, 24, 32, 48, 64, 256]
+SMALL_SIZES = [16, 20, 24, 28, 32, 40, 48]  # icon-small.ico: the windows' title bar icon (user 2026-10-29: 3 rings crowded)
 
 
 def colour(text):
@@ -135,6 +136,9 @@ def main():
         pngs[size] = png(size, render(size, drawings[name]))
     with open(os.path.join(OUT, "icon.ico"), "wb") as f:
         f.write(ico([(s, pngs[s]) for s in ICO_SIZES]))
+    tiny = drawings[DRAWINGS[0][1]]  # (title bars: the two-ring drawing at every size Windows' scaling asks for)
+    with open(os.path.join(OUT, "icon-small.ico"), "wb") as f:
+        f.write(ico([(s, pngs[s] if s <= DRAWINGS[0][0] else png(s, render(s, tiny))) for s in SMALL_SIZES]))
     for s in PNG_SIZES:
         with open(os.path.join(OUT, f"icon-{s}.png"), "wb") as f:
             f.write(pngs[s])

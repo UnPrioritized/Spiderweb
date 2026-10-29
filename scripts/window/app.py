@@ -484,6 +484,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         try:  # title bar + taskbar icon; True = every other window (drawer, Help, ...) gets it too
             self.icons = [tk.PhotoImage(file=os.path.join(ICONS, f"icon-{n}.png")) for n in (16, 24, 32, 48, 64, 256)]
             self.iconphoto(True, *self.icons)
+            from files.system import small_title_icon  # (title bars: the two-ring icon, on every window once shown)
+            small, big = os.path.join(ICONS, "icon-small.ico"), os.path.join(ICONS, "icon.ico")
+            self.bind_class("Toplevel", "<Map>", lambda e: e.widget is e.widget.winfo_toplevel()
+                            and small_title_icon(e.widget, small, big), add="+")
+            self.bind("<Map>", lambda e: e.widget is self and small_title_icon(self, small, big), add="+")
         except tk.TclError:  # icons missing: Tk's own icon
             pass
         s = self.scale = self.winfo_fpixels("1i") / 96  # match Windows display scaling

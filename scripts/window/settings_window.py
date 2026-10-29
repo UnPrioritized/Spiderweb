@@ -128,6 +128,9 @@ def open_settings(app, tab=None):
     return w
 
 
+PAGE_MOST = 560  # the tallest a Settings page shows at 100 % size, in pixels (taller ones scroll)
+
+
 class ScrollPage(ttk.Frame):
     """A tab whose page scrolls when the screen is too short for the whole window (user 2026-10-16: on a small
     screen at a big Size, Look's bottom row was under the taskbar). .page = the frame to fill."""
@@ -235,6 +238,7 @@ class SettingsWindow(tk.Toplevel):
         room = bottom - top - round(40 * k)  # (the title bar + edges)
         tallest = max(t.page.winfo_reqheight() for t in tabs)
         most = max(round(150 * app.scale), tallest - (self.winfo_reqheight() - room))
+        most = min(most, round(PAGE_MOST * app.scale))  # (user 2026-10-29: grew too long; the rest scrolls)
         for t in tabs:
             t.most = most
             t.fit()

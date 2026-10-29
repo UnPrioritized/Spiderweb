@@ -183,6 +183,33 @@ def open_path(path, text=False):
         return False
 
 
+_small_icon = []  # (the title bars' icon, loaded once: kept for as long as the program runs)
+
+
+def small_title_icon(window, path, big_path):
+    """The window's title bar icon from path (.ico) at the size Windows draws it there (Tk would shrink the big
+    taskbar one: user 2026-10-29, three rings crowded), and its big one (taskbar, Alt+Tab) from big_path at its own
+    size: with only a small one set, Windows stretched it for the taskbar (blurry). Nothing elsewhere."""
+    if not WINDOWS:
+        return
+    try:
+        u = ctypes.windll.user32
+        if not _small_icon:
+            u.LoadImageW.restype = ctypes.c_void_p
+            u.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_uint]
+            for p, metric in ((path, 49), (big_path, 11)):  # SM_CXSMICON / SM_CXICON (scaled: we scale ourselves)
+                size = u.GetSystemMetrics(metric)
+                _small_icon.append(u.LoadImageW(None, p, 1, size, size, 0x10))  # IMAGE_ICON, LR_LOADFROMFILE
+        u.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+        hwnd = ctypes.c_void_p(int(window.wm_frame(), 16))
+        for kind, icon in enumerate(_small_icon):  # (WM_SETICON: 0 = small, 1 = big)
+            if icon:
+                u.SendMessageW(hwnd, 0x80, kind, icon)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 FILE_KIND = "Spiderweb.Project"  # (the name Windows files .spwb under)
 
 
