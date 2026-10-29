@@ -713,7 +713,7 @@ class Playback:
                 return out
             if out is not None:  # (the soundfonts / settings changed meanwhile: started again with them)
                 out.close()
-        loaded = kestrel.kept_for(fonts)
+        loaded = kestrel.kept_for(fonts, self.kestrel_opts["card"], self.kestrel_opts["filter"])
         if loaded is None:  # (it would read for seconds: never on the window's thread, e.g. an Hz window key; hunt
             # 2026-10-29: it froze the window and read beside a start already on its way)
             if self._kestrel_job is None:
@@ -739,6 +739,14 @@ class Playback:
             return out
         finally:
             self.busy(None)
+
+    def kestrel_card_gone(self, card):
+        """The graphics card picked in Settings → Sound isn't on this PC now (another PC, a laptop's card turned off):
+        Kestrel played on its own pick, the setting back to Automatic, said on the status line."""
+        self.kestrel_opts["card"] = ""
+        self.kestrel_vars["card"].set("")
+        self.status.config(text=tr("ks.card_gone", card=card.partition(":")[2]))
+        self.schedule_autosave()
 
     def kestrel_lowered(self, top):
         """Max voices past what this graphics card takes: lowered to its top and said plainly (it showed Kestrel's
@@ -820,7 +828,10 @@ class Playback:
         def work():
             try:
                 # (kept loaded: only soundfonts not read yet are read; a broken one is named by its reading)
-                loaded = kestrel.loaded_for(fonts)
+                loaded = kestrel.loaded_for(fonts, opts["card"], opts["filter"])
+                if loaded.card != opts["card"]:  # (the picked graphics card isn't there now: Kestrel's own pick)
+                    job["card_gone"] = opts["card"]
+                    opts["card"] = loaded.card
                 top = loaded.voices_top(opts["block"])
                 if top is not None and top < opts["voices"]:  # (lowered first: never a refused open)
                     job["top"] = top
@@ -858,6 +869,8 @@ class Playback:
             self._kestrel_job = None
             if win.winfo_exists():
                 win.destroy()
+            if job.get("card_gone") and self.kestrel_opts["card"] == job["card_gone"]:
+                self.kestrel_card_gone(job["card_gone"])
             if self.midi_device.get() != KESTREL or not self.winfo_exists():  # (another MIDI out picked meanwhile)
                 if job["out"] is not None:
                     job["out"].close()
@@ -1229,7 +1242,7 @@ class Playback:
         """A Kestrel (GPU) row in Settings → Sound changed (app.kestrel_vars[key]): Lower it by itself is heard at
         once, the others from the next Play (Kestrel opened again with them: fresh_builtin). Max voices typed wrong
         = back to the one in use."""
-        from files.kestrel import BLOCKS, VOICES_RANGE, read_voices
+        from files.kestrel import BLOCKS, CHOICES, RANGES, VOICES_RANGE, read_voices
         var = self.kestrel_vars[key]
         if key == "voices":
             e = getattr(self, "kestrel_voices_entry", None)
@@ -1250,6 +1263,24 @@ class Playback:
             var.set(str(v))
         elif key == "block":
             v = BLOCKS[max(0, min(len(BLOCKS) - 1, int(var.get())))]
+        elif key in RANGES:  # (13g number boxes: whole numbers in their range, else back to the one in use)
+            e = getattr(self, "kestrel_entries", {}).get(key)
+            lo, hi = RANGES[key]
+            try:
+                v = int(round(float(calc(var.get()))))
+                if not lo <= v <= hi:
+                    raise ValueError
+            except (ValueError, ZeroDivisionError, OverflowError):
+                if e is not None and e.winfo_exists():
+                    bad(e)
+                return
+            if e is not None and e.winfo_exists():
+                good(e)
+            var.set(str(v))
+        elif key in CHOICES:
+            v = max(0, min(CHOICES[key] - 1, int(var.get())))
+        elif key == "card":
+            v = var.get()
         else:
             v = bool(var.get())
         if v == self.kestrel_opts[key]:
@@ -1286,18 +1317,26 @@ class Playback:
 
     def take_kestrel_opts(self, opts):
         """The saved Kestrel settings (autosave window / settings.ini), each checked; wrong ones = defaults."""
-        from files.kestrel import BLOCKS, KESTREL_DEFAULTS, VOICES_RANGE
+        from files.kestrel import BLOCKS, CHOICES, KESTREL_DEFAULTS, RANGES, VOICES_RANGE
         for k, d in KESTREL_DEFAULTS.items():
             v = opts.get(k)
+            whole = isinstance(v, int) and not isinstance(v, bool)
             if k == "voices":
-                ok = isinstance(v, int) and not isinstance(v, bool) and VOICES_RANGE[0] <= v <= VOICES_RANGE[1]
+                ok = whole and VOICES_RANGE[0] <= v <= VOICES_RANGE[1]
             elif k == "block":
                 ok = v in BLOCKS and not isinstance(v, bool)
+            elif k in RANGES:
+                ok = whole and RANGES[k][0] <= v <= RANGES[k][1]
+            elif k in CHOICES:
+                ok = whole and 0 <= v < CHOICES[k]
+            elif k == "card":
+                ok = isinstance(v, str) and len(v) < 300
             else:
                 ok = isinstance(v, bool)
             self.kestrel_opts[k] = v if ok else d
         for k, v in self.kestrel_opts.items():
-            self.kestrel_vars[k].set(str(v) if k == "voices" else BLOCKS.index(v) if k == "block" else v)
+            self.kestrel_vars[k].set(str(v) if k == "voices" or k in RANGES else BLOCKS.index(v) if k == "block"
+                                     else v)
 
     def note_builtin(self):
         """Built-in BASSMIDI's settings in the logs (errors.note), once it has been opened."""

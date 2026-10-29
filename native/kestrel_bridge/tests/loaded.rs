@@ -173,3 +173,78 @@ fn a_broken_soundfont_is_named_without_the_graphics_card() {
     assert!(FontBank::load(&bad, 48_000).is_err());
     assert!(FontBank::load(&d.join("not there.sf2"), 48_000).is_err());
 }
+
+#[test]
+fn the_sound_rows_sound_like_kestrels_own_render_with_them() {
+    // 13g: each new KbOptions field = its Kestrel Config field (a file render with the same settings, bit for bit)
+    use kestrel::config::AdmitRule;
+    use kestrel::{Interpolation, StealRule};
+    let (a, _, midi) = files();
+    let blocks = 4 * 48_000 / BLOCK as usize;
+    let mine = KbOptions {
+        interpolation: 2,
+        steal_rule: 0,
+        release_floor_db: -60.0,
+        min_velocity: 60,
+        admit_rule: 1,
+        max_steal_percent: 50,
+        max_layers: 2,
+        filter: 0,
+        lfo: 0,
+        mod_env: 0,
+        ..opts(1 << 20)
+    };
+    let theirs = Config {
+        interpolation: Interpolation::Cubic,
+        steal_rule: StealRule::Oldest,
+        env_floor: 10f32.powf(-60.0 / 20.0),
+        min_velocity: 60,
+        admit_rule: AdmitRule::Even,
+        max_steal_percent: 50,
+        max_layers: 2,
+        filter_enabled: false,
+        lfo_enabled: false,
+        mod_env_enabled: false,
+        ..cfg()
+    };
+    let bank = Arc::new(kestrel::session::load_layered(&[a.clone()], None, &theirs).unwrap());
+    let Ok(mut synth) = GpuSynth::new(&theirs, bank.clone()) else {
+        eprintln!("no graphics card: skipped");
+        return;
+    };
+    let mut d = Driver::open(&theirs, bank, &midi).unwrap();
+    let n = theirs.block_samples();
+    let mut want = vec![0.0f32; n * blocks];
+    for k in 0..blocks {
+        if !d.next_block(&mut synth, &mut want[k * n..(k + 1) * n]).unwrap() {
+            break;
+        }
+    }
+    // (the filter is decided as the soundfont is read: Filter off = read without)
+    let fa = FontBank::load_with(&a, 48_000, false).unwrap();
+    let loaded = Loaded::new(&[&fa]).unwrap();
+    let s = Synth::open_on(&loaded, &mine).unwrap();
+    same(&want, &live_render(&s, blocks), "the sound rows");
+    // and they change the sound (velocity under 60 skipped, no filter...): not Kestrel's defaults
+    let fd = FontBank::load(&a, 48_000).unwrap();
+    let plain = Synth::open_on(&Loaded::new(&[&fd]).unwrap(), &opts(1 << 20)).unwrap();
+    assert_ne!(live_render(&plain, blocks), want, "the rows changed nothing");
+    // a set read with and without filters isn't stacked
+    assert!(Loaded::new(&[&fa, &fd]).is_err());
+}
+
+#[test]
+fn a_picked_graphics_card_loads_and_a_missing_one_is_said() {
+    let (a, _, _) = files();
+    let fa = FontBank::load(&a, 48_000).unwrap();
+    let Ok((list, _)) = kestrel::gpu::survey(&Config::default()) else { return };
+    let Some(card) = list.iter().find(|c| !c.is_software()) else {
+        eprintln!("no graphics card: skipped");
+        return;
+    };
+    let backend = format!("{:?}", card.backend).to_ascii_lowercase();
+    let loaded = Loaded::new_on(&[&fa], Some(backend.clone()), Some(card.name.clone())).unwrap();
+    assert!(Synth::open_on(&loaded, &opts(4096)).is_ok());
+    let err = Loaded::new_on(&[&fa], Some(backend), Some("no such card 123".into())).err().expect("opened");
+    assert!(format!("{err:#}").contains("no gpu adapter matched"), "{err:#}");
+}

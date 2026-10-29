@@ -15,7 +15,7 @@ from files.synth import RATE
 from window import look
 from window.font_list import FontList
 from window.hz_preview import VOICES
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, keep_width
 
 
 def open_builtin_settings(app):
@@ -152,13 +152,139 @@ class BuiltinPanel(ttk.Frame):
             Tooltip(c, tr(text + "_tip"))
             r += 1
 
+        r = self.card_row(r)
+        r = self.choice_row(r, "interpolation", "ks.interp")
+        r = self.choice_row(r, "steal", "ks.steal", order=(2, 0, 1))  # (Kestrel's usual first)
+        r = self.number_row(r, "release_floor", "ks.floor", (-160, -20), tr("ks.floor_unit"))
+        r = self.number_row(r, "min_velocity", "ks.min_vel", (0, 127))
+
+        # (13g, user 2026-10-29: the rarer ones folded, shut at first; the fold is kept while Spiderweb runs)
+        fold = ttk.Label(box, cursor="hand2", foreground=look.HINT)
+        fold.grid(row=r, column=0, columnspan=3, sticky="w", pady=(6, 3))
+        Tooltip(fold, tr("ks.advanced_tip"))
+        r += 1
+        start = set(box.grid_slaves())
+        r = self.choice_row(r, "admit", "ks.admit")
+        r = self.number_row(r, "max_steal", "ks.max_steal", (1, 100), "%")
+        r = self.number_row(r, "max_layers", "ks.max_layers", (1, 64))
+        for key, text in (("filter", "ks.filter"), ("lfo", "ks.lfo"), ("mod_env", "ks.mod_env")):
+            c = ttk.Checkbutton(box, text=tr(text), variable=vars_[key],
+                                command=lambda k=key: app.on_kestrel_opt(k), takefocus=False)
+            c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+            Tooltip(c, tr(text + "_tip"))
+            r += 1
+        self.advanced = [w for w in box.grid_slaves() if w not in start]
+        self.fold = fold
+
+        def flip(ev=None):
+            app.kestrel_advanced = not getattr(app, "kestrel_advanced", False)
+            self.sync_fold()
+        fold.bind("<Button-1>", flip)
+
         v = kestrel.version()
         hint = ttk.Label(box, text=tr("ks.next_play") + ("\n" + tr("ks.version", v=v) if v else ""),
                          foreground=look.HINT, font=look.font(8), wraplength=round(320 * app.scale), justify="left")
         hint.grid(row=r, column=1, columnspan=2, sticky="w", pady=(2, 0))
         r += 1
         self.k_rows = [w for w in box.grid_slaves() if w not in before]
+        self.kestrel_shown = True
+        self.sync_fold()
         return r
+
+    def sync_fold(self):
+        """The Advanced rows shown while the fold is open (and Kestrel's rows show)."""
+        open_ = getattr(self.app, "kestrel_advanced", False)
+        self.fold.config(text=("▾ " if open_ else "▸ ") + tr("ks.advanced"))
+        for w in self.advanced:
+            w.grid() if open_ and self.kestrel_shown else w.grid_remove()
+
+    def card_row(self, r):
+        """Graphics card: Automatic + the cards Kestrel can play on (asked on a thread the first time: up to a
+        second); a saved card not found now still shows (Play goes back to Automatic and says so)."""
+        from files import kestrel
+        app, box = self.app, self
+        var = app.kestrel_vars["card"]
+        lb = ttk.Label(box, text=tr("ks.card"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        cb = keep_width(ttk.Combobox(box, state="readonly", width=34))
+        cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(cb, tr("ks.card_tip"))
+        Tooltip(lb, tr("ks.card_tip"))
+        ids = []
+
+        def fill(found):
+            if not cb.winfo_exists():
+                return
+            ids[:] = [""] + [kestrel.card_id(n, b) for n, b, _ in (found or [])]
+            if var.get() not in ids:
+                ids.append(var.get())
+            cb.config(values=[kestrel.card_name(c) or tr("ks.card_auto") for c in ids])
+            cb.current(ids.index(var.get()))
+
+        def picked(ev=None):
+            if ids:
+                var.set(ids[cb.current()])
+                app.on_kestrel_opt("card")
+        cb.bind("<<ComboboxSelected>>", picked)
+        var.trace_add("write", lambda *a: ids and cb.winfo_exists() and fill(kestrel.seen_cards()))
+        if kestrel.seen_cards() is not None:
+            fill(kestrel.seen_cards())
+        else:
+            cb.set(tr("ks.card_looking"))
+            got = []
+            threading.Thread(target=lambda: got.append(kestrel.cards()), daemon=True).start()
+
+            def wait():
+                if got:
+                    fill(got[0])
+                elif cb.winfo_exists():
+                    cb.after(50, wait)
+            cb.after(50, wait)
+        return r + 1
+
+    def choice_row(self, r, key, text, order=None):
+        """A dropdown row of Kestrel's choices (kestrel.CHOICES; texts text_0, text_1...; order = the places shown,
+        Kestrel's usual first)."""
+        from files.kestrel import CHOICES
+        app, box = self.app, self
+        var = app.kestrel_vars[key]
+        order = list(order or range(CHOICES[key]))
+        lb = ttk.Label(box, text=tr(text))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        cb = ttk.Combobox(box, values=[tr(f"{text}_{i}") for i in order], state="readonly", width=18)
+        cb.current(order.index(var.get()))
+        cb.grid(row=r, column=1, sticky="w", pady=3)
+
+        def picked(ev=None):
+            var.set(order[cb.current()])  # (by place: translated names)
+            app.on_kestrel_opt(key)
+        cb.bind("<<ComboboxSelected>>", picked)
+        var.trace_add("write", lambda *a: cb.winfo_exists() and cb.current(order.index(var.get())))
+        Tooltip(cb, tr(text + "_tip"))
+        Tooltip(lb, tr(text + "_tip"))
+        return r + 1
+
+    def number_row(self, r, key, text, span, unit=None):
+        """A number box row (whole numbers in span, kestrel.RANGES) with its unit after it."""
+        app, box = self.app, self
+        var = app.kestrel_vars[key]
+        lb = ttk.Label(box, text=tr(text))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        row = ttk.Frame(box)
+        row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        e = ttk.Entry(row, textvariable=var, width=8)
+        e.pack(side="left")
+        if not hasattr(app, "kestrel_entries"):
+            app.kestrel_entries = {}
+        app.kestrel_entries[key] = e
+        e.bind("<Return>", lambda ev: (app.on_kestrel_opt(key), "break")[1])
+        e.bind("<FocusOut>", lambda ev: app.on_kestrel_opt(key))
+        Scrub(app, [(e, var, lambda: app.on_kestrel_opt(key))], (1, 10, 1), *span, label=lb, no_undo=True)
+        if unit:
+            ttk.Label(row, text=unit).pack(side="left", padx=(4, 0))
+        Tooltip(e, tr(text + "_tip"))
+        Tooltip(lb, tr(text + "_tip"))
+        return r + 1
 
     def show_for(self, kestrel):
         """Kestrel's rows (kestrel True) or Built-in BASSMIDI's; the soundfont list stays."""
@@ -166,6 +292,8 @@ class BuiltinPanel(ttk.Frame):
             w.grid_remove() if kestrel else w.grid()
         for w in self.k_rows:
             w.grid() if kestrel else w.grid_remove()
+        self.kestrel_shown = kestrel
+        self.sync_fold()
 
     def take_voices(self):
         """Settings closed (Esc, X) or another MIDI out picked: a voice limit typed without Enter is taken, a wrong

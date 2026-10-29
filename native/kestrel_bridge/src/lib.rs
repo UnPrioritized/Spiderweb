@@ -23,7 +23,8 @@ use std::time::Instant;
 use anyhow::{bail, Context, Result};
 use kestrel::gpu::{GpuShared, GpuSynth};
 use kestrel::midi::Event;
-use kestrel::{Backend, Bank, Config, Driver};
+use kestrel::config::AdmitRule;
+use kestrel::{Backend, Bank, Config, Driver, Interpolation, StealRule};
 
 use budget::Budget;
 
@@ -49,6 +50,20 @@ pub struct KbOptions {
     /// ~5 dB under the user's render, which had one on (2026-10-27).
     pub dc_blocker: u32,
     pub dc_blocker_hz: f32,
+    /// Settings → Sound's sound rows (13g, 2026-10-29), each Kestrel's own Config field at its default when 0 /
+    /// out of range: interpolation 0 Nearest / 1 Linear / 2 Cubic; steal_rule 0 Oldest / 1 Drop new / 2 Quietest;
+    /// release_floor_db = env_floor in dB (-100); min_velocity 0..127; admit_rule 0 Loudest / 1 Even;
+    /// max_steal_percent (25); max_layers (16); filter / lfo / mod_env 1 = on.
+    pub interpolation: u32,
+    pub steal_rule: u32,
+    pub release_floor_db: f32,
+    pub min_velocity: u32,
+    pub admit_rule: u32,
+    pub max_steal_percent: u32,
+    pub max_layers: u32,
+    pub filter: u32,
+    pub lfo: u32,
+    pub mod_env: u32,
 }
 
 impl Default for KbOptions {
@@ -65,6 +80,16 @@ impl Default for KbOptions {
             limiter_ceiling_db: 0.0,
             dc_blocker: 1,
             dc_blocker_hz: 0.0,
+            interpolation: 1,
+            steal_rule: 2,
+            release_floor_db: -100.0,
+            min_velocity: 0,
+            admit_rule: 0,
+            max_steal_percent: 25,
+            max_layers: 16,
+            filter: 1,
+            lfo: 1,
+            mod_env: 1,
         }
     }
 }
@@ -267,10 +292,11 @@ pub fn decode(msg: u32) -> Option<Event> {
     })
 }
 
-/// The settings a bank is loaded with: only the sample rate is Spiderweb's (Kestrel's defaults for the rest), so a
-/// loaded bank serves every Max voices / block / limiter setting.
-fn bank_config(sample_rate: u32) -> Config {
-    Config { sample_rate, ..Config::default() }
+/// The settings a bank is loaded with: only the sample rate and the filter are Spiderweb's (Kestrel's defaults for
+/// the rest), so a loaded bank serves every other setting. (The filter is decided per region as the soundfont is
+/// read: Filter off = read again, 13g.)
+fn bank_config(sample_rate: u32, filter: bool) -> Config {
+    Config { sample_rate, filter_enabled: filter, ..Config::default() }
 }
 
 /// One soundfont read into memory, no graphics card (`kb_font_load`): Spiderweb keeps these by file, so a changed
@@ -278,12 +304,18 @@ fn bank_config(sample_rate: u32) -> Config {
 pub struct FontBank {
     bank: Arc<Bank>,
     sample_rate: u32,
+    filter: bool,
 }
 
 impl FontBank {
     pub fn load(path: &std::path::Path, sample_rate: u32) -> Result<FontBank> {
-        let bank = kestrel::load_bank(path, &bank_config(sample_rate))?;
-        Ok(FontBank { bank: Arc::new(bank), sample_rate })
+        FontBank::load_with(path, sample_rate, true)
+    }
+
+    /// `load` with the soundfont's low-pass filters used (Kestrel's default) or left out.
+    pub fn load_with(path: &std::path::Path, sample_rate: u32, filter: bool) -> Result<FontBank> {
+        let bank = kestrel::load_bank(path, &bank_config(sample_rate, filter))?;
+        Ok(FontBank { bank: Arc::new(bank), sample_rate, filter })
     }
 }
 
@@ -293,17 +325,29 @@ pub struct Loaded {
     bank: Arc<Bank>,
     gpu: GpuShared,
     sample_rate: u32,
+    /// (read with their filters: a synth on it keeps them whatever its options say, `KbOptions::filter`)
+    filter: bool,
 }
 
 impl Loaded {
     /// `fonts` top of Spiderweb's list first: each overrides the ones before it.
     pub fn new(fonts: &[&FontBank]) -> Result<Loaded> {
+        Loaded::new_on(fonts, None, None)
+    }
+
+    /// `new` on one graphics card: `backend` ("vulkan", "dx12", ...) + a part of its name, as `kb_cards` lists
+    /// them (None = Kestrel's own pick, the strongest card).
+    pub fn new_on(fonts: &[&FontBank], backend: Option<String>, card: Option<String>) -> Result<Loaded> {
         let (first, rest) = fonts.split_first().context("no soundfont given")?;
         let sample_rate = first.sample_rate;
         if rest.iter().any(|f| f.sample_rate != sample_rate) {
             bail!("the soundfonts were read at different sample rates");
         }
-        let cfg = bank_config(sample_rate);
+        let filter = first.filter;
+        if rest.iter().any(|f| f.filter != filter) {
+            bail!("the soundfonts were read with and without their filters");
+        }
+        let cfg = Config { gpu_backend: backend, gpu_adapter: card, ..bank_config(sample_rate, filter) };
         // one soundfont = its own bank (no copy); more = copies stacked (the files' banks stay as they were)
         let bank = if rest.is_empty() {
             first.bank.clone()
@@ -324,7 +368,7 @@ impl Loaded {
                 b.pool = Vec::new();
             }
         }
-        Ok(Loaded { bank, gpu, sample_rate })
+        Ok(Loaded { bank, gpu, sample_rate, filter })
     }
 
     /// Samples kept in the PC's memory for this set (0 for a stack: they're on the graphics card).
@@ -358,6 +402,32 @@ fn config(opts: &KbOptions) -> Result<Config> {
         } else {
             0.0
         },
+        interpolation: match opts.interpolation {
+            0 => Interpolation::Nearest,
+            2 => Interpolation::Cubic,
+            _ => Interpolation::Linear,
+        },
+        steal_rule: match opts.steal_rule {
+            0 => StealRule::Oldest,
+            1 => StealRule::DropNew,
+            _ => StealRule::Quietest,
+        },
+        env_floor: if opts.release_floor_db.is_finite() && opts.release_floor_db < 0.0 {
+            10f32.powf(opts.release_floor_db.clamp(-160.0, -20.0) / 20.0)
+        } else {
+            Config::default().env_floor
+        },
+        min_velocity: opts.min_velocity.min(127) as u8,
+        admit_rule: if opts.admit_rule == 1 { AdmitRule::Even } else { AdmitRule::Loudest },
+        max_steal_percent: if (1..=100).contains(&opts.max_steal_percent) {
+            opts.max_steal_percent
+        } else {
+            Config::default().max_steal_percent
+        },
+        max_layers: if (1..=64).contains(&opts.max_layers) { opts.max_layers } else { Config::default().max_layers },
+        filter_enabled: opts.filter != 0,
+        lfo_enabled: opts.lfo != 0,
+        mod_env_enabled: opts.mod_env != 0,
         ..Config::default()
     };
     cfg.validate()?;
@@ -370,7 +440,10 @@ impl Synth {
         if fonts.is_empty() {
             bail!("no soundfont given");
         }
-        let banks = fonts.iter().map(|f| FontBank::load(f, opts.sample_rate)).collect::<Result<Vec<_>>>()?;
+        let banks = fonts
+            .iter()
+            .map(|f| FontBank::load_with(f, opts.sample_rate, opts.filter != 0))
+            .collect::<Result<Vec<_>>>()?;
         let loaded = Loaded::new(&banks.iter().collect::<Vec<_>>())?;
         drop(banks);
         Synth::open_on(&loaded, opts)
@@ -378,7 +451,7 @@ impl Synth {
 
     /// A synth on soundfonts already loaded: only its own buffers + render thread (~20 ms).
     pub fn open_on(loaded: &Loaded, opts: &KbOptions) -> Result<Synth> {
-        let cfg = config(opts)?;
+        let cfg = Config { filter_enabled: loaded.filter, ..config(opts)? };
         if cfg.sample_rate != loaded.sample_rate {
             bail!("the soundfonts were loaded at {} Hz, not {}", loaded.sample_rate, cfg.sample_rate);
         }
@@ -1009,7 +1082,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.2.0; Kestrel 1.3.0 (mbms0/kestrel-midi 844b002 + Spiderweb's changes 450306c)";
+    static V: &CStr = c"0.3.0; Kestrel 1.3.0 (mbms0/kestrel-midi 844b002 + Spiderweb's changes 450306c)";
     V.as_ptr()
 }
 
@@ -1052,13 +1125,19 @@ fn or_null<T>(r: Result<T>) -> *mut T {
 /// Takes seconds: off the window's thread. Free with kb_font_free (synths and loaded sets keep what they need).
 #[no_mangle]
 pub unsafe extern "C" fn kb_font_load(path: *const c_char, sample_rate: u32) -> *mut FontBank {
+    kb_font_load_with(path, sample_rate, 1)
+}
+
+/// `kb_font_load` with the soundfont's filters (1, Kestrel's default) or without (0: Settings → Sound's Filter).
+#[no_mangle]
+pub unsafe extern "C" fn kb_font_load_with(path: *const c_char, sample_rate: u32, filter: u32) -> *mut FontBank {
     guard(std::ptr::null_mut(), || {
         if path.is_null() {
             set_error("no soundfont given");
             return std::ptr::null_mut();
         }
         match CStr::from_ptr(path).to_str() {
-            Ok(s) => or_null(FontBank::load(std::path::Path::new(s), sample_rate)),
+            Ok(s) => or_null(FontBank::load_with(std::path::Path::new(s), sample_rate, filter != 0)),
             Err(_) => {
                 set_error("a soundfont path isn't UTF-8");
                 std::ptr::null_mut()
@@ -1078,9 +1157,57 @@ pub unsafe extern "C" fn kb_font_free(f: *mut FontBank) {
 /// Under a second (the upload): still off the window's thread.
 #[no_mangle]
 pub unsafe extern "C" fn kb_load(fonts: *const *const FontBank, n: u32) -> *mut Loaded {
+    kb_load_on(fonts, n, std::ptr::null(), std::ptr::null())
+}
+
+/// `kb_load` on one graphics card: `backend` + `card` (UTF-8, a line of `kb_cards`'s); null = Kestrel's own pick.
+#[no_mangle]
+pub unsafe extern "C" fn kb_load_on(
+    fonts: *const *const FontBank,
+    n: u32,
+    backend: *const c_char,
+    card: *const c_char,
+) -> *mut Loaded {
     guard(std::ptr::null_mut(), || {
+        let text = |p: *const c_char| {
+            (!p.is_null()).then(|| CStr::from_ptr(p).to_string_lossy().into_owned()).filter(|s| !s.is_empty())
+        };
         let list: Vec<&FontBank> = (0..n as usize).filter_map(|i| (*fonts.add(i)).as_ref()).collect();
-        or_null(Loaded::new(&list))
+        or_null(Loaded::new_on(&list, text(backend), text(card)))
+    })
+}
+
+/// The graphics cards Kestrel can play on, best first (its own pick = the first): one line each,
+/// "name\tbackend\tkind" (kind: discrete / integrated / virtual / other; software ones left out). Null on failure
+/// (kb_error). Valid until the next kb_cards call. Takes up to a second: off the window's thread.
+#[no_mangle]
+pub extern "C" fn kb_cards() -> *const c_char {
+    static CARDS: Mutex<Option<CString>> = Mutex::new(None);
+    guard(std::ptr::null(), || match kestrel::gpu::survey(&Config::default()) {
+        Ok((list, _)) => {
+            let lines: Vec<String> = list
+                .iter()
+                .filter(|a| !a.is_software())
+                .map(|a| {
+                    // (by its name: wgpu isn't a dependency of ours)
+                    let kind = match format!("{:?}", a.device_type).as_str() {
+                        "DiscreteGpu" => "discrete",
+                        "IntegratedGpu" => "integrated",
+                        "VirtualGpu" => "virtual",
+                        _ => "other",
+                    };
+                    let name = a.name.replace(['\t', '\n', '\r'], " ");
+                    format!("{name}\t{}\t{kind}", format!("{:?}", a.backend).to_ascii_lowercase())
+                })
+                .collect();
+            let mut keep = CARDS.lock().unwrap_or_else(|e| e.into_inner());
+            *keep = CString::new(lines.join("\n")).ok();
+            keep.as_ref().map_or(std::ptr::null(), |c| c.as_ptr())
+        }
+        Err(e) => {
+            set_error(&format!("{e:#}"));
+            std::ptr::null()
+        }
     })
 }
 

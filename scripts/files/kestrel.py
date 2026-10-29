@@ -31,7 +31,60 @@ BLOCKS = (256, 512, 1024, 2048)  # (Settings → Sound's block sizes)
 VOICES_RANGE = (1024, 1 << 26)  # (Settings → Sound's Max voices)
 # Settings → Sound's rows (App.kestrel_opts = Kestrel's keywords): "lower" changes while open, the rest at the next open
 LIVE_VOICES = 300_000  # (Max voices to start with: user 2026-10-28, Kestrel's own 1 M fell behind on heavy MIDIs)
-KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limiter": True, "dc_blocker": True}
+KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limiter": True, "dc_blocker": True,
+                    # (13g, user 2026-10-29: Kestrel's own defaults; "card" = "backend:name" of cards(), "" = its
+                    # pick; card + filter = the soundfonts sent to the card / read again)
+                    "card": "", "interpolation": 1, "steal": 2, "release_floor": -100, "min_velocity": 0,
+                    "admit": 0, "max_steal": 25, "max_layers": 16, "filter": True, "lfo": True, "mod_env": True}
+# (the lists' places = the connector's numbers: Nearest / Linear / Cubic, Oldest / Drop new / Quietest, Loudest / Even)
+CHOICES = {"interpolation": 3, "steal": 3, "admit": 2}
+RANGES = {"release_floor": (-160, -20), "min_velocity": (0, 127), "max_steal": (1, 100), "max_layers": (1, 64)}
+LOADED_KEYS = ("card", "filter")  # (decide the Loaded, not just the synth)
+
+
+def card_id(name, backend):
+    """A card as saved (App.kestrel_opts["card"]): "vulkan:NVIDIA ..." (Kestrel picks the first card whose name holds it)."""
+    return f"{backend}:{name}"
+
+
+_cards_seen = None  # (cards()' last answer: the graphics cards don't change while Spiderweb runs, mostly)
+
+
+def cards():
+    """The graphics cards Kestrel can play on, best first: [(name, backend, kind)] (kind discrete / integrated /
+    virtual; other kinds and OpenGL left out: slower, and Kestrel's own pick never takes them), [] when none,
+    None when the connector can't say. Up to a second: off the window's thread (seen_cards() = the last answer)."""
+    global _cards_seen
+    try:
+        with _OPENING:  # (never beside a start: asking the cards opens their drivers too)
+            text = load().kb_cards()
+    except SynthError:
+        return None
+    if text is None:
+        return None
+    out = []
+    for line in text.decode("utf-8", "replace").splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0] and parts[1] != "gl" and parts[2] != "other":
+            out.append(tuple(parts))
+    _cards_seen = out
+    return out
+
+
+def seen_cards():
+    """cards()' last answer, None before it was asked."""
+    return _cards_seen
+
+
+BACKEND_NAMES = {"vulkan": "Vulkan", "dx12": "DirectX 12", "metal": "Metal"}
+
+
+def card_name(card):
+    """A card as the dropdown shows it: "NVIDIA GeForce RTX 3080 Ti (Vulkan)" ("" = None: Automatic)."""
+    if not card:
+        return None
+    backend, _, name = card.partition(":")
+    return f"{name} ({BACKEND_NAMES.get(backend, backend)})"
 
 
 def read_voices(text):
@@ -61,7 +114,20 @@ class _Options(ctypes.Structure):
                 ("ahead_blocks", ctypes.c_uint32), ("max_voices", ctypes.c_uint32),
                 ("lower_by_itself", ctypes.c_uint32), ("limiter", ctypes.c_uint32),
                 ("limiter_ceiling_db", ctypes.c_float), ("dc_blocker", ctypes.c_uint32),
-                ("dc_blocker_hz", ctypes.c_float)]
+                ("dc_blocker_hz", ctypes.c_float), ("interpolation", ctypes.c_uint32),
+                ("steal_rule", ctypes.c_uint32), ("release_floor_db", ctypes.c_float),
+                ("min_velocity", ctypes.c_uint32), ("admit_rule", ctypes.c_uint32),
+                ("max_steal_percent", ctypes.c_uint32), ("max_layers", ctypes.c_uint32), ("filter", ctypes.c_uint32),
+                ("lfo", ctypes.c_uint32), ("mod_env", ctypes.c_uint32)]
+
+
+def _options(block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True, limiter=True, ceiling_db=0.0, dc_blocker=True,
+             dc_blocker_hz=0.0, interpolation=1, steal=2, release_floor=-100, min_velocity=0, admit=0, max_steal=25,
+             max_layers=16, filter=True, lfo=True, mod_env=True, card=""):
+    """The connector's options from Kestrel's keywords (App.kestrel_opts; card = Loaded's, not a synth's)."""
+    return _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), ceiling_db,
+                    int(dc_blocker), dc_blocker_hz, interpolation, steal, release_floor, min_velocity, admit, max_steal,
+                    max_layers, int(filter), int(lfo), int(mod_env))
 
 
 class _Stats(ctypes.Structure):
@@ -115,6 +181,9 @@ def load():
                             ("kb_fill", [p, p, u32], None), ("kb_close", [p], None),
                             ("kb_font_load", [ctypes.c_char_p, u32], p), ("kb_font_free", [p], None),
                             ("kb_load", [ctypes.POINTER(p), u32], p), ("kb_unload", [p], None),
+                            ("kb_font_load_with", [ctypes.c_char_p, u32, u32], p),
+                            ("kb_load_on", [ctypes.POINTER(p), u32, ctypes.c_char_p, ctypes.c_char_p], p),
+                            ("kb_cards", [], ctypes.c_char_p),
                             ("kb_voices_top", [p, ctypes.POINTER(_Options)], u32),
                             ("kb_open_on", [p, ctypes.POINTER(_Options)], p)):
         fn = getattr(d, name)
@@ -190,17 +259,19 @@ def starting():
     return _STARTING.locked()
 
 
-def _stamp(path):
+def _stamp(path, filter=True):
+    """The file's size + time, and whether it's read with its filters (Kestrel decides them while reading: the
+    Filter tick = read again, 13g)."""
     st = os.stat(path)
-    return st.st_size, st.st_mtime_ns
+    return st.st_size, st.st_mtime_ns, bool(filter)
 
 
-def _font_bank(path):
+def _font_bank(path, filter=True):
     """(called holding _BANKS; let go while it reads) The handle of this soundfont read into memory: the kept one while the
     file is the same, else read now (seconds: the lock let go meanwhile). SynthError with .path when it can't be."""
     d = load()
     try:
-        stamp = _stamp(path)
+        stamp = _stamp(path, filter)
     except OSError as e:
         err = SynthError("playback.kestrel_failed", err=e)
         err.path = path
@@ -210,7 +281,7 @@ def _font_bank(path):
         return old[1]
     _BANKS.release()  # (reading takes seconds: the window's thread may forget banks meanwhile)
     try:
-        h = d.kb_font_load(os.fsdecode(path).encode("utf-8"), RATE)
+        h = d.kb_font_load_with(os.fsdecode(path).encode("utf-8"), RATE, int(bool(filter)))
         why = None if h else _error(d)
     finally:
         _BANKS.acquire()
@@ -229,9 +300,10 @@ class Loaded:
     """Spiderweb's soundfont list (top first) stacked and on the graphics card: synths open on it in a moment.
     Made by loaded_for(); SynthError when a soundfont can't be read (.path = that one) or the card can't start."""
 
-    def __init__(self, fonts, era=None):
+    def __init__(self, fonts, era=None, card="", filter=True):
         d = self.dll = load()
         self.fonts = list(fonts)
+        self.card, self.filter = card or "", bool(filter)
         self.handle = None
         era = _era if era is None else era
         with _BANKS:
@@ -239,24 +311,25 @@ class Loaded:
                 hs = []
                 for f in self.fonts:
                     _given_up(era)  # (between soundfonts: a given-up start reads no more)
-                    hs.append(_font_bank(f))
+                    hs.append(_font_bank(f, filter))
                 if all(_banks.get(f, (0, None))[1] == h for f, h in zip(self.fonts, hs)):
                     break
             _given_up(era)
             self.stamps = [_banks[f][0] for f in self.fonts]
             arr = (ctypes.c_void_p * max(1, len(hs)))(*hs)
+            backend, _, name = self.card.partition(":")
             with _OPENING:
-                h = d.kb_load(arr, len(hs))
+                h = d.kb_load_on(arr, len(hs), backend.encode("utf-8") or None, name.encode("utf-8") or None)
         if not h:
             raise SynthError("playback.kestrel_failed", err=_error(d))
         self.handle = h
 
-    def fits(self, fonts):
-        """Loaded for exactly these soundfonts, none changed on disk since."""
-        if self.handle is None or list(fonts) != self.fonts:
+    def fits(self, fonts, card="", filter=True):
+        """Loaded for exactly these soundfonts on this card ("" = Kestrel's pick), none changed on disk since."""
+        if self.handle is None or list(fonts) != self.fonts or (card or "") != self.card:
             return False
         try:
-            return [_stamp(f) for f in fonts] == self.stamps
+            return [_stamp(f, filter) for f in fonts] == self.stamps
         except OSError:
             return False
 
@@ -264,7 +337,7 @@ class Loaded:
         """The most Max voices this graphics card takes at this block size, or None when not known."""
         if self.handle is None:
             return None
-        opts = _Options(ctypes.sizeof(_Options), RATE, block, 3, 1, 0, 1, 0.0, 1, 0.0)
+        opts = _options(block=block, ahead=3, voices=1, lower=False)
         with _OPENING:
             top = self.dll.kb_voices_top(self.handle, ctypes.byref(opts)) if self.handle else 0
         return top or None
@@ -277,19 +350,25 @@ class Loaded:
                 self.handle = None
 
 
-def loaded_for(fonts):
-    """(any thread) The kept Loaded when it is for these soundfonts, else a new one (the old one closed FIRST: one
-    copy on the graphics card; only soundfonts not kept read; banks no longer listed freed)."""
+def loaded_for(fonts, card="", filter=True):
+    """(any thread) The kept Loaded when it is for these soundfonts (+ card, Filter: Settings → Sound's), else a new
+    one (the old one closed FIRST: one copy on the graphics card; only soundfonts not kept read; banks no longer
+    listed freed)."""
     global _kept
     era = _era
     with _STARTING:  # (one start at a time: a later one finds the earlier one's kept)
         _given_up(era)
         kept = _kept
-        if kept is not None and kept.fits(fonts):
+        if kept is not None and kept.fits(fonts, card, filter):
             return kept
         drop_loaded()
         forget(keep=fonts)
-        new = Loaded(fonts, era)
+        try:
+            new = Loaded(fonts, era, card, filter)
+        except SynthError as e:  # (that card isn't on this PC now: Kestrel's own pick; the caller sees .card "")
+            if not card or "no gpu adapter matched" not in str(getattr(e, "values", {}).get("err", "")):
+                raise
+            new = Loaded(fonts, era, "", filter)
         if era != _era:  # (given up while it was sent to the graphics card: nothing kept)
             new.close()
             _given_up(era)
@@ -297,10 +376,10 @@ def loaded_for(fonts):
         return new
 
 
-def kept_for(fonts):
-    """The kept Loaded when it is for these soundfonts, else None (never reads)."""
+def kept_for(fonts, card="", filter=True):
+    """The kept Loaded when it is for these soundfonts (+ card, Filter), else None (never reads)."""
     kept = _kept
-    return kept if kept is not None and kept.fits(fonts) else None
+    return kept if kept is not None and kept.fits(fonts, card, filter) else None
 
 
 def drop_loaded():
@@ -335,16 +414,15 @@ class Kestrel:
     None = read and stacked just for this synth. synth = files.synth.Synth (BASS + the sound device). Opening
     without loaded takes seconds (the soundfonts load): not on the window's thread. SynthError when it can't."""
 
-    def __init__(self, synth, fonts, block=BLOCK, ahead=None, voices=MAX_VOICES, lower=True, limiter=True,
-                 ceiling_db=0.0, dc_blocker=True, dc_blocker_hz=0.0, loaded=None):
+    def __init__(self, synth, fonts, block=BLOCK, ahead=None, loaded=None, **sound):
+        """sound = _options' keywords (Max voices, Lower it by itself, Limiter, the sound rows...)."""
         d = self.dll = load()
         self.bass = synth.bass
         self.block = block
         if ahead is None:  # (about the same time made ahead at every block size: AHEAD of 512, 3 blocks at least)
             ahead = max(3, -(-AHEAD * BLOCK // block))
         self.ahead = ahead
-        opts = _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), ceiling_db,
-                        int(dc_blocker), dc_blocker_hz)
+        opts = _options(block=block, ahead=ahead, **sound)
         names = (ctypes.c_char_p * max(1, len(fonts)))(*[os.fsdecode(f).encode("utf-8") for f in fonts])
         with _OPENING:
             if loaded is None:
