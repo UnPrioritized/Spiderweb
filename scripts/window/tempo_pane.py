@@ -30,7 +30,7 @@ from files.mathexpr import calc, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
                          bpm_text, clamp_bpm, curve, drawn_from, drop_loose, end_point, formula_fn,
-                         catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_runs, keeps,
+                         catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_runs, keeps, on_beat,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
                          swap_part, tempo_text)
 from notes.tempo import changed as tempo_edited, keep_heard, FAR
@@ -2658,14 +2658,21 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if push:
             self.app.push_undo(name=tr("project.paste_from_domino"))
         pts, base = self.ed()["points"], self.base()
+        beats = [q[0] for q in pts]  # (in order: only the points round each beat looked at, on_beat)
+        if any(x > y for x, y in zip(beats, beats[1:])):
+            beats = None
         for p in new:
             p[0] += at
-            split_at(pts, p[0], base)
-            on = [i for i, q in enumerate(pts) if abs(q[0] - p[0]) < 1e-9]
+            split_at(pts, p[0], base, beats)
+            on = on_beat(pts, p[0], beats)
             if len(on) == 2:
                 del pts[on[1]]
+                if beats is not None:
+                    del beats[on[1]]
             p[0] = pts[on[0]][0]  # (on that beat exactly: a pair)
             pts.insert(on[0] + 1, p)
+            if beats is not None:
+                beats.insert(on[0] + 1, p[0])
         drop_loose(pts)
         self.bands, self.sel, self.part = [], [], None  # (nothing picked: the pasted notes are what's selected)
         self.app.tempo_changed()

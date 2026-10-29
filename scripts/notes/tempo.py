@@ -1202,25 +1202,40 @@ def to_jump(pts, i):
     return i + 2 < len(pts) and pts[i + 2][0] == pts[i + 1][0]
 
 
-def split_at(pts, b, base):
+def on_beat(pts, b, beats=None):
+    """The indexes of the points within 1e-9 of beat b, in order. beats: the points' beats, sorted (kept in step
+    by the caller): only the few around b looked at (many pastes into thousands of points, speed hunt 2026-10-29)."""
+    if beats is None:
+        return [i for i, p in enumerate(pts) if abs(p[0] - b) < 1e-9]
+    lo, hi = bisect.bisect_left(beats, b - 2e-9), bisect.bisect_right(beats, b + 2e-9)
+    return [i for i in range(lo, hi) if abs(pts[i][0] - b) < 1e-9]
+
+
+def split_at(pts, b, base, beats=None):
     """A point put on beat b (in place) so the tempo line looks exactly the same (user 2026-10-22: a paste / cut
     must leave the tempo around it as it was): the part there cut in two (hold / line / S-curve exact, an S-curve
     becoming its two bent halves; a formula part's formula written again for each piece), before the first point
     the project's BPM held, after the last one its BPM. Nothing when a point is on b already. Returns the point on
     b (the last one there). (Curved parts change every "every" ticks from their own start: each piece starts
-    its steps again.)"""
-    on = [p for p in pts if abs(p[0] - b) < 1e-9]
+    its steps again.) beats: the points' beats in order, kept in step here (on_beat)."""
+    on = on_beat(pts, b, beats)
     if on:
-        return on[-1]
-    i = bisect.bisect_left([p[0] for p in pts], b) - 1
+        return pts[on[-1]]
+
+    def put(k, new):
+        pts.insert(k, new)
+        if beats is not None:
+            beats.insert(k, new[0])
+
+    i = bisect.bisect_left(beats if beats is not None else [p[0] for p in pts], b) - 1
     if i < 0:  # (before the first point: the project's BPM)
         new = [float(b), clamp_bpm(base), "hold", "", "lin", False, list(BEND)]
-        pts.insert(0, new)
+        put(0, new)
         return new
     p = pts[i]
     if i + 1 >= len(pts):  # (after the last point: it holds)
         new = [float(b), p[1]] + copy.deepcopy(p[2:])
-        pts.insert(i + 1, new)
+        put(i + 1, new)
         return new
     if p[2] == "s":  # (its two halves: a bent line, then the same bend mirrored)
         cx, cy = bend_of(p)
@@ -1230,7 +1245,7 @@ def split_at(pts, b, base):
             mid.append(copy.deepcopy(p[7]))
         p[2] = "line"
         set_bend(p, [cx, cy])
-        pts.insert(i + 1, mid)
+        put(i + 1, mid)
         if abs(mid[0] - b) < 1e-9:
             return mid
         if mid[0] < b:
@@ -1261,7 +1276,7 @@ def split_at(pts, b, base):
             p[3] = f"({x.sub(f'({f!r}*x)', text)}) / ({ff!r})"
         if abs(1 - ff) > 1e-12:
             new[3] = f"(({x.sub(f'({f!r}+{1 - f!r}*x)', text)}) - ({ff!r})) / ({1 - ff!r})"
-    pts.insert(i + 1, new)
+    put(i + 1, new)
     return new
 
 
