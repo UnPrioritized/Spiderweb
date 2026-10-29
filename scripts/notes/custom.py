@@ -977,10 +977,10 @@ def fit_upright(sh):
     return True
 
 
-def outline_notes(sh, ppq, only=None):
+def outline_notes(sh, ppq, only=None, paths=None):
     """(start, end, pitch) notes along every stroke of a custom shape (only: just these stroke numbers), like
-    lines. Fill lines make none."""
-    paths = custom_strokes(sh)
+    lines. Fill lines make none. paths: custom_strokes(sh) worked out already."""
+    paths = custom_strokes(sh) if paths is None else paths
     ks = range(len(paths)) if only is None else only
     if not sh.get("text"):
         ks = [k for k in ks if role_of(sh["strokes"][k]) != "cut"]
@@ -2439,9 +2439,11 @@ def outline_groups(sh, ppq, spam=False):
         notes = thicker(sh, outline_notes(sh, ppq), spans, g, ppq)
         return (chop_outline(sh, notes, ppq) if spam else notes), None
     parts, ids = [], []
+    paths = custom_strokes(sh)  # (once for every group: a live shape of 1,000 lines made them 1,000 times, speed
+    # hunt 2026-10-29)
     for n, (_, strokes) in enumerate(sorted(groups.items())):
         # (the even band goes with the first group: it's the whole shape's)
-        notes = outline_notes(sh, ppq, strokes)
+        notes = outline_notes(sh, ppq, strokes, paths)
         notes = thicker(sh, notes, spans, g, ppq) if n == 0 or sh.get("edge_mode") == "sideways" else notes
         if spam:
             notes = chop_outline(sh, notes, ppq)
