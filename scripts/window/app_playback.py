@@ -1,6 +1,7 @@
 """Mixed into App: playing the notes (Space), right-drag listening and the MIDI out, Built-in BASSMIDI's
 soundfont and settings."""
 
+import collections
 import math
 import os
 import threading
@@ -58,6 +59,12 @@ def kestrel_voices_top(err):
 def _same_opts(a, b):
     """Kestrel opened with settings a = with b ("lower" changes while open: never counts)."""
     return {k: v for k, v in a.items() if k != "lower"} == {k: v for k, v in b.items() if k != "lower"}
+
+
+def readable(n):
+    """n to 3 figures for the status line's red text (466,814 -> 467,000: it changes every moment, unreadable)."""
+    n = int(round(n))
+    return n if n < 1000 else int(round(n, 3 - len(str(n))))
 
 
 READY_AFTER_MS = 1500  # Built-in BASSMIDI made ready this long after the start (ready_builtin); None = never (tests)
@@ -128,6 +135,7 @@ class Playback:
         self.slow_down.reset()  # (each Play at the song's own speed: Player.start too)
         self._pace_seen = self._pace_seen_b = None  # (Kestrel's silence / BASSMIDI's notes thinned, seen)
         self._k_drops = None  # (Kestrel's notes left out by its own lowering: count, when it last grew)
+        self._thin_hist = collections.deque()  # (a loaded MIDI's (time, notes left out, sent): notes_left_text)
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
         if self.out.name == BUILTIN:
@@ -450,9 +458,26 @@ class Playback:
             for m in (0xB0 | ch, 0xB0 | ch | 32 << 8, 0xC0 | ch):
                 self.out.send(m)
 
+    def notes_left_text(self, lp, now):
+        """A loaded MIDI on Built-in BASSMIDI: "Overloaded: 12,000 notes left out a second (24 %)" over the last
+        second (its note budget leaves note starts out; user 2026-10-29: the number and the share)."""
+        hist = self._thin_hist
+        hist.append((now, lp.thinned, lp.sent))
+        while len(hist) > 2 and now - hist[0][0] > 1.0:
+            hist.popleft()
+        t0, th0, se0 = hist[0]
+        if now - t0 < 0.2:
+            return tr("app.overloaded")
+        left, sent = lp.thinned - th0, lp.sent - se0
+        if left <= 0:
+            return tr("app.overloaded")
+        return tr("app.overloaded_notes", n=f"{readable(left / (now - t0)):,}",
+                  p=max(1, round(100 * left / max(1, left + sent))))
+
     def show_overload(self):
         """The red text at the status line's right end (and in Settings → Sound): "Overloaded", with the
-        voices playing when the limit was lowered by itself."""
+        voices playing when the limit was lowered by itself (Kestrel's too), a loaded MIDI's notes left out a second
+        on Built-in BASSMIDI (user 2026-10-29)."""
         text = self.overload.text()
         lp = self.loaded_play
         if lp is not None:  # (a loaded MIDI's notes thinned for the synth within the last second: overloaded too)
@@ -460,7 +485,7 @@ class Playback:
             if lp.thinned != self._thin_seen[0]:
                 self._thin_seen = (lp.thinned, now)
             if not text and now - self._thin_seen[1] < 1.0:
-                text = tr("app.overloaded")
+                text = self.notes_left_text(lp, now) if lp.sinks else tr("app.overloaded")
         if self.out.name == KESTREL and self.out.handle and self.player.running:
             # (Kestrel (GPU): notes left out to keep up, or gaps in the sound, within the last second)
             now = time.perf_counter()
@@ -473,7 +498,11 @@ class Playback:
                 seen = (key, 0.0)
             self._k_seen = seen
             if not text and now - seen[1] < 1.0:
-                text = tr("app.overloaded")
+                # (its own lowering cut the voices: how many it lets sound now, as Built-in BASSMIDI's text)
+                top = self.out.handle.opts.get("voices", self.kestrel_opts["voices"])
+                cap = st.get("voice_cap", 0)
+                text = (tr("app.overloaded_1") if cap == 1 else tr("app.overloaded_n", n=f"{readable(cap):,}")) \
+                    if 0 < cap < top else tr("app.overloaded")
         elif not self.player.running:
             self._k_seen = (None, 0.0)
         v = self.player.speed

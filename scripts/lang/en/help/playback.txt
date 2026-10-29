@@ -4,7 +4,7 @@ Built-in BASSMIDI (in the MIDI out list) plays through Spiderweb's own synth, wi
 
 Soundfonts can be stacked, and order matters: each soundfont overrides the ones above it. For example, a General MIDI soundfont first and your piano under it: your piano plays the piano, and the General MIDI one adds drums and other instruments. A sound no soundfont has stays silent, like in other players. Add… adds soundfonts at the bottom, Up and Down change the order, Remove takes one out.
 
-When the computer can't keep up, a red "Overloaded" shows at the right end of the status line at the bottom: lower the Voice limit, or tick "Lower it by itself when overloaded" in Settings (Help menu) → Sound.
+When the computer can't keep up, a red "Overloaded" shows at the right end of the status line at the bottom: lower the Voice limit, or tick "Lower it by itself when overloaded" in Settings (Help menu) → Sound. While it lowers the voice limit, the red text says the voices it lets sound now ("Overloaded: 850 voices"); with a loaded MIDI, the notes left out a second and their share ("Overloaded: 12,000 notes left out a second (24 %)").
 
 Or tick "Slow down to keep up" there (off at first): the song then plays slower instead while the computer can't keep up (down to 10 %, the pitch the same), and goes back to its own speed once it can. An orange "Slowed to 62 %" shows while it's slower. With "Lower it by itself when overloaded" ticked too, the voice limit is lowered only once it's at the slowest, or once playing slower stops helping (very many notes ringing at once). Busy loaded MIDIs can slow down a lot.
 

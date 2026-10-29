@@ -4,6 +4,7 @@ panel_pattern.py (those panel sections), app_playback.py (playing, MIDI out), ap
 history.py (undo and the History panel),
 project.py (files, autosave, MIDI export), widgets.py (tooltips), font_dialog.py (picking a font)."""
 
+import collections
 import copy
 import itertools
 import json
@@ -667,6 +668,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._kestrel_job = None  # Kestrel (GPU) starting on a thread for a play (kestrel_first)
         self._kestrel_made = None  # ... started, waiting for MidiOut.open: (out, error, soundfonts)
         self._thin_seen = (0, 0.0)  # (its thinned count, when it last grew: "Overloaded")
+        self._thin_hist = collections.deque()  # (a loaded MIDI's (time, notes left out, sent): notes_left_text)
         set_key_top(self.keys)
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
