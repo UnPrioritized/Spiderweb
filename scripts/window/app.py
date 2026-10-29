@@ -2157,10 +2157,37 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if have[0] not in rows:
                 continue
             anchor = rows.index(have[0])
-            if cols:  # (a copy's columns, or a Domino paste's tracks: from the highlighted row, gaps kept)
-                have, made_here = [], []
-            else:
-                made_here = []
+            if cols:  # (a copy's columns, or a Domino paste's tracks: from the highlighted row, gaps kept; an open
+                # folder's Ch rows are rows too, a shut one = its first channel: user 2026-10-29)
+                lanes = self.paste_lanes(rows)
+                start = (have[0], chs[0] if chs and chs[0] >= 0 else -1)
+                at = lanes.index(start) if start in lanes else next(
+                    (k for k, (v, _) in enumerate(lanes) if v == have[0]), 0)
+                laid, lchs, made_here = [], [], []
+                for k in range(n):
+                    r = at + cols[k] if k < len(cols) else at + (cols[-1] if cols else 0) + k - len(cols) + 1
+                    while r >= len(lanes):
+                        v = at_end(laid[0] >= 0 if laid else have[0] >= 0)
+                        made_here.append(v)
+                        lanes.append((v, -1))
+                    laid.append(lanes[r][0])
+                    lchs.append(lanes[r][1])
+                sh["into"] = laid
+                sh.pop("cols", None)
+                sh.pop("into_rest", None)
+                if any(c >= 0 for c in lchs):
+                    sh["into_ch"], sh["into_home"] = lchs, list(laid)
+                else:
+                    sh.pop("into_ch", None)
+                    sh.pop("into_home", None)
+                gap = [v for v in made_here if v >= 0 and v not in laid]
+                if gap:
+                    sh["into_gap"] = sorted(set(sh.get("into_gap", [])) | set(gap))
+                if any(v < 0 for v in laid):
+                    sh["slots10"] = bool(use10) and any(channel(v) == 9 for v in laid if v < 0)
+                changed = True
+                continue
+            made_here = []
             while len(have) < n:
                 k = len(have)
                 if have and have[-1] not in rows:  # (its last track isn't listed: nothing to go on from)
@@ -2272,6 +2299,33 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return FILE0 + n if whole and n in self.file_tracks() else None
         return -1 - s if s < HAND else None
 
+    def paste_lanes(self, rows):
+        """fit_into's rows (placed_on entries) as the places a paste's columns count: (entry, channel) each, an OPEN
+        folder's Ch rows one each (in the list's order), any other row once, a shut folder on its first channel
+        (user 2026-10-29: "if mixed track is not expanded, paste at their 1ch position"), -1 = the track's own."""
+        tl, out = self.track_list, []
+        chans = tl.row_chans()
+        for v in rows:
+            lid = -1 - (v - FILE0) if v >= FILE0 else HAND + v if v >= 0 else -1 - v
+            row = tl.row_of_id(lid)
+            mine = chans[row] if row is not None and row < len(chans) else ()
+            if len(mine) > 1 and lid in tl.open:
+                out += [(v, int(c)) for c in mine]
+            else:
+                out.append((v, int(mine[0]) if len(mine) > 1 else -1))
+        return out
+
+    def first_ch(self, target):
+        """A mixed track's first channel (its top Ch row) when target (a placed_on entry) is one, else None: where
+        a shape drawn / pasted with its track row highlighted goes (user 2026-10-29)."""
+        if target is None or target < 0:
+            return None
+        tl = self.track_list
+        row = tl.row_of_id(-1 - (target - FILE0) if target >= FILE0 else HAND + target)
+        chans = tl.row_chans()
+        mine = chans[row] if row is not None and row < len(chans) else ()
+        return int(mine[0]) if len(mine) > 1 else None
+
     def put_into_current(self, sh, relay=True):
         """A new shape is laid from the highlighted track (Draw into a track; fit_into lays its colours). relay
         False (duplicate) or nothing highlighted: one already laid in this project stays where it is. True if it
@@ -2299,6 +2353,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         ch = tl.shown_ch()  # (a folder's "Ch n" row highlighted: on that channel there, check-in C)
         if ch is None and tl.current is not None and tl.current < 0 and tl.file_part(tl.current)[1] is not None:
             ch = tl.part_channel(tl.current)  # (a loaded track's part: on its channel, PLAN #11 D)
+        if ch is None:  # (a mixed track's own row: its first channel, open or shut, user 2026-10-29)
+            ch = self.first_ch(target)
         if ch is not None and target >= 0:
             sh["into_ch"], sh["into_home"] = [ch], [target]
         return False
