@@ -2308,14 +2308,26 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         (user 2026-10-29: "if mixed track is not expanded, paste at their 1ch position"), -1 = the track's own."""
         tl, out = self.track_list, []
         chans = tl.row_chans()
+        # (a loaded track with parts is in rows once per row, track or part, in the list's order: each its own row
+        # on its own channels, hunt 2026-10-29: every part's column landed on the track's first channel)
+        split = {}
+        tl.tracks()
+        for s in (int(v) for v in tl._all):
+            if s < 0 and tl.file_part(s)[1] is not None:
+                split.setdefault(tl.file_part(s)[0], []).append(s)
+        seen = {}
         for v in rows:
             lid = -1 - (v - FILE0) if v >= FILE0 else HAND + v if v >= 0 else -1 - v
+            own_ch = False
+            if v >= FILE0 and v - FILE0 in split:
+                k = seen[v] = seen.get(v, -1) + 1
+                lid, own_ch = split[v - FILE0][min(k, len(split[v - FILE0]) - 1)], True
             row = tl.row_of_id(lid)
             mine = chans[row] if row is not None and row < len(chans) else ()
             if len(mine) > 1 and lid in tl.open:
                 out += [(v, int(c)) for c in mine]
             else:
-                out.append((v, int(mine[0]) if len(mine) > 1 else -1))
+                out.append((v, int(mine[0]) if len(mine) > 1 or (own_ch and mine) else -1))
         return out
 
     def first_ch(self, target):
