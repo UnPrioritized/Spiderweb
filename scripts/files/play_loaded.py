@@ -29,6 +29,7 @@ from files import midi_play, speed
 from files.synth import GROUP_BUFFER, RATE
 from files.midi_scan import (C_BANK, C_BEND, C_BTICK, C_CC, C_CHANNELS, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS,
                              C_PROG, C_PTICK, C_PVAL)
+from files.midi_index import CC_KINDS, K_BEND, K_POLY, K_PRESSURE, K_PROGRAM
 
 STEP_S = 0.003  # the feeder's beat
 AHEAD_S = 1.0  # read this far ahead of the play line at most
@@ -60,6 +61,11 @@ GROW = 1.08  # a budget growing: this much each check
 WARM_S = 2.0  # sound lost this soon after the line starts never lowers a ceiling (start-up loses some at any load)
 _caps = {}  # (synths, voices each, soundfont) -> each synth's learned ceiling, for the next play
 SKIP = 64 * 16 * 128  # (port x channel x key: note-offs still to leave out)
+RPN = (6, 38, 96, 97, 98, 99, 100, 101)  # (controllers that are steps of a setting: never sent alone)
+RESET = (1, 11, 64, 65, 66, 67, K_BEND, K_PRESSURE)  # (what a reset all controllers, CC 121, puts back)
+# a controller as a channel starts (a muted track's put back where no track left on set it; none here = left)
+START = {1: 0, 2: 0, 4: 0, 5: 0, 7: 100, 8: 64, 10: 64, 11: 127, 64: 0, 65: 0, 66: 0, 67: 0, 68: 0, 69: 0,
+         **{c: 64 for c in range(71, 80)}, 84: 0, 91: 40, 93: 0, 94: 0, 95: 0}
 POOL = 12  # windows' arrays kept for use again at most
 POOL_LONGEST = 1 << 23  # ... each this long at most (a wall's big ones go)
 WINDOW_MOST = 4 * WANT  # a window holding more events is read again shorter (one tick: stepped over, counted only)
@@ -231,12 +237,17 @@ class LoadedPlayer:
         self.cp_off = cat([lm.tracks[n].cp_off for n in num])
         self.cp_run = cat([lm.tracks[n].cp_run for n in num])
         self.mode_file = lm.mode != "memory"
-        # (the channels each slot plays on, a bit each: every one muted = the slot isn't read at all, off)
-        used = np.array([int(lm.mf.tracks[n].counts[C_CHANNELS]) for n in num], np.int64)
+        # (the channels each slot plays notes on, a bit each (none: every channel it uses): every one muted = the
+        # slot isn't read at all, off; its controllers on other channels go with it, hunt 2026-10-30)
+        every = np.array([int(lm.mf.tracks[n].counts[C_CHANNELS]) for n in num], np.int64)
+        notes = np.array([int((np.int64(1) << np.flatnonzero(lm.tracks[n].chn)).sum()) for n in num], np.int64)
+        used = np.where(notes != 0, notes, every)
         if self.chans is not None and len(num):
             ch = self.chans[self.num]
             used = np.where(ch >= 0, np.int64(1) << np.maximum(ch, 0), used)
-        self.used = used
+            every = np.where(ch >= 0, np.int64(1) << np.maximum(ch, 0), every)
+        self.used, self.every = used, every
+        self.ctl = np.array([len(lm.tracks[n].c_tick) > 0 or lm.tracks[n].cc_over for n in num], bool)  # (_last_ctl)
         self.off = np.zeros(len(num), bool)
         # (Extract: the hidden events, read as they were when playing started)
         self.sk = lm.skip_all
@@ -434,11 +445,20 @@ class LoadedPlayer:
                                      zip(self.num[slots].tolist(), self.pos[slots].tolist())], np.int64).reshape(-1)
         pos = np.zeros(S, np.int64)  # (the instruments of these slots only)
         pos[slots] = self.pos[slots]
-        before = self._instruments(pos, self.tick.copy())
+        cp = self.tick.copy()
+        before = self._instruments(pos, cp)
         # (notes only counted on the way: what's still open at t0 sounds on past it, each slot's own count; a
         # dense part's millions of notes are never kept, hunt 2026-10-25: 1.9 GB to start inside Shinki's wall)
         ts, ms, ks = self._read(slots, t0, count=opened)
         self._rechannel(before[1], before[2])
+        # (and every other controller set before the checkpoint: volume, pan, pedal, bend; the ones since it are
+        # read, hunt 2026-10-30: a track's volume at its start was lost playing from mid-song)
+        sh = slots[pos[slots] > 0]
+        got = self._last_ctl(sh, cp[sh] + 1)
+        if got is not None:
+            k = got[3] % CC_KINDS
+            own = ~np.isin(k, (0, 32, K_PROGRAM) + RPN)  # (instruments: above; RPN steps: only as read)
+            before = tuple(np.concatenate([a, b[own]]) for a, b in zip(before, got[:3]))
         if self.chans is not None:  # (notes sounding at t0 counted on their tracks' new channels: offs skipped there)
             live = np.flatnonzero(opened)
             ch = self.chans[self.num[live // 2048]]
@@ -463,22 +483,168 @@ class LoadedPlayer:
         self.off = new
         opened, chase = self._placed(t0, np.concatenate([gone, back]))
         live = np.flatnonzero(opened)
-        stop = new[live // 2048]
-        ends, live = live[stop], live[~stop]
+        live = live[~new[live // 2048]]
         skip = np.zeros(SKIP, np.int64)
         if len(live):
             port = self.tport[self.num[live // 2048]] % (16 if self.kind == "kestrel" else 64)
             np.add.at(skip, port * 2048 + live % 2048, opened[live])
+        on = np.flatnonzero(~new)
+        now = self._last_ctl(self._sharing(np.concatenate([gone, back]), on[~np.isin(on, back)]), t0)
         keep = np.isin(chase[2], self.num[back])
-        n = opened[ends]
-        ends = np.repeat(ends, n)
-        offs = (0x80 | (ends // 128 % 16) | (ends % 128) << 8).astype(np.int32)
-        ts = np.concatenate([chase[0][keep], np.full(len(ends), t0, np.int64)])
-        ms = np.concatenate([chase[1][keep], offs])
-        ks = np.concatenate([chase[2][keep], self.num[ends // 2048].astype(np.int32)])
+        ms, ks = chase[1][keep], chase[2][keep]
+        uk, ut = self._newest(now)[:2] if now is not None else ((),) * 2
+        if len(uk) and len(ms):  # (only what's newer than the tracks left on have set on its channels, hunt
+            # 2026-10-30: a muted track's older instrument came back over theirs)
+            key = self._keys(ms, ks)
+            j = np.minimum(np.searchsorted(uk, key), len(uk) - 1)
+            older = (key >= 0) & (uk[j] == key) & (chase[0][keep] <= ut[j])
+            ms, ks = ms[~older], ks[~older]
+        om, ok = self._stops(t0, opened, gone, now)
+        # (all at t0, in order: the comeback's controllers on its earlier ticks came amid what was already sent)
+        ms, ks = np.concatenate([ms, om]), np.concatenate([ks, ok])
         with self._lock:
             if self._gen == gen and self._jump is None:
-                self._queue.append([ts, ms, ks, 0, skip if len(live) else None, None])
+                self._queue.append([np.full(len(ms), t0, np.int64), ms, ks, 0, skip if len(live) else None, None])
+
+    def _sharing(self, slots, among):
+        """The slots of among sharing a port + channel with any of slots (their channel events)."""
+        P = 16 if self.kind == "kestrel" else 64
+        bits = np.zeros(P, np.int64)
+        np.bitwise_or.at(bits, self.tport[self.num[slots]] % P, self.every[slots])
+        return among[(bits[self.tport[self.num[among]] % P] & self.every[among]) != 0]
+
+    def _keys(self, ms, ks):
+        """Each message's place x CC_KINDS + kind (place = port x 16 + channel; banks + instrument one kind:
+        K_PROGRAM), -1 = not a controller."""
+        m = ms.astype(np.int64)
+        hi = m >> 4 & 15
+        kind = np.select([hi == 0xB, hi == 0xC, hi == 0xE, hi == 0xD], [m >> 8 & 127, K_PROGRAM, K_BEND, K_PRESSURE],
+                         -1)
+        kind = np.where((kind == 0) | (kind == 32), K_PROGRAM, kind)
+        place = (self.tport[ks] % (16 if self.kind == "kestrel" else 64)) * 16 + (m & 15)
+        return np.where(kind >= 0, place * CC_KINDS + kind, -1)
+
+    def _last_ctl(self, slots, upto):
+        """The last CC-type event of each channel x kind of each slot before tick upto (one, or one per slot), from
+        the index's kept ones (TrackInfo.c_tick / c_code): (ticks, messages as played, track numbers, keys =
+        place x CC_KINDS + kind, place = port x 16 + channel), in tick order. A CC 121 (reset all controllers)
+        drops the ones it puts back before it; 120-127 (sounds off, modes) and key pressure left out. None = not
+        kept (the MIDI has too many)."""
+        lm, P = self.lm, 16 if self.kind == "kestrel" else 64
+        slots = np.asarray(slots, np.int64)
+        upto = np.broadcast_to(np.asarray(upto, np.int64), slots.shape)
+        has = self.ctl[slots]
+        slots, upto = slots[has], upto[has]
+        out = []
+        for s, u in zip(slots.tolist(), upto.tolist()):
+            n = int(self.num[s])
+            t = lm.tracks[n]
+            if t.cc_over:
+                return None
+            i = int(np.searchsorted(t.c_tick, u, "left"))
+            if not i:
+                continue
+            code = t.c_code[:i].astype(np.int64)
+            hi = code >> 4 & 15
+            kind = np.select([hi == 0xB, hi == 0xC, hi == 0xE, hi == 0xD],
+                             [code >> 8 & 127, K_PROGRAM, K_BEND, K_PRESSURE], K_POLY)
+            u_, first = np.unique(((code & 15) * CC_KINDS + kind)[::-1], return_index=True)
+            at = i - 1 - first  # (each one's last)
+            k, c = u_ % CC_KINDS, u_ // CC_KINDS
+            reset = np.full(16, -1, np.int64)
+            reset[c[k == 121]] = at[k == 121]
+            ok = ((k < 120) | (k == K_PROGRAM) | (k == K_BEND) | (k == K_PRESSURE)) & \
+                ~(np.isin(k, RESET) & (at < reset[c]))
+            at, c, k = at[ok], c[ok], k[ok]
+            msg = code[at]
+            if self.chans is not None and self.chans[n] >= 0:
+                c = np.full(len(c), int(self.chans[n]), np.int64)
+                msg = msg & ~0xF | c
+            place = int(self.tport[n] % P) * 16 + c
+            out.append((t.c_tick[at].astype(np.int64), msg.astype(np.int32), np.full(len(at), n, np.int32),
+                        place * CC_KINDS + k))
+        if not out:
+            return np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32), np.zeros(0, np.int64)
+        got = [np.concatenate(a) for a in zip(*out)]
+        o = np.argsort(got[0], kind="stable")
+        return tuple(a[o] for a in got)
+
+    def _newest(self, now):
+        """_last_ctl's events, the newest of each key (banks + instrument together: K_PROGRAM) over every track:
+        (keys sorted, ticks, messages, track numbers)."""
+        ts, ms, ks = now[:3]
+        key = self._keys(ms, ks)
+        o = np.lexsort((ts, key))
+        key, ts, ms, ks = key[o], ts[o], ms[o], ks[o]
+        last = np.r_[key[1:] != key[:-1], True] if len(key) else np.zeros(0, bool)
+        return key[last], ts[last], ms[last], ks[last]
+
+    def _stops(self, t0, opened, gone, now):
+        """Slots gone (muted while playing) stopped at t0: (messages, track numbers) to send there: their notes
+        sounding (opened) ended; the controllers they set put back as the tracks still on have them (now:
+        _last_ctl of those), else as a channel starts (hunt 2026-10-30: a held pedal rang on, the tracks left on
+        played under it). Not kept (now None): pedal up + bend centred where no track left on plays."""
+        live = np.flatnonzero(opened)
+        ends = live[np.isin(live // 2048, gone)]
+        ends = np.repeat(ends, opened[ends])
+        ms = [(0x80 | (ends // 128 % 16) | (ends % 128) << 8).astype(np.int32)]
+        ks = [self.num[ends // 2048].astype(np.int32)]
+        mine = None if now is None else self._last_ctl(gone, t0)
+        out = []  # (message, track number)
+        if mine is None:
+            on = np.flatnonzero(~self.off)
+            P = 16 if self.kind == "kestrel" else 64
+            taken = np.zeros(P, np.int64)
+            np.bitwise_or.at(taken, self.tport[self.num[on]] % P, self.every[on])
+            for s in gone.tolist():
+                n = int(self.num[s])
+                free = int(self.every[s]) & ~int(taken[self.tport[n] % P])
+                for ch in range(16):
+                    if free >> ch & 1:
+                        out += [(0xB0 | ch | 64 << 8, n), (0xE0 | ch | 64 << 16, n)]
+        else:
+            uk, ut, um, un = self._newest(now)
+            kinds = self._keys(mine[1], mine[2])
+            done = set()
+            for m, n, key in zip(mine[1].tolist(), mine[2].tolist(), kinds.tolist()):
+                if key < 0 or key in done:
+                    continue
+                done.add(key)
+                k, ch = key % CC_KINDS, key // CC_KINDS % 16
+                if k == K_PROGRAM:  # (banks + instrument: the newest of the tracks left on, else bank 0, piano)
+                    base = key - K_PROGRAM
+                    for cc in (0, 32):
+                        v = self._value(now, base + cc, 2)
+                        out.append((0xB0 | ch | cc << 8 | (0 if v is None else v) << 16, n))
+                    v = self._value(now, base + K_PROGRAM, 1)
+                    out.append((0xC0 | ch | (0 if v is None else v) << 8, n))
+                    continue
+                j = int(np.searchsorted(uk, key))
+                if j < len(uk) and uk[j] == key:
+                    out.append((int(um[j]), n))
+                elif k == K_BEND:
+                    out.append((0xE0 | ch | 64 << 16, n))
+                elif k == K_PRESSURE:
+                    out.append((0xD0 | ch, n))
+                elif k in START:
+                    out.append((0xB0 | ch | k << 8 | START[k] << 16, n))
+        if out:
+            ms.append(np.array([m for m, _ in out], np.int32))
+            ks.append(np.array([n for _, n in out], np.int32))
+        return np.concatenate(ms), np.concatenate(ks)
+
+    def _value(self, now, key, byte):
+        """The newest value (data byte 1 or 2) among now's events of exactly key (place x CC_KINDS + kind: bank
+        selects 0 / 32 and the instrument apart), None = none."""
+        ts, ms, ks = now[:3]
+        m = ms.astype(np.int64)
+        hi = m >> 4 & 15
+        kind = np.select([hi == 0xB, hi == 0xC], [m >> 8 & 127, K_PROGRAM], -1)
+        place = (self.tport[ks] % (16 if self.kind == "kestrel" else 64)) * 16 + (m & 15)
+        hit = np.flatnonzero(place * CC_KINDS + kind == key)
+        if not len(hit):
+            return None
+        return int(m[hit[np.argmax(ts[hit])]] >> (8 * byte) & 127)
 
     def _instruments(self, pos, tick):
         """The program changes (with their bank select) and bank selects in effect at each slot's checkpoint (pos /
@@ -704,13 +870,16 @@ class LoadedPlayer:
         with self._lock:
             gen, p, tm = self._unpart
             self._queue.clear()
-        self.off[:] = False  # (the part held every track: all placed, the mutes then taken by _reoff)
-        self._place(tm)
+        self.off[:] = False  # (the part held every track: all placed, the muted ones then stopped there, read once)
+        opened = self._placed(tm)[0]
+        self.off = self._off_now()
+        gone = np.flatnonzero(self.off)
+        on = np.flatnonzero(~self.off)
+        ms, ks = self._stops(tm, opened, gone, self._last_ctl(self._sharing(gone, on), tm))
         with self._lock:
             self._unpart = None
             if self._gen == gen:
-                self._queue.append([np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32), 0, None,
-                                    None])
+                self._queue.append([np.full(len(ms), tm, np.int64), ms, ks, 0, None, None])
                 self._horizon = tm
         return tm
 
