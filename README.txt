@@ -6,6 +6,11 @@ one, you draw on a piano roll (it looks and works much like Domino's) and
 every key your drawing crosses gets a note: a slanted line becomes a smooth
 staircase of notes, a filled circle becomes a round block of notes.
 
+It's not a MIDI sequencer. It isn't made for writing a song note by note:
+there are no tools for placing or editing single notes, no controller (CC)
+editing outside the Hz bass, and no instruments or plugins. Make your shapes
+here, then finish the song in a sequencer like Domino.
+
 New versions, source code and problem reports:
 https://github.com/UnPrioritized/Spiderweb
 
@@ -25,10 +30,18 @@ What it can do
 - Image to notes: turn an image into notes in up to 15 colours (16 with
   channel 10).
 - Note tools: Claw machine, Strum and Chop pages that change the notes of a
-  shape, Add between (shapes that step from one shape to another), slicing
+  shape, Add between (shapes that step from one shape to another), Recolour,
+  Gate trim, Fill gaps, slicing (with a line, a Lasso loop or another shape)
   and merging.
+- Load MIDI: open a MIDI file, even a huge dense one, draw on top of it,
+  change its tempo, reorder or draw into its tracks; the export changes only
+  what you changed.
+- Track list and Conductor pane: see and arrange the tracks your MIDI will
+  have (Tab), and draw the tempo as a line with jumps, glides and catch-ups,
+  plus time and key signatures.
 - Share shapes with others as one line of text.
-- Play it as you go, then write a .mid file, or copy the notes straight into
+- Play it as you go (Built-in BASSMIDI, or Kestrel on the graphics card for
+  walls of notes), then write a .mid file, or copy the notes straight into
   Domino (and paste notes from Domino, or save a Domino song file).
 - Settings: light or dark look, your own note colours, size, font and
   language.
@@ -70,7 +83,8 @@ and mouse shortcuts.
   Right-drag       listen to the notes under the mouse
   Wheel            scroll (Ctrl+wheel = zoom, middle-drag = scroll)
   Ctrl+Z / Ctrl+Y  undo / redo
-  Export MIDI    (Project, on the right) writes the .mid file
+  Tab              track list <-> piano roll
+  Ctrl+E           Export MIDI (File menu): writes the .mid file
 
 
 Good to know
@@ -83,7 +97,7 @@ Copying to Domino
 - Use the same PPQ in both: the ticks are copied as they are.
 - Pasting works the other way too: notes copied in Domino (Ctrl+C there) and
   pasted in Spiderweb (Ctrl+V) become one shape, starting at the play line.
-  Only the notes come along (no controllers).
+  The tempo, signatures, CC, pitch bend and program changes come along too.
 
 Copying to other programs (Spiderweb Notes)
 - With Settings > General > "Ctrl+C also copies as Spiderweb Notes" ticked,
@@ -106,7 +120,7 @@ Limits
 - Editing the notes in Domino and pasting them back works, but it can change
   which channels they are on. To keep the colours (channels), right-click
   the shape and pick Turn into plain notes instead: the notes stay on their
-  channels, and you can cut them with the Slice tool.
+  channels, and you can cut them with the Slice or Lasso tool.
 - Domino can't hold notes longer than 65,535 ticks. Copy and Export to
   Domino cut them to that length and tell you.
 
@@ -117,7 +131,8 @@ Autosave and problems
   double-click (Windows).
 - Everything you do is saved on its own (user/autosave.json). Each time
   Spiderweb starts, the previous session is also kept as
-  autosave-backup.json: open it with Open... if something went wrong.
+  autosave-backup.json: open it with File -> Open... if something went
+  wrong.
 - If Spiderweb runs into an error, the details go to spiderweb-error.log
   next to it. If it closes by itself, spiderweb-crash.log there says where
   (it's written the next time Spiderweb starts). Please include these files
