@@ -93,6 +93,8 @@ What's new:
 
 • Plain notes (Turn into plain notes, path copies turned into plain shapes) follow Settings → General → Overlapping shapes keep their colours: off, an overlapping one takes the next free channels.
 
+• Big projects are much faster: Notes by snap, Slice, Lasso, Turn into live shape (Ctrl+R), Join, Make complete again, the Shapes list and the Conductor pane keep up with far more shapes, strokes and tempo points.
+
 • Fixes: merging no longer leaves gaps where a row is shorter; plain shapes keep their colours apart and no longer move a channel onto channel 10; quick right-clicks no longer switch tools; no more typing lag in the output name, BPM and beats per bar boxes; texts no longer get cut off with wider system fonts; the toolbar's pinned tools wrap and Help stays at the top right; Delete and Ctrl+A work after clicking a toolbar button, also in the Hz bass window.
 
 ## Version 1.6.1
