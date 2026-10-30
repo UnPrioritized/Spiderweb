@@ -29,7 +29,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
-                         bpm_text, clamp_bpm, curve, drawn_from, drop_loose, end_point, formula_fn,
+                         bpm_text, clamp_bpm, curve, drawn_bpm, drawn_from, drop_loose, end_point, formula_fn,
                          catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_runs, keeps, on_beat,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
                          swap_part, tempo_text)
@@ -544,9 +544,11 @@ class TempoBox(ttk.Frame):
     def picked_keep(self):
         pick = self.pane.picked()
         if pick and pick[0] == "part" and self.mode == "visual":
-            i = pick[1]  # (a part of a Keep timing run: the whole run, user 2026-10-24: they're one part)
+            i = pick[1]  # (a part of a Keep timing run: the whole run, user 2026-10-24: they're one part; but Off =
+            # only the picked part, user 2026-10-30: the parts before / after keep it, reading the same heard line)
+            want = KEEP_HOW[max(0, self.keep_box.current())]
             s, t = next((r for r in keep_runs(self.app.tempo) if r[0] <= i <= r[1]), (i, i))
-            self.set_keep(list(range(s, t + 1)), KEEP_HOW[max(0, self.keep_box.current())])
+            self.set_keep([i] if want == "off" else list(range(s, t + 1)), want)
         self.app.roll.focus_set()
 
     def picked_keeps(self):
@@ -879,6 +881,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
         except (ValueError, ArithmeticError, TypeError, SyntaxError):
             pass
         return 120.0
+
+    def view_bpm(self):
+        """The bold number + its faint line (user 2026-10-30; it showed the old BPM box's 120): the tempo coming
+        into view at the piano roll's left edge: the drawn line's (the file's whole microseconds made 90 read
+        89.99995), 2 decimals like the bar's "Tempo"."""
+        b = max(0.0, self.app.roll.x2t(self.app.roll.kb_w))
+        return round(float(drawn_bpm(self.app.tempo, self.base(), [b])[0]), 2)
 
     def area(self):
         return self.pad, self.winfo_height() - 1 - self.pad
@@ -1470,6 +1479,10 @@ class TempoPane(ConductorMarks, tk.Canvas):
         if got is not None:  # an arrow to the line out of view: scrolled there
             self._off_click = (time.perf_counter(), e.x, e.y)
             return self.scroll_to_off(got)
+        got = self.limit_arrow_at(e.x, e.y)
+        if got is not None:  # an arrow to a Keep timing limit spot out of view: scrolled there
+            self._off_click = (time.perf_counter(), e.x, e.y)
+            return self.scroll_to_limit(got)
         if self.after_off_click(e):  # (its second click: nothing under it now, hunt 2026-10-29)
             return
         w = self.edges_on()
@@ -1977,7 +1990,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
         roll = self.app.roll
         if roll.sx is None or self.view is None or e.x < roll.kb_w:
             return
-        if self.off_mark_at(e.x, e.y) is not None or self.after_off_click(e):  # (a double-click on an out-of-view
+        if self.off_mark_at(e.x, e.y) is not None or self.limit_arrow_at(e.x, e.y) is not None or \
+                self.after_off_click(e):  # (a double-click on an out-of-view
             return  # arrow only scrolls: the 2nd click drew a point / pasted the copy there, hunt 2026-10-29)
         if self.edges_on() is not None:  # (Jump areas: a press like any other, never a point's box)
             return self.on_press(e)
@@ -2793,6 +2807,8 @@ class TempoPane(ConductorMarks, tk.Canvas):
             want, hint = "sb_v_double_arrow", "numbers"
         elif self.off_mark_at(e.x, e.y) is not None:
             want, hint = "hand2", "off_view"
+        elif self.limit_arrow_at(e.x, e.y) is not None:
+            want, hint = "hand2", "limit_arrow_" + self.limit_arrow_at(e.x, e.y)[1]
         elif w is not None:  # (Jump areas: clicks make edges, near one = drag it)
             ch = w.live_chain()
             want, hint = ("sb_h_double_arrow", "on_area_edge") if ch and ch.edge_near(e.x) is not None else \
@@ -3038,7 +3054,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.after_idle(self.redraw)
 
     def labels(self):
-        """[(bpm, strong)] numbers for the left side: the project's BPM, the file's limits, (exponential: doublings
+        """[(bpm, strong)] numbers for the left side: the tempo coming into view (bold, view_bpm), the file's limits, (exponential: doublings
         of 15), then rounder numbers as they fit."""
         lo, hi = self.view
         top, bot = self.area()
@@ -3052,7 +3068,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
         def room(v):
             return all(abs(a(v) - a(p)) * per >= gap for p, _ in placed)
 
-        base = self.base()
+        base = self._view_bpm if getattr(self, "_view_bpm", None) is not None else self.view_bpm()
         if lo <= a(base) <= hi:
             placed.append((base, True))
         if not self.log and lo <= 0 and room(0):  # (linear: 0 BPM at the bottom, like the velocity pane)
@@ -3169,6 +3185,50 @@ class TempoPane(ConductorMarks, tk.Canvas):
             self.set_view(u - room, u - room + span)
         self.request_redraw()
 
+    def draw_limit_arrows(self, words, kb, w, h):
+        """A small arrow at a Keep timing part's edge in view when the part has limit spots (draw_limits' texts)
+        out of view that way (user 2026-10-30: they showed only when the spot itself was in view; everywhere
+        would clutter). Its colour = the nearest spot's text's; clicking it scrolls to that spot (scroll_to_limit).
+        words: draw_all's [x0, x1, too close, run, end beat, start beat] of the parts in view."""
+        roll, s = self.app.roll, self.scale
+        vl, vr = roll.x2t(kb), roll.x2t(w)
+        arrows = []
+        for x0, x1, _, _, b1, b0 in words:
+            near = {}  # left / right: (beat, kind) of the nearest spot out of view
+            for kind in ("dense", "unfit", "gave", "moved"):
+                spots = self._limits.get(kind) or []
+                i = bisect.bisect_left(spots, vl - 1e-9)  # (left: in the part, before the view)
+                if i > 0 and spots[i - 1] >= b0 - 1e-9 and (near.get("left") is None or spots[i - 1] > near["left"][0]):
+                    near["left"] = (spots[i - 1], kind)
+                j = bisect.bisect_right(spots, vr + 1e-9)  # (right: in the part, past the view)
+                if j < len(spots) and spots[j] <= b1 + 1e-9 and (near.get("right") is None or
+                                                                spots[j] < near["right"][0]):
+                    near["right"] = (spots[j], kind)
+            for side, (b, kind) in near.items():
+                x = x0 + 9 * s if side == "left" else x1 - 9 * s
+                arrows.append((x, h - 10 * s, side == "left", b, kind))
+        self._limit_arrows = arrows
+        for x, y, left, _, kind in arrows:
+            d = -1 if left else 1
+            self.create_polygon(x + 6 * s * d, y, x - 4 * s * d, y - 6 * s, x - 4 * s * d, y + 6 * s,
+                                fill=look.ERROR if kind in ("dense", "unfit") else look.WARN, outline=look.ROLL_BG,
+                                tags="limit_arrow")
+
+    def limit_arrow_at(self, x, y):
+        """(beat, kind) of the arrow (draw_limit_arrows) at x, y; None."""
+        r = 9 * self.scale
+        for ax, ay, _, b, kind in getattr(self, "_limit_arrows", ()):
+            if abs(ax - x) <= r and abs(ay - y) <= r:
+                return b, kind
+        return None
+
+    def scroll_to_limit(self, got):
+        """A limit arrow clicked: the piano roll's time moved (same zoom) so that spot is in the middle."""
+        roll = self.app.roll
+        roll.view_t = got[0] - (self.winfo_width() - roll.kb_w) / 2 / roll.sx
+        roll.clamp_view()
+        roll.request_redraw()
+
     def line_xy(self, worked, w, kb, tempo=None, base=None):
         """The tempo line (tempo: this one, base its BPM before the first point; else the project's) from x = kb
         to w as (xs, beats, ys): every 2 px, plus each jump drawn exactly upright (the beat just before and the
@@ -3279,11 +3339,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
             return
         self.delete("all")
         self._off_marks = []  # (draw_off_marks: none until drawn)
+        self._limit_arrows = []  # (draw_limit_arrows: the same)
         roll, app = self.app.roll, self.app
         w, h = self.winfo_width(), self.winfo_height()
         kb = int(roll.kb_w)
         if roll.sx is None or w - kb < 2 or h < 2 * self.pad + 10:
             return
+        self._view_bpm = self.view_bpm()  # (the bold number + its line: worked out once a drawing)
         if self.view is None:
             self.fit_view(False)
         tempo, base = app.tempo, self.base()
@@ -3375,10 +3437,11 @@ class TempoPane(ConductorMarks, tk.Canvas):
             y = round(float(self.b2y(0)))
             if 0 <= y <= h:
                 self.create_line(kb, y, w, y, fill=look.CHART_GRID_STRONG)
-        y = float(self.b2y(base))
+        y = float(self.b2y(self._view_bpm))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
         dense = self.dense_now()
-        words = []  # [x0, x1, too close, run, end beat]: a run's pieces side by side = one part, one word (user)
+        words = []  # [x0, x1, too close, run, end beat, start beat]: a run's pieces side by side = one part, one
+        # word (user)
         for x0, x1, u, b0, b1, i in keep_spans:
             # notes too close for its tempo (user 2026-10-22: shown while editing, not only after the export): a
             # dashed orange line on each spot (one per pixel)
@@ -3390,12 +3453,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
             if words and words[-1][3] == run_of.get(i) and abs(words[-1][4] - b0) < 1e-9:
                 words[-1][1], words[-1][2], words[-1][4] = x1, words[-1][2] or bad, b1
             else:
-                words.append([x0, x1, bad, run_of.get(i), b1])
-        for x0, x1, bad, _, _ in words:  # (the words on top)
+                words.append([x0, x1, bad, run_of.get(i), b1, b0])
+        for x0, x1, bad, *_ in words:  # (the words on top)
             text, colour = (tr("tempo.keep_dense"), look.WARN) if bad else (tr("tempo.keep"), look.TEMPO_KEEP)
             if x1 - x0 > 70 * self.scale:
                 self.create_text((x0 + x1) / 2, top + 8 * self.scale, text=text, fill=colour,
                                  font=look.font(8, "bold"))
+        self.draw_limit_arrows(words, kb, w, h)
         # the line itself (faded while the heard line is drawn: user 2026-10-24)
         preview = self.drag_preview()  # (a line being drawn: the tempo as letting go gives it)
         if preview and "tempo" in preview:
