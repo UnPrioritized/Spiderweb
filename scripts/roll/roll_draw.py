@@ -538,13 +538,17 @@ class RollDrawing:
         w, h = self.winfo_width(), self.winfo_height()
         if self.sx is None or w < 50:
             self.delete("all")
-            self._grid_key = self._frame_key = None
+            self._grid_key = self._frame_key = self._kb_key = None
             return
-        frame_key = (w, h, self.kb_w, self.ruler_h, self.sx, self.sy, self.view_t, self.view_top, self.scale,
-                     self.app.keys, self.app.edo(), json.dumps(sigs_of(self.app.tempo)),
+        # (keyboard and ruler kept apart: a sideways scroll draws only the ruler again)
+        kb_key = (h, self.kb_w, self.ruler_h, self.sy, self.view_top, self.scale, self.app.keys, self.app.edo())
+        frame_key = (w, self.kb_w, self.ruler_h, self.sx, self.view_t, self.scale, json.dumps(sigs_of(self.app.tempo)),
                      json.dumps(self.app.tempo.get("keysigs")), self.track_mark())
+        if kb_key != self._kb_key:
+            self.delete("kbd", "playhead")
+            self._kb_key = None
         if frame_key != self._frame_key:
-            self.delete("frame", "playhead")
+            self.delete("ruler", "playhead")
             self._frame_key = None
         app = self.app
         rows, cols = self.grid_parts(w, h)
@@ -679,10 +683,16 @@ class RollDrawing:
         self.draw_centre_dots()
         self.draw_melody_lit()
         self.draw_sustain_stops()
-        if self._frame_key is None:
-            self.draw_keyboard(h)
-            self.draw_ruler(w)
-            self._frame_key = frame_key
+        if self._kb_key is None or self._frame_key is None:
+            if self._kb_key is None:
+                self.draw_keyboard(h)
+                self._kb_key = kb_key
+            if self._frame_key is None:
+                self.draw_ruler(w)
+                self._frame_key = frame_key
+            self.addtag_withtag("made", "!(grid||frame||playhead)")  # (the shapes made now: under the kept part)
+            self.tag_lower("made", "frame")
+            self.dtag("made")
             self.draw_playhead()
         else:  # (what was made now goes under the kept keyboard + ruler, in its own order)
             self.addtag_withtag("made", "!(grid||frame||playhead)")
@@ -1794,7 +1804,7 @@ class RollDrawing:
     def draw_keyboard(self, h):
         """Piano keys follow the pitch zoom: black keys on their rows, white-key edges between B/C and E/F."""
         kb, top = self.kb_w, self.ruler_h
-        self.create_rectangle(0, top, kb, h, fill=look.KEY_WHITE, outline="", tags="frame")
+        self.create_rectangle(0, top, kb, h, fill=look.KEY_WHITE, outline="", tags=("frame", "kbd"))
         p_lo, p_hi = self.visible_pitches(h)
         font_size = max(7, min(11, int(self.sy * 0.6 / self.scale)))
         # faintly greyed: outside a real 88-key piano; with 256 keys, above the standard 128 instead (31-EDO: the
@@ -1809,15 +1819,15 @@ class RollDrawing:
             n = p % size
             half = edo and n not in EDO_WHITE and n not in black  # (31-EDO's half sharps / flats: narrower, grey)
             if p not in usual:
-                self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="", tags="frame")
+                self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="", tags=("frame", "kbd"))
             if n in black:
                 self.create_rectangle(0, y0, kb * black_w, y1,
-                                      fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE, outline="", tags="frame")
+                                      fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE, outline="", tags=("frame", "kbd"))
             elif half:
                 self.create_rectangle(0, y0, kb * half_w, y1, fill=look.KEY_HALF if p in usual else look.KEY_HALF_OUTSIDE,
-                                      outline="", tags="frame")
+                                      outline="", tags=("frame", "kbd"))
             if n in (0, f):  # bottom edge of C and F = white key border
-                self.create_line(0, y1, kb, y1, fill=look.KEY_EDGE_C if n == 0 else look.KEY_EDGE_F, tags="frame")
+                self.create_line(0, y1, kb, y1, fill=look.KEY_EDGE_C if n == 0 else look.KEY_EDGE_F, tags=("frame", "kbd"))
             white = n not in black and not half  # (31-EDO: every row named once there's room)
             label = note_name(p, edo) if n == 0 and self.sy >= 6 else (
                 note_name(p, edo) if (white or edo) and self.sy >= 16 else None)
@@ -1825,19 +1835,19 @@ class RollDrawing:
                 self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill=look.KEY_TEXT,
                                  font=look.font(font_size if white else min(font_size, 8), "bold" if n == 0 else "normal",
                                                  fit=True),
-                                 tags="frame")
-        self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE, tags="frame")
+                                 tags=("frame", "kbd"))
+        self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE, tags=("frame", "kbd"))
 
     def draw_ruler(self, w):
         kb, top = self.kb_w, self.ruler_h
         beats = self.app.beats
-        self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="", tags="frame")
-        self.create_line(0, top, w, top, fill=look.ROLL_EDGE, tags="frame")
+        self.create_rectangle(0, 0, w, top, fill=look.RULER_BG, outline="", tags=("frame", "ruler"))
+        self.create_line(0, top, w, top, fill=look.ROLL_EDGE, tags=("frame", "ruler"))
         for x, label in self.ruler_marks(w):
-            self.create_line(x, top - 6, x, top, fill=look.RULER_TICK, tags="frame")
+            self.create_line(x, top - 6, x, top, fill=look.RULER_TICK, tags=("frame", "ruler"))
             self.create_text(x + 3, self.bar_y(), text=label, anchor="w", fill=look.RULER_TEXT,
-                             font=look.font(8, fit=True), tags="frame")
-        self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags="frame")
+                             font=look.font(8, fit=True), tags=("frame", "ruler"))
+        self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags=("frame", "ruler"))
         mark = self.track_mark()
         self.mark_full = ""
         if mark:  # (only one track shows: its name in the corner, so hidden notes never look lost)
@@ -1850,7 +1860,7 @@ class RollDrawing:
                 shown += "…"
                 self.mark_full = mark
             self.create_text(kb / 2, top / 2, text=shown, fill=look.TRACK_PICK, font=font,
-                             tags=("frame", "trackmark"))
+                             tags=("frame", "ruler", "trackmark"))
 
     def track_mark(self):
         """The corner's text: the track the track list highlights ("Track 3"), else "All tracks" (user 2026-10-26:

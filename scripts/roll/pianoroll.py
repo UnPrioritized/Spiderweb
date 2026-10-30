@@ -111,7 +111,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.paint_time = 0.0    # seconds the last whole repaint of the notes took (app.shapes_changed: slow?)
         self._redraw_pending = False
         self._late_redraw = None  # request_redraw(delay)'s timer
-        self._grid_key = self._frame_key = self._playhead_x = None  # what the kept canvas items show (redraw)
+        self._grid_key = self._frame_key = self._kb_key = self._playhead_x = None  # what the kept canvas items show (redraw)
         self._tempo_key, self.tempo_tips = None, []  # the ruler's tempo marks (draw_tempo_marks): [(x0, x1, tip)]
         self.cc_tips = []  # ... and its CC row's (draw_cc_marks)
         self.mark_full = ""  # (the corner's track name when it was cut short: draw_ruler, its tip)

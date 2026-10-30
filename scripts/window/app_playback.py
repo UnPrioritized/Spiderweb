@@ -67,6 +67,12 @@ def _same_opts(a, b):
     return {k: v for k, v in a.items() if k != "lower"} == {k: v for k, v in b.items() if k != "lower"}
 
 
+def scrub_note(out, ch, p, vel):
+    """Right-drag listening's note on / off: channel None = a piano roll row played in 31-EDO, else as it is (a
+    loaded MIDI's notes stay as written then, like playback)."""
+    out.note(ch or 0, p, vel, rows=ch is None)
+
+
 def readable(n):
     """n to 3 figures for the status line's red text (466,814 -> 467,000: it changes every moment, unreadable)."""
     n = int(round(n))
@@ -1398,18 +1404,20 @@ class Playback:
                 self.status.config(text=err)
                 return False
         lo, hi = min(t_from, t_to), max(t_from, t_to)
-        now = {}  # (channel, key) -> (start of the latest note there, velocity)
+        now = {}  # (channel, key) -> (start of the latest note there, velocity); channel None = a 31-EDO row
         near = self.roll.visible_notes(lo, hi)
         near = near[near[:, 3] >= -1]  # (the track list's faint tracks: shown only, not listened to)
         s_, e_ = near[:, 0], near[:, 1]
         tuned = out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
-            k = (0 if tuned else slot_track_channel(slot, self.picture_use10)[1], p)
+            k = (None if tuned else slot_track_channel(slot, self.picture_use10)[1], p)
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
         held = self._scrub_held
-        if self.loaded is not None and not tuned:  # (a loaded MIDI's notes drawn on top there; Spiderweb's own win
-            from roll.roll_loaded import loud_on, scrub_notes, shown_only, shown_tracks  # a key both sound)
+        # (a loaded MIDI's notes drawn on top there; Spiderweb's own win a key both sound; 31-EDO: its notes played
+        # as written, like playback plays them, Spiderweb's own rows tuned beside them)
+        if self.loaded is not None:
+            from roll.roll_loaded import loud_on, scrub_notes, shown_only, shown_tracks
             order, faint = shown_tracks(self, self.loaded)
             if order is not None:  # (faint tracks: shown only, not listened to, like Spiderweb's)
                 order = tuple(n for n in order if n not in faint)
@@ -1426,13 +1434,13 @@ class Playback:
         if out.edo and out.name != BUILTIN and now and not held:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
         for k in [k for k in held if k not in now]:
-            out.note(*k, 0, rows=True)
+            scrub_note(out, *k, 0)
             del held[k]
         for (ch, p), (s, v) in now.items():
             if held.get((ch, p)) != s:  # a new note on this key (back-to-back spam notes each sound)
                 if (ch, p) in held:
-                    out.note(ch, p, 0, rows=True)
-                out.note(ch, p, v, rows=True)
+                    scrub_note(out, ch, p, 0)
+                scrub_note(out, ch, p, v)
                 held[(ch, p)] = s
         self.roll.scrub_t = t_to / self.ppq  # (a line of its own: the play line stays where it is, user)
         self.roll.draw_playhead()
@@ -1453,7 +1461,7 @@ class Playback:
     def scrub_end(self):
         out = self.scrub_out()
         for ch, p in self._scrub_held:
-            out.note(ch, p, 0, rows=True)
+            scrub_note(out, ch, p, 0)
         self._scrub_held.clear()
         if self.roll.scrub_t is not None:
             self.roll.scrub_t = None
