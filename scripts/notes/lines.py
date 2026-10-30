@@ -7,34 +7,37 @@ dev/data/shard-flip/imageset1 + imageset2)."""
 import numpy as np
 
 
-def note_lines(notes, tracks=None):
+def note_lines(notes, tracks=None, gap=0):
     """(start, end, key, ...) notes + each one's track (None = all one track) -> (each note's line, how many). Lines
-    are numbered by track (in number order), then first start, then lowest key."""
+    are numbered by track (in number order), then first start, then lowest key. gap: notes up to that many ticks
+    apart still touch (the user's allowance, user 2026-10-30: slanted strips of short notes with small gaps; 0 =
+    the pictures' rule)."""
     n = len(notes)
     if not n:
         return np.zeros(0, np.int64), 0
+    gap = max(int(gap), 0)
     start, end, key = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
     tracks = np.zeros(n, np.int64) if tracks is None else np.asarray(tracks, np.int64)
     # each track's notes on each key in time order -> RUNS of touching ones (one covered stretch each)
     _, t_rank = np.unique(tracks, return_inverse=True)
     t_rank = t_rank.reshape(-1)
-    k0, t0 = int(key.min()), int(start.min())
+    k0, t0 = int(key.min()), int(start.min()) - gap  # (times from gap up: reaching gap back stays in the lane)
     lane = t_rank * (int(key.max()) - k0 + 2) + (key - k0)  # (+2: a track's top key + 1 is an empty lane)
-    span = int(max(end.max(), start.max())) - t0 + 2
+    span = int(max(end.max(), start.max())) - t0 + 2 + gap
     o = np.lexsort((start, lane))
     ln, s, e = lane[o], start[o] - t0, end[o] - t0
     reach = np.maximum.accumulate(ln * span + e)  # (furthest end so far, never carried into the next lane)
     new = np.ones(n, bool)
-    new[1:] = (ln[1:] != ln[:-1]) | (ln[1:] * span + s[1:] > reach[:-1])
+    new[1:] = (ln[1:] != ln[:-1]) | (ln[1:] * span + s[1:] > reach[:-1] + gap)
     run = np.cumsum(new) - 1
     at = np.flatnonzero(new)
     r_lane, r_start = ln[at], s[at]
     r_end = np.maximum.reduceat(e, at)
     # runs on the key above that touch each run: those ending at / after its start AND starting at / before its end
-    # (runs on one key never touch each other, so both are sorted and the matches are one stretch)
+    # (gap ticks allowed; runs on one key never touch each other, so both are sorted and the matches are one stretch)
     s_code, e_code = r_lane * span + r_start, r_lane * span + r_end
-    lo = np.searchsorted(e_code, (r_lane + 1) * span + r_start, "left")
-    hi = np.searchsorted(s_code, (r_lane + 1) * span + r_end, "right")
+    lo = np.searchsorted(e_code, (r_lane + 1) * span + r_start - gap, "left")
+    hi = np.searchsorted(s_code, (r_lane + 1) * span + r_end + gap, "right")
     many = np.maximum(hi - lo, 0)
     a = np.repeat(np.arange(len(at)), many)
     b = lo[a] + (np.arange(len(a)) - np.repeat(np.cumsum(many) - many, many))
@@ -52,6 +55,19 @@ def note_lines(notes, tracks=None):
     out = np.empty(n, np.int64)
     out[o] = number[g[run]]
     return out, len(g_ids)
+
+
+def flipped_lines(notes, line, count, sideways):
+    """Each line mirrored inside its own span: sideways = in time (start' = lo + hi - end), else upside down
+    (key' = lowest + highest - key). Everything else of each note kept. -> a new array."""
+    lo, hi, kl, kh = line_spans(notes, line, count)
+    out = np.array(notes, np.int64, copy=True)
+    if sideways:
+        out[:, 0] = lo[line] + hi[line] - notes[:, 1]
+        out[:, 1] = lo[line] + hi[line] - notes[:, 0]
+    else:
+        out[:, 2] = kl[line] + kh[line] - notes[:, 2]
+    return out
 
 
 def joined(n, a, b):

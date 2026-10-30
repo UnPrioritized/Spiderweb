@@ -18,6 +18,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.fillgaps import fill_gaps as filled, needs_fill
+from notes.lines import flipped_lines, note_lines
 from notes.passengers import pack_cc, unpack_cc
 from files.own_tracks import into_ids
 from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
@@ -73,6 +74,12 @@ def by_owner(rows):
     rows = rows[o]
     owners = rows[:, 5]
     return lambda i: rows[np.searchsorted(owners, i):np.searchsorted(owners, i, side="right")]
+
+
+def line_tracks(owner, slot):
+    """The line tools' track per note: a shape's own colour (lines never cross shapes or colours). Slots stay under
+    2 ** 40 (own tracks' OWN0 = 2 ** 32 + id x 16)."""
+    return np.asarray(owner, np.int64) << 40 | np.asarray(slot, np.int64)
 
 
 def without10(sh, use10):
@@ -753,18 +760,7 @@ class JoinSplit:
         if not changed[0]:
             self.status.config(text=tr("fill_gaps.no_gaps"))
             return
-        for i, sh in new.items():
-            old = self.shapes[i]
-            if "notes" in old and not old.get("merge"):  # (pasted / plain notes already: keep their name)
-                sh["name"] = old.get("name", sh["name"])
-                if old.get("made"):
-                    sh["made"] = old["made"]
-            if old.get("own_slots") is True:  # (Extract / an image's masked notes: channels fixed in every mode,
-                sh["own_slots"] = True       # hunt 10-25; without10 left its tracks + slots10 by that rule)
-            if "picture_notes" in old:
-                sh["picture_notes"] = copy.deepcopy(old["picture_notes"])
-            if same == "both" or old.get("held"):  # (overlaps kept: not cut again by the overlap rule)
-                sh["held"] = True
+        self.plain_kept(new, same == "both")
         gone = [i for i in sorted(had) if i not in new]  # (shapes that never had notes stay as they are, hunt)
         lost = clean_extract([g for i in gone for g in extract_groups(held_extract(self.shapes[i]))])
         if lost and new:  # (its loaded notes stay out of the file while the filled notes are there, hunt)
@@ -784,6 +780,82 @@ class JoinSplit:
             self.select_many([], None)
         self.shapes_changed()
         self.status.config(text=trn("fill_gaps.done", len(kept), n=len(kept)))
+
+    def plain_kept(self, new, held=False):
+        """Fill gaps / the line tools: what each new plain shape keeps of the shape it replaces (pasted / plain
+        notes: their name; fixed channels, an image's colours, overlaps kept). held: overlaps kept for all."""
+        for i, sh in new.items():
+            old = self.shapes[i]
+            if "notes" in old and not old.get("merge"):  # (pasted / plain notes already: keep their name)
+                sh["name"] = old.get("name", sh["name"])
+                if old.get("made"):
+                    sh["made"] = old["made"]
+            if old.get("own_slots") is True:  # (Extract / an image's masked notes: channels fixed in every mode,
+                sh["own_slots"] = True       # hunt 10-25; without10 left its tracks + slots10 by that rule)
+            if "picture_notes" in old:
+                sh["picture_notes"] = copy.deepcopy(old["picture_notes"])
+            if held or old.get("held"):  # (overlaps kept: not cut again by the overlap rule)
+                sh["held"] = True
+
+    def line_targets(self):
+        """The selected shapes the line tools work on (Flip each line…; notes/lines.py): Fill gaps' (not Hz bass,
+        images or masks). Drawn ones become plain notes in the same step (lines_window asks first)."""
+        return self.fill_targets()
+
+    def line_count(self, gap):
+        """How many lines the line tools' shapes have (each shape's own colours = its tracks), or None: no notes."""
+        got = self.line_targets()
+        key = (id(self.rendered), self.shapes_gen, self.channel_mode.get())
+        kept = getattr(self, "_fill_multi", None)
+        if kept and kept[0] == key:
+            multi = kept[1]
+        else:
+            multi = self.multi_rendered()[1]
+            self._fill_multi = (key, multi)
+        rows = multi[np.isin(multi[:, 5], got)] if got else multi[:0]
+        if not len(rows):
+            return None
+        return note_lines(rows, line_tracks(rows[:, 5], rows[:, 4]), gap)[1]
+
+    def flip_lines(self, sideways, gap):
+        """Flip each line sideways / upside down (notes/lines.py; user 2026-10-30, "shard flips"): the selected
+        shapes' notes as laid in Multi channel (like Fill gaps), every line of each shape's colours mirrored inside its
+        own time span / key range. Each shape becomes its own plain-notes shape, colours kept. One undo step;
+        nothing changing = status line, no step."""
+        self.commit_typing()
+        got = self.line_targets()
+        if not got:
+            self.status.config(text=tr("lines.nothing"))
+            return
+        flipped = []
+
+        def together(rows):
+            order = sorted(rows)
+            both = np.concatenate([rows[i] for i in order])
+            owner = np.concatenate([np.full(len(rows[i]), i, np.int64) for i in order])
+            line, n = note_lines(both, line_tracks(owner, both[:, 4]), gap)
+            out = flipped_lines(both, line, n, sideways)
+            flipped.append(len(np.unique(line[(out[:, :3] != both[:, :3]).any(1)])))
+            ends = np.searchsorted(owner, order + [order[-1] + 1])
+            return {i: out[ends[j]:ends[j + 1]] for j, i in enumerate(order)}
+        self.busy(tr("lines.busy"))
+        try:
+            new = self.plain_copies(got, together=together, whole=True)
+        finally:
+            self.busy(None)
+        if not flipped:
+            self.status.config(text=tr("lines.nothing"))
+            return
+        if not flipped[0]:
+            self.status.config(text=tr("lines.no_change"))
+            return
+        self.plain_kept(new)
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("lines.title_" + ("sideways" if sideways else "upside")))
+        self.put_plain(new)
+        self.select_many(got, self.sel if self.sel in got else got[0])
+        self.shapes_changed()
+        self.status.config(text=trn("lines.done", flipped[0], n=f"{flipped[0]:,}"))
 
     def plain_copies(self, got, moved=None, own=False, together=None, whole=False):
         """Turn into plain notes' new shapes: {i: a shape of shape i's notes exactly as they sound now, each note on

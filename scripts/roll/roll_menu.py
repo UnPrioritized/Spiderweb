@@ -32,6 +32,7 @@ from window.merge_window import open_merge
 from window.fill_window import open_fill
 from window.subtract_window import any_subtracted, carry_subtract, open_subtract, subtract_targets
 from window.strips_window import any_strips, open_strips, strips_targets
+from window.lines_window import open_lines
 from window.widgets import symmetry_menu
 
 
@@ -448,6 +449,9 @@ class ShapeMenu:
              keys=curve_keys and whole)
         item(tr("roll_menu.flip_upside_down"), tr("roll_menu.ctrl_j"), lambda: app.flip(False, whole=True),
              keys=curve_keys and whole)
+        if app.line_targets():  # (each line inside its own place: lines_window.py, notes/lines.py)
+            item(tr("lines.menu_sideways"), "", lambda: open_lines(app, "sideways"))
+            item(tr("lines.menu_upside"), "", lambda: open_lines(app, "upside"))
         item(tr("roll_menu.turn_90_left"), tr("roll_menu.ctrl_left"), lambda: app.rotate(False, whole=True), keys=whole)
         item(tr("roll_menu.turn_90_right"), tr("roll_menu.ctrl_right"), lambda: app.rotate(True, whole=True),
              keys=whole)
