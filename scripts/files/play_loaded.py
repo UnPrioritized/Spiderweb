@@ -27,8 +27,8 @@ import numpy as np
 
 from files import midi_play, speed
 from files.synth import GROUP_BUFFER, RATE
-from files.midi_scan import (C_BANK, C_BEND, C_BTICK, C_CC, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS, C_PROG, C_PTICK,
-                             C_PVAL)
+from files.midi_scan import (C_BANK, C_BEND, C_BTICK, C_CC, C_CHANNELS, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS,
+                             C_PROG, C_PTICK, C_PVAL)
 
 STEP_S = 0.003  # the feeder's beat
 AHEAD_S = 1.0  # read this far ahead of the play line at most
@@ -231,6 +231,13 @@ class LoadedPlayer:
         self.cp_off = cat([lm.tracks[n].cp_off for n in num])
         self.cp_run = cat([lm.tracks[n].cp_run for n in num])
         self.mode_file = lm.mode != "memory"
+        # (the channels each slot plays on, a bit each: every one muted = the slot isn't read at all, off)
+        used = np.array([int(lm.mf.tracks[n].counts[C_CHANNELS]) for n in num], np.int64)
+        if self.chans is not None and len(num):
+            ch = self.chans[self.num]
+            used = np.where(ch >= 0, np.int64(1) << np.maximum(ch, 0), used)
+        self.used = used
+        self.off = np.zeros(len(num), bool)
         # (Extract: the hidden events, read as they were when playing started)
         self.sk = lm.skip_all
         self.sk_end = lm.skip_at[self.num + 1] if len(num) else np.zeros(0, np.int64)
@@ -373,23 +380,47 @@ class LoadedPlayer:
         return got[0][:n], got[1][:n], got[2][:n], got
 
     def _place(self, t0):
-        """Every playable track's place at tick t0 (from its checkpoint before it, then read up to t0): (the skip
-        counters to add: notes still sounding at t0, their offs left out; the controllers before t0 to send
-        first)."""
+        """Every playable track's place at tick t0 (from its checkpoint before it, then read up to t0), the ones
+        off (all their channels muted) left unread: (the skip counters to add: notes still sounding at t0, their
+        offs left out; the controllers before t0 to send first)."""
+        opened, chase = self._placed(t0)
+        skip = np.zeros(SKIP, np.int64)
+        live = np.flatnonzero(opened)
+        if len(live):
+            port = self.tport[self.num[live // 2048]] % (16 if self.kind == "kestrel" else 64)  # (Kestrel: 16)
+            np.add.at(skip, port * 2048 + live % 2048, opened[live])
+        return skip, chase
+
+    def _off_now(self):
+        """The slots whose every channel is muted now (self.muted): never read while so."""
+        m = self.muted[self.num].astype(np.int64)
+        return (self.used != 0) & (m & self.used == self.used)
+
+    def _placed(self, t0, slots=None):
+        """_place's work: slots (None = every one not off, the others' places made anew too) placed at t0, the
+        other slots keep theirs: (notes sounding at t0 per slot x channel x key, the controllers before t0 to send
+        first, in tick order)."""
         S = len(self.num)
-        self.pos, self.tick, self.run = (np.zeros(S, np.int64) for _ in range(3))
-        self.nxt, self.want = np.full(S, -1, np.int64), np.zeros(S, np.int64)
-        self.done = np.zeros(S, bool)
-        slots = np.arange(S, dtype=np.int64)
+        if slots is None:
+            self.pos, self.tick, self.run = (np.zeros(S, np.int64) for _ in range(3))
+            self.nxt, self.want = np.full(S, -1, np.int64), np.zeros(S, np.int64)
+            self.done = np.zeros(S, bool)
+            self.sk_i = np.zeros(S, np.int64)
+            slots = np.flatnonzero(~self.off).astype(np.int64)
+        else:
+            slots = np.asarray(slots, np.int64)
+            for a, v in ((self.pos, 0), (self.tick, 0), (self.run, 0), (self.nxt, -1), (self.want, 0)):
+                a[slots] = v
+            self.done[slots] = False
         opened = np.zeros(S * 2048, np.int64)  # (slot x channel x key: notes sounding)
         if len(self.cp_key):
             # (the last checkpoint BEFORE t0: one on t0 itself can sit amid that tick's events, the ones before it
             # were lost: Shinki's beat 340, ~500 note-offs a key, 2026-10-27)
             j = np.searchsorted(self.cp_key, slots * self.M + t0, "left") - 1
-            has = (j >= self.seg0) & (j < self.seg1)
-            jj = j[has]
-            self.pos[has], self.tick[has], self.run[has] = self.cp_off[jj], self.cp_tick[jj], self.cp_run[jj]
-            for s, local in zip(slots[has].tolist(), (jj - self.seg0[has]).tolist()):
+            has = (j >= self.seg0[slots]) & (j < self.seg1[slots])
+            jj, sh = j[has], slots[has]
+            self.pos[sh], self.tick[sh], self.run[sh] = self.cp_off[jj], self.cp_tick[jj], self.cp_run[jj]
+            for s, local in zip(sh.tolist(), (jj - self.seg0[sh]).tolist()):
                 t = self.lm.tracks[int(self.num[s])]
                 a, b = int(t.cp_ent[local]), int(t.cp_ent[local + 1])
                 q = t.e_q[a:b].astype(np.int64)
@@ -399,9 +430,11 @@ class LoadedPlayer:
                 ok = q % 256 < 128
                 np.add.at(opened, s * 2048 + (q[ok] // 256) * 128 + q[ok] % 256, -c[ok])
         lm = self.lm
-        self.sk_i = np.array([lm.skip_at[n] + np.searchsorted(lm.skip_of(n), p) for n, p in
-                              zip(self.num.tolist(), self.pos.tolist())], np.int64).reshape(-1)
-        before = self._instruments(self.pos.copy(), self.tick.copy())
+        self.sk_i[slots] = np.array([lm.skip_at[n] + np.searchsorted(lm.skip_of(n), p) for n, p in
+                                     zip(self.num[slots].tolist(), self.pos[slots].tolist())], np.int64).reshape(-1)
+        pos = np.zeros(S, np.int64)  # (the instruments of these slots only)
+        pos[slots] = self.pos[slots]
+        before = self._instruments(pos, self.tick.copy())
         # (notes only counted on the way: what's still open at t0 sounds on past it, each slot's own count; a
         # dense part's millions of notes are never kept, hunt 2026-10-25: 1.9 GB to start inside Shinki's wall)
         ts, ms, ks = self._read(slots, t0, count=opened)
@@ -418,13 +451,34 @@ class LoadedPlayer:
         if len(before[0]):
             ts, ms, ks = (np.concatenate([a, b]) for a, b in zip(before, (ts, ms, ks)))
         np.maximum(opened, 0, out=opened)
-        skip = np.zeros(SKIP, np.int64)
-        live = np.flatnonzero(opened)
-        if len(live):
-            port = self.tport[self.num[live // 2048]] % (16 if self.kind == "kestrel" else 64)  # (Kestrel: 16)
-            np.add.at(skip, port * 2048 + live % 2048, opened[live])
         o = np.argsort(ts, kind="stable")
-        return skip, (ts[o].copy(), ms[o].copy(), ks[o].copy())
+        return opened, (ts[o].copy(), ms[o].copy(), ks[o].copy())
+
+    def _reoff(self, t0, gen):
+        """(The reader, everything before t0 queued) the mutes changed which slots are off: the ones muted now stop
+        at t0 (their notes sounding there get their note-offs at t0, never read after), the ones unmuted placed at
+        t0 (their notes sounding there unheard: offs left out; their controllers before t0 sent first)."""
+        new = self._off_now()
+        gone, back = np.flatnonzero(new & ~self.off), np.flatnonzero(~new & self.off)
+        self.off = new
+        opened, chase = self._placed(t0, np.concatenate([gone, back]))
+        live = np.flatnonzero(opened)
+        stop = new[live // 2048]
+        ends, live = live[stop], live[~stop]
+        skip = np.zeros(SKIP, np.int64)
+        if len(live):
+            port = self.tport[self.num[live // 2048]] % (16 if self.kind == "kestrel" else 64)
+            np.add.at(skip, port * 2048 + live % 2048, opened[live])
+        keep = np.isin(chase[2], self.num[back])
+        n = opened[ends]
+        ends = np.repeat(ends, n)
+        offs = (0x80 | (ends // 128 % 16) | (ends % 128) << 8).astype(np.int32)
+        ts = np.concatenate([chase[0][keep], np.full(len(ends), t0, np.int64)])
+        ms = np.concatenate([chase[1][keep], offs])
+        ks = np.concatenate([chase[2][keep], self.num[ends // 2048].astype(np.int32)])
+        with self._lock:
+            if self._gen == gen and self._jump is None:
+                self._queue.append([ts, ms, ks, 0, skip if len(live) else None, None])
 
     def _instruments(self, pos, tick):
         """The program changes (with their bank select) and bank selects in effect at each slot's checkpoint (pos /
@@ -508,6 +562,7 @@ class LoadedPlayer:
             start = t0
             while not self._stop.is_set():
                 began = time.perf_counter()
+                self.off = self._off_now()  # (muted tracks never read: as if the file hadn't them)
                 skip, chase = self._place(start)
                 self._place_s = time.perf_counter() - began
                 p = self._dense_part(start)
@@ -533,6 +588,9 @@ class LoadedPlayer:
                     if self._unpart is not None:  # (a mute changed while a part played: live from where it was)
                         w0, span, fresh = self._leave_part(), max(1, self.lm.ppq // 8), False
                         unplaced = None
+                        continue
+                    if unplaced is None and not np.array_equal(self._off_now(), self.off):
+                        self._reoff(w0, gen)  # (a track muted / unmuted: read from here or not)
                         continue
                     if w0 > last:
                         self.ready.set()
@@ -586,7 +644,7 @@ class LoadedPlayer:
                     if cut is not None:
                         w1 = cut
                     began = time.perf_counter()
-                    todo = np.flatnonzero(~self.done & (self.nxt < w1))
+                    todo = np.flatnonzero(~self.done & ~self.off & (self.nxt < w1))
                     kept = [a.copy() for a in (self.pos, self.tick, self.run, self.nxt, self.want, self.done,
                                                self.sk_i)]
                     got = self._read_side(todo, w1, WINDOW_MOST)
@@ -646,6 +704,7 @@ class LoadedPlayer:
         with self._lock:
             gen, p, tm = self._unpart
             self._queue.clear()
+        self.off[:] = False  # (the part held every track: all placed, the mutes then taken by _reoff)
         self._place(tm)
         with self._lock:
             self._unpart = None
