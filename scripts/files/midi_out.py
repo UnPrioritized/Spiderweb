@@ -333,6 +333,9 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
         np.cumsum(np.bincount(slots, minlength=count), out=cuts[1:])
         del slots
     every, ports = slot_ports(autos, cc, use10), ports or ()
+    # (a track of yours given a port in Track Properties: every track says its port, A too, so no player carries
+    # one over from the track before; without one the file stays as it always was)
+    ported = any(type(t) is dict and t.get("port") for t in tracks)
     fast = loops()
     if fast is not None and (not len(notes) or notes[:, 0].min() < 0):  # (the radix sort: ticks from 0 only)
         fast = None
@@ -342,8 +345,8 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
 
     def make(track):
         head, mine_cc = [], cc.get(track) if type(track) is not dict else None
-        if type(track) is dict:  # (an own track: its name first, port A, its notes if any were drawn into it)
-            head = ([bytes([0, 0xFF, 0x21, 1, 0])] if every else []) + (
+        if type(track) is dict:  # (an own track: its port, its name, its notes if any were drawn into it)
+            head = ([bytes([0, 0xFF, 0x21, 1, track.get("port", 0)])] if every or ported else []) + (
                 [name_event(track["name"])] if track["name"] else [])
             evs, ev_ch = own_events(cc, track["id"])  # (pasted notes' CC events laid there, every channel's)
             channel, track = track["ch"], at.get(track["id"])
@@ -360,6 +363,8 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
             channel = slot_track_channel(track, use10)[1]
             if every or track in ports:
                 head = [bytes([0, 0xFF, 0x21, 1, slot_port(track, use10)])]
+            elif ported:
+                head = [bytes([0, 0xFF, 0x21, 1, 0])]
         if fast is not None and not mine_cc:
             rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
             events = [fast.midi_track(notes, rows, channel, MAX_DELTA, bits)] if len(rows) else [empty_track(channel)]

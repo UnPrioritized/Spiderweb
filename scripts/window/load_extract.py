@@ -111,6 +111,10 @@ def sync_extract(app, found=None):
         app.start_play(keep=True)
 
 
+def same_array(a, b):
+    return (a is None) == (b is None) and (a is None or np.array_equal(a, b))
+
+
 def sync_channels(app):
     """The loaded tracks given a new channel in Track Properties (app.file_props) shown and heard on it, and the
     removed ones (app.file_gone) neither drawn nor heard: lm.rechannel = each track's new channel (-1: its events'
@@ -120,17 +124,21 @@ def sync_channels(app):
     if lm is None:
         return
     new = np.full(len(lm.tracks), -1, np.int64)
+    ports = new.copy()  # (Track Properties' ports, heard on them too: lm.port_moved)
     for n, p in app.file_props.items():
         if p.get("ch") is not None and 0 <= n < len(new):
             new[n] = p["ch"]
-    if not (new >= 0).any():
-        new = None
-    old = lm.rechannel
+        if p.get("port") is not None and 0 <= n < len(new):
+            ports[n] = p["port"]
+    new = new if (new >= 0).any() else None
+    ports = ports if (ports >= 0).any() else None
+    old, old_ports = lm.rechannel, lm.port_moved
     gone = frozenset(n for n in app.file_gone if 0 <= n < len(lm.tracks))
-    if (old is None) == (new is None) and (new is None or np.array_equal(old, new)) and gone == lm.gone:
+    if same_array(old, new) and same_array(old_ports, ports) and gone == lm.gone:
         return
-    lm.rechannel, lm.gone = new, gone
-    lm.hide_ver += 1
+    if not same_array(old, new) or gone != lm.gone:  # (a port alone draws nothing new)
+        lm.hide_ver += 1
+    lm.rechannel, lm.gone, lm.port_moved = new, gone, ports
     app.roll.request_redraw()
     if hasattr(app, "track_list"):
         app.track_list.request_redraw()

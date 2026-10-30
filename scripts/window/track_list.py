@@ -22,11 +22,11 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
 from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, PART, add_tracks, key_part, key_track, part_key, part_keys, among_file, clean_file_order, clean_name, file_order, from_rows, full_plan, into_ids, move_rows, ordered,
-                              new_id, plan)
+                              new_id, plan, port_letter, with_port)
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
 from notes.engine import BEATS_FAR, OWN0, channels_of, slot_track_channel, track_ids
-from notes.loaded import KEY_SIG, TEMPO, TIME_SIG, tempo_tracks
+from notes.loaded import KEY_SIG, TEMPO, TIME_SIG, tempo_tracks, track_port as file_port
 from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text, tempo_text
@@ -945,13 +945,27 @@ class TrackList(tk.Canvas):
         got = self.row_chans()[row] if row is not None else ()
         return got[0] if got else min(chs, default=None)
 
-    def channel_of(self, slot):
+    def port_of(self, slot):
+        """A track's port (0 = A): yours as set in Track Properties, a loaded one's (its parts': their track's) as
+        the file or Track Properties has it; Spiderweb's: A."""
+        if slot < 0:
+            return self.app.file_tracks().get(self.file_part(slot)[0], {}).get("port", 0)
+        return self._hand[slot].get("port", 0) if slot >= HAND else 0
+
+    def channel_of(self, slot, long=False):
+        """"Ch 3", or "B 3" on a port other than A (user 2026-10-30; long: "Port B, channel 3", for tips)."""
         if slot < 0:  # (a loaded MIDI's track: its main channel; none without notes; a part's: its first)
             ch = self.part_channel(slot)
-            return "" if ch is None else tr("tracks.channel", ch=ch + 1)
-        if slot >= HAND:
-            return tr("tracks.channel", ch=self._hand[slot]["ch"] + 1)
-        return tr("tracks.channel", ch=slot_track_channel(slot, self.app.picture_use10)[1] + 1)
+            if ch is None:
+                return ""
+        elif slot >= HAND:
+            ch = self._hand[slot]["ch"]
+        else:
+            ch = slot_track_channel(slot, self.app.picture_use10)[1]
+        port = self.port_of(slot)
+        if port:
+            return tr("tracks.port_channel_long" if long else "tracks.port_channel", port=port_letter(port), ch=ch + 1)
+        return tr("tracks.channel", ch=ch + 1)
 
     def colour_of(self, slot):
         """The track's notes' colour: its channel's, as on the piano roll (the light look's darker edge colour shows
@@ -2447,15 +2461,15 @@ class TrackList(tk.Canvas):
             self.tracks()
             self.request_redraw()
 
-    def add_own(self, row, chs):
-        """One track per channel in chs, after row (own_row), the first of them highlighted; named where they show
-        (the others named first: none shifts)."""
+    def add_own(self, row, chs, port=0):
+        """One track per channel in chs (all on port), after row (own_row), the first of them highlighted; named where
+        they show (the others named first: none shifts)."""
         app = self.app
         app.push_undo(name=tr("tracks.add_step" if len(chs) == 1 else "tracks.add_many_step"))
         # (Spiderweb's tracks after it would shift: made yours when they can be; at the end nothing shifts)
         self.keep_places(None if row is None else max(row, -1) + 1)
         new, ids = add_tracks(self.named(), self._slots, self.own_row(row), chs, app.own_next, self._filled,
-                              app.file_rows())
+                              app.file_rows(), port)
         app.own_next = max(ids) + 1
         app.own_tracks = new
         self.own_changed()
@@ -2473,9 +2487,9 @@ class TrackList(tk.Canvas):
 
     def ask_add(self, row):
         """Add Tracks…: one track per channel ticked in its window, after row."""
-        chs = AddTracksBox(self, self.app.picture_use10).run()
-        if chs:
-            self.add_own(row, chs)
+        got = AddTracksBox(self, self.app.picture_use10).run()
+        if got:
+            self.add_own(row, *got)
 
     def has_properties(self, s):
         """Properties… works on it: yours, Spiderweb's (made yours first), a loaded MIDI's (loaded, not damaged)."""
@@ -2489,40 +2503,44 @@ class TrackList(tk.Canvas):
         return lm is not None and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole
 
     def ask_properties(self, s):
-        """Properties…: its name and channel in a small window. Yours: changed as it is; a loaded MIDI's: kept as the
-        file's track's new name / channel (app.file_props, written again on export, group E); Spiderweb's: every
-        automatic track made yours first (dragging's rule), then it's changed."""
+        """Properties…: its name, channel and port in a small window. Yours: changed as it is; a loaded MIDI's: kept
+        as the file's track's new name / channel / port (app.file_props, written again on export, group E);
+        Spiderweb's: every automatic track made yours first (dragging's rule), then it's changed."""
         if not self.has_properties(s):
             return
         own = self.own_track(s)
         if own is not None:
-            got = PropertiesBox(self, own["name"], own["ch"]).run()
+            got = PropertiesBox(self, own["name"], own["ch"], own.get("port", 0)).run()
             if got is not None:
                 self.set_properties(s, *got)
             return
         if s < 0:
             now = self.app.file_tracks().get(-1 - s, {"name": "", "ch": 0})
-            got = PropertiesBox(self, now["name"], now["ch"]).run()
+            got = PropertiesBox(self, now["name"], now["ch"], now.get("port", 0)).run()
             if got is not None:
                 self.set_file_props(-1 - s, *got)
             return
         ch = slot_track_channel(s, self.app.picture_use10)[1]
         got = PropertiesBox(self, "", ch).run()
-        if got is not None and got != ("", ch):
+        if got is not None and got != ("", ch, 0):
             self.set_auto_properties(s, *got)
 
-    def set_file_props(self, n, name, ch):
-        """A loaded MIDI's track n given a new name / channel (the file's own = none kept): one undo step."""
+    def set_file_props(self, n, name, ch, port=None):
+        """A loaded MIDI's track n given a new name / channel / port (the file's own = none kept): one undo step."""
         t = self.app.loaded.tracks[n]
         # (its own channel = nothing to change, unless its notes use several: OK puts them all on it, hunt 10-26)
         alone = np.count_nonzero(t.chn) <= 1
+        had = self.app.file_props.get(n) or {}
         mine = {"name": None if name == (t.name or "") else name,
                 "ch": None if alone and ch == (t.channel if t.channel is not None else 0) else ch}
+        if port is not None and port != file_port(t):
+            mine["port"] = port
         new = dict(self.app.file_props)
-        if mine["name"] is None and mine["ch"] is None:
+        extra = {k: v for k, v in had.items() if k in ("parts", "order")}  # (kept as they were)
+        if mine["name"] is None and mine["ch"] is None and "port" not in mine and not extra:
             new.pop(n, None)
         else:
-            new[n] = mine
+            new[n] = {**mine, **extra}
         if new == self.app.file_props:
             return
         self.app.roll.end_typing()
@@ -2530,9 +2548,9 @@ class TrackList(tk.Canvas):
         self.app.file_props = new
         self.own_changed()
 
-    def set_auto_properties(self, s, name, ch):
-        """One of Spiderweb's tracks given a name / channel: every automatic track made yours (snapshot), then this
-        one changed, one undo step."""
+    def set_auto_properties(self, s, name, ch, port=0):
+        """One of Spiderweb's tracks given a name / channel / port: every automatic track made yours (snapshot), then
+        this one changed, one undo step."""
         app = self.app
         got = self.snapshot()
         if got is None:
@@ -2541,19 +2559,19 @@ class TrackList(tk.Canvas):
         app.roll.end_typing()
         app.push_undo(name=tr("tracks.properties_step"))
         taken, rows = self.take_all(*got, full)
-        app.own_tracks = [dict(t, name=name, ch=ch) if t["id"] == taken.get(s) else t
+        app.own_tracks = [with_port(dict(t, name=name, ch=ch), port) if t["id"] == taken.get(s) else t
                           for t in from_rows(rows, self._slots, app.own_tracks, self._filled)]
         self.own_changed()
         if taken:
             app.status.config(text=trn("tracks.made_yours", len(taken), n=len(taken)))
 
-    def set_properties(self, s, name, ch):
+    def set_properties(self, s, name, ch, port=0):
         own = self.own_track(s)
-        if own is None or (own["name"], own["ch"]) == (name, ch):
+        if own is None or (own["name"], own["ch"], own.get("port", 0)) == (name, ch, port):
             return
         # (a track Spiderweb added for a shape's colours: changed by hand = yours, kept even when unused)
         mine = {k: v for k, v in own.items() if k != "auto"}
-        self.set_own([dict(mine, name=name, ch=ch) if t is own else t for t in self.app.own_tracks],
+        self.set_own([with_port(dict(mine, name=name, ch=ch), port) if t is own else t for t in self.app.own_tracks],
                      tr("tracks.properties_step"))
 
     def on_double(self, e):
@@ -2799,7 +2817,7 @@ class TrackList(tk.Canvas):
         n = self.app.rendered
         mine = n[self.note_rows() == row] if len(n) else n
         if slot < 0:  # (a loaded MIDI's track; shapes drawn into it, group D)
-            lines = ["  ·  ".join(x for x in (self.name_of(row), self.channel_of(slot)) if x)]
+            lines = ["  ·  ".join(x for x in (self.name_of(row), self.channel_of(slot, long=True)) if x)]
             lm = self.app.loaded
             if lm is not None:
                 k, chs = self.file_part(slot)  # (a part / a track with parts: its channels' notes, PLAN #11 D)
@@ -2825,7 +2843,7 @@ class TrackList(tk.Canvas):
                 if len(owners) > TIP_SHAPES:
                     lines.append(trn("tracks.more_shapes", len(owners) - TIP_SHAPES, n=len(owners) - TIP_SHAPES))
             return "\n".join(lines)
-        lines = [f"{self.name_of(row)}  ·  {self.channel_of(slot)}",
+        lines = [f"{self.name_of(row)}  ·  {self.channel_of(slot, long=True)}",
                  trn("tracks.notes", len(mine), n=f"{len(mine):,}")]
         chans = self.row_chans()[row]
         if len(chans) > 1:  # (a folder: where its track row's drawing / pasting goes, user 2026-10-29)

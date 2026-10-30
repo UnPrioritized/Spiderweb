@@ -428,10 +428,10 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
     ports = slot_ports(autos, cc, use10)  # (Output port A, B, ... as the MIDI export's)
     for own_t, slot in tracks:
         name, port = b"", 0
-        if type(own_t) is dict:  # (a track added by hand: its name in Domino's own text bytes, port A)
-            name, channel = own_t["name"].encode("cp932", "replace"), own_t["ch"]
+        if type(own_t) is dict:  # (a track added by hand: its name in Domino's own text bytes, its port)
+            name, channel, port = own_t["name"].encode("cp932", "replace"), own_t["ch"], own_t.get("port", 0)
             if slot is None:
-                track_head(channel, name, 0)
+                track_head(channel, name, 0, port=port)
                 feed(track_tail(0))
                 continue
             channel = int(was[order[cuts[slot]]]) & 15  # (its notes' own: moved in from another track)
@@ -439,7 +439,7 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
             if mine_cc:
                 part = notes[order[cuts[slot]:cuts[slot + 1]]]
                 pieces = with_cc(note_rows(part), mine_cc)
-                track_head(channel, name, sum(len(p) for p in pieces))
+                track_head(channel, name, sum(len(p) for p in pieces), port=port)
                 for p in pieces:
                     feed(bytes(p))
                 feed(track_tail(max(int(part[:, 1].max()), mine_cc[-1][0])))

@@ -28,8 +28,9 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
-                          auto_count)
-from files.own_tracks import FILE0, HAND, file_order, key_track, from_rows, full_plan, into_ids, new_id, next_channel
+                          auto_count, PORTS)
+from files.own_tracks import FILE0, HAND, file_order, key_track, from_rows, full_plan, into_ids, new_id, next_channel, with_port
+from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -2014,29 +2015,35 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         return out
 
     def file_tracks(self):
-        """{n: {"name", "ch"}} of the loaded MIDI's tracks (its main channel; none = 1). Its MIDI not loaded: as
-        saved with the project (file_saved), so shapes drawn into them keep their channel and are listed and
-        exported under the track's name."""
+        """{n: {"name", "ch", "port"}} of the loaded MIDI's tracks (its main channel; none = 1; its first FF 21 port,
+        none = A). Its MIDI not loaded: as saved with the project (file_saved), so shapes drawn into them keep their
+        channel and are listed and exported under the track's name."""
         lm = self.loaded
         if lm is None:
             return self.file_saved
         got = getattr(self, "_file_tracks", None)
         if got is None or got[0] is not lm:
-            got = self._file_tracks = (lm, {n: {"name": t.name or "", "ch": t.channel if t.channel is not None else 0}
+            ports = port_numbers(lm) % PORTS
+            got = self._file_tracks = (lm, {n: with_port({"name": t.name or "",  # (port A: none kept, saves as before)
+                                                          "ch": t.channel if t.channel is not None else 0}, int(ports[n]))
                                             for n, t in enumerate(lm.tracks)})
         props = self.file_props
         if not props:
             return got[1]
-        # (Track Properties' new name / channel, group E)
-        return {n: {k: v if props.get(n, {}).get(k) is None else props[n][k] for k, v in d.items()}
-                for n, d in got[1].items()}
+        # (Track Properties' new name / channel / port, group E)
+        out = {}
+        for n, d in got[1].items():
+            p = props.get(n) or {}
+            d = {k: v if p.get(k) is None else p[k] for k, v in d.items()}
+            out[n] = d if p.get("port") is None else with_port(d, p["port"])
+        return out
 
     def with_file_tracks(self):
         """own_written + the loaded MIDI's tracks shapes are drawn into, each as a track of its own under its name,
         first (for writing WITHOUT the file: Export MIDI while it isn't loaded, Copy / Export to Domino)."""
         files = self.file_tracks()
-        return [{"id": FILE0 + n, "name": files[n]["name"], "ch": files[n]["ch"], "after": 0}
-                for n in self.file_into()] + list(self.own_written())
+        return [with_port({"id": FILE0 + n, "name": files[n]["name"], "ch": files[n]["ch"], "after": 0},
+                          files[n].get("port", 0)) for n in self.file_into()] + list(self.own_written())
 
     def file_rows(self):
         """The loaded MIDI's track numbers in the order they're listed (own_tracks.full_plan's files); none while
@@ -2111,13 +2118,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return files[v - FILE0]["ch"] if v - FILE0 in files else 0
             return by_id[v]["ch"] if v >= 0 else slot_track_channel(-1 - v, use10)[1]
 
+        def port(v):  # (a new tinted track takes the port of the one above)
+            if v >= FILE0:
+                return files[v - FILE0].get("port", 0) if v - FILE0 in files else 0
+            return by_id[v].get("port", 0) if v >= 0 else 0
+
         def at_end(kind_own):
             """A new track at the end of the rows (kind_own: added by hand, else an automatic slot)."""
             if kind_own:
                 v = new_id(own, self.own_next)
                 self.own_next = v + 1
-                t = {"id": v, "name": "", "ch": next_channel(channel(rows[-1]) if rows else 0, use10), "after": -1,
-                     "auto": True}
+                t = with_port({"id": v, "name": "", "ch": next_channel(channel(rows[-1]) if rows else 0, use10),
+                               "after": -1, "auto": True}, port(rows[-1]) if rows else 0)
                 own.append(t)
                 by_id[v] = t
             else:
@@ -2130,7 +2142,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             user: never into another shape's track, however many tracks that makes)."""
             v = new_id(own, self.own_next)
             self.own_next = v + 1
-            t = {"id": v, "name": "", "ch": next_channel(channel(prev), use10), "after": -1, "auto": True}
+            t = with_port({"id": v, "name": "", "ch": next_channel(channel(prev), use10), "after": -1, "auto": True},
+                          port(prev))
             if prev in by_id and "file" in by_id[prev]:  # (among a loaded MIDI's tracks: there too)
                 t["file"] = by_id[prev]["file"]
             own.append(t)

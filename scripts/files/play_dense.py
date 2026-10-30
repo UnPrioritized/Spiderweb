@@ -85,7 +85,8 @@ def plan(lm, tmap):
 
 def key_of(lm):
     """What a read-ahead depends on besides the file."""
-    return lm.hide_ver, lm.gone, None if lm.rechannel is None else tuple(lm.rechannel)
+    return (lm.hide_ver, lm.gone, None if lm.rechannel is None else tuple(lm.rechannel),
+            None if lm.port_moved is None else tuple(lm.port_moved))
 
 
 class Part:

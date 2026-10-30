@@ -18,6 +18,7 @@ from files.midi_read import BIGGEST_EVENT, PIECE, SCAN_WORKERS, Cancelled, FileC
 from files.own_tracks import PART, key_track
 
 NAME = 0x03  # a track name's meta event type (Track Properties' new name goes in its place)
+PORT = 0x21  # a track's port meta event type (... its new port)
 
 ROOM_SPARE = 64 << 20  # free disk space wanted on top of the file's size
 HELD_TRACK = 64 << 20  # a track written event by event up to this size is made in memory (else counted first)
@@ -47,9 +48,9 @@ def copy_through(mf, dst, walk=False, progress=None, cancel=None, retime=None, a
     (Extract: sorted byte places, midi_scan), written again without them. order: the track numbers in the order
     they're written (dragged in the track list, D4; None = the file's): each track's place in the file takes the
     one order puts there, anything between tracks stays where it is; tracks left out of it aren't written (removed,
-    group E). props: {track number: {"name": its new name or None, "ch": its new channel 0-15 or None}} (Track
-    Properties, group E): those tracks written again, the name in place of theirs at tick 0, every channel event on
-    that channel. PARTS (PLAN #11 D): order may hold own_tracks.part_key entries = that track written again; props
+    group E). props: {track number: {"name": its new name or None, "ch": its new channel 0-15 or None, "port": its
+    new port 0-15 or None}} (Track Properties, group E): those tracks written again, the name / port in place of
+    theirs at tick 0, every channel event on that channel. PARTS (PLAN #11 D): order may hold own_tracks.part_key entries = that track written again; props
     of an entry may hold "keep" (channel bits written) and "meta" 0 (no meta / SysEx: a part's)."""
     if not mf.scanned:
         raise ValueError("scan() the file first")
@@ -327,10 +328,13 @@ class _Work:
         chan = -1 if prop.get("ch") is None else int(prop["ch"])
         if (keep != 0xFFFF or not meta) and len(ins_t):  # (a part: only the events put in on its channels)
             ins_t, ins_at, ins_b = keep_inserts(ins_t, ins_at, ins_b, keep, meta)
-        if prop.get("name") is not None:  # (its name events out, the new one first; a part's own name)
+        # (its name / port events out, the new ones first; a part's own name)
+        for kind, ev in ((PORT, bytes([0xFF, PORT, 1, prop["port"]]) if prop.get("port") is not None else None),
+                         (NAME, name_event(prop["name"])[1:] if prop.get("name") is not None else None)):
+            if ev is None:  # (ev without its time: put in at tick 0)
+                continue
             drop = drop.copy()
-            drop[NAME] = 1
-            ev = name_event(prop["name"])[1:]  # (without its time: put in at tick 0)
+            drop[kind] = 1
             ins_t = np.concatenate([np.zeros(1, np.int64), np.asarray(ins_t, np.int64)])
             ins_at = np.concatenate([np.zeros(1, np.int64), np.asarray(ins_at, np.int64) + len(ev)])
             ins_b = np.concatenate([np.frombuffer(ev, np.uint8), np.asarray(ins_b, np.uint8)])

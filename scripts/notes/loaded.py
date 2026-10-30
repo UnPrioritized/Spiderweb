@@ -68,6 +68,7 @@ class LoadedMidi:
         self.boxes, self._taken = (), {}
         self.hide_ver = 0
         self.rechannel = None  # (Track Properties' new channels: per track, -1 = its own; load_extract.sync_channels)
+        self.port_moved = None  # (... new ports, the same way)
         self.gone = frozenset()  # (tracks removed in the track list: never drawn nor played; the same)
         self.dense = None  # (Kestrel (GPU)'s read-ahead of the parts too dense to read live: files/play_dense.py)
         self.cc_over = any(t.cc_over for t in infos)  # (more CC events than CC_MOST: none kept, only counted)
@@ -225,13 +226,15 @@ class Frozen:
         return getattr(self._lm, k)
 
 
+def track_port(t):
+    """A loaded track's port number (its first FF 21; none = 0)."""
+    got = t.metas(PORT)
+    return got[0][1][0] if got and got[0][1] else 0
+
+
 def port_numbers(lm):
-    """Each track's port number (its first FF 21; none = 0)."""
-    out = []
-    for t in lm.tracks:
-        got = t.metas(PORT)
-        out.append(got[0][1][0] if got and got[0][1] else 0)
-    return np.array(out, np.int64)
+    """Each track's port number (track_port)."""
+    return np.array([track_port(t) for t in lm.tracks], np.int64)
 
 
 def file_tempos(lm):

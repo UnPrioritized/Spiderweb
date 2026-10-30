@@ -1,5 +1,5 @@
 """Tracks the user added by hand (track list right-click: Add Track, Add Tracks…; user 2026-10-24, like Domino's).
-app.own_tracks = [{"id", "name", "ch" 0-15, "after"}] in the order they show. "after" = how many of Spiderweb's
+app.own_tracks = [{"id", "name", "ch" 0-15, "after"}] in the order they show (+ "port" 1-15 = B-P; none = A). "after" = how many of Spiderweb's
 automatic tracks WITH NOTES (the slots, midi_out.track_slots; empty ones kept between channels don't count:
 counted) come before it; -1 = after all of them (so is a number past them). The automatic tracks keep their slot
 order around them. With a loaded MIDI (group D) a track may sit among the file's tracks: "file" = how many of the
@@ -19,6 +19,24 @@ FILE_MOST = FILE0 + COUNT_MOST  # into entries below this
 # place in file_order n + PART * (part id + 1), its track list id -1 - that (the track's own row keeps -1 - n)
 PART = 1 << 20
 PARTS_MOST = 16  # parts of one track at most (16 channels: its own row may keep none)
+PORT_MOST = 15  # a track's port at most (0 = A .. 15 = P: engine.PORTS)
+
+
+def clean_port(p):
+    """A saved port as kept: 0..PORT_MOST, anything else = 0 (A)."""
+    return p if type(p) is int and 0 <= p <= PORT_MOST else 0
+
+
+def port_letter(p):
+    return chr(ord("A") + p)
+
+
+def with_port(t, port):
+    """Track t (a dict) on port: A = no "port" kept, so files and saves stay as they were."""
+    t = {k: v for k, v in t.items() if k != "port"}
+    if port:
+        t["port"] = port
+    return t
 
 
 def clean_name(text):
@@ -39,6 +57,8 @@ def clean_own_tracks(raw):
         seen.add(i)
         out.append({"id": i, "name": clean_name(t.get("name", "")) if isinstance(t.get("name", ""), str) else "",
                     "ch": ch, "after": after})
+        if clean_port(t.get("port")):  # (Track Properties' port; A = left out)
+            out[-1]["port"] = t["port"]
         if t.get("auto") is True:  # (added by Spiderweb for a shape's colours: App.fit_into)
             out[-1]["auto"] = True
         if type(t.get("file")) is int and 0 <= t["file"] <= COUNT_MOST:  # (among a loaded MIDI's tracks)
@@ -58,14 +78,15 @@ def ordered(order, chans):
 
 
 def clean_file_tracks(raw):
-    """A project's "file_tracks" as read ({track number: {"name", "ch"}} of the loaded MIDI's tracks shapes are drawn
-    into): anything that isn't one left out."""
+    """A project's "file_tracks" as read ({track number: {"name", "ch", "port"}} of the loaded MIDI's tracks shapes
+    are drawn into): anything that isn't one left out."""
     out = {}
     for k, t in (raw.items() if isinstance(raw, dict) else ()):
         if (isinstance(k, str) and k.isdigit() and int(k) < COUNT_MOST and isinstance(t, dict)
                 and type(t.get("ch")) is int and 0 <= t["ch"] <= 15):
             name = t.get("name", "")
-            out[int(k)] = {"name": clean_name(name) if isinstance(name, str) else "", "ch": t["ch"]}
+            out[int(k)] = with_port({"name": clean_name(name) if isinstance(name, str) else "", "ch": t["ch"]},
+                                    clean_port(t.get("port")))
     return out
 
 
@@ -136,7 +157,7 @@ def clean_file_gone(raw):
 
 def clean_file_props(raw):
     """A project's "file_props" as read (Track Properties on the loaded MIDI's tracks, group E): {track number:
-    {"name": text or None, "ch": 0-15 or None}}, unchanged ones left out."""
+    {"name": text or None, "ch": 0-15 or None (+ "port" 0-15 when changed)}}, unchanged ones left out."""
     out = {}
     if not isinstance(raw, dict):
         return out
@@ -153,9 +174,10 @@ def clean_file_props(raw):
         # (its Ch rows' order as dragged, PLAN #11 D: the list only, a MIDI has no order inside a track)
         order = [c for c in dict.fromkeys(v.get("order") if isinstance(v.get("order"), list) else [])
                  if type(c) is int and 0 <= c <= 15]
-        if name is not None or ch is not None or parts or len(order) > 1:
+        port = v.get("port") if type(v.get("port")) is int and 0 <= v["port"] <= PORT_MOST else None
+        if name is not None or ch is not None or port is not None or parts or len(order) > 1:
             out[n] = {"name": name[:NAME_MOST] if name is not None else None, "ch": ch,
-                      **({"parts": parts} if parts else {}), **({"order": order} if len(order) > 1 else {})}
+                      **({"port": port} if port is not None else {}), **({"parts": parts} if parts else {}), **({"order": order} if len(order) > 1 else {})}
     return out
 
 
@@ -244,13 +266,14 @@ def new_id(own, floor=0):
     return max(max((t["id"] for t in own), default=-1) + 1, floor)
 
 
-def add_tracks(own, slots, row, chs, floor=0, filled=None, files=()):
-    """own with one new track per channel in chs added just after row `row` of full_plan's order (None: at the end;
-    -1: first of them all); (new list, new ids). floor: new_id's; slots, filled: plan's; files: full_plan's."""
+def add_tracks(own, slots, row, chs, floor=0, filled=None, files=(), port=0):
+    """own with one new track per channel in chs, all on port, added just after row `row` of full_plan's order (None:
+    at the end; -1: first of them all); (new list, new ids). floor: new_id's; slots, filled: plan's; files:
+    full_plan's."""
     rows = full_plan(files, slots, own, filled)
     at = len(rows) if row is None else 0 if row < 0 else row + 1
     first = new_id(own, floor)
-    new = [{"id": first + k, "name": "", "ch": ch, "after": -1} for k, ch in enumerate(chs)]
+    new = [with_port({"id": first + k, "name": "", "ch": ch, "after": -1}, port) for k, ch in enumerate(chs)]
     return from_rows(rows[:at] + new + rows[at:], slots, own + new, filled), [t["id"] for t in new]
 
 

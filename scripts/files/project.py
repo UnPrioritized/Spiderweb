@@ -1130,9 +1130,9 @@ class ProjectFiles:
         props, names = {}, self.file_tracks()
         for n, p in self.file_props.items():
             parts = p.get("parts") or ()
-            if p.get("name") is None and p.get("ch") is None and not parts:
+            if p.get("name") is None and p.get("ch") is None and p.get("port") is None and not parts:
                 continue  # (only its Ch rows' order: the track copied as it is)
-            props[n] = {"name": p.get("name"), "ch": p.get("ch")}
+            props[n] = {"name": p.get("name"), "ch": p.get("ch"), "port": p.get("port")}
             if parts:
                 props[n]["keep"] = 0xFFFF & ~sum(1 << c for q in parts for c in q["chs"])
             for q in parts:
@@ -1991,12 +1991,13 @@ class ProjectFiles:
         first_ch = np.full(count, -1, np.int64)
         lead = np.unique(slot_track, return_index=True)  # (each track's lowest slot)
         first_ch[lead[0]] = slot_ch[lead[1]]
-        chans, names = [], {}
+        chans, names, row_ports = [], {}, [0] * count
         for t in range(count):  # (each track's usual channel: the list's first, else its first note's, else (an
             row = top + t        # empty row between) the track's own)
             shown = listed[row] if row < len(listed) else ()
             s = int(ids[row]) if row < len(ids) else None
             own = tl.own_track(s)
+            row_ports[t] = tl.port_of(s) if s is not None else 0  # (Track Properties' port)
             if len(shown) or first_ch[t] >= 0:
                 chans.append(int(shown[0]) if len(shown) else int(first_ch[t]))
             else:
@@ -2040,6 +2041,8 @@ class ProjectFiles:
             ports = [0] * count                            # past one round of channels, hunt 2026-10-29)
             for s, t in zip(slots.tolist(), slot_track.tolist()):
                 ports[t] = ports[t] or slot_port(s, use10)
+        if any(row_ports):
+            ports = [p or q for p, q in zip(ports or [0] * count, row_ports)]
         return (rows_out, ppq, chans, first - bar_line(sigs, first, ppq), end - first, names, colours,
                 channel_colours, stretch(tempo), [(t, top_, 2 ** p) for t, top_, p in stretch(sigs)],
                 stretch(plan["keys"]) if plan else [], events, ports)

@@ -1,12 +1,12 @@
 """The track list's small windows for the tracks added by hand (files/own_tracks.py; user 2026-10-24..26, like
-Domino's): Track Properties (name + channel) and Add Tracks (one track per ticked channel; dragging over the ticks
+Domino's): Track Properties (name + channel + port) and Add Tracks (one track per ticked channel; dragging over the ticks
 ticks / unticks every one crossed). Both modal with OK / Cancel; their answer is None when cancelled."""
 
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from files.own_tracks import NAME_MOST, clean_name
+from files.own_tracks import NAME_MOST, PORT_MOST, clean_name, port_letter
 from window import look
 
 
@@ -53,15 +53,24 @@ class _Box(tk.Toplevel):
         return self.answer
 
 
-class PropertiesBox(_Box):
-    """Track Properties: (name, channel 0-15), or None."""
+def port_box(f, row, port):
+    """A "Port:" row (A-P dropdown) on grid row `row` of f; port = the one picked at first."""
+    ttk.Label(f, text=tr("tracks.properties_port")).grid(row=row, column=0, sticky="w", pady=(6, 0))
+    box = ttk.Combobox(f, values=[port_letter(p) for p in range(PORT_MOST + 1)], state="readonly", width=5)
+    box.current(port)
+    box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+    return box
 
-    def __init__(self, parent, name, ch):
-        self.start = (name, ch)
+
+class PropertiesBox(_Box):
+    """Track Properties: (name, channel 0-15, port 0-15), or None."""
+
+    def __init__(self, parent, name, ch, port=0):
+        self.start = (name, ch, port)
         super().__init__(parent, tr("tracks.properties_title"))
 
     def fill(self, f):
-        name, ch = self.start
+        name, ch, port = self.start
         self.name = tk.StringVar(value=name)
         self.ch = tk.StringVar(value=str(ch + 1))
         ttk.Label(f, text=tr("tracks.properties_name")).grid(row=0, column=0, sticky="w", pady=(0, 6))
@@ -71,13 +80,14 @@ class PropertiesBox(_Box):
         self.box = ttk.Combobox(f, values=[str(c) for c in range(1, 17)], textvariable=self.ch, state="readonly",
                                 width=5)
         self.box.grid(row=1, column=1, sticky="w", padx=(8, 0))
+        self.port = port_box(f, 2, port)
         e.focus_set()
         e.selection_range(0, "end")
-        return lambda: (clean_name(self.name.get())[:NAME_MOST], int(self.ch.get()) - 1)
+        return lambda: (clean_name(self.name.get())[:NAME_MOST], int(self.ch.get()) - 1, self.port.current())
 
 
 class AddTracksBox(_Box):
-    """Add Tracks: the channels (0-15, in order) ticked, or None. Every channel ticked at first, but channel 10
+    """Add Tracks: (the channels (0-15, in order) ticked, the port 0-15), or None. Every channel ticked at first, but channel 10
     while "Use channel 10" is off (use10 False; it can still be ticked, user 2026-10-26)."""
 
     def __init__(self, parent, use10=True):
@@ -102,8 +112,11 @@ class AddTracksBox(_Box):
         ttk.Button(row, text=tr("tracks.select_all"), command=lambda: self.set_all(True)).pack(side="left")
         ttk.Button(row, text=tr("tracks.deselect_all"), command=lambda: self.set_all(False)).pack(side="left",
                                                                                                 padx=(4, 0))
+        ports = ttk.Frame(f)  # (every new track on the port picked, user 2026-10-30; default A as before)
+        ports.grid(row=10, column=0, columnspan=2, sticky="w")
+        self.port = port_box(ports, 0, 0)
         self.hint = ttk.Label(f, text="", foreground=look.WARN)
-        self.hint.grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.hint.grid(row=11, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self._sweep = None
 
         def get():
@@ -111,7 +124,7 @@ class AddTracksBox(_Box):
             if not chs:  # (says why OK did nothing)
                 self.hint.config(text=tr("tracks.add_many_none"))
                 return None
-            return chs
+            return chs, self.port.current()
         return get
 
     def press(self, c):

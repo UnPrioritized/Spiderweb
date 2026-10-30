@@ -143,9 +143,13 @@ def preload(synth, lm):
 
 
 def track_ports(lm):
-    """(port index per track (0 .. ports - 1, by the file's FF 21 port numbers; none = port 0), ports used)."""
+    """(port index per track (0 .. ports - 1, by the file's FF 21 port numbers; none = port 0; Track Properties'
+    port when given: lm.port_moved), ports used)."""
     from notes.loaded import port_numbers
-    raw = port_numbers(lm).tolist()
+    raw = port_numbers(lm)
+    if lm.port_moved is not None:
+        raw = np.where(lm.port_moved >= 0, lm.port_moved, raw)
+    raw = raw.tolist()
     used = sorted(set(raw)) or [0]
     return np.array([used.index(p) for p in raw], np.int64), len(used)
 
