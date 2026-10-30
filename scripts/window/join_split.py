@@ -20,8 +20,9 @@ from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.fillgaps import fill_gaps as filled, needs_fill
 from notes.lines import flipped_lines, note_lines
 from notes.passengers import pack_cc, unpack_cc
-from files.own_tracks import into_ids
-from notes.engine import SHAPE_DEFAULTS, as_made, cached_arrays, clean_shape, shape_notes_tracks, shape_path
+from files.own_tracks import COUNT_MOST, FILE0, clean_name, from_rows, full_plan, into_ids, new_id, with_port
+from notes.engine import (PORTS, SHAPE_DEFAULTS, as_made, cached_arrays, channels_of, clean_shape, shape_notes_tracks,
+                          shape_path)
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import SKIP10, is_mask, same_mask
@@ -856,6 +857,117 @@ class JoinSplit:
         self.select_many(got, self.sel if self.sel in got else got[0])
         self.shapes_changed()
         self.status.config(text=trn("lines.done", flipped[0], n=f"{flipped[0]:,}"))
+
+    def split_lines(self, gap):
+        """Split into pieces (notes/lines.py; user 2026-10-30): each line of each selected shape's colours onto a track
+        of its own. Piece 1 stays on its colour's track (Spiderweb's automatic tracks made yours first, names kept:
+        TrackList.keep_places); the next pieces go on new tracks right under it, same channel, each on the next port
+        (A -> B-P), round the ports again from piece 17 (user 2026-10-30; status line says so), named "Name 2", "Name 3"... Pieces numbered like the lines (first start, lowest key).
+        Each shape with pieces becomes its own plain-notes shape laid on those tracks. One undo step; nothing to split
+        = status line, no step."""
+        from window.app import own_chs, placed_on  # (app.py imports this file)
+        self.commit_typing()
+        got = self.line_targets()
+        multi = self.multi_rendered()[1]
+        rows = multi[np.isin(multi[:, 5], got)] if got else multi[:0]
+        if not len(rows):
+            self.status.config(text=tr("lines.nothing"))
+            return
+        groups = line_tracks(rows[:, 5], rows[:, 4])
+        extra = note_lines(rows, groups, gap)[1] - len(np.unique(groups))
+        if not extra:
+            self.status.config(text=tr("lines.split_none"))
+            return
+        tl = self.track_list
+        if len(tl.tracks()) + extra > COUNT_MOST:  # (a MIDI file's most tracks: refused before anything changes)
+            messagebox.showwarning(tr("lines.title_split"), tr("lines.split_too_many", n=f"{len(tl.tracks()) + extra:,}",
+                                                               most=f"{COUNT_MOST:,}"), parent=self)
+            return
+        self.roll.cancel_draft()
+        self.push_undo(name=tr("lines.title_split"))
+        pieces = {}
+
+        def together(rows):
+            out = {}
+            for i, x in rows.items():  # (each colour's lines in a row: note_lines numbers them by track first)
+                line, n = note_lines(x, x[:, 4], gap)
+                src = np.empty(n, np.int64)
+                src[line] = x[:, 4]
+                pieces[i] = (src, np.arange(n) - np.searchsorted(src, src, "left"))
+                out[i] = np.column_stack([x[:, :4], line, x[:, 5:]])
+            return out
+        self.busy(tr("lines.split_busy"))
+        try:
+            chans = self.own_channels()
+            if any(min(placed_on(self.shapes[i], chans), default=-1) < 0 for i in got):
+                tl.keep_places(0)  # (piece 1 stays on its track, made yours like a track list drag: names stick)
+                self.shapes_changed(now=True)
+            new = self.plain_copies(got, together=together, whole=True)
+        finally:
+            self.busy(None)
+        new = {i: sh for i, sh in new.items() if i in pieces and pieces[i][1].max(initial=0) > 0}
+        use10, chans, files = self.picture_use10, self.own_channels(), self.file_tracks()
+        own = tl.named()
+        by_id = {t["id"]: t for t in own}
+        nid = new_id(own, self.own_next)
+        under, intos, made, shared = {}, {}, 0, False
+        for i in sorted(new):
+            sh = self.shapes[i]
+            have = placed_on(sh, chans)
+            slots = self.laid_slots(sh) if have else []
+            chs, homes = own_chs(sh) if have else ([], [])
+            into, ich, ihome, kept = [], [], [], {}
+            src, nth = pieces[i]
+            for s, k in zip(src.tolist(), nth.tolist()):
+                if k == 0:  # (piece 1: where the colour was; a track of Spiderweb's that couldn't be made yours: pinned)
+                    v, slot = (have[s], slots[s]) if have else (-1 - s, s)
+                    into.append(v)
+                    ich.append(chs[s] if s < len(chs) else -1)
+                    ihome.append(homes[s] if s < len(homes) else -1)
+                    if v >= FILE0:
+                        key, port = -1 - (v - FILE0), files.get(v - FILE0, {}).get("port", 0)
+                        base = tl.name_of(tl.row_of_id(key))
+                    elif v >= 0:
+                        key, port = ("own", v), by_id[v].get("port", 0) if v in by_id else 0
+                        base = by_id[v]["name"] if v in by_id else ""
+                    else:
+                        key, port = -1 - v, 0
+                        base = tl.name_of(tl.row_of_id(-1 - v))
+                    kept[s] = (key, port, int(channels_of([slot], use10)[0]), base or tr("tracks.name", n=1))
+                    continue
+                key, port, ch, base = kept[s]
+                shared = shared or k >= PORTS  # (round the ports again: shares port + channel with piece k - 15)
+                t = with_port({"id": nid, "name": clean_name(tr("lines.piece_name", name=base, n=k + 1)),
+                               "ch": ch, "after": -1}, (port + k) % PORTS)
+                under.setdefault(key, []).append(t)
+                into.append(nid)
+                ich.append(-1)
+                ihome.append(-1)
+                nid += 1
+                made += 1
+            intos[i] = (into, ich, ihome)
+        tl.tracks()
+        laid = []
+        for r in full_plan(self.file_rows(), tl._slots, own, tl._filled):
+            laid.append(r)
+            laid += under.get(("own", r["id"]) if isinstance(r, dict) else r, [])
+        self.own_next = nid
+        self.own_tracks = from_rows(laid, tl._slots, own + [t for ts in under.values() for t in ts], tl._filled)
+        self.plain_kept(new)
+        for i, sh in new.items():
+            into, ich, ihome = intos[i]
+            for k in ("own_slots", "slots10", "into_ch", "into_home", "into_rest", "into_gap", "cols", "into_new"):
+                sh.pop(k, None)
+            sh["into"] = into
+            if any(c >= 0 for c in ich):  # (a colour on its own channel in its track stays so: piece 1)
+                sh["into_ch"], sh["into_home"] = ich, ihome
+            if any(v < 0 for v in into):
+                sh["slots10"] = bool(use10)
+        self.put_plain(new)
+        self.select_many(got, self.sel if self.sel in got else got[0])
+        tl.own_changed()
+        self.status.config(text=trn("lines.split_done", made, n=f"{made:,}") +
+                           (tr("lines.split_shared", most=PORTS) if shared else ""))
 
     def plain_copies(self, got, moved=None, own=False, together=None, whole=False):
         """Turn into plain notes' new shapes: {i: a shape of shape i's notes exactly as they sound now, each note on

@@ -1,5 +1,5 @@
-"""The line tools' small window (right-click "Flip each line sideways…" / "Flip each line upside down…"; notes/lines.py,
-JoinSplit.flip_lines; user 2026-10-30): "Join notes with gaps up to [n] ticks" (0 = the pictures' rule; kept until
+"""The line tools' small window (right-click "Flip each line sideways…" / "Flip each line upside down…" / "Split into
+pieces…"; notes/lines.py, JoinSplit.flip_lines / split_lines; user 2026-10-30): "Join notes with gaps up to [n] ticks" (0 = the pictures' rule; kept until
 Spiderweb closes), a live "N lines found" under it, then the button doing it (one undo step) or Cancel. Drawn shapes
 among the selection are asked about first (they turn into plain notes in the same step)."""
 
@@ -103,7 +103,10 @@ class LinesWindow(tk.Toplevel):
             return
         self.app.line_gap = g
         self.close()
-        self.app.flip_lines(self.kind == "sideways", g)
+        if self.kind == "split":
+            self.app.split_lines(g)
+        else:
+            self.app.flip_lines(self.kind == "sideways", g)
 
     def close(self):
         if self.job:

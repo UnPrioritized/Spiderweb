@@ -394,6 +394,8 @@ class ShapeMenu:
         if strips_targets(app):  # Channel per strip… (strips_window.py): pasted notes only, else left out
             self._strips_var = tk.BooleanVar(value=any_strips(app))
             m.add_checkbutton(label=tr("strips.menu"), variable=self._strips_var, command=lambda: open_strips(app))
+        if app.line_targets():  # Split into pieces… (each line onto its own track: lines_window.py)
+            m.add_command(label=tr("lines.menu_split"), command=lambda: open_lines(app, "split"))
 
     def knife_item(self, item):
         """Slice with shape, when the front-most selected shape's notes are over another (App.knife_menu; user
