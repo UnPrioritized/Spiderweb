@@ -1926,6 +1926,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if self._notes_worked != worked:
                 self._notes_time = time.perf_counter() - started
         if self.fit_into(made):  # (shapes laid on tracks got more colours: laid down the rows, laid again)
+            if any("into_ch" in sh for sh in self.shapes):  # (a paste's lanes tidied too, so undo / redo give
+                tidy_tracks(self)                           # back the same: found by the track sweep)
             made = lay_again(made, stash, self.shapes, self.own_channels()) or make()
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _ = made
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
