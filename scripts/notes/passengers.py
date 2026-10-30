@@ -304,6 +304,49 @@ def carried(shapes, slots_of, got, ppq):
     return pack_cc(out) if out else None
 
 
+def split_cc(sh, slots, rows, line, ppq):
+    """Split into pieces (user 2026-10-30): the pasted shape's passengers onto its pieces. rows = its notes as laid
+    ((start, end, key, velocity, slot, ...): slot = its colour before), line = each note's piece; slots = {track:
+    slot} (track_map). An event goes to the piece of its track's colour playing there (its latest first start at or
+    before it), else that colour's first piece; a piece after the first starts with the values in effect there
+    (another port = its own channel settings, as Channel per strip's cc_messages). Packed, ticks from the first
+    note, track = piece; None if none."""
+    from notes.custom import unpack_notes
+    rows, line = np.asarray(rows, np.int64), np.asarray(line, np.int64)
+    if not len(rows) or "cc" not in sh:
+        return None
+    t0 = int(rows[:, 0].min())
+    firsts = {}  # (colour -> [(first start, piece)] in time order)
+    for p in np.unique(line).tolist():
+        mine = rows[line == p]
+        firsts.setdefault(int(mine[0, 4]), []).append((int(mine[:, 0].min()), p))
+    for v in firsts.values():
+        v.sort()
+    out, n = [], 0
+    by_track = {}
+    for t, k, tag, body in placed(sh, unpack_notes(sh["notes"]), ppq):
+        s = slots.get(k)
+        if s not in firsts:
+            continue
+        starts = firsts[s]
+        i = max(0, int(np.searchsorted([a for a, _ in starts], t, "right")) - 1)
+        by_track.setdefault(k, []).append((t, n, tag, body))
+        out.append((max(t, t0) - t0, n, starts[i][1], tag, body))
+        n += 1
+    for k, events in by_track.items():  # (each later piece: the values in effect at its start, before its own)
+        for a, p in firsts[slots[k]][1:]:
+            last = {}
+            for t, _, tag, body in events:
+                if t >= a:
+                    break
+                kind = event_kind(tag, body)
+                if kind is not None:
+                    last[kind] = (tag, body)
+            out += [(a - t0, -1, p, tag, body) for tag, body in last.values()]
+    out.sort(key=lambda e: (e[0], e[1]))
+    return pack_cc([(t, p, tag, body) for t, _, p, tag, body in out]) if out else None
+
+
 def mirrored(r, u, b0, ub, ppq):
     """placed for a box flipped sideways (user 2026-10-22): each control's values mirrored as STRETCHES (a value
     held from its event to the next one runs the other way, so it now starts where that stretch ends; the value

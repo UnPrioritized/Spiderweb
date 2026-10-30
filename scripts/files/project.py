@@ -1138,6 +1138,14 @@ class ProjectFiles:
             for q in parts:
                 props[part_key(n, q["id"])] = {"name": names.get(n, {}).get("name") or "", "ch": None,
                                                "keep": sum(1 << c for c in q["chs"]), "meta": 0}
+        lm = self.loaded
+        if lm is not None:  # (once any track is on another port, the file's tracks without a port event say port A:
+            from notes.loaded import PORT, track_port  # some players carry a port over from the track before, hunt
+            if any(t.get("port") for t in self.own_tracks) or any(p.get("port") for p in props.values()) \
+                    or any(track_port(t) for t in lm.tracks):  # 2026-10-30; midi_out's rule for your own tracks)
+                for n, t in enumerate(lm.tracks):
+                    if t.notes and not t.metas(PORT) and props.get(n, {}).get("port") is None:
+                        props.setdefault(n, {"name": None, "ch": None, "port": None, "said": True})["port"] = 0
         return props
 
     def export_loaded(self):
@@ -1311,7 +1319,7 @@ class ProjectFiles:
             if win.winfo_exists():
                 win.destroy()
             # (tracks dragged, renamed, re-channelled, split or removed: not "exactly as loaded", 10-29 measure)
-            listed = order != list(range(len(lm.mf.tracks))) or bool(props)
+            listed = order != list(range(len(lm.mf.tracks))) or any(not p.get("said") for p in props.values())
             e = job["error"]
             if isinstance(e, Cancelled):
                 self.status.config(text=tr("export.cancelled"))

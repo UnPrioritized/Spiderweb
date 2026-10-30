@@ -19,7 +19,7 @@ from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.fillgaps import fill_gaps as filled, needs_fill
 from notes.lines import flipped_lines, note_lines
-from notes.passengers import pack_cc, unpack_cc
+from notes.passengers import has_cc, pack_cc, split_cc, unpack_cc
 from files.own_tracks import COUNT_MOST, FILE0, clean_name, from_rows, full_plan, into_ids, new_id, with_port
 from notes.engine import (PORTS, SHAPE_DEFAULTS, as_made, cached_arrays, channels_of, clean_shape, shape_notes_tracks,
                           shape_path)
@@ -885,7 +885,7 @@ class JoinSplit:
             return
         self.roll.cancel_draft()
         self.push_undo(name=tr("lines.title_split"))
-        pieces = {}
+        pieces, ccs = {}, {}
 
         def together(rows):
             out = {}
@@ -894,6 +894,8 @@ class JoinSplit:
                 src = np.empty(n, np.int64)
                 src[line] = x[:, 4]
                 pieces[i] = (src, np.arange(n) - np.searchsorted(src, src, "left"))
+                if has_cc(self.shapes[i]):  # (its CC events onto the pieces: the copy's own carrying goes by colour)
+                    ccs[i] = split_cc(self.shapes[i], self.track_slots_in(x)(i), x, line, self.ppq)
                 out[i] = np.column_stack([x[:, :4], line, x[:, 5:]])
             return out
         self.busy(tr("lines.split_busy"))
@@ -906,6 +908,11 @@ class JoinSplit:
         finally:
             self.busy(None)
         new = {i: sh for i, sh in new.items() if i in pieces and pieces[i][1].max(initial=0) > 0}
+        for i, sh in new.items():
+            if i in ccs:
+                sh.pop("cc", None)
+                if ccs[i]:
+                    sh["cc"] = ccs[i]
         use10, chans, files = self.picture_use10, self.own_channels(), self.file_tracks()
         own = tl.named()
         by_id = {t["id"]: t for t in own}
@@ -926,13 +933,15 @@ class JoinSplit:
                     ihome.append(homes[s] if s < len(homes) else -1)
                     if v >= FILE0:
                         key, port = -1 - (v - FILE0), files.get(v - FILE0, {}).get("port", 0)
-                        base = tl.name_of(tl.row_of_id(key))
+                        row = tl.row_of_id(key)
+                        base = tl.name_of(row) if row is not None else ""
                     elif v >= 0:
                         key, port = ("own", v), by_id[v].get("port", 0) if v in by_id else 0
                         base = by_id[v]["name"] if v in by_id else ""
                     else:
                         key, port = -1 - v, 0
-                        base = tl.name_of(tl.row_of_id(-1 - v))
+                        row = tl.row_of_id(-1 - v)  # (Single channel / As drawn: Multi channel's slot may not be a row)
+                        base = tl.name_of(row) if row is not None else ""
                     kept[s] = (key, port, int(channels_of([slot], use10)[0]), base or tr("tracks.name", n=1))
                     continue
                 key, port, ch, base = kept[s]

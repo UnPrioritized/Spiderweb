@@ -22,6 +22,7 @@ class LinesWindow(tk.Toplevel):
         self.withdraw()
         self.app, self.kind = app, kind
         self.job = None
+        self.asked = {id(app.shapes[i]) for i in drawn_of(app, app.line_targets())}  # (asked about on opening)
         app.lines_window = self
         self.title(tr("lines.title_" + kind))
         self.transient(app)
@@ -77,6 +78,10 @@ class LinesWindow(tk.Toplevel):
             return None
         return int(min(math.floor(v + 0.5), MOST_GAP))
 
+    def sync(self):
+        """The selection or the notes changed (App.sync_panel / shapes_changed; hunt 2026-10-30): counted again."""
+        self.count_later()
+
     def count_later(self):
         if self.job:
             self.after_cancel(self.job)
@@ -101,6 +106,10 @@ class LinesWindow(tk.Toplevel):
         g = self.gap()
         if g is None or self.go.instate(["disabled"]):
             return
+        app = self.app
+        new = [i for i in drawn_of(app, app.line_targets()) if id(app.shapes[i]) not in self.asked]
+        if new and not ask_drawn(app, self.kind, new, self):  # (drawn shapes selected since it opened, hunt 10-30)
+            return
         self.app.line_gap = g
         self.close()
         if self.kind == "split":
@@ -124,7 +133,18 @@ def open_lines(app, kind):
     got = app.line_targets()
     if not got:
         return
-    drawn = [i for i in got if "notes" not in app.shapes[i]]
-    if drawn and not messagebox.askyesno(tr("lines.title_" + kind), trn("lines.drawn_ask", len(drawn), n=len(drawn)), parent=app):
+    drawn = drawn_of(app, got)
+    if drawn and not ask_drawn(app, kind, drawn, app):
         return
     LinesWindow(app, kind)
+
+
+def drawn_of(app, got):
+    """The shapes among got that turn into plain notes first: drawn ones, and merged ones (they lose their Split,
+    hunt 2026-10-30; Turn into plain notes' rule)."""
+    return [i for i in got if "notes" not in app.shapes[i] or app.shapes[i].get("merge")]
+
+
+def ask_drawn(app, kind, drawn, parent):
+    return messagebox.askyesno(tr("lines.title_" + kind), trn("lines.drawn_ask", len(drawn), n=len(drawn)),
+                               parent=parent)

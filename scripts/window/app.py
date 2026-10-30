@@ -1466,7 +1466,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_by_snap()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
                   self.sustain_window, self.subtract_window, self.merge_window, self.strips_window,
-                  self.fill_window):
+                  self.fill_window, self.lines_window):
             if w:
                 w.sync()
         if self.hz_window:
@@ -1977,6 +1977,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.strips_window.show()
         if self.fill_window:  # (anything to fill? from these notes: undo / redo, Channels changed, hunt 10-25)
             self.fill_window.sync()
+        if self.lines_window:  # (its line count from these notes, hunt 2026-10-30)
+            self.lines_window.sync()
         self.sync_list_selection()
         self.roll.request_redraw()
         self.track_list.changed()
