@@ -843,11 +843,43 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """Slice with shape: the top shape under x, y (masks never cut: looked through) cuts with its notes, when it
         can (App.can_knife); a line over pasted notes = the line (can't cut), never the notes under it."""
         app = self.app
-        under = [i for i in self.shapes_at(x, y) if i not in app.hidden_shapes and not is_mask(app.shapes[i])]
-        if under and app.can_knife(app.shapes[under[0]]):
-            app.knife_cut(under[0])
+        i = self.knife_at(x, y)
+        if i is not None and app.can_knife(app.shapes[i]):
+            app.knife_cut(i)
         else:
-            app.status.config(text=tr("join_split.knife_cant" if under else "join_split.knife_click"))
+            app.status.config(text=tr("join_split.knife_cant" if i is not None else "join_split.knife_click"))
+
+    def knife_at(self, x, y, near=None):
+        """The shape a Slice with shape click at x, y is for: the first of shapes_at that isn't a mask or hidden,
+        or None. near (near_shapes, for the pointer on every mouse move): only those are tried by their lines."""
+        app = self.app
+        order = [i for i in range(len(app.shapes) - 1, -1, -1)
+                 if i not in app.hidden_shapes and not is_mask(app.shapes[i])]
+        mine = set(order)
+        for i in order if near is None else [i for i in near if i in mine]:
+            if self.hit_shape(x, y, [i]) is not None:
+                return i
+        owners = self.note_owners(x, y)
+        return next((i for i in order if i in owners), None)
+
+    def near_shapes(self, x, y):
+        """The shape numbers (top first) whose lines' reach, PICK px wider, holds x, y: the only ones whose lines /
+        insides can be under the mouse (the hover pointer tries just these: every shape took ~0.1 s a move at 1,000
+        shapes). The reaches are worked out again after each change to the shapes (app.shapes_gen)."""
+        app = self.app
+        key = (app.shapes_gen, len(app.shapes))
+        if getattr(self, "_reach_key", None) != key:
+            boxes = np.full((len(app.shapes), 4), np.nan)
+            for i, sh in enumerate(app.shapes):
+                pts = [np.asarray(s, float).reshape(-1, 2) for s in self.pick_strokes(sh) if len(s)]
+                if pts:
+                    a = np.concatenate(pts)
+                    boxes[i] = a[:, 0].min(), a[:, 1].min(), a[:, 0].max(), a[:, 1].max()
+            self._reach, self._reach_key = boxes, key
+        r, b, p = self._reach, self.x2t(x), self.y2p(y)
+        mb, mk = (PICK + 1) / self.sx, (PICK + 1) / self.sy
+        ok = (r[:, 0] - mb <= b) & (b <= r[:, 2] + mb) & (r[:, 1] - mk <= p) & (p <= r[:, 3] + mk)
+        return np.flatnonzero(ok)[::-1].tolist()
 
     def next_at(self, x, y, i):
         """The shape after i under x, y (shapes_at, round again to the first), or None when i is the only one."""
@@ -1768,7 +1800,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if e.y < self.ruler_h and not over:  # (the bar numbers: the plain pointer, like many MIDI programs)
                 self.set_cursor("arrow")
             else:
-                self.set_cursor("fleur" if over else BOX_CURSORS[on_box] if on_box else self.custom_cursor(hit))
+                self.set_cursor("fleur" if over else BOX_CURSORS[on_box] if on_box else self.hover_cursor(e, hit))
         if self.follow:  # a shape started with a click follows the mouse
             self.drag, self.follow = self.follow, None
             self.on_drag(e)
@@ -1776,6 +1808,22 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         elif self.draft and self.draft["kind"] in ("poly", "arc"):
             self.draft["pts"][1 if self.arc_bend else -1] = self.draw_pt(e)
             self.request_redraw()
+
+    def hover_cursor(self, e, hit):
+        """The pointer away from handles and boxes (user 2026-10-30): Select over a shape a press grabs = the move
+        pointer (not a mask found only by its area: a drag there draws a Select box); Slice with shape = the plain
+        arrow, a hand over a shape it can cut with."""
+        name = self.custom_cursor(hit)
+        app, tool = self.app, self.app.tool.get()
+        if self.draft or hit and hit[0] != "inside":
+            return name
+        if tool == "select" and (self.hit_shape(e.x, e.y, self.near_shapes(e.x, e.y)) is not None
+                                 or self.note_owner(e.x, e.y) is not None):
+            return "fleur"  # (as shape_at, without a mask found only by its area)
+        if tool == "slice" and app.slice_mode.get() == "shape":
+            i = self.knife_at(e.x, e.y, self.near_shapes(e.x, e.y))
+            return "hand2" if i is not None and app.can_knife(app.shapes[i]) else "arrow"
+        return name
 
     def poly_point(self, pt):
         """The polyline being drawn gets its next point at pt (a new one then follows the mouse). True if that
