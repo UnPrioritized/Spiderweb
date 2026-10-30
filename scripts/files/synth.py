@@ -36,7 +36,8 @@ PREROLL = 1.0  # seconds rendered before a stretch and thrown away. Measured: jo
 PIECE = RATE // 20  # frames asked of BASS at a time (progress is told this often)
 FADE_MS = 60  # stopping fades out this long (a sudden stop clicks)
 
-# bass.h / bassmidi.h
+# bass.h / bassmidi.h / bassmix.h
+_MIXER_NONSTOP, _ATTRIB_MIXER_THREADS = 0x20000, 0x15001
 _DEVICE_NONE, _DEVICE_DEFAULT = 0, -1
 _ERROR_ALREADY = 14
 _ERROR_CODEC = 44
@@ -50,12 +51,12 @@ _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
 _ATTRIB_MIDI_QUEUED_ASYNC = 0x12010
 _ATTRIB_VOL, _ATTRIB_BUFFER, _ATTRIB_CPU = 2, 13, 7
-_CONFIG_UPDATEPERIOD, _CONFIG_UPDATETHREADS = 1, 24
+_CONFIG_UPDATEPERIOD = 1
 GROUP_QUEUE = 8 << 20  # bytes of messages a LiveGroup's synth holds waiting (a black MIDI wall: millions a second)
-# seconds of sound each LiveGroup synth keeps ready: made by BASS's update threads side by side. Without one (BUFFER
-# 0) the sound device's ONE mixing thread made them one after another: all 8 lost ~100 ms a second together in the
-# Lagtester's busy parts at ~20 % load each (user heard stutter, 2026-10-24); 0.03 s already fixed it. The loaded
-# MIDI's notes are sent this much early (play_loaded) so they still sound on the play line.
+# seconds of sound a LiveGroup's mix keeps ready, its synths made side by side on the mixer's threads. Without one
+# (BUFFER 0) the sound device's ONE mixing thread made them one after another: all 8 lost ~100 ms a second together
+# in the Lagtester's busy parts at ~20 % load each (user heard stutter, 2026-10-24); 0.03 s already fixed it. The
+# loaded MIDI's notes are sent this much early (play_loaded) so they still sound on the play line.
 GROUP_BUFFER = 0.03
 # ms between BASS's refills of those buffers: notes sent within one refill all start at its beginning, so a long one
 # makes fast spam uneven (user 2026-10-24: smoother in OmniMIDI, which makes sound in small slices). 5 = BASS's least.
@@ -117,7 +118,7 @@ def _pin(*paths):
 
 
 def load_dlls():
-    """(bass, bassmidi), loaded once. SynthError when they can't be."""
+    """(bass, bassmidi, bassmix), loaded once. SynthError when they can't be."""
     global _dlls
     if _dlls:
         return _dlls
@@ -129,11 +130,13 @@ def load_dlls():
         if WINDOWS:
             bass = ctypes.WinDLL(os.path.join(folder, "bass.dll"))
             midi = ctypes.WinDLL(os.path.join(folder, "bassmidi.dll"))
-            _pin(os.path.join(folder, "bass.dll"), os.path.join(folder, "bassmidi.dll"))
+            mix = ctypes.WinDLL(os.path.join(folder, "bassmix.dll"))
+            _pin(*(os.path.join(folder, name) for name in ("bass.dll", "bassmidi.dll", "bassmix.dll")))
         else:  # (Linux, a Linux user says it works: libbassmidi.so needs libbass.so's names, so that one is shared
             # first; Mac the same way, untested)
             bass = ctypes.CDLL(os.path.join(folder, "libbass" + ending), mode=ctypes.RTLD_GLOBAL)
             midi = ctypes.CDLL(os.path.join(folder, "libbassmidi" + ending))
+            mix = ctypes.CDLL(os.path.join(folder, "libbassmix" + ending))
     except (AttributeError, OSError) as e:
         raise SynthError("synth.no_dll", err=e) from None
     u, i, p, f = ctypes.c_uint, ctypes.c_int, ctypes.c_void_p, ctypes.c_float
@@ -162,7 +165,10 @@ def load_dlls():
                             ("BASS_MIDI_FontLoad", [u, i, i], i), ("BASS_MIDI_FontLoadEx", [u, i, i, u, u], i)):
         fn = getattr(midi, name)
         fn.argtypes, fn.restype = args, res
-    _dlls = bass, midi
+    for name, args, res in (("BASS_Mixer_StreamCreate", [u, u, u], u), ("BASS_Mixer_StreamAddChannel", [u, u, u], i)):
+        fn = getattr(mix, name)
+        fn.argtypes, fn.restype = args, res
+    _dlls = bass, midi, mix
     # BASSMIDI's own "compacting" off: 2 s after any stream closes it throws away the samples no stream uses, in its
     # own thread. The preview's pieces open and close streams all the time, each loading its samples: one freed while
     # being loaded crashed Spiderweb (heap corruption in StreamLoadSamples, a user's crash log 2026-10-13; measured
@@ -261,7 +267,7 @@ class Synth:
     one's. can_play = False when there's no sound device (render still works)."""
 
     def __init__(self):
-        self.bass, self.midi = load_dlls()
+        self.bass, self.midi, self.mix = load_dlls()
         self.play_device = None  # (BASS's number for the sound device, once it opened)
         if not self._init(_DEVICE_DEFAULT):
             self._init(_DEVICE_NONE)  # (sound can still be made, not played: the device is asked for again)
@@ -725,10 +731,12 @@ class Player:
 # maths; dev/tests/live_limiter.py compares them). Switched on / off, it fades between the plain and the limited
 # sound over LIM_FADE (a cut clicks: the limited sound is LIM_DELAY frames late); the first LIM_DELAY frames after
 # it's put on the stream stay plain (nothing late to fade to yet).
-# ONE LIMITER FOR ALL OF THEM (user 2026-10-30: a loaded MIDI's synths, each limited alone, added up past full volume
-# in the sound device's mix and clipped): every limited stream has a slot in _LIM_ALL (its handle, its loudness
-# lately, its row) and turns down by the loudness of all of them together (the sum of their peaks is never under
-# the peak of their sum). One stream alone = the same sound as before.
+# A loaded MIDI's synths are mixed into ONE stream first (LiveGroup's mixer, BASSmix) and limited there, on the real
+# mix like the driver (user 2026-10-30: each synth limited alone added up past full volume and clipped; then turning
+# down by the sum of all their peaks was up to 6 dB quieter than the driver: dev/scratch/limiter_loopback.py).
+# Streams still limited apart (the main synth beside a group's mixer) share _LIM_ALL: each has a slot (its handle,
+# its loudness lately, its row) and turns down by their loudness together (the sum of their peaks is never under the
+# peak of their sum). One stream alone = its own loudness only.
 LIM_BLOCK, LIM_DELAY, LIM_RING = 64, 128, 256  # frames: a gain per block, the limited sound this late, frames kept
 LIM_N, LIM_ON, LIM_MIX, LIM_ENV, LIM_G0, LIM_G1, LIM_PEAK, LIM_PREV = range(8)  # (the row: then the kept frames)
 LIM_HEAD = 8
@@ -737,7 +745,7 @@ LIM_CEILING = 1.0  # full volume (the driver's limiter plugin at its defaults)
 LIM_FALL = math.exp(-LIM_BLOCK / (Limiter.RELEASE * RATE))
 LIM_FADE = 0.005  # seconds
 LIM_STEP = 1 / (LIM_FADE * RATE)
-LIM_SLOTS = 64  # (streams limited at once: a group of 16 closing while the next opens, + the main synth)
+LIM_SLOTS = 64  # (streams limited at once: the main synth + groups' mixers, one closing while the next opens)
 LIM_TOP = 2 * LIM_SLOTS  # (_LIM_ALL: handles, then loudness, then each slot's row)
 LIM_ALL = LIM_TOP + LIM_SLOTS * LIM_SIZE
 _LIM_ALL = np.zeros(LIM_ALL)  # (never freed: BASS's threads read it)
@@ -810,67 +818,16 @@ def live_limit(st, x, loud, slot):
         i += k
 
 
-class Live:
-    """A BASSMIDI stream with LIVE_CHANNELS channels (0-15 as on any GM synth, but 10 is a piano too; 16-95 =
-    ports 2-6's channels, 16 each, for a Hz bass's own channel per note; 96-126 = 31-EDO's steps, each
-    pitch-bent once here, playback.EDO_BENDS) that sounds each message the moment it's sent, set up like the
-    common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
-    Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
-    as there), linear sample interpolation, notes killed rather than faded at the voice limit, voices dropped
-    rather than stuttering when it can't keep up. Holds the soundfont open until close(). set_limiter = the
-    driver's optional limiter (a limiter plugin at its defaults: catches only what goes past full volume), handed
-    each piece by BASS as it makes it (see LIM_BLOCK; BASS's own compressor measured useless here: at full volume it
-    does nothing, past +6 dB it lets sound through). Without Numba that step is Python: it waits while the window is
-    busy and the sound breaks up then (hunt 2026-10-08: editing while playing, 150 ms of 6 s missing)."""
-    CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
-    QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
-    def __init__(self, synth, voices, volume=1.0, nofx=False, limiter=False, plain=False, drums=False):
-        """plain = one of a LiveGroup's synths: 16 channels, no 31-EDO channels, messages sent raw (send_raw).
-        drums = channel 10 plays drums (a loaded MIDI's, like players; its samples loaded here, never mid-play)."""
-        if not synth.font:
-            raise SynthError("synth.no_font")
-        if not synth.can_play:
-            raise SynthError("synth.no_device")
-        bass, midi = synth.bass, synth.midi
-        self.synth, self.font_path, self.font_paths = synth, synth.font_path, synth.font_paths
-        self.handle = midi.BASS_MIDI_StreamCreate(16 if plain else LIVE_CHANNELS,
-                                                  _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0), RATE)
-        if not self.handle:
-            raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
-        self.font = synth._take()
-        synth.set_stream_fonts(self.handle, self.font)
-        h, at = self.handle, bass.BASS_ChannelSetAttribute
-        if plain and bass.BASS_GetConfig(_CONFIG_UPDATEPERIOD) > GROUP_PERIOD:
-            bass.BASS_SetConfig(_CONFIG_UPDATEPERIOD, GROUP_PERIOD)
-        for attr, value in ((_ATTRIB_BUFFER, GROUP_BUFFER if plain else 0), (_ATTRIB_MIDI_SRC, 0), (_ATTRIB_MIDI_KILL, 1),
-                            (_ATTRIB_MIDI_CPU, self.CPU), (_ATTRIB_MIDI_QUEUE_ASYNC, GROUP_QUEUE if plain else self.QUEUE),
-                            (_ATTRIB_VOL, volume)):
-            at(h, attr, float(value))
-        self.set_voices(voices)
-        self.dsp, self.st, self._proc, self.slot = 0, None, None, None  # (_proc kept: BASS holds on to it)
-        self._lock = threading.Lock()
-        if limiter:
-            self.set_limiter(True)
-        # channel 10 plays the piano like the others (user, 2026-10-11: "Use channel 10" is for its colour; nothing
-        # in Spiderweb is meant as drums)
-        for port in range(1 if plain else LIVE_PORTS):  # (every port's channel 10)
-            midi.BASS_MIDI_StreamEvent(h, port * 16 + 9, _EV_DRUMS, 1 if drums else 0)
-        if not plain:  # (before the samples load: its drum kit with them, never mid-play)
-            midi.BASS_MIDI_StreamEvent(h, LIVE_DRUMS, _EV_DRUMS, 1)
-        synth._load_samples(h)  # (program 0: no wait at the first notes; one stream at a time, see _load_samples)
-        self._rpn = {}  # (channel past 16, CC 101 / 100: the bend range being set, send)
-        if not plain:
-            from files.playback import edo_bends
-            for msg in edo_bends():
-                self.send(msg)
-        if not bass.BASS_ChannelPlay(h, 0):
-            err = bass.BASS_ErrorGetCode()
-            self.close()
-            raise SynthError("synth.failed", err=err)
+class _Limited:
+    """The driver's optional limiter on a playing stream (a Live, or a LiveGroup's mixer): synth, handle and _lock are
+    the owner's; set_limiter puts it on or takes it off."""
+    synth: "Synth"
+    handle: int
+    _lock: threading.Lock
+    dsp, st, _proc, slot = 0, None, None, None
 
-    def set_voices(self, voices):
-        self.voices = voices  # (play_loaded keeps what it learned per voice limit)
-        self.synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_MIDI_VOICES, float(voices))
+    def _no_limiter(self):
+        self.dsp, self.st, self._proc, self.slot = 0, None, None, None  # (_proc kept: BASS holds on to it)
 
     def set_limiter(self, on):
         """Heard at once (faded over LIM_FADE). Turned off, it leaves the stream once faded out."""
@@ -923,6 +880,94 @@ class Live:
                                                                 (length // 8, 2)), _LIM_ALL[LIM_SLOTS:LIM_TOP], slot)
         except Exception:  # (never into BASS's thread: that piece just plays as made)
             pass
+
+    def _fade_free(self, free):
+        """Takes the handle away and calls free(handle) after a quick fade out like Player.stop (cut off mid-sound
+        it clicked; the timer keeps self, so the limiter's _proc lives while BASS may still call it), then lets go of
+        the limiter's slot (it works to the end of the fade)."""
+        with self._lock:
+            h, self.handle = self.handle, 0
+            slot, self.slot = self.slot, None
+        if not h:
+            return
+        bass = self.synth.bass
+
+        def done():
+            free(h)
+            if slot is not None:
+                lim_give(slot)
+
+        if bass.BASS_ChannelIsActive(h) and bass.BASS_ChannelSlideAttribute(h, _ATTRIB_VOL, -1.0, FADE_MS):
+            timer = threading.Timer(FADE_MS / 1000 + 0.1, lambda: (done(), self))
+            timer.daemon = True
+            timer.start()
+        else:
+            done()
+
+
+class Live(_Limited):
+    """A BASSMIDI stream with LIVE_CHANNELS channels (0-15 as on any GM synth, but 10 is a piano too; 16-95 =
+    ports 2-6's channels, 16 each, for a Hz bass's own channel per note; 96-126 = 31-EDO's steps, each
+    pitch-bent once here, playback.EDO_BENDS) that sounds each message the moment it's sent, set up like the
+    common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
+    Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
+    as there), linear sample interpolation, notes killed rather than faded at the voice limit, voices dropped
+    rather than stuttering when it can't keep up. Holds the soundfont open until close(). set_limiter = the
+    driver's optional limiter (a limiter plugin at its defaults: catches only what goes past full volume), handed
+    each piece by BASS as it makes it (see LIM_BLOCK; BASS's own compressor measured useless here: at full volume it
+    does nothing, past +6 dB it lets sound through). Without Numba that step is Python: it waits while the window is
+    busy and the sound breaks up then (hunt 2026-10-08: editing while playing, 150 ms of 6 s missing)."""
+    CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
+    QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
+    plain, mixer = False, 0  # (mixer: a group's synth, its group's mix once added)
+
+    def __init__(self, synth, voices, volume=1.0, nofx=False, limiter=False, plain=False, drums=False):
+        """plain = one of a LiveGroup's synths: 16 channels, no 31-EDO channels, messages sent raw (send_raw), its
+        sound pulled by the group's mixer (which plays it, limiter there: no limiter or playing here).
+        drums = channel 10 plays drums (a loaded MIDI's, like players; its samples loaded here, never mid-play)."""
+        if not synth.font:
+            raise SynthError("synth.no_font")
+        if not synth.can_play:
+            raise SynthError("synth.no_device")
+        bass, midi = synth.bass, synth.midi
+        self.synth, self.font_path, self.font_paths, self.plain = synth, synth.font_path, synth.font_paths, plain
+        self.handle = midi.BASS_MIDI_StreamCreate(16 if plain else LIVE_CHANNELS,
+                                                  _SAMPLE_FLOAT | _MIDI_ASYNC | (_MIDI_NOFX if nofx else 0)
+                                                  | (_STREAM_DECODE if plain else 0), RATE)
+        if not self.handle:
+            raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
+        self.font = synth._take()
+        synth.set_stream_fonts(self.handle, self.font)
+        h, at = self.handle, bass.BASS_ChannelSetAttribute
+        for attr, value in (((_ATTRIB_BUFFER, 0),) if not plain else ()) + (
+                (_ATTRIB_MIDI_SRC, 0), (_ATTRIB_MIDI_KILL, 1), (_ATTRIB_MIDI_CPU, self.CPU),
+                (_ATTRIB_MIDI_QUEUE_ASYNC, GROUP_QUEUE if plain else self.QUEUE), (_ATTRIB_VOL, volume)):
+            at(h, attr, float(value))
+        self.set_voices(voices)
+        self._no_limiter()
+        self._lock = threading.Lock()
+        if limiter and not plain:
+            self.set_limiter(True)
+        # channel 10 plays the piano like the others (user, 2026-10-11: "Use channel 10" is for its colour; nothing
+        # in Spiderweb is meant as drums)
+        for port in range(1 if plain else LIVE_PORTS):  # (every port's channel 10)
+            midi.BASS_MIDI_StreamEvent(h, port * 16 + 9, _EV_DRUMS, 1 if drums else 0)
+        if not plain:  # (before the samples load: its drum kit with them, never mid-play)
+            midi.BASS_MIDI_StreamEvent(h, LIVE_DRUMS, _EV_DRUMS, 1)
+        synth._load_samples(h)  # (program 0: no wait at the first notes; one stream at a time, see _load_samples)
+        self._rpn = {}  # (channel past 16, CC 101 / 100: the bend range being set, send)
+        if not plain:
+            from files.playback import edo_bends
+            for msg in edo_bends():
+                self.send(msg)
+        if not plain and not bass.BASS_ChannelPlay(h, 0):
+            err = bass.BASS_ErrorGetCode()
+            self.close()
+            raise SynthError("synth.failed", err=err)
+
+    def set_voices(self, voices):
+        self.voices = voices  # (play_loaded keeps what it learned per voice limit)
+        self.synth.bass.BASS_ChannelSetAttribute(self.handle, _ATTRIB_MIDI_VOICES, float(voices))
 
     def send(self, msg):
         """One short MIDI message (status | data1 << 8 | data2 << 16, as a MIDI-out device takes it; channels past 16:
@@ -982,8 +1027,10 @@ class Live:
         return int(got.value)
 
     def position(self):
-        """Bytes of sound made so far (8 a frame)."""
-        return self.synth.bass.BASS_ChannelGetPosition(self.handle, _POS_BYTE) if self.handle else 0
+        """Bytes of sound made so far (8 a frame). A group's synth: its mix's played so far (the mixer pulls the
+        synth in steps of a refill, ~5 ms: read every 0.1 s that passed for lost sound, play_loaded LOST_S)."""
+        h = self.mixer or self.handle
+        return self.synth.bass.BASS_ChannelGetPosition(h, _POS_BYTE) if h else 0
 
     def voices_playing(self):
         used = ctypes.c_float()
@@ -993,27 +1040,18 @@ class Live:
         return int(used.value)
 
     def close(self):
+        """Faded out, then freed (a group's synth: freed at once, its group fades the mix out before)."""
+        def free(h):
+            self.synth.bass.BASS_StreamFree(h)
+            self.synth._give(self.font)
+
+        if not self.plain:
+            self._fade_free(free)
+            return
         with self._lock:
             h, self.handle = self.handle, 0
-            slot, self.slot = self.slot, None
-        if not h:
-            return
-        bass = self.synth.bass
-
-        def free():
-            bass.BASS_StreamFree(h)
-            self.synth._give(self.font)
-            if slot is not None:  # (after the stream: its limiter works to the end of the fade)
-                lim_give(slot)
-
-        if bass.BASS_ChannelIsActive(h) and bass.BASS_ChannelSlideAttribute(h, _ATTRIB_VOL, -1.0, FADE_MS):
-            # (a quick fade out like Player.stop: cut off mid-sound it clicked; the timer keeps this Live, so the
-            # limiter's _proc lives while BASS may still call it)
-            timer = threading.Timer(FADE_MS / 1000 + 0.1, free)
-            timer.daemon = True
-            timer.start()
-        else:
-            free()
+        if h:
+            free(h)
 
 
 def group_voices(voices, count):
@@ -1023,23 +1061,39 @@ def group_voices(voices, count):
     return max(1, min(voices, voices * 4 // count))
 
 
-class LiveGroup:
-    """Several plain Live synths side by side, each made by BASS on its own thread (a loaded MIDI's playback, Load
-    MIDI group D). One BASSMIDI stream makes sound on one core and slows down with its voice count: measured
-    2026-10-24 (dev/scratch/play_measure*.py), one stream kept up with ~1 M notes a second at 1,000 voices, 16
-    side by side with 10 M at 2,000 voices in all (each ~10 % busy). Voices each: group_voices. Which synth a note goes to:
-    files/play_loaded.py (all of a channel's notes on one key always the same one)."""
+class LiveGroup(_Limited):
+    """Several plain Live synths side by side (a loaded MIDI's playback, Load MIDI group D), mixed into one playing
+    stream by BASSmix (handle), each made on its own mixing thread. One BASSMIDI stream makes sound on one core and
+    slows down with its voice count: measured 2026-10-24 (dev/scratch/play_measure*.py), one stream kept up with
+    ~1 M notes a second at 1,000 voices, 16 side by side with 10 M at 2,000 voices in all (each ~10 % busy). Voices
+    each: group_voices. Which synth a note goes to: files/play_loaded.py (all of a channel's notes on one key always
+    the same one). The limiter works on the mix (see LIM_BLOCK)."""
 
     def __init__(self, synth, count, voices, volume=1.0, nofx=False, limiter=False, drums=True):
         bass = synth.bass
-        bass.BASS_GetConfig.restype = ctypes.c_uint
-        if bass.BASS_GetConfig(_CONFIG_UPDATETHREADS) < count:
-            bass.BASS_SetConfig(_CONFIG_UPDATETHREADS, count)  # (one BASS thread per synth: else all on one core)
-        self.lives = []
+        self.synth, self.lives, self._lock = synth, [], threading.Lock()
+        self._no_limiter()
+        if not synth.can_play:
+            raise SynthError("synth.no_device")
+        self.handle = synth.mix.BASS_Mixer_StreamCreate(RATE, 2, _SAMPLE_FLOAT | _MIXER_NONSTOP)
+        if not self.handle:
+            raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
+        h, at = self.handle, bass.BASS_ChannelSetAttribute
+        if bass.BASS_GetConfig(_CONFIG_UPDATEPERIOD) > GROUP_PERIOD:
+            bass.BASS_SetConfig(_CONFIG_UPDATEPERIOD, GROUP_PERIOD)
+        at(h, _ATTRIB_BUFFER, GROUP_BUFFER)
+        at(h, _ATTRIB_MIXER_THREADS, float(min(count, 16)))  # (each synth on its own thread: else all on one core)
         try:
             for _ in range(count):
-                self.lives.append(Live(synth, group_voices(voices, count), volume, nofx, limiter, plain=True,
-                                       drums=drums))
+                live = Live(synth, group_voices(voices, count), volume, nofx, plain=True, drums=drums)
+                self.lives.append(live)
+                if not synth.mix.BASS_Mixer_StreamAddChannel(h, live.handle, 0):
+                    raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
+                live.mixer = h
+            if limiter:
+                self.set_limiter(True)
+            if not bass.BASS_ChannelPlay(h, 0):
+                raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
         except SynthError:
             self.close()
             raise
@@ -1051,10 +1105,6 @@ class LiveGroup:
         for live in self.lives:
             live.set_voices(group_voices(voices, len(self.lives)))
 
-    def set_limiter(self, on):
-        for live in self.lives:
-            live.set_limiter(on)
-
     def cpu(self):
         """The busiest synth's % (BASS_ATTRIB_CPU)."""
         return max((live.cpu() for live in self.lives), default=0.0)
@@ -1063,6 +1113,15 @@ class LiveGroup:
         return sum(live.voices_playing() for live in self.lives)
 
     def close(self):
+        """The mix faded out, then it and its synths freed."""
         lives, self.lives = self.lives, []
-        for live in lives:
-            live.close()
+
+        def free(h):
+            for live in lives:
+                live.mixer = 0
+            self.synth.bass.BASS_StreamFree(h)
+            for live in lives:
+                live.close()
+
+        if self.handle:
+            self._fade_free(free)

@@ -192,8 +192,8 @@ Ideas borrowed from osu! mapping: arcs through three points work like osu!'s
 Mapping Tools by OliBomby (github.com/OliBomby/Mapping_Tools), written anew
 here for the piano roll.
 
-The Hz bass preview and the Built-in BASSMIDI playback use BASS and BASSMIDI
-by Un4seen Developments (un4seen.com; the DLLs, Linux .so and macOS .dylib
+The Hz bass preview and the Built-in BASSMIDI playback use BASS, BASSMIDI and
+BASSmix by Un4seen Developments (un4seen.com; the DLLs, Linux .so and macOS .dylib
 files in scripts/bass, the DLLs also inside the .exe). They are NOT covered by
 Spiderweb's MIT License: they are free for non-commercial use only. Anyone
 selling or otherwise making money from a copy of Spiderweb needs a BASS

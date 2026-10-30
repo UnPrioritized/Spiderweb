@@ -16,7 +16,7 @@ LINE = "=" * 78
 HEAD = """Spiderweb.exe carries these programs and libraries inside it. Their licences ask for their
 notices to come with it, so here they are. Spiderweb's own licence is in LICENSE.
 
-The Hz bass preview and the built-in synth use BASS and BASSMIDI by Un4seen Developments
+The Hz bass preview and the built-in synth use BASS, BASSMIDI and BASSmix by Un4seen Developments
 (un4seen.com). They aren't covered by these licences or by Spiderweb's: they are free for
 non-commercial use only (see README.txt).
 
