@@ -34,6 +34,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_gather    midi_scan.gather (Extract: a loaded track's notes in a box), the very same function compiled
   midi_index, midi_close, midi_grid, midi_halve   midi_index's functions (Load MIDI's pass: notes paired, the index
                  to read a track from anywhere, the overview picture), the very same functions compiled
+  midi_cover_many  roll_loaded's exact pictures: many small tracks painted in one call (TrackReader.read each)
   play_read, play_order, play_order_count, play_order_place, play_hist, play_emit, play_programs, play_stamp,
   play_condense, play_stamp_pre   midi_play's functions (playing a loaded MIDI), compiled
   all_tops       track_list.loaded_tops: a loaded MIDI's tracks in the track list's All tracks row
@@ -1694,6 +1695,47 @@ midi_grid = njit(cache=CACHE, nogil=True)(_index.grid)
 midi_halve = njit(cache=CACHE, nogil=True)(_index.halve)
 midi_cover = njit(cache=CACHE, nogil=True)(_index.cover)
 midi_merge_loud = njit(cache=CACHE, nogil=True)(_index.merge_loud)
+
+
+@njit(cache=CACHE, nogil=True)
+def midi_cover_many(faint, klo, khi, starts, ends, e0s, e1s, cp_tick, cp_run, limits, lasts, buf, pos, eq, ec, ev,
+                    skip, t1, ax, bx, W, k_lo, normal, behind, tab, nx, filled, marks, sq, sa, sb, sv, cnt_q, first_q,
+                    vel_q, st, covered):
+    """roll_loaded.TrackReader.read for many small tracks in one go (roll_loaded.read_small: everything per track
+    worked out before, their bytes end to end in buf from pos), in the same order with the same covered check
+    (exact_tab). Returns how many tracks went into covered (read later, read_covered)."""
+    nk = tab.shape[0]
+    nc = 0
+    for i in range(len(starts)):
+        a = max(klo[i], k_lo) - k_lo
+        b = min(khi[i], k_lo + nk - 1) - k_lo + 1
+        full = True
+        for r in range(a, b):
+            if filled[r] < W:
+                full = False
+                break
+        if full:
+            covered[nc] = i
+            nc += 1
+            continue
+        tick0 = cp_tick[i]
+        for e in range(e0s[i], e1s[i]):
+            q = np.int64(eq[e])
+            cnt_q[q] = ec[e]
+            first_q[q] = tick0
+            vel_q[q] = ev[e]
+        size = ends[i] - starts[i]
+        b8 = buf[pos[i]:pos[i] + size]
+        st[:] = 0
+        st[_index.C_TICK] = tick0
+        st[_index.C_RUN] = cp_run[i]
+        colour = behind if faint[i] else normal
+        p = midi_cover(b8, 0, size, starts[i], skip, st, cnt_q, first_q, vel_q, t1, -1, ax, bx, W, k_lo, colour, tab,
+                       nx, filled, marks, sq, sa, sb, sv)
+        close = t1 + 1 if st[_index.C_STOP] == 1 or ends[i] < limits[i] else max(st[_index.C_TICK], lasts[i])
+        midi_cover(b8, p, p, starts[i], skip, st, cnt_q, first_q, vel_q, t1, close, ax, bx, W, k_lo, colour, tab, nx,
+                   filled, marks, sq, sa, sb, sv)
+    return nc
 play_read = njit(cache=CACHE, nogil=True)(midi_play.read)
 play_order = njit(cache=CACHE, nogil=True)(midi_play.order)
 play_order_count = njit(cache=CACHE, nogil=True)(midi_play.order_count)
@@ -1864,6 +1906,10 @@ def warm():
     midi_cover(u8, 0, 0, 0, i1[:0], np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,
                np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
                z.copy(), z.copy())
+    midi_cover_many(np.zeros(1, bool), i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, u8, i1, np.zeros(1, np.int16), i1,
+                    u8.copy(), i1[:0], 1, 1.0, 0.0, 2, 0, np.zeros((16, 32), np.int64), np.zeros((16, 32), np.int64),
+                    t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(), z.copy(), z.copy(), q,
+                    q.copy(), q.copy(), np.zeros(_index.C_SIZE, np.int64), i1.copy())
     loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
     all_tops(np.full((1, 1), -1, np.int32), np.zeros(1, np.uint8), i1, i1 + 1, i1 + 1, i1.copy(), i1.copy(), i1 + 1,
              i1 + 1, np.zeros(1, bool), i1.copy(), i1.copy(), 0, 1.0, 1)

@@ -38,6 +38,9 @@ KEEP = 3  # exact pictures kept (newest first)
 RATE = {"memory": 1.5e9, "file": 0.8e9}  # bytes a second read + painted, until pictures have been timed
 RATE_PLAIN = 0.5e6  # ... without the speed-ups (plain Python)
 TIMED_LEAST = 4 << 20  # pictures reading fewer bytes don't time the rate (their fixed costs would)
+SMALL_TRACK = 1 << 20  # tracks this small read many in one compiled call (read_small: per track costs ruled there)
+SMALL_BATCH = 4 << 20  # ... this many bytes a call at most (a stop asked between calls)
+_BIG = 1 << 40  # (small_tables' search keys: track place x this + tick)
 
 class Exact:
     """One exact picture: rows = every key of the file (0 .. keys - 1) x W columns, pixel x of tick t =
@@ -151,6 +154,7 @@ class LoadedNotes:
             made = (overview_tab(lm, ax, bx, W, p_lo, nk) if order is None else
                     pictures_tab(lm, order, faint, ax, bx, W, p_lo, nk))
             over = self._loaded_over = (key, *made)
+        self._loaded_rough = True  # (not exact on screen: painted again when an exact picture comes, _poll_exact)
         if slow > EXACT_MOST_S:
             return over[1], over[2]
         if not changed(self, lm):
@@ -288,8 +292,12 @@ class LoadedNotes:
         if made and not job.stop:
             for e in made:
                 self._remember(e)
-            self.loaded_version = getattr(self, "loaded_version", 0) + 1
-            self.request_redraw()
+            # (only when something rough shows: else the screen has these very pixels already, and painting the
+            # whole view again made scrolling stutter on a MIDI of many tracks, user 2026-10-30)
+            if getattr(self, "_loaded_rough", True):
+                self._loaded_rough = False
+                self.loaded_version = getattr(self, "loaded_version", 0) + 1
+                self.request_redraw()
         if job.done:
             self._loaded_job = None
             changed(self, job.lm)
@@ -306,6 +314,7 @@ class LoadedNotes:
             self.after_cancel(timer)
         self._loaded_job = self._loaded_timer = self._loaded_over = self._loaded_now = None
         self._loaded_exact = []
+        self._loaded_rough = True
         self.loaded_version = getattr(self, "loaded_version", 0) + 1
         # (nothing kept that still holds the old one, so its memory goes: hunt 2026-10-29, a "Keep in memory" MIDI
         # stayed after New) the CC row's, the file tracks' names, the track list's small pictures
@@ -727,6 +736,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
         return None, None
     covered = []  # (tracks whose every row is painted already: they only shade, read on other cores)
     rd = TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint, only)
+    run = []  # (small tracks waiting to be read together, in order: read_small)
     try:
         for n in order:
             if stop():
@@ -734,11 +744,20 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
             t = lm.tracks[n]
             if not t.notes or n in lm.gone or t.end <= t0 or t.first > t1 or t.khi < k_lo or t.klo >= k_lo + nk:
                 continue
+            if fast and small_ok(lm, rd, n):
+                run.append(n)
+                continue
+            if run:
+                if not read_small(rd, run, tab, nx, filled, marks, stop, covered):
+                    return None, None
+                run = []
             if fast and (filled[max(t.klo, k_lo) - k_lo:min(t.khi, k_lo + nk - 1) - k_lo + 1] >= W).all():
                 covered.append(n)
                 continue
             if not rd.read(n, tab, nx, filled, marks):
                 return None, None
+        if run and not read_small(rd, run, tab, nx, filled, marks, stop, covered):
+            return None, None
         if covered and not read_covered(lm, covered, rd, tab, marks, stop):
             return None, None
     finally:
@@ -856,6 +875,89 @@ def read_covered(lm, covered, first, tab, marks, stop):
     return True
 
 
+def small_tables(lm):
+    """The small tracks' (at most SMALL_TRACK bytes) checkpoints + entries end to end, for read_small; made once per
+    MIDI. "at"[track] = its place here, -1 = not small (read alone: its reading outweighs the per track costs)."""
+    sm = getattr(lm, "_small", None)
+    if sm is not None:
+        return sm
+    ts = lm.tracks
+    small = [n for n, t in enumerate(ts) if len(t.cp_off) and t.limit <= SMALL_TRACK
+             and len(t.cp_ent) == len(t.cp_off) + 1]
+    sel = [ts[n] for n in small]
+    at = np.full(len(ts), -1, np.int64)
+    at[small] = np.arange(len(small))
+    ncp = np.array([len(t.cp_off) for t in sel], np.int64)
+    ne = np.array([len(t.e_q) for t in sel], np.int64)
+
+    def cat(name, dt):
+        return np.concatenate([np.asarray(getattr(t, name), dt) for t in sel]) if sel else np.zeros(0, dt)
+    cp_tick = cat("cp_tick", np.int64)
+    sm = {"at": at, "cp0": np.concatenate([[0], np.cumsum(ncp)]).astype(np.int64),
+          "ent0": np.concatenate([[0], np.cumsum(ncp + 1)[:-1]]).astype(np.int64),
+          "e0": np.concatenate([[0], np.cumsum(ne)[:-1]]).astype(np.int64),
+          "key": np.repeat(np.arange(len(sel), dtype=np.int64), ncp) * _BIG + cp_tick, "cp_tick": cp_tick,
+          "cp_off": cat("cp_off", np.int64), "cp_run": cat("cp_run", np.int64), "cp_ent": cat("cp_ent", np.int64),
+          "eq": cat("e_q", np.int16), "ec": cat("e_cnt", np.int64), "ev": cat("e_vel", np.uint8)}
+    for name, get in (("limit", lambda n, t: t.limit), ("last", lambda n, t: t.last_tick), ("klo", lambda n, t: t.klo),
+                      ("khi", lambda n, t: t.khi), ("fstart", lambda n, t: lm.mf.tracks[n].start)):
+        sm[name] = np.array([get(n, t) for n, t in zip(small, sel)], np.int64)
+    lm._small = sm
+    return sm
+
+
+def small_ok(lm, rd, n):
+    """Track n can go through read_small: small, nothing extracted from it, its own channel, all its channels."""
+    if small_tables(lm)["at"][n] < 0 or lm.h_at[n] != lm.h_at[n + 1] or n in rd.only:
+        return False
+    moved = lm.rechannel
+    return moved is None or n >= len(moved) or moved[n] < 0
+
+
+def read_small(rd, ns, tab, nx, filled, marks, stop, covered):
+    """rd.read for each of the small tracks ns (small_ok, in this order), SMALL_BATCH bytes per compiled call
+    (fastloops.midi_cover_many): the same tables, the same covered check (those put in covered, read later).
+    False = stopped / the file changed."""
+    lm, fast = rd.lm, speed.loops()
+    sm = small_tables(lm)
+    ns = np.asarray(ns, np.int64)
+    ii = sm["at"][ns]
+    k0, k1 = sm["cp0"][ii], sm["cp0"][ii + 1]
+    t0, t1 = max(rd.t0, -1), min(rd.t1, _BIG - 1)  # (checkpoint ticks are 0 .. below _BIG)
+    j = np.maximum(np.searchsorted(sm["key"], ii * _BIG + t0, "right") - 1, k0)
+    j2 = np.searchsorted(sm["key"], ii * _BIG + t1, "right")
+    cpo = sm["cp_off"]
+    starts = cpo[j]
+    ends = np.where(j2 < k1, cpo[np.minimum(j2, len(cpo) - 1)], sm["limit"][ii])
+    keep = ends > starts  # (nothing to read: nothing painted, nothing marked; rd.read returns at once)
+    ns, ii, j, k0, starts, ends = ns[keep], ii[keep], j[keep], k0[keep], starts[keep], ends[keep]
+    ent = sm["ent0"][ii] + (j - k0)
+    e0s = sm["cp_ent"][ent] + sm["e0"][ii]
+    e1s = sm["cp_ent"][ent + 1] + sm["e0"][ii]
+    faint = np.isin(ns, np.fromiter(rd.faint, np.int64)) if len(rd.faint) else np.zeros(len(ns), bool)
+    sizes = ends - starts
+    run = np.cumsum(sizes)
+    cuts = np.searchsorted(run, np.arange(SMALL_BATCH, int(run[-1]) if len(run) else 0, SMALL_BATCH), "right")
+    skip = np.zeros(0, np.int64)
+    out = np.zeros(len(ns), np.int64)
+    for c in np.split(np.arange(len(ns)), np.unique(cuts[(cuts > 0) & (cuts < len(ns))])):
+        if not len(c):
+            continue
+        if stop():
+            return False
+        buf, pos = rd.read_bytes(ns[c], starts[c], ends[c], sm["fstart"][ii[c]])
+        if buf is None:
+            return False
+        rd.took += int(sizes[c].sum())
+        nc = fast.midi_cover_many(faint[c], sm["klo"][ii[c]], sm["khi"][ii[c]], starts[c], ends[c], e0s[c], e1s[c],
+                                  sm["cp_tick"][j[c]], sm["cp_run"][j[c]], sm["limit"][ii[c]], sm["last"][ii[c]], buf,
+                                  pos, sm["eq"], sm["ec"], sm["ev"], skip, rd.t1, rd.ax, rd.bx, rd.W, rd.k_lo,
+                                  rd.normal, rd.behind, tab, nx, filled, marks, rd.sq, rd.sa, rd.sb, rd.sv, rd.cnt_q,
+                                  rd.first_q, rd.vel_q, rd.st, out)
+        covered.extend(ns[c][out[:nc]].tolist())
+    return True
+
+
 class TrackReader:
     """One track at a time painted into an exact picture's tables (cover from its checkpoint before t0), with its
     own scratch arrays and file handle, so several can read side by side."""
@@ -925,6 +1027,41 @@ class TrackReader:
         close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)
         self.cover(b, p, p, start, skip, st, cnt_q, first_q, vel_q, t1, close, *args)
         return True
+
+    def read_bytes(self, ns, starts, ends, fstarts):
+        """(buf, pos) for read_small: tracks ns' bytes starts..ends (in each track) in buf from pos; from memory
+        when kept, else the file: ONE read when they lie close together in it, else one each. (None, None) = the
+        file changed / went (lm.changed)."""
+        lm, sizes = self.lm, ends - starts
+        if lm.tracks[int(ns[0])].data is not None:
+            pos = np.concatenate([[0], np.cumsum(sizes)[:-1]]).astype(np.int64)
+            return np.concatenate([lm.tracks[n].data[s:e] for n, s, e in zip(ns.tolist(), starts.tolist(),
+                                                                                ends.tolist())]), pos
+        at = fstarts + starts
+        lo, hi, need = int(at.min()), int((at + sizes).max()), int(sizes.sum())
+        whole = hi - lo <= need + need // 4 + (256 << 10)  # (little in between: read it along)
+        size = hi - lo if whole else need
+        if self.buf is None or len(self.buf) < size:
+            self.buf = np.empty(max(size, 1 << 20), np.uint8)
+        try:
+            if self.f is None:
+                self.f = open(lm.path, "rb")
+            if whole:
+                pos = at - lo
+                self.f.seek(lo)
+                ok = self.f.readinto(memoryview(self.buf)[:size]) == size
+            else:
+                pos = np.concatenate([[0], np.cumsum(sizes)[:-1]]).astype(np.int64)
+                ok = True
+                for a, p, n in zip(at.tolist(), pos.tolist(), sizes.tolist()):
+                    self.f.seek(a)
+                    ok = ok and self.f.readinto(memoryview(self.buf)[p:p + n]) == n
+        except OSError:
+            ok = False
+        if not ok:
+            lm.changed = True
+            return None, None
+        return self.buf, pos.astype(np.int64)
 
     def close(self):
         if self.f is not None:
