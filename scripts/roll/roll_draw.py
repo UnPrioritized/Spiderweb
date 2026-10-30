@@ -26,7 +26,7 @@ from notes.tempo import bpm_text, heard_marks, kept_bpms, ruler_marks, short_bpm
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_colours,
                               note_name, slot_colours)
-from roll.tiles import Tiles, see_through
+from roll.tiles import Tiles, see_through_strips
 from window import look
 
 TIP_MARKS = 10  # a ruler tempo mark's tip lists at most this many changes, then "+N more"
@@ -576,6 +576,8 @@ class RollDrawing:
         carried = self.carried()
         if carried is None:
             self._carry = None
+            if not (self.drag and self.drag[0] == "move"):  # (a rest: the same picture goes on after it)
+                self._carry_pic = None
         # (a drag called off: the notes catch up; a held knob / number box isn't one)
         if app.notes_late and not (self.drag or app.scrubbing) and not app._late_notes:
             app.notes_rested()
@@ -1445,10 +1447,25 @@ class RollDrawing:
                 self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
         if apart:
             return
-        a = c["area"]  # the dragged notes' picture holds the part of the screen they come from, and around it
-        if a is None or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy:
-            a = c["area"] = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
-            c["photo"] = None
+        # The dragged notes' picture holds the part of the screen they came from, and around it. KEPT FOR THE WHOLE
+        # DRAG at this view: after a rest their real notes are the same, moved along (making it again took ~0.2 s
+        # at every next move with a zoomed-in spam shape), so it's slid from where it was made (ref)
+        orig = self.drag[2]
+        view = (fixed[:7], self.view_t, self.view_top)
+        d = self._carry_pic
+        if d is not None and (d["orig"] is not orig or d["view"] != view):
+            d = None
+        if d is not None:
+            got = {(round((app.shapes[j]["pts"][0][0] - b0) * self.sx), round((p0 - app.shapes[j]["pts"][0][1]) * self.sy))
+                   for j, (b0, p0) in d["ref"].items()}
+            dx, dy = min(got)
+            a = d["area"]
+            if len(got) > 1 or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy:
+                d = None
+        if d is None:
+            a = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
+            d = self._carry_pic = {"orig": orig, "view": view, "area": a, "photo": [],
+                                   "ref": {j: app.rendered_pts[j] for j in orig}}
             rects = self.note_rects(w, h, area=a, only=True)
             if len(rects[0]):
                 x0, y0 = max(int(rects[0].min()), a[0]), max(int(rects[1].min()), a[1])
@@ -1458,9 +1475,9 @@ class RollDrawing:
                     px = np.zeros(((y1 - y0) * (x1 - x0), 4), np.uint8)
                     px[at, :3] = rgb
                     px[at, 3] = 255
-                    c["photo"] = (see_through(self, px.reshape(y1 - y0, x1 - x0, 4)), x0, y0)
-        if c["photo"]:
-            photo, x0, y0 = c["photo"]
+                    d["photo"] = [(photo, x0 + x, y0 + y) for photo, x, y
+                                  in see_through_strips(self, px.reshape(y1 - y0, x1 - x0, 4))]
+        for photo, x0, y0 in d["photo"]:
             self.create_image(x0 + dx, y0 + dy, image=photo, anchor="nw")
 
     def paint_drafted(self, w, h, rows, cols):

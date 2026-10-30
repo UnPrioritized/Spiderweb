@@ -15,7 +15,7 @@ TILE = 1024  # px each side, about (the picture's size split evenly)
 
 def see_through(master, rgba):
     """A Tk picture of rgba (rows x columns x 4, uint8; alpha 0 = see-through, 255 = solid), sent as PNG bytes
-    (the only way into Tk with see-through pixels; plain Tk reads PNG)."""
+    (the only way into Tk with see-through pixels; plain Tk reads PNG). Many see-through gaps: see_through_strips."""
     h, w = rgba.shape[:2]
     rows = np.zeros((h, w * 4 + 1), np.uint8)  # (each row starts with its filter byte, 0 = none)
     rows[:, 1:] = rgba.reshape(h, -1)
@@ -25,6 +25,23 @@ def see_through(master, rgba):
     data = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(rows.tobytes(), 1)) + chunk(b"IEND", b""))
     return tk.PhotoImage(master=master, data=data, format="png")
+
+
+STRIP = 25  # px: see_through_strips' height
+
+
+def see_through_strips(master, rgba):
+    """see_through cut into strips STRIP px high, each cut to its solid pixels' columns, empty ones left out:
+    [(picture, x, y)], x, y = its top left corner in rgba. Tk keeps a picture's see-through part as a list of
+    solid stretches that grows slower the more there are: a zoomed-in spam shape's notes as one picture (~4,000
+    notes, 1000 x 1000 px) took ~0.5 s at every drag start and after every rest; in strips ~4x quicker."""
+    out = []
+    for y in range(0, rgba.shape[0], STRIP):
+        part = rgba[y:y + STRIP]
+        cols = np.flatnonzero(part[:, :, 3].any(axis=0))
+        if len(cols):
+            out.append((see_through(master, part[:, cols[0]:cols[-1] + 1]), int(cols[0]), y))
+    return out
 
 
 class Tiles:
