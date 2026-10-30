@@ -725,6 +725,10 @@ class Player:
 # maths; dev/tests/live_limiter.py compares them). Switched on / off, it fades between the plain and the limited
 # sound over LIM_FADE (a cut clicks: the limited sound is LIM_DELAY frames late); the first LIM_DELAY frames after
 # it's put on the stream stay plain (nothing late to fade to yet).
+# ONE LIMITER FOR ALL OF THEM (user 2026-10-30: a loaded MIDI's synths, each limited alone, added up past full volume
+# in the sound device's mix and clipped): every limited stream has a slot in _LIM_ALL (its handle, its loudness
+# lately, its row) and turns down by the loudness of all of them together (the sum of their peaks is never under
+# the peak of their sum). One stream alone = the same sound as before.
 LIM_BLOCK, LIM_DELAY, LIM_RING = 64, 128, 256  # frames: a gain per block, the limited sound this late, frames kept
 LIM_N, LIM_ON, LIM_MIX, LIM_ENV, LIM_G0, LIM_G1, LIM_PEAK, LIM_PREV = range(8)  # (the row: then the kept frames)
 LIM_HEAD = 8
@@ -733,16 +737,44 @@ LIM_CEILING = 1.0  # full volume (the driver's limiter plugin at its defaults)
 LIM_FALL = math.exp(-LIM_BLOCK / (Limiter.RELEASE * RATE))
 LIM_FADE = 0.005  # seconds
 LIM_STEP = 1 / (LIM_FADE * RATE)
+LIM_SLOTS = 64  # (streams limited at once: a group of 16 closing while the next opens, + the main synth)
+LIM_TOP = 2 * LIM_SLOTS  # (_LIM_ALL: handles, then loudness, then each slot's row)
+LIM_ALL = LIM_TOP + LIM_SLOTS * LIM_SIZE
+_LIM_ALL = np.zeros(LIM_ALL)  # (never freed: BASS's threads read it)
+_lim_lock = threading.Lock()
 
 
 def limit_state():
     st = np.zeros(LIM_SIZE)
-    st[LIM_ENV], st[LIM_G0], st[LIM_G1] = LIM_CEILING, 1.0, 1.0
+    st[LIM_G0], st[LIM_G1] = 1.0, 1.0
     return st
 
 
-def live_limit(st, x):
-    """The limiter without Numba: x = float32 rows (left, right), changed in place; st = limit_state()'s row."""
+def lim_take(handle):
+    """A free slot for this stream's limiter (its row reset), or None when all are in use."""
+    with _lim_lock:
+        for i in range(LIM_SLOTS):
+            if not _LIM_ALL[i]:
+                _LIM_ALL[LIM_TOP + i * LIM_SIZE:LIM_TOP + (i + 1) * LIM_SIZE] = limit_state()
+                _LIM_ALL[LIM_SLOTS + i] = 0.0
+                _LIM_ALL[i] = handle  # (last: the sound thread finds the slot only once it's ready)
+                return i
+    return None
+
+
+def lim_give(slot):
+    with _lim_lock:
+        _LIM_ALL[slot] = 0.0
+        _LIM_ALL[LIM_SLOTS + slot] = 0.0
+
+
+def lim_row(slot):
+    return _LIM_ALL[LIM_TOP + slot * LIM_SIZE:LIM_TOP + (slot + 1) * LIM_SIZE]
+
+
+def live_limit(st, x, loud, slot):
+    """The limiter without Numba: x = float32 rows (left, right), changed in place; st = limit_state()'s row,
+    loud = every limited stream's loudness lately (slot = this one's)."""
     ring = st[LIM_HEAD:].reshape(LIM_RING, 2)
     m, i = len(x), 0
     while i < m:  # (in pieces ending at block ends)
@@ -772,7 +804,8 @@ def live_limit(st, x):
         if n % LIM_BLOCK == 0:  # a block made: the gain at the end of the one before it (the next to come out)
             if n >= 2 * LIM_BLOCK:
                 st[LIM_ENV] = max(st[LIM_PREV], st[LIM_PEAK], st[LIM_ENV] * LIM_FALL)
-                st[LIM_G0], st[LIM_G1] = st[LIM_G1], LIM_CEILING / max(st[LIM_ENV], LIM_CEILING)
+                loud[slot] = st[LIM_ENV]
+                st[LIM_G0], st[LIM_G1] = st[LIM_G1], LIM_CEILING / max(loud.sum(), LIM_CEILING)
             st[LIM_PREV], st[LIM_PEAK] = st[LIM_PEAK], 0.0
         i += k
 
@@ -814,7 +847,7 @@ class Live:
                             (_ATTRIB_VOL, volume)):
             at(h, attr, float(value))
         self.set_voices(voices)
-        self.dsp, self.st, self._proc = 0, None, None  # (st + _proc kept: BASS holds on to them)
+        self.dsp, self.st, self._proc, self.slot = 0, None, None, None  # (_proc kept: BASS holds on to it)
         self._lock = threading.Lock()
         if limiter:
             self.set_limiter(True)
@@ -845,14 +878,20 @@ class Live:
             if not self.handle:
                 return
             if on and not self.dsp:
+                slot = lim_take(self.handle)
+                if slot is None:  # (64 streams limited at once: this one plays as made)
+                    return
                 from files import speed
                 fast = speed.loops()
                 if fast is not None and struct.calcsize("P") == 8:  # (compiled code calls the plain C way: 64-bit)
                     self._proc = _DSPPROC(fast.limit_dsp.address)
                 else:
                     self._proc = _DSPPROC(self._limit)
-                self.st = limit_state()
-                self.dsp = self.synth.bass.BASS_ChannelSetDSP(self.handle, self._proc, self.st.ctypes.data, 0)
+                self.slot, self.st = slot, lim_row(slot)
+                self.dsp = self.synth.bass.BASS_ChannelSetDSP(self.handle, self._proc, _LIM_ALL.ctypes.data, 0)
+                if not self.dsp:
+                    lim_give(slot)
+                    self.slot = None
             if self.dsp:
                 self.st[LIM_ON] = 1.0 if on else 0.0
                 if not on:
@@ -872,12 +911,16 @@ class Live:
                 return
             self.synth.bass.BASS_ChannelRemoveDSP(self.handle, self.dsp)
             self.dsp = 0
+            lim_give(self.slot)
+            self.slot = None
 
     def _limit(self, dsp, channel, buf, length, user):
         """(BASS's sound thread, without Numba) A piece just made, turned down in place where too loud."""
         try:
-            live_limit(self.st, np.ctypeslib.as_array(ctypes.cast(buf, ctypes.POINTER(ctypes.c_float)),
-                                                      (length // 8, 2)))
+            slot = self.slot
+            if slot is not None:
+                live_limit(lim_row(slot), np.ctypeslib.as_array(ctypes.cast(buf, ctypes.POINTER(ctypes.c_float)),
+                                                                (length // 8, 2)), _LIM_ALL[LIM_SLOTS:LIM_TOP], slot)
         except Exception:  # (never into BASS's thread: that piece just plays as made)
             pass
 
@@ -952,19 +995,25 @@ class Live:
     def close(self):
         with self._lock:
             h, self.handle = self.handle, 0
+            slot, self.slot = self.slot, None
         if not h:
             return
         bass = self.synth.bass
+
+        def free():
+            bass.BASS_StreamFree(h)
+            self.synth._give(self.font)
+            if slot is not None:  # (after the stream: its limiter works to the end of the fade)
+                lim_give(slot)
+
         if bass.BASS_ChannelIsActive(h) and bass.BASS_ChannelSlideAttribute(h, _ATTRIB_VOL, -1.0, FADE_MS):
             # (a quick fade out like Player.stop: cut off mid-sound it clicked; the timer keeps this Live, so the
             # limiter's _proc lives while BASS may still call it)
-            timer = threading.Timer(FADE_MS / 1000 + 0.1, lambda: (bass.BASS_StreamFree(h), self.synth._give(self.font),
-                                                                  self))
+            timer = threading.Timer(FADE_MS / 1000 + 0.1, free)
             timer.daemon = True
             timer.start()
         else:
-            bass.BASS_StreamFree(h)
-            self.synth._give(self.font)
+            free()
 
 
 def group_voices(voices, count):

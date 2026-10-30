@@ -50,8 +50,8 @@ from numba.core import caching
 from numba.typed import List
 
 from files import midi_index as _index, midi_play, midi_scan
-from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX,
-                         LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP)
+from files.synth import (LIM_ALL, LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD,
+                         LIM_MIX, LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_SLOTS, LIM_STEP, LIM_TOP)
 
 
 def keep_exe_loops():
@@ -107,7 +107,7 @@ def drop_stale(folder):
     when they differ from the ones the saved loops were made with, those are deleted (made again)."""
     from files import safefile
     now = repr((LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX, LIM_N, LIM_ON,
-                LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP))
+                LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP, LIM_ALL, LIM_SLOTS, LIM_TOP))
     mark = os.path.join(folder, "fastloops-synth.txt")
     try:
         with open(mark, encoding="utf-8") as f:
@@ -1578,7 +1578,7 @@ def midi_events(notes, rows, order, ch, most):
 
 
 @njit(cache=CACHE, nogil=True)
-def limit_live(st, x, frames):
+def limit_live(st, x, frames, loud, slot):
     """synth.live_limit one frame at a time: x = the piece's floats (left, right, left...), changed in place."""
     for f in range(frames):
         n = int(st[LIM_N])
@@ -1607,15 +1607,22 @@ def limit_live(st, x, frames):
         if n % LIM_BLOCK == 0:
             if n >= 2 * LIM_BLOCK:
                 st[LIM_ENV] = max(st[LIM_PREV], st[LIM_PEAK], st[LIM_ENV] * LIM_FALL)
-                st[LIM_G0], st[LIM_G1] = st[LIM_G1], LIM_CEILING / max(st[LIM_ENV], LIM_CEILING)
+                loud[slot] = st[LIM_ENV]
+                st[LIM_G0], st[LIM_G1] = st[LIM_G1], LIM_CEILING / max(loud.sum(), LIM_CEILING)
             st[LIM_PREV], st[LIM_PEAK] = st[LIM_PEAK], 0.0
 
 
-# (BASS's DSPPROC: handle, channel, the piece, its bytes, user = the limiter's row of numbers)
+# (BASS's DSPPROC: handle, channel = the stream, the piece, its bytes, user = synth._LIM_ALL: the stream's slot found
+# by its handle; none = left as made)
 @cfunc(types.void(types.uint32, types.uint32, types.CPointer(types.float32), types.uint32,
                   types.CPointer(types.float64)), cache=CACHE)
 def limit_dsp(dsp, channel, buf, length, user):
-    limit_live(carray(user, (LIM_SIZE,)), carray(buf, (length // 4,)), length // 8)
+    a = carray(user, (LIM_ALL,))
+    for i in range(LIM_SLOTS):
+        if a[i] == channel:
+            limit_live(a[LIM_TOP + i * LIM_SIZE:LIM_TOP + (i + 1) * LIM_SIZE], carray(buf, (length // 4,)),
+                       length // 8, a[LIM_SLOTS:LIM_TOP], i)
+            return
 
 
 @njit(cache=CACHE, nogil=True)
