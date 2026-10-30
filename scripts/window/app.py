@@ -339,7 +339,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              [tracks_apart(sh) or is_recoloured(sh) for sh in shapes],  # (Split: from one colour)
                              pins, ("order" if order else "all") if all16 else use10, teams,
                              [sh.get("paste") if "notes" in sh else None for sh in shapes],
-                             [is_sustained(sh) or sh.get("held") is True for sh in shapes],
+                             # (a Domino paste keeps its own overlaps outside Single channel: user 2026-10-30)
+                             [is_sustained(sh) or sh.get("held") is True or mode == "auto" and pasted_notes(sh)
+                              for sh in shapes],
                              backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
@@ -382,7 +384,9 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         if kept and "cc" in sh and t is not None and len(n):  # (each pasted track's events: its colour's)
             tracks = np.unique(np.asarray(t, np.int64))
             laid[i] = {int(u): int(on[min(k, len(ids) - 1)]) for k, u in enumerate(tracks.tolist())}
-        fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True
+        # (a Domino paste keeps its own overlaps in Multi channel too, as copied: user 2026-10-30, round trip)
+        fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True and not (
+            mode == "auto" and pasted_notes(sh))
         if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
             together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
         else:
