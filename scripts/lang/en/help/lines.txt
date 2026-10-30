@@ -1,0 +1,36 @@
+Select one or more shapes, then right-click one: Flip each line sideways…, Flip each line upside down… (under the normal flips) or Split into pieces… (under Channel per strip). They work on pasted notes, merged shapes and any shape that makes notes, not on Hz bass, images or masks.
+
+## What a line is
+
+A line is a run of notes on one track that hang together: notes on the same key that touch or overlap, and notes on neighbouring keys (one key apart) where one starts right where the other ends, or they overlap. A staircase is one line, and so are two staircases woven into each other. A gap in time, or an empty key between two notes, starts a new line.
+
+Each tool opens a small window first. "Join notes with gaps up to" lets notes that many ticks apart still count as one line (0 = only touching notes). The window counts the lines as you type. Spiderweb remembers the number until it closes.
+
+## Flip each line sideways
+
+Each line is mirrored in time inside its own place: it starts and ends where it did, but the notes inside run the other way, so a rising line becomes a falling one in the same spot. The lines stay where they are, and so do their keys and colours. Top: before. Bottom: flipped sideways.
+[clip:line-flip-sideways]
+
+## Flip each line upside down
+
+Each line is mirrored inside its own keys: its highest and lowest keys swap, and every note keeps its time. Top: before. Bottom: flipped upside down.
+[clip:line-flip-upside]
+
+Flipped lines may end up overlapping each other: move them apart as you like. When every line already looks the same flipped, nothing changes and the status line says so.
+
+## Split into pieces
+
+Each line becomes its own track. The first line (the earliest, then the lowest) stays on its track; the next ones go on new tracks right under it, named after it ("Strings 2", "Strings 3"...), on the same channel, each on the next port: B, C, and on up to P. From the 17th piece on, they go round the ports again, sharing ports and channels with the first ones, and the status line says so.
+[clip:line-split-tracks]
+
+The new tracks are yours, like tracks you add in the track list. When the notes were on Spiderweb's own tracks, those become yours first, as dragging one does. A MIDI file holds at most 65,534 tracks: a split that would make more is refused, and nothing changes.
+
+## For all three
+
+A drawn shape (a line, a curve, a custom shape...) has to turn into plain notes first. Spiderweb asks once for all of them; Yes turns them into plain notes and does the rest in the same step. Each shape stays a shape of its own, with its colours, and one Ctrl+Z takes all of it back.
+
+## Ports
+
+A MIDI file can have up to 16 ports (A to P), each with its own 16 channels. Right-click a track → Properties… to set its port beside its name and channel, or pick one in Add Tracks… for all the new tracks. The track list shows the port only when it isn't A: "B 3" is port B, channel 3. Export MIDI, Export to Domino and Copy to Domino write each track's port.
+
+While playing in Spiderweb, a loaded MIDI's tracks play on their ports. Your own notes sound the same on any port.

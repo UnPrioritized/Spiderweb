@@ -14,9 +14,9 @@ Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar
 
 Right-click a track's name in the track list (or the empty space below the names):
 • Add Track adds one empty track after the track you right-clicked (right-click below the tracks to add it at the end). It gets the lowest channel no track uses yet. When every channel is taken, it gets the channel the fewest tracks use, the lowest one first (tracks can share a channel).
-• Add Tracks… adds one track for each channel you tick. Drag over the ticks to tick or untick many at once.
+• Add Tracks… adds one track for each channel you tick, all on the port you pick. Drag over the ticks to tick or untick many at once.
 • Remove Track removes a track and every note on it, like in Domino. A shape with colours on other tracks too keeps those: it becomes plain notes of the colours left, each still on its track. One of Spiderweb's own tracks goes once its notes are gone. A loaded MIDI's track is left out of the list and of Export MIDI (the track holding the song's tempo and signatures can't be removed).
-• Properties… sets a track's name and channel. Double-clicking its name does the same. On one of Spiderweb's own tracks it first makes all of Spiderweb's tracks yours (as dragging one does). On a loaded MIDI's track, Export MIDI writes that track again with the new name and every event on the new channel; a track you leave alone is still copied exactly.
+• Properties… sets a track's name, channel and port (A to P; the list shows "B 3" for port B, channel 3, and nothing extra for A). Double-clicking its name does the same. On one of Spiderweb's own tracks it first makes all of Spiderweb's tracks yours (as dragging one does). On a loaded MIDI's track, Export MIDI writes that track again with the new name and every event on the new channel; a track you leave alone is still copied exactly.
 
 A new track is highlighted at once. Your tracks stay where you put them, among the tracks Spiderweb makes for your shapes, and are saved with the project. Export MIDI and Export to Domino write them with their names and channels. Each change can be undone with Ctrl+Z. On a loaded MIDI, Add Track on one of the file's tracks puts the new track right after it.
 

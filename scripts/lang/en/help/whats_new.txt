@@ -1,5 +1,17 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.7.1
+
+What's new:
+
+• Flip each line sideways / upside down (right-click selected shapes): every line, a run of touching notes like a staircase, is mirrored inside its own place, so rising lines fall and falling lines rise while everything stays where it was. See Help → Line flips and Split into pieces.
+
+• Split into pieces (right-click selected shapes): every line goes onto a track of its own, right under the first one, same channel, on ports B to P.
+
+• Ports: Track Properties and Add Tracks… set a track's port (A to P). Export MIDI, Export to Domino and Copy to Domino write it, and the track list shows "B 3" for port B, channel 3.
+
+• Fixed: notes pasted from Domino lost their overlaps on the same key in Multi channel, so Copy to Domino and pasting straight back didn't match. Now only Single channel removes them.
+
 ## Version 1.7.0
 
 What's new:
