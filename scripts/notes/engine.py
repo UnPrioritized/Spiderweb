@@ -593,7 +593,34 @@ SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits",
 # a straightened freehand stroke look (besides the points)
 
 
+_held = threading.local()  # (same_shapes: {id(shape): (shape, its _cached)} while nothing changes the shapes)
+
+
+@contextmanager
+def same_shapes():
+    """While the shapes can't change (the piano roll's redraw): _cached works each one out once, then knows it by
+    the object itself (its key's JSON ~0.06 ms a circle, asked 3 times a shape a redraw: 200 shapes ~36 ms, redraw
+    hunt 2026-10-31)."""
+    outer = getattr(_held, "seen", None)
+    _held.seen = {} if outer is None else outer
+    try:
+        yield
+    finally:
+        _held.seen = outer
+
+
 def _cached(sh):
+    seen = getattr(_held, "seen", None)
+    if seen is not None:
+        got = seen.get(id(sh))
+        if got is not None and got[0] is sh:
+            return got[1]
+        seen[id(sh)] = (sh, _keyed(sh))
+        return seen[id(sh)][1]
+    return _keyed(sh)
+
+
+def _keyed(sh):
     key = (sh["kind"], tuple(map(tuple, sh["pts"])), json.dumps(sh.get("strokes")),
            json.dumps([sh.get(k) for k in SHAPE_KEYS]),
            json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m"), sh["cut"].get("mould")])

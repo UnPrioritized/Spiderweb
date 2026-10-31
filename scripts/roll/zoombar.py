@@ -64,13 +64,18 @@ class ZoomBar(tk.Canvas):
         return "end" if c > pos + length - self.grip else "move"
 
     def refresh(self):
-        self.delete("all")
         bar = self.bar()
+        t, g, s = self.thick, self.grip, self.scale
+        color = THUMB_HOT if self._hot or self._drag else THUMB
+        # (the piano roll refreshes its bars at every redraw: the same bar is left as it is, redraw hunt 2026-10-31)
+        drawn = bar and (bar[:2], color, t, g, s)
+        if drawn == self.__dict__.get("_drawn", ()) and self.find_all():
+            return
+        self._drawn = drawn
+        self.delete("all")
         if bar is None:
             return
         pos, length = bar[:2]
-        t, g, s = self.thick, self.grip, self.scale
-        color = THUMB_HOT if self._hot or self._drag else THUMB
         rect = self.create_rectangle if self.across else lambda x0, y0, x1, y1, **kw: self.create_rectangle(
             y0, x0, y1, x1, **kw)
         line = self.create_line if self.across else lambda x0, y0, x1, y1, **kw: self.create_line(

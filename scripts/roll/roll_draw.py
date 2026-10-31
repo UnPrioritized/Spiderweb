@@ -1,6 +1,7 @@
 """Piano roll: painting the grid, notes, shapes, handles, keyboard and ruler."""
 
 import bisect
+import itertools
 import json
 import math
 import time
@@ -13,7 +14,7 @@ from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
 from files.lang import tr, trn
 from files.midi_index import CC_MOST
 from files.speed import key_sort, loops
-from notes.engine import cached_arrays, channels_of, shape_key, shape_notes_tracks, track_ids
+from notes.engine import cached_arrays, channels_of, same_shapes, shape_key, shape_notes_tracks, track_ids
 from notes.joined import all_tumours
 from notes.mask import mask_joined, mask_units, unit_of
 from notes.merge import preview_parts, slid_preview
@@ -51,6 +52,7 @@ RING_RGB = np.frombuffer(bytes.fromhex(RING_COLOR[1:]), np.uint8)
 PREVIEW_COLOR, PREVIEW_HALO = look.PREVIEW_LINE, look.PREVIEW_HALO  # (draw_edge_preview)
 RING_GAP = 4  # px: notes in a row closer than this count as touching for the ring
 RING_MAX = 20000  # more ring pieces on screen than this: none drawn (canvas items are slow)
+LINE_TAGS = itertools.count()  # (each shape's kept lines get their own canvas tag: keep_lines)
 
 
 NO_CC = ()  # (loaded_cc with nothing loaded: always the same one, so what's worked out from it is kept)
@@ -528,17 +530,22 @@ class RollDrawing:
         self._draft_made = None
 
     def redraw(self):
+        with same_shapes():  # (each shape's lines looked up once a redraw)
+            self.redraw_all()
+
+    def redraw_all(self):
         self._redraw_pending = False
         for bar in self.bars:
             bar.refresh()
         # the grid, keyboard + ruler and play line stay when nothing they show changed (e.g. dragging a shape): Tk
         # puts back on screen only the part around what's made again, not the whole piano roll (measured on the
-        # user's screen: ~43 ms a mouse move for the whole)
-        self.delete("!(grid||frame||playhead)")
+        # user's screen: ~43 ms a mouse move for the whole); the shapes' lines too (keep_lines)
+        self.delete("!(grid||frame||playhead||kept)")
         w, h = self.winfo_width(), self.winfo_height()
         if self.sx is None or w < 50:
             self.delete("all")
             self._grid_key = self._frame_key = self._kb_key = None
+            self._lines = {}
             return
         # (keyboard and ruler kept apart: a sideways scroll draws only the ruler again)
         kb_key = (h, self.kb_w, self.ruler_h, self.sy, self.view_top, self.scale, self.app.keys, self.app.edo())
@@ -620,6 +627,23 @@ class RollDrawing:
         if carried is None:  # (while shapes are dragged their notes are stamped along: no ring)
             self.draw_ring(w, h)
             self.draw_edge_preview(w, h)
+        # the shapes' lines stay on the canvas while they'd be drawn the same (keep_lines): dragging / selecting one
+        # shape remade every shape's lines (200 shapes: ~77 ms a drag step, redraw hunt 2026-10-31)
+        self.addtag_withtag("under", "!(grid||frame||playhead||kept)")  # (made so far: the notes, ring...: under them)
+        lines = self.__dict__.get("_lines")
+        if lines is None:  # (none known: any left from before go)
+            self.delete("kept")
+            lines = {}
+        self._lines, order = {}, []
+        at = (self.sx, self.sy, self.view_t, self.view_top, self.kb_w, self.ruler_h, w, h)
+
+        def keep(key, sh, draw):
+            order.append(self.keep_lines(lines, (key, at, "notes" in sh, sh.get("fill"), bool(sh.get("text"))),
+                                         cached_arrays(sh), draw))
+
+        def path(sh, *how, dash=None):
+            keep(("path", i) + how + (dash,), sh, lambda tags: self.draw_path(sh, *how, dash=dash, tags=tags))
+
         # a line with tumours / a curve with a pattern: the line as drawn (the origin path), faint and dashed under it
         hidden = app.hidden_shapes - app.sels  # (on tracks the track list hides: no lines either, user 2026-10-23)
         for i, sh in enumerate(app.shapes):
@@ -627,14 +651,11 @@ class RollDrawing:
                 continue
             if ((sh.get("pattern") or sh.get("shape") or any(tm["on"] for tm in all_tumours(sh)))
                     and (i in app.sels or app.show_lines.get())):
-                self.draw_path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
-                               look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, 1, dash=(6, 4))
+                path(dict(sh, tumour=None, tumours=None, pattern=None, shape=None),
+                     look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, 1, dash=(6, 4))
             if sh["kind"] in ("funnel", "custom") and (i in app.sels or app.show_lines.get()):  # its curves' / strokes'
-                knives = piece_knives(sh) if sh["kind"] == "funnel" else None  # (a funnel piece: its side only)
-                for path in ((clip_strokes(funnel_origins(sh), knives) if knives else funnel_origins(sh))
-                             if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh))):
-                    self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
-                                     fill=look.ORIGIN_PICKED if i in app.sels else look.ORIGIN, dash=(6, 4))
+                keep(("origins", i, look.ORIGIN_PICKED if i in app.sels else look.ORIGIN), sh,
+                     lambda tags, i=i, sh=sh: self.draw_origins(sh, i in app.sels, tags))
         covered = app.mask_covered
         units = mask_units(app.shapes)
 
@@ -651,15 +672,18 @@ class RollDrawing:
             if i in app.sels or i in hidden:
                 continue
             if sh.get("mask"):  # a mask: always shown, dashed (so it isn't forgotten, mask.py)
-                self.draw_path(sh, mask_colour(i, i in partners), look.LINES + (i in partners), dash=MASK_DASH)
+                path(sh, mask_colour(i, i in partners), look.LINES + (i in partners), dash=MASK_DASH)
             elif app.show_lines.get():
-                self.draw_path(sh, look.MASKED_LINE if i in covered else look.SHAPE_LINE, look.LINES)
+                path(sh, look.MASKED_LINE if i in covered else look.SHAPE_LINE, look.LINES)
         for i in app.sels:
             sh = app.shapes[i]
             if sh.get("mask"):  # (two pixels more: a selected mask was hard to see, user)
-                self.draw_path(sh, mask_colour(i, True), look.LINES + 2, dash=MASK_DASH)
+                path(sh, mask_colour(i, True), look.LINES + 2, dash=MASK_DASH)
             else:
-                self.draw_path(sh, look.SHAPE_LINE_PICKED, look.LINES + 1)
+                path(sh, look.SHAPE_LINE_PICKED, look.LINES + 1)
+        for _, tag, _ in lines.values():  # (lines no longer shown / drawn otherwise now)
+            self.delete(tag)
+        self.stack_lines(order)
         for i in app.sels:
             if i < len(app.shapes) and "picture" in app.shapes[i]:
                 self.draw_picture_label(app.shapes[i])
@@ -692,15 +716,18 @@ class RollDrawing:
             if self._frame_key is None:
                 self.draw_ruler(w)
                 self._frame_key = frame_key
-            self.addtag_withtag("made", "!(grid||frame||playhead)")  # (the shapes made now: under the kept part)
+            self.addtag_withtag("made", "!(grid||frame||playhead||kept)")  # (the shapes made now: under the kept part)
             self.tag_lower("made", "frame")
             self.dtag("made")
             self.draw_playhead()
         else:  # (what was made now goes under the kept keyboard + ruler, in its own order)
-            self.addtag_withtag("made", "!(grid||frame||playhead)")
+            self.addtag_withtag("made", "!(grid||frame||playhead||kept)")
             self.tag_lower("made", "frame")
             self.dtag("made")
             self.draw_playhead(keep=True)
+        if self._line_order:  # (the notes' picture, ring...: under the shapes' kept lines)
+            self.tag_lower("under", "kept")
+        self.dtag("under")
         self.tag_raise("rulerpick")  # (over the ruler, under the play line)
         self.tag_raise("tempomark")
         self.tag_raise("ccmark")  # (the CC row: a whole ruler drawn again went over it, hunt 2026-10-29)
@@ -1642,7 +1669,53 @@ class RollDrawing:
                     np.maximum(grid[a:b, d - 1], edge, out=grid[a:b, d - 1])
         return top_px, idx
 
-    def draw_path(self, sh, color, width, dash=None):
+    def keep_lines(self, old, key, arrays, draw):
+        """The lines draw(tags) makes, kept on the canvas from the last redraw (old: {key: (arrays, tag, filled)})
+        when key (which lines, how, the view) and the shape's lines are the same (arrays: its cached_arrays, held so
+        their id stays theirs). Returns (tag, made now), None when it drew nothing."""
+        key = (key, id(arrays))
+        got = old.pop(key, None)
+        if key in self._lines:  # (twice the same: drawn, not kept)
+            draw(())
+            return None
+        made = got is None or got[0] is not arrays
+        if made:
+            if got:
+                self.delete(got[1])
+            tag = "lines%d" % next(LINE_TAGS)
+            draw(("kept", tag))
+            got = (arrays, tag, bool(self.find_withtag(tag)))
+        self._lines[key] = got
+        return (got[1], made) if got[2] else None
+
+    def stack_lines(self, order):
+        """Puts the lines keep_lines made now in their place among the kept ones (order: its answers, bottom to
+        top): each just above the one before it. Kept ones still in order aren't moved (Tk paints a moved item
+        again)."""
+        order = [o for o in order if o]
+        old, self._line_order = self.__dict__.get("_line_order", []), [tag for tag, _ in order]
+        kept = [tag for tag, made in order if not made]
+        if not kept:
+            if order and self.find_withtag("frame"):  # (all new: under the keyboard + ruler)
+                self.tag_lower("kept", "frame")
+            return
+        was = set(kept)
+        same = kept == [tag for tag in old if tag in was]
+        for k, (tag, made) in enumerate(order):
+            if k and (made or not same):
+                self.tag_raise(tag, order[k - 1][0])
+            elif made:
+                self.tag_lower(tag, kept[0])
+
+    def draw_origins(self, sh, picked, tags=()):
+        """A funnel's / custom shape's curves / strokes with a formula as drawn: faint and dashed."""
+        knives = piece_knives(sh) if sh["kind"] == "funnel" else None  # (a funnel piece: its side only)
+        for path in ((clip_strokes(funnel_origins(sh), knives) if knives else funnel_origins(sh))
+                     if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh))):
+            self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
+                             fill=look.ORIGIN_PICKED if picked else look.ORIGIN, dash=(6, 4), tags=tags)
+
+    def draw_path(self, sh, color, width, dash=None, tags=()):
         if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)
             width, dash = 1, (4, 3)
         ax, bx = self.sx, self.kb_w - self.view_t * self.sx
@@ -1653,25 +1726,25 @@ class RollDrawing:
         for k, path in enumerate(cached_arrays(sh)):
             if k < len(cuts) and cuts[k]:  # a fill line (no notes of its own): thin, dashed
                 for coords, _ in screen_lines(path, ax, bx, ay, by, view):
-                    self.create_line(*coords, fill=color, width=1, dash=(2, 3))
+                    self.create_line(*coords, fill=color, width=1, dash=(2, 3), tags=tags)
                 continue
             for coords, size in screen_lines(path, ax, bx, ay, by, view):
                 # (dashed: never one thick line, a thick dashed one reaching far off screen froze Windows)
                 if width == 1 or size < 1000 and not dash:
-                    self.create_line(*coords, fill=color, width=width, dash=dash)
+                    self.create_line(*coords, fill=color, width=width, dash=dash, tags=tags)
                     continue
                 # a long thick line: Windows paints thick lines with thousands of points very slowly (seconds),
                 # thin ones quickly, so it's the thin line a few times, a pixel apart (2 px wide: three times)
-                self.create_line(*coords, fill=color, width=1, dash=dash)
+                self.create_line(*coords, fill=color, width=1, dash=dash, tags=tags)
                 # (spread to both sides, centred like a real thick line: 4 px = -1 .. +2)
                 shifts = [k for k in range(-((width - 1) // 2), width // 2 + 1) if k]
                 for dx, dy in [(k, 0) for k in shifts] + [(0, k) for k in shifts]:
                     self.create_line(*[v + (dx if n % 2 == 0 else dy) for n, v in enumerate(coords)], fill=color,
-                                     width=1, dash=dash)
+                                     width=1, dash=dash, tags=tags)
         if sh["kind"] == "custom" and sh.get("fill") in ("fill", "spam"):
             for (b0, p0), (b1, p1) in gap_lines(sh):  # the straight lines closing gaps in its outline: dashed
                 self.create_line(b0 * ax + bx, p0 * ay + by, b1 * ax + bx, p1 * ay + by, fill=color, width=1,
-                                 dash=(4, 3))
+                                 dash=(4, 3), tags=tags)
 
     def part_colors(self):
         """{(start, wall end): colour} for the highlighted curves: the one clicked purple, the curves linked to it
