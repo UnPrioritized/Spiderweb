@@ -9,7 +9,7 @@ from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
 from files import lang, settings
 from files.lang import tr
-from files.playback import BUILTIN, KESTREL, devices
+from files.playback import BUILTIN, KESTREL, MAESTRO, devices
 from files.system import WINDOWS, open_path, work_area
 from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
@@ -551,15 +551,39 @@ class SettingsWindow(tk.Toplevel):
         self.sound_sep = page.grid_slaves(row=f.r - 1, column=0)[0]  # (the heading's line: hidden with it)
         panel = app.builtin_window = f.span(BuiltinPanel(page, app))
         panel.bind("<Destroy>", lambda e: e.widget is panel and setattr(app, "builtin_window", None), add="+")
+        # (Maestro: its sound settings are in its own window, a profile for Spiderweb; user 2026-11-01)
+        self.maestro_title = f.head(tr("maestro.title"))
+        self.maestro_sep = page.grid_slaves(row=f.r - 1, column=0)[0]
+        self.maestro_btn = f.row(None, ttk.Button(page, text=tr("maestro.open"), command=self.maestro_settings),
+                                 tip=tr("maestro.open_tip"))
+        self.maestro_note = f.note()
         self.show_builtin()
 
+    def maestro_settings(self):
+        """Maestro's window for Spiderweb's profile (it needs an open engine: opened as Play would)."""
+        out = self.app.out
+        err = out.open(MAESTRO)
+        if err is None and not out.handle.show_settings():
+            from files import maestro
+            err = tr("playback.maestro_failed_why", why=maestro.load()[1].last_error().decode("utf-8", "replace"))
+        if err:
+            messagebox.showerror(tr("settings.title"), err, parent=self)
+
     def show_builtin(self):
-        """Built-in BASSMIDI's settings while it's the MIDI out, else a line saying they're for it."""
+        """Built-in BASSMIDI's settings while it's the MIDI out, Maestro's button while that is, else a line saying
+        they're for them."""
         dev = self.app.midi_device.get()
         on = dev in (BUILTIN, KESTREL)
         for w in (self.sound_sep, self.builtin_title, self.app.builtin_window):
             w.grid() if on else w.grid_remove()
-        self.builtin_off.grid_remove() if on else self.builtin_off.grid()
+        mo = dev == MAESTRO
+        for w in (self.maestro_title, self.maestro_sep, self.maestro_btn, self.maestro_note):
+            w.grid() if mo else w.grid_remove()
+        if mo:
+            from files import maestro
+            v = maestro.version()
+            self.maestro_note.config(text=tr("maestro.version", v=v) if v else tr("playback.maestro_failed"))
+        self.builtin_off.grid_remove() if on or mo else self.builtin_off.grid()
         if on:  # (Kestrel (GPU): its own rows instead, the soundfont list shared)
             self.builtin_title.config(text=tr("ks.title" if dev == KESTREL else "bs.title"))
             self.app.builtin_window.show_for(dev == KESTREL)

@@ -21,6 +21,7 @@ BUILTIN = "Built-in BASSMIDI"  # (the user's name for it; like a device's name i
 KDMAPI = "OmniMIDI (KDMAPI)"  # (OmniMIDI's own direct way in, skipping Windows' MIDI layers; user's name, saved)
 KESTREL = "Kestrel (GPU, Experimental)"  # (the GPU synth through files/kestrel.py; user 2026-10-27: its name may
 # show; saved. "Experimental" user 2026-10-28: still rough on the heaviest MIDIs)
+MAESTRO = "Maestro (API)"  # (the user's own install, through its API: files/maestro.py; user 2026-11-01; saved)
 OLD_NAMES = {"Kestrel (GPU)": KESTREL}  # (saved MIDI outs under an earlier name)
 DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
 MAPPER = 0xFFFFFFFF
@@ -134,12 +135,14 @@ def _load_kdmapi():
 
 
 def devices():
-    """Names of the MIDI-OUT devices: Windows' default first, then the built-in synth, OmniMIDI's direct way when
-    it's installed, then Windows' devices."""
-    from files import kestrel
-    kd = [KDMAPI] if _kdmapi_path() else []
-    kd += [KESTREL] if kestrel.available() is None else []
-    return [MAPPER_NAME, BUILTIN] + kd + _winmm_devices() if _winmm else [BUILTIN] + kd
+    """Names of the MIDI-OUT devices: Windows' default first, then the built-in synths (Built-in BASSMIDI, Kestrel),
+    then other programs' ways in when installed (OmniMIDI's KDMAPI, Maestro; user 2026-11-01), then Windows'
+    devices."""
+    from files import kestrel, maestro
+    own = [BUILTIN] + ([KESTREL] if kestrel.available() is None else [])
+    own += [KDMAPI] if _kdmapi_path() else []
+    own += [MAESTRO] if maestro.lib_path() else []
+    return [MAPPER_NAME] + own + _winmm_devices() if _winmm else own
 
 
 def keep_saved(name):
@@ -196,7 +199,7 @@ class MidiOut:
     @property
     def lead(self):
         """Seconds early a player sends (send_at), 0 = at the time itself (send)."""
-        return self.handle.lead if self.name == KESTREL and self.handle else 0
+        return self.handle.lead if self.name in (KESTREL, MAESTRO) and self.handle else 0
 
     def send_at(self, msg, when, length=None):
         """(lead > 0) msg to sound at perf_counter time `when`; length = a note-on's in seconds."""
@@ -225,6 +228,8 @@ class MidiOut:
             if name == KESTREL and self.edo:  # (listening before any Play: 31-EDO's channels bent already)
                 self.bend_edo()
             return None
+        if name == MAESTRO:
+            return self._open_maestro()
         if name == KDMAPI:
             from files.synth import SynthError, load_dlls
             try:
@@ -261,10 +266,28 @@ class MidiOut:
         self.handle, self.name = h, name
         return None
 
+    def _open_maestro(self):
+        from files import maestro
+        from files.synth import SynthError, load_dlls
+        try:
+            load_dlls()  # (ours first: Maestro uses a BASS already loaded, ours, rather than a second copy)
+        except SynthError:
+            pass
+        try:
+            self.handle = maestro.MaestroOut()
+        except maestro.MaestroError as e:
+            if e.disabled:
+                return tr("playback.maestro_disabled")
+            return tr("playback.maestro_failed_why", why=str(e) or "?")
+        except (OSError, AttributeError):
+            return tr("playback.maestro_failed")
+        self.name = MAESTRO
+        return None
+
     def send(self, msg):
         h = self.handle
         if h:
-            if self.name in (BUILTIN, KESTREL):
+            if self.name in (BUILTIN, KESTREL, MAESTRO):
                 h.send(msg)
             elif self.name == KDMAPI:
                 h.SendDirectData(msg)
@@ -281,7 +304,7 @@ class MidiOut:
 
     def close(self):
         if self.handle:
-            if self.name in (BUILTIN, KESTREL):
+            if self.name in (BUILTIN, KESTREL, MAESTRO):
                 self.handle.close()
             elif self.name == KDMAPI:
                 self.handle.ResetKDMAPIStream()
@@ -628,10 +651,11 @@ class Player:
         while ready is not None and not ready.wait(0.01):
             if stop.is_set():
                 return
-        if lead:
+        kestrel = getattr(out, "name", None) == KESTREL  # (Maestro sends ahead too, with nothing of Kestrel's)
+        if kestrel:
             out.handle.resync()
         # (Kestrel falling behind = the line waits: here when alone, else the loaded MIDI's feeder does it)
-        behind = out.handle if lead and not self.along else None
+        behind = out.handle if kestrel and not self.along else None
         # (Kestrel: the line starts `lead` from now, so the first notes are sent ahead too)
         self._clock = (clock() + lead, self.map.sec(t0), self.map)
         held = self.held = {}

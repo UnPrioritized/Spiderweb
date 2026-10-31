@@ -235,8 +235,10 @@ def order_place(ticks, ms, ks, base, at, out_t, out_m, out_k):
 
 def hist(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, h):
     """h[synth, velocity] += the note-ons of events i0..i1 that would be played (not muted, not late). muted[track] =
-    its channels muted, one bit each (every bit: the whole track; a folder's sub-row: one)."""
-    per = 1 if ports >= synths else synths // ports
+    its channels muted, one bit each (every bit: the whole track; a folder's sub-row: one). ports < 0: each port its
+    own synth (r = port: Maestro's ports)."""
+    exact = ports < 0
+    per = 1 if exact or ports >= synths else synths // ports
     for i in range(i0, i1):
         m = ms[i]
         if (m & 0xF0) != 0x90:
@@ -246,7 +248,11 @@ def hist(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, h):
             continue
         port = tport[trk[i]]  # (its synth: as emit's)
         ch = m & 15
-        r = (port + ch) % synths if ports >= synths else (port + ch) % ports * per + (((m >> 8) & 127) * 5 + ch * 3) % per
+        if exact:
+            r = port
+        else:
+            r = (port + ch) % synths if ports >= synths else \
+                (port + ch) % ports * per + (((m >> 8) & 127) * 5 + ch * 3) % per
         h[r, v] += 1
 
 
@@ -619,9 +625,11 @@ def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room,
     off goes"): kept notes rang on past their own off, Shinki bar 209 91 % of them (dev/scratch/bm_offs.py,
     2026-10-28). Needs room for a node per note-on (Line.room).
     Controllers / bends / channel pressure go to every synth of their channel's block. three: every message 3 bytes (a
-    device that takes whole messages). Stops before an event that wouldn't fit; returns where it stopped."""
+    device that takes whole messages). ports < 0: each port its own synth, r = the port (Maestro's ports, tport
+    under synths). Stops before an event that wouldn't fit; returns where it stopped."""
     cap = out.shape[1]
-    per = 1 if ports >= synths else synths // ports
+    exact = ports < 0
+    per = 1 if exact or ports >= synths else synths // ports
     for i in range(i0, i1):
         m = ms[i]
         s = m & 0xFF
@@ -634,7 +642,10 @@ def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room,
             # (the synth: the synths in blocks, one per port; each channel's block turned by its number, so a busy
             # port's channels reach every block, two ports' same channel never share a synth; a channel's keys
             # spread over its block; a channel + key always the same synth, so a note-off finds its note)
-            r = (port + ch) % synths if ports >= synths else (port + ch) % ports * per + (key * 5 + ch * 3) % per
+            if exact:
+                r = port
+            else:
+                r = (port + ch) % synths if ports >= synths else (port + ch) % ports * per + (key * 5 + ch * 3) % per
             if lens[r] + 3 > cap:
                 return i
             q = ((port % 64) * 16 + ch) * 128 + key
@@ -685,7 +696,10 @@ def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room,
             out[r, o + 2] = (m >> 16) & 127
             lens[r] = o + 3
         else:
-            first = (port + ch) % ports * per if ports < synths else (port + ch) % synths
+            if exact:
+                first = port
+            else:
+                first = (port + ch) % ports * per if ports < synths else (port + ch) % synths
             for r in range(first, first + per):
                 if lens[r] + size > cap:
                     return i

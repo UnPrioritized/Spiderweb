@@ -168,6 +168,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     unzip.py         unpacking outside data with a size limit (no "zip bomb" can fill the memory)
     colour_list.py   picture colours as text for a player's settings (formats), and colours read out of any text
     playback.py      playing through Windows MIDI out
+    maestro.py       Maestro (the user's own install) as a MIDI out, through its API: every note stamped with its time
     slow_down.py     slow down to keep the sound going: the synth's load -> the speed the song plays at
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
     sfz.py           the sample files an SFZ soundfont names (checked when one is picked)

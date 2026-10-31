@@ -47,6 +47,8 @@ SPAN_MOST = 1 << 22  # a window's ticks at most (the counting sort's table)
 BUDGET_SYNTH = 200_000  # note-ons a second to start from on each of Built-in BASSMIDI's synths (then by its load)
 BUDGET_KDMAPI = 200_000  # ... OmniMIDI (KDMAPI): one message per call from Python
 BUDGET_DEVICE = 30_000  # ... a Windows MIDI device
+BUDGET_MAESTRO = 400_000  # ... each of Maestro's ports (bytes in one call a port; its own limiter does the rest)
+SLICE_S = 0.001  # (Maestro: messages stamped together at most this far apart in the song)
 BUDGET_LEAST, BUDGET_MOST = 20_000, 1_500_000  # (a synth: one makes ~1 M notes a second at 1,000 voices, measured)
 # A synth's load reading LAGS (measured 2026-10-24, Shinki beats 1100-1125, 8 synths x 500 voices: budgets grew to 1.5 M
 # each, the synths jammed up to 440 % and lost ~4.5 s of sound in 25 s). So each synth's CEILING is learned from the
@@ -184,10 +186,16 @@ class LoadedPlayer:
                                np.int64)
         self.muted_of = muted
         self.kind = kind
-        if sinks or kind == "kestrel":  # (Kestrel has 16 ports: the file's own)
+        if sinks or kind in ("kestrel", "maestro"):  # (Kestrel, Maestro have 16 ports: the file's own)
             self.tport, self.ports = track_ports(lm)
         else:  # (one device: 16 channels, every port onto them)
             self.tport, self.ports = np.zeros(len(lm.tracks), np.int64), 1
+        if kind == "maestro":  # (each port its own "synth" for the note budget and the bytes: midi_play.emit's
+            # ports < 0; past 16 ports round again, as Kestrel's)
+            self.tport %= 16
+            self.ports = min(self.ports, 16)
+            self.synths = int(self.tport.max()) + 1 if len(self.tport) else 1
+            self.budgets = np.full(self.synths, BUDGET_MAESTRO, np.int64)
         self.muted = np.zeros(len(lm.tracks), np.uint16)  # (each track's channels muted, a bit each: mute_masks)
         moved = lm.rechannel  # (Track Properties' channels, per track: -1 = as written)
         self.chans = None if moved is None else np.asarray(moved, np.int64).copy()
@@ -919,8 +927,15 @@ class LoadedPlayer:
 
     # --- the feeder ---------------------------------------------------------------------------------------------
 
-    def _send(self, out, lens):
-        if self.sinks:
+    def _send(self, out, lens, when=None):
+        """when = Maestro's: perf_counter time they sound at (None = now)."""
+        if self.kind == "maestro":
+            h = self.out.handle
+            if h is not None:
+                for r in range(len(lens)):
+                    if lens[r]:
+                        h.send_raw(r, out[r].ctypes.data, int(lens[r]), when)
+        elif self.sinks:
             for r, live in enumerate(self.sinks):
                 if lens[r]:
                     live.send_raw(out[r].ctypes.data, int(lens[r]))
@@ -944,6 +959,14 @@ class LoadedPlayer:
             buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
             for live in self.sinks:
                 live.send_raw(ctypes.addressof(buf), len(raw))
+        elif self.kind == "maestro":  # (every port the file uses)
+            h = self.out.handle
+            if h is None:
+                return
+            raw = bytes(b for ch in range(16) for m in msgs for b in (m[0] | ch,) + m[1:])
+            buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
+            for port in range(self.synths):
+                h.send_raw(port, ctypes.addressof(buf), len(raw))
         elif self.kind == "kestrel":  # (every port the file uses, in one push, now)
             kout = self.out.handle
             if kout is None:
@@ -969,7 +992,10 @@ class LoadedPlayer:
         h = np.zeros((K, 128), np.int64)
         line = midi_play.Line(places=SKIP)  # (each key's notes in file order: the offs of notes left out go too)
         thr, room = np.zeros(K, np.int64), np.zeros(K, np.int64)
-        three = not self.sinks
+        maestro = self.kind == "maestro"
+        three = not self.sinks and not maestro  # (Maestro takes a byte stream: program changes 2 bytes)
+        P = -self.ports if maestro else self.ports  # (Maestro: each port its own, midi_play.emit)
+        lead = self.out.lead if maestro else 0.0  # (sent this early, each slice stamped with when it sounds)
         gen, cur = -1, None
         last = time.perf_counter()
         checked = 0.0  # (mutes read at once)
@@ -1034,7 +1060,7 @@ class LoadedPlayer:
                     hit[:] = False
                     behind[:] = False
             t_c, sec, tmap = clock
-            s_now = sec + now - t_c + (GROUP_BUFFER if self.sinks else 0.0)  # (the group's sound comes out later)
+            s_now = sec + now - t_c + (GROUP_BUFFER if self.sinks else lead)  # (the group's sound comes out later)
             T = tmap.tick(s_now)
             t_late = int(tmap.tick(s_now - LATE_S))
             with self._lock:
@@ -1062,7 +1088,7 @@ class LoadedPlayer:
                 i1 = int(np.searchsorted(ts, T, "right"))
                 if i1 > i:
                     h[:] = 0
-                    hist(ms, ks, i, i1, ts, t_late, self.muted, self.tport, self.ports, K, h)
+                    hist(ms, ks, i, i1, ts, t_late, self.muted, self.tport, P, K, h)
                     asked += h.sum(axis=1)
                     above = np.cumsum(h[:, ::-1], axis=1)[:, ::-1]  # (note-ons at or above each velocity)
                     for r in range(K):
@@ -1080,9 +1106,16 @@ class LoadedPlayer:
                     ons = int(h.sum())
                     line.room(midi_play.ons_in(ms, i, i1))
                     while i < i1:
-                        j = emit(ms, ks, i, i1, ts, t_late, self.muted, self.tport, self.ports, K, thr, room,
+                        stop_at, when = i1, None
+                        if maestro:  # (a slice of SLICE_S of the song at a time, stamped with its first one's time)
+                            s_i = tmap.sec(int(ts[i]))
+                            when = t_c + s_i - sec
+                            if when > now - LATE_S:  # (far behind: what's left goes at once, in one)
+                                edge = tmap.tick(s_i + SLICE_S)
+                                stop_at = max(i + 1, min(i1, int(np.searchsorted(ts, edge, "left"))))
+                        j = emit(ms, ks, i, stop_at, ts, t_late, self.muted, self.tport, P, K, thr, room,
                                  out, lens, three, *line.arrays())
-                        self._send(out, lens)
+                        self._send(out, lens, when)
                         i = j
                     cur[3] = i
                     kept = np.minimum(above[:, 1], step)

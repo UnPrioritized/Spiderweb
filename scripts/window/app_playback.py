@@ -11,7 +11,7 @@ from tkinter import filedialog, messagebox
 from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
-from files.playback import BUILTIN, KESTREL, cc_list
+from files.playback import BUILTIN, KESTREL, MAESTRO, cc_list
 from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
@@ -245,7 +245,7 @@ class Playback:
         from files.play_loaded import LoadedPlayer
         from files.playback import KDMAPI
         from files.synth import LiveGroup
-        sinks, kind = None, {KDMAPI: "kdmapi", KESTREL: "kestrel"}.get(self.out.name, "device")
+        sinks, kind = None, {KDMAPI: "kdmapi", KESTREL: "kestrel", MAESTRO: "maestro"}.get(self.out.name, "device")
         if self.out.name == BUILTIN and self.synth is not None:
             try:
                 self.loaded_group = LiveGroup(self.synth, self.loaded_synths, self.play_voices,
@@ -338,7 +338,7 @@ class Playback:
         heard = self.track_list.unmuted(self.rendered)  # (tracks muted in the track list: not played)
         if not per_shape and not any(pasted.values()):
             return heard, {}, 0
-        ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL) else 0
+        ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO) else 0
         rendered, msgs = cc_apart(heard, per_shape, self.picture_use10, ports) if per_shape else (heard, {})
         for s, ms in pasted.items():
             if ms:
@@ -498,9 +498,11 @@ class Playback:
         of its own."""
         if self.out.handle is None or self.out.name in (BUILTIN, KESTREL):
             return
-        for ch in range(16):
-            for m in (0xB0 | ch, 0xB0 | ch | 32 << 8, 0xC0 | ch):
-                self.out.send(m)
+        # (Maestro: the loaded MIDI's tracks on their own ports, the shapes on the first LIVE_PORTS: all 16 ports)
+        for port in range(16 if self.out.name == MAESTRO else 1):
+            for ch in range(16):
+                for m in (0xB0 | ch, 0xB0 | ch | 32 << 8, 0xC0 | ch):
+                    self.out.send(m | port << 24)
 
     def notes_left_text(self, lp, now):
         """A loaded MIDI on Built-in BASSMIDI: "Overloaded: 12,000 notes left out a second (24 %)" over the last
