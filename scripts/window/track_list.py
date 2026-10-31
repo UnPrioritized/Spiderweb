@@ -2950,64 +2950,108 @@ class TrackList(tk.Canvas):
         if aw < 1 or ah < 1:
             return
         ox, top = self.left_px(), max(0, self.top)
-        key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._all), self.current,
-               self.current_ch, frozenset(self.open), frozenset(self.muted), frozenset(self.selected), frozenset(self.sel_ch),
-               json.dumps(sigs_of(self.app.tempo)),
+        # (the highlight and picks aren't in the key: a click only recolours their rows, remark; user 2026-10-31:
+        # every click painted every note again)
+        key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._all),
+               frozenset(self.open), frozenset(self.muted), json.dumps(sigs_of(self.app.tempo)),
                self.app.ppq, self.app.keys,
                # (a loaded MIDI's notes hidden / back, read on a thread: shown at once, hunt 2026-10-26)
                self.app.loaded.hide_ver if self.app.loaded is not None else None)
         (xs, xw), (ys, yw) = squares(ox, aw), squares(top, ah)
-        got = self.tiled("_sheet", key, xw, yw, SQUARE, self.paint_sheet)
+        marks = self.marked_lines()
+        st = self._sheet
+        if st is not None and st["key"] == key and st["marks"] != marks:
+            self.remark(st, marks)
+        got = self.tiled("_sheet", key, xw, yw, SQUARE, self.sheet_with_bg)
+        self._sheet["marks"] = marks
         for j in ys:
             for i in xs:
                 self.create_image(x0 + i * SQUARE - ox, y0 + j * SQUARE - self.top, image=got[(i, j)].photo,
                                   anchor="nw")
 
     def tiled(self, name, key, xs, ys, th, paint):
-        """The kept squares of picture name (self.<name> = {"key", "tiles"}; None = all painted again): SQUARE wide,
-        th high, columns xs x rows ys. The missing ones painted together in one go (paint(cx, cy, cw, ch) -> image),
-        all of them again when key changes. Returns {(column, row): Photo}."""
+        """The kept squares of picture name (self.<name> = {"key", "tiles", "pix", "marks"}; None = all painted
+        again): SQUARE wide, th high, columns xs x rows ys. The missing ones painted together in one go (paint(cx, cy,
+        cw, ch) -> image, or (image, background mask): then each square's pixels kept in "pix" for remark), all of
+        them again when key changes. Returns {(column, row): Photo}."""
         st = getattr(self, name)
         if st is None or st["key"] != key:
-            st = {"key": key, "tiles": OrderedDict()}
+            st = {"key": key, "tiles": OrderedDict(), "pix": {}, "marks": None}
             setattr(self, name, st)
-        kept = st["tiles"]
+        kept, pix = st["tiles"], st["pix"]
         want = [(i, j) for j in ys for i in xs]
         miss = [p for p in want if p not in kept]
         if miss:
             i0, i1 = min(p[0] for p in miss), max(p[0] for p in miss)
             j0, j1 = min(p[1] for p in miss), max(p[1] for p in miss)
             img = paint(i0 * SQUARE, j0 * th, (i1 - i0 + 1) * SQUARE, (j1 - j0 + 1) * th)
+            img, bg = img if isinstance(img, tuple) else (img, None)
             for i, j in miss:
+                cut = (slice((j - j0) * th, (j - j0 + 1) * th), slice((i - i0) * SQUARE, (i - i0 + 1) * SQUARE))
+                part = np.ascontiguousarray(img[cut])
                 photo = Photo(self, SQUARE, th)
-                photo.put(np.ascontiguousarray(img[(j - j0) * th:(j - j0 + 1) * th,
-                                                   (i - i0) * SQUARE:(i - i0 + 1) * SQUARE]))
+                photo.put(part)
                 kept[(i, j)] = photo
+                if bg is not None:
+                    pix[(i, j)] = (part, bg[cut].copy())
         for p in want:
             kept.move_to_end(p)
         while len(kept) > max(SQUARES_KEPT, 2 * len(want)):  # (the longest unseen go)
-            kept.popitem(last=False)
+            pix.pop(kept.popitem(last=False)[0], None)
         return kept
+
+    def marked_lines(self):
+        """{line: kind} of the rows painted apart (paint_sheet's base colours): picked ones 4, the highlighted 2."""
+        out = {}
+        for s in self.selected:  # (Ctrl+clicked along with the highlighted one: fainter)
+            got = self.line_of(s)
+            if got is not None:
+                out[got] = 4
+        for s, c in self.sel_ch:  # (a folder's sub-rows picked with it)
+            got = self.line_of(s, c)
+            if got is not None:
+                out[got] = 4
+        at = self.line_of(self.current, self.current_ch) if self.current is not None else None
+        if at is not None:
+            out[at] = 2
+        return out
+
+    @staticmethod
+    def row_colours():
+        """paint_sheet's row colours by kind: plain, plain (every other), highlighted, past the rows, picked."""
+        return np.array([hex_rgb(look.TRACK_ROW), hex_rgb(look.TRACK_ROW_ALT), hex_rgb(look.TRACK_PICKED),
+                         hex_rgb(look.TRACK_EMPTY), hex_rgb(look.TRACK_SELECTED)], np.uint8)
+
+    def remark(self, st, marks):
+        """The highlight / picks changed, nothing else: the kept squares' background in the rows whose kind changed
+        recoloured (notes, lines and bars stay), only those squares put again."""
+        old = st["marks"] or {}
+        changed = {line for line in set(old) | set(marks) if old.get(line) != marks.get(line)}
+        rh, base, count = self.row_h, self.row_colours(), len(self.lines()[0])
+        for (i, j), photo in st["tiles"].items():
+            got = st["pix"].get((i, j))
+            if got is None:
+                continue
+            img, bg = got
+            y0 = j * SQUARE
+            hit = [line for line in range(y0 // rh, (y0 + SQUARE - 1) // rh + 1) if line in changed]
+            for line in hit:
+                a, b = max(line * rh - y0, 0), min((line + 1) * rh - y0, SQUARE)
+                kind = marks.get(line, line % 2 if line < count else 3)
+                img[a:b][bg[a:b]] = base[kind]
+            if hit:
+                photo.put(img)
+        st["marks"] = marks
 
     def paint_sheet(self, cx, cy, cw, ch):
         """paint's picture: cw x ch pixels from pixel cx of the song (sideways) and cy of the rows (down)."""
         rh = self.row_h
         count = len(self.lines()[0])
         rows = (np.arange(ch) + cy) // rh  # (each pixel row's line: a track's own or a folder's sub-row)
-        base = np.array([hex_rgb(look.TRACK_ROW), hex_rgb(look.TRACK_ROW_ALT), hex_rgb(look.TRACK_PICKED),
-                         hex_rgb(look.TRACK_EMPTY), hex_rgb(look.TRACK_SELECTED)], np.uint8)
+        base = self.row_colours()
         kind = np.where(rows >= count, 3, rows % 2)
-        for s in self.selected:  # (Ctrl+clicked along with the highlighted one: fainter)
-            got = self.line_of(s)
-            if got is not None:
-                kind[rows == got] = 4
-        for s, c in self.sel_ch:  # (a folder's sub-rows picked with it)
-            got = self.line_of(s, c)
-            if got is not None:
-                kind[rows == got] = 4
-        at = self.line_of(self.current, self.current_ch) if self.current is not None else None
-        if at is not None:
-            kind[rows == at] = 2
+        for line, k in self.marked_lines().items():
+            kind[rows == line] = k
         img = np.empty((ch, cw, 3), np.uint8)
         img[:] = base[kind][:, None, :]
         edge = ((np.arange(ch) + cy) % rh == rh - 1) & (rows < count)  # (a faint line under each line)
@@ -3020,7 +3064,14 @@ class TrackList(tk.Canvas):
         img[rows >= count] = base[3]
         self.paint_loaded_rows(img, rows, cx, cy)
         self.paint_notes(img, rows, cx, cy)
+        self._kind = (base, kind, rows < count)
         return img
+
+    def sheet_with_bg(self, cx, cy, cw, ch):
+        """paint_sheet's picture + the mask of its pixels showing their row's background (remark recolours those)."""
+        img = self.paint_sheet(cx, cy, cw, ch)
+        base, kind, listed = self._kind
+        return img, (img == base[kind][:, None, :]).all(axis=2) & listed[:, None]
 
     def paint_notes(self, img, rows, cx, cy):
         """Each track's notes as lines in its row (the project's whole key range over the row's height, like
@@ -3080,7 +3131,6 @@ class TrackList(tk.Canvas):
         y = y + pad
         on = (y >= 0) & (y < hh)
         y, xa, xb, cid = y[on], xa[on], xb[on], cid[on]
-        size = hh * (aw + 1)
         if pad:  # covered if a line starts at most its thickness - 1 rows up, within the same line
             at = np.arange(hh) - pad + cy  # (each picture row's pixel in the rows)
             track_row = at // self.row_h
@@ -3090,15 +3140,24 @@ class TrackList(tk.Canvas):
             start = np.maximum(np.arange(hh) - tk + 1, track_row * self.row_h - cy + pad)  # (first row that counts)
         for c in range(len(colours)):  # (one colour at a time: a later one over an earlier one)
             mine = cid == c
+            ym = y[mine]
+            if not len(ym):
+                continue
+            # (only the pixel rows its lines reach: a colour is mostly one track's, user 2026-10-31: every colour
+            # over the whole picture made each repaint slow)
+            ya, yb = int(ym.min()), min(hh, int(ym.max()) + 1 + pad)
+            size = (yb - ya) * (aw + 1)
             # (+1 where a line starts, -1 just past its end, added up along each pixel row: covered where > 0)
-            cover = np.bincount(y[mine] * (aw + 1) + xa[mine], minlength=size).astype(np.int32)
-            cover -= np.bincount(y[mine] * (aw + 1) + xb[mine] + 1, minlength=size).astype(np.int32)
-            hit = np.cumsum(cover.reshape(hh, aw + 1), axis=1, dtype=np.int32)[:, :aw] > 0
+            cover = np.bincount((ym - ya) * (aw + 1) + xa[mine], minlength=size).astype(np.int32)
+            cover -= np.bincount((ym - ya) * (aw + 1) + xb[mine] + 1, minlength=size).astype(np.int32)
+            hit = np.cumsum(cover.reshape(yb - ya, aw + 1), axis=1, dtype=np.int32)[:, :aw] > 0
             if pad:
                 ups = np.cumsum(hit, axis=0, dtype=np.int32)
-                below = np.where(start[:, None] > 0, ups[np.maximum(start - 1, 0)], 0)
+                back = start[ya:yb] - 1 - ya  # (rows above ya hold none of its lines: counted 0 there)
+                below = np.where(back[:, None] >= 0, ups[np.maximum(back, 0)], 0)
                 hit = (ups - below) > 0
-            img[hit[pad:]] = hex_rgb(colours[c])
+            lo = max(ya, pad)
+            img[lo - pad:yb - pad][hit[lo - ya:]] = hex_rgb(colours[c])
 
     def chan_colour(self, ch):
         """Channel ch's notes' colour (colour_of's look)."""
