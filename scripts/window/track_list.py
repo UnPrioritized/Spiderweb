@@ -7,6 +7,7 @@ bars per column (meter.bar_lines), like Domino's.
 Picture: the rows' stripes, bar lines and notes painted into one NumPy picture (speed.Photo) per redraw; names,
 ruler and play line are canvas items. Each track's notes fill its row from its own lowest to highest key."""
 
+import contextlib
 import json
 import math
 import threading
@@ -61,7 +62,10 @@ SQUARE = 256  # px: the rows, All tracks and Conductor rows are painted in squar
 INDENT = 12  # px (x scale): a folder's sub-rows indented by this in the names (and its name after its ▾)
 FOLD_W = 14  # px (x scale): a press this near the names' left edge on a folder = opened / shut
 OPEN_MOST = 65534  # open folders read back from a saved view at most (a MIDI file's most tracks)
-SQUARES_KEPT = 96  # squares of each picture kept at least (twice the ones in use when more)
+# redraw's parts, bottom to top (TrackList.layer's tags; each name row is its own part in "names")
+# (never "all" / "current": Tk's own tags, "all" = every item: deleting it blanked the whole list)
+LAYER_ORDER = ("pic", "boxes", "ruler", "allrow", "cond", "names_bg", "names", "names_top", "move", "playhead")
+SQUARES_KEPT = 96 # squares of each picture kept at least (twice the ones in use when more)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 MOVE_PX = 5  # a press on a track's name moved this far (x scale) = dragging the tracks to another place
 EDGE_MS = 40  # how often the list scrolls while tracks are dragged past its top / bottom
@@ -171,6 +175,9 @@ class TrackList(tk.Canvas):
         self._pan = None
         self.play_follow = PlayFollow(app)
         self._job = None
+        # redraw's parts (layer): name -> what was drawn last time; while one is drawn, its items are written down
+        # here instead of sent (_rec), the names drawn this redraw (_drawn)
+        self._layers, self._rec, self._drawn, self._moved = {}, None, set(), False
         self.tip = Tooltip(self, "")
         self.bind("<Configure>", lambda e: self.request_redraw())
         # (shown again by Tab at the same size: no <Configure>, and the redraw asked for before it was mapped did
@@ -2890,31 +2897,69 @@ class TrackList(tk.Canvas):
             self.fit()
         self.tracks()
         self.clamp()
-        self.delete("all")
+        # (each part's items kept when they come out the same: redraw 2026-10-31, every click remade all ~300)
+        self._drawn, self._moved = set(), False
         lines = self.shown_bars(w)
-        self.paint(w, h)
-        self.draw_boxes(w, h)
-        self.draw_ruler(w, lines)
-        self.draw_all(w)
-        self.draw_conductor(w)
+        with self.layer("pic"):
+            self.paint(w, h)
+        with self.layer("boxes"):
+            self.draw_boxes(w, h)
+        with self.layer("ruler"):
+            self.draw_ruler(w, lines)
+        with self.layer("allrow"):
+            self.draw_all(w)
+        with self.layer("cond"):
+            self.draw_conductor(w)
         self.draw_names(h)
         m = self._move
         thick = max(2, round(2 * self.scale))
-        if m is not None and m["on"] and m["gap"] is not None:  # (where dragged tracks land, Domino's black line)
-            y = self.area()[1] + self.row_y(m["gap"]) - self.top
-            self.create_line(0, y, w, y, fill=look.TRACK_TEXT, width=thick)
-        elif m is not None and m["on"] and m["into"] is not None:  # (INTO a track, PLAN #11 C2)
-            row, pos = m["into"]
-            y = self.area()[1] + self.row_y(row) - self.top
-            if pos is None:  # (the row rested on: lit all along)
-                self.create_rectangle(thick // 2, y + thick // 2, w - thick // 2, y + self.row_h - thick // 2,
-                                      outline=look.TRACK_TEXT, width=thick)
-            else:  # (between an open folder's Ch rows: short and indented, like them; decision 7)
-                y += (pos + 1) * self.row_h - round(INTO_UP * self.scale)
-                self.create_line(round(INDENT * 2 * self.scale), y, w, y, fill=look.TRACK_TEXT, width=thick)
+        with self.layer("move"):
+            if m is not None and m["on"] and m["gap"] is not None:  # (where dragged tracks land, Domino's line)
+                y = self.area()[1] + self.row_y(m["gap"]) - self.top
+                self.create_line(0, y, w, y, fill=look.TRACK_TEXT, width=thick)
+            elif m is not None and m["on"] and m["into"] is not None:  # (INTO a track, PLAN #11 C2)
+                row, pos = m["into"]
+                y = self.area()[1] + self.row_y(row) - self.top
+                if pos is None:  # (the row rested on: lit all along)
+                    self.create_rectangle(thick // 2, y + thick // 2, w - thick // 2, y + self.row_h - thick // 2,
+                                          outline=look.TRACK_TEXT, width=thick)
+                else:  # (between an open folder's Ch rows: short and indented, like them; decision 7)
+                    y += (pos + 1) * self.row_h - round(INTO_UP * self.scale)
+                    self.create_line(round(INDENT * 2 * self.scale), y, w, y, fill=look.TRACK_TEXT, width=thick)
+        for name in [n for n in self._layers if n not in self._drawn]:  # (rows scrolled away...)
+            self.delete(name)
+            del self._layers[name]
+        if self._moved:  # (a part drawn again lands on top: every part back in drawing order)
+            for tag in LAYER_ORDER:
+                self.tag_raise(tag)
         self.draw_playhead()
         for bar in self.bars:
             bar.refresh()
+
+    def _create(self, kind, args, kw):
+        if self._rec is None:
+            return super()._create(kind, args, kw)
+        self._rec.append((kind, args, kw))
+        return 0
+
+    @contextlib.contextmanager
+    def layer(self, name, group=None):
+        """One part of redraw: the items made inside are only written down; the same as last time = the canvas keeps
+        its items, else they're replaced (tagged name and group: LAYER_ORDER)."""
+        self._rec = rec = []
+        try:
+            yield
+        finally:
+            self._rec = None
+        self._drawn.add(name)
+        if self._layers.get(name) == rec:
+            return
+        self.delete(name)
+        tags = (name, group or name)
+        for kind, args, kw in rec:
+            super()._create(kind, args, dict(kw, tags=tags))
+        self._layers[name] = rec
+        self._moved = True
 
     def measurer(self, font):
         """font's text width in pixels, each text measured once (asking Tk every redraw was a third of it)."""
@@ -2952,18 +2997,24 @@ class TrackList(tk.Canvas):
         ox, top = self.left_px(), max(0, self.top)
         # (the highlight and picks aren't in the key: a click only recolours their rows, remark; user 2026-10-31:
         # every click painted every note again)
+        # (nor the mutes: a speaker click paints again only the squares of the rows it greyed, mute_squares; redraw
+        # hunt 2026-10-31: every square was painted again, ~0.2 s a click)
         key = (self.sx, self.row_h, id(self._made[0]) if self._made else None, id(self._all),
-               frozenset(self.open), frozenset(self.muted), json.dumps(sigs_of(self.app.tempo)),
+               frozenset(self.open), json.dumps(sigs_of(self.app.tempo)),
                self.app.ppq, self.app.keys,
                # (a loaded MIDI's notes hidden / back, read on a thread: shown at once, hunt 2026-10-26)
                self.app.loaded.hide_ver if self.app.loaded is not None else None)
         (xs, xw), (ys, yw) = squares(ox, aw), squares(top, ah)
         marks = self.marked_lines()
         st = self._sheet
-        if st is not None and st["key"] == key and st["marks"] != marks:
-            self.remark(st, marks)
+        if st is not None and st["key"] == key:
+            if st.get("muted") != self.muted:
+                self.mute_squares(st, st.get("muted") or set())
+            if st["marks"] != marks:
+                self.remark(st, marks)
         got = self.tiled("_sheet", key, xw, yw, SQUARE, self.sheet_with_bg)
         self._sheet["marks"] = marks
+        self._sheet["muted"] = set(self.muted)
         for j in ys:
             for i in xs:
                 self.create_image(x0 + i * SQUARE - ox, y0 + j * SQUARE - self.top, image=got[(i, j)].photo,
@@ -3021,6 +3072,27 @@ class TrackList(tk.Canvas):
         """paint_sheet's row colours by kind: plain, plain (every other), highlighted, past the rows, picked."""
         return np.array([hex_rgb(look.TRACK_ROW), hex_rgb(look.TRACK_ROW_ALT), hex_rgb(look.TRACK_PICKED),
                          hex_rgb(look.TRACK_EMPTY), hex_rgb(look.TRACK_SELECTED)], np.uint8)
+
+    def mute_squares(self, st, old):
+        """The mutes changed from old: the kept squares of the lines whose track's mutes changed forgotten (tiled
+        paints them again, greyed / coloured)."""
+        def of(m, s):
+            return {x for x in m if x == s or (isinstance(x, tuple) and x[0] == s)}
+        changed = {x if not isinstance(x, tuple) else x[0] for x in old ^ self.muted}
+        changed = {s for s in changed if of(old, s) != of(self.muted, s)}
+        rows = self.lines()[0]
+        slots = self._all
+        lines = [line for line in range(len(rows)) if int(slots[int(rows[line])]) in changed]
+        self.forget_squares(st, lines)
+
+    def forget_squares(self, st, lines):
+        """The kept squares (+ their kept pixels) holding any of lines dropped: painted again when shown."""
+        rh, js = self.row_h, set()
+        for line in lines:
+            js |= set(range(line * rh // SQUARE, ((line + 1) * rh - 1) // SQUARE + 1))
+        for p in [p for p in st["tiles"] if p[1] in js]:
+            del st["tiles"][p]
+            st.get("pix", {}).pop(p, None)
 
     def remark(self, st, marks):
         """The highlight / picks changed, nothing else: the kept squares' background in the rows whose kind changed
@@ -3372,7 +3444,7 @@ class TrackList(tk.Canvas):
         if st is None:
             return
         rows, chs = self.lines()[:2]
-        js = set()
+        lines = []
         for line in range(len(rows)):
             row = int(rows[line])
             r = self.file_at(row)
@@ -3380,10 +3452,8 @@ class TrackList(tk.Canvas):
                 continue
             c = int(chs[line]) if chs[line] >= 0 else self.row_only(row)
             if (r, c) in done:
-                js |= set(range(line * self.row_h // SQUARE, ((line + 1) * self.row_h - 1) // SQUARE + 1))
-        for p in [p for p in st["tiles"] if p[1] in js]:
-            del st["tiles"][p]
-            st.get("pix", {}).pop(p, None)  # (its kept pixels too, hunt 2026-10-31)
+                lines.append(line)
+        self.forget_squares(st, lines)  # (their kept pixels too, hunt 2026-10-31)
 
     def _poll_rows(self):
         job = self._row_job
@@ -3699,7 +3769,8 @@ class TrackList(tk.Canvas):
         y0 = self.ruler_h
         font = look.font(9)
         measure = self.measurer(font)
-        self.create_rectangle(0, y0, x1, h, fill=look.TRACK_NAME_BG, outline="")
+        with self.layer("names_bg"):
+            self.create_rectangle(0, y0, x1, h, fill=look.TRACK_NAME_BG, outline="")
         top = self.area()[1]
         slots = self._all
         line_row, line_ch = self.lines()[:2]
@@ -3710,75 +3781,77 @@ class TrackList(tk.Canvas):
             if ya > h:
                 break
             yb = ya + self.row_h
-            row, c = int(line_row[line]), int(line_ch[line])
-            slot = int(slots[row])
-            if c >= 0:  # (an open folder's sub-row: indented "Ch n" in its colour, its own speaker)
-                picked = slot == self.current and self.current_ch == c
-                chosen = (slot, c) in self.sel_ch  # (picked along with it: fainter, as tracks)
+            with self.layer(f"n{line}", "names"):  # (each row kept while it looks the same)
+                row, c = int(line_row[line]), int(line_ch[line])
+                slot = int(slots[row])
+                if c >= 0:  # (an open folder's sub-row: indented "Ch n" in its colour, its own speaker)
+                    picked = slot == self.current and self.current_ch == c
+                    chosen = (slot, c) in self.sel_ch  # (picked along with it: fainter, as tracks)
+                    if picked or chosen:
+                        self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK if picked else look.TRACK_SELECT,
+                                              outline="")
+                    elif self.aimed_ch(row) == c:  # (its track row highlighted: new notes go here, user 2026-10-29)
+                        w = max(1, round(2 * s))
+                        self.create_rectangle(w / 2, max(ya, top) + w / 2, x1 - w / 2, yb - w / 2, outline=look.TRACK_PICK,
+                                              width=w)
+                    mid = (ya + yb) / 2
+                    if self.row_h >= 12 * s and mid > top:
+                        self.create_text(18 * s + ind, mid, text=tr("tracks.channel", ch=c + 1), anchor="w", font=font,
+                                         fill=look.TRACK_PICK_TEXT if picked else look.TRACK_SELECT_TEXT if chosen
+                                         else self.chan_colour(c))
+                        if (row, c) in self.cc_rows():  # (its CC events, user 2026-10-29: never silent)
+                            self.draw_cc_mark(x1 - 26 * s, mid, font, picked)
+                        self.draw_speaker(self.speaker_x(), mid, slot in self.muted or (slot, c) in self.muted, picked)
+                    self.create_line(ind, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
+                    continue
+                folder = len(chans[row]) > 1
+                picked = slot == self.current and self.current_ch is None
+                chosen = not picked and slot in self.selected  # (selected along with it: a fainter blue, like Domino)
                 if picked or chosen:
                     self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK if picked else look.TRACK_SELECT,
                                           outline="")
-                elif self.aimed_ch(row) == c:  # (its track row highlighted: new notes go here, user 2026-10-29)
-                    w = max(1, round(2 * s))
-                    self.create_rectangle(w / 2, max(ya, top) + w / 2, x1 - w / 2, yb - w / 2, outline=look.TRACK_PICK,
-                                          width=w)
-                mid = (ya + yb) / 2
-                if self.row_h >= 12 * s and mid > top:
-                    self.create_text(18 * s + ind, mid, text=tr("tracks.channel", ch=c + 1), anchor="w", font=font,
-                                     fill=look.TRACK_PICK_TEXT if picked else look.TRACK_SELECT_TEXT if chosen
-                                     else self.chan_colour(c))
-                    if (row, c) in self.cc_rows():  # (its CC events, user 2026-10-29: never silent)
-                        self.draw_cc_mark(x1 - 26 * s, mid, font, picked)
-                    self.draw_speaker(self.speaker_x(), mid, slot in self.muted or (slot, c) in self.muted, picked)
-                self.create_line(ind, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
-                continue
-            folder = len(chans[row]) > 1
-            picked = slot == self.current and self.current_ch is None
-            chosen = not picked and slot in self.selected  # (selected along with it: a fainter blue, like Domino)
-            if picked or chosen:
-                self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK if picked else look.TRACK_SELECT,
-                                      outline="")
-            elif (self.own_track(slot) or {}).get("auto"):  # (added by Spiderweb for a shape's colours, user)
-                self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_ADDED, outline="")
-            if self.row_h >= 12 * s:
-                colour = (look.TRACK_PICK_TEXT if picked else look.TRACK_SELECT_TEXT if chosen else look.TRACK_TEXT)
-                ch = tr("tracks.folder_ch", n=len(chans[row])) if folder else self.channel_of(slot)
-                left = 18 * s + (ind if folder else 0)  # (a folder: its ▸ / ▾ first)
-                cc = any(r == row for r, _ in self.cc_rows())  # (CC events ride on it: a "CC" mark)
-                mark = measure(tr("cc.mark")) + 6 * s if cc else 0
-                room = x1 - 26 * s - left - measure(ch) - 8 * s - mark
-                name = cut_text(self.name_of(row), room, measure)
-                mid = (ya + yb) / 2
-                if mid > top:
-                    dot = 10 * s + (ind if folder else 0)
-                    if slot in self.behind:  # (shown behind the current track: a dot in its colour)
-                        r = 3.5 * s
-                        self.create_oval(dot - r, mid - r, dot + r, mid + r, fill=self.colour_of(slot),
-                                         outline=colour)
-                    if folder:
-                        self.draw_fold(6 * s, mid, slot in self.open, colour)
-                    self.create_text(left, mid, text=name, anchor="w", fill=colour, font=font)
-                    self.create_text(x1 - 26 * s, mid, text=ch, anchor="e",
-                                     fill=look.TRACK_PICK_TEXT if picked else look.HINT, font=font)
-                    if cc:
-                        self.draw_cc_mark(x1 - 26 * s - measure(ch) - 6 * s, mid, font, picked)
-                    state = self.mute_state(slot) if folder else 2 if slot in self.muted else 0
-                    self.draw_speaker(self.speaker_x(), mid, state == 2, picked, part=state == 1)
-            self.create_line(0, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
-        self.create_rectangle(0, y0, x1, top, fill=look.TRACK_NAME_BG, outline="")  # (rows scrolled under it)
-        ya = self.conductor_y()
-        picked = self.current is None  # (the All tracks row: highlighted like a track)
-        if picked:
-            self.create_rectangle(0, y0, x1, ya - 1, fill=look.TRACK_PICK, outline="")
-        self.create_text(18 * s, (y0 + ya) / 2, text=tr("tracks.all"), anchor="w",
-                         fill=look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT, font=look.font(9, "bold"))
-        if self.cc_rows():  # (some track sends CC events: user 2026-10-29)
-            self.draw_cc_mark(x1 - 26 * s, (y0 + ya) / 2, font, picked)
-        self.create_line(0, ya - 1, x1, ya - 1, fill=look.ROLL_EDGE)
-        self.create_text(18 * s, ya + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
-                         font=font)
-        self.create_line(0, top, x1, top, fill=look.ROLL_EDGE)
-        self.create_line(x1, 0, x1, h, fill=look.ROLL_EDGE)
+                elif (self.own_track(slot) or {}).get("auto"):  # (added by Spiderweb for a shape's colours, user)
+                    self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_ADDED, outline="")
+                if self.row_h >= 12 * s:
+                    colour = (look.TRACK_PICK_TEXT if picked else look.TRACK_SELECT_TEXT if chosen else look.TRACK_TEXT)
+                    ch = tr("tracks.folder_ch", n=len(chans[row])) if folder else self.channel_of(slot)
+                    left = 18 * s + (ind if folder else 0)  # (a folder: its ▸ / ▾ first)
+                    cc = any(r == row for r, _ in self.cc_rows())  # (CC events ride on it: a "CC" mark)
+                    mark = measure(tr("cc.mark")) + 6 * s if cc else 0
+                    room = x1 - 26 * s - left - measure(ch) - 8 * s - mark
+                    name = cut_text(self.name_of(row), room, measure)
+                    mid = (ya + yb) / 2
+                    if mid > top:
+                        dot = 10 * s + (ind if folder else 0)
+                        if slot in self.behind:  # (shown behind the current track: a dot in its colour)
+                            r = 3.5 * s
+                            self.create_oval(dot - r, mid - r, dot + r, mid + r, fill=self.colour_of(slot),
+                                             outline=colour)
+                        if folder:
+                            self.draw_fold(6 * s, mid, slot in self.open, colour)
+                        self.create_text(left, mid, text=name, anchor="w", fill=colour, font=font)
+                        self.create_text(x1 - 26 * s, mid, text=ch, anchor="e",
+                                         fill=look.TRACK_PICK_TEXT if picked else look.HINT, font=font)
+                        if cc:
+                            self.draw_cc_mark(x1 - 26 * s - measure(ch) - 6 * s, mid, font, picked)
+                        state = self.mute_state(slot) if folder else 2 if slot in self.muted else 0
+                        self.draw_speaker(self.speaker_x(), mid, state == 2, picked, part=state == 1)
+                self.create_line(0, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
+        with self.layer("names_top"):
+            self.create_rectangle(0, y0, x1, top, fill=look.TRACK_NAME_BG, outline="")  # (rows scrolled under it)
+            ya = self.conductor_y()
+            picked = self.current is None  # (the All tracks row: highlighted like a track)
+            if picked:
+                self.create_rectangle(0, y0, x1, ya - 1, fill=look.TRACK_PICK, outline="")
+            self.create_text(18 * s, (y0 + ya) / 2, text=tr("tracks.all"), anchor="w",
+                             fill=look.TRACK_PICK_TEXT if picked else look.TRACK_TEXT, font=look.font(9, "bold"))
+            if self.cc_rows():  # (some track sends CC events: user 2026-10-29)
+                self.draw_cc_mark(x1 - 26 * s, (y0 + ya) / 2, font, picked)
+            self.create_line(0, ya - 1, x1, ya - 1, fill=look.ROLL_EDGE)
+            self.create_text(18 * s, ya + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
+                             font=font)
+            self.create_line(0, top, x1, top, fill=look.ROLL_EDGE)
+            self.create_line(x1, 0, x1, h, fill=look.ROLL_EDGE)
 
     def draw_fold(self, cx, cy, opened, colour):
         """A folder's ▾ (open) / ▸ (shut)."""
