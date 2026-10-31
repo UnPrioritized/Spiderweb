@@ -752,6 +752,10 @@ class Player:
             if wait < -0.1:
                 continue  # far behind (too many notes at once): skip late notes instead of smearing them
             s, e, key, vel = on
+            if shared and held.get(key):
+                # (the key sounding already: let go first, ONE sound a key. Every on stacked a voice while the off
+                # waited for the last note: rows never quiet piled ~49 k voices and playback froze, 2026-10-31)
+                emit(0x80 | key, when)
             # (its length: Kestrel's note budget keeps the longest start of a key, a held note beside spam)
             emit(0x90 | key | vel << 16, when, tmap.sec(e) - tmap.sec(s) if lead else None)
             held[key] = held.get(key, 0) + 1
