@@ -221,12 +221,12 @@ class ChopWindow(ToolWindow):
         self.delete_button = ttk.Button(row, text=tr("chop.delete"), command=self.delete_rhythm)
         self.delete_button.pack(side="left", padx=(6, 0))
 
-        self.strip = RhythmStrip(box, s, self.on_strip)
-        self.strip.grid(row=3, column=0, columnspan=2, pady=(4, 2))
-        Tooltip(self.strip, tr("chop.tip_strip"))
+        self.rhythm_strip = RhythmStrip(box, s, self.on_strip)
+        self.rhythm_strip.grid(row=3, column=0, columnspan=2, pady=(4, 2))
+        Tooltip(self.rhythm_strip, tr("chop.tip_strip"))
 
         ttk.Label(box, text=tr("chop.grid")).grid(row=4, column=0, sticky="e", padx=(0, 8), pady=2)
-        self.cells = tk.StringVar(value=str(self.strip.cells))
+        self.cells = tk.StringVar(value=str(self.rhythm_strip.cells))
         grid = ttk.Combobox(box, textvariable=self.cells, values=[str(c) for c in CELLS], state="readonly", width=4)
         grid.grid(row=4, column=1, sticky="w", pady=2)
         grid.bind("<<ComboboxSelected>>", lambda e: self.on_cells())
@@ -365,8 +365,8 @@ class ChopWindow(ToolWindow):
         self.put("on", True, done)
 
     def on_cells(self):
-        self.strip.cells = int(self.cells.get())
-        self.strip.draw()
+        self.rhythm_strip.cells = int(self.cells.get())
+        self.rhythm_strip.draw()
 
     def on_steps(self, done=True):
         try:
@@ -456,9 +456,9 @@ class ChopWindow(ToolWindow):
         self.delete_button.state(["!disabled"] if saved else ["disabled"])
         if self.mode_box.current() != int(c["fixed"]):
             self.mode_box.current(int(c["fixed"]))
-        if ((self.strip.steps, self.strip.pieces, self.strip.fixed) != (c["steps"], c["pieces"], c["fixed"])
-                and not self.strip.drag):
-            self.strip.show(c["steps"], c["pieces"], c["fixed"])
+        if ((self.rhythm_strip.steps, self.rhythm_strip.pieces, self.rhythm_strip.fixed) != (c["steps"], c["pieces"], c["fixed"])
+                and not self.rhythm_strip.drag):
+            self.rhythm_strip.show(c["steps"], c["pieces"], c["fixed"])
         ticks = fmt(round(step_ticks(c, self.app.ppq), 2))
         unit = tr("chop.tick" if ticks == "1" else "chop.ticks")
         if self.ticks_unit.cget("text") != unit:
