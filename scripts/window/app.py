@@ -2333,7 +2333,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Each colour's slot of a shape not laid on tracks (mine: its rendered notes, some): where most of that
         colour's notes are now, found by start + key; one colour = the slot most of its notes are on (also for a
         colour none of whose notes were found). "Repeated colours get new channels": each repeat's colours are
-        colours of their own, in the order all_notes lays them (hunt 2026-10-26: repeats landed on other tracks)."""
+        colours of their own, in the order all_notes lays them (hunt 2026-10-26: repeats landed on other tracks).
+        Notes of several colours on one start + key (stacked pasted tracks) count for each of those slots, shared
+        out; a colour whose best slot another colour took goes on its next best one if that's about as good (a
+        tester's 32-track paste, 2026-10-31: tracks lying on others were laid onto their tracks and merged)."""
         vals, counts = np.unique(mine[:, 4], return_counts=True)
         most = int(vals[counts.argmax()])
         n, t = self.notes_tracks(dict(sh, _rounds=True) if self.rounds_apart() and has_colours(sh) else sh)
@@ -2346,14 +2349,27 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         o = np.argsort(have, kind="stable")
         have, slot = have[o], mine[o, 4]
         want = n[:, 0] * 1024 + n[:, 2]
-        at = np.clip(np.searchsorted(have, want), 0, len(have) - 1)
-        found = have[at] == want
-        out = []
-        for k in range(int(colour.max()) + 1):
-            got = slot[at[found & (colour == k)]]
-            if len(got):
-                vals, counts = np.unique(got, return_counts=True)
-            out.append(int(vals[counts.argmax()]) if len(got) else most)
+        lo, hi = np.searchsorted(have, want), np.searchsorted(have, want, side="right")
+        many = hi - lo  # (rendered notes on each note's start + key)
+        each = np.repeat(lo, many) + np.arange(int(many.sum())) - np.repeat(np.cumsum(many) - many, many)
+        colours = int(colour.max()) + 1
+        pair = np.repeat(colour, many) * len(vals) + np.searchsorted(vals, slot[each])
+        weight = np.bincount(pair, 1.0 / np.repeat(many, many), colours * len(vals)).reshape(colours, len(vals))
+        best = weight.max(axis=1)
+        out, taken = [most] * colours, set()
+        for k in sorted(range(colours), key=lambda k: -best[k]):  # (the surest colours first)
+            if best[k] <= 0:
+                continue  # (none of its notes found: the slot most notes are on)
+            order = np.argsort(-weight[k], kind="stable")
+            pick = order[0]
+            for j in order:
+                if weight[k, j] < best[k] * 0.5:
+                    break
+                if int(vals[j]) not in taken:
+                    pick = j
+                    break
+            out[k] = int(vals[pick])
+            taken.add(out[k])
         return out
 
     def into_target(self):
