@@ -70,6 +70,49 @@ def flipped_lines(notes, line, count, sideways):
     return out
 
 
+def lined_up(notes, line, count, up):
+    """Flip each line's "Line up the lines" (a Chinese user's request 2026-10-31): every WHOLE line moved up (its
+    highest key onto the highest key of all the notes) or down (its lowest onto the lowest). Keys only: times,
+    lengths and the notes themselves stay. Cut lines that bunched up after a flip sit side by side again. -> a new
+    array."""
+    _, _, kl, kh = line_spans(notes, line, count)
+    out = np.array(notes, np.int64, copy=True)
+    out[:, 2] += (kh.max() - kh if up else kl.min() - kl)[line]
+    return out
+
+
+def overlap_losers(notes, line):
+    """The notes to remove so none overlaps another on the same key (any colour): by key, then start, then line
+    number, each note kept unless it starts before the end of a note already kept on its key. -> a bool mask."""
+    n = len(notes)
+    lose = np.zeros(n, bool)
+    if n < 2:
+        return lose
+    start, end, key = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
+    o = np.lexsort((line, start, key))
+    k, s, e = key[o], start[o], end[o]
+    # clusters: runs on one key where each note starts before the furthest end so far (singles can't lose)
+    t0 = int(s.min())
+    span = int(max(e.max(), s.max())) - t0 + 2
+    code_s, code_e = (k - k.min()) * span + (s - t0), (k - k.min()) * span + (e - t0)
+    reach = np.maximum.accumulate(code_e)
+    clash = np.zeros(n, bool)
+    clash[1:] = code_s[1:] < reach[:-1]
+    if not clash.any():
+        return lose
+    # walk only the clusters with a clash (a few notes each in practice), keeping the furthest kept end
+    heads = np.flatnonzero(~clash)
+    ends = np.r_[heads[1:], n]
+    for a, b in zip(heads[ends - heads > 1].tolist(), ends[ends - heads > 1].tolist()):
+        kept_end = e[a]
+        for j in range(a + 1, b):
+            if s[j] < kept_end:
+                lose[o[j]] = True
+            else:
+                kept_end = max(kept_end, e[j])
+    return lose
+
+
 def joined(n, a, b):
     """The groups n things fall into when each pair (a[i], b[i]) is joined: each thing's group = its lowest member.
     Roots hooked onto the lower root, then every pointer followed to its root, until no pair is split."""

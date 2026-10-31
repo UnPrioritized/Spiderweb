@@ -18,7 +18,7 @@ from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live,
 from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.fillgaps import fill_gaps as filled, needs_fill
-from notes.lines import flipped_lines, note_lines
+from notes.lines import flipped_lines, lined_up, note_lines, overlap_losers
 from notes.passengers import has_cc, pack_cc, split_cc, unpack_cc
 from files.own_tracks import COUNT_MOST, FILE0, clean_name, from_rows, full_plan, into_ids, new_id, with_port
 from notes.engine import (PORTS, SHAPE_DEFAULTS, as_made, cached_arrays, channels_of, clean_shape, shape_notes_tracks,
@@ -820,17 +820,19 @@ class JoinSplit:
             return None
         return note_lines(rows, line_tracks(rows[:, 5], rows[:, 4]), gap)[1]
 
-    def flip_lines(self, sideways, gap):
+    def flip_lines(self, sideways, gap, align=None, remove=False):
         """Flip each line sideways / upside down (notes/lines.py; user 2026-10-30, "shard flips"): the selected
         shapes' notes as laid in Multi channel (like Fill gaps), every line of each shape's colours mirrored inside its
-        own time span / key range. Each shape becomes its own plain-notes shape, colours kept. One undo step;
-        nothing changing = status line, no step."""
+        own time span / key range. align "up" / "down" (Line up the lines, user 2026-10-31): then every whole line
+        moved onto the highest / lowest key of all the notes; remove: notes left overlapping another on their key
+        go (else kept, never cut by the overlap rule). Each shape becomes its own plain-notes shape, colours kept.
+        One undo step; nothing changing = status line, no step."""
         self.commit_typing()
         got = self.line_targets()
         if not got:
             self.status.config(text=tr("lines.nothing"))
             return
-        flipped = []
+        flipped, removed, emptied = [], [], []
 
         def together(rows):
             order = sorted(rows)
@@ -838,9 +840,14 @@ class JoinSplit:
             owner = np.concatenate([np.full(len(rows[i]), i, np.int64) for i in order])
             line, n = note_lines(both, line_tracks(owner, both[:, 4]), gap)
             out = flipped_lines(both, line, n, sideways)
-            flipped.append(len(np.unique(line[(out[:, :3] != both[:, :3]).any(1)])))
+            if align:
+                out = lined_up(out, line, n, align == "up")
+            lose = overlap_losers(out, line) if align and remove else np.zeros(len(out), bool)
+            flipped.append(len(np.unique(line[(out[:, :3] != both[:, :3]).any(1) | lose])))
+            removed.append(int(lose.sum()))
             ends = np.searchsorted(owner, order + [order[-1] + 1])
-            return {i: out[ends[j]:ends[j + 1]] for j, i in enumerate(order)}
+            emptied.extend(i for j, i in enumerate(order) if lose[ends[j]:ends[j + 1]].all())
+            return {i: out[ends[j]:ends[j + 1]][~lose[ends[j]:ends[j + 1]]] for j, i in enumerate(order)}
         self.busy(tr("lines.busy"))
         try:
             new = self.plain_copies(got, together=together, whole=True)
@@ -852,13 +859,26 @@ class JoinSplit:
         if not flipped[0]:
             self.status.config(text=tr("lines.no_change"))
             return
-        self.plain_kept(new)
+        self.plain_kept(new, held=bool(align) and not remove)  # (lined up + overlaps kept: none cut by the rule)
+        gone = sorted(emptied)
         self.roll.cancel_draft()
         self.push_undo(name=tr("lines.title_" + ("sideways" if sideways else "upside")))
         self.put_plain(new)
-        self.select_many(got, self.sel if self.sel in got else got[0])
+        if gone:  # (every note of a shape lost to overlaps: the shape goes, like Fill gaps)
+            self.unlink_groups(gone)
+            for i in reversed(gone):
+                del self.shapes[i]
+        kept = [i - sum(j < i for j in gone) for i in got if i not in gone]
+        if kept:
+            self.select_many(kept, kept[0] if self.sel in gone or self.sel not in got else
+                             self.sel - sum(j < self.sel for j in gone))
+        else:
+            self.select_many([], None)
         self.shapes_changed()
-        self.status.config(text=trn("lines.done", flipped[0], n=f"{flipped[0]:,}"))
+        text = trn("lines.done", flipped[0], n=f"{flipped[0]:,}")
+        if removed[0]:
+            text += trn("lines.removed", removed[0], n=f"{removed[0]:,}")
+        self.status.config(text=text)
 
     def split_lines(self, gap):
         """Split into pieces (notes/lines.py; user 2026-10-30): each line of each selected shape's colours onto a track

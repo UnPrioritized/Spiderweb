@@ -4,7 +4,7 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
-• Flip each line sideways / upside down (right-click selected shapes): every line, a run of touching notes like a staircase, is mirrored inside its own place, so rising lines fall and falling lines rise while everything stays where it was. See Help → Line flips and Split into pieces.
+• Flip each line sideways / upside down (right-click selected shapes): every line, a run of touching notes like a staircase, is mirrored inside its own place, so rising lines fall and falling lines rise while everything stays where it was. See Help → Line flips and Split into pieces. "Line up the lines" (tick it before flipping) moves every whole line up or down to the highest or lowest note, so cut lines of different lengths don't bunch up in one place; "Remove notes that overlap" can take away notes left on top of each other.
 
 • Split into pieces (right-click selected shapes): every line goes onto a track of its own, right under the first one, same channel, on ports B to P.
 

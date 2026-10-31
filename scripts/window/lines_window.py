@@ -47,6 +47,8 @@ class LinesWindow(tk.Toplevel):
             Tooltip(w, tr("lines.gap_tip"))
         self.count = ttk.Label(box, text="", foreground=look.VALUE)
         self.count.pack(anchor="w", pady=(8, 0))
+        if kind != "split":
+            self.align_parts(box)
         ttk.Label(box, text=tr("lines.hint_" + kind), foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=int(320 * app.scale)).pack(anchor="w", pady=(8, 0))
         row = ttk.Frame(box)
@@ -67,6 +69,35 @@ class LinesWindow(tk.Toplevel):
         self.deiconify()
         self.gap_box.focus_set()
         self.gap_box.select_range(0, "end")
+
+    def align_parts(self, box):
+        """The flips' "Line up the lines" tick + Up / Down + "Remove notes that overlap" (a Chinese user's request
+        2026-10-31: cut lines bunch up after a flip; ticked before flipping; kept until Spiderweb closes)."""
+        app = self.app
+        was = getattr(app, "line_align", {"on": False, "way": "up", "remove": False})
+        self.align_on = tk.BooleanVar(value=was["on"])
+        self.align_way = tk.StringVar(value=was["way"])
+        self.align_remove = tk.BooleanVar(value=was["remove"])
+        tick = ttk.Checkbutton(box, text=tr("lines.align"), variable=self.align_on, command=self.sync_align)
+        tick.pack(anchor="w", pady=(10, 0))
+        Tooltip(tick, tr("lines.align_tip"))
+        row = ttk.Frame(box)
+        row.pack(anchor="w", padx=(20, 0), pady=(2, 0))
+        self.align_parts_on = []
+        for way in ("up", "down"):
+            r = ttk.Radiobutton(row, text=tr("lines.align_" + way), variable=self.align_way, value=way)
+            r.pack(side="left", padx=(0, 10))
+            Tooltip(r, tr("lines.align_" + way + "_tip"))
+            self.align_parts_on.append(r)
+        r = ttk.Checkbutton(box, text=tr("lines.align_remove"), variable=self.align_remove)
+        r.pack(anchor="w", padx=(20, 0), pady=(2, 0))
+        Tooltip(r, tr("lines.align_remove_tip"))
+        self.align_parts_on.append(r)
+        self.sync_align()
+
+    def sync_align(self):
+        for w in self.align_parts_on:
+            w.state(["!disabled"] if self.align_on.get() else ["disabled"])
 
     def gap(self):
         """The typed gap -> whole ticks 0..MOST_GAP, or None."""
@@ -111,11 +142,14 @@ class LinesWindow(tk.Toplevel):
         if new and not ask_drawn(app, self.kind, new, self):  # (drawn shapes selected since it opened, hunt 10-30)
             return
         self.app.line_gap = g
+        if self.kind != "split":
+            on, way, remove = self.align_on.get(), self.align_way.get(), self.align_remove.get()
+            self.app.line_align = {"on": on, "way": way, "remove": remove}
         self.close()
         if self.kind == "split":
             self.app.split_lines(g)
         else:
-            self.app.flip_lines(self.kind == "sideways", g)
+            self.app.flip_lines(self.kind == "sideways", g, way if on else None, remove)
 
     def close(self):
         if self.job:

@@ -18,6 +18,12 @@ Each line is mirrored inside its own keys: its highest and lowest keys swap, and
 
 Flipped lines may end up overlapping each other: move them apart as you like. When every line already looks the same flipped, nothing changes and the status line says so.
 
+## Line up the lines
+
+Lines of different lengths (a shape cut off at an edge, like a triangle) bunch up in one place after a flip. Tick "Line up the lines" in either flip window before pressing Flip: every whole line then moves up (its top onto the highest note of the selected shapes) or down (its bottom onto the lowest note), as you pick. Only the keys change: every note keeps its time and length, and no note is lost. The shape covers fewer keys, but the lines sit neatly side by side. Lines that are all the same length don't need it.
+
+Lined-up lines may still overlap on some keys. "Remove notes that overlap" takes those notes away (the earlier line keeps its note); unticked, every note stays. Spiderweb remembers these choices until it closes.
+
 ## Split into pieces
 
 Each line becomes its own track. The first line (the earliest, then the lowest) stays on its track; the next ones go on new tracks right under it, named after it ("Strings 2", "Strings 3"...), on the same channel, each on the next port: B, C, and on up to P. From the 17th piece on, they go round the ports again, sharing ports and channels with the first ones, and the status line says so.
