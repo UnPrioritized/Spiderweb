@@ -638,6 +638,7 @@ class ProjectFiles:
                               "copy_notes": self.copy_notes.get(),
                               "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
                               "loud_on_top": self.stack_order.get() == "loud",
+                              "hidden_shade": self.hidden_shade.get(),
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
                               "tracks": self.track_list.state(),
@@ -841,6 +842,7 @@ class ProjectFiles:
             stack = win.get("stacked_notes")  # (none yet: the old "Louder notes on top" tick's)
             self.stack_order.set(stack if stack in STACK_MODES else "loud" if win.get("loud_on_top") is True
                                  else STACK_MODES[0])
+            self.hidden_shade.set(win.get("hidden_shade") is True)
             self.sync_builtin()
         kept(sound)
 

@@ -428,6 +428,10 @@ class SettingsWindow(tk.Toplevel):
             self.app.roll.request_redraw()
             self.app.schedule_autosave()
         box.bind("<<ComboboxSelected>>", picked)
+        # (user 2026-10-31: "I don't like it but if that floats their boat": off by default; loaded MIDI always has it)
+        f.row(None, self.tick(f.page, "settings.hidden_shade", self.app.hidden_shade,
+                              lambda: (self.app.roll.request_redraw(), self.app.schedule_autosave())),
+              tip=tr("settings.hidden_shade_hint"))
 
     def build_indexes(self, f):
         """Load MIDI's saved indexes (files/midi_saved.py): each MIDI's name, the index's size, a Delete button."""

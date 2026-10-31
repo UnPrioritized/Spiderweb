@@ -535,6 +535,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # Settings → Look "Stacked notes": which of the notes on top of each other shows (roll_draw.stack_rule; a
         # loaded MIDI's painter too: "loud" = roll_loaded.loud_on)
         self.stack_order = tk.StringVar(self, value=STACK_MODES[0])
+        # Settings → Note colours "Show hidden note starts / ends" (off by default, user 2026-10-31): Spiderweb's own
+        # notes shaded where a note under them starts / ends (roll_draw.hidden_shade; loaded MIDI always has it)
+        self.hidden_shade = tk.BooleanVar(self, value=False)
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
         # when it opens (a change = opened again at the next Play: fresh_builtin)
         self.kestrel_opts = dict(KESTREL_DEFAULTS)

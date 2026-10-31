@@ -412,6 +412,20 @@ def cover_next(s, e, key, group):
     return nxt_s, nxt_e
 
 
+NO_END = 1 << 30  # (a note's colour number + this: its end was cut short by covered_ends, not a real end;
+# fastloops.NO_END)
+
+
+def row_overlap(rects):
+    """Two notes on one key row overlapping on screen (note_rects' rectangles)? Then a note's start / end can be
+    under another's fill, shaded (user 2026-10-25): only the picture does that, canvas rectangles can't."""
+    x0, y0, x1 = rects[0], rects[1], rects[2]
+    if len(x0) < 2:
+        return False
+    o = np.lexsort((x0, y0))
+    return bool(((y0[o][1:] == y0[o][:-1]) & (x0[o][1:] <= x1[o][:-1])).any())
+
+
 def covered_ends(e, nxt, room):
     """Ends to PAINT (Sustain's stacked notes: sustain.py): a note the next one on its key covers to its end (painted
     after it, ending no earlier) only needs painting to `room` ticks past that one's start, where its own right edge
@@ -624,7 +638,7 @@ class RollDrawing:
         boxed = getattr(app, "_box_notes", None) if ring is not None else None
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
                  self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])))
-        pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols)))
+        pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols), self.hidden_shade()))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
         if not drafted:
@@ -663,11 +677,13 @@ class RollDrawing:
                 rects = self.note_rects(w, h) if app.show_notes.get() else None
                 if rects is not None and (len(rects[0]) > w * h // 2000 or self._panning or scrolled
                                           or app.loaded is not None
-                                          or ((rects[0] == rects[2]) | (rects[1] == rects[3])).any()):
+                                          or ((rects[0] == rects[2]) | (rects[1] == rects[3])).any()
+                                          or (self.hidden_shade() and row_overlap(rects))):
                     # Lots of notes: paint grid + notes as one picture (thousands of canvas items redraw slowly).
                     # Panning / scrolling (scrollbar, wheel): always (the picture is moved along, ~12 ms a move;
                     # canvas items drawn again at every move took 35-80 ms on the user's screen with ~1000 notes).
                     # A note 1 px wide or tall: the picture too (a canvas rectangle makes it 2 px; user: 1 px everywhere)
+                    # Notes overlapping on a row: the picture (shades where a note under another starts / ends)
                     self.paint_image(w, h, rows, cols, rects)
                     self._note_pic = None if drafted else pic
                 else:
@@ -675,7 +691,8 @@ class RollDrawing:
                     self.keep_grid(w, h, rows, cols)
                     colors = note_tables(app.picture_pal)[0]
                     for x0, y0, x1, y1, color in zip(*(v.tolist() for v in rects or ())):
-                        self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
+                        fill, edge = colors[color & (NO_END - 1)]
+                        self.create_rectangle(x0, y0, x1, y1, fill=fill, outline=edge)
             self.paint_time = time.perf_counter() - started
         if self._tiles is not None and self._grid_key:  # (the grid is in the notes' picture)
             self.delete("grid")
@@ -1281,8 +1298,16 @@ class RollDrawing:
             got = self._cover[which] = [made, cover_next(s, e, key, group()), None, tag]
         if got[2] is None or got[2][0] != room:
             ends = covered_ends(e, got[1], room)
-            got[2] = (room, ends, int((ends - s).max()) if len(s) else 0)
+            got[2] = (room, ends, int((ends - s).max()) if len(s) else 0, ends < e)
         return got[2][1:]
+
+    def cut_colours(self, c, cut):
+        """Colour numbers with NO_END on the notes whose ends covered_ends cut short (no shade for those ends),
+        remembered while the same."""
+        got = getattr(self, "_cut_colours", None)
+        if got is None or got[0] is not c or got[1] is not cut:
+            got = self._cut_colours = (c, cut, np.where(cut, c | c.dtype.type(NO_END), c))
+        return got[2]
 
     def visible_notes(self, t_lo, t_hi):
         """Rendered notes (array rows) that can overlap ticks t_lo..t_hi."""
@@ -1320,7 +1345,8 @@ class RollDrawing:
             (s, e, k, c, first, longest), others = kept
             held = self.paint_ends("fast", s, s, e, k, lambda: np.repeat(np.arange(len(first) - 1), np.diff(first)))
             if held is not None:  # (Sustain: held notes painted only where they show; same pixels)
-                e, longest = held
+                e, longest, cut = held
+                c = self.cut_colours(c, cut)
             b0, b1 = 0, len(first) - 1
             if only is not None and app.sels:
                 b0, b1 = (others, b1) if only else (0, others)
@@ -1334,9 +1360,10 @@ class RollDrawing:
             main = fast.order_screen(*args)
         sels = list(app.sels)
 
-        def screen(notes, color, order):
+        def screen(notes, color, order, cut=None):
             """These notes' x0, x1, key and colour number, the ones on screen only. order: put in painting order
-            (shapes drawn later go on top, clicks pick that one too; then the selected shapes' notes on top)."""
+            (shapes drawn later go on top, clicks pick that one too; then the selected shapes' notes on top).
+            cut: the notes whose ends were cut short (their colour numbers get NO_END)."""
             key = notes[:, 2]
             # (the same sums as one note at a time, so the same pixels)
             x0, x1 = np.round(notes[:, 0] * ax + bx), np.round(notes[:, 1] * ax + bx)
@@ -1361,8 +1388,11 @@ class RollDrawing:
             # low velocity = paler fill (outline stays); 32 shades is plenty. Velocity -1 = a ghost (mask.py)
             vel = notes[on, 3]
             code = color * 32 + np.clip(vel, 0, 127) // 4
-            return (x0[on].astype(np.int64), x1[on].astype(np.int64), key[on],
-                    np.where(vel < 0, ghost_code(color, vel), code) if len(vel) and vel.min() < 0 else code)
+            if len(vel) and vel.min() < 0:
+                code = np.where(vel < 0, ghost_code(color, vel), code)
+            if cut is not None:
+                code = np.where(cut[on], code | NO_END, code)
+            return x0[on].astype(np.int64), x1[on].astype(np.int64), key[on], code
 
         if main is None:
             lo, hi = self.visible_range(t_lo, t_hi)
@@ -1371,14 +1401,18 @@ class RollDrawing:
             back, rule = getattr(app, "behind_owner", None), stack_rule(app)
             held = self.paint_ends("plain", every, every[:, 0], every[:, 1], every[:, 2],
                                    lambda: stack_keys(every, sels, back, rule)[0], (frozenset(sels), back, rule))
+            cut = None
             if held is not None:  # (Sustain: held notes painted only where they show; same pixels)
                 notes = notes.copy()
                 notes[:, 1] = held[0][lo:hi]
+                cut = held[2][lo:hi]
             if clip:
-                notes = notes[shown[np.clip(notes[:, 2], 0, app.keys - 1)]]
+                keep = shown[np.clip(notes[:, 2], 0, app.keys - 1)]
+                notes, cut = notes[keep], None if cut is None else cut[keep]
             if only is not None and app.sels:
-                notes = notes[np.isin(notes[:, 5], list(app.sels)) == only]
-            main = screen(notes, None, True)
+                keep = np.isin(notes[:, 5], list(app.sels)) == only
+                notes, cut = notes[keep], None if cut is None else cut[keep]
+            main = screen(notes, None, True, cut)
         parts = [main]
         if drafted is not None:
             parts.append(screen(drafted, DRAFT, False))
@@ -1505,10 +1539,11 @@ class RollDrawing:
         c = self._carry
         if c is None or c["rendered"] is not app.drawn or c["key"] != key:
             c = self._carry = {"rendered": app.drawn, "key": key, "area": None, "base": None}
-            if len(app.drawn) > w * h // 2000 or app.loaded is not None:  # (a picture, as redraw paints them: a
-                # loaded MIDI's notes are only in the picture, else they went every other frame)
-                c["base"] = self.paint_region(rows, cols, self.note_rects(w, h, only=False), (kb, top, w, h),
-                                              ring=False)
+            rects = self.note_rects(w, h, only=False)
+            if (len(app.drawn) > w * h // 2000 or app.loaded is not None
+                    or (self.hidden_shade() and row_overlap(rects))):  # (a picture, as redraw paints them: a loaded
+                # MIDI's notes are only in the picture, else they went every other frame)
+                c["base"] = self.paint_region(rows, cols, rects, (kb, top, w, h), ring=False)
         if c["base"] is not None:
             if self._shown is c["base"] and self._tiles is not None:
                 self._tiles.place(self, kb, top)  # (nothing new to send)
@@ -1520,7 +1555,8 @@ class RollDrawing:
             self.keep_grid(w, h, rows, cols)
             colors = note_tables(app.picture_pal)[0]
             for x0, y0, x1, y1, color in zip(*(v.tolist() for v in self.note_rects(w, h, only=False))):
-                self.create_rectangle(x0, y0, x1, y1, fill=colors[color][0], outline=colors[color][1])
+                fill, edge = colors[color & (NO_END - 1)]
+                self.create_rectangle(x0, y0, x1, y1, fill=fill, outline=edge)
         if apart:
             return
         # The dragged notes' picture holds the part of the screen they came from, and around it. KEPT FOR THE WHOLE
@@ -1641,7 +1677,8 @@ class RollDrawing:
         if fast:  # (the compiled loops: the colours go straight in, no list of pixels in between)
             pal = getattr(getattr(self, "app", None), "picture_pal", None)
             fast.paint_notes(img.reshape(-1, 3), *(int(v) for v in region),
-                             *(np.ascontiguousarray(v, np.int64) for v in rects), note_tables(pal)[1])
+                             *(np.ascontiguousarray(v, np.int64) for v in rects), note_tables(pal)[1],
+                             self.hidden_shade())
         else:
             at, colors = self.note_pixels(rects, region)
             img.reshape(-1, 3)[at] = colors
@@ -1649,33 +1686,46 @@ class RollDrawing:
         if at is not None:
             img.reshape(-1, 3)[at] = RING_RGB
 
+    def hidden_shade(self):
+        """The Look option "Show hidden note starts / ends" (off by default, user 2026-10-31): a note's fill shaded
+        where a note under it starts / ends. Off in the Hz window (no app.hidden_shade)."""
+        var = getattr(getattr(self, "app", None), "hidden_shade", None)
+        return bool(var.get()) if var is not None else False
+
     def note_pixels(self, rects, region):
         """The pixels of note_rects' notes inside region = (x0, y0, x1, y1): (where, colours), where = row * the
         region's width + column."""
         kb, top, w, h = region
         iw, ih = w - kb, h - top
-        fast = loops()
+        fast, shade = loops(), self.hidden_shade()
         if fast:
-            top_px = self.top_pixels(fast, rects, region)
-            idx = np.arange(len(rects[0]))
+            (top_px, half), idx = self.top_pixels(fast, rects, region, shade), np.arange(len(rects[0]))
         else:
-            top_px, idx = self.top_pixels_numpy(rects, region)
+            (top_px, half), idx = self.top_pixels_numpy(rects, region, shade)
         at = np.flatnonzero(top_px >= 0)
         k = top_px[at]
         pal = getattr(getattr(self, "app", None), "picture_pal", None)  # (the Hz window shares this, no pictures)
-        return at, note_tables(pal)[1][rects[4][idx][k >> 1], k & 1]
+        rgb = note_tables(pal)[1]
+        code = rects[4][idx][k >> 1] & (NO_END - 1)
+        colors = rgb[code, k & 1]
+        shade = np.flatnonzero(half[at] & ~k & 1)  # (a fill pixel where a note under it starts / ends)
+        if len(shade):
+            colors[shade] = (rgb[code[shade], 0].astype(np.int64) + rgb[code[shade], 1]) // 2
+        return at, colors
 
     @staticmethod
-    def top_pixels(fast, rects, region):
-        """note_pixels' top_px by the compiled loop (every note numbered, also the ones off the region)."""
+    def top_pixels(fast, rects, region, shade=False):
+        """note_pixels' (top_px, half) by the compiled loop (every note numbered, also the ones off the region)."""
         kb, top, w, h = (int(v) for v in region)
         top_px = np.full((h - top) * (w - kb), -1, np.int64)
-        fast.note_top(top_px, kb, top, w, h, *(np.ascontiguousarray(v, np.int64) for v in rects[:4]))
-        return top_px
+        half = np.zeros(len(top_px), np.uint8)
+        fast.note_top(top_px, half, kb, top, w, h, *(np.ascontiguousarray(v, np.int64) for v in rects), bool(shade))
+        return top_px, half
 
-    def top_pixels_numpy(self, rects, region):
-        """(top_px, idx): which note is on top at every pixel of region (the last one painted) as its number in
-        idx (the notes that reach the region) * 2 + 1 if that pixel is its outline; -1 = no note."""
+    def top_pixels_numpy(self, rects, region, shade=False):
+        """((top_px, half), idx): which note is on top at every pixel of region (the last one painted) as its number
+        in idx (the notes that reach the region) * 2 + 1 if that pixel is its outline; -1 = no note. half = 1 where
+        a note under the top one has its start / end column (not one cut short: NO_END)."""
         kb, top, w, h = region
         iw, ih = w - kb, h - top
         # Same pixels as a canvas rectangle with a 1-pixel outline: x0..x1 and y0..y1 inclusive.
@@ -1686,8 +1736,10 @@ class RollDrawing:
         seen = (n > 0) & (rh > 0)
         idx = np.nonzero(seen)[0]
         x0, y0, x1, y1, cx0, cx1, cy0, cy1, n, rh = (v[seen] for v in (x0, y0, x1, y1, cx0, cx1, cy0, cy1, n, rh))
+        real_end = (color[seen] & NO_END) == 0
         solid = (x1 - x0 < 2) | (y1 - y0 < 2)  # too small to have a fill: all outline
         top_px = np.full(ih * iw, -1, np.int64)  # note number * 2 + (1 = outline), the highest wins
+        ends = np.full(ih * iw, -1, np.int64)  # the highest note number with its start / end column there
         small = n * rh < 256
         # small notes: pixel by pixel
         i = np.nonzero(small)[0]
@@ -1700,13 +1752,22 @@ class RollDrawing:
             y = ry[p]
             outline = (solid[ri] | (y == y0[ri]) | (y == y1[ri]) | ((x == x0[ri]) & (cx0[ri] == x0[ri]))
                        | ((x == x1[ri]) & (cx1[ri] == x1[ri] + 1)))
-            np.maximum.at(top_px, (y - top) * iw + (x - kb), ri * 2 + outline)
+            at = (y - top) * iw + (x - kb)
+            np.maximum.at(top_px, at, ri * 2 + outline)
+            if shade:
+                col = (((x == x0[ri]) & (cx0[ri] == x0[ri])) | ((x == x1[ri]) & (cx1[ri] == x1[ri] + 1)
+                                                                & real_end[ri]))
+                np.maximum.at(ends, at[col], ri[col])
         # big ones: as blocks (fill first, the outline over it: the same note, so the outline wins)
-        grid = top_px.reshape(ih, iw)
+        grid, egrid = top_px.reshape(ih, iw), ends.reshape(ih, iw)
         big = np.nonzero(~small)[0]
-        for k, a, b, c, d, ya, yb, xa, xb, full in zip(big.tolist(), *(v[big].tolist() for v in (
-                cy0 - top, cy1 - top, cx0 - kb, cx1 - kb, y0 - top, y1 - top, x0 - kb, x1 - kb, solid))):
+        for k, a, b, c, d, ya, yb, xa, xb, full, real in zip(big.tolist(), *(v[big].tolist() for v in (
+                cy0 - top, cy1 - top, cx0 - kb, cx1 - kb, y0 - top, y1 - top, x0 - kb, x1 - kb, solid, real_end))):
             np.maximum(grid[a:b, c:d], k * 2 + full, out=grid[a:b, c:d])
+            if shade and c == xa:
+                np.maximum(egrid[a:b, c], k, out=egrid[a:b, c])
+            if shade and d == xb + 1 and real:
+                np.maximum(egrid[a:b, d - 1], k, out=egrid[a:b, d - 1])
             if not full:
                 edge = k * 2 + 1
                 for yy in (ya, yb):
@@ -1716,7 +1777,9 @@ class RollDrawing:
                     np.maximum(grid[a:b, c], edge, out=grid[a:b, c])
                 if d == xb + 1:
                     np.maximum(grid[a:b, d - 1], edge, out=grid[a:b, d - 1])
-        return top_px, idx
+        # (a fill pixel with a start / end column there: a note under it has it, the top one's would be its outline)
+        half = ((top_px >= 0) & ((top_px & 1) == 0) & (ends >= 0)).astype(np.uint8)
+        return (top_px, half), idx
 
     def keep_lines(self, old, key, arrays, draw):
         """The lines draw(tags) makes, kept on the canvas from the last redraw (old: {key: (arrays, tag, filled)})

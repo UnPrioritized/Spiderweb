@@ -1635,6 +1635,8 @@
  "settings.stack_loud": "Louder note on top",
  "settings.stack_shape": "Later shape on top",
  "settings.stack_tip": "Which note shows where notes lie on top of each other on one key.\nLater track on top: the note of the track lower in the track list, like many MIDI programs.\nLouder note on top: the loudest one (equally loud: the later track's). Handy in dense MIDIs, where quiet notes covering the keys hide the music.\nLater shape on top: the note of the shape made later (a loaded MIDI's notes: the later track's).\nSelected shapes always show on top. A loaded MIDI's note is a little darker where a hidden note under it starts or ends.",
+ "settings.hidden_shade": "Show hidden note starts / ends",
+ "settings.hidden_shade_hint": "Your own notes get a little darker where a note hidden under them starts or ends, so you can see notes that are covered.\nA loaded MIDI's notes always show this.",
  "language.only_english_short": "Only English so far.",
  "settings.keep_colours": "Overlapping shapes keep their colours",
  "settings.keep_colours_hint": "Multi channel: a shape (plain notes too) that overlaps an earlier one moves whole to the next row of channels (15 further, 16 with channel 10 used), so its colours stay the same. Off: it takes the next free channels (other colours).\nMany shapes on top of each other make many tracks: untick Keep empty tracks under Multi channel to write only the tracks with notes.",

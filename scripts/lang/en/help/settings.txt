@@ -1,14 +1,10 @@
-Help → Settings… (the menu bar at the top) opens Settings: how Spiderweb itself looks and sounds. These settings are kept for every project (in settings.ini in the user folder), not saved with a project, and Ctrl+Z doesn't take them back.
+Help → Settings… (the menu bar at the top) opens Settings: how Spiderweb itself looks and sounds. These settings are kept for every project (in settings.ini in the user folder), not saved with a project, and Ctrl+Z doesn't take them back. Pick a page in the list on the left; every change is kept at once, Close just closes the window. Rest the mouse on a setting to see what it does.
 
-General tab: how often to look for a new version (and Check now), tips on or off, Show all tips again, and Open .spwb files with Spiderweb (double-clicking a project opens it; press it again if you move the Spiderweb folder). Overlapping shapes keep their colours (Multi channel: a shape that overlaps an earlier one moves whole to the next row of channels, so its colours stay the same). Plain notes made with Turn into plain notes or Turn into plain shapes follow it too: with it off, one that overlaps another takes the next free channels instead. (Experimental) Domino 256 keys: Copy, Paste and Export to Domino keep notes above key 127; only the 256 keys mod of Domino can open them.
+General: how often to look for a new version (and Check now), tips on or off, Show all tips again, and Open .spwb files with Spiderweb (double-clicking a project opens it; press it again if you move the Spiderweb folder).
 
-Look tab:
+Look:
 
 • Look: Light, Dark, or Follow Windows. Restart Spiderweb to see the new look.
-
-• Note colours: the colours of the notes on the piano roll, one per MIDI channel (the numbers under them; channel 10's colour is used only when a project ticks Use channel 10). Default is built in and never changes; New… makes your own palette from the one in use, and Rename… / Delete work on yours. Switching palettes shows at once.
-
-• Click a colour to change it (changing Default makes a copy first). Random picks soft colours, Gradient… blends from a first to a last colour.
 
 • Size, Font and Text size: how big everything is, the font, and the text a little smaller or larger. The Preview beside them shows a pick at once; the rest of Spiderweb changes after a restart.
 
@@ -16,6 +12,22 @@ Look tab:
 
 • Shape lines: how thick shapes' lines are on the piano roll. This one shows at once.
 
-Sound tab: the MIDI out used for playback, and with Built-in BASSMIDI its soundfonts (several can be stacked, each overriding the ones above it: see Playback), voice limit, lowering it by itself when it can't keep up, slowing down to keep up, and Use OmniMIDI Limiter. With Kestrel (GPU, Experimental) picked: the same soundfonts list, Max voices, Lower it by itself, Slow down to keep up, Block size, Limiter, DC blocker, Graphics card, Interpolation and Velocity threshold (see Kestrel (GPU) playback).
+Note colours:
 
-Language tab: the language of every text, shown after a restart. Start a translation saves a copy of the English texts to fill in.
+• Palette: the colours of the notes on the piano roll, one per MIDI channel (the numbers under them; channel 10's colour is used only when a project ticks Use channel 10). Default is built in and never changes; New… makes your own palette from the one in use, and Rename… / Delete work on yours. Switching palettes shows at once.
+
+• Click a colour to change it (changing Default makes a copy first). Random picks soft colours, Gradient… blends from a first to a last colour.
+
+• Stacked notes → On top: where notes lie on top of each other on one key, which one shows. Later track on top (the track lower in the track list, like many MIDI programs), Louder note on top (handy in dense MIDIs, where quiet notes covering the keys hide the music), or Later shape on top. It works for every note in the piano roll, drawn, pasted or loaded. Selected shapes always show on top, and a highlighted track shows over the faint ones.
+
+• Show hidden note starts / ends (off at first): your own notes get a little darker where a note hidden under them starts or ends. A loaded MIDI's notes always show this.
+
+• Overlapping shapes keep their colours (Multi channel): a shape that overlaps an earlier one moves whole to the next row of channels, so its colours stay the same. Plain notes made with Turn into plain notes or Turn into plain shapes follow it too: with it off, one that overlaps another takes the next free channels instead.
+
+Sound: the MIDI out used for playback, and with Built-in BASSMIDI its soundfonts (several can be stacked, each overriding the ones above it: see Playback), voice limit, lowering it by itself when it can't keep up, slowing down to keep up, and Use OmniMIDI Limiter. With Kestrel (GPU, Experimental) picked: the same soundfonts list, Max voices, Lower it by itself, Slow down to keep up, Block size, Limiter, DC blocker, Graphics card, Interpolation and Velocity threshold (see Kestrel (GPU) playback).
+
+Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (a copy for Domino, Spiderweb Notes), and Domino's 256 keys (Experimental): Copy, Paste and Export to Domino keep notes above key 127; only the 256 keys mod of Domino can open them.
+
+Loaded MIDI: the saved indexes Load MIDI keeps so a big MIDI opens faster the next time, each with its size and a Delete button.
+
+Language: the language of every text, shown after a restart. Start a translation saves a copy of the English texts to fill in.
