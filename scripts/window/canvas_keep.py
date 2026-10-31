@@ -3,6 +3,7 @@ as last time stay on the canvas. Only the others are deleted / made, in their pl
 paints again only where something changed (a full wipe made it paint the whole board on every click)."""
 import bisect
 import collections
+import tkinter as tk
 
 
 def in_order(places):
@@ -36,6 +37,102 @@ def _plain(v):
         return v
     except TypeError:
         return str(v)
+
+
+CHANGES = ("itemconfigure", "itemconfig", "coords", "move", "moveto", "dchars", "insert", "addtag",
+           "dtag", "tag_raise", "tag_lower", "lift", "lower")
+
+
+class KeepsItems:
+    """For a Canvas subclass whose redraw wiped it (delete("all")) and made everything again (redraw hunt
+    2026-10-31: the Conductor / velocity panes, ~280 items on every piano roll scroll / hover / selection):
+        self.keep_begin(); ...the same create_* calls as before...; self.keep_finish()
+    Each create_* made the same way as an item of the last redraw gets that item back (its id returned at once, so
+    a redraw can still change it), others are made in their place in the stacking order; at keep_finish everything
+    else on the canvas goes, as the wipe did. An item changed or restacked any other way (by a redraw itself or
+    between redraws: a hover colour) is never handed back: made again next time."""
+    _kept = ()  # [(how it was made, id)] of the last redraw, bottom to top
+    _keeping = None  # while a redraw runs: {"old", "i", "pool", "new", "there"}
+    _changed = None  # ids changed since they were made (see CHANGES)
+
+    def keep_begin(self):
+        there = set(self.find_all())
+        old = [it for it in self._kept if it[1] in there and it[1] not in (self._changed or ())]
+        pool = collections.defaultdict(collections.deque)
+        for k, (how, _) in enumerate(old):
+            pool[how].append(k)
+        self._keeping = {"old": old, "i": 0, "pool": pool, "new": [], "dead": set()}
+        self._changed = set()
+
+    def keep_finish(self):
+        k = self._keeping
+        if k is None:
+            return
+        self._keeping = None
+        mine = {iid for _, iid in k["new"]}
+        gone = [i for i in self.find_all() if i not in mine]
+        if gone:
+            tk.Canvas.delete(self, *gone)
+        self._kept = k["new"]
+
+    def _keep(self, kind, args, kw):
+        k = self._keeping
+        coords = args[0] if len(args) == 1 and isinstance(args[0], (list, tuple)) else args
+        how = (kind, tuple(coords), tuple(sorted((n, _plain(v)) for n, v in kw.items())))
+        q, old = k["pool"].get(how), k["old"]
+        while q and (q[0] < k["i"] or old[q[0]][1] in k["dead"]):  # (already passed: those go; or deleted)
+            q.popleft()
+        if q:
+            j = q.popleft()
+            k["i"] = j + 1
+            iid = old[j][1]
+        else:
+            iid = getattr(tk.Canvas, "create_" + kind)(self, *args, **kw)
+            if k["i"] < len(old):  # (under the next old item still to come: its place in the order)
+                tk.Canvas.tag_lower(self, iid, old[k["i"]][1])
+        k["new"].append((how, iid))
+        return iid
+
+    def _mark(self, what):
+        if self._changed is None:
+            self._changed = set()
+        if isinstance(what, int) or (isinstance(what, str) and what.isdigit()):
+            self._changed.add(int(what))
+        elif what is not None:
+            self._changed.update(tk.Canvas.find_withtag(self, what))
+
+    def delete(self, *args):
+        k = self._keeping
+        if k is not None:  # (deleted during the redraw, e.g. the play line made again: never handed back)
+            for a in args:
+                k["dead"].update(tk.Canvas.find_withtag(self, a))
+        return tk.Canvas.delete(self, *args)
+
+
+def _keeps(kind):
+    def create(self, *args, **kw):
+        if self._keeping is None:
+            return getattr(tk.Canvas, "create_" + kind)(self, *args, **kw)
+        return self._keep(kind, args, kw)
+    create.__name__ = "create_" + kind
+    return create
+
+
+def _marks(name):
+    def change(self, *args, **kw):
+        if name == "addtag":  # (addtag(new tag, "withtag" / "above" / "all"...): which items is Tk's search;
+            self._mark("all")  # rare, so every item counts as changed)
+        elif args:
+            self._mark(args[0])
+        return getattr(tk.Canvas, name)(self, *args, **kw)
+    change.__name__ = name
+    return change
+
+
+for _kind in ("line", "rectangle", "oval", "polygon", "image", "text", "arc", "window", "bitmap"):
+    setattr(KeepsItems, "create_" + _kind, _keeps(_kind))
+for _name in CHANGES:
+    setattr(KeepsItems, _name, _marks(_name))
 
 
 class KeptItems:

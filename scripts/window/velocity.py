@@ -19,6 +19,7 @@ from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURS
                               box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
                               set_cursor, slot_colours)
 from window import look
+from window.canvas_keep import KeepsItems
 
 LEVELS = (127, 96, 64, 32, 0)
 CURVE_STEPS = 48
@@ -115,7 +116,7 @@ def curve_mid(a, b, c):
     return [(a[0] + 2 * c[0] + b[0]) / 4, (a[1] + 2 * c[1] + b[1]) / 4]
 
 
-class VelocityPane(tk.Canvas):
+class VelocityPane(KeepsItems, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0)
         set_cursor(self, PENCIL_CURSOR)
@@ -502,7 +503,13 @@ class VelocityPane(tk.Canvas):
         self._redraw_pending = False
         if not self.winfo_ismapped():
             return
-        self.delete("all")
+        self.keep_begin()  # (items made the same way as last time stay: canvas_keep.KeepsItems; was a wipe)
+        try:
+            self._redraw()
+        finally:
+            self.keep_finish()
+
+    def _redraw(self):
         roll = self.app.roll
         w, h = self.winfo_width(), self.winfo_height()
         kb = int(roll.kb_w)

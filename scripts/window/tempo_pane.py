@@ -43,6 +43,7 @@ from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR
                               grab_while_panning,
                               set_cursor)
 from window import look
+from window.canvas_keep import KeepsItems
 from window.conductor_marks import ROW, ConductorMarks
 from window.melody_window import open_melody
 from window.widgets import Scrub, ShortLabel, Tooltip, unit_word
@@ -707,7 +708,7 @@ class TempoBox(ttk.Frame):
         self.app.tempo_changed()
 
 
-class TempoPane(ConductorMarks, tk.Canvas):
+class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
     def __init__(self, parent, box, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0)
         self.box, self.app, self.scale = box, app, scale
@@ -3065,22 +3066,29 @@ class TempoPane(ConductorMarks, tk.Canvas):
         def a(v):
             return float(self.ax(v))
 
+        spots = []  # (each placed number's place on the scale, worked out once: room() asked it for every one)
+
         def room(v):
-            return all(abs(a(v) - a(p)) * per >= gap for p, _ in placed)
+            av = a(v)
+            return all(abs(av - q) * per >= gap for q in spots)
+
+        def put(v, strong=False):
+            placed.append((v, strong))
+            spots.append(a(v))
 
         base = self._view_bpm if getattr(self, "_view_bpm", None) is not None else self.view_bpm()
         if lo <= a(base) <= hi:
-            placed.append((base, True))
+            put(base, True)
         if not self.log and lo <= 0 and room(0):  # (linear: 0 BPM at the bottom, like the velocity pane)
-            placed.append((0, False))
+            put(0)
         for v in (MIN_BPM, MAX_BPM):  # (where the faint red lines are)
             if lo - 1e-9 <= a(v) <= hi + 1e-9 and room(v):
-                placed.append((v, False))
+                put(v)
         if self.log:
             for n in range(math.floor(lo - math.log2(15)), math.ceil(hi - math.log2(15)) + 1):
                 v = 15 * 2.0 ** n
                 if lo <= a(v) <= hi and MIN_BPM <= v <= MAX_BPM and room(v):
-                    placed.append((v, False))
+                    put(v)
         lo_v, hi_v = self.unax(lo), self.unax(hi)
         for step in reversed(NICE):
             if step > hi_v:
@@ -3091,7 +3099,7 @@ class TempoPane(ConductorMarks, tk.Canvas):
             for k in range(max(1 if self.log else 0, k0), k1 + 1):
                 v = k * step
                 if room(v):
-                    placed.append((v, False))
+                    put(v)
         return placed
 
     def heard_xy(self, heard, x0, x1):
@@ -3129,19 +3137,18 @@ class TempoPane(ConductorMarks, tk.Canvas):
         s, ppq = self.scale, self.app.ppq
         marks = []
         for up in (True, False):
-            spots = []  # (x, beat, line number)
-            for n, (xs, beats, ys, *_) in enumerate(lines):
+            spots = []  # (x, how far out it goes: the BPM itself on the pane's scale (ys stop at the edge), line)
+            for n, (xs, beats, ys, tempo, worked, _) in enumerate(lines):
                 off = np.flatnonzero(ys < 0 if up else ys > h)
-                spots += [(float(xs[k]), float(beats[k]), n) for k in off.tolist()]
+                if not len(off):
+                    continue
+                us = self.ax(shown_bpm(tempo, base, beats[off], worked, ppq)).tolist()  # (ONE go per line: per
+                spots += [(float(xs[k]), u, n) for k, u in zip(off.tolist(), us)]  # group it was half the redraw)
             spots.sort()
             group = []
             for spot in spots + [None]:
                 if group and (spot is None or spot[0] - group[-1][0] > 30 * s):
-                    us = []
-                    for n in {g[2] for g in group}:  # (how far out it goes: the BPMs themselves, ys stop at the edge)
-                        _, _, _, tempo, worked, _ = lines[n]
-                        bs = [g[1] for g in group if g[2] == n]
-                        us += self.ax(shown_bpm(tempo, base, bs, worked, ppq)).tolist()
+                    us = [g[1] for g in group]
                     x = min(max((group[0][0] + group[-1][0]) / 2, kb + 8 * s), w - 8 * s)
                     marks.append((x, up, max(us) if up else min(us), all(g[2] and lines[g[2]][5] for g in group)))
                     group = []
@@ -3337,7 +3344,13 @@ class TempoPane(ConductorMarks, tk.Canvas):
         self._redraw_pending = False
         if not self.winfo_ismapped():
             return
-        self.delete("all")
+        self.keep_begin()  # (items made the same way as last time stay: canvas_keep.KeepsItems; was a wipe)
+        try:
+            self._draw_all()
+        finally:
+            self.keep_finish()
+
+    def _draw_all(self):
         self._off_marks = []  # (draw_off_marks: none until drawn)
         self._limit_arrows = []  # (draw_limit_arrows: the same)
         roll, app = self.app.roll, self.app
