@@ -3383,6 +3383,7 @@ class TrackList(tk.Canvas):
                 js |= set(range(line * self.row_h // SQUARE, ((line + 1) * self.row_h - 1) // SQUARE + 1))
         for p in [p for p in st["tiles"] if p[1] in js]:
             del st["tiles"][p]
+            st.get("pix", {}).pop(p, None)  # (its kept pixels too, hunt 2026-10-31)
 
     def _poll_rows(self):
         job = self._row_job
