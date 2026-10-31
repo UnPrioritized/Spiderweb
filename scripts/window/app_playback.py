@@ -30,6 +30,9 @@ STUCK_PLAY_S = 5.0  # Kestrel made no new sound this long while playing: stopped
 QUIET_S = 3.0  # (a question nobody asked for waits this long after the last key / click: quiet_now)
 # the red "Overloaded" text kept steady (user 2026-10-29: it flashed): on this long after the last overload, its
 # number changing at most this often, a loaded MIDI's notes left out averaged over this long
+MAESTRO_LATE = 100.0  # (Maestro's render load: above = its sound falls behind)
+MAESTRO_EVERY_S = 0.25  # (note-ons a second sent to Maestro: counted over this; more than its lowered limit =
+# it's leaving notes out)
 OVER_HOLD_S, OVER_EVERY_S, OVER_AVG_S = 4.0, 1.0, 4.0  # (tries faster leave a few notes out every 2-3 s)
 EASY_S = 1.5  # Slow down: a loaded MIDI asking for almost no notes this long = its busy part is over, straight to 1x
 GROUP_MOST = 16  # synths side by side playing a loaded MIDI at most (Settings → Sound)
@@ -123,6 +126,8 @@ class Playback:
                     or not self.pick_soundfont(self.font_failed):
                 return
             err = self.out.open(dev)
+        if err is None and self.out.name == MAESTRO:  # (its delay read again; turned off / stopped = said)
+            err = self.maestro_problem(self.out.handle.refresh())
         if err:
             messagebox.showerror(tr("app.spiderweb_2"), err)
             return
@@ -177,15 +182,27 @@ class Playback:
             return False
         return now - seen[3] > STUCK_PLAY_S
 
+    def maestro_problem(self, why):
+        """Maestro's problem() as the message shown, or None. A Play refused closes it (opened again next time)."""
+        if why is None:
+            return None
+        if self.player.thread is None:
+            self.out.close()
+        return tr("playback.maestro_disabled" if why == "disabled" else "playback.maestro_stopped")
+
     def kestrel_parts(self):
         """Kestrel: channel 10 a normal instrument on every port, as Built-in BASSMIDI plays Spiderweb's own shapes
         (it made them drums: a GM soundfont's snare, hunt 2026-10-28), except the ports a loaded MIDI uses: its
-        channel 10 stays drums there. Each Play: the last play's choice never carries over."""
-        if self.out.name != KESTREL or not self.out.handle:
+        channel 10 stays drums there. Each Play: the last play's choice never carries over. Maestro the same (hunt
+        2026-11-01, user picked)."""
+        if self.out.name not in (KESTREL, MAESTRO) or not self.out.handle:
             return
-        from files.kestrel import PART_TYPE
         lp = self.loaded_play
         files_ports = set((lp.tport % 16).tolist()) if lp is not None and lp.tport is not None else set()
+        if self.out.name == MAESTRO:
+            self.out.handle.drum_parts(files_ports)
+            return
+        from files.kestrel import PART_TYPE
         for port in range(16):
             self.out.handle.send(PART_TYPE | 9 << 8 | (1 if port in files_ports else 0) << 16 | port << 24)
         # 31-EDO (13g): its channels bent for this play on the highest two ports the loaded MIDI leaves free (hunt
@@ -369,6 +386,14 @@ class Playback:
                 self.out.close()
                 self.kestrel_failed(SynthError("playback.kestrel_failed", err=why), during=True)
                 return
+        if self.out.name == MAESTRO and self.out.handle is not None:  # (turned off / its engine stopped meanwhile:
+            # stopped and said, never playing on silent)
+            err = self.maestro_problem(self.out.handle.problem())
+            if err:
+                self.stop_play()
+                self.out.close()  # (the next Play opens it again: works again once it's back)
+                messagebox.showerror(tr("app.spiderweb_2"), err, parent=self)
+                return
         self.pace_play(now)
         self.roll.show_playhead()
         self.show_overload()
@@ -551,6 +576,18 @@ class Playback:
                 m = f"{top:,}"  # (of your Max voices, user 2026-10-29)
                 text = (tr("app.overloaded_1", m=m) if cap == 1 else
                         tr("app.overloaded_n", n=f"{readable(cap):,}", m=m)) if 0 < cap < top else tr("app.overloaded")
+        elif self.out.name == MAESTRO and self.out.handle and self.player.running and not text:
+            # (its own load limiter lowered and notes at it, or its sound falling behind: notes left out, hunt
+            # 2026-11-01; Spiderweb's own sending follows its limit, play_loaded)
+            h, now = self.out.handle, time.perf_counter()
+            seen = getattr(self, "_m_ons", None)
+            if seen is None or seen[0] is not h or h.ons < seen[1]:
+                seen = self._m_ons = (h, h.ons, now, 0.0)
+            elif now - seen[2] >= MAESTRO_EVERY_S:  # (note-ons a second it was asked for, lately)
+                seen = self._m_ons = (h, h.ons, now, (h.ons - seen[1]) / (now - seen[2]))
+            st = h.stats()
+            if st and (st["load"] > MAESTRO_LATE or st["nps_limit"] and seen[3] > st["nps_limit"]):
+                text = tr("app.overloaded")
         elif not self.player.running:
             self._k_seen = (None, 0.0)
         # (steady, user 2026-10-29: it flashed in and out): shown on for OVER_HOLD_S after the last overload, its

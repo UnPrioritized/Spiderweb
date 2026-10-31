@@ -48,6 +48,7 @@ BUDGET_SYNTH = 200_000  # note-ons a second to start from on each of Built-in BA
 BUDGET_KDMAPI = 200_000  # ... OmniMIDI (KDMAPI): one message per call from Python
 BUDGET_DEVICE = 30_000  # ... a Windows MIDI device
 BUDGET_MAESTRO = 400_000  # ... each of Maestro's ports (bytes in one call a port; its own limiter does the rest)
+MAESTRO_ROOM = 1.1  # (its limit lowered: a little more than it lets through, so it can climb back)
 SLICE_S = 0.001  # (Maestro: messages stamped together at most this far apart in the song)
 BUDGET_LEAST, BUDGET_MOST = 20_000, 1_500_000  # (a synth: one makes ~1 M notes a second at 1,000 voices, measured)
 # A synth's load reading LAGS (measured 2026-10-24, Shinki beats 1100-1125, 8 synths x 500 voices: budgets grew to 1.5 M
@@ -963,6 +964,7 @@ class LoadedPlayer:
             h = self.out.handle
             if h is None:
                 return
+            h.drain()  # (its "all notes off" plays at once: after what was sent ahead, never before it)
             raw = bytes(b for ch in range(16) for m in msgs for b in (m[0] | ch,) + m[1:])
             buf = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
             for port in range(self.synths):
@@ -1023,6 +1025,17 @@ class LoadedPlayer:
                 if self.sinks and checked:  # (13f: note-ons asked for a second / the budget, the busiest synth: how
                     # much faster the song fits, as the speed scales the note-ons exactly)
                     self.asked = float(np.max(asked / (now - checked) / np.maximum(self.budgets, 1)))
+                if maestro and checked:  # (its load limiter lowered: no more than it lets play, shared by what each
+                    # port asked for; the loudest kept, left out counted = "Overloaded")
+                    st = self.out.handle.stats() if self.out.handle else None
+                    lim = st["nps_limit"] if st else 0
+                    if lim:
+                        tot = float(asked.sum())
+                        share = asked / tot if tot else np.full(K, 1.0 / K)
+                        self.budgets = np.clip((lim * MAESTRO_ROOM * share).astype(np.int64), BUDGET_LEAST,
+                                               BUDGET_MAESTRO)
+                    else:
+                        self.budgets[:] = BUDGET_MAESTRO
                 asked[:] = 0
                 checked = now
                 try:
@@ -1121,6 +1134,8 @@ class LoadedPlayer:
                     kept = np.minimum(above[:, 1], step)
                     step -= kept  # (the next window's events in this step share what's left)
                     self.sent += int(kept.sum())
+                    if maestro and self.out.handle is not None:  # (what it was asked for: its limiter's Overloaded)
+                        self.out.handle.ons += int(kept.sum())
                     self.thinned += max(0, ons - int(kept.sum()))
                 if i >= len(ts):
                     with self._lock:

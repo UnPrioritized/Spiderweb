@@ -211,8 +211,8 @@ class MidiOut:
             self.handle.flush()
 
     def cancel(self):
-        """(lead > 0) what was sent ahead forgotten (its note-offs sound now)."""
-        if self.name == KESTREL and self.handle:
+        """(lead > 0) what was sent ahead forgotten (its note-offs sound now); Maestro: played first."""
+        if self.name in (KESTREL, MAESTRO) and self.handle:
             self.handle.cancel()
 
     def _open(self, name):
