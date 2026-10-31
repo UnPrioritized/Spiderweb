@@ -40,7 +40,7 @@ Ctrl+C copies the picked stretch, Ctrl+X cuts it, Ctrl+V pastes it at the play l
 
 Interval: curved parts change the tempo every this many ticks (24 like many MIDI programs; 1 = every tick). The pane draws the steps the file will have.
 
-Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with every step up, so huge spikes and very slow stops fit on one screen. Fit shows the whole line. The wheel over the numbers on the left zooms, Shift+wheel or a drag there scrolls. Where the tempo goes higher or lower than the pane shows, a small arrow at its top or bottom edge points to it: click the arrow to scroll there.
+Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with every step up, so huge spikes and very slow stops fit on one screen. Fit shows the whole line. The bold number on the left is the tempo at the piano roll's left edge. The wheel over the numbers on the left zooms, Shift+wheel or a drag there scrolls. Where the tempo goes higher or lower than the pane shows, a small arrow at its top or bottom edge points to it: click the arrow to scroll there.
 [clip:conductor-arrows]
 
 Above: the 600 BPM stop is above the view and the 40 BPM one below it.
@@ -71,7 +71,7 @@ Keep timing lets a part show one tempo while the notes sound at another. Pick a 
 
 • Keep the visual: the other way round. The tempo line stays what the file shows, and the purple line is the tempo the notes sound at.
 
-Either way the export moves the notes in ticks to make it exact. Switching between the two swaps the lines. The part after the last point can be picked too (to the song's end). Keep timing doesn't work inside a catch-up's yellow area.
+Either way the export moves the notes in ticks to make it exact. Switching between the two swaps the lines. Off turns Keep timing off for the picked part only: the parts next to it keep it. The part after the last point can be picked too (to the song's end). Keep timing doesn't work inside a catch-up's yellow area.
 [clip:conductor-keep]
 
 Above, Keep the audio: the file shows 60 BPM in the purple part, so the piano roll scrolls at half speed in other programs, but the notes still sound at 120, the dotted purple line.
@@ -89,7 +89,7 @@ Fit bar lines (top row, on at first): when Keep timing moves notes, the export a
 
 ## What Keep timing can't do
 
-A MIDI file only has whole ticks, so Keep timing has limits. The pane marks each spot in red or orange; rest the mouse on the text for more. A higher PPQ helps with all of them.
+A MIDI file only has whole ticks, so Keep timing has limits. The pane marks each spot in red or orange; rest the mouse on the text for more. When a spot is out of view, a small arrow at the part's edge points to it: click it to scroll there. A higher PPQ helps with all of them.
 
 • Notes under 1 tick apart (red): at the tempo you drew, two notes would land less than one tick apart. There the file keeps a faster tempo instead, so the sound stays right but other programs show a different tempo for that bit. An orange dashed line marks each spot.
 

@@ -16,6 +16,26 @@ What's new:
 
 • Glue happens where you used it, like the last thing you did: Chop, then Glue joins the chopped pieces back (before, the glue always came first, so it seemed to do nothing). Projects saved before keep their notes.
 
+• A shape's colours now fill down the tracks already in the list, and only past the last one are new tracks added, on channels no track uses yet (never on a hidden track's channel or one a loaded MIDI plays on). See Help → Track list.
+
+• Channel per strip warns you when the notes were on tracks of their own (for example from Split into pieces): turn Channel per strip on first, then split.
+
+• Conductor pane: the bold number on the left is now the tempo at the piano roll's left edge. Keep timing Off turns it off for the picked part only, not the whole run. When a Keep timing problem spot is out of view, a small arrow at the part's edge points to it: click it to scroll there.
+
+• Select shows the move pointer over shapes it can grab, and Slice with shape shows a hand over shapes it can cut with.
+
+• Faster: the piano roll with many shapes, the track list's clicks, drags and muting, the drawer with many strokes, the Hz bass window, the Velocity and Conductor panes, dragging shapes with many notes, and right-drag listening and scrolling over a loaded MIDI.
+
+• Fixed: Built-in BASSMIDI played a loaded MIDI too quiet, or let its synths clip together.
+
+• Fixed: muting a loaded MIDI's track while playing could leave its pedal, pitch bend, volume or instrument stuck, and muted tracks were still read while playing.
+
+• Fixed: right-drag listening was silent on a loaded MIDI with 31-EDO Audio on, and 31-EDO playback could freeze Built-in BASSMIDI on busy rows.
+
+• Fixed: the Chop window crashed when the picked shapes had different pages.
+
+• Fixed: undo / redo of a paste onto a track holding several channels, and stacked pasted tracks merging into one when made yours or split.
+
 • Fixed: notes pasted from Domino lost their overlaps on the same key in Multi channel, so Copy to Domino and pasting straight back didn't match. Now only Single channel removes them.
 
 • Fixed: Ctrl+A in Show multiple tracks highlighted every track but showed none of them until the next click.
