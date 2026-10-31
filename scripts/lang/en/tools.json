@@ -764,6 +764,7 @@
  "tool_window.flip_time": "flipped sideways",
  "tool_window.flip_keys": "flipped upside down",
  "tool_window.vel": "velocities drawn",
+ "tool_window.glue": "glued",
  "tool_window.turn_cw": "turned {deg}° right",
  "tool_window.turn_ccw": "turned {deg}° left",
  "between.title": "Add between",

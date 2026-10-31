@@ -1,5 +1,5 @@
 """A shape's note tool pages (user, 2026-10-06): sh["fx"] = the steps done to its notes after they're made (and
-after its glue), in the order they were added. The drawing stays editable: every step runs again on its new notes.
+after its glue, unless a glue step says where it goes), in the order they were added. The drawing stays editable: every step runs again on its new notes.
 
   {"tool": "chop" / "claw" / "strum" / "path" / "trim", "cfg": that tool's settings, "off": True (switched off; optional)}
       a page of the Chop / Claw machine / Strum / Copy along a path window (each window shows its own pages; the
@@ -15,6 +15,10 @@ after its glue), in the order they were added. The drawing stays editable: every
   {"tool": "vel", "pts": [[u, velocity], ...]}
       velocities drawn after the steps before it: they replace those steps' velocities (only between the first and
       last u: 0..1 across the shape's time, as its velocity line)
+  {"tool": "glue"}
+      where the shape's glue (sh["glue"]) was last used among its pages (user, 2026-10-31, as FL: the last thing done
+      is what happens; Chop then Glue joins the pieces back). None = before every page (old files, or glued before
+      any page); at most one; kept only after a page
 
 Old files kept one chop / claw / strum per shape: they load as the first pages, in the order they were applied."""
 
@@ -27,6 +31,7 @@ from notes.chop import clean_chop
 from notes.claw import clean_claw
 from notes.copypath import clean_path
 from notes.envelope import env_values
+from notes.glue import clean_glue
 from notes.strum import clean_strum
 from notes.trim import clean_trim
 
@@ -78,7 +83,73 @@ def clean_fx(sh, steps=False):
             pts = clean_pts(st.get("pts"))
             if pts:
                 out.append({"tool": "vel", "pts": pts})
+        elif tool == "glue" and pages(out):
+            out = without_glue(out) or []
+            out.append(dict(GLUE))
+    if not clean_glue(sh.get("glue")):  # (no glue: no place for it)
+        out = without_glue(out) or []
     return out or None
+
+
+GLUE = {"tool": "glue"}
+
+
+def glue_index(fx):
+    """Where the glue is done among the steps fx (its step's index), or None: before them all."""
+    for k, st in enumerate(fx or ()):
+        if st["tool"] == "glue":
+            return k
+    return None
+
+
+def without_glue(fx):
+    """The steps without the glue's place (None when none are left)."""
+    out = [st for st in fx or () if st["tool"] != "glue"]
+    return out or None
+
+
+def glue_last(fx):
+    """The steps after the shape is glued (again): the glue done last, after every page there is (none: before
+    them all, so no step)."""
+    fx = without_glue(fx) or []
+    return fx + [dict(GLUE)] if pages(fx) else (fx or None)
+
+
+def before_page(sh, k):
+    """sh as its step k gets the notes: only the steps before it, and its glue only when that comes before too."""
+    fx = sh.get("fx") or []
+    out = {key: v for key, v in sh.items() if key != "fx"}
+    if fx[:k]:
+        out["fx"] = fx[:k]
+    g = glue_index(fx)
+    if g is not None and g >= k:
+        out.pop("glue", None)
+    return out
+
+
+def tidy_glue(sh):
+    """sh without a glue place when it has no glue any more. Changes sh."""
+    if not sh.get("glue") and glue_index(sh.get("fx")) is not None:
+        fx = without_glue(sh["fx"])
+        if fx:
+            sh["fx"] = fx
+        else:
+            sh.pop("fx", None)
+    return sh
+
+
+def chained(first, then, own_glue):
+    """Steps first, then steps then (a sliced piece's whole's, then the piece's own), with one glue place: then's
+    when its shape has glue of its own (none stored: it came right after first's steps), else first's."""
+    first, then = list(first or []), list(then or [])
+    if own_glue:
+        k = glue_index(then)
+        first = without_glue(first) or []
+        if k is None and pages(first):
+            then = [dict(GLUE)] + then
+    else:
+        then = without_glue(then) or []
+    return (first + then) or None
 
 
 def clean_pts(pts):

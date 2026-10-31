@@ -10,6 +10,8 @@ What's new:
 
 • Ports: Track Properties and Add Tracks… set a track's port (A to P). Export MIDI, Export to Domino and Copy to Domino write it, and the track list shows "B 3" for port B, channel 3.
 
+• Glue happens where you used it, like the last thing you did: Chop, then Glue joins the chopped pieces back (before, the glue always came first, so it seemed to do nothing). Projects saved before keep their notes.
+
 • Fixed: notes pasted from Domino lost their overlaps on the same key in Multi channel, so Copy to Domino and pasting straight back didn't match. Now only Single channel removes them.
 
 ## Version 1.7.0

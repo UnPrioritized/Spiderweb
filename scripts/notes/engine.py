@@ -36,7 +36,7 @@ from notes.ripples import clean_ripples, free_span, grows_free
 from notes.chop import apply_chop
 from notes.claw import apply_claw
 from notes.copypath import apply_path
-from notes.fx import (clean_fx, flip_shape, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
+from notes.fx import (clean_fx, flip_shape, glue_index, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.gateflip import is_flipped as is_gate_flipped, is_pasted_flipped, mirrored_runs, unflipped_starts
@@ -858,6 +858,8 @@ def fx_notes(sh, ppq, keys, get):
             same = groups(np.column_stack([notes[:, 3:], tracks if tracks is not None else np.zeros(len(notes))]))
             notes, idx = turn_notes(notes, last["deg"], last["r"] * ppq, keys, same)
             return notes, None if tracks is None else np.asarray(tracks)[idx]
+        if last["tool"] == "glue":
+            return with_glue(notes, tracks, glue_level(sh), ppq)
         return fx_step(notes, tracks, last, sh, ppq, keys)
     if sh.get("_m"):
         if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)
@@ -918,7 +920,9 @@ def before_step(sh):
     rest = dict(sh, fx=fx[:-1]) if len(fx) > 1 else {k: v for k, v in sh.items() if k != "fx"}
     if last["tool"] in ("flip", "turn") and idle(fx[:-1]) and not steps_kept(sh):
         return rest, None
-    if last["tool"] == "flip":
+    if last["tool"] == "glue":  # (the glue is done here, not before the pages: glue_level)
+        rest.pop("glue", None)
+    elif last["tool"] == "flip":
         rest["_m"] = toggled(sh.get("_m"), last["axis"])
         if not rest["_m"]:
             del rest["_m"]
@@ -997,8 +1001,17 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
     return notes, tracks
 
 
+def glue_level(sh):
+    """sh as its glue step sees it (fx.GLUE): its drawing and glue boxes as they were before the flips / turns after
+    that step (its boxes are shares of the drawing's box, flipped / turned with it)."""
+    while sh.get("fx") and sh["fx"][-1]["tool"] != "glue":
+        sh = before_step(sh)[0]
+    return unflipped(sh) if sh.get("_m") else sh
+
+
 def with_glue(notes, tracks, sh, ppq):
-    """shape_notes_tracks' notes and tracks after the shape's glue (glue.py; it comes first, before any page)."""
+    """shape_notes_tracks' notes and tracks after the shape's glue (glue.py; before any page, unless it has a place
+    among them: glue_level)."""
     glue = sh.get("glue")
     if not glue or not len(notes):
         return notes, tracks
@@ -1054,7 +1067,7 @@ def whole_tools(whole, raw, spots, tracks, ppq):
     vel = env_velocities(velocity_env(whole), raw[:, 0], float(t.min()), float(t.max()))
     who = tracks if tracks is not None else np.zeros(len(raw), np.int64)
     a = np.column_stack([raw, vel, np.arange(len(raw)), who]).astype(np.int64)  # (spots ride along as row numbers)
-    if whole.get("glue") and len(a):
+    if whole.get("glue") and len(a) and glue_index(whole.get("fx")) is None:  # (else at its place: run_steps)
         a = apply_glue(a, whole["glue"], glue_box(np.concatenate(cached_arrays(whole))), ppq, True)
     a = run_steps(a, whole.get("fx") or [], whole, ppq)
     return a[:, :4], spots[a[:, 4]], a[:, 5] if tracks is not None or path_colours(whole) else None
@@ -1085,6 +1098,10 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
             a = mirrored(a, [last["axis"]], notes_box(a))
         elif last["tool"] == "turn":  # (velocity, track: not spot)
             a = turn_notes(a, last["deg"], last["r"] * ppq, 256, groups(a[:, 3::2]))[0]
+        elif last["tool"] == "glue":  # (the last column = the tracks: never glued together)
+            g = glue_level(sh)
+            if g.get("glue") and len(a):
+                a = apply_glue(a, g["glue"], glue_box(np.concatenate(cached_arrays(g))), ppq, True)
         elif last["tool"] == "path":  # (the last column = the tracks: the copies' colours go on them, hunt)
             notes, tr = fx_step(a[:, :-1], a[:, -1], last, sh, ppq)
             a = np.column_stack([notes, tr])

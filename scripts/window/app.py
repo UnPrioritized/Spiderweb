@@ -32,7 +32,8 @@ from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
-from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
+from notes.fx import (flip_shape, flipped as fx_flipped, glue_last, tidy_glue, turn_shape, with_turn as fx_turned,
+                      with_velocity)
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, unflipped_starts, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
@@ -2920,12 +2921,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for sh in shapes:
             if not areas:
                 sh["glue"] = True
-                continue
-            box = glue_box(np.concatenate(cached_arrays(sh)))
-            for area in areas:
-                shares = glue_shares(area, box)
-                if shares:
-                    sh["glue"] = glue_added(sh.get("glue"), shares)
+            else:
+                box = glue_box(np.concatenate(cached_arrays(sh)))
+                for area in areas:
+                    shares = glue_shares(area, box)
+                    if shares:
+                        sh["glue"] = glue_added(sh.get("glue"), shares)
+            if sh.get("glue"):  # (done after the pages there are now, like the last thing done: fx.GLUE)
+                fx = glue_last(sh.get("fx"))
+                if fx:
+                    sh["fx"] = fx
         after = sum(len(self.notes_of(sh)) for sh in shapes)
         self.shapes_changed()
         self.status.config(text=tr("app.glued", notes=trn("n.notes", before, n=before), after=after))
@@ -2938,6 +2943,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.push_undo(name=tr("app.remove_glue"))
         for sh in shapes:
             del sh["glue"]
+            tidy_glue(sh)
         self.shapes_changed()
 
     def picked(self):

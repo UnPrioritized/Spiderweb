@@ -204,8 +204,11 @@ def completed(sh):
     if whole.get("cut"):  # (cut from a piece: its own whole's pages / glue first, then its own)
         whole = json.loads(json.dumps(whole))
         completed(whole)
-    if whole.get("fx"):
-        sh["fx"] = json.loads(json.dumps(whole["fx"])) + (sh.get("fx") or [])
+    if whole.get("fx"):  # (one glue place: the piece's own glue's, else the whole's, fx.chained)
+        from notes.fx import chained
+        fx = chained(json.loads(json.dumps(whole["fx"])), sh.get("fx"), bool(sh.get("glue")))
+        if fx:
+            sh["fx"] = fx
     gl = whole.get("glue")
     if gl and sh.get("glue") is not True:  # (the boxes inside it as it was when cut, as shares of its own box)
         from notes.engine import cached_arrays
@@ -786,8 +789,9 @@ def rejoined(olds, new, join=None):
         out.update(outline(src))
         if same_vel:
             out.update(velocity(src))
-        if src.get("fx"):  # (its pages first, then the ones the pieces had alike)
-            out["fx"] = json.loads(json.dumps(src["fx"])) + (out.get("fx") or [])
+        if src.get("fx"):  # (its pages first, then the ones the pieces had alike; its glue's place)
+            from notes.fx import chained
+            out["fx"] = chained(json.loads(json.dumps(src["fx"])), out.get("fx"), False) or []
         if src.get("glue"):
             out["glue"] = json.loads(json.dumps(src["glue"]))
         if src.get("cut"):  # (a piece itself: the one these were cut from)

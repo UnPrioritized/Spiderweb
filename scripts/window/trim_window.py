@@ -8,6 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
+from notes.fx import before_page
 from notes.trim import BY, MAX_LENGTH, TRIM_DEFAULTS, clean_trim, length_ticks, longest_run
 from window import look
 from window.tool_window import ToolWindow
@@ -169,10 +170,7 @@ class TrimWindow(ToolWindow):
             sh = self.app.shapes[i]
             fx = sh.get("fx") or []
             k = len(fx) if self.at is None else self.at[i]
-            before = {key: v for key, v in sh.items() if key != "fx"}
-            if fx[:k]:
-                before["fx"] = fx[:k]
-            most = max(most, longest_run(self.app.notes_of(before)))
+            most = max(most, longest_run(self.app.notes_of(before_page(sh, k))))
         return most
 
     # ---- the slider (whole percents; greyed while counting ticks)

@@ -21,6 +21,7 @@ from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
                             peak, shifts, speed_of, track)
 from notes.engine import tagged_notes
+from notes.fx import before_page
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
 from roll.roll_shared import note_name
@@ -208,8 +209,7 @@ class PathWindow(ToolWindow):
         sh = self.app.shapes[i]
         fx = sh.get("fx") or []
         k = self.at.get(i, len(fx)) if self.at else len(fx)
-        bare = {key: v for key, v in sh.items() if key != "fx"}
-        return self.app.notes_of(dict(bare, fx=fx[:k]) if k else bare)
+        return self.app.notes_of(before_page(sh, k))
 
     def boxes(self):
         """{shape: (first start, last end, lowest key, highest key)} of the selected shapes' notes before this page."""

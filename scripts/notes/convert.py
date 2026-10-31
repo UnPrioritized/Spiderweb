@@ -117,6 +117,9 @@ def shared_settings(shapes):
             keep[key] = json.loads(json.dumps(vals[0]))
         else:
             lost.append(tr(name))
+    if "fx" in keep and "glue" not in keep:  # (the pages kept, the glue not: no place for it)
+        from notes.fx import tidy_glue
+        keep = tidy_glue(keep)
     names = {sh.get("by_snap_name") for sh in shapes}
     if "by_snap" in keep and len(names) == 1 and None not in names:  # (Notes by snap's "1/32": kept too, hunt)
         keep["by_snap_name"] = names.pop()

@@ -142,6 +142,8 @@ def part_glue(part, whole):
             part["glue"] = got
         else:
             part.pop("glue", None)
+            from notes.fx import tidy_glue
+            tidy_glue(part)
 
 
 JOIN_KINDS = tr("join_split.lines_polylines_freehand_strokes_curves")

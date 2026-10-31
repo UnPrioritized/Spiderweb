@@ -14,6 +14,7 @@ from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAPS, snap_beats, snap_text
+from notes.fx import before_page
 from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
                         too_many, top)
 from window import look
@@ -492,12 +493,12 @@ class ChopWindow(ToolWindow):
         shapes = [app.shapes[i] for i in self.targets if i < len(app.shapes)]
         after = sum(len(app.notes_of(sh)) for sh in shapes)
 
-        def before_page(i):  # (the shape's notes as this page gets them)
+        def page_input(i):  # (the shape's notes as this page gets them)
             sh = app.shapes[i]
             fx = sh.get("fx") or []
             k = len(fx) if self.at is None else self.at.get(i, len(fx))
-            return dict(sh, fx=fx[:k]) if k else {a: b for a, b in sh.items() if a != "fx"}
-        plain = [app.notes_of(before_page(i)) for i in self.targets if i < len(app.shapes)]
+            return before_page(sh, k)
+        plain = [app.notes_of(page_input(i)) for i in self.targets if i < len(app.shapes)]
         before = sum(len(n) for n in plain)
         cl = self.clean(self.cfg)
         stuck = any(too_many(n, cl, app.ppq) for n in plain)
