@@ -27,6 +27,7 @@ from files.system import double_click_ms
 from roll.roll_shared import grab_while_panning
 from window import look
 from window.help import open_help
+from window.canvas_keep import KeptItems
 from window.drawer_areas import AREA_FRAME, BOARD, OFF_BOARD, DrawerAreas
 from window.drawer_lasso import DrawerLasso
 from window.drawer_mouse import CTRL, MOD_KEYS, SHIFT, STICK_RANK, DrawerMouse
@@ -574,6 +575,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
 
         self.canvas = tk.Canvas(self, bg=OFF_BOARD, highlightthickness=0, cursor="crosshair")
         self.canvas.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=(0, 6))
+        self.board = KeptItems(self.canvas)  # (redraw's items, kept when unchanged)
         c = self.canvas
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
@@ -631,9 +633,9 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         return max(10, min(w, h) - 48 * self.scale) * self.zoom
 
     def to_screen(self, u, v):
-        k = self.px()
-        return (self.canvas.winfo_width() / 2 + (u - self.center[0]) * k,
-                self.canvas.winfo_height() / 2 - (v - self.center[1]) * k)
+        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()  # (asked once: px() asks again)
+        k = max(10, min(w, h) - 48 * self.scale) * self.zoom
+        return w / 2 + (u - self.center[0]) * k, h / 2 - (v - self.center[1]) * k
 
     def screen_points(self, pts):
         """Many (u, v) points on screen at once: [x0, y0, x1, y1, ...] (to_screen asks the canvas its size each
@@ -797,7 +799,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         for pts in pieces:
             coords = self.screen_points(pts)
             if len(coords) >= 4:
-                self.canvas.create_line(*coords, fill=STICK_LINE, width=width, capstyle="round", joinstyle="round")
+                self.board.create_line(*coords, fill=STICK_LINE, width=width, capstyle="round", joinstyle="round")
 
     def stick_move(self, moving, du, dv):
         """The strokes moving ({index: stroke as it was when grabbed}) moved by du, dv: (du, dv) changed so they
@@ -1739,9 +1741,9 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
 
     def redraw(self):
         self.show_colours_count()
-        c = self.canvas
-        c.delete("all")
-        cw, ch = c.winfo_width(), c.winfo_height()
+        c = self.board  # (made like on the canvas; items the same as last time stay: canvas_keep)
+        c.begin()
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
         (x0, y0), (x1, y1) = self.to_screen(0, 1), self.to_screen(1, 0)
         img = self.area_image(cw, ch) if cw > 1 and ch > 1 else None
         if img is not None:  # the board with the areas' colours
@@ -1867,7 +1869,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
                 c.create_line(x - q, y + q, x + q, y - q, fill=STICK_COLOR, width=lw)
             else:
                 c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill="", outline=STICK_COLOR, width=lw)
-        self.draw_lasso()  # (the Lasso tool's loop: drawer_lasso)
+        c.finish()
+        self.draw_lasso()  # (the Lasso tool's loop: drawer_lasso; its own items, on top)
         hidden = len(self.strokes) - len(shown_idx)
         if not self.strokes:
             text = tr("drawer.nothing_drawn_yet")
@@ -1895,7 +1898,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         """The points of the stroke being drawn: its ends, a polyline's / square's corners, an arc's three points
         (the middle one round), a circle's box corners. Not freehand, not a curve's handles (they come once it's
         drawn)."""
-        st, c, s = self.draft, self.canvas, self.scale
+        st, c, s = self.draft, self.board, self.scale
         if self.drag and self.drag[0] == "free":
             return
         if st["kind"] == "ellipse":
@@ -1915,7 +1918,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
     def draw_stroke(self, st, color, width, dash=None):
         coords = self.screen_points(stroke_points(st))
         if len(coords) >= 4:
-            self.canvas.create_line(*coords, fill=color, width=width, capstyle="round", joinstyle="round", dash=dash)
+            self.board.create_line(*coords, fill=color, width=width, capstyle="round", joinstyle="round", dash=dash)
         elif coords:
             x, y = coords
-            self.canvas.create_oval(x - 2, y - 2, x + 2, y + 2, fill=color, outline=color)
+            self.board.create_oval(x - 2, y - 2, x + 2, y + 2, fill=color, outline=color)

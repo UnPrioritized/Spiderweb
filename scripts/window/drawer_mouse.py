@@ -157,7 +157,7 @@ class DrawerMouse:
         for i, st in enumerate(self.strokes):
             if not self.pickable(i):
                 continue
-            pts = np.array([self.to_screen(u, v) for u, v in stroke_points(st)], float).reshape(-1, 2)
+            pts = np.array(self.screen_points(stroke_points(st)), float).reshape(-1, 2)
             if len(pts) and line_touches_box(pts[:, 0], pts[:, 1], x0, y0, x1, y1):
                 found.append(i)
         return found
