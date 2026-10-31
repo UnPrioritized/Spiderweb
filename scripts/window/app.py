@@ -87,7 +87,7 @@ from window.app_playback import GROUP_DEFAULT, Playback
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
-from roll.roll_draw import GHOST_FADE, painting_order
+from roll.roll_draw import GHOST_FADE, STACK_MODES, painting_order, stack_rule
 from files import clipboard, errors, notes_clip, speed
 from files.about import ICONS, VERSION
 from files.playback import BUILTIN, DEFAULT_DEVICE, KESTREL, MidiOut, Player
@@ -532,7 +532,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.copy_notes = tk.BooleanVar(self, value=False)  # ... and as Spiderweb Notes (files/notes_clip.py)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
-        self.loud_on_top = tk.BooleanVar(self, value=False)  # Settings → Look: a loaded MIDI's louder notes drawn on top
+        # Settings → Look "Stacked notes": which of the notes on top of each other shows (roll_draw.stack_rule; a
+        # loaded MIDI's painter too: "loud" = roll_loaded.loud_on)
+        self.stack_order = tk.StringVar(self, value=STACK_MODES[0])
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
         # when it opens (a change = opened again at the next Play: fresh_builtin)
         self.kestrel_opts = dict(KESTREL_DEFAULTS)
@@ -2498,7 +2500,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False,
                               "follow": follow}
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
-        sels, fast = frozenset(self.sels), speed.loops()
+        sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
 
         def notes_tracks(sh):
@@ -2530,8 +2532,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
                 if fast:
                     pics = np.array([picture_like(sh) for sh in shapes], bool)
-                    order = ((sels, pics.tobytes(), len(pics), bool(got[1]), None),
-                             painting_order(fast, rendered, start, sels, pics, key[2], got[1]))
+                    order = ((sels, pics.tobytes(), len(pics), bool(got[1]), None, rule),
+                             painting_order(fast, rendered, start, sels, pics, key[2], got[1], None, rule))
                 job["drawn"] = (start, order)
                 job["got"] = got
             except Exception:  # (MemoryError too: made again the normal way, which tells about it; Stopped)

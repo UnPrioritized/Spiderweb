@@ -170,8 +170,9 @@ def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1):
 
 @njit(cache=CACHE, nogil=True)
 def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
-    """The notes kept in painting order between pictures (redone when the notes or the selection change): by owner
-    rank, each owner's in by_start's order (np.argsort of the starts, stable). cols = roll_shared.slot_colours. ->
+    """The notes kept in painting order between pictures (redone when the notes or the selection change): by each
+    NOTE's rank (roll_draw.stack_keys: track / loudness / shape, the selected ones last), each rank's in by_start's
+    order (np.argsort of the starts, stable). cols = roll_shared.slot_colours. ->
     start, end, key, colour (as roll_draw.note_rects' screen() works it out; velocity -1 = ghost, a mask hides it;
     -2 - velocity = a track the track list shows faintly behind the highlighted one),
     first (rank r's notes = first[r] .. first[r + 1]), the longest note."""
@@ -179,7 +180,7 @@ def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
     n = len(by_start)
     first = np.zeros(nranks + 1, np.int64)
     for i in range(n):
-        first[rank[notes[i, 5]] + 1] += 1
+        first[rank[i] + 1] += 1
     for r in range(nranks):
         first[r + 1] += first[r]
     at = first[:-1].copy()
@@ -190,7 +191,7 @@ def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
     longest = 0
     for j in range(n):
         i = by_start[j]
-        r = rank[notes[i, 5]]
+        r = rank[i]
         o = at[r]
         at[r] += 1
         s[o], e[o], key[o] = notes[i, 0], notes[i, 1], notes[i, 2]

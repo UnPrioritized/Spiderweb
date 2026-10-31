@@ -235,7 +235,7 @@ class SettingsWindow(tk.Toplevel):
         self.look = f.row(tr("look.look"), look_box(page), tip=tr("settings.look_hint"))
         self.build_size(f)
         self.build_palettes(f)
-        self.build_loud(f)
+        self.build_stacked(f)
         self.build_sound()
         # General: updates (how often to look, and looking now: the answer shows under the row), then tips
         tab = self.pages["general"] = ScrollPage(tabs)
@@ -373,11 +373,23 @@ class SettingsWindow(tk.Toplevel):
         f.row(tr("settings.row_channels"), self.tick(f.page, "settings.keep_colours", self.app.keep_colours,
                                                      self.app.shapes_changed), tip=tr("settings.keep_colours_hint"))
 
-    def build_loud(self, f):
-        """A loaded MIDI's louder notes drawn on top (roll_loaded.loud_tab); off = the later track on top."""
+    def build_stacked(self, f):
+        """"Stacked notes" (user 2026-10-31: ONE setting for every note in the piano roll): which of the notes on top
+        of each other shows (roll_draw.stack_rule; a loaded MIDI's painter: roll_loaded.loud_on). Read by place."""
+        from roll.roll_draw import STACK_MODES
         f.sep()
-        f.row(tr("settings.row_loaded"), self.tick(f.page, "settings.loud_on_top_short", self.app.loud_on_top,
-                                                   self.app.roll.request_redraw), tip=tr("settings.loud_on_top_hint"))
+        names = [tr("settings.stack_" + k) for k in STACK_MODES]
+        var = self.app.stack_order
+        box = self.stack_box = f.row(tr("settings.row_stacked"), ttk.Combobox(
+            f.page, values=names, state="readonly", width=24), tip=tr("settings.stack_tip"))
+        box.current(STACK_MODES.index(var.get()) if var.get() in STACK_MODES else 0)
+
+        def picked(e):
+            var.set(STACK_MODES[box.current()])
+            box.selection_clear()
+            self.app.roll.request_redraw()
+            self.app.schedule_autosave()
+        box.bind("<<ComboboxSelected>>", picked)
 
     def build_indexes(self, f):
         """Load MIDI's saved indexes (files/midi_saved.py): each MIDI's name, the index's size, a Delete button."""

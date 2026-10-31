@@ -440,9 +440,10 @@ def colours(faint=False):
 
 
 def loud_on(app):
-    """Settings → Look "Louder notes on top (loaded MIDI)" ticked?"""
-    var = getattr(app, "loud_on_top", None)
-    return bool(var is not None and var.get())
+    """Settings → Look "Stacked notes" = Louder note on top? (else the later track: "Later shape" has no shapes
+    here)"""
+    var = getattr(app, "stack_order", None)
+    return bool(var is not None and var.get() == "loud")
 
 
 def shown_only(app, lm):

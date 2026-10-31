@@ -420,23 +420,79 @@ def covered_ends(e, nxt, room):
     return np.where(nxt_e >= e, np.minimum(e, nxt_s + room), e)
 
 
-def painting_order(fast, rendered, start, sels, pics, keys, use10, back=None):
+STACK_MODES = ("track", "loud", "shape")  # Settings → Look "Stacked notes" (user 2026-10-31; first = default)
+
+
+def stack_rule(app):
+    """(mode, own tracks' (id, after)): what decides which of the notes lying on top of each other shows. "track" =
+    the later track (like Domino: lower in the track list = on top), "loud" = the louder note (equal: the later
+    track), "shape" = the later shape. Selected shapes on top in all; tracks shown faint behind the highlighted one
+    under everything."""
+    var = getattr(app, "stack_order", None)
+    mode = var.get() if var is not None else STACK_MODES[0]
+    own = tuple((t["id"], t["after"]) for t in getattr(app, "own_tracks", None) or ())
+    return (mode if mode in STACK_MODES else STACK_MODES[0], own)
+
+
+def track_ranks(slots, own):
+    """Each note's track place in the track list / export (own_tracks.plan; own = stack_rule's (id, after)) and how
+    many places there are. A track's channels share its place."""
+    from files.own_tracks import plan
+    from notes.engine import OWN0
+    slots = np.asarray(slots, np.int64)
+    auto = slots < OWN0
+    autos = int(slots[auto].max()) + 1 if auto.any() else 0
+    filled = np.flatnonzero(np.bincount(slots[auto], minlength=autos)) if autos else ()
+    ids = np.unique((slots[~auto] - OWN0) >> 4) if not auto.all() else np.zeros(0, np.int64)
+    rows = plan(range(autos), [{"id": i, "after": a} for i, a in own], filled)
+    at_auto, at_own = np.zeros(autos, np.int64), {}
+    for k, r in enumerate(rows):
+        if isinstance(r, dict):
+            at_own[r["id"]] = k
+        else:
+            at_auto[r] = k
+    out = np.empty(len(slots), np.int64)
+    out[auto] = at_auto[slots[auto]]
+    if len(ids):
+        place = np.array([at_own.get(int(i), len(rows) + j) for j, i in enumerate(ids)], np.int64)
+        out[~auto] = place[np.searchsorted(ids, (slots[~auto] - OWN0) >> 4)]
+    return out, len(rows) + len(ids)
+
+
+def stack_keys(notes, sels, back, rule):
+    """Each note's painting key (bigger = painted later = on top) by stack_rule's rule, and the key where the
+    selected shapes' notes start (all below it are the rest)."""
+    owner = notes[:, 5]
+    group = np.ones(len(notes), np.int64)  # 0 = faint tracks behind the highlighted one, 1 = the rest, 2 = selected
+    if sels:
+        group[np.isin(owner, list(sels))] = 2
+    if back is not None:
+        group[(owner == back) & (group == 1)] = 0
+    mode = rule[0]
+    if mode == "shape":
+        span = int(owner.max()) + 1 if len(owner) else 1
+        return group * span + owner, 2 * span
+    place, span = track_ranks(notes[:, 4], rule[1])
+    if mode == "loud":  # (-1 = a mask's ghost: quietest; -2 - velocity = a faint track's note)
+        v = notes[:, 3]
+        v = np.where(v <= -2, -2 - v, np.clip(v, 0, 127))
+        place = v * span + place
+        span *= 128
+    return group * span + place, 2 * span
+
+
+def painting_order(fast, rendered, start, sels, pics, keys, use10, back=None, rule=(STACK_MODES[0], ())):
     """RollDrawing.paint_order's work (start = the notes' rows by start; use10: channel 10 used, slot_colours).
     back: the owner number of the tracks shown behind the highlighted one (App.track_view), painted first.
-    Touches no Tk: also done in a background thread for notes made there (App.notes_rested)."""
+    rule: stack_rule's. Touches no Tk: also done in a background thread for notes made there (App.notes_rested)."""
     if not (len(rendered) and rendered[:, 2].min() >= 0 and rendered[:, 2].max() < keys and rendered[:, 5].min() >= 0):
         return None
-    owners = int(rendered[:, 5].max()) + 1
-    sel = np.zeros(owners, bool)
-    sel[[s for s in sels if 0 <= s < owners]] = True
-    rank = np.empty(owners, np.int64)  # shapes in their order, the selected ones last
-    others = owners - int(sel.sum())
-    unsel = np.flatnonzero(~sel)
-    if back is not None and back < owners and not sel[back]:
-        unsel = np.concatenate([[back], unsel[unsel != back]])
-    rank[unsel] = np.arange(others)
-    rank[sel] = np.arange(others, owners)
-    made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), start, rank, owners,
+    key, sel_from = stack_keys(rendered, sels, back, rule)
+    used = np.zeros(int(key.max()) + 1, bool)  # (keys made into ranks 0, 1, 2 ... in the same order)
+    used[key] = True
+    rank = np.cumsum(used) - 1
+    others = int(used[:sel_from].sum())
+    made = fast.paint_order(np.ascontiguousarray(rendered, np.int64), start, rank[key], int(used.sum()),
                             pics if pics.any() else np.zeros(0, bool), slot_colours(use10), PICTURE_GROUP, GHOST_BASE)
     return made, others
 
@@ -1196,11 +1252,13 @@ class RollDrawing:
         rendered = app.drawn
         pics = np.asarray(getattr(app, "picture_owners", ()), bool)
         back = getattr(app, "behind_owner", None)
-        key = (frozenset(app.sels), pics.tobytes(), len(pics), bool(app.picture_use10), back)
+        rule = stack_rule(app)
+        key = (frozenset(app.sels), pics.tobytes(), len(pics), bool(app.picture_use10), back, rule)
         got = self._paint_order
         if got is not None and got[0] is rendered and got[1] == key:
             return got[2]
-        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys, app.picture_use10, back)
+        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys, app.picture_use10, back,
+                              rule)
         self._paint_order = (rendered, key, made)
         return made
 
@@ -1211,16 +1269,16 @@ class RollDrawing:
         if order is not None:
             self._paint_order = (rendered,) + order
 
-    def paint_ends(self, which, made, s, e, key, group):
+    def paint_ends(self, which, made, s, e, key, group, tag=None):
         """covered_ends for these notes at this zoom (None: no sustained shape, nothing to save), remembered per notes
-        (which = "fast" / "plain": the two ways' arrays, made = the array they came from) and zoom. group(): each
-        note's owner group."""
+        (which = "fast" / "plain": the two ways' arrays, made = the array they came from), tag (what else group()
+        depends on) and zoom. group(): each note's painting group."""
         if not any(is_sustained(sh) for sh in self.app.shapes):
             return None
         room = math.ceil(3 * self.app.ppq / self.sx) + 1  # (3 px: its edge well inside the note over it)
         got = self._cover.get(which)
-        if got is None or got[0] is not made:
-            got = self._cover[which] = [made, cover_next(s, e, key, group()), None]
+        if got is None or got[0] is not made or got[3] != tag:
+            got = self._cover[which] = [made, cover_next(s, e, key, group()), None, tag]
         if got[2] is None or got[2][0] != room:
             ends = covered_ends(e, got[1], room)
             got[2] = (room, ends, int((ends - s).max()) if len(s) else 0)
@@ -1287,28 +1345,17 @@ class RollDrawing:
                 on &= ~((x1 < clip[0]) | (x0 >= clip[2]))
             on = np.flatnonzero(on)
             if order and len(on):
+                # (stacked notes: stack_rule's order, the selected shapes' on top, faint tracks under all; the
+                # same order as the compiled painting_order: by key, then by start)
+                key_of = stack_keys(notes[on], sels, getattr(app, "behind_owner", None), stack_rule(app))[0]
+                on = on[np.argsort(key_of, kind="stable")]
                 owner = notes[on, 5]
-                lo, hi = owner.min(), owner.max()
-                if lo != hi:
-                    on = on[np.argsort(owner.astype(np.uint16) if 0 <= lo and hi < 65536 else owner, kind="stable")]
-                    owner = notes[on, 5]
                 cols = slot_colours(getattr(app, "picture_use10", False))
                 color = note_colours(notes[on, 4], cols)
                 pics = getattr(app, "picture_owners", ())
                 if len(pics) and pics.any():  # a placed picture's notes: its own colours (PICTURE_GROUP on)
                     mine = pics[np.clip(owner, 0, len(pics) - 1)]
                     color = np.where(mine, PICTURE_GROUP + np.minimum(notes[on, 4], 15), color)
-                if sels:
-                    mine = np.isin(owner, sels)
-                    if mine.any():
-                        last = np.concatenate([np.nonzero(~mine)[0], np.nonzero(mine)[0]])
-                        on, color, owner = on[last], color[last], owner[last]
-                back = getattr(app, "behind_owner", None)
-                if back is not None:  # (tracks shown behind the highlighted one: painted first, under it)
-                    mine = owner == back
-                    if mine.any():
-                        first = np.concatenate([np.nonzero(mine)[0], np.nonzero(~mine)[0]])
-                        on, color = on[first], color[first]
             elif order:
                 color = np.zeros(0, np.int64)
             # low velocity = paler fill (outline stays); 32 shades is plenty. Velocity -1 = a ghost (mask.py)
@@ -1321,7 +1368,9 @@ class RollDrawing:
             lo, hi = self.visible_range(t_lo, t_hi)
             notes = self.sorted_notes()[lo:hi]
             every = self.sorted_notes()
-            held = self.paint_ends("plain", every, every[:, 0], every[:, 1], every[:, 2], lambda: every[:, 5])
+            back, rule = getattr(app, "behind_owner", None), stack_rule(app)
+            held = self.paint_ends("plain", every, every[:, 0], every[:, 1], every[:, 2],
+                                   lambda: stack_keys(every, sels, back, rule)[0], (frozenset(sels), back, rule))
             if held is not None:  # (Sustain: held notes painted only where they show; same pixels)
                 notes = notes.copy()
                 notes[:, 1] = held[0][lo:hi]

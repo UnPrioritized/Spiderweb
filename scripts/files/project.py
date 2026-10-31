@@ -61,7 +61,7 @@ from files.unzip import allowance
 from files.update_check import version_tuple
 from window.big_ask import ask as ask_big, ask_drums, trouble as big_trouble
 from window.tempo_pane import ask_domino
-from roll.roll_draw import GHOST_FADE
+from roll.roll_draw import GHOST_FADE, STACK_MODES
 
 AUTOSAVE = os.path.join(USER, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
@@ -636,7 +636,8 @@ class ProjectFiles:
                               "kestrel_slow_down": self.slow_kestrel.get(), "play_slow_down": self.slow_builtin.get(),
                               "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
                               "copy_notes": self.copy_notes.get(),
-                              "keep_colours": self.keep_colours.get(), "loud_on_top": self.loud_on_top.get(),
+                              "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
+                              "loud_on_top": self.stack_order.get() == "loud",
                               "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
                               "tracks": self.track_list.state(),
@@ -837,7 +838,9 @@ class ProjectFiles:
             self.copy_domino.set(win.get("copy_domino") is True)
             self.copy_notes.set(win.get("copy_notes") is True)
             self.keep_colours.set(win.get("keep_colours") is True)
-            self.loud_on_top.set(win.get("loud_on_top") is True)
+            stack = win.get("stacked_notes")  # (none yet: the old "Louder notes on top" tick's)
+            self.stack_order.set(stack if stack in STACK_MODES else "loud" if win.get("loud_on_top") is True
+                                 else STACK_MODES[0])
             self.sync_builtin()
         kept(sound)
 

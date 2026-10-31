@@ -142,7 +142,8 @@ APP_KEYS = {
     "copy_domino": ("domino", "with_ctrl_c", bool),
     "copy_notes": ("copying", "spiderweb_notes", bool),
     "keep_colours": ("channels", "keep_colours", bool),
-    "loud_on_top": ("look", "louder_notes_on_top", bool),
+    "loud_on_top": ("look", "louder_notes_on_top", bool),  # (old tick: read when stacked_notes isn't there yet)
+    "stacked_notes": ("look", "stacked_notes", str),  # (roll_draw.STACK_MODES)
 }
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)
 # the ones the autosave keeps inside its "hz_preview" settings (1.5.1 sweep: all app-wide): window key -> key there
