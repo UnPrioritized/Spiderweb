@@ -25,6 +25,8 @@ Each line becomes its own track. The first line (the earliest, then the lowest) 
 
 The new tracks are yours, like tracks you add in the track list. When the notes were on Spiderweb's own tracks, those become yours first, as dragging one does. A MIDI file holds at most 65,534 tracks: a split that would make more is refused, and nothing changes.
 
+With Channel per strip: turn Channel per strip on first, then use Split into pieces. The other way round, Channel per strip takes the pieces off their new tracks again.
+
 ## For all three
 
 A drawn shape (a line, a curve, a custom shape...) has to turn into plain notes first. Spiderweb asks once for all of them; Yes turns them into plain notes and does the rest in the same step. Each shape stays a shape of its own, with its colours, and one Ctrl+Z takes all of it back.

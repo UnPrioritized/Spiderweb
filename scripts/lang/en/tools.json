@@ -874,6 +874,7 @@
  "strips.count": "{strips} found, most with {notes}",
  "strips.count_shapes": "{strips} found in {shapes} shapes",
  "strips.multi_only": "Works only with Channels → Multi channel: in the other modes all notes share one channel.",
+ "strips.off_tracks": "These notes were on tracks of their own (for example from Split into pieces). With Channel per strip on, they go back to Spiderweb's tracks. To use both, turn Channel per strip on first, then use Split into pieces.",
  "strips.view": "Show each strip in its own colour",
  "strips.view_tip": "While this window is open, each strip is painted in a colour of its own, so you can see where the guess cut. Strips cut wrong look like confetti; strips it missed look like one long block.\nThe real colours come back when you close the window.",
  "strips.hint": "Experimental: a guess made key by key. One colour on its own is never split.",

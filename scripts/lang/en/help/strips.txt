@@ -14,4 +14,6 @@ When it guesses wrong: two colours taking turns on a key (fast A B A B notes, or
 
 One colour on its own is never split, since nothing comes between its strips.
 
+With Split into pieces: turn Channel per strip on first, then use Split into pieces. The other way round, Channel per strip takes the pieces off their new tracks and puts them back on Spiderweb's tracks; the window says so in orange.
+
 OK keeps the change (one Ctrl+Z takes it back); Cancel, Esc or X puts it back as it was. The menu item has a tick while it's on, and the Shapes list says (Ch. per strip). Sliced pieces keep it, and a strip cut in two stays on one channel.

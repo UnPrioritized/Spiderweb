@@ -71,6 +71,8 @@ class StripsWindow(tk.Toplevel):
         self.count.pack(anchor="w", pady=(8, 0))
         self.warn = ttk.Label(box, text=tr("strips.multi_only"), foreground=look.WARN, wraplength=int(320 * app.scale),
                               justify="left")
+        self.off_tracks = ttk.Label(box, text=tr("strips.off_tracks"), foreground=look.WARN,
+                                    wraplength=int(320 * app.scale), justify="left")
         self.view_var = tk.BooleanVar(value=True)
         self.view_tick = ttk.Checkbutton(box, text=tr("strips.view"), variable=self.view_var,
                                          command=self.app.shapes_changed)
@@ -258,6 +260,12 @@ class StripsWindow(tk.Toplevel):
             self.warn.pack(anchor="w", pady=(8, 0), after=self.count)
         elif (multi or not on) and self.warn.winfo_manager():
             self.warn.pack_forget()
+        # (notes laid on tracks, e.g. by Split into pieces, leave them while it's on: the order matters, user 10-31)
+        laid = any(on and t.get("into") for t, on in zip(self.tgts, self.ons))
+        if laid and not self.off_tracks.winfo_manager():
+            self.off_tracks.pack(anchor="w", pady=(8, 0), before=self.view_tick)
+        elif not laid and self.off_tracks.winfo_manager():
+            self.off_tracks.pack_forget()
         self.count.config(text=self.counted() if on else "")
 
     # ---- undo inside, storing
