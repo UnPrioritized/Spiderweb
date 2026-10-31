@@ -29,7 +29,7 @@ from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
                           auto_count, PORTS)
-from files.own_tracks import FILE0, HAND, file_order, key_track, from_rows, full_plan, into_ids, new_id, next_channel, with_port
+from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
 from notes.fx import flip_shape, flipped as fx_flipped, turn_shape, with_turn as fx_turned, with_velocity
@@ -2120,8 +2120,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         files = self.file_tracks()
         rows = [(-1 - r if r >= 0 else FILE0 + key_track(-1 - r)) if type(r) is int else r["id"]  # (a part: its track)
                 for r in full_plan(self.file_rows(), slots, own, filled)]
-        inserted = []
-
         def channel(v):
             if v >= FILE0:
                 return files[v - FILE0]["ch"] if v - FILE0 in files else 0
@@ -2132,13 +2130,32 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return files[v - FILE0].get("port", 0) if v - FILE0 in files else 0
             return by_id[v].get("port", 0) if v >= 0 else 0
 
-        def at_end(kind_own):
-            """A new track at the end of the rows (kind_own: added by hand, else an automatic slot)."""
+        used = []  # (how many rows use each channel: worked out when the first track is added)
+
+        def new_channel(laid):
+            """A new tinted track's channel for the shape's next colour (laid: its tracks so far; user 2026-10-31):
+            the first one no row uses yet, going up from its first track's; none left = the channel of its colour one
+            repeat earlier (15 colours, 16 with channel 10), so each colour keeps its channel in every repeat; fewer
+            colours than that: the one fewest rows use (Add Track's)."""
+            if not used:
+                used.append(collections.Counter(channel(r) for r in rows))
+            counts, k = used[0], len(laid)
+            ch = free_channel(channel(laid[0]), counts, use10)
+            if ch is None:
+                step = 16 if use10 else 15
+                ch = channel(laid[k - step]) if k >= step else min(
+                    (c for c in range(16) if c != 9 or use10), key=lambda c: (counts[c], c))
+            counts[ch] += 1
+            return ch
+
+        def at_end(kind_own, laid):
+            """A new track at the end of the rows for the next colour of a shape laid on laid (kind_own: added by
+            hand, else an automatic slot)."""
             if kind_own:
                 v = new_id(own, self.own_next)
                 self.own_next = v + 1
-                t = with_port({"id": v, "name": "", "ch": next_channel(channel(rows[-1]) if rows else 0, use10),
-                               "after": -1, "auto": True}, port(rows[-1]) if rows else 0)
+                t = with_port({"id": v, "name": "", "ch": new_channel(laid), "after": -1, "auto": True},
+                              port(rows[-1]) if rows else 0)
                 own.append(t)
                 by_id[v] = t
             else:
@@ -2146,25 +2163,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             rows.append(v)
             return v
 
-        def after(prev):
-            """A new tinted track right after the row prev (more colours of a shape laid before: hunt 2026-10-26,
-            user: never into another shape's track, however many tracks that makes)."""
-            v = new_id(own, self.own_next)
-            self.own_next = v + 1
-            t = with_port({"id": v, "name": "", "ch": next_channel(channel(prev), use10), "after": -1, "auto": True},
-                          port(prev))
-            if prev in by_id and "file" in by_id[prev]:  # (among a loaded MIDI's tracks: there too)
-                t["file"] = by_id[prev]["file"]
-            own.append(t)
-            by_id[v] = t
-            rows.insert(rows.index(prev) + 1, v)
-            inserted.append(v)
-            return v
-
         known = Known(by_id, files)  # (yours, also the ones added below, and the loaded MIDI's)
         for i, n in need.items():
             sh = self.shapes[i]
-            fresh = sh.pop("into_new", False)  # (just drawn / pasted: down the rows, like Domino's paste)
+            sh.pop("into_new", False)  # (just drawn / pasted)
             have, cols = placed_on(sh, known), sh.get("cols")
             if n <= 0 or not have or (len(have) >= n and not cols):
                 if have and len(have) > max(n, 1):  # (colours gone for now: their tracks kept aside, hunt 10-26;
@@ -2211,7 +2213,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 for k in range(n):
                     r = at + cols[k] if k < len(cols) else at + (cols[-1] if cols else 0) + k - len(cols) + 1
                     while r >= len(lanes):
-                        v = at_end(laid[0] >= 0 if laid else have[0] >= 0)
+                        v = at_end(laid[0] >= 0 if laid else have[0] >= 0, laid or have[:1])
                         made_here.append(v)
                         lanes.append((v, -1))
                     laid.append(lanes[r][0])
@@ -2232,16 +2234,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 changed = True
                 continue
             made_here = []
-            while len(have) < n:
-                k = len(have)
+            while len(have) < n:  # (colours gained later too, e.g. Repeated colours ticked: down the rows, whatever
+                # track is there, user 2026-10-31)
                 if have and have[-1] not in rows:  # (its last track isn't listed: nothing to go on from)
                     break
-                if have and not cols and not fresh:  # (colours it gained later, e.g. Repeated colours ticked)
-                    have.append(after(have[-1]))
-                    continue
-                r = anchor + cols[k] if cols and k < len(cols) else (rows.index(have[-1]) + 1 if have else anchor)
+                r = rows.index(have[-1]) + 1 if have else anchor
+                while r < len(rows) and rows[r] in have:  # (one of its own tracks, dragged below: the next one)
+                    r += 1
                 while r >= len(rows):
-                    made_here.append(at_end(have[0] >= 0 if have else rows[anchor] >= 0))
+                    made_here.append(at_end(have[0] >= 0 if have else rows[anchor] >= 0, have))
                 have.append(rows[r])
             sh["into"] = have
             if sh.pop("cols", None) is not None:  # (laid again from its columns: nothing kept aside)
@@ -2252,9 +2253,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if any(v < 0 for v in have):  # (its automatic tracks' channel rule, kept when Use channel 10 changes)
                 sh["slots10"] = bool(use10) and any(channel(v) == 9 for v in have if v < 0)
             changed = True
-        if inserted:  # (tracks put in the middle: every track's place worked out again from the rows)
-            own = from_rows([-1 - r if r < 0 else FILE0 - 1 - r if r >= FILE0 else {"id": r} for r in rows], slots,
-                            own, filled)
         for sh in self.shapes:  # (each colour's own channel kept beside its track: one per "into" entry)
             if "into_ch" in sh:
                 sh.update(aligned_ch(sh))

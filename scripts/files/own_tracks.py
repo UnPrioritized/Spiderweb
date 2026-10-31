@@ -103,6 +103,18 @@ def next_channel(ch, use10):
     return ch + 1 if ch == 9 and not use10 else ch
 
 
+def free_channel(start, used, use10):
+    """The channel for a track App.fit_into adds past the end (user 2026-10-31): the first one after start, going up
+    (16 -> 1, 10 skipped while it isn't used), that no track uses yet (used: channel -> tracks on it); None = all
+    used."""
+    ch = start
+    for _ in range(16):
+        ch = next_channel(ch, use10)
+        if not used.get(ch):
+            return ch
+    return None
+
+
 def placed(own, autos):
     """Where each own track goes among autos automatic tracks: [(own track, automatic tracks before it)], in the
     order they show."""
