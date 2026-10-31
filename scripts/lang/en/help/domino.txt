@@ -1,6 +1,6 @@
 Copy (on the Domino row under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or all notes when nothing is selected. In Domino, pick the track and press Ctrl+V, or double-click where the notes should go. Copying and pasting notes this way is tested on Windows; on Linux (Domino through Wine) it is untested.
 
-To skip the extra step, tick "Ctrl+C also copies for Domino" in Settings → General: then the normal Ctrl+C (and Ctrl+X) copies for Domino too, without any questions. A very big copy is left out of it (the status line says so): use Copy for those.
+To skip the extra step, tick "Ctrl+C also copies for Domino" in Settings → Copying: then the normal Ctrl+C (and Ctrl+X) copies for Domino too, without any questions. A very big copy is left out of it (the status line says so): use Copy for those.
 
 The Domino start dropdown above the row sets where the notes start, for copying and pasting both:
 
@@ -10,9 +10,9 @@ The Domino start dropdown above the row sets where the notes start, for copying 
 
 Channels (under Project) set to As drawn or Single channel: everything goes into the track you paste into, on that track's channel.
 
-Channels set to Multi channel: each channel with notes becomes a track, in channel order, packed together (channels without notes are skipped; with Settings → General → Overlapping shapes keep their colours, the empty tracks between are kept so each row of channels stays in place): the first goes into the track you paste into, the next into the track below it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below the last one are dropped. With 10 tracks or more, Spiderweb asks first, since the 10th lands on a track that may play channel 10 (drums in most players). It doesn't ask when Use channel 10 is ticked.
+Channels set to Multi channel: each channel with notes becomes a track, in channel order, packed together (channels without notes are skipped; with Settings → Note colours → Overlapping shapes keep their colours, the empty tracks between are kept so each row of channels stays in place): the first goes into the track you paste into, the next into the track below it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below the last one are dropped. With 10 tracks or more, Spiderweb asks first, since the 10th lands on a track that may play channel 10 (drums in most players). It doesn't ask when Use channel 10 is ticked.
 
-Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so set the same PPQ in both (or use that on purpose). With 256 keys, notes above key 127 are left out (Domino has 128 keys), unless Settings → General → (Experimental) Domino 256 keys is ticked.
+Ticks are copied as they are: with a different PPQ in Domino the notes come out longer or shorter, so set the same PPQ in both (or use that on purpose). With 256 keys, notes above key 127 are left out (Domino has 128 keys), unless Settings → Copying → 256 keys (Experimental) is ticked.
 
 Pasting works the other way: select notes in Domino, press Ctrl+C there, then press Ctrl+V here (or Paste on the Domino row). The start of what you copied (or its first note, see the dropdown) lands on the play line (snapped to the grid), like pasting in Domino, and ticks are taken as they are. With the Select tool, a double-click on empty space pastes them there instead.
 

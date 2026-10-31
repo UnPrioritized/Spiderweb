@@ -10,9 +10,9 @@ What's new:
 
 • Ports: Track Properties and Add Tracks… set a track's port (A to P). Export MIDI, Export to Domino and Copy to Domino write it, and the track list shows "B 3" for port B, channel 3.
 
-• Stacked notes (Settings → Look): where notes lie on top of each other on one key, pick which shows: the later track's (new default, like many MIDI programs), the louder one, or the later shape's (how Spiderweb drew them before). One setting for every note in the piano roll, drawn or loaded; it replaces the "Louder notes on top (loaded MIDI)" tick.
+• Stacked notes (Settings → Note colours): where notes lie on top of each other on one key, pick which shows: the later track's (new default, like many MIDI programs), the louder one, or the later shape's (how Spiderweb drew them before). One setting for every note in the piano roll, drawn or loaded; it replaces the "Louder notes on top (loaded MIDI)" tick.
 
-• The Settings window got a tidier layout: short names, the long explanations moved into tips you see when the mouse rests on a setting.
+• The Settings window has a new layout: a list of pages on the left (General, Look, Note colours, Sound, Copying, Loaded MIDI, Language), short names, and the long explanations in tips you see when the mouse rests on a setting.
 
 • Glue happens where you used it, like the last thing you did: Chop, then Glue joins the chopped pieces back (before, the glue always came first, so it seemed to do nothing). Projects saved before keep their notes.
 

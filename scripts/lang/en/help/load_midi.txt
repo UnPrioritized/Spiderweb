@@ -14,7 +14,7 @@ Before reading, Spiderweb asks how to hold the notes:
 
 A window shows each step while it reads, with Cancel. Your project is replaced only when the reading is done. The summary at the end counts the notes, tracks, channels and tempo changes, and says what's odd in the file (notes 0 ticks long, notes never let go, damaged tracks). Those are left exactly as they are.
 
-A very big file can take a while (17 GB: about 30 seconds on a fast drive). After a slow load, Spiderweb offers to save the file's index: where everything is in it, never the notes. Next time it opens in a moment. Settings → General lists the saved indexes with their sizes, and deletes them. A changed file is read again the usual way.
+A very big file can take a while (17 GB: about 30 seconds on a fast drive). After a slow load, Spiderweb offers to save the file's index: where everything is in it, never the notes. Next time it opens in a moment. Settings → Loaded MIDI lists the saved indexes with their sizes, and deletes them. A changed file is read again the usual way.
 
 [clip:load-summary]
 

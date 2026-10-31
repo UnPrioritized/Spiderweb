@@ -49,14 +49,14 @@ class BuiltinPanel(ttk.Frame):
         box.columnconfigure(1, weight=1)
         r = 0
 
-        ttk.Label(box, text=tr("ps.fonts")).grid(row=r, column=0, sticky="ne", padx=(0, 8), pady=3)
+        ttk.Label(box, text=tr("ps.fonts")).grid(row=r, column=0, sticky="nw", padx=(0, 8), pady=3)
         self.fonts = FontList(box, app)  # (shared with the Hz bass preview)
         self.fonts.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
         r += 1
         first = set(box.grid_slaves())  # (rows from here on: Built-in BASSMIDI's own)
 
         lb = ttk.Label(box, text=tr("ps.voices"))
-        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         e = app.voices_entry = ttk.Entry(box, textvariable=app.voices_var, width=8)
         e.grid(row=r, column=1, sticky="w", pady=3)
         e.bind("<Return>", lambda ev: (app.on_play_voices(), "break")[1])
@@ -68,7 +68,7 @@ class BuiltinPanel(ttk.Frame):
 
         from window.app_playback import GROUP_MOST
         lb = ttk.Label(box, text=tr("bs.synths"))
-        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         e = app.synths_entry = ttk.Entry(box, textvariable=app.synths_var, width=8)
         e.grid(row=r, column=1, sticky="w", pady=3)
         e.bind("<Return>", lambda ev: (app.on_loaded_synths(), "break")[1])
@@ -111,7 +111,7 @@ class BuiltinPanel(ttk.Frame):
         vars_ = app.kestrel_vars
         before = set(box.grid_slaves())
         lb = ttk.Label(box, text=tr("ks.voices"))
-        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         row = ttk.Frame(box)  # (the box + its Default button side by side)
         row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         e = app.kestrel_voices_entry = ttk.Entry(row, textvariable=vars_["voices"], width=10)
@@ -144,7 +144,7 @@ class BuiltinPanel(ttk.Frame):
         r += 1
 
         lb = ttk.Label(box, text=tr("ks.block"))
-        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         names = [tr("ks.block_n", n=b, ms=f"{b / kestrel.RATE * 1000:.0f}") for b in kestrel.BLOCKS]
         cb = ttk.Combobox(box, values=names, state="readonly", width=14)
         cb.current(vars_["block"].get())
@@ -187,7 +187,7 @@ class BuiltinPanel(ttk.Frame):
         app, box = self.app, self
         var = app.kestrel_vars["card"]
         lb = ttk.Label(box, text=tr("ks.card"))
-        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         cb = keep_width(ttk.Combobox(box, state="readonly", width=34))
         cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(cb, tr("ks.card_tip"))
@@ -234,7 +234,7 @@ class BuiltinPanel(ttk.Frame):
         var = app.kestrel_vars[key]
         order = list(order or range(CHOICES[key]))
         lb = ttk.Label(box, text=tr(text))
-        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         cb = ttk.Combobox(box, values=[tr(f"{text}_{i}") for i in order], state="readonly", width=18)
         cb.current(order.index(var.get()))
         cb.grid(row=r, column=1, sticky="w", pady=3)
@@ -253,7 +253,7 @@ class BuiltinPanel(ttk.Frame):
         app, box = self.app, self
         var = app.kestrel_vars[key]
         lb = ttk.Label(box, text=tr(text))
-        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         row = ttk.Frame(box)
         row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         e = ttk.Entry(row, textvariable=var, width=8)
