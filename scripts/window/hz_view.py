@@ -14,6 +14,7 @@ from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, 
                               ruler_boxes)
 from notes.meter import bar_lines, beat_lines, sigs_of
 from window import look
+from window.canvas_keep import KeptItems
 from window.hz_layers import layer_colour
 from window.widgets import StatusLine
 
@@ -43,6 +44,14 @@ def shape_length(sh):
 
 
 class HzView:
+    painting = None  # (while redraw runs: its KeptItems, see paint)
+
+    @property
+    def paint(self):
+        """What the notes canvas is drawn on: during redraw the kept items (items drawn the same way as last time
+        stay on the canvas, canvas_keep.py), else the canvas itself."""
+        return self.painting or self.canvas
+
     def fit_view(self):
         """The view moved so the notes are in sight (the first time there are any). Not before the canvas has its
         size (just opened): worked out for a 1 pixel canvas, the keys sat high up until the view moved (on_resize)."""
@@ -232,13 +241,26 @@ class HzView:
         self.redraw()
 
     def redraw(self):
-        c = self.canvas
         for bar in self.bars:
             bar.refresh()
-        c.delete("all")
+        keep = self.__dict__.get("board")
+        if keep is None:
+            keep = self.board = KeptItems(self.canvas)
+        keep.begin()
+        self.painting = keep
+        try:
+            drawn = self.draw_board(keep)
+        finally:
+            self.painting = None
+            keep.finish(rest=True)  # (only what changed is made again; anything else drawn on it goes, as a wipe did)
+        if drawn:
+            self.after_board()
+
+    def draw_board(self, c):
+        """Everything on the notes canvas (c = the kept items, see redraw). False: too small to draw anything."""
         w, h = c.winfo_width(), c.winfo_height()
         if w < 50 or h < 50:
-            return
+            return False
         s, kb, rh = self.s, self.kb_w, self.ruler_h
         k_hi, k_lo = self.key_at(rh), self.key_at(h)
         for k in range(k_lo, k_hi + 1):  # rows
@@ -281,9 +303,13 @@ class HzView:
                 fill, edge = (fade(colour) for colour in layer_colour(hz, i))
                 for n in layer.get("tones") or ():
                     x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
+                    if max(x1, x0 + 2) < 0 or x0 > w or y + self.sy < 0 or y > h:  # (out of view: not drawn)
+                        continue
                     c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
         for i, n in enumerate(self.tones if not self.sketching() else ()):  # notes (Sketch: lines, hz_sketch.py)
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
+            if max(x1, x0 + 2) < 0 or x0 > w or y + self.sy < 0 or y > h:
+                continue
             fill, edge = SELECTED_COLOR if i in self.sel else own
             c.create_rectangle(x0, y + 1, max(x1, x0 + 2), y + self.sy - 1, fill=fill, outline=edge)
         if self.sketching():
@@ -293,9 +319,13 @@ class HzView:
         red = self.slide_red()  # (faded while the Arpeggio leaves the slides out)
         for x, y, *_ in self.dots():
             r = 3.5 * s
+            if x + r < 0 or x - r > w:
+                continue
             c.create_oval(x - r, y - r, x + r, y + r, fill=look.HZ_DOT, outline=red, width=max(1, round(1.5 * s)))
         for x, y, _, sl, *_ in self.handles():  # a slide's bend: hollow while it follows the Glide curve
             r = 3 * s
+            if x + r < 0 or x - r > w:
+                continue
             c.create_rectangle(x - r, y - r, x + r, y + r, fill=red if "bend" in sl else "", outline=red,
                                width=max(1, round(1.5 * s)))
         self.draw_bends()  # (the Bend tool: each note's own bend line and points, over the slides', hz_bend.py)
@@ -337,6 +367,11 @@ class HzView:
         if not self.can_place():
             c.create_text((kb + w) / 2, (rh + h) / 2, text=tr("hz.hint_none"), fill=look.HINT,
                           width=w - kb - 40 * s, justify="center")
+        return True
+
+    def after_board(self):
+        """After the notes canvas is drawn: the status line, the panes and windows showing the same Hz bass, the
+        preview's grey and play line."""
         self.show_status()
         self.layers.redraw()
         self.fx.redraw()
@@ -371,7 +406,7 @@ class HzView:
         """The red line: the tone that's really heard. Each repeat lasts a whole number of ticks, so the line sits
         a little off the middle of the row (the exact tone), more at a low PPQ. It stops dead at a note's end; only
         a slide goes on to the next note."""
-        c, app, kb = self.canvas, self.app, self.kb_w
+        c, app, kb = self.paint, self.app, self.kb_w
         width = max(2, round(2 * self.s))
         hz = self.line_hz()
         sh = self.target()  # (what's heard: at the tempo under it NOW, so a Hz bass made for another shows off)
@@ -380,8 +415,11 @@ class HzView:
         knobs = dict(hz, _memo={})  # (each slide's Glide curve: what the MOD tab needs worked out once)
         red = self.slide_red()
         most = NOTE_BEND_MOST  # (notes' own bends: no Range knob)
+        lo, hi = self.beat_at(kb), self.beat_at(w)
         for a, b, s in links(self.tones):  # a slide over a gap between two notes: no sound there
             x0, x1 = a["t"] + a["len"], b["t"]
+            if x0 > hi or x1 < lo:  # (out of view)
+                continue
             f0, f1, k0, k1 = glide(a, b, s)
             k0, k1 = self.bent_pitch(a, f0, most), self.bent_pitch(b, f1, most)  # (from / to the bent pitches)
             if x1 - x0 > 1e-9:
@@ -391,7 +429,6 @@ class HzView:
                        for t in beats]
                 c.create_line(*[v for p in pts for v in p], fill=red, dash=(3, 3))
         left = self.song_left()
-        lo, hi = self.beat_at(kb), self.beat_at(w)
         for n in self.tones:  # Auto gates: the threshold around each note's tone, green = fixed, orange = mixed (a
             got = auto_state(hz, app.ppq, n)  # note's own gates: the thinnest band)
             if got is None or n["t"] > hi or n["t"] + n["len"] < lo:
@@ -427,6 +464,8 @@ class HzView:
                 c.create_oval(x - r, y - r, x + r, y + r, fill=RED, outline=RED)
         if self.tune_rows():  # the exact tone of each note, over the red line: a line right on it shows green
             for n in self.tones:
+                if n["t"] > hi or n["t"] + n["len"] < lo:
+                    continue
                 y = self.pitch_y(n["key"])
                 c.create_line(self.x_of(n["t"]), y, self.x_of(n["t"] + n["len"]), y, fill=GREEN)
 

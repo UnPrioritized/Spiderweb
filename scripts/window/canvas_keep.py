@@ -26,14 +26,33 @@ def in_order(places):
     return out
 
 
+def _plain(v):
+    """An option's value as something that can be compared and remembered: a list as a tuple, a Font (can't be) by
+    its Tk name, which is what Tk is given anyway."""
+    if isinstance(v, list):
+        return tuple(v)
+    try:
+        hash(v)
+        return v
+    except TypeError:
+        return str(v)
+
+
 class KeptItems:
     """keep = KeptItems(canvas); keep.begin(); keep.create_line(...) etc. as on the canvas; keep.finish().
-    Items the canvas gets any other way are left alone (made after finish = above the kept ones)."""
+    Items the canvas gets any other way are left alone (made after finish = above the kept ones), unless
+    finish(rest=True): then they go, as a wipe of the whole canvas would. Anything else asked of it (winfo_width,
+    bbox...) is the canvas's own."""
 
     def __init__(self, canvas):
         self.canvas = canvas
         self.items = []  # [(how it was made, item id)], bottom to top
         self.want = []
+
+    def __getattr__(self, name):
+        if name in ("canvas", "items", "want"):  # (not made yet: no endless loop)
+            raise AttributeError(name)
+        return getattr(self.canvas, name)
 
     def begin(self):
         self.want = []
@@ -45,7 +64,7 @@ class KeptItems:
     def _add(self, kind, coords, kw):
         if len(coords) == 1 and isinstance(coords[0], (list, tuple)):
             coords = coords[0]
-        self.want.append((kind, tuple(coords), tuple(sorted(kw.items()))))
+        self.want.append((kind, tuple(coords), tuple(sorted((k, _plain(v)) for k, v in kw.items()))))
 
     def create_line(self, *coords, **kw):
         self._add("line", coords, kw)
@@ -62,8 +81,19 @@ class KeptItems:
     def create_image(self, *coords, **kw):
         self._add("image", coords, kw)
 
-    def finish(self):
+    def create_text(self, *coords, **kw):
+        self._add("text", coords, kw)
+
+    def finish(self, rest=False, spare=None):
+        """rest: everything else on the canvas goes too (but items tagged spare)."""
         c, want = self.canvas, self.want
+        if rest:  # (everything else on the canvas goes; kept items deleted some other way are forgotten)
+            there = set(c.find_all())
+            mine = {iid for _, iid in self.items} | (set(c.find_withtag(spare)) if spare else set())
+            strays = [i for i in there if i not in mine]
+            if strays:
+                c.delete(*strays)
+            self.items = [it for it in self.items if it[1] in there]
         pool = collections.defaultdict(collections.deque)  # how made -> (place, id) of the items made so
         for k, (how, iid) in enumerate(self.items):
             pool[how].append((k, iid))

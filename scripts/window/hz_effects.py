@@ -45,6 +45,7 @@ from notes.hzbass import (BEND, BOOST_FX, CC_FX, ENVELOPES, FROM_MODES, FX, FX_S
                           sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHIFT
 from window import look
+from window.canvas_keep import KeptItems
 from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, remember_place
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
@@ -413,12 +414,25 @@ class FxPane:
 
     def redraw(self):
         self._spans = None  # (the notes may have changed since: note_spans once again)
-        c, win, s, pal = self.canvas, self.win, self.s, self.LOOK
-        c.delete("all")
+        keep = self.__dict__.get("board")
+        if keep is None:
+            keep = self.board = KeptItems(self.canvas)
+        keep.begin()
+        try:
+            drawn = self.paint_pane(keep)
+        finally:
+            keep.finish(rest=True)  # (only what changed is made again; the moving dots go too, drawn again below)
+        if drawn:
+            self.dots = None
+            self.draw_dots()
+
+    def paint_pane(self, c):
+        """Everything on the pane but the moving dots (c = the kept items, see redraw). False: too small."""
+        win, s, pal = self.win, self.s, self.LOOK
         self.drawn = {}
         w, h, kb = c.winfo_width(), c.winfo_height(), win.kb_w
         if w < 50 or h < 20:
-            return
+            return False
         fx = win.fxl
         self.sel = {(n, i) for n, i in self.sel if n in fx and i < len(fx[n])}
         for v in (0.0, 0.5, 1.0):
@@ -429,8 +443,9 @@ class FxPane:
                 if b > a:
                     c.create_rectangle(a, 0, b, h, fill=pal["outside"], outline="")
         for n in win.tones:  # where the notes are, faintly
-            c.create_rectangle(max(kb, win.x_of(n["t"])), h - 3 * s, max(kb, win.x_of(n["t"] + n["len"])), h,
-                               fill=pal["notes"], outline="")
+            x0, x1 = max(kb, win.x_of(n["t"])), max(kb, win.x_of(n["t"] + n["len"]))
+            if x1 > kb and x0 <= w:  # (out of view: not drawn)
+                c.create_rectangle(x0, h - 3 * s, x1, h, fill=pal["notes"], outline="")
         if not fx:  # (kept clear of the "50 %" at the right, on both sides so it stays in the middle)
             free = tkfont.Font(font=look.font(7)).measure("100 %") + 12 * s
             c.create_text((kb + w) / 2, h / 2, text=tr("hz.fx_hint"), fill=pal["hint"],
@@ -467,6 +482,8 @@ class FxPane:
                 r = 3.5 * s
                 at = self.sustain(name)
                 for x, y, i, _ in self.points(name):
+                    if x + 2 * r < kb or x - 2 * r > w:  # (out of view)
+                        continue
                     fill = colour if (name, i) in self.sel else pal["point"]
                     if at is not None and abs(fx[name][i][0] - at) < 1e-9:  # the sustain point: a diamond
                         q = r * 1.5
@@ -477,6 +494,8 @@ class FxPane:
                                        width=max(1, round(1.5 * s)))
                 r = 3 * s
                 for x, y, _, _ in self.handles(name):
+                    if x + r < kb or x - r > w:
+                        continue
                     c.create_oval(x - r, y - r, x + r, y + r, fill=pal["point"], outline=colour, width=1)
         c.create_rectangle(0, 0, kb, h, fill=pal["names"], outline="")  # the effects
         over = self.names_over()
@@ -487,11 +506,19 @@ class FxPane:
                 continue
             if name is None:  # the CC lines' divider: a line with its name on it
                 c.create_line(4 * s, y, kb - 8 * s, y, fill=pal["grid"])
-                label = c.create_text(8 * s, y, text=tr("hz.fx_cc_head"), anchor="w", fill=pal["text"],
-                                      font=look.font(7))
-                box = c.bbox(label)
-                c.tag_lower(c.create_rectangle(box[0] - 2 * s, box[1], box[2] + 2 * s, box[3], fill=pal["names"],
-                                               outline=""), label)
+                how = dict(text=tr("hz.fx_cc_head"), anchor="w", fill=pal["text"], font=look.font(7))
+                key = (how["text"], how["font"], s, y)  # (its size measured on the canvas itself once, then drawn
+                boxes = self.__dict__.setdefault("label_boxes", {})  # like everything else)
+                box = boxes.get(key)
+                if box is None:
+                    real = self.canvas
+                    label = real.create_text(8 * s, y, **how)
+                    box = boxes[key] = real.bbox(label)
+                    real.delete(label)
+                    if len(boxes) > 64:  # (names scrolled a lot: only the newest kept)
+                        boxes.pop(next(iter(boxes)))
+                c.create_rectangle(box[0] - 2 * s, box[1], box[2] + 2 * s, box[3], fill=pal["names"], outline="")
+                c.create_text(8 * s, y, **how)
                 continue
             lit = self.active in (None, name)
             colour = self.colour(name) if lit else self.faint(self.colour(name), pal["names_dim"])
@@ -517,8 +544,7 @@ class FxPane:
         d = self.drag
         if d and d["kind"] == "box" and "x1" in d:
             c.create_rectangle(d["x0"], d["y0"], d["x1"], d["y1"], outline=pal["box"], dash=(3, 3))
-        self.dots = None
-        self.draw_dots()
+        return True
 
     def y_on(self, name, x):
         """The height of a line as drawn at x (None: not drawn there)."""

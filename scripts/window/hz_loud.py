@@ -23,6 +23,7 @@ from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.hzbass import clean_line, left_edge
 from roll.roll_shared import CTRL, SELECTED_COLOR, SHIFT, SLOT_COLORS, fade
 from window import look
+from window.canvas_keep import KeptItems
 from window.hz_layers import layer_colour
 from window.velocity import curve_env, curve_mid, limit_bend, segment
 from window.widgets import Tooltip
@@ -163,9 +164,23 @@ class LoudPane:
         hz = (self.win.target() or {}).get("hz") or {}
         return layer_colour(hz, hz.get("layer", 0)) if hz.get("layers") else SLOT_COLORS[0]
 
+    painting = None  # (while redraw runs: its KeptItems)
+
     def redraw(self):
-        c, win, s = self.canvas, self.win, self.s
-        c.delete("all")
+        keep = self.__dict__.get("board")
+        if keep is None:
+            keep = self.board = KeptItems(self.canvas)
+        keep.begin()
+        self.painting = keep
+        try:
+            self.paint_pane(keep)
+        finally:
+            self.painting = None
+            keep.finish(rest=True)  # (only what changed is made again, canvas_keep.py)
+
+    def paint_pane(self, c):
+        """Everything on the pane (c = the kept items, see redraw)."""
+        win, s = self.win, self.s
         w, h, kb = c.winfo_width(), c.winfo_height(), win.kb_w
         if w < 50 or h < 2 * self.pad + 10 or not self.box.winfo_manager():
             return
@@ -215,7 +230,7 @@ class LoudPane:
 
     def draw_handles(self, a, b, c, kind, lw):
         """The red line / curve with square handles on its ends and a curve's round handle in the middle."""
-        cv, win, r = self.canvas, self.win, 4 * self.s
+        cv, win, r = self.painting or self.canvas, self.win, 4 * self.s
         pts = curve_env(a, b, c, 0, self.lowest(), TOP)[1:-1]
         if len(pts) >= 2:
             cv.create_line(*[q for x, v in pts for q in (win.x_of(x), self.y_of(v))], fill=look.CHART_LINE, width=lw)

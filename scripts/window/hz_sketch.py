@@ -516,7 +516,7 @@ class HzSketch:
 
     def draw_sketch_notes(self, colours, selected):
         """The notes in view as lines (Sketch tool), each in its colours (fill, edge; selected ones in `selected`)."""
-        c, s, most, w = self.canvas, self.s, self.bend_most(), self.canvas.winfo_width()
+        c, s, most, w = self.paint, self.s, self.bend_most(), self.canvas.winfo_width()
         wide = self.sketch_wide()
         grabbed = self.drag and self.drag.get("grabbed")
         r = 3.5 * s
@@ -562,12 +562,15 @@ class HzSketch:
         label = self.sketch_label()
         if label:
             x, y, text = label
-            t = c.create_text(x, y, text=text, anchor="s", fill=look.LABEL, font=look.font(8, "bold"))
-            box = c.bbox(t)
+            how = dict(text=text, anchor="s", fill=look.LABEL, font=look.font(8, "bold"))
+            real = self.canvas  # (its size measured on the canvas itself, then drawn like everything else)
+            t = real.create_text(x, y, **how)
+            box = real.bbox(t)
+            real.delete(t)
             under = self.ruler_h + 2 * s - box[1]  # (never under the bar numbers: a top-key note, hunt 2026-10-28)
             if under > 0:
-                c.move(t, 0, under)
-                box = c.bbox(t)
+                y += under
+                box = (box[0], box[1] + under, box[2], box[3] + under)
             c.create_rectangle(box[0] - 3 * s, box[1] - s, box[2] + 3 * s, box[3] + s, fill=look.HZ_LABEL_BOX,
                                outline=BEND)
-            c.tag_raise(t)
+            c.create_text(x, y, **how)

@@ -345,7 +345,7 @@ class HzDraw:
         d = self.draft
         if d is None:
             return
-        c, s = self.canvas, self.s
+        c, s = self.paint, self.s
         fill, edge = (fade(x, 0.45) for x in colour)
         for n in self.draft_tones() or ():
             x0, x1, y = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])

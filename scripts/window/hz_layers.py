@@ -15,6 +15,7 @@ from notes.hzbass import (LAYER_NAME, LAYERS, NOT_SOUND, SOUND, all_tones, clean
                           next_id, with_layers)
 from roll.roll_shared import SLOT_COLORS
 from window import look
+from window.canvas_keep import KeptItems
 from window.hz_gates import hz_keys, hz_made
 from window.widgets import Tooltip
 
@@ -128,10 +129,20 @@ class LayerStrip:
             (w - b - round(4 * s), w - round(4 * s))
 
     def redraw(self):
-        c = self.canvas
         if not self.box.winfo_manager():
             return
-        c.delete(*[k for k in c.find_all() if "naming" not in c.gettags(k)])  # (a name being typed stays)
+        keep = self.__dict__.get("board")
+        if keep is None:
+            keep = self.board = KeptItems(self.canvas)
+        keep.begin()
+        try:
+            self.paint_rows(keep)
+        finally:
+            keep.finish(rest=True, spare="naming")  # (only what changed is made again; a name being typed stays)
+        self.canvas.tag_raise("naming")
+
+    def paint_rows(self, c):
+        """The rows (c = the kept items, see redraw)."""
         hz = self.hz()
         self.add_btn.config(state="normal" if hz is not None and len(plain_layers(hz)["layers"]) < LAYERS
                             else "disabled")
@@ -164,7 +175,6 @@ class LayerStrip:
         if self.drop is not None and self.held and self.drop not in (self.held[0], self.held[0] + 1):
             y = min(self.drop * rh, len(info) * rh - 1)
             c.create_line(0, y, w, y, fill=look.HZ_LAYER_DROP, width=max(2, round(2 * s)))
-        c.tag_raise("naming")
 
     def show_bar(self, on):
         if on != bool(self.bar.winfo_manager()):
