@@ -2134,17 +2134,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
         def new_channel(laid):
             """A new tinted track's channel for the shape's next colour (laid: its tracks so far; user 2026-10-31):
-            the first one no row uses yet, going up from its first track's; none left = the channel of its colour one
-            repeat earlier (15 colours, 16 with channel 10), so each colour keeps its channel in every repeat; fewer
-            colours than that: the one fewest rows use (Add Track's)."""
+            the first one no row uses yet, going up from its first track's; none left = the first one the shape
+            doesn't use yet (user 2026-10-31: a full list gave it its own Ch 4 twice); it uses them all = the channel
+            of its colour one repeat earlier (15 colours, 16 with channel 10), so each colour keeps its channel in
+            every repeat."""
             if not used:
                 used.append(collections.Counter(channel(r) for r in rows))
             counts, k = used[0], len(laid)
-            ch = free_channel(channel(laid[0]), counts, use10)
+            start = channel(laid[0])
+            ch = free_channel(start, counts, use10)
             if ch is None:
-                step = 16 if use10 else 15
-                ch = channel(laid[k - step]) if k >= step else min(
-                    (c for c in range(16) if c != 9 or use10), key=lambda c: (counts[c], c))
+                ch = free_channel(start, collections.Counter(channel(v) for v in laid), use10)
+            if ch is None:
+                ch = channel(laid[k - (16 if use10 else 15)])
             counts[ch] += 1
             return ch
 
