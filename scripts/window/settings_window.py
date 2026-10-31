@@ -129,6 +129,55 @@ def open_settings(app, tab=None):
 
 
 PAGE_MOST = 560  # the tallest a Settings page shows at 100 % size, in pixels (taller ones scroll)
+NOTE_WRAP = 380  # a status line's width under its control, at 100 % size
+
+
+class Form:
+    """Every Settings page laid out alike (user 2026-10-31: pages were inconsistent, texts too long): a short name
+    on the left (column 0, right side), its controls on the right (column 1); the long explanation is the hover
+    tip of both; separators across the whole page. .r = the next free row."""
+
+    def __init__(self, page, app):
+        self.page, self.app, self.r = page, app, 0
+        page.columnconfigure(1, weight=1)
+
+    def sep(self):
+        if self.r:
+            s = ttk.Separator(self.page)
+            s.grid(row=self.r, column=0, columnspan=2, sticky="ew", pady=(10, 8))
+            self.r += 1
+            return s
+
+    def row(self, label, widget=None, tip=None, pady=3, widget_tip=True):
+        """label (text or None) + widget on one row; tip on both (widget_tip=False: the widget's own pieces have
+        theirs). Returns the widget."""
+        if label:
+            lb = ttk.Label(self.page, text=label)
+            lb.grid(row=self.r, column=0, sticky="e", padx=(0, 8), pady=pady)
+            if tip:
+                Tooltip(lb, tip)
+        if widget is not None:
+            widget.grid(row=self.r, column=1, sticky="w", pady=pady)
+            if tip and widget_tip:
+                Tooltip(widget, tip)
+        self.r += 1
+        return widget
+
+    def note(self, text="", colour=None, tip=None):
+        """A grey (or coloured) status line under the controls, in column 1."""
+        lb = ttk.Label(self.page, text=text, foreground=colour or look.HINT,
+                       wraplength=round(NOTE_WRAP * self.app.scale), justify="left")
+        lb.grid(row=self.r, column=1, sticky="w", pady=(2, 3))
+        if tip:
+            Tooltip(lb, tip)
+        self.r += 1
+        return lb
+
+    def span(self, widget, pady=(4, 0)):
+        """A widget across both columns (preview box, built-in panel)."""
+        widget.grid(row=self.r, column=0, columnspan=2, sticky="ew", pady=pady)
+        self.r += 1
+        return widget
 
 
 class ScrollPage(ttk.Frame):
@@ -145,8 +194,10 @@ class ScrollPage(ttk.Frame):
         c.configure(yscrollcommand=self.bar.set)
         c.pack(side="left", fill="both", expand=True)
         self.page = ttk.Frame(c, padding=padding)
-        c.create_window(0, 0, window=self.page, anchor="nw")
+        item = c.create_window(0, 0, window=self.page, anchor="nw")
         self.page.bind("<Configure>", lambda e: self.fit())
+        # the page as wide as the tab (the widest page sets it): separators run to the edge on every page
+        c.bind("<Configure>", lambda e: c.itemconfigure(item, width=max(e.width, self.page.winfo_reqwidth())))
 
     def fit(self):
         """As big as the page, or as tall as self.most with a scrollbar."""
@@ -180,39 +231,39 @@ class SettingsWindow(tk.Toplevel):
         tab = self.pages["look"] = ScrollPage(tabs)
         page = tab.page
         tabs.add(tab, text=tr("settings.look_tab"))
-        ttk.Label(page, text=tr("look.look")).grid(row=0, column=0, sticky="e", padx=(0, 8), pady=3)
-        self.look = look_box(page)
-        self.look.grid(row=0, column=1, sticky="w", pady=3)
-        ttk.Label(page, text=tr("settings.look_hint"), foreground=look.HINT, wraplength=round(300 * app.scale),
-                  justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        self.build_size(page, 2)
-        self.build_palettes(page, 11)
-        self.build_loud(page, 17)
+        f = Form(page, app)
+        self.look = f.row(tr("look.look"), look_box(page), tip=tr("settings.look_hint"))
+        self.build_size(f)
+        self.build_palettes(f)
+        self.build_loud(f)
         self.build_sound()
         # General: updates (how often to look, and looking now: the answer shows under the row), then tips
         tab = self.pages["general"] = ScrollPage(tabs)
         page = tab.page
         tabs.add(tab, text=tr("settings.general_tab"))
+        f = Form(page, app)
         updates = app.updates
-        row = ttk.Frame(page)
-        row.pack(anchor="w")
-        ttk.Label(row, text=tr("updates.check_for_updates")).pack(side="left")
-        often_box(row, updates).pack(side="left", padx=(6, 8))
-        status = self.update_status = ttk.Label(page, text="", foreground=look.HINT,
-                                                wraplength=round(360 * app.scale), justify="left")
-        status.pack(anchor="w", pady=(6, 0))
+        row = f.row(tr("settings.row_updates"), ttk.Frame(page))
+        often_box(row, updates).pack(side="left", padx=(0, 8))
+        status = self.update_status = f.note()
+        status.grid_remove()
+
+        def say(msg):
+            if status.winfo_exists():
+                status.config(text=msg)
+                status.grid()
         ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
-            status.config(text=tr("updates.checking")),
-            updates.check(report=lambda msg: status.winfo_exists() and status.config(text=msg)))).pack(side="left")
-        self.build_tips(page)
-        self.build_file_link(page)
-        self.build_keep_colours(page)
-        self.build_copying(page)
-        self.build_domino(page)
-        self.build_indexes(page)
+            say(tr("updates.checking")), updates.check(report=say))).pack(side="left")
+        self.build_tips(f)
+        self.build_file_link(f)
+        self.build_keep_colours(f)
+        self.build_copying(f)
+        self.build_domino(f)
+        self.build_indexes(f)
         self.build_language()
         tabs.insert(0, self.pages["general"])  # (General first, user 2026-10-18)
         tabs.select(0)
+        self.line_up()
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<MouseWheel>", lambda e: self.pages and self.nametowidget(self.tabs.select()).wheel(e), add="+")
@@ -250,14 +301,34 @@ class SettingsWindow(tk.Toplevel):
             panel.take_voices()
         self.destroy()
 
-    def build_tips(self, page):
+    def line_up(self):
+        """Every page's (and the built-in panel's) name column as wide as the widest one: the controls start at
+        the same place on every tab."""
+        boxes = [t.page for t in self.pages.values()]
+        if self.app.builtin_window is not None:
+            boxes.append(self.app.builtin_window)
+        widest = 0
+        for b in boxes:
+            for w in b.grid_slaves(column=0):
+                info = w.grid_info()
+                if int(info.get("columnspan", 1)) == 1:
+                    widest = max(widest, w.winfo_reqwidth() + 8)
+        for b in boxes:
+            b.columnconfigure(0, minsize=widest)
+
+    def tick(self, page, key, var, command, tip=None, **kw):
+        c = ttk.Checkbutton(page, text=tr(key), variable=var, takefocus=False, command=command, **kw)
+        if tip:
+            Tooltip(c, tip)
+        return c
+
+    def build_tips(self, f):
         """The same tick and button as at the bottom of the Help window (the tick shares app.tips.on)."""
         tips = self.app.tips
-        ttk.Separator(page).pack(fill="x", pady=(12, 8))
-        ttk.Checkbutton(page, text=tr("help.show_a_tip_the_first_time"), variable=tips.on, takefocus=False,
-                        command=self.app.schedule_autosave).pack(anchor="w")
-        row = ttk.Frame(page)
-        row.pack(anchor="w", pady=(6, 0))
+        f.sep()
+        f.row(tr("settings.row_tips"), self.tick(f.page, "help.show_a_tip_the_first_time", tips.on,
+                                                 self.app.schedule_autosave))
+        row = f.row(None, ttk.Frame(f.page))
         note = self.tips_note = ttk.Label(row, text="", foreground=look.GOOD)
 
         def again():
@@ -267,61 +338,61 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(row, text=tr("help.show_all_tips_again"), takefocus=False, command=again).pack(side="left")
         note.pack(side="left", padx=(6, 0))
 
-    def build_file_link(self, page):
+    def build_file_link(self, f):
         """"Open .spwb files with Spiderweb" (14, user 2026-10-29): Windows told that double-clicking a .spwb opens
-        this Spiderweb. Pressed again after the folder moved = linked to the new place. Windows only."""
+        this Spiderweb. Pressed again after the folder moved = linked to the new place. Windows only. A short
+        status under it, the whole story in its tip."""
         from files.about import HERE
         from files.project import PROJECT_EXT
         from files.system import file_link, link_files
-        ttk.Separator(page).pack(fill="x", pady=(12, 8))
-        row = ttk.Frame(page)
-        row.pack(anchor="w")
-        note = self.link_note = ttk.Label(page, text="", foreground=look.HINT, wraplength=round(360 * self.app.scale),
-                                          justify="left")
+        f.sep()
+        b = f.row(tr("settings.row_files"), ttk.Button(f.page, text=tr("settings.link_button"), takefocus=False))
+        note = self.link_note = f.note()
+        tip = Tooltip(note, "")
 
         def show():
-            now = file_link(PROJECT_EXT, HERE)
-            note.config(text=tr("settings.link_" + (now or "windows_only")),
+            now = file_link(PROJECT_EXT, HERE) or "windows_only"
+            note.config(text=tr(f"settings.link_{now}_short"),
                         foreground=look.GOOD if now == "here" else look.HINT)
+            tip.set_text(tr(f"settings.link_{now}"))
 
         def link():
             if link_files(PROJECT_EXT, HERE, tr("project.spiderweb_project")):
                 show()
             else:
                 note.config(text=tr("settings.link_failed"), foreground=look.ERROR)
-        b = ttk.Button(row, text=tr("settings.link_button"), takefocus=False, command=link)
-        b.pack(side="left")
+                tip.set_text("")
+        b.config(command=link)
         if file_link(PROJECT_EXT, HERE) is None:
             b.state(["disabled"])
-        note.pack(anchor="w", pady=(6, 0))
         show()
 
-    def build_keep_colours(self, page):
+    def build_keep_colours(self, f):
         """Multi channel: a shape overlapping an earlier one moves whole to the next row of channels (render keep)."""
-        ttk.Separator(page).pack(fill="x", pady=(12, 8))
-        ttk.Checkbutton(page, text=tr("settings.keep_colours"), variable=self.app.keep_colours, takefocus=False,
-                        command=self.app.shapes_changed).pack(anchor="w")
-        ttk.Label(page, text=tr("settings.keep_colours_hint"), foreground=look.HINT,
-                  wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
+        f.sep()
+        f.row(tr("settings.row_channels"), self.tick(f.page, "settings.keep_colours", self.app.keep_colours,
+                                                     self.app.shapes_changed), tip=tr("settings.keep_colours_hint"))
 
-    def build_loud(self, page, r):
+    def build_loud(self, f):
         """A loaded MIDI's louder notes drawn on top (roll_loaded.loud_tab); off = the later track on top."""
-        ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
-        ttk.Checkbutton(page, text=tr("settings.loud_on_top"), variable=self.app.loud_on_top, takefocus=False,
-                        command=self.app.roll.request_redraw).grid(row=r + 1, column=0, columnspan=2, sticky="w")
-        ttk.Label(page, text=tr("settings.loud_on_top_hint"), foreground=look.HINT,
-                  wraplength=round(360 * self.app.scale), justify="left").grid(row=r + 2, column=0, columnspan=2,
-                                                                               sticky="w", pady=(4, 0))
+        f.sep()
+        f.row(tr("settings.row_loaded"), self.tick(f.page, "settings.loud_on_top_short", self.app.loud_on_top,
+                                                   self.app.roll.request_redraw), tip=tr("settings.loud_on_top_hint"))
 
-    def build_indexes(self, page):
+    def build_indexes(self, f):
         """Load MIDI's saved indexes (files/midi_saved.py): each MIDI's name, the index's size, a Delete button."""
         from files import midi_saved
         from window.load_midi import size_text
-        ttk.Separator(page).pack(fill="x", pady=(12, 8))
-        ttk.Label(page, text=tr("settings.indexes")).pack(anchor="w")
+        f.sep()
+        page = f.page
         box = ttk.Frame(page)
-        box.pack(anchor="w", fill="x", pady=(4, 0))
-        width = round(360 * self.app.scale)
+        lb = ttk.Label(page, text=tr("settings.row_indexes"))
+        lb.grid(row=f.r, column=0, sticky="ne", padx=(0, 8), pady=3)
+        box.grid(row=f.r, column=1, sticky="ew", pady=3)
+        f.r += 1
+        for w in (lb, box):
+            Tooltip(w, tr("settings.indexes_hint"))
+        width = round(NOTE_WRAP * self.app.scale)
 
         def fill():
             for w in box.winfo_children():
@@ -338,32 +409,22 @@ class SettingsWindow(tk.Toplevel):
                 ShortLabel(row, text=os.path.basename(path)).pack(side="left", fill="x", expand=True)
             ttk.Frame(box, width=width, height=0).pack(anchor="w")
         fill()
-        ttk.Label(page, text=tr("settings.indexes_hint"), foreground=look.HINT, wraplength=width,
-                  justify="left").pack(anchor="w", pady=(4, 0))
 
-    def build_copying(self, page):
+    def build_copying(self, f):
         """Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (App.put_clipboard)."""
-        ttk.Separator(page).pack(fill="x", pady=(12, 8))
-        ttk.Label(page, text=tr("settings.copying")).pack(anchor="w")
-        ttk.Checkbutton(page, text=tr("settings.copy_domino"), variable=self.app.copy_domino, takefocus=False,
-                        command=self.app.schedule_autosave).pack(anchor="w", pady=(4, 0))
-        ttk.Label(page, text=tr("settings.copy_domino_hint"), foreground=look.HINT,
-                  wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
+        f.sep()
+        f.row(tr("settings.row_copying"), self.tick(f.page, "settings.copy_domino", self.app.copy_domino,
+                                                    self.app.schedule_autosave), tip=tr("settings.copy_domino_hint"))
         from files.clipboard import RAW  # (Linux: no such clipboard yet, the tick greyed, user 2026-10-20)
-        ttk.Checkbutton(page, text=tr("settings.copy_notes"), variable=self.app.copy_notes, takefocus=False,
-                        command=self.app.schedule_autosave,
-                        state="normal" if RAW else "disabled").pack(anchor="w", pady=(8, 0))
-        ttk.Label(page, text=tr("settings.copy_notes_hint") + ("" if RAW else tr("settings.copy_notes_windows")),
-                  foreground=look.HINT,
-                  wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
+        f.row(None, self.tick(f.page, "settings.copy_notes", self.app.copy_notes, self.app.schedule_autosave,
+                              state="normal" if RAW else "disabled"),
+              tip=tr("settings.copy_notes_hint") + ("" if RAW else tr("settings.copy_notes_windows")))
 
-    def build_domino(self, page):
+    def build_domino(self, f):
         """(Experimental) Domino 256 keys: Copy / Paste / Export to Domino keep keys above 127 (off: left out)."""
-        ttk.Separator(page).pack(fill="x", pady=(12, 8))
-        ttk.Checkbutton(page, text=tr("settings.domino_256"), variable=self.app.domino256, takefocus=False,
-                        command=self.app.schedule_autosave).pack(anchor="w")
-        ttk.Label(page, text=tr("settings.domino_256_hint"), foreground=look.HINT,
-                  wraplength=round(360 * self.app.scale), justify="left").pack(anchor="w", pady=(4, 0))
+        f.sep()
+        f.row(tr("settings.row_domino"), self.tick(f.page, "settings.domino_256_short", self.app.domino256,
+                                                   self.app.schedule_autosave), tip=tr("settings.domino_256_hint"))
 
     # ------------------------------------------------------------ language (lang.languages; next start, like the look)
 
@@ -378,30 +439,24 @@ class SettingsWindow(tk.Toplevel):
         self.language_codes = codes = [c for c, _ in found]  # (picked by place in the list: names can be alike)
         names = [n for _, n in found]
         var = self.language_var = tk.StringVar(value=names[codes.index(saved)])
-        wrap = round(320 * self.app.scale)
-        row = ttk.Frame(page)
-        row.pack(anchor="w")
-        ttk.Label(row, text=tr("language.pick")).pack(side="left")
-        box = self.language_box = ttk.Combobox(row, textvariable=var, values=names, state="readonly",
-                                               width=max(18, max(len(n) for n in names) + 2))
-        box.pack(side="left", padx=(6, 0))
+        f = Form(page, self.app)
+        box = self.language_box = f.row(tr("language.pick"), ttk.Combobox(
+            page, textvariable=var, values=names, state="readonly", width=max(18, max(len(n) for n in names) + 2)),
+            tip=tr("language.tip"))
         letter_jump(box)
-        Tooltip(box, tr("language.tip"))
-        note = self.language_note = ttk.Label(page, text="", foreground=look.WARN, wraplength=wrap, justify="left")
+        note = self.language_note = f.note(colour=look.WARN)
         if saved != lang.LANGUAGE:  # (picked before, not put on yet: said for as long as it's true)
             note.config(text=tr("language.restart"))
-        note.pack(anchor="w", pady=(8, 0))
-        for file, (why, line) in sorted(lang.problems.items()):
-            text = (tr("language.broken", file=file, line=line) if why == "line" else
-                    tr("language.bad_name", file=file) if why == "name" else tr("language.unreadable", file=file))
-            ttk.Label(page, text=text, foreground=look.WARN, wraplength=wrap, justify="left").pack(anchor="w",
-                                                                                               pady=(4, 0))
+        else:
+            note.grid_remove()
+        for file, (why, line) in sorted(lang.problems.items()):  # (warnings stay whole: they say what to fix)
+            f.note(tr("language.broken", file=file, line=line) if why == "line" else
+                   tr("language.bad_name", file=file) if why == "name" else tr("language.unreadable", file=file),
+                   colour=look.WARN)
         if len(found) < 2:
-            ttk.Label(page, text=tr("language.only_english"), foreground=look.HINT, justify="left",
-                      wraplength=wrap).pack(anchor="w", pady=(8, 0))
-        b = ttk.Button(page, text=tr("language.template"), takefocus=False, command=self.make_template)
-        b.pack(anchor="w", pady=(8, 0))
-        Tooltip(b, tr("language.template_tip"))
+            f.note(tr("language.only_english_short"), tip=tr("language.only_english"))
+        f.row(None, ttk.Button(page, text=tr("language.template"), takefocus=False, command=self.make_template),
+              tip=tr("language.template_tip"))
 
         def picked(e):
             code = codes[box.current()]
@@ -413,6 +468,7 @@ class SettingsWindow(tk.Toplevel):
                 box.current(codes.index(back) if back in codes else codes.index(saved))
                 return
             note.config(text="" if code == lang.LANGUAGE else tr("language.restart"))
+            note.grid_remove() if code == lang.LANGUAGE else note.grid()
         box.bind("<<ComboboxSelected>>", picked)
 
     def make_template(self):
@@ -439,30 +495,24 @@ class SettingsWindow(tk.Toplevel):
         tab = self.pages["sound"] = ScrollPage(self.tabs)
         page = tab.page
         self.tabs.add(tab, text=tr("settings.sound_tab"))
-        page.columnconfigure(1, weight=1)
-        ttk.Label(page, text=tr("app.midi_out")).grid(row=0, column=0, sticky="e", padx=(0, 8), pady=3)
-        dev = self.midi_box = ttk.Combobox(page, textvariable=app.midi_device, state="readonly", values=devices(),
-                                           width=30)
+        f = Form(page, app)
+        dev = self.midi_box = f.row(tr("settings.row_midi_out"), ttk.Combobox(page, textvariable=app.midi_device,
+                                                                     state="readonly", values=devices(), width=30))
         keep_width(dev)
         letter_jump(dev)
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # (re-listed when it opens)
-        dev.grid(row=0, column=1, sticky="w", pady=3)
-        ttk.Separator(page).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 8))
-        self.builtin_title = ttk.Label(page, text=tr("bs.title"))
-        self.builtin_title.grid(row=2, column=0, columnspan=2, sticky="w")
-        panel = app.builtin_window = BuiltinPanel(page, app)
-        panel.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.builtin_off = f.note(tr("settings.builtin_off"))
+        self.sound_sep = f.sep()
+        self.builtin_title = f.span(ttk.Label(page, text=tr("bs.title")), pady=(0, 2))
+        panel = app.builtin_window = f.span(BuiltinPanel(page, app))
         panel.bind("<Destroy>", lambda e: e.widget is panel and setattr(app, "builtin_window", None), add="+")
-        self.builtin_off = ttk.Label(page, text=tr("settings.builtin_off"), foreground=look.HINT,
-                                     wraplength=round(320 * app.scale), justify="left")
-        self.builtin_off.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.show_builtin()
 
     def show_builtin(self):
         """Built-in BASSMIDI's settings while it's the MIDI out, else a line saying they're for it."""
         dev = self.app.midi_device.get()
         on = dev in (BUILTIN, KESTREL)
-        for w in (self.builtin_title, self.app.builtin_window):
+        for w in (self.sound_sep, self.builtin_title, self.app.builtin_window):
             w.grid() if on else w.grid_remove()
         self.builtin_off.grid_remove() if on else self.builtin_off.grid()
         if on:  # (Kestrel (GPU): its own rows instead, the soundfont list shared)
@@ -471,10 +521,11 @@ class SettingsWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ size, font, text size (look.apply_size)
 
-    def build_size(self, page, r):
+    def build_size(self, f):
         """Size / Font / Text size: saved at once, put on at the next start (an orange line says so while what's
         saved isn't what's showing)."""
-        ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+        page = f.page
+        f.sep()
         self.size_names = {k: tr("look.size_system") if k == "system" else f"{k} %" for k in look.SIZES}
         self.font_default = tr("look.font_default", font=look.USUAL_FAMILY)
         self.text_names = {k: tr("look.text_" + k) for k in look.TEXT_STEPS}
@@ -496,10 +547,8 @@ class SettingsWindow(tk.Toplevel):
                 ("look.edge", self.edge_var, list(self.edge_names.values()), 18, "look.edge_tip"),
                 ("look.lines", self.lines_var, list(self.lines_names.values()), 18, "look.lines_tip"))
         self.look_boxes = {}
-        for k, (label, var, values, width, tip) in enumerate(rows):
-            ttk.Label(page, text=tr(label)).grid(row=r + 1 + k, column=0, sticky="e", padx=(0, 8), pady=3)
-            row = ttk.Frame(page)
-            row.grid(row=r + 1 + k, column=1, sticky="w", pady=3)
+        for label, var, values, width, tip in rows:
+            row = f.row(tr(label), ttk.Frame(page), tip=tr(tip), widget_tip=False)
             box = self.look_boxes[label] = ttk.Combobox(row, textvariable=var, values=values, state="readonly",
                                                         width=width)
             if label == "look.font":
@@ -513,17 +562,15 @@ class SettingsWindow(tk.Toplevel):
         self.size_reset = ttk.Button(row, text=tr("look.reset"), takefocus=False, command=self.reset_size)
         self.size_reset.pack(side="left", padx=(8, 0))
         Tooltip(self.size_reset, tr("look.reset_tip"))
-        self.size_note = ttk.Label(page, text=tr("look.restart_size"), foreground=look.WARN,
-                                   wraplength=round(300 * self.app.scale), justify="left")
-        self.size_note.grid(row=r + 7, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.size_note = f.note(tr("look.restart_size"), colour=look.WARN)
         self.show_size_note()
-        self.build_preview(page, r + 8)
+        self.build_preview(f)
 
-    def build_preview(self, page, r):
+    def build_preview(self, f):
         """Pieces that work but change nothing else (user: tick, open the dropdown, step / type the number), drawn
         with the picked Size / Font / Text size at once, while the rest of the app waits for the restart. Own styles ("Preview.T..."), so the real widgets never change."""
-        box = self.preview = ttk.LabelFrame(page, text=tr("look.preview"), padding=(10, 6, 10, 8))
-        box.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        box = self.preview = f.span(ttk.LabelFrame(f.page, text=tr("look.preview"), padding=(10, 6, 10, 8)),
+                                    pady=(8, 0))
         Tooltip(box, tr("look.preview_tip"))
         self.pv_fonts = {k: tkfont.Font(self, family=look.USUAL_FAMILY, size=9) for k in ("text", "heading", "hint")}
         self.pv_fonts["heading"].configure(weight="bold")
@@ -715,25 +762,27 @@ class SettingsWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ note colours (palettes.py)
 
-    def build_palettes(self, page, r):
-        ttk.Separator(page).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 8))
-        ttk.Label(page, text=tr("palette.label")).grid(row=r + 1, column=0, sticky="e", padx=(0, 8), pady=3)
+    def build_palettes(self, f):
+        page = f.page
+        f.sep()
         self.pal_var = tk.StringVar()
-        self.pal_box = name_list(ttk.Combobox(page, textvariable=self.pal_var, state="readonly", width=24))
-        self.pal_box.grid(row=r + 1, column=1, sticky="w", pady=3)
+        self.pal_box = f.row(tr("palette.label"), name_list(ttk.Combobox(page, textvariable=self.pal_var,
+                                                                         state="readonly", width=24)),
+                             tip=tr("palette.tip"))
         self.pal_box.bind("<<ComboboxSelected>>", lambda e: self.pick_palette())
-        Tooltip(self.pal_box, tr("palette.tip"))
         # the colours, each over its MIDI channel's number (click one to change it)
         s = self.swatch_size = round(22 * self.app.scale)
         self.number_h = round(16 * self.app.scale)
-        ttk.Label(page, text=tr("palette.channel")).grid(row=r + 2, column=0, sticky="se", padx=(0, 8),
+        r = f.r
+        ttk.Label(page, text=tr("palette.channel")).grid(row=r, column=0, sticky="se", padx=(0, 8),
                                                          pady=(4, 4))
         self.swatches = tk.Canvas(page, width=palettes.SLOTS * (s + 3), height=s + 2 + self.number_h,
                                   highlightthickness=0, cursor="hand2",
                                   background=look.WINDOW_BG if look.DARK else None)
-        self.swatches.grid(row=r + 2, column=1, sticky="w", pady=(4, 4))
+        self.swatches.grid(row=r, column=1, sticky="w", pady=(4, 4))
         self.swatches.bind("<Button-1>", self.click_swatch)
         Tooltip(self.swatches, tr("palette.swatch_tip"))
+        f.r += 1
         for k, (text, command, tip) in enumerate((
                 ("palette.new", self.new_palette, "palette.new_tip"),
                 ("palette.rename", self.rename_palette, "palette.rename_tip"),
@@ -741,8 +790,7 @@ class SettingsWindow(tk.Toplevel):
                 ("palette.random", self.random_palette, "palette.random_tip"),
                 ("palette.gradient", self.gradient_palette, "palette.gradient_tip"))):
             if k % 3 == 0:
-                row = ttk.Frame(page)
-                row.grid(row=r + 3 + k // 3, column=1, sticky="w", pady=(4, 0))
+                row = f.row(None, ttk.Frame(page), pady=(4, 0))
             b = ttk.Button(row, text=tr(text), command=command, takefocus=False)
             b.pack(side="left", padx=(0, 6))
             Tooltip(b, tr(tip))
