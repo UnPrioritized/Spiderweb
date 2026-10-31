@@ -28,7 +28,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
-                          auto_count, PORTS)
+                          auto_count, PORTS, pasted_notes)
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
@@ -156,15 +156,6 @@ def can_go_in(sh):
     basses and Channel per strip shapes keep their own channels for now; pasted notes with CC events go in, their
     events on each colour's track, user 2026-10-29: "you copy from Domino is what you'll get")."""
     return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh))
-
-
-def pasted_notes(sh):
-    """Notes pasted from Domino (or pieces of them), or a plain copy made from one laid on tracks (Fill gaps, Remove
-    Track: sh["from_paste"], hunt 2026-10-29): not made by Spiderweb (Turn into plain notes, Apply mask, merges,
-    pictures...)."""
-    if sh.get("from_paste") is True:
-        return True
-    return "notes" in sh and not sh.get("made") and "merge" not in sh and not picture_like(sh)
 
 
 def placed_on(sh, own):

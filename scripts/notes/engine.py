@@ -810,6 +810,16 @@ def from_key(key):
     return json.loads(key) if isinstance(key, str) else with_big(json.loads(key[0]), key[1])
 
 
+def pasted_notes(sh):
+    """Notes pasted from Domino (or pieces of them), or a plain copy made from one laid on tracks (Fill gaps, Remove
+    Track: sh["from_paste"], hunt 2026-10-29): not made by Spiderweb (Turn into plain notes, Apply mask, merges,
+    pictures...)."""
+    if sh.get("from_paste") is True:
+        return True
+    return "notes" in sh and not sh.get("made") and "merge" not in sh and "picture" not in sh and \
+        "picture_notes" not in sh
+
+
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)
 _warming = threading.local()
 
@@ -823,7 +833,10 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get(without_recolour(sh))
         if not is_recoloured(sh):
             return notes, tracks
-        return recoloured(notes, tracks, rule_of(sh["recolour"]), is_sustained(sh) or sh.get("held") is True,
+        # (held: overlaps kept, not settled; a Domino paste keeps its own overlaps too, as with Recolour off
+        # (Multi channel, user 2026-10-30; Single channel cuts them on its track afterwards anyway)
+        return recoloured(notes, tracks, rule_of(sh["recolour"]),
+                          is_sustained(sh) or sh.get("held") is True or pasted_notes(sh),
                           is_pasted_flipped(sh) or is_gate_flipped(sh), free_box(sh, notes, get, keys))
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
