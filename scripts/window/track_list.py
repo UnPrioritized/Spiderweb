@@ -4113,6 +4113,12 @@ class BehindWindow(tk.Toplevel):
                                                                                                  padx=(4, 0))
         ttk.Button(btns, text=tr("tracks.picker_close"), command=self.close).pack(side="right")
         self.bind("<Escape>", lambda e: self.close())
+        # Ctrl+A = All (user 2026-10-31: Tk's own list key only highlighted the rows, the piano roll took nothing
+        # until the next click); Ctrl+/ too (Tk's), Ctrl+\ = None. "break": not the main window's Select all
+        for keys, on in (("<Control-a> <Control-A> <Control-slash>", True), ("<Control-backslash>", False)):
+            for k in keys.split():
+                self.bind(k, lambda e, on=on: (self.set_all(on), "break")[1])
+                self.list.bind(k, lambda e, on=on: (self.set_all(on), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.slots = []
         self.fill()

@@ -18,6 +18,8 @@ What's new:
 
 • Fixed: notes pasted from Domino lost their overlaps on the same key in Multi channel, so Copy to Domino and pasting straight back didn't match. Now only Single channel removes them.
 
+• Fixed: Ctrl+A in Show multiple tracks highlighted every track but showed none of them until the next click.
+
 ## Version 1.7.0
 
 What's new:
