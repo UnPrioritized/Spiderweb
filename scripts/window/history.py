@@ -76,7 +76,9 @@ FUTURE = look.FUTURE  # steps undone (Ctrl+Y / clicking them brings them back; a
 EDIT_NAMES = {"vel0": tr("history.velocity"), "vel1": tr("history.velocity"), "point": tr("history.move_a_point"),
               "smooth": tr("history.straighten"), "pattern": tr("history.pattern"),
               "shape": tr("history.shape"), "polygon": tr("history.polygon"), "by_snap": tr("app.by_snap"),
-              "gliss": tr("history.gliss_grids"), "gliss_keys": tr("history.gliss_keys")}
+              "gliss": tr("history.gliss_grids"), "gliss_keys": tr("history.gliss_keys"),
+              "gliss_step": tr("history.gliss_step"), "gliss_thick": tr("history.gliss_thick"),
+              "gliss_len": tr("history.gliss_len")}
 
 
 def edit_name(key):

@@ -771,6 +771,8 @@ class RollDrawing:
             if sel["kind"] == "custom" and app.tool.get() != "text":
                 self.draw_custom_box(sel)
             self.draw_handles(sel)  # on top: a stroke's point wins over the box's squares
+            if sel["kind"] == "gliss":
+                self.draw_gliss(sel)  # (its thickness handle + outermost copy: roll_gliss)
         if self.draft:
             self.draw_path(self.draft, look.DRAFT_LINE, look.LINES + 1)
             self.draw_draft_points()

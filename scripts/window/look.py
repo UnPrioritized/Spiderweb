@@ -170,6 +170,7 @@ KEY_BLACK, KEY_BLACK_OUTSIDE = pick("#222222", "#212123"), pick("#6a6a6a", "#4a4
 KEY_HALF, KEY_HALF_OUTSIDE = pick("#8c8c8c", "#6a6a6c"), pick("#b4b4b4", "#58585a")  # 31-EDO's half sharps / flats
 KEY_EDGE_C, KEY_EDGE_F = pick("#606060", "#5a5a5c"), pick("#b0b0b0", "#8a8a8c")  # under C, under F
 KEY_TEXT = pick("#333", "#363637")
+GLISS_COPY = pick("#5b8fd6", "#8ab4f0")  # a thick Glissando run's outermost copy (dashed, roll_gliss)
 KEY_PICKED, KEY_PICKED_BLACK = pick("#8cbcf4", "#7aa6e0"), pick("#2a64b4", "#3d6fb8")  # Glissando's picked keys (lit)
 ROLL_EDGE = pick("#808080", "#656567")  # beside the keys, under the ruler
 RULER_BG, RULER_TICK, RULER_TEXT = pick("#f0f0f0", "#434346"), pick("#555", "#a0a0a4"), pick("#333", "#e2e2e4")

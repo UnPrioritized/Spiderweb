@@ -24,7 +24,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     graph_window.py  a tumour setting's graph (the number changing along the line)
     join_split.py    Join (shapes -> one curve) and Split (cut in two, pieces -> separate shapes)
     panel_freehand.py  the panel's Straighten setting for freehand strokes
-    panel_gliss.py   the panel's Glissando settings: which grids a run's step picks from
+    panel_gliss.py   the panel's Glissando settings: grids, step, thickness, note length, picked keys
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
     font_dialog.py   the font window (type a font's name or pick one)
     widgets.py       tooltips
@@ -83,6 +83,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_curve.py    editing curves (anchors + handles, symmetric halves)
     roll_custom.py   the selected custom shape's box (resize, turn, skew)
     roll_funnel.py   editing funnels (curve starts, bends, extra lines, highlighted lines / curves)
+    roll_gliss.py    editing a Glissando run: its thickness handle, its notes' right ends
     roll_live.py     live drawing (strokes straight into one custom shape), picking / editing its strokes
     roll_menu.py     the right-click menu
     roll_text.py     the Text tool: typing on the roll, the caret

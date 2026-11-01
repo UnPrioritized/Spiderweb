@@ -29,6 +29,7 @@ from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
 from roll.roll_funnel import FunnelEditing
+from roll.roll_gliss import GlissEditing
 from roll.roll_hz import HzStart
 from window import look
 from window.hz_window import open_hz
@@ -52,7 +53,7 @@ EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                PathEditing, SustainStops, LassoDrawing, CentreDots, MelodyMarks, tk.Canvas):
+                PathEditing, SustainStops, LassoDrawing, CentreDots, MelodyMarks, GlissEditing, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -1153,6 +1154,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 if isinstance(i, tuple) and i[0] == "ripple":  # (a Ripples source's centre point: picked too)
                     app.pick_source(i[1])
                 return
+            if self.gliss_press(e):  # (the selected Glissando run's thickness handle / a note's right end)
+                if kept:
+                    self.box_kept = (kept, set(app.sels))
+                return
 
         hit = self.custom_hit(e.x, e.y)
         if hit and hit[0] != "inside":  # the selected custom shape's corner / side: resize, just outside: turn / skew
@@ -1361,6 +1366,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if abs(e.x - self.drag[2]) >= BOX_STILL:
                 self.ruler_box()
                 self.on_drag(e)
+        elif kind in ("gliss_thick", "gliss_len"):
+            self.gliss_drag(e)
         elif kind == "handle":
             step = self.held_step([self.app.sel])
             if isinstance(self.drag[1], tuple) and self.app.selected()["kind"] == "custom":
@@ -1715,6 +1722,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         elif kind == "stretch":  # the box goes back to its size, the shapes stay stretched (user)
             self.box_kept = (self.drag[4], set(self.app.sels))
             self.app.sync_panel()
+        if kind == "handle":
+            self.gliss_snap()  # (a Glissando run's end square: its end snaps, like drawing it)
         if kind in ("handle", "move", "stretch"):
             self.app.sync_funnel()  # its note count
         if kind in ("handle", "move", "stretch", "resize", "turn", "skew"):
@@ -1815,6 +1824,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                       and self.app.tool.get() == "select" and not self.draft else None)
             if e.y < self.ruler_h and not over:  # (the bar numbers: the plain pointer, like many MIDI programs)
                 self.set_cursor("arrow")
+            elif not over and not self.draft and self.gliss_cursor(e.x, e.y):  # (a Glissando run's handle / note end)
+                self.set_cursor(self.gliss_cursor(e.x, e.y))
             else:
                 self.set_cursor("fleur" if over else BOX_CURSORS[on_box] if on_box else self.hover_cursor(e, hit))
         if self.follow:  # a shape started with a click follows the mouse

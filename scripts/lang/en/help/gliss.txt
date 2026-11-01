@@ -14,6 +14,12 @@ A click picks that note in every octave: click C, E and G for a C major run. Cli
 
 With a run selected, the picked keys are the run's: pick other keys and the run follows them. With nothing selected, they are the keys your next runs use. With no keys picked, runs use the white keys.
 
-## Moving a run's ends
+## Changing a run
 
-Select a run and drag its squares to move its ends.
+Select a run and drag its squares to move its ends. When you let go, the end moves to where the last key's note starts.
+
+Step: Auto picks the step from how steep the line is. Pick a fixed step to make the run faster or slower: 1/32 to 1/64 makes it 2x faster. The run keeps its start and keys and gets shorter or longer.
+
+Thickness: copies of the run, each one picked key above, playing at the same times. A minus number puts them below. On the piano roll, drag the selected run's round handle up or down; a dashed line shows the outermost copy.
+
+Note length: how long each note is, as % of the step (100 % = up to the next note, more = they overlap) or in ticks. On the piano roll, drag any note's right end: every note in the run follows.
