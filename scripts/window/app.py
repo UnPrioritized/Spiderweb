@@ -2078,14 +2078,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         return sorted({v - FILE0 for sh in self.shapes for v in into_ids(sh) + list(sh.get("into_rest") or [])
                        if type(v) is int and v >= FILE0 and v - FILE0 in files})
 
-    def own_written(self):
+    def own_written(self, as_mode=None):
         """The tracks added by hand the track list shows and the exports write. Multi channel: all of them. Single
         channel / As drawn (hunt 2026-10-26, user: you get what you see): a laid shape plays every colour on its first
         track, so the tracks Spiderweb added only for its other colours (tinted, "auto") are left out until Multi
         channel again. In every mode a tinted track kept only for a colour gone for now (into_rest: e.g. Repeated colours
         unticked) is left out too, until the colour is back. The same list while nothing changes (the track list
-        compares it by identity)."""
-        own, mode = self.own_tracks, self.channel_mode.get()
+        compares it by identity). as_mode: the list that channels mode would show (not kept: fit_into asks what Multi
+        channel shows, for a Domino paste)."""
+        own, mode = self.own_tracks, as_mode or self.channel_mode.get()
         if not any(t.get("auto") for t in own):
             return own
         chans = self.own_channels()
@@ -2101,7 +2102,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return got[1]
         out = [t for t in own if not t.get("auto") or t["id"] in shown]
         out = own if len(out) == len(own) else out
-        self._own_written = (key, out)
+        if as_mode is None:
+            self._own_written = (key, out)
         return out
 
     def fit_into(self, made):
@@ -2155,7 +2157,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
         # (tracks kept hidden for a colour gone for now / Single channel: not rows to fill, hunt 2026-10-31: a new
         # shape's colour landed on one and its channel was handed out twice; their own shape still gets them back)
-        hidden = {t["id"] for t in own} - {t["id"] for t in self.own_written()}
+        hidden = shown_hidden = {t["id"] for t in own} - {t["id"] for t in self.own_written()}
+        # (a Domino paste fills the rows Multi channel shows, in every mode: hunt 2026-11-01, in Single it skipped
+        # tracks Single hides and landed elsewhere than in Multi; those it lays on show again)
+        multi_hidden = shown_hidden if mode == "auto" else (
+            {t["id"] for t in own} - {t["id"] for t in self.own_written("auto")})
+        apart_now = [False]
 
         def port(v):  # (a new tinted track takes the port of the one above)
             if v >= FILE0:
@@ -2171,12 +2178,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             16 on (17 with channel 10): the channel of its colour one repeat earlier, so each colour keeps its
             channel in every repeat (two of its tracks sharing a channel don't shift them)."""
             if not taken:
-                taken.append(collections.Counter(c for r in rows if r not in hidden for c in plays_on(r)))
+                taken.append(collections.Counter(c for r in rows if r not in shown_hidden for c in plays_on(r)))
+                taken.append(collections.Counter(c for r in rows if r in shown_hidden and r not in multi_hidden
+                                                 for c in plays_on(r)))  # (shown in Multi channel only)
             counts, k, step = taken[0], len(laid), 16 if use10 else 15
             if k >= step:
                 ch = channel(laid[k - step])
             else:
-                ch = free_channel(start, counts, use10)
+                ch = free_channel(start, counts + taken[1] if apart_now[0] else counts, use10)
                 if ch is None:
                     ch = free_channel(start, collections.Counter(c for v in laid for c in plays_on(v)), use10)
                 if ch is None:
@@ -2204,6 +2213,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         known = Known(by_id, files)  # (yours, also the ones added below, and the loaded MIDI's)
         for i, n in need.items():
             sh = self.shapes[i]
+            apart_now[0] = mode != "auto" and colours_apart(sh, mode)
+            hidden = multi_hidden if apart_now[0] else shown_hidden
             sh.pop("into_new", False)  # (just drawn / pasted)
             have, cols = placed_on(sh, known), sh.get("cols")
             if n <= 0 or not have or (len(have) >= n and not cols):
