@@ -158,6 +158,14 @@ def can_go_in(sh):
     return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh))
 
 
+def recolour_alone(sh):
+    """sh as its notes are made outside Multi channel: Recolour left out (in one channel it would only change
+    overlaps), except on a Domino paste (its tracks kept in every mode: hunt 2026-11-01)."""
+    if "recolour" not in sh:
+        return sh
+    return with_most(sh, False) if pasted_notes(sh) else without_recolour(sh)
+
+
 def colours_apart(sh, mode):
     """Does a laid shape keep each colour on its own track in this channels mode? Multi channel: always. Single
     channel / As drawn: only a shape keeping its own channels (an Extract, a picture) or a Domino paste (user
@@ -1817,8 +1825,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """shape_notes_tracks, remembered. Each note tool page goes on top of the notes remembered without it
         (trying a page's settings doesn't make the notes before it again). Outside Multi channel a Hz bass's notes
         are made as for one channel (Own channel per note needs Multi channel)."""
-        if self.channel_mode.get() != "auto":  # (Recolour too: in one channel it would only change overlaps)
-            sh = without_recolour(one_voice(sh)) if "recolour" in sh else one_voice(sh)
+        if self.channel_mode.get() != "auto":  # (Recolour too: in one channel it would only change overlaps; a
+            sh = recolour_alone(one_voice(sh))  # Domino paste keeps its tracks, so its Recolour stays)
         elif "recolour" in sh:  # (a colour set holds 16 with channel 10 used)
             sh = with_most(sh, self.all16())
         key = (shape_key(sh), self.ppq, self.keys)
@@ -2525,8 +2533,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def notes_tracks(sh):
             if job["stop"]:
                 raise Stopped
-            if not voiced:  # (as App.notes_tracks: Recolour left out too)
-                sh = without_recolour(one_voice(sh)) if "recolour" in sh else one_voice(sh)
+            if not voiced:  # (as App.notes_tracks: Recolour left out too, not a Domino paste's)
+                sh = recolour_alone(one_voice(sh))
             elif "recolour" in sh:
                 sh = with_most(sh, wide)
             k = (shape_key(sh), key[1], key[2])

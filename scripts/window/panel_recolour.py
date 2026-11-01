@@ -9,6 +9,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import ROUND
+from notes.engine import pasted_notes
 from notes.recolour import BY, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
     wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
@@ -114,7 +115,8 @@ class RecolourPanel:
         self.recolour_mix.set(mixes == {True})
         self.recolour_mix_tick.state(["alternate" if len(mixes) > 1 else "!alternate"])
         self._loading = False
-        lonely = bool(live) and self.channel_mode.get() != "auto"
+        lonely = bool(live) and self.channel_mode.get() != "auto" and not all(  # (a Domino paste: works in
+            pasted_notes(t) for t, r in zip(tgts, on) if r)                     # every mode, hunt 2026-11-01)
         owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
         # (nothing to shuffle, e.g. one colour: Shuffle has nothing to swap, hunt 2026-10-25)
         single = not lonely and any(r and not enough(palettes(o, wanted(r), self.set_most()), r.get("mix"))
