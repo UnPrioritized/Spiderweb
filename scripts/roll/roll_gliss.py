@@ -7,11 +7,14 @@ and lights it, moving the mouse moves both (note-off for the one left), letting 
 
 import math
 
+import numpy as np
+
 from files.lang import tr
-from notes.gliss import copies_at, gliss_notes, len_for, plan, shifted
+from notes.gliss import bent, copies_at, for_new, gliss_notes, len_for, plan, run_path, shifted
 from window import look
 
 GAP = 10  # px between the dotted lines and the outermost note rows they stand for (easy to grab off the run)
+DRAW_EVERY = 8  # a bent run's dotted lines: every 8th point of its line (30 a curve piece)
 END_NEAR = 5  # px from a note's right end that grab it
 LINE_NEAR = 6  # px from a dotted line that grab it
 SIDES = ("above", "below")
@@ -35,31 +38,45 @@ class GlissEditing:
         return sh if sh and sh["kind"] == "gliss" else None
 
     def run_pitch_at(self, sh, beat):
-        """The drawn line's pitch at beat (held level past its ends)."""
-        (b0, p0), (b1, p1) = sh["pts"][0], sh["pts"][-1]
-        if b1 == b0:
-            return (p0 + p1) / 2
-        f = max(0.0, min(1.0, (beat - b0) / (b1 - b0)))
-        return p0 + (p1 - p0) * f
+        """The drawn line's pitch at beat (a curve: its point nearest that beat; held level past its ends)."""
+        a = run_path(sh)
+        if len(a) == 2:
+            (b0, p0), (b1, p1) = a
+            if b1 == b0:
+                return (p0 + p1) / 2
+            f = max(0.0, min(1.0, (beat - b0) / (b1 - b0)))
+            return p0 + (p1 - p0) * f
+        return float(a[int(np.argmin(abs(a[:, 0] - beat))), 1])
 
     def copy_line(self, sh, side):
-        """(x0, y0, x1, y1) of side's dotted line: the drawn line moved to the outermost copy on that side (by its
-        ends' keys), then GAP px further out."""
+        """[x0, y0, x1, y1, ...] of side's dotted line: the drawn line (a curve: as drawn, bends too) moved to the
+        outermost copy on that side (by its ends' keys, in between shared out along it), then GAP px further out."""
         g, ppq = sh["gliss"], self.app.ppq
         n = g.get(side, 0) * (1 if side == "above" else -1)
         keys = plan(sh, ppq)[3]
-        (b0, p0), (b1, p1) = sh["pts"][0], sh["pts"][-1]
-        late_first = b1 < b0  # (keys go from the earlier end)
-        out = []
-        for (b, p), first in (((b0, p0), not late_first), ((b1, p1), late_first)):
-            k = (keys[0] if first else keys[-1]) if keys else None
+        a = run_path(sh)[::DRAW_EVERY] if bent(sh) else run_path(sh)
+        if bent(sh) and len(a) and a[-1].tolist() != run_path(sh)[-1].tolist():
+            a = np.vstack([a, run_path(sh)[-1:]])
+        offs = []
+        for k in ((keys[0], keys[-1]) if keys else (None, None)):
             to = shifted(g, k, n) if k is not None else None
-            p = p + ((to - k) if to is not None else n)
-            y0, y1 = self.row_y(math.floor(p + 0.5))
-            gap = GAP * self.scale
-            edge = min(y0, y1) - gap if side == "above" else max(y0, y1) + gap
-            out += [self.t2x(b), edge + (self.p2y(p) - (y0 + y1) / 2)]
-        return tuple(out)
+            offs.append((to - k) if to is not None else n)
+        f = np.linspace(0.0, 1.0, len(a))
+        p = a[:, 1] + offs[0] + (offs[1] - offs[0]) * f
+        out = (GAP * self.scale + self.sy / 2) * (-1 if side == "above" else 1)
+        xs, ys = self.t2x(a[:, 0]), self.p2y(p) + out
+        return np.column_stack([xs, ys]).ravel().tolist()
+
+    def line_near(self, line, x, y):
+        """(distance, the line's y at the nearest place) from (x, y) to a polyline [x0, y0, x1, y1, ...]."""
+        best = (math.inf, y)
+        for j in range(0, len(line) - 2, 2):
+            x0, y0, x1, y1 = line[j:j + 4]
+            d = seg_dist(x, y, x0, y0, x1, y1)
+            if d < best[0]:
+                f = 0 if x1 == x0 else max(0, min(1, (x - x0) / (x1 - x0)))
+                best = (d, y0 + (y1 - y0) * f)
+        return best
 
     def gliss_hit(self, x, y):
         """("copies", side) (a dotted line), ("end", note start tick) (a note's right end) or None, on the selected
@@ -68,7 +85,7 @@ class GlissEditing:
         if sh is None:
             return None
         for side in SIDES:
-            if seg_dist(x, y, *self.copy_line(sh, side)) <= LINE_NEAR * self.scale:
+            if self.line_near(self.copy_line(sh, side), x, y)[0] <= LINE_NEAR * self.scale:
                 return ("copies", side)
         ppq = self.app.ppq
         notes = gliss_notes(sh, ppq)
@@ -92,9 +109,7 @@ class GlissEditing:
         sh = self.gliss_run()
         if hit[0] == "copies":
             self.app.push_undo(name=tr("history.gliss_copies"))
-            x0, y0, x1, y1 = self.copy_line(sh, hit[1])
-            f = 0 if x1 == x0 else max(0, min(1, (e.x - x0) / (x1 - x0)))
-            self.drag = ("gliss_copies", hit[1], e.y - (y0 + (y1 - y0) * f))
+            self.drag = ("gliss_copies", hit[1], e.y - self.line_near(self.copy_line(sh, hit[1]), e.x, e.y)[1])
         else:
             self.app.push_undo(name=tr("history.gliss_len"))
             self.drag = ("gliss_len", hit[1])
@@ -114,10 +129,10 @@ class GlissEditing:
             new, key = copies_at(sh, away, side, self.app.ppq), side
         else:
             tick = self.event_pt(e, snap=False)[0] * self.app.ppq
-            new, key = len_for(sh, tick - self.drag[1], self.app.ppq), "len"
+            new, key = len_for(sh, tick - self.drag[1], self.app.ppq, self.drag[1]), "len"
         if g.get(key) != new:
             sh["gliss"] = dict(g, **{key: new})
-            self.app.gliss_defaults = dict(self.app.gliss_defaults, **{key: new})
+            self.app.gliss_defaults = for_new(dict(self.app.gliss_defaults, **{key: new}))
             self.app.shape_edited()
             self.app.sync_gliss()
 
@@ -126,6 +141,28 @@ class GlissEditing:
         w = max(1, round(1.5 * self.scale))
         for side in SIDES:
             self.create_line(*self.copy_line(sh, side), fill=look.GLISS_COPY, width=w, dash=(4, 3))
+
+    # ---- bending (stage E): a run gets the Curve tool's anchors and handles
+    def gliss_bend(self, sh, e, near=None):
+        """Middle-click / "Add anchor here" on a run: a new anchor there, moved to the mouse (a straight run becomes a
+        curve first: the same line, so the same notes). True if one was added."""
+        if bent(sh):
+            return self.curve_click(sh, e, near)
+        old = sh["pts"]
+        sh["pts"] = [list(old[0]), list(old[0]), list(old[-1]), list(old[-1])]
+        if self.curve_click(sh, e, near):
+            return True
+        sh["pts"] = old
+        return False
+
+    def gliss_straight(self, sh):
+        """A bent run straight again: from its start to its end (right-click "Make the run straight")."""
+        if not bent(sh):
+            return
+        self.app.push_undo(name=tr("history.gliss_straight"))
+        sh["pts"] = [list(sh["pts"][0]), list(sh["pts"][-1])]
+        self.app.shape_edited()
+        self.app.build_points()
 
     # ---- the piano keys while picking (pianoroll.key_press starts it)
     def key_hold(self, key, ctrl):

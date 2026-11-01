@@ -16,6 +16,7 @@ from files.midi_index import CC_MOST
 from files.speed import key_sort, loops
 from notes.engine import cached_arrays, channels_of, same_shapes, shape_key, shape_notes_tracks, track_ids
 from notes.joined import all_tumours
+from notes.gliss import pen_shape
 from notes.mask import mask_joined, mask_units, unit_of
 from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
@@ -1918,7 +1919,7 @@ class RollDrawing:
         # a highlighted funnel curve's handles take its colour (purple / teal), so you see which ones shape it
         colors = self.part_colors() if sh["kind"] == "funnel" else {}
         knives = (piece_knives(sh) if sh["kind"] == "funnel" else None) or []
-        lines = ([(a, h, HANDLE_COLOR) for a, h in self.curve_handle_lines(sh)] if sh["kind"] == "curve" else
+        lines = ([(a, h, HANDLE_COLOR) for a, h in self.curve_handle_lines(sh)] if pen_shape(sh) else
                  [(a, h, colors.get(c, HANDLE_COLOR)) for a, h, c in funnel_handle_lines(sh)
                   if on_side(knives, *a)]  # (a funnel piece: its side's only)
                  if sh["kind"] == "funnel" else
@@ -1958,7 +1959,7 @@ class RollDrawing:
                     continue
                 if kind != "start":
                     color = colors.get(i[1:3], HANDLE_COLOR)
-            elif sh["kind"] == "curve":  # a curve's ends stay squares, like a line's
+            elif pen_shape(sh):  # a curve's (a bent run's) ends stay squares, like a line's
                 kind = "ctrl" if i % 3 else "anchor" if free else None
             elif sh["kind"] == "arc":  # the point an arc passes through: round, like an anchor
                 kind = "anchor" if free else None

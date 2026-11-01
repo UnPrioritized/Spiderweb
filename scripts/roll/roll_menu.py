@@ -94,6 +94,10 @@ class ShapeMenu:
                  new_start(sh, hit[1], hit[0]) is not None if hit else bool(sh["starts"]))  # (greyed: no room)
         if sh["kind"] == "poly" and len(app.sels) == 1:
             item(tr("roll_menu.add_point_here"), "", lambda: self.insert_poly_point(sh, at))
+        if sh["kind"] == "gliss" and len(app.sels) == 1:  # (bending a Glissando run, roll_gliss)
+            item(tr("roll_menu.add_anchor_here"), "", lambda: self.gliss_bend(sh, at))
+            if len(sh["pts"]) >= 4:
+                item(tr("roll_menu.gliss_straight"), "", lambda: self.gliss_straight(sh))
         if sh["kind"] == "curve" and len(app.sels) == 1:
             item(tr("roll_menu.add_anchor_here"), "", lambda: self.curve_click(sh, at))
             if not is_joined(sh):  # one half follows the other; the half right-clicked keeps its shape

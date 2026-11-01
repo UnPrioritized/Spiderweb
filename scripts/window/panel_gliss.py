@@ -6,8 +6,8 @@ from tkinter import ttk
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.gliss import (DEFAULTS, GRID_KINDS, MOST_COPIES, MOST_LEN, UNITS, auto_name, fit_pts, grid_ticks, grids,
-                         pick_key, pick_parts, picked, plan, read_list)
+from notes.gliss import (DEFAULTS, GRID_KINDS, MOST_COPIES, MOST_LEN, TIMINGS, UNITS, auto_name, base_gap, fit_pts,
+                         for_new, grid_ticks, grids, pick_key, pick_parts, picked, plan, read_list)
 from roll.roll_shared import NOTE_NAMES
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
@@ -27,29 +27,35 @@ class GlissPanel:
             Tooltip(lb, tr("panel_gliss." + key + "_tip"))
             return lb
 
-        label(0, "grids")
+        label(0, "timing")
+        cb = self.gliss_timing = ttk.Combobox(grid, state="readonly", width=20,
+                                               values=[tr("panel_gliss.timing_" + t) for t in TIMINGS])
+        cb.grid(row=0, column=1, columnspan=2, sticky="w", padx=(5, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_timing())
+        Tooltip(cb, tr("panel_gliss.timing_tip"))
+        label(1, "grids")
         cb = self.gliss_grids = ttk.Combobox(grid, state="readonly", width=18,
                                               values=(tr("panel_gliss.halves"), tr("panel_gliss.my_list")))
-        cb.grid(row=0, column=1, columnspan=2, sticky="w", padx=(5, 0))
+        cb.grid(row=1, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_grids())
         Tooltip(cb, tr("panel_gliss.grids_tip"))
         self.gliss_var = tk.StringVar()
         e = self.gliss_list = ttk.Entry(grid, textvariable=self.gliss_var, width=24)
-        e.grid(row=1, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        e.grid(row=2, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
         e.bind("<Return>", lambda ev: self.on_gliss_list())
         leave_box(self, e, self.gliss_var, self.on_gliss_list)
         Tooltip(e, tr("panel_gliss.list_tip"))
-        label(2, "step")
+        label(3, "step")
         cb = self.gliss_step = ttk.Combobox(grid, state="readonly", width=12)
-        cb.grid(row=2, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        cb.grid(row=3, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_step())
         Tooltip(cb, tr("panel_gliss.step_tip"))
         self.gliss_nums = {}
-        label(3, "copies")
+        label(4, "copies")
         both = ttk.Frame(grid)  # (Copies  above [n]  below [n]: one dotted line above the run, one below)
-        both.grid(row=3, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
-        for r, key, steps in ((3, "above", (1, 5, 1)), (3, "below", (1, 5, 1)), (4, "len", (5, 25, 1))):
-            if r == 3:
+        both.grid(row=4, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        for r, key, steps in ((4, "above", (1, 5, 1)), (4, "below", (1, 5, 1)), (5, "len", (5, 25, 1))):
+            if r == 4:
                 lb = ttk.Label(both, text=tr("panel_gliss." + key))
                 lb.pack(side="left", padx=(0 if key == "above" else 8, 4))
                 Tooltip(lb, tr("panel_gliss.copies_tip"))
@@ -64,11 +70,11 @@ class GlissPanel:
             e.bind("<Return>", lambda ev, k=key: self.on_gliss_number(k))
             leave_box(self, e, var, lambda left, k=key: self.on_gliss_number(k, left))
             Scrub(self, [(e, var, lambda k=key: self.on_gliss_number(k))], steps, label=lb)
-            Tooltip(e, tr("panel_gliss." + ("copies" if r == 3 else key) + "_tip"))
+            Tooltip(e, tr("panel_gliss." + ("copies" if r == 4 else key) + "_tip"))
             self.gliss_nums[key] = (e, var)
         cb = self.gliss_unit = ttk.Combobox(grid, state="readonly", width=10,
                                              values=[tr("panel_gliss.unit_" + u) for u in UNITS])
-        cb.grid(row=4, column=2, sticky="w", padx=(4, 0), pady=(3, 0))
+        cb.grid(row=5, column=2, sticky="w", padx=(4, 0), pady=(3, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_unit())
         Tooltip(cb, tr("panel_gliss.len_tip"))
         self.gliss_info = ttk.Label(box, text="", foreground=look.HINT)
@@ -90,6 +96,10 @@ class GlissPanel:
             return
         g = tgts[0]["gliss"]
         self._loading = True
+        timing = g.get("timing", "grid")
+        self.gliss_timing.current(TIMINGS.index(timing))
+        for w in (self.gliss_grids, self.gliss_list, self.gliss_step):  # (unsnapped: no step, the line decides)
+            w.config(state=("readonly" if w is not self.gliss_list else "normal") if timing == "grid" else "disabled")
         self.gliss_grids.current(GRID_KINDS.index(g.get("grids", "halves")))
         if g.get("grids") == "list":
             self.gliss_list.grid()
@@ -105,6 +115,9 @@ class GlissPanel:
             var.set(fmt(g.get(key, DEFAULTS[key])))
             good(e)
         self.gliss_unit.current(UNITS.index(g.get("unit", "pct")))
+        run = "kind" in tgts[0]  # (new runs always start at 100 %, user 11-02: greyed with no run selected)
+        self.gliss_nums["len"][0].config(state="normal" if run else "disabled")
+        self.gliss_unit.config(state="readonly" if run else "disabled")
         self._loading = False
         lines = [self.picks_text(g)]
         if "kind" in tgts[0]:  # a run: how many keys
@@ -133,6 +146,13 @@ class GlissPanel:
                            step="auto" if i <= 0 else self.gliss_step_names(tgts[0])[i])
         self.roll.focus_set()
 
+    def on_gliss_timing(self):
+        if self._loading:
+            return
+        if self.gliss_targets():
+            self.set_gliss(_key=("gliss_timing", tuple(sorted(self.sels))), timing=TIMINGS[self.gliss_timing.current()])
+        self.roll.focus_set()
+
     def on_gliss_unit(self):
         """% of the step <-> ticks: the length is changed so the notes stay as long as they were (the first run's)."""
         if self._loading:
@@ -141,7 +161,7 @@ class GlissPanel:
         unit = UNITS[self.gliss_unit.current()]
         if tgts and tgts[0]["gliss"].get("unit", "pct") != unit:
             g = tgts[0]["gliss"]
-            step = plan(tgts[0], self.ppq)[1] if "kind" in tgts[0] else self.ppq / 4
+            step = base_gap(tgts[0], self.ppq) if "kind" in tgts[0] else self.ppq / 4
             n = g.get("len", 100)
             n = n / 100 * step if unit == "ticks" else n / step * 100
             n = max(1, round(n)) if unit == "ticks" else round(n, 2)
@@ -203,7 +223,7 @@ class GlissPanel:
         tgts = self.gliss_targets()
         if not tgts:
             return
-        self.gliss_defaults = dict(self.gliss_defaults, **changes)
+        self.gliss_defaults = for_new(dict(self.gliss_defaults, **changes))
         runs = [t for t in tgts if "kind" in t and any(t["gliss"].get(k) != v for k, v in changes.items())]
         if runs:
             self.begin_edit(_key or ("gliss", tuple(sorted(self.sels))))

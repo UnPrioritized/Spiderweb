@@ -29,7 +29,7 @@ from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, left_edge
 from notes.hz_cc import cc_fall, ring_of, voice_hz, voices
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
-from notes.gliss import clean_gliss, gliss_notes
+from notes.gliss import bent, clean_gliss, for_new, gliss_notes
 from notes.areas import clean_areas
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -76,7 +76,7 @@ POINT_NAMES = {"line": [tr("engine.a"), tr("engine.b")], "gliss": [tr("engine.st
 
 def point_names(sh):
     """Names for the panel's point boxes, or None if the shape has none."""
-    if sh["kind"] == "curve":  # anchors + handles (bezier.py); a plain curve: Start, Handle 1, Handle 2, End
+    if sh["kind"] == "curve" or bent(sh):  # anchors + handles (bezier.py); a plain curve: Start, Handle 1, Handle 2, End
         pts = sh["pts"]
         if len(pts) == 4:
             return [tr("engine.start"), tr("engine.handle_1"), tr("engine.handle_2"), tr("engine.end")]
@@ -135,7 +135,7 @@ def make_shape(kind, pts, defaults):
     if kind in ("line", "funnel", "gliss"):
         sh["pts"] = [list(pts[0]), list(pts[-1])]
         if kind == "gliss":  # (its own copy of the settings: the defaults' stay as they are)
-            sh["gliss"] = clean_gliss(defaults.get("gliss"))
+            sh["gliss"] = for_new(clean_gliss(defaults.get("gliss")))
         if kind == "funnel":
             sh["starts"] = []  # the line only: the wall is drawn next, then the curves are added
     elif kind == "curve":
@@ -479,8 +479,9 @@ def clean_shape(sh):
                 out["picture"] = pic
                 for k in ("own_vel", "glue", "fx"):  # (no note tools on a picture, user)
                     out.pop(k, None)
-    if out["kind"] == "gliss":  # a Glissando run: its line + settings (gliss.py)
-        out["pts"] = [out["pts"][0], out["pts"][-1]]
+    if out["kind"] == "gliss":  # a Glissando run: its line (straight: 2 points, bent: a curve's) + settings (gliss.py)
+        n = len(out["pts"])
+        out["pts"] = out["pts"][:n - (n - 1) % 3] if n >= 4 else [out["pts"][0], out["pts"][-1]]
         out["gliss"] = clean_gliss(sh.get("gliss"))
     if out["kind"] == "arc":  # start, a point it passes through, end; k = beats per key on screen (arc.py)
         if len(out["pts"]) != 3:
@@ -566,7 +567,7 @@ def shape_path(sh):
     if sh["kind"] in ("custom", "funnel"):
         return [p for stroke in shape_strokes(sh) for p in stroke]
     pts = [tuple(p) for p in sh["pts"]]
-    if sh["kind"] == "curve":
+    if sh["kind"] == "curve" or bent(sh):  # (a bent Glissando run: its line is a curve too, gliss.py)
         pts = sample(pts, 240)
     elif sh["kind"] == "arc":
         pts = arc_points(pts, sh.get("k", 1.0))

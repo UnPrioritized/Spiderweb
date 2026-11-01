@@ -22,6 +22,7 @@ from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
 from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
+from notes.gliss import pen_shape
 from notes.fx import copied as fx_copied, with_turn as fx_turned
 from notes.sliced import clip_strokes, fresh_marks, on_side, piece_knives, steps_kept
 from roll.roll_curve import CurveEditing
@@ -750,7 +751,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def handles(self, sh):
         """(beat, pitch, point index, draggable with any tool)"""
         pts = sh["pts"]
-        if sh["kind"] == "curve":
+        if pen_shape(sh):  # (a curve, a bent Glissando run)
             return self.curve_handles(sh)
         if sh["kind"] == "custom":  # its box has its own corners (custom_hit); a picked curve stroke: its handles
             return self.stroke_handles(sh)
@@ -1375,7 +1376,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.drag = ("handle", self.drag_stroke(self.app.selected(), self.drag[1], e))
             elif isinstance(self.drag[1], tuple):
                 self.drag_funnel(self.app.selected(), self.drag[1], e)
-            elif self.app.selected()["kind"] == "curve":
+            elif pen_shape(self.app.selected()):
                 self.drag_curve(self.app.selected(), self.drag[1], e)
             else:
                 sh, i = self.app.selected(), self.drag[1]
@@ -1958,7 +1959,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if isinstance(hid, tuple):  # a funnel's curve start, anchor or handle: remove it
             self.delete_funnel_handle(self.app.selected(), hid, e)
             return
-        if hid is not None and self.app.selected()["kind"] == "curve" and self.delete_curve_handle(
+        if hid is not None and pen_shape(self.app.selected()) and self.delete_curve_handle(
                 self.app.selected(), hid):  # a curve's anchor (removed) or handle point (pulled back in)
             return
         if self.sx is not None and e.x >= self.kb_w:
@@ -2077,7 +2078,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         sh = self.point_shape()
         if (not self._pan or self._panned or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
-                or self.drag or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom")
+                or self.drag or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom", "gliss")
                 or e.x < self.kb_w or e.y < self.ruler_h):
             return
         if sh["kind"] == "custom":  # its picked curve stroke: an anchor there
@@ -2088,6 +2089,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if sh["kind"] == "curve":
             self.curve_click(sh, e, near=12 * self.scale)
+            return
+        if sh["kind"] == "gliss":  # (a Glissando run: an anchor there bends it, roll_gliss)
+            self.gliss_bend(sh, e, near=12 * self.scale)
             return
         self.insert_poly_point(sh, e)
 
