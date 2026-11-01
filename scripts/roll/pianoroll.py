@@ -1095,7 +1095,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
 
     def key_press(self, e):
         """A click on the piano keys: while picking Glissando keys (app.gliss_key_click; Ctrl = that key only) the key
-        is picked / unpicked and sounds (app.tap_key). Elsewhere nothing, as before."""
+        is picked / unpicked and sounds until the button is let go (app.tap_key / tap_end). Elsewhere nothing."""
         key = math.floor(self.y2p(e.y) + 0.5)
         if 0 <= key < self.app.keys and self.app.gliss_key_click(key, bool(e.state & CTRL)):
             self.app.tap_key(key)
@@ -1559,6 +1559,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
 
     def on_release(self, e, second=False):
         """second: the click that finishes a shape started with a click (see follow)."""
+        self.app.tap_end()  # (a piano key held while picking Glissando keys: its note-off)
         if not self.drag:
             return
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
@@ -1799,6 +1800,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if not self.drag and self.stop_hit(e.x, e.y, e.state) is not None:
             self.set_cursor("sb_h_double_arrow")  # (a sustained shape's stop line: drag it sideways)
+            return
+        if (not self.drag and not self.draft and e.x < self.kb_w and e.y >= self.ruler_h
+                and self.app.gliss_picks() is not None):
+            self.set_cursor("hand2")  # (the piano keys pick Glissando keys: key_press; user 11-02)
             return
         if not self.drag:
             over = not self.draft and self.hit_handle(e.x, e.y, self.app.tool.get() == "select") is not None
