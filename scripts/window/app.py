@@ -1972,11 +1972,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.drawn_all, self.picture_owners_all = self.drawn, self.picture_owners
         self.track_view(follow=True)
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
-        chans = [1] * len(self.shapes)  # Multi channel: how many channels each shape spreads over
-        if self.channel_mode.get() == "auto" and len(self.rendered):
-            pairs = np.unique(self.rendered[:, 5] * (self.slot_count + 1)  # (a track added by hand: one channel)
-                              + np.minimum(self.rendered[:, 4], self.slot_count))
-            chans = np.bincount(pairs // (self.slot_count + 1), minlength=len(self.shapes)).tolist()
+        chans = [1] * len(self.shapes)  # how many channels each shape spreads over (every mode: a paste keeps its
+        if len(self.rendered):          # tracks in Single too; each track of yours counted, hunt 2026-11-01)
+            ids, which = np.unique(self.rendered[:, 4], return_inverse=True)
+            pairs = np.unique(self.rendered[:, 5] * len(ids) + which.ravel())
+            chans = np.bincount(pairs // len(ids), minlength=len(self.shapes)).tolist()
         # (an Add between group is one row: between_window.py)
         self.fill_shape_list(counts, chans, most_colours(self.all16()), self.colours_used())
         if self.strips_window:  # (its count / Multi channel line from these notes: made late, Channels changed)
@@ -3508,7 +3508,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         parts = [self._position] if self._position else []
         parts.append(tr("app.shapes_notes", shapes=trn("n.shapes", len(self.shapes), n=len(self.shapes)),
                         notes=trn("n.notes", len(self.rendered), n=len(self.rendered))))
-        if self.channel_mode.get() == "auto" and self.slot_count:
+        if self.slot_count:  # (every mode: pastes and your tracks make several in Single too, hunt 2026-11-01)
             if self.pad_tracks():
                 tracks = self.slot_count
             else:  # (counted once per notes made: the status line changes with every mouse move)

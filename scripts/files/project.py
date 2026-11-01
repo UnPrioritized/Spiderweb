@@ -1486,7 +1486,7 @@ class ProjectFiles:
                                                  self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"],
                                                  own=self.with_file_tracks(), least=self.least_tracks())):
             return
-        channels = tracks if self.channel_mode.get() == "auto" else 1
+        channels = tracks  # (the tracks written, in every mode: pastes / your tracks make several in Single too)
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
         if (self.rendered[:, 2] > 127).any():
