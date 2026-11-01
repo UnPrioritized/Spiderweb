@@ -82,6 +82,7 @@ def readable(n):
     return n if n < 1000 else int(round(n, 3 - len(str(n))))
 
 
+TAP_MS, TAP_VELOCITY = 300, 100  # a piano key clicked while picking Glissando keys (tap_key)
 READY_AFTER_MS = 1500  # Built-in BASSMIDI made ready this long after the start (ready_builtin); None = never (tests)
 LIVE_SETTLE_S = 0.4  # a synth opened right at Space runs this long before the notes (hunt 2026-10-25: a new BASSMIDI
 # stream lost its first 12-46 ms; notes 0.4 s after it opened lost none)
@@ -1489,6 +1490,24 @@ class Playback:
         self.roll.scrub_t = t_to / self.ppq  # (a line of its own: the play line stays where it is, user)
         self.roll.draw_playhead()
         return True
+
+    def tap_key(self, key):
+        """A piano key clicked while picking Glissando keys: it sounds briefly (note-on, note-off TAP_MS later) on the
+        MIDI out right-drag listening uses."""
+        self.fresh_builtin()
+        out = self.scrub_out()
+        if not out.handle:
+            err = out.open(BUILTIN if self.midi_device.get() == KESTREL else self.midi_device.get())
+            if err:
+                self.status.config(text=err)
+                return
+        ch = None if out.tuned else 0
+        scrub_note(out, ch, key, TAP_VELOCITY)
+
+        def off():
+            if out.handle:  # (closed meanwhile: nothing is sounding)
+                scrub_note(out, ch, key, 0)
+        self.after(TAP_MS, off)
 
     def scrub_out(self):
         """Right-drag listening's MIDI out: the one picked, but with Kestrel (GPU) picked Built-in BASSMIDI's own

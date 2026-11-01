@@ -1093,6 +1093,13 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         else:
             self.drag = ("seek", False, x, state, kept)
 
+    def key_press(self, e):
+        """A click on the piano keys: while picking Glissando keys (app.gliss_key_click; Ctrl = that key only) the key
+        is picked / unpicked and sounds (app.tap_key). Elsewhere nothing, as before."""
+        key = math.floor(self.y2p(e.y) + 0.5)
+        if 0 <= key < self.app.keys and self.app.gliss_key_click(key, bool(e.state & CTRL)):
+            self.app.tap_key(key)
+
     def on_press(self, e):
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
         self.focus_set()
@@ -1109,6 +1116,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if e.x < self.kb_w or self.sx is None:
             if kept:  # (the dropped box / band off the screen too, hunt 10-26)
                 self.request_redraw()
+            if self.sx is not None and e.y >= self.ruler_h:
+                self.key_press(e)
             return
         app = self.app
         self.press_beat = self.event_pt(e, snap=False)[0]

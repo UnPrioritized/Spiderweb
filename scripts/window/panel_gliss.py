@@ -4,7 +4,8 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr, trn
-from notes.gliss import DEFAULTS, GRID_KINDS, fit_pts, plan, read_list
+from notes.gliss import DEFAULTS, GRID_KINDS, fit_pts, pick_key, pick_parts, picked, plan, read_list
+from roll.roll_shared import NOTE_NAMES
 from window import look
 from window.widgets import Tooltip, bad, good, leave_box, unchanged
 
@@ -56,21 +57,49 @@ class GlissPanel:
         self.gliss_var.set(g.get("list", DEFAULTS["list"]))
         good(self.gliss_list)
         self._loading = False
+        lines = [self.picks_text(g)]
         if "kind" in tgts[0]:  # a run: the step it picked and how many keys
             _, _, name, keys = plan(tgts[0], self.ppq)
-            self.gliss_info.config(text=tr("panel_gliss.info", grid=name, keys=trn("n.keys", len(keys), n=len(keys))))
-        else:
-            self.gliss_info.config(text=tr("panel_gliss.white_keys"))
+            lines.insert(0, tr("panel_gliss.info", grid=name, keys=trn("n.keys", len(keys), n=len(keys))))
+        self.gliss_info.config(text="\n".join(lines))
 
-    def set_gliss(self, **changes):
-        """Changes the runs' settings (one undo step) and the ones new runs start with; their ends snap again."""
+    def picks_text(self, g):
+        """The panel's line on the picked keys: "Keys: C E G" (+ single keys), or the hint when none are picked."""
+        keys = picked(g)
+        full, rest = pick_parts(keys, self.keys - 1)
+        if not full and not rest:
+            return tr("panel_gliss.no_picks")
+        parts = [" ".join(NOTE_NAMES[n] for n in full)] if full else []
+        if rest:
+            parts.append(trn("panel_gliss.single", len(rest), n=len(rest)))
+        return tr("panel_gliss.picks", keys=" + ".join(parts))
+
+    def gliss_picks(self):
+        """The picked keys the piano keys light up (the first selected run's / new runs'), or None: not picking."""
+        tgts = self.gliss_targets()
+        return picked(tgts[0]["gliss"]) if tgts else None
+
+    def gliss_key_click(self, key, one=False):
+        """A click on the piano keys while picking: key picked / unpicked (one = Ctrl: that key only, else that note in
+        every octave), one undo step per run of clicks; the key sounds (roll.tap_key). False = not picking."""
+        tgts = self.gliss_targets()
+        if not tgts:
+            return False
+        keys = pick_key(tgts[0]["gliss"], key, one)
+        self.set_gliss(_key=("gliss_keys", tuple(sorted(self.sels))), keys=keys)
+        self.roll.request_redraw()
+        return True
+
+    def set_gliss(self, _key=None, **changes):
+        """Changes the runs' settings (one undo step; _key = its begin_edit key) and the ones new runs start with;
+        their ends snap again."""
         tgts = self.gliss_targets()
         if not tgts:
             return
         self.gliss_defaults = dict(self.gliss_defaults, **changes)
         runs = [t for t in tgts if "kind" in t and any(t["gliss"].get(k) != v for k, v in changes.items())]
         if runs:
-            self.begin_edit(("gliss", tuple(sorted(self.sels))))
+            self.begin_edit(_key or ("gliss", tuple(sorted(self.sels))))
             for sh in runs:
                 sh["gliss"] = dict(sh["gliss"], **changes)
                 pts = fit_pts(sh, self.ppq)

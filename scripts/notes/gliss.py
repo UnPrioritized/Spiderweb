@@ -5,7 +5,9 @@ key per grid step, each note one step long.
 sh["kind"] = "gliss", sh["pts"] = [start, end] (beats, keys) like a line; sh["gliss"] = its settings:
   "grids": "halves" (1/1, 1/2 ... as fine as the PPQ allows) or "list" (the typed "list" below) = the grids the step picks from;
   "list": the typed grids, e.g. "1/16, 1/32, 1/48";
-  "pcs": the picked keys as notes of the octave (0 = C ... 11 = B), every octave; missing = the white keys.
+  "keys": the picked keys (0 ... 255), sorted; missing / empty = the white keys (user 11-02: a hint says so).
+Picking (pick_key, the piano keys while the tool is in use): a click = that note in every octave (user: chords rarely
+skip a key in an octave), Ctrl+click = that one key.
 The step picks itself: the grid in the list nearest one key per step for the line as drawn ("fits one key per
 step", user 2026-11-01). The run starts on the line's earlier end; its end snaps to where the last key's note
 starts ("Snap the end", user OK'd in the mock-up): fit_pts.
@@ -17,6 +19,7 @@ import re
 import numpy as np
 
 WHITE = (0, 2, 4, 5, 7, 9, 11)
+TOP_KEY = 255  # (a click picks the note up to here: the most keys a project has)
 LIST_DEFAULT = "1/16, 1/32, 1/64"
 DEFAULTS = {"grids": "halves", "list": LIST_DEFAULT}
 GRID_KINDS = ("halves", "list")
@@ -49,12 +52,35 @@ def clean_gliss(g):
         out["grids"] = g["grids"]
     if isinstance(g.get("list"), str) and read_list(g["list"]):
         out["list"] = g["list"][:200]
-    pcs = g.get("pcs")
-    if isinstance(pcs, list):
-        got = sorted({p for p in pcs if type(p) is int and 0 <= p < 12})
+    keys = g.get("keys")
+    if isinstance(keys, list):
+        got = sorted({k for k in keys if type(k) is int and 0 <= k <= TOP_KEY})
         if got:
-            out["pcs"] = got
+            out["keys"] = got
     return out
+
+
+def picked(g):
+    """The picked keys as a set (empty = none picked: runs use the white keys)."""
+    return set(g.get("keys") or ())
+
+
+def pick_key(g, key, one=False):
+    """The picked keys after clicking key on the piano keys: one (Ctrl+click) = that key on / off; else that note in
+    every octave, on when the clicked key was off, off when it was on."""
+    keys = picked(g)
+    if one:
+        keys ^= {key}
+    else:
+        row = set(range(key % 12, TOP_KEY + 1, 12))
+        keys = keys - row if key in keys else keys | row
+    return sorted(keys)
+
+
+def pick_parts(keys, top):
+    """(notes picked in every octave up to key top, as 0-11, the other picked keys up to top) for the panel's line."""
+    full = [n for n in range(12) if all(k in keys for k in range(n, top + 1, 12))]
+    return full, [k for k in sorted(keys) if k <= top and k % 12 not in full]
 
 
 def halves(ppq):
@@ -80,8 +106,8 @@ def grid_ticks(name, ppq):
 
 def run_keys(g, lo, hi):
     """The picked keys from key lo up to key hi (both included), low to high."""
-    pcs = set(g.get("pcs") or WHITE)
-    return [k for k in range(max(0, lo), max(0, hi) + 1) if k % 12 in pcs]
+    keys = picked(g)
+    return [k for k in range(max(0, lo), max(0, hi) + 1) if (k in keys if keys else k % 12 in WHITE)]
 
 
 def plan(sh, ppq):

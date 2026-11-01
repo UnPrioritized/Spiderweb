@@ -617,7 +617,9 @@ class RollDrawing:
             self._lines = {}
             return
         # (keyboard and ruler kept apart: a sideways scroll draws only the ruler again)
-        kb_key = (h, self.kb_w, self.ruler_h, self.sy, self.view_top, self.scale, self.app.keys, self.app.edo())
+        picks = self.app.gliss_picks()
+        kb_key = (h, self.kb_w, self.ruler_h, self.sy, self.view_top, self.scale, self.app.keys, self.app.edo(),
+                  None if picks is None else frozenset(picks))
         frame_key = (w, self.kb_w, self.ruler_h, self.sx, self.view_t, self.scale, json.dumps(sigs_of(self.app.tempo)),
                      json.dumps(self.app.tempo.get("keysigs")), self.track_mark())
         if kb_key != self._kb_key:
@@ -2015,15 +2017,18 @@ class RollDrawing:
         size, black, f = (EDO, EDO_BLACK, 13) if edo else (12, BLACK, 5)
         # (31-EDO names every row: shorter keys and smaller in-between names leave them room)
         black_w, half_w = (0.45, 0.35) if edo else (0.6, 0)
+        lit = self.app.gliss_picks() or ()  # (Glissando's picked keys, lit while picking: window/panel_gliss.py)
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
             n = p % size
             half = edo and n not in EDO_WHITE and n not in black  # (31-EDO's half sharps / flats: narrower, grey)
-            if p not in usual:
+            if p in lit and n not in black:
+                self.create_rectangle(0, y0, kb, y1, fill=look.KEY_PICKED, outline="", tags=("frame", "kbd"))
+            elif p not in usual:
                 self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="", tags=("frame", "kbd"))
             if n in black:
-                self.create_rectangle(0, y0, kb * black_w, y1,
-                                      fill=look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE, outline="", tags=("frame", "kbd"))
+                self.create_rectangle(0, y0, kb * black_w, y1, fill=look.KEY_PICKED_BLACK if p in lit else
+                                      look.KEY_BLACK if p in usual else look.KEY_BLACK_OUTSIDE, outline="", tags=("frame", "kbd"))
             elif half:
                 self.create_rectangle(0, y0, kb * half_w, y1, fill=look.KEY_HALF if p in usual else look.KEY_HALF_OUTSIDE,
                                       outline="", tags=("frame", "kbd"))
