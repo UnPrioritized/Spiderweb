@@ -440,6 +440,21 @@ def flat_cut(sh, notes, tracks, a, b, ppq, box=None, seen=None):
     return _halves(sh, [np.concatenate(stay), np.column_stack([s0, s1 - s0, *cols])[up]], ppq), crossed
 
 
+def laid_part(half, whole, tracks):
+    """A piece of a paste laid on tracks (sh["into"]: one entry per colour = per pasted track, in track order) keeps
+    only its own tracks' entries (hunt 2026-11-01: a piece without the first track had every note one row up, its
+    colours counted from its own first track)."""
+    into = half.get("into")
+    if not isinstance(into, list) or not into:
+        return
+    mine = np.searchsorted(whole, np.unique(np.asarray(tracks, np.int64)))
+    pick = [int(min(k, len(into) - 1)) for k in mine.tolist()]
+    for key in ("into", "into_ch", "into_home"):
+        got = half.get(key)
+        if isinstance(got, list) and len(got) == len(into):
+            half[key] = [got[k] for k in pick]
+
+
 def _halves(sh, parts, ppq):
     """slice_notes' two pieces: each (start, length, key, velocity, track) array -> a pasted-notes shape with sh's
     other settings, sharing its paste id. None if one is empty."""
@@ -452,6 +467,7 @@ def _halves(sh, parts, ppq):
     rides = shared_out(sh, parts, ppq) if "cc" in sh else [None] * len(parts)  # (its CCs by time per track)
     from notes.sustain import is_sustained
     held = is_sustained(sh) or sh.get("held") is True  # (Sustain done in its notes: they keep their overlaps)
+    whole = np.unique(np.concatenate([np.asarray(n[:, 4], np.int64) for n in parts]))  # (its colours, in order)
     out = []
     for n, cc in zip(parts, rides):
         half = {k: copy.deepcopy(v) for k, v in sh.items()
@@ -460,6 +476,7 @@ def _halves(sh, parts, ppq):
         # (pages / glue / a velocity line / a gate aware flip / Sustain / Gate subtract / Recolour: in its notes, as
         # they sound (user 2026-10-23); a merge's notes cut: no Split back)
         half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)
+        laid_part(half, whole, n[:, 4])
         if held:
             half["held"] = True
         if cc:
