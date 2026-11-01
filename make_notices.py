@@ -1,5 +1,5 @@
 """Writes THIRD-PARTY-NOTICES.txt: the licences of everything Spiderweb.exe carries inside it besides Spiderweb itself
-(Python, Tcl/Tk, NumPy, Numba, llvmlite with LLVM, Pillow, PyInstaller's starter), read from the copies installed here
+(Python, Tcl/Tk, NumPy, Numba, llvmlite with LLVM, Pillow, PyNaCl + cffi + pycparser, PyInstaller's starter), read from the copies installed here
 so the notices match the versions built in, then the Kestrel connector's (native/kestrel_bridge/NOTICES.txt, written
 by its own make_notices.py). build.bat runs it before building."""
 
@@ -61,6 +61,9 @@ def main():
              package("numba", "Numba"),
              package("llvmlite", "llvmlite (with LLVM)"),
              package("pillow", "Pillow"),
+             package("pynacl", "PyNaCl (with libsodium; checks update signatures)"),
+             package("cffi", "cffi (used by PyNaCl)"),
+             package("pycparser", "pycparser (used by cffi)"),
              package("pyinstaller", "PyInstaller (its starter program runs Spiderweb.exe)")]
     kestrel = os.path.join(HERE, "native", "kestrel_bridge", "NOTICES.txt")
     if os.path.isfile(kestrel):

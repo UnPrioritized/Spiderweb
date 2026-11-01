@@ -5,12 +5,15 @@ settings): update_check (how often; missing = not asked yet), update_last (the l
 seen_version (the version that last started). The looking itself
 is files/update_check.py; it runs in the background, so the window never waits for it."""
 
+import os
+import sys
 import threading
 import time
 import tkinter as tk
 import webbrowser
 from tkinter import ttk
 
+from files import errors, self_update, system
 from files.about import VERSION, WEBSITE
 from files.lang import tr
 from files.update_check import newer_releases
@@ -209,12 +212,15 @@ class UpdateQuestion(tk.Toplevel):
 
 class UpdatePopup(tk.Toplevel):
     """A newer version is out: which, what's new in it (every newer version's notes, newest first), the download
-    page (the browser opens the GitHub release; nothing downloads by itself), Later, and how often to look."""
+    page (the browser opens the GitHub release), Later, and how often to look. A signed release that can be checked
+    here also gets "Update and restart" (exe) / "Download and check" (scripts): files/self_update.py, only on a
+    press, never by itself."""
     APP_ONLY = True  # (keys pressed here never change the shapes: App.app_only)
 
     def __init__(self, updates, found):
         app = updates.app
         super().__init__(app)
+        self.updates = updates
         self.url = found[0]["url"]
         self.title(tr("updates.popup_title"))
         box = ttk.Frame(self, padding=(16, 12, 16, 12))
@@ -244,13 +250,132 @@ class UpdatePopup(tk.Toplevel):
         row.pack(fill="x", pady=(0, 10))
         ttk.Label(row, text=tr("updates.check_for_updates")).pack(side="left")
         often_box(row, updates).pack(side="left", padx=(6, 0))
-        row = ttk.Frame(box)
+        # updating from here (files/self_update.py): only when the release is signed and it can be checked
+        self.release = found[0]
+        self.cancel_event = None
+        self.work = ttk.Frame(box)  # (progress + what happened: shown once the update button is pressed)
+        self.bar = ttk.Progressbar(self.work, mode="determinate", maximum=1000)
+        self.say = ttk.Label(self.work, text="", wraplength=int(440 * app.scale), justify="left")
+        self.stop_button = ttk.Button(self.work, text=tr("updates.cancel"), command=self.stop)
+        self.row = row = ttk.Frame(box)
         row.pack(fill="x")
-        ttk.Button(row, text=tr("updates.later"), command=self.destroy).pack(side="right")
+        self.later = ttk.Button(row, text=tr("updates.later"), command=self.close)
+        self.later.pack(side="right")
+        self.go = None
+        if self_update.possible(self.release) is None:
+            self.go = ttk.Button(row, text=tr("updates.update_exe" if self_update.exe_mode() else "updates.update_zip"),
+                                 command=self.start_update)
+            self.go.pack(side="right", padx=(0, 6))
         ttk.Button(row, text=tr("updates.open_download_page"), command=self.download).pack(side="right", padx=(0, 6))
-        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.close())
+        self.protocol("WM_DELETE_WINDOW", self.close)
         on_top(self, app, "update_popup")
 
     def download(self):
         webbrowser.open(self.url or WEBSITE + "/releases/latest")
+        self.close()
+
+    def close(self):
+        if self.cancel_event is not None:  # (a download running: stopped, its part file deleted by its thread)
+            self.cancel_event.set()
         self.destroy()
+
+    def stop(self):
+        """The Cancel button while downloading (the popup stays)."""
+        if self.cancel_event is not None:
+            self.cancel_event.set()
+
+    def start_update(self):
+        self.go.state(["disabled"])
+        self.cancel_event = threading.Event()
+        self.progress = [0, 0]
+        self.result = {}
+        release, cancel, result, progress = self.release, self.cancel_event, self.result, self.progress
+
+        def work():
+            try:
+                result["path"] = self_update.download(release, lambda d, s: progress.__setitem__(slice(None), [d, s]),
+                                                      cancel)
+            except self_update.Refused as e:
+                result["fail"] = str(e)
+            except OSError:
+                result["fail"] = "no_connection"
+            except Exception:
+                result["fail"] = "other"
+                errors.write_log(*sys.exc_info(), "Update download")
+        self.worker = threading.Thread(target=work, daemon=True)
+        self.worker.start()
+        self.work.pack(fill="x", pady=(0, 10), before=self.row)
+        self.say.configure(text=tr("updates.connecting"), foreground="")
+        self.say.pack(fill="x")
+        self.bar.configure(value=0)
+        self.stop_button.pack(side="right", pady=(4, 0))
+        self.bar.pack(side="left", fill="x", expand=True, pady=(4, 0), padx=(0, 6))
+        self.after(100, self.poll)
+
+    def poll(self):
+        """(Tk isn't touched from the download thread: this looks at what it reached.)"""
+        if not self.winfo_exists():
+            return
+        done, size = self.progress
+        mb = lambda n: "%.1f" % (n / 1048576)  # noqa: E731
+        if done:
+            self.bar.configure(value=done * 1000 // size if size else 0)
+            self.say.configure(text=tr("updates.downloading", done=mb(done), size=mb(size)) if size else
+                               tr("updates.downloading_unknown", done=mb(done)))
+        if self.worker.is_alive():
+            self.after(100, self.poll)
+            return
+        self.cancel_event = None
+        self.bar.pack_forget()
+        self.stop_button.pack_forget()
+        if "fail" in self.result:
+            self.failed(self.result["fail"])
+        elif self_update.exe_mode():
+            self.finish_exe(self.result["path"])
+        else:
+            self.finish_zip(self.result["path"])
+
+    def failed(self, why):
+        self.say.configure(text=tr("updates.fail." + why), foreground=look.WARN)
+        if self.go is not None:
+            self.go.state(["!disabled"])
+
+    def finish_zip(self, path):
+        self.say.configure(text=tr("updates.zip_ready", file=path), foreground="")
+        self.go.configure(text=tr("updates.show_file"), command=lambda: system.show_file(path))
+        self.go.state(["!disabled"])
+        system.show_file(path)
+
+    def finish_exe(self, path):
+        """Swap the checked exe in, close Spiderweb as usual (it may ask things: cancelled = swapped back), then start
+        the new one."""
+        self.say.configure(text=tr("updates.restarting"), foreground="")
+        self.update_idletasks()
+        try:
+            undo = self_update.swap_in(path)
+        except OSError:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            self.failed("swap_failed")
+            return
+        app = self.updates.app
+        app.on_close()
+        try:
+            still_open = bool(app.winfo_exists())
+        except tk.TclError:
+            still_open = False
+        if still_open:
+            try:
+                undo()
+            except OSError:  # (the new exe stays in place: it's the checked new version, used at the next start)
+                pass
+            if self.winfo_exists():
+                self.failed("not_closed")
+            return
+        try:
+            self_update.start_new()
+        except OSError:  # (the new exe is in place: the next start by hand opens it)
+            pass

@@ -208,6 +208,19 @@ def open_path(path, text=False):
         return False
 
 
+def show_file(path):
+    """Open the file's folder with the file picked (Windows; elsewhere just the folder). False if it couldn't."""
+    import os
+    import subprocess
+    if WINDOWS:
+        try:
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+            return True
+        except OSError:
+            pass
+    return open_path(os.path.dirname(path))
+
+
 _small_icon = []  # (the title bars' icon, loaded once: kept for as long as the program runs)
 
 

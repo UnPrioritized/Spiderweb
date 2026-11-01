@@ -394,8 +394,19 @@ if __name__ == "__main__":
     import time
     started = time.time()
     given = [os.path.abspath(a) for a in sys.argv[1:] if os.path.isfile(a)]  # (opened with Spiderweb / dropped on it)
+    updated = "--updated" in sys.argv[1:]  # (started by the old exe after an update: files/self_update.py)
     try:
-        if not first_instance():
+        first = first_instance()
+        if not first and updated:  # the old one is still closing: wait for it (up to a minute)
+            for _ in range(600):
+                time.sleep(0.1)
+                close_lock()
+                if first_instance():
+                    first = True
+                    break
+            else:
+                sys.exit(0)
+        if not first:
             if not given:
                 sys.exit(0)
             from window.open_files import hand_over, handed_taken
@@ -411,6 +422,11 @@ if __name__ == "__main__":
             else:
                 sys.exit(0)
     except (AttributeError, OSError):  # not Windows: no lock
+        pass
+    try:
+        from files.self_update import clean_leftovers
+        clean_leftovers()  # (an update's Spiderweb.exe.old / .new: exe only)
+    except Exception:
         pass
     from window import open_files
     open_files.STARTED = started

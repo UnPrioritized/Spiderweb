@@ -53,10 +53,13 @@ Just run **Spiderweb.exe**. Nothing to install.
 
 - Exported MIDI goes in the same folder as the .exe. Your autosave, settings, presets and saved shapes go in its
   `user` folder.
-- **To update**, replace just Spiderweb.exe in that folder; everything else stays.
+- **To update**, replace just Spiderweb.exe in that folder; everything else stays. Or press "Update and restart" when
+  Spiderweb says a new version is out.
 - **Update check:** Spiderweb can look on GitHub for a new version when it starts. It asks you once how often (every
   start, once a day, week or month, or never); change it later in Settings (the gear button), General tab. It only
   asks GitHub for the list of versions: nothing about you or your work is sent, and nothing is downloaded by itself.
+- **Signed updates:** every release is signed with a key that is kept offline, never on GitHub. "Update and restart"
+  checks that signature before using the download, so files changed by anyone else are refused.
 
 ## Getting started
 
@@ -140,7 +143,8 @@ offers to install them once; to do it yourself later, type
 pip install numba pillow
 ```
 The first start with Numba takes a second longer in the background while it prepares its fast code (kept for the
-next starts).
+next starts). With **PyNaCl** installed (`pip install pynacl`), the update popup can also download the new source zip
+and check its signature for you.
 
 Tested with Python 3.14.7, NumPy 2.5.3, Numba 0.68.0 and Pillow 12.3.0. If something misbehaves with other
 versions, these are known to work:
@@ -181,5 +185,5 @@ release's source zip, or build the connector with `cargo build --release`). Spid
 their source is at [UnPrioritized/kestrel-midi](https://github.com/UnPrioritized/kestrel-midi). Its licence and
 those of the libraries it carries are at the end of [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
 
-The .exe also carries Python, Tcl/Tk, NumPy, Numba, llvmlite (with LLVM), Pillow and PyInstaller's starter
-program. Their licences are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+The .exe also carries Python, Tcl/Tk, NumPy, Numba, llvmlite (with LLVM), Pillow, PyNaCl (with libsodium, cffi and
+pycparser) and PyInstaller's starter program. Their licences are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).

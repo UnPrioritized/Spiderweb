@@ -1,6 +1,7 @@
 """Looking on GitHub for a newer Spiderweb: the list of releases (tags like v1.3.0; drafts and pre-releases are
 skipped, so test builds can go online without anyone being told). Only the release list is asked for; nothing is
-sent and nothing is downloaded. The window side (asking, when to check, the popup) is window/updates.py."""
+sent and nothing is downloaded here (files/self_update.py downloads when the popup's update button is pressed). The
+window side (asking, when to check, the popup) is window/updates.py."""
 
 import json
 import re
@@ -39,8 +40,12 @@ def newer_releases():
         v = version_tuple(rel.get("tag_name", ""))
         if v is None or v <= mine:
             continue
+        assets = {}  # (its files, for files/self_update.py: {name: {"url", "size"}})
+        for a in rel.get("assets") or []:
+            if isinstance(a, dict) and a.get("name") and str(a.get("browser_download_url", "")).startswith("https://"):
+                assets[str(a["name"])] = {"url": str(a["browser_download_url"]), "size": a.get("size") or 0}
         found.append((v, {"version": ".".join(map(str, v[:3])), "url": str(rel.get("html_url") or ""),
-                          "notes": plain_notes(rel.get("body") or "")}))
+                          "notes": plain_notes(rel.get("body") or ""), "assets": assets}))
     found.sort(key=lambda f: f[0], reverse=True)
     return [f[1] for f in found]
 
