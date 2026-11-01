@@ -65,6 +65,8 @@ from window.panel_nested import NestedPanel
 from window.panel_tiles import TilesPanel
 from window.panel_ripples import RipplesPanel
 from window.panel_freehand import FreehandPanel
+from window.panel_gliss import GlissPanel
+from notes.gliss import DEFAULTS as GLISS_DEFAULTS
 from window.panel_lasso import LassoPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_pattern import PatternPanel
@@ -126,7 +128,8 @@ LASSO_MODES = [("free", tr("app.lasso_free")), ("poly", tr("app.lasso_poly")),
                ("magnet", tr("app.lasso_magnet"))]  # (the Lasso button's ▾)
 # in the drawing tools' list (tool_picker.py), in this order
 DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), ("free", tr("app.freehand"), "f"),
-              ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("custom", tr("app.custom_shape"), "s"),
+              ("curve", tr("app.curve"), "c"), ("arc", tr("app.arc"), "a"), ("gliss", tr("app.gliss"), "r"),
+              ("custom", tr("app.custom_shape"), "s"),
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
@@ -489,7 +492,7 @@ def cc_texts(shapes, mode):
                                    for sh in shapes))
 
 
-class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
+class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, GlissPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     def __init__(self, autosave=AUTOSAVE):
         mac_buttons()  # (Mac's Tk 8.6: right / middle button swapped back, before any binding)
@@ -575,8 +578,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.free_smooth = SMOOTH_DEFAULT  # how much new freehand strokes are made perfect (smooth.py)
         self.text_defaults = dict(TEXT_DEFAULTS)  # settings for new text (the last ones used)
         self.polygon_defaults = dict(POLYGON_DEFAULTS)  # points / kind of new polygons (polygon.py)
-        self._rows = {"last": True, "line_fill": False, "free": False, "tumour": False, "pattern": False, "text": False,
-                      "custom": False, "funnel": False}  # optional panel parts
+        self.gliss_defaults = dict(GLISS_DEFAULTS)  # grids new Glissando runs pick their step from (the last used)
+        self._rows = {"last": True, "line_fill": False, "free": False, "gliss": False, "tumour": False,
+                      "pattern": False, "text": False, "custom": False, "funnel": False}  # optional panel parts
         self.drawer = None
         self.claw_window = None
         self.claw_pos = ""  # where the claw machine window was last ("+x+y", remembered in the autosave)
@@ -1367,6 +1371,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._build_by_snap(last)
         self._build_line_fill()
         self._build_freehand()
+        self._build_gliss()
         self._build_tumour()
         self._build_pattern()
         self._build_text()
@@ -1473,6 +1478,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_colours()
         self.sync_mask()
         self.sync_freehand()
+        self.sync_gliss()
         self.sync_tumour()
         self.sync_pattern()
         self.sync_text()
@@ -2621,6 +2627,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def shape_edited(self, moving=False):
         """The selected shape was changed with the mouse (moving: just dragged to another place)."""
         self.sync_points()
+        if self._rows["gliss"]:  # (a Glissando run's step / keys as its ends move)
+            self.sync_gliss()
         self.shapes_changed(moving=moving)
 
     def add_shape(self, sh, name=None):
@@ -3432,7 +3440,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def layout_rows(self):
         """Show the panel's optional parts, always in the same order above the point boxes."""
         rows = ((self.last_row, "last"), (self.line_fill_row, "line_fill"), (self.free_box, "free"),
-                (self.tumour_box, "tumour"), (self.pattern_box, "pattern"),
+                (self.gliss_box, "gliss"), (self.tumour_box, "tumour"), (self.pattern_box, "pattern"),
                 (self.text_box, "text"), (self.custom_box, "custom"), (self.funnel_box, "funnel"))
         shown = [key for _, key in rows if self._rows[key]]
         if shown == getattr(self, "_rows_shown", None):
@@ -3475,6 +3483,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         #                                                       pointer it had was skipped)
         self.tool_picker.tool_changed()
         self.sync_freehand()
+        self.sync_gliss()
         self.sync_lasso()
         self.sync_text()
         self.sync_custom()

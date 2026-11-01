@@ -38,6 +38,7 @@ from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
+from notes.gliss import clean_gliss
 from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
@@ -318,7 +319,7 @@ class ProjectFiles:
             "hz_loud": bool(self.hz_loud.get()),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
-            "free_smooth": self.free_smooth,
+            "free_smooth": self.free_smooth, "gliss_defaults": self.gliss_defaults,
             # (whenever anything in it isn't the default: a 3/4 with no tempo point too, hunt 2026-10-24; a plain
             # one is left out, so files without a tempo line stay as they were)
             **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
@@ -488,6 +489,7 @@ class ProjectFiles:
         if tx:
             self.text_defaults = {k: tx[k] for k in TEXT_DEFAULTS}
         self.free_smooth = get(lambda: clean_level(data.get("free_smooth", SMOOTH_DEFAULT))) or SMOOTH_DEFAULT
+        self.gliss_defaults = clean_gliss(data.get("gliss_defaults"))
         if pg:
             self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}
         self.roll.cancel_draft()

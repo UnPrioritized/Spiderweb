@@ -111,6 +111,8 @@ class FunnelPanel:
 
     def new_defaults(self, kind):
         """Settings a new shape of this kind starts with."""
+        if kind == "gliss":
+            return dict(self.defaults, gliss=self.gliss_defaults)
         return dict(self.defaults, **self.funnel_defaults) if kind == "funnel" else self.defaults
 
     def funnel_targets(self):

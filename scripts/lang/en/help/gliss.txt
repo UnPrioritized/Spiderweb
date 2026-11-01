@@ -1,0 +1,9 @@
+A run of short notes. Drag a line from where the run starts to where it ends: each picked key between them gets one note, one grid step long, one after another.
+
+The step picks itself: the grid nearest one key per step for the line you drew. A steeper line = a finer grid. When you let go, the line's end moves to where the last key's note starts.
+
+The side panel's Grids picks which grid sizes the step can be: Halves (1/1, 1/2, 1/4 … 1/128) or My list, your own sizes like 1/16, 1/32, 1/48.
+
+The run uses the white keys.
+
+Selected: drag its squares to move the ends.

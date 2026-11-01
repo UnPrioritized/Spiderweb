@@ -17,6 +17,7 @@ from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
 from notes.engine import cached_reach, make_shape, shape_key
+from notes.gliss import fit_pts
 from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
@@ -2009,6 +2010,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def commit_draft(self):
         self.keep_draft()
         sh, self.draft = self.draft, None
+        if sh["kind"] == "gliss":  # (a Glissando run: its end goes where the last key's note starts, gliss.py)
+            sh["pts"] = fit_pts(sh, self.app.ppq) or sh["pts"]
         if not self.live_commit(sh):  # a stroke of a live shape / a circle or polygon: done there
             self.add_drawn(sh)
 

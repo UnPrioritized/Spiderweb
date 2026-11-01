@@ -29,6 +29,7 @@ from notes.hzbass import (HZ_KINDS, clean_hz, heard_layers, layers_of, left_edge
 from notes.hz_cc import cc_fall, ring_of, voice_hz, voices
 from notes.funnel import clean_funnel, clean_starts, funnel_notes, funnel_strokes, old_funnel
 from notes.arc import arc_k, arc_points
+from notes.gliss import clean_gliss, gliss_notes
 from notes.areas import clean_areas
 from notes.nested import clean_nested
 from notes.tiles import clean_tiles
@@ -67,8 +68,8 @@ from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
 
 KINDS = {"line": tr("engine.line"), "poly": tr("engine.polyline"), "free": tr("engine.freehand"),
          "curve": tr("engine.curve"), "arc": tr("engine.arc"), "custom": tr("engine.custom"),
-         "funnel": tr("engine.funnel")}
-POINT_NAMES = {"line": [tr("engine.a"), tr("engine.b")],
+         "funnel": tr("engine.funnel"), "gliss": tr("engine.glissando")}
+POINT_NAMES = {"line": [tr("engine.a"), tr("engine.b")], "gliss": [tr("engine.start"), tr("engine.end")],
                "arc": [tr("engine.start"), tr("engine.through"), tr("engine.end")],
                "funnel": [tr("engine.line_start"), tr("engine.line_end"), tr("engine.wall_1"), tr("engine.wall_2")]}
 
@@ -131,8 +132,10 @@ def auto_count(slots):
 
 def make_shape(kind, pts, defaults):
     sh = dict(defaults, kind=kind)
-    if kind in ("line", "funnel"):
+    if kind in ("line", "funnel", "gliss"):
         sh["pts"] = [list(pts[0]), list(pts[-1])]
+        if kind == "gliss":  # (its own copy of the settings: the defaults' stay as they are)
+            sh["gliss"] = clean_gliss(defaults.get("gliss"))
         if kind == "funnel":
             sh["starts"] = []  # the line only: the wall is drawn next, then the curves are added
     elif kind == "curve":
@@ -476,6 +479,9 @@ def clean_shape(sh):
                 out["picture"] = pic
                 for k in ("own_vel", "glue", "fx"):  # (no note tools on a picture, user)
                     out.pop(k, None)
+    if out["kind"] == "gliss":  # a Glissando run: its line + settings (gliss.py)
+        out["pts"] = [out["pts"][0], out["pts"][-1]]
+        out["gliss"] = clean_gliss(sh.get("gliss"))
     if out["kind"] == "arc":  # start, a point it passes through, end; k = beats per key on screen (arc.py)
         if len(out["pts"]) != 3:
             return None
@@ -1311,6 +1317,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw, groups = custom_notes_groups(sh, ppq)
     elif sh["kind"] == "funnel":
         raw = funnel_notes(sh, ppq)
+    elif sh["kind"] == "gliss":  # a Glissando run: one note per picked key, a grid step each (gliss.py)
+        raw = gliss_notes(sh, ppq)
     elif sh["kind"] in LINE_KINDS and len(cached_arrays(sh)) > 1:  # a joined curve's pieces: each like a line
         pieces = []
         for a in cached_arrays(sh):

@@ -24,6 +24,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     graph_window.py  a tumour setting's graph (the number changing along the line)
     join_split.py    Join (shapes -> one curve) and Split (cut in two, pieces -> separate shapes)
     panel_freehand.py  the panel's Straighten setting for freehand strokes
+    panel_gliss.py   the panel's Glissando settings: which grids a run's step picks from
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
     font_dialog.py   the font window (type a font's name or pick one)
     widgets.py       tooltips
@@ -115,6 +116,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     funnel.py        funnels: curves, note grid, gates
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
     arc.py           arcs: pieces of a perfect circle through three points
+    gliss.py         Glissando runs: one note per picked key along a line, one grid step each
     tumour.py        tumours: bumps along lines
     pattern.py       a curve's formulas: its shape (circle, spiral...) and a pattern along it (wave...)
     polygon.py       polygons and stars made by the Polygon tool (a pattern along every side)

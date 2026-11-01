@@ -35,6 +35,7 @@ TOPIC_LIST = [
     ("free", "Tools"),
     ("curve", "Tools"),
     ("arc", "Tools"),
+    ("gliss", "Tools"),
     ("custom", "Tools"),
     ("box", "Tools"),
     ("funnel", "Tools"),
@@ -145,6 +146,7 @@ SEE = {
     "free": ["straighten", "by_snap", "tumours", "live"],
     "curve": ["curves_pen", "formulas", "symmetric", "by_snap", "tumours", "join"],
     "arc": ["curve", "by_snap", "tumours"],
+    "gliss": ["line", "curve"],
     "by_snap": ["line", "curve", "slice", "join", "between"],
     "custom": ["drawer", "fill", "custom_edit", "box"],
     "box": ["custom", "fill", "custom_edit", "formulas", "live"],
@@ -235,7 +237,7 @@ SEE = {
 }
 # the tip for each tool (Circle / Polygon share one)
 TOOL_TOPICS = {"select": "select", "line": "line", "poly": "poly", "free": "free", "curve": "curve", "arc": "arc",
-               "custom": "custom", "circle": "box", "polygon": "box", "funnel": "funnel",
+               "gliss": "gliss", "custom": "custom", "circle": "box", "polygon": "box", "funnel": "funnel",
                "text": "text", "hz": "hz_bass", "slice": "slice", "lasso": "lasso", "picture": "picture"}
 DRAWER_TOOL_TOPICS = {"select": "drawer_select", "line": "drawer_line", "poly": "drawer_poly", "free": "drawer_free",
                       "curve": "drawer_curve", "arc": "drawer_arc", "square": "drawer_square",
