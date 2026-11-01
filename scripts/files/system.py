@@ -135,6 +135,31 @@ def cpu_name():
     return ""
 
 
+def file_version(path):
+    """(Windows) A program file's own version as "1.2.3" (the 4th number left out when 0), or None: not Windows,
+    no version in it, can't read."""
+    if not WINDOWS:
+        return None
+    try:
+        ver = ctypes.windll.version
+        size = ver.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return None
+        buf = ctypes.create_string_buffer(size)
+        if not ver.GetFileVersionInfoW(path, 0, size, buf):
+            return None
+        info, n = ctypes.c_void_p(), wintypes.UINT()
+        if not ver.VerQueryValueW(buf, "\\", ctypes.byref(info), ctypes.byref(n)) or n.value < 52:
+            return None
+        ms, ls = ctypes.cast(info, ctypes.POINTER(wintypes.DWORD * 13)).contents[4:6]  # (VS_FIXEDFILEINFO)
+        parts = [ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF]
+        if parts[3] == 0:
+            parts.pop()
+        return ".".join(map(str, parts))
+    except (OSError, AttributeError, ValueError):
+        return None
+
+
 def _ask(command):
     """(Mac) What a small system program prints. OSError when it can't run or fails."""
     import subprocess

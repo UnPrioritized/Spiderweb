@@ -582,7 +582,8 @@ class SettingsWindow(tk.Toplevel):
         if mo:
             from files import maestro
             v = maestro.version()
-            self.maestro_note.config(text=tr("maestro.version", v=v) if v else tr("playback.maestro_failed"))
+            self.maestro_note.config(text=tr("maestro.version", v=v, tested=maestro.TESTED) if v
+                                     else tr("playback.maestro_failed"))
         self.builtin_off.grid_remove() if on or mo else self.builtin_off.grid()
         if on:  # (Kestrel (GPU): its own rows instead, the soundfont list shared)
             self.builtin_title.config(text=tr("ks.title" if dev == KESTREL else "bs.title"))

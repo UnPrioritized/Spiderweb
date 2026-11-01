@@ -1881,7 +1881,7 @@
  "maestro.title": "Maestro settings",
  "maestro.open": "Open Maestro's settings for Spiderweb…",
  "maestro.open_tip": "Maestro keeps its own sound settings (soundfont list, synth, limiter) in a profile just for Spiderweb. Change them in Maestro's window: they're used at once. Piano keys and drawing while listening sound a little late on Maestro: a smaller render buffer there makes that shorter.",
- "maestro.version": "Maestro {v} found.",
+ "maestro.version": "Maestro {v} found. Tested with Maestro {tested}.",
  "playback.kestrel_missing": "Kestrel (GPU, Experimental) isn't in this copy of Spiderweb (its connector file is missing). Pick Built-in BASSMIDI in Settings (Help menu) → Sound.",
  "playback.kestrel_not_here": "Kestrel (GPU, Experimental) only works on 64-bit Windows and Linux for now. Pick Built-in BASSMIDI in Settings (Help menu) → Sound.",
  "playback.kestrel_failed": "Couldn't start Kestrel (GPU, Experimental): {err}",

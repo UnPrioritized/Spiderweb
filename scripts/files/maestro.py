@@ -15,8 +15,10 @@ import sys
 import threading
 import time
 
+from files import system
 from files.system import WINDOWS
 
+TESTED = "0.2.3"  # (the Maestro version Spiderweb was last checked with: skill maestro-update sets it)
 APP_ID = b"io.github.unprioritized.spiderweb"
 APP_NAME = b"Spiderweb"
 PORTS = 16
@@ -126,12 +128,15 @@ def load():
 
 
 def version():
-    """Maestro's version as "0.2", or None."""
+    """Maestro's version, or None (not found / too old). Its API says only "0.2": on Windows the full "0.2.3" is read
+    from maestro.exe beside the library."""
     try:
         v = load()[1].get_version()
     except OSError:
         return None
-    return f"{v >> 16}.{v & 0xFFFF}"
+    full = system.file_version(os.path.join(os.path.dirname(lib_path() or ""), "maestro.exe"))
+    short = f"{v >> 16}.{v & 0xFFFF}"
+    return full if full and (full + ".").startswith(short + ".") else short
 
 
 def gs_drum_part(ch, drums):
