@@ -600,7 +600,7 @@ _GROUP_CH = np.argsort(COLOURS_16)  # (channel colour group -> channel)
 def scrub_notes(lm, order, lo, hi, at, loud=False, only=()):
     """Right-drag listening on a loaded MIDI (user 2026-10-25): {(channel, key): (start, velocity)} of what's drawn
     on top: the keys sounding at tick `at` (start None) and notes starting in ticks lo..hi (start = about their
-    tick; the latest per key). order = the tracks shown (shown_tracks, faint ones left out), None = all; loud =
+    tick; the latest per key). order = the tracks shown (shown_tracks; faint ones too unless Faint is 0 %), None = all; loud =
     louder notes on top (Settings → Look). Velocity
     as drawn (to within 4); the overview (where reading exactly is slow) has no starts nor velocities (100).
     Returns (that, rough): rough = from the overview (the status line says so)."""

@@ -1444,11 +1444,16 @@ class Playback:
                 return False
         lo, hi = min(t_from, t_to), max(t_from, t_to)
         now = {}  # (channel, key) -> (start of the latest note there, velocity); channel None = a 31-EDO row
-        near = self.roll.visible_notes(lo, hi)
-        near = near[near[:, 3] >= -1]  # (the track list's faint tracks: shown only, not listened to)
+        from roll.roll_draw import TRACK_FADE
+        seen = TRACK_FADE[0] > 0  # (like Domino: every note shown is heard, the track list's faint tracks too;
+        near = self.roll.visible_notes(lo, hi)  # Faint 0 % = not shown, not heard; user 2026-11-01)
+        if not seen:
+            near = near[near[:, 3] >= -1]
         s_, e_ = near[:, 0], near[:, 1]
         tuned = out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
+            if v <= -2:  # (a faint track's copy: -2 - its velocity)
+                v = -2 - v
             k = (None if tuned else slot_track_channel(slot, self.picture_use10)[1], p)
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
@@ -1458,7 +1463,7 @@ class Playback:
         if self.loaded is not None:
             from roll.roll_loaded import loud_on, scrub_notes, shown_only, shown_tracks
             order, faint = shown_tracks(self, self.loaded)
-            if order is not None:  # (faint tracks: shown only, not listened to, like Spiderweb's)
+            if order is not None and not seen:  # (faint tracks at 0 %: not shown, not heard)
                 order = tuple(n for n in order if n not in faint)
             ppq_lm = self.loaded.ppq / self.ppq  # (its own ticks)
             got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm, loud_on(self),
