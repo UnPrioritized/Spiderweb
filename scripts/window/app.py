@@ -2115,8 +2115,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         (the track list's Ctrl+C: its rows kept, like Domino's). No undo step of its own: part
         of the change that asked for it. True if anything changed (the notes are made again)."""
         need, rendered, use10 = made[5], made[2], made[1]
-        if self.channel_mode.get() != "auto":  # (the track list's copies keep their rows in every mode: Domino's)
-            need = {i: n for i, n in need.items() if self.shapes[i].get("cols")}
+        mode = self.channel_mode.get()
+        if mode != "auto":  # (the track list's copies keep their rows in every mode: Domino's; a Domino paste is
+            need = {i: n for i, n in need.items()  # laid as in Multi channel too, hunt 2026-11-01)
+                    if self.shapes[i].get("cols") or colours_apart(self.shapes[i], mode)}
             if not need:
                 return False
         own, changed = list(self.own_tracks), False
@@ -2307,9 +2309,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def copy_columns(self, idx):
         """Ctrl+C's columns (Domino's paste, user 2026-10-26): {shape's number: each colour's row in the track list,
         counted from the first row of everything copied}, so a paste lays them out the same from the highlighted
-        track. Multi channel only (else one channel: nothing to keep); shapes with no notes left out."""
-        if self.channel_mode.get() != "auto" or not len(self.rendered):
+        track. Multi channel only (else one channel: nothing to keep), except shapes keeping their tracks in every
+        mode (a Domino paste: colours_apart, hunt 2026-11-01); shapes with no notes left out."""
+        mode = self.channel_mode.get()
+        if not len(self.rendered):
             return {}
+        idx = [i for i in idx if colours_apart(self.shapes[i], mode)]
         tl, r = self.track_list, self.rendered
         own = self.own_channels()
         rows = {}
