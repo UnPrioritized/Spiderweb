@@ -24,8 +24,10 @@ Copies: copies of the run above and below it, each one picked key further out, p
 
 Note length: how long each note is, as % of the step (100 % = up to the next note, more = they overlap) or in ticks. On the piano roll, drag any note's right end: every note in the run follows. New runs always start at 100 %.
 
+For notes that run over into the next ones like a run played by hand, right-click the run → Gate extend…: each note ends later by a % of its own length or by ticks (see Help → Gate extend). It works on any shape.
+
 ## Bending a run
 
 Select a run and middle-click on its line (or right-click → Add anchor here) to add an anchor, then drag the anchor or its handles, like the Curve tool. The run plays the picked keys in the order its line crosses them: a line bent up and back down plays up and back down. Right-click → Make the run straight puts it back to a straight line.
 
-Timing: On the grid = one note per step, one after another. Where the line crosses = each note starts where the line crosses its key, so the run speeds up where the line is steep and slows down where it's flat. The first note starts on the line's start; Last note decides whether the last note ends on the line's end or starts there. With % Note length, 100 % = each note up to the next one.
+Timing: On the grid = one note per step, one after another, evenly: the bend only decides which key comes next. Where the line crosses = each note starts where the line crosses its key, so the run speeds up where the line is steep and slows down where it's flat. The first note starts on the line's start; Last note decides whether the last note ends on the line's end or starts there. With % Note length, 100 % = each note up to the next one.
