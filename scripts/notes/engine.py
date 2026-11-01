@@ -2106,15 +2106,22 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     else:  # (a Hz bass layer's clashing notes too: one channel, user)
         slot_of = [0 if pin is None else pin for pin in pinned]
         count = 1 if any(p is None for p in pinned) else 0
-        groups = {}  # (a Domino paste's tracks keep a channel each here too, in track order; the pieces of one
-        for i, (k, tr) in enumerate(zip(kept or (), tracks)):  # paste share them; user 2026-11-01)
-            if k and tr is not None and pinned[i] is None and len(tr):
-                groups.setdefault(("paste", pastes[i]) if pastes[i] is not None else ("shape", i), []).append(i)
-        for members in groups.values():
-            ids = np.unique(np.concatenate([np.asarray(tracks[i], np.int64) for i in members]))
-            for i in members:
-                slot_of[i] = mapped_slots(np.searchsorted(ids, np.asarray(tracks[i], np.int64)), use10)
-            count = max(count, int(mapped_slots(np.int64(len(ids) - 1), use10)) + 1)
+        # (a Domino paste's tracks take their slots as with "auto", among the other pastes and the pinned shapes,
+        # so each keeps a channel and two pastes never share one: user 2026-11-01, "a paste acts like Multi
+        # channel"; hunt 2026-11-01: two pastes merged; the other shapes stay on slot 0)
+        sub = [i for i, (k, tr) in enumerate(zip(kept or (), tracks))
+               if k and tr is not None and pinned[i] is None and len(tr)]
+        if sub:
+            pick = sorted(sub + [i for i, p in enumerate(pinned) if p is not None])
+            got = {k: None for k, i in enumerate(pick) if i in set(sub)}
+            render([note_lists[i] for i in pick], "auto", split, [tracks[i] for i in pick],
+                   [apart[i] for i in pick], [fixed[i] for i in pick], use10, None, [pastes[i] for i in pick],
+                   None, [back[i] for i in pick], [ordered[i] for i in pick], keep=keep,
+                   busy=[busy[i] for i in pick] if busy else None, note_slots=got)
+            for k, s in got.items():
+                if s is not None and len(s):
+                    slot_of[pick[k]] = np.asarray(s, np.int64)
+                    count = max(count, int(np.max(s)) + 1)
     count = max(count, top)
     notes = np.empty((sum(len(lst) for lst in note_lists), 6), np.int64)
     at = 0
