@@ -556,8 +556,6 @@ class SettingsWindow(tk.Toplevel):
         self.maestro_sep = page.grid_slaves(row=f.r - 1, column=0)[0]
         self.maestro_btn = f.row(None, ttk.Button(page, text=tr("maestro.open"), command=self.maestro_settings),
                                  tip=tr("maestro.open_tip"))
-        # (its "coalesce" setting plays controllers at once, before their notes: hunt 2026-11-01, user picked a hint)
-        self.maestro_timing = f.note(tr("maestro.timing"), tip=tr("maestro.timing_tip"))
         self.maestro_note = f.note()
         self.show_builtin()
 
@@ -579,7 +577,7 @@ class SettingsWindow(tk.Toplevel):
         for w in (self.sound_sep, self.builtin_title, self.app.builtin_window):
             w.grid() if on else w.grid_remove()
         mo = dev == MAESTRO
-        for w in (self.maestro_title, self.maestro_sep, self.maestro_btn, self.maestro_timing, self.maestro_note):
+        for w in (self.maestro_title, self.maestro_sep, self.maestro_btn, self.maestro_note):
             w.grid() if mo else w.grid_remove()
         if mo:
             from files import maestro

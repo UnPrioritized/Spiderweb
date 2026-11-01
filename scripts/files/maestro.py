@@ -25,7 +25,7 @@ OK = 0
 ERR_INVALID_ARG = -1
 ERR_DISABLED = -3
 NOTIFY_STOPPED = 1  # (its engine failed to restart)
-NOTIFY_DISABLED = 3  # (the user turned the API / this program's profile off)
+NOTIFY_DISABLED = 3  # (the user turned this program's profile off; 0.2.2 and older: or the whole API)
 DELAY_SETTLE_S = 1.2  # (just opened: its delay waited for at most this long after opening...)
 DELAY_STILL_S = 0.25  # (... until it held still this long)
 DELAY_SOON_S = 0.5  # (and never trusted sooner than this after opening)
@@ -144,7 +144,7 @@ def gs_drum_part(ch, drums):
 class MaestroError(Exception):
     def __init__(self, disabled, why):
         super().__init__(why)
-        self.disabled = disabled  # (the user turned the API / Spiderweb's profile off in Maestro)
+        self.disabled = disabled  # (the user turned Spiderweb's profile off in Maestro)
 
 
 class MaestroOut:
@@ -175,7 +175,7 @@ class MaestroOut:
         self._sync()
 
     def problem(self):
-        """None, or what's wrong: "disabled" (the user turned the API / Spiderweb's profile off in Maestro), "stopped"
+        """None, or what's wrong: "disabled" (the user turned Spiderweb's profile off in Maestro), "stopped"
         (its engine failed to start, or kept refusing sends for NOT_RUNNING_S: a settings change restarts it)."""
         if self.event == NOTIFY_DISABLED or self.failed == ERR_DISABLED:
             return "disabled"
@@ -280,9 +280,10 @@ class MaestroOut:
         pass
 
     def drain(self):
-        """Waits until everything sent ahead has started (at most lead). Maestro plays controller messages at once
-        (its "coalesce" setting), so an "all notes off" sent before then came before a note sent ahead: that note
-        rang forever (hunt 2026-11-01)."""
+        """Waits until everything sent ahead has started (at most lead). Maestro 0.2.2 and older played controller
+        messages at once (its "coalesce" setting, removed in 0.2.3), so an "all notes off" sent before then came
+        before a note sent ahead: that note rang forever (hunt 2026-11-01). Kept for those versions: its API can't
+        tell 0.2.2 from 0.2.3 (get_version = major.minor only)."""
         if not self.h:
             return
         wait = (self.last - self.rt.now()) / self.tps
