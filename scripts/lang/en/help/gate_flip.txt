@@ -4,7 +4,7 @@ With a gate Range, the long and short gates swap sides, and the edge where every
 
 Colours turn round with the gates, so the colour at the left edge is now at the right edge, on the same channel it had there. Velocities turn round too, like a normal flip. Drawing them again in the velocity pane works as usual.
 
-Nothing moves: every key row starts and ends on the same ticks as before. A row with a gap in it, like a ring's hole, flips each side of the gap by itself, so the gap stays put. A gap counts when it's longer than the usual gap between the notes, like Sustain's Auto. To keep the notes inside the drawing as well, tick "Fit to the shape's edges" in the Range window.
+Nothing moves: every key row starts and ends on the same ticks as before. A row with a gap in it, like a ring's hole, flips each side of the gap by itself, so the gap stays put. A gap counts when it's longer than the usual gap between the notes, like Sustain's Auto. To keep the notes inside the drawing as well, pick Ends "Stretch to the edges" in the Range window.
 
 Pasted notes flip the same way.
 

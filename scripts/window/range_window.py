@@ -1,7 +1,7 @@
 """The spam gate Range window (the side panel's Range… button next to the gate; gaterange.py). Everything about the
 Range is set here, not in the panel (user: room for more options later): on / off, the first and second gate (From
 = the shape's spam gate, To = where the graph reaches the top), across time or keys (low to high or top to bottom),
-each key row by itself (+ across gaps), Fit to the shape's edges, and the graph: across the shape from the first gate to the second. Drag points, click to add one, right-click
+each key row by itself (+ across gaps), Ends (leave / stretch to the edges / exact), and the graph: across the shape from the first gate to the second. Drag points, click to add one, right-click
 one to delete it; presets. The pale steps behind the line = the whole-tick gates the notes really get. Beside it:
 how many notes get each gate (counted from the picked shapes' real notes; red = a gate no note gets).
 
@@ -19,7 +19,8 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, gate_ticks, range_gates
 from notes.funnel import funnel_gates, funnel_range
-from notes.gaterange import DIRS, STRAIGHT, clean_range, few_steps, gate_steps, halved, steps_to, y_gate
+from notes.gaterange import (DIRS, ENDS, STRAIGHT, clean_range, ends_of, exact_ok, few_steps, gate_steps, halved,
+                             steps_to, with_ends, y_gate)
 from window import big_ask, look
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_word
@@ -60,7 +61,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         clean = funnel_range if self.funnel else clean_range
         self.memo = [clean(json.loads(json.dumps(t.get("range") or t.get("range_kept") or
                                                  {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time",
-                                                  "halves": self.funnel})))
+                                                  "halves": self.funnel, "exact": not self.funnel})))
                      for t in self.tgts]
         for i, t in enumerate(self.tgts[1:], 1):  # (shapes without a Range on take the one shown: the first's)
             if not t.get("range"):
@@ -122,14 +123,17 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.join_check = ttk.Checkbutton(box, text=tr("range_window.join"), variable=self.join_var,
                                           command=lambda: self.change("join", self.join_var.get()))
         Tooltip(self.join_check, tr("range_window.join_tip"))
-        self.fit_var = tk.BooleanVar()
-        self.fit_check = ttk.Checkbutton(box, text=tr("range_window.fit"), variable=self.fit_var,
-                                         command=lambda: self.change("fit", self.fit_var.get()))
-        Tooltip(self.fit_check, tr("range_window.fit_tip"))
+        ends_row = ttk.Frame(box)
+        ttk.Label(ends_row, text=tr("range_window.ends")).pack(side="left")
+        self.ends_box = ttk.Combobox(ends_row, values=[tr(f"range_window.ends_{e}") for e in ENDS], state="readonly",
+                                     width=24)
+        self.ends_box.pack(side="left", padx=4)
+        self.ends_box.bind("<<ComboboxSelected>>", lambda e: self.change_ends(ENDS[self.ends_box.current()]))
+        Tooltip(self.ends_box, tr("range_window.ends_tip"))
         if not self.funnel:
             self.rows_check.pack(anchor="w", pady=(4, 0))
             self.join_check.pack(anchor="w", padx=(int(20 * s), 0))
-            self.fit_check.pack(anchor="w", pady=(4, 0))
+            ends_row.pack(anchor="w", pady=(4, 0))
         self.info = ttk.Label(box, text="")
         self.info.pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
@@ -283,6 +287,16 @@ class RangeGraph(PointGraph, tk.Toplevel):
         if mark:
             self.hist.mark()
 
+    def change_ends(self, ends):
+        """Ends picked: Leave as is / Stretch to the edges (sh["range"]["fit"]) / Exact (sh["range"]["exact"])."""
+        old = json.loads(json.dumps(self.memo))
+        self.memo = [with_ends(m, ends) for m in self.memo]
+        if not self.fits():
+            self.memo = old
+            return self.show_boxes()
+        self.store()
+        self.hist.mark()
+
     def set_points(self, pts):
         self.change("graph", [list(p) for p in pts])
 
@@ -299,8 +313,9 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.rows_check.config(state="normal" if time else "disabled")
         self.join_var.set(self.memo[0]["join"])
         self.join_check.config(state="normal" if time and self.memo[0]["rows"] else "disabled")
-        self.fit_var.set(self.memo[0]["fit"])
-        self.fit_check.config(state="normal" if on else "disabled")
+        ends = ends_of(self.memo[0])
+        self.ends_box.current(ENDS.index(ends))
+        self.ends_box.config(state="readonly" if on else "disabled")
         self.choice_vars["halves"].set("steps" if self.memo[0].get("halves") else "smooth")
         self.choice_vars["follow"].set("with_curve" if self.memo[0].get("follow") == "curve" else "evenly")
         for key, ok in (("halves", on), ("follow", on and self.funnel)):
@@ -311,7 +326,9 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.info.config(text=tr("range_window.info", a=a, b=b) +
                          (trn("range_window.notes", self.count, n=self.count) if self.count else "") +
                          (tr("range_window.no_step") if on and self.memo[0].get("halves") and a != b
-                          and not steps_to(a, b) else ""))  # (Steps: no halving / doubling fits)
+                          and not steps_to(a, b) else "") +  # (Steps: no halving / doubling fits)
+                         (tr("range_window.no_exact") if on and not self.funnel and ends == "exact"
+                          and not exact_ok(self.memo[0], a, b) else ""))
 
     def on_gate(self, key):
         """From (the spam gate itself) or To typed / stepped."""

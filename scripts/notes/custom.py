@@ -15,7 +15,8 @@ from files.unzip import unzip
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import ALL_COLOURS, COLOURS, area_maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
-from notes.gaterange import RangeKeys, RangeRows, clean_range, range_grid  # (a spam gate going from one to another)
+from notes.gaterange import (RangeKeys, RangeRows, clean_range, range_grid,  # (a spam gate going from one to another)
+                             stretched)
 from notes.bezier import sample
 from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -2489,7 +2490,7 @@ def chop(sh, stretches, g, count=False):
     as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
     keep = bool(sh.get("range")) and not sh.get("hz")
-    fit = keep and bool(sh["range"].get("fit"))
+    fit = keep and stretched(sh["range"])
     if isinstance(g, RangeRows):
         return chop_rows(stretches, g, count, fit)
     if isinstance(g, (KeyGrid, RangeKeys)):
@@ -3021,7 +3022,7 @@ def range_steps(sh, notes, ppq):
     every key, so columns line up; keys: counted along each key's own row). Fit: the square its middle is in (a row's
     first and last note reach past their own square's start / end). Along each key row: counted along its stretch."""
     grid = range_grid(sh, ppq)
-    fit = sh["range"].get("fit")
+    fit = stretched(sh["range"])
     if isinstance(grid, RangeRows):
         return row_steps(sh, notes, ppq, grid, fit)[0]
     s = (notes[:, 0] + notes[:, 1]) / 2 if fit else notes[:, 0]
@@ -3082,7 +3083,7 @@ def range_gates(sh, notes, ppq):
     last note count as their step's gate even when stretched or trimmed)."""
     grid = range_grid(sh, ppq)
     if isinstance(grid, RangeRows):
-        return row_steps(sh, notes, ppq, grid, sh["range"].get("fit"))[1]
+        return row_steps(sh, notes, ppq, grid, stretched(sh["range"]))[1]
     if not isinstance(grid, RangeKeys):
         k = range_steps(sh, notes, ppq)
         return grid[k, 1] - grid[k, 0]

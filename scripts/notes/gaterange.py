@@ -54,7 +54,37 @@ def clean_range(r):
     return {"to": min(to, 10 ** 4), "graph": clean_graph(r.get("graph")) or [list(p) for p in STRAIGHT],
             "dir": r["dir"] if r.get("dir") in DIRS else "time", "fit": bool(r.get("fit")), "rows": bool(r.get("rows")),
             "join": bool(r.get("join")), "halves": bool(r.get("halves")),
+            **({"exact": True} if r.get("exact") is True and not r.get("fit") else {}),
             **({"follow": "curve"} if r.get("follow") == "curve" else {})}
+
+
+ENDS = ("exact", "leave", "stretch")  # the window's Ends dropdown, in its order (Exact on top: user)
+
+
+def ends_of(r):
+    """Ends of a range: "leave" (whole notes, the last one as it falls), "stretch" ("fit": the first and last note
+    reach the edges) or "exact" (the gates share the length out exactly, exact_squares)."""
+    return "stretch" if r.get("fit") else "exact" if r.get("exact") else "leave"
+
+
+def with_ends(r, ends):
+    out = {k: v for k, v in r.items() if k != "exact"}
+    out["fit"] = ends == "stretch"
+    if ends == "exact":
+        out["exact"] = True
+    return out
+
+
+def stretched(r):
+    """Are a stretch's first and last note stretched / trimmed to its edges? Stretch, or Exact by keys (one gate a
+    key row: no sharing out there)."""
+    return bool(r.get("fit")) or (bool(r.get("exact")) and r.get("dir") != "time")
+
+
+def exact_ok(r, a, b):
+    """Can Exact share the length out with real gates? Not with one gate, Steps (only halvings) or by keys (one gate
+    a key row): there the last note is stretched / trimmed to the edge instead."""
+    return a != b and not r.get("halves") and keys_up(r)["dir"] == "time"
 
 
 def reversed_graph(graph):
@@ -181,6 +211,57 @@ def range_squares(t0, t1, a, b, graph, halves=False):
     return np.column_stack([edges[:-1], edges[1:]])
 
 
+def exact_squares(t0, t1, a, b, graph, halves=False):
+    """range_squares that end exactly at t1 (Exact, tools/gate-distribute's rule): the notes the graph gives, the last
+    one kept or dropped (whichever is nearer), then the ticks left over / too many shared out as +-1 tick on notes
+    spread evenly along (each stays a gate between the two, so most notes stay as they were). When that can't fit
+    (one gate, Steps, a stretch too short) the last note is stretched / trimmed to t1."""
+    span = max(t1 - t0, 1)
+    sq = range_squares(0, span, a, b, graph, halves)
+    sq = sq[sq[:, 0] < span]
+    g = (sq[:, 1] - sq[:, 0]).astype(np.int64)
+    over = int(g.sum()) - span  # (>= 0: the last note reaches the end or past it)
+    if len(g) > 1 and over > 0 and span - (int(g.sum()) - int(g[-1])) < over:
+        g = g[:-1]
+    lo, hi = sorted((a, b))
+    if a != b and not halves:  # (a note count whose gates can add up to span: the nearest one, notes at the end
+        least, most = -(-span // hi), span // lo  # dropped / copies of the last added)
+        if least <= most and not least <= len(g) <= most:
+            n = min(max(len(g), least), most)
+            g = g[:n] if n < len(g) else np.r_[g, np.full(n - len(g), g[-1], np.int64)]
+    diff = span - int(g.sum())  # (> 0: ticks to add, < 0: to take off)
+    if diff and a != b and not halves:
+        room = (hi - g) if diff > 0 else (g - lo)
+        if int(room.sum()) >= abs(diff):
+            g = g + np.sign(diff) * _share(room, abs(diff))
+            diff = 0
+    if diff:
+        g[-1] = max(1, int(g[-1]) + diff)
+        if int(g.sum()) != span:  # (a last note too short to take it all: one note over the whole span)
+            g = np.array([span], np.int64)
+    edges = t0 + np.r_[0, np.cumsum(g)]
+    return np.column_stack([edges[:-1], edges[1:]])
+
+
+def _share(room, d):
+    """d ticks shared out over notes that can each take room[i] more, as evenly as can be: every note up to a level,
+    the rest one tick each on notes spread evenly along."""
+    lo, hi = 0, int(room.max())
+    while lo < hi:  # (the lowest level that takes all d)
+        mid = (lo + hi) // 2
+        if int(np.minimum(room, mid).sum()) >= d:
+            hi = mid
+        else:
+            lo = mid + 1
+    add = np.minimum(room, max(lo - 1, 0))
+    rest = d - int(add.sum())
+    if rest:
+        can = np.flatnonzero(room > add)
+        pick = can[((np.arange(rest) + 0.5) * len(can) / rest).astype(np.int64)]
+        add[pick] += 1
+    return add
+
+
 class RangeKeys:
     """Range by keys: every key row its own gate, notes back to back from the shape's left edge (custom.chop_keys
     asks it for each key's squares)."""
@@ -201,17 +282,18 @@ class RangeRows:
     """Range along each key row: the whole graph over every stretch's own length (join: each key's stretches
     together; custom.chop_rows asks it for the squares over (t0, t1))."""
 
-    def __init__(self, a, b, graph, join, halves=False):
+    def __init__(self, a, b, graph, join, halves=False, exact=False):
         self.a, self.b, self.graph, self.join, self.halves = a, b, tuple(map(tuple, graph)), join, bool(halves)
+        self.exact = bool(exact)
 
     def squares(self, t0, t1):
-        return t0 + _row_squares(max(t1 - t0, 1), self.a, self.b, self.graph, self.halves)
+        return t0 + _row_squares(max(t1 - t0, 1), self.a, self.b, self.graph, self.halves, self.exact)
 
 
 @functools.lru_cache(maxsize=4096)
-def _row_squares(span, a, b, graph, halves):
-    """range_squares from 0 (kept: many stretches share a length)."""
-    return range_squares(0, span, a, b, graph, halves)
+def _row_squares(span, a, b, graph, halves, exact=False):
+    """range_squares / exact_squares from 0 (kept: many stretches share a length)."""
+    return (exact_squares if exact else range_squares)(0, span, a, b, graph, halves)
 
 
 def is_rows(r):
@@ -274,10 +356,11 @@ def range_grid(sh, ppq):
     r = keys_up(sh["range"])
     a = max(1, math.floor(sh["gate"] * ppq + 0.5))
     b = max(1, math.floor(r["to"] * ppq + 0.5))
+    exact = bool(r.get("exact"))
     if is_rows(r):
-        return RangeRows(a, b, r["graph"], bool(r.get("join")), r.get("halves"))
+        return RangeRows(a, b, r["graph"], bool(r.get("join")), r.get("halves"), exact)
     lo, hi, k0, k1 = frame_span(sh)
     t0, t1 = math.floor(lo * ppq), math.ceil(hi * ppq)
     if r["dir"] == "keys":
         return RangeKeys(t0, t1, round(k0), round(k1), a, b, r["graph"], r.get("halves"))
-    return range_squares(t0, t1, a, b, r["graph"], r.get("halves"))
+    return (exact_squares if exact else range_squares)(t0, t1, a, b, r["graph"], r.get("halves"))

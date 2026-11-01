@@ -74,7 +74,7 @@ def clean_funnel(sh):
 def funnel_range(r):
     """A range from a file made valid for a funnel (from the line start to the wall: no keys / rows / fit)."""
     r = clean_range(r)
-    return r and dict(r, dir="time", rows=False, join=False, fit=False)
+    return r and {k: v for k, v in dict(r, dir="time", rows=False, join=False, fit=False).items() if k != "exact"}
 
 
 def old_gates(sh):

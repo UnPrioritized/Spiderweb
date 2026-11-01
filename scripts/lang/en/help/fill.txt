@@ -58,7 +58,9 @@ Left to right (time): every key is cut at the same places, starting at the shape
 
 With "Each key row by itself" (Left to right only), every row instead runs the whole range along its own length, each piece of a row on its own. "Across gaps in a row" runs it across the gaps instead. A row too short for any note gets one note of the first gate.
 
-Low to high or Top to bottom (keys): each key gets its own gate. "Fit to the shape's edges" stretches or trims each row's first and last note so the notes reach exactly to the shape's edges, with no blank and nothing sticking out.
+Low to high or Top to bottom (keys): each key gets its own gate.
+
+Ends says what happens where the gates don't fit the length exactly. "Leave as is" keeps every note's gate, so the last one can stick out a little or stop short. "Stretch to the edges" stretches or trims each row's first and last note so the notes reach exactly to the shape's edges. "Exact (no leftover)", the default for new Ranges, makes the gates add up exactly to the length: a few notes get a gate a tick longer or shorter, spread along, so every note is still a gate from the Range and none is odd. With one gate, Steps or across keys that can't work, so the last note is stretched instead.
 
 Hz bass (Spam and Outline spam): spam so fast that the repeats sound like a tone. Tick it, then press Notes… to place the tones in the Hz bass window (one tone, or several, chords and slides; see Hz bass). The gate is worked out from the tone, the tempo under the shape and the PPQ. Every key is in step, so more keys make the tone thicker, not different.
 
