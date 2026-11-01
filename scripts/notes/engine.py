@@ -2114,10 +2114,13 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         if sub:
             pick = sorted(sub + [i for i, p in enumerate(pinned) if p is not None])
             got = {k: None for k, i in enumerate(pick) if i in set(sub)}
+            told = {k: None for k, i in enumerate(pick) if voice_slots is not None and i in voice_slots}
             render([note_lists[i] for i in pick], "auto", split, [tracks[i] for i in pick],
                    [apart[i] for i in pick], [fixed[i] for i in pick], use10, None, [pastes[i] for i in pick],
-                   None, [back[i] for i in pick], [ordered[i] for i in pick], keep=keep,
+                   None, [back[i] for i in pick], [ordered[i] for i in pick], keep=keep, voice_slots=told,
                    busy=[busy[i] for i in pick] if busy else None, note_slots=got)
+            for k, v in told.items():  # (its CC events' tracks: passengers.py)
+                voice_slots[pick[k]] = v
             for k, s in got.items():
                 if s is not None and len(s):
                     slot_of[pick[k]] = np.asarray(s, np.int64)

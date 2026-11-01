@@ -334,8 +334,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (merged shapes and Nested / Tiles / Ripples fills take channels by colour number, not by which colour starts
     # first: a flipped or moved copy keeps its colours, user; pasted notes by track: a pasted song's channels stay
     # in their order, user 2026-10-22)
+    # (pasted notes' passengers: each track's on its slot; a Domino paste's in every mode, hunt 2026-11-01)
     voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz")) or "cc" in sh} \
-        if mode == "auto" else {}  # (pasted notes' passengers: each track's on its slot)
+        if mode == "auto" else {i: None for i, sh in enumerate(shapes) if "cc" in sh and pasted_notes(sh)}
     note_slots = {i: None for i, (sh, s) in enumerate(zip(shapes, strips)) if s and "cc" in sh}
     ordered = [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh for sh in shapes]
     # (a recoloured shape's colours: each counted as starting where it did before, so they keep their channels)
@@ -466,7 +467,11 @@ def cc_busy(shapes, ppq, mode):
     """all_notes' busy: per shape None, or {track: (start, end)} the times its CC lines are sent (hz_cc.cc_spans at the
     Hz bass's own BPM, as its notes): Multi channel keeps its channel for them, on every key, so no other shape
     takes it while its lines (run-on too) change it (user 2026-10-21: either split). None otherwise."""
-    if mode != "auto" or not any(sends_cc(sh) or "cc" in sh for sh in shapes):
+    if mode != "auto":  # (a Domino paste's tracks: as in Multi channel in every mode, hunt 2026-11-01)
+        if not any("cc" in sh and pasted_notes(sh) for sh in shapes):
+            return None
+        return [passenger_spans(sh, ppq) or None if "cc" in sh and pasted_notes(sh) else None for sh in shapes]
+    if not any(sends_cc(sh) or "cc" in sh for sh in shapes):
         return None
     # (pasted notes' CCs too: each track's channel held from its first event to its last, hunt 2026-10-22: a volume
     # change after a track's last note changed the shape that took its channel next)
