@@ -34,33 +34,47 @@ def make_list(version, hashes):
     return ("\n".join(lines) + "\n").encode("ascii")
 
 
+class BadSignature(ValueError):
+    """Not signed by our key (or no key here): someone else's file."""
+
+
+class Unreadable(ValueError):
+    """Signed by us, but in a list format this version doesn't know (a newer one): not an alarm."""
+
+
 def read_list(data):
-    """(version, {file name: sha256 hex}) from a list's bytes; ValueError when it isn't one."""
-    lines = data.decode("ascii").split("\n")
-    if not lines or lines[0] != HEADER or len(lines) < 3 or not lines[1].startswith("version "):
-        raise ValueError("not an update list")
-    version = lines[1][len("version "):]
-    hashes = {}
-    for line in lines[2:]:
-        if not line:
-            continue
+    """(version, {file name: sha256 hex}) from a list's bytes; Unreadable when it isn't one this version reads.
+    Lines of kinds it doesn't know are SKIPPED (still signed): later versions may add some without old copies
+    refusing the list. Never change what "version" / "sha256" lines mean: add new kinds instead."""
+    try:
+        lines = data.decode("ascii").split("\n")
+    except UnicodeDecodeError:
+        raise Unreadable("not ascii") from None
+    if not lines or lines[0] != HEADER:
+        raise Unreadable("not an update list this version reads")
+    version, hashes = None, {}
+    for line in lines[1:]:
         parts = line.split(" ", 2)
-        if len(parts) != 3 or parts[0] != "sha256" or len(parts[1]) != 64:
-            raise ValueError("bad line in update list")
-        hashes[parts[2]] = parts[1].lower()
+        if parts[0] == "version" and len(parts) == 2 and version is None:
+            version = parts[1]
+        elif parts[0] == "sha256" and len(parts) == 3 and len(parts[1]) == 64:
+            hashes[parts[2]] = parts[1].lower()
+    if version is None:
+        raise Unreadable("no version line")
     return version, hashes
 
 
 def check(list_bytes, sig_text, public_key=None):
-    """(version, hashes) when sig_text is a valid signature of list_bytes by the public key; ValueError if not."""
+    """(version, hashes) when sig_text is a valid signature of list_bytes by the public key. BadSignature if it
+    isn't; Unreadable when it is but the list can't be read here."""
     from nacl.signing import VerifyKey
     from nacl.exceptions import BadSignatureError
     key = public_key or PUBLIC_KEY
     if not key:
-        raise ValueError("no public key in this version")
+        raise BadSignature("no public key in this version")
     try:
         sig = base64.b64decode(sig_text.strip(), validate=True)
         VerifyKey(base64.b64decode(key)).verify(list_bytes, sig)
     except (BadSignatureError, ValueError, TypeError) as e:
-        raise ValueError("bad signature") from e
+        raise BadSignature("bad signature") from e
     return read_list(list_bytes)

@@ -140,6 +140,9 @@ class Updates:
 
     def show_popup(self, found):
         if self.popup is not None and self.popup.winfo_exists():
+            if self.popup.busy:  # (downloading: never a second download, never a hidden one)
+                self.popup.lift()
+                return
             self.popup.destroy()
         self.popup = UpdatePopup(self, found)
 
@@ -267,7 +270,9 @@ class UpdatePopup(tk.Toplevel):
                                  command=self.start_update)
             self.go.pack(side="right", padx=(0, 6))
         ttk.Button(row, text=tr("updates.open_download_page"), command=self.download).pack(side="right", padx=(0, 6))
+        self.busy = False  # (downloading / finishing: a new check only brings this popup to the front)
         self.bind("<Escape>", lambda e: self.close())
+        self.bind("<Destroy>", self._gone, add="+")
         self.protocol("WM_DELETE_WINDOW", self.close)
         on_top(self, app, "update_popup")
 
@@ -275,17 +280,27 @@ class UpdatePopup(tk.Toplevel):
         webbrowser.open(self.url or WEBSITE + "/releases/latest")
         self.close()
 
+    def _gone(self, e):
+        """Closed any way (Spiderweb itself closing too): a running download stops, its part file deleted."""
+        if e.widget is self and self.cancel_event is not None:
+            self.cancel_event.set()
+
     def close(self):
-        if self.cancel_event is not None:  # (a download running: stopped, its part file deleted by its thread)
+        if self.cancel_event is not None:
             self.cancel_event.set()
         self.destroy()
 
     def stop(self):
-        """The Cancel button while downloading (the popup stays)."""
+        """The Cancel button while downloading (the popup stays; shown at once, the download ends when its
+        connection next answers)."""
         if self.cancel_event is not None:
             self.cancel_event.set()
+            self.stop_button.state(["disabled"])
+            self.say.configure(text=tr("updates.stopping"), foreground="")
 
     def start_update(self):
+        self.busy = True
+        self.stop_button.state(["!disabled"])
         self.go.state(["disabled"])
         self.cancel_event = threading.Event()
         self.progress = [0, 0]
@@ -298,7 +313,7 @@ class UpdatePopup(tk.Toplevel):
                                                       cancel)
             except self_update.Refused as e:
                 result["fail"] = str(e)
-            except OSError:
+            except OSError:  # (disk trouble comes as Refused("disk"): what's left is the connection)
                 result["fail"] = "no_connection"
             except Exception:
                 result["fail"] = "other"
@@ -319,7 +334,7 @@ class UpdatePopup(tk.Toplevel):
             return
         done, size = self.progress
         mb = lambda n: "%.1f" % (n / 1048576)  # noqa: E731
-        if done:
+        if done and not self.cancel_event.is_set():
             self.bar.configure(value=done * 1000 // size if size else 0)
             self.say.configure(text=tr("updates.downloading", done=mb(done), size=mb(size)) if size else
                                tr("updates.downloading_unknown", done=mb(done)))
@@ -337,11 +352,13 @@ class UpdatePopup(tk.Toplevel):
             self.finish_zip(self.result["path"])
 
     def failed(self, why):
-        self.say.configure(text=tr("updates.fail." + why), foreground=look.WARN)
+        self.busy = False
+        self.say.configure(text=tr("updates.fail." + why), foreground="" if why == "cancelled" else look.WARN)
         if self.go is not None:
             self.go.state(["!disabled"])
 
     def finish_zip(self, path):
+        self.busy = False
         self.say.configure(text=tr("updates.zip_ready", file=path), foreground="")
         self.go.configure(text=tr("updates.show_file"), command=lambda: system.show_file(path))
         self.go.state(["!disabled"])
@@ -353,6 +370,7 @@ class UpdatePopup(tk.Toplevel):
         self.say.configure(text=tr("updates.restarting"), foreground="")
         self.update_idletasks()
         try:
+            size = os.path.getsize(path)
             undo = self_update.swap_in(path)
         except OSError:
             try:
@@ -361,21 +379,39 @@ class UpdatePopup(tk.Toplevel):
                 pass
             self.failed("swap_failed")
             return
+        if not self_update.new_ready(size):  # (taken away since it was checked: an antivirus?)
+            self.back(undo, "blocked")
+            return
         app = self.updates.app
-        app.on_close()
+        self.attributes("-topmost", False)  # (closing's own questions must come in front of this popup)
+        try:
+            app.on_close()
+        except Exception:  # (an error while closing: Spiderweb stays as it is, the old exe back)
+            errors.write_log(*sys.exc_info(), "Closing for an update")
         try:
             still_open = bool(app.winfo_exists())
         except tk.TclError:
             still_open = False
         if still_open:
-            try:
-                undo()
-            except OSError:  # (the new exe stays in place: it's the checked new version, used at the next start)
-                pass
-            if self.winfo_exists():
-                self.failed("not_closed")
+            self.back(undo, "not_closed")
             return
         try:
             self_update.start_new()
-        except OSError:  # (the new exe is in place: the next start by hand opens it)
-            pass
+        except OSError:  # (Windows refused it, e.g. an antivirus): the old exe back + a message, then it starts
+            back = self_update.give_back()
+            system.error_box(tr("updates.popup_title"), tr("updates.fail.start_failed" if back else
+                                                           "updates.fail.start_failed_kept"))
+            if back:
+                try:
+                    self_update.start_new()  # (the old version again: it waits for this one's lock too)
+                except OSError:
+                    pass
+
+    def back(self, undo, why):
+        """Spiderweb stays open: the old exe back in place (or, when that fails, ask for a restart: the running
+        program must not go on reading the new exe's file)."""
+        ok = undo()
+        if not self.winfo_exists():
+            return
+        self.attributes("-topmost", True)
+        self.failed(why if ok else "undo_failed")

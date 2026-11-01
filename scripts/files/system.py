@@ -208,6 +208,36 @@ def open_path(path, text=False):
         return False
 
 
+def downloads_folder():
+    """The user's real Downloads folder (moved / renamed ones too), else the home folder."""
+    import os
+    home = os.path.expanduser("~")
+    found = None
+    if WINDOWS:
+        try:
+            class GUID(ctypes.Structure):
+                _fields_ = [("a", wintypes.DWORD), ("b", wintypes.WORD), ("c", wintypes.WORD),
+                            ("d", ctypes.c_ubyte * 8)]
+            gid = GUID(0x374DE290, 0x123F, 0x4565, (ctypes.c_ubyte * 8)(0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7B))
+            out = ctypes.c_wchar_p()
+            sh = ctypes.windll.shell32
+            if sh.SHGetKnownFolderPath(ctypes.byref(gid), 0, None, ctypes.byref(out)) == 0:  # (FOLDERID_Downloads)
+                found = out.value
+            ctypes.windll.ole32.CoTaskMemFree(out)
+        except (AttributeError, OSError):
+            pass
+    elif not MAC:
+        try:
+            found = _ask(["xdg-user-dir", "DOWNLOAD"]).strip()
+            if os.path.normpath(found) == os.path.normpath(home):  # (none set: it answers the home folder)
+                found = None
+        except OSError:
+            pass
+    if not found or not os.path.isdir(found):
+        found = os.path.join(home, "Downloads")
+    return found if os.path.isdir(found) else home
+
+
 def show_file(path):
     """Open the file's folder with the file picked (Windows; elsewhere just the folder). False if it couldn't."""
     import os
