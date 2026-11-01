@@ -158,6 +158,13 @@ def can_go_in(sh):
     return not (picture_like(sh) or is_mask(sh) or "hz" in sh or has_strips(sh))
 
 
+def colours_apart(sh, mode):
+    """Does a laid shape keep each colour on its own track in this channels mode? Multi channel: always. Single
+    channel / As drawn: only a shape keeping its own channels (an Extract, a picture) or a Domino paste (user
+    2026-10-29 / 11-01: what you copied is what you get); other shapes play every colour on their first track."""
+    return mode == "auto" or bool(pinned_slots(sh, mode)) or pasted_notes(sh)
+
+
 def placed_on(sh, own):
     """The tracks the shape was laid on (Draw into a track; own: {id: channel} of the tracks added by hand): its
     into_ids up to the first track added by hand that's gone (from there on: laid again, App.fit_into). Each a
@@ -370,7 +377,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         on = np.array(laid_slots_of(sh, ids, own, use10), np.int64)
         # (Single channel / As drawn: every colour on its first track, hunt 2026-10-26; an Extract keeps its channels,
         # pasted notes their tracks: user 2026-10-29, "you copy from Domino is what you'll get")
-        kept = mode == "auto" or pinned_slots(sh, mode) or pasted_notes(sh)
+        kept = colours_apart(sh, mode)
         if not kept:
             colour = np.zeros_like(colour)
         if kept and "cc" in sh and t is not None and len(n):  # (each pasted track's events: its colour's)
@@ -2086,7 +2093,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             shown = {v for sh in self.shapes for k in ("into", "into_gap") for v in (sh.get(k) or [])
                      if type(v) is int}
         else:
-            shown = {p[0] for p in (placed_on(sh, chans) for sh in self.shapes) if p}
+            shown = {v for sh in self.shapes for v in (lambda p: p if colours_apart(sh, mode) else p[:1])(
+                placed_on(sh, chans))}  # (a Domino paste's tracks: all shown, user 2026-11-01)
         # (kept by what it shows: a change counter missed shapes laid again within one change, sweep 2026-10-26)
         key = (id(own), mode, frozenset(shown))
         got = getattr(self, "_own_written", None)
@@ -2185,6 +2193,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                               port(rows[-1]) if rows else 0)
                 own.append(t)
                 by_id[v] = t
+            elif rows and 0 <= rows[-1] < FILE0:  # (the list ends with a track of yours: a new automatic one would
+                return at_end(True, laid, start)  # be listed above yours, not at the end; user 2026-11-01)
             else:
                 v = -1 - (max([-1 - r for r in rows if r < 0] + [-1]) + 1)
             rows.append(v)

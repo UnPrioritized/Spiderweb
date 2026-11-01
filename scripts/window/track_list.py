@@ -26,7 +26,7 @@ from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, PART, add_tracks, key_p
                               new_id, plan, port_letter, with_port)
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
-from notes.engine import BEATS_FAR, OWN0, channels_of, slot_track_channel, track_ids
+from notes.engine import BEATS_FAR, OWN0, channels_of, pasted_notes, slot_track_channel, track_ids
 from notes.loaded import KEY_SIG, TEMPO, TIME_SIG, tempo_tracks, track_port as file_port
 from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
@@ -2198,8 +2198,9 @@ class TrackList(tk.Canvas):
             mine = r[by[a:b]]
             slots = app.colour_slots(sh, mine) if len(mine) else [autos[0]]  # (no notes now: the first one)
             # (Single channel / As drawn: one track, all colours on it; a shape keeping its own channels in every
-            # mode, e.g. an Extract, keeps every track, hunt 2026-10-26)
-            entries = [taken.get(s, -1 - s) for s in (slots if multi or pinned_slots(sh, "single") else slots[:1])]
+            # mode, e.g. an Extract, keeps every track, hunt 2026-10-26; a Domino paste too, user 2026-11-01)
+            entries = [taken.get(s, -1 - s) for s in (slots if multi or pinned_slots(sh, "single") or pasted_notes(sh)
+                                                      else slots[:1])]
             for key in ("cols", "into_gap", "into_rest", "slots10"):
                 sh.pop(key, None)
             sh["into"] = entries
@@ -2334,7 +2335,7 @@ class TrackList(tk.Canvas):
         """Remove channel(s): the picked Ch rows (pairs (your track, channel)) gone with your notes on them, like
         Remove Track for a track (remove_own): a shape wholly on them goes, one with other colours elsewhere keeps
         those as plain notes on their tracks; an empty Ch row just goes. The tracks stay. One undo step."""
-        from window.app import placed_on
+        from window.app import colours_apart, placed_on
         from window.track_channels import forget_channels, laid_channels, tidy_tracks
         app = self.app
         want = {(s - HAND, c) for s, c in pairs if s >= HAND}
@@ -2347,8 +2348,8 @@ class TrackList(tk.Canvas):
             if not ids:
                 continue
             drop = [k for k, vc in enumerate(zip(ids, laid_channels(app, sh, ids, own))) if vc in want]
-            if not multi:  # (Single channel / As drawn: every colour on the first one)
-                drop = list(range(len(ids))) if 0 in drop else []
+            if not multi and not colours_apart(sh, "single"):  # (Single channel / As drawn: every colour on the
+                drop = list(range(len(ids))) if 0 in drop else []        # first one; a Domino paste keeps its tracks)
             if drop:
                 hit[i] = (ids, drop)
         gone = {i for i, (ids, drop) in hit.items() if len(drop) == len(ids)}
@@ -2864,7 +2865,7 @@ class TrackList(tk.Canvas):
             entry, chans, more = slot - HAND if slot >= HAND else -1 - slot, self.app.own_channels(), set()
             for sh in self.app.shapes:
                 laid = placed_on(sh, chans)
-                if laid and laid[0] == entry:
+                if laid and laid[0] == entry and not pasted_notes(sh):  # (a Domino paste: on its own tracks)
                     more |= set(laid[1:]) - {entry}
             if more:
                 lines.append(trn("tracks.waiting", len(more), n=len(more)))

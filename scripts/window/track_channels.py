@@ -49,14 +49,14 @@ def move_channels(app, src, chans, dst, to=None):
 
 def track_channels(app):
     """{your track's id or FILE0 + n: the channels your shapes play on it}."""
-    from window.app import placed_on
-    own, out = app.own_channels(), {}
+    from window.app import colours_apart, placed_on
+    own, out, mode = app.own_channels(), {}, app.channel_mode.get()
     for sh in app.shapes:
         ids = placed_on(sh, own)
         if not ids:
             continue
         laid = laid_channels(app, sh, ids, own)
-        if app.channel_mode.get() != "auto":  # (Single channel / As drawn: every colour on the first)
+        if not colours_apart(sh, mode):  # (Single channel / As drawn: every colour on the first; a Domino paste not)
             ids, laid = ids[:1], laid[:1]
         for v, c in zip(ids, laid):
             if v >= 0:
