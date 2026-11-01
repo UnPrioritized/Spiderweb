@@ -3,7 +3,7 @@ Random glissando runs (the Glissando tool, PLAN.md): a dragged line = a run of s
 key per grid step, each note one step long.
 
 sh["kind"] = "gliss", sh["pts"] = [start, end] (beats, keys) like a line; sh["gliss"] = its settings:
-  "grids": "halves" (1/1, 1/2 ... 1/128) or "list" (the typed "list" below) = the grids the step picks from;
+  "grids": "halves" (1/1, 1/2 ... as fine as the PPQ allows) or "list" (the typed "list" below) = the grids the step picks from;
   "list": the typed grids, e.g. "1/16, 1/32, 1/48";
   "pcs": the picked keys as notes of the octave (0 = C ... 11 = B), every octave; missing = the white keys.
 The step picks itself: the grid in the list nearest one key per step for the line as drawn ("fits one key per
@@ -17,16 +17,16 @@ import re
 import numpy as np
 
 WHITE = (0, 2, 4, 5, 7, 9, 11)
-HALVES = tuple(f"1/{2 ** i}" for i in range(8))  # 1/1 ... 1/128
 LIST_DEFAULT = "1/16, 1/32, 1/64"
 DEFAULTS = {"grids": "halves", "list": LIST_DEFAULT}
 GRID_KINDS = ("halves", "list")
 
 
 def grid_name(text):
-    """One typed grid like "1/32" or " 3 / 16 " -> "3/16", else None (top 1-100, bottom 1-128: the Snap list's)."""
-    m = re.fullmatch(r"\s*(\d{1,3})\s*/\s*(\d{1,3})\s*", text) if isinstance(text, str) else None
-    if not m or not 1 <= int(m.group(1)) <= 100 or not 1 <= int(m.group(2)) <= 128:
+    """One typed grid like "1/32" or " 3 / 16 " -> "3/16", else None (any size: grids under a tick are dropped
+    later, by the PPQ)."""
+    m = re.fullmatch(r"\s*(\d{1,6})\s*/\s*(\d{1,7})\s*", text) if isinstance(text, str) else None
+    if not m or int(m.group(1)) < 1 or int(m.group(2)) < 1:
         return None
     return f"{int(m.group(1))}/{int(m.group(2))}"
 
@@ -57,9 +57,20 @@ def clean_gliss(g):
     return out
 
 
-def grids(g):
-    """The grids the step can be, as names ("1/32")."""
-    return list(HALVES) if g.get("grids") != "list" else (read_list(g.get("list")) or list(HALVES))
+def halves(ppq):
+    """1/1, 1/2, 1/4 ... down to the finest half that's still at least one tick at this PPQ (no other limit)."""
+    out, b = [], 1
+    while 4 * ppq / b >= 1:
+        out.append(f"1/{b}")
+        b *= 2
+    return out or ["1/1"]
+
+
+def grids(g, ppq):
+    """The grids the step can be, as names ("1/32"): none under one tick (the PPQ is the only limit, user 11-02)."""
+    names = read_list(g.get("list")) if g.get("grids") == "list" else None
+    names = [n for n in names or halves(ppq) if grid_ticks(n, ppq) >= 1]
+    return names or [f"1/{4 * ppq}"]  # (every typed grid under a tick: one tick)
 
 
 def grid_ticks(name, ppq):
@@ -84,7 +95,7 @@ def plan(sh, ppq):
     if k1 < k0:
         keys.reverse()
     start = math.floor(b0 * ppq + 0.5)
-    names = [n for n in grids(g) if grid_ticks(n, ppq) >= 1] or ["1/1"]  # (never under a tick)
+    names = grids(g, ppq)
     span = (b1 - b0) * ppq
     if len(keys) < 2 or span <= 0:  # (one key / an upright line: the finest grid)
         name = min(names, key=lambda n: grid_ticks(n, ppq))
