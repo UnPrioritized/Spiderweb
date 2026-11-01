@@ -2702,6 +2702,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         shown = [i for i in range(len(self.shapes)) if i not in self.hidden_shapes]  # (one track shown: its shapes)
         if shown:
             self.select_many(shown, self.sel if self.sel in shown else shown[-1])
+            self.picked_all = frozenset(self.sels)  # (a copy for Domino takes the tempo along: copied_whole)
 
     def on_list_select(self, _):
         rows = self.shape_rows()  # (an Add between group is one row: all its shapes)

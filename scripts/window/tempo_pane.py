@@ -2521,12 +2521,14 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         out = [[p[0] - lo] + copy.deepcopy(p[1:]) for p in pts]
         for p in out:  # (heard tempo lines along, from the copy's start too)
             shift_heard(p, -lo, None)
-        return {"length": spans[-1][1] - lo, "points": out, "catch": clip_c,
+        return {"from": lo, "length": spans[-1][1] - lo, "points": out, "catch": clip_c,
                 "spans": [(a - lo, b - lo) for a, b in spans]}
 
-    def copy(self):
+    def copy(self, domino=None):
         """Ctrl+C after clicking the pane: the Select boxes (or what's picked, or the part picked: its two
-        points), each kept as its distance from the copy's start, so a paste keeps the gaps."""
+        points), each kept as its distance from the copy's start, so a paste keeps the gaps. Also on the clipboard
+        for Domino (a Conductor track alone): domino True = Copy to Domino; None = when "Ctrl+C also copies for
+        Domino" is ticked (user 2026-11-01)."""
         pts, pick = self.ed()["points"], self.picked()
         if self.bands:
             clip = self.clip_of(spans=self.bands)
@@ -2543,6 +2545,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         self.app.drop_own_copy()  # (Spiderweb's older copy off the clipboard, like a stroke copy: hunt 2026-10-29)
         n = len(clip["points"]) + len(clip["catch"])
         self.app.status.config(text=trn("tempo.copied", n, n=n))
+        if domino or domino is None and self.app.copy_domino.get():
+            self.app.tempo_to_domino(clip, quiet=not domino)
         return True
 
     def cut(self):

@@ -1423,6 +1423,7 @@ class TrackList(tk.Canvas):
         end = self.last_end()
         self._box = None
         self.boxes = [{"t0": 0.0, "t1": end, "rows": None}] if end > 0 else []
+        self.all_band = self.boxes[0] if self.boxes else None  # (a copy for Domino takes the tempo: copied_whole)
         self.request_redraw()
 
     def last_end(self):

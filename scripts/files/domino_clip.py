@@ -195,6 +195,15 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
         return MAGIC + struct.pack("<I", len(data)) + z.finish()
 
 
+def conductor_clip(ppq, conductor, length):
+    """The clipboard bytes of a Conductor track alone (tempo_items bytes, length ticks long): the Conductor pane's
+    copy for Domino (user 2026-11-01), pasted on Domino's Conductor track."""
+    end = item(2009, item(1001, struct.pack("<I", max(int(length), 1))))
+    data = (SONG_START + item(1002, struct.pack("<H", ppq)) + SONG_REST
+            + item(1003, CONDUCTOR_HEAD + conductor + end + TRACK_TAIL) + SONG_TAIL)
+    return MAGIC + struct.pack("<I", len(data)) + zlib.compress(data)
+
+
 def dms_path(mid_path):
     """The .dms file next to the MIDI file (output_path) with the same name. A name typed with .dms (made
     "song.dms.mid" by output_path) is used as it is."""

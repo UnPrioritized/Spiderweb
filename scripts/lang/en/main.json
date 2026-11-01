@@ -715,6 +715,7 @@
  "tempo.step_copy_drag": "Copy tempo",
  "tempo.copied": "Copied {n} tempo points and catch-ups: Ctrl+V pastes them at the play line",
  "tempo.copied_one": "Copied 1 tempo point or catch-up: Ctrl+V pastes it at the play line",
+ "tempo.copied_for_domino": "Copied the tempo for Domino — in Domino, pick the Conductor track and paste at the cursor",
  "tempo.copy_nothing": "Nothing to copy: pick tempo points or drag a Select box over them first",
  "tempo.paste_nothing": "No tempo copied yet: pick tempo points or a Select box and press Ctrl+C",
  "tempo.step_catch_move": "Move a catch-up",

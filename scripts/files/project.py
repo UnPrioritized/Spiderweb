@@ -44,7 +44,8 @@ from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text
 from files import clipboard, notes_clip
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
-                               dms_path, get_from_clipboard, put_on_clipboard, read_notes, tempo_items)
+                               conductor_clip, dms_path, get_from_clipboard, put_on_clipboard, read_notes,
+                               tempo_items)
 from files.own_tracks import ID_MOST, part_key, clean_file_gone, clean_file_order, clean_file_props, clean_file_tracks, clean_own_tracks, new_id
 from files.midi_out import (MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note_inserts, note_tracks, own_events,
                             track_slots, write_midi)
@@ -1766,11 +1767,65 @@ class ProjectFiles:
         from window.track_moves import boxed
         return boxed(self, self.track_list.boxes)
 
+    def copied_whole(self):
+        """True when what's copied was picked by Ctrl+A (every shape, or the track list's Ctrl+A band) and nothing
+        since: only then does a copy for Domino take the tempo along (user 2026-11-01)."""
+        tl = getattr(self, "track_list", None)
+        if self.tracks_shown() and tl is not None and tl.boxes:
+            return len(tl.boxes) == 1 and tl.boxes[0] is getattr(tl, "all_band", None)
+        return bool(self.sels) and getattr(self, "picked_all", None) == frozenset(self.sels)
+
+    def tempo_for_domino(self, lo, hi):
+        """The Conductor pane's copied stretch (beats lo..hi) as Domino's clipboard bytes: a Conductor track alone
+        (user 2026-11-01), times as Export MIDI writes them -> (raw, status text); time / key signatures only when
+        the copy starts on a bar line (off it, Domino would put one mid-bar)."""
+        ppq, bpm, beats = self.read_project()
+        top = round(max(hi, lo) * ppq)
+        plan = self.tempo_timed(ppq, bpm, beats, {}, upto=top)[2]
+        first, end = (int(t) for t in plan["map"](np.array([round(lo * ppq), top], np.int64)).tolist())
+        end = max(end, first + 1)
+        on_bar = bar_line(plan["sigs"], first, ppq) == first
+        items, slow = tempo_items(plan["events"], plan["sigs"] if on_bar else (), first, end,
+                                  plan["keys"] if on_bar else ())
+        return conductor_clip(ppq, items, end - first), slow
+
+    def tempo_to_domino(self, clip, quiet):
+        """The Conductor pane's copy (clip = app.tempo_clip) on the clipboard for Domino: Ctrl+C there with "Ctrl+C
+        also copies for Domino" (quiet: said in the status line only) or Copy to Domino after clicking the pane."""
+        if not clipboard.RAW:
+            if not quiet:
+                messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
+            return
+        try:
+            raw, slow = self.tempo_for_domino(clip["from"], clip["from"] + clip["length"])
+            copied = put_on_clipboard(raw)
+        except (ValueError, MemoryError) as e:
+            copied, why = False, (str(e) if isinstance(e, ValueError) else tr("big_ask.out_of_memory"))
+        else:
+            why = tr("project.couldn_t_use_the_clipboard_another")
+        if not copied:
+            if quiet:
+                self.status.config(text=self.status.cget("text") + tr("app.not_copied_for_domino"))
+            else:
+                messagebox.showerror(tr("project.spiderweb"), why)
+            return
+        self.remember_clip()  # (the piano roll's Ctrl+V doesn't take it for Domino's notes)
+        if quiet:
+            self.status.config(text=self.status.cget("text") + tr("app.copied_for_domino_too"))
+            return
+        self.status.config(text=tr("tempo.copied_for_domino"))
+        if slow:
+            messagebox.showwarning(tr("project.spiderweb"), tr("tempo.copied_for_domino") + tr("project.dms_tempo_slow"))
+
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected; the track list's Select
         boxes kept: the notes starting in them) on the clipboard, for
         Ctrl+V in Domino. One track per channel that has notes; the copy starts on the first note or at the bar
-        line before it (domino_start)."""
+        line before it (domino_start). The tempo goes along only after Ctrl+A (copied_whole). The Conductor pane
+        clicked last: its copy, the tempo alone (tempo_to_domino)."""
+        if getattr(self, "key_pane", None) is self.tempo_pane:
+            self.tempo_pane.copy(domino=True)
+            return
         got = self.domino_copy()
         if got is None:
             return
@@ -1890,8 +1945,11 @@ class ProjectFiles:
             lo, hi = early, int(notes[:, 1].max())
             first = bar_line(plan["sigs"], lo, ppq) if bar else lo
             span = first, max((bar_line(plan["sigs"], hi, ppq, True) if bar else hi) - first, 1)
-            conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1],
-                                    plan["keys"] if bar else ())[0]
+            # (the tempo goes along only with everything picked by Ctrl+A, user 2026-11-01: a Conductor track
+            # first pushed the notes one track down in Domino)
+            if self.copied_whole():
+                conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1],
+                                        plan["keys"] if bar else ())[0]
         elif early < int(notes[:, 0].min()):
             first, length = clip_span(notes, beats * ppq, self.domino_start())
             start = early if self.domino_start() == "note" else early // (beats * ppq) * beats * ppq
@@ -1925,7 +1983,7 @@ class ProjectFiles:
             self.busy(None)
         what =((tr("project.one_note") if len(notes) == 1 else tr("project.n_notes", n=len(notes))) if sels else
                 trn("project.all_notes", len(notes), n=len(notes)))
-        where = (tr("project.the_conductor_track") if plan else
+        where = (tr("project.the_conductor_track") if conductor is not None else
                  tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks))
         how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
                tr("project.double_click_a_bar_line_to"))
@@ -1937,7 +1995,8 @@ class ProjectFiles:
                                                                  if sels else None) else "")
                 + self.loaded_left_out(short=True))
         warn = ""
-        if plan:  # (the tempo warnings as Export to Domino gives them; places only inside what was copied)
+        if plan and conductor is not None:  # (the tempo warnings as Export to Domino gives them; places only
+            # inside what was copied)
             lo, hi = heard
             inside = {k: [b for b in plan[k] if lo <= b <= hi] for k in ("jumps", "hz", "dense", "gave")}
             warn = self.tempo_notes(dict(plan, **inside))
