@@ -493,6 +493,8 @@
  "range_window.ends_stretch": "Stretch to the edges",
  "range_window.ends_exact": "Exact (no leftover)",
  "range_window.ends_tip": "What happens where the gates don't fit the length exactly.\nExact: the gates add up exactly to the length, with no odd note: a few notes get a gate a tick longer or shorter, spread along. With one gate, Steps or across keys that can't work, so the last note is stretched instead.\nLeave as is: every note keeps its gate, so the last one can stick out a little past the shape or stop short of it.\nStretch to the edges: each row's first and last note reach exactly to the shape's edges, stretched over the blank or trimmed where they'd stick out.",
+ "range_window.odd": "\nExact: {n:,} rows are too short for the gates to add up, so their last note is stretched or trimmed.",
+ "range_window.odd_one": "\nExact: 1 row is too short for the gates to add up, so its last note is stretched or trimmed.",
  "range_window.no_exact": "\nExact: with one gate, Steps or across keys the gates can't add up exactly, so the last note is stretched or trimmed to the edge.",
  "range_window.halves": "Changes:",
  "range_window.smooth": "Smooth",

@@ -15,8 +15,8 @@ from files.unzip import unzip
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import ALL_COLOURS, COLOURS, area_maps, area_map, inside_loops  # (areas coloured by hand)
 from notes.faces import faces  # (what's filled when it isn't plain even-odd: fill_test)
-from notes.gaterange import (RangeKeys, RangeRows, clean_range, range_grid,  # (a spam gate going from one to another)
-                             stretched)
+from notes.gaterange import (RangeKeys, RangeRows, clean_range, halved, range_grid,  # (a spam gate going from one to
+                             stretched)                                               # another)
 from notes.bezier import sample
 from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
@@ -3078,15 +3078,29 @@ def row_steps(sh, notes, ppq, grid, fit):
     return k, g
 
 
+def exact_named(sh, g, ppq):
+    """Exact's gates as counted (Notes per gate chart, colours by step): a last note stretched / trimmed where the
+    gates can't add up (one gate, Steps, too narrow) counts as the gate it was stretched from, the nearest real one
+    (as Stretch's do; hunt 2026-11-01)."""
+    r = sh["range"]
+    if not r.get("exact") or not len(g):
+        return g
+    a = max(1, math.floor(sh["gate"] * ppq + 0.5))
+    b = max(1, math.floor(r["to"] * ppq + 0.5))
+    lo, hi = sorted((a, b))
+    near = np.clip(g, lo, hi)
+    return halved(near, a, b) if r.get("halves") else near
+
+
 def range_gates(sh, notes, ppq):
     """The gate (ticks) each note of a shape with a gate Range was cut with (its step's; with Fit a row's first and
     last note count as their step's gate even when stretched or trimmed)."""
     grid = range_grid(sh, ppq)
     if isinstance(grid, RangeRows):
-        return row_steps(sh, notes, ppq, grid, stretched(sh["range"]))[1]
+        return exact_named(sh, row_steps(sh, notes, ppq, grid, stretched(sh["range"]))[1], ppq)
     if not isinstance(grid, RangeKeys):
         k = range_steps(sh, notes, ppq)
-        return grid[k, 1] - grid[k, 0]
+        return exact_named(sh, grid[k, 1] - grid[k, 0], ppq)
     g = np.zeros(len(notes), np.int64)
     for key in np.unique(notes[:, 2]).tolist():
         sq = grid.squares(key)

@@ -55,7 +55,8 @@ class RangeGraph(PointGraph, tk.Toplevel):
         # can follow the curve
         self.funnel = self.tgts[0] is app.funnel_defaults or self.tgts[0].get("kind") == "funnel"
         self.before = json.dumps(app.shapes)
-        self.old = [json.loads(json.dumps({k: t.get(k) for k in ("gate", "range", "range_kept")})) for t in self.tgts]
+        self.old = [json.loads(json.dumps(t)) for t in self.tgts]  # (whole: a sliced piece whose Range changes
+        # becomes a shape of its own, sliced.moved_by; Cancel gives it back as a piece)
         # each shape's range, kept while it's switched off so switching on brings it back (sh["range_kept"] while
         # it's off; new: 4 times the gate; a funnel's in steps, as its gate first changed)
         clean = funnel_range if self.funnel else clean_range
@@ -221,6 +222,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
     def spread(self):
         """How many notes get each gate from From to To (the first shape's; others' gates outside left out), or None
         while the Range is off. Counted without Strum / Claw pages (they move notes, not their gates)."""
+        self.odd = 0  # (Exact: notes stretched / trimmed where the gates couldn't add up, for the info line)
         if not self.on_var.get():
             return None
         a, b = self.gates()
@@ -245,6 +247,10 @@ class RangeGraph(PointGraph, tk.Toplevel):
             notes = self.app.notes_of(bare)
             if not len(notes):
                 continue
+            r = t["range"]
+            if r.get("exact") and "fx" not in bare and exact_ok(r, a, b):  # (a Chop page cuts them shorter)
+                real = notes[:, 1] - notes[:, 0]
+                self.odd += int(((real < min(a, b)) | (real > max(a, b))).sum())
             j = (range_gates(bare, notes, self.app.ppq) - a) * (1 if b >= a else -1)
             out += np.bincount(j[(j >= 0) & (j < n)], minlength=n)
         return out
@@ -328,7 +334,8 @@ class RangeGraph(PointGraph, tk.Toplevel):
                          (tr("range_window.no_step") if on and self.memo[0].get("halves") and a != b
                           and not steps_to(a, b) else "") +  # (Steps: no halving / doubling fits)
                          (tr("range_window.no_exact") if on and not self.funnel and ends == "exact"
-                          and not exact_ok(self.memo[0], a, b) else ""))
+                          and not exact_ok(self.memo[0], a, b) else "") +
+                         (trn("range_window.odd", self.odd, n=self.odd) if on and getattr(self, "odd", 0) else ""))
 
     def on_gate(self, key):
         """From (the spam gate itself) or To typed / stepped."""
@@ -373,10 +380,8 @@ class RangeGraph(PointGraph, tk.Toplevel):
     def cancel(self):
         self.closed = True
         for t, old in zip(self.tgts, self.old):
-            t.update({k: v for k, v in old.items() if v is not None})
-            for k in ("range", "range_kept"):
-                if old[k] is None:
-                    t.pop(k, None)
+            t.clear()
+            t.update(old)
         self.app.shapes_changed()
         self.close()
 

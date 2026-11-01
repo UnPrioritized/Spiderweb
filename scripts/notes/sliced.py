@@ -264,6 +264,9 @@ def moved_by(sh):
     if (len(sh["pts"]) != len(was["pts"]) or was.get("kind") != sh["kind"]
             or any(not close(sh.get(k), was.get(k)) for k in keys_of(sh) if k != "pts")):
         return None
+    if sh.get("range") and cut.get("gate") is not None and not close(velocity(sh, GATE), cut["gate"]):
+        return None  # (its gate Range changed: a Range runs across the shape, so over the whole's outline it'd give
+    # the wrong gates at each spot; made from the piece itself, like an outline change; hunt 2026-11-01)
     d = np.asarray(sh["pts"], float) - np.asarray(was["pts"], float)
     if not len(d) or np.abs(d - d[0]).max() > 1e-6:  # (a save file trims the last digits)
         return None

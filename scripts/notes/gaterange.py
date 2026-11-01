@@ -233,7 +233,7 @@ def exact_squares(t0, t1, a, b, graph, halves=False):
     if diff and a != b and not halves:
         room = (hi - g) if diff > 0 else (g - lo)
         if int(room.sum()) >= abs(diff):
-            g = g + np.sign(diff) * _share(room, abs(diff))
+            g = _in_order(g, g + np.sign(diff) * _share(room, abs(diff)))
             diff = 0
     if diff:
         g[-1] = max(1, int(g[-1]) + diff)
@@ -241,6 +241,20 @@ def exact_squares(t0, t1, a, b, graph, halves=False):
             g = np.array([span], np.int64)
     edges = t0 + np.r_[0, np.cumsum(g)]
     return np.column_stack([edges[:-1], edges[1:]])
+
+
+def _in_order(was, now):
+    """The shared-out gates (now) sorted inside each run of equal gates they came from (was), rising when the next run
+    is longer, falling when it's shorter (the last run: as the one before it), so the gates still rise or fall
+    steadily (10, 10, 11, 11, not 10, 11, 10, 11; the user's gate tool keeps them in order, hunt 2026-11-01)."""
+    first = np.flatnonzero(np.r_[True, was[1:] != was[:-1]])
+    vals = was[first]
+    up = np.r_[vals[1:] > vals[:-1], True] if len(vals) > 1 else np.array([True])
+    if len(vals) > 1:
+        up[-1] = vals[-1] > vals[-2]
+    run = np.repeat(np.arange(len(first)), np.diff(np.r_[first, len(was)]))
+    order = np.lexsort((np.where(up[run], now, -now), run))
+    return now[order]
 
 
 def _share(room, d):
@@ -361,6 +375,8 @@ def range_grid(sh, ppq):
         return RangeRows(a, b, r["graph"], bool(r.get("join")), r.get("halves"), exact)
     lo, hi, k0, k1 = frame_span(sh)
     t0, t1 = math.floor(lo * ppq), math.ceil(hi * ppq)
+    if exact and r["dir"] == "time":  # (rounded as the rows are, custom.inside_spans: else a frame between ticks
+        t0, t1 = math.floor(lo * ppq + 0.5), math.floor(hi * ppq + 0.5)  # ran a tick past each edge, hunt)
     if r["dir"] == "keys":
         return RangeKeys(t0, t1, round(k0), round(k1), a, b, r["graph"], r.get("halves"))
     return (exact_squares if exact else range_squares)(t0, t1, a, b, r["graph"], r.get("halves"))
