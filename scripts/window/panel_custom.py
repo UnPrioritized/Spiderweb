@@ -322,7 +322,14 @@ class CustomPanel:
         makes_custom = tool in ("custom", "text", "hz") or tool in BOX_TOOLS or live
         # "last note" means nothing for custom shapes and funnels
         kinds = {self.shapes[i]["kind"] for i in self.sels} or {"custom" if makes_custom else tool}
-        self._rows["last"] = not kinds <= {"custom", "funnel", "gliss"}  # (a Glissando run: its own notes)
+        self._rows["last"] = not kinds <= {"custom", "funnel"}
+        runs = kinds <= {"gliss"}  # (Glissando runs: Last note yes, Notes by snap no: user 11-02)
+        if runs == bool(self.by_snap_rows[0].winfo_manager()):
+            for row in self.by_snap_rows:
+                if runs:
+                    row.pack_forget()
+                else:
+                    row.pack(fill="x", pady=(2, 0))
         self._rows["custom"] = placed or bool(tgts and makes_custom)
         self.layout_rows()
         if not self._rows["custom"]:

@@ -619,7 +619,7 @@ class RollDrawing:
         # (keyboard and ruler kept apart: a sideways scroll draws only the ruler again)
         picks = self.app.gliss_picks()
         kb_key = (h, self.kb_w, self.ruler_h, self.sy, self.view_top, self.scale, self.app.keys, self.app.edo(),
-                  None if picks is None else frozenset(picks))
+                  None if picks is None else frozenset(picks), self.held_key)
         frame_key = (w, self.kb_w, self.ruler_h, self.sx, self.view_t, self.scale, json.dumps(sigs_of(self.app.tempo)),
                      json.dumps(self.app.tempo.get("keysigs")), self.track_mark())
         if kb_key != self._kb_key:
@@ -2020,11 +2020,14 @@ class RollDrawing:
         # (31-EDO names every row: shorter keys and smaller in-between names leave them room)
         black_w, half_w = (0.45, 0.35) if edo else (0.6, 0)
         lit = self.app.gliss_picks() or ()  # (Glissando's picked keys, lit while picking: window/panel_gliss.py)
+        held = self.held_key  # (a piano key held while picking: its own colour, roll_gliss)
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
             n = p % size
             half = edo and n not in EDO_WHITE and n not in black  # (31-EDO's half sharps / flats: narrower, grey)
-            if p in lit and n not in black:
+            if p == held:
+                self.create_rectangle(0, y0, kb, y1, fill=look.KEY_HELD, outline="", tags=("frame", "kbd"))
+            elif p in lit and n not in black:
                 self.create_rectangle(0, y0, kb, y1, fill=look.KEY_PICKED, outline="", tags=("frame", "kbd"))
             elif p not in usual:
                 self.create_rectangle(0, y0, kb, y1, fill=look.KEY_OUTSIDE, outline="", tags=("frame", "kbd"))

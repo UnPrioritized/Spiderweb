@@ -6,7 +6,7 @@ from tkinter import ttk
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.gliss import (DEFAULTS, GRID_KINDS, MOST_LEN, MOST_THICK, UNITS, auto_name, fit_pts, grid_ticks, grids,
+from notes.gliss import (DEFAULTS, GRID_KINDS, MOST_COPIES, MOST_LEN, UNITS, auto_name, fit_pts, grid_ticks, grids,
                          pick_key, pick_parts, picked, plan, read_list)
 from roll.roll_shared import NOTE_NAMES
 from window import look
@@ -45,15 +45,26 @@ class GlissPanel:
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_step())
         Tooltip(cb, tr("panel_gliss.step_tip"))
         self.gliss_nums = {}
-        for r, key, steps in ((3, "thick", (1, 5, 1)), (4, "len", (5, 25, 1))):
-            lb = label(r, key)
+        label(3, "copies")
+        both = ttk.Frame(grid)  # (Copies  above [n]  below [n]: one dotted line above the run, one below)
+        both.grid(row=3, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        for r, key, steps in ((3, "above", (1, 5, 1)), (3, "below", (1, 5, 1)), (4, "len", (5, 25, 1))):
+            if r == 3:
+                lb = ttk.Label(both, text=tr("panel_gliss." + key))
+                lb.pack(side="left", padx=(0 if key == "above" else 8, 4))
+                Tooltip(lb, tr("panel_gliss.copies_tip"))
+                e = ttk.Entry(both, width=4)
+                e.pack(side="left")
+            else:
+                lb = label(r, key)
+                e = ttk.Entry(grid, width=7)
+                e.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=(3, 0))
             var = tk.StringVar()
-            e = ttk.Entry(grid, textvariable=var, width=7)
-            e.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=(3, 0))
+            e.config(textvariable=var)
             e.bind("<Return>", lambda ev, k=key: self.on_gliss_number(k))
             leave_box(self, e, var, lambda left, k=key: self.on_gliss_number(k, left))
             Scrub(self, [(e, var, lambda k=key: self.on_gliss_number(k))], steps, label=lb)
-            Tooltip(e, tr("panel_gliss." + key + "_tip"))
+            Tooltip(e, tr("panel_gliss." + ("copies" if r == 3 else key) + "_tip"))
             self.gliss_nums[key] = (e, var)
         cb = self.gliss_unit = ttk.Combobox(grid, state="readonly", width=10,
                                              values=[tr("panel_gliss.unit_" + u) for u in UNITS])
@@ -138,23 +149,25 @@ class GlissPanel:
         self.roll.focus_set()
 
     def on_gliss_number(self, key, left=False):
-        """Thickness / Note length box (Enter, stepped, or left: widgets.leave_box)."""
+        """Copies above / below or Note length box (Enter, stepped, or left: widgets.leave_box)."""
         e, var = self.gliss_nums[key]
         tgts = self.gliss_targets()
         if self._loading or not tgts or left and unchanged(e):
             return
         unit = tgts[0]["gliss"].get("unit", "pct")
+        copies = key in ("above", "below")
         try:
             n = float(calc(var.get()))
-            ok = (n == int(n) and abs(n) <= MOST_THICK) if key == "thick" else 0 < n <= MOST_LEN[unit]
+            ok = (n == int(n) and 0 <= n <= MOST_COPIES) if copies else 0 < n <= MOST_LEN[unit]
             if not math.isfinite(n) or not ok:
                 raise ValueError
         except (ValueError, ZeroDivisionError, OverflowError):
             bad(e)
             return
         good(e)
-        n = int(n) if key == "thick" or n == int(n) else n
-        self.set_gliss(_key=("gliss_" + key, tuple(sorted(self.sels))), **{key: n})
+        n = int(n) if copies or n == int(n) else n
+        key_ = "gliss_copies" if copies else "gliss_len"
+        self.set_gliss(_key=(key_, tuple(sorted(self.sels)), key), **{key: n})
 
     def picks_text(self, g):
         """The panel's line on the picked keys: "Keys: C E G" (+ single keys), or the hint when none are picked."""
@@ -179,13 +192,14 @@ class GlissPanel:
         if not tgts:
             return False
         keys = pick_key(tgts[0]["gliss"], key, one)
-        self.set_gliss(_key=("gliss_keys", tuple(sorted(self.sels))), keys=keys)
+        self.set_gliss(_key=("gliss_keys", tuple(sorted(self.sels))), _snap=False, keys=keys)
         self.roll.request_redraw()
         return True
 
-    def set_gliss(self, _key=None, **changes):
-        """Changes the runs' settings (one undo step; _key = its begin_edit key) and the ones new runs start with;
-        their ends snap again."""
+    def set_gliss(self, _key=None, _snap=True, **changes):
+        """Changes the runs' settings (one undo step; _key = its begin_edit key) and the ones new runs start with.
+        _snap: their ends snap onto the notes (panel edits, user 11-02); picked keys / dragged copies leave the drawn
+        line where it is."""
         tgts = self.gliss_targets()
         if not tgts:
             return
@@ -195,7 +209,7 @@ class GlissPanel:
             self.begin_edit(_key or ("gliss", tuple(sorted(self.sels))))
             for sh in runs:
                 sh["gliss"] = dict(sh["gliss"], **changes)
-                pts = fit_pts(sh, self.ppq)
+                pts = fit_pts(sh, self.ppq) if _snap else None
                 if pts:
                     sh["pts"] = pts
             self.shapes_changed()

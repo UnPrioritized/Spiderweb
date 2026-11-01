@@ -17,7 +17,6 @@ from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
 from notes.engine import cached_reach, make_shape, shape_key
-from notes.gliss import fit_pts
 from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
@@ -1095,11 +1094,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.drag = ("seek", False, x, state, kept)
 
     def key_press(self, e):
-        """A click on the piano keys: while picking Glissando keys (app.gliss_key_click; Ctrl = that key only) the key
-        is picked / unpicked and sounds until the button is let go (app.tap_key / tap_end). Elsewhere nothing."""
+        """A press on the piano keys: while picking Glissando keys the key sounds and lights, follows the mouse while
+        held, and is picked / unpicked when let go (roll_gliss key_hold; Ctrl = that key only). Elsewhere nothing."""
         key = math.floor(self.y2p(e.y) + 0.5)
-        if 0 <= key < self.app.keys and self.app.gliss_key_click(key, bool(e.state & CTRL)):
-            self.app.tap_key(key)
+        if 0 <= key < self.app.keys and self.app.gliss_picks() is not None:
+            self.key_hold(key, bool(e.state & CTRL))
 
     def on_press(self, e):
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)
@@ -1366,8 +1365,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if abs(e.x - self.drag[2]) >= BOX_STILL:
                 self.ruler_box()
                 self.on_drag(e)
-        elif kind in ("gliss_thick", "gliss_len"):
+        elif kind in ("gliss_copies", "gliss_len"):
             self.gliss_drag(e)
+        elif kind == "keyhold":
+            self.key_hold_drag(e)
         elif kind == "handle":
             step = self.held_step([self.app.sel])
             if isinstance(self.drag[1], tuple) and self.app.selected()["kind"] == "custom":
@@ -1566,7 +1567,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
 
     def on_release(self, e, second=False):
         """second: the click that finishes a shape started with a click (see follow)."""
-        self.app.tap_end()  # (a piano key held while picking Glissando keys: its note-off)
+        if self.drag and self.drag[0] == "keyhold":  # (a piano key held while picking Glissando keys: picked now)
+            self.key_hold_end()
+            return
+        self.app.tap_end()  # (in case: nothing may keep sounding)
         if not self.drag:
             return
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
@@ -1722,8 +1726,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         elif kind == "stretch":  # the box goes back to its size, the shapes stay stretched (user)
             self.box_kept = (self.drag[4], set(self.app.sels))
             self.app.sync_panel()
-        if kind == "handle":
-            self.gliss_snap()  # (a Glissando run's end square: its end snaps, like drawing it)
         if kind in ("handle", "move", "stretch"):
             self.app.sync_funnel()  # its note count
         if kind in ("handle", "move", "stretch", "resize", "turn", "skew"):
@@ -2034,9 +2036,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
 
     def commit_draft(self):
         self.keep_draft()
-        sh, self.draft = self.draft, None
-        if sh["kind"] == "gliss":  # (a Glissando run: its end goes where the last key's note starts, gliss.py)
-            sh["pts"] = fit_pts(sh, self.app.ppq) or sh["pts"]
+        sh, self.draft = self.draft, None  # (a Glissando run's line stays as drawn: user 11-02, gliss.py)
         if not self.live_commit(sh):  # a stroke of a live shape / a circle or polygon: done there
             self.add_drawn(sh)
 

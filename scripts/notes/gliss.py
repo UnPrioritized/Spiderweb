@@ -7,13 +7,15 @@ sh["kind"] = "gliss", sh["pts"] = [start, end] (beats, keys) like a line; sh["gl
   "list": the typed grids, e.g. "1/16, 1/32, 1/48";
   "keys": the picked keys (0 ... 255), sorted; missing / empty = the white keys (user 11-02: a hint says so);
   "step": "auto" (picks itself, below) or a fixed grid ("1/64": 2x faster than 1/32; the run's length follows);
-  "thick": copies of the run one picked key over each, above (> 0) or below (< 0), at the same times;
+  "above" / "below": copies of the run one picked key over each, above / below it, at the same times (user 11-02:
+    one dotted line above the run and one below set them apart);
   "len" + "unit": each note's length, "pct" = % of the step (default 100: up to the next note), "ticks".
-Picking (pick_key, the piano keys while the tool is in use): a click = that note in every octave (user: chords rarely
-skip a key in an octave), Ctrl+click = that one key.
+sh["end_dot"] = the shared Last note choice (like Line): True = the last note STARTS on the line's end, else it ENDS
+there. Picking (pick_key, the piano keys while the tool is in use): a click = that note in every octave (user:
+chords rarely skip a key in an octave), Ctrl+click = that one key.
 The step picks itself: the grid in the list nearest one key per step for the line as drawn ("fits one key per
-step", user 2026-11-01). The run starts on the line's earlier end; its end snaps to where the last key's note
-starts ("Snap the end", user OK'd in the mock-up): fit_pts.
+step", user 2026-11-01). The run starts on the line's earlier end. THE DRAWN LINE STAYS AS DRAWN (user 11-02); only
+editing Grids / My list / Step / copies / Note length / Last note snaps its end onto the notes (fit_pts).
 """
 
 import bisect
@@ -25,10 +27,11 @@ import numpy as np
 WHITE = (0, 2, 4, 5, 7, 9, 11)
 TOP_KEY = 255  # (a click picks the note up to here: the most keys a project has)
 LIST_DEFAULT = "1/16, 1/32, 1/64"
-DEFAULTS = {"grids": "halves", "list": LIST_DEFAULT, "step": "auto", "thick": 0, "len": 100, "unit": "pct"}
+DEFAULTS = {"grids": "halves", "list": LIST_DEFAULT, "step": "auto", "above": 0, "below": 0, "len": 100,
+            "unit": "pct"}
 GRID_KINDS = ("halves", "list")
 UNITS = ("pct", "ticks")
-MOST_THICK = 127  # copies each way
+MOST_COPIES = 127  # copies each way
 MOST_LEN = {"pct": 100000, "ticks": 10 ** 7}
 
 
@@ -61,8 +64,9 @@ def clean_gliss(g):
         out["list"] = g["list"][:200]
     if g.get("step") != "auto" and grid_name(g.get("step")):
         out["step"] = grid_name(g["step"])
-    if type(g.get("thick")) is int and abs(g["thick"]) <= MOST_THICK:
-        out["thick"] = g["thick"]
+    for side in ("above", "below"):
+        if type(g.get(side)) is int and 0 <= g[side] <= MOST_COPIES:
+            out[side] = g[side]
     if g.get("unit") in UNITS:
         out["unit"] = g["unit"]
     n = g.get("len")
@@ -146,8 +150,8 @@ def plan(sh, ppq):
     span = (b1 - b0) * ppq
     if len(keys) < 2 or span <= 0:  # (one key / an upright line: the finest grid)
         name = min(names, key=lambda n: grid_ticks(n, ppq))
-    else:  # the grid nearest one key per step (as a ratio: 1/32 vs 1/64 is as far as 1/16 vs 1/32)
-        want = span / (len(keys) - 1)
+    else:  # the grid nearest one key per step (as a ratio: 1/32 vs 1/64 is as far as 1/16 vs 1/32); Last note
+        want = span / (len(keys) - (1 if sh.get("end_dot") else 0))  # ending on the line's end = one step more
         name = min(names, key=lambda n: abs(math.log(grid_ticks(n, ppq) / want)))
     return start, grid_ticks(name, ppq), name, keys
 
@@ -172,30 +176,30 @@ def gliss_notes(sh, ppq):
         ends = start + np.floor((i + n / 100) * step + 0.5).astype(np.int64)
     ends = np.maximum(ends, starts + 1)
     rows = [np.column_stack([starts, ends, np.asarray(keys, np.int64)])]
-    thick = g.get("thick", 0)
-    if thick:  # copies, one picked key over each (counted among every picked key, not only the run's)
+    up, down = g.get("above", 0), g.get("below", 0)
+    if up or down:  # copies, one picked key over each (counted among every picked key, not only the run's)
         every = run_keys(g, 0, TOP_KEY)
         place = {k: j for j, k in enumerate(every)}
         at = np.asarray([place[k] for k in keys], np.int64)
         every = np.asarray(every, np.int64)
-        for c in range(1, abs(thick) + 1):
-            j = at + (c if thick > 0 else -c)
+        for c in list(range(1, up + 1)) + list(range(-1, -down - 1, -1)):
+            j = at + c
             ok = (j >= 0) & (j < len(every))
             rows.append(np.column_stack([starts[ok], ends[ok], every[j[ok]]]))
     return np.concatenate(rows)
 
 
 def shifted(g, key, c):
-    """key moved c picked keys up (down when c < 0), or None past the picked keys' ends / key not picked."""
+    """key moved c picked keys up (down when c < 0), as far as the picked keys go (None: key not picked)."""
     every = run_keys(g, 0, TOP_KEY)
     j = bisect.bisect_left(every, key)
-    if j >= len(every) or every[j] != key or not 0 <= j + c < len(every):
+    if j >= len(every) or every[j] != key:
         return None
-    return every[j + c]
+    return every[max(0, min(len(every) - 1, j + c))]
 
 
 def middle_note(sh, ppq):
-    """(start tick, key) of the run's middle note (where its thickness handle sits), or None without notes."""
+    """(start tick, key) of the run's middle note, or None without notes."""
     start, step, _, keys = plan(sh, ppq)
     if not keys:
         return None
@@ -203,15 +207,18 @@ def middle_note(sh, ppq):
     return start + math.floor(i * step + 0.5), keys[i]
 
 
-def thick_at(sh, key, ppq):
-    """The thickness for the handle dragged to key: picked keys from the run's middle note to the one nearest key."""
+def copies_at(sh, keys_away, side, ppq):
+    """Copies above / below (side) for a dotted line dragged keys_away keys from the run (its middle note's key): the
+    picked keys passed on that side, 0 or more (the other side never: user 11-02, nothing flips)."""
     g = sh.get("gliss") or DEFAULTS
     mid = middle_note(sh, ppq)
     if mid is None:
         return 0
     every = run_keys(g, 0, TOP_KEY)
-    near = min(range(len(every)), key=lambda j: abs(every[j] - key))
-    return max(-MOST_THICK, min(MOST_THICK, near - every.index(mid[1])))
+    to = mid[1] + keys_away
+    near = min(range(len(every)), key=lambda j: abs(every[j] - to))
+    n = near - every.index(mid[1])
+    return max(0, min(MOST_COPIES, n if side == "above" else -n))
 
 
 def len_for(sh, ticks, ppq):
@@ -224,12 +231,17 @@ def len_for(sh, ticks, ppq):
 
 
 def fit_pts(sh, ppq):
-    """The run's line snapped to its notes ("Snap the end"): from the first key's note start to where the last
-    key's note starts, on their rows. None when there's nothing to snap to (under two keys)."""
+    """The run's line snapped to its notes: from the first key's note start to where the last key's note starts
+    (Last note: starts exactly on it) or ends, on their rows. None when there's nothing to snap to (under two
+    keys)."""
     start, step, _, keys = plan(sh, ppq)
     if len(keys) < 2:
         return None
     a = [start / ppq, float(keys[0])]
-    b = [(start + math.floor((len(keys) - 1) * step + 0.5)) / ppq, float(keys[-1])]
+    if sh.get("end_dot"):
+        end = start + math.floor((len(keys) - 1) * step + 0.5)
+    else:
+        end = int(gliss_notes(sh, ppq)[len(keys) - 1, 1])  # (the run's own last note: copies come after it)
+    b = [end / ppq, float(keys[-1])]
     (b0, _), (b1, _) = sh["pts"][0], sh["pts"][-1]
     return [b, a] if b1 < b0 else [a, b]  # (the ends stay the ends they were)

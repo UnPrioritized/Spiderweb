@@ -24,6 +24,7 @@ class SnapPanel:
         """[x] Notes by snap   Step [n] ticks (the box greyed while it's off)."""
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(2, 0))
+        self.by_snap_rows = [row]  # (hidden for Glissando runs: Last note shows for them, Notes by snap doesn't)
         self.by_snap_on = tk.BooleanVar(value=False)
         self.by_snap_tick = ttk.Checkbutton(row, text=tr("app.by_snap"), variable=self.by_snap_on,
                                             command=self.on_by_snap_tick)
@@ -51,6 +52,7 @@ class SnapPanel:
         # a line that isn't a whole number of steps long: how its end goes (user 2026-10-28: their choice)
         end = ttk.Frame(parent)
         end.pack(fill="x", pady=(2, 0))
+        self.by_snap_rows.append(end)
         self.by_snap_end_word = ttk.Label(end, text=tr("app.by_snap_end"))
         self.by_snap_end_word.pack(side="left", padx=(20, 0))
         self.by_snap_end_box = ttk.Combobox(end, values=[tr("app.by_snap_end_" + h) for h in SNAP_ENDS],

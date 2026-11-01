@@ -66,7 +66,7 @@ from window.panel_tiles import TilesPanel
 from window.panel_ripples import RipplesPanel
 from window.panel_freehand import FreehandPanel
 from window.panel_gliss import GlissPanel
-from notes.gliss import DEFAULTS as GLISS_DEFAULTS
+from notes.gliss import DEFAULTS as GLISS_DEFAULTS, fit_pts as fit_gliss
 from window.panel_lasso import LassoPanel
 from window.panel_funnel import FunnelPanel
 from window.panel_pattern import PatternPanel
@@ -1559,7 +1559,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.push_undo(name=tr("app.last_note"))
         for t in tgts:
             t["end_dot"] = value
+            if t.get("kind") == "gliss":  # (a Glissando run: its end snaps to the last note's start / end, gliss.py)
+                t["pts"] = fit_gliss(t, self.ppq) or t["pts"]
         self.shapes_changed()
+        self.sync_points()
 
     def on_point(self, i):
         if self._loading or not self.selected():
