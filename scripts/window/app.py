@@ -2089,12 +2089,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not any(t.get("auto") for t in own):
             return own
         chans = self.own_channels()
-        if mode == "auto":
-            shown = {v for sh in self.shapes for k in ("into", "into_gap") for v in (sh.get(k) or [])
-                     if type(v) is int}
-        else:
-            shown = {v for sh in self.shapes for v in (lambda p: p if colours_apart(sh, mode) else p[:1])(
-                placed_on(sh, chans))}  # (a Domino paste's tracks: all shown, user 2026-11-01)
+        # (a Domino paste: as in Multi channel in every mode, its gap tracks too; user 2026-11-01)
+        shown = {v for sh in self.shapes if colours_apart(sh, mode) for k in ("into", "into_gap")
+                 for v in (sh.get(k) or []) if type(v) is int}
+        if mode != "auto":
+            shown |= {p[0] for p in (placed_on(sh, chans) for sh in self.shapes if not colours_apart(sh, mode)) if p}
         # (kept by what it shows: a change counter missed shapes laid again within one change, sweep 2026-10-26)
         key = (id(own), mode, frozenset(shown))
         got = getattr(self, "_own_written", None)
