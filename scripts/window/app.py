@@ -337,7 +337,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
-                             busy, together, note_slots)
+                             busy, together, note_slots, [pasted_notes(sh) for sh in shapes])
     if stash is not None:  # (App.fit_into's laying again: lay_again)
         stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
                      all16=all16, mode=mode)

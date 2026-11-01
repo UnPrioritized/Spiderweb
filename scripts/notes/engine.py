@@ -1893,7 +1893,7 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None, together
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
            held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None, busy=None,
-           together=None, note_slots=None):
+           together=None, note_slots=None, kept=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1932,6 +1932,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     busy: per shape None, or {track (None: every track): (start, end) ticks}: with "auto" its tracks also count as
     sounding then on every key (a Hz bass's CC lines: their whole time, run-on too, hz_cc.cc_spans).
     note_slots: {shape's number: None} filled with each of its notes' slot (with "auto").
+    kept: per shape True if its tracks keep a slot each outside "auto" too (a Domino paste: what you copied; "single"
+    then fixes overlaps per slot).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -2104,6 +2106,15 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     else:  # (a Hz bass layer's clashing notes too: one channel, user)
         slot_of = [0 if pin is None else pin for pin in pinned]
         count = 1 if any(p is None for p in pinned) else 0
+        groups = {}  # (a Domino paste's tracks keep a channel each here too, in track order; the pieces of one
+        for i, (k, tr) in enumerate(zip(kept or (), tracks)):  # paste share them; user 2026-11-01)
+            if k and tr is not None and pinned[i] is None and len(tr):
+                groups.setdefault(("paste", pastes[i]) if pastes[i] is not None else ("shape", i), []).append(i)
+        for members in groups.values():
+            ids = np.unique(np.concatenate([np.asarray(tracks[i], np.int64) for i in members]))
+            for i in members:
+                slot_of[i] = mapped_slots(np.searchsorted(ids, np.asarray(tracks[i], np.int64)), use10)
+            count = max(count, int(mapped_slots(np.int64(len(ids) - 1), use10)) + 1)
     count = max(count, top)
     notes = np.empty((sum(len(lst) for lst in note_lists), 6), np.int64)
     at = 0
