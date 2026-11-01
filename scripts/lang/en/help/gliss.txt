@@ -16,7 +16,7 @@ With a run selected, the picked keys are the run's: pick other keys and the run 
 
 ## Changing a run
 
-The line stays where you draw it. Select a run and drag its squares to move its ends. Changing Grids, Step, Copies, Note length or Last note moves the end onto the notes: where the last note ends, or where it starts with "Last note: starts exactly on the last point".
+The line stays where you draw it. Select a run and drag its squares to move its ends. Changing Grids, Step, Copies, Note length or Last note moves the end onto the steps: where the last step ends, or where the last note starts with "Last note: starts exactly on the last point". Longer or shorter notes and copies never change where the end goes.
 
 Step: Auto picks the step from how steep the line is. Pick a fixed step to make the run faster or slower: 1/32 to 1/64 makes it 2x faster. The run keeps its start and keys and gets shorter or longer.
 

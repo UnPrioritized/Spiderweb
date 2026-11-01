@@ -6,7 +6,7 @@ from tkinter import ttk
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.gliss import (DEFAULTS, GRID_KINDS, MOST_COPIES, MOST_LEN, TIMINGS, UNITS, auto_name, base_gap, fit_pts,
+from notes.gliss import (DEFAULTS, GRID_KINDS, LEAST_PCT, MOST_COPIES, MOST_LEN, TIMINGS, UNITS, auto_name, base_gap, fit_pts,
                          for_new, grid_ticks, grids, pick_key, pick_parts, picked, plan, read_list)
 from roll.roll_shared import NOTE_NAMES
 from window import look
@@ -142,6 +142,7 @@ class GlissPanel:
         tgts = self.gliss_targets()
         if tgts:
             i = self.gliss_step.current()
+            self._edit_key = None  # (each pick its own undo step, like other dropdowns)
             self.set_gliss(_key=("gliss_step", tuple(sorted(self.sels))),
                            step="auto" if i <= 0 else self.gliss_step_names(tgts[0])[i])
         self.roll.focus_set()
@@ -150,6 +151,7 @@ class GlissPanel:
         if self._loading:
             return
         if self.gliss_targets():
+            self._edit_key = None  # (each pick its own undo step)
             self.set_gliss(_key=("gliss_timing", tuple(sorted(self.sels))), timing=TIMINGS[self.gliss_timing.current()])
         self.roll.focus_set()
 
@@ -164,7 +166,7 @@ class GlissPanel:
             step = base_gap(tgts[0], self.ppq) if "kind" in tgts[0] else self.ppq / 4
             n = g.get("len", 100)
             n = n / 100 * step if unit == "ticks" else n / step * 100
-            n = max(1, round(n)) if unit == "ticks" else round(n, 2)
+            n = max(1, round(n)) if unit == "ticks" else max(LEAST_PCT, round(n, 4))
             self.set_gliss(_key=("gliss_len", tuple(sorted(self.sels))), unit=unit, len=min(n, MOST_LEN[unit]))
         self.roll.focus_set()
 

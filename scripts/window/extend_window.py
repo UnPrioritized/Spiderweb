@@ -3,6 +3,7 @@ they run over into the notes after them like a run played by hand. The Gate subt
 (subtract_window.SubtractWindow: live, follows the selection, settle, OK / Cancel, own Ctrl+Z, "Change across the
 shape" graph) with one side only and an "Amount in" choice: Ticks or % of each note's own length (default %, 50)."""
 
+import json
 from tkinter import ttk
 
 import numpy as np
@@ -69,13 +70,57 @@ class ExtendWindow(SubtractWindow):
         return is_extended(sh)
 
     def own_part(self, sh):
-        return sh.get("extend")
+        """Its Gate extend + an Add between step's mark for one of its own ("-": none), like Gate subtract's."""
+        return [sh.get("extend"), (sh.get("between") or {}).get("ext", "-")]
 
     def put_own(self, sh, part):
-        if part is None:
+        ext, mark = part
+        if ext is None:
             sh.pop("extend", None)
         else:
-            sh["extend"] = part
+            sh["extend"] = ext
+        b = sh.get("between")
+        if isinstance(b, dict):
+            if mark == "-":
+                b.pop("ext", None)
+            else:
+                b["ext"] = mark
+
+    # ---- shapes extended in the other unit than the window's: left exactly as they are until a control is used,
+    # then they take the window's unit + amount (self.foreign[i] = their own setting, else None)
+
+    def adopt(self):
+        foreign = getattr(self, "foreign", None)
+        if not foreign or not any(foreign):
+            return
+        d = self.sides["end"]
+        b = self.read(self.by_var.get())
+        b = self.first_amount() if b is None else b
+        for i, e in enumerate(foreign):
+            if e is not None:
+                d["bys"][i] = b
+                d["use"][i] = True
+        self.foreign = [None] * len(foreign)
+
+    def put_all(self, what):
+        self.adopt()
+        super().put_all(what)
+
+    def put_graph(self, key, value, mark=True):
+        self.adopt()
+        super().put_graph(key, value, mark)
+
+    def on_box(self, key):
+        self.adopt()
+        super().on_box(key)
+
+    def state(self):
+        return json.dumps([self.ons, self.sides, getattr(self, "foreign", None)])
+
+    def put_state(self, state):
+        ons, sides, foreign = json.loads(state)
+        self.foreign = foreign
+        super().put_state(json.dumps([ons, sides]))
 
     def first_amount(self):
         return 50.0 if self.pct else 1 / self.app.ppq
@@ -97,6 +142,9 @@ class ExtendWindow(SubtractWindow):
                                                "subtract.ticks", "subtract.tick"))
 
     def made_of(self, i):
+        foreign = getattr(self, "foreign", None)
+        if foreign and i < len(foreign) and foreign[i] is not None:
+            return json.loads(json.dumps(foreign[i]))
         side = self.side_of("end", i) or {"by": self.first_amount()}
         side = {k: v for k, v in side.items() if k not in ("off", "touch", "cuts")}
         if self.pct:
@@ -104,20 +152,23 @@ class ExtendWindow(SubtractWindow):
         return side
 
     def load(self, start):
-        """As Gate subtract's, the unit being the first extended shape's (default %); shapes in the other unit get
-        the amount shown (their numbers mean something else)."""
+        """As Gate subtract's, the unit being the first extended shape's (default %); shapes in the other unit stay
+        exactly as they are (self.foreign) until a control is used, then get the unit + amount shown (their numbers
+        mean something else)."""
         exts = [t.get("extend") if is_extended(t) else None for t in self.tgts]
         got = next((e for e in exts if e), None)
         d = self.sides["end"]
         d["unit"] = "pct" if got is None or got.get("unit") == "pct" else "ticks"
         super().load(start)
+        if start:
+            self.use_first()
+        self.foreign = [None] * len(exts)
         for i, e in enumerate(exts):
             if e and (e.get("unit") == "pct") != self.pct:
                 d["bys"][i], d["owns"][i] = None, None
+                self.foreign[i] = json.loads(json.dumps(e))
         if d["g"] and all(o is None for o in d["owns"]):
             d["g"] = None
-        if start:
-            self.use_first()
         self.show_controls()
 
     def show_controls(self):
@@ -129,6 +180,7 @@ class ExtendWindow(SubtractWindow):
         """Ticks <-> %: the numbers shown stay (10 ticks -> 10 %), every shape takes the unit."""
         if not self.idx or unit == ("pct" if self.pct else "ticks"):
             return self.show_controls()
+        self.adopt()
         self.take_typing()
         d = self.sides["end"]
         ppq = self.app.ppq

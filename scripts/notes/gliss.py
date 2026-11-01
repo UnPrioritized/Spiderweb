@@ -42,6 +42,7 @@ TIMINGS = ("grid", "line")
 SAMPLES = 240  # points per curve piece the crossings are found on (like engine.shape_path)
 MOST_COPIES = 127  # copies each way
 MOST_LEN = {"pct": 100000, "ticks": 10 ** 7}
+LEAST_PCT = 0.0001  # (the smallest % Note length: a tiny one never rounds to 0, which a file would drop)
 
 
 def grid_name(text):
@@ -344,7 +345,7 @@ def len_for(sh, ticks, ppq, start=None):
     ticks = max(1, round(ticks))
     if g.get("unit") == "ticks":
         return min(ticks, MOST_LEN["ticks"])
-    return min(round(ticks / base_gap(sh, ppq, start) * 100, 1), MOST_LEN["pct"])
+    return min(max(LEAST_PCT, round(ticks / base_gap(sh, ppq, start) * 100, 4)), MOST_LEN["pct"])
 
 
 def fit_pts(sh, ppq):
@@ -356,10 +357,9 @@ def fit_pts(sh, ppq):
     if len(keys) < 2 or unsnapped(sh):
         return None
     a = [start / ppq, float(keys[0])]
-    if sh.get("end_dot"):
-        end = start + math.floor((len(keys) - 1) * step + 0.5)
-    else:
-        end = int(gliss_notes(sh, ppq)[len(keys) - 1, 1])  # (the run's own last note: copies come after it)
+    # where the last step starts (Last note starts exactly) or ends: never the last NOTE's end, so Note length and
+    # copies never change the line (an Auto step would pick a new grid from it)
+    end = start + math.floor((len(keys) - (1 if sh.get("end_dot") else 0)) * step + 0.5)
     b = [end / ppq, float(keys[-1])]
     pts = sh["pts"]
     (b0, _), (b1, _) = pts[0], pts[-1]

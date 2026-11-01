@@ -367,7 +367,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
         return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
-                                                     "rccentre",
+                                                     "rccentre", "gliss_copies", "gliss_len", "keyhold",
                                                      "sustop", "lasso_free", "lasso_poly", "lasso_point",
                                                      "lasso_magnet")
 
@@ -1573,6 +1573,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         self.app.tap_end()  # (in case: nothing may keep sounding)
         if not self.drag:
+            self.after_idle(self.app.settle_history)  # (a drag Esc called off: a step that changed nothing goes)
             return
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
         kind = self.drag[0]
@@ -2063,6 +2064,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.drag = None
         self.follow = None
         self.arc_bend = False
+        if self.held_key is not None:  # (a piano key held while picking Glissando keys: let go, not picked)
+            self.held_key = None
+            self.app.tap_end()
         self.request_redraw()
         if funnel:
             self.app.sync_funnel()  # no longer waiting for a wall

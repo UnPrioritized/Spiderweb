@@ -199,6 +199,10 @@ def flip_shape(sh, sideways, mid2):
         reverse_velocity(sh)
     elif (sh.get("cycle") or {}).get("shift"):  # (Colours' Diagonal slants the other way, user)
         sh["cycle"] = dict(sh["cycle"], shift=[-sh["cycle"]["shift"][0], sh["cycle"]["shift"][1]])
+    if not sideways and sh.get("kind") == "gliss":  # (a Glissando run's copies above are below it now)
+        g = sh.get("gliss") or {}
+        if g.get("above") or g.get("below"):
+            sh["gliss"] = dict(g, above=g.get("below", 0), below=g.get("above", 0))
     if sh.get("glue"):  # (its boxes are shares of the shape's box)
         sh["glue"] = glue_flipped(sh["glue"], sideways)
     for k in ("range", "range_kept"):  # (a spam gate range runs the other way, the one kept while off too; a

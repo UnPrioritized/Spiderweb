@@ -26,6 +26,43 @@ def seg_dist(px, py, x0, y0, x1, y1):
     return math.hypot(px - x0 - t * dx, py - y0 - t * dy)
 
 
+def clip_segment(x0, y0, x1, y1, box):
+    """The part of a segment inside box = (left, top, right, bottom), or None (Liang-Barsky)."""
+    left, top, right, bottom = box
+    dx, dy = x1 - x0, y1 - y0
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, x0 - left), (dx, right - x0), (-dy, y0 - top), (dy, bottom - y0)):
+        if p == 0:
+            if q < 0:
+                return None
+            continue
+        t = q / p
+        if p < 0:
+            t0 = max(t0, t)
+        else:
+            t1 = min(t1, t)
+        if t0 > t1:
+            return None
+    return x0 + t0 * dx, y0 + t0 * dy, x0 + t1 * dx, y0 + t1 * dy
+
+
+def clip_polyline(line, box):
+    """A polyline [x0, y0, x1, y1, ...] cut to box: the pieces inside, each [x, y, ...] with 2+ points."""
+    pieces, cur = [], None
+    for j in range(0, len(line) - 2, 2):
+        got = clip_segment(*line[j:j + 4], box)
+        if got is None:
+            cur = None
+            continue
+        a, b = list(got[:2]), list(got[2:])
+        if cur is not None and cur[-2:] == a:
+            cur += b
+        else:
+            cur = a + b
+            pieces.append(cur)
+    return pieces
+
+
 class GlissEditing:
     """Mixed into PianoRoll. Drags: ("gliss_copies", side, dy) = a dotted line (dy: mouse minus the line where it was
     grabbed, px), ("gliss_len", start tick of the note held), ("keyhold", key, ctrl) = a piano key held."""
@@ -80,13 +117,10 @@ class GlissEditing:
 
     def gliss_hit(self, x, y):
         """("copies", side) (a dotted line), ("end", note start tick) (a note's right end) or None, on the selected
-        run."""
+        run. Note ends win over the dotted lines (the lower line can sit over the notes' ends)."""
         sh = self.gliss_run()
         if sh is None:
             return None
-        for side in SIDES:
-            if self.line_near(self.copy_line(sh, side), x, y)[0] <= LINE_NEAR * self.scale:
-                return ("copies", side)
         ppq = self.app.ppq
         notes = gliss_notes(sh, ppq)
         tick = self.x2t(x) * ppq  # (only the notes ending near the mouse are looked at: a thick run has thousands)
@@ -95,6 +129,9 @@ class GlissEditing:
             y0, y1 = self.row_y(k)
             if min(y0, y1) <= y <= max(y0, y1) and abs(self.t2x(e / ppq) - x) <= END_NEAR * self.scale:
                 return ("end", s)
+        for side in SIDES:
+            if self.line_near(self.copy_line(sh, side), x, y)[0] <= LINE_NEAR * self.scale:
+                return ("copies", side)
         return None
 
     def gliss_cursor(self, x, y):
@@ -137,10 +174,17 @@ class GlissEditing:
             self.app.sync_gliss()
 
     def draw_gliss(self, sh):
-        """The selected run's two dotted lines (copies above / below)."""
+        """The selected run's two dotted lines (copies above / below). Cut to the view first and drawn as thin lines
+        side by side, never one thick dashed line (roll/CLAUDE.md: a thick dashed line reaching far off screen froze
+        the PC)."""
         w = max(1, round(1.5 * self.scale))
+        view = (self.kb_w - 20, self.ruler_h - 20, self.winfo_width() + 20, self.winfo_height() + 20)
+        shifts = [0] + [k for k in range(-((w - 1) // 2), w // 2 + 1) if k]
         for side in SIDES:
-            self.create_line(*self.copy_line(sh, side), fill=look.GLISS_COPY, width=w, dash=(4, 3))
+            for piece in clip_polyline(self.copy_line(sh, side), view):
+                for k in shifts:
+                    self.create_line(*[v + k * (n % 2) for n, v in enumerate(piece)], fill=look.GLISS_COPY, width=1,
+                                     dash=(4, 3))
 
     # ---- bending (stage E): a run gets the Curve tool's anchors and handles
     def gliss_bend(self, sh, e, near=None):

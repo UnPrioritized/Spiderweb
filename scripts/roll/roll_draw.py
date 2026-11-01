@@ -793,6 +793,8 @@ class RollDrawing:
             if self._frame_key is None:
                 self.draw_ruler(w)
                 self._frame_key = frame_key
+            elif self.find_withtag("ruler"):  # (the keys redrawn alone: under the kept ruler, as in a full redraw)
+                self.tag_lower("kbd", "ruler")
             self.addtag_withtag("made", "!(grid||frame||playhead||kept)")  # (the shapes made now: under the kept part)
             self.tag_lower("made", "frame")
             self.dtag("made")

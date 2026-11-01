@@ -97,6 +97,11 @@ def clean_between(b):
             sub = False if b["sub"] is False else clean_subtract(b["sub"])
             if sub is not None:
                 out["sub"] = sub
+        if b["role"] == "step" and "ext" in b:  # (its own Gate extend, alike)
+            from notes.extend import clean_extend
+            ext = False if b["ext"] is False else clean_extend(b["ext"])
+            if ext is not None:
+                out["ext"] = ext
     return out
 
 
@@ -463,7 +468,7 @@ def _no_own(sh):
     return {k: v for k, v in _no_vel(sh).items() if k not in OWN}
 
 
-OWN = {"sustain": "sus", "subtract": "sub"}  # a step's own settings -> their marks in sh["between"]
+OWN = {"sustain": "sus", "subtract": "sub", "extend": "ext"}  # a step's own settings -> their marks in sh["between"]
 
 
 def with_sus(step, sus, key="sustain"):
@@ -746,7 +751,7 @@ def sync_groups(shapes):
                         b[mark] = json.loads(json.dumps(mine.get(key, False)))
                 continue
             b["role"] = "key"
-            for k in ("sig", "vel", "sus", "sub"):
+            for k in ("sig", "vel", *OWN.values()):
                 b.pop(k, None)
             changed = keyed = True
         if keyed:

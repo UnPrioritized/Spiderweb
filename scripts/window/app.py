@@ -1687,6 +1687,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_funnel()
         self.sync_tumour()
         self.sync_text()
+        self.sync_gliss()  # (Step "Auto (1/32)" / grids under a tick and the key count follow the PPQ / Keys)
         for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
                   self.sustain_window, self.subtract_window, self.extend_window, self.merge_window, self.fill_window, self.melody_window):
             if w:
