@@ -161,6 +161,9 @@ def turn_velocities(sh):
     if isinstance(sub, dict):
         from notes.subtract import flipped_subtract
         sh["subtract"] = flipped_subtract(sub, True)
+    if isinstance(sh.get("extend"), dict):  # (Gate extend's graph across time turned too: extend.py)
+        from notes.extend import flipped_extend
+        sh["extend"] = flipped_extend(sh["extend"], True)
     for step in sh.get("fx") or ():
         if step["tool"] == "vel":
             step["pts"] = [[1 - u, v] for u, v in reversed(step["pts"])]

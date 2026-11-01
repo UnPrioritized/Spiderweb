@@ -593,6 +593,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.path_window = None  # Copy along a path (path_window.py)
         self.sustain_window = None  # Sustain… (sustain_window.py)
         self.subtract_window = None  # Gate subtract… (subtract_window.py)
+        self.extend_window = None  # Gate extend… (extend_window.py)
         self.merge_window = None  # Gate sensitive merge… (merge_window.py)
         self.shares_window = None  # Recolour's Shares… (shares_window.py)
         self.fill_window = None  # Fill gaps… (fill_window.py)
@@ -1488,7 +1489,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_line_fill()
         self.sync_by_snap()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
-                  self.sustain_window, self.subtract_window, self.merge_window, self.strips_window,
+                  self.sustain_window, self.subtract_window, self.extend_window, self.merge_window, self.strips_window,
                   self.fill_window, self.lines_window):
             if w:
                 w.sync()
@@ -1687,7 +1688,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_tumour()
         self.sync_text()
         for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
-                  self.sustain_window, self.subtract_window, self.merge_window, self.fill_window, self.melody_window):
+                  self.sustain_window, self.subtract_window, self.extend_window, self.merge_window, self.fill_window, self.melody_window):
             if w:
                 w.ppq_changed()  # (numbers shown in ticks)
         if self.image_window and (self.ppq, self.keys) != before:
@@ -3263,7 +3264,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         free (rings cut off at the piano roll's edges move the notes' middle: flipping twice drifted)."""
         if any(grows_free(sh) for sh in shapes):
             return mid2
-        got = [self.notes_of({k: v for k, v in sh.items() if k not in ("fx", "_m", "sustain", "range", "subtract")})
+        got = [self.notes_of({k: v for k, v in sh.items() if k not in ("fx", "_m", "sustain", "range", "subtract", "extend")})
                for sh in shapes if not sh.get("hz") and "picture" not in sh]
         got = [n for n in got if len(n)]
         if not got:

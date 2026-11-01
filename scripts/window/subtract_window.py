@@ -20,7 +20,7 @@ from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr, trn
+from files.lang import texts, tr, trn
 from files.mathexpr import calc, fmt
 from notes.gaterange import DIRS, STRAIGHT, few_steps, gate_steps, y_gate
 from notes.subtract import (MOST, box_of, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
@@ -128,11 +128,58 @@ def put_own(sh, part):
 class SubtractWindow(PointGraph, tk.Toplevel):
     use, bys, touches, varies, owns, g, g_all = (_side_list(k) for k in SIDE_LISTS)
 
+    KEY = "subtract"  # the shape's key (sh["subtract"])
+    T = "subtract"  # texts' first word (subtract.title...), window place, tip / Help topic
+    ATTR = "subtract_window"  # App's attribute holding the open one
+    SIDES = SIDES
+    TOUCH = True  # "Only notes that touch..." shown
+
+    def extra_rows(self, box):
+        """More rows above the amount (Gate extend: what the amount is in)."""
+
+    def tx(self, key, **kw):
+        """A text of this window: "<T>.<key>" (Gate extend: Gate subtract's where it has none of its own); a key with a
+        dot = that one."""
+        if "." not in key:
+            k = f"{self.T}.{key}"
+            key = k if k in texts() else "subtract." + key
+        return tr(key, **kw)
+
+    def side_data(self):
+        return side_data()
+
+    def has_it(self, sh):
+        return is_subtracted(sh)
+
+    def own_part(self, sh):
+        return own_part(sh)
+
+    def put_own(self, sh, part):
+        put_own(sh, part)
+
+    def first_amount(self):
+        """What a shape gets where it has no amount yet: 1 tick."""
+        return 1 / self.app.ppq
+
+    def uppq(self, ppq=None):
+        """Whole steps per stored unit: the PPQ (amounts kept in beats, shown in ticks); ppq: the one typed for."""
+        return ppq or self.app.ppq
+
+    def most(self):
+        return MOST
+
+    def amount_text(self, n):
+        return trn("n.ticks", n, n=n)
+
+    def made_of(self, i):
+        """Shape i's stored settings from the window's."""
+        return with_sides(self.side_of("end", i) or {"by": 0.0, "off": True}, self.side_of("start", i))
+
     def __init__(self, app):
         super().__init__(app)
         self.app = app
-        app.subtract_window = self
-        self.title(tr("subtract.title"))
+        setattr(app, self.ATTR, self)
+        self.title(self.tx("title"))
         self.transient(app)
         self.resizable(False, False)
         self.closed = False
@@ -142,33 +189,37 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.drag, self.hover = None, None
         box = ttk.Frame(self, padding=10)
         box.pack(fill="both", expand=True)
-        self.what = ttk.Label(box, text=tr("subtract.nothing"), foreground=look.HINT)
+        self.what = ttk.Label(box, text=self.tx("nothing"), foreground=look.HINT)
         self.on_var = tk.BooleanVar(value=True)
-        self.on_tick = ttk.Checkbutton(box, text=tr("subtract.on"), variable=self.on_var,
+        self.on_tick = ttk.Checkbutton(box, text=self.tx("on"), variable=self.on_var,
                                        command=lambda: self.put_all("on"))
         self.on_tick.pack(anchor="w")
-        Tooltip(self.on_tick, tr("subtract.on_tip"))
+        Tooltip(self.on_tick, self.tx("on_tip"))
         self.side = "end"
         self.side_var = tk.StringVar(value=self.side)
-        row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(8, 0))
-        for side in SIDES:
-            b = ttk.Radiobutton(row, text=tr("subtract.side_" + side), value=side, variable=self.side_var,
-                                style="Toolbutton", command=self.pick_side)
-            b.pack(side="left", padx=(0, 2))
-            Tooltip(b, tr(f"subtract.side_{side}_tip"))
-        ttk.Separator(box).pack(fill="x", pady=(0, 6))
+        tabs = len(self.SIDES) > 1  # (Gate extend: one side, no tabs / "Use this side")
+        if tabs:
+            row = ttk.Frame(box)
+            row.pack(anchor="w", pady=(8, 0))
+            for side in self.SIDES:
+                b = ttk.Radiobutton(row, text=self.tx("side_" + side), value=side, variable=self.side_var,
+                                    style="Toolbutton", command=self.pick_side)
+                b.pack(side="left", padx=(0, 2))
+                Tooltip(b, self.tx(f"side_{side}_tip"))
+            ttk.Separator(box).pack(fill="x", pady=(0, 6))
         self.use_var = tk.BooleanVar(value=True)
         self.use_tick = ttk.Checkbutton(box, variable=self.use_var, command=lambda: self.put_all("use"))
-        self.use_tick.pack(anchor="w")
+        if tabs:
+            self.use_tick.pack(anchor="w")
         self.use_tip = Tooltip(self.use_tick, "")
+        self.extra_rows(box)
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(6, 0))
-        self.by_label = ttk.Label(row, text=tr("subtract.by"))
+        self.by_label = ttk.Label(row, text=self.tx("by"))
         self.by_label.pack(side="left")
         self.by_var, self.to_var = tk.StringVar(value=""), tk.StringVar(value="")
         self.by_box = self.number_box(row, self.by_var, "by", self.by_label)
-        self.to_label = ttk.Label(row, text=tr("subtract.to"))
+        self.to_label = ttk.Label(row, text=self.tx("to"))
         self.to_box = self.number_box(row, self.to_var, "to", self.to_label)
         self.by_unit = ttk.Label(row)
         self.by_unit.pack(side="left", padx=(4, 0))
@@ -177,16 +228,17 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         Scrub(app, [(self.by_box, self.by_var, lambda: self.on_box("by"))], lambda: (1, 10, 1), 0, None,
               label=self.by_unit, drag_box=True, no_undo=True)
         self.by_tips = [Tooltip(w, "") for w in (self.by_label, self.by_box, self.by_unit)]
-        Tooltip(self.to_label, tr("subtract.to_tip"))
+        Tooltip(self.to_label, self.tx("to_tip"))
         self.touch_var = tk.BooleanVar(value=False)
         self.touch_tick = ttk.Checkbutton(box, variable=self.touch_var, command=lambda: self.put_all("touch"))
-        self.touch_tick.pack(anchor="w", pady=(6, 0))
+        if self.TOUCH:
+            self.touch_tick.pack(anchor="w", pady=(6, 0))
         self.touch_tip = Tooltip(self.touch_tick, "")
         self.vary_var = tk.BooleanVar(value=False)
-        self.vary_tick = ttk.Checkbutton(box, text=tr("subtract.vary"), variable=self.vary_var,
+        self.vary_tick = ttk.Checkbutton(box, text=self.tx("vary"), variable=self.vary_var,
                                          command=lambda: self.put_all("vary"))
         self.vary_tick.pack(anchor="w", pady=(6, 0))
-        Tooltip(self.vary_tick, tr("subtract.vary_tip"))
+        Tooltip(self.vary_tick, self.tx("vary_tip"))
         self.graph_part = self.make_graph(ttk.Frame(box), s)
         self.after_graph = row = ttk.Frame(box)
         row.pack(anchor="e", pady=(10, 0))
@@ -195,13 +247,13 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.bind("<Escape>", lambda ev: self.cancel())
         self.bind("<Return>", lambda ev: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.ons, self.sides = [], {side: side_data() for side in SIDES}  # (ons: "Subtract from gates" per shape)
+        self.ons, self.sides = [], {side: self.side_data() for side in self.SIDES}  # (ons: "Subtract from gates" per shape)
         self.hist = LocalUndo(self, self.state, self.put_state, main=app.last_step)
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.retarget(start=True)
         self.update_idletasks()
         self.geometry(f"+{app.winfo_rootx() + 160}+{app.winfo_rooty() + 160}")
-        remember_place(self, "subtract")
+        remember_place(self, self.T)
         self.focus_set()
 
     def number_box(self, row, var, key, label):
@@ -213,13 +265,13 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         if key == "to":
             Scrub(self.app, [(e, var, lambda: self.on_box("to"))], lambda: (1, 10, 1), 0, None, label=label,
                   drag_box=True, no_undo=True)
-            Tooltip(e, tr("subtract.to_tip"))
+            Tooltip(e, self.tx("to_tip"))
         return e
 
     def make_graph(self, part, s):
         """The part shown while "Change across the shape" is ticked: Across, the row ticks, the graph, presets."""
         self.w, self.h = int(460 * s), int(170 * s)
-        self.ml, self.mb = chart_edges(s, (trn("n.ticks", 99999, n=99999),), 56, 22)
+        self.ml, self.mb = chart_edges(s, (self.amount_text(99999),), 56, 22)
         self.mr, self.mt = int(12 * s), int(10 * s)
         pad = int(20 * s)
         row = ttk.Frame(part)
@@ -228,27 +280,27 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.dir_box = ttk.Combobox(row, values=[tr(f"range_window.{d}") for d in DIRS], state="readonly", width=24)
         self.dir_box.pack(side="left", padx=4)
         self.dir_box.bind("<<ComboboxSelected>>", lambda e: self.put_graph("dir", DIRS[self.dir_box.current()]))
-        Tooltip(self.dir_box, tr("subtract.dir_tip"))
+        Tooltip(self.dir_box, self.tx("dir_tip"))
         self.rows_var, self.join_var = tk.BooleanVar(), tk.BooleanVar()
         self.rows_check = ttk.Checkbutton(part, text=tr("range_window.rows"), variable=self.rows_var,
                                           command=lambda: self.put_graph("rows", self.rows_var.get()))
         self.rows_check.pack(anchor="w", padx=(pad, 0), pady=(4, 0))
-        Tooltip(self.rows_check, tr("subtract.rows_tip"))
+        Tooltip(self.rows_check, self.tx("rows_tip"))
         self.join_check = ttk.Checkbutton(part, text=tr("range_window.join"), variable=self.join_var,
                                           command=lambda: self.put_graph("join", self.join_var.get()))
         self.join_check.pack(anchor="w", padx=(2 * pad, 0))
-        Tooltip(self.join_check, tr("subtract.join_tip"))
+        Tooltip(self.join_check, self.tx("join_tip"))
         row = ttk.Frame(part)
         row.pack(anchor="w", padx=(2 * pad, 0), pady=(2, 0))
-        self.along_label = ttk.Label(row, text=tr("subtract.along"))
+        self.along_label = ttk.Label(row, text=self.tx("along"))
         self.along_label.pack(side="left")
-        self.along_box = ttk.Combobox(row, values=[tr(f"subtract.along_{a}") for a in ALONG], state="readonly",
+        self.along_box = ttk.Combobox(row, values=[self.tx(f"along_{a}") for a in ALONG], state="readonly",
                                       width=16)
         self.along_box.pack(side="left", padx=4)
         self.along_box.bind("<<ComboboxSelected>>",
                             lambda e: self.put_graph("count", ALONG[self.along_box.current()] == "count"))
         for w in (self.along_label, self.along_box):
-            Tooltip(w, tr("subtract.along_tip"))
+            Tooltip(w, self.tx("along_tip"))
         cv = self.canvas = tk.Canvas(part, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
                                      highlightbackground=look.CHART_BORDER, cursor="crosshair")
         cv.pack(anchor="w", padx=(pad, 0), pady=(6, 4))
@@ -261,9 +313,9 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         row = ttk.Frame(part)
         row.pack(anchor="w", padx=(pad, 0))
         for key, pts in PRESETS:  # (Gate Range's, named for gaps: subtract.short_longer...)
-            ttk.Button(row, text=tr("subtract." + key.split(".")[1]), command=lambda pts=pts: self.put_graph("graph", [list(p) for p in pts])
+            ttk.Button(row, text=self.tx(key.split(".")[1]), command=lambda pts=pts: self.put_graph("graph", [list(p) for p in pts])
                        ).pack(side="left", padx=(0, 4))
-        ttk.Label(part, text=tr("subtract.hint"), foreground=look.HINT, font=look.font(8), justify="left",
+        ttk.Label(part, text=self.tx("hint"), foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=self.w).pack(anchor="w", padx=(pad, 0), pady=(6, 0))
         return part
 
@@ -278,10 +330,10 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     # ---- the shapes worked on
 
     def sub_now(self):
-        return json.dumps([t.get("subtract") for t in self.tgts])
+        return json.dumps([t.get(self.KEY) for t in self.tgts])
 
     def own_now(self):
-        return json.dumps([own_part(t) for t in self.tgts])
+        return json.dumps([self.own_part(t) for t in self.tgts])
 
     def retarget(self, start=False):
         """Work on the selected shapes (start: opened, which puts Gate subtract on)."""
@@ -301,9 +353,9 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         """Each shape's settings from the shapes, then the controls. start (opened from the menu): all on, and a shape
         with no side used gets the Note end side (1 tick where it had none; user 2026-10-20: the first tab). Opened
         on the Note end tab unless only the start side is used."""
-        subs = [t.get("subtract") if is_subtracted(t) else None for t in self.tgts]
+        subs = [t.get(self.KEY) if self.has_it(t) else None for t in self.tgts]
         self.ons = [start or s is not None for s in subs]
-        for side in SIDES:
+        for side in self.SIDES:
             # (an empty side = none: one a flip left with 0 ticks gets 1 tick when used, hunt 2026-10-20)
             ss = [s and (end_side(s) if side == "end" else s.get("start")) for s in subs]
             ss = [None if empty_side(s) else s for s in ss]
@@ -319,19 +371,20 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             d["g_all"] = False
         if start:
             self.use_first()
-            ends, starts = self.sides["end"]["use"], self.sides["start"]["use"]
+            ends = self.sides["end"]["use"]
+            starts = self.sides["start"]["use"] if "start" in self.sides else []
             self.side = "start" if any(starts) and not any(ends) else "end"
         self.side_var.set(self.side)
         self.show_controls()
 
     def use_first(self):
         """Shapes with neither side used: the Note end side used (1 tick where it has no amount)."""
-        ends, starts = self.sides["end"], self.sides["start"]
+        ends, starts = self.sides["end"], self.sides.get("start")  # (Gate extend: no start side)
         for i in range(len(self.ons)):
-            if self.ons[i] and not ends["use"][i] and not starts["use"][i]:
+            if self.ons[i] and not ends["use"][i] and not (starts and starts["use"][i]):
                 ends["use"][i] = True
                 if ends["bys"][i] is None:
-                    ends["bys"][i] = 1 / self.app.ppq
+                    ends["bys"][i] = self.first_amount()
 
     def pick_side(self):
         """A tab clicked: its settings shown (a number typed on the other one goes to it first)."""
@@ -347,8 +400,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
 
     def new_graph(self):
         """The graph settings a shape gets the first time it changes across: To = 4 times its amount (0: 4 ticks)."""
-        b = next((b for b in self.bys if b is not None), 1 / self.app.ppq) or 1 / self.app.ppq
-        return {"to": min(b * 4, MOST), "graph": [list(p) for p in STRAIGHT], "dir": "time"}
+        b = next((b for b in self.bys if b is not None), None) or self.first_amount()
+        return {"to": min(b * 4, self.most()), "graph": [list(p) for p in STRAIGHT], "dir": "time"}
 
     def show_controls(self):
         """The ticks, boxes and graph as the shapes' settings are: ticked when every shape has it, half-ticked when
@@ -359,12 +412,12 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         tick(self.on_var, self.on_tick, self.ons)
         tick(self.use_var, self.use_tick, self.use)
         start = self.side == "start"
-        self.use_tick.config(text=tr("subtract.use_" + self.side))
-        self.use_tip.set_text(tr(f"subtract.use_{self.side}_tip"))
-        self.touch_tick.config(text=tr("subtract.touch_start" if start else "subtract.touch"))
-        self.touch_tip.set_text(tr("subtract.touch_start_tip" if start else "subtract.touch_tip"))
+        self.use_tick.config(text=self.tx("use_" + self.side))
+        self.use_tip.set_text(self.tx(f"use_{self.side}_tip"))
+        self.touch_tick.config(text=self.tx("touch_start" if start else "touch"))
+        self.touch_tip.set_text(self.tx("touch_start_tip" if start else "touch_tip"))
         for t in self.by_tips:
-            t.set_text(tr("subtract.by_start_tip" if start else "subtract.by_tip"))
+            t.set_text(self.tx("by_start_tip" if start else "by_tip"))
         tick(self.touch_var, self.touch_tick, self.touches)
         tick(self.vary_var, self.vary_tick, self.varies)
         got = {b for b in self.bys if b is not None}
@@ -399,7 +452,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         """The shapes' Gate subtract as before the change tried here, on saved (a copy of the shapes)."""
         for i, sub in zip(self.idx, json.loads(self.kept)):
             if i < len(saved):
-                put_own(saved[i], sub)
+                self.put_own(saved[i], sub)
 
     def settle(self, also=()):
         """Something else is about to change in the main window: the change tried so far is kept (its own undo
@@ -414,7 +467,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             w.put_back(saved)
         sel, self.saved_sel, self.before = self.saved_sel, self.app.sel_state(), self.now
         self.kept = self.own_now()
-        self.app.add_undo_step(json.dumps(saved), tr("subtract.step"), sel)
+        self.app.add_undo_step(json.dumps(saved), self.tx("step"), sel)
         self.hist.seen()
 
     def ppq_changed(self):
@@ -433,19 +486,19 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     # ---- the amounts: kept in beats, shown in whole ticks
 
     def text_of(self, beats):
-        return fmt(ticks_of(beats, self.app.ppq))
+        return fmt(ticks_of(beats, self.uppq()))
 
     def read(self, text, ppq=None):
         """Typed ticks -> beats (whole ticks, 0 or more, at most MOST beats), or None (empty, not a number, under
         0). ppq: the one it was typed for (default the project's)."""
-        ppq = ppq or self.app.ppq
+        ppq = self.uppq(ppq)
         try:
             v = calc(text)
         except (ValueError, ZeroDivisionError):
             return None
         if not math.isfinite(v) or v < 0:
             return None
-        return min(math.floor(v + 0.5) / ppq, MOST)
+        return min(math.floor(v + 0.5) / ppq, self.most())
 
     def put_all(self, what):
         """A tick changed ("on", "use", "touch", "vary"): every shape takes it (a half-ticked one: a click = all
@@ -462,7 +515,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
                 self.use = [self.use_var.get()] * n
             if any(self.use):  # (shapes on this side with no amount yet: the box's, else 1 tick)
                 b = self.read(self.by_var.get())
-                b = 1 / self.app.ppq if b is None else b
+                b = self.first_amount() if b is None else b
                 self.bys = [v if v is not None or not u else b for v, u in zip(self.bys, self.use)]
         elif what == "touch":
             self.touches = [self.touch_var.get()] * n
@@ -528,7 +581,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.by_box.config(state="normal" if on else "disabled")
         for w in (self.by_label, self.by_unit):
             w.config(foreground="" if on else look.LABEL_OFF)
-        self.by_label.config(text=tr("subtract.from" if vary else "subtract.by"))
+        self.by_label.config(text=self.tx("from" if vary else "by"))
         # (the second number and the graph only while it's used; each checked by itself: opened with it ticked, the
         # graph stayed hidden)
         if vary and not self.to_box.winfo_manager():
@@ -553,7 +606,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         """The first and second amount in ticks."""
         got = [b for b in self.bys if b is not None]
         g = self.g or self.new_graph()
-        return ticks_of(got[0] if got else 1 / self.app.ppq, self.app.ppq), ticks_of(g["to"], self.app.ppq)
+        u = self.uppq()
+        return ticks_of(got[0] if got else self.first_amount(), u), ticks_of(g["to"], u)
 
     def draw(self):
         """The graph: amounts at 0, 25 ... 100 % up, the whole-tick amounts the notes get (pale steps), the line."""
@@ -569,17 +623,16 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             y = k / 4
             g = y_gate(a, b, y)
             cv.create_line(x0, self.y2c(y), x1, self.y2c(y), fill=look.CHART_GRID)
-            cv.create_text(x0 - 4 * s, self.y2c(y), text=trn("n.ticks", g, n=g), anchor="e", fill=look.LABEL,
+            cv.create_text(x0 - 4 * s, self.y2c(y), text=self.amount_text(g), anchor="e", fill=look.LABEL,
                            font=look.font(7))
         cv.create_rectangle(x0, top, x1, bot, outline=look.CHART_FRAME)
         d = self.g["dir"]
         ends = {"time": ("first", "last"), "keys": ("range_window.low", "range_window.high"),
                 "keys_down": ("range_window.high", "range_window.low")}[d]
         if d == "time":
-            ends = ("subtract.row_first", "subtract.row_last") if self.g.get("rows") else (
-                "subtract.first", "subtract.last")
-        cv.create_text(x0, bot + 4 * s, text=tr(ends[0]), anchor="nw", fill=look.LABEL, font=look.font(7))
-        cv.create_text(x1, bot + 4 * s, text=tr(ends[1]), anchor="ne", fill=look.LABEL, font=look.font(7))
+            ends = ("row_first", "row_last") if self.g.get("rows") else ("first", "last")
+        cv.create_text(x0, bot + 4 * s, text=self.tx(ends[0]), anchor="nw", fill=look.LABEL, font=look.font(7))
+        cv.create_text(x1, bot + 4 * s, text=self.tx(ends[1]), anchor="ne", fill=look.LABEL, font=look.font(7))
         span = (b - a) or 1
         if few_steps(self.pts, a, b):
             line = []
@@ -598,8 +651,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         at = self.pts[self.drag] if self.drag is not None else self.hover
         if at is not None:
             g = y_gate(a, b, float(at[1]))
-            cv.create_text(x1 - 4 * s, top + 4 * s, text=tr("subtract.at", at=fmt(round(at[0] * 100, 1)),
-                                                                 ticks=trn("n.ticks", g, n=g)),
+            cv.create_text(x1 - 4 * s, top + 4 * s, text=self.tx("at", at=fmt(round(at[0] * 100, 1)), ticks=self.amount_text(g)),
                            anchor="ne", fill=look.VALUE, font=look.font(8))
 
     # ---- the graph's mouse (like Gate Range's)
@@ -666,7 +718,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def put_state(self, state):
         self.drag = None
         ons, sides = json.loads(state)
-        changed = [s for s in SIDES if sides[s] != self.sides[s]]
+        changed = [s for s in self.SIDES if sides[s] != self.sides[s]]
         if changed and self.side not in changed:  # (Ctrl+Z / Ctrl+Y show the tab they change, hunt 2026-10-20)
             self.side = changed[0]
             self.side_var.set(self.side)
@@ -699,9 +751,9 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         """Put each shape's settings on it and show them."""
         for i, t in enumerate(self.tgts):
             if not self.ons[i]:
-                t.pop("subtract", None)
+                t.pop(self.KEY, None)
                 continue
-            t["subtract"] = with_sides(self.side_of("end", i) or {"by": 0.0, "off": True}, self.side_of("start", i))
+            t[self.KEY] = self.made_of(i)
         self.now = self.sub_now()
         self.show()
         self.app.shapes_changed()
@@ -723,19 +775,19 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.settle()
         self.close()
         if any(self.ons) and self.idx:
-            self.app.tips.show("subtract", wait=True)  # (the first time: what it does)
+            self.app.tips.show(self.T, wait=True)  # (the first time: what it does)
 
     def cancel(self):
         if self.idx and self.idx[-1] < len(self.app.shapes) and self.own_now() != self.kept:
             self.app.roll.cancel_draft()  # (as it was: an Add between step tried out stays one)
             for i, part in zip(self.idx, json.loads(self.kept)):
-                put_own(self.app.shapes[i], part)
+                self.put_own(self.app.shapes[i], part)
         self.close()
         self.app.shapes_changed()
 
     def close(self):
         self.closed = True
-        self.app.subtract_window = None
+        setattr(self.app, self.ATTR, None)
         self.destroy()
         self.app.roll.focus_set()
 

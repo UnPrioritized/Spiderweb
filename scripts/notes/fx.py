@@ -207,6 +207,9 @@ def flip_shape(sh, sideways, mid2):
     if sh.get("subtract"):  # (Gate subtract's graphs, like the Range's; sideways its end / start swap: subtract.py)
         from notes.subtract import flipped_subtract
         sh["subtract"] = flipped_subtract(sh["subtract"], sideways)
+    if sh.get("extend"):  # (Gate extend's graph: extend.py)
+        from notes.extend import flipped_extend
+        sh["extend"] = flipped_extend(sh["extend"], sideways)
     stops = (sh.get("sustain") or {}).get("stops")
     if sideways and stops and stops.get("at"):  # (Sustain's stops put by hand: shares of the notes' time; past the
         at = sorted(1 - f if f < 1 else f for f in stops["at"])  # end ones stay)
@@ -415,6 +418,9 @@ def turn_shape(sh, clockwise, r, cb, cp):
     if sh.get("subtract"):  # (Gate subtract's graphs: subtract.py)
         from notes.subtract import turned_subtract
         sh["subtract"] = turned_subtract(sh["subtract"], clockwise)
+    if sh.get("extend"):  # (Gate extend's graph: extend.py)
+        from notes.extend import turned_extend
+        sh["extend"] = turned_extend(sh["extend"], clockwise)
     from notes.recolour import ANTI, CLOCKWISE, moved
     moved(sh, CLOCKWISE if clockwise else ANTI)  # (its Clumps areas turned with it: recolour.py FRAME)
     return sh

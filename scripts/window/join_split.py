@@ -45,6 +45,7 @@ from roll.roll_shared import cached_path, cached_strokes
 from window import look
 from notes.subtract import plain_subtract, same_subtract
 from window.subtract_window import carry_subtract
+from window.extend_window import carry_extend
 from window.sustain_window import carry_stops
 from window.widgets import Tooltip
 
@@ -508,6 +509,10 @@ class JoinSplit:
         if subs[0] is not None and subs[1] is not None and same_subtract(*subs):  # (both alike: so are the merged
             for sh in new:                                                        # notes)
                 sh["subtract"] = plain_subtract(copy.deepcopy(subs[0]))
+        exts = [self.shapes[i].get("extend") for i in pair]
+        if exts[0] is not None and exts[0] == exts[1]:  # (Gate extend the same way)
+            for sh in new:
+                sh["extend"] = copy.deepcopy(exts[0])
         masks = [self.shapes[i].get("mask") for i in pair]
         if masks[0] and masks[1] and same_mask(*masks):  # (both masks alike: so is what's made of them, like Join;
             # groups apart, the first one's)
@@ -1136,6 +1141,7 @@ class JoinSplit:
         if velocity:  # (like Slice, hunt: Sustain's stops put by hand kept per piece, Gate subtract's graph cut)
             carry_stops(self, [old], parts)
             carry_subtract(self, old, parts)
+            carry_extend(self, old, parts)  # (Gate extend's graph too)
             carry_recolour(self, old, parts)
         self.shapes[i:i + 1] = parts
         self.select_many(range(i, i + len(parts)), i)
@@ -1688,6 +1694,7 @@ class JoinSplit:
             if i in done:
                 carry_stops(self, [sh], parts)  # (Sustain's stops put by hand: each piece keeps the ones inside it)
                 carry_subtract(self, sh, parts)  # (Gate subtract's graph across the shape: cut per piece)
+                carry_extend(self, sh, parts)  # (Gate extend's graph too)
                 if i not in plain:
                     carry_recolour(self, sh, parts)  # (each piece keeps the colours it had in the whole)
                 picked += [len(new) + k for k, p in enumerate(parts) if pick is None or pick(p)]

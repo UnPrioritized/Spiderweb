@@ -346,7 +346,7 @@ def part_rows(parts, ppq, keys, rounds=False):
     from notes.recolour import is_recoloured
     units, forced, firsts, made, laps, after = [], [], [], [], [], 0
     for p in parts:
-        p = {k: v for k, v in p.items() if k not in ("sustain", "subtract")}
+        p = {k: v for k, v in p.items() if k not in ("sustain", "subtract", "extend")}
         notes, tracks = shape_notes_tracks(dict(p, _rounds=True) if rounds else p, ppq, keys)
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         tracks = np.zeros(len(notes), np.int64) if tracks is None or not len(tracks) else np.asarray(tracks, np.int64)
@@ -570,7 +570,7 @@ def made_sides(m):
     """(sliding part's index, from the left?, its smallest slide, how much later all went) as the recipe was made,
     ticks at m["ppq"]; None = nothing met."""
     from notes.engine import shape_notes
-    a, b = (shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract")}, m["ppq"], m["keys"])
+    a, b = (shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract", "extend")}, m["ppq"], m["keys"])
             for p in m["parts"])
     left = 1 if len(a) and len(b) and comes_from_left(a, b) else 0
     slide = left if m["right"] else 1 - left
@@ -581,7 +581,7 @@ def made_sides(m):
 def made_keys(m):
     """Merge up / down recipe: (moving part's index, its smallest slide in keys, + = up) as made; None = none met."""
     from notes.engine import shape_notes
-    a, b = (np.asarray(shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract")}, m["ppq"],
+    a, b = (np.asarray(shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract", "extend")}, m["ppq"],
                                    m["keys"]),
                        np.int64).reshape(-1, 4) for p in m["parts"])
     if not len(a) or not len(b):

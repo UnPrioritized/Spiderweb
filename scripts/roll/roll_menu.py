@@ -31,6 +31,7 @@ from window.sustain_window import any_sustained, carry_stops, open_sustain, sust
 from window.merge_window import open_merge
 from window.fill_window import open_fill
 from window.subtract_window import any_subtracted, carry_subtract, open_subtract, subtract_targets
+from window.extend_window import any_extended, carry_extend, open_extend
 from window.strips_window import any_strips, open_strips, strips_targets
 from window.lines_window import open_lines
 from window.widgets import symmetry_menu
@@ -253,6 +254,7 @@ class ShapeMenu:
                 part_glue(p, sh)
             carry_stops(app, [sh], letters)  # (Sustain stops put by hand stay on their ticks)
             carry_subtract(app, sh, letters)  # (Gate subtract's graph across the text: cut per letter)
+            carry_extend(app, sh, letters)  # (Gate extend's graph too)
             changed = changed or rows(app.notes_of(sh)) != rows(np.concatenate([app.notes_of(p) for p in letters]))
             app.unlink_groups([j])
             app.shapes[j:j + 1] = letters
@@ -394,6 +396,9 @@ class ShapeMenu:
                           state="normal" if sustain_targets(app) else "disabled")
         self._subtract_var = tk.BooleanVar(value=any_subtracted(app))  # Gate subtract… (subtract_window.py), alike
         m.add_checkbutton(label=tr("subtract.menu"), variable=self._subtract_var, command=lambda: open_subtract(app),
+                          state="normal" if subtract_targets(app) else "disabled")
+        self._extend_var = tk.BooleanVar(value=any_extended(app))  # Gate extend… (extend_window.py), alike
+        m.add_checkbutton(label=tr("extend.menu"), variable=self._extend_var, command=lambda: open_extend(app),
                           state="normal" if subtract_targets(app) else "disabled")
         if strips_targets(app):  # Channel per strip… (strips_window.py): pasted notes only, else left out
             self._strips_var = tk.BooleanVar(value=any_strips(app))

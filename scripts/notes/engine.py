@@ -48,6 +48,7 @@ from notes.strum import apply_strum
 from notes.trim import apply_trim
 from notes.recolour import box_of, clean_recolour, is_recoloured, recoloured, rule_of, without_recolour
 from notes.subtract import clean_subtract, is_subtracted, subtracted
+from notes.extend import clean_extend, extended, is_extended
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, snap_steps
@@ -525,6 +526,9 @@ def clean_shape(sh):
     sub = clean_subtract(sh.get("subtract"))
     if sub is not None:  # its gates made shorter (subtract.py)
         out["subtract"] = sub
+    ext = clean_extend(sh.get("extend"))
+    if ext is not None:  # its gates made longer (extend.py)
+        out["extend"] = ext
     rc = clean_recolour(sh.get("recolour"))
     if rc is not None:  # its notes' colours changed (recolour.py)
         out["recolour"] = rc
@@ -848,6 +852,9 @@ def fx_notes(sh, ppq, keys, get):
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
+    if "extend" in sh:  # (gates made longer after Sustain, before Gate subtract: extend.py)
+        notes, tracks = get({k: v for k, v in sh.items() if k != "extend"})
+        return (extended(notes, sh["extend"], ppq), tracks) if is_extended(sh) else (notes, tracks)
     if "sustain" in sh:  # (held on last, after everything else: sustain.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
         return held(notes, tracks, sh["sustain"], ppq) if is_sustained(sh) else (notes, tracks)

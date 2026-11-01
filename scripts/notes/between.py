@@ -312,6 +312,10 @@ class Pair:
         if x is not None and y is not None:  # (both ends with Gate subtract: amounts / graph step by step, each side)
             from notes.subtract import mixed_subtract
             out["subtract"] = mixed_subtract(x, y, f, mix)
+        x, y = a.get("extend"), b.get("extend")
+        if x is not None and y is not None:  # (both ends with Gate extend: step by step when in the same unit)
+            from notes.extend import mixed_extend
+            out["extend"] = mixed_extend(x, y, f, mix)
         from notes.recolour import BLEND_DEFAULTS, clean_recolour
         x, y = clean_recolour(a.get("recolour")), clean_recolour(b.get("recolour"))
         if x and y and x["mode"] == y["mode"]:  # (both ends recoloured alike: the numbers step by step, a setting
