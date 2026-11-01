@@ -26,7 +26,7 @@ from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, heard_marks, kept_bpms, ruler_marks, short_bpm, tempo_text
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_colours,
-                              note_name, slot_colours)
+                              note_name, slot_colours, velocity_shades)
 from roll.tiles import Tiles, see_through_strips
 from window import look
 
@@ -45,8 +45,7 @@ TWIN_COLOR = look.TWIN
 # slot colours, then selected (unused: a selected shape's notes keep their colours, user; a red line goes round
 # them, draw_ring), then the shape being drawn. Ghosts of notes a mask hides (velocity -1 in app.drawn): ghost_code
 SELECTED, DRAFT = len(SLOT_COLORS), len(SLOT_COLORS) + 1
-NOTE_COLORS = [(fade(f, 1 - level * 4 / 124), b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR]
-               for level in range(32)]
+NOTE_COLORS = [(shade, b) for f, b in SLOT_COLORS + [SELECTED_COLOR, DRAFT_COLOR] for shade in velocity_shades(f)]
 RING_COLOR = look.RING
 RING_RGB = np.frombuffer(bytes.fromhex(RING_COLOR[1:]), np.uint8)
 PREVIEW_COLOR, PREVIEW_HALO = look.PREVIEW_LINE, look.PREVIEW_HALO  # (draw_edge_preview)
