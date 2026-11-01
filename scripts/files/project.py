@@ -1736,7 +1736,8 @@ class ProjectFiles:
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
                                pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys,
-                               own=self.with_file_tracks(), least=self.least_tracks()))):
+                               own=self.with_file_tracks(), least=self.least_tracks(),
+                               typed=plan.get("typed")))):
             return
         tracks = len(track_slots(notes, self.pad_tracks(), self.least_tracks())) + len(self.with_file_tracks())
         ports = slot_ports(auto_count(notes[:, 4]), cc, self.picture_use10)  # (as dms_data decides)
@@ -1786,7 +1787,7 @@ class ProjectFiles:
         end = max(end, first + 1)
         on_bar = bar_line(plan["sigs"], first, ppq) == first
         items, slow = tempo_items(plan["events"], plan["sigs"] if on_bar else (), first, end,
-                                  plan["keys"] if on_bar else ())
+                                  plan["keys"] if on_bar else (), plan.get("typed"))
         return conductor_clip(ppq, items, end - first), slow
 
     def tempo_to_domino(self, clip, quiet):
@@ -1949,7 +1950,7 @@ class ProjectFiles:
             # first pushed the notes one track down in Domino)
             if self.copied_whole():
                 conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1],
-                                        plan["keys"] if bar else ())[0]
+                                        plan["keys"] if bar else (), plan.get("typed"))[0]
         elif early < int(notes[:, 0].min()):
             first, length = clip_span(notes, beats * ppq, self.domino_start())
             start = early if self.domino_start() == "note" else early // (beats * ppq) * beats * ppq

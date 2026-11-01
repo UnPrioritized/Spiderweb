@@ -31,7 +31,8 @@ Exact timing (user's rule: tick and microsecond perfect, not "too small to hear"
 numbers, ticks x microseconds per beat, so the catch-up is picked tick by tick to make each stretch's sum exactly
 the project BPM's. Every value written also survives Domino opening and saving the file unchanged (domino_safe:
 measured 2026-10-21, Domino keeps a tempo as a 32-bit BPM, f32(6e7 / us), and saves trunc(6e7 / bpm): half of all
-values lost 1 us each save)."""
+values lost 1 us each save). EXCEPT a typed held BPM: what Domino itself writes for it (held_us; user 2026-11-01),
+so Domino shows the BPM typed."""
 
 import bisect
 import copy
@@ -611,12 +612,29 @@ def base_us(base):
 
 def held_us(bpm):
     """A held part's microseconds per beat: a BPM that is exactly a file's whole microseconds (a loaded MIDI's own
-    tempo, loaded.conductor_line) keeps them as they are (user 2026-10-24: the file's values stay); any other the
-    nearest Domino-safe value (Spiderweb's own additions follow Domino)."""
+    tempo, loaded.conductor_line) keeps them as they are (user 2026-10-24: the file's values stay); any other =
+    what Domino itself writes for that BPM (its float32, 60e6 / it cut to a whole number; user 2026-11-01: 252 came
+    out 251.99 in Domino. A MIDI re-saved in Domino may slip a microsecond there, as Domino's own files do: checked
+    on the user's 252 song)."""
     u = round(60_000_000 / bpm)
     if 1 <= u <= 0xFFFFFF and 60_000_000 / u == bpm:
         return u
+    u = int(60_000_000 / float(np.float32(bpm)))
+    if 1 <= u <= 0xFFFFFF:
+        return u
     return int(nearest_safe([60_000_000 / bpm])[0])
+
+
+def typed_bpms(tempo):
+    """{us: the f32 BPM typed}: each point's BPM by the microseconds held_us gives it, so a Domino copy / .dms
+    writes the BPM as typed (252, not another f32 that also gives 238,095 us; user 2026-11-01)."""
+    out = {}
+    for p in tempo.get("points") or ():
+        try:
+            out.setdefault(held_us(p[1]), float(np.float32(p[1])))
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError):
+            pass
+    return out
 
 
 def _first_ticks(pb, ppq):

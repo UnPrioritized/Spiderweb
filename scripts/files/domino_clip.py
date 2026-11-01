@@ -331,11 +331,16 @@ def time_signature(beats, tick=0, bottom=4):
     return item(2015, item(1001, struct.pack("<I", tick)) + item(2001, bytes([beats])) + item(2002, bytes([bottom])))
 
 
-def dms_bpm(us):
+def dms_bpm(us, typed=None):
     """(f32 BPM, exact) for a tempo of us microseconds a beat: the f32 Domino turns back into exactly us when it saves
     a MIDI (its maths, measured 2026-10-21: trunc(60e6 / bpm) in doubles). Plain f32(60e6 / us) misses for ~9 % of
     values; a neighbouring f32 fixes them all from ~5.35 BPM up (slower: the f32 steps are too coarse, the closest
-    is taken)."""
+    is taken). typed = the BPM typed for it (tempo.typed_bpms): written as it is when it gives us (user 2026-11-01:
+    a typed 252 showed 251.99 in Domino)."""
+    if typed is not None:
+        g = np.float32(typed)
+        if g > 0 and int(60_000_000 / float(g)) == us:
+            return float(g), True
     f = np.float32(60_000_000 / us)
     best = None
     for step in range(9):
@@ -354,12 +359,14 @@ def _f32_step(f, n):
     return np.array([bits], np.int32).view(np.float32)[0]
 
 
-def tempo_items(tempo, sigs=(), first=0, end=None, keys=()):
+def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
     """(Conductor item bytes, slow): tempo [(tick, us)], time signatures [(tick, top, bottom power)] and key
     signatures [(tick, sharps, minor)] as Domino's items, by tick (tempo, then time, then key signature on a tick). first..end: only that stretch, ticks counted
     from first, with what is in effect at first put on tick 0, and what is in effect at end put on end when it
     changed (user 2026-10-22: Domino ADDS a pasted Conductor's items, so without it the song after the paste
-    would stay at the copy's last tempo). slow = how many tempos can't come back exact."""
+    would stay at the copy's last tempo). slow = how many tempos can't come back exact. typed = {us: typed BPM}
+    (file_plan's "typed"): those BPMs written as typed (dms_bpm)."""
+    typed = typed or {}
     tempo = sorted(tempo)
     sigs = sorted(sigs)
     out, slow = [], 0
@@ -372,7 +379,7 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=()):
             got += back
         return [r for r in got if r[0] - first <= LONGEST]  # (past what Domino's ticks hold: left out)
     for tick, us in take(tempo):
-        bpm, exact = dms_bpm(us)
+        bpm, exact = dms_bpm(us, typed.get(us))
         slow += not exact
         out.append((tick - first, 0, item(2008, item(1001, struct.pack("<I", tick - first))
                                           + item(2001, item(0, struct.pack("<f", bpm))))))
@@ -385,7 +392,7 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=()):
 
 
 def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None, keys=None,
-             own=(), least=0):
+             own=(), least=0, typed=None):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
     (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad; least:
@@ -399,11 +406,11 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None,
     power)] (the Tempo pane's, tempo_file.file_plan): the Conductor track's instead of one BPM. own: the tracks
     added by hand (files/own_tracks.py), among the slots' like the MIDI export's."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys, own, least)
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys, own, least, typed)
 
 
 def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None, keys=None, own=(),
-             least=0):
+             least=0, typed=None):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
@@ -419,7 +426,7 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
 
     feed(SONG_START + item(1002, struct.pack("<H", ppq)) + DMS_SONG_REST)
     if tempo:
-        events = tempo_items(tempo, sigs or [(0, beats, 2)], keys=keys or ())[0]
+        events = tempo_items(tempo, sigs or [(0, beats, 2)], keys=keys or (), typed=typed)[0]
     else:
         events = (item(2008, item(1001, struct.pack("<I", 0)) + item(2001, item(0, struct.pack("<f", bpm))))
                   + b"".join(time_signature(top, t, 2 ** p) for t, top, p in sorted(sigs or [(0, beats, 2)]))

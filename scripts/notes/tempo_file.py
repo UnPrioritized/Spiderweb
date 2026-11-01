@@ -21,6 +21,7 @@ import numpy as np
 
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
 from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put_all, _put_many, _runs, base_us, beat_tick, domino_safe,
+                         typed_bpms,
                          file_segments, has_tempo, keep_heard, layout, tempo_text)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
@@ -488,6 +489,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         return out
     start_u = base_us(base)
     out["events"] = [(0, start_u)]
+    out["typed"] = typed_bpms(tempo)  # (Domino's items write these BPMs as typed: domino_clip.dms_bpm)
     ticks = np.asarray(ticks, np.int64).ravel()
     loose = np.asarray(loose, np.int64).ravel()
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
