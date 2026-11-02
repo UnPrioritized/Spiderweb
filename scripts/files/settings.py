@@ -130,6 +130,13 @@ APP_KEYS = {
     "ahead_engine": ("sound", "rendered_ahead_engine", str),  # (files/render_ahead.ENGINES)
     "ahead_seconds": ("sound", "rendered_ahead_seconds", int),
     "ahead_slow_down": ("sound", "rendered_ahead_slow_down", bool),
+    "ahead_voices": ("sound", "rendered_ahead_max_voices", int),  # (R1b: render_ahead.DEFAULTS; the card is
+    "ahead_block": ("sound", "rendered_ahead_block_size", int),  # Kestrel's, kestrel_graphics_card)
+    "ahead_interpolation": ("sound", "rendered_ahead_interpolation", int),
+    "ahead_min_velocity": ("sound", "rendered_ahead_velocity_threshold", int),
+    "ahead_limiter": ("sound", "rendered_ahead_limiter_mode", int),
+    "ahead_ceiling_db": ("sound", "rendered_ahead_limiter_ceiling_db", float),
+    "ahead_bass_voices": ("sound", "rendered_ahead_voice_limit", int),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)
     "more_soundfonts": ("sound", "more_soundfonts", PATHS),  # (the ones under it in the list, user 2026-10-25)
     "hz_on": ("hz_preview", "on", bool),

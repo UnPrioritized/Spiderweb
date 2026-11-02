@@ -204,6 +204,7 @@ class BuiltinPanel(ttk.Frame):
         def picked(ev=None):
             app.ahead_engine.set(here[cb.current()])  # (by place: translated names)
             app.on_ahead_opt()
+            self.show_for("ahead")  # (the engine's own rows)
         cb.bind("<<ComboboxSelected>>", picked)
         follow(cb, app.ahead_engine, show)
         show()
@@ -232,12 +233,60 @@ class BuiltinPanel(ttk.Frame):
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(c, tr("ra.slow_down_tip"))
         r += 1
+
+        # R1b: the engine's own rows (render_ahead.ROWS: only the picked engine's show)
+        from files.kestrel import LIMITER_ORDER, VOICES_RANGE
+        from window.hz_preview import VOICES as BASS_RANGE
+        self.a_keyed = {}
+
+        def keyed(key, make):
+            nonlocal r
+            had = set(box.grid_slaves())
+            r = make(r)
+            self.a_keyed[key] = [w for w in box.grid_slaves() if w not in had]
+        keyed("card", lambda r: self.card_row(r, tip="ra.card_tip"))
+        keyed("voices", lambda r: self.number_row(r, "voices", "ks.voices", VOICES_RANGE, steps=(65536, 1048576, 1024),
+                                                  ahead=True, tip="ra.voices_tip"))
+        keyed("bass_voices", lambda r: self.number_row(r, "bass_voices", "ps.voices", BASS_RANGE, steps=(50, 500, 1),
+                                                       ahead=True, tip="ra.bass_voices_tip"))
+        keyed("block", self.ahead_block_row)
+        keyed("interpolation", lambda r: self.choice_row(r, "interpolation", "ks.interp", ahead=True,
+                                                         tip="ra.interp_tip"))
+        keyed("min_velocity", lambda r: self.number_row(r, "min_velocity", "ks.min_vel", (0, 127), ahead=True,
+                                                        tip="ra.min_vel_tip"))
+        keyed("limiter", lambda r: self.choice_row(r, "limiter", "ks.limiter", order=LIMITER_ORDER, ahead=True,
+                                                   tip="ra.limiter_tip"))
+        keyed("ceiling_db", lambda r: self.number_row(r, "ceiling_db", "ks.ceiling", (-24.0, 0.0),
+                                                      unit=tr("ks.ceiling_unit"), steps=(0.5, 3, 0.1), ahead=True,
+                                                      tip="ks.ceiling_tip"))
         self.a_rows = [w for w in box.grid_slaves() if w not in before]
         return r
 
-    def card_row(self, r):
+    def ahead_block_row(self, r):
+        """Rendered ahead's Block size (render_ahead.BLOCKS, bigger than live play's: nothing has to sound at once)."""
+        from files import kestrel, render_ahead
+        app, box = self.app, self
+        var = app.ahead_vars["block"]
+        lb = ttk.Label(box, text=tr("ks.block"))
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
+        cb = ttk.Combobox(box, values=[tr("ks.block_n", n=b, ms=f"{b / kestrel.RATE * 1000:.0f}")
+                                       for b in render_ahead.BLOCKS], state="readonly", width=14)
+        cb.current(var.get())
+        cb.grid(row=r, column=1, sticky="w", pady=3)
+
+        def picked(ev=None):
+            var.set(cb.current())  # (by place)
+            app.on_ahead_opt("block")
+        cb.bind("<<ComboboxSelected>>", picked)
+        follow(cb, var, lambda *a: cb.winfo_exists() and cb.current(var.get()))
+        Tooltip(cb, tr("ra.block_tip"))
+        Tooltip(lb, tr("ra.block_tip"))
+        return r + 1
+
+    def card_row(self, r, tip="ks.card_tip"):
         """Graphics card: Automatic + the cards Kestrel can play on (asked on a thread the first time: up to a
-        second); a saved card not found now still shows (Play goes back to Automatic and says so)."""
+        second); a saved card not found now still shows (Play goes back to Automatic and says so). Rendered ahead
+        has a row of its own on the same setting (shared, user 2026-11-02)."""
         from files import kestrel
         app, box = self.app, self
         var = app.kestrel_vars["card"]
@@ -245,8 +294,8 @@ class BuiltinPanel(ttk.Frame):
         lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         cb = keep_width(ttk.Combobox(box, state="readonly", width=34))
         cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
-        Tooltip(cb, tr("ks.card_tip"))
-        Tooltip(lb, tr("ks.card_tip"))
+        Tooltip(cb, tr(tip))
+        Tooltip(lb, tr(tip))
         ids = []
 
         def fill(found):
@@ -281,12 +330,13 @@ class BuiltinPanel(ttk.Frame):
             cb.after(50, wait)
         return r + 1
 
-    def choice_row(self, r, key, text, order=None):
+    def choice_row(self, r, key, text, order=None, ahead=False, tip=None):
         """A dropdown row of Kestrel's choices (kestrel.CHOICES; texts text_0, text_1...; order = the places shown,
-        Kestrel's usual first)."""
+        Kestrel's usual first). ahead = Rendered ahead's own setting of that name (app.ahead_vars)."""
         from files.kestrel import CHOICES
         app, box = self.app, self
-        var = app.kestrel_vars[key]
+        var = (app.ahead_vars if ahead else app.kestrel_vars)[key]
+        changed = (lambda: app.on_ahead_opt(key)) if ahead else (lambda: app.on_kestrel_opt(key))
         order = list(order or range(CHOICES[key]))
         lb = ttk.Label(box, text=tr(text))
         lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
@@ -296,34 +346,38 @@ class BuiltinPanel(ttk.Frame):
 
         def picked(ev=None):
             var.set(order[cb.current()])  # (by place: translated names)
-            app.on_kestrel_opt(key)
+            changed()
         cb.bind("<<ComboboxSelected>>", picked)
         follow(cb, var, lambda *a: cb.winfo_exists() and cb.current(order.index(var.get())))
-        Tooltip(cb, tr(text + "_tip"))
-        Tooltip(lb, tr(text + "_tip"))
+        Tooltip(cb, tr(tip or text + "_tip"))
+        Tooltip(lb, tr(tip or text + "_tip"))
         return r + 1
 
-    def number_row(self, r, key, text, span, unit=None, steps=(1, 10, 1)):
+    def number_row(self, r, key, text, span, unit=None, steps=(1, 10, 1), ahead=False, tip=None):
         """A number box row (whole numbers in span, kestrel.RANGES; decimals in kestrel.DECIMALS) with its unit after
-        it."""
+        it. ahead = Rendered ahead's own setting of that name (app.ahead_vars)."""
         app, box = self.app, self
-        var = app.kestrel_vars[key]
+        var = (app.ahead_vars if ahead else app.kestrel_vars)[key]
+        changed = (lambda: app.on_ahead_opt(key)) if ahead else (lambda: app.on_kestrel_opt(key))
         lb = ttk.Label(box, text=tr(text))
         lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         row = ttk.Frame(box)
         row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         e = ttk.Entry(row, textvariable=var, width=8)
         e.pack(side="left")
-        if not hasattr(app, "kestrel_entries"):
-            app.kestrel_entries = {}
-        app.kestrel_entries[key] = e
-        e.bind("<Return>", lambda ev: (app.on_kestrel_opt(key), "break")[1])
-        e.bind("<FocusOut>", lambda ev: app.on_kestrel_opt(key))
-        Scrub(app, [(e, var, lambda: app.on_kestrel_opt(key))], steps, *span, label=lb, no_undo=True)
+        if ahead:
+            app.ahead_entries[key] = e
+        else:
+            if not hasattr(app, "kestrel_entries"):
+                app.kestrel_entries = {}
+            app.kestrel_entries[key] = e
+        e.bind("<Return>", lambda ev: (changed(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: changed())
+        Scrub(app, [(e, var, changed)], steps, *span, label=lb, no_undo=True)
         if unit:
             ttk.Label(row, text=unit).pack(side="left", padx=(4, 0))
-        Tooltip(e, tr(text + "_tip"))
-        Tooltip(lb, tr(text + "_tip"))
+        Tooltip(e, tr(tip or text + "_tip"))
+        Tooltip(lb, tr(tip or text + "_tip"))
         return r + 1
 
     def show_for(self, which):
@@ -333,6 +387,12 @@ class BuiltinPanel(ttk.Frame):
         for rows, mine in ((self.bass_rows, "builtin"), (self.k_rows, "kestrel"), (self.a_rows, "ahead")):
             for w in rows:
                 w.grid() if which == mine else w.grid_remove()
+        if which == "ahead":  # (only the picked engine's own rows)
+            from files.render_ahead import ROWS, engine_used
+            shown = ROWS[engine_used(self.app.ahead_engine.get())]
+            for key, rows in self.a_keyed.items():
+                for w in rows:
+                    w.grid() if key in shown else w.grid_remove()
 
     def take_voices(self):
         """Settings closed (Esc, X) or another MIDI out picked: a voice limit typed without Enter is taken, a wrong
@@ -347,6 +407,9 @@ class BuiltinPanel(ttk.Frame):
         app.on_ahead_seconds()
         if app.ahead_var.get() != str(app.ahead_seconds):
             app.ahead_var.set(str(app.ahead_seconds))
+        for key in ("voices", "bass_voices", "min_velocity", "ceiling_db"):  # (Rendered ahead's number boxes)
+            app.on_ahead_opt(key)
+            app.show_ahead_opts(key)
         from files.kestrel import DECIMALS, RANGES
         for key in ("voices", *RANGES, *DECIMALS):  # (Kestrel's number boxes the same way: hunt 2026-10-29, Esc lost them)
             app.on_kestrel_opt(key)

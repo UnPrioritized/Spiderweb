@@ -584,11 +584,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.slow_down, self.slowed_text = SlowDown(), ""
         # Rendered ahead's settings (files/render_ahead.py; Settings → Sound): engine by its saved name, how far
         # ahead in seconds, Slow down (user 2026-11-02: off = a part not made in time is skipped, on = play waits)
-        from files.render_ahead import DEFAULT_SECONDS, engines
-        self.ahead_engine = tk.StringVar(self, value=engines()[0])
-        self.ahead_seconds = DEFAULT_SECONDS
-        self.ahead_var = tk.StringVar(self, value=str(DEFAULT_SECONDS))
+        from files import render_ahead
+        self.ahead_engine = tk.StringVar(self, value=render_ahead.engines()[0])
+        self.ahead_seconds = render_ahead.DEFAULT_SECONDS
+        self.ahead_var = tk.StringVar(self, value=str(render_ahead.DEFAULT_SECONDS))
         self.slow_ahead = tk.BooleanVar(self, value=False)
+        # (R1b: its engines' own settings, render_ahead.DEFAULTS; the lists' vars hold their places)
+        self.ahead_opts = dict(render_ahead.DEFAULTS)
+        self.ahead_vars = {k: tk.IntVar(self) if k in ("block", "interpolation", "limiter") else tk.StringVar(self)
+                           for k in render_ahead.DEFAULTS}
+        self.ahead_entries = {}
+        self.show_ahead_opts()
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)
         self._play_job = None
         self._scrub_held = {}

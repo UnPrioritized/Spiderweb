@@ -639,6 +639,7 @@ class ProjectFiles:
                               "kestrel_slow_down": self.slow_kestrel.get(), "play_slow_down": self.slow_builtin.get(),
                               "ahead_engine": self.ahead_engine.get(), "ahead_seconds": self.ahead_seconds,
                               "ahead_slow_down": self.slow_ahead.get(),
+                              **{"ahead_" + k: v for k, v in self.ahead_opts.items()},
                               "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
                               "copy_notes": self.copy_notes.get(),
                               "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
@@ -848,6 +849,7 @@ class ProjectFiles:
                 self.ahead_seconds = v
                 self.ahead_var.set(str(v))
             self.slow_ahead.set(win.get("ahead_slow_down") is True)
+            self.take_ahead_opts({k: win.get("ahead_" + k) for k in self.ahead_opts})
             self.domino256.set(win.get("domino_256") is True)
             self.copy_domino.set(win.get("copy_domino") is True)
             self.copy_notes.set(win.get("copy_notes") is True)

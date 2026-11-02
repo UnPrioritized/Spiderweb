@@ -1311,9 +1311,43 @@ class Playback:
             self.ahead_seconds = v
             self.schedule_autosave()
 
-    def on_ahead_opt(self):
-        """Rendered ahead's Engine / Slow down changed: saved (used from the next Play)."""
+    def on_ahead_opt(self, key=None):
+        """Rendered ahead's Engine / Slow down (key None) or one of its engine rows (app.ahead_vars[key]) changed:
+        saved, used from the next Play. A number typed wrong = red, Settings closed = back to the one in use."""
+        if key is not None:
+            from files.render_ahead import BLOCKS, check_opt
+            var, e = self.ahead_vars[key], self.ahead_entries.get(key)
+            raw = var.get()
+            try:
+                v = check_opt(key, BLOCKS[raw] if key == "block" else raw)
+            except (ValueError, IndexError):
+                if e is not None and e.winfo_exists():
+                    bad(e)
+                return
+            if e is not None and e.winfo_exists():
+                good(e)
+            if v == self.ahead_opts[key]:
+                self.show_ahead_opts(key)  # ("1m" shown as the number)
+                return
+            self.ahead_opts[key] = v
+            self.show_ahead_opts(key)
         self.schedule_autosave()
+
+    def show_ahead_opts(self, only=None):
+        """app.ahead_opts into the rows' vars (lists by place, the ceiling as "-1", not "-1.0")."""
+        from files.render_ahead import BLOCKS
+        for k, v in self.ahead_opts.items():
+            if only is None or k == only:
+                shown = BLOCKS.index(v) if k == "block" else v if k in ("interpolation", "limiter") \
+                    else f"{v:g}" if k == "ceiling_db" else str(v)
+                if self.ahead_vars[k].get() != shown:
+                    self.ahead_vars[k].set(shown)
+
+    def take_ahead_opts(self, saved):
+        """Saved Rendered ahead engine settings (autosave window / settings.ini: "ahead_" + key), checked."""
+        from files.render_ahead import take_opts
+        self.ahead_opts = take_opts(saved)
+        self.show_ahead_opts()
 
     def on_play_guard(self):
         self.overload.set_guard(self.play_guard.get())
