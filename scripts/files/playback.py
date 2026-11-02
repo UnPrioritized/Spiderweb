@@ -651,7 +651,8 @@ class Player:
         while ready is not None and not ready.wait(0.01):
             if stop.is_set():
                 return
-        kestrel = getattr(out, "name", None) == KESTREL  # (Maestro sends ahead too, with nothing of Kestrel's)
+        # (Maestro sends ahead too, with nothing of Kestrel's; no handle: nothing open, like MidiOut's own checks)
+        kestrel = getattr(out, "name", None) == KESTREL and getattr(out, "handle", None) is not None
         if kestrel:
             out.handle.resync()
         # (Kestrel falling behind = the line waits: here when alone, else the loaded MIDI's feeder does it)
