@@ -401,9 +401,13 @@ def split_at(sh, a):
     return left, right
 
 
-def piece_velocity(new, old, new_span, old_span):
+LEAD_MOST = 2000  # points of the line before a piece kept at most (a Formula line can have 40,000)
+
+
+def piece_velocity(new, old, new_span, old_span, lead=False):
     """Give `new` (a part of `old`) the velocities it had as part of old: its own envelope over its own time span
-    (spans: (earliest, latest) beat)."""
+    (spans: (earliest, latest) beat). lead: old's envelope before new's span kept too (u < 0): a piece with a
+    velocity of its own reads a cut note's velocity where the note started, before the cut (engine)."""
     from notes.envelope import env_values, velocity_env
     import numpy as np
     env = velocity_env(old)
@@ -415,8 +419,10 @@ def piece_velocity(new, old, new_span, old_span):
     va, vb = (float(x) for x in env_values(env, np.array([ua, ub])))
     new.pop("vel_env", None)
     new["vel0"], new["vel1"] = int(round(va)), int(round(vb))
-    if inner:
-        new["vel_env"] = [[0.0, va]] + inner + [[1.0, vb]]
+    # (points ON its start too: a jump right at the cut keeps its value before it)
+    before = [[(u - ua) / (ub - ua), float(v)] for u, v in env if u <= ua][-LEAD_MOST:] if lead and ua > 1e-12 else []
+    if inner or before:
+        new["vel_env"] = before + [[0.0, va]] + inner + [[1.0, vb]]
     elif abs(va - round(va)) > 1e-9 or abs(vb - round(vb)) > 1e-9:
         new["vel_env"] = [[0.0, va], [1.0, vb]]
 

@@ -52,7 +52,7 @@ from notes.paths import KEYS
 from notes.tumour import LINE_KINDS
 from notes.polygon import POLYGON_DEFAULTS
 from notes.ripples import grows_free
-from notes.sliced import completed, fresh_marks, moved_by, steps_kept, turned_piece
+from notes.sliced import completed, cut_group, fresh_marks, moved_by, steps_kept, turned_piece
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -359,7 +359,9 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
-                             busy, together, note_slots, [pasted_notes(sh) for sh in shapes])
+                             busy, together, note_slots, [pasted_notes(sh) for sh in shapes],
+                             # (keep colours: a cut shape's pieces move as one shape, partial sweep 11-02)
+                             groups=[cut_group(sh) for sh in shapes] if keep else None)
     if stash is not None:  # (App.fit_into's laying again: lay_again)
         stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
                      all16=all16, mode=mode)

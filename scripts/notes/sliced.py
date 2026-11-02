@@ -330,6 +330,24 @@ def source(sh):
     return src, cut["part"], same_vel
 
 
+def cut_group(sh):
+    """A sliced piece -> a key its fellow pieces share (cut from one whole), else None: with "Overlapping shapes
+    keep their colours" the pieces move to other channels as one shape, like a paste's pieces."""
+    cut = sh.get("cut")
+    if not cut or not cut.get("whole"):
+        return None
+    whole = cut["whole"]
+    got = _groups.get(id(whole))  # (pieces share one whole: worked out once, not per piece per redraw)
+    if got is None or got[0] is not whole:
+        if len(_groups) > 256:
+            _groups.clear()
+        got = _groups[id(whole)] = (whole, json.dumps(whole, sort_keys=True, default=str))
+    return got[1]
+
+
+_groups = {}  # id(whole) -> (whole, its key): cut_group's
+
+
 def paths_of(sh):
     """The paths a line kind's notes are made from, each first to last point in time (engine.kind_notes_tracks)."""
     from notes.engine import cached_arrays

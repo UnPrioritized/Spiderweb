@@ -1102,11 +1102,12 @@ def _after(fn, notes, tracks, settings, ppq):
     return got[:, :-1], got[:, -1]
 
 
-def env_velocities(env, starts, t_lo, t_hi):
-    """Velocities of notes starting at starts (ticks) from a velocity line env over t_lo .. t_hi."""
+def env_velocities(env, starts, t_lo, t_hi, lo=0.0):
+    """Velocities of notes starting at starts (ticks) from a velocity line env over t_lo .. t_hi (lo: read that far
+    before its start, as a share of its time; else at its start)."""
     if len({v for _, v in env}) == 1:  # the same velocity everywhere
         return np.full(len(starts), max(1, min(127, round(env[0][1]))), np.int64)
-    frac = np.clip((starts - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(starts))
+    frac = np.clip((starts - t_lo) / (t_hi - t_lo), lo, 1) if t_hi > t_lo else np.zeros(len(starts))
     # (rounds halves to even, like round; float noise taken off first: a point added to the line elsewhere moved a
     # value sitting on a half a hair either way, 83.5 -> 84 or 83)
     return np.clip(np.round(np.round(env_values(env, frac), 6)), 1, 127).astype(np.int64)
@@ -1409,7 +1410,7 @@ def _kind_notes_tracks(sh, ppq, keys):
             if not same_vel and (sh.get("glue") or sh.get("fx")) else None
         # (each note's own start rides along: a note the cut went through keeps its velocity in both halves, read
         # where the note started, user 2026-11-02; pages carry their velocity column themselves)
-        carry = same_vel and not (sh.get("glue") or sh.get("fx")) and raw.shape[1] == 3
+        carry = not (sh.get("glue") or sh.get("fx")) and raw.shape[1] == 3
         if carry:
             raw = np.column_stack([raw, raw[:, 0]])
         raw, tracks = finish(sh, raw, spots, tracks, came)
@@ -1446,7 +1447,10 @@ def _kind_notes_tracks(sh, ppq, keys):
         frac = np.clip((raw[:, 0] - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
         vel = own_velocities(vel_sh, made, frac)
     else:
-        vel = env_velocities(env, vel_at if vel_at is not None and len(vel_at) == len(raw) else raw[:, 0], t_lo, t_hi)
+        carried = vel_at is not None and len(vel_at) == len(raw)
+        # (a cut note's start before a piece's own time: read on the line kept from before it, joined.piece_velocity)
+        vel = env_velocities(env, vel_at if carried else raw[:, 0], t_lo, t_hi,
+                             min(0.0, float(env[0][0])) if carried and not same_vel else 0.0)
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
         if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)
@@ -1953,7 +1957,7 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None, together
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
            held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None, busy=None,
-           together=None, note_slots=None, kept=None):
+           together=None, note_slots=None, kept=None, groups=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -1994,6 +1998,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     note_slots: {shape's number: None} filled with each of its notes' slot (with "auto").
     kept: per shape True if its tracks keep a slot each outside "auto" too (a Domino paste: what you copied; "single"
     then fixes overlaps per slot).
+    groups: per shape None or a key: with keep, shapes with one key move as one shape (the pieces of one cut shape).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -2141,7 +2146,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                 if u is None:
                     continue
                 key = ("team", teams[i][0]) if teams[i] is not None else ("paste", pastes[i]) if (
-                    pastes[i] is not None and tracks[i] is not None) else ("shape", i)
+                    pastes[i] is not None and tracks[i] is not None) else ("cut", groups[i]) if (
+                    groups and groups[i] is not None) else ("shape", i)
                 for v in np.unique(np.asarray(u)).tolist():
                     shape_of[v] = key
             for p, team in solid_teams:  # (a step turned into plain notes still belongs to its group)

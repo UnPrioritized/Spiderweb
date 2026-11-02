@@ -44,6 +44,22 @@ def time_span(sh, ppq):
     return min(bs), max(bs)
 
 
+def with_lead(sh, base, pts):
+    """base (a velocity line) with pts (in its u, sorted) drawn over it, tidied. A sliced piece keeps the line from
+    before its start (u < 0, joined.piece_velocity: a note cut in two reads its velocity where it started) while the
+    drawing leaves its start alone; drawn over its start, the drawing goes for those notes too."""
+    env = paint_env(base, pts)
+    if not sh.get("cut") or not any(p[0] < 0 for p in base):
+        return tidy_env(env)
+    ua = pts[0][0]
+    if ua > 0:
+        return [p for p in env if p[0] < 0] + tidy_env([p for p in env if p[0] >= 0])
+    env = [p for p in env if p[0] >= ua]
+    if len(env) > 1 and env[0][0] == env[1][0]:  # (paint_env's value just before the drawing: not wanted)
+        env.pop(0)
+    return tidy_env(env)
+
+
 def own_repainted(sh, text, drawn, ppq):
     """Packed notes text (custom.pack_notes) of a shape keeping its notes' own velocities (pasted / Extract: sh
     ["own_vel"]) after velocities drawn ([[beat, v]]): only the notes starting under the drawn stretch change, the
@@ -407,7 +423,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
             base = had[2] if had else velocity_env(sh)
             if hi > lo:
                 pts = [[(b - lo) / (hi - lo), v] for b, v in drawn]
-                env = tidy_env(paint_env(base, pts))
+                env = with_lead(sh, base, pts)
             else:
                 env = [[0.0, float(max(1, min(127, round(env_at(drawn, dus, lo)))))]]  # every note is at the start
                 pts = [[0.0, env[0][1]], [1.0, env[0][1]]]

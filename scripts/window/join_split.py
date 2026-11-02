@@ -1136,7 +1136,7 @@ class JoinSplit:
             p.pop("between", None)
         whole = span(old)
         for p in parts if velocity else ():  # (pieces of it, not the shapes it was made of back)
-            piece_velocity(p, old, span(p), whole)
+            piece_velocity(p, old, span(p), whole, lead="cut" in p)
             part_glue(p, old)
             keep_velocity(p)
         if velocity:  # (like Slice, hunt: Sustain's stops put by hand kept per piece, Gate subtract's graph cut)
@@ -1691,7 +1691,7 @@ class JoinSplit:
             parts = done.get(i, [sh])
             whole = span(sh)
             for p in parts if i in done and i not in plain else ():  # (pasted notes: their notes kept as they were)
-                piece_velocity(p, sh, span(p), whole)
+                piece_velocity(p, sh, span(p), whole, lead="cut" in p)
                 part_glue(p, sh)
                 keep_velocity(p)
             if i in done:
