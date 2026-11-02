@@ -35,12 +35,18 @@ START_LOWER_S = 3.0  # a start waiting longer than this (first piece back): Lowe
 
 def merlin_gap(ccs, fonts):
     """Why Merlin can't make this song yet (a key of "ra.kestrel_*"), or None: more than one soundfont ("fonts"),
-    channel volume / expression lines ("cc", CC7 / CC11: Merlin doesn't apply them yet)."""
+    any CC line but pitch bends + their bend range ("cc"): its README says CC7 / CC11 aren't applied properly yet,
+    and a pan line (measured, R8: dev/scratch/r8_seams.py) came out different depending on where a piece starts
+    (-45 dB, the same every run); bends (31-EDO, Hz bass) measured exact."""
     if len(fonts) > 1:
         return "fonts"
-    if any((m & 0xF0) == 0xB0 and (m >> 8) & 0x7F in (7, 11) for _, m in ccs or ()):
+    if any((m & 0xF0) not in (0xE0, 0xB0) or (m & 0xF0) == 0xB0 and (m >> 8) & 0x7F not in _BEND_RANGE
+           for _, m in ccs or ()):
         return "cc"
     return None
+
+
+_BEND_RANGE = (101, 100, 6, 38)  # (RPN 0 = the bend range: its controllers)
 
 
 class AheadLimiter:
