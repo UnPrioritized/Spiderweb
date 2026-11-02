@@ -147,6 +147,11 @@ class _Stats(ctypes.Structure):
                [(name, ctypes.c_float) for name in ("merge_mean", "merge_max")]
 
 
+class _PieceStatus(ctypes.Structure):
+    _fields_ = [("size", ctypes.c_uint32), ("state", ctypes.c_uint32), ("frames", ctypes.c_uint64),
+                ("progress", ctypes.c_float), ("wall_ms", ctypes.c_uint32)]
+
+
 _dll = None
 
 
@@ -196,6 +201,16 @@ def load():
                             ("kb_open_on", [p, ctypes.POINTER(_Options)], p)):
         fn = getattr(d, name)
         fn.argtypes, fn.restype = args, res
+    # (Rendered ahead's pieces, connector 0.4.0 on: an older DLL lacks them, pieces_here() says so)
+    for name, args, res in (("kb_piece_start", [p, ctypes.c_char_p, ctypes.POINTER(_Options), u32, ctypes.c_uint64,
+                                                ctypes.c_uint64], p),
+                            ("kb_piece_status", [p, ctypes.POINTER(_PieceStatus)], None),
+                            ("kb_piece_wait", [p, u32], u32), ("kb_piece_cancel", [p], None),
+                            ("kb_piece_audio", [p, ctypes.POINTER(ctypes.c_uint64)], ctypes.POINTER(ctypes.c_float)),
+                            ("kb_piece_error", [p], ctypes.c_char_p), ("kb_piece_free", [p], None)):
+        fn = getattr(d, name, None)
+        if fn is not None:
+            fn.argtypes, fn.restype = args, res
     _dll = d
     return d
 
@@ -434,6 +449,113 @@ def let_go():
     stop_starts()
     drop_loaded()
     forget()
+
+
+# RENDERED AHEAD's pieces (PLAN.md stage M): a small MIDI file made into audio by Merlin (Kestrel 1.4.0's per-key
+# renderer, drops no note) or Kestrel, on a Loaded's soundfonts, in the connector's own thread. Same samples as
+# Kestrel's own render of that file (dev/scratch/piece_check.py). Merlin refuses 31-EDO, Velocity threshold and 2+
+# soundfonts for now (FAILED + .error): the caller sends those to Kestrel.
+PIECE_BLOCK = 4096  # (Kestrel's render default: fewer, bigger blocks; Merlin's partition is min(block, 2048))
+ENGINES = {"kestrel": 0, "merlin": 1}
+RUNNING, DONE, FAILED, CANCELLED = 0, 1, 2, 3
+
+
+def pieces_here():
+    """The connector can make pieces (an older DLL can't)."""
+    try:
+        return hasattr(load(), "kb_piece_start")
+    except SynthError:
+        return False
+
+
+class Piece:
+    """One piece being made (starts at once, returns at once). loaded = a Loaded; midi = path of the piece's MIDI
+    (kept until close(); delete_midi = removed then); skip = frames dropped at the start (the piece starts early so
+    notes already ringing sound right), most = frames kept after them (0 = to the end, ring-out included); opts =
+    _options keywords (limiter Off by default: Spiderweb's own runs over the joined pieces). SynthError when it
+    can't start. close() waits for the connector's thread (Merlin stops within ~0.3 s): not on the window's thread."""
+
+    def __init__(self, loaded, midi, engine="merlin", skip=0, most=0, delete_midi=False, **opts):
+        d = self.dll = load()
+        if not pieces_here():
+            raise SynthError("playback.kestrel_failed", err="this connector can't render pieces")
+        self.midi, self.delete_midi, self.engine = midi, delete_midi, engine
+        o = dict(block=PIECE_BLOCK, limiter=0, dc_blocker=False)
+        o.update(opts)
+        self._opts = _options(**o)  # (kept alive while the call reads it)
+        if loaded is None or not loaded.handle:
+            raise SynthError("playback.kestrel_failed", err="no soundfonts loaded")
+        self.handle = d.kb_piece_start(loaded.handle, os.fsdecode(midi).encode("utf-8"), ctypes.byref(self._opts),
+                                       ENGINES[engine], int(skip), int(most))
+        if not self.handle:
+            raise SynthError("playback.kestrel_failed", err=_error(d))
+        self._lock = threading.Lock()
+
+    def status(self):
+        """{"state": RUNNING / DONE / FAILED / CANCELLED, "frames": kept so far (Merlin: at the end), "progress":
+        0..1, "seconds": the time it took (0 while running)}."""
+        st = _PieceStatus(ctypes.sizeof(_PieceStatus))
+        with self._lock:
+            if not self.handle:
+                return {"state": CANCELLED, "frames": 0, "progress": 0.0, "seconds": 0.0}
+            self.dll.kb_piece_status(self.handle, ctypes.byref(st))
+        return {"state": st.state, "frames": st.frames, "progress": st.progress, "seconds": st.wall_ms / 1000}
+
+    def wait(self, timeout=None):
+        """Wait until it's finished (or timeout seconds); its state."""
+        end = None if timeout is None else time.monotonic() + timeout
+        while True:  # (short waits: the lock isn't held long, close() can run between them)
+            left = 0.05 if end is None else max(0.0, min(0.05, end - time.monotonic()))
+            with self._lock:
+                if not self.handle:
+                    return CANCELLED
+                state = self.dll.kb_piece_wait(self.handle, int(left * 1000))
+            if state != RUNNING or (end is not None and time.monotonic() >= end):
+                return state
+
+    def cancel(self):
+        """Ask it to stop (it turns CANCELLED soon)."""
+        with self._lock:
+            if self.handle:
+                self.dll.kb_piece_cancel(self.handle)
+
+    def audio(self):
+        """The finished audio: float32 array (frames, 2), a copy (None before DONE)."""
+        n = ctypes.c_uint64()
+        with self._lock:
+            if not self.handle:
+                return None
+            ptr = self.dll.kb_piece_audio(self.handle, ctypes.byref(n))
+            if not ptr:
+                return None
+            if not n.value:
+                return np.zeros((0, 2), np.float32)
+            return np.ctypeslib.as_array(ptr, shape=(n.value * 2,)).reshape(-1, 2).copy()
+
+    def error(self):
+        """Why it FAILED (text), None if it didn't."""
+        with self._lock:
+            text = self.dll.kb_piece_error(self.handle) if self.handle else None
+        return text.decode("utf-8", "replace") if text else None
+
+    def close(self):
+        """Stop it if running, free it and its audio (waits for its thread), remove the MIDI if asked."""
+        with self._lock:
+            h, self.handle = self.handle, None
+        if h:
+            self.dll.kb_piece_free(h)
+        if self.delete_midi:
+            try:
+                os.remove(self.midi)
+            except OSError:
+                pass
+            self.delete_midi = False
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class Kestrel:
