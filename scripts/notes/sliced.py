@@ -351,6 +351,29 @@ def spotted_notes(sh, ppq, end_dot):
     return path_notes(path, end_dot, where=True)
 
 
+def with_whole_velocity(src, sh):
+    """source()'s src for piece sh with the velocities the piece had when it was cut (the whole's)."""
+    out = {k: v for k, v in src.items() if k not in VELOCITY}
+    out.update(velocity(sh["cut"]["whole"]))
+    return out
+
+
+def own_velocities(sh, made, frac):
+    """A piece with velocities of its own: made = its notes' velocities as the whole's glue / pages left them (made
+    from the piece's own line), frac = each note's start over the piece's own time (0..1). The plain line is used
+    only where it differs from the line the piece had when cut (drawn over in the velocity pane, typed in the panel);
+    elsewhere the pages' velocities stay (user 2026-11-02: a velocity line over part of a sliced Chop piece reset
+    every Chop piece's velocity)."""
+    from notes.envelope import env_values, velocity_env
+    env = velocity_env(sh)
+    vals = env_values(env, frac)
+    was = sh["cut"].get("vel")
+    if not was or "vel0" not in was:
+        return np.clip(np.round(np.round(vals, 6)), 1, 127).astype(np.int64)
+    changed = np.abs(vals - env_values(velocity_env(was), frac)) > 1e-6
+    return np.where(changed, np.clip(np.round(np.round(vals, 6)), 1, 127), made).astype(np.int64)
+
+
 def piece_notes(sh, ppq, keys, make):
     """A custom piece's (notes, tracks): the whole's (make = engine.kind_notes_tracks), cut at every cut like a knife went
     through them (user: a spam note across it leaves a sliver; spam keeps the whole's grid, an Empty shape's cut side
@@ -374,14 +397,23 @@ def piece_notes(sh, ppq, keys, make):
         notes, tracks = mould_cut(notes, tracks, sh["cut"]["mould"], moved_by(sh), ppq)
     if not same_vel and len(notes):  # (its own velocities: over its own time, as a shape of its own)
         from notes.engine import cached_arrays
-        from notes.envelope import env_values, velocity_env
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
-        env = velocity_env(sh)
-        if len({v for _, v in env}) == 1:
-            notes[:, 3] = max(1, min(127, round(env[0][1])))
-        else:
-            frac = np.clip((notes[:, 0] - t.min()) / max(t.max() - t.min(), 1e-9), 0, 1)
-            notes[:, 3] = np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)
+        frac = np.clip((notes[:, 0] - t.min()) / max(t.max() - t.min(), 1e-9), 0, 1)
+        made = notes[:, 3]
+        if src.get("fx") or src.get("glue"):  # (pages: their notes as made with the velocities it had when cut)
+            was_src = with_whole_velocity(src, sh)
+            key = (json.dumps(was_src, sort_keys=True), ppq, keys)
+            if key not in _wholes:
+                if len(_wholes) > 8:
+                    _wholes.clear()
+                _wholes[key] = make(was_src, ppq, keys)
+            was = knife_cut(*_wholes[key], halves, moved_by(sh), ppq)[0]
+            if sh["cut"].get("mould"):
+                from notes.mould import mould_cut
+                was = mould_cut(was, None, sh["cut"]["mould"], moved_by(sh), ppq)[0]
+            if was.shape == notes.shape and (was[:, :3] == notes[:, :3]).all():
+                made = was[:, 3]
+        notes[:, 3] = own_velocities(sh, made, frac)
     return notes, tracks
 
 

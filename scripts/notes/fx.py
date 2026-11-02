@@ -299,7 +299,7 @@ def velocities(notes, pts, t_lo, t_hi):
     if not on.any():
         return notes
     out = notes.copy()
-    out[on, 3] = np.clip(np.round(env_values(pts, frac[on])), 1, 127).astype(np.int64)
+    out[on, 3] = np.clip(np.round(np.round(env_values(pts, frac[on]), 6)), 1, 127).astype(np.int64)
     return out
 
 

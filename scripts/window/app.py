@@ -341,7 +341,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     voice_slots = {i: None for i, sh in enumerate(shapes) if own_channels(sh.get("hz")) or "cc" in sh} \
         if mode == "auto" else {i: None for i, sh in enumerate(shapes) if "cc" in sh and pasted_notes(sh)}
     note_slots = {i: None for i, (sh, s) in enumerate(zip(shapes, strips)) if s and "cc" in sh}
-    ordered = [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh for sh in shapes]
+    # (a sliced piece with Colours: by colour number too, so it keeps the whole's colours, user 2026-11-02: a
+    # piece starting on the 3rd colour began again from the 1st)
+    ordered = [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh
+               or bool(sh.get("cut")) and has_colours(sh, turns=True) for sh in shapes]
     # (a recoloured shape's colours: each counted as starting where it did before, so they keep their channels)
     backs = [recolour_back(s, notes_tracks, dict(s_as, _rounds=True) if r else s_as, n, t)
              if mode == "auto" and not o and t is not None and is_recoloured(s) else colours_back(s)

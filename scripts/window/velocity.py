@@ -13,7 +13,7 @@ import numpy as np
 from files.lang import tr
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.custom import pack_notes, unpack_notes
-from notes.fx import with_velocity
+from notes.fx import pages, with_velocity
 from notes.gateflip import is_pasted_flipped, mirrored_runs
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
@@ -390,14 +390,18 @@ class VelocityPane(KeepsItems, tk.Canvas):
             had = bases.get(i) if bases else None  # (a shape the end was moved over: from what it has now)
             fx = had[4] if had else sh.get("fx")
             lo, hi = time_span(sh, app.ppq)
+            if pages(fx):
+                # note tool pages: only a velocity step after them, on the notes as they show (user 2026-11-02: a
+                # Chop piece past the line kept its velocity; the notes under the pages are left as they are)
+                pts = [[(b - lo) / (hi - lo), v] for b, v in drawn] if hi > lo else \
+                    [[0.0, env_at(drawn, dus, lo)], [1.0, env_at(drawn, dus, lo)]]
+                sh["fx"] = with_velocity(fx, pts)
+                done[i] = (sh, sh["fx"], None, (lo, hi), fx)
+                continue
             if sh.get("own_vel") and "notes" in sh:
                 # pasted / Extract notes: only the notes under the drawn stretch change, the rest keep their own
                 base = had[2] if had else sh["notes"]
                 sh["notes"] = own_repainted(sh, base, drawn, app.ppq)
-                if fx:
-                    pts = [[(b - lo) / (hi - lo), v] for b, v in drawn] if hi > lo else \
-                        [[0.0, drawn[0][1]], [1.0, drawn[0][1]]]
-                    sh["fx"] = with_velocity(fx, pts)
                 done[i] = (sh, sh["notes"], base, (lo, hi), fx)
                 continue
             base = had[2] if had else velocity_env(sh)
@@ -427,7 +431,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
             return None
         shapes = self.app.shapes
         for i, (sh, env, _, span, _) in cv["done"].items():
-            if i >= len(shapes) or shapes[i] is not sh or sh.get("notes" if sh.get("own_vel") else "vel_env") is not env:
+            if i >= len(shapes) or shapes[i] is not sh or all(sh.get(k) is not env for k in ("vel_env", "notes", "fx")):
                 break
             if time_span(sh, self.app.ppq) != span:
                 break

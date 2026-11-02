@@ -408,7 +408,8 @@ def slice_notes(sh, notes, tracks, a, b, ppq, box=None, seen=None):
     rest, before = (~on & ~side) | (on & (hi > x)), (on & (lo < x)) | side
     cols = notes[:, 3], tracks
     return _halves(sh, [np.column_stack([s0, s1 - s0, keys, *cols])[keep] for keep, s0, s1 in
-                        ((rest, np.where(on, np.maximum(lo, x), lo), hi), (before, lo, np.minimum(hi, x)))],
+                        ((rest, np.where(on, np.maximum(lo, x), lo), hi),
+                         (before, lo, np.where(on, np.minimum(hi, x), hi)))],  # (past an end: whole, never cut)
                    ppq), crossed
 
 

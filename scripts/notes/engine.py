@@ -61,6 +61,7 @@ from notes.passengers import check_cc
 from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved, moved_by,
+                          own_velocities, with_whole_velocity,
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
 from notes.smooth import clean_level, smooth_path
@@ -1106,7 +1107,9 @@ def env_velocities(env, starts, t_lo, t_hi):
     if len({v for _, v in env}) == 1:  # the same velocity everywhere
         return np.full(len(starts), max(1, min(127, round(env[0][1]))), np.int64)
     frac = np.clip((starts - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(starts))
-    return np.clip(np.round(env_values(env, frac)), 1, 127).astype(np.int64)  # (rounds halves to even, like round)
+    # (rounds halves to even, like round; float noise taken off first: a point added to the line elsewhere moved a
+    # value sitting on a half a hair either way, 83.5 -> 84 or 83)
+    return np.clip(np.round(np.round(env_values(env, frac), 6)), 1, 127).astype(np.int64)
 
 
 def whole_tools(whole, raw, spots, tracks, ppq):
@@ -1379,7 +1382,7 @@ def _kind_notes_tracks(sh, ppq, keys):
         keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
         raw = raw[keep]
         raw[:, 0] = np.maximum(raw[:, 0], 0)
-    tracks = None
+    tracks = made = vel_at = None
     if spots is not None:  # (Colours count over the whole's notes, then the piece keeps its own)
         spots = spots[keep]
         came = came[keep] if came is not None else None
@@ -1388,20 +1391,35 @@ def _kind_notes_tracks(sh, ppq, keys):
         came = came[keep] if came is not None else None
         if cycling(sh) and len(raw):
             tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
-        if sh.get("glue") or sh.get("fx"):  # the whole's glue / note tool pages first, on all its notes (sliced.py)
-            raw, spots, tracks = whole_tools(sh, raw, spots, tracks, ppq)
-            came = None  # (the pages' notes aren't the steps any more)
-        raw, spots, tracks = cut_through(sh, raw, spots, tracks, part, ppq, came)
-        mine = in_part(spots, part)
-        raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
-        if knife:
-            raw, tracks = knife_cut(raw, tracks, knife, knife_d, ppq)
-        if mould:
-            raw, tracks = mould_cut(raw, tracks, mould, knife_d, ppq)
+        def finish(src, raw, spots, tracks, came):
+            if src.get("glue") or src.get("fx"):  # the whole's glue / note tool pages first, on all its notes
+                raw, spots, tracks = whole_tools(src, raw, spots, tracks, ppq)
+                came = None  # (the pages' notes aren't the steps any more)
+            raw, spots, tracks = cut_through(src, raw, spots, tracks, part, ppq, came)
+            mine = in_part(spots, part)
+            raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
+            if knife:
+                raw, tracks = knife_cut(raw, tracks, knife, knife_d, ppq)
+            if mould:
+                raw, tracks = mould_cut(raw, tracks, mould, knife_d, ppq)
+            return raw, tracks
+        # (a velocity of its own on a piece of a shape with pages: its notes also as made with the velocities it had
+        # when cut, kept where its own line didn't change: sliced.own_velocities)
+        was = finish(with_whole_velocity(sh, vel_sh), raw, spots, tracks, came)[0] \
+            if not same_vel and (sh.get("glue") or sh.get("fx")) else None
+        # (each note's own start rides along: a note the cut went through keeps its velocity in both halves, read
+        # where the note started, user 2026-11-02; pages carry their velocity column themselves)
+        carry = same_vel and not (sh.get("glue") or sh.get("fx")) and raw.shape[1] == 3
+        if carry:
+            raw = np.column_stack([raw, raw[:, 0]])
+        raw, tracks = finish(sh, raw, spots, tracks, came)
+        if carry:
+            vel_at, raw = raw[:, 3].copy(), raw[:, :3]
         if raw.shape[1] == 4:  # (velocities made by the whole's pages: kept, unless the piece has its own)
             if same_vel:
                 return raw, tracks
-            raw = raw[:, :3]
+            ok = was is not None and was.shape == raw.shape and (was[:, :3] == raw[:, :3]).all()
+            made, raw = (was if ok else raw)[:, 3], raw[:, :3]
     if own is not None:
         own = own[keep]
         if cycling(sh):  # (a merged shape with Colours: turns across it all, not its shapes' own colours)
@@ -1424,7 +1442,11 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = unique_rows(raw)
         if cycling(sh) and len(raw):  # "Colours" on a line / funnel
             tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
-    vel = env_velocities(env, raw[:, 0], t_lo, t_hi)
+    if made is not None and len(made) == len(raw):  # (a piece of a shape with pages, with a velocity of its own)
+        frac = np.clip((raw[:, 0] - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
+        vel = own_velocities(vel_sh, made, frac)
+    else:
+        vel = env_velocities(env, vel_at if vel_at is not None and len(vel_at) == len(raw) else raw[:, 0], t_lo, t_hi)
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
         if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)

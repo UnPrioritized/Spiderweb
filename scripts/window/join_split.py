@@ -50,6 +50,7 @@ from window.sustain_window import carry_stops
 from window.widgets import Tooltip
 
 TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) count as touching, like Live shape snaps
+ON_PX = 1e-6  # Slice / Lasso cuts a line where their line crosses it: onto a corner only when right on it
 
 
 def multi_slots(rows, multi):
@@ -1221,18 +1222,19 @@ class JoinSplit:
         self.status.config(text=tr("join_split.split_in_two_baked" if baked else "join_split.split_in_two"))
         self.tips.show("join", wait=True)
 
-    def cut_at(self, sh, at, mark=None):
+    def cut_at(self, sh, at, mark=None, exact=False):
         """A line kind cut in two at the spot at (x, y on screen) -> its two halves, or None (too near an end).
         They're pieces that keep their notes (sliced.py); mark: the cut's mark ({"kind": "slice", "dir": ...}; default
-        Split here's scissors)."""
-        got = self._cut_at(sh, at)
+        Split here's scissors). exact (Slice / Lasso: where their line crosses it): never moved onto a corner near it
+        (a right-click is)."""
+        got = self._cut_at(sh, at, exact)
         if got:
             roll = self.roll
             scale = (abs(roll.t2x(1) - roll.t2x(0)), abs(roll.p2y(0) - roll.p2y(1)))
             cut_in_two(sh, got, got[0]["pts"][-1], scale, mark or {"kind": "split"})
         return got
 
-    def _cut_at(self, sh, at):
+    def _cut_at(self, sh, at, exact=False):
         roll = self.roll
         if has_formula(sh):  # (each half would lay the whole formula again: made into a plain curve first, as Split
             sh = copy.deepcopy(sh)  # does; the halves still make the whole's notes)
@@ -1240,7 +1242,7 @@ class JoinSplit:
         if sh["kind"] == "curve":
             c = copy.deepcopy(sh)
             seg, t, _ = nearest(sh["pts"], roll.to_xy, at.x, at.y, gaps=sh.get("gaps", ()))
-            a = self.anchor_near(sh["pts"], seg, at)
+            a = self.anchor_near(sh["pts"], seg, at, exact)
             if a is None:  # a new anchor there first
                 c["pts"] = split(sh["pts"], seg, t)
                 for key in ("sharp", "gaps", "splits"):
@@ -1253,7 +1255,7 @@ class JoinSplit:
         elif sh["kind"] == "arc":
             got = self.split_arc(sh, at)
         else:
-            got = self.split_line(sh, at)
+            got = self.split_line(sh, at, exact)
         return list(got) if got else None
 
     def slice_along(self, a, b):
@@ -1325,7 +1327,8 @@ class JoinSplit:
                         at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
                         # (the piece the crossing is on)
                         k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))
-                        got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": [sb[0] - sa[0], sb[1] - sa[1]]})
+                        got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": [sb[0] - sa[0], sb[1] - sa[1]]},
+                                          exact=True)
                         if got:
                             pieces[k:k + 1] = got
             else:
@@ -1651,7 +1654,7 @@ class JoinSplit:
         for pt, way in hits:
             at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
             k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))  # (the piece it's on)
-            got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": way})  # (its mark along the loop there)
+            got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": way}, exact=True)  # (its mark along the loop)
             if got:
                 pieces[k:k + 1] = got
         if len(pieces) == 1:  # (only too near an end to cut)
@@ -1723,11 +1726,11 @@ class JoinSplit:
         u = np.clip(((at.x - ax) * bx + (at.y - ay) * by) / np.where(L > 0, L, 1), 0, 1)
         return float(np.hypot(ax + bx * u - at.x, ay + by * u - at.y).min())
 
-    def anchor_near(self, pts, seg, at):
-        """The segment's anchor the right-click was on (near), or None."""
+    def anchor_near(self, pts, seg, at, exact=False):
+        """The segment's anchor the right-click was on (near; exact: right on it), or None."""
         d, a = min((math.hypot(self.roll.to_xy(pts[3 * a])[0] - at.x, self.roll.to_xy(pts[3 * a])[1] - at.y), a)
                    for a in (seg, seg + 1))
-        return a if d <= TOUCH_PX * self.scale else None
+        return a if d <= (ON_PX if exact else TOUCH_PX * self.scale) else None
 
     def nearest_on(self, pts, at):
         """The spot on the polyline pts (beat, pitch) nearest the click on screen: (segment, 0..1 along it, its
@@ -1741,7 +1744,7 @@ class JoinSplit:
         j = int(np.argmin(d))
         return j, float(u[j]), float(np.sqrt(L[j]))
 
-    def split_line(self, sh, at):
+    def split_line(self, sh, at, exact=False):
         """A line / polyline / freehand stroke cut in two: at the point right-clicked on, or on the nearest part of
         it (a freehand stroke: at its nearest drawn point; a straightened one is cut from the straightened line, so
         the halves look the same, and they're no longer straightened)."""
@@ -1751,7 +1754,7 @@ class JoinSplit:
             sh = {key: v for key, v in sh.items() if key != "smooth"}
         j, u, seg_px = self.nearest_on(pts, at)
         a, b = pts[j], pts[j + 1]
-        near = TOUCH_PX * self.scale
+        near = ON_PX if exact else TOUCH_PX * self.scale
         if sh["kind"] == "free":
             cut, k = (list(a), j) if u < 0.5 else (list(b), j + 1)
         elif u * seg_px <= near:
