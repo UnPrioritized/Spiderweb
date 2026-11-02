@@ -45,7 +45,8 @@ PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
 TIGHT, MOST_TIGHT = 1.0, 50.0  # Swirl tightness: turns from the centre point to the edge
 MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more toward that side)
 MOST_SEED = 2 ** 31 - 1
-STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0]}
+STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay"}
+STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
 BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": [0, 0],
                   "stir": STIR_DEFAULTS}  # (left out when so: Add between blends from them)
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
@@ -118,7 +119,7 @@ def clean_recolour(r):
 
 def clean_stir(s):
     """A saved rc["stir"] -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
-    % up]}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
+    % up], "sets": "move" (STIR_SETS)}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
     if not isinstance(s, dict):
         return None
     out = {}
@@ -132,6 +133,8 @@ def clean_stir(s):
     if isinstance(c, list) and len(c) == 2 and all(number(x) and 0 <= x <= 100 for x in c) and \
             [round(x, 3) for x in c] != [50, 50]:
         out["centre"] = [round(float(x), 3) for x in c]
+    if s.get("sets") == "move":
+        out["sets"] = "move"
     return out or None
 
 
@@ -447,25 +450,38 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
 
 def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     """Recolour's Stir: the colours now (each note's, without its round) bent round the stir's Centre point: each note
-    takes the colour of the note found where it comes from (stir_from), within its own colour set unless Mix across
-    sets; Per chord / run: its group's first note's. No colour is made or thrown: only the ones there go round. Two
-    notes on a key sounding together then kept apart (kept_apart, low = the colours before Recolour). at = the
-    notes' places (places_of)."""
+    looks at the note found where it comes from (stir_from, any colour set) and takes its colour; with more than
+    one colour set (a user's feedback 2026-11-02: the pattern broke into patches when each note only looked at its
+    own set's notes) Stir "sets" decides: "stay" (default) = the colour in the SAME PLACE of the note's own set (the
+    pattern bends whole, each note keeps its set's tracks), "move" = that note's colour itself (notes may go to
+    another set). Per chord / run: its group's first note's. No colour is made or thrown: only the ones there go
+    round. Two notes on a key sounding together then kept apart (kept_apart, low = the colours before Recolour). at
+    = the notes' places (places_of)."""
     st = rc.get("stir")
     if not st or not len(at):
         return now
     mid, key = stir_from(at, rc, box, own)
-    new = now.copy()
-    mix = rc.get("mix") and len(pals) > 1
-    for m in ([np.arange(len(at))] if mix else [np.flatnonzero(which == s) for s in range(len(pals))]):
-        if len(m):
-            new[m] = now[m][nearest(at[m], mid[m], key[m])]
+    src = nearest(at, mid, key)
+    move = st.get("sets") == "move" or len(pals) < 2
+    if move:
+        new = now[src]
+    else:  # (blocks of the channels' colours, 15 / 16 with channel 10: the note's own block, the found one's colour)
+        per = rc.get("most", MOST)
+        pool = np.concatenate(pals)
+        set_of = np.repeat(np.arange(len(pals)), [len(p) for p in pals])
+        o = np.argsort(pool, kind="stable")
+        want = now // per * per + now[src] % per
+        i = o[np.clip(np.searchsorted(pool[o], want), 0, len(pool) - 1)]
+        new = np.where(pool[i] == want, want, now)  # (a colour the shape doesn't have there: its own one stays)
     if rc.get("by"):
         new = new[leaders(at, rc["by"])]
-    if mix:
+    if move and len(pals) > 1:
         return kept_apart(notes, low, new, np.unique(np.concatenate(pals)), pick)
+    if move:
+        return kept_apart(notes, low, new, pals[0], pick) if len(pals[0]) >= 2 else new
+    mine = set_of[o[np.clip(np.searchsorted(pool[o], new), 0, len(pool) - 1)]]  # (Per chord: the leader's set)
     for s, p in enumerate(pals):
-        m = np.flatnonzero(which == s)
+        m = np.flatnonzero(mine == s)
         if len(p) >= 2 and len(m):
             new[m] = kept_apart(notes[m], low[m], new[m], p, pick[m])
     return new
