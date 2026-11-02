@@ -9,7 +9,7 @@ from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
 from files import lang, settings
 from files.lang import tr
-from files.playback import BUILTIN, KESTREL, MAESTRO, devices
+from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, devices
 from files.system import WINDOWS, open_path, work_area
 from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
@@ -573,7 +573,7 @@ class SettingsWindow(tk.Toplevel):
         """Built-in BASSMIDI's settings while it's the MIDI out, Maestro's button while that is, else a line saying
         they're for them."""
         dev = self.app.midi_device.get()
-        on = dev in (BUILTIN, KESTREL)
+        on = dev in (BUILTIN, KESTREL, AHEAD)
         for w in (self.sound_sep, self.builtin_title, self.app.builtin_window):
             w.grid() if on else w.grid_remove()
         mo = dev == MAESTRO
@@ -585,9 +585,10 @@ class SettingsWindow(tk.Toplevel):
             self.maestro_note.config(text=tr("maestro.version", v=v, tested=maestro.TESTED) if v
                                      else tr("playback.maestro_failed"))
         self.builtin_off.grid_remove() if on or mo else self.builtin_off.grid()
-        if on:  # (Kestrel (GPU): its own rows instead, the soundfont list shared)
-            self.builtin_title.config(text=tr("ks.title" if dev == KESTREL else "bs.title"))
-            self.app.builtin_window.show_for(dev == KESTREL)
+        if on:  # (Kestrel (GPU), Rendered ahead: their own rows instead, the soundfont list shared)
+            which = {KESTREL: "kestrel", AHEAD: "ahead"}.get(dev, "builtin")
+            self.builtin_title.config(text=tr({"kestrel": "ks.title", "ahead": "ra.title"}.get(which, "bs.title")))
+            self.app.builtin_window.show_for(which)
 
     # ------------------------------------------------------------ size, font, text size (look.apply_size)
 

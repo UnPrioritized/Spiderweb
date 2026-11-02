@@ -11,7 +11,7 @@ from tkinter import filedialog, messagebox
 from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
-from files.playback import BUILTIN, KESTREL, MAESTRO, cc_list
+from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, cc_list
 from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
@@ -1055,8 +1055,9 @@ class Playback:
         self.after(100, done)
 
     def sync_builtin(self):
-        """Settings → Sound shows Built-in BASSMIDI's / Kestrel's settings only while it's the MIDI out."""
-        on = self.midi_device.get() in (BUILTIN, KESTREL)
+        """Settings → Sound shows Built-in BASSMIDI's / Kestrel's / Rendered ahead's settings only while it's the MIDI
+        out."""
+        on = self.midi_device.get() in (BUILTIN, KESTREL, AHEAD)
         w = self.builtin_window  # (in Settings → Sound while that's open)
         if w is not None and w.winfo_exists():
             if on:
@@ -1290,6 +1291,29 @@ class Playback:
         if v != self.loaded_synths:
             self.loaded_synths = v
             self.schedule_autosave()
+
+    def on_ahead_seconds(self):
+        """Rendered ahead's "Render ahead" box (Settings → Sound): whole seconds in render_ahead.SECONDS, typed wrong
+        = red, Settings closed = back to the one in use (BuiltinPanel.take_voices)."""
+        from files.render_ahead import read_seconds
+        e = getattr(self, "ahead_entry", None)
+        try:
+            v = read_seconds(self.ahead_var.get())
+        except ValueError:
+            if e is not None and e.winfo_exists():
+                bad(e)
+            return
+        if e is not None and e.winfo_exists():
+            good(e)
+        if str(v) != self.ahead_var.get():
+            self.ahead_var.set(str(v))
+        if v != self.ahead_seconds:
+            self.ahead_seconds = v
+            self.schedule_autosave()
+
+    def on_ahead_opt(self):
+        """Rendered ahead's Engine / Slow down changed: saved (used from the next Play)."""
+        self.schedule_autosave()
 
     def on_play_guard(self):
         self.overload.set_guard(self.play_guard.get())

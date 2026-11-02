@@ -637,6 +637,8 @@ class ProjectFiles:
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
                               "kestrel_slow_down": self.slow_kestrel.get(), "play_slow_down": self.slow_builtin.get(),
+                              "ahead_engine": self.ahead_engine.get(), "ahead_seconds": self.ahead_seconds,
+                              "ahead_slow_down": self.slow_ahead.get(),
                               "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
                               "copy_notes": self.copy_notes.get(),
                               "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
@@ -838,6 +840,14 @@ class ProjectFiles:
             self.take_kestrel_opts({k: win.get("kestrel_" + k) for k in self.kestrel_opts})
             self.slow_kestrel.set(win.get("kestrel_slow_down") is True)
             self.slow_builtin.set(win.get("play_slow_down") is True)
+            from files.render_ahead import ENGINES, SECONDS
+            if win.get("ahead_engine") in ENGINES:  # (kept as saved even when it can't play here: engine_used)
+                self.ahead_engine.set(win["ahead_engine"])
+            v = win.get("ahead_seconds")
+            if isinstance(v, int) and not isinstance(v, bool) and SECONDS[0] <= v <= SECONDS[1]:
+                self.ahead_seconds = v
+                self.ahead_var.set(str(v))
+            self.slow_ahead.set(win.get("ahead_slow_down") is True)
             self.domino256.set(win.get("domino_256") is True)
             self.copy_domino.set(win.get("copy_domino") is True)
             self.copy_notes.set(win.get("copy_notes") is True)

@@ -22,6 +22,7 @@ KDMAPI = "OmniMIDI (KDMAPI)"  # (OmniMIDI's own direct way in, skipping Windows'
 KESTREL = "Kestrel (GPU, Experimental)"  # (the GPU synth through files/kestrel.py; user 2026-10-27: its name may
 # show; saved. "Experimental" user 2026-10-28: still rough on the heaviest MIDIs)
 MAESTRO = "Maestro (API)"  # (the user's own install, through its API: files/maestro.py; user 2026-11-01; saved)
+AHEAD = "Rendered ahead"  # (sound made into audio ahead of the play line: files/render_ahead.py; user 2026-11-02; saved)
 OLD_NAMES = {"Kestrel (GPU)": KESTREL}  # (saved MIDI outs under an earlier name)
 DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
 MAPPER = 0xFFFFFFFF
@@ -135,11 +136,11 @@ def _load_kdmapi():
 
 
 def devices():
-    """Names of the MIDI-OUT devices: Windows' default first, then the built-in synths (Built-in BASSMIDI, Kestrel),
-    then other programs' ways in when installed (OmniMIDI's KDMAPI, Maestro; user 2026-11-01), then Windows'
-    devices."""
+    """Names of the MIDI-OUT devices: Windows' default first, then the built-in synths (Built-in BASSMIDI, Kestrel,
+    Rendered ahead: always, its BASSMIDI engine works everywhere), then other programs' ways in when installed
+    (OmniMIDI's KDMAPI, Maestro; user 2026-11-01), then Windows' devices."""
     from files import kestrel, maestro
-    own = [BUILTIN] + ([KESTREL] if kestrel.available() is None else [])
+    own = [BUILTIN] + ([KESTREL] if kestrel.available() is None else []) + [AHEAD]
     own += [KDMAPI] if _kdmapi_path() else []
     own += [MAESTRO] if maestro.lib_path() else []
     return [MAPPER_NAME] + own + _winmm_devices() if _winmm else own
@@ -230,6 +231,8 @@ class MidiOut:
             return None
         if name == MAESTRO:
             return self._open_maestro()
+        if name == AHEAD:  # (its player comes with Rendered ahead's step R3: PLAN.md)
+            return tr("ra.not_yet")
         if name == KDMAPI:
             from files.synth import SynthError, load_dlls
             try:

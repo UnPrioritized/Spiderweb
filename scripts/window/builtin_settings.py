@@ -97,6 +97,7 @@ class BuiltinPanel(ttk.Frame):
         r += 1
         self.bass_rows = [w for w in box.grid_slaves() if w not in first]
         r = self.kestrel_rows(r)
+        r = self.ahead_rows(r)
 
         self.state = ttk.Label(box, text="", foreground=look.ERROR)
         self.state.grid(row=r, column=1, columnspan=2, sticky="w", pady=(3, 0))
@@ -181,6 +182,57 @@ class BuiltinPanel(ttk.Frame):
         hint.grid(row=r, column=1, columnspan=2, sticky="w", pady=(2, 0))
         r += 1
         self.k_rows = [w for w in box.grid_slaves() if w not in before]
+        return r
+
+    def ahead_rows(self, r):
+        """Rendered ahead's own rows (files/render_ahead.py; the soundfont list shared): Engine, Render ahead
+        (seconds), Slow down to keep up."""
+        from files import render_ahead
+        app, box = self.app, self
+        before = set(box.grid_slaves())
+        lb = ttk.Label(box, text=tr("ra.engine"))
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
+        here = render_ahead.engines()
+        cb = ttk.Combobox(box, values=[tr("ra.engine_" + k) for k in here], state="readonly", width=26)
+        cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        keep_width(cb)
+
+        def show(*_):
+            if cb.winfo_exists():
+                cb.current(here.index(render_ahead.engine_used(app.ahead_engine.get())))
+
+        def picked(ev=None):
+            app.ahead_engine.set(here[cb.current()])  # (by place: translated names)
+            app.on_ahead_opt()
+        cb.bind("<<ComboboxSelected>>", picked)
+        follow(cb, app.ahead_engine, show)
+        show()
+        Tooltip(cb, tr("ra.engine_tip"))
+        Tooltip(lb, tr("ra.engine_tip"))
+        self.ahead_engine_box = cb
+        r += 1
+
+        lb = ttk.Label(box, text=tr("ra.seconds"))
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
+        row = ttk.Frame(box)
+        row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        e = app.ahead_entry = ttk.Entry(row, textvariable=app.ahead_var, width=8)
+        e.pack(side="left")
+        e.bind("<Return>", lambda ev: (app.on_ahead_seconds(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: app.on_ahead_seconds())
+        Scrub(app, [(e, app.ahead_var, app.on_ahead_seconds)], (5, 30, 1), *render_ahead.SECONDS, label=lb,
+              no_undo=True)
+        ttk.Label(row, text=tr("unit.seconds")).pack(side="left", padx=(4, 0))
+        Tooltip(e, tr("ra.seconds_tip"))
+        Tooltip(lb, tr("ra.seconds_tip"))
+        r += 1
+
+        c = ttk.Checkbutton(box, text=tr("ra.slow_down"), variable=app.slow_ahead, command=app.on_ahead_opt,
+                            takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("ra.slow_down_tip"))
+        r += 1
+        self.a_rows = [w for w in box.grid_slaves() if w not in before]
         return r
 
     def card_row(self, r):
@@ -274,12 +326,13 @@ class BuiltinPanel(ttk.Frame):
         Tooltip(lb, tr(text + "_tip"))
         return r + 1
 
-    def show_for(self, kestrel):
-        """Kestrel's rows (kestrel True) or Built-in BASSMIDI's; the soundfont list stays."""
-        for w in self.bass_rows:
-            w.grid_remove() if kestrel else w.grid()
-        for w in self.k_rows:
-            w.grid() if kestrel else w.grid_remove()
+    def show_for(self, which):
+        """The rows of "builtin", "kestrel" or "ahead" (Rendered ahead); True / False = Kestrel's / Built-in's. The
+        soundfont list stays."""
+        which = {True: "kestrel", False: "builtin"}.get(which, which)
+        for rows, mine in ((self.bass_rows, "builtin"), (self.k_rows, "kestrel"), (self.a_rows, "ahead")):
+            for w in rows:
+                w.grid() if which == mine else w.grid_remove()
 
     def take_voices(self):
         """Settings closed (Esc, X) or another MIDI out picked: a voice limit typed without Enter is taken, a wrong
@@ -291,6 +344,9 @@ class BuiltinPanel(ttk.Frame):
         app.on_loaded_synths()
         if app.synths_var.get() != str(app.loaded_synths):
             app.synths_var.set(str(app.loaded_synths))
+        app.on_ahead_seconds()
+        if app.ahead_var.get() != str(app.ahead_seconds):
+            app.ahead_var.set(str(app.ahead_seconds))
         from files.kestrel import DECIMALS, RANGES
         for key in ("voices", *RANGES, *DECIMALS):  # (Kestrel's number boxes the same way: hunt 2026-10-29, Esc lost them)
             app.on_kestrel_opt(key)

@@ -127,6 +127,9 @@ APP_KEYS = {
     "kestrel_min_velocity": ("sound", "kestrel_velocity_threshold", int),
     "kestrel_slow_down": ("sound", "kestrel_slow_down", bool),
     "play_slow_down": ("sound", "slow_down", bool),
+    "ahead_engine": ("sound", "rendered_ahead_engine", str),  # (files/render_ahead.ENGINES)
+    "ahead_seconds": ("sound", "rendered_ahead_seconds", int),
+    "ahead_slow_down": ("sound", "rendered_ahead_slow_down", bool),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)
     "more_soundfonts": ("sound", "more_soundfonts", PATHS),  # (the ones under it in the list, user 2026-10-25)
     "hz_on": ("hz_preview", "on", bool),
