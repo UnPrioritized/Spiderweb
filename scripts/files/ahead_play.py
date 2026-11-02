@@ -7,7 +7,10 @@ sound waits.
 
 At the grey (a block not made yet): Slow down to keep up ON = the sound waits (stutters) until it's made; OFF
 (default) = skips: silence at the song's speed, the maker jumps past the line (it makes from where the sound is).
-The first block is always waited for (play starts as soon as it's made). Stop fades (synth.FADE_MS).
+FIRST BATCH (user 2026-11-03: the first play stuttered and skipped notes; it must sound like a replay there): the
+line waits at Play until START_S of sound is made from it (less near the song's end / with a shorter Render ahead),
+silence before the first note too; Lower it by itself may lower only once the first piece is back and the start
+has waited START_LOWER_S (a dense start). Stop fades (synth.FADE_MS).
 Loudness: OUR limiter over the joined pieces (pieces are made without one: no level jumps at the joins),
 App.ahead_opts limiter 0 Off / 1 Brickwall / 2 Balanced + ceiling_db.
 Lower it by itself (R1c, Kestrel + BASSMIDI): sound made ahead under LOW_SHARE of Render ahead (at least
@@ -26,6 +29,8 @@ from files.synth import RATE, Player, Synth, SynthError
 FLOOR_VOICES = {"voices": 1024, "bass_voices": 50}  # lowering never goes under these
 RISE_EVERY = 2.0  # seconds between steps back up
 FOLLOW_S = 0.02  # the play line moved to the heard sound when it's further off than this
+START_S = 10.0  # seconds made from the play line before playing starts (the first batch)
+START_LOWER_S = 3.0  # a start waiting longer than this (first piece back): Lower it by itself may lower
 
 
 class AheadLimiter:
@@ -100,7 +105,9 @@ class AheadPlay:
         self.key = None  # (engine, settings, soundfonts, card) the maker was made for
         self.audio = None  # synth.Player
         self.play_at = 0  # the song frame handed to the sound next
-        self.started = False  # (the first block has been played: from then on Slow down OFF skips)
+        self.started = False  # (the first batch is made: from then on Slow down OFF skips; set on the window's thread)
+        self.since = 0.0  # (when Play was pressed)
+        self.gate = threading.Event()
         self.load = None  # a thread opening BASSMIDI's soundfonts
         self.factor = 1.0  # (Lower it by itself: the voice limit's share in use)
         self._rose = 0.0
@@ -174,7 +181,8 @@ class AheadPlay:
             return tr("synth.no_device")
         self.stop()
         self.play_at = max(0, song.frame(int(round(start_beat * ppq))))
-        self.started, self.skipped = False, 0
+        self.started, self.skipped, self.since = False, 0, time.monotonic()
+        self.gate = threading.Event()  # (the play line's Player.ready: set with the first batch)
         from files.render_ahead import take_opts
         o = take_opts(self.app.ahead_opts)
         try:
@@ -202,18 +210,31 @@ class AheadPlay:
         m = self.maker
         if m is None or m.song is None:
             return np.zeros((0, 2), np.float32)
+        if not self.started:  # (the first batch isn't made yet: the line waits, silence before the first note too)
+            return None
         got = m.take(self.play_at, n)
         if got is None:
-            if not self.started or self.slow:  # (read on the window's thread: Tk can't be asked from here)
+            if self.slow:  # (read on the window's thread: Tk can't be asked from here)
                 return None
             k = min(n, BLOCK - self.play_at % BLOCK)  # (to the block's end: the next may be made)
             self.play_at += k
             self.skipped += k
             return np.zeros((k, 2), np.float32)
-        if len(got):
-            self.started = True
         self.play_at += len(got)
         return got
+
+    def first_batch(self):
+        """(window's thread) True once enough is made from the play line to start: START_S (or what Render ahead /
+        free memory / the rest of the song allows), counted from the first note when Play is before it."""
+        m = self.maker
+        lo, hi = m.span
+        if hi <= lo:
+            return True
+        at = max(self.play_at, lo)
+        if at >= hi:
+            return True
+        need = min(START_S, self.app.ahead_seconds, m.room(), (hi - at) / RATE)
+        return m.made_ahead(at) >= need - 1e-6
 
     def tick(self):
         """(window's thread, every play tick) Pieces looked after; the voice limit lowered / raised. Returns an
@@ -230,7 +251,14 @@ class AheadPlay:
                 return err
         self._lower()
         m.step(self.play_at, self.app.ahead_seconds)
+        if not self.started and m.song is not None and self.first_batch():
+            self.started = True
+            self.gate.set()
         return m.error
+
+    def ended(self):
+        """True once the sound's end was played (the play line then runs to its own end and stops)."""
+        return self.audio is not None and not self.audio.active()
 
     def _lower(self):
         from files.render_ahead import LOW_LEAST, LOW_SHARE, LOWER_STEP, RISE_SHARE
@@ -242,6 +270,8 @@ class AheadPlay:
         made = m.made_ahead(self.play_at)
         ahead = self.app.ahead_seconds
         now = time.monotonic()
+        if not self.started and (not m.took or now - self.since < START_LOWER_S):
+            return  # (the first batch: never lowered while the soundfonts load / before a dense start shows)
         if made < max(LOW_LEAST, LOW_SHARE * ahead):
             if now - self._rose > RISE_EVERY / 2:  # (one step per half RISE_EVERY at most)
                 self._set_factor(self.factor * LOWER_STEP)

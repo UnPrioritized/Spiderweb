@@ -13,7 +13,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from files.ahead_play import FOLLOW_S
 from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, cc_list
-from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, Live, Synth, SynthError, silent_list
+from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, RATE, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
@@ -140,7 +140,9 @@ class Playback:
             self.hz_window.draw_preview()
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
-        self.player.along = self.loaded is not None
+        # (Rendered ahead: a loaded MIDI isn't read, its notes would go nowhere; said once Play is running)
+        along = self.loaded is not None and self.out.name != AHEAD
+        self.player.along = along
         rendered, ccs, ports = self.play_parts(ppq, bpm)
         end = self.play_end(ppq, beats, self.playhead)
         self.player.ready = None
@@ -148,7 +150,7 @@ class Playback:
         self.player._clock = None  # (the loaded MIDI's feeder waits for the new line, never the last play's)
         self.player.map = None  # (its reader waits for this play's tempo: Player.start sets it)
         self.piano_back()
-        if self.loaded is not None:  # (first: the play line waits until its first notes are read)
+        if along:  # (first: the play line waits until its first notes are read)
             self.start_loaded(int(round(self.playhead * ppq)))
         self.kestrel_parts()
         self.slow_down.reset()  # (each Play at the song's own speed: Player.start too)
@@ -164,6 +166,7 @@ class Playback:
             if err:
                 messagebox.showerror(tr("app.spiderweb_2"), err, parent=self)
                 return
+            self.player.ready = self.ahead_play.gate  # (the line waits there until the first batch is made)
         self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports, tempo)
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
@@ -174,6 +177,8 @@ class Playback:
         if self.loaded is not None:  # (a redraw now: the loaded notes' exact pictures start reading ahead the way
             self.roll.request_redraw()  # it plays before the first page turn, roll_loaded._keep_ahead)
         self._play_job = self.after(15, self._play_tick)
+        if self.loaded is not None and self.out.name == AHEAD:
+            self.after_idle(self.ahead_silent, "loaded")
 
     def kestrel_stuck(self, live, now):
         """Kestrel made no new sound for STUCK_PLAY_S while the speakers kept taking it (silence handed out): its
@@ -413,9 +418,12 @@ class Playback:
                 return
             sec = self.ahead_play.heard_sec()
             pmap = self.player.map
-            if pmap is not None:
-                # (the line = the heard sound; silence while waiting = the line stays where it is)
-                now_sec = pmap.sec(self.playhead * self.player.ppq) if sec is None else sec
+            # (the sound's end played: the line runs on to its own end and stops; held at the last heard frame it
+            # stuck there, user 2026-11-03)
+            if pmap is not None and not self.ahead_play.ended():
+                # (the line = the heard sound; silence while waiting = the line held where the sound waits: the
+                # frame handed out next. Held at "where it is now" it crept on a tick at a time, user 2026-11-03)
+                now_sec = self.ahead_play.play_at / RATE if sec is None else sec
                 if sec is None or abs(pmap.sec(self.playhead * self.player.ppq) - sec) > FOLLOW_S:
                     self.player.follow(now_sec)
         self.pace_play(now)
@@ -1548,6 +1556,8 @@ class Playback:
             if err:
                 self.status.config(text=err)
                 return False
+        if out.name == AHEAD:  # (silent there: said when let go, scrub_end)
+            self._ahead_scrubbed = True
         lo, hi = min(t_from, t_to), max(t_from, t_to)
         now = {}  # (channel, key) -> (start of the latest note there, velocity); channel None = a 31-EDO row
         from roll.roll_draw import TRACK_FADE
@@ -1629,7 +1639,19 @@ class Playback:
         side.edo = self.out.edo  # (31-EDO's sound works there)
         return side
 
+    def ahead_silent(self, what):
+        """Rendered ahead can't sound right-drag listening / a loaded MIDI (what = "scrub" / "loaded"): a warning
+        window the first time in this run of Spiderweb, then only the status line (user 2026-11-03)."""
+        if not getattr(self, "_ahead_warned", False):
+            self._ahead_warned = True
+            messagebox.showwarning(tr("app.spiderweb_2"), tr("ra.silent_window"), parent=self)
+        else:
+            self.status.config(text=tr(f"ra.{what}_silent"))
+
     def scrub_end(self):
+        if getattr(self, "_ahead_scrubbed", False):  # (said once it's let go: a window mid-drag takes the mouse)
+            self._ahead_scrubbed = False
+            self.after_idle(self.ahead_silent, "scrub")
         out = self.scrub_out()
         for ch, p in self._scrub_held:
             scrub_note(out, ch, p, 0)

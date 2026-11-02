@@ -568,7 +568,9 @@ class Maker:
         return [tuple(s) for s in spans]
 
     def made_ahead(self, at):
-        """Seconds of sound made in a row from frame at (the R1c lowering looks at it)."""
+        """Seconds of sound made in a row from frame at (the R1c lowering + the first batch look at it; before the
+        first note: from it, nothing is made there)."""
+        at = max(at, self.span[0])
         i, n = at // BLOCK, 0
         while i + n in self.blocks:
             n += 1
