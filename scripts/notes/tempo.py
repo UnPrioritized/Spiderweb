@@ -1779,7 +1779,8 @@ def ruler_marks(tempo, base, ppq, bar=4):
     if key in _marks:
         return _marks[key]
     worked = plans(tempo, base, ppq)
-    pts, lines = tempo["points"], [st["line"] for st, _ in worked]
+    pts = tempo["points"]
+    lines = sorted(st["line"] for st, _ in worked)  # (sorted: the line after a beat by bisect, not a look at all)
     out = []
     pb = np.array([p[0] for p in pts], float)
     befores = shown_bpm(tempo, base, pb - 1e-9 * np.maximum(1.0, pb), worked).tolist()  # (all in one go)
@@ -1791,9 +1792,10 @@ def ruler_marks(tempo, base, ppq, bar=4):
         before = befores[i] if b > 0 else None
         then = until = None
         if p[2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != p[1]:
-            cut = [x for x in lines if b < x < pts[i + 1][0]]  # (a catch-up line cuts the part short)
-            then = float(drawn_bpm(tempo, base, [min(cut)])[0]) if cut else float(pts[i + 1][1])
-            until = min(cut) if cut else pts[i + 1][0]
+            n = bisect.bisect_right(lines, b)  # (a catch-up line cuts the part short: the first one after b)
+            cut = lines[n] if n < len(lines) and lines[n] < pts[i + 1][0] else None
+            then = float(drawn_bpm(tempo, base, [cut])[0]) if cut is not None else float(pts[i + 1][1])
+            until = cut if cut is not None else pts[i + 1][0]
         marks.append([i, before, float(p[1]), then, until])
     k = 0
     while k < len(marks):
@@ -1857,7 +1859,7 @@ def kept_bpms(tempo, base, ppq, beats):
 
 def _stairs(marks, k, pts, lines, bar):
     """The marks from k on that make stairs (held steps in a row, one way, small, within a bar of each other, no
-    catch-up line between them); fewer than STAIR_MIN = not stairs."""
+    catch-up line between them; lines sorted); fewer than STAIR_MIN = not stairs."""
     run, way = [], 0
     for m in marks[k:]:
         i, before, at = m[0], m[1], m[2]
@@ -1872,7 +1874,8 @@ def _stairs(marks, k, pts, lines, bar):
             break
         if run:
             a, b = pts[run[-1][0]][0], pts[i][0]
-            if b - a > bar or any(a < x <= b for x in lines):
+            n = bisect.bisect_right(lines, a)  # (lines sorted: the first one after a)
+            if b - a > bar or (n < len(lines) and lines[n] <= b):
                 break
         way = way or d
         run.append(m)
