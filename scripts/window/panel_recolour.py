@@ -10,7 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.engine import pasted_notes
-from notes.recolour import BY, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
+from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
     wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
@@ -41,6 +41,9 @@ class RecolourPanel:
         self.recolour_tip = Tooltip(self.recolour_mode, tr("recolour.tip"))
         self.recolour_again = ttk.Button(c, text=tr("recolour.again"), command=lambda: self.on_recolour("seed"))
         Tooltip(self.recolour_again, tr("recolour.again_tip"))
+        self.recolour_stir = ttk.Button(c, text=tr("stir.button"), command=self.open_stir)
+        self.recolour_stir.pack(side="left", padx=(4, 0))
+        Tooltip(self.recolour_stir, tr("stir.button_tip"))
         rows = self.recolour_row = ttk.Frame(box)  # (only shown while Recolour is on)
         row = ttk.Frame(rows)
         row.pack(anchor="w")
@@ -75,6 +78,10 @@ class RecolourPanel:
         from window.shares_window import open_shares
         open_shares(self)
 
+    def open_stir(self):
+        from window.stir_window import open_stir
+        open_stir(self)
+
     def recolour_targets(self):
         """The selected shapes Recolour works on (not a Hz bass); nothing selected: none (no setting for new
         shapes)."""
@@ -101,6 +108,8 @@ class RecolourPanel:
     def sync_recolour(self):
         tgts = self.recolour_targets()
         on = [clean_recolour(t.get("recolour")) for t in tgts]
+        stir_on = any(r and r.get("stir") for r in on)
+        on = [r if r and r["mode"] != KEEP else None for r in on]  # (Off with only a Stir: shown as Off)
         modes = {r["mode"] if r else None for r in on}
         live = [r for r in on if r]
         self._loading = True
@@ -129,6 +138,8 @@ class RecolourPanel:
         kind = mode if mode in AMOUNT_WORDS else "shuffle"  # (Mixed: the plain Amount)
         self.recolour_amount_word.config(text=tr(AMOUNT_WORDS[kind][0]))
         self.recolour_amount_tip.text = tr(AMOUNT_WORDS[kind][1])
+        self.recolour_stir.config(text=tr("stir.button_on" if stir_on else "stir.button"))
+        self.recolour_stir.state(["!disabled" if tgts else "disabled"])
         shown = bool(live)
         if shown != bool(self.recolour_row.winfo_manager()):
             if shown:
@@ -137,7 +148,7 @@ class RecolourPanel:
                 self.recolour_row.pack_forget()
         if shown != bool(self.recolour_again.winfo_manager()):
             if shown:
-                self.recolour_again.pack(side="left")
+                self.recolour_again.pack(side="left", before=self.recolour_stir)
             else:
                 self.recolour_again.pack_forget()
         sets = shown and any(len(o) > 1 for o in owns)  # (more than one colour set: Mix across sets)
@@ -147,9 +158,9 @@ class RecolourPanel:
             else:
                 self.recolour_mix_tick.pack_forget()
         self.recolour_mix_tip.text = tr("recolour.mix_tip", most=SET)
-        w = getattr(self, "shares_window", None)
-        if w:
-            w.sync()
+        for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None)):
+            if w:
+                w.sync()
 
     def on_recolour(self, what, left=None):
         """The Recolour dropdown (what = "mode"), the Amount box ("amount"), New shuffle ("seed"), Per note / chord /
@@ -187,13 +198,13 @@ class RecolourPanel:
 
         def changed(old, _sh=None):
             if what == "mode":
-                if mode is None:
-                    return None
+                if mode is None:  # (Off: a Stir stays, on the colours as they are)
+                    return dict(old, mode=KEEP) if old and old.get("stir") else None
                 if old and old["mode"] == mode:
                     return old
                 # (another mode: its own Amount to start from, the word means another thing there)
                 return dict(old or {"seed": new_seed()}, mode=mode, amount=START_AMOUNT[mode])
-            if not old:
+            if not old or old["mode"] == KEEP:
                 return old
             if what == "amount":
                 return dict(old, amount=amount)

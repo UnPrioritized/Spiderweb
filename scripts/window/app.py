@@ -596,6 +596,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.extend_window = None  # Gate extend… (extend_window.py)
         self.merge_window = None  # Gate sensitive merge… (merge_window.py)
         self.shares_window = None  # Recolour's Shares… (shares_window.py)
+        self.stir_window = None  # Recolour's Stir… (stir_window.py)
         self.fill_window = None  # Fill gaps… (fill_window.py)
         self.lines_window = None  # Flip each line… (lines_window.py)
         self.melody_window = None  # Fill with tempo jumps… (melody_window.py)

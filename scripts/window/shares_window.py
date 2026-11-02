@@ -13,7 +13,8 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import MOST_PUSH, MOST_TIGHT, PATTERNS, SPLIT, TIGHT, clean_recolour, palettes, wanted, weights
+from notes.recolour import KEEP, MOST_PUSH, MOST_TIGHT, PATTERNS, SPLIT, TIGHT, clean_recolour, palettes, wanted, \
+    weights
 from window import look
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, bad, good, remember_place, show_mixed, wheel_ready
@@ -227,7 +228,55 @@ class KnobHold:
         self.win.call_off(self)
 
 
-class SharesWindow(tk.Toplevel):
+class HeldKnobs:
+    """Knobs in a small window (Shares…, Stir…): a held turn = one undo step, wheel / arrow steps in a row too,
+    Ctrl+Z while held = back to the press. Needs self.app, self.hold, self.wheel, self.sync(), self.take_typing()."""
+
+    def knob_pressed(self, knob):
+        self.take_typing()  # (a number typed in a box first: its own step)
+        self.hold = KnobHold(self, knob)
+        self.app.held_scrub = self.hold  # (shortcuts wait, Ctrl+Z = back to the press: App.key_undo)
+        self.app.scrubbing = "follow"  # (slow notes made in the background over and over while held: App.shapes_changed)
+
+    def on_turn(self, knob, done, run):
+        """A knob turned (run = its change): a held turn is one undo step (scrub_step), wheel / arrow steps in a
+        row too."""
+        hold = self.hold if self.hold and self.hold.knob is knob else None
+        if hold:
+            gesture = hold.drag["gesture"]
+        else:
+            sc = self.app._scrub
+            if not (self.wheel and self.wheel[0] is knob and sc and sc["gesture"] is self.wheel[1]):
+                self.wheel = (knob, object())
+            gesture = self.wheel[1]
+        if not (hold and done and not knob.held()):
+            self.app.scrub_step(gesture, run)
+        if hold and done and not knob.held():  # (let go: the notes catch up, the window shows what's there)
+            self.end_hold()
+        elif not hold:
+            self.sync()
+
+    def end_hold(self):
+        self.hold = None
+        self.app.held_scrub = None
+        self.app.scrubbing = False
+        self.app.catch_up_notes()
+        self.sync()
+
+    def call_off(self, hold):
+        """Ctrl+Z while a knob is held: the settings as at the press, no step; the held mouse turns nothing more."""
+        if self.hold is not hold:
+            return
+        hold.knob.call_off()
+        self.hold = None
+        self.app.held_scrub = None
+        self.app.scrubbing = False
+        self.app.take_back_scrub(hold.drag["gesture"])
+        self.app.catch_up_notes()
+        self.sync()
+
+
+class SharesWindow(HeldKnobs, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()
@@ -383,8 +432,9 @@ class SharesWindow(tk.Toplevel):
     # ---- what the selection holds
 
     def targets(self):
-        """The selected recoloured shapes."""
-        return [t for t in self.app.recolour_targets() if clean_recolour(t.get("recolour"))]
+        """The selected recoloured shapes (not Off with only a Stir)."""
+        return [t for t in self.app.recolour_targets() if (clean_recolour(t.get("recolour")) or {}).get("mode")
+                not in (None, KEEP)]
 
     def layout(self, sh):
         """sh's {own: the most own colours in a set, least: the fewest Colours can be (Split: 2), used: colours used
@@ -528,12 +578,6 @@ class SharesWindow(tk.Toplevel):
         return self.change(lambda L: (spread(L["shares"], i, v, L["pins"]), L["pins"]) if i < L["used"] else None,
                            name)
 
-    def knob_pressed(self, knob):
-        self.take_typing()  # (a number typed in a box first: its own step)
-        self.hold = KnobHold(self, knob)
-        self.app.held_scrub = self.hold  # (shortcuts wait, Ctrl+Z = back to the press: App.key_undo)
-        self.app.scrubbing = "follow"  # (slow notes made in the background over and over while held: App.shapes_changed)
-
     def on_knob(self, i, v, done):
         self.on_turn(self.cells[i]["knob"], done, lambda: self.set_share(i, v))
 
@@ -541,43 +585,6 @@ class SharesWindow(tk.Toplevel):
         """The Angle / Swirl tightness knob turned."""
         knob = self.angle_knob if name == "angle" else self.tight_knob
         self.on_turn(knob, done, lambda: self.set_clumps(name, v))
-
-    def on_turn(self, knob, done, run):
-        """A knob turned (run = its change): a held turn is one undo step (scrub_step), wheel / arrow steps in a
-        row too."""
-        hold = self.hold if self.hold and self.hold.knob is knob else None
-        if hold:
-            gesture = hold.drag["gesture"]
-        else:
-            sc = self.app._scrub
-            if not (self.wheel and self.wheel[0] is knob and sc and sc["gesture"] is self.wheel[1]):
-                self.wheel = (knob, object())
-            gesture = self.wheel[1]
-        if not (hold and done and not knob.held()):
-            self.app.scrub_step(gesture, run)
-        if hold and done and not knob.held():  # (let go: the notes catch up, the window shows what's there)
-            self.end_hold()
-        elif not hold:
-            self.sync()
-
-    def end_hold(self):
-        self.hold = None
-        self.app.held_scrub = None
-        self.app.scrubbing = False
-        self.app.catch_up_notes()
-        self.sync()
-
-    def call_off(self, hold):
-        """Ctrl+Z while a knob is held: the shares as at the press, no step; the held mouse turns nothing more."""
-        if self.hold is not hold:
-            return
-        hold.knob.call_off()
-        self.hold = None
-        self.app.held_scrub = None
-        self.app.scrubbing = False
-        self.app.take_back_scrub(hold.drag["gesture"])
-        self.app.catch_up_notes()
-        self.sync()
 
     def on_typed(self, i):
         c = self.cells[i]

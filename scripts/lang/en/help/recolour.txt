@@ -50,6 +50,18 @@ Centre point: where Swirl and Wedges turn around, in % of the shape's box (50 / 
 
 Push bunches the areas toward one side, a step per click; the dot in the middle takes the push away.
 
+## Stir
+
+Stir… (beside the Recolour dropdown) bends the colours the notes have now, without adding or taking away any colour and without anything random. It works with Recolour Off (the shape's own colours) and on top of Shuffle and Split (their result gets stirred). Each note takes the colour of the note found where the stir brings it from, so the colours keep about the same amounts.
+
+Turn turns all the colours around the Centre point, from -360 to 360 degrees.
+
+Twist winds the colours into a swirl around the Centre point: how many times they wind round from the centre to the edge, minus for the other way. It twists most near the centre.
+
+Centre point: where Turn and Twist go around, in % of the shape's box. Moving it also moves the middle of the colours there, so they get squeezed on one side and stretched on the other. While the window is open the piano roll shows it as a dot with a dot inside: drag it (whole %, hold Shift for in between), right-click it to put it back in the middle.
+
+Reset takes the stir away. The button reads "Stir… (on)" while a selected shape has one.
+
 ## With the rest of Spiderweb
 
 Two notes on the same key that sound together always keep different colours, so they never cut each other off. With "Repeated colours get new channels", each note stays on the channels of the repeat it was in before.
