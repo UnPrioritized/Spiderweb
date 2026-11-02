@@ -18,7 +18,7 @@ from notes.gateflip import is_pasted_flipped, mirrored_runs
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
-                              box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
+                              bind_double_right, box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
                               set_cursor, slot_colours)
 from window import look
 from window.canvas_keep import KeepsItems
@@ -176,6 +176,8 @@ class VelocityPane(KeepsItems, tk.Canvas):
         self.curve = None  # the last curve drawn, while its handle can still bend it
         self.mouse = None  # (x, y, key state) of the drag's last mouse move: follow_mouse
         app.vel_tool.trace_add("write", lambda *_: self.request_redraw())
+        self.last_tool = "line"  # the drawing tool a double right-click goes back to
+        app.vel_tool.trace_add("write", lambda *_: self.remember_tool())
         self._pan = None
         self._redraw_pending = False
 
@@ -185,7 +187,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<Motion>", self.on_motion)
-        self.bind("<ButtonPress-3>", self.on_right)
+        bind_double_right(self, self.on_right, self.on_double_right)
         self.bind("<ButtonPress-2>", self.start_pan)
         self.bind("<B2-Motion>", self.pan_to)
         grab_while_panning(self)
@@ -520,6 +522,20 @@ class VelocityPane(KeepsItems, tk.Canvas):
         self.edit = None
         self.curve = None
         self.app.select(None)
+
+    def remember_tool(self):
+        tool = self.app.vel_tool.get()
+        if tool != "select":
+            self.last_tool = tool
+
+    def on_double_right(self, e):
+        """Double right-click: Select <-> the tool used last (like the piano roll). Nothing while the left button
+        is down (the drag goes on)."""
+        if e.state & 0x100 or self.band_drag:
+            return
+        tool = self.app.vel_tool
+        tool.set(self.last_tool if tool.get() == "select" else "select")
+        self.on_motion(e)  # (the pointer at once)
 
     def start_pan(self, e):
         self._pan = (e.x, self.app.roll.view_t)
