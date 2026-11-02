@@ -107,9 +107,9 @@ class RecolourPanel:
 
     def sync_recolour(self):
         tgts = self.recolour_targets()
-        on = [clean_recolour(t.get("recolour")) for t in tgts]
-        stir_on = any(r and r.get("stir") for r in on)
-        on = [r if r and r["mode"] != KEEP else None for r in on]  # (Off with only a Stir: shown as Off)
+        act = [clean_recolour(t.get("recolour")) for t in tgts]
+        stir_on = any(r and r.get("stir") for r in act)
+        on = [r if r and r["mode"] != KEEP else None for r in act]  # (Off with only a Stir: shown as Off)
         modes = {r["mode"] if r else None for r in on}
         live = [r for r in on if r]
         self._loading = True
@@ -124,12 +124,9 @@ class RecolourPanel:
         self.recolour_mix.set(mixes == {True})
         self.recolour_mix_tick.state(["alternate" if len(mixes) > 1 else "!alternate"])
         self._loading = False
-        lonely = bool(live) and self.channel_mode.get() != "auto" and not all(  # (a Domino paste: works in
-            pasted_notes(t) for t, r in zip(tgts, on) if r)                     # every mode, hunt 2026-11-01)
+        # (Off + a Stir counts too: it says why the stir shows nothing, hunt 2026-11-02)
+        lonely, single = self.recolour_trouble(tgts, act)
         owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
-        # (nothing to shuffle, e.g. one colour: Shuffle has nothing to swap, hunt 2026-10-25)
-        single = not lonely and any(r and not enough(palettes(o, wanted(r), self.set_most()), r.get("mix"))
-                                    for o, r in zip(owns, on))
         self.recolour_mode.config(state="readonly" if tgts else "disabled",
                                   style="Gap.TCombobox" if lonely or single else "TCombobox")
         show_mixed(self.recolour_mode, len(modes) > 1, self.recolour_tip,
@@ -161,6 +158,17 @@ class RecolourPanel:
         for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None)):
             if w:
                 w.sync()
+
+    def recolour_trouble(self, tgts, rcs):
+        """(lonely, single) for shapes tgts with Recolours rcs (clean; None = Off): lonely = Channels isn't Multi
+        channel, so a Recolour on (a Domino paste works in every mode, hunt 2026-11-01) changes nothing; single =
+        one has nothing to swap (e.g. one colour, hunt 2026-10-25). Stir window: rcs = what a stir would make."""
+        lonely = any(rcs) and self.channel_mode.get() != "auto" and not all(
+            pasted_notes(t) for t, r in zip(tgts, rcs) if r)
+        single = not lonely and any(
+            r and not enough(palettes(self.colour_owns(t), None if r["mode"] == KEEP else wanted(r), self.set_most()),
+                             r.get("mix") and r["mode"] != KEEP) for t, r in zip(tgts, rcs))
+        return lonely, single
 
     def on_recolour(self, what, left=None):
         """The Recolour dropdown (what = "mode"), the Amount box ("amount"), New shuffle ("seed"), Per note / chord /

@@ -40,6 +40,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.resizable(False, False)
         self.hold = None
         self.wheel = None
+        self.twist_real, self.twist_at, self.zeroing = 0.0, 0.0, False  # (sync: the Twist shown, its knob's place)
         self.boxes = {}  # name -> {var, entry, shown, lo, hi}
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
@@ -58,6 +59,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             else:
                 knob = self.twist_knob = Knob(cell, app.scale, turned, look.KNOB_GREEN, 40, self.knob_pressed)
             knob.pack()
+            if name == "twist":  # (middle-click: back to 0 itself, also from past the knob's end)
+                knob.bind("<ButtonPress-2>", lambda e: self.twist_to_zero())
             r = ttk.Frame(cell)
             r.pack()
             self._number_box(r, name, lo, hi, word)
@@ -77,6 +80,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.hint = ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
+        # (why a stir shows nothing: Channels not Multi channel / one colour; shown only then, hunt 2026-11-02)
+        self.warn = ttk.Label(box, text="", foreground=look.WARN, wraplength=int(300 * app.scale), justify="left")
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(10, 0))
         ttk.Button(row, text=tr("shares.close"), command=self.close).pack(side="right")
@@ -91,6 +96,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
         self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
         remember_place(self, "stir")
+        app.centre_first = "stir"  # (its dots win over Clumps' on one spot: roll_centre.centre_boxes)
+        self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
         self.deiconify()
 
     def _number_box(self, parent, name, lo, hi, word):
@@ -129,7 +136,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             if knob is self.turn_knob:
                 knob.set(round(vals[0], 1) if vals else 0.0)
             elif knob:
-                knob.set(round(max(-100.0, min(100.0, vals[0] / TWIST_KNOB * 100)), 1) if vals else 0.0)
+                self.twist_real = vals[0] if vals else 0.0
+                self.twist_at = round(max(-100.0, min(100.0, self.twist_real / TWIST_KNOB * 100)), 1)
+                knob.set(self.twist_at)
             if knob:
                 knob.on(on)
             b = self.boxes[name]
@@ -139,6 +148,15 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             b["shown"] = text
             b["entry"].config(state="normal" if on else "disabled")
         self.reset.state(["!disabled" if any(s != full_stir(None) for s in sts) else "disabled"])
+        lonely, single = app.recolour_trouble(tgts, [clean_recolour(t.get("recolour")) or {"mode": KEEP}
+                                                     for t in tgts])
+        text = tr("stir.needs") if lonely else tr("stir.one") if single else ""
+        if text != self.warn.cget("text"):
+            self.warn.config(text=text)
+            if text:
+                self.warn.pack(anchor="w", fill="x", pady=(6, 0), after=self.hint)
+            else:
+                self.warn.pack_forget()
         app.roll.request_redraw()  # (the Centre point dots: roll_centre.py)
 
     # ---- changes
@@ -160,8 +178,20 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     def on_turned(self, name, v, done):
         knob = self.turn_knob if name == "turn" else self.twist_knob
         if name == "twist":
-            v = round(v / 100 * TWIST_KNOB, 3)
+            if abs(self.twist_real) > TWIST_KNOB and not self.zeroing:
+                # (typed past the knob's end: the knob moves it from there, no jump to its end, hunt 2026-11-02)
+                v = self.twist_real + (v - self.twist_at) / 100 * TWIST_KNOB
+                v = round(max(-MOST_TIGHT, min(MOST_TIGHT, v)), 3)
+            else:
+                v = round(v / 100 * TWIST_KNOB, 3)
         self.on_turn(knob, done, lambda: self.set_stir(name, v))
+
+    def twist_to_zero(self):
+        self.zeroing = True
+        try:
+            self.twist_knob.turn_to(0, True)
+        finally:
+            self.zeroing = False
 
     def on_box(self, name):
         b = self.boxes[name]

@@ -1457,6 +1457,8 @@
  "stir.centre": "Centre point",
  "stir.centre_tip": "Where the colours turn and twist around, in % of the shape's box (50 / 50 = the middle).\nMoving it also moves the middle of the colours there: they get squeezed on one side and stretched on the other.\nYou can also drag the dot on the shape in the piano roll while this window is open. Right-click the dot: back to the middle.",
  "stir.hint": "Bends the colours the notes have now. Each note takes the colour of the note found where the stir brings it from.",
+ "stir.needs": "Channels isn't Multi channel now: all the notes are in one channel, so stirring changes nothing.",
+ "stir.one": "This shape has only one colour, so there's nothing to stir. Give it more with Colours in the side panel.",
  "stir.reset": "Reset",
  "stir.reset_tip": "No stir: the colours as they were before.",
  "stir.undo": "Stir colours",

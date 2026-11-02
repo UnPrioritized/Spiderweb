@@ -849,8 +849,8 @@ def fx_notes(sh, ppq, keys, get):
         held_ = is_sustained(sh) or sh.get("held") is True or pasted_notes(sh)
         gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
         rule = rule_of(sh["recolour"])
-        if rule.get("stir") and sh.get("cut") and not gate and not rule.get("frame"):
-            got = stirred_piece(sh, notes, tracks, held_, get)
+        if rule.get("stir") and sh.get("cut") and not (rule.get("frame") or (1, 0))[1]:  # (turned: notes made anew)
+            got = stirred_piece(sh, notes, tracks, held_, get, gate, rule)
             if got is not None:
                 return got
         return recoloured(notes, tracks, rule, held_, gate, free_box(sh, notes, get, keys))
@@ -904,18 +904,21 @@ def fx_notes(sh, ppq, keys, get):
     return with_glue(*kind_notes_tracks(sh, ppq, keys), sh, ppq)
 
 
-def stirred_piece(sh, notes, tracks, held_, get):
+def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
     """A sliced piece of a stirred shape (recolour.py Stir): its notes take the colours the WHOLE shape shows (its
-    stir looks across the cut, into the other pieces' notes), each from the whole's note at its spot (from_whole).
+    stir looks across the cut, into the other pieces' notes), each from the whole's note at its spot (from_whole;
+    a gate flipped / flipped piece: the spot its note had before, recolour.places_of, so the colours flip with it).
     None: not a piece any more (made as a shape of its own)."""
-    from notes.recolour import from_whole
+    from notes.recolour import from_whole, places_of
     from notes.sliced import source
     got = source(without_recolour(sh))
     if got is None or tracks is None:
         return None
-    rc = {k: v for k, v in sh["recolour"].items() if k != "whole"}  # (the whole counts in its own box)
-    wn, wt = get(dict(without_recolour(got[0]), recolour=rc))
-    return from_whole(notes, tracks, wn, wt, held_)
+    # (the whole as it was cut: its own box, never flipped)
+    rc = {k: v for k, v in sh["recolour"].items() if k not in ("whole", "frame")}
+    whole = {k: v for k, v in without_recolour(got[0]).items() if k != "gate_flip"}
+    wn, wt = get(dict(whole, recolour=rc))
+    return from_whole(notes, tracks, wn, wt, held_, lambda n: places_of(n, rule, gate, box_of(n)))
 
 
 def free_box(sh, notes, get, keys):

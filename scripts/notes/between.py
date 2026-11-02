@@ -321,8 +321,13 @@ class Pair:
         if x is not None and y is not None:  # (both ends with Gate extend: step by step when in the same unit)
             from notes.extend import mixed_extend
             out["extend"] = mixed_extend(x, y, f, mix)
-        from notes.recolour import BLEND_DEFAULTS, clean_recolour, full_stir
+        from notes.recolour import BLEND_DEFAULTS, KEEP, clean_recolour, full_stir
         x, y = clean_recolour(a.get("recolour")), clean_recolour(b.get("recolour"))
+        # (Off + a Stir at one end, plain Off at the other: the stir fades out step by step, hunt 2026-11-02)
+        if x and not y and x["mode"] == KEEP:
+            y = {"mode": KEEP, "seed": x["seed"]}
+        elif y and not x and y["mode"] == KEEP:
+            x = {"mode": KEEP, "seed": y["seed"]}
         if x and y and x["mode"] == y["mode"]:  # (both ends recoloured alike: the numbers step by step, a setting
             near = x if f < 0.5 else y  # only one end has its default there; choices, dice, flips: the nearer end's)
             x, y = ({k: full_stir(r.get("stir")) if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))

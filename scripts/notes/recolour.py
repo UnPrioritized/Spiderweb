@@ -38,6 +38,7 @@ from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
+KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most")  # (what mode KEEP looks at: recoloured)
 SPLIT = ("scatter", "clumps")  # (Split modes: work from one colour, 2 colours when Colours isn't set)
 BY = ("note", "chord", "run")
 PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
@@ -394,6 +395,11 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     the notes' box without the piano roll's edges (engine.free_box; None = as they are): the dice and areas count
     from it (and a piece's whole's box, rc "whole": colour_box), so pushing a shape against an edge keeps its
     colours."""
+    if rc["mode"] == KEEP:  # (Off + a Stir: the shape's own colours only, the same however it got there: settings
+        # left from another mode (Per chord, Colours, Mix, Shares) wait for it, the seed too (which of two notes
+        # sounding together gives way: never random here)
+        rc = {k: v for k, v in rc.items() if k in KEEP_KEYS}
+        rc["seed"] = 1
     if tracks is None and len(notes) and rc["mode"] in SPLIT:  # (one colour: Split works from it)
         tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
@@ -465,18 +471,29 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     return new
 
 
-def from_whole(notes, tracks, wn, wt, held=False):
+def from_whole(notes, tracks, wn, wt, held=False, back=None):
     """A stirred piece's notes and tracks: settled as recoloured does (held: not), each note the colour of the
-    whole's recoloured note (wn, wt) nearest its spot (the same note, or the one a cut sliver came from), its own
-    round kept."""
+    whole's recoloured note (wn, wt) at its spot (back(notes): where each was before a flip): the whole's note on
+    its key covering its middle (the one a cut sliver came from), else the nearest; its own round kept."""
     t = np.asarray(tracks, np.int64)
     if not held:
         notes, t = settled(notes, t)
     if not len(notes) or not len(wn) or wt is None:
         return notes, t
-    mid = (np.asarray(notes[:, 0], np.float64) + np.asarray(notes[:, 1], np.float64)) / 2
-    got = np.asarray(wt, np.int64)[nearest(wn, mid, notes[:, 2], own=False)] % ROUND
-    return notes, t - t % ROUND + got
+    at = back(notes) if back else notes
+    mid = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
+    key = np.asarray(at[:, 2], np.int64)
+    got = nearest(wn, mid, key, own=False)
+    # (a sliver of a long note cut near its end: its middle may be nearer the next note's; the covering one wins)
+    ws, we, wk = (np.asarray(wn[:, c], np.int64) for c in (0, 1, 2))
+    o = np.lexsort((ws, wk))
+    line = wk[o].astype(np.float64) * 2.0 ** 42 + ws[o]
+    j = np.searchsorted(line, key.astype(np.float64) * 2.0 ** 42 + mid, side="right") - 1
+    ok = j >= 0
+    c = o[np.maximum(j, 0)]
+    ok &= (wk[c] == key) & (we[c] > mid)
+    got = np.where(ok, c, got)
+    return notes, t - t % ROUND + np.asarray(wt, np.int64)[got] % ROUND
 
 
 def unit_xy(mid, key, rc, box, own):

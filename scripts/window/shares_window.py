@@ -346,6 +346,8 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
         y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
         self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
         remember_place(self, "shares")
+        app.centre_first = "clumps"  # (its dots win over the Stir's on one spot: roll_centre.centre_boxes)
+        self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "clumps"), add="+")
         self.deiconify()
 
     def _build_clumps(self, parent):

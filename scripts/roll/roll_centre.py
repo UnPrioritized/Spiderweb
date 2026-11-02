@@ -43,6 +43,8 @@ class CentreDots:
                     continue
                 own = free_box(plain, notes, app.notes_tracks, app.keys)
                 out.append((sh, (rc or {}, notes, own, kind), centre_spot(rc or {}, notes, own, c)))
+        # (both windows open: the dots of the one used last drawn on top and grabbed first, hunt 2026-11-02)
+        out.sort(key=lambda d: d[1][3] == getattr(app, "centre_first", None))
         return out
 
     def centre_xy(self, spot):
