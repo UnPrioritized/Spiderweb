@@ -37,14 +37,16 @@ from files.speed import loops
 from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
+KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
 SPLIT = ("scatter", "clumps")  # (Split modes: work from one colour, 2 colours when Colours isn't set)
 BY = ("note", "chord", "run")
 PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
 TIGHT, MOST_TIGHT = 1.0, 50.0  # Swirl tightness: turns from the centre point to the edge
 MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more toward that side)
 MOST_SEED = 2 ** 31 - 1
-BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": [0, 0]}  # (left out when so: Add
-# between blends from them)
+STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0]}
+BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": [0, 0],
+                  "stir": STIR_DEFAULTS}  # (left out when so: Add between blends from them)
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
 SET = 15  # colours in a colour set (always: the ticks change no colour)
 
@@ -56,8 +58,12 @@ def number(x):
 def clean_recolour(r):
     """A saved sh["recolour"] -> {"mode", "amount": 0..100 (3 decimals), "seed": int, and only when set: "shares"
     [% per place], "pins" [places whose share stays when others change: the Shares window], "colours" n (2..16),
-    "mix" True, "by" "chord" / "run"}, or None (Off)."""
-    if not isinstance(r, dict) or r.get("mode") not in MODES:
+    "mix" True, "by" "chord" / "run", "stir" (clean_stir)}, or None (Off). Mode KEEP = Off with a Stir (none
+    without one)."""
+    if not isinstance(r, dict) or r.get("mode") not in MODES + (KEEP,):
+        return None
+    stir = clean_stir(r.get("stir"))
+    if r["mode"] == KEEP and not stir:
         return None
     a = r.get("amount", 100)
     if not number(a):
@@ -104,7 +110,34 @@ def clean_recolour(r):
     if isinstance(w, list) and len(w) == 6 and all(number(x) and x == int(x) and abs(x) < 1 << 40 for x in w) \
             and w[4] >= 0 and w[5] >= 0 and any(w[:4]):
         out["whole"] = [int(x) for x in w]
+    if stir:
+        out["stir"] = stir
     return out
+
+
+def clean_stir(s):
+    """A saved rc["stir"] -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
+    % up]}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
+    if not isinstance(s, dict):
+        return None
+    out = {}
+    a = s.get("turn")
+    if number(a) and abs(a) <= 360 and round(a, 3):
+        out["turn"] = round(float(a), 3)
+    t = s.get("twist")
+    if number(t) and abs(t) <= MOST_TIGHT and round(t, 3):
+        out["twist"] = round(float(t), 3)
+    c = s.get("centre")
+    if isinstance(c, list) and len(c) == 2 and all(number(x) and 0 <= x <= 100 for x in c) and \
+            [round(x, 3) for x in c] != [50, 50]:
+        out["centre"] = [round(float(x), 3) for x in c]
+    return out or None
+
+
+def full_stir(s):
+    """A stir with every setting filled in (Add between blends one end's into the other's)."""
+    s = clean_stir(s) or {}
+    return {k: s.get(k, STIR_DEFAULTS[k]) for k in STIR_DEFAULTS}
 
 
 # WHOLE (rc "whole", a sliced drawn piece: carried): [first start, last end, lowest key, highest key] of the shape it
@@ -375,6 +408,8 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     at = places_of(notes, rc, gate, box_of(notes))
     corner = (box[0], box[2])
     pick = dice(at, low, rc["seed"], 1, corner)
+    if rc["mode"] == KEEP:
+        return notes, lap + stirred(notes, at, low, low, rc, which, pals, pick, box, own)
     roll = dice(at, low, rc["seed"], 0, corner)
     clumps = rc["mode"] == "clumps"
     if clumps:  # (every note takes the colour of the area it lands in: the throw = where it lands)
@@ -390,15 +425,120 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
         pool = np.concatenate(pals)  # (each set weighed by its colours: even shares = every colour alike)
         w = np.concatenate([weights(len(p), shares) * len(p) for p in pals])
         new = np.where(change, take(pool, w / w.sum(), low, pick), low)
-        return notes, lap + kept_apart(notes, low, new, np.unique(pool), pick)
-    new = low.copy()
+        new = kept_apart(notes, low, new, np.unique(pool), pick)
+    else:
+        new = low.copy()
+        for s, p in enumerate(pals):
+            m = np.flatnonzero(which == s)
+            if len(p) < 2 or not len(m):
+                continue
+            got = np.where(change[m], take(p, weights(len(p), shares), low[m], pick[m]), low[m])
+            new[m] = kept_apart(notes[m], low[m], got, p, pick[m])
+    if rc.get("stir"):
+        new = stirred(notes, at, low, new, rc, which, pals, pick, box, own)
+    return notes, lap + new
+
+
+def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
+    """Recolour's Stir: the colours now (each note's, without its round) bent round the stir's Centre point: each note
+    takes the colour of the note found where it comes from (stir_from), within its own colour set unless Mix across
+    sets; Per chord / run: its group's first note's. No colour is made or thrown: only the ones there go round. Two
+    notes on a key sounding together then kept apart (kept_apart, low = the colours before Recolour). at = the
+    notes' places (places_of)."""
+    st = rc.get("stir")
+    if not st or not len(at):
+        return now
+    mid, key = stir_from(at, rc, box, own)
+    new = now.copy()
+    mix = rc.get("mix") and len(pals) > 1
+    for m in ([np.arange(len(at))] if mix else [np.flatnonzero(which == s) for s in range(len(pals))]):
+        if len(m):
+            new[m] = now[m][nearest(at[m], mid[m], key[m])]
+    if rc.get("by"):
+        new = new[leaders(at, rc["by"])]
+    if mix:
+        return kept_apart(notes, low, new, np.unique(np.concatenate(pals)), pick)
     for s, p in enumerate(pals):
         m = np.flatnonzero(which == s)
-        if len(p) < 2 or not len(m):
-            continue
-        got = np.where(change[m], take(p, weights(len(p), shares), low[m], pick[m]), low[m])
-        new[m] = kept_apart(notes[m], low[m], got, p, pick[m])
-    return notes, lap + new
+        if len(p) >= 2 and len(m):
+            new[m] = kept_apart(notes[m], low[m], new[m], p, pick[m])
+    return new
+
+
+def unit_xy(mid, key, rc, box, own):
+    """Places (note middle in ticks, key) -> (x, y) 0..1 in the colour box, as areas counts them: flipped / turned
+    since (rc "frame") and a piece's whole's box (rc "whole") taken in."""
+    f = rc.get("frame")
+    turned = bool(f and f[1])
+    t0, t1, k0, k1 = own if turned else box
+    x = (np.asarray(mid, np.float64) - t0) / max(t1 - t0, 1.0)
+    y = (np.asarray(key, np.float64) - k0) / (k1 - k0) if k1 > k0 else np.full(len(x), 0.5)
+    if turned:
+        x, y = 0.5 + f[1] * (y - 0.5), 0.5 + f[2] * (x - 0.5)
+        (a0, a1), (b0, b1) = whole_shares(rc)
+        x, y = (x - a0) / max(a1 - a0, 1e-12), (y - b0) / max(b1 - b0, 1e-12) if b1 > b0 else y
+    return x, y
+
+
+def from_unit(x, y, rc, box, own):
+    """unit_xy's way back: (x, y) in the colour box -> (middle in ticks, key), both floats."""
+    f = rc.get("frame")
+    turned = bool(f and f[1])
+    t0, t1, k0, k1 = own if turned else box
+    if turned:
+        (a0, a1), (b0, b1) = whole_shares(rc)
+        x, y = a0 + x * (a1 - a0), b0 + y * (b1 - b0) if b1 > b0 else y
+        x, y = 0.5 + f[2] * (y - 0.5), 0.5 + f[1] * (x - 0.5)  # (f[1], f[2] are +-1: each its own way back)
+    return t0 + x * max(t1 - t0, 1.0), (k0 + y * (k1 - k0) if k1 > k0 else np.full(len(x), float(k0)))
+
+
+def stir_from(at, rc, box, own):
+    """(middle in ticks, key) each note's colour comes from under rc's Stir: its place in the colour box turned
+    back round the Centre point by Turn + Twist (turns, most near the centre: Swirl's way), then the Centre point
+    taken back to the middle (the colours' middle moved there: squeezed on one side, stretched on the other)."""
+    st = full_stir(rc.get("stir"))
+    s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
+    x, y = unit_xy((s + e) / 2, k, rc, box, own)
+    cx, cy = (v / 100 for v in st["centre"])
+    dx, dy = x - cx, y - cy
+    turn = st["turn"] / 360
+    if st["twist"]:
+        far = max(np.hypot(X - cx, Y - cy) for X in (0, 1) for Y in (0, 1))
+        turn = turn + st["twist"] * np.sqrt(np.hypot(dx, dy) / max(far, 1e-12))
+    a = -2 * np.pi * np.asarray(turn, np.float64)
+    ca, sa = np.cos(a), np.sin(a)
+    x, y = np.clip(cx + dx * ca - dy * sa, 0, 1), np.clip(cy + dx * sa + dy * ca, 0, 1)
+    x = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
+    y = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
+    return from_unit(x, y, rc, box, own)
+
+
+def nearest(at, mid, key):
+    """For each spot (mid, key): the note of at nearest it: on the nearest key holding notes (the key rounded), the
+    note there whose middle is nearest in time. A note itself as near as the one found wins (no stir = each note its
+    own)."""
+    n = len(at)
+    nk = np.asarray(at[:, 2], np.int64)
+    nm = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
+    o = np.lexsort((nm, nk))
+    ks, ms = nk[o], nm[o]
+    keys, first = np.unique(ks, return_index=True)
+    last = np.append(first[1:], n)
+    q = np.rint(np.asarray(key, np.float64))
+    i = np.clip(np.searchsorted(keys, q), 0, len(keys) - 1)
+    j = np.maximum(i - 1, 0)
+    row = np.where(np.abs(keys[j] - q) <= np.abs(keys[i] - q), j, i)  # (the nearer key with notes; lower on a tie)
+    lo, hi = first[row], last[row]
+    mid = np.asarray(mid, np.float64)
+    base = min(ms.min(), mid.min())
+    gap = 2 * (max(ms.max(), mid.max()) - base) + 2  # (each key row its own stretch of one long sorted line)
+    line = ms - base + np.repeat(np.arange(len(keys)) * gap, last - first)
+    p = np.clip(np.searchsorted(line, mid - base + row * gap), lo, hi - 1)
+    p0 = np.maximum(p - 1, lo)
+    p = np.where(np.abs(ms[p0] - mid) <= np.abs(ms[p] - mid), p0, p)
+    got = o[p]
+    own = (nk == keys[row]) & (np.abs(nm - mid) <= np.abs(ms[p] - mid) + 1e-9)
+    return np.where(own, np.arange(n), got)
 
 
 def whole_shares(rc):
