@@ -30,10 +30,10 @@ from files.mathexpr import calc, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
                          bpm_text, clamp_bpm, curve, drawn_bpm, drawn_from, drop_loose, end_point, formula_fn,
-                         catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_runs, keeps, on_beat,
+                         catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_points, keep_runs, keeps, on_beat,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
                          swap_part, tempo_text)
-from notes.tempo import changed as tempo_edited, keep_heard, FAR
+from notes.tempo import changed as tempo_edited, keep_heard, FAR, hold as hold_tempo, version as tempo_version
 from notes.loaded import file_tempos
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.tempo_file import FileTempo, limit_spots, loaded_part, sorted_union
@@ -729,6 +729,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         self.drag = None
         self._pan = None
         self._redraw_pending = False
+        self._laid_ok = None  # (laid_window: the line's beats when in order with no loose point, per tempo change)
         self._typing = None  # the BPM box over a point (double-click)
         self.run = None  # Draw: Heard tempo: the Keep timing run whose heard line is edited (its first point)
         self._ed = None  # (first point, its line, the line as a tempo line, the run's points) being edited
@@ -2110,26 +2111,80 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         self.live = {"base": base, "ends": [[b0, v0], [b1, v1]], "first": first}
         self.live_seen()
 
-    def lay_part(self, b0, v0, b1, v1, kind, text, like=None):
+    def lay_part(self, b0, v0, b1, v1, kind, text, like=None, beats=None):
         """A part from (b0, v0) to (b1, v1) over the points there (they're replaced), picked; like: a first point
-        whose curve / formula / scale / keep / bend it takes. Returns its first point."""
+        whose curve / formula / scale / keep / bend it takes. Returns its first point. beats: laid_window's."""
         pts = self.ed()["points"]
-        first = self.laid(pts, b0, v0, b1, v1, kind, text, self.ed_base(), like, True)[1]
+        first = self.laid(pts, b0, v0, b1, v1, kind, text, self.ed_base(), like, True, beats)[1]
         self.sel, self.part = [], first
         self.app.tempo_changed()
         return first
 
-    def laid(self, pts, b0, v0, b1, v1, kind, text, base, like=None, inplace=False):
+    def laid(self, pts, b0, v0, b1, v1, kind, text, base, like=None, inplace=False, beats=None):
         """lay_part's points: (the line pts with the part laid in, its first point); a copy unless inplace (a drag
         shows what letting go will give, user 2026-10-24). base: the line's BPM before its first point.
         THE PART OVERRIDES ONLY ITS OWN STRETCH, like Domino (user 2026-10-24: the parts before / after were bent
         to meet it): the line before it stays exactly (a jump at its start where they differ); after it an old
         ramp / curve goes on from where it was (a jump back), an old held tempo is replaced by its end value up to
         the next point (Domino's steps do that). Drawn from / up to a jump: its arrival / its leaving tempo stays
-        (lay_points' edges)."""
+        (lay_points' edges).
+        SPEED (a loaded MIDI's 35,000 tempo points: every drag step copied them all, 0.3 s a step): only the
+        points from a little before b0 to a little after b1 are worked on (and copied), the same result
+        (dev/scratch/laid_window_check.py); the whole line when it isn't in order or has loose points already."""
         if b1 < b0:
             b0, v0, b1, v1 = b1, v1, b0, v0
-        work = pts if inplace else copy.deepcopy(pts)
+        lo, hi = self.laid_window(pts, b0, b1, beats)
+        if inplace:
+            win = pts[lo:hi]
+            first = self._laid(win, b0, v0, b1, v1, kind, text, base, like)
+            pts[lo:hi] = win
+            return pts, first
+        win = copy.deepcopy(pts[lo:hi])
+        first = self._laid(win, b0, v0, b1, v1, kind, text, base, like)
+        return pts[:lo] + win + pts[hi:], first
+
+    def window_beats(self, pts):
+        """pts' beats when laid() may work on a window of them (in order, no loose point), else None; remembered
+        once per tempo change, not per drag step."""
+        key = (id(pts), len(pts), tempo_version())
+        ok = self._laid_ok
+        if ok is None or ok[0] != key:
+            beats = [p[0] for p in pts]
+            fine = all(a <= b for a, b in zip(beats, beats[1:]))
+            if fine:
+                test = [p[:3] for p in pts]
+                fine = not drop_loose(test)
+            ok = self._laid_ok = (key, beats if fine else None)
+        return ok[1]
+
+    def laid_window(self, pts, b0, b1, beats=None):
+        """(lo, hi): the points laid() needs to work on for a part b0..b1 (the whole line when it must). beats:
+        window_beats of a line with the same beats (the live line's points as they were), else worked out here."""
+        n = len(pts)
+        known = beats is not None
+        if not known:
+            beats = self.window_beats(pts)
+        if beats is None or n < 64 or len(beats) != n:
+            return 0, n
+        lo = max(0, bisect.bisect_right(beats, b0 + 1e-9) - 3)  # (two points before the one holding at b0)
+        hi = min(n, bisect.bisect_right(beats, b1 + 1e-9) + 2)  # (two points after the one holding at b1)
+        # (never cut through points on one beat: the first point of the window has a beat of its own)
+        while lo > 0 and (beats[lo - 1] == beats[lo] or lo + 1 < n and beats[lo] == beats[lo + 1]):
+            lo -= 1
+        while hi < n and beats[hi] == beats[hi - 1]:
+            hi += 1
+        if any(pts[k][0] != beats[k] for k in range(lo, hi)):  # (remembered for another line: worked out again)
+            if known:
+                return self.laid_window(pts, b0, b1)
+            self._laid_ok = None
+            beats = [p[0] for p in pts]
+            if all(a <= b for a, b in zip(beats, beats[1:])) and not drop_loose([p[:3] for p in pts]):
+                return self.laid_window(pts, b0, b1, beats)
+            return 0, n
+        return lo, hi
+
+    def _laid(self, work, b0, v0, b1, v1, kind, text, base, like):
+        """laid's work on the points work (in place; b0 <= b1): returns the part's first point."""
         held = [p for p in work if p[0] <= b0 + 1e-9]
         first = [float(b0), clamp_bpm(v0), kind, text, self.box.draw_scale, bool(held) and keeps(held[-1]),
                  list(BEND)]
@@ -2163,7 +2218,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             del p[7:]
             if heard is not None:
                 p.append(heard)
-        return work, first
+        return first
 
     # ------------------------------------------------------------ the line just drawn, live (user 2026-10-22)
 
@@ -2174,10 +2229,12 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             self.live = lv = None
         return lv
 
-    def live_seen(self):
-        """The live line's own change done: the tempo as it is now is still its."""
+    def live_seen(self, said=False):
+        """The live line's own change done: the tempo as it is now is still its. said: its change went through
+        App.tempo_changed (already said: the line's text isn't written again)."""
         if self.live is not None:
-            tempo_edited()  # (its own change may not have said so yet)
+            if not said:
+                tempo_edited()  # (its own change may not have said so yet)
             self.live["seen"] = tempo_text(self.ed())
 
     def live_end_at(self, x, y):
@@ -2202,12 +2259,20 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         ends[k] = [b, self.snap_bpm(self.y2b(e.y), e)]
         if abs(ends[0][0] - ends[1][0]) < 0.5 / max(1, self.app.ppq):
             return
+        was = lv["ends"]
         lv["ends"] = ends
         old = lv["first"]
-        self.ed()["points"][:] = copy.deepcopy(lv["base"])
+        # (back to the points as they were before the line: only the stretch the line was laid over and will be
+        # now, the rest is untouched by it; the whole line was copied every drag step, 0.25 s on 35,000 points)
+        base, pts = lv["base"], self.ed()["points"]
+        if "beats" not in lv:
+            lv["beats"] = self.window_beats(base)
+        span = [ends[0][0], ends[1][0], was[0][0], was[1][0]]
+        lo, hi = self.laid_window(base, min(span), max(span), lv["beats"])
+        pts[lo:len(pts) - (len(base) - hi)] = copy.deepcopy(base[lo:hi])
         (b0, v0), (b1, v1) = ends
-        lv["first"] = self.lay_part(b0, v0, b1, v1, old[2], old[3], like=old)
-        self.live_seen()
+        lv["first"] = self.lay_part(b0, v0, b1, v1, old[2], old[3], like=old, beats=lv["beats"])
+        self.live_seen(said=True)
         self.app.changed_in_step()  # (the line's own step: after a save, unsaved now, hunt 10-27)
 
     def dense_key(self):
@@ -3274,10 +3339,11 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         worked = plans(tempo, self.base(), self.app.ppq) if worked is None else worked
         offs = keep_off(tempo, [st for st, _ in worked])
         pts, out = tempo["points"], []
-        for i, p in enumerate(pts):
-            if keeps(p):
-                a, e = p[0], pts[i + 1][0] if i + 1 < len(pts) else math.inf
-                out += [(max(a, lo), min(e, hi)) for lo, hi in offs if max(a, lo) < min(e, hi) - 1e-9]
+        if not offs:  # (nothing switched off: no walk through a loaded MIDI's thousands of points)
+            return out
+        for i in keep_points(pts):
+            a, e = pts[i][0], pts[i + 1][0] if i + 1 < len(pts) else math.inf
+            out += [(max(a, lo), min(e, hi)) for lo, hi in offs if max(a, lo) < min(e, hi) - 1e-9]
         return out
 
     def drag_preview(self):
@@ -3339,10 +3405,12 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             return self.draw_all()
         keep = self.app.tempo, self.sel  # (a Ctrl+drag held: everything drawn as letting go gives it)
         self.app.tempo, self.sel = got
+        hold_tempo(got[0])  # (the same line all through this drawing: its text worked out once)
         try:
             self.draw_all()
         finally:
             self.app.tempo, self.sel = keep
+            hold_tempo(None)
 
     def draw_all(self):
         self._redraw_pending = False
@@ -3353,6 +3421,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             self._draw_all()
         finally:
             self.keep_finish()
+            hold_tempo(None)  # (a drawn line's preview: _draw_all held it)
 
     def _draw_all(self):
         self._off_marks = []  # (draw_off_marks: none until drawn)
@@ -3481,6 +3550,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         preview = self.drag_preview()  # (a line being drawn: the tempo as letting go gives it)
         if preview and "tempo" in preview:
             pt = preview["tempo"]
+            hold_tempo(pt)  # (unchanged for the rest of this drawing: its text worked out once, draw_all lets go)
             line_of = (pt, plans(pt, base, self.app.ppq))
             xs, beats, ys = self.line_xy(line_of[1], w, kb, pt, base)
         else:

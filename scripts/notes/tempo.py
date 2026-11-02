@@ -39,6 +39,7 @@ import copy
 import functools
 import json
 import hashlib
+import marshal
 import math
 import os
 import re
@@ -93,9 +94,45 @@ def changed():
     _text["ver"] += 1
 
 
+def version():
+    """A number that goes up with every tempo change (changed())."""
+    return _text["ver"]
+
+
+_held = {"tempo": None, "text": None, "n": 0}
+
+
+def hold(tempo):
+    """tempo (a drag's preview line, made new each redraw) won't change until hold(None): its text is worked out
+    once, and the caches (layout, step_edges, ...) know it by a token instead of its text (35,000 tempo points:
+    ~30 ms to write the text, ~35 ms to read it back, every drag step)."""
+    _held["tempo"], _held["text"] = tempo, None
+    _held["n"] += 1
+
+
+def held_copy(tempo):
+    """A copy of the held line as its text would read back (marshal: many times quicker than json; a number
+    marshal can't write, e.g. NumPy's, through json as before)."""
+    try:
+        return marshal.loads(marshal.dumps(tempo))
+    except ValueError:
+        return json.loads(json.dumps(tempo))
+
+
+def tempo_key(tempo):
+    """What the caches know tempo by: its text, a token for the held line (never the same as another's)."""
+    if tempo is not None and tempo is _held["tempo"]:
+        return ("held", _held["n"])
+    return tempo_text(tempo)
+
+
 def tempo_text(tempo):
     """json.dumps(tempo), remembered for the watched line until it changes (the same string each time, so undo
-    steps share it)."""
+    steps share it) and for the held one (hold)."""
+    if tempo is not None and tempo is _held["tempo"]:
+        if _held["text"] is None:
+            _held["text"] = json.dumps(tempo)
+        return _held["text"]
     if tempo is not _text["tempo"] or tempo is None:
         return json.dumps(tempo)
     if _text["made"] != _text["ver"]:
@@ -640,6 +677,20 @@ def typed_bpms(tempo):
 def _first_ticks(pb, ppq):
     """The first tick of each point's part: the smallest tick t with t / ppq >= the point's beat (as drawn_bpm
     reads it)."""
+    if len(pb) > 64:  # (all at once, the same steps: a loaded MIDI's 35,000 points took 15 ms every drag step)
+        a = np.asarray(pb, float)
+        if a.ndim == 1 and np.isfinite(a).all() and (np.abs(a) * ppq).max() < 2.0 ** 52:
+            c = np.maximum(0, np.ceil(a * ppq)).astype(np.int64)
+            on = np.ones(len(c), bool)
+            for _ in range(4):
+                down = on & (c > 0) & ((c - 1) / ppq >= a)
+                up = on & ~down & (c / ppq < a)
+                c[down] -= 1
+                c[up] += 1
+                on = down | up
+                if not on.any():
+                    break
+            return c.tolist()
     out = []
     for b in pb:
         c = max(0, math.ceil(b * ppq))
@@ -878,12 +929,18 @@ def keeps(p):
     return len(p) > 5 and p[5] is True
 
 
+def keep_points(pts):
+    """The indexes of the points keeps() is True for, in order (one quick pass: a loaded MIDI's 35,000 points
+    asked keeps() one by one several times every redraw)."""
+    return [i for i, p in enumerate(pts) if len(p) > 5 and p[5] is True]
+
+
 def keep_off(tempo, sts):
     """[(first, end beat)] of the catch-ups' yellow areas a Keep timing part is switched off in (user 2026-10-24: Keep
     timing doesn't work inside a catch-up's yellow area; it played the tempo the catch-up comes back to and could
     undo the catch-up). A catch-up whose line is inside a Keep timing part is that part's own: not these."""
     pts = tempo["points"]
-    parts = [(p[0], pts[i + 1][0] if i + 1 < len(pts) else math.inf) for i, p in enumerate(pts) if keeps(p)]
+    parts = [(pts[i][0], pts[i + 1][0] if i + 1 < len(pts) else math.inf) for i in keep_points(pts)]
     return [(st["from"], st["line"]) for st in sts if st["end"] is not None and st["from"] < st["line"]
             and not any(a <= st["line"] - 1e-9 < e for a, e in parts)]
 
@@ -895,9 +952,8 @@ def keep_parts(tempo, sts=()):
     pts = tempo["points"]
     spans = [(c[0], end) for c, end in zip(tempo["catch"], catch_ends(tempo))] + keep_off(tempo, sts)
     out = []
-    for i, p in enumerate(pts):
-        if not keeps(p):
-            continue
+    for i in keep_points(pts):
+        p = pts[i]
         pieces = [(p[0], pts[i + 1][0] if i + 1 < len(pts) else None)]
         for lo, hi in spans:
             cut = []
@@ -941,10 +997,11 @@ def layout(tempo, base, ppq):
     BPM's microseconds, "keeps": [(point index, first tick, end tick or None, heard us)], "worked": [(stretch,
     catch_plan)]}. Each stretch gets "base_u" / "base" (BPM) = the tempo heard just before it, each Keep timing
     part its heard us the same way: inside a stretch, its tempo; inside a Keep timing part, its; else the line."""
-    key = (tempo_text(tempo), base, ppq)
+    key = (tempo_key(tempo), base, ppq)
     if key in _layouts:
         return _layouts[key]
-    tempo = json.loads(key[0])  # (its own copy: what's remembered never changes with the line)
+    # (its own copy: what's remembered never changes with the line; the held line copied straight: no text)
+    tempo = json.loads(key[0]) if isinstance(key[0], str) else held_copy(tempo)
     ordered = all(p[0] <= q[0] for p, q in zip(tempo["points"], tempo["points"][1:]))  # (once: _segments' many reads)
     start_u = base_us(base)
     sts = stretches(tempo, base)
@@ -1048,9 +1105,8 @@ def keep_runs(tempo):
     """[(first, last point index)] of the Keep timing runs: parts in a row with Keep timing and one heard tempo line
     (a part cut in two keeps reading the same line), each edited as one in the Conductor pane."""
     pts, out = tempo["points"], []
-    for i, p in enumerate(pts):
-        if not keeps(p):
-            continue
+    for i in keep_points(pts):
+        p = pts[i]
         if out and out[-1][1] == i - 1 and json.dumps(heard_of(pts[i - 1])) == json.dumps(heard_of(p)):
             out[-1] = (out[-1][0], i)
         else:
@@ -1191,7 +1247,7 @@ def step_edges(tempo, worked, ppq):
     points' beats) and curved catch-ups (None, None, False), which change every "every" ticks from their first tick
     (as the file has them). Remembered for the line (a loaded MIDI's thousands of points: every redraw)."""
     pts = tempo["points"]
-    key = (tempo_text(tempo), ppq)
+    key = (tempo_key(tempo), ppq)
     got = _edges.get(key)
     if got is None:
         first = _first_ticks([p[0] for p in pts], ppq)
@@ -1775,7 +1831,7 @@ def ruler_marks(tempo, base, ppq, bar=4):
     a line to the last step, [(beat, before, at)] of every step as its 5th item (the tip)."""
     if not has_tempo(tempo):
         return []
-    key = (tempo_text(tempo), base, ppq, bar)
+    key = (tempo_key(tempo), base, ppq, bar)
     if key in _marks:
         return _marks[key]
     worked = plans(tempo, base, ppq)
@@ -1892,7 +1948,7 @@ def bpm_at(tempo, base, ppq, tick):
     draws there); the project's BPM without a tempo line."""
     if not has_tempo(tempo):
         return float(base)
-    key = (tempo_text(tempo), base, ppq, tick)
+    key = (tempo_key(tempo), base, ppq, tick)
     if key in _at:  # (the play line resting / redrawn: once)
         return _at[key]
     u = None
