@@ -10,7 +10,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import KEEP, MOST_TIGHT, STIR_SETS, clean_recolour, full_stir, new_seed
+from notes.recolour import KEEP, MOST_TIGHT, STIR_EDGES, STIR_SETS, clean_recolour, full_stir, new_seed
 from window import look
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
@@ -46,7 +46,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         box.pack(fill="both", expand=True)
         self.what = ttk.Label(box, text="", foreground=look.HINT)
         self.what.pack(anchor="w")
-        row = ttk.Frame(box)
+        knobs = row = ttk.Frame(box)
         row.pack(anchor="w", pady=(8, 0))
         for name, unit, lo, hi in (("turn", "°", -360, 360), ("twist", "", -MOST_TIGHT, MOST_TIGHT)):
             cell = ttk.Frame(row, padding=(0, 0, 14, 0))
@@ -77,17 +77,28 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             w.pack(side="left", padx=(6, 0))
             self._number_box(row, "centre" + str(k), 0, 100, w)
             ttk.Label(row, text="%").pack(side="left")
-        # (only while a shape has more than one colour set: a user's feedback 2026-11-02, recolour.stirred)
-        self.sets_row = row = ttk.Frame(box)
-        word = ttk.Label(row, text=tr("stir.sets"))
-        word.pack(side="left")
-        names = [tr("stir.sets_" + s) for s in STIR_SETS]
-        self.sets = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 1)
-        self.sets.pack(side="left", padx=(5, 0))
-        self.sets.bind("<<ComboboxSelected>>", lambda e: self.on_sets())
-        self.sets_tip = Tooltip(self.sets, tr("stir.sets_tip"))
-        Tooltip(word, tr("stir.sets_tip"))
-        self.hint =ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
+        # (a user's feedback 2026-11-02, recolour.stir_from / stirred; Colour sets only while a shape has 2+ sets)
+        self.picks = {}  # key -> {row, box, tip, choices}
+        for key, choices in (("edge", STIR_EDGES), ("sets", STIR_SETS)):
+            if key == "edge":  # (beside the knobs, where the user's picture asked: name over the dropdown)
+                row = ttk.Frame(knobs)
+                row.pack(side="left", anchor="n")
+                side, pad = "top", (4, 0)
+            else:
+                row = ttk.Frame(box)
+                side, pad = "left", (5, 0)
+            word = ttk.Label(row, text=tr(f"stir.{key}"))
+            word.pack(side=side, anchor="w")
+            names = [tr(f"stir.{key}_{c}") for c in choices]
+            cb = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 1)
+            if side == "top":
+                cb.pack(side=side, anchor="w", pady=pad)
+            else:
+                cb.pack(side=side, anchor="w", padx=pad)
+            cb.bind("<<ComboboxSelected>>", lambda e, key=key: self.on_pick(key))
+            Tooltip(word, tr(f"stir.{key}_tip"))
+            self.picks[key] = {"row": row, "box": cb, "tip": Tooltip(cb, tr(f"stir.{key}_tip")), "choices": choices}
+        self.hint = ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
         # (why a stir shows nothing: Channels not Multi channel / one colour; shown only then, hunt 2026-11-02)
@@ -128,11 +139,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         return [full_stir((clean_recolour(t.get("recolour")) or {}).get("stir")) for t in self.targets()]
 
     def sync(self):
-        """Show the selected shapes' Stir (not while a knob is held): a box where they differ is blank; boxes being
-        typed in keep the typing."""
-        if self.hold:
-            return
+        """Show the selected shapes' Stir (a held knob stays where the mouse put it, its box follows): a box where
+        they differ is blank; boxes being typed in keep the typing."""
         app = self.app
+        held = self.held_knob()
         tgts = self.targets()
         sts = self.stirs()
         self.what.config(text=tr("stir.nothing") if not tgts else
@@ -143,13 +153,15 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                                  ("twist", self.twist_knob, [s["twist"] for s in sts]),
                                  ("centre0", None, [s["centre"][0] for s in sts]),
                                  ("centre1", None, [s["centre"][1] for s in sts])):
-            if knob is self.turn_knob:
+            if knob is held:  # (the twist's place from the press stays too: on_turned counts from it)
+                pass
+            elif knob is self.turn_knob:
                 knob.set(round(vals[0], 1) if vals else 0.0)
             elif knob:
                 self.twist_real = vals[0] if vals else 0.0
                 self.twist_at = round(max(-100.0, min(100.0, self.twist_real / TWIST_KNOB * 100)), 1)
                 knob.set(self.twist_at)
-            if knob:
+            if knob and knob is not held:
                 knob.on(on)
             b = self.boxes[name]
             text = fmt(vals[0]) if vals and len(set(vals)) == 1 else ""
@@ -157,16 +169,19 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 b["var"].set(text)
             b["shown"] = text
             b["entry"].config(state="normal" if on else "disabled")
-        sets = {s["sets"] for s in sts}
-        if len(sets) == 1:
-            self.sets.current(STIR_SETS.index(next(iter(sets))))
-        show_mixed(self.sets, len(sets) > 1, self.sets_tip, tr("stir.sets_tip"))
+        for key, p in self.picks.items():
+            vals = {s[key] for s in sts}
+            if len(vals) == 1:
+                p["box"].current(p["choices"].index(next(iter(vals))))
+            show_mixed(p["box"], len(vals) > 1, p["tip"], tr(f"stir.{key}_tip"))
+            p["box"].config(state="readonly" if on else "disabled")
         many = any(len(app.colour_owns(t)) > 1 for t in tgts)
-        if many != bool(self.sets_row.winfo_manager()):
+        row = self.picks["sets"]["row"]
+        if many != bool(row.winfo_manager()):
             if many:
-                self.sets_row.pack(anchor="w", pady=(8, 0), before=self.hint)
+                row.pack(anchor="w", pady=(6, 0), before=self.hint)
             else:
-                self.sets_row.pack_forget()
+                row.pack_forget()
         self.reset.state(["!disabled" if any(s != full_stir(None) for s in sts) else "disabled"])
         lonely, single = app.recolour_trouble(tgts, [clean_recolour(t.get("recolour")) or {"mode": KEEP}
                                                      for t in tgts])
@@ -231,12 +246,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.set_stir(name, v)
         self.sync()
 
-    def on_sets(self):
-        i = self.sets.current()
-        unhighlight(self.sets)
+    def on_pick(self, key):
+        p = self.picks[key]
+        i = p["box"].current()
+        unhighlight(p["box"])
         if i >= 0:
             self.wheel = None
-            self.set_stir("sets", STIR_SETS[i])
+            self.set_stir(key, p["choices"][i])
             self.sync()
 
     def on_reset(self):

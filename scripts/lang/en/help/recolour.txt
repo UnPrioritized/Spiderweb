@@ -60,6 +60,8 @@ Twist winds the colours into a swirl around the Centre point: how many times the
 
 Centre point: where Turn and Twist go around, in % of the shape's box. Moving it also moves the middle of the colours there, so they get squeezed on one side and stretched on the other. While the window is open the piano roll shows it as a dot with a dot inside: drag it (whole %, hold Shift for in between), right-click it to put it back in the middle.
 
+At the edges (beside the knobs): what happens to colours stirred past the edge of the shape's box. "Escape" (the default): they're gone, and the colours at the edge stretch in to fill the empty corners. "Wrap around": what goes out one side comes back in on the other, as if the colours were a repeating tile, so the corners get the pattern too.
+
 Colour sets (shown when a shape has more than one set of channels, 15 colours each, 16 with channel 10): "Stay in their set" (the default) keeps each note in its own set of tracks and gives it the matching colour there, so the whole pattern bends together. "Move between sets" gives each note the colour and track of the note it's stirred from, so notes can move to another set.
 
 Turn works in the shape's own box, so on a long flat shape (one or a few key rows) a big turn squeezes many notes onto the few colours near the middle. Twist and small turns keep more of them.

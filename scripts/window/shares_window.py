@@ -253,8 +253,12 @@ class HeldKnobs:
             self.app.scrub_step(gesture, run)
         if hold and done and not knob.held():  # (let go: the notes catch up, the window shows what's there)
             self.end_hold()
-        elif not hold:
+        else:  # (held too: the boxes follow the turn, user 2026-11-02; the held knob is left to the mouse: held_knob)
             self.sync()
+
+    def held_knob(self):
+        """The knob held now (sync leaves it where the mouse put it), or None."""
+        return self.hold.knob if self.hold else None
 
     def end_hold(self):
         self.hold = None
@@ -450,11 +454,10 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
                 "shares": shares, "pins": [p for p in rc.get("pins", ()) if p < used]}
 
     def sync(self):
-        """Show the selected recoloured shapes' colours and shares (not while a knob is held): a box where they
-        differ is blank; boxes being typed in (changed, with the keyboard) keep the typing."""
-        if self.hold:
-            return
+        """Show the selected recoloured shapes' colours and shares (a held knob stays where the mouse put it): a box
+        where they differ is blank; boxes being typed in (changed, with the keyboard) keep the typing."""
         app = self.app
+        held = self.held_knob()
         tgts = self.targets()
         lays = [self.layout(t) for t in tgts]
         self.what.config(text=tr("shares.nothing") if not tgts else
@@ -487,8 +490,9 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
             vals = {L["shares"][i] for L in mine}
             first = mine[0]
             c["name"].config(text=tr("shares.colour" if i < first["own"] else "shares.new", n=i + 1))
-            c["knob"].set(round(first["shares"][i], 1))
-            c["knob"].on(used > 1)
+            if c["knob"] is not held:
+                c["knob"].set(round(first["shares"][i], 1))
+                c["knob"].on(used > 1)
             text = fmt(first["shares"][i]) if len(vals) == 1 else ""
             if self.focus_get() is not c["entry"] or c["var"].get() == c["shown"]:
                 c["var"].set(text)
@@ -523,7 +527,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
                 ("tight", self.tight_knob, [r.get("tight", TIGHT) for r in rcs], "swirl" in pats),
                 ("centre0", None, [r.get("centre", [50, 50])[0] for r in rcs], turned),
                 ("centre1", None, [r.get("centre", [50, 50])[1] for r in rcs], turned)):
-            if knob:
+            if knob and knob is not self.held_knob():
                 knob.set(round(vals[0], 1))
                 knob.on(on)
             self.show_box(name, vals, on)

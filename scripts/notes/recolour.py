@@ -45,8 +45,9 @@ PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
 TIGHT, MOST_TIGHT = 1.0, 50.0  # Swirl tightness: turns from the centre point to the edge
 MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more toward that side)
 MOST_SEED = 2 ** 31 - 1
-STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay"}
+STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape"}
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
+STIR_EDGES = ("escape", "wrap")  # (colours stirred past the box's edge: gone / back in on the other side)
 BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": [0, 0],
                   "stir": STIR_DEFAULTS}  # (left out when so: Add between blends from them)
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
@@ -119,7 +120,7 @@ def clean_recolour(r):
 
 def clean_stir(s):
     """A saved rc["stir"] -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
-    % up], "sets": "move" (STIR_SETS)}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
+    % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES)}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
     if not isinstance(s, dict):
         return None
     out = {}
@@ -135,6 +136,8 @@ def clean_stir(s):
         out["centre"] = [round(float(x), 3) for x in c]
     if s.get("sets") == "move":
         out["sets"] = "move"
+    if s.get("edge") == "wrap":
+        out["edge"] = "wrap"
     return out or None
 
 
@@ -554,7 +557,13 @@ def stir_from(at, rc, box, own):
         turn = turn + st["twist"] * np.sqrt(np.hypot(dx, dy) / max(far, 1e-12))
     a = -2 * np.pi * np.asarray(turn, np.float64)
     ca, sa = np.cos(a), np.sin(a)
-    x, y = np.clip(cx + dx * ca - dy * sa, 0, 1), np.clip(cy + dx * sa + dy * ca, 0, 1)
+    x, y = cx + dx * ca - dy * sa, cy + dx * sa + dy * ca
+    if st["edge"] == "wrap":  # (what went out one side comes back in the other: the colours tiled, user 11-02)
+        out = lambda v: (v < -1e-9) | (v > 1 + 1e-9)  # (on the edge, or a hair past it: stays on it)
+        x = np.clip(np.where(out(x), np.mod(x, 1.0), x), 0, 1)
+        y = np.clip(np.where(out(y), np.mod(y, 1.0), y), 0, 1)
+    else:  # (escape: gone, the edge's colours stretch in)
+        x, y = np.clip(x, 0, 1), np.clip(y, 0, 1)
     x = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
     y = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
     return from_unit(x, y, rc, box, own)
