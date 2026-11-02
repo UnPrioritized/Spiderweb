@@ -135,6 +135,34 @@ class Song:
         if edo_first is not None:
             from files.playback import edo_bends
             self.bends = edo_bends(first=edo_first)
+        self._finish(ccs)
+
+    @classmethod
+    def on_channels(cls, notes, chans, ccs, ppq, bpm, tempo=None):
+        """A Song from rows (start, end, key, velocity) on stream channels chans (port x 16 + channel each; None =
+        channel 1) and CC lines [(tick, message)] (channel | port << 24): the Hz preview's notes as it plays them
+        (R7). Keys over 127 left out."""
+        self = cls.__new__(cls)
+        notes = np.asarray(notes)
+        chans = np.zeros(len(notes), np.int64) if chans is None else np.asarray(chans, np.int64)
+        if len(notes):
+            keep = notes[:, 2] <= 127
+            notes, chans = notes[keep], chans[keep]
+        else:
+            notes = np.zeros((0, 4), np.int64)
+        self.edo_first, self.bends, self.ppq = None, [], ppq
+        self.tempo = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
+        self.map = TimeMap(ppq, self.tempo)
+        order = np.argsort(notes[:, 0], kind="stable") if len(notes) else np.zeros(0, np.int64)
+        self.start, self.end = notes[order, 0].astype(np.int64), notes[order, 1].astype(np.int64)
+        self.key = notes[order, 2].astype(np.uint8)
+        self.vel = np.clip(notes[order, 3], 1, 127).astype(np.uint8)
+        self.chan, self.port = (chans[order] & 15).astype(np.uint8), (chans[order] >> 4).astype(np.uint8)
+        self._finish(ccs)
+        return self
+
+    def _finish(self, ccs):
+        n = len(self.start)
         self.ccs = sorted(ccs, key=lambda e: e[0]) if ccs else []
         self.cc_ticks = np.array([t for t, _ in self.ccs], np.int64)
         # the longest note (held notes before a tick are among the ones starting up to that much earlier)
@@ -274,6 +302,54 @@ def changed_ticks(a, b):
     return None if lo is None else (lo, hi)
 
 
+CARD_LOCK = threading.Lock()  # (one piece on the graphics card at a time: Rendered ahead's + the Hz preview's)
+
+
+def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None):
+    """(a piece's thread) Song frames f0 .. f1 made on the graphics card by "merlin" / "kestrel" with the soundfonts
+    already there (kestrel.loaded_for: read once, kept); opts = App.ahead_opts. Returns (float32 (frames, 2) or None
+    when cancelled, the frame the ring died away at when it did in this piece, else None). progress(0..1)."""
+    from files import kestrel
+    data, skip = song.midi(f0, f1)
+    if data is None:  # (nothing sounds here: silence, no piece)
+        return np.zeros((f1 - f0, 2), np.float32), None
+    with CARD_LOCK:
+        if cancel.is_set():
+            return None, None
+        loaded = kestrel.loaded_for(fonts, card)
+        fd, path = tempfile.mkstemp(".mid", "spiderweb-piece-")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        o = {"block": opts["block"]}
+        if engine == "kestrel":
+            o.update(voices=opts["voices"], interpolation=opts["interpolation"], min_velocity=opts["min_velocity"])
+        piece = kestrel.Piece(loaded, path, engine, skip, f1 - f0, delete_midi=True, **o)
+        try:
+            while True:
+                state = piece.wait(0.05)
+                if cancel.is_set():
+                    piece.cancel()
+                    return None, None
+                if state != kestrel.RUNNING:
+                    break
+                if progress:
+                    progress(piece.status()["progress"])
+            if state == kestrel.FAILED:
+                from files.synth import SynthError
+                raise SynthError("playback.kestrel_failed", err=piece.error() or "?")
+            if state != kestrel.DONE:
+                return None, None
+            out = piece.audio()
+        finally:
+            piece.close()
+    end = None
+    if out is not None and len(out) < f1 - f0 and f0 + len(out) >= song.last:  # (the ring died away)
+        end = f0 + len(out)
+    elif out is not None and len(out) < f1 - f0:  # (silence at the piece's end left out: put back)
+        out = np.concatenate([out, np.zeros((f1 - f0 - len(out), 2), np.float32)])
+    return out, end
+
+
 class _Job:
     """One piece being made: blocks first .. first + count - 1."""
 
@@ -304,7 +380,6 @@ class Maker:
         self.ends = {}  # block -> the frame the sound died away at in it
         self.took = []  # seconds the last pieces took, with their blocks: [(seconds, blocks)]
         self.error = None  # the first piece's error text (the caller says it)
-        self.loaded = None  # (kestrel.Loaded, read in a piece's thread the first time)
         self._lock = threading.Lock()
         self._free = (0.0, None)  # (when free memory was last asked, the answer)
         self.lowered = False  # (Lower it by itself: new pieces made with a lowered voice limit, ahead_play)
@@ -502,43 +577,9 @@ class Maker:
         return out
 
     def _card(self, job, song, f0, f1):
-        from files import kestrel
-        data, skip = song.midi(f0, f1)
-        if data is None:  # (nothing sounds here: silence, no piece)
-            return np.zeros((f1 - f0, 2), np.float32)
-        if self.loaded is None or not self.loaded.handle:
-            self.loaded = kestrel.loaded_for(self.fonts, self.card)
-        if job.cancel.is_set():
-            return None
-        fd, path = tempfile.mkstemp(".mid", "spiderweb-piece-")
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        opts = {"block": self.opts["block"]}
-        if self.engine == "kestrel":
-            opts.update(voices=self.opts["voices"], interpolation=self.opts["interpolation"],
-                        min_velocity=self.opts["min_velocity"])
-        piece = kestrel.Piece(self.loaded, path, self.engine, skip, f1 - f0, delete_midi=True, **opts)
-        try:
-            while True:
-                state = piece.wait(0.05)
-                if job.cancel.is_set():
-                    piece.cancel()
-                    return None
-                if state != kestrel.RUNNING:
-                    break
-                job.progress = piece.status()["progress"]
-            if state == kestrel.FAILED:
-                from files.synth import SynthError
-                raise SynthError("playback.kestrel_failed", err=piece.error() or "?")
-            if state != kestrel.DONE:
-                return None
-            out = piece.audio()
-        finally:
-            piece.close()
-        if out is not None and len(out) < f1 - f0 and f0 + len(out) >= song.last:  # (the ring died away)
-            job.end = f0 + len(out)
-        elif out is not None and len(out) < f1 - f0:  # (silence at the piece's end left out: put back)
-            out = np.concatenate([out, np.zeros((f1 - f0 - len(out), 2), np.float32)])
+        out, end = card_piece(song, self.engine, self.opts, self.fonts, self.card, f0, f1, job.cancel,
+                              lambda p: setattr(job, "progress", p))
+        job.end = end
         return out
 
     # ------------------------------------------------------------ playing / grey

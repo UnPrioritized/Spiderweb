@@ -94,6 +94,7 @@ class _Job:
         self.finished = False
         self.took, self.voices = 0.0, 0
         self.end = None  # the frame the ring after the last note died away at, if in this piece
+        self.card = False  # (made on the graphics card: no voice count)
 
 
 class Preview:
@@ -118,6 +119,8 @@ class Preview:
         self.changed = 0.0  # when the notes / settings last changed (the sound waits SETTLE after it)
         self.load = None  # the thread opening the soundfont (it happens in the background)
         self.loaded_at = 0.0  # when it finished (the green "loaded" shows for a few seconds)
+        self.mode = None  # (card_mode when the notes were last taken in: changed = everything made again)
+        self.card = None  # (engine, files.ahead_pieces.Song): made on the graphics card (R7), else None = BASSMIDI
 
     @property
     def cfg(self):
@@ -238,29 +241,36 @@ class Preview:
         shape = (id(sh), left_edge(sh), multi, cc_key(sh.get("hz"))) if sh is not None else None
         end = int(notes[:, 1].max()) + 1 if notes is not None and len(notes) else 0
         tempo = heard_tempo(self.app.tempo, bpm, ppq, end)  # (None: one tempo, the BPM box's)
-        if notes is self.notes and (ppq, bpm, tempo) == (self.ppq, self.bpm, self.tempo) and shape == self.shape:
+        mode = self.card_mode()
+        if notes is self.notes and (ppq, bpm, tempo) == (self.ppq, self.bpm, self.tempo) and shape == self.shape \
+                and mode == self.mode:
             return
-        old, same_time = self.ev, (ppq, bpm, tempo) == (self.ppq, self.bpm, self.tempo)
-        self.notes, self.ppq, self.bpm, self.shape, self.tempo = notes, ppq, bpm, shape, tempo
+        old, same_time = self.ev, (ppq, bpm, tempo) == (self.ppq, self.bpm, self.tempo) and mode == self.mode
+        self.notes, self.ppq, self.bpm, self.shape, self.tempo, self.mode = notes, ppq, bpm, shape, tempo, mode
         voiced = multi and sh is not None and own_channels(sh.get("hz")) and tracks is not None
         if voiced:  # (own channel per note: each voice on its own channel, port after port, with its own lines)
             place = np.array([p * 16 + c for p in range(STREAM_PORTS) for c in CHANNELS], np.int64)
             chans = place[np.asarray(tracks, np.int64) % len(place)]
-            cc = synth_cc([(t, s, a, b, int(place[v % len(place)])) for v, got in voice_events(sh, ppq, bpm).items()
-                           for t, s, a, b in got])
+            raw = [(t, s, a, b, int(place[v % len(place)])) for v, got in voice_events(sh, ppq, bpm).items()
+                   for t, s, a, b in got]
         else:
             # (a layer's notes clashing with another's: on another channel with Multi channel, as in the MIDI)
             chans = np.asarray(tracks) // CLASH if multi and tracks is not None and len(tracks) else None
             # (its CC lines on every channel its notes are on, as in the MIDI)
             used = (sorted({c + (c >= 9) for c in np.minimum(np.unique(chans), 14).tolist()}) if chans is not None
                     else [0])
-            cc = synth_cc([(t, s, a, b, c) for t, s, a, b in cc_events(sh, ppq, bpm) for c in used]) if sh else None
+            raw = [(t, s, a, b, c) for t, s, a, b in cc_events(sh, ppq, bpm) for c in used] if sh else []
+        cc = synth_cc(raw) if raw or voiced else None
         ev = events(notes, ppq, bpm, chans, cc, voiced, tempo) if notes is not None and len(notes) else None
         if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
-            self.ev, self.span, self.last = None, (0, 0), 0
+            self.ev, self.span, self.last, self.card = None, (0, 0), 0, None
             self.clear()
             return
         self.ev = ev
+        was = self.card and self.card[0]
+        self.card = self.card_song(mode, notes, chans, voiced, raw, ppq, bpm, tempo)
+        if (self.card and self.card[0]) != was:  # (Merlin <-> Kestrel by a CC7 / CC11 line: one engine's sound)
+            old = None
         ticks = ev["tick"][2:-1]
         self.last = int(self.frames(int(ticks[-1])))
         self.span = (int(self.frames(int(ticks[0]))), self.last)
@@ -281,21 +291,60 @@ class Preview:
         self.clear(self.frames(lo), self.frames(hi) + TAIL * RATE)
         self.set_end()
 
+    def card_mode(self):
+        """(R7, user 2026-11-02: no engine of its own) What makes the pieces: None = BASSMIDI as always; with the main
+        MIDI out on Rendered ahead and its engine on the graphics card: that engine with Rendered ahead's settings
+        (a CC7 / CC11 line still sends Merlin's to Kestrel, card_song)."""
+        from files.playback import AHEAD
+        if self.app.midi_device.get() != AHEAD:
+            return None
+        from files.render_ahead import engine_used
+        engine = engine_used(self.app.ahead_engine.get())
+        if engine == "bassmidi":
+            return None
+        return engine, tuple(sorted(self.app.ahead_opts.items())), self.app.kestrel_opts.get("card", "")
+
+    def card_song(self, mode, notes, chans, voiced, raw, ppq, bpm, tempo):
+        """(engine, Song) for the graphics card, the notes on the channels the BASSMIDI list has them on, or None."""
+        if mode is None:
+            return None
+        from files.ahead_pieces import Song
+        from files.ahead_play import merlin_gap
+        if chans is not None and not voiced:  # (as synth.events: channel 10 skipped, 15 the last)
+            c = np.minimum(np.asarray(chans, np.int64), 14)
+            chans = c + (c >= 9)
+        msgs = [(t, s | c & 15 | a << 8 | b << 16 | (c >> 4) << 24) for t, s, a, b, c in raw]
+        engine = mode[0]
+        if engine == "merlin" and merlin_gap(msgs, font_list(self.cfg)):
+            engine = "kestrel"
+        return engine, Song.on_channels(notes, chans, msgs, ppq, bpm, tempo)
+
     def set_end(self):
         """The sound ends where a piece found the ring died away, else TAIL after the last note (until it's made)."""
         self.span = (self.span[0], int(min([self.last + TAIL * RATE] + list(self.ends.values()))))
 
     # ------------------------------------------------------------ making the sound
 
-    def _work(self, job, ev, ppq):
+    def _work(self, job, ev, ppq, card=None):
         started = time.perf_counter()
         stats = {}
+        f0, n = int(job.i * CHUNK * RATE), int(CHUNK * RATE)
         try:
-            job.result = self.synth.render(ev, ppq, int(job.i * CHUNK * RATE), int(CHUNK * RATE),
-                                           self.cfg["voices"], self.cfg["nofx"], job.cancel,
-                                           lambda n: setattr(job, "done", n), stats)
+            if card is not None:  # (R7: the graphics card, with Rendered ahead's engine + settings)
+                from files.ahead_pieces import card_piece
+                engine, song = card
+                job.result, stats["end"] = card_piece(song, engine, self.app.ahead_opts, font_list(self.cfg),
+                                                      self.app.kestrel_opts.get("card", ""), f0, f0 + n, job.cancel,
+                                                      lambda p: setattr(job, "done", int(p * n)))
+                job.card = True
+            else:
+                job.result = self.synth.render(ev, ppq, f0, n, self.cfg["voices"], self.cfg["nofx"], job.cancel,
+                                               lambda n: setattr(job, "done", n), stats)
         except SynthError as e:
             job.error = str(e)
+        except Exception as e:  # (said like any piece's error; the traceback goes to the log)
+            errors.write_log(type(e), e, e.__traceback__, "Hz preview piece")
+            job.error = repr(e)
         job.took, job.voices, job.end = time.perf_counter() - started, stats.get("voices", 0), stats.get("end")
         job.finished = True
 
@@ -338,8 +387,8 @@ class Preview:
                     if job.end is not None:
                         self.ends[i] = job.end
                         self.set_end()
-                    if job.voices and i * CHUNK * RATE < self.last:  # (after the last note: only the ring, quick)
-                        self.took = (self.took + [job.took])[-2 * WORKERS:]
+                    if (job.voices or job.card) and i * CHUNK * RATE < self.last:  # (after the last note: only the
+                        self.took = (self.took + [job.took])[-2 * WORKERS:]  # ring, quick)
                         self.voices_used = max(self.voices_used, job.voices)
         want = self.wanted()
         keep = set(want)
@@ -355,12 +404,13 @@ class Preview:
         # ends, or a slider dragged over a big soundfont piled up threads)
         self.threads = [t for t in self.threads if t.is_alive()]
         if self.ev is not None and not self.loading() and (self.playing() or self.settled()):
+            most = 1 if self.card is not None else WORKERS  # (one graphics card: one piece at a time)
             for i in want:
-                if len(self.threads) >= WORKERS:
+                if len(self.threads) >= most:
                     break
                 if i not in self.chunks and i not in self.jobs:
                     job = self.jobs[i] = _Job(i, self.ver.get(i, 0))
-                    t = threading.Thread(target=self._work, args=(job, self.ev, self.ppq), daemon=True)
+                    t = threading.Thread(target=self._work, args=(job, self.ev, self.ppq, self.card), daemon=True)
                     t.start()
                     self.threads.append(t)
         if self.player is not None:

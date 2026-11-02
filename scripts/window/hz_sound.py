@@ -177,7 +177,8 @@ class HzSound:
                 c.tag_lower("preview", "frame")
         says, colour = "", look.INFO
         if on:
-            vo = tr("hz.preview_voices", used=f"{p.voices_used:,}", limit=f"{self.app.hz_preview['voices']:,}")
+            vo = tr("hz.preview_voices", used=f"{p.voices_used:,}", limit=f"{self.app.hz_preview['voices']:,}") \
+                if p.card is None else tr("ra.engine_" + p.card[0])  # (R7: Rendered ahead's graphics card engine)
             if p.loading():
                 says, colour = tr("hz.preview_loading"), ORANGE
             elif p.just_loaded():
