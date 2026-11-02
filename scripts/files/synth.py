@@ -638,9 +638,9 @@ class Player:
     array = the end. Limiter + volume (0..1) on the way out. position() = the frame of pull's sound heard now.
     buffer = seconds of sound BASS keeps ready (None: its own half second; the live keys want a short one)."""
 
-    def __init__(self, synth, pull, volume=0.8, buffer=None):
+    def __init__(self, synth, pull, volume=0.8, buffer=None, limiter=None):
         self.synth, self.pull, self.volume = synth, pull, volume
-        self.limiter = Limiter()
+        self.limiter = limiter or Limiter()  # (anything with process(x) and DELAY: Rendered ahead's own)
         self.heard = deque()  # (stream frame, song frame or None = silence, count): what was handed to BASS
         self.written = 0
         self.fed = 0  # song frames handed over (the limiter holds the last Limiter.DELAY of them)
@@ -679,7 +679,7 @@ class Player:
             m += len(got)
         if m:
             out[:m] = self.limiter.process(np.concatenate(parts)) * self.volume
-            self.heard.append((self.written, self.fed - Limiter.DELAY, m))
+            self.heard.append((self.written, self.fed - self.limiter.DELAY, m))
             self.written += m
             self.fed += m
         if end:

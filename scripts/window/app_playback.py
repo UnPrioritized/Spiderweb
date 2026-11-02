@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox
 from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
+from files.ahead_play import FOLLOW_S
 from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, cc_list
 from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
@@ -107,7 +108,7 @@ class Playback:
             messagebox.showerror(tr("app.spiderweb_2"), str(e))
             return
         dev = self.midi_device.get()
-        if dev in (BUILTIN, KESTREL) and not self.hz_preview["font"] and not self.pick_soundfont():
+        if dev in (BUILTIN, KESTREL, AHEAD) and not self.hz_preview["font"] and not self.pick_soundfont():
             return
         self.fresh_builtin()
         made = self._kestrel_made
@@ -157,8 +158,13 @@ class Playback:
         # (the last play's count of notes left out forgotten: the new play's starts at 0, read as "left out" it showed
         # a red Overloaded for ~5 s, hunt 2026-10-29); the steady text's hold too
         self._thin_seen, self._easy_since, self._ov_last = (0, 0.0), None, float("-inf")
-        self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports,
-                          heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
+        tempo = heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard())
+        if self.out.name == AHEAD:  # (the sound made ahead: files/ahead_play.py; the player runs the line)
+            err = self.ahead_play.start(rendered, ccs, ports, ppq, bpm, tempo, self.playhead)
+            if err:
+                messagebox.showerror(tr("app.spiderweb_2"), err, parent=self)
+                return
+        self.player.start(rendered, ppq, bpm, self.playhead, end, self.picture_use10, ccs, ports, tempo)
         if self.out.name == BUILTIN:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo and not self.out.tuned:
@@ -320,8 +326,10 @@ class Playback:
         # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
         rendered, ccs, ports = self.play_parts(ppq, bpm)
         end = self.play_end(ppq, beats, self.player.position())
-        self.player.update(rendered, bpm, end, self.picture_use10, ccs, ports,
-                           heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard()))
+        tempo = heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard())
+        self.player.update(rendered, bpm, end, self.picture_use10, ccs, ports, tempo)
+        if self.out.name == AHEAD:
+            self.ahead_play.changed(rendered, ccs, ports, ppq, bpm, tempo)
 
     def play_tempo(self):
         """The tempo line changed while playing: the player goes on at the new speed (the notes stay)."""
@@ -335,6 +343,8 @@ class Playback:
         if ppq != self.player.ppq:
             return self.play_changed()
         end = int(self.player.stop_beat * ppq) + 1
+        if self.out.name == AHEAD:  # (the sound is made at the new tempo: made again)
+            return self.play_changed()
         self.player.set_tempo(bpm, heard_tempo(self.tempo, bpm, ppq, end, self.file_heard()))
 
     def play_parts(self, ppq, bpm):
@@ -356,7 +366,7 @@ class Playback:
         heard = self.track_list.unmuted(self.rendered)  # (tracks muted in the track list: not played)
         if not per_shape and not any(pasted.values()):
             return heard, {}, 0
-        ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO) else 0
+        ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO, AHEAD) else 0
         rendered, msgs = cc_apart(heard, per_shape, self.picture_use10, ports) if per_shape else (heard, {})
         for s, ms in pasted.items():
             if ms:
@@ -395,6 +405,19 @@ class Playback:
                 self.out.close()  # (the next Play opens it again: works again once it's back)
                 messagebox.showerror(tr("app.spiderweb_2"), err, parent=self)
                 return
+        if self.out.name == AHEAD and self.ahead_play.playing():
+            err = self.ahead_play.tick()
+            if err:  # (a piece couldn't be made: stopped and said, never playing on silent)
+                self.stop_play()
+                messagebox.showerror(tr("app.spiderweb_2"), err, parent=self)
+                return
+            sec = self.ahead_play.heard_sec()
+            pmap = self.player.map
+            if pmap is not None:
+                # (the line = the heard sound; silence while waiting = the line stays where it is)
+                now_sec = pmap.sec(self.playhead * self.player.ppq) if sec is None else sec
+                if sec is None or abs(pmap.sec(self.playhead * self.player.ppq) - sec) > FOLLOW_S:
+                    self.player.follow(now_sec)
         self.pace_play(now)
         self.roll.show_playhead()
         self.show_overload()
@@ -511,6 +534,7 @@ class Playback:
             self.player.stop()
             self.roll.show_playhead()
             self.schedule_autosave()
+        self.ahead_play.stop()  # (fades out; what's made is kept for the next Play)
         self.stop_loaded()
         self.piano_back()
         self.overload.stop()
@@ -632,12 +656,15 @@ class Playback:
         self._device_was = self.midi_device.get()
         self.stop_play()
         self.out.close()
+        if self._device_was != AHEAD:  # (Rendered ahead's made sound: let go, memory)
+            self.ahead_play.drop()
         if self._device_was != KESTREL:  # (only Kestrel uses it)
             self.drop_read_ahead()
             from files import kestrel
             if self._kestrel_job is not None:  # (a start on its way: its window closes at once, it gives up)
                 self._kestrel_job["close"]()
-            kestrel.let_go()  # (its soundfonts kept loaded: freed, user 2026-10-28)
+            if self._device_was != AHEAD:  # (Rendered ahead's pieces use the same soundfonts on the card)
+                kestrel.let_go()  # (its soundfonts kept loaded: freed, user 2026-10-28)
         self.sync_builtin()
         self.edo_warn()
         if self.hz_window:

@@ -546,6 +546,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.out = MidiOut(self.make_live, self.make_kestrel)
         self.font_failed = None  # (make_live: the soundfont that couldn't be read)
         self.player = Player(self.out)
+        from files.ahead_play import AheadPlay
+        self.ahead_play = AheadPlay(self)  # (Rendered ahead's sound: files/ahead_play.py)
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
         self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)

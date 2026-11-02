@@ -220,6 +220,7 @@ class _Job:
         self.result = self.error = None  # (audio float32 (frames, 2): count blocks or fewer at the song's end)
         self.end = None  # the song frame the sound died away at, when it did in this piece
         self.took = 0.0
+        self.lowered = False  # (made with a lowered voice limit)
         self.finished = False
 
 
@@ -242,6 +243,8 @@ class Maker:
         self.loaded = None  # (kestrel.Loaded, read in a piece's thread the first time)
         self._lock = threading.Lock()
         self._free = (0.0, None)  # (when free memory was last asked, the answer)
+        self.lowered = False  # (Lower it by itself: new pieces made with a lowered voice limit, ahead_play)
+        self.low = set()  # blocks made lowered (R5: made again at the full limit once calm)
 
     def held_bytes(self):
         return sum(b.nbytes for b in list(self.blocks.values()))
@@ -340,6 +343,7 @@ class Maker:
                     break
                 run.append(j)
             job = _Job(i, len(run), [self.ver.get(j, 0) for j in run])
+            job.lowered = self.lowered
             with self._lock:
                 self.jobs.append(job)
             t = threading.Thread(target=self._work, args=(job, self.song), daemon=True)
@@ -370,6 +374,7 @@ class Maker:
                         part = np.concatenate([part, np.zeros((BLOCK - len(part), 2), np.float32)])
                     # (its own copy: a block kept must not hold the whole piece's buffer)
                     self.blocks[i] = np.ascontiguousarray(part).copy() if job.count > 1 else part
+                    (self.low.add if job.lowered else self.low.discard)(i)
                 if job.end is not None:
                     self.ends[job.first] = job.end
                 self.took = (self.took + [(job.took, job.count)])[-8:]

@@ -231,8 +231,10 @@ class MidiOut:
             return None
         if name == MAESTRO:
             return self._open_maestro()
-        if name == AHEAD:  # (its player comes with Rendered ahead's step R3: PLAN.md)
-            return tr("ra.not_yet")
+        if name == AHEAD:  # (the usual player runs the play line; files/ahead_play.py makes + plays the sound)
+            from files.ahead_play import Sink
+            self.handle, self.name = Sink(), name
+            return None
         if name == KDMAPI:
             from files.synth import SynthError, load_dlls
             try:
@@ -290,7 +292,7 @@ class MidiOut:
     def send(self, msg):
         h = self.handle
         if h:
-            if self.name in (BUILTIN, KESTREL, MAESTRO):
+            if self.name in (BUILTIN, KESTREL, MAESTRO, AHEAD):
                 h.send(msg)
             elif self.name == KDMAPI:
                 h.SendDirectData(msg)
@@ -307,7 +309,7 @@ class MidiOut:
 
     def close(self):
         if self.handle:
-            if self.name in (BUILTIN, KESTREL, MAESTRO):
+            if self.name in (BUILTIN, KESTREL, MAESTRO, AHEAD):
                 self.handle.close()
             elif self.name == KDMAPI:
                 self.handle.ResetKDMAPIStream()
@@ -582,6 +584,12 @@ class Player:
                 if k is None or not self._kestrel_retime(k, clock, new):
                     self._clock = (now, new.sec(old.tick(sec + now - t)), new)
         self.map = new
+
+    def follow(self, sec):
+        """(Rendered ahead) The play line to song second sec now: it goes on from there (the heard sound leads)."""
+        with self._clock_lock:
+            if self._clock is not None and self.map is not None:
+                self._clock = (time.perf_counter(), sec, self.map)
 
     def kestrel_wait(self, k):
         """Kestrel fell behind (handed out silence while it caught up, so all later sound comes later): the play line
