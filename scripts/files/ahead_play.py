@@ -114,7 +114,7 @@ class AheadPlay:
         from files.render_ahead import engine_used
         app = self.app
         opts = {k: v for k, v in app.ahead_opts.items() if k not in ("lower", "limiter", "ceiling_db")}
-        return (engine_used(app.ahead_engine), tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)),
+        return (engine_used(app.ahead_engine.get()),tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)),
                 app.kestrel_opts.get("card", ""))
 
     def _ensure_maker(self):
@@ -162,9 +162,8 @@ class AheadPlay:
         err = self._ensure_maker()
         if err:
             return err
-        song = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo)
-        if self.maker.song is None or not same_song(self.maker.song, song):
-            self.maker.set_song(song)
+        self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo))
+        song = self.maker.song
         try:
             if self.app.synth is None:
                 self.app.synth = Synth()
@@ -188,12 +187,12 @@ class AheadPlay:
         return None
 
     def changed(self, rendered, ccs, ports, ppq, bpm, tempo):
-        """The notes / tempo changed while playing (R5 makes only the changed stretch again)."""
+        """The notes / tempo changed while playing: only the changed stretch (+ its ring) turns grey and is made
+        again (R5); playing goes on."""
         if self.maker is None:
             return
-        song = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo)
-        if self.maker.song is None or not same_song(self.maker.song, song):
-            self.maker.set_song(song)
+        if self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo)):
+            self.app.roll.draw_ahead_grey()
 
     def playing(self):
         return self.audio is not None
@@ -250,6 +249,14 @@ class AheadPlay:
         elif made > RISE_SHARE * ahead and self.factor < 1.0 and now - self._rose > RISE_EVERY:
             self._set_factor(min(1.0, self.factor / LOWER_STEP))
             self._rose = now
+        elif made > RISE_SHARE * ahead and self.factor == 1.0 and m.low and now - self._rose > RISE_EVERY:
+            # (R5: calm at the full limit: blocks made lowered and still far enough ahead are made again at the
+            # full limit; the ones nearer than the lowering mark stay, so this can't lower it again by itself)
+            near = self.play_at + int((max(LOW_LEAST, LOW_SHARE * ahead) + BLOCK / RATE) * RATE)
+            for i in sorted(m.low):
+                if i * BLOCK >= near:
+                    m.clear(i * BLOCK, (i + 1) * BLOCK)
+            self._rose = now
 
     def _set_factor(self, f):
         m = self.maker
@@ -286,10 +293,3 @@ class AheadPlay:
             self.audio = None
         if self.factor != 1.0 and self.maker is not None:
             self._set_factor(1.0)
-
-
-def same_song(a, b):
-    """True when two Songs would sound the same (notes, CC lines, tempo)."""
-    if a.ppq != b.ppq or a.tempo != b.tempo or a.ccs != b.ccs or len(a) != len(b):
-        return False
-    return all(np.array_equal(getattr(a, k), getattr(b, k)) for k in ("start", "end", "key", "vel", "chan", "port"))

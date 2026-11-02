@@ -210,6 +210,56 @@ class Song:
         return self._bass
 
 
+_FIELDS = ("start", "end", "key", "vel", "chan", "port")
+
+
+def _ends_tick(song):
+    return int(song.end.max()) if len(song) else 0
+
+
+def same_tempo(a, b):
+    """True when two Songs' tempo is the same up to where either one's notes end (the heard tempo list is cut at the
+    song's end, which moves with edits: points past both songs' notes don't count)."""
+    if a.tempo == b.tempo:
+        return True
+    far = max(_ends_tick(a), _ends_tick(b))
+    return [p for p in a.tempo if p[0] <= far] == [p for p in b.tempo if p[0] <= far]
+
+
+def changed_ticks(a, b):
+    """(first tick, last tick) of what differs between two Songs with the same tempo (notes in start order: from
+    the first note that differs to the last, both songs' notes there, their ends included; a changed CC line
+    reaches to the song's end). None = the same sound."""
+    lo = hi = None
+    na, nb = len(a), len(b)
+    n = min(na, nb)
+    if na != nb or any(not np.array_equal(getattr(a, k), getattr(b, k)) for k in _FIELDS):
+        diff = np.zeros(n, bool)
+        for k in _FIELDS:
+            diff |= getattr(a, k)[:n] != getattr(b, k)[:n]
+        first = int(np.argmax(diff)) if diff.any() else n
+        rdiff = np.zeros(n, bool)
+        for k in _FIELDS:
+            rdiff |= getattr(a, k)[na - n:][::-1] != getattr(b, k)[nb - n:][::-1]
+        same_end = int(np.argmax(rdiff)) if rdiff.any() else n
+        same_end = min(same_end, n - first)
+        for s in (a, b):
+            part = slice(first, len(s) - same_end)
+            if part.stop > part.start:
+                t0, t1 = int(s.start[part].min()), int(s.end[part].max())
+                lo = t0 if lo is None else min(lo, t0)
+                hi = t1 if hi is None else max(hi, t1)
+    if a.ccs != b.ccs:
+        k = 0
+        while k < min(len(a.ccs), len(b.ccs)) and a.ccs[k] == b.ccs[k]:
+            k += 1
+        t0 = min(t for t in ([a.ccs[k][0]] if k < len(a.ccs) else []) + ([b.ccs[k][0]] if k < len(b.ccs) else []))
+        t1 = max(_ends_tick(a), _ends_tick(b), t0)
+        lo = t0 if lo is None else min(lo, t0)
+        hi = t1 if hi is None else max(hi, t1)
+    return None if lo is None else (lo, hi)
+
+
 class _Job:
     """One piece being made: blocks first .. first + count - 1."""
 
@@ -269,6 +319,25 @@ class Maker:
         self.clear()
         self.span = (song.first, song.last + int(TAIL * RATE)) if song is not None and len(song) else (0, 0)
 
+    def update_song(self, song):
+        """(R5) The song changed: only the stretch that changed (+ its ring, TAIL) is thrown away and made again;
+        another PPQ / tempo = everything. Returns True when anything was thrown away."""
+        old = self.song
+        if old is None or song is None or old.ppq != song.ppq or not same_tempo(old, song):
+            self.set_song(song)
+            return True
+        span = changed_ticks(old, song)
+        if span is None:
+            self.song = song  # (the same sound: the newer copy kept)
+            return False
+        self.song = song
+        self.span = (song.first, song.last + int(TAIL * RATE)) if len(song) else (0, 0)
+        if not len(song):
+            self.clear()
+            return True
+        self.clear(song.frame(span[0]), song.frame(span[1]) + int(TAIL * RATE))
+        return True
+
     def clear(self, lo=None, hi=None):
         """Throws away the blocks between frames lo and hi (all without them) and stops making them."""
         with self._lock:
@@ -288,10 +357,13 @@ class Maker:
         self.ver[i] = self.ver.get(i, 0) + 1
         self.blocks.pop(i, None)
         self.ends.pop(i, None)
+        self.low.discard(i)
 
     def _set_end(self):
-        """The sound ends where a piece found the ring died away, else TAIL after the last note."""
-        self.span = (self.span[0], int(min([self.song.last + int(TAIL * RATE)] + list(self.ends.values()))))
+        """The sound ends where a piece found the ring died away, else TAIL after the last note. (An end found
+        before the last note = an older song's, from before notes were added later: not used.)"""
+        last = self.song.last
+        self.span = (self.span[0], int(min([last + int(TAIL * RATE)] + [e for e in self.ends.values() if e >= last])))
 
     # ------------------------------------------------------------ what to make
 
