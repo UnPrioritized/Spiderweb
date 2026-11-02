@@ -420,7 +420,10 @@ def piece_velocity(new, old, new_span, old_span, lead=False):
     new.pop("vel_env", None)
     new["vel0"], new["vel1"] = int(round(va)), int(round(vb))
     # (points ON its start too: a jump right at the cut keeps its value before it)
-    before = [[(u - ua) / (ub - ua), float(v)] for u, v in env if u <= ua][-LEAD_MOST:] if lead and ua > 1e-12 else []
+    # (a first piece passes on old's own line from before old's start too)
+    before = [[(u - ua) / (ub - ua), float(v)] for u, v in env if u <= ua][-LEAD_MOST:] if lead else []
+    if not any(u < -1e-12 for u, _ in before):
+        before = []
     if inner or before:
         new["vel_env"] = before + [[0.0, va]] + inner + [[1.0, vb]]
     elif abs(va - round(va)) > 1e-9 or abs(vb - round(vb)) > 1e-9:

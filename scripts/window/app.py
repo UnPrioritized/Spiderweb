@@ -349,10 +349,17 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     backs = [recolour_back(s, notes_tracks, dict(s_as, _rounds=True) if r else s_as, n, t)
              if mode == "auto" and not o and t is not None and is_recoloured(s) else colours_back(s)
              for s, s_as, r, o, (n, t) in zip(shapes, shapes_as, took, ordered, got)]
-    rendered, slots = render([n for n, _ in got], mode, split, [t for _, t in got],
+    # (a one-colour piece as one track too, so its whole's pieces share it: a tiny Lasso piece's note on its
+    # neighbour's pushed the pieces onto another row with keep colours, partial sweep 11-02)
+    rendered, slots = render([n for n, _ in got], mode, split,
+                             [np.zeros(len(n), np.int64) if t is None and mode == "auto" and len(n) and cut_group(sh)
+                              else t for (n, t), sh in zip(got, shapes)],
                              [tracks_apart(sh) or is_recoloured(sh) for sh in shapes],  # (Split: from one colour)
                              pins, ("order" if order else "all") if all16 else use10, teams,
-                             [sh.get("paste") if "notes" in sh else None for sh in shapes],
+                             # (a cut shape's pieces like a paste's: one channel per colour across them, so a piece
+                             # without the first colours keeps the whole's channels, partial sweep 11-02)
+                             [sh.get("paste") if "notes" in sh else ("cut", cut_group(sh)) if cut_group(sh) else None
+                              for sh in shapes],
                              # (a Domino paste keeps its own overlaps outside Single channel: user 2026-10-30)
                              [is_sustained(sh) or sh.get("held") is True or mode == "auto" and pasted_notes(sh)
                               for sh in shapes],

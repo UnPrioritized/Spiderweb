@@ -418,19 +418,20 @@ def piece_notes(sh, ppq, keys, make):
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
         frac = np.clip((notes[:, 0] - t.min()) / max(t.max() - t.min(), 1e-9), 0, 1)
         made = notes[:, 3]
-        if src.get("fx") or src.get("glue"):  # (pages: their notes as made with the velocities it had when cut)
-            was_src = with_whole_velocity(src, sh)
-            key = (json.dumps(was_src, sort_keys=True), ppq, keys)
-            if key not in _wholes:
-                if len(_wholes) > 8:
-                    _wholes.clear()
-                _wholes[key] = make(was_src, ppq, keys)
-            was = knife_cut(*_wholes[key], halves, moved_by(sh), ppq)[0]
-            if sh["cut"].get("mould"):
-                from notes.mould import mould_cut
-                was = mould_cut(was, None, sh["cut"]["mould"], moved_by(sh), ppq)[0]
-            if was.shape == notes.shape and (was[:, :3] == notes[:, :3]).all():
-                made = was[:, 3]
+        # (its notes as made with the velocities it had when cut, the whole's (with pages: as they left them); src
+        # holds the piece's own line, stretched over the whole's time: partial sweep 11-02)
+        was_src = with_whole_velocity(src, sh)
+        key = (json.dumps(was_src, sort_keys=True), ppq, keys)
+        if key not in _wholes:
+            if len(_wholes) > 8:
+                _wholes.clear()
+            _wholes[key] = make(was_src, ppq, keys)
+        was = knife_cut(*_wholes[key], halves, moved_by(sh), ppq)[0]
+        if sh["cut"].get("mould"):
+            from notes.mould import mould_cut
+            was = mould_cut(was, None, sh["cut"]["mould"], moved_by(sh), ppq)[0]
+        if was.shape == notes.shape and (was[:, :3] == notes[:, :3]).all():
+            made = was[:, 3]
         notes[:, 3] = own_velocities(sh, made, frac)
     return notes, tracks
 
@@ -665,6 +666,14 @@ def in_part(u, part):
     return (u >= a) & (u < b) if b is not None else u >= a
 
 
+def beat_on(a, r):
+    """The beat at spot r (point index + share) along path a."""
+    if len(a) < 2:
+        return a[0][0] if len(a) else 0.0
+    i = max(0, min(int(r), len(a) - 2))
+    return a[i][0] + (a[i + 1][0] - a[i][0]) * (r - i)
+
+
 def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
     """A line piece's notes (the whole's, before its part is kept): the note sounding at each of the piece's cuts is
     cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
@@ -713,7 +722,18 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
             if tracks is not None:
                 tracks = np.append(tracks, tracks[idx])
             continue
-        hit = (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
+        near = np.abs(raw[:, 2] - key) <= 1
+        late = np.flatnonzero((spots < c) & (raw[:, 0] == t) & (raw[:, 1] > t) & near)
+        if len(late):  # (starting under half a tick before the cut, rounded onto it: nothing of it is before the cut,
+            # it goes to the piece after whole, partial sweep 11-02: it stayed with the piece before, uncut)
+            ks = (spots[late] // BIG).astype(np.int64)
+            rs = spots[late] - ks * BIG
+            exact = np.array([float(beat_on(paths[kk], rr)) for kk, rr in zip(ks.tolist(), rs.tolist())]) * ppq
+            late = late[exact < t - 1e-9]  # (an upright part: its keys start right on it, they stay)
+            if len(late):
+                spots = spots.copy()
+                spots[late] = c
+        hit = (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & near
         if not hit.any():
             continue
         j = int(np.flatnonzero(hit)[np.argmax(spots[hit])])  # (the one started last along the path)

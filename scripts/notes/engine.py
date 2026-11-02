@@ -863,7 +863,10 @@ def fx_notes(sh, ppq, keys, get):
         return (extended(notes, sh["extend"], ppq), tracks) if is_extended(sh) else (notes, tracks)
     if "sustain" in sh:  # (held on last, after everything else: sustain.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
-        return held(notes, tracks, sh["sustain"], ppq) if is_sustained(sh) else (notes, tracks)
+        if not is_sustained(sh):
+            return notes, tracks
+        got = held_piece(sh, notes, tracks, ppq, get)
+        return got if got is not None else held(notes, tracks, sh["sustain"], ppq)
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
         return kind_notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")
@@ -903,6 +906,91 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
     return with_glue(*kind_notes_tracks(sh, ppq, keys), sh, ppq)
+
+
+_held_wholes = {}  # id(whole's notes) -> (them, (sustain, ppq), held(...)): held_piece's
+
+
+def held_piece(sh, notes, tracks, ppq, get):
+    """A sliced piece of a sustained line (notes, tracks: its own, before Sustain): held as the WHOLE shape holds them,
+    cut at the piece's own cuts, and the held ends of earlier notes crossing its start starting again there (partial
+    sweep 11-02: held per piece, a note held across the cut ended at its own end). None: not such a piece."""
+    from notes.sliced import BIG, beat_on, paths_of, velocity
+    got = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
+    if got is None or not len(notes):
+        return None
+    src, part, same_vel = got
+    if not isinstance(part[0], (int, float)) or src.get("glue") or src.get("fx"):
+        return None
+    whole = dict({k: v for k, v in src.items() if k != "sustain"}, **velocity(sh["cut"]["whole"]))
+    w0, wt0 = get(whole)
+    if not len(w0):
+        return None
+    hold = json.dumps(sh["sustain"], sort_keys=True)
+    was = _held_wholes.get(id(w0))  # (the whole held once for all its pieces, not again per piece)
+    if was is None or was[0] is not w0 or was[1] != (hold, ppq):
+        if len(_held_wholes) > 16:
+            _held_wholes.clear()
+        was = _held_wholes[id(w0)] = (w0, (hold, ppq), held(w0, wt0, sh["sustain"], ppq))
+    w1, wt1 = was[2]
+    paths = paths_of(src)
+
+    def tick(c):
+        k = int(c // BIG)
+        if k >= len(paths) or len(paths[k]) < 1:
+            return None
+        return int(round(float(beat_on(paths[k], c - k * BIG)) * ppq))
+    tl = tick(part[0]) if part[0] else None
+    tr = tick(part[1]) if part[1] is not None else None
+    lo, hi = (-1 << 62) if tl is None else tl, (1 << 62) if tr is None else tr
+    w1 = np.asarray(w1, np.int64)
+    wt1 = np.zeros(len(w1), np.int64) if wt1 is None else np.asarray(wt1, np.int64)
+    ends = {}
+    for s, e, k in w1[:, :3].tolist():
+        ends[s, k] = max(e, ends.get((s, k), e))
+    starts0 = {(s, k) for s, k in w0[:, [0, 2]].tolist()}
+    notes = np.asarray(notes, np.int64).copy()
+    mine = {(s, k): v for s, k, v in notes[:, [0, 2, 3]].tolist()}
+    env = velocity_env(sh)
+    span = np.concatenate(cached_arrays(sh))[:, 0] * ppq
+    t_lo, t_hi = float(span.min()), float(span.max())
+
+    def vel_of(k, s):  # (a note going on from an earlier one: that one's velocity, as this piece reads it)
+        on = w0[(w0[:, 2] == k) & (w0[:, 0] <= s)]
+        if not len(on):
+            return None
+        s0 = int(on[:, 0].max())
+        if (s0, k) in mine:
+            return mine[s0, k]
+        if same_vel:
+            return None
+        return int(env_velocities(env, np.array([s0]), t_lo, t_hi, min(0.0, float(env[0][0])))[0])
+    for i, (s, e, k) in enumerate(notes[:, :3].tolist()):
+        if (s, k) in ends:
+            e2 = ends[s, k]
+        else:  # (the second half of a note cut at the piece's start: the whole's note held over it)
+            over = w1[(w1[:, 2] == k) & (w1[:, 0] < s) & (w1[:, 1] > s)]
+            e2 = int(over[:, 1].max()) if len(over) else e
+        notes[i, 1] = max(min(e2, hi), s + 1) if e2 > s else e
+    extra = []
+    own_at = {k for s, k in mine if s == tl}
+    for j, (s, e, k, v) in enumerate(w1[:, :4].tolist()):
+        if s < lo < e and k not in own_at:  # (held over the cut from the piece before)
+            row = [lo, min(e, hi), k, vel_of(k, s) or v]
+        elif lo <= s < hi and (s, k) not in starts0 and (s, k) not in mine:  # (starting on a Sustain stop)
+            row = [s, min(e, hi), k, vel_of(k, s) or v]
+        else:
+            continue
+        if row[1] > row[0]:
+            extra.append(row + [int(wt1[j])])
+    if extra:
+        add = np.asarray(extra, np.int64)
+        notes = np.concatenate([notes[:, :4], add[:, :4]])
+        tracks = np.concatenate([np.zeros(len(notes) - len(add), np.int64) if tracks is None else
+                                 np.asarray(tracks, np.int64), add[:, 4]])
+        got = unique_rows(np.column_stack([notes, tracks]))
+        return got[:, :4], got[:, 4]
+    return notes, tracks
 
 
 def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
