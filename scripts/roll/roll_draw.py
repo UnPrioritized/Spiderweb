@@ -1105,10 +1105,11 @@ class RollDrawing:
 
     def draw_playhead(self, keep=False):
         """keep: left as it is when it's already there (redraw with the keyboard + ruler kept)."""
+        self.draw_ahead_grey()
         x = round(self.t2x(self.app.playhead))
-        if keep and self._playhead_x == x and self.find_withtag("playhead"):
+        if keep and self._playhead_x == x and self.find_withtag("playhead&&!ahead"):
             return
-        self.delete("playhead")
+        self.delete("playhead&&!ahead")
         self._playhead_x = x
         w, h = self.winfo_width(), self.winfo_height()
         if self.kb_w <= x <= w:
@@ -1120,6 +1121,30 @@ class RollDrawing:
         if x is not None and self.kb_w <= x <= w:  # right-drag listening: a line of its own, no arrow (the play
             self.create_line(x, self.ruler_h, x, h, fill=look.PLAY_LINE,  # line stays put; user)
                              width=max(1, round(self.scale)), tags="playhead")
+
+    def draw_ahead_grey(self):
+        """Rendered ahead (PLAN R4): a REALLY faint grey (user: must not disturb the piano roll; fainter than the Hz
+        preview's) over the part of the song not made yet, while playing. Tagged "playhead" too, so a redraw keeps
+        it like the play line; the canvas is only changed when the grey moved by a pixel."""
+        ahead = getattr(self.app, "ahead_play", None)
+        w, h = self.winfo_width(), self.winfo_height()
+        spans = ()
+        if ahead is not None and self.sx is not None and w > self.kb_w:
+            spans = tuple((max(a, self.kb_w), min(b, w)) for a, b in
+                          ((round(self.t2x(a)), round(self.t2x(b)))
+                           for a, b in ahead.grey_beats(self.x2t(self.kb_w), self.x2t(w))) if b > a)
+            spans = tuple((a, b) for a, b in spans if b > a)
+        key = (spans, self.ruler_h, h)
+        had = self.find_withtag("ahead")
+        if key == getattr(self, "_ahead_key", None) and (bool(had) or not spans):
+            return
+        self._ahead_key = key
+        self.delete("ahead")
+        for a, b in spans:
+            self.create_rectangle(a, self.ruler_h, b, h, fill=look.AHEAD_UNMADE, outline="", stipple="gray12",
+                                  tags=("playhead", "ahead"))
+        if spans and self.find_withtag("playhead&&!ahead"):  # (under the play line)
+            self.tag_lower("ahead", "playhead&&!ahead")
 
     def show_playhead(self, start=False):
         """Move the play line; while playing, turn the page when it gets near the right edge

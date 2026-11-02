@@ -262,6 +262,17 @@ class AheadPlay:
         m.opts[key] = max(1, int(full * f))
         m.lowered = f < 1.0
 
+    def grey_beats(self, b0, b1):
+        """(R4) [(from, to)] beats between b0 and b1 not made yet, while playing (stopped: none; nothing is made
+        then, a whole song in grey would only be in the way)."""
+        m = self.maker
+        song = None if m is None else m.song
+        if self.audio is None or song is None or not len(song) or b1 <= b0:
+            return []
+        ppq = song.ppq
+        f0, f1 = song.frame(max(0, int(b0 * ppq))), song.frame(max(0, int(math.ceil(b1 * ppq))))
+        return [(song.map.tick(a / RATE) / ppq, song.map.tick(b / RATE) / ppq) for a, b in m.grey(f0, f1)]
+
     def heard_sec(self):
         """Song seconds heard right now (None: silence while waiting for the first / next block)."""
         if self.audio is None:
