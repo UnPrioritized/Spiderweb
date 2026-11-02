@@ -1498,7 +1498,7 @@
  "panel_custom.inside": "Inside",
  "panel_custom.pasted_notes": "{value:,} pasted notes. ",
  "panel_custom.pasted_notes_one": "1 pasted note. ",
- "panel_custom.they_keep_their_own_velocities_until": "They keep their own velocities until you change the velocity here or in the velocity pane. ",
+ "panel_custom.they_keep_their_own_velocities_until": "They keep their own velocities until you change the velocity here. The velocity pane changes only the notes you draw over. ",
  "panel_custom.drag_a_corner_or_side_to": "Drag a corner or side to stretch them, just outside a corner to turn them, just outside a side's middle to skew them.",
  "panel_custom.the_outline_has_a_gap_it": "The outline has a gap: it's filled as if a straight line closed it (the dashed line).",
  "panel_custom.the_outline_has_gaps_each_is": "The outline has {gaps} gaps: each is closed with a straight line (the dashed lines).",

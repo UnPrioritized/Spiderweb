@@ -12,7 +12,9 @@ import numpy as np
 
 from files.lang import tr
 from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
+from notes.custom import pack_notes, unpack_notes
 from notes.fx import with_velocity
+from notes.gateflip import is_pasted_flipped, mirrored_runs
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
@@ -40,6 +42,34 @@ def time_span(sh, ppq):
         return got[0] / ppq, got[1] / ppq
     bs = [b for b, _ in cached_path(sh)]
     return min(bs), max(bs)
+
+
+def own_repainted(sh, text, drawn, ppq):
+    """Packed notes text (custom.pack_notes) of a shape keeping its notes' own velocities (pasted / Extract: sh
+    ["own_vel"]) after velocities drawn ([[beat, v]]): only the notes starting under the drawn stretch change, the
+    others keep theirs. text = the notes to start from. Returns text itself when no note changed."""
+    rows = unpack_notes(text)
+    if not len(rows) or not drawn:
+        return text
+    (b0, p0), (b1, _), (b2, _) = sh["pts"]
+    t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
+    v = (rows[:, 2] + 0.5) / k_all
+    a, b = ((b0 + (rows[:, c] / t_all) * (b1 - b0) + v * (b2 - b0)) * ppq for c in (0, 1))
+    start, end = np.rint(np.minimum(a, b)), np.rint(np.maximum(a, b))
+    if is_pasted_flipped(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
+        base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], np.arange(len(rows))]).astype(np.int64)
+        start = mirrored_runs(base, None, True)[0][:, 0].astype(float)
+    beat = start / ppq
+    lo, hi = drawn[0][0], drawn[-1][0]
+    hit = (beat >= lo - 1e-9) & (beat <= hi + 1e-9)
+    if not hit.any():
+        return text
+    vels = np.clip(np.rint(np.interp(beat[hit], [p[0] for p in drawn], [p[1] for p in drawn])), 1, 127)
+    if np.array_equal(vels.astype(np.int64), rows[hit, 3]):
+        return text
+    new = rows.copy()
+    new[hit, 3] = vels
+    return pack_notes(new)
 
 
 def segment(a, b, pad):
@@ -358,9 +388,19 @@ class VelocityPane(KeepsItems, tk.Canvas):
         for i in owners:
             sh = app.shapes[i]
             had = bases.get(i) if bases else None  # (a shape the end was moved over: from what it has now)
-            base = had[2] if had else velocity_env(sh)
             fx = had[4] if had else sh.get("fx")
             lo, hi = time_span(sh, app.ppq)
+            if sh.get("own_vel") and "notes" in sh:
+                # pasted / Extract notes: only the notes under the drawn stretch change, the rest keep their own
+                base = had[2] if had else sh["notes"]
+                sh["notes"] = own_repainted(sh, base, drawn, app.ppq)
+                if fx:
+                    pts = [[(b - lo) / (hi - lo), v] for b, v in drawn] if hi > lo else \
+                        [[0.0, drawn[0][1]], [1.0, drawn[0][1]]]
+                    sh["fx"] = with_velocity(fx, pts)
+                done[i] = (sh, sh["notes"], base, (lo, hi), fx)
+                continue
+            base = had[2] if had else velocity_env(sh)
             if hi > lo:
                 pts = [[(b - lo) / (hi - lo), v] for b, v in drawn]
                 env = tidy_env(paint_env(base, pts))
@@ -368,7 +408,6 @@ class VelocityPane(KeepsItems, tk.Canvas):
                 env = [[0.0, float(max(1, min(127, round(env_at(drawn, dus, lo)))))]]  # every note is at the start
                 pts = [[0.0, env[0][1]], [1.0, env[0][1]]]
             sh["vel_env"] = env
-            sh.pop("own_vel", None)  # pasted notes: their own velocities are replaced
             us = [u for u, _ in env]
             sh["vel0"], sh["vel1"] = (max(1, min(127, round(env_at(env, us, u)))) for u in (0.0, 1.0))
             if fx:
@@ -388,7 +427,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
             return None
         shapes = self.app.shapes
         for i, (sh, env, _, span, _) in cv["done"].items():
-            if i >= len(shapes) or shapes[i] is not sh or sh.get("vel_env") is not env:
+            if i >= len(shapes) or shapes[i] is not sh or sh.get("notes" if sh.get("own_vel") else "vel_env") is not env:
                 break
             if time_span(sh, self.app.ppq) != span:
                 break
