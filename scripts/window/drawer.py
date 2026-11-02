@@ -24,7 +24,7 @@ from files.safefile import write_text
 from files.clipboard import get_text, put_text
 from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawing, unpack
 from files.system import double_click_ms
-from roll.roll_shared import grab_while_panning
+from roll.roll_shared import bind_double_right, grab_while_panning
 from window import look
 from window.help import open_help
 from window.canvas_keep import KeptItems
@@ -433,6 +433,9 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         self._pan = None
         self._panned = False  # the middle button moved further than a click's 3 px (pan_to)
         self.tool = tk.StringVar(value="poly")
+        self.last_tool = "poly"  # the tool a double right-click goes back to (any but Select)
+        self.right_used = False  # the last right-click worked on something (a quick next one isn't a double one)
+        self.menu_wait = None  # a right-click menu waiting to see if it's a double right-click
         self.lasso_kind = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points)
         self.lasso_kind.trace_add("write", lambda *_: self.drop_lasso(unfinished=True))
         self.grid_n = tk.StringVar(value="16")
@@ -451,6 +454,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
 
     def on_tool(self):
         self.hover = None
+        if self.tool.get() != "select":
+            self.last_tool = self.tool.get()
         if self.tool.get() != "lasso":
             self.drop_lasso()  # (a loop waiting for Enter goes with the tool)
         if self.tool.get() == "areas":
@@ -584,7 +589,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         c.bind("<Double-Button-1>", self.on_double)
         c.bind("<Motion>", self.on_motion)
         c.bind("<Leave>", self.on_leave)
-        c.bind("<ButtonPress-3>", self.right_click)
+        bind_double_right(c, self.right_click, self.double_right)
         c.bind("<ButtonPress-2>", self.start_pan)
         c.bind("<B2-Motion>", self.pan_to)
         c.bind("<ButtonRelease-2>", self.on_middle_release)

@@ -22,6 +22,9 @@ from window.formula_host import DrawerHost, formula_menu
 from window.layers import pasted
 from window.sticky import REACH
 from window.widgets import symmetry_menu
+from files.system import double_click_ms
+
+DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 SHIFT, CTRL = 0x1, 0x4
 MOD_KEYS = ("shift_l", "shift_r", "control_l", "control_r")
@@ -744,6 +747,8 @@ class DrawerMouse:
         """Finishes a polyline being drawn. Otherwise, like on the piano roll: on the selected curve's anchor =
         remove it, on a handle dot = pull it back in; near a stroke = its menu; empty space = deselect."""
         self.canvas.focus_set()  # (keys go to the drawing now, not the shape list)
+        self.drop_menu_wait()
+        self.right_used = True  # (anything but empty space: a quick 2nd right-click is a click of its own)
         if self.holding():  # (the left button holds a stroke: nothing, its menu would work on it mid-move)
             return
         if self.tool.get() == "lasso" and (self.lasso_right(e) or self.lasso_holding()):  # (an open loop closes,
@@ -758,6 +763,8 @@ class DrawerMouse:
             lab = self.area_at(e)
             if lab is not None:
                 self.set_area(lab, None, None)
+            else:
+                self.right_used = False
             return
         j = self.curve_handle_at(e.x, e.y)
         if j is not None:
@@ -776,10 +783,20 @@ class DrawerMouse:
                 return self.changed()
         chosen = self.chosen()
         if chosen and self.in_boxes(e.x, e.y):  # inside the select box: what works on all of them
-            return self.show_menu(e, chosen[0]) if len(chosen) == 1 else self.show_group_menu(e)
+            def menu():
+                self.menu_wait = None
+                return self.show_menu(e, chosen[0]) if len(chosen) == 1 else self.show_group_menu(e)
+            if self.hit_stroke(e.x, e.y) is not None:
+                return menu()
+            # (empty space in the box: the menu waits, so a double right-click still switches the tool, like the
+            # piano roll)
+            self.right_used = False
+            self.menu_wait = self.after(DOUBLE_MS, menu)
+            return
         self.boxes = []  # (a click outside the box drops it)
         i = self.hit_stroke(e.x, e.y)
         if i is None:
+            self.right_used = False
             if chosen:
                 self.deselect()
             self.redraw()
@@ -792,6 +809,24 @@ class DrawerMouse:
         if len(self.chosen()) > 1:  # (a stroke in a group: the group's menu)
             return self.show_group_menu(e)
         self.show_menu(e, i)
+
+    def drop_menu_wait(self):
+        if self.menu_wait:
+            self.after_cancel(self.menu_wait)
+            self.menu_wait = None
+
+    def double_right(self, e):
+        """Double right-click: Select <-> the tool used last (like the piano roll). Nothing while the left button
+        holds something; after a right-click that worked on something (a loop, a draft, an anchor, a menu) it's a
+        right-click of its own."""
+        if self.holding() or e.state & 0x100:
+            return
+        if self.right_used:
+            self.canvas._right_paired = False
+            return self.right_click(e)
+        self.drop_menu_wait()
+        self.tool.set(self.last_tool if self.tool.get() == "select" else "select")
+        self.on_motion(e)  # (the pointer at once)
 
     def show_group_menu(self, e):
         """The menu for several selected strokes: what works on all of them at once (roles, colour, delete: only
