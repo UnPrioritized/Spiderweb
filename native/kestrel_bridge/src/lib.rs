@@ -10,6 +10,7 @@
 //! next block (Kestrel's live rule).
 
 mod budget;
+pub mod piece;
 mod rank;
 
 use std::collections::{HashMap, VecDeque};
@@ -328,6 +329,9 @@ pub struct Loaded {
     sample_rate: u32,
     /// (read with their filters: a synth on it keeps them whatever its options say, `KbOptions::filter`)
     filter: bool,
+    /// The card it was asked for (pieces made with Merlin open their own device on the same one).
+    backend: Option<String>,
+    card: Option<String>,
 }
 
 impl Loaded {
@@ -348,7 +352,7 @@ impl Loaded {
         if rest.iter().any(|f| f.filter != filter) {
             bail!("the soundfonts were read with and without their filters");
         }
-        let cfg = Config { gpu_backend: backend, gpu_adapter: card, ..bank_config(sample_rate, filter) };
+        let cfg = Config { gpu_backend: backend.clone(), gpu_adapter: card.clone(), ..bank_config(sample_rate, filter) };
         // one soundfont = its own bank (no copy); more = copies stacked (the files' banks stay as they were)
         let bank = if rest.is_empty() {
             first.bank.clone()
@@ -369,7 +373,7 @@ impl Loaded {
                 b.pool = Vec::new();
             }
         }
-        Ok(Loaded { bank, gpu, sample_rate, filter })
+        Ok(Loaded { bank, gpu, sample_rate, filter, backend, card })
     }
 
     /// Samples kept in the PC's memory for this set (0 for a stack: they're on the graphics card).
@@ -1419,6 +1423,99 @@ pub unsafe extern "system" fn kb_streamproc(_handle: u32, buffer: *mut c_void, l
 pub unsafe extern "C" fn kb_close(h: *mut Synth) {
     if !h.is_null() {
         guard((), || drop(Box::from_raw(h)))
+    }
+}
+
+/// Rendered ahead: start making one piece (`midi` = UTF-8 path of a small MIDI file) into audio on a loaded set,
+/// on its own thread. `engine` 0 = Kestrel, 1 = Merlin (refused for 31-EDO, Velocity threshold, 2+ soundfonts:
+/// FAILED with kb_piece_error's text). `skip` frames dropped at the start, then at most `max_frames` kept (0 = to
+/// the end, ring-out included). Returns at once; null on bad arguments (kb_error). Free with kb_piece_free.
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_start(
+    l: *const Loaded,
+    midi: *const c_char,
+    opts: *const KbOptions,
+    engine: u32,
+    skip: u64,
+    max_frames: u64,
+) -> *mut piece::Piece {
+    if l.is_null() || midi.is_null() {
+        set_error("no soundfonts loaded or no MIDI file given");
+        return std::ptr::null_mut();
+    }
+    guard(std::ptr::null_mut(), || {
+        let path = PathBuf::from(CStr::from_ptr(midi).to_string_lossy().into_owned());
+        let engine = if engine == 1 { piece::Engine::Merlin } else { piece::Engine::Kestrel };
+        or_null(piece::Piece::start(&*l, &path, &read_opts(opts), engine, skip, max_frames))
+    })
+}
+
+/// Where a piece is (state RUNNING 0 / DONE 1 / FAILED 2 / CANCELLED 3, frames kept, progress 0..1).
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_status(p: *const piece::Piece, out: *mut piece::KbPieceStatus) {
+    if p.is_null() || out.is_null() {
+        return;
+    }
+    guard((), || {
+        let st = (*p).status();
+        let size = ((*out).size as usize).min(std::mem::size_of::<piece::KbPieceStatus>());
+        std::ptr::copy_nonoverlapping(&st as *const _ as *const u8, out as *mut u8, size);
+        (*out).size = size as u32;
+    })
+}
+
+/// Wait up to `ms` milliseconds for a piece to finish; its state.
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_wait(p: *const piece::Piece, ms: u32) -> u32 {
+    if p.is_null() {
+        return piece::FAILED;
+    }
+    guard(piece::FAILED, || (*p).wait(std::time::Duration::from_millis(ms as u64)))
+}
+
+/// Ask a piece to stop (its state turns CANCELLED soon; kb_piece_free waits for it).
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_cancel(p: *const piece::Piece) {
+    if !p.is_null() {
+        guard((), || (*p).cancel())
+    }
+}
+
+/// A finished piece's audio: stereo interleaved f32, `*frames` frames; null before DONE. Valid until kb_piece_free.
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_audio(p: *const piece::Piece, frames: *mut u64) -> *const f32 {
+    if p.is_null() {
+        return std::ptr::null();
+    }
+    guard(std::ptr::null(), || {
+        let (ptr, n) = (*p).audio();
+        if !frames.is_null() {
+            *frames = n as u64;
+        }
+        ptr
+    })
+}
+
+/// Why a piece FAILED (UTF-8), null if it didn't; valid until the next kb_* call.
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_error(p: *const piece::Piece) -> *const c_char {
+    if p.is_null() {
+        return std::ptr::null();
+    }
+    guard(std::ptr::null(), || match (*p).error() {
+        Some(e) => {
+            set_error(&e);
+            LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(std::ptr::null(), |c| c.as_ptr())
+        }
+        None => std::ptr::null(),
+    })
+}
+
+/// Cancel (if running), wait for its thread, free it and its audio.
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_free(p: *mut piece::Piece) {
+    if !p.is_null() {
+        guard((), || drop(Box::from_raw(p)))
     }
 }
 
