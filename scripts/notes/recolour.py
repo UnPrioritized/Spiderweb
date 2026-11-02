@@ -465,6 +465,20 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     return new
 
 
+def from_whole(notes, tracks, wn, wt, held=False):
+    """A stirred piece's notes and tracks: settled as recoloured does (held: not), each note the colour of the
+    whole's recoloured note (wn, wt) nearest its spot (the same note, or the one a cut sliver came from), its own
+    round kept."""
+    t = np.asarray(tracks, np.int64)
+    if not held:
+        notes, t = settled(notes, t)
+    if not len(notes) or not len(wn) or wt is None:
+        return notes, t
+    mid = (np.asarray(notes[:, 0], np.float64) + np.asarray(notes[:, 1], np.float64)) / 2
+    got = np.asarray(wt, np.int64)[nearest(wn, mid, notes[:, 2], own=False)] % ROUND
+    return notes, t - t % ROUND + got
+
+
 def unit_xy(mid, key, rc, box, own):
     """Places (note middle in ticks, key) -> (x, y) 0..1 in the colour box, as areas counts them: flipped / turned
     since (rc "frame") and a piece's whole's box (rc "whole") taken in."""
@@ -513,10 +527,10 @@ def stir_from(at, rc, box, own):
     return from_unit(x, y, rc, box, own)
 
 
-def nearest(at, mid, key):
+def nearest(at, mid, key, own=True):
     """For each spot (mid, key): the note of at nearest it: on the nearest key holding notes (the key rounded), the
-    note there whose middle is nearest in time. A note itself as near as the one found wins (no stir = each note its
-    own)."""
+    note there whose middle is nearest in time. own: spot i is note i's own spot moved: the note itself as near as
+    the one found wins (no stir = each note its own)."""
     n = len(at)
     nk = np.asarray(at[:, 2], np.int64)
     nm = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
@@ -537,8 +551,10 @@ def nearest(at, mid, key):
     p0 = np.maximum(p - 1, lo)
     p = np.where(np.abs(ms[p0] - mid) <= np.abs(ms[p] - mid), p0, p)
     got = o[p]
-    own = (nk == keys[row]) & (np.abs(nm - mid) <= np.abs(ms[p] - mid) + 1e-9)
-    return np.where(own, np.arange(n), got)
+    if not own:
+        return got
+    mine = (nk == keys[row]) & (np.abs(nm - mid) <= np.abs(ms[p] - mid) + 1e-9)
+    return np.where(mine, np.arange(n), got)
 
 
 def whole_shares(rc):

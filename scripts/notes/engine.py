@@ -846,9 +846,14 @@ def fx_notes(sh, ppq, keys, get):
             return notes, tracks
         # (held: overlaps kept, not settled; a Domino paste keeps its own overlaps too, as with Recolour off
         # (Multi channel, user 2026-10-30; Single channel cuts them on its track afterwards anyway)
-        return recoloured(notes, tracks, rule_of(sh["recolour"]),
-                          is_sustained(sh) or sh.get("held") is True or pasted_notes(sh),
-                          is_pasted_flipped(sh) or is_gate_flipped(sh), free_box(sh, notes, get, keys))
+        held_ = is_sustained(sh) or sh.get("held") is True or pasted_notes(sh)
+        gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
+        rule = rule_of(sh["recolour"])
+        if rule.get("stir") and sh.get("cut") and not gate and not rule.get("frame"):
+            got = stirred_piece(sh, notes, tracks, held_, get)
+            if got is not None:
+                return got
+        return recoloured(notes, tracks, rule, held_, gate, free_box(sh, notes, get, keys))
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
@@ -897,6 +902,20 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
     return with_glue(*kind_notes_tracks(sh, ppq, keys), sh, ppq)
+
+
+def stirred_piece(sh, notes, tracks, held_, get):
+    """A sliced piece of a stirred shape (recolour.py Stir): its notes take the colours the WHOLE shape shows (its
+    stir looks across the cut, into the other pieces' notes), each from the whole's note at its spot (from_whole).
+    None: not a piece any more (made as a shape of its own)."""
+    from notes.recolour import from_whole
+    from notes.sliced import source
+    got = source(without_recolour(sh))
+    if got is None or tracks is None:
+        return None
+    rc = {k: v for k, v in sh["recolour"].items() if k != "whole"}  # (the whole counts in its own box)
+    wn, wt = get(dict(without_recolour(got[0]), recolour=rc))
+    return from_whole(notes, tracks, wn, wt, held_)
 
 
 def free_box(sh, notes, get, keys):
