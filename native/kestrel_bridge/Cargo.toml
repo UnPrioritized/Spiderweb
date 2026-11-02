@@ -1,6 +1,6 @@
 [package]
 name = "kestrel_bridge"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 publish = false
 description = "Spiderweb's live connection to the Kestrel GPU synth: a C ABI over Kestrel's live render"
@@ -16,10 +16,10 @@ anyhow = "1"
 
 # (Windows: DirectX 12 through its shader compiler, as Kestrel's own builds; Linux: Vulkan)
 [target.'cfg(windows)'.dependencies]
-kestrel = { git = "https://github.com/UnPrioritized/kestrel-midi", rev = "0c1e198ba5e3ac8a1217d21147d223c5c01d4c96", default-features = false, features = ["dx12-dxc"] }
+kestrel = { git = "https://github.com/UnPrioritized/kestrel-midi", rev = "55519b3aa8c1dfe8a65ca3cb5e6c86b0d65d5709", default-features = false, features = ["dx12-dxc"] }
 
 [target.'cfg(not(windows))'.dependencies]
-kestrel = { git = "https://github.com/UnPrioritized/kestrel-midi", rev = "0c1e198ba5e3ac8a1217d21147d223c5c01d4c96", default-features = false }
+kestrel = { git = "https://github.com/UnPrioritized/kestrel-midi", rev = "55519b3aa8c1dfe8a65ca3cb5e6c86b0d65d5709", default-features = false }
 
 [profile.release]
 opt-level = 3

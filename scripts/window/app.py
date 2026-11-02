@@ -568,8 +568,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # when it opens (a change = opened again at the next Play: fresh_builtin)
         self.kestrel_opts = dict(KESTREL_DEFAULTS)
         self.kestrel_vars = {"voices": tk.StringVar(self, value=f"{KESTREL_DEFAULTS['voices']}"),
-                             **{k: tk.BooleanVar(self, value=KESTREL_DEFAULTS[k]) for k in ("lower", "limiter",
-                                                                                            "dc_blocker")},
+                             **{k: tk.BooleanVar(self, value=KESTREL_DEFAULTS[k]) for k in ("lower", "dc_blocker")},
+                             # (user 2026-11-02: a list (by the connector's number) + a dB box)
+                             "limiter": tk.IntVar(self, value=KESTREL_DEFAULTS["limiter"]),
+                             "ceiling_db": tk.StringVar(self, value=f"{KESTREL_DEFAULTS['ceiling_db']:g}"),
                              "block": tk.IntVar(self, value=KESTREL_BLOCKS.index(KESTREL_DEFAULTS["block"])),
                              # (13g: a list by place, a number box as text, the card as cards()' "backend:name")
                              "interpolation": tk.IntVar(self, value=KESTREL_DEFAULTS["interpolation"]),

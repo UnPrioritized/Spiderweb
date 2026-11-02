@@ -234,11 +234,43 @@ fn the_sound_rows_sound_like_kestrels_own_render_with_them() {
 }
 
 #[test]
+fn the_limiter_list_and_ceiling_sound_like_kestrels_own_render_with_them() {
+    // (user 2026-11-02, Kestrel 1.4.0: limiter 1 = Brickwall, 2 = Balanced, + a ceiling in dB, minus taken)
+    use kestrel::limiter::LimiterMode;
+    let (a, _, midi) = files();
+    let blocks = 4 * 48_000 / BLOCK as usize;
+    let fa = FontBank::load(&a, 48_000).unwrap();
+    let loaded = Loaded::new(&[&fa]).unwrap();
+    let mut heard = Vec::new();
+    for (limiter, ceiling, mode) in [(2, -1.0f32, LimiterMode::Balanced), (1, -3.0, LimiterMode::Brickwall)] {
+        let theirs = Config { limiter_mode: mode, limiter_ceiling_db: ceiling as f64, ..cfg() };
+        let bank = Arc::new(kestrel::session::load_layered(&[a.clone()], None, &theirs).unwrap());
+        let Ok(mut synth) = GpuSynth::new(&theirs, bank.clone()) else {
+            eprintln!("no graphics card: skipped");
+            return;
+        };
+        let mut d = Driver::open(&theirs, bank, &midi).unwrap();
+        let n = theirs.block_samples();
+        let mut want = vec![0.0f32; n * blocks];
+        for k in 0..blocks {
+            if !d.next_block(&mut synth, &mut want[k * n..(k + 1) * n]).unwrap() {
+                break;
+            }
+        }
+        let mine = KbOptions { limiter, limiter_ceiling_db: ceiling, ..opts(1 << 20) };
+        let s = Synth::open_on(&loaded, &mine).unwrap();
+        same(&want, &live_render(&s, blocks), &format!("limiter {limiter}, ceiling {ceiling}"));
+        heard.push(want);
+    }
+    assert_ne!(heard[0], heard[1], "Balanced sounded like Brickwall");
+}
+
+#[test]
 fn a_picked_graphics_card_loads_and_a_missing_one_is_said() {
     let (a, _, _) = files();
     let fa = FontBank::load(&a, 48_000).unwrap();
-    let Ok((list, _)) = kestrel::gpu::survey(&Config::default()) else { return };
-    let Some(card) = list.iter().find(|c| !c.is_software()) else {
+    let Ok(survey) = kestrel::gpu::survey(&Config::default()) else { return };
+    let Some(card) = survey.adapters.iter().find(|c| !c.is_software()) else {
         eprintln!("no graphics card: skipped");
         return;
     };

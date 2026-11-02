@@ -31,7 +31,10 @@ BLOCKS = (256, 512, 1024, 2048)  # (Settings → Sound's block sizes)
 VOICES_RANGE = (1024, 1 << 26)  # (Settings → Sound's Max voices)
 # Settings → Sound's rows (App.kestrel_opts = Kestrel's keywords): "lower" changes while open, the rest at the next open
 LIVE_VOICES = 300_000  # (Max voices to start with: user 2026-10-28, Kestrel's own 1 M fell behind on heavy MIDIs)
-KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limiter": True, "dc_blocker": True,
+KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK,
+                    # (user 2026-11-02, Kestrel 1.4.0: the limiter a list, Balanced first + the default; the
+                    # connector's numbers 0 Off / 1 Brickwall (the old tick's "on") / 2 Balanced; ceiling in dB)
+                    "limiter": 2, "ceiling_db": 0.0, "dc_blocker": True,
                     # (13g, user 2026-10-29: Kestrel's own defaults; "card" = "backend:name" of cards(), "" = its
                     # pick: changing it sends the soundfonts to the card again)
                     "card": "", "interpolation": 1, "min_velocity": 0}
@@ -41,8 +44,10 @@ KESTREL_DEFAULTS = {"voices": LIVE_VOICES, "lower": True, "block": BLOCK, "limit
 # + its bit-exact test (loaded.rs the_sound_rows_*) kept: a row back = its KESTREL_DEFAULTS key, CHOICES / RANGES
 # entry, settings.APP_KEYS line, BuiltinPanel row, texts (git: d292586). Filter would also need loaded_for's filter.)
 # (the lists' places = the connector's numbers: Nearest / Linear / Cubic)
-CHOICES = {"interpolation": 3}
+CHOICES = {"interpolation": 3, "limiter": 3}
+LIMITER_ORDER = (2, 1, 0)  # (shown Balanced, Brickwall, Off)
 RANGES = {"min_velocity": (0, 127)}
+DECIMALS = {"ceiling_db": (-24.0, 0.0)}  # (number boxes taking decimals + minus: "-1", "-0.5")
 
 
 def card_id(name, backend):
@@ -124,11 +129,11 @@ class _Options(ctypes.Structure):
                 ("lfo", ctypes.c_uint32), ("mod_env", ctypes.c_uint32)]
 
 
-def _options(block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True, limiter=True, ceiling_db=0.0, dc_blocker=True,
+def _options(block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True, limiter=2, ceiling_db=0.0, dc_blocker=True,
              dc_blocker_hz=0.0, interpolation=1, steal=2, release_floor=-100, min_velocity=0, admit=0, max_steal=25,
              max_layers=16, filter=True, lfo=True, mod_env=True, card=""):
     """The connector's options from Kestrel's keywords (App.kestrel_opts; card = Loaded's, not a synth's)."""
-    return _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), ceiling_db,
+    return _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), float(ceiling_db),
                     int(dc_blocker), dc_blocker_hz, interpolation, steal, release_floor, min_velocity, admit, max_steal,
                     max_layers, int(filter), int(lfo), int(mod_env))
 

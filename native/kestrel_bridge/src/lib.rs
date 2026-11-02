@@ -24,6 +24,7 @@ use anyhow::{bail, Context, Result};
 use kestrel::gpu::{GpuShared, GpuSynth};
 use kestrel::midi::Event;
 use kestrel::config::AdmitRule;
+use kestrel::limiter::LimiterMode;
 use kestrel::{Backend, Bank, Config, Driver, Interpolation, StealRule};
 
 use budget::Budget;
@@ -41,8 +42,8 @@ pub struct KbOptions {
     pub max_voices: u32,
     /// 1 = drop new notes (fair by track, quietest first) to stay in real time; 0 = never (it stutters instead).
     pub lower_by_itself: u32,
-    /// Kestrel's limiter on the output: 1 = on (its default, as in its file renders), 0 = off; and its ceiling
-    /// in dBFS (0 = Kestrel's default; the user's reference renders use -1).
+    /// Kestrel's limiter on the output: 0 = off, 1 = Brickwall (what "on" was), 2 = Balanced (Kestrel 1.4.0's render
+    /// default; Spiderweb's too); and its ceiling in dBFS, -24..0 (0 = Kestrel's default; the user often uses -1).
     pub limiter: u32,
     pub limiter_ceiling_db: f32,
     /// Kestrel's DC blocker ahead of the limiter: 1 = on, at `dc_blocker_hz` (0 = Kestrel's 15 Hz). Off (Kestrel's
@@ -391,6 +392,9 @@ fn config(opts: &KbOptions) -> Result<Config> {
         max_voices: opts.max_voices.max(1),
         steal_fade_frames: Config::default().steal_fade_frames.min(block - 1),
         limiter: opts.limiter != 0,
+        // (1 = Brickwall, as "on" was before 1.4.0; 2 = Balanced: a leveler ahead of the brickwall, Kestrel 1.4.0's
+        // render default. Both keep 1.4.0's 20 ms brickwall hold: less distortion on low notes, ~1 dB quieter walls)
+        limiter_mode: if opts.limiter == 2 { LimiterMode::Balanced } else { LimiterMode::Brickwall },
         dc_blocker: opts.dc_blocker != 0,
         dc_blocker_hz: if opts.dc_blocker_hz.is_finite() && opts.dc_blocker_hz > 0.0 {
             (opts.dc_blocker_hz as f64).clamp(1.0, 200.0)
@@ -398,7 +402,7 @@ fn config(opts: &KbOptions) -> Result<Config> {
             Config::default().dc_blocker_hz
         },
         limiter_ceiling_db: if opts.limiter_ceiling_db.is_finite() {
-            opts.limiter_ceiling_db.min(0.0) as _
+            opts.limiter_ceiling_db.clamp(-24.0, 0.0) as _
         } else {
             0.0
         },
@@ -1082,7 +1086,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.3.0; Kestrel 1.3.0 (mbms0/kestrel-midi 844b002 + Spiderweb's changes UnPrioritized/kestrel-midi 0c1e198)";
+    static V: &CStr = c"0.4.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 55519b3)";
     V.as_ptr()
 }
 
@@ -1184,8 +1188,9 @@ pub unsafe extern "C" fn kb_load_on(
 pub extern "C" fn kb_cards() -> *const c_char {
     static CARDS: Mutex<Option<CString>> = Mutex::new(None);
     guard(std::ptr::null(), || match kestrel::gpu::survey(&Config::default()) {
-        Ok((list, _)) => {
-            let lines: Vec<String> = list
+        Ok(survey) => {
+            let lines: Vec<String> = survey
+                .adapters
                 .iter()
                 .filter(|a| !a.is_software())
                 .map(|a| {

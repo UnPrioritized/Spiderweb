@@ -1321,7 +1321,7 @@ class Playback:
         """A Kestrel (GPU) row in Settings → Sound changed (app.kestrel_vars[key]): Lower it by itself is heard at
         once, the others from the next Play (Kestrel opened again with them: fresh_builtin). Max voices typed wrong
         = back to the one in use."""
-        from files.kestrel import BLOCKS, CHOICES, RANGES, VOICES_RANGE, read_voices
+        from files.kestrel import BLOCKS, CHOICES, DECIMALS, RANGES, VOICES_RANGE, read_voices
         var = self.kestrel_vars[key]
         if key == "voices":
             e = getattr(self, "kestrel_voices_entry", None)
@@ -1356,6 +1356,20 @@ class Playback:
             if e is not None and e.winfo_exists():
                 good(e)
             var.set(str(v))
+        elif key in DECIMALS:  # (Ceiling: tenths, minus taken: "-1", "-0.5"; else back to the one in use)
+            e = getattr(self, "kestrel_entries", {}).get(key)
+            lo, hi = DECIMALS[key]
+            try:
+                v = round(float(calc(var.get())), 1) + 0.0  # (+ 0.0: -0.0 shown as 0)
+                if not lo <= v <= hi:
+                    raise ValueError
+            except (ValueError, ZeroDivisionError, OverflowError):
+                if e is not None and e.winfo_exists():
+                    bad(e)
+                return
+            if e is not None and e.winfo_exists():
+                good(e)
+            var.set(f"{v:g}")
         elif key in CHOICES:
             v = max(0, min(CHOICES[key] - 1, int(var.get())))
         elif key == "card":
@@ -1372,7 +1386,7 @@ class Playback:
         if key == "lower" and self.out.name == KESTREL and self.out.handle:
             self.out.handle.k.set_lower(v)
         elif self.out.name == KESTREL and self.player.running:
-            self.kestrel_again(wait=key == "voices" or key in RANGES)
+            self.kestrel_again(wait=key == "voices" or key in RANGES or key in DECIMALS)
         errors.note("Kestrel (GPU)", ", ".join(f"{k} {v}" for k, v in self.kestrel_opts.items()))
         self.schedule_autosave()
 
@@ -1401,11 +1415,16 @@ class Playback:
 
     def take_kestrel_opts(self, opts):
         """The saved Kestrel settings (autosave window / settings.ini), each checked; wrong ones = defaults."""
-        from files.kestrel import BLOCKS, CHOICES, KESTREL_DEFAULTS, RANGES, VOICES_RANGE
+        from files.kestrel import BLOCKS, CHOICES, DECIMALS, KESTREL_DEFAULTS, RANGES, VOICES_RANGE
         for k, d in KESTREL_DEFAULTS.items():
             v = opts.get(k)
+            if k == "limiter" and isinstance(v, bool):  # (the old tick, before 1.4.0: on = Balanced now, off stays off)
+                v = 2 if v else 0
             whole = isinstance(v, int) and not isinstance(v, bool)
-            if k == "voices":
+            if k in DECIMALS:
+                ok = isinstance(v, (int, float)) and not isinstance(v, bool) and DECIMALS[k][0] <= v <= DECIMALS[k][1]
+                v = round(float(v), 1) + 0.0 if ok else v
+            elif k == "voices":
                 ok = whole and VOICES_RANGE[0] <= v <= VOICES_RANGE[1]
             elif k == "block":
                 ok = v in BLOCKS and not isinstance(v, bool)
@@ -1419,8 +1438,8 @@ class Playback:
                 ok = isinstance(v, bool)
             self.kestrel_opts[k] = v if ok else d
         for k, v in self.kestrel_opts.items():
-            self.kestrel_vars[k].set(str(v) if k == "voices" or k in RANGES else BLOCKS.index(v) if k == "block"
-                                     else v)
+            self.kestrel_vars[k].set(str(v) if k == "voices" or k in RANGES else f"{v:g}" if k in DECIMALS
+                                     else BLOCKS.index(v) if k == "block" else v)
 
     def note_builtin(self):
         """Built-in BASSMIDI's settings in the logs (errors.note), once it has been opened."""

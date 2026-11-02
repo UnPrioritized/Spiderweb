@@ -159,12 +159,15 @@ class BuiltinPanel(ttk.Frame):
         Tooltip(lb, tr("ks.block_tip"))
         r += 1
 
-        for key, text in (("limiter", "ks.limiter"), ("dc_blocker", "ks.dc")):
-            c = ttk.Checkbutton(box, text=tr(text), variable=vars_[key],
-                                command=lambda k=key: app.on_kestrel_opt(k), takefocus=False)
-            c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
-            Tooltip(c, tr(text + "_tip"))
-            r += 1
+        # (user 2026-11-02, Kestrel 1.4.0: Limiter a list, Balanced first; its ceiling in dB, "-1" typed as is)
+        r = self.choice_row(r, "limiter", "ks.limiter", order=kestrel.LIMITER_ORDER)
+        r = self.number_row(r, "ceiling_db", "ks.ceiling", kestrel.DECIMALS["ceiling_db"], unit=tr("ks.ceiling_unit"),
+                            steps=(0.5, 3, 0.1))
+        c = ttk.Checkbutton(box, text=tr("ks.dc"), variable=vars_["dc_blocker"],
+                            command=lambda: app.on_kestrel_opt("dc_blocker"), takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("ks.dc_tip"))
+        r += 1
 
         # (13g, user 2026-10-29; When voices run out, Release floor + an Advanced fold were here too: removed as
         # player settings, files/kestrel.py KESTREL_DEFAULTS says how to bring one back)
@@ -248,8 +251,9 @@ class BuiltinPanel(ttk.Frame):
         Tooltip(lb, tr(text + "_tip"))
         return r + 1
 
-    def number_row(self, r, key, text, span, unit=None):
-        """A number box row (whole numbers in span, kestrel.RANGES) with its unit after it."""
+    def number_row(self, r, key, text, span, unit=None, steps=(1, 10, 1)):
+        """A number box row (whole numbers in span, kestrel.RANGES; decimals in kestrel.DECIMALS) with its unit after
+        it."""
         app, box = self.app, self
         var = app.kestrel_vars[key]
         lb = ttk.Label(box, text=tr(text))
@@ -263,7 +267,7 @@ class BuiltinPanel(ttk.Frame):
         app.kestrel_entries[key] = e
         e.bind("<Return>", lambda ev: (app.on_kestrel_opt(key), "break")[1])
         e.bind("<FocusOut>", lambda ev: app.on_kestrel_opt(key))
-        Scrub(app, [(e, var, lambda: app.on_kestrel_opt(key))], (1, 10, 1), *span, label=lb, no_undo=True)
+        Scrub(app, [(e, var, lambda: app.on_kestrel_opt(key))], steps, *span, label=lb, no_undo=True)
         if unit:
             ttk.Label(row, text=unit).pack(side="left", padx=(4, 0))
         Tooltip(e, tr(text + "_tip"))
@@ -287,12 +291,13 @@ class BuiltinPanel(ttk.Frame):
         app.on_loaded_synths()
         if app.synths_var.get() != str(app.loaded_synths):
             app.synths_var.set(str(app.loaded_synths))
-        from files.kestrel import RANGES
-        for key in ("voices", *RANGES):  # (Kestrel's number boxes the same way: hunt 2026-10-29, Esc lost them)
+        from files.kestrel import DECIMALS, RANGES
+        for key in ("voices", *RANGES, *DECIMALS):  # (Kestrel's number boxes the same way: hunt 2026-10-29, Esc lost them)
             app.on_kestrel_opt(key)
             v = app.kestrel_vars[key]
-            if v.get() != str(app.kestrel_opts[key]):
-                v.set(str(app.kestrel_opts[key]))
+            shown = f"{app.kestrel_opts[key]:g}" if key in DECIMALS else str(app.kestrel_opts[key])  # ("-1", not "-1.0")
+            if v.get() != shown:
+                v.set(shown)
 
     def refresh(self):
         if not self.winfo_exists():

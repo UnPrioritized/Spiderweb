@@ -117,7 +117,10 @@ APP_KEYS = {
     "kestrel_voices": ("sound", "kestrel_max_voices", int),
     "kestrel_lower": ("sound", "kestrel_lower_by_itself", bool),
     "kestrel_block": ("sound", "kestrel_block_size", int),
-    "kestrel_limiter": ("sound", "kestrel_limiter", bool),
+    # (user 2026-11-02: 0 off / 1 brickwall / 2 balanced; a new name so an old "kestrel_limiter = yes" line is just
+    # left there, the autosave's old tick read instead: App.take_kestrel_opts)
+    "kestrel_limiter": ("sound", "kestrel_limiter_mode", int),
+    "kestrel_ceiling_db": ("sound", "kestrel_limiter_ceiling_db", float),
     "kestrel_dc_blocker": ("sound", "kestrel_dc_blocker", bool),
     "kestrel_card": ("sound", "kestrel_graphics_card", str),  # (13g: "backend:name", empty = Kestrel's pick)
     "kestrel_interpolation": ("sound", "kestrel_interpolation", int),
