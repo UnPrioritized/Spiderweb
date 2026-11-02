@@ -11,7 +11,9 @@ sh["kind"] = "gliss", sh["pts"] = [start, end] (beats, keys) like a line; sh["gl
     one dotted line above the run and one below set them apart);
   "len" + "unit": each note's length, "pct" = % of the step (default 100: up to the next note), "ticks";
   "timing": "grid" (one note per step, default) or "line" (UNSNAPPED, stage E: each note where the line crosses its
-    key's row; "pct" = % of the gap up to the next note, user 11-02).
+    key's row; "pct" = % of the gap up to the next note, user 11-02) or "smooth" (unsnapped too: the same keys, start
+    and end, but the gaps between notes smoothed by "smooth" % (0 = as "line", 100 = all the same): user 11-02 after
+    a hearing test, the line's own gaps sounded uneven; the notes no longer sit on the line, on purpose).
 A BENT RUN (stage E, bent()): sh["pts"] = a pen-tool curve (anchor, handle, handle, anchor ..., bezier.py) instead of
 [start, end]; its keys = the picked keys in the order the line crosses their rows (crossings), so an arch goes up
 and back down.
@@ -35,10 +37,10 @@ WHITE = (0, 2, 4, 5, 7, 9, 11)
 TOP_KEY = 255  # (a click picks the note up to here: the most keys a project has)
 LIST_DEFAULT = "1/16, 1/32, 1/64"
 DEFAULTS = {"grids": "halves", "list": LIST_DEFAULT, "step": "auto", "above": 0, "below": 0, "len": 100,
-            "unit": "pct", "timing": "grid"}
+            "unit": "pct", "timing": "grid", "smooth": 0}
 GRID_KINDS = ("halves", "list")
 UNITS = ("pct", "ticks")
-TIMINGS = ("grid", "line")
+TIMINGS = ("grid", "line", "smooth")
 SAMPLES = 240  # points per curve piece the crossings are found on (like engine.shape_path)
 MOST_COPIES = 127  # copies each way
 MOST_LEN = {"pct": 100000, "ticks": 10 ** 7}
@@ -81,6 +83,9 @@ def clean_gliss(g):
         out["unit"] = g["unit"]
     if g.get("timing") in TIMINGS:
         out["timing"] = g["timing"]
+    sm = g.get("smooth")
+    if type(sm) in (int, float) and math.isfinite(sm) and 0 <= sm <= 100:
+        out["smooth"] = sm
     n = g.get("len")
     if type(n) in (int, float) and math.isfinite(n) and 0 < n <= MOST_LEN[out["unit"]]:
         out["len"] = n
@@ -235,7 +240,7 @@ def auto_name(sh, ppq):
 
 
 def unsnapped(sh):
-    return (sh.get("gliss") or DEFAULTS).get("timing") == "line"
+    return (sh.get("gliss") or DEFAULTS).get("timing") in ("line", "smooth")
 
 
 def line_starts(sh, ppq):
@@ -251,7 +256,47 @@ def line_starts(sh, ppq):
     if not sh.get("end_dot") and n > 1 and t[-1] >= end - 1e-6:
         t = t[0] + (t - t[0]) * (n - 1) / n
     nxt = np.append(t[1:], end if not sh.get("end_dot") or n < 2 else 2 * t[-1] - t[-2])
-    return t, nxt - t
+    gap = nxt - t
+    g = sh.get("gliss") or DEFAULTS
+    if g.get("timing") == "smooth" and g.get("smooth", 0) > 0 and n > 2:
+        # Last note ending on the end: every gap smoothed (the last one ends there); starting on it: the gaps
+        # between the starts, the last note as long as the one before
+        k = n if not sh.get("end_dot") else n - 1
+        gap[:k] = smoothed(gap[:k], g["smooth"])
+        if k < n:
+            gap[-1] = gap[-2]
+        t = t[0] + np.concatenate([[0.0], np.cumsum(gap[:-1])])
+    return t, gap
+
+
+def smoothed(gap, amount):
+    """Gaps smoothed by amount % (0 = as they are, 100 = all the same), the same total: in speed (log) space, by a
+    Gaussian over the note number n x u / (1 - u) / 12 notes wide (u = amount / 100: 50 % = n / 12 = the hearing
+    test's "smooth", 75 % = n / 4 = its "smooth more"; three moving averages, so it stays quick with thousands of
+    notes)."""
+    n, total = len(gap), float(gap.sum())
+    u = amount / 100
+    if n < 2 or total <= 0:
+        return gap
+    if u >= 1:
+        return np.full(n, total / n)
+    lg = np.log(np.maximum(gap, total / n / 100))  # (a fold back in time = no gap: 1 % of the average)
+    sigma = n * u / (1 - u) / 12
+    w = int(round(math.sqrt(4 * sigma * sigma + 1)))  # (3 boxes this wide = a Gaussian about sigma wide)
+    if w > 1:
+        for _ in range(3):
+            lg = box_average(lg, w)
+    s = np.exp(lg)
+    return s * total / s.sum()
+
+
+def box_average(a, w):
+    """Each value averaged with its neighbours, w wide (fewer at the ends: no made-up values past them)."""
+    h = w // 2
+    c = np.concatenate([[0.0], np.cumsum(a)])
+    i = np.arange(len(a))
+    lo, hi = np.maximum(0, i - h), np.minimum(len(a), i + w - h)
+    return (c[hi] - c[lo]) / (hi - lo)
 
 
 def run_notes(sh, ppq):

@@ -10,7 +10,7 @@ from notes.gliss import (DEFAULTS, GRID_KINDS, LEAST_PCT, MOST_COPIES, MOST_LEN,
                          for_new, grid_ticks, grids, pick_key, pick_parts, picked, plan, read_list)
 from roll.roll_shared import NOTE_NAMES
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, leave_box, unchanged
 
 
 class GlissPanel:
@@ -33,48 +33,55 @@ class GlissPanel:
         cb.grid(row=0, column=1, columnspan=2, sticky="w", padx=(5, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_timing())
         Tooltip(cb, tr("panel_gliss.timing_tip"))
-        label(1, "grids")
+        self.gliss_smooth_row = [label(1, "smooth")]  # (Smoothing [n] %: only with Timing "Smooth")
+        label(2, "grids")
         cb = self.gliss_grids = ttk.Combobox(grid, state="readonly", width=18,
                                               values=(tr("panel_gliss.halves"), tr("panel_gliss.my_list")))
-        cb.grid(row=1, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        cb.grid(row=2, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_grids())
         Tooltip(cb, tr("panel_gliss.grids_tip"))
         self.gliss_var = tk.StringVar()
         e = self.gliss_list = ttk.Entry(grid, textvariable=self.gliss_var, width=24)
-        e.grid(row=2, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        e.grid(row=3, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
         e.bind("<Return>", lambda ev: self.on_gliss_list())
         leave_box(self, e, self.gliss_var, self.on_gliss_list)
         Tooltip(e, tr("panel_gliss.list_tip"))
-        label(3, "step")
+        label(4, "step")
         cb = self.gliss_step = ttk.Combobox(grid, state="readonly", width=12)
-        cb.grid(row=3, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        cb.grid(row=4, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_step())
         Tooltip(cb, tr("panel_gliss.step_tip"))
         self.gliss_nums = {}
-        label(4, "copies")
+        label(5, "copies")
         both = ttk.Frame(grid)  # (Copies  above [n]  below [n]: one dotted line above the run, one below)
-        both.grid(row=4, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
-        for r, key, steps in ((4, "above", (1, 5, 1)), (4, "below", (1, 5, 1)), (5, "len", (5, 25, 1))):
-            if r == 4:
+        both.grid(row=5, column=1, columnspan=2, sticky="w", padx=(5, 0), pady=(3, 0))
+        for r, key, steps in ((5, "above", (1, 5, 1)), (5, "below", (1, 5, 1)), (6, "len", (5, 25, 1)),
+                              (1, "smooth", (1, 10, 0.1))):
+            if r == 5:
                 lb = ttk.Label(both, text=tr("panel_gliss." + key))
                 lb.pack(side="left", padx=(0 if key == "above" else 8, 4))
                 Tooltip(lb, tr("panel_gliss.copies_tip"))
                 e = ttk.Entry(both, width=4)
                 e.pack(side="left")
             else:
-                lb = label(r, key)
+                lb = self.gliss_smooth_row[0] if key == "smooth" else label(r, key)
                 e = ttk.Entry(grid, width=7)
                 e.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=(3, 0))
             var = tk.StringVar()
             e.config(textvariable=var)
             e.bind("<Return>", lambda ev, k=key: self.on_gliss_number(k))
             leave_box(self, e, var, lambda left, k=key: self.on_gliss_number(k, left))
-            Scrub(self, [(e, var, lambda k=key: self.on_gliss_number(k))], steps, label=lb)
-            Tooltip(e, tr("panel_gliss." + ("copies" if r == 4 else key) + "_tip"))
+            smooth = key == "smooth"
+            Scrub(self, [(e, var, lambda k=key: self.on_gliss_number(k))], steps, label=lb,
+                  lo=0 if smooth else None, hi=100 if smooth else None)
+            Tooltip(e, tr("panel_gliss." + ("copies" if r == 5 else key) + "_tip"))
             self.gliss_nums[key] = (e, var)
+        lb = ttk.Label(grid, text="%")
+        lb.grid(row=1, column=2, sticky="w", padx=(4, 0), pady=(3, 0))
+        self.gliss_smooth_row += [self.gliss_nums["smooth"][0], lb]
         cb = self.gliss_unit = ttk.Combobox(grid, state="readonly", width=10,
                                              values=[tr("panel_gliss.unit_" + u) for u in UNITS])
-        cb.grid(row=5, column=2, sticky="w", padx=(4, 0), pady=(3, 0))
+        cb.grid(row=6, column=2, sticky="w", padx=(4, 0), pady=(3, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_gliss_unit())
         Tooltip(cb, tr("panel_gliss.len_tip"))
         self.gliss_info = ttk.Label(box, text="", foreground=look.HINT)
@@ -98,6 +105,8 @@ class GlissPanel:
         self._loading = True
         timing = g.get("timing", "grid")
         self.gliss_timing.current(TIMINGS.index(timing))
+        for w in self.gliss_smooth_row:
+            grid_shown(w, timing == "smooth")
         for w in (self.gliss_grids, self.gliss_list, self.gliss_step):  # (unsnapped: no step, the line decides)
             w.config(state=("readonly" if w is not self.gliss_list else "normal") if timing == "grid" else "disabled")
         self.gliss_grids.current(GRID_KINDS.index(g.get("grids", "halves")))
@@ -180,15 +189,16 @@ class GlissPanel:
         copies = key in ("above", "below")
         try:
             n = float(calc(var.get()))
-            ok = (n == int(n) and 0 <= n <= MOST_COPIES) if copies else 0 < n <= MOST_LEN[unit]
+            ok = ((n == int(n) and 0 <= n <= MOST_COPIES) if copies else 0 <= n <= 100 if key == "smooth" else
+                  0 < n <= MOST_LEN[unit])
             if not math.isfinite(n) or not ok:
                 raise ValueError
         except (ValueError, ZeroDivisionError, OverflowError):
             bad(e)
             return
         good(e)
-        n = int(n) if copies or n == int(n) else n
-        key_ = "gliss_copies" if copies else "gliss_len"
+        n = int(n) if copies or n == int(n) else round(n, 4)
+        key_ = "gliss_copies" if copies else "gliss_smooth" if key == "smooth" else "gliss_len"
         self.set_gliss(_key=(key_, tuple(sorted(self.sels)), key), **{key: n})
 
     def picks_text(self, g):

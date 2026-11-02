@@ -78,7 +78,8 @@ EDIT_NAMES = {"vel0": tr("history.velocity"), "vel1": tr("history.velocity"), "p
               "shape": tr("history.shape"), "polygon": tr("history.polygon"), "by_snap": tr("app.by_snap"),
               "gliss": tr("history.gliss_grids"), "gliss_keys": tr("history.gliss_keys"),
               "gliss_step": tr("history.gliss_step"), "gliss_copies": tr("history.gliss_copies"),
-              "gliss_len": tr("history.gliss_len"), "gliss_timing": tr("history.gliss_timing")}
+              "gliss_len": tr("history.gliss_len"), "gliss_timing": tr("history.gliss_timing"),
+              "gliss_smooth": tr("history.gliss_smooth")}
 
 
 def edit_name(key):
