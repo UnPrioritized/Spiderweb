@@ -100,12 +100,15 @@ def _messages(ticks, st, d1, d2, last=0):
 class Song:
     """What the pieces are made of. notes = App.play_parts' rows (start, end, key, velocity, slot ... in ticks),
     ccs = its [(tick, message)] (playback.cc_list: channel | port << 24), ports = its synth ports (0 = one port),
-    tempo = heard [(tick, us)] from tick 0 (None = one tempo: bpm). Keys over 127 are left out (31-EDO: R6)."""
+    tempo = heard [(tick, us)] from tick 0 (None = one tempo: bpm). Keys over 127 are left out, unless edo_first:
+    31-EDO's sound (R6, like live play: playback.edo_code), each row on its own pitch-bent channel from that channel
+    (port x 16 + channel), the bends at every piece's start."""
 
-    def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None):
+    def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None, edo_first=None):
         from notes.engine import channels_of, ports_of
         notes = np.asarray(notes)
-        if len(notes):
+        self.edo_first = edo_first
+        if len(notes) and edo_first is None:
             notes = notes[notes[:, 2] <= 127]
         self.ppq = ppq
         self.tempo = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
@@ -121,7 +124,17 @@ class Song:
         slot = col(4, np.int64)
         self.chan = channels_of(slot, use10).astype(np.uint8) if n else np.zeros(0, np.uint8)
         self.port = (ports_of(slot, use10, ports).astype(np.uint8) if n and ports else np.zeros(n, np.uint8))
+        if edo_first is not None and n:  # (31-EDO: the row decides channel + key, the note's colour doesn't)
+            from files.playback import edo_code
+            code = edo_code(notes[order, 2], edo_first)
+            self.chan, self.key = (code & 15).astype(np.uint8), ((code >> 8) & 0x7F).astype(np.uint8)
+            self.port = (code >> 24).astype(np.uint8)
+            del code
         del slot, order
+        self.bends = []  # (31-EDO: its channels' bends, as CC-line messages at a piece's start)
+        if edo_first is not None:
+            from files.playback import edo_bends
+            self.bends = edo_bends(first=edo_first)
         self.ccs = sorted(ccs, key=lambda e: e[0]) if ccs else []
         self.cc_ticks = np.array([t for t, _ in self.ccs], np.int64)
         # the longest note (held notes before a tick are among the ones starting up to that much earlier)
@@ -171,7 +184,7 @@ class Song:
         # tick, order on a shared tick (ends 0, CC lines 1, starts 2), status, data 1, data 2, port
         n = len(idx)
         from files.playback import cc_before
-        cc = [(0, m) for m in cc_before(self.ccs, t0)] + [(t - t0, m) for t, m in self.ccs[c0:c1]]
+        cc = [(0, m) for m in self.bends + cc_before(self.ccs, t0)] + [(t - t0, m) for t, m in self.ccs[c0:c1]]
         cm = np.array([m for _, m in cc], np.int64)
         tick = np.concatenate([self.end[idx] - t0, np.maximum(self.start[idx], t0) - t0,
                                np.array([t for t, _ in cc], np.int64)])
@@ -200,7 +213,8 @@ class Song:
             rows = np.stack([self.start, self.end, self.key, self.vel], axis=1) if len(self) else \
                 np.zeros((0, 4), np.int64)
             chans = self.port.astype(np.int64) * 16 + self.chan
-            cc = [(t, m & 0xF0, (m >> 8) & 0x7F, (m >> 16) & 0x7F, (m >> 24) * 16 + (m & 15)) for t, m in self.ccs]
+            cc = [(t, m & 0xF0, (m >> 8) & 0x7F, (m >> 16) & 0x7F, (m >> 24) * 16 + (m & 15))
+                  for t, m in [(0, b) for b in self.bends] + self.ccs]
             extra = synth.cc_events(cc)
             used = sorted({int(c) for c in np.unique(chans)} | {int(c[4]) for c in cc})
             drums = np.array([(synth._EV_DRUMS, 0, c, 0, 0) for c in used if c % 16 == 9], synth.EVENT)
@@ -323,7 +337,8 @@ class Maker:
         """(R5) The song changed: only the stretch that changed (+ its ring, TAIL) is thrown away and made again;
         another PPQ / tempo = everything. Returns True when anything was thrown away."""
         old = self.song
-        if old is None or song is None or old.ppq != song.ppq or not same_tempo(old, song):
+        if old is None or song is None or old.ppq != song.ppq or old.edo_first != song.edo_first or \
+                not same_tempo(old, song):
             self.set_song(song)
             return True
         span = changed_ticks(old, song)

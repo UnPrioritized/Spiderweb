@@ -168,7 +168,7 @@ class MidiOut:
     def tuned(self):
         """True when the piano roll's notes are played in 31-EDO now (Built-in BASSMIDI, Kestrel: 13g, user
         2026-10-29; Kestrel's channels get their bends at open and each Play, App.kestrel_parts)."""
-        return self.edo and self.name in (BUILTIN, KESTREL)
+        return self.edo and self.name in (BUILTIN, KESTREL, AHEAD)  # (Rendered ahead: its pieces, R6)
 
     def open(self, name):
         """Open the device called name. Returns an error message, or None when it's ready."""

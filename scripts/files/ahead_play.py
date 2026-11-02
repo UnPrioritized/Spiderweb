@@ -33,6 +33,16 @@ START_S = 10.0  # seconds made from the play line before playing starts (the fir
 START_LOWER_S = 3.0  # a start waiting longer than this (first piece back): Lower it by itself may lower
 
 
+def merlin_gap(ccs, fonts):
+    """Why Merlin can't make this song yet (a key of "ra.kestrel_*"), or None: more than one soundfont ("fonts"),
+    channel volume / expression lines ("cc", CC7 / CC11: Merlin doesn't apply them yet)."""
+    if len(fonts) > 1:
+        return "fonts"
+    if any((m & 0xF0) == 0xB0 and (m >> 8) & 0x7F in (7, 11) for _, m in ccs or ()):
+        return "cc"
+    return None
+
+
 class AheadLimiter:
     """Keeps the joined sound under the ceiling (looking one block ahead, nothing gets through). Brickwall comes back
     up quickly (FAST s), Balanced slowly (SLOW s: less pulling at low notes). Both HOLD the gain HOLD_S first. Off =
@@ -116,20 +126,46 @@ class AheadPlay:
 
     # ------------------------------------------------------------ settings
 
-    def _want_key(self):
+    def _want_key(self, engine):
         from window.hz_preview import font_list
-        from files.render_ahead import engine_used
         app = self.app
         opts = {k: v for k, v in app.ahead_opts.items() if k not in ("lower", "limiter", "ceiling_db")}
-        return (engine_used(app.ahead_engine.get()),tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)),
-                app.kestrel_opts.get("card", ""))
+        return engine, tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)), app.kestrel_opts.get("card", "")
 
-    def _ensure_maker(self):
-        """The Maker for the current settings (a new one when they changed). Returns an error text or None."""
-        key = self._want_key()
+    def engine_for(self, ccs):
+        """(the engine the song is made with, why Kestrel stands in for Merlin or None). R6: what Merlin can't do yet
+        goes to Kestrel by itself: channel volume / expression lines (CC7 / CC11: Merlin doesn't apply them yet),
+        more than one soundfont (refused)."""
+        from window.hz_preview import font_list
+        from files.render_ahead import engine_used
+        engine = engine_used(self.app.ahead_engine.get())
+        if engine != "merlin":
+            return engine, None
+        why = merlin_gap(ccs, font_list(self.app.hz_preview))
+        return ("kestrel", why) if why else (engine, None)
+
+    def _edo_first(self, engine):
+        """31-EDO's first channel for this engine while the 31-EDO + Audio ticks are on, else None: BASSMIDI's after
+        the Hz bass ports like live play (96), the graphics card's the top two ports (playback.EDO_KESTREL)."""
+        from files.playback import EDO_FIRST, EDO_KESTREL
+        if not self.app.out.edo:
+            return None
+        return EDO_FIRST if engine == "bassmidi" else EDO_KESTREL
+
+    def _say_why(self, why):
+        if why:
+            from files.lang import tr
+            self.app.status.config(text=tr("ra.kestrel_" + why))
+
+    def _ensure_maker(self, engine):
+        """The Maker for the current settings and this engine (a new one when they changed; the sound playing goes on
+        with it). Returns an error text or None."""
+        key = self._want_key(engine)
         if self.maker is not None and key == self.key:
             return None
-        self.drop()
+        if self.maker is not None:
+            self.maker.close()
+        self.maker, self.key = None, None
         engine, _, fonts, card = key
         synth = None
         if engine == "bassmidi":
@@ -166,11 +202,14 @@ class AheadPlay:
 
     def start(self, rendered, ccs, ports, ppq, bpm, tempo, start_beat):
         """Play from start_beat. Returns an error text, or None."""
-        err = self._ensure_maker()
+        engine, why = self.engine_for(ccs)
+        err = self._ensure_maker(engine)
         if err:
             return err
-        self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo))
+        self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo,
+                                    self._edo_first(engine)))
         song = self.maker.song
+        self._say_why(why)
         try:
             if self.app.synth is None:
                 self.app.synth = Synth()
@@ -199,7 +238,13 @@ class AheadPlay:
         again (R5); playing goes on."""
         if self.maker is None:
             return
-        if self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo)):
+        engine, why = self.engine_for(ccs)
+        if engine != self.maker.engine:  # (a CC7 / CC11 line drawn or gone: the other engine, all made again)
+            if self._ensure_maker(engine):
+                return
+            self._say_why(why)
+        if self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo,
+                                       self._edo_first(engine))):
             self.app.roll.draw_ahead_grey()
 
     def playing(self):
