@@ -249,6 +249,13 @@ class BuiltinPanel(ttk.Frame):
                                                   ahead=True, tip="ra.voices_tip"))
         keyed("bass_voices", lambda r: self.number_row(r, "bass_voices", "ps.voices", BASS_RANGE, steps=(50, 500, 1),
                                                        ahead=True, tip="ra.bass_voices_tip"))
+        def lower_row(r):
+            c = ttk.Checkbutton(box, text=tr("ra.lower"), variable=app.ahead_vars["lower"],
+                                command=lambda: app.on_ahead_opt("lower"), takefocus=False)
+            c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+            Tooltip(c, tr("ra.lower_tip"))
+            return r + 1
+        keyed("lower", lower_row)
         keyed("block", self.ahead_block_row)
         keyed("interpolation", lambda r: self.choice_row(r, "interpolation", "ks.interp", ahead=True,
                                                          tip="ra.interp_tip"))

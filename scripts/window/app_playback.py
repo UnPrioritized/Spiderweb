@@ -1338,7 +1338,7 @@ class Playback:
         from files.render_ahead import BLOCKS
         for k, v in self.ahead_opts.items():
             if only is None or k == only:
-                shown = BLOCKS.index(v) if k == "block" else v if k in ("interpolation", "limiter") \
+                shown = BLOCKS.index(v) if k == "block" else v if k in ("interpolation", "limiter", "lower") \
                     else f"{v:g}" if k == "ceiling_db" else str(v)
                 if self.ahead_vars[k].get() != shown:
                     self.ahead_vars[k].set(shown)

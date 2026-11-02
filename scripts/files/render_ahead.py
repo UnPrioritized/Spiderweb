@@ -10,26 +10,36 @@ SECONDS = (5, 300)  # Render ahead: how far ahead of the play line the sound is 
 DEFAULT_SECONDS = 30  # (user 2026-11-02: "sounds right")
 
 # R1b (user 2026-11-02): its own engine settings, apart from Kestrel live play's (nothing has to sound at once
-# here), EXCEPT the graphics card (shared: App.kestrel_opts["card"]). No "Lower it by itself" (Merlin drops no
-# note, Kestrel making ahead can take its time). Exact copies stay merged (pieces: Kestrel's coalescing on,
-# Merlin folds them itself; user: never lose that speed). App.ahead_opts keys:
+# here), EXCEPT the graphics card (shared: App.kestrel_opts["card"]). Exact copies stay merged (pieces: Kestrel's
+# coalescing on, Merlin folds them itself; user: never lose that speed).
+# R1c "lower" (user 2026-11-03, OFF by default; Kestrel + BASSMIDI, Merlin has no voice limit): the sound made
+# ahead of the play line running low (< LOW_SHARE of Render ahead, at least LOW_LEAST s) = the next pieces made
+# with the voice limit x LOWER_STEP (like live play's); back above RISE_SHARE = climbs back slowly. Pieces made
+# lowered are marked and made again at the full limit once calm, while still ahead of the play line (R5). With
+# Slow down on: lowering first, waiting only if the play line still reaches the grey. Works from R3.
+LOW_SHARE, LOW_LEAST, RISE_SHARE, LOWER_STEP = 0.25, 3.0, 0.5, 0.85
+# App.ahead_opts keys:
 BLOCKS = (512, 1024, 2048, 4096, 8192)  # (bigger = easier on a weak graphics card; pieces were checked at 4096)
 BASS_VOICES = (1, 100000)  # (BASSMIDI's voice limit, as Built-in's)
 DEFAULTS = {"voices": 1 << 20,  # (Kestrel's own default: making ahead can afford more than live play's 300k)
             "block": 4096, "interpolation": 1, "min_velocity": 0,
             "limiter": 2, "ceiling_db": 0.0,  # (Spiderweb's own limiter over the joined pieces: Balanced first)
-            "bass_voices": 1000}
+            "bass_voices": 1000, "lower": False}
 # rows shown for each engine ("card" = the shared one; Merlin reads neither Max voices nor Interpolation, and
 # can't skip quiet notes yet: those pieces would go to Kestrel)
 ROWS = {"merlin": ("card", "block", "limiter", "ceiling_db"),
-        "kestrel": ("card", "voices", "block", "interpolation", "min_velocity", "limiter", "ceiling_db"),
-        "bassmidi": ("bass_voices", "limiter", "ceiling_db")}
+        "kestrel": ("card", "voices", "lower", "block", "interpolation", "min_velocity", "limiter", "ceiling_db"),
+        "bassmidi": ("bass_voices", "lower", "limiter", "ceiling_db")}
 
 
 def check_opt(key, value):
     """A setting typed / saved / picked, as stored (whole numbers, ceiling to tenths), or ValueError."""
     from files.kestrel import CHOICES, DECIMALS, RANGES, VOICES_RANGE, read_voices
     from files.mathexpr import calc
+    if key == "lower":
+        if isinstance(value, bool):
+            return value
+        raise ValueError(value)
     if isinstance(value, bool):
         raise ValueError(value)
     try:
