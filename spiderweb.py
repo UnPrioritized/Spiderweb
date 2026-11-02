@@ -173,6 +173,9 @@ Files (the scripts live in scripts/, one subfolder per group):
     colour_list.py   picture colours as text for a player's settings (formats), and colours read out of any text
     playback.py      playing through Windows MIDI out
     maestro.py       Maestro (the user's own install) as a MIDI out, through its API: every note stamped with its time
+    kestrel.py       Kestrel (GPU) through our connector DLL: live play, and pieces made ahead (Merlin / Kestrel)
+    render_ahead.py  Rendered ahead's settings (the sound made into audio ahead of the play line)
+    ahead_pieces.py  Rendered ahead's pieces: the song cut into blocks, made in the background, joined for playing
     slow_down.py     slow down to keep the sound going: the synth's load -> the speed the song plays at
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
     sfz.py           the sample files an SFZ soundfont names (checked when one is picked)
