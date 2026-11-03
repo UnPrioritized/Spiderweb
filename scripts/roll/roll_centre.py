@@ -5,13 +5,18 @@ the colours count in (a sliced piece's whole's, flipped / turned with the shape:
 sets that Centre point (in % of that box, like the windows' boxes) of every selected shape of its kind. Whole %
 (Shift = free); one undo step a drag."""
 
+import math
+
 from files.lang import tr
 from notes.engine import free_box
-from notes.recolour import centre_at, centre_spot, clean_recolour, full_stir, without_recolour
+from notes.recolour import (LEAST_REACH, MOST_REACH, centre_at, centre_spot, clean_recolour, full_stir,
+                            without_recolour)
+from roll.roll_gliss import clip_polyline
 from roll.roll_shared import SHIFT
 from window import look
 
-GRAB = 8  # px: how near the dot the mouse must be to grab it
+GRAB = 8  # px: how near the dot (or a Stir's circle line) the mouse must be to grab it
+RING_POINTS = 72  # (the circle line's pieces)
 
 
 def clumps_centre(rc):
@@ -50,14 +55,44 @@ class CentreDots:
     def centre_xy(self, spot):
         return self.to_xy((spot[0] / self.app.ppq, spot[1]))
 
+    def reach_ring(self, made):
+        """The Stir's Only inside a circle line on the piano roll, [x0, y0, x1, y1, ...] closed (in the colour box,
+        so an oval on a box that isn't square; flipped / turned with the shape), or None."""
+        rc, notes, own, kind = made
+        st = full_stir(rc.get("stir")) if kind == "stir" else None
+        if not st or not st["reach"]:
+            return None
+        cx, cy = st["centre"]
+        r = st["reach"] / 2
+        out = []
+        for j in range(RING_POINTS + 1):
+            a = 2 * math.pi * j / RING_POINTS
+            out += self.centre_xy(centre_spot(rc, notes, own, [cx + r * math.cos(a), cy + r * math.sin(a)]))
+        return out
+
+    def ring_near(self, line, x, y):
+        """How near (px) the point x, y is to the polyline line."""
+        best = math.inf
+        for j in range(0, len(line) - 2, 2):
+            x0, y0, x1, y1 = line[j:j + 4]
+            dx, dy = x1 - x0, y1 - y0
+            t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / max(dx * dx + dy * dy, 1e-12)))
+            best = min(best, math.hypot(x0 + t * dx - x, y0 + t * dy - y))
+        return best
+
     def draw_centre_dots(self):
         self.delete("rccentre")
         s = self.scale
         r = 6 * s
         line = max(1, round(2 * s))
+        room = (-10, -10, self.winfo_width() + 10, self.winfo_height() + 10)
         for _, made, spot in self.centre_boxes():
             x, y = self.centre_xy(spot)
             col = look.PATH_LINE
+            ring = self.reach_ring(made)
+            if ring:  # (thin, dashed, cut to the view: never one long dashed line far off screen)
+                for piece in clip_polyline(ring, room):
+                    self.create_line(*piece, fill=col, width=line, dash=(4, 3), tags="rccentre")
             if made[3] == "stir":  # (the Stir's: a ring with a dot, apart from Clumps' cross)
                 self.create_oval(x - r, y - r, x + r, y + r, outline=col, fill=look.ROLL_BG, width=line,
                                  tags="rccentre")
@@ -69,20 +104,32 @@ class CentreDots:
             self.create_line(x - r * 1.8, y, x + r * 1.8, y, fill=col, width=line, tags="rccentre")
             self.create_line(x, y - r * 1.8, x, y + r * 1.8, fill=col, width=line, tags="rccentre")
 
-    def centre_hit(self, e):
-        """(its shape's Recolour, notes, box, kind) of the Centre point dot under the mouse, else None."""
+    def centre_hit(self, e, rings=False):
+        """(its shape's Recolour, notes, box, kind) of the Centre point dot under the mouse, else None. rings: also
+        a Stir's circle line, as (made, "reach") (dots win)."""
         g = GRAB * self.scale
-        for sh, made, spot in reversed(self.centre_boxes()):
+        dots = list(reversed(self.centre_boxes()))
+        for sh, made, spot in dots:
             x, y = self.centre_xy(spot)
             if abs(x - e.x) <= g and abs(y - e.y) <= g:
                 return made
+        if rings:
+            for sh, made, spot in dots:
+                ring = self.reach_ring(made)
+                if ring and self.ring_near(ring, e.x, e.y) <= g:
+                    return made, "reach"
         return None
 
     def centre_press(self, e):
-        """A left press on a Centre point dot: grabbed (one undo step). True if taken."""
-        made = self.centre_hit(e)
+        """A left press on a Centre point dot (or a Stir's circle line: its size): grabbed (one undo step). True if
+        taken."""
+        made = self.centre_hit(e, rings=True)
         if made is None:
             return False
+        if len(made) == 2:  # ((made, "reach"): the circle line)
+            self.app.push_undo(name=tr("stir.undo_reach"))
+            self.drag = ("rccentre", made[0], "reach")
+            return True
         self.app.push_undo(name=tr("stir.undo_centre" if made[3] == "stir" else "shares.undo_centre"))
         self.drag = ("rccentre", made)
         return True
@@ -118,6 +165,15 @@ class CentreDots:
             return
         b, p = self.from_xy(e.x, e.y)
         c = centre_at(rc, notes, own, b * self.app.ppq, p)  # (the grabbed shape's box: under the mouse)
+        if len(self.drag) > 2:  # (the circle line: its size = twice the mouse's distance from the Centre point)
+            from window.stir_window import stirred_rc
+            m = full_stir(rc.get("stir"))["centre"]
+            size = 2 * math.hypot(c[0] - m[0], c[1] - m[1])
+            size = round(size, 3) if e.state & SHIFT else float(round(size))
+            size = min(max(size, LEAST_REACH if e.state & SHIFT else 1.0), MOST_REACH)
+            self.app.change_recolour(lambda old, sh: stirred_rc(old, dict(full_stir((old or {}).get("stir")),
+                                                                          reach=size)), None, False)
+            return
         c = [min(max(v, 0.0), 100.0) for v in c]
         c = [round(v, 3) if e.state & SHIFT else float(round(v)) for v in c]
         self.set_centre(kind, c, None, push=False)

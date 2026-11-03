@@ -47,8 +47,11 @@ MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more t
 MOST_SEED = 2 ** 31 - 1
 # (squeeze: the colours' middle taken to the Centre point, squeezed on one side; off = the point is only where the
 # turn / twist happens, BMC tester 11-03)
+# (reach: Only inside a circle, its diameter in % of the colour box (an oval on a box that isn't square, as Turn
+# counts), None = the whole shape; the turn fades to nothing at its edge, BMC tester 11-03)
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
-                 "squeeze": True}
+                 "squeeze": True, "reach": None}
+MOST_REACH, LEAST_REACH = 100.0, 0.01
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
 # (colours stirred past the edge: gone / back in on the other side OF THE NOTES (each key row's own span) / back in
 # on the other side of the BOX, the outline cutting it out (the old Wrap) / each key row stretched to the box first,
@@ -126,8 +129,8 @@ def clean_recolour(r):
 
 def clean_stir(s):
     """A saved rc["stir"] -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
-    % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False}, each only when not its default
-    (STIR_DEFAULTS), or None (no stir)."""
+    % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False, "reach": % LEAST_REACH..
+    MOST_REACH}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
     if not isinstance(s, dict):
         return None
     out = {}
@@ -147,6 +150,9 @@ def clean_stir(s):
         out["edge"] = s["edge"]
     if s.get("squeeze") is False:
         out["squeeze"] = False
+    r = s.get("reach")
+    if number(r) and LEAST_REACH <= round(r, 3) <= MOST_REACH:
+        out["reach"] = round(float(r), 3)
     return out or None
 
 
@@ -571,7 +577,14 @@ def stir_from(at, rc, box, own):
     cx, cy = (v / 100 for v in st["centre"])
     dx, dy = x - cx, y - cy
     turn = st["turn"] / 360
-    if st["twist"]:
+    reach = st["reach"]
+    if reach:  # (Only inside a circle: Twist winds out to its edge, everything fades smoothly to none there)
+        q = np.clip(np.hypot(dx, dy) / (reach / 200), 0.0, 1.0)
+        w = 1 - q * q * (3 - 2 * q)
+        if st["twist"]:
+            turn = turn + st["twist"] * np.sqrt(q)
+        turn = turn * w
+    elif st["twist"]:
         far = max(np.hypot(X - cx, Y - cy) for X in (0, 1) for Y in (0, 1))
         turn = turn + st["twist"] * np.sqrt(np.hypot(dx, dy) / max(far, 1e-12))
     a = -2 * np.pi * np.asarray(turn, np.float64)
@@ -584,8 +597,11 @@ def stir_from(at, rc, box, own):
     else:  # (escape: gone, the edge's colours stretch in)
         x, y = np.clip(x, 0, 1), np.clip(y, 0, 1)
     if st["squeeze"]:
-        x = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
-        y = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
+        sx = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
+        sy = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
+        if reach:  # (the squeeze fades with the circle too: outside it nothing moves)
+            sx, sy = x + (sx - x) * w, y + (sy - y) * w
+        x, y = sx, sy
     mid, key = from_unit(x, y, rc, box, own)
     if edge == "wrap":  # (a spot past its key row's notes comes back in on that row's other side: a box's row
         # spans the whole box, so a rectangle is the box's tiling exactly)

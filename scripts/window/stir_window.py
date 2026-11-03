@@ -10,7 +10,8 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import KEEP, MOST_TIGHT, STIR_EDGES, STIR_SETS, clean_recolour, full_stir, new_seed
+from notes.recolour import (KEEP, LEAST_REACH, MOST_REACH, MOST_TIGHT, STIR_EDGES, STIR_SETS, clean_recolour,
+                            full_stir, new_seed)
 from window import look
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
@@ -82,6 +83,18 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                                             command=self.on_squeeze)
         self.squeeze_tick.pack(anchor="w", pady=(6, 0))
         Tooltip(self.squeeze_tick, tr("stir.squeeze_tip"))
+        row = ttk.Frame(box)  # (Only inside a circle, BMC tester 11-03: its size = diameter in % of the box)
+        row.pack(anchor="w", pady=(4, 0))
+        self.reach_on = tk.BooleanVar(value=False)
+        self.reach_last = 50.0  # (the size a tick brings back: the last one shown)
+        self.reach_tick = ttk.Checkbutton(row, text=tr("stir.reach"), variable=self.reach_on, command=self.on_reach)
+        self.reach_tick.pack(side="left")
+        Tooltip(self.reach_tick, tr("stir.reach_tip"))
+        w = ttk.Label(row, text=tr("stir.reach_size"))
+        w.pack(side="left", padx=(8, 0))
+        Tooltip(w, tr("stir.reach_tip"))
+        self._number_box(row, "reach", LEAST_REACH, MOST_REACH, w)
+        ttk.Label(row, text="%").pack(side="left")
         # (a user's feedback 2026-11-02, recolour.stir_from / stirred; Colour sets only while a shape has 2+ sets)
         self.picks = {}  # key -> {row, box, tip, choices}
         for key, choices in (("edge", STIR_EDGES), ("sets", STIR_SETS)):
@@ -180,6 +193,19 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 p["box"].current(p["choices"].index(next(iter(vals))))
             show_mixed(p["box"], len(vals) > 1, p["tip"], tr(f"stir.{key}_tip"))
             p["box"].config(state="readonly" if on else "disabled")
+        reaches = [s["reach"] for s in sts]
+        ons = {r is not None for r in reaches}
+        self.reach_on.set(ons == {True})
+        self.reach_tick.state(["alternate" if len(ons) > 1 else "!alternate", "!disabled" if on else "disabled"])
+        sizes = {r for r in reaches if r is not None}
+        if len(sizes) == 1:
+            self.reach_last = next(iter(sizes))
+        b = self.boxes["reach"]
+        text = fmt(next(iter(sizes))) if len(sizes) == 1 else "" if sizes else fmt(self.reach_last)
+        if self.focus_get() is not b["entry"] or b["var"].get() == b["shown"]:
+            b["var"].set(text)
+        b["shown"] = text
+        b["entry"].config(state="normal" if on and sizes else "disabled")
         squeezes = {s["squeeze"] for s in sts}
         self.squeeze.set(squeezes != {False})
         self.squeeze_tick.state(["alternate" if len(squeezes) > 1 else "!alternate",
@@ -263,6 +289,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.wheel = None
             self.set_stir(key, p["choices"][i])
             self.sync()
+
+    def on_reach(self):
+        self.wheel = None
+        self.set_stir("reach", self.reach_last if self.reach_on.get() else None)
+        self.sync()
 
     def on_squeeze(self):
         self.wheel = None
