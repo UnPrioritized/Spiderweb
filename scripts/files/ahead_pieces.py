@@ -368,18 +368,12 @@ def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None):
         if cancel.is_set():
             return None, None
         loaded = kestrel.loaded_for(fonts, card)
-        _clean_old_pieces()
-        fd, path = tempfile.mkstemp(".mid", PIECE_PREFIX)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
+        _clean_old_pieces()  # (files older Spiderwebs left: pieces go to the connector as bytes now, user 11-03)
         o = {"block": opts["block"]}
         if engine == "kestrel":
             o.update(voices=opts["voices"], interpolation=opts["interpolation"], min_velocity=opts["min_velocity"])
-        try:
-            piece = kestrel.Piece(loaded, path, engine, skip, f1 - f0, delete_midi=True, **o)
-        except BaseException:  # (it couldn't start: its file is ours to delete, it was left behind)
-            _remove(path)
-            raise
+        piece = kestrel.Piece(loaded, bytes(data), engine, skip, f1 - f0, **o)
+        del data  # (the connector has its own copy: ours let go before the long wait)
         try:
             while True:
                 state = piece.wait(0.05)

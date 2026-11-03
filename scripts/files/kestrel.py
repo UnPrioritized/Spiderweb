@@ -12,6 +12,7 @@ import ctypes
 import os
 import struct
 import sys
+import tempfile
 import threading
 import time
 
@@ -201,9 +202,11 @@ def load():
                             ("kb_open_on", [p, ctypes.POINTER(_Options)], p)):
         fn = getattr(d, name)
         fn.argtypes, fn.restype = args, res
-    # (Rendered ahead's pieces, connector 0.4.0 on: an older DLL lacks them, pieces_here() says so)
+    # (Rendered ahead's pieces, connector 0.4.0 on: an older DLL lacks them, pieces_here() says so; pieces as bytes 0.5.0 on)
     for name, args, res in (("kb_piece_start", [p, ctypes.c_char_p, ctypes.POINTER(_Options), u32, ctypes.c_uint64,
                                                 ctypes.c_uint64], p),
+                            ("kb_piece_start_bytes", [p, ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(_Options), u32,
+                                                      ctypes.c_uint64, ctypes.c_uint64], p),
                             ("kb_piece_status", [p, ctypes.POINTER(_PieceStatus)], None),
                             ("kb_piece_wait", [p, u32], u32), ("kb_piece_cancel", [p], None),
                             ("kb_piece_audio", [p, ctypes.POINTER(ctypes.c_uint64)], ctypes.POINTER(ctypes.c_float)),
@@ -485,8 +488,18 @@ class Piece:
         self._opts = _options(**o)  # (kept alive while the call reads it)
         if loaded is None or not loaded.handle:
             raise SynthError("playback.kestrel_failed", err="no soundfonts loaded")
-        self.handle = d.kb_piece_start(loaded.handle, os.fsdecode(midi).encode("utf-8"), ctypes.byref(self._opts),
-                                       ENGINES[engine], int(skip), int(most))
+        if isinstance(midi, (bytes, bytearray)) and not hasattr(d, "kb_piece_start_bytes"):
+            fd, path = tempfile.mkstemp(".mid", "spiderweb-piece-")  # (an older connector: a file it can read)
+            with os.fdopen(fd, "wb") as f:
+                f.write(midi)
+            self.midi, self.delete_midi, midi = path, True, path
+        if isinstance(midi, (bytes, bytearray)):  # (the piece's MIDI never on disk: the connector copies it)
+            self.midi = None
+            self.handle = d.kb_piece_start_bytes(loaded.handle, bytes(midi), len(midi), ctypes.byref(self._opts),
+                                                 ENGINES[engine], int(skip), int(most))
+        else:
+            self.handle = d.kb_piece_start(loaded.handle, os.fsdecode(midi).encode("utf-8"), ctypes.byref(self._opts),
+                                           ENGINES[engine], int(skip), int(most))
         if not self.handle:
             raise SynthError("playback.kestrel_failed", err=_error(d))
         self._lock = threading.Lock()

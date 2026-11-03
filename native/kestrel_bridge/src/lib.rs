@@ -1090,7 +1090,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.4.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 55519b3)";
+    static V: &CStr = c"0.5.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 21df623)";
     V.as_ptr()
 }
 
@@ -1447,6 +1447,29 @@ pub unsafe extern "C" fn kb_piece_start(
         let path = PathBuf::from(CStr::from_ptr(midi).to_string_lossy().into_owned());
         let engine = if engine == 1 { piece::Engine::Merlin } else { piece::Engine::Kestrel };
         or_null(piece::Piece::start(&*l, &path, &read_opts(opts), engine, skip, max_frames))
+    })
+}
+
+/// kb_piece_start with the piece's MIDI file given as bytes (`len` of them at `data`, copied before it returns: the
+/// caller may free them at once), never written to disk. Same `engine`, `skip`, `max_frames`, result.
+#[no_mangle]
+pub unsafe extern "C" fn kb_piece_start_bytes(
+    l: *const Loaded,
+    data: *const u8,
+    len: u64,
+    opts: *const KbOptions,
+    engine: u32,
+    skip: u64,
+    max_frames: u64,
+) -> *mut piece::Piece {
+    if l.is_null() || data.is_null() || len == 0 {
+        set_error("no soundfonts loaded or no MIDI given");
+        return std::ptr::null_mut();
+    }
+    guard(std::ptr::null_mut(), || {
+        let bytes: std::sync::Arc<[u8]> = std::slice::from_raw_parts(data, len as usize).into();
+        let engine = if engine == 1 { piece::Engine::Merlin } else { piece::Engine::Kestrel };
+        or_null(piece::Piece::start_bytes(&*l, bytes, &read_opts(opts), engine, skip, max_frames))
     })
 }
 

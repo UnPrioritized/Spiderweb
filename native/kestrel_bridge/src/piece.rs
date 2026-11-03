@@ -120,6 +120,23 @@ impl Piece {
     /// Start making `midi` into audio: the first `skip` frames dropped (the piece starts early so notes already
     /// ringing sound right), then at most `max_frames` kept (0 = to the end, its ring-out included).
     pub fn start(loaded: &Loaded, midi: &Path, opts: &KbOptions, engine: Engine, skip: u64, max_frames: u64) -> Result<Piece> {
+        Self::start_on(loaded, midi, false, opts, engine, skip, max_frames)
+    }
+
+    /// `start` with the MIDI file as bytes, never on disk: held under a name of its own (Kestrel's readers look
+    /// there first) until the piece's thread ends.
+    pub fn start_bytes(loaded: &Loaded, bytes: Arc<[u8]>, opts: &KbOptions, engine: Engine, skip: u64, max_frames: u64) -> Result<Piece> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let name = PathBuf::from(format!("<spiderweb memory>/piece-{}.mid", NEXT.fetch_add(1, Ordering::Relaxed)));
+        kestrel::midi::hold_in_memory(name.clone(), bytes);
+        let got = Self::start_on(loaded, &name, true, opts, engine, skip, max_frames);
+        if got.is_err() {
+            kestrel::midi::let_go_in_memory(&name);
+        }
+        got
+    }
+
+    fn start_on(loaded: &Loaded, midi: &Path, held: bool, opts: &KbOptions, engine: Engine, skip: u64, max_frames: u64) -> Result<Piece> {
         let fonts = Fonts {
             bank: loaded.bank.clone(),
             gpu: loaded.gpu.clone(),
@@ -147,6 +164,9 @@ impl Piece {
             let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 make(&s, &fonts, &midi, &opts, engine, skip, max_frames, t0)
             }));
+            if held {  // (its bytes: freed as soon as it's made, before the audio is taken)
+                kestrel::midi::let_go_in_memory(&midi);
+            }
             let state = match run {
                 Ok(Ok(())) if s.cancel.load(Ordering::Acquire) => CANCELLED,
                 Ok(Ok(())) => DONE,
