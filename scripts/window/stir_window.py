@@ -77,6 +77,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             w.pack(side="left", padx=(6, 0))
             self._number_box(row, "centre" + str(k), 0, 100, w)
             ttk.Label(row, text="%").pack(side="left")
+        self.squeeze = tk.BooleanVar(value=True)  # (BMC tester 11-03: off = the point only says where it turns)
+        self.squeeze_tick = ttk.Checkbutton(box, text=tr("stir.squeeze"), variable=self.squeeze,
+                                            command=self.on_squeeze)
+        self.squeeze_tick.pack(anchor="w", pady=(6, 0))
+        Tooltip(self.squeeze_tick, tr("stir.squeeze_tip"))
         # (a user's feedback 2026-11-02, recolour.stir_from / stirred; Colour sets only while a shape has 2+ sets)
         self.picks = {}  # key -> {row, box, tip, choices}
         for key, choices in (("edge", STIR_EDGES), ("sets", STIR_SETS)):
@@ -175,6 +180,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 p["box"].current(p["choices"].index(next(iter(vals))))
             show_mixed(p["box"], len(vals) > 1, p["tip"], tr(f"stir.{key}_tip"))
             p["box"].config(state="readonly" if on else "disabled")
+        squeezes = {s["squeeze"] for s in sts}
+        self.squeeze.set(squeezes != {False})
+        self.squeeze_tick.state(["alternate" if len(squeezes) > 1 else "!alternate",
+                                 "!disabled" if on else "disabled"])
         many = any(len(app.colour_owns(t)) > 1 for t in tgts)
         row = self.picks["sets"]["row"]
         if many != bool(row.winfo_manager()):
@@ -254,6 +263,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.wheel = None
             self.set_stir(key, p["choices"][i])
             self.sync()
+
+    def on_squeeze(self):
+        self.wheel = None
+        self.set_stir("squeeze", bool(self.squeeze.get()))
+        self.sync()
 
     def on_reset(self):
         self.wheel = None

@@ -45,7 +45,10 @@ PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
 TIGHT, MOST_TIGHT = 1.0, 50.0  # Swirl tightness: turns from the centre point to the edge
 MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more toward that side)
 MOST_SEED = 2 ** 31 - 1
-STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape"}
+# (squeeze: the colours' middle taken to the Centre point, squeezed on one side; off = the point is only where the
+# turn / twist happens, BMC tester 11-03)
+STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
+                 "squeeze": True}
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
 # (colours stirred past the edge: gone / back in on the other side OF THE NOTES (each key row's own span) / back in
 # on the other side of the BOX, the outline cutting it out (the old Wrap) / each key row stretched to the box first,
@@ -123,7 +126,8 @@ def clean_recolour(r):
 
 def clean_stir(s):
     """A saved rc["stir"] -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
-    % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES)}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
+    % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False}, each only when not its default
+    (STIR_DEFAULTS), or None (no stir)."""
     if not isinstance(s, dict):
         return None
     out = {}
@@ -141,6 +145,8 @@ def clean_stir(s):
         out["sets"] = "move"
     if s.get("edge") in STIR_EDGES[1:]:
         out["edge"] = s["edge"]
+    if s.get("squeeze") is False:
+        out["squeeze"] = False
     return out or None
 
 
@@ -549,8 +555,9 @@ def from_unit(x, y, rc, box, own):
 
 def stir_from(at, rc, box, own):
     """(middle in ticks, key) each note's colour comes from under rc's Stir: its place in the colour box turned
-    back round the Centre point by Turn + Twist (turns, most near the centre: Swirl's way), then the Centre point
-    taken back to the middle (the colours' middle moved there: squeezed on one side, stretched on the other)."""
+    back round the Centre point by Turn + Twist (turns, most near the centre: Swirl's way), then (Squeeze on) the
+    Centre point taken back to the middle (the colours' middle moved there: squeezed on one side, stretched on the
+    other)."""
     st = full_stir(rc.get("stir"))
     s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
     mid = (s + e) / 2
@@ -576,8 +583,9 @@ def stir_from(at, rc, box, own):
         y = np.clip(np.where(out(y), np.mod(y, 1.0), y), 0, 1)
     else:  # (escape: gone, the edge's colours stretch in)
         x, y = np.clip(x, 0, 1), np.clip(y, 0, 1)
-    x = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
-    y = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
+    if st["squeeze"]:
+        x = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
+        y = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
     mid, key = from_unit(x, y, rc, box, own)
     if edge == "wrap":  # (a spot past its key row's notes comes back in on that row's other side: a box's row
         # spans the whole box, so a rectangle is the box's tiling exactly)
