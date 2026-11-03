@@ -38,7 +38,9 @@ POST_S = 0.3  # ... and its events go this far past its end: Merlin looks ahead 
 # Cats Dance 2026-11-03: 0.1 s = -43 dB in the last 10 ms, 0.3 s = -126 dB, 1 s = the same to the bit)
 HELD_PRE = 30.0  # ... at most, for a note still held there (8 s: an 18 s held note was -14 dB off at 12 s)
 TAIL = 30.0  # seconds of ring after the last note at most (a piece finding the sound died away ends it sooner)
-BEHIND = 10.0  # seconds of made blocks kept behind the play line (further back = thrown away)
+BEHIND = 10.0  # seconds of made blocks kept behind the play line (further back = thrown away when over KEPT_MOST_S)
+KEPT_MOST_S = 600.0  # made sound kept outside what's wanted (M2, user 2026-11-03: the play line moved back plays at
+# once), farthest from the play line thrown away first; 600 s = 230 MB
 PIECE_MOST = 512 << 20  # a loaded MIDI's piece WRITES about this many bytes at most (more blocks = shorter piece; a
 # block over it = made in parts) ...
 PIECE_LEAST = 32 << 20  # ... or 1/16 of the free memory, not below this (Merlin holds ~5x the piece)
@@ -599,10 +601,16 @@ class Maker:
         want = self.wanted(anchor, min(ahead_s, self.room()))
         keep = set(want)
         with self._lock:
-            for i in list(self.blocks):  # (behind the play line past BEHIND, or past the window: thrown away)
-                if i not in keep and not (anchor - BEHIND * RATE <= (i + 1) * BLOCK and i * BLOCK <= anchor):
-                    del self.blocks[i]
-                    changed = True
+            # (behind the play line past BEHIND, or past the window: kept up to KEPT_MOST_S (and what free memory
+            # allows), the farthest from the play line thrown away first)
+            far = [i for i in self.blocks
+                   if i not in keep and not (anchor - BEHIND * RATE <= (i + 1) * BLOCK and i * BLOCK <= anchor)]
+            budget = min(KEPT_MOST_S, max(0.0, self.room() - len(keep) * BLOCK_S))
+            far.sort(key=lambda i: abs(i * BLOCK - anchor))
+            for i in far[int(budget // BLOCK_S):]:
+                del self.blocks[i]
+                self.low.discard(i)
+                changed = True
             for job in self.jobs:
                 if not any(i in keep for i in range(job.first, job.first + job.count)):
                     job.cancel.set()

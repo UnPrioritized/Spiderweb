@@ -146,13 +146,18 @@ class AheadPlay:
         self.skipped = 0  # frames skipped (silence) since Play
         self.slow = False  # (the Slow down tick, copied each tick for the sound's thread)
         self.picked = None  # (the Engine dropdown's engine at Play: kept while playing)
+        # (M2 Make ahead while stopped: the play line / notes as last seen, since when they rest, the song is old,
+        # the frame made from (None = nothing made while stopped), the place a making error was said for)
+        self._seen, self._rest_since, self._dirty = None, 0.0, True
+        self.idle_anchor = None
+        self._failed_at = None
 
     # ------------------------------------------------------------ settings
 
     def _want_key(self, engine):
         from window.hz_preview import font_list
         app = self.app
-        opts = {k: v for k, v in app.ahead_opts.items() if k not in ("lower", "limiter", "ceiling_db")}
+        opts = {k: v for k, v in app.ahead_opts.items() if k not in ("lower", "limiter", "ceiling_db", "while_stopped")}
         return engine, tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)), app.kestrel_opts.get("card", "")
 
     def engine_for(self, ccs):
@@ -231,6 +236,7 @@ class AheadPlay:
     def drop(self):
         """Everything made let go (settings changed, MIDI out changed, closing)."""
         self.stop()
+        self.idle_anchor, self._dirty = None, True
         if self.maker is not None:
             self.maker.close()
         self.maker, self.key = None, None
@@ -241,6 +247,7 @@ class AheadPlay:
         """Play from start_beat. Returns an error text, or None."""
         from files.render_ahead import engine_used
         self.stop()  # (the Engine dropdown read anew: engine_for keeps it while playing)
+        self.idle_anchor = None  # (made while stopped: kept, played from)
         self.picked = engine_used(self.app.ahead_engine.get())
         engine, why = self.engine_for(ccs)
         err = self._ensure_maker(engine)
@@ -350,6 +357,71 @@ class AheadPlay:
             self.gate.set()
         return m.error
 
+    # ------------------------------------------------------------ making while stopped (M2)
+
+    def mark_dirty(self):
+        """The notes / tempo / mutes changed while stopped: the song is built again once they rest."""
+        self._dirty = True
+        self._failed_at = None
+
+    def idle_wanted(self):
+        """True while making ahead while stopped is on for this window (Rendered ahead picked, the tick on, not
+        playing)."""
+        from files.playback import AHEAD
+        app = self.app
+        return self.audio is None and app.midi_device.get() == AHEAD and bool(app.ahead_opts.get("while_stopped"))
+
+    def idle(self):
+        """(window's thread, every IDLE_MS while stopped) Once the play line and the notes rested REST_S: the song
+        built again if it changed, then made from the play line up to Render ahead seconds (the grey shows what's
+        not made yet). Returns False when it should stop looking (not wanted any more)."""
+        from files.render_ahead import REST_S
+        app = self.app
+        if not self.idle_wanted():
+            if self.idle_anchor is not None:
+                self.idle_anchor = None
+                app.roll.draw_ahead_grey()
+            return False
+        now = time.monotonic()
+        seen = (app.playhead, self._dirty)
+        if seen != self._seen:
+            self._seen, self._rest_since = seen, now
+        if now - self._rest_since < REST_S or self._failed_at == seen:
+            return True
+        if self._dirty or self.maker is None or self.maker.song is None:
+            parts = app.ahead_parts()  # (rendered, ccs, ports, ppq, bpm, tempo) or None (a number being typed)
+            if parts is None:
+                return True
+            rendered, ccs, ports, ppq, bpm, tempo = parts
+            engine, why = self.engine_for(ccs)
+            err = self._ensure_maker(engine)
+            if err:
+                self._failed_at = seen
+                app.status.config(text=err)
+                return True
+            self.maker.error = None
+            self.maker.update_song(self.song(rendered, ccs, ports, ppq, bpm, tempo, engine))
+            self._say_why(why)
+            self._dirty = False
+            self._seen = (app.playhead, False)
+        m = self.maker
+        if self.load is not None:  # (BASSMIDI's soundfonts opening)
+            if self.load.is_alive():
+                return True
+            err, self.load = self.load.error, None
+            if err:
+                self._failed_at = self._seen
+                app.status.config(text=err)
+                return True
+        song = m.song
+        self.idle_anchor = max(0, song.frame(int(round(app.playhead * song.ppq))))
+        m.step(self.idle_anchor, app.ahead_seconds)
+        if m.error:
+            self._failed_at = self._seen
+            app.status.config(text=m.error)
+        app.roll.draw_ahead_grey()
+        return True
+
     def ended(self):
         """True once the sound's end was played (the play line then runs to its own end and stops)."""
         return self.audio is not None and not self.audio.active()
@@ -394,14 +466,20 @@ class AheadPlay:
         m.lowered = f < 1.0
 
     def grey_beats(self, b0, b1):
-        """(R4) [(from, to)] beats between b0 and b1 not made yet, while playing (stopped: none; nothing is made
-        then, a whole song in grey would only be in the way)."""
+        """(R4) [(from, to)] beats between b0 and b1 not made yet, while playing; stopped and making ahead (M2):
+        only from the play line to Render ahead seconds past it (the whole song in grey would be in the way)."""
         m = self.maker
         song = None if m is None else m.song
-        if self.audio is None or song is None or not len(song) or b1 <= b0:
+        idle = self.audio is None and self.idle_anchor is not None
+        if (self.audio is None and not idle) or song is None or not len(song) or b1 <= b0:
             return []
         ppq = song.ppq
         f0, f1 = song.frame(max(0, int(b0 * ppq))), song.frame(max(0, int(math.ceil(b1 * ppq))))
+        if idle:
+            f0 = max(f0, self.idle_anchor)
+            f1 = min(f1, self.idle_anchor + int(min(self.app.ahead_seconds, m.room()) * RATE))
+            if f1 <= f0:
+                return []
         return [(song.map.tick(a / RATE) / ppq, song.map.tick(b / RATE) / ppq) for a, b in m.grey(f0, f1)]
 
     def heard_sec(self):

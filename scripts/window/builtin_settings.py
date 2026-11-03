@@ -255,6 +255,11 @@ class BuiltinPanel(ttk.Frame):
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(c, tr("ra.slow_down_tip"))
         r += 1
+        c = ttk.Checkbutton(box, text=tr("ra.while_stopped"), variable=app.ahead_vars["while_stopped"],
+                            command=lambda: app.on_ahead_opt("while_stopped"), takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("ra.while_stopped_tip"))
+        r += 1
 
         # R1b: the engine's own rows (render_ahead.ROWS: only the picked engine's show)
         from files.kestrel import LIMITER_ORDER, VOICES_RANGE

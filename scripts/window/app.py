@@ -798,6 +798,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         from window import app_playback
         if app_playback.READY_AFTER_MS is not None:  # (Built-in BASSMIDI ready before the first Space)
             self.after(app_playback.READY_AFTER_MS, self.ready_builtin)
+            self.after(app_playback.READY_AFTER_MS, self.kick_ahead)  # (Rendered ahead: made while stopped, M2)
 
         for k, v in self.pvar.items():  # (the output file name changes no notes: typing it remade them all, slow)
             v.trace_add("write", lambda *_, k=k: self.schedule_autosave() if k == "output" else self.on_project_change(True))

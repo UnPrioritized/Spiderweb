@@ -996,6 +996,8 @@
  "ra.engine_kestrel": "Kestrel (graphics card)",
  "ra.engine_bassmidi": "BASSMIDI (processor)",
  "ra.engine_tip": "What makes the sound ahead of the play line. Merlin: the fastest, every note played, but some controllers aren't exact yet. Kestrel: slower, exact. BASSMIDI: on the processor, works on any PC. Used from the next Play.",
+ "ra.while_stopped": "Make ahead while stopped",
+ "ra.while_stopped_tip": "Ticked: while playing is stopped, the sound is made from the play line (once it rests half a second) up to Render ahead seconds, so a heavy song can be waited out before Play: the faint grey clears as it's made, and Play starts at once with what's made. Moving the play line makes from the new place; what was made elsewhere is kept for a while.",
  "ra.exact": "Use Kestrel where Merlin isn't exact",
  "ra.exact_tip": "Merlin doesn't play controllers exactly yet (volume, expression, pan, sustain pedal and CC lines other than pitch bends), in your shapes and in a loaded MIDI. Unticked: Merlin makes them anyway, fast but a little off. Ticked: songs with them are made with Kestrel, exact but much slower (the status line says so). Used from the next Play.",
  "ra.fonts_note": "More than one soundfont is in the list: Merlin can't use several yet, so Kestrel makes the sound (slower).",

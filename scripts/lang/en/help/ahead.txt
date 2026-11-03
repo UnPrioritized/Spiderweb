@@ -10,6 +10,8 @@ Edit while playing (draw, move, delete, change velocities) and only the changed 
 
 Playing stops once the sound has died away, not a beat after the last note.
 
+While stopped, the sound is made from the play line too (Make ahead while stopped, on at first): once the play line rests half a second, making starts there, up to Render ahead seconds, with the faint grey over what's not made yet. So a heavy song can be waited out: when the grey is gone, Play starts at once. Moving the play line makes from the new place; what was already made elsewhere is kept for a while, so going back plays at once too.
+
 A loaded MIDI plays too, with your own shapes on top (muted tracks are left out). Very dense parts are made in shorter pieces, so a heavy wall may take longer to make than to play: the time made ahead before it is used up while it's made.
 
 Right-drag listening, piano keys and the Hz bass window's keys can't be made ahead (the mouse decides them as you go): they sound through Built-in BASSMIDI, with the same soundfonts.

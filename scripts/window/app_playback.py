@@ -84,6 +84,7 @@ def readable(n):
 
 
 TAP_VELOCITY = 100  # a piano key pressed while picking Glissando keys (tap_key)
+AHEAD_IDLE_MS = 150  # Rendered ahead's making while stopped looks this often (M2)
 READY_AFTER_MS = 1500  # Built-in BASSMIDI made ready this long after the start (ready_builtin); None = never (tests)
 LIVE_SETTLE_S = 0.4  # a synth opened right at Space runs this long before the notes (hunt 2026-10-25: a new BASSMIDI
 # stream lost its first 12-46 ms; notes 0.4 s after it opened lost none)
@@ -230,13 +231,14 @@ class Playback:
             last = max(last, self.loaded.end / ppq)
         return float(math.ceil(max(last, start) + 1.0 - 1e-9))
 
-    def end_and_tempo(self, ppq, bpm, beats, start):
+    def end_and_tempo(self, ppq, bpm, beats, start, device=None):
         """(play end in beats, heard tempo). Rendered ahead: the sound decides the end (Play stops once the ring
         died away, AheadPlay.ended), so the line's own end is put past the longest ring (TAIL at the fastest tempo);
-        a quarter bar cut the soundfont's release short (user 2026-11-03)."""
+        a quarter bar cut the soundfont's release short (user 2026-11-03). device = the MIDI out to plan for (None:
+        the open one)."""
         end = self.play_end(ppq, beats, start)
         tempo = heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard())
-        if self.out.name == AHEAD:
+        if (device or self.out.name) == AHEAD:
             from files.ahead_pieces import TAIL
             fastest = max([bpm] + [60e6 / us for _, us in (tempo or ()) if us > 0])
             end += (TAIL + 2.0) * fastest / 60.0
@@ -328,8 +330,10 @@ class Playback:
 
     def play_changed(self):
         """The notes or the project's numbers changed while playing: it plays on with them from where it is (a new
-        PPQ: started again from there)."""
+        PPQ: started again from there). Stopped: Rendered ahead's making while stopped builds its song again."""
         if not self.player.running:
+            self.ahead_play.mark_dirty()
+            self.kick_ahead()
             return
         try:
             ppq, bpm, beats = self.read_project()
@@ -363,10 +367,36 @@ class Playback:
             return self.play_changed()
         self.player.set_tempo(bpm, heard_tempo(self.tempo, bpm, ppq, end, self.file_heard()))
 
-    def play_parts(self, ppq, bpm):
+    def play_parts(self, ppq, bpm, device=None):
         """play_apart's, the CC lines as the player's messages (cc_list)."""
-        rendered, msgs, ports = self.play_apart(ppq, bpm)
+        rendered, msgs, ports = self.play_apart(ppq, bpm, device)
         return rendered, cc_list(msgs, self.picture_use10, ports) if msgs else [], ports
+
+    def ahead_parts(self):
+        """(rendered, ccs, ports, ppq, bpm, tempo) as Play would hand Rendered ahead from the play line, while
+        stopped (M2: the MIDI out isn't open then); None while a project number is being typed."""
+        try:
+            ppq, bpm, beats = self.read_project()
+        except ValueError:
+            return None
+        rendered, ccs, ports = self.play_parts(ppq, bpm, AHEAD)
+        _, tempo = self.end_and_tempo(ppq, bpm, beats, self.playhead, AHEAD)
+        return rendered, ccs, ports, ppq, bpm, tempo
+
+    def kick_ahead(self):
+        """Making ahead while stopped (M2): its loop started when it's wanted and not running yet."""
+        if getattr(self, "_ahead_idle_job", None) is None and self.ahead_play.idle_wanted():
+            self._ahead_idle_job = self.after(AHEAD_IDLE_MS, self._ahead_idle)
+
+    def _ahead_idle(self):
+        self._ahead_idle_job = None
+        try:
+            go = self.ahead_play.idle()
+        except Exception as e:  # (never a dead loop with no word: logged, said once)
+            errors.write_log(type(e), e, e.__traceback__, "Rendered ahead while stopped")
+            return
+        if go:
+            self._ahead_idle_job = self.after(AHEAD_IDLE_MS, self._ahead_idle)
 
     def play_apart(self, ppq, bpm, device=None):
         """(the notes, the Hz basses' CC lines {slot: messages}, the synth's ports) for the player: Built-in BASSMIDI
@@ -555,7 +585,8 @@ class Playback:
             self.roll.show_playhead()
             self.schedule_autosave()
         self.ahead_play.stop()  # (fades out; what's made is kept for the next Play)
-        self.roll.draw_ahead_grey()  # (its grey goes: shown only while playing)
+        self.roll.draw_ahead_grey()  # (its grey goes; making while stopped shows its own, M2)
+        self.kick_ahead()
         self.stop_loaded()
         self.piano_back()
         self.overload.stop()
@@ -694,6 +725,8 @@ class Playback:
         if READY_AFTER_MS is not None:
             self.after(300, self.ready_builtin)
         self.read_ahead()
+        self.ahead_play.mark_dirty()
+        self.kick_ahead()
 
     def read_ahead(self):
         """Kestrel (GPU) picked with a MIDI loaded: its densest parts read ahead now, in the background (files/
@@ -1143,6 +1176,9 @@ class Playback:
         self.soundfont_changed(again, added)  # (Settings → Sound shows the new names)
         if remake:
             self.remake_preview()
+        if not self.player.running:  # (Rendered ahead's making while stopped: with the new soundfonts)
+            self.ahead_play.mark_dirty()
+            self.kick_ahead()
 
     def pick_soundfont(self, replace=None):
         """Pick a soundfont (shared by Built-in BASSMIDI and the Hz bass preview): in place of replace, else of the
@@ -1359,6 +1395,7 @@ class Playback:
         if v != self.ahead_seconds:
             self.ahead_seconds = v
             self.schedule_autosave()
+            self.kick_ahead()
 
     def on_ahead_opt(self, key=None):
         """Rendered ahead's Engine / Slow down (key None) or one of its engine rows (app.ahead_vars[key]) changed:
@@ -1381,6 +1418,9 @@ class Playback:
             self.ahead_opts[key] = v
             self.show_ahead_opts(key)
         self.schedule_autosave()
+        if not self.player.running:  # (making while stopped: with the new settings, or stopped by the tick)
+            self.ahead_play.mark_dirty()
+            self.kick_ahead()
 
     def show_ahead_opts(self, only=None):
         """app.ahead_opts into the rows' vars (lists by place, the ceiling as "-1", not "-1.0")."""
