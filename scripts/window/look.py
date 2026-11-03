@@ -233,6 +233,7 @@ MASK_GROUPS = [  # a mask group's dashed line, (line, picked) (mask.GROUP_COLOUR
 MASKED_LINE = pick("#f0c8c8", "#6a5a5a")  # the line of a shape a mask covers: faint
 CUT, CUT_UNDER = pick("#d00000", "#ff5050"), pick("#ffffff")  # Slice line, cut marks, scissors (+ the white under a mark)
 PATH_LINE = pick("#0d8f46", "#62d996")  # Copy along a path: the path on the piano roll, its points A / middle / B
+STIR_RING = pick("#1f1f22", "#f2f2f4")  # Stir's Only inside a circle dashes (over a ROLL_BG band: busy colours, 11-03)
 MELODY_LIT = pick("#111111", "#ffffff")  # Fill with tempo jumps: outline round the notes it follows (roll_melody.py)
 MELODY_PREVIEW = pick("#f0a070", "#9a5a36")  # Fill with tempo jumps: the faint line of what Fill would lay
 MELODY_EDGE = pick("#c2410c", "#fb923c")  # Jump areas: the clicked edges + "Area n" words (jump_areas.py)

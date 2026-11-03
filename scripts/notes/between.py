@@ -330,10 +330,20 @@ class Pair:
             x = {"mode": KEEP, "seed": y["seed"]}
         if x and y and x["mode"] == y["mode"]:  # (both ends recoloured alike: the numbers step by step, a setting
             near = x if f < 0.5 else y  # only one end has its default there; choices, dice, flips: the nearer end's)
-            # (stacked stirs: the shorter stack padded with stirs at their defaults, so an extra one fades in)
+            # (stacked stirs: the shorter stack padded, so an extra one fades in. A stir with nothing to blend with
+            # meets a copy of itself with no Turn / Twist (and no squeeze: that end shows none), so it fades where
+            # it is: inside its circle too; plain stirs switched the circle off halfway, hunt 11-03)
             n = max(len(stir_stack(x.get("stir"))), len(stir_stack(y.get("stir"))), 1)
-            pad = lambda r: (stir_stack(r.get("stir")) + [full_stir(None)] * n)[:n]
-            x, y = ({k: pad(r) if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
+            plain = full_stir(None)
+            sx, sy = ((stir_stack(r.get("stir")) + [plain] * n)[:n] for r in (x, y))
+            calm = lambda s: dict(s, turn=0.0, twist=0.0, squeeze=False)
+            for j in range(n):
+                if sx[j] == plain and sy[j] != plain:
+                    sx[j] = calm(sy[j])
+                elif sy[j] == plain and sx[j] != plain:
+                    sy[j] = calm(sx[j])
+            stacks = {id(x): sx, id(y): sy}
+            x, y = ({k: stacks[id(r)] if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
                      for k in set(x) | set(y)} for r in (x, y))
             got = {k: mix(x[k], y[k], f) for k in x if k not in ("seed", "frame", "whole")}
             got.update({k: near[k] for k in ("seed", "frame", "whole") if k in near})

@@ -1175,6 +1175,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.drag = ("resize", hit[1], orig, hit[0] == "side", self.event_pt(e, snap=False))
             return
 
+        if not self.draft and self.ring_press(e):  # Stir window open: an Only inside a circle line (Select only)
+            return
         on_box = self.on_kept_box(kept, e) if tool == "select" and not self.draft else None
         if on_box and on_box != (0, 0):  # the kept Select box's side / corner: what's in it stretches
             self.box_kept = (kept, set(app.sels))  # (kept with the undo step: undo puts the box back)
