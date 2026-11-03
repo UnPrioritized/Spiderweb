@@ -47,7 +47,10 @@ MOST_PUSH = 8  # Push steps each way (each one = the areas bunched a step more t
 MOST_SEED = 2 ** 31 - 1
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape"}
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
-STIR_EDGES = ("escape", "wrap")  # (colours stirred past the box's edge: gone / back in on the other side)
+# (colours stirred past the edge: gone / back in on the other side OF THE NOTES (each key row's own span) / back in
+# on the other side of the BOX, the outline cutting it out (the old Wrap) / each key row stretched to the box first,
+# so the stir bends with the outline; BMC tester 11-03: Wrap turned into "the box cut out" on round / slanted shapes)
+STIR_EDGES = ("escape", "wrap", "cut", "bend")
 BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": [0, 0],
                   "stir": STIR_DEFAULTS}  # (left out when so: Add between blends from them)
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
@@ -136,8 +139,8 @@ def clean_stir(s):
         out["centre"] = [round(float(x), 3) for x in c]
     if s.get("sets") == "move":
         out["sets"] = "move"
-    if s.get("edge") == "wrap":
-        out["edge"] = "wrap"
+    if s.get("edge") in STIR_EDGES[1:]:
+        out["edge"] = s["edge"]
     return out or None
 
 
@@ -550,7 +553,14 @@ def stir_from(at, rc, box, own):
     taken back to the middle (the colours' middle moved there: squeezed on one side, stretched on the other)."""
     st = full_stir(rc.get("stir"))
     s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
-    x, y = unit_xy((s + e) / 2, k, rc, box, own)
+    mid = (s + e) / 2
+    edge = st["edge"]
+    if edge in ("wrap", "bend"):
+        rows = Rows(at)
+        t0, t1 = float(at[:, 0].min()), float(at[:, 1].max())
+    if edge == "bend":  # (each key row stretched to the notes' whole width: no empty spot left to come from)
+        mid = rows.stretched(mid, k, t0, t1)
+    x, y = unit_xy(mid, k, rc, box, own)
     cx, cy = (v / 100 for v in st["centre"])
     dx, dy = x - cx, y - cy
     turn = st["turn"] / 360
@@ -560,7 +570,7 @@ def stir_from(at, rc, box, own):
     a = -2 * np.pi * np.asarray(turn, np.float64)
     ca, sa = np.cos(a), np.sin(a)
     x, y = cx + dx * ca - dy * sa, cy + dx * sa + dy * ca
-    if st["edge"] == "wrap":  # (what went out one side comes back in the other: the colours tiled, user 11-02)
+    if edge != "escape":  # (what went out one side comes back in the other: the colours tiled, user 11-02)
         out = lambda v: (v < -1e-9) | (v > 1 + 1e-9)  # (on the edge, or a hair past it: stays on it)
         x = np.clip(np.where(out(x), np.mod(x, 1.0), x), 0, 1)
         y = np.clip(np.where(out(y), np.mod(y, 1.0), y), 0, 1)
@@ -568,7 +578,48 @@ def stir_from(at, rc, box, own):
         x, y = np.clip(x, 0, 1), np.clip(y, 0, 1)
     x = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
     y = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
-    return from_unit(x, y, rc, box, own)
+    mid, key = from_unit(x, y, rc, box, own)
+    if edge == "wrap":  # (a spot past its key row's notes comes back in on that row's other side: a box's row
+        # spans the whole box, so a rectangle is the box's tiling exactly)
+        mid = rows.wrapped(mid, key)
+    elif edge == "bend":
+        mid = rows.unstretched(mid, key, t0, t1)
+    return mid, key
+
+
+class Rows:
+    """Each key row's notes' span (first start, last end) of at, for Stir's Wrap around and Bend with the outline;
+    a key without notes counts as the nearest one with notes (lower on a tie, as nearest does)."""
+
+    def __init__(self, at):
+        k = np.asarray(at[:, 2], np.int64)
+        self.keys, inv = np.unique(k, return_inverse=True)
+        self.a = np.full(len(self.keys), np.inf)
+        self.b = np.full(len(self.keys), -np.inf)
+        np.minimum.at(self.a, inv, np.asarray(at[:, 0], np.float64))
+        np.maximum.at(self.b, inv, np.asarray(at[:, 1], np.float64))
+
+    def row(self, key):
+        q = np.rint(np.asarray(key, np.float64))
+        i = np.clip(np.searchsorted(self.keys, q), 0, len(self.keys) - 1)
+        j = np.maximum(i - 1, 0)
+        return np.where(np.abs(self.keys[j] - q) <= np.abs(self.keys[i] - q), j, i)
+
+    def wrapped(self, mid, key):
+        r = self.row(key)
+        a, b = self.a[r], self.b[r]
+        w = np.maximum(b - a, 1.0)
+        return np.where((mid < a) | (mid > b), a + np.mod(mid - a, w), mid)
+
+    def stretched(self, mid, key, t0, t1):
+        r = self.row(key)
+        a, b = self.a[r], self.b[r]
+        return t0 + (mid - a) / np.maximum(b - a, 1.0) * (t1 - t0)
+
+    def unstretched(self, mid, key, t0, t1):
+        r = self.row(key)
+        a, b = self.a[r], self.b[r]
+        return a + (mid - t0) / max(t1 - t0, 1.0) * (b - a)
 
 
 def nearest(at, mid, key, own=True):
