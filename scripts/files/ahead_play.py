@@ -169,9 +169,7 @@ class AheadPlay:
         from files.render_ahead import engine_used
         engine = self.picked if self.audio is not None and self.picked else engine_used(self.app.ahead_engine.get())
         lm = self.app.loaded
-        if lm is not None and engine == "bassmidi":  # (BASSMIDI pieces of a loaded MIDI: PLAN.md L4)
-            return "kestrel", "loaded_bass"
-        if engine != "merlin":
+        if engine != "merlin":  # (BASSMIDI with a loaded MIDI: the card's piece files read by BASSMIDI, L4)
             return engine, None
         why = merlin_gap(ccs, font_list(self.app.hz_preview)) or (loaded_gap(lm) if lm is not None else None)
         if why == "cc" and not self.app.ahead_opts.get("exact"):  # (user 2026-11-03: speed first unless ticked)

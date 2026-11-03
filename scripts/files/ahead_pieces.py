@@ -415,19 +415,22 @@ def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress):
             piece.close()
 
 
-def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None, piece_most=None):
+def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None, piece_most=None, one=None):
     """(a piece's thread) Song frames f0 .. f1 made on the graphics card by "merlin" / "kestrel" with the soundfonts
     already there (kestrel.loaded_for: read once, kept); opts = App.ahead_opts. Returns (float32 (frames, 2) or None
     when cancelled, the frame the ring died away at when it did in this piece, else None). progress(0..1).
-    piece_most = bytes a loaded MIDI's piece copies at most (Maker.piece_most): more = made in parts."""
+    piece_most = bytes a loaded MIDI's piece copies at most (Maker.piece_most): more = made in parts.
+    one(a, b, cancel, progress) = what makes one part instead of the card (BASSMIDI with a loaded MIDI, L4)."""
+    if one is None:
+        def one(a, b, c, p):
+            return _card_one(song, engine, opts, fonts, card, a, b, c, p)
     spans = song.spans(f0, f1, piece_most) if piece_most and hasattr(song, "spans") else [(f0, f1)]
     if len(spans) == 1:
-        out = _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress)
+        out = one(f0, f1, cancel, progress)
     else:  # (M1: a dense wall's block in parts, one after another, joined: one piece never takes GBs)
         parts = []
         for k, (a, b) in enumerate(spans):
-            got = _card_one(song, engine, opts, fonts, card, a, b, cancel,
-                            progress and (lambda p, k=k: progress((k + p) / len(spans))))
+            got = one(a, b, cancel, progress and (lambda p, k=k: progress((k + p) / len(spans))))
             if got is None:
                 return None, None
             if len(got) < b - a:
@@ -635,7 +638,8 @@ class Maker:
                     break
                 run.append(j)
             fit = getattr(self.song, "blocks_fit", None)  # (a loaded MIDI: dense parts in shorter pieces, memory)
-            cap = self.piece_most() if fit is not None else None
+            # (BASSMIDI makes several pieces at once: their share each)
+            cap = max(PIECE_LEAST, self.piece_most() // most) if fit is not None else None
             if fit is not None and len(run) > 1:
                 run = run[:fit(i, len(run), cap)]
             job = _Job(i, len(run), [self.ver.get(j, 0) for j in run])
@@ -705,6 +709,19 @@ class Maker:
         job.finished = True
 
     def _bass(self, job, song, f0, f1):
+        if getattr(song, "lm", None) is not None:  # (a loaded MIDI: the card's piece files, read by BASSMIDI, L4)
+            voices = self.opts["bass_voices"]
+
+            def one(a, b, cancel, progress):
+                data, skip = song.midi(a, b)
+                if data is None:  # (nothing sounds here: silence)
+                    return np.zeros((b - a, 2), np.float32)
+                return self.synth.render_file(data, skip, b - a, voices, a, cancel,
+                                              progress and (lambda n: progress(n / max(1, b - a))))
+            out, end = card_piece(song, self.engine, self.opts, self.fonts, self.card, f0, f1, job.cancel,
+                                  lambda p: setattr(job, "progress", p), getattr(job, "most", None), one)
+            job.end = end
+            return out
         stats = {}
         out = self.synth.render(song.bass_events(), song.ppq, f0, f1 - f0, self.opts["bass_voices"], False,
                                 job.cancel, lambda n: setattr(job, "progress", n / max(1, f1 - f0)), stats,

@@ -47,6 +47,7 @@ FONT_TYPES = "*.sf2 *.sf3 *.sfz *.sf2pack" + ("" if WINDOWS else " *.SF2 *.SF3 *
 _SAMPLE_FLOAT, _STREAM_DECODE, _UNICODE = 0x100, 0x200000, 0x80000000
 _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX, _MIDI_ASYNC = 0x1000, 0x2000, 0x400000
+_FILE_MEM = 1  # (BASS_MIDI_StreamCreateFile: the file is in memory, kept there while the stream lives)
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
 _ATTRIB_MIDI_QUEUED_ASYNC = 0x12010
@@ -159,6 +160,7 @@ def load_dlls():
         fn.argtypes, fn.restype = args, res
     for name, args, res in (("BASS_MIDI_FontInit", [ctypes.c_wchar_p if WINDOWS else ctypes.c_char_p, u], u), ("BASS_MIDI_FontFree", [u], i),
                             ("BASS_MIDI_StreamCreateEvents", [p, u, u, u], u),
+                            ("BASS_MIDI_StreamCreateFile", [u, p, ctypes.c_uint64, ctypes.c_uint64, u, u], u),
                             ("BASS_MIDI_StreamCreate", [u, u, u], u), ("BASS_MIDI_StreamEvents", [u, u, p, u], u),
                             ("BASS_MIDI_StreamEvent", [u, u, u, u], i),
                             ("BASS_MIDI_StreamSetFonts", [u, p, u], i), ("BASS_MIDI_StreamLoadSamples", [u], i),
@@ -564,28 +566,61 @@ class Synth:
             out = np.zeros((early + frames, 2), np.float32)
             if at and not bass.BASS_ChannelSetPosition(h, at * 8, _POS_BYTE):
                 return out[early:]  # (a failed jump would start from the song's start instead)
-            done, most, used = 0, 0.0, ctypes.c_float()
-            while done < len(out):
-                if cancel is not None and cancel.is_set():
-                    return None
-                n = min(PIECE, len(out) - done)
-                got = bass.BASS_ChannelGetData(h, out[done:].ctypes.data, (n * 8) | _DATA_FLOAT)
-                if got <= 0:  # (the ring after the last note has died away: silence from here)
-                    if stats is not None:
-                        stats["end"] = at + done
-                    break
-                done += got // 8
-                if stats is not None and bass.BASS_ChannelGetAttribute(h, _ATTRIB_MIDI_VOICES_ACTIVE,
-                                                                       ctypes.byref(used)):
-                    most = max(most, used.value)
-                if progress and done > early:
-                    progress(done - early)
-            if stats is not None:
-                stats["voices"] = int(most)
-            return out[early:]
+            return self._decode(h, out, at, early, cancel, progress, stats)
         finally:
             bass.BASS_StreamFree(h)
             self._give(sf)
+
+    def _decode(self, h, out, at, early, cancel, progress, stats):
+        """Stream h's sound into out (early frames thrown away at its start); at = the song frame out starts at."""
+        bass = self.bass
+        done, most, used = 0, 0.0, ctypes.c_float()
+        while done < len(out):
+            if cancel is not None and cancel.is_set():
+                return None
+            n = min(PIECE, len(out) - done)
+            got = bass.BASS_ChannelGetData(h, out[done:].ctypes.data, (n * 8) | _DATA_FLOAT)
+            if got <= 0:  # (the ring after the last note has died away: silence from here)
+                if stats is not None:
+                    stats["end"] = at + done
+                break
+            done += got // 8
+            if stats is not None and bass.BASS_ChannelGetAttribute(h, _ATTRIB_MIDI_VOICES_ACTIVE,
+                                                                   ctypes.byref(used)):
+                most = max(most, used.value)
+            if progress and done > early:
+                progress(done - early)
+        if stats is not None:
+            stats["voices"] = int(most)
+        return out[early:]
+
+    def render_file(self, data, skip, frames, voices, start, cancel=None, progress=None, stats=None, nofx=False):
+        """A piece MIDI FILE in memory (Rendered ahead with a loaded MIDI, PLAN.md L4: the same bytes the graphics
+        card gets, ahead_loaded.LoadedSong.midi) made into sound: its first `skip` frames made and thrown away (the
+        early start, where the notes still held are struck), then `frames` frames, as render's. start = the song
+        frame the kept part starts at (stats "end"). BASSMIDI reads the file's port events itself (ports over 7 fold
+        onto 0-7)."""
+        if not self.font:
+            raise SynthError("synth.no_font")
+        bass = self.bass
+        held = (ctypes.c_char * len(data)).from_buffer(data) if isinstance(data, bytearray) else \
+            ctypes.create_string_buffer(bytes(data), len(data))
+        flags = _STREAM_DECODE | _SAMPLE_FLOAT | _MIDI_DECAYEND | (_MIDI_NOFX if nofx else 0)
+        h = self.midi.BASS_MIDI_StreamCreateFile(_FILE_MEM, ctypes.addressof(held), 0, len(data), flags, RATE)
+        if not h:
+            raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
+        sf = self._take()
+        try:
+            self.set_stream_fonts(h, sf)
+            bass.BASS_ChannelSetAttribute(h, _ATTRIB_MIDI_VOICES, float(voices))
+            self._load_samples(h)  # (every instrument the piece uses: before its sound is made, never on demand)
+            skip = max(0, int(skip))
+            return self._decode(h, np.zeros((skip + frames, 2), np.float32), start - skip, skip, cancel, progress,
+                                stats)
+        finally:
+            bass.BASS_StreamFree(h)
+            self._give(sf)
+            del held
 
     def close(self):
         """(After every render has finished.)"""
