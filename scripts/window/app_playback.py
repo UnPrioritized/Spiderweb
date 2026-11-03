@@ -222,13 +222,13 @@ class Playback:
         self.out.bend_edo(edo_ports(files_ports) if self.out.tuned else False)
 
     def play_end(self, ppq, beats, start):
-        """Where playing stops: a quarter bar after the last note ends (a loaded MIDI's too; or after the play
-        line if already past it), rounded up to the next quarter-bar line."""
-        quarter = beats / 4
+        """Where playing stops: one beat after the last note ends (a loaded MIDI's too; or after the play line if
+        already past it), rounded up to the next beat line, whatever the time signature (user 2026-11-03: a
+        quarter bar was half a beat in 2/4)."""
         last = (int(self.rendered[:, 1].max()) if len(self.rendered) else 0) / ppq
         if self.loaded is not None:
             last = max(last, self.loaded.end / ppq)
-        return math.ceil((max(last, start) + quarter) / quarter - 1e-9) * quarter
+        return float(math.ceil(max(last, start) + 1.0 - 1e-9))
 
     def end_and_tempo(self, ppq, bpm, beats, start):
         """(play end in beats, heard tempo). Rendered ahead: the sound decides the end (Play stops once the ring
