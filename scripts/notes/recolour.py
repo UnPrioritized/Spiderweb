@@ -456,7 +456,7 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     looks at the note found where it comes from (stir_from, any colour set) and takes its colour; with more than
     one colour set (a user's feedback 2026-11-02: the pattern broke into patches when each note only looked at its
     own set's notes) Stir "sets" decides: "stay" (default) = the colour in the SAME PLACE of the note's own set (the
-    pattern bends whole, each note keeps its set's tracks), "move" = that note's colour itself (notes may go to
+    pattern bends whole, each note keeps its set's tracks; a colour its set lacks = Move's), "move" = that note's colour itself (notes may go to
     another set). Per chord / run: its group's first note's. No colour is made or thrown: only the ones there go
     round. Two notes on a key sounding together then kept apart (kept_apart, low = the colours before Recolour). at
     = the notes' places (places_of)."""
@@ -475,7 +475,9 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
         o = np.argsort(pool, kind="stable")
         want = now // per * per + now[src] % per
         i = o[np.clip(np.searchsorted(pool[o], want), 0, len(pool) - 1)]
-        new = np.where(pool[i] == want, want, now)  # (a colour the shape doesn't have there: its own one stays)
+        # (a colour the note's block doesn't have: the found note's colour itself, as Move does; keeping its own
+        # left a whole area unstirred, a tester's file 11-03: a 17th colour alone in the 2nd block)
+        new = np.where(pool[i] == want, want, now[src])
     if rc.get("by"):
         new = new[leaders(at, rc["by"])]
     if move and len(pals) > 1:
