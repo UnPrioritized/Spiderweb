@@ -41,9 +41,13 @@ class RecolourPanel:
         self.recolour_tip = Tooltip(self.recolour_mode, tr("recolour.tip"))
         self.recolour_again = ttk.Button(c, text=tr("recolour.again"), command=lambda: self.on_recolour("seed"))
         Tooltip(self.recolour_again, tr("recolour.again_tip"))
-        self.recolour_stir = ttk.Button(c, text=tr("stir.button"), command=self.open_stir)
-        self.recolour_stir.pack(side="left", padx=(4, 0))
+        # (Stir… goes on a line of its own under the dropdown when the row has no room: "Stir… (on)" beside New
+        # shuffle was cut, user 2026-11-03; fit_stir)
+        self.recolour_line, self.recolour_stir_line = c, ttk.Frame(box)
+        self.recolour_stir = ttk.Button(box, text=tr("stir.button"), command=self.open_stir)
+        self.recolour_stir.pack(in_=c, side="left", padx=(4, 0))
         Tooltip(self.recolour_stir, tr("stir.button_tip"))
+        box.bind("<Configure>", lambda e: self.fit_stir(), add="+")
         rows = self.recolour_row = ttk.Frame(box)  # (only shown while Recolour is on)
         row = ttk.Frame(rows)
         row.pack(anchor="w")
@@ -73,6 +77,27 @@ class RecolourPanel:
         self.recolour_mix_tick = ttk.Checkbutton(rows, text=tr("recolour.mix"), variable=self.recolour_mix,
                                                  command=lambda: self.on_recolour("mix"))
         self.recolour_mix_tip = Tooltip(self.recolour_mix_tick, tr("recolour.mix_tip", most=SET))
+
+    def fit_stir(self):
+        """Stir… beside the dropdown (and New shuffle) when the row has room for it, else on its own line under
+        the dropdown."""
+        box, c, line, b = self.recolour_box, self.recolour_line, self.recolour_stir_line, self.recolour_stir
+        room = box.winfo_width()
+        if room <= 1:
+            return
+        def wide(w):
+            pad = w.pack_info().get("padx", 0)
+            return w.winfo_reqwidth() + sum(pad) if isinstance(pad, tuple) else w.winfo_reqwidth() + 2 * int(pad)
+        others = sum(wide(w) for w in c.pack_slaves() if w is not b)
+        fits = others + b.winfo_reqwidth() + 4 <= room
+        if fits == (b.winfo_manager() == "pack" and b.pack_info().get("in") == c):
+            return
+        if fits:
+            b.pack(in_=c, side="left", padx=(4, 0))
+            line.pack_forget()
+        else:
+            line.pack(anchor="w", after=c, pady=(2, 0), padx=(wide(self.recolour_word) + 5, 0))
+            b.pack(in_=line, side="left", padx=(0, 0))
 
     def open_shares(self):
         from window.shares_window import open_shares
@@ -145,9 +170,10 @@ class RecolourPanel:
                 self.recolour_row.pack_forget()
         if shown != bool(self.recolour_again.winfo_manager()):
             if shown:
-                self.recolour_again.pack(side="left", before=self.recolour_stir)
+                self.recolour_again.pack(side="left", after=self.recolour_mode)
             else:
                 self.recolour_again.pack_forget()
+        self.recolour_box.after_idle(self.fit_stir)  # (New shuffle / "(on)" changed the room the row needs)
         sets = shown and any(len(o) > 1 for o in owns)  # (more than one colour set: Mix across sets)
         if sets != bool(self.recolour_mix_tick.winfo_manager()):
             if sets:
