@@ -10,7 +10,9 @@ Edit while playing (draw, move, delete, change velocities) and only the changed 
 
 Playing stops once the sound has died away, not a beat after the last note.
 
-For now Rendered ahead plays only your own shapes: a loaded MIDI and right-drag listening stay silent with it (a window says so the first time, then only the status line). To hear them, pick Built-in BASSMIDI or Kestrel.
+A loaded MIDI plays too, with your own shapes on top (muted tracks are left out). Very dense parts are made in shorter pieces, so a heavy wall may take longer to make than to play: the time made ahead before it is used up while it's made.
+
+Right-drag listening, piano keys and the Hz bass window's keys can't be made ahead (the mouse decides them as you go): they sound through Built-in BASSMIDI, with the same soundfonts.
 
 ## Engine
 

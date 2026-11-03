@@ -49,6 +49,22 @@ def merlin_gap(ccs, fonts):
 _BEND_RANGE = (101, 100, 6, 38)  # (RPN 0 = the bend range: its controllers)
 
 
+def loaded_gap(lm):
+    """merlin_gap for a loaded MIDI: "cc" when any of its tracks has a controller other than the bend range (its
+    counts per channel x kind, midi_index c_kinds: nothing read). Measured 2026-11-03: a volume + pan line made
+    Merlin's piece differ from its whole render by -59 dB."""
+    from files.midi_index import CC_KINDS
+    for t in lm.tracks:
+        kinds = getattr(t, "c_kinds", None)
+        if kinds is None or not len(kinds):
+            continue
+        kinds = np.asarray(kinds).reshape(-1, 2)
+        kind = kinds[:, 0] % CC_KINDS
+        if ((kind < 128) & ~np.isin(kind, _BEND_RANGE) & (kinds[:, 1] > 0)).any():
+            return "cc"
+    return None
+
+
 class AheadLimiter:
     """Keeps the joined sound under the ceiling (looking one block ahead, nothing gets through). Brickwall comes back
     up quickly (FAST s), Balanced slowly (SLOW s: less pulling at low notes). Both HOLD the gain HOLD_S first. Off =
@@ -147,10 +163,21 @@ class AheadPlay:
         from window.hz_preview import font_list
         from files.render_ahead import engine_used
         engine = self.picked if self.audio is not None and self.picked else engine_used(self.app.ahead_engine.get())
+        lm = self.app.loaded
+        if lm is not None and engine == "bassmidi":  # (BASSMIDI pieces of a loaded MIDI: PLAN.md L4)
+            return "kestrel", "loaded_bass"
         if engine != "merlin":
             return engine, None
-        why = merlin_gap(ccs, font_list(self.app.hz_preview))
+        why = merlin_gap(ccs, font_list(self.app.hz_preview)) or (loaded_gap(lm) if lm is not None else None)
         return ("kestrel", why) if why else (engine, None)
+
+    def song(self, rendered, ccs, ports, ppq, bpm, tempo, engine):
+        """What the pieces are made of: your shapes (a Song), with the loaded MIDI along (a LoadedSong: its tracks
+        as the track list mutes them) when one is loaded."""
+        from files.ahead_loaded import song_for
+        own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, self._edo_first(engine))
+        lm = self.app.loaded
+        return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else ())
 
     def _edo_first(self, engine):
         """31-EDO's first channel for this engine while the 31-EDO + Audio ticks are on, else None: BASSMIDI's after
@@ -218,8 +245,7 @@ class AheadPlay:
         if err:
             return err
         self.maker.error = None  # (each Play tries again: a failed piece's cause may be gone, hunt 2026-11-03)
-        self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo,
-                                    self._edo_first(engine)))
+        self.maker.update_song(self.song(rendered, ccs, ports, ppq, bpm, tempo, engine))
         song = self.maker.song
         self._say_why(why)
         try:
@@ -256,7 +282,7 @@ class AheadPlay:
                 return
             self._say_why(why)
         old = self.maker.song
-        song = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, self._edo_first(engine))
+        song = self.song(rendered, ccs, ports, ppq, bpm, tempo, engine)
         if old is not None and self.audio is not None and not same_tempo(old, song):
             # (another tempo: the play place and the sound already handed over are on the old tempo's clock; moved
             # to the same beat on the new one, or the line jumped back / ahead, hunt 2026-11-03)

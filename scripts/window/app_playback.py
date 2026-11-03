@@ -140,7 +140,7 @@ class Playback:
             self.hz_window.draw_preview()
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
-        # (Rendered ahead: a loaded MIDI isn't read, its notes would go nowhere; said once Play is running)
+        # (Rendered ahead: the loaded MIDI is made ahead with the rest, files/ahead_loaded.py; not played live too)
         along = self.loaded is not None and self.out.name != AHEAD
         self.player.along = along
         rendered, ccs, ports = self.play_parts(ppq, bpm)
@@ -176,8 +176,6 @@ class Playback:
         if self.loaded is not None:  # (a redraw now: the loaded notes' exact pictures start reading ahead the way
             self.roll.request_redraw()  # it plays before the first page turn, roll_loaded._keep_ahead)
         self._play_job = self.after(15, self._play_tick)
-        if self.loaded is not None and self.out.name == AHEAD:
-            self.after_idle(self.ahead_silent, "loaded")
         if self.out.name == AHEAD:  # (the first time: what the faint grey and the wait at Play are)
             self.after_idle(lambda: self.tips.show("ahead", wait=True))
 
@@ -1567,12 +1565,10 @@ class Playback:
         self.fresh_builtin()
         out = self.scrub_out()
         if not out.handle:
-            err = out.open(BUILTIN if self.midi_device.get() == KESTREL else self.midi_device.get())
+            err = out.open(self.scrub_device())
             if err:
                 self.status.config(text=err)
                 return False
-        if out.name == AHEAD:  # (silent there: said when let go, scrub_end)
-            self._ahead_scrubbed = True
         lo, hi = min(t_from, t_to), max(t_from, t_to)
         now = {}  # (channel, key) -> (start of the latest note there, velocity); channel None = a 31-EDO row
         from roll.roll_draw import TRACK_FADE
@@ -1625,14 +1621,10 @@ class Playback:
         """A piano key pressed while picking Glissando keys: it sounds until the button is let go (tap_end; user
         11-02: as long as it's held) on the MIDI out right-drag listening uses."""
         self.tap_end()
-        if self.midi_device.get() == AHEAD:  # (silent there, like right-drag listening: said, hunt 2026-11-03; the
-            # status line only: a window now would take the held mouse button)
-            self.status.config(text=tr("ra.tap_silent"))
-            return
         self.fresh_builtin()
         out = self.scrub_out()
         if not out.handle:
-            err = out.open(BUILTIN if self.midi_device.get() == KESTREL else self.midi_device.get())
+            err = out.open(self.scrub_device())
             if err:
                 self.status.config(text=err)
                 return
@@ -1646,10 +1638,18 @@ class Playback:
         if tap and tap[0].handle:  # (closed meanwhile: nothing is sounding)
             scrub_note(*tap, 0)
 
+    def scrub_device(self):
+        """The MIDI out listening opens: Built-in BASSMIDI for Kestrel (sounds ~0.1 s late) and Rendered ahead (can't
+        make what the mouse decides ahead; user 2026-11-03), else the one picked."""
+        dev = self.midi_device.get()
+        return BUILTIN if dev in (KESTREL, AHEAD) else dev
+
     def scrub_out(self):
-        """Right-drag listening's MIDI out: the one picked, but with Kestrel (GPU) picked Built-in BASSMIDI's own
-        synth (user 2026-10-27: listening stays on BASSMIDI; Kestrel sounds ~0.1 s late)."""
-        if self.midi_device.get() != KESTREL:
+        """Right-drag listening's MIDI out (piano keys, the Hz bass window's keys too): the one picked, but with
+        Kestrel (GPU) or Rendered ahead picked Built-in BASSMIDI's own synth (user 2026-10-27: listening stays on
+        BASSMIDI; Kestrel sounds ~0.1 s late; 2026-11-03: Rendered ahead too, never a second copy of the soundfont:
+        make_live opens it on the app's one Synth, the one Rendered ahead's BASSMIDI engine uses)."""
+        if self.midi_device.get() not in (KESTREL, AHEAD):
             return self.out
         side = getattr(self, "_scrub_side", None)
         if side is None:
@@ -1658,19 +1658,7 @@ class Playback:
         side.edo = self.out.edo  # (31-EDO's sound works there)
         return side
 
-    def ahead_silent(self, what):
-        """Rendered ahead can't sound right-drag listening / a loaded MIDI (what = "scrub" / "loaded"): a warning
-        window the first time in this run of Spiderweb, then only the status line (user 2026-11-03)."""
-        if not getattr(self, "_ahead_warned", False):
-            self._ahead_warned = True
-            messagebox.showwarning(tr("app.spiderweb_2"), tr("ra.silent_window"), parent=self)
-        else:
-            self.status.config(text=tr(f"ra.{what}_silent"))
-
     def scrub_end(self):
-        if getattr(self, "_ahead_scrubbed", False):  # (said once it's let go: a window mid-drag takes the mouse)
-            self._ahead_scrubbed = False
-            self.after_idle(self.ahead_silent, "scrub")
         out = self.scrub_out()
         for ch, p in self._scrub_held:
             scrub_note(out, ch, p, 0)

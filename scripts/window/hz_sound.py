@@ -29,7 +29,10 @@ class HzSound:
         self.hush()
         if not play:
             return
-        if not app.out.handle and app.out.open(app.midi_device.get()):
+        from files.playback import AHEAD
+        # (Rendered ahead can't make what the mouse decides ahead: Built-in BASSMIDI's listening synth, user 11-03)
+        out = self.key_out = app.scrub_out() if app.midi_device.get() == AHEAD else app.out
+        if not out.handle and out.open(app.scrub_device() if out is not app.out else app.midi_device.get()):
             return  # (no device: silent)
         sh, ch, vel = self.target(), 0, app.defaults["vel0"]
         if sh is not None:  # the shape's own channel and velocity
@@ -53,7 +56,7 @@ class HzSound:
 
     def sound_key(self, ch, key, vel):
         """One note on (vel 0 = off) for sound()."""
-        out = self.app.out
+        out = getattr(self, "key_out", None) or self.app.out
         if key in self.sound_on:
             out.note(ch, key, 0)
             self.sound_on.discard(key)
@@ -67,8 +70,9 @@ class HzSound:
             self.after_cancel(job)
         self.sound_jobs = []
         if self.sounding is not None:
+            out = getattr(self, "key_out", None) or self.app.out
             for k in self.sound_on:
-                self.app.out.note(self.sounding[0], k, 0)
+                out.note(self.sounding[0], k, 0)
         self.sound_on, self.sounding = set(), None
 
     def preview_again(self):

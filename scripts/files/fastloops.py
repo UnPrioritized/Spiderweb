@@ -37,6 +37,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_cover_many  roll_loaded's exact pictures: many small tracks painted in one call (TrackReader.read each)
   play_read, play_order, play_order_count, play_order_place, play_hist, play_emit, play_programs, play_stamp,
   play_condense, play_stamp_pre   midi_play's functions (playing a loaded MIDI), compiled
+  piece_track    midi_piece.piece_track (Rendered ahead: a loaded track's piece copied from its bytes), compiled
   all_tops       track_list.loaded_tops: a loaded MIDI's tracks in the track list's All tracks row
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
@@ -50,7 +51,7 @@ from numba import carray, cfunc, njit, types
 from numba.core import caching
 from numba.typed import List
 
-from files import midi_index as _index, midi_play, midi_scan
+from files import midi_index as _index, midi_piece, midi_play, midi_scan
 from files.synth import (LIM_ALL, LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD,
                          LIM_MIX, LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_SLOTS, LIM_STEP, LIM_TOP)
 
@@ -1784,6 +1785,7 @@ play_programs = njit(cache=CACHE, nogil=True)(midi_play.programs)
 play_stamp = njit(cache=CACHE, nogil=True)(midi_play.stamp)
 play_condense = njit(cache=CACHE, nogil=True)(midi_play.condense)
 play_stamp_pre = njit(cache=CACHE, nogil=True)(midi_play.stamp_pre)
+piece_track = njit(cache=CACHE, nogil=True)(midi_piece.piece_track)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1977,3 +1979,6 @@ def warm():
                    i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0, np.zeros(1, np.uint64),
                    np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(3, np.int64), False,
                    *line.arrays())
+    q = np.zeros(midi_piece.QS, np.int64)
+    piece_track(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 0, 10, i1[:0], q, q.copy(),
+                q.copy(), 0, -1, 0, np.zeros(32, np.uint8))

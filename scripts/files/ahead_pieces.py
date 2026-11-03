@@ -34,9 +34,13 @@ BLOCK = int(BLOCK_S * RATE)
 FIRST_RUN = 1  # blocks in the first piece of a run of missing blocks next to the play line (a quick start)
 RUN = 5  # blocks in a later piece (10 s)
 PRE = 1.0  # seconds a piece starts early (dropped)
+POST_S = 0.3  # ... and its events go this far past its end: Merlin looks ahead (vs its render of the whole file,
+# Cats Dance 2026-11-03: 0.1 s = -43 dB in the last 10 ms, 0.3 s = -126 dB, 1 s = the same to the bit)
 HELD_PRE = 30.0  # ... at most, for a note still held there (8 s: an 18 s held note was -14 dB off at 12 s)
 TAIL = 30.0  # seconds of ring after the last note at most (a piece finding the sound died away ends it sooner)
 BEHIND = 10.0  # seconds of made blocks kept behind the play line (further back = thrown away)
+PIECE_MOST = 256 << 20  # a loaded MIDI's piece copies at most this many of its bytes (more blocks = shorter piece) ...
+PIECE_LEAST = 32 << 20  # ... or 1/16 of the free memory, not below this (one block always goes)
 BYTES_A_SECOND = RATE * 2 * 4  # (made sound: stereo float32)
 MEMORY_SHARE = 0.25  # the made sound never takes more than this share of the free memory (less is made ahead)
 FREE_EVERY = 2.0  # seconds between asking the system for free memory
@@ -190,16 +194,18 @@ class Song:
         before = [u for t, u in self.tempo if t <= tick]
         return before[-1], [(t, u) for t, u in self.tempo if t > tick]
 
-    def piece_start(self, f0):
+    def piece_start(self, f0, last=None):
         """(the tick a piece from frame f0 starts at, the tick notes count from: ones ending after it sound in it).
         PRE early; a note still held there = from its own start (at most HELD_PRE early: only the held notes come
         from that far back, so it costs little). Past the last note: held notes looked for PRE before the last end,
-        so the song's ring after it is made too (a piece starting there would be silence otherwise)."""
-        t_pre = t0 = self.tick_at(max(0, min(f0, self.last) - int(PRE * RATE)))
+        so the song's ring after it is made too (a piece starting there would be silence otherwise). last = the
+        whole song's last frame when this Song is only a part of it (a loaded MIDI's LoadedSong)."""
+        last = self.last if last is None else last
+        t_pre = t0 = self.tick_at(max(0, min(f0, last) - int(PRE * RATE)))
         lo = int(np.searchsorted(self.start, t0 - self.longest, "left"))
         held = lo + np.flatnonzero((self.start[lo:] < t0) & (self.end[lo:] > t0))
         if len(held):
-            t0 = max(min(int(self.start[held].min()), t0), self.tick_at(max(0, f0 - int(HELD_PRE * RATE))))
+            t0 = max(min(int(self.start[held].min()), t0), self.tick_at(max(0, min(f0, last) - int(HELD_PRE * RATE))))
         return t0, t_pre
 
     def pre_frames(self, f0):
@@ -209,22 +215,36 @@ class Song:
     def midi(self, f0, f1):
         """The piece f0 .. f1 (frames) as MIDI file bytes, + the frames to drop at its start (None: no notes sound
         in it)."""
-        t_end = self.tick_at(f1)
+        t_end = self.tick_at(f1 + int(POST_S * RATE))  # (a little past it: see POST_S)
         t0, t_pre = self.piece_start(f0)
+        tracks = self.tracks(t0, t_pre, t_end)
+        if not tracks:
+            return None, 0
+        skip = f0 - self.frame(t0)
+        # (a PPQ over 32767 reads as SMPTE timing in a MIDI file: written as half the PPQ with half the tempo
+        # value, so every tick keeps its time; hunt 2026-11-03, PPQ goes up to 65535)
+        half = 2 if self.ppq > 32767 else 1
+        tracks.insert(0, self.tempo_track(t0, t_end, (self.ppq // half) / self.ppq))
+        head = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + len(tracks).to_bytes(2, "big")
+        return head + (self.ppq // half).to_bytes(2, "big") + b"".join(tracks), skip
+
+    def tempo_track(self, t0, t_end, scale=1.0):
+        """The heard tempo from tick t0 (the piece's tick 0) to t_end as a track; scale = the tempo values' factor
+        (an odd PPQ halved: the exact ratio, not 1/2)."""
+        us, changes = self._at(t0)
+        tempo_of = lambda u: b"\xff\x51\x03" + max(1, int(round(u * scale))).to_bytes(3, "big")  # noqa: E731
+        return _track([(0, tempo_of(us))] + [(t - t0, tempo_of(u)) for t, u in changes if t < t_end])
+
+    def tracks(self, t0, t_pre, t_end, file_ports=()):
+        """The notes + CC lines of a piece from tick t0 (its tick 0; notes ending after t_pre sound in it) to t_end
+        as MTrk chunks, one per port ([] = nothing there). file_ports = ports a loaded MIDI uses: their channel 10
+        stays drums (its own, as live play has it)."""
         lo = int(np.searchsorted(self.start, t0 - self.longest, "left"))
         hi = int(np.searchsorted(self.start, t_end, "left"))
         idx = lo + np.flatnonzero(self.end[lo:hi] > t_pre)  # (the notes sounding from PRE early on)
         c0, c1 = int(np.searchsorted(self.cc_ticks, t0, "left")), int(np.searchsorted(self.cc_ticks, t_end, "left"))
         if not len(idx) and c0 == c1:
-            return None, 0
-        skip = f0 - self.frame(t0)
-        us, changes = self._at(t0)
-        # (a PPQ over 32767 reads as SMPTE timing in a MIDI file: written as half the PPQ with half the tempo
-        # value, so every tick keeps its time; hunt 2026-11-03, PPQ goes up to 65535)
-        half = 2 if self.ppq > 32767 else 1
-        scale = (self.ppq // half) / self.ppq  # (an odd PPQ: the tempo by the exact ratio, not 1/2)
-        tempo_of = lambda u: b"\xff\x51\x03" + max(1, int(round(u * scale))).to_bytes(3, "big")  # noqa: E731
-        tempo = [(0, tempo_of(us))] + [(t - t0, tempo_of(u)) for t, u in changes if t < t_end]
+            return []
         # every event as arrays (NumPy, never a Python object a note: a dense piece holds millions):
         # tick, order on a shared tick (ends 0, CC lines 1, starts 2), status, data 1, data 2, port
         n = len(idx)
@@ -240,15 +260,13 @@ class Song:
         d2 = np.concatenate([np.zeros(n, np.uint8), self.vel[idx], ((cm >> 16) & 0x7F).astype(np.uint8)])
         port = np.concatenate([self.port[idx], self.port[idx], (cm >> 24).astype(np.uint8)])
         del cm, ch
-        tracks = [_track(tempo)]
+        tracks = []
         for p in np.unique(port).tolist():
             sel = np.flatnonzero(port == p)
             sel = sel[np.lexsort((order[sel], tick[sel]))]
-            head = [(0, b"\xff\x21\x01" + bytes([p & 127])), (0, _MELODIC_10)]
+            head = [(0, b"\xff\x21\x01" + bytes([p & 127]))] + ([] if p % 16 in file_ports else [(0, _MELODIC_10)])
             tracks.append(_track(head, _messages(tick[sel], st[sel], d1[sel], d2[sel])))
-        del tick, order, st, d1, d2, port
-        head = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + len(tracks).to_bytes(2, "big")
-        return head + (self.ppq // half).to_bytes(2, "big") + b"".join(tracks), skip
+        return tracks
 
     def bass_events(self):
         """The whole song as BASSMIDI's event list (synth.events' order; each port's channels as the stream's
@@ -465,6 +483,13 @@ class Maker:
             return float("inf")
         return max(BLOCK_S, (self.held_bytes() + free * MEMORY_SHARE) / BYTES_A_SECOND - BEHIND)
 
+    def piece_most(self):
+        """Bytes a loaded MIDI's piece may copy: PIECE_MOST, less with little free memory (Merlin's own working
+        memory is ~5x the piece, measured: a 249 MB piece added 1.3 GB; the copy + its read ~3x more)."""
+        self.room()  # (free memory asked again when due)
+        free = self._free[1]
+        return PIECE_MOST if free is None else max(PIECE_LEAST, min(PIECE_MOST, int(free / 16)))
+
     # ------------------------------------------------------------ the song
 
     def set_song(self, song):
@@ -481,7 +506,14 @@ class Maker:
                 not same_tempo(old, song):
             self.set_song(song)
             return True
-        span = changed_ticks(old, song)
+        lo_old, lo_new = getattr(old, "lm", None), getattr(song, "lm", None)
+        if lo_old is not None or lo_new is not None:  # (a loaded MIDI: its part the same = your shapes compared)
+            if lo_old is None or lo_new is None or old.key != song.key:
+                self.set_song(song)  # (L3 makes only from the play line)
+                return True
+            span = changed_ticks(old.own, song.own)
+        else:
+            span = changed_ticks(old, song)
         if span is None:
             self.song = song  # (the same sound: the newer copy kept)
             return False
@@ -569,6 +601,9 @@ class Maker:
                 if j != run[-1] + 1 or j in self.blocks or self._busy(j):
                     break
                 run.append(j)
+            fit = getattr(self.song, "blocks_fit", None)  # (a loaded MIDI: dense parts in shorter pieces, memory)
+            if fit is not None and len(run) > 1:
+                run = run[:fit(i, len(run), self.piece_most())]
             job = _Job(i, len(run), [self.ver.get(j, 0) for j in run])
             job.lowered = self.lowered
             with self._lock:
