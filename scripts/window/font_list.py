@@ -22,6 +22,7 @@ class FontList(ttk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
+        self.on_put = None  # (called after the list changed)
         self.columnconfigure(0, weight=1)
         self.list = tk.Listbox(self, height=ROWS[0], width=30, activestyle="none", exportselection=False,
                                font=look.font(9))
@@ -88,6 +89,8 @@ class FontList(ttk.Frame):
         if picked is not None and self.shown:
             self.pick(picked)
         self.sync_buttons()
+        if self.on_put is not None:  # (the settings window's lines that depend on how many soundfonts there are)
+            self.on_put()
 
     def add(self):
         paths = self.paths()

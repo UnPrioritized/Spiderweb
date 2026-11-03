@@ -20,7 +20,11 @@ The Engine row picks what makes the sound:
 
 • Merlin (graphics card): the fastest, and every note is played, nothing is left out. The first Play takes a few seconds while your soundfont is sent to the graphics card.
 
-• Kestrel (graphics card): the same synth as Kestrel (GPU) playback, with its own settings here. Merlin can't yet play CC lines other than pitch bends (for example an Hz bass's volume or pan lines), or more than one soundfont: there Kestrel is used by itself, and the status line says so.
+• Kestrel (graphics card): the same synth as Kestrel (GPU) playback, with its own settings here. Exact, but much slower than Merlin.
+
+Merlin doesn't play controllers exactly yet: volume, expression, pan, sustain pedal and CC lines other than pitch bends (for example an Hz bass's volume or pan lines, or a loaded MIDI's). Unticked (at first), "Use Kestrel where Merlin isn't exact" lets Merlin make them anyway: fast, but a little off. Ticked, songs with them are made with Kestrel, and the status line says so.
+
+Merlin can't use more than one soundfont yet either: with several in the list, Kestrel always makes the sound, and a line under the tick says so.
 
 • BASSMIDI (processor): works on any PC. Slower to make in busy parts.
 

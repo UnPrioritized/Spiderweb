@@ -594,7 +594,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (R1b: its engines' own settings, render_ahead.DEFAULTS; the lists' vars hold their places)
         self.ahead_opts = dict(render_ahead.DEFAULTS)
         self.ahead_vars = {k: tk.IntVar(self) if k in ("block", "interpolation", "limiter") else
-                           tk.BooleanVar(self) if k == "lower" else tk.StringVar(self) for k in render_ahead.DEFAULTS}
+                           tk.BooleanVar(self) if k in render_ahead.BOOLS else tk.StringVar(self)
+                           for k in render_ahead.DEFAULTS}
         self.ahead_entries = {}
         self.show_ahead_opts()
         self.builtin_window = self.voices_entry = None  # (window/builtin_settings.py)

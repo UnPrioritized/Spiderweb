@@ -1384,10 +1384,10 @@ class Playback:
 
     def show_ahead_opts(self, only=None):
         """app.ahead_opts into the rows' vars (lists by place, the ceiling as "-1", not "-1.0")."""
-        from files.render_ahead import BLOCKS
+        from files.render_ahead import BLOCKS, BOOLS
         for k, v in self.ahead_opts.items():
             if only is None or k == only:
-                shown = BLOCKS.index(v) if k == "block" else v if k in ("interpolation", "limiter", "lower") \
+                shown = BLOCKS.index(v) if k == "block" else v if k in ("interpolation", "limiter") + BOOLS \
                     else f"{v:g}" if k == "ceiling_db" else str(v)
                 if self.ahead_vars[k].get() != shown:
                     self.ahead_vars[k].set(shown)

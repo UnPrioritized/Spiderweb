@@ -169,6 +169,8 @@ class AheadPlay:
         if engine != "merlin":
             return engine, None
         why = merlin_gap(ccs, font_list(self.app.hz_preview)) or (loaded_gap(lm) if lm is not None else None)
+        if why == "cc" and not self.app.ahead_opts.get("exact"):  # (user 2026-11-03: speed first unless ticked)
+            why = None
         return ("kestrel", why) if why else (engine, None)
 
     def song(self, rendered, ccs, ports, ppq, bpm, tempo, engine):

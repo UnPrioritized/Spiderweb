@@ -213,6 +213,28 @@ class BuiltinPanel(ttk.Frame):
         self.ahead_engine_box = cb
         r += 1
 
+        self.a_keyed = {}
+
+        def keyed(key, make):
+            nonlocal r
+            had = set(box.grid_slaves())
+            r = make(r)
+            self.a_keyed[key] = [w for w in box.grid_slaves() if w not in had]
+
+        def exact_row(r):
+            """(Merlin only, user 2026-11-03) Kestrel where Merlin isn't exact (off = speed first) + a warning line
+            while several soundfonts are stacked (those go to Kestrel either way)."""
+            c = ttk.Checkbutton(box, text=tr("ra.exact"), variable=app.ahead_vars["exact"],
+                                command=lambda: app.on_ahead_opt("exact"), takefocus=False)
+            c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+            Tooltip(c, tr("ra.exact_tip"))
+            note = self.ahead_fonts_note = ttk.Label(box, text=tr("ra.fonts_note"), foreground=look.WARN,
+                                                     wraplength=round(320 * app.scale), justify="left")
+            note.grid(row=r + 1, column=1, columnspan=2, sticky="w", pady=(0, 3))
+            return r + 2
+        keyed("exact", exact_row)
+        self.fonts.on_put = self.sync_fonts_note
+
         lb = ttk.Label(box, text=tr("ra.seconds"))
         lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
         row = ttk.Frame(box)
@@ -237,13 +259,6 @@ class BuiltinPanel(ttk.Frame):
         # R1b: the engine's own rows (render_ahead.ROWS: only the picked engine's show)
         from files.kestrel import LIMITER_ORDER, VOICES_RANGE
         from window.hz_preview import VOICES as BASS_RANGE
-        self.a_keyed = {}
-
-        def keyed(key, make):
-            nonlocal r
-            had = set(box.grid_slaves())
-            r = make(r)
-            self.a_keyed[key] = [w for w in box.grid_slaves() if w not in had]
         keyed("card", lambda r: self.card_row(r, tip="ra.card_tip"))
         keyed("voices", lambda r: self.number_row(r, "voices", "ks.voices", VOICES_RANGE, steps=(65536, 1048576, 1024),
                                                   ahead=True, tip="ra.voices_tip"))
@@ -400,6 +415,20 @@ class BuiltinPanel(ttk.Frame):
             for key, rows in self.a_keyed.items():
                 for w in rows:
                     w.grid() if key in shown else w.grid_remove()
+            self.sync_fonts_note()
+
+    def sync_fonts_note(self):
+        """The "several soundfonts: Kestrel makes it" line under Merlin's tick: shown only while it's true."""
+        note = getattr(self, "ahead_fonts_note", None)
+        if note is None or not note.winfo_exists():
+            return
+        from files.playback import AHEAD
+        from files.render_ahead import ROWS, engine_used
+        from window.hz_preview import font_list
+        app = self.app
+        on = app.midi_device.get() == AHEAD and "exact" in ROWS[engine_used(app.ahead_engine.get())] and \
+            len(font_list(app.hz_preview)) > 1
+        note.grid() if on else note.grid_remove()
 
     def take_voices(self):
         """Settings closed (Esc, X) or another MIDI out picked: a voice limit typed without Enter is taken, a wrong
