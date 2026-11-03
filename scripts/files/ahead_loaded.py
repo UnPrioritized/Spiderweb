@@ -122,28 +122,61 @@ class LoadedSong:
             m -= 1
         return out
 
-    def _cc_state(self, j, t_pre, newch):
-        """Track j's controllers / instruments / bends / channel pressure in force before t_pre: the last of each,
-        as (status, data 1, data 2) rows (its muted channels left out)."""
-        t = self.lm.tracks[j]
-        if not len(t.c_tick):
-            return []
-        k = int(np.searchsorted(t.c_tick, t_pre, "left"))
-        codes = t.c_code[:k].astype(np.int64)
-        st = codes & 0xF0
-        codes = codes[(st != 0xA0) & (((int(self.masks[j]) >> (codes & 15)) & 1) == 0)]
-        if not len(codes):
-            return []
-        st = codes & 0xF0
-        key = np.where(st == 0xB0, codes & 0xFFFF, codes & 0xFF)
-        _, first = np.unique(key[::-1], return_index=True)
-        rows = []
-        for c in codes[np.sort(len(key) - 1 - first)].tolist():
-            s = c & 0xFF
-            if newch >= 0:
-                s = (s & 0xF0) | newch
-            rows.append((s, (c >> 8) & 127, (c >> 16) & 127))
-        return rows
+    def _setup(self, t_pre):
+        """{port: [(status, data 1, data 2)]}: what's in force on each port + channel before t_pre, from ALL the
+        playing tracks together (hunt 2026-11-03: a set-up track, or one that ended, set a channel's instrument /
+        volume for the others: per track it was lost after the first piece). Newest wins (same tick: the later
+        track). Order kept where it matters: the bank as it was at the last instrument, then the bank now; pitch
+        bend range / other RPN / NRPN as whole select + value groups, then the selection in force; "reset all
+        controllers" drops what it resets. Muted channels left out, Track Properties' channel / port followed."""
+        ticks, codes, tracks = [], [], []
+        for n, j in enumerate(self.playing):
+            t = self.lm.tracks[j]
+            if not len(t.c_tick):
+                continue
+            k = int(np.searchsorted(t.c_tick, t_pre, "left"))
+            if not k:
+                continue
+            c = t.c_code[:k].astype(np.int64)
+            keep = ((c & 0xF0) != 0xA0) & (((int(self.masks[j]) >> (c & 15)) & 1) == 0)
+            c = c[keep]
+            if not len(c):
+                continue
+            nc = int(self.newch[j])
+            if nc >= 0:
+                c = (c & ~np.int64(15)) | nc
+            codes.append(c | (np.int64(self.tport[j]) << 24))
+            ticks.append(t.c_tick[:k][keep].astype(np.int64))
+            tracks.append(np.full(len(c), n, np.int64))
+        if not codes:
+            return {}
+        tick, code, trk = np.concatenate(ticks), np.concatenate(codes), np.concatenate(tracks)
+        code = code[np.lexsort((np.arange(len(code)), trk, tick))]  # (in time; same tick: track order, then file)
+        out = {}
+        chan = code >> 24 << 4 | (code & 15)
+        for pc in np.unique(chan).tolist():
+            rows = _channel_rows(code[chan == pc])
+            if rows:
+                out.setdefault(pc >> 4, []).extend(rows)
+        return out
+
+    def _sysex(self, f, j):
+        """Track j's SysEx messages before its first note (GM / GS / XG resets, drum part settings: set-up, hunt
+        2026-11-03: lost after the first piece) as [(tick, the event's bytes after its wait)], read once a MIDI."""
+        kept = getattr(self.lm, "_ahead_sysex", None)
+        if kept is None:
+            kept = self.lm._ahead_sysex = {}
+        got = kept.get(j)
+        if got is None:
+            limit = int(self.lm.tracks[j].limit)
+            size = 4096  # (most tracks reach their first note in a few bytes: read more only when needed)
+            while True:
+                got, done = _sysex_before_notes(self._read(f, j, 0, min(limit, size)))
+                if done or size >= min(limit, SYSEX_SCAN):
+                    break
+                size *= 16
+            kept[j] = got
+        return got
 
     def bytes_in(self, f0, f1):
         """About how many of the file's bytes a piece f0 .. f1 copies: each playing track's checkpoints around it
@@ -279,28 +312,40 @@ class LoadedSong:
                 if old.any():
                     start[old] = self._held_starts(f, j, c, held[old], ends[held[old]], floor)
                 start = np.maximum(start, floor)
-                rows = self._cc_state(j, t_pre, int(self.newch[j]))
-                if not w and not len(held) and not rows:
+                if not w and not len(held):
                     continue
                 # (its own small copy: the walk's buffer (1.67x the read) and the read let go at once, M1)
                 body = out[:w].tobytes()
                 del out, b
-                got.append((j, body, held, start, cnt[held], vel[held], rows))
+                got.append((j, body, held, start, cnt[held], vel[held]))
+            sysex = {}  # port -> [(tick, track order, bytes)]
+            for n, j in enumerate(self.playing):
+                for tk, ev in self._sysex(f, j):
+                    if tk < t_pre:
+                        sysex.setdefault(int(self.tport[j]), []).append((tk, n, ev))
+        rows = self._setup(t_pre)
         origin = min([t0] + [int(g[3].min()) for g in got if len(g[3])])
         own = self.own.tracks(origin, t_pre, t_copy, self.file_ports)
         if not got and not own:
             return None, 0
-        count = 1 + len(got) + len(own)
+        ports = sorted(set(rows) | set(sysex))
+        count = 1 + len(ports) + len(got) + len(own)
         buf = bytearray(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
                         + self.ppq.to_bytes(2, "big"))
         buf += self.own.tempo_track(origin, t_copy)
+        for port in ports:  # (each port's set-up first: SysEx in order, then every channel's state; hunt 11-03)
+            head = bytearray(b"\x00\xff\x21\x01" + bytes([port]))
+            for _, _, ev in sorted(sysex.get(port, ()), key=lambda e: e[:2]):
+                head += b"\x00" + ev
+            for s, d1, d2 in rows.get(port, ()):
+                head += bytes([0, s, d1]) + (b"" if (s & 0xF0) in (0xC0, 0xD0) else bytes([d2]))
+            head += b"\x00\xff\x2f\x00"
+            buf += b"MTrk" + len(head).to_bytes(4, "big") + head
         got.reverse()  # (popped from the end: each track's body let go once it's in buf)
         while got:
-            j, body, held, start, cnt, vel, rows = got.pop()
+            j, body, held, start, cnt, vel = got.pop()
             nc = int(self.newch[j])
             head = bytearray(b"\x00\xff\x21\x01" + bytes([int(self.tport[j])]))
-            for s, d1, d2 in rows:
-                head += bytes([0, s, d1]) + (b"" if (s & 0xF0) in (0xC0, 0xD0) else bytes([d2]))
             last = origin
             for i in np.argsort(start, kind="stable").tolist():  # (each held note struck where it began)
                 q = int(held[i])
@@ -329,6 +374,135 @@ class _NoFile:
 
     def __exit__(self, *a):
         return False
+
+
+SYSEX_SCAN = 1 << 20  # bytes of a track looked through for SysEx before its first note (set-up sits at the start)
+_RPN = (6, 38, 98, 99, 100, 101)  # data entry MSB / LSB, NRPN LSB / MSB, RPN LSB / MSB: kept as groups
+_BANK = (0, 32)
+_RESET = 121  # reset all controllers: drops these (GM's list) where they came before it
+_RESETS = (1, 11, 64, 65, 66, 67)
+
+
+def _channel_rows(code):
+    """One port + channel's events (status | data 1 << 8 | data 2 << 16, in time order) -> the rows that put it in
+    the same state at a piece's start (see LoadedSong._setup)."""
+    st = code & 0xF0
+    d1, d2 = (code >> 8) & 127, (code >> 16) & 127
+    ch = int(code[0] & 15)
+    cc = st == 0xB0
+    reset = np.flatnonzero(cc & (d1 == _RESET))
+    last_reset = int(reset[-1]) if len(reset) else -1
+    pos = np.arange(len(code))
+    resets = (cc & np.isin(d1, _RESETS)) | (st == 0xE0) | (st == 0xD0)
+    live = ~(resets & (pos < last_reset)) & ~(cc & (d1 == _RESET))
+    rows = []
+    # instrument: the bank as it was at the last program change, the program, then the bank now
+    prog = np.flatnonzero(st == 0xC0)
+    bank_now = {b: np.flatnonzero(cc & (d1 == b)) for b in _BANK}
+    if len(prog):
+        p = int(prog[-1])
+        for b in _BANK:
+            before = bank_now[b][bank_now[b] < p]
+            if len(before):
+                rows.append((0xB0 | ch, b, int(d2[before[-1]])))
+        rows.append((0xC0 | ch, int(d1[p]), 0))
+    for b in _BANK:
+        if len(bank_now[b]) and (not len(prog) or bank_now[b][-1] > prog[-1]):
+            rows.append((0xB0 | ch, b, int(d2[bank_now[b][-1]])))
+    # plain controllers, bend, pressure: the last of each still in force
+    plain = live & ((cc & ~np.isin(d1, _RPN + _BANK)) | (st == 0xE0) | (st == 0xD0))
+    idx = np.flatnonzero(plain)
+    if len(idx):
+        key = np.where(cc[idx], d1[idx], 200 + (st[idx] >> 4))
+        _, first = np.unique(key[::-1], return_index=True)
+        for i in idx[np.sort(len(idx) - 1 - first)].tolist():
+            s = int(st[i])
+            rows.append((s | ch, int(d1[i]), 0 if s == 0xD0 else int(d2[i])))
+    # RPN / NRPN: each parameter's last values, sent with its own selection; then the selection in force
+    idx = np.flatnonzero(cc & np.isin(d1, _RPN))
+    if len(idx):
+        sel = [None, None, None]  # (kind "r" / "n", MSB, LSB)
+        vals = {}
+        for i in idx.tolist():
+            n, v = int(d1[i]), int(d2[i])
+            if n in (101, 99):
+                sel = ["r" if n == 101 else "n", v, sel[2] if sel[0] == ("r" if n == 101 else "n") else None]
+            elif n in (100, 98):
+                sel = ["r" if n == 100 else "n", sel[1] if sel[0] == ("r" if n == 100 else "n") else None, v]
+            elif sel[0] is not None and sel[1] is not None and sel[2] is not None and (sel[1], sel[2]) != (127, 127):
+                p = vals.setdefault(tuple(sel), {})
+                p.pop(n, None)
+                p[n] = v
+                vals[tuple(sel)] = vals.pop(tuple(sel))  # (the newest set last)
+        for (kind, msb, lsb), p in vals.items():
+            a, b = (101, 100) if kind == "r" else (99, 98)
+            rows += [(0xB0 | ch, a, msb), (0xB0 | ch, b, lsb)]
+            rows += [(0xB0 | ch, n, v) for n, v in p.items()]
+        if sel[0] is not None and sel[1] is not None and sel[2] is not None:
+            a, b = (101, 100) if sel[0] == "r" else (99, 98)
+            rows += [(0xB0 | ch, a, sel[1]), (0xB0 | ch, b, sel[2])]
+        elif vals:
+            rows += [(0xB0 | ch, 101, 127), (0xB0 | ch, 100, 127)]  # (as GM advises after setting one)
+    return rows
+
+
+def _sysex_before_notes(b):
+    """([(tick, F0 / F7 event bytes)] in a track's bytes up to its first note-on, done): done = it got there (or
+    to the track's end / a broken event); False = b ended first (read more)."""
+    out, p, n, tick, run = [], 0, len(b), 0, 0
+    b = bytes(b)
+    while p < n:
+        d = 0
+        while p < n:
+            c = b[p]
+            p += 1
+            d = (d << 7) | (c & 127)
+            if c < 128:
+                break
+        tick += d
+        if p >= n:
+            return out, False
+        s = b[p]
+        if s in (0xF0, 0xF7):
+            q, ln = p + 1, 0
+            while q < n:
+                c = b[q]
+                q += 1
+                ln = (ln << 7) | (c & 127)
+                if c < 128:
+                    break
+            if q + ln > n:
+                return out, False
+            out.append((tick, b[p:q + ln]))
+            p = q + ln
+            continue
+        if s == 0xFF:
+            if p + 1 >= n:
+                return out, False
+            if b[p + 1] == 0x2F:
+                return out, True
+            q, ln = p + 2, 0
+            while q < n:
+                c = b[q]
+                q += 1
+                ln = (ln << 7) | (c & 127)
+                if c < 128:
+                    break
+            p = q + ln
+            continue
+        if s & 0x80:
+            run = s
+            p += 1
+        if run < 0x80:
+            return out, True  # (a broken track: stop looking)
+        hi = run & 0xF0
+        if hi == 0x90:
+            if p + 1 >= n:
+                return out, False
+            if b[p + 1] > 0:
+                return out, True  # (the first note: set-up is before it)
+        p += 1 if hi in (0xC0, 0xD0) else 2
+    return out, False
 
 
 def _vlq(n):
