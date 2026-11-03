@@ -20,7 +20,7 @@ from notes.hzbass import AUTO_MOST, RING_MOST
 from window import look
 from window.font_list import FontList
 from window.hz_gates import GATE_MODES
-from window.hz_preview import LIVE_MB, VOICES, WORKERS
+from window.hz_preview import ENGINES, LIVE_MB, VOICES, WORKERS
 from window.hz_trace import open_trace
 from window.widgets import Scrub, Tooltip, bad, good, no_spaces, remember_place, unit_word
 
@@ -159,6 +159,20 @@ class PreviewSettings(tk.Toplevel):
         self.fonts.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
         r += 1
 
+        # (user 2026-11-03: the preview's own engine, never following the main MIDI out)
+        lb = ttk.Label(box, text=tr("ps.engine"))
+        lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
+        from files.render_ahead import engines
+        self.engine_ids = [e for e in ENGINES if e in engines()]
+        names = [tr("ra.engine_" + e) for e in self.engine_ids]
+        self.engine_box = cb = ttk.Combobox(box, values=names, state="readonly", width=max(map(len, names)))
+        cb.current(self.engine_ids.index(cfg["engine"]) if cfg["engine"] in self.engine_ids else 0)
+        cb.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        cb.bind("<<ComboboxSelected>>", lambda e: self.on_engine())  # (by place: translated names)
+        Tooltip(cb, tr("ps.engine_tip"))
+        Tooltip(lb, tr("ps.engine_tip"))
+        r += 1
+
         lb = ttk.Label(box, text=tr("ps.voices"))
         lb.grid(row=r, column=0, sticky="e", padx=(0, 8), pady=3)
         self.voices = tk.StringVar(value=str(cfg["voices"]))
@@ -172,7 +186,8 @@ class PreviewSettings(tk.Toplevel):
         r += 1
 
         self.nofx = tk.BooleanVar(value=cfg["nofx"])
-        c = ttk.Checkbutton(box, text=tr("ps.nofx"), variable=self.nofx, command=self.on_nofx, takefocus=False)
+        c = self.nofx_box = ttk.Checkbutton(box, text=tr("ps.nofx"), variable=self.nofx, command=self.on_nofx,
+                                            takefocus=False)
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(c, tr("ps.nofx_tip"))
         r += 1
@@ -217,6 +232,7 @@ class PreviewSettings(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.close())
         self.bind("<space>", win.on_space)  # (not in a box: on_space leaves those alone)
         self.on_volume()
+        self.show_engine()
 
     def show(self):
         if not self.placed_once:  # (the first time: next to the Hz bass window's top right, or where it was last)
@@ -360,6 +376,18 @@ class PreviewSettings(tk.Toplevel):
             if getattr(self.app, "quick", None) is not None:
                 self.app.quick.set_budget(v)
             self.refresh()
+
+    def on_engine(self):
+        """Engine picked: saved, the voice limit + reverb rows greyed off BASSMIDI, the sound made again."""
+        self.app.hz_preview["engine"] = self.engine_ids[self.engine_box.current()]
+        self.app.schedule_autosave()
+        self.show_engine()
+        self.remake()
+
+    def show_engine(self):
+        state = "normal" if self.app.hz_preview["engine"] not in self.engine_ids[1:] else "disabled"
+        self.voices_entry.config(state=state)
+        self.nofx_box.config(state=state)
 
     def on_nofx(self):
         self.app.hz_preview["nofx"] = bool(self.nofx.get())

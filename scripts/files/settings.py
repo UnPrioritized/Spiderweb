@@ -143,6 +143,7 @@ APP_KEYS = {
     "hz_on": ("hz_preview", "on", bool),
     "hz_voices": ("hz_preview", "voice_limit", int),
     "hz_nofx": ("hz_preview", "without_effects", bool),
+    "hz_engine": ("hz_preview", "engine", str),  # (the preview's own Engine, user 2026-11-03)
     "hz_volume": ("hz_preview", "volume", float),
     "hz_live_mb": ("hz_preview", "live_keys_memory_mb", int),
     "hz_ring": ("hz_preview", "auto_run_on_seconds", float),  # (Auto's CC run-on measured, App.ring_check)
@@ -163,6 +164,7 @@ APP_KEYS = {
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)
 # the ones the autosave keeps inside its "hz_preview" settings (1.5.1 sweep: all app-wide): window key -> key there
 IN_HZ = {"soundfont": "font", "more_soundfonts": "more_fonts", "hz_on": "on", "hz_voices": "voices", "hz_nofx": "nofx", "hz_volume": "volume",
+         "hz_engine": "engine",
          "hz_live_mb": "live_mb", "hz_ring": "ring", "hz_ring_font": "ring_font"}
 
 

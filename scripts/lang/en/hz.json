@@ -342,6 +342,8 @@
  "ps.font_up_tip": "Move the soundfont picked one place up.",
  "ps.font_down": "Down",
  "ps.font_down_tip": "Move the soundfont picked one place down.",
+ "ps.engine": "Engine",
+ "ps.engine_tip": "What makes the preview's sound. BASSMIDI: on the processor, uses the voice limit and the reverb tick here. Merlin / Kestrel: on the graphics card, with Rendered ahead's settings (Settings → Sound). It stays as picked whatever the MIDI out is.",
  "ps.voices": "Voice limit",
  "ps.voices_tip": "How many sounds can ring at once. More = fuller and closer to a big render, but slower to make.\nChange it and the notes grey again while the sound is made anew: watch the speed below.",
  "ps.nofx": "No reverb or chorus",

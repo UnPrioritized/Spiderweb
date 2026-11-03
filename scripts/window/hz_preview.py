@@ -36,7 +36,9 @@ SETTLE = 0.5  # seconds after the last change before the sound is made (a slider
 # second: sound made for each step was thrown away at once, user). Playing (Space) makes it at once.
 LOADED_SHOWN = 3.0  # seconds the green "soundfont loaded" stays
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # pieces made at once
-DEFAULTS = {"on": False, "font": "", "more_fonts": [], "voices": 1000, "nofx": False, "volume": 0.8, "live_mb": 1000}
+DEFAULTS = {"on": False, "font": "", "more_fonts": [], "voices": 1000, "nofx": False, "volume": 0.8, "live_mb": 1000,
+            "engine": "bassmidi"}
+ENGINES = ("bassmidi", "merlin", "kestrel")  # (the preview's Engine list, in this order; render_ahead's names)
 
 
 VOICES = (1, 100000)  # the voice limit's range
@@ -76,6 +78,8 @@ def clean_settings(d):
     if isinstance(d.get("volume"), (int, float)) and 0 <= d["volume"] <= 1:
         got["volume"] = float(d["volume"])
     got["on"], got["nofx"] = d.get("on") is True, d.get("nofx") is True
+    if d.get("engine") in ENGINES:  # (kept as saved: a PC without the graphics card engines uses BASSMIDI)
+        got["engine"] = d["engine"]
     ring = d.get("ring")  # (Auto's CC run-on measured for the soundfont "ring_font": App.ring_check)
     if (isinstance(ring, (int, float)) and not isinstance(ring, bool) and math.isfinite(ring) and ring >= 0
             and isinstance(d.get("ring_font"), str)):
@@ -292,15 +296,13 @@ class Preview:
         self.set_end()
 
     def card_mode(self):
-        """(R7, user 2026-11-02: no engine of its own) What makes the pieces: None = BASSMIDI as always; with the main
-        MIDI out on Rendered ahead and its engine on the graphics card: that engine with Rendered ahead's settings
-        (a CC7 / CC11 line still sends Merlin's to Kestrel, card_song)."""
-        from files.playback import AHEAD
-        if self.app.midi_device.get() != AHEAD:
-            return None
-        from files.render_ahead import engine_used
-        engine = engine_used(self.app.ahead_engine.get())
-        if engine == "bassmidi":
+        """What makes the pieces: the preview's OWN Engine (cfg "engine"; user 2026-11-03, it followed the main MIDI
+        out before and had to be changed every time). None = BASSMIDI; Merlin / Kestrel = on the graphics card with
+        Rendered ahead's settings (a CC line still sends Merlin's to Kestrel, card_song). Graphics card engines
+        missing here = BASSMIDI."""
+        from files.render_ahead import engines
+        engine = self.cfg.get("engine", "bassmidi")
+        if engine == "bassmidi" or engine not in engines():
             return None
         return engine, tuple(sorted(self.app.ahead_opts.items())), self.app.kestrel_opts.get("card", "")
 
