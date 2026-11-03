@@ -3933,10 +3933,17 @@ class TrackList(tk.Canvas):
         self.delete("playhead")
         if self.sx is None or not self.winfo_ismapped():
             return
+        w, h = self.winfo_width(), self.winfo_height()
+        ahead = getattr(self.app, "ahead_play", None)
+        if ahead is not None and w > self.name_w:  # (M4: Rendered ahead's faint grey, as on the piano roll)
+            for a, b in ahead.grey_beats(self.x2t(self.name_w), self.x2t(w)):
+                a, b = max(self.name_w, round(self.t2x(a))), min(w, round(self.t2x(b)))
+                if b > a:
+                    self.create_rectangle(a, self.ruler_h, b, h, fill=look.AHEAD_UNMADE, outline="",
+                                          stipple="gray12", tags=("playhead", "ahead"))
         x = round(self.t2x(self.app.playhead))
-        if self.name_w <= x <= self.winfo_width():
-            self.create_line(x, 0, x, self.winfo_height(), fill=look.PLAY_LINE, width=max(1, round(self.scale)),
-                             tags="playhead")
+        if self.name_w <= x <= w:
+            self.create_line(x, 0, x, h, fill=look.PLAY_LINE, width=max(1, round(self.scale)), tags="playhead")
 
 
 def row_mask(lm, r, ax, bx, W, ch=None):

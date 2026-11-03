@@ -301,7 +301,7 @@ class AheadPlay:
                 self.play_at = moved(self.play_at)
                 self.audio.remap(moved)
         if self.maker.update_song(song):
-            self.app.roll.draw_ahead_grey()
+            self.draw_grey()
 
     def playing(self):
         return self.audio is not None
@@ -380,7 +380,7 @@ class AheadPlay:
         if not self.idle_wanted():
             if self.idle_anchor is not None:
                 self.idle_anchor = None
-                app.roll.draw_ahead_grey()
+                self.draw_grey()
             return False
         now = time.monotonic()
         seen = (app.playhead, self._dirty)
@@ -419,7 +419,7 @@ class AheadPlay:
         if m.error:
             self._failed_at = self._seen
             app.status.config(text=m.error)
-        app.roll.draw_ahead_grey()
+        self.draw_grey()
         return True
 
     def ended(self):
@@ -464,6 +464,13 @@ class AheadPlay:
         self.factor = f
         m.opts[key] = max(1, int(full * f))
         m.lowered = f < 1.0
+
+    def draw_grey(self):
+        """The faint grey drawn again on the piano roll and the track list (M4, while shown)."""
+        self.app.roll.draw_ahead_grey()
+        tracks = getattr(self.app, "track_list", None)
+        if tracks is not None:
+            tracks.draw_playhead()
 
     def grey_beats(self, b0, b1):
         """(R4) [(from, to)] beats between b0 and b1 not made yet, while playing; stopped and making ahead (M2):

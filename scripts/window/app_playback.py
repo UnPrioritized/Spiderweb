@@ -587,7 +587,7 @@ class Playback:
             self.roll.show_playhead()
             self.schedule_autosave()
         self.ahead_play.stop()  # (fades out; what's made is kept for the next Play)
-        self.roll.draw_ahead_grey()  # (its grey goes; making while stopped shows its own, M2)
+        self.ahead_play.draw_grey()  # (its grey goes; making while stopped shows its own, M2)
         self.kick_ahead()
         self.stop_loaded()
         self.piano_back()
