@@ -3737,6 +3737,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if getattr(self, "_tempo_play_job", None):
                 self.after_cancel(self._tempo_play_job)
             self._tempo_play_job = self.after(80 if self.tempo_pane.drag else 0, self.play_tempo)
+        else:  # (Rendered ahead made while stopped: at the new tempo, once it rests; hunt 2026-11-03)
+            self.ahead_play.mark_dirty()
+            self.kick_ahead()
 
     def let_go(self):
         """The mouse let go of a drag on the piano roll or in the Conductor pane: what the side panel and the open

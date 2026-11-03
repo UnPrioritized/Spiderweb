@@ -149,6 +149,8 @@ class AheadPlay:
         # (M2 Make ahead while stopped: the play line / notes as last seen, since when they rest, the song is old,
         # the frame made from (None = nothing made while stopped), the place a making error was said for)
         self._seen, self._rest_since, self._dirty = None, 0.0, True
+        self._edits = 0  # (changes so far: each one starts the rest again)
+        self._why_said = None  # (why Kestrel stands in, as last said while stopped)
         self.idle_anchor = None
         self._failed_at = None
 
@@ -234,10 +236,14 @@ class AheadPlay:
     def drop(self):
         """Everything made let go (settings changed, MIDI out changed, closing)."""
         self.stop()
-        self.idle_anchor, self._dirty = None, True
+        self.idle_anchor, self._dirty, self._why_said = None, True, None
         if self.maker is not None:
             self.maker.close()
         self.maker, self.key = None, None
+        try:  # (its grey goes at once: another MIDI out picked while making stopped left it, hunt 2026-11-03)
+            self.draw_grey()
+        except Exception:  # (closing: the window's gone)
+            pass
 
     # ------------------------------------------------------------ playing
 
@@ -358,15 +364,30 @@ class AheadPlay:
     # ------------------------------------------------------------ making while stopped (M2)
 
     def mark_dirty(self):
-        """The notes / tempo / mutes changed while stopped: the song is built again once they rest."""
+        """The notes / tempo / mutes changed while stopped: the song is built again once they rest (each change
+        starts the rest again: a tempo point dragged builds it once, after)."""
         self._dirty = True
+        self._edits += 1
         self._failed_at = None
+        self.forget_closed()
+
+    def forget_closed(self):
+        """Stopped, and the MIDI the made sound is of was closed (New, Open, another loaded): its bytes and what was
+        made let go now, also with making while stopped off (hunt 2026-11-03: kept until the next Play)."""
+        m = self.maker
+        lm = getattr(m.song, "lm", None) if m is not None else None
+        if self.audio is None and lm is not None and lm is not self.app.loaded:
+            m.set_song(None)
 
     def idle_wanted(self):
         """True while making ahead while stopped is on for this window (Rendered ahead picked, the tick on, not
-        playing)."""
+        playing, the Hz bass preview not playing: it comes first, hunt 2026-11-03)."""
         from files.playback import AHEAD
         app = self.app
+        hz = getattr(app, "hz_window", None)
+        preview = getattr(hz, "preview", None) if hz else None
+        if preview is not None and preview.playing():
+            return False
         return self.audio is None and app.midi_device.get() == AHEAD and bool(app.ahead_opts.get("while_stopped"))
 
     def idle(self):
@@ -381,7 +402,7 @@ class AheadPlay:
                 self.draw_grey()
             return False
         now = time.monotonic()
-        seen = (app.playhead, self._dirty)
+        seen = (app.playhead, self._edits)
         if seen != self._seen:
             self._seen, self._rest_since = seen, now
         if now - self._rest_since < REST_S or self._failed_at == seen:
@@ -399,10 +420,13 @@ class AheadPlay:
                 return True
             self.maker.error = None
             self.maker.update_song(self.song(rendered, ccs, ports, ppq, bpm, tempo, engine))
-            self._say_why(why)
+            if why != self._why_said:  # (said once, when it's news: hunt 2026-11-03, it replaced every edit's text)
+                self._say_why(why)
+            self._why_said = why
             self._dirty = False
-            self._seen = (app.playhead, False)
         m = self.maker
+        if m.error:  # (a new rest place or an edit since it failed: tried again, hunt 2026-11-03)
+            m.error = None
         if self.load is not None:  # (BASSMIDI's soundfonts opening)
             if self.load.is_alive():
                 return True

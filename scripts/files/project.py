@@ -498,6 +498,7 @@ class ProjectFiles:
         self.stop_loaded()  # (still playing: its MIDI stops, the shapes play on)
         self.drop_read_ahead()  # (its read-ahead stopped and let go: hunt 2026-10-28, read on for a minute)
         self.loaded = None  # (another project: its loaded MIDI goes; attach_midi puts a new one in after this)
+        self.ahead_play.mark_dirty()  # (Rendered ahead: that MIDI's made sound let go too)
         self.midi_link = link
         self.midi_missing = False  # (looked for now: "not found" only once that fails, load_midi.said_without)
         self.drop_finding()
@@ -966,6 +967,7 @@ class ProjectFiles:
         self.load_file(None, quiet=True, text=json.dumps(data))
         self.project_token = os.urandom(8).hex()  # (a new project: copies from before aren't laid on its tracks)
         self.loaded, self.midi_link = lm, lm.link()
+        self.ahead_play.mark_dirty()  # (Rendered ahead: the old MIDI's made sound let go, the new one made)
         self.roll.forget_loaded()
         self.project_file = None
         self._saved_shapes = None
@@ -991,6 +993,9 @@ class ProjectFiles:
         saved. A file of another PPQ (the changed file was picked) gives the project its PPQ (shapes are in beats);
         retempo (the changed file picked): its tempos + signatures replace the Conductor line."""
         self.loaded, self.midi_link = lm, lm.link()
+        # (Rendered ahead, hunt 2026-11-03: made while stopped before the MIDI came in = without it; built again)
+        self.ahead_play.mark_dirty()
+        self.kick_ahead()
         if retempo and not same_conductor(self.tempo, conductor_line(lm)):
             self.tempo = conductor_line(lm)
             self.tempo_pane.forget()

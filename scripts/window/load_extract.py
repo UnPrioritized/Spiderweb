@@ -109,6 +109,9 @@ def sync_extract(app, found=None):
     if app.player.running:  # (its reader read the old ones: started again from where it is)
         app.stop_play()
         app.start_play(keep=True)
+    else:  # (Rendered ahead made while stopped: made again, also once boxes read in the background, hunt 11-03)
+        app.ahead_play.mark_dirty()
+        app.kick_ahead()
 
 
 def same_array(a, b):
@@ -145,6 +148,9 @@ def sync_channels(app):
     if app.player.running:
         app.stop_play()
         app.start_play(keep=True)
+    else:  # (Rendered ahead made while stopped: made again)
+        app.ahead_play.mark_dirty()
+        app.kick_ahead()
 
 
 def read_boxes(app, lm, boxes):

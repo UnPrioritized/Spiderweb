@@ -543,3 +543,4 @@ class Preview:
         if self.player is not None:
             self.player.stop()
             self.player = None
+            self.app.kick_ahead()  # (Rendered ahead's making while stopped waited while this played: on again)

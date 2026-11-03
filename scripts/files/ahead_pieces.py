@@ -267,10 +267,21 @@ class Song:
         port = np.concatenate([self.port[idx], self.port[idx], (cm >> 24).astype(np.uint8)])
         del cm, ch
         tracks = []
-        for p in np.unique(port).tolist():
+        used = np.unique(port).tolist()
+        moved = {}
+        if file_ports and self.edo_first is None:
+            # (a loaded MIDI's ports: your shapes moved to ports it leaves free, so they never take its instruments /
+            # volume / drums and sound as in Built-in BASSMIDI: piano, channel 10 melodic; hunt 2026-11-03. All 16
+            # used: shared, as before)
+            free = [q for q in range(16) if q not in file_ports and q not in used]
+            for p in used:
+                if p % 16 in file_ports and free:
+                    moved[p] = free.pop(0)
+        for p in used:
             sel = np.flatnonzero(port == p)
             sel = sel[np.lexsort((order[sel], tick[sel]))]
-            head = [(0, b"\xff\x21\x01" + bytes([p & 127]))] + ([] if p % 16 in file_ports else [(0, _MELODIC_10)])
+            q = moved.get(p, p)
+            head = [(0, b"\xff\x21\x01" + bytes([q & 127]))] + ([] if q % 16 in file_ports else [(0, _MELODIC_10)])
             tracks.append(_track(head, _messages(tick[sel], st[sel], d1[sel], d2[sel])))
         return tracks
 

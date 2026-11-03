@@ -587,6 +587,7 @@ class Playback:
             self.roll.show_playhead()
             self.schedule_autosave()
         self.ahead_play.stop()  # (fades out; what's made is kept for the next Play)
+        self.ahead_play.forget_closed()  # (... unless its MIDI was closed: New closes it first, hunt 2026-11-03)
         self.ahead_play.draw_grey()  # (its grey goes; making while stopped shows its own, M2)
         self.kick_ahead()
         self.stop_loaded()
