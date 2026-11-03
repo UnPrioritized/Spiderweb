@@ -2,7 +2,7 @@ Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead 
 
 ## Playing
 
-Play waits a moment first, until the first 10 seconds from the play line are made (less if Render ahead is shorter or the song ends sooner), so the start sounds just like a replay. While it plays, making goes on in the background, always keeping Render ahead seconds ahead of the play line.
+Play waits a moment first, until the first 5 seconds from the play line are made (less if the song ends sooner), so the start sounds just like a replay. While it plays, making goes on in the background, always keeping Render ahead seconds ahead of the play line.
 
 While playing, the part not made yet shows a very faint grey over the piano roll, and clears as it's made. Stop and Play again from the same place: what's already made is played at once.
 
@@ -42,7 +42,7 @@ Settings (Help menu) → Sound, while Rendered ahead is picked:
 
 • Limiter: keeps very loud parts from clipping, over the whole sound (no jumps where pieces meet). Balanced first evens out long loud parts a little, then catches the peaks; Brickwall only catches the peaks; Off lets them clip. Ceiling = the loudest it lets through, in dB.
 
-Changes to these are used from the next Play.
+Render ahead, Slow down to keep up and Lower it by itself work at once, even while playing. The Engine and the other settings are used from the next Play.
 
 ## Also
 

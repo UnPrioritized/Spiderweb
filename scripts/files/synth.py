@@ -537,11 +537,12 @@ class Synth:
             longest = max(longest, (st["end"] - gate) / RATE)
         return longest
 
-    def render(self, ev, ppq, start, frames, voices, nofx=False, cancel=None, progress=None, stats=None):
+    def render(self, ev, ppq, start, frames, voices, nofx=False, cancel=None, progress=None, stats=None, pre=None):
         """`frames` frames of sound from `start` (frames from the song's start) as float32 rows (left, right).
         cancel = a threading.Event (set = stop: returns None); progress(frames done) after every piece;
         stats (a dict) gets "voices" = the most voices used at once, and "end" = the frame where all sound has died
-        away after the last note, if that's in this stretch."""
+        away after the last note, if that's in this stretch. pre = frames made before `start` and thrown away
+        (None = PREROLL; more for a note still held there: BASSMIDI never sounds a note struck before the start)."""
         if not self.font:
             raise SynthError("synth.no_font")
         bass = self.bass
@@ -557,7 +558,8 @@ class Synth:
             # past the last note (the stream can't jump there): from PREROLL before the last note ends, so the
             # ring after it is heard
             length = bass.BASS_ChannelGetLength(h, _POS_BYTE) // 8
-            at = min(start - min(start, int(PREROLL * RATE)), max(0, length - int(PREROLL * RATE)))
+            pre = int(PREROLL * RATE) if pre is None else max(0, int(pre))
+            at = min(start - min(start, pre), max(0, length - int(PREROLL * RATE)))
             early = start - at
             out = np.zeros((early + frames, 2), np.float32)
             if at and not bass.BASS_ChannelSetPosition(h, at * 8, _POS_BYTE):
@@ -644,6 +646,7 @@ class Player:
         self.heard = deque()  # (stream frame, song frame or None = silence, count): what was handed to BASS
         self.written = 0
         self.fed = 0  # song frames handed over (the limiter holds the last Limiter.DELAY of them)
+        self.lock = threading.Lock()  # (held while filling: remap() moves the song frames between fills)
         self._proc = _STREAMPROC(self._fill)  # (kept: BASS calls it)
         self.handle = synth.bass.BASS_StreamCreate(RATE, 2, _SAMPLE_FLOAT, self._proc, None)
         if not self.handle:
@@ -657,6 +660,16 @@ class Player:
                 synth.bass.BASS_SetConfig(_CONFIG_UPDATEPERIOD, ms)
 
     def _fill(self, handle, buffer, length, user):
+        with self.lock:
+            return self._fill_now(buffer, length)
+
+    def remap(self, f):
+        """The song frames already handed over (heard / fed) turned by f (old song frame -> new: a tempo change while
+        playing, Rendered ahead). Call with self.lock held (no fill in between)."""
+        self.fed = int(f(self.fed))
+        self.heard = deque((w, None if s is None else int(f(s)), n) for w, s, n in self.heard)
+
+    def _fill_now(self, buffer, length):
         n = length // 8
         out = np.frombuffer((ctypes.c_float * (n * 2)).from_address(buffer), np.float32).reshape(n, 2)
         if not self.handle:  # (fading out after stop: nothing more from pull)

@@ -12,7 +12,7 @@ a note held longer starts there, struck again out of hearing). Engines:
 - Merlin / Kestrel (files/kestrel.py Piece): the piece written as a small MIDI file (format 1: tempo track + one
   track per port, FF 21), made on the graphics card with the soundfonts already there (kestrel.loaded_for).
   Channel 10 of each port is melodic (GS "use for rhythm part" off), as your shapes' are in live play.
-- BASSMIDI (files/synth.py Synth.render): straight from the song's event list (it does its own PRE).
+- BASSMIDI (files/synth.py Synth.render): straight from the song's event list, started as early (pre_frames).
 Each piece is made with the limiter OFF: Spiderweb's own runs over the joined pieces (R3).
 
 Thread rules: Maker.step() runs on the window's thread (quick: it only looks at jobs and starts threads); the
@@ -169,7 +169,8 @@ class Song:
         self.longest = int((self.end - self.start).max()) if n else 0
         self.first = self.frame(int(self.start[0])) if n else 0
         self.last = self.frame(int(self.end.max())) if n else 0  # the frame the last note ends at
-        self._bass = None  # (BASSMIDI's event list, made once)
+        self._bass = None  # (BASSMIDI's event list, made once: pieces made at once wait for the first to make it)
+        self._bass_lock = threading.Lock()
 
     def __len__(self):
         return len(self.start)
@@ -189,16 +190,28 @@ class Song:
         before = [u for t, u in self.tempo if t <= tick]
         return before[-1], [(t, u) for t, u in self.tempo if t > tick]
 
+    def piece_start(self, f0):
+        """(the tick a piece from frame f0 starts at, the tick notes count from: ones ending after it sound in it).
+        PRE early; a note still held there = from its own start (at most HELD_PRE early: only the held notes come
+        from that far back, so it costs little). Past the last note: held notes looked for PRE before the last end,
+        so the song's ring after it is made too (a piece starting there would be silence otherwise)."""
+        t_pre = t0 = self.tick_at(max(0, min(f0, self.last) - int(PRE * RATE)))
+        lo = int(np.searchsorted(self.start, t0 - self.longest, "left"))
+        held = lo + np.flatnonzero((self.start[lo:] < t0) & (self.end[lo:] > t0))
+        if len(held):
+            t0 = max(min(int(self.start[held].min()), t0), self.tick_at(max(0, f0 - int(HELD_PRE * RATE))))
+        return t0, t_pre
+
+    def pre_frames(self, f0):
+        """Frames a piece from f0 starts early (BASSMIDI's render: synth.render pre)."""
+        return f0 - self.frame(self.piece_start(f0)[0])
+
     def midi(self, f0, f1):
         """The piece f0 .. f1 (frames) as MIDI file bytes, + the frames to drop at its start (None: no notes sound
         in it)."""
         t_end = self.tick_at(f1)
-        t_pre = t0 = self.tick_at(max(0, f0 - int(PRE * RATE)))
+        t0, t_pre = self.piece_start(f0)
         lo = int(np.searchsorted(self.start, t0 - self.longest, "left"))
-        held = lo + np.flatnonzero((self.start[lo:] < t0) & (self.end[lo:] > t0))
-        if len(held):  # (a note still held: from its start, at most HELD_PRE early; only the held notes come
-            # from that far back, so it costs little)
-            t0 = max(min(int(self.start[held].min()), t0), self.tick_at(max(0, f0 - int(HELD_PRE * RATE))))
         hi = int(np.searchsorted(self.start, t_end, "left"))
         idx = lo + np.flatnonzero(self.end[lo:hi] > t_pre)  # (the notes sounding from PRE early on)
         c0, c1 = int(np.searchsorted(self.cc_ticks, t0, "left")), int(np.searchsorted(self.cc_ticks, t_end, "left"))
@@ -206,8 +219,12 @@ class Song:
             return None, 0
         skip = f0 - self.frame(t0)
         us, changes = self._at(t0)
-        tempo = [(0, b"\xff\x51\x03" + int(us).to_bytes(3, "big"))]
-        tempo += [(t - t0, b"\xff\x51\x03" + int(u).to_bytes(3, "big")) for t, u in changes if t < t_end]
+        # (a PPQ over 32767 reads as SMPTE timing in a MIDI file: written as half the PPQ with half the tempo
+        # value, so every tick keeps its time; hunt 2026-11-03, PPQ goes up to 65535)
+        half = 2 if self.ppq > 32767 else 1
+        scale = (self.ppq // half) / self.ppq  # (an odd PPQ: the tempo by the exact ratio, not 1/2)
+        tempo_of = lambda u: b"\xff\x51\x03" + max(1, int(round(u * scale))).to_bytes(3, "big")  # noqa: E731
+        tempo = [(0, tempo_of(us))] + [(t - t0, tempo_of(u)) for t, u in changes if t < t_end]
         # every event as arrays (NumPy, never a Python object a note: a dense piece holds millions):
         # tick, order on a shared tick (ends 0, CC lines 1, starts 2), status, data 1, data 2, port
         n = len(idx)
@@ -231,11 +248,15 @@ class Song:
             tracks.append(_track(head, _messages(tick[sel], st[sel], d1[sel], d2[sel])))
         del tick, order, st, d1, d2, port
         head = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + len(tracks).to_bytes(2, "big")
-        return head + self.ppq.to_bytes(2, "big") + b"".join(tracks), skip
+        return head + (self.ppq // half).to_bytes(2, "big") + b"".join(tracks), skip
 
     def bass_events(self):
         """The whole song as BASSMIDI's event list (synth.events' order; each port's channels as the stream's
         channels port x 16 + channel; channel 10s melodic)."""
+        with self._bass_lock:
+            return self._bass_now()
+
+    def _bass_now(self):
         if self._bass is None:
             from files import synth
             rows = np.stack([self.start, self.end, self.key, self.vel], axis=1) if len(self) else \
@@ -303,6 +324,36 @@ def changed_ticks(a, b):
 
 
 CARD_LOCK = threading.Lock()  # (one piece on the graphics card at a time: Rendered ahead's + the Hz preview's)
+PIECE_PREFIX = "spiderweb-piece-"  # (pieces' MIDI files in the temp folder, deleted once made)
+OLD_PIECE_S = 600  # a piece file older than this is a leftover (Spiderweb closed mid-piece): deleted
+_cleaned = []
+
+
+def _remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _clean_old_pieces():
+    """Once a run: piece files left in the temp folder by a Spiderweb closed mid-piece (hunt 2026-11-03). Only old
+    ones: another Spiderweb (another folder) may be making one right now."""
+    if _cleaned:
+        return
+    _cleaned.append(True)
+    folder, now = tempfile.gettempdir(), time.time()
+    try:
+        names = [n for n in os.listdir(folder) if n.startswith(PIECE_PREFIX) and n.endswith(".mid")]
+    except OSError:
+        return
+    for n in names:
+        p = os.path.join(folder, n)
+        try:
+            if now - os.path.getmtime(p) > OLD_PIECE_S:
+                os.remove(p)
+        except OSError:
+            pass
 
 
 def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None):
@@ -317,13 +368,18 @@ def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None):
         if cancel.is_set():
             return None, None
         loaded = kestrel.loaded_for(fonts, card)
-        fd, path = tempfile.mkstemp(".mid", "spiderweb-piece-")
+        _clean_old_pieces()
+        fd, path = tempfile.mkstemp(".mid", PIECE_PREFIX)
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         o = {"block": opts["block"]}
         if engine == "kestrel":
             o.update(voices=opts["voices"], interpolation=opts["interpolation"], min_velocity=opts["min_velocity"])
-        piece = kestrel.Piece(loaded, path, engine, skip, f1 - f0, delete_midi=True, **o)
+        try:
+            piece = kestrel.Piece(loaded, path, engine, skip, f1 - f0, delete_midi=True, **o)
+        except BaseException:  # (it couldn't start: its file is ours to delete, it was left behind)
+            _remove(path)
+            raise
         try:
             while True:
                 state = piece.wait(0.05)
@@ -388,7 +444,7 @@ class Maker:
         self.engine, self.opts, self.fonts, self.card, self.synth = engine, dict(opts), list(fonts), card, synth
         self.song = None
         self.span = (0, 0)  # frames with sound in them: first note .. the ring's end
-        self.blocks = {}  # block -> audio (BLOCK frames, fewer for the song's last)
+        self.blocks = {}  # block -> audio (BLOCK frames each; the span's end ends the sound)
         self.ver = {}  # block -> version (a change throws away a piece still making it)
         self.jobs = []
         self.threads = []
@@ -547,7 +603,9 @@ class Maker:
                     if job.vers[k] != self.ver.get(i, 0):
                         continue  # (changed while it was made)
                     part = job.result[k * BLOCK:(k + 1) * BLOCK]
-                    if len(part) < BLOCK and (i + 1) * BLOCK < self.span[1]:  # (the sound died away in it)
+                    if len(part) < BLOCK:  # (the sound died away in it: silence to the block's end. ALWAYS: a short
+                        # block read as the song's end stopped playing before notes added past it, hunt 2026-11-03;
+                        # only the span's end ends the sound)
                         part = np.concatenate([part, np.zeros((BLOCK - len(part), 2), np.float32)])
                     # (its own copy: a block kept must not hold the whole piece's buffer)
                     self.blocks[i] = np.ascontiguousarray(part).copy() if job.count > 1 else part
@@ -585,7 +643,8 @@ class Maker:
     def _bass(self, job, song, f0, f1):
         stats = {}
         out = self.synth.render(song.bass_events(), song.ppq, f0, f1 - f0, self.opts["bass_voices"], False,
-                                job.cancel, lambda n: setattr(job, "progress", n / max(1, f1 - f0)), stats)
+                                job.cancel, lambda n: setattr(job, "progress", n / max(1, f1 - f0)), stats,
+                                pre=song.pre_frames(f0))  # (held notes sound on: from their start, as on the card)
         if out is not None and stats.get("end") is not None:
             job.end = int(stats["end"])
             out = out[:max(0, job.end - f0)]
@@ -610,8 +669,6 @@ class Maker:
         if got is None:
             return None
         start = at - (at // BLOCK) * BLOCK
-        if start >= len(got):  # (past where the sound died away)
-            return np.zeros((0, 2), np.float32)
         return got[start:start + min(n, hi - at)]
 
     def grey(self, lo, hi):

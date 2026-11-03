@@ -99,6 +99,7 @@ class _Job:
         self.took, self.voices = 0.0, 0
         self.end = None  # the frame the ring after the last note died away at, if in this piece
         self.card = False  # (made on the graphics card: no voice count)
+        self.pre = None  # frames made early and dropped (BASSMIDI; HzPreview.held_pre)
 
 
 class Preview:
@@ -304,7 +305,10 @@ class Preview:
         engine = self.cfg.get("engine", "bassmidi")
         if engine == "bassmidi" or engine not in engines():
             return None
-        return engine, tuple(sorted(self.app.ahead_opts.items())), self.app.kestrel_opts.get("card", "")
+        # (only the settings its pieces use: Limiter / Ceiling / Lower it by itself / BASSMIDI's voice limit
+        # changed made the whole preview again for nothing, hunt 2026-11-03)
+        used = ("block",) if engine == "merlin" else ("block", "voices", "interpolation", "min_velocity")
+        return engine, tuple((k, self.app.ahead_opts[k]) for k in used), self.app.kestrel_opts.get("card", "")
 
     def card_song(self, mode, notes, chans, voiced, raw, ppq, bpm, tempo):
         """(engine, Song) for the graphics card, the notes on the channels the BASSMIDI list has them on, or None."""
@@ -320,6 +324,27 @@ class Preview:
         if engine == "merlin" and merlin_gap(msgs, font_list(self.cfg)):
             engine = "kestrel"
         return engine, Song.on_channels(notes, chans, msgs, ppq, bpm, tempo)
+
+    def held_pre(self, f0):
+        """Frames a BASSMIDI piece from f0 starts early: PRE, or back to the start of a note still held there (at
+        most HELD_PRE; BASSMIDI never sounds a note struck before its start, a held note went silent at the next
+        piece, hunt 2026-11-03). Past the last note: looked for PRE before the last end, so the ring is made."""
+        from files.ahead_pieces import HELD_PRE, PRE
+        r = max(0, min(f0, self.last) - int(PRE * RATE))
+        early = f0 - r
+        notes = self.notes
+        if notes is None or not len(notes):
+            return early
+        key = (id(notes), self.ppq, self.bpm, self.tempo)
+        if getattr(self, "_held_key", None) != key:  # (the notes' frames once per song, not per piece)
+            self._held_key = key
+            self._held = (np.asarray(self.frames(notes[:, 0].astype(np.float64))),
+                          np.asarray(self.frames(notes[:, 1].astype(np.float64))))
+        sf, ef = self._held
+        held = (sf < r) & (ef > r)
+        if held.any():
+            early = max(early, min(f0 - int(sf[held].min()), int(HELD_PRE * RATE)))
+        return early
 
     def set_end(self):
         """The sound ends where a piece found the ring died away, else TAIL after the last note (until it's made)."""
@@ -341,7 +366,7 @@ class Preview:
                 job.card = True
             else:
                 job.result = self.synth.render(ev, ppq, f0, n, self.cfg["voices"], self.cfg["nofx"], job.cancel,
-                                               lambda n: setattr(job, "done", n), stats)
+                                               lambda n: setattr(job, "done", n), stats, pre=job.pre)
         except SynthError as e:
             job.error = str(e)
         except Exception as e:  # (said like any piece's error; the traceback goes to the log)
@@ -412,6 +437,7 @@ class Preview:
                     break
                 if i not in self.chunks and i not in self.jobs:
                     job = self.jobs[i] = _Job(i, self.ver.get(i, 0))
+                    job.pre = self.held_pre(int(i * CHUNK * RATE))
                     t = threading.Thread(target=self._work, args=(job, self.ev, self.ppq, self.card), daemon=True)
                     t.start()
                     self.threads.append(t)

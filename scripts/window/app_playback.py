@@ -1184,7 +1184,8 @@ class Playback:
     def soundfont_changed(self, again=True, added=None):
         """The shared soundfonts were changed (set_soundfonts): Built-in BASSMIDI opens them at the next note. again
         = opened anew even if open (picked again); added = the new ones (None: the top one) checked (.sfz)."""
-        if self.out.name in (BUILTIN, KESTREL):
+        if self.out.name in (BUILTIN, KESTREL, AHEAD):  # (Rendered ahead too: its pieces read the old list back onto
+            # the graphics card mid-song, a silent gap, hunt 2026-11-03)
             self.stop_play()
             self.scrub_end()
             self.out.close()
@@ -1624,6 +1625,10 @@ class Playback:
         """A piano key pressed while picking Glissando keys: it sounds until the button is let go (tap_end; user
         11-02: as long as it's held) on the MIDI out right-drag listening uses."""
         self.tap_end()
+        if self.midi_device.get() == AHEAD:  # (silent there, like right-drag listening: said, hunt 2026-11-03; the
+            # status line only: a window now would take the held mouse button)
+            self.status.config(text=tr("ra.tap_silent"))
+            return
         self.fresh_builtin()
         out = self.scrub_out()
         if not out.handle:

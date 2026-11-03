@@ -23,13 +23,13 @@ import time
 import numpy as np
 
 from files import errors
-from files.ahead_pieces import BLOCK, Maker, Song
+from files.ahead_pieces import BLOCK, Maker, Song, same_tempo
 from files.synth import RATE, Player, Synth, SynthError
 
 FLOOR_VOICES = {"voices": 1024, "bass_voices": 50}  # lowering never goes under these
 RISE_EVERY = 2.0  # seconds between steps back up
 FOLLOW_S = 0.02  # the play line moved to the heard sound when it's further off than this
-START_S = 10.0  # seconds made from the play line before playing starts (the first batch)
+START_S = 5.0  # seconds made from the play line before playing starts (the first batch; user 2026-11-03: 10 too long)
 START_LOWER_S = 3.0  # a start waiting longer than this (first piece back): Lower it by itself may lower
 
 
@@ -129,6 +129,7 @@ class AheadPlay:
         self._rose = 0.0
         self.skipped = 0  # frames skipped (silence) since Play
         self.slow = False  # (the Slow down tick, copied each tick for the sound's thread)
+        self.picked = None  # (the Engine dropdown's engine at Play: kept while playing)
 
     # ------------------------------------------------------------ settings
 
@@ -141,10 +142,11 @@ class AheadPlay:
     def engine_for(self, ccs):
         """(the engine the song is made with, why Kestrel stands in for Merlin or None). R6: what Merlin can't do yet
         goes to Kestrel by itself: channel volume / expression lines (CC7 / CC11: Merlin doesn't apply them yet),
-        more than one soundfont (refused)."""
+        more than one soundfont (refused). While playing: the Engine picked at Play (a change waits for the next Play,
+        like every other setting; it switched mid-song at the next edit, hunt 2026-11-03)."""
         from window.hz_preview import font_list
         from files.render_ahead import engine_used
-        engine = engine_used(self.app.ahead_engine.get())
+        engine = self.picked if self.audio is not None and self.picked else engine_used(self.app.ahead_engine.get())
         if engine != "merlin":
             return engine, None
         why = merlin_gap(ccs, font_list(self.app.hz_preview))
@@ -208,10 +210,14 @@ class AheadPlay:
 
     def start(self, rendered, ccs, ports, ppq, bpm, tempo, start_beat):
         """Play from start_beat. Returns an error text, or None."""
+        from files.render_ahead import engine_used
+        self.stop()  # (the Engine dropdown read anew: engine_for keeps it while playing)
+        self.picked = engine_used(self.app.ahead_engine.get())
         engine, why = self.engine_for(ccs)
         err = self._ensure_maker(engine)
         if err:
             return err
+        self.maker.error = None  # (each Play tries again: a failed piece's cause may be gone, hunt 2026-11-03)
         self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo,
                                     self._edo_first(engine)))
         song = self.maker.song
@@ -249,8 +255,17 @@ class AheadPlay:
             if self._ensure_maker(engine):
                 return
             self._say_why(why)
-        if self.maker.update_song(Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo,
-                                       self._edo_first(engine))):
+        old = self.maker.song
+        song = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, self._edo_first(engine))
+        if old is not None and self.audio is not None and not same_tempo(old, song):
+            # (another tempo: the play place and the sound already handed over are on the old tempo's clock; moved
+            # to the same beat on the new one, or the line jumped back / ahead, hunt 2026-11-03)
+            def moved(f):
+                return song.frame(int(round(old.map.tick(max(0, f) / RATE))))
+            with self.audio.lock:
+                self.play_at = moved(self.play_at)
+                self.audio.remap(moved)
+        if self.maker.update_song(song):
             self.app.roll.draw_ahead_grey()
 
     def playing(self):
