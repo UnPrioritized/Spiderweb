@@ -144,7 +144,7 @@ class Playback:
         along = self.loaded is not None and self.out.name != AHEAD
         self.player.along = along
         rendered, ccs, ports = self.play_parts(ppq, bpm)
-        end = self.play_end(ppq, beats, self.playhead)
+        end, tempo = self.end_and_tempo(ppq, bpm, beats, self.playhead)
         self.player.ready = None
         self.player.stop()
         self.player._clock = None  # (the loaded MIDI's feeder waits for the new line, never the last play's)
@@ -160,7 +160,6 @@ class Playback:
         # (the last play's count of notes left out forgotten: the new play's starts at 0, read as "left out" it showed
         # a red Overloaded for ~5 s, hunt 2026-10-29); the steady text's hold too
         self._thin_seen, self._easy_since, self._ov_last = (0, 0.0), None, float("-inf")
-        tempo = heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard())
         if self.out.name == AHEAD:  # (the sound made ahead: files/ahead_play.py; the player runs the line)
             err = self.ahead_play.start(rendered, ccs, ports, ppq, bpm, tempo, self.playhead)
             if err:
@@ -230,6 +229,19 @@ class Playback:
         if self.loaded is not None:
             last = max(last, self.loaded.end / ppq)
         return math.ceil((max(last, start) + quarter) / quarter - 1e-9) * quarter
+
+    def end_and_tempo(self, ppq, bpm, beats, start):
+        """(play end in beats, heard tempo). Rendered ahead: the sound decides the end (Play stops once the ring
+        died away, AheadPlay.ended), so the line's own end is put past the longest ring (TAIL at the fastest tempo);
+        a quarter bar cut the soundfont's release short (user 2026-11-03)."""
+        end = self.play_end(ppq, beats, start)
+        tempo = heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard())
+        if self.out.name == AHEAD:
+            from files.ahead_pieces import TAIL
+            fastest = max([bpm] + [60e6 / us for _, us in (tempo or ()) if us > 0])
+            end += (TAIL + 2.0) * fastest / 60.0
+            tempo = heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard())
+        return end, tempo
 
     def file_heard(self):
         """A loaded MIDI's own tempo for heard_tempo (its notes keep their file time in Keep timing parts), else
@@ -330,8 +342,7 @@ class Playback:
             return
         # (the end: never before where it is, so a note deleted at the end doesn't stop it at once)
         rendered, ccs, ports = self.play_parts(ppq, bpm)
-        end = self.play_end(ppq, beats, self.player.position())
-        tempo = heard_tempo(self.tempo, bpm, ppq, int(end * ppq) + 1, self.file_heard())
+        end, tempo = self.end_and_tempo(ppq, bpm, beats, self.player.position())
         self.player.update(rendered, bpm, end, self.picture_use10, ccs, ports, tempo)
         if self.out.name == AHEAD:
             self.ahead_play.changed(rendered, ccs, ports, ppq, bpm, tempo)
@@ -416,11 +427,12 @@ class Playback:
                 self.stop_play()
                 messagebox.showerror(tr("app.spiderweb_2"), err, parent=self)
                 return
+            if self.ahead_play.ended():  # (the ring died away: stops there, user 2026-11-03)
+                self.stop_play()
+                return
             sec = self.ahead_play.heard_sec()
             pmap = self.player.map
-            # (the sound's end played: the line runs on to its own end and stops; held at the last heard frame it
-            # stuck there, user 2026-11-03)
-            if pmap is not None and not self.ahead_play.ended():
+            if pmap is not None:
                 # (the line = the heard sound; silence while waiting = the line held where the sound waits: the
                 # frame handed out next. Held at "where it is now" it crept on a tick at a time, user 2026-11-03)
                 now_sec = self.ahead_play.play_at / RATE if sec is None else sec

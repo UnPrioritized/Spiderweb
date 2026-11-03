@@ -347,7 +347,22 @@ def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None):
         end = f0 + len(out)
     elif out is not None and len(out) < f1 - f0:  # (silence at the piece's end left out: put back)
         out = np.concatenate([out, np.zeros((f1 - f0 - len(out), 2), np.float32)])
+    elif out is not None and f1 > song.last:  # (Merlin hands back the whole piece: the ring's end found here)
+        end = _died_at(out, f0, song.last)
     return out, end
+
+
+SILENT = 1e-5  # (-100 dB: the ring counts as died away below it to the piece's end)
+
+
+def _died_at(out, f0, last):
+    """The song frame the sound fell silent at for good in this piece (after the last note ends), or None."""
+    start = max(0, last - f0)
+    if start >= len(out):
+        return None
+    loud = np.flatnonzero(np.abs(out[start:]).max(axis=1) > SILENT)
+    at = start + (int(loud[-1]) + 1 if len(loud) else 0)
+    return f0 + at if at < len(out) else None
 
 
 class _Job:
