@@ -350,6 +350,7 @@ class HelpWindow(tk.Toplevel):
         self.text.tag_configure("heading", font=look.font(12, "bold"), spacing1=6)
         self.text.tag_configure("hit", background=look.SEARCH_HIT)
         self.text.tag_configure("link", foreground=look.LINK)
+        self.text.tag_configure("back_top", font=look.font(8))  # (the small link after a heading)
         self.text.tag_configure("hover", underline=True)
         # (a long bullet line wraps under its text, not under the •)
         self.text.tag_configure("bullet", lmargin2=tkfont.Font(font=self.text.cget("font")).measure("•  "))
@@ -518,6 +519,10 @@ class HelpWindow(tk.Toplevel):
         for n, i in enumerate(heads):  # (marks move along with the text put in above them)
             t.mark_set(f"head:{n}", f"{i}.0")
             t.mark_gravity(f"head:{n}", "left")
+            # a small "Back to top" link after each heading (user 2026-11-03), on pages with the links at the top
+            t.insert(f"{i}.end", "   ")
+            t.insert(f"{i}.end", tr("help.back_to_top"), ("back_top", "link", f"back_top:{n}"))
+            self.bind_link(f"back_top:{n}", lambda: t.yview("1.0"))  # (own tag each: only it underlined)
         t.mark_set("links", top)
         t.mark_gravity("links", "right")  # (each piece goes after the one before)
         t.insert("links", tr("help.on_this_page"), "section")
