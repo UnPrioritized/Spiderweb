@@ -10,8 +10,8 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import (KEEP, LEAST_REACH, MOST_REACH, MOST_TIGHT, STIR_EDGES, STIR_SETS, clean_recolour,
-                            full_stir, new_seed)
+from notes.recolour import (KEEP, LEAST_REACH, MOST_REACH, MOST_STIRS, MOST_TIGHT, STIR_EDGES, STIR_SETS,
+                            clean_recolour, full_stir, new_seed, stir_stack)
 from window import look
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
@@ -21,13 +21,32 @@ TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGH
 
 
 def stirred_rc(old, stir):
-    """A shape's Recolour (clean, or None = Off) with its Stir = stir (full_stir form, or None = none)."""
+    """A shape's Recolour (clean, or None = Off) with its Stir = stir (one stir, a list of them: stacked, or None =
+    none)."""
     rc = {k: v for k, v in (old or {}).items() if k != "stir"}
     if stir:
         rc["stir"] = stir
     if not old:
         rc.update(mode=KEEP, seed=new_seed())
     return clean_recolour(rc)
+
+
+def stir_at(rc, i):
+    """Stir number i (0 = the first) of a Recolour, every setting filled in (none there yet: the defaults)."""
+    stack = stir_stack((rc or {}).get("stir"))
+    return stack[i] if i < len(stack) else full_stir(None)
+
+
+def with_stir(old, i, change):
+    """old's Recolour with stir number i = change(that stir, filled in) (the stack padded with plain stirs up to it;
+    change None = that stir taken out of the stack)."""
+    stack = stir_stack((old or {}).get("stir"))
+    stack += [full_stir(None)] * (i + 1 - len(stack))
+    if change is None:
+        del stack[i]
+    else:
+        stack[i] = change(dict(stack[i]))
+    return stirred_rc(old, stack or None)
 
 
 class StirWindow(HeldKnobs, tk.Toplevel):
@@ -47,6 +66,20 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         box.pack(fill="both", expand=True)
         self.what = ttk.Label(box, text="", foreground=look.HINT)
         self.what.pack(anchor="w")
+        # STACKED STIRS (BMC tester 11-03): a tab per stir, in order; "+" shows a new one (saved once a setting
+        # changes, like the note tool pages), × takes the shown one away
+        self.tab, self.fresh, self.tab_count = 0, False, 0
+        self.tab_var = tk.IntVar(value=0)
+        self.tab_row = ttk.Frame(box)
+        self.tab_row.pack(anchor="w", fill="x", pady=(6, 0))
+        self.tab_buttons = ttk.Frame(self.tab_row)
+        self.tab_buttons.pack(side="left")
+        self.tab_add = ttk.Button(self.tab_row, text="+", width=3, command=self.on_add)
+        self.tab_add.pack(side="left", padx=(4, 0))
+        Tooltip(self.tab_add, tr("stir.add_tip", most=MOST_STIRS))
+        self.tab_drop = ttk.Button(self.tab_row, text="×", width=3, command=self.on_drop)
+        self.tab_drop.pack(side="right")
+        Tooltip(self.tab_drop, tr("stir.drop_tip"))
         knobs = row = ttk.Frame(box)
         row.pack(anchor="w", pady=(8, 0))
         for name, unit, lo, hi in (("turn", "°", -360, 360), ("twist", "", -MOST_TIGHT, MOST_TIGHT)):
@@ -154,7 +187,64 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         return self.app.recolour_targets()
 
     def stirs(self):
-        return [full_stir((clean_recolour(t.get("recolour")) or {}).get("stir")) for t in self.targets()]
+        """The shown tab's stir of each selected shape (filled in)."""
+        return [stir_at(clean_recolour(t.get("recolour")), self.tab) for t in self.targets()]
+
+    def shown_stir(self, rc):
+        """The stir of Recolour rc this window shows (its tab's), filled in: the piano roll's dot + circle."""
+        return stir_at(rc, self.tab)
+
+    def sync_tabs(self, tgts):
+        """The tab row: one tab per stir (the most any selected shape has, at least one; a new tab from "+" shown
+        until something else is picked)."""
+        count = max([len(stir_stack((clean_recolour(t.get("recolour")) or {}).get("stir"))) for t in tgts] + [1])
+        if self.fresh and self.tab == count and count < MOST_STIRS:
+            count += 1
+        else:
+            self.fresh = False
+            self.tab = min(self.tab, count - 1)
+        if count != self.tab_count:
+            for w in self.tab_buttons.winfo_children():
+                w.destroy()
+            for i in range(count):
+                ttk.Radiobutton(self.tab_buttons, text=tr("stir.tab", n=i + 1), variable=self.tab_var, value=i,
+                                style="Toolbutton", command=self.on_tab).pack(side="left", padx=(0, 2))
+            self.tab_count = count
+        self.tab_var.set(self.tab)
+        on = bool(tgts)
+        self.tab_add.state(["!disabled" if on and count < MOST_STIRS and not self.fresh else "disabled"])
+        shown = self.stirs()
+        self.tab_drop.state(["!disabled" if on and (count > 1 or any(s != full_stir(None) for s in shown))
+                             else "disabled"])
+
+    def on_tab(self):
+        self.take_typing()
+        if self.fresh and self.tab_var.get() != self.tab:
+            self.fresh = False
+        self.tab = self.tab_var.get()
+        self.wheel = None
+        self.sync()
+
+    def on_add(self):
+        """A new stir after the others (saved once one of its settings changes)."""
+        self.take_typing()
+        self.tab, self.fresh = self.tab_count, True
+        self.wheel = None
+        self.sync()
+
+    def on_drop(self):
+        """The shown stir taken away from every selected shape that has it (one undo step)."""
+        self.take_typing()
+        i = self.tab
+        if self.fresh:
+            self.fresh = False
+        else:
+            self.wheel = None
+            self.app.change_recolour(
+                lambda old, sh: with_stir(old, i, None)
+                if i < len(stir_stack((old or {}).get("stir"))) else old, tr("stir.undo_drop"))
+        self.tab = max(0, i - 1)
+        self.sync()
 
     def sync(self):
         """Show the selected shapes' Stir (a held knob stays where the mouse put it, its box follows): a box where
@@ -162,6 +252,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         app = self.app
         held = self.held_knob()
         tgts = self.targets()
+        self.sync_tabs(tgts)
         sts = self.stirs()
         self.what.config(text=tr("stir.nothing") if not tgts else
                          tr("stir.shape", name=app.shape_label(tgts[0])) if len(tgts) == 1 else
@@ -232,18 +323,19 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     # ---- changes
 
     def set_stir(self, key, value, name=None, push=True):
-        """Each selected shape's Stir key = value (centre0 / centre1: one side of the Centre point); one undo
-        step (push False: part of the step taken before)."""
-        def changed(old, sh):
-            st = full_stir((old or {}).get("stir"))
+        """Each selected shape's shown stir (its tab's) key = value (centre0 / centre1: one side of the Centre
+        point); one undo step (push False: part of the step taken before)."""
+        def change(st):
             if key.startswith("centre"):
                 c = list(st["centre"])
                 c[int(key[-1])] = value
                 st["centre"] = c
             else:
                 st[key] = value
-            return stirred_rc(old, st)
-        return self.app.change_recolour(changed, name or tr("stir.undo"), push)
+            return st
+        self.fresh = False
+        i = self.tab
+        return self.app.change_recolour(lambda old, sh: with_stir(old, i, change), name or tr("stir.undo"), push)
 
     def on_turned(self, name, v, done):
         knob = self.turn_knob if name == "turn" else self.twist_knob
@@ -301,8 +393,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.sync()
 
     def on_reset(self):
+        """The shown stir back to its start (one stir: no stir at all, as before stacking)."""
         self.wheel = None
-        self.app.change_recolour(lambda old, sh: stirred_rc(old, None) if old else old, tr("stir.undo_reset"))
+        i = self.tab
+        self.app.change_recolour(
+            lambda old, sh: with_stir(old, i, lambda st: full_stir(None))
+            if old and i < len(stir_stack(old.get("stir"))) else old, tr("stir.undo_reset"))
         self.sync()
 
     def take_typing(self):

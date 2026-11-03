@@ -9,8 +9,7 @@ import math
 
 from files.lang import tr
 from notes.engine import free_box
-from notes.recolour import (LEAST_REACH, MOST_REACH, centre_at, centre_spot, clean_recolour, full_stir,
-                            without_recolour)
+from notes.recolour import LEAST_REACH, MOST_REACH, centre_at, centre_spot, clean_recolour, without_recolour
 from roll.roll_gliss import clip_polyline
 from roll.roll_shared import SHIFT
 from window import look
@@ -39,7 +38,7 @@ class CentreDots:
         for sh in app.recolour_targets():
             rc = clean_recolour(sh.get("recolour"))
             for kind in kinds:
-                c = full_stir((rc or {}).get("stir"))["centre"] if kind == "stir" else clumps_centre(rc)
+                c = app.stir_window.shown_stir(rc)["centre"] if kind == "stir" else clumps_centre(rc)
                 if c is None:
                     continue
                 plain = without_recolour(sh)
@@ -59,7 +58,8 @@ class CentreDots:
         """The Stir's Only inside a circle line on the piano roll, [x0, y0, x1, y1, ...] closed (in the colour box,
         so an oval on a box that isn't square; flipped / turned with the shape), or None."""
         rc, notes, own, kind = made
-        st = full_stir(rc.get("stir")) if kind == "stir" else None
+        w = self.app.stir_window
+        st = w.shown_stir(rc) if kind == "stir" and w else None
         if not st or not st["reach"]:
             return None
         cx, cy = st["centre"]
@@ -149,10 +149,11 @@ class CentreDots:
 
     def set_centre(self, kind, c, name, push=True):
         if kind == "stir":
-            from window.stir_window import stirred_rc
+            from window.stir_window import with_stir
+            i = self.app.stir_window.tab
 
             def changed(old, sh):
-                return stirred_rc(old, dict(full_stir((old or {}).get("stir")), centre=c))
+                return with_stir(old, i, lambda st: dict(st, centre=c))
         else:
             def changed(old, sh):
                 return dict(old, centre=c) if old and old["mode"] == "clumps" else old
@@ -166,13 +167,13 @@ class CentreDots:
         b, p = self.from_xy(e.x, e.y)
         c = centre_at(rc, notes, own, b * self.app.ppq, p)  # (the grabbed shape's box: under the mouse)
         if len(self.drag) > 2:  # (the circle line: its size = twice the mouse's distance from the Centre point)
-            from window.stir_window import stirred_rc
-            m = full_stir(rc.get("stir"))["centre"]
+            from window.stir_window import with_stir
+            w = self.app.stir_window
+            m, i = w.shown_stir(rc)["centre"], w.tab
             size = 2 * math.hypot(c[0] - m[0], c[1] - m[1])
             size = round(size, 3) if e.state & SHIFT else float(round(size))
             size = min(max(size, LEAST_REACH if e.state & SHIFT else 1.0), MOST_REACH)
-            self.app.change_recolour(lambda old, sh: stirred_rc(old, dict(full_stir((old or {}).get("stir")),
-                                                                          reach=size)), None, False)
+            self.app.change_recolour(lambda old, sh: with_stir(old, i, lambda st: dict(st, reach=size)), None, False)
             return
         c = [min(max(v, 0.0), 100.0) for v in c]
         c = [round(v, 3) if e.state & SHIFT else float(round(v)) for v in c]

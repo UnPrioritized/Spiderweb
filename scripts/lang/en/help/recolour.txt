@@ -68,7 +68,9 @@ Colour sets (shown when a shape has more than one set of channels, 15 colours ea
 
 Turn works in the shape's own box, so on a long flat shape (one or a few key rows) a big turn squeezes many notes onto the few colours near the middle. Twist and small turns keep more of them.
 
-Reset takes the stir away. The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
+Several stirs on one shape: the tabs at the top (Stir 1, Stir 2, ...) each hold a stir of their own, with its own Centre point and settings. They work in order: each stir bends the colours the stirs before it left, so you can turn the whole pattern with Stir 1 and put a small swirl in one spot with Stir 2 (Only inside a circle). "+" adds a stir after the others (it is kept once you change one of its settings), × takes the shown one away. The piano roll shows the dot and circle of the tab you're on. Up to 20 stirs.
+
+Reset puts the shown stir back to nothing; with only one stir that takes the stir away. The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
 
 A sliced piece of a stirred shape shows the colours it had in the whole, also after a Gate aware flip. After Flip or Turn 90° it becomes a shape of its own, so a few notes right at the cut may change.
 

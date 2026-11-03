@@ -52,6 +52,7 @@ MOST_SEED = 2 ** 31 - 1
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
                  "squeeze": True, "reach": None}
 MOST_REACH, LEAST_REACH = 100.0, 0.01
+MOST_STIRS = 20  # (stacked stirs on one shape)
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
 # (colours stirred past the edge: gone / back in on the other side OF THE NOTES (each key row's own span) / back in
 # on the other side of the BOX, the outline cutting it out (the old Wrap) / each key row stretched to the box first,
@@ -128,7 +129,25 @@ def clean_recolour(r):
 
 
 def clean_stir(s):
-    """A saved rc["stir"] -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
+    """A saved rc["stir"]: one stir (a dict) or STACKED STIRS (a list, BMC tester 11-03: each stirs the colours the
+    one before left, in order; at most MOST_STIRS) -> one clean stir, a list of 2+ (a stir still at its defaults =
+    {} keeps its place), or None (no stir)."""
+    if isinstance(s, list):
+        items = [one_stir(x) or {} for x in s[:MOST_STIRS] if isinstance(x, dict)]
+        if not any(items):
+            return None
+        return items if len(items) > 1 else items[0]
+    return one_stir(s)
+
+
+def stir_stack(s):
+    """A saved rc["stir"] -> its stirs in order, each with every setting filled in ([] = no stir)."""
+    s = clean_stir(s)
+    return [] if not s else [full_stir(x) for x in (s if isinstance(s, list) else [s])]
+
+
+def one_stir(s):
+    """One saved stir -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
     % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False, "reach": % LEAST_REACH..
     MOST_REACH}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
     if not isinstance(s, dict):
@@ -157,8 +176,8 @@ def clean_stir(s):
 
 
 def full_stir(s):
-    """A stir with every setting filled in (Add between blends one end's into the other's)."""
-    s = clean_stir(s) or {}
+    """One stir with every setting filled in (Add between blends one end's into the other's)."""
+    s = one_stir(s) or {}
     return {k: s.get(k, STIR_DEFAULTS[k]) for k in STIR_DEFAULTS}
 
 
@@ -436,7 +455,7 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     corner = (box[0], box[2])
     pick = dice(at, low, rc["seed"], 1, corner)
     if rc["mode"] == KEEP:
-        return notes, lap + stirred(notes, at, low, low, rc, which, pals, pick, box, own)
+        return notes, lap + all_stirred(notes, at, low, low, rc, which, pals, pick, box, own)
     roll = dice(at, low, rc["seed"], 0, corner)
     clumps = rc["mode"] == "clumps"
     if clumps:  # (every note takes the colour of the area it lands in: the throw = where it lands)
@@ -461,9 +480,17 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
                 continue
             got = np.where(change[m], take(p, weights(len(p), shares), low[m], pick[m]), low[m])
             new[m] = kept_apart(notes[m], low[m], got, p, pick[m])
-    if rc.get("stir"):
-        new = stirred(notes, at, low, new, rc, which, pals, pick, box, own)
-    return notes, lap + new
+    return notes, lap + all_stirred(notes, at, low, new, rc, which, pals, pick, box, own)
+
+
+def all_stirred(notes, at, low, now, rc, which, pals, pick, box, own):
+    """now after every stir of rc in order (stacked stirs: each on the colours the one before left; a stir at its
+    defaults skipped)."""
+    st = rc.get("stir")
+    for one in (st if isinstance(st, list) else [st] if st else []):
+        if one:
+            now = stirred(notes, at, low, now, dict(rc, stir=one), which, pals, pick, box, own)
+    return now
 
 
 def stirred(notes, at, low, now, rc, which, pals, pick, box, own):

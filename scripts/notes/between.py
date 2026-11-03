@@ -321,7 +321,7 @@ class Pair:
         if x is not None and y is not None:  # (both ends with Gate extend: step by step when in the same unit)
             from notes.extend import mixed_extend
             out["extend"] = mixed_extend(x, y, f, mix)
-        from notes.recolour import BLEND_DEFAULTS, KEEP, clean_recolour, full_stir
+        from notes.recolour import BLEND_DEFAULTS, KEEP, clean_recolour, full_stir, stir_stack
         x, y = clean_recolour(a.get("recolour")), clean_recolour(b.get("recolour"))
         # (Off + a Stir at one end, plain Off at the other: the stir fades out step by step, hunt 2026-11-02)
         if x and not y and x["mode"] == KEEP:
@@ -330,7 +330,10 @@ class Pair:
             x = {"mode": KEEP, "seed": y["seed"]}
         if x and y and x["mode"] == y["mode"]:  # (both ends recoloured alike: the numbers step by step, a setting
             near = x if f < 0.5 else y  # only one end has its default there; choices, dice, flips: the nearer end's)
-            x, y = ({k: full_stir(r.get("stir")) if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
+            # (stacked stirs: the shorter stack padded with stirs at their defaults, so an extra one fades in)
+            n = max(len(stir_stack(x.get("stir"))), len(stir_stack(y.get("stir"))), 1)
+            pad = lambda r: (stir_stack(r.get("stir")) + [full_stir(None)] * n)[:n]
+            x, y = ({k: pad(r) if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
                      for k in set(x) | set(y)} for r in (x, y))
             got = {k: mix(x[k], y[k], f) for k in x if k not in ("seed", "frame", "whole")}
             got.update({k: near[k] for k in ("seed", "frame", "whole") if k in near})
