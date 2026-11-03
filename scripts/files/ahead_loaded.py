@@ -13,7 +13,7 @@ import numpy as np
 
 from files import midi_piece
 from files.ahead_pieces import HELD_PRE, POST_S, PRE, Song
-from files.synth import RATE
+from files.synth import RATE, SynthError
 
 
 FAR = midi_piece.FAR
@@ -70,6 +70,20 @@ class LoadedSong:
         return self.own.tick_at(frame)
 
     # ------------------------------------------------------------ a piece
+
+    def _same_file(self):
+        """The loaded file is still the one read (size + time, as the piano roll asks: roll_loaded.still_same);
+        lm.changed once it isn't (the piano roll then says it once too)."""
+        from files.midi_read import MidiError
+        lm = self.lm
+        if getattr(lm, "changed", False):
+            return False
+        try:
+            lm.mf.same()
+        except MidiError:
+            lm.changed = True
+            return False
+        return True
 
     def _read(self, f, j, lo, hi):
         """Track j's bytes lo .. hi (places in the track) as uint8: from memory (Keep in memory) or the file."""
@@ -225,7 +239,10 @@ class LoadedSong:
         floor = min(t_pre, self.tick_at(max(0, min(f0, self.last) - int(HELD_PRE * RATE))))
         loop = _loop()
         got = []
-        with open(lm.path, "rb") if any(lm.tracks[j].data is None for j in self.playing) else _NoFile() as f:
+        from_file = any(lm.tracks[j].data is None for j in self.playing)
+        if from_file and not self._same_file():  # (L3: changed on disk = nothing more read, said: playing stops)
+            raise SynthError("load.file_changed")
+        with open(lm.path, "rb") if from_file else _NoFile() as f:
             for j in self.playing:
                 t = lm.tracks[j]
                 if t.last_tick < t_pre or (t.notes and t.first > t_copy and not len(t.c_tick)):
