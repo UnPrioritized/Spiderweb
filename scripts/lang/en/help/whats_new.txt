@@ -4,7 +4,7 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
-• Rendered ahead in Settings → Sound → MIDI out: the sound is made a little ahead of the play line and played from there, so every note rings, even in the densest walls, with no "Overloaded". Three engines: Merlin and Kestrel on the graphics card, BASSMIDI on the processor. While playing, the part not made yet shows a very faint grey; edit while playing and only the changed stretch is made again. For now it plays your own shapes (a loaded MIDI stays silent with it). See Help → Rendered ahead playback.
+• Rendered ahead in Settings → Sound → MIDI out: the sound is made a little ahead of the play line and played from there, so every note rings, even in the densest walls, with no "Overloaded". Three engines: Merlin and Kestrel on the graphics card, BASSMIDI on the processor. It plays a loaded MIDI too, with your shapes on top. While stopped it makes the sound from the play line, so a heavy song can be waited out before Play. The part not made yet shows a very faint grey (piano roll and track list), and the status line shows how much is made ahead ("Audio buffer: 12.4 / 60"); edit while playing and only the changed stretch is made again. See Help → Rendered ahead playback.
 
 • The Hz bass preview has an Engine choice of its own (Hz settings… → Preview): BASSMIDI as before, or Merlin / Kestrel on the graphics card.
 

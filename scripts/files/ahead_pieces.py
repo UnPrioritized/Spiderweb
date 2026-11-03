@@ -49,6 +49,8 @@ MEMORY_SHARE = 0.25  # the made sound never takes more than this share of the fr
 FREE_EVERY = 2.0  # seconds between asking the system for free memory
 GPU_WORKERS = 1  # Merlin / Kestrel pieces made at once (one graphics card)
 CPU_WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # BASSMIDI pieces made at once (one core each)
+BUSY_MOST = 2  # a loaded MIDI's BASSMIDI pieces being made at once copy at most this many piece caps together
+# (BASSMIDI holds ~2x a piece's bytes, measured on a dense wall: a full 512 MB cap piece = +1 GB)
 # GS "use for rhythm part" off for part 10 (Kestrel + Merlin read it: midi.rs DrumPart)
 _MELODIC_10 = bytes([0xF0, 0x0A, 0x41, 0x10, 0x42, 0x12, 0x40, 0x10, 0x15, 0x00, 0x1B, 0xF7])
 
@@ -638,11 +640,21 @@ class Maker:
                     break
                 run.append(j)
             fit = getattr(self.song, "blocks_fit", None)  # (a loaded MIDI: dense parts in shorter pieces, memory)
-            # (BASSMIDI makes several pieces at once: their share each)
-            cap = max(PIECE_LEAST, self.piece_most() // most) if fit is not None else None
+            cap = self.piece_most() if fit is not None else None
             if fit is not None and len(run) > 1:
                 run = run[:fit(i, len(run), cap)]
+            heavy = 0
+            if fit is not None and most > 1:
+                # (BASSMIDI makes several at once: heavy pieces wait while the ones being made already copy BUSY_MOST
+                # caps; a smaller cap each split dense walls into dozens of parts, each reading it all again: 2 s
+                # took 394 s instead of 43, L5)
+                heavy = self.song.bytes_in(i * BLOCK, (i + len(run)) * BLOCK)
+                with self._lock:
+                    busy = sum(getattr(j, "heavy", 0) for j in self.jobs)
+                if self.jobs and busy + heavy > BUSY_MOST * cap:
+                    break
             job = _Job(i, len(run), [self.ver.get(j, 0) for j in run])
+            job.heavy = heavy
             job.most = cap  # (a block still over it: made in parts, card_piece)
             job.lowered = self.lowered
             with self._lock:
