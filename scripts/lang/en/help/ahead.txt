@@ -1,0 +1,53 @@
+Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead of the play line, in small pieces, and plays it from there. Since nothing has to sound at the very moment it's played, every note can ring, even in the densest walls, and the sound never breaks up or gets "Overloaded". Pick it in Settings (Help menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see Playing and listening).
+
+## Playing
+
+Play waits a moment first, until the first 10 seconds from the play line are made (less if Render ahead is shorter or the song ends sooner), so the start sounds just like a replay. While it plays, making goes on in the background, always keeping Render ahead seconds ahead of the play line.
+
+While playing, the part not made yet shows a very faint grey over the piano roll, and clears as it's made. Stop and Play again from the same place: what's already made is played at once.
+
+Edit while playing (draw, move, delete, change velocities) and only the changed stretch turns grey and is made again; playing goes on. A tempo change makes it all again from the play line.
+
+Playing stops once the sound has died away, not a beat after the last note.
+
+For now Rendered ahead plays only your own shapes: a loaded MIDI and right-drag listening stay silent with it (a window says so the first time, then only the status line). To hear them, pick Built-in BASSMIDI or Kestrel.
+
+## Engine
+
+The Engine row picks what makes the sound:
+
+• Merlin (graphics card): the fastest, and every note is played, nothing is left out. The first Play takes a few seconds while your soundfont is sent to the graphics card.
+
+• Kestrel (graphics card): the same synth as Kestrel (GPU) playback, with its own settings here. Merlin can't yet play CC lines other than pitch bends (for example an Hz bass's volume or pan lines), or more than one soundfont: there Kestrel is used by itself, and the status line says so.
+
+• BASSMIDI (processor): works on any PC. Slower to make in busy parts.
+
+Merlin and Kestrel need 64-bit Windows or Linux and a fairly recent graphics card with an up-to-date driver (see Kestrel (GPU) playback).
+
+## Settings
+
+Settings (Help menu) → Sound, while Rendered ahead is picked:
+
+• Render ahead: how far ahead of the play line the sound is made, 5 to 300 seconds (30 to start). More = fewer waits in busy parts, but more memory.
+
+• Slow down to keep up (off at first): ticked, when the play line catches up with the grey, playing waits there until the sound is ready, then goes on (it stutters). Off, the play line keeps the song's speed, a part not made in time stays silent, and making jumps ahead to just past the play line.
+
+• Lower it by itself when falling behind (Kestrel and BASSMIDI, off at first): when the sound made ahead runs low, the next pieces are made with fewer voices so they're ready sooner. Those pieces are made again at the full voices later, while they're still ahead of the play line. With Slow down to keep up ticked too, this comes first.
+
+• Graphics card: the same setting as Kestrel's: changing one changes both.
+
+• Max voices (Kestrel) or Voice limit (BASSMIDI): the most notes that can ring at once. More = fuller busy parts, but each piece takes longer to make.
+
+• Block size, Interpolation, Velocity threshold: as in Kestrel (GPU) playback.
+
+• Limiter: keeps very loud parts from clipping, over the whole sound (no jumps where pieces meet). Balanced first evens out long loud parts a little, then catches the peaks; Brickwall only catches the peaks; Off lets them clip. Ceiling = the loudest it lets through, in dB.
+
+Changes to these are used from the next Play.
+
+## Also
+
+31-EDO Audio plays through Rendered ahead too (see 31-EDO).
+
+The Hz bass preview has an Engine choice of its own (Hz settings… → Preview): with Merlin or Kestrel picked there, it uses Rendered ahead's settings.
+
+Merlin is part of Kestrel 1.4.0, by thtstickyboi (see Kestrel (GPU) playback).

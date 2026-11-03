@@ -1,5 +1,17 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.7.2
+
+What's new:
+
+• Rendered ahead in Settings → Sound → MIDI out: the sound is made a little ahead of the play line and played from there, so every note rings, even in the densest walls, with no "Overloaded". Three engines: Merlin and Kestrel on the graphics card, BASSMIDI on the processor. While playing, the part not made yet shows a very faint grey; edit while playing and only the changed stretch is made again. For now it plays your own shapes (a loaded MIDI stays silent with it). See Help → Rendered ahead playback.
+
+• The Hz bass preview has an Engine choice of its own (Hz settings… → Preview): BASSMIDI as before, or Merlin / Kestrel on the graphics card.
+
+• Kestrel (GPU) moved to Kestrel 1.4.0. Its Limiter is now a list: Balanced (new, the usual), Brickwall or Off, with a Ceiling in dB.
+
+• Playing stops one beat after the last note (before, a quarter of a bar), in any time signature; with Rendered ahead, once the sound has died away.
+
 ## Version 1.7.1
 
 What's new:

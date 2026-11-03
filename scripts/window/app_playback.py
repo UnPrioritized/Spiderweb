@@ -178,6 +178,8 @@ class Playback:
         self._play_job = self.after(15, self._play_tick)
         if self.loaded is not None and self.out.name == AHEAD:
             self.after_idle(self.ahead_silent, "loaded")
+        if self.out.name == AHEAD:  # (the first time: what the faint grey and the wait at Play are)
+            self.after_idle(lambda: self.tips.show("ahead", wait=True))
 
     def kestrel_stuck(self, live, now):
         """Kestrel made no new sound for STUCK_PLAY_S while the speakers kept taking it (silence handed out): its

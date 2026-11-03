@@ -3,7 +3,7 @@ of three engines (Merlin and Kestrel on the graphics card through the Kestrel co
 processor), and played from there. The part not made yet shows a very faint grey in the piano roll.
 
 This file: its settings (Settings → Sound while it's the MIDI out; saved in user/settings.ini [sound]). Pieces:
-files/ahead_pieces.py. Player and grey come in later steps (spiderweb/PLAN.md stage R)."""
+files/ahead_pieces.py. Player, grey, lowering: files/ahead_play.py. Help page: lang/en/help/ahead.txt."""
 
 ENGINES = ("merlin", "kestrel", "bassmidi")  # (saved by these names; the list shows them in this order)
 SECONDS = (5, 300)  # Render ahead: how far ahead of the play line the sound is made (user 2026-11-02: up to 300)
