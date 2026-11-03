@@ -4,7 +4,7 @@ Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead 
 
 Play waits a moment first, until the first 5 seconds from the play line are made (less if the song ends sooner), so the start sounds just like a replay. While it plays, making goes on in the background, always keeping Render ahead seconds ahead of the play line.
 
-While playing, the part not made yet shows a very faint grey over the piano roll, and clears as it's made. Stop and Play again from the same place: what's already made is played at once.
+While playing, the part not made yet shows a very faint grey over the piano roll, and clears as it's made. The right end of the status line says how much is made ahead of the play line, in seconds, of Render ahead: "Audio buffer: 12.4 / 60" ("(to the end)" once the rest of the song is made). Stop and Play again from the same place: what's already made is played at once.
 
 Edit while playing (draw, move, delete, change velocities) and only the changed stretch turns grey and is made again; playing goes on. A tempo change makes it all again from the play line.
 

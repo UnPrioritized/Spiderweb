@@ -980,6 +980,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.overload_label = ttk.Label(self.status, text="", foreground=look.ERROR, font=look.font(9))
         # (13f: orange "Slowed to 62 %" left of it while the song plays slower to keep up)
         self.slowed_label = ttk.Label(self.status, text="", foreground=look.WARN, font=look.font(9))
+        # (M3: Rendered ahead's grey "Audio buffer: 12.4 / 60" at the very right end while playing / making stopped)
+        self.buffer_label = ttk.Label(self.status, text="", foreground=look.HINT, font=look.font(9))
+        self.buffer_text = ""
 
         side = self._build_side()
         self._build_project(side)

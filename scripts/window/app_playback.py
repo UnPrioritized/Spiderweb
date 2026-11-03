@@ -395,6 +395,8 @@ class Playback:
         except Exception as e:  # (never a dead loop with no word: logged, said once)
             errors.write_log(type(e), e, e.__traceback__, "Rendered ahead while stopped")
             return
+        if not self.player.running:
+            self.show_overload()  # (M3: "Audio buffer" while making stopped; gone once not wanted)
         if go:
             self._ahead_idle_job = self.after(AHEAD_IDLE_MS, self._ahead_idle)
 
@@ -681,19 +683,26 @@ class Playback:
             self._ov_changed = now
         v = self.player.speed
         slowed = tr("app.slowed", n=max(1, round(v * 100))) if self.player.running and v < 1.0 else ""
-        if text != self.overload_text or slowed != self.slowed_text:
-            self.overload_text, self.slowed_text = text, slowed
+        buf = self.ahead_play.buffer_text() if self.midi_device.get() == AHEAD else ""
+        if text != self.overload_text or slowed != self.slowed_text or buf != self.buffer_text:
+            self.overload_text, self.slowed_text, self.buffer_text = text, slowed, buf
             self.overload_label.config(text=text)
             self.slowed_label.config(text=slowed)
+            self.buffer_label.config(text=buf)
             free = 0
+            if buf:  # (M3: rightmost, the red / orange ones left of it)
+                self.buffer_label.place(relx=1.0, rely=0.5, anchor="e", x=-6)
+                free = self.buffer_label.winfo_reqwidth() + 12
+            else:
+                self.buffer_label.place_forget()
             if text:
-                self.overload_label.place(relx=1.0, rely=0.5, anchor="e", x=-6)
-                free = self.overload_label.winfo_reqwidth() + 18
+                self.overload_label.place(relx=1.0, rely=0.5, anchor="e", x=-6 - free)
+                free += self.overload_label.winfo_reqwidth() + (12 if buf else 18)
             else:
                 self.overload_label.place_forget()
             if slowed:  # (13f: orange, left of the red "Overloaded" when both show)
                 self.slowed_label.place(relx=1.0, rely=0.5, anchor="e", x=-6 - free)
-                free += self.slowed_label.winfo_reqwidth() + (12 if text else 18)
+                free += self.slowed_label.winfo_reqwidth() + (12 if text or buf else 18)
             else:
                 self.slowed_label.place_forget()
             # (a long status message stops short of them with "…" instead of running under them)

@@ -482,6 +482,30 @@ class AheadPlay:
                 return []
         return [(song.map.tick(a / RATE) / ppq, song.map.tick(b / RATE) / ppq) for a, b in m.grey(f0, f1)]
 
+    def buffer_text(self):
+        """(M3, user 2026-11-03) "Audio buffer: 12.4 / 60" at the status line's right end: seconds made in a row
+        from the play line, of Render ahead; "(to the end)" once all that's left of the song is made. Only while
+        playing or making while stopped; "" otherwise (past the song's end too)."""
+        from files.lang import tr
+        m = self.maker
+        if m is None or m.song is None or not len(m.song):
+            return ""
+        if self.audio is not None:
+            at = self.play_at
+        elif self.idle_anchor is not None:
+            at = self.idle_anchor
+        else:
+            return ""
+        lo, hi = m.span
+        at = max(at, lo)
+        if at >= hi:
+            return ""
+        ahead = self.app.ahead_seconds
+        rest = (hi - at) / RATE
+        made = min(m.made_ahead(at), rest, ahead)
+        key = "ra.buffer_end" if rest < ahead and made >= rest - 1e-6 else "ra.buffer"
+        return tr(key, n=f"{made:.1f}", m=f"{ahead:,}")
+
     def heard_sec(self):
         """Song seconds heard right now (None: silence while waiting for the first / next block)."""
         if self.audio is None:
