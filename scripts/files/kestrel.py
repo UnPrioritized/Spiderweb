@@ -495,8 +495,11 @@ class Piece:
             self.midi, self.delete_midi, midi = path, True, path
         if isinstance(midi, (bytes, bytearray)):  # (the piece's MIDI never on disk: the connector copies it)
             self.midi = None
-            self.handle = d.kb_piece_start_bytes(loaded.handle, bytes(midi), len(midi), ctypes.byref(self._opts),
+            # (a bytearray handed over in place, never copied first: the connector makes its own copy, M1)
+            held = (ctypes.c_char * len(midi)).from_buffer(midi) if isinstance(midi, bytearray) else midi
+            self.handle = d.kb_piece_start_bytes(loaded.handle, held, len(midi), ctypes.byref(self._opts),
                                                  ENGINES[engine], int(skip), int(most))
+            del held
         else:
             self.handle = d.kb_piece_start(loaded.handle, os.fsdecode(midi).encode("utf-8"), ctypes.byref(self._opts),
                                            ENGINES[engine], int(skip), int(most))

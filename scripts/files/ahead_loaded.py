@@ -17,6 +17,10 @@ from files.synth import RATE
 
 
 FAR = midi_piece.FAR
+PRE_MOST = 64 << 20  # bytes the early start (PRE) writes at most: shorter in dense walls (Shinki 440 s: 0.5 s) ...
+PRE_STEPS = (PRE, 0.5, 0.25, 0.1, 0.05, 0.02)  # ... trying these seconds (the last one goes whatever it costs)
+SPAN_LEAST = RATE // 20  # (50 ms: a piece is never cut shorter, however dense: each part reads ~320 MB again on
+# a 2,788-track MIDI)
 
 
 def _loop():
@@ -33,6 +37,7 @@ class LoadedSong:
     def __init__(self, lm, own, muted=()):
         from files.play_loaded import mute_masks, track_ports
         self.lm, self.own = lm, own
+        self._starts = {}  # (piece_start per frame: asked again by bytes_in / spans / midi)
         self.ppq, self.tempo, self.map, self.edo_first = own.ppq, own.tempo, own.map, own.edo_first
         self.bends = own.bends
         n = len(lm.tracks)
@@ -129,15 +134,53 @@ class LoadedSong:
     def bytes_in(self, f0, f1):
         """About how many of the file's bytes a piece f0 .. f1 copies: each playing track's checkpoints around it
         (the index only, nothing read; from the same early start as midi(), clamped before the last note)."""
-        t_pre = self.own.piece_start(f0, self.last)[1]
-        t_copy = self.tick_at(f1 + int(POST_S * RATE))
-        total = 0
+        return self._span_bytes(self.piece_start(f0)[1], self.tick_at(f1 + int(POST_S * RATE)))
+
+    def _span_bytes(self, t_pre, t_copy):
+        """About how many bytes the piece from tick t_pre to t_copy WRITES (the events copied: what Merlin gets and
+        holds). M1 2026-11-03: not what's READ (each track from its checkpoint: Shinki's 2,788 tracks read ~320 MB
+        for ANY piece, freed track by track), so a short piece isn't counted as big."""
+        ticks, cum = self._curve()
+        lo, hi = np.interp([t_pre, t_copy], ticks, cum)
+        return max(0, int(hi - lo))
+
+    def _curve(self):
+        """(ticks, bytes so far) of all playing tracks together, straight between each track's checkpoints (the
+        index only; kept on the LoadedMidi per set of playing tracks: a Play with the same mutes reuses it)."""
+        key = tuple(self.playing)
+        kept = getattr(self.lm, "_ahead_curve", None)
+        if kept is not None and kept[0] == key:
+            return kept[1]
+        tk, ds, jp = [], [], []  # (each span: its start tick + slope, its end tick - slope; no ticks = a jump)
         for j in self.playing:
             t = self.lm.tracks[j]
-            c = max(0, int(np.searchsorted(t.cp_tick, t_pre, "right")) - 1)
-            k = int(np.searchsorted(t.cp_tick, t_copy, "right"))
-            total += (int(t.cp_off[k]) if k < len(t.cp_off) else int(t.limit)) - int(t.cp_off[c])
-        return total
+            a = np.append(t.cp_tick.astype(np.int64), max(int(t.last_tick), int(t.cp_tick[-1])))
+            o = np.append(t.cp_off.astype(np.float64), float(t.limit))
+            da, do = np.diff(a), np.diff(o)
+            flat = da <= 0
+            slope = np.where(flat, 0.0, do / np.maximum(da, 1))
+            tk += [a[:-1], a[1:], a[:-1][flat]]
+            ds += [slope, -slope, np.zeros(int(flat.sum()))]
+            jp += [np.zeros(len(slope)), np.zeros(len(slope)), do[flat]]
+        if not tk:
+            got = (np.array([0, 1], np.int64), np.zeros(2))
+        else:
+            t_all, d_all, j_all = np.concatenate(tk), np.concatenate(ds), np.concatenate(jp)
+            order = np.argsort(t_all, kind="stable")
+            t_all, d_all, j_all = t_all[order], d_all[order], j_all[order]
+            slope = np.cumsum(d_all)  # (the slope after each point)
+            rise = np.concatenate([[0.0], slope[:-1] * np.diff(t_all)])
+            got = (t_all, np.cumsum(rise) + np.cumsum(j_all))
+        self.lm._ahead_curve = (key, got)
+        return got
+
+    def spans(self, f0, f1, most):
+        """[(a, b)] frames f0 .. f1 cut so each part's piece copies at most `most` bytes (M1: Shinki's wall held 5 GB
+        in one 2 s block; the parts are made one after another and joined), none under SPAN_LEAST."""
+        if f1 - f0 <= SPAN_LEAST or self.bytes_in(f0, f1) <= most:
+            return [(f0, f1)]
+        mid = f0 + (f1 - f0) // 2
+        return self.spans(f0, mid, most) + self.spans(mid, f1, most)
 
     def blocks_fit(self, first, count, most):
         """How many of the blocks from block `first` (count at most, 1 at least) one piece takes within `most`
@@ -149,9 +192,25 @@ class LoadedSong:
         return n
 
     def piece_start(self, f0):
-        """(the tick the piece starts at, the early start's tick): PRE early, your held notes from their start
-        (Song.piece_start); the loaded MIDI's held ones are found in midi()."""
-        return self.own.piece_start(f0, self.last)
+        """(the tick the piece starts at, the early start's tick): PRE early, LESS in dense walls (the early part
+        copies at most PRE_MOST bytes: Shinki's end holds ~1.1 GB a second, M1 2026-11-03; held notes are struck
+        from their start either way), your held notes from their start (Song.piece_start); the loaded MIDI's held
+        ones are found in midi()."""
+        key = (f0,)
+        hit = self._starts.get(key)
+        if hit is not None:
+            return hit
+        at = min(f0, self.last)
+        pre = PRE
+        for pre in PRE_STEPS:
+            a = max(0, at - int(pre * RATE))
+            if self._span_bytes(self.tick_at(a), self.tick_at(at)) <= PRE_MOST:
+                break
+        got = self.own.piece_start(f0, self.last, pre)
+        if len(self._starts) > 256:
+            self._starts.clear()
+        self._starts[key] = got
+        return got
 
     def pre_frames(self, f0):
         return f0 - self.frame(self.piece_start(f0)[0])
@@ -160,7 +219,7 @@ class LoadedSong:
         """The piece f0 .. f1 (frames) as MIDI file bytes + the frames to drop at its start (None: silence)."""
         lm = self.lm
         t_copy = self.tick_at(f1 + int(POST_S * RATE))
-        t0, t_pre = self.own.piece_start(f0, self.last)
+        t0, t_pre = self.piece_start(f0)
         # (past the last note the piece starts PRE before it: the floor from there too, never after t_pre; a
         # floor after it gave a negative wait = _vlq's endless loop, 22 GB on Shinki's ring-out)
         floor = min(t_pre, self.tick_at(max(0, min(f0, self.last) - int(HELD_PRE * RATE))))
@@ -206,10 +265,21 @@ class LoadedSong:
                 rows = self._cc_state(j, t_pre, int(self.newch[j]))
                 if not w and not len(held) and not rows:
                     continue
-                got.append((j, out[:w], held, start, cnt, vel, rows))
+                # (its own small copy: the walk's buffer (1.67x the read) and the read let go at once, M1)
+                body = out[:w].tobytes()
+                del out, b
+                got.append((j, body, held, start, cnt[held], vel[held], rows))
         origin = min([t0] + [int(g[3].min()) for g in got if len(g[3])])
-        tracks = [self.own.tempo_track(origin, t_copy)]
-        for j, body, held, start, cnt, vel, rows in got:
+        own = self.own.tracks(origin, t_pre, t_copy, self.file_ports)
+        if not got and not own:
+            return None, 0
+        count = 1 + len(got) + len(own)
+        buf = bytearray(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
+                        + self.ppq.to_bytes(2, "big"))
+        buf += self.own.tempo_track(origin, t_copy)
+        got.reverse()  # (popped from the end: each track's body let go once it's in buf)
+        while got:
+            j, body, held, start, cnt, vel, rows = got.pop()
             nc = int(self.newch[j])
             head = bytearray(b"\x00\xff\x21\x01" + bytes([int(self.tport[j])]))
             for s, d1, d2 in rows:
@@ -218,17 +288,19 @@ class LoadedSong:
             for i in np.argsort(start, kind="stable").tolist():  # (each held note struck where it began)
                 q = int(held[i])
                 ch = nc if nc >= 0 else q >> 8
-                on = bytes([0x90 | ch, q & 255, max(1, int(vel[q]))])
-                head += _vlq(int(start[i]) - last) + on + (b"\x00" + on) * (int(cnt[q]) - 1)
+                on = bytes([0x90 | ch, q & 255, max(1, int(vel[i]))])
+                head += _vlq(int(start[i]) - last) + on + (b"\x00" + on) * (int(cnt[i]) - 1)
                 last = int(start[i])
             # (the copy's first wait was counted from t_pre: the gap from the last held note to t_pre first)
-            data = bytes(head) + _vlq(t_pre - last) + b"\xff\x01\x00" + body.tobytes() + b"\x00\xff\x2f\x00"
-            tracks.append(b"MTrk" + len(data).to_bytes(4, "big") + data)
-        tracks += self.own.tracks(origin, t_pre, t_copy, self.file_ports)
-        if len(tracks) == 1:
-            return None, 0
-        head = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, len(tracks)).to_bytes(2, "big")
-        return head + self.ppq.to_bytes(2, "big") + b"".join(tracks), f0 - self.frame(origin)
+            head += _vlq(t_pre - last) + b"\xff\x01\x00"
+            buf += b"MTrk" + (len(head) + len(body) + 4).to_bytes(4, "big")
+            buf += head
+            buf += body
+            buf += b"\x00\xff\x2f\x00"
+            del body
+        for chunk in own:
+            buf += chunk
+        return buf, f0 - self.frame(origin)
 
     def bass_events(self):
         raise NotImplementedError("BASSMIDI pieces of a loaded MIDI: PLAN.md L4")

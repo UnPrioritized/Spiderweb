@@ -39,8 +39,9 @@ POST_S = 0.3  # ... and its events go this far past its end: Merlin looks ahead 
 HELD_PRE = 30.0  # ... at most, for a note still held there (8 s: an 18 s held note was -14 dB off at 12 s)
 TAIL = 30.0  # seconds of ring after the last note at most (a piece finding the sound died away ends it sooner)
 BEHIND = 10.0  # seconds of made blocks kept behind the play line (further back = thrown away)
-PIECE_MOST = 256 << 20  # a loaded MIDI's piece copies at most this many of its bytes (more blocks = shorter piece) ...
-PIECE_LEAST = 32 << 20  # ... or 1/16 of the free memory, not below this (one block always goes)
+PIECE_MOST = 512 << 20  # a loaded MIDI's piece WRITES about this many bytes at most (more blocks = shorter piece; a
+# block over it = made in parts) ...
+PIECE_LEAST = 32 << 20  # ... or 1/16 of the free memory, not below this (Merlin holds ~5x the piece)
 BYTES_A_SECOND = RATE * 2 * 4  # (made sound: stereo float32)
 MEMORY_SHARE = 0.25  # the made sound never takes more than this share of the free memory (less is made ahead)
 FREE_EVERY = 2.0  # seconds between asking the system for free memory
@@ -194,14 +195,15 @@ class Song:
         before = [u for t, u in self.tempo if t <= tick]
         return before[-1], [(t, u) for t, u in self.tempo if t > tick]
 
-    def piece_start(self, f0, last=None):
+    def piece_start(self, f0, last=None, pre=PRE):
         """(the tick a piece from frame f0 starts at, the tick notes count from: ones ending after it sound in it).
         PRE early; a note still held there = from its own start (at most HELD_PRE early: only the held notes come
         from that far back, so it costs little). Past the last note: held notes looked for PRE before the last end,
         so the song's ring after it is made too (a piece starting there would be silence otherwise). last = the
-        whole song's last frame when this Song is only a part of it (a loaded MIDI's LoadedSong)."""
+        whole song's last frame when this Song is only a part of it (a loaded MIDI's LoadedSong); pre = seconds
+        early (a LoadedSong's dense walls: less)."""
         last = self.last if last is None else last
-        t_pre = t0 = self.tick_at(max(0, min(f0, last) - int(PRE * RATE)))
+        t_pre = t0 = self.tick_at(max(0, min(f0, last) - int(pre * RATE)))
         lo = int(np.searchsorted(self.start, t0 - self.longest, "left"))
         held = lo + np.flatnonzero((self.start[lo:] < t0) & (self.end[lo:] > t0))
         if len(held):
@@ -374,30 +376,29 @@ def _clean_old_pieces():
             pass
 
 
-def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None):
-    """(a piece's thread) Song frames f0 .. f1 made on the graphics card by "merlin" / "kestrel" with the soundfonts
-    already there (kestrel.loaded_for: read once, kept); opts = App.ahead_opts. Returns (float32 (frames, 2) or None
-    when cancelled, the frame the ring died away at when it did in this piece, else None). progress(0..1)."""
+def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress):
+    """One piece on the card (card_piece's part): float32 (frames, 2), maybe shorter (silence at its end left out),
+    or None when cancelled."""
     from files import kestrel
     data, skip = song.midi(f0, f1)
     if data is None:  # (nothing sounds here: silence, no piece)
-        return np.zeros((f1 - f0, 2), np.float32), None
+        return np.zeros((f1 - f0, 2), np.float32)
     with CARD_LOCK:
         if cancel.is_set():
-            return None, None
+            return None
         loaded = kestrel.loaded_for(fonts, card)
         _clean_old_pieces()  # (files older Spiderwebs left: pieces go to the connector as bytes now, user 11-03)
         o = {"block": opts["block"]}
         if engine == "kestrel":
             o.update(voices=opts["voices"], interpolation=opts["interpolation"], min_velocity=opts["min_velocity"])
-        piece = kestrel.Piece(loaded, bytes(data), engine, skip, f1 - f0, **o)
+        piece = kestrel.Piece(loaded, data, engine, skip, f1 - f0, **o)
         del data  # (the connector has its own copy: ours let go before the long wait)
         try:
             while True:
                 state = piece.wait(0.05)
                 if cancel.is_set():
                     piece.cancel()
-                    return None, None
+                    return None
                 if state != kestrel.RUNNING:
                     break
                 if progress:
@@ -406,10 +407,34 @@ def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None):
                 from files.synth import SynthError
                 raise SynthError("playback.kestrel_failed", err=piece.error() or "?")
             if state != kestrel.DONE:
-                return None, None
-            out = piece.audio()
+                return None
+            return piece.audio()
         finally:
             piece.close()
+
+
+def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None, piece_most=None):
+    """(a piece's thread) Song frames f0 .. f1 made on the graphics card by "merlin" / "kestrel" with the soundfonts
+    already there (kestrel.loaded_for: read once, kept); opts = App.ahead_opts. Returns (float32 (frames, 2) or None
+    when cancelled, the frame the ring died away at when it did in this piece, else None). progress(0..1).
+    piece_most = bytes a loaded MIDI's piece copies at most (Maker.piece_most): more = made in parts."""
+    spans = song.spans(f0, f1, piece_most) if piece_most and hasattr(song, "spans") else [(f0, f1)]
+    if len(spans) == 1:
+        out = _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress)
+    else:  # (M1: a dense wall's block in parts, one after another, joined: one piece never takes GBs)
+        parts = []
+        for k, (a, b) in enumerate(spans):
+            got = _card_one(song, engine, opts, fonts, card, a, b, cancel,
+                            progress and (lambda p, k=k: progress((k + p) / len(spans))))
+            if got is None:
+                return None, None
+            if len(got) < b - a:
+                got = np.concatenate([got, np.zeros((b - a - len(got), 2), np.float32)])
+            parts.append(got)
+        out = np.concatenate(parts)
+        del parts
+    if out is None:
+        return None, None
     end = None
     if out is not None and len(out) < f1 - f0 and f0 + len(out) >= song.last:  # (the ring died away)
         end = f0 + len(out)
@@ -602,9 +627,11 @@ class Maker:
                     break
                 run.append(j)
             fit = getattr(self.song, "blocks_fit", None)  # (a loaded MIDI: dense parts in shorter pieces, memory)
+            cap = self.piece_most() if fit is not None else None
             if fit is not None and len(run) > 1:
-                run = run[:fit(i, len(run), self.piece_most())]
+                run = run[:fit(i, len(run), cap)]
             job = _Job(i, len(run), [self.ver.get(j, 0) for j in run])
+            job.most = cap  # (a block still over it: made in parts, card_piece)
             job.lowered = self.lowered
             with self._lock:
                 self.jobs.append(job)
@@ -681,7 +708,7 @@ class Maker:
 
     def _card(self, job, song, f0, f1):
         out, end = card_piece(song, self.engine, self.opts, self.fonts, self.card, f0, f1, job.cancel,
-                              lambda p: setattr(job, "progress", p))
+                              lambda p: setattr(job, "progress", p), getattr(job, "most", None))
         job.end = end
         return out
 
