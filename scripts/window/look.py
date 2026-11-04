@@ -302,6 +302,8 @@ MIRROR_LINE = pick("#0097a7", "#26c6da")  # Mirror: the line it's mirrored acros
 TOOL_ROW, TOOL_HOVER = pick("#ffffff", "#2f2f31"), pick("#e5f3ff", "#3d4a5c")  # the drawing tools list
 TOOL_PICKED = pick("#cce4f7", "#2f5a8a")
 KNOB_ORANGE, KNOB_GREEN = pick("#f5a623"), pick("#7cc21b")  # Claw / Strum / Chop knobs
+# (Stir's Turn past a whole turn: the ring's colour for each further turn, then round again; user 11-04)
+KNOB_LAPS = (KNOB_GREEN, pick("#3d9be9", "#5aa9ef"), pick("#a15be0", "#b47ce8"), KNOB_ORANGE)
 KNOB_RING, KNOB_RING_FOCUS, KNOB_RING_OFF = pick("#bbb", "#6c6c70"), pick("#888", "#a0a0a4"), pick("#ccc", "#4f4f52")
 KNOB_BODY, KNOB_BODY_OFF, KNOB_POINTER = pick("#555", "#252527"), pick("#aaa", "#4a4a4d"), pick("white", "#e2e2e4")
 LOCK_ON, LOCK_OFF = pick("#333", "#e2e2e4"), pick("#aaa", "#6c6c70")  # Shares window's padlocks (locked / open)

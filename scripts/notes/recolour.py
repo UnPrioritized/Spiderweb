@@ -61,6 +61,7 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False}
 MOST_REACH, LEAST_REACH = 100.0, 0.01
+MOST_TURN = 360000.0  # (Stir's Turn: 1000 whole turns, only so a file can't hold nonsense; user 11-04 dropped +-360)
 MOST_STRETCH, LEAST_STRETCH = 1000.0, 10.0
 STIR_AREAS = ("circle", "square", "diamond")  # (Size = the circle's width / the square's side / the diamond's tip to tip)
 MOST_STIRS = 20  # (stacked stirs on one shape)
@@ -158,7 +159,7 @@ def stir_stack(s):
 
 
 def one_stir(s):
-    """One saved stir -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
+    """One saved stir -> {"turn": degrees -MOST_TURN..MOST_TURN, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
     % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False, "reach": % LEAST_REACH..
     MOST_REACH (+ "area": STIR_AREAS, "stretch": %, "round": True, only with a reach), "spin": True, "seen":
     beats per key (only with round / spin), "flip_side" / "flip_up": True}, each only when not its default (STIR_DEFAULTS), or None (no
@@ -167,7 +168,7 @@ def one_stir(s):
         return None
     out = {}
     a = s.get("turn")
-    if number(a) and abs(a) <= 360 and round(a, 3):
+    if number(a) and abs(a) <= MOST_TURN and round(a, 3):
         out["turn"] = round(float(a), 3)
     t = s.get("twist")
     if number(t) and abs(t) <= MOST_TIGHT and round(t, 3):

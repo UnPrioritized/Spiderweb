@@ -85,10 +85,13 @@ class ShareKnob(Knob):
 
 
 class AngleKnob(ShareKnob):
-    """Split: Clumps' Angle, -360..360: its pointer shows the way (0 = right, turning counter-clockwise); dragged 1°
-    a pixel (Shift 0.1°), the right button points it at the mouse, middle-click = 0."""
+    """Split: Clumps' Angle, -360..360 (most: Stir's Turn goes on for many turns, user 11-04): its pointer shows the
+    way (0 = right, turning counter-clockwise); dragged 1° a pixel (Shift 0.1°), the right button points it at the
+    mouse (in the turn it's on), middle-click = 0. Past a whole turn the ring is full in the last turn's colour and
+    the new turn's arc goes over it in the next colour (look.KNOB_LAPS)."""
 
-    def __init__(self, parent, scale, changed, pressed):
+    def __init__(self, parent, scale, changed, pressed, most=360.0):
+        self.most = most
         super().__init__(parent, scale, changed, pressed, lambda: self.turn_to(0, True), 360.0)
 
     def draw(self):
@@ -97,8 +100,15 @@ class AngleKnob(ShareKnob):
         ring = look.KNOB_RING_FOCUS if wheel_ready(self) else look.KNOB_RING
         self.create_oval(m, m, s - m, s - m, outline=ring, width=max(2, m // 2))
         if self.value:
-            self.create_arc(m, m, s - m, s - m, start=0, extent=max(-359.9, min(359.9, self.value)), style="arc",
-                            outline=self.color if self.enabled else look.KNOB_RING_OFF, width=max(2, m // 2))
+            laps = int(abs(self.value) // 360)
+            rest = math.copysign(abs(self.value) - 360 * laps, self.value)
+            colour = lambda n: (look.KNOB_LAPS[n % len(look.KNOB_LAPS)] if self.most > 360 else self.color) \
+                if self.enabled else look.KNOB_RING_OFF
+            if laps:  # (whole turns done: the ring full in the last one's colour)
+                self.create_oval(m, m, s - m, s - m, outline=colour(laps - 1), width=max(2, m // 2))
+            if rest:
+                self.create_arc(m, m, s - m, s - m, start=0, extent=max(-359.9, min(359.9, rest)), style="arc",
+                                outline=colour(laps), width=max(2, m // 2))
         c, r = s / 2, s / 2 - m * 1.8
         a = math.radians(self.value)
         self.create_oval(c - r, c - r, c + r, c + r, fill=look.KNOB_BODY if self.enabled else look.KNOB_BODY_OFF,
@@ -111,17 +121,20 @@ class AngleKnob(ShareKnob):
         self.focus_set()
         c = self.size / 2
         if (e.x - c) ** 2 + (e.y - c) ** 2 > 4:
-            self.turn_to(math.degrees(math.atan2(c - e.y, e.x - c)))
+            a = math.degrees(math.atan2(c - e.y, e.x - c))
+            if self.most > 360:  # (stays in the turn it's on: pointing never throws whole turns away)
+                a += 360 * round((self.value - a) / 360)
+            self.turn_to(a)
 
     def move(self, e):
         if self.drag:
             y, v = self.drag
-            v = max(-360.0, min(360.0, v + (y - e.y) * (0.1 if e.state & 1 else 1)))
+            v = max(-self.most, min(self.most, v + (y - e.y) * (0.1 if e.state & 1 else 1)))
             self.drag = (e.y, v)
             self.turn_to(v)
 
     def turn_to(self, value, done=False):
-        value = round(max(-360.0, min(360.0, value)), 1)
+        value = round(max(-self.most, min(self.most, value)), 1)
         if value != self.value:
             self.set(value)
             self.changed(value, done)

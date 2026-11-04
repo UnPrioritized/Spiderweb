@@ -1484,7 +1484,7 @@
  "stir.shape": "Stirring: {name}",
  "stir.n_shapes": "Stirring {n} shapes",
  "stir.turn": "Turn",
- "stir.turn_tip": "Turns all the colours around the Centre point by this much.\nMiddle-click: back to 0.",
+ "stir.turn_tip": "Turns all the colours around the Centre point by this much. It can go past a whole turn (360°): the ring changes colour for each further turn. On the whole shape a whole turn looks like none, but inside an Area each extra turn winds the colours tighter towards the area's edge.\nMiddle-click: back to 0.",
  "stir.twist": "Twist",
  "stir.twist_tip": "Twists the colours into a swirl around the Centre point: how many times they wind round from the centre to the edge (minus = the other way). It twists most near the centre.\nMiddle-click: back to 0.",
  "stir.turns": "turns",

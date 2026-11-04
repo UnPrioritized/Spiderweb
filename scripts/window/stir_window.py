@@ -11,7 +11,8 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_STIRS, MOST_STRETCH, MOST_TIGHT,
-                            STIR_AREAS, STIR_EDGES, STIR_SETS, clean_recolour, full_stir, new_seed, stir_stack)
+                            MOST_TURN, STIR_AREAS, STIR_EDGES, STIR_SETS, clean_recolour, full_stir, new_seed,
+                            stir_stack)
 from window import look
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
@@ -82,14 +83,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(self.tab_drop, tr("stir.drop_tip"))
         knobs = row = ttk.Frame(box)
         row.pack(anchor="w", pady=(8, 0))
-        for name, unit, lo, hi in (("turn", "°", -360, 360), ("twist", "", -MOST_TIGHT, MOST_TIGHT)):
+        for name, unit, lo, hi in (("turn", "°", -MOST_TURN, MOST_TURN), ("twist", "", -MOST_TIGHT, MOST_TIGHT)):
             cell = ttk.Frame(row, padding=(0, 0, 14, 0))
             cell.pack(side="left", anchor="n")
             word = ttk.Label(cell, text=tr("stir." + name))
             word.pack()
             turned = lambda v, done, name=name: self.on_turned(name, v, done)
             if name == "turn":
-                knob = self.turn_knob = AngleKnob(cell, app.scale, turned, self.knob_pressed)
+                knob = self.turn_knob = AngleKnob(cell, app.scale, turned, self.knob_pressed, MOST_TURN)
             else:
                 knob = self.twist_knob = Knob(cell, app.scale, turned, look.KNOB_GREEN, 40, self.knob_pressed)
             knob.pack()

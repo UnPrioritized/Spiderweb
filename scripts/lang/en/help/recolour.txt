@@ -54,7 +54,7 @@ Push bunches the areas toward one side, a step per click; the dot in the middle 
 
 Stir… (beside the Recolour dropdown) bends the colours the notes have now, without adding or taking away any colour and without anything random. It works with Recolour Off (the shape's own colours) and on top of Shuffle and Split (their result gets stirred). Each note takes the colour of the note found where the stir brings it from, so the colours keep about the same amounts.
 
-Turn turns all the colours around the Centre point, from -360 to 360 degrees.
+Turn turns all the colours around the Centre point, in degrees. It can go past a whole turn (360): the knob's ring changes colour for each further turn. On the whole shape a whole turn looks like none, but inside an Area each extra turn winds the colours tighter towards the area's edge.
 
 Twist winds the colours into a swirl around the Centre point: how many times they wind round from the centre to the edge, minus for the other way. It twists most near the centre.
 
