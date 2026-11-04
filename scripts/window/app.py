@@ -2686,6 +2686,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes.append(sh)
         if getattr(self, "stir_window", None):  # (a Stir area being drawn: this stroke goes into it)
             self.stir_window.took(sh)
+        elif self.companion is not None:  # (drawn on Domino: goes into Domino once finished, domino_companion.py)
+            self.companion.drawn(sh)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
         if left_out:

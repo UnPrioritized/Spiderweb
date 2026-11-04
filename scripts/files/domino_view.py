@@ -33,13 +33,19 @@ class Build:
     left: int        # H + this: left edge of the grid, in 1/24 beat
     keys_w: int = 101   # keyboard width (Domino pixels) left of the grid
     ruler_h: int = 17   # measure ruler height above the grid
+    c_slot: int = 0     # fixed spot -> the song position object C (0 = not known for this build)
+    c_vtable: int = 0
+    cursor: int = 0     # C + this: Domino's cursor (where it pastes), in ticks
+    song: int = 0       # C + this -> the song object S
+    ppq_at: int = 0     # S + this: the song's PPQ
 
 
 # sha256 of Domino.exe -> Build. Only builds checked by hand: an unknown one is never guessed at.
 BUILDS = {
     "ba4d007be174626387a59dd0f127d5fd63d0c67cab2219b71aa087ba6725db9d": Build(
         "Domino 1.43 (with dominohook)", p_slot=0x5B49C8, p_vtable=0x55F490, top_row=0xB8, row_px=0x1CC,
-        beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234),
+        beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234,
+        c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC),
 }
 UNITS_PER_BEAT = 24
 
@@ -288,6 +294,24 @@ def read_numbers(d):
         return None
     out = (_i32(ph, p + b.top_row), _i32(ph, p + b.row_px), _i32(ph, p + b.beat_px), _i32(ph, h + b.left))
     return out if None not in out and sane(out) else None
+
+
+def song_place(d):
+    """(cursor tick, PPQ) read from Domino's memory, or None (unknown build / not readable). The cursor is where
+    Domino pastes; after a copy it is the copied stretch's start."""
+    b, ph = d.build, d.handle()
+    if b is None or not b.c_slot or not ph:
+        return None
+    c = _i32(ph, b.c_slot)
+    if not c or (_i32(ph, c & 0xFFFFFFFF) or 0) & 0xFFFFFFFF != b.c_vtable:
+        return None
+    c &= 0xFFFFFFFF
+    s = _i32(ph, c + b.song)
+    tick = _i32(ph, c + b.cursor)
+    ppq = _i32(ph, (s & 0xFFFFFFFF) + b.ppq_at) if s else None
+    if tick is None or ppq is None or not 0 <= tick < 2 ** 31 or not 1 <= ppq <= 65535:
+        return None
+    return tick, ppq
 
 
 def view(d, tries=4):
