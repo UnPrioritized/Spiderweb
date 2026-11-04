@@ -10,6 +10,7 @@ own shapes (an ahead_pieces.Song) on the same clock (the tempo as heard). A piec
 Measured (dev/scratch/loaded_piece_bytes.py + lp_compare.py): the same sound as Merlin's render of the whole file
 over that stretch (-113..-164 dB), Shinki 4.5 s of music made in ~2 s."""
 
+import os
 from collections import OrderedDict
 
 import numpy as np
@@ -863,6 +864,18 @@ _NO_EVENTS = (np.zeros(0, np.int64), np.zeros(256, np.uint8), np.zeros(0, np.int
               np.zeros(2, np.int64))
 _EMPTY = np.zeros(0, np.int64)
 COUNTED_BATCH = 4 << 20  # notes gathered before they're sorted + folded (PLAN D2: ~70 MB; the folded runs stay)
+SORT_WORKERS = max(1, min(8, (os.cpu_count() or 2) - 2))  # threads sorting / merging counted batches (PLAN E3: the
+# compiled loops let go of Python's lock; a piece is made one at a time, on the graphics card, so they're free)
+_POOL = []
+
+
+def _sort_pool():
+    if not _POOL:
+        from concurrent.futures import ThreadPoolExecutor
+        _POOL.append(ThreadPoolExecutor(SORT_WORKERS, thread_name_prefix="counted sort"))
+    return _POOL[0]
+
+
 COUNTED_SLICE = 8 << 20  # bytes of a track walked at a time in a counted piece (checkpoints are <= 0.5 MB apart)
 CARRY_ENDED_S = (5.0, 2.0, 1.0, 0.5, 0.25, 0.0)  # seconds of notes ended before a piece handed to it too (their release
 # tails: Shinki 470 s needed 5 s, 1 s left a click; a dense wall starts its pieces 0.02 s early), less when ...
@@ -1044,34 +1057,46 @@ class _Runs:
         return False
 
     def flush(self):
-        """The batch sorted + folded onto the stack of folded lists (oldest = earlier tracks first); neighbours
-        merged while the older one is at most twice the newer (each run copied a few times, not once a batch:
-        Shinki's 457 s, 359 batches into 15 M runs, took 50 s merged one by one)."""
+        """The batch handed to a sorting thread (sorted + folded), kept in order in the stack (oldest = earlier
+        tracks first); merged down in acc (in pairs: Shinki's 457 s, 359 batches merged one by one took 50 s)."""
         if not self.n:
             return
         sort, _, _, _ = _counted_loops()
-        n = self.n
-        m = sort(self.k, self.s, self.c, n, np.empty(n, np.int64), np.empty(n, np.uint8), np.empty(n, np.int64),
-                 self.bits)
-        self.stack.append((self.k[:m].copy(), self.s[:m].copy(), self.c[:m].copy()))
-        self.n = 0
-        while len(self.stack) > 1 and len(self.stack[-2][0]) <= 2 * len(self.stack[-1][0]):
-            self._merge_top()
+        n, k, s, c, bits = self.n, self.k, self.s, self.c, self.bits
 
-    def _merge_top(self):
-        _, merge, _, _ = _counted_loops()
-        (ak, asg, ac), (bk, bsg, bc) = self.stack[-2], self.stack[-1]
-        size = len(ak) + len(bk)
-        ok, osg, oc = np.empty(size, np.int64), np.empty(size, np.uint8), np.empty(size, np.int64)
-        got = merge(ak, asg, ac, len(ak), bk, bsg, bc, len(bk), ok, osg, oc)
-        self.stack[-2:] = [(ok[:got], osg[:got], oc[:got])]
+        def job():
+            m = sort(k, s, c, n, np.empty(n, np.int64), np.empty(n, np.uint8), np.empty(n, np.int64), bits)
+            return k[:m].copy(), s[:m].copy(), c[:m].copy()
+        # (PLAN E3: sorted on the other cores while the walk goes on; Shinki's 432 s, 137 batches = 9 s on one)
+        self.stack.append(_sort_pool().submit(job))
+        self.k = np.zeros(self.cap, np.int64)
+        self.s = np.zeros(self.cap, np.uint8)
+        self.c = np.ones(self.cap, np.int64)
+        self.n = 0
+        busy = [f for f in self.stack if not isinstance(f, tuple) and not f.done()]
+        if len(busy) > 2 * SORT_WORKERS:  # (batches waiting to be sorted held at most this many: memory)
+            busy[0].result()
 
     @property
     def acc(self):
-        """Everything folded so far as one list (the stack merged down)."""
+        """Everything folded so far as one list: the sorted batches merged in pairs, neighbours only (the earlier
+        tracks' runs first), each level's pairs at once on the other cores."""
         self.flush()
-        while len(self.stack) > 1:
-            self._merge_top()
+        parts = [f if isinstance(f, tuple) else f.result() for f in self.stack]
+        _, merge, _, _ = _counted_loops()
+
+        def two(a, b):
+            (ak, asg, ac), (bk, bsg, bc) = a, b
+            size = len(ak) + len(bk)
+            ok, osg, oc = np.empty(size, np.int64), np.empty(size, np.uint8), np.empty(size, np.int64)
+            got = merge(ak, asg, ac, len(ak), bk, bsg, bc, len(bk), ok, osg, oc)
+            return ok[:got], osg[:got], oc[:got]
+        while len(parts) > 1:
+            pairs = [(parts[i], parts[i + 1]) for i in range(0, len(parts) - 1, 2)]
+            last = [parts[-1]] if len(parts) % 2 else []
+            parts = list(_sort_pool().map(lambda p: two(*p), pairs)) + last
+            del pairs
+        self.stack = parts
         return self.stack[0] if self.stack else (np.zeros(0, np.int64), np.zeros(0, np.uint8), np.zeros(0, np.int64))
 
     def tracks(self, origin):
