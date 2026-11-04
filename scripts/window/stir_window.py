@@ -6,6 +6,7 @@ turn / wheel run / typed number is one undo step; Reset = no stir (one step). Th
 piano roll while this window is open (roll_centre.py)."""
 
 import json
+import math
 import tkinter as tk
 from tkinter import ttk
 
@@ -14,8 +15,9 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_SHAPE_POINTS, MOST_STIRS,
-                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, STIR_AREAS, STIR_EDGES, STIR_SETS,
-                            clean_area_shape, clean_recolour, full_stir, new_seed, stir_stack)
+                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
+                            centre_at, clean_area_shape, clean_recolour, full_stir, new_seed, stir_stack)
+from roll.roll_live import STROKE_TOOLS
 from window import look
 from window.drawer import library_lists, shape_path
 from window.shares_window import AngleKnob, HeldKnobs
@@ -107,6 +109,19 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.tab_drop = ttk.Button(self.tab_row, text="×", width=3, command=self.on_drop)
         self.tab_drop.pack(side="right")
         Tooltip(self.tab_drop, tr("stir.drop_tip"))
+        # (Area "Draw one…", PLAN C3: shown while an area is being drawn on the piano roll)
+        self.drawing = None
+        self.draw_bar = ttk.Frame(box)
+        ttk.Label(self.draw_bar, text=tr("stir.draw_hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
+                  justify="left").pack(anchor="w", fill="x")
+        self.draw_save = tk.BooleanVar(value=False)
+        ttk.Checkbutton(self.draw_bar, text=tr("stir.draw_save"), variable=self.draw_save).pack(anchor="w",
+                                                                                               pady=(4, 0))
+        row = ttk.Frame(self.draw_bar)
+        row.pack(fill="x", pady=(4, 0))
+        self.draw_use = ttk.Button(row, text=tr("stir.draw_use"), command=self.on_draw_use)
+        self.draw_use.pack(side="left")
+        ttk.Button(row, text=tr("stir.draw_cancel"), command=self.end_draw).pack(side="left", padx=(6, 0))
         knobs = row = ttk.Frame(box)
         row.pack(anchor="w", pady=(8, 0))
         for name, unit, lo, hi in (("turn", "°", -MOST_TURN, MOST_TURN), ("twist", "", -MOST_TIGHT, MOST_TIGHT)):
@@ -277,6 +292,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     # ---- what the selection holds
 
     def targets(self):
+        """The selected shapes the window stirs; while an area is drawn: the ones it stirred when drawing began."""
+        if self.drawing:
+            return [t for t in self.drawing["targets"] if any(t is s for s in self.app.shapes)]
         return self.app.recolour_targets()
 
     def stirs(self):
@@ -498,6 +516,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             else:
                 st[key] = value
             return st
+        if self.drawing:  # (an area being drawn: the selection is the drawing, not the stirred shapes)
+            return False
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
                 "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
                 "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)
@@ -574,7 +594,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         top, saved = library_lists()
         self.library = [n for n in top if shape_path(n) or n.lower() not in ("circle", "square")] + saved
         shown = self.area_box.get()
-        set_names(self.area_box, [tr("stir.area_" + a) for a in self.areas], self.library)
+        set_names(self.area_box, [tr("stir.area_" + a) for a in self.areas] + [tr("stir.area_draw")], self.library)
         self.area_box.set(shown)
 
     def on_area(self):
@@ -585,8 +605,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.wheel = None
         if i < len(self.areas):
             self.set_stir("area", self.areas[i] if i else None, tr("stir.undo_area"))
+        elif i == len(self.areas):
+            return self.on_draw()
         else:
-            name = self.library[i - len(self.areas)]
+            name = self.library[i - len(self.areas) - 1]
             shape = library_area(self.app, name)
             if shape is None:  # (only open lines, or the file can't be read: nothing to stir inside)
                 self.app.status.config(text=tr("stir.area_no_inside", name=name))
@@ -630,7 +652,123 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             if b["var"].get() != b["shown"]:
                 self.on_box(name)
 
+    # ---- Area "Draw one…" (PLAN C3, user 11-04)
+
+    def on_draw(self):
+        """Drawing an area: the stirred shapes kept aside, nothing selected, Live shape on (every stroke goes into
+        one shape) and a drawing tool picked; the window shows Use as the area / Cancel."""
+        app = self.app
+        tgts = list(self.targets())
+        if not tgts:
+            return self.sync()
+        self.take_typing()
+        self.drawing = {"targets": tgts, "tab": self.tab, "live": app.live.get(), "tool": app.tool.get()}
+        app.select(None)
+        app.live.set(True)
+        if app.tool.get() not in STROKE_TOOLS:
+            app.tool.set(app.draw_tool if app.draw_tool in STROKE_TOOLS else "poly")
+        self.draw_bar.pack(anchor="w", fill="x", pady=(8, 0), after=self.tab_row)
+        app.status.config(text=tr("stir.draw_status"))
+        self.sync()
+
+    def end_draw(self, select=True):
+        """Drawing an area over: Live shape as it was, the stirred shapes selected again (Cancel: the strokes stay,
+        Ctrl+Z takes them back)."""
+        d = self.drawing
+        if not d:
+            return
+        self.drawing = None
+        self.draw_bar.pack_forget()
+        app = self.app
+        app.live.set(d["live"])
+        if app.tool.get() != d["tool"]:  # (the tool from before drawing: Select for the area's box)
+            app.tool.set(d["tool"])
+        if select:
+            idx = {i for i, s in enumerate(app.shapes) if any(s is t for t in d["targets"])}
+            if idx:
+                app.select_many(idx, min(idx))
+        self.sync()
+
+    def on_draw_use(self):
+        """The drawn shape (the selection) becomes the area of the stirred shapes, where it was drawn: its outline
+        (open ends closed with a straight line, like Fill), its box turned into each one's middle / Size / Stretch /
+        Angle (round as seen); the strokes go, one undo step. Saved to the library too when ticked."""
+        from notes.convert import to_live
+        from notes.custom import drawing_in_box, fill_plan
+        from notes.engine import cached_strokes
+        app, d = self.app, self.drawing
+        tgts = self.targets()
+        if not d or len(tgts) != len(d["targets"]):
+            app.status.config(text=tr("stir.draw_lost"))
+            return self.end_draw()
+        drawn = [i for i in sorted(app.sels) if i < len(app.shapes) and not any(app.shapes[i] is t for t in tgts)]
+        olds = [app.shapes[i] for i in drawn]
+        if not olds:
+            app.status.config(text=tr("stir.draw_none"))
+            return
+        sh = olds[0] if len(olds) == 1 and olds[0]["kind"] == "custom" and olds[0].get("strokes") else to_live(
+            olds, [cached_strokes(s) for s in olds], app.defaults, app.custom_defaults, self.seen_now())
+        roll = app.roll
+        box = None
+        try:
+            held, _, box = drawing_in_box(sh)  # (the drawing as its shown box holds it, like saving it does)
+            loops = [np.asarray(p, np.float64).reshape(-1, 2) for p in
+                     fill_plan(app.new_custom(held, 0, 0, 1, 1))["polys"]]
+        except (ValueError, KeyError, MemoryError):
+            loops = []
+        loops = [p for p in loops if len(p) >= 3]
+        if not loops or box is None:
+            app.status.config(text=tr("stir.draw_none"))
+            return
+        (b0, p0), (b1, p1), (b2, p2) = box
+        wpx = math.hypot((b1 - b0) * roll.sx, (p1 - p0) * roll.sy)
+        hpx = math.hypot((b2 - b0) * roll.sx, (p2 - p0) * roll.sy)
+        if not loops or wpx < 1 or hpx < 1:
+            app.status.config(text=tr("stir.draw_none"))
+            return
+        total = sum(len(p) for p in loops)
+        if total > MOST_SHAPE_POINTS:
+            k = -(-total // MOST_SHAPE_POINTS)
+            loops = [p[::k] for p in loops if len(p[::k]) >= 3]
+        name = tr("stir.area_drawn")
+        if self.draw_save.get():
+            before = sh.get("name")
+            app.save_to_library(sh)
+            if sh.get("name") != before:
+                name = sh["name"]
+        shape = clean_area_shape({"name": name, "loops": [p.tolist() for p in loops], "aspect": wpx / hpx})
+        seen, i = self.seen_now(), d["tab"]
+        puts = {}
+        for t in tgts:
+            made = roll.stir_made(t)
+            if made is None:
+                continue
+            st = dict(stir_at(made[0], i), area=DRAWN, shape=shape, round=True, seen=seen)
+            st["reach"] = st["reach"] or self.reach_last
+            pcts = [centre_at(made[0], made[1], made[2], b * app.ppq, p) for b, p in box]
+            got = area_from_box(st, *pcts, roll.area_k(made, st))
+            if got is None:
+                continue
+            middle = [round(min(max(v, 0.0), 100.0), 3) for v in got["middle"]]
+            puts[id(t)] = dict(area=DRAWN, shape=shape, round=True, seen=seen,
+                               reach=round(min(max(got["reach"], LEAST_REACH), MOST_REACH), 3),
+                               stretch=round(min(max(got["stretch"], LEAST_STRETCH), MOST_STRETCH), 3),
+                               tilt=round(got["tilt"], 3), skew=round(got["skew"], 4),
+                               **({"spot": middle} if st["spot"] else {"centre": middle}))
+        app.roll.cancel_draft()
+        app.push_undo(name=tr("stir.undo_drawn"))
+        app.select(None)  # (before the strokes go: nothing may point at them)
+        for j in reversed(drawn):
+            del app.shapes[j]
+        self.end_draw()
+        app.change_recolour(lambda old, s: with_stir(old, i, lambda st: dict(st, **puts[id(s)]))
+                            if id(s) in puts else old, None, False)
+        app.shapes_changed()
+        self.sync()
+
     def close(self):
+        if self.drawing:
+            self.end_draw()
         if self.hold:
             self.call_off(self.hold)
         self.take_typing()

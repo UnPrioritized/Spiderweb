@@ -40,6 +40,8 @@ class CentreDots:
         kinds = [k for k, w in (("clumps", "shares_window"), ("stir", "stir_window")) if getattr(app, w, None)]
         if not kinds:
             return []
+        if "stir" in kinds and app.stir_window.drawing:  # (an area being drawn: no stir dots in the way, C3)
+            kinds.remove("stir")
         out = []
         for sh in app.recolour_targets():
             rc = clean_recolour(sh.get("recolour"))
@@ -48,18 +50,28 @@ class CentreDots:
                 c = st["centre"] if st else clumps_centre(rc)
                 if c is None:
                     continue
-                plain = without_recolour(sh)
-                notes, _ = app.notes_tracks(plain)
-                if not len(notes):
+                made = self.stir_made(sh, kind)
+                if made is None:
                     continue
-                own = free_box(plain, notes, app.notes_tracks, app.keys)
-                out.append((sh, (rc or {}, notes, own, kind), centre_spot(rc or {}, notes, own, c)))
+                notes, own = made[1], made[2]
+                out.append((sh, made, centre_spot(rc or {}, notes, own, c)))
                 if st and st["reach"] is not None and st["spot"]:  # (the area's own spot: a square, PLAN C1)
                     out.append((sh, (rc or {}, notes, own, "spot"), centre_spot(rc or {}, notes, own, st["spot"])))
         # (both windows open: the dots of the one used last drawn on top and grabbed first, hunt 2026-11-02)
         first = getattr(app, "centre_first", None) == "clumps"
         out.sort(key=lambda d: (d[1][3] == "clumps") == first)
         return out
+
+    def stir_made(self, sh, kind="stir"):
+        """(its Recolour, its notes without it, their box past the piano roll's edges, kind) for a shape, or None
+        (no notes)."""
+        app = self.app
+        plain = without_recolour(sh)
+        notes, _ = app.notes_tracks(plain)
+        if not len(notes):
+            return None
+        return (clean_recolour(sh.get("recolour")) or {}, notes, free_box(plain, notes, app.notes_tracks, app.keys),
+                kind)
 
     def centre_xy(self, spot):
         return self.to_xy((spot[0] / self.app.ppq, spot[1]))
