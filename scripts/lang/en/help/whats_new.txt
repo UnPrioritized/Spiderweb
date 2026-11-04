@@ -10,7 +10,7 @@ What's new:
 
 • Kestrel (GPU) moved to Kestrel 1.4.0. Its Limiter is now a list: Balanced (new, the usual), Brickwall or Off, with a Ceiling in dB.
 
-• Stir… (side panel, Recolour, beside New shuffle) bends a shape's colours round a Centre point with Turn and Twist, without adding or losing any colour: swirls and turned patterns made from the colours you drew or pasted. At the edges picks what happens to colours stirred past the edge: Escape, Wrap around (it follows round and slanted shapes too), Cut by the outline or Bend with the outline. Untick "Moving the Centre point squeezes the colours" to move only where the colours turn, and tick "Only inside a circle" to stir one round spot. Several stirs can go on one shape, each on its own tab. Flip colours mirrors the colours sideways or upside down while the notes stay put, and Middle puts the Centre point back. See Help → Recolour.
+• Stir… (side panel, Recolour, beside New shuffle) bends a shape's colours round a Centre point with Turn and Twist, without adding or losing any colour: swirls and turned patterns made from the colours you drew or pasted. At the edges picks what happens to colours stirred past the edge: Escape, Wrap around (it follows round and slanted shapes too), Cut by the outline or Bend with the outline. Untick "Moving the Centre point squeezes the colours" to move only where the colours turn, and pick an Area (Circle, Square or Diamond) to stir one spot. Several stirs can go on one shape, each on its own tab. Flip colours mirrors the colours sideways or upside down while the notes stay put, and Middle puts the Centre point back. See Help → Recolour.
 
 • Help pages with many headings have a small "Back to top" link next to each heading.
 

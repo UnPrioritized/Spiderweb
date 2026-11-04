@@ -11,7 +11,8 @@ import numpy as np
 
 from files.lang import tr
 from notes.engine import free_box
-from notes.recolour import LEAST_REACH, MOST_REACH, centre_at, centre_spot, clean_recolour, without_recolour
+from notes.recolour import (LEAST_REACH, MOST_REACH, area_dist, area_outline, centre_at, centre_spot,
+                            clean_recolour, without_recolour)
 from roll.roll_gliss import clip_polyline
 from roll.roll_shared import SHIFT
 from window import look
@@ -57,8 +58,8 @@ class CentreDots:
         return self.to_xy((spot[0] / self.app.ppq, spot[1]))
 
     def reach_ring(self, made):
-        """The Stir's Only inside a circle line on the piano roll, [x0, y0, x1, y1, ...] closed (in the colour box,
-        so an oval on a box that isn't square; flipped / turned with the shape), or None."""
+        """The Stir's area line (circle / square / diamond) on the piano roll, [x0, y0, x1, y1, ...] closed (in the
+        colour box, so an oval on a box that isn't square; flipped / turned with the shape), or None."""
         rc, notes, own, kind = made
         w = self.app.stir_window
         st = w.shown_stir(rc) if kind == "stir" and w else None
@@ -66,10 +67,10 @@ class CentreDots:
             return None
         cx, cy = st["centre"]
         r = st["reach"] / 2
-        a = np.linspace(0, 2 * np.pi, RING_POINTS + 1)  # (all points at once: the box is measured once, hunt 11-03)
-        t, k = centre_spot(rc, notes, own, [cx + r * np.cos(a), cy + r * np.sin(a)])
+        dx, dy = area_outline(st["area"], RING_POINTS)  # (all points at once: the box is measured once, hunt 11-03)
+        t, k = centre_spot(rc, notes, own, [cx + r * dx, cy + r * dy])
         x, y = self.to_xy((np.asarray(t, np.float64) / self.app.ppq, np.asarray(k, np.float64)))
-        out = np.empty(2 * len(a))
+        out = np.empty(2 * len(dx))
         out[0::2], out[1::2] = x, y
         return out.tolist()
 
@@ -191,11 +192,13 @@ class CentreDots:
             return
         b, p = self.from_xy(e.x, e.y)
         c = centre_at(rc, notes, own, b * self.app.ppq, p)  # (the grabbed shape's box: under the mouse)
-        if len(self.drag) > 2:  # (the circle line: its size = twice the mouse's distance from the Centre point)
+        if len(self.drag) > 2:  # (the area line: its size = twice the mouse's distance from the Centre point,
+            # measured the area's way, so the line stays under the mouse on a square / diamond too)
             from window.stir_window import stir_at, with_stir
             w = self.app.stir_window
-            m, i = w.shown_stir(rc)["centre"], w.tab
-            size = 2 * math.hypot(c[0] - m[0], c[1] - m[1])
+            st, i = w.shown_stir(rc), w.tab
+            m = st["centre"]
+            size = 2 * float(area_dist(c[0] - m[0], c[1] - m[1], st["area"]))
             size = round(size, 3) if e.state & SHIFT else float(round(size))
             size = min(max(size, LEAST_REACH if e.state & SHIFT else 1.0), MOST_REACH)
             # (only shapes whose shown stir has a circle: a whole-shape stir stays one, hunt 11-03)

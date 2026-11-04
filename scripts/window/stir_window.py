@@ -10,8 +10,8 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import (KEEP, LEAST_REACH, MOST_REACH, MOST_STIRS, MOST_TIGHT, STIR_EDGES, STIR_SETS,
-                            clean_recolour, full_stir, new_seed, stir_stack)
+from notes.recolour import (KEEP, LEAST_REACH, MOST_REACH, MOST_STIRS, MOST_TIGHT, STIR_AREAS, STIR_EDGES,
+                            STIR_SETS, clean_recolour, full_stir, new_seed, stir_stack)
 from window import look
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
@@ -119,13 +119,20 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                                             command=self.on_squeeze)
         self.squeeze_tick.pack(anchor="w", pady=(6, 0))
         Tooltip(self.squeeze_tick, tr("stir.squeeze_tip"))
-        row = ttk.Frame(box)  # (Only inside a circle, BMC tester 11-03: its size = diameter in % of the box)
+        # (Area, BMC tester 11-03 + the user's own idea 11-04: the stir only inside a circle / square / diamond
+        # round the Centre point; Size = its width in % of the box; Whole shape = no area)
+        row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
-        self.reach_on = tk.BooleanVar(value=False)
-        self.reach_last = 50.0  # (the size a tick brings back: the last one shown)
-        self.reach_tick = ttk.Checkbutton(row, text=tr("stir.reach"), variable=self.reach_on, command=self.on_reach)
-        self.reach_tick.pack(side="left")
-        Tooltip(self.reach_tick, tr("stir.reach_tip"))
+        self.reach_last = 50.0  # (the size picking an area brings back: the last one shown)
+        w = ttk.Label(row, text=tr("stir.area"))
+        w.pack(side="left")
+        Tooltip(w, tr("stir.area_tip"))
+        self.areas = ("whole",) + STIR_AREAS
+        names = [tr("stir.area_" + a) for a in self.areas]
+        self.area_box = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 1)
+        self.area_box.pack(side="left", padx=(5, 0))
+        self.area_box.bind("<<ComboboxSelected>>", lambda e: self.on_area())
+        self.area_tip = Tooltip(self.area_box, tr("stir.area_tip"))
         w = ttk.Label(row, text=tr("stir.reach_size"))
         w.pack(side="left", padx=(8, 0))
         Tooltip(w, tr("stir.reach_tip"))
@@ -301,9 +308,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             show_mixed(p["box"], len(vals) > 1, p["tip"], tr(f"stir.{key}_tip"))
             p["box"].config(state="readonly" if on else "disabled")
         reaches = [s["reach"] for s in sts]
-        ons = {r is not None for r in reaches}
-        self.reach_on.set(ons == {True})
-        self.reach_tick.state(["alternate" if len(ons) > 1 else "!alternate", "!disabled" if on else "disabled"])
+        kinds = {"whole" if s["reach"] is None else s["area"] for s in sts}
+        if len(kinds) == 1:
+            self.area_box.current(self.areas.index(next(iter(kinds))))
+        elif not kinds:
+            self.area_box.current(0)
+        show_mixed(self.area_box, len(kinds) > 1, self.area_tip, tr("stir.area_tip"))
+        self.area_box.config(state="readonly" if on else "disabled")
         sizes = {r for r in reaches if r is not None}
         if len(sizes) == 1:
             self.reach_last = next(iter(sizes))
@@ -349,6 +360,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         def change(st):
             if key == "centre":  # (the Middle button)
                 st["centre"] = [50.0, 50.0]
+            elif key == "area":  # (None = Whole shape; an area on a whole-shape stir starts at the last size)
+                if value is None:
+                    st["reach"] = None
+                else:
+                    st["area"] = value
+                    st["reach"] = st["reach"] or self.reach_last
             elif key.startswith("centre"):
                 c = list(st["centre"])
                 c[int(key[-1])] = value
@@ -405,10 +422,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.set_stir(key, p["choices"][i])
             self.sync()
 
-    def on_reach(self):
-        self.wheel = None
-        self.set_stir("reach", self.reach_last if self.reach_on.get() else None)
-        self.sync()
+    def on_area(self):
+        i = self.area_box.current()
+        unhighlight(self.area_box)
+        if i >= 0:
+            self.wheel = None
+            self.set_stir("area", self.areas[i] if i else None, tr("stir.undo_area"))
+            self.sync()
 
     def on_squeeze(self):
         self.wheel = None

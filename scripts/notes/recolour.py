@@ -49,10 +49,12 @@ MOST_SEED = 2 ** 31 - 1
 # turn / twist happens, BMC tester 11-03)
 # (reach: Only inside a circle, its diameter in % of the colour box (an oval on a box that isn't square, as Turn
 # counts), None = the whole shape; the turn fades to nothing at its edge, BMC tester 11-03)
+# (area: that area's shape round the Centre point (STIR_AREAS), kept only with a reach; user's own idea 11-04)
 # (flip_side / flip_up: the colours mirrored at the notes' own outline before this stir bends them, BMC tester 11-04)
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
-                 "squeeze": True, "reach": None, "flip_side": False, "flip_up": False}
+                 "squeeze": True, "reach": None, "area": "circle", "flip_side": False, "flip_up": False}
 MOST_REACH, LEAST_REACH = 100.0, 0.01
+STIR_AREAS = ("circle", "square", "diamond")  # (Size = the circle's width / the square's side / the diamond's tip to tip)
 MOST_STIRS = 20  # (stacked stirs on one shape)
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
 # (colours stirred past the edge: gone / back in on the other side OF THE NOTES (each key row's own span) / back in
@@ -150,7 +152,7 @@ def stir_stack(s):
 def one_stir(s):
     """One saved stir -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
     % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False, "reach": % LEAST_REACH..
-    MOST_REACH, "flip_side" / "flip_up": True}, each only when not its default (STIR_DEFAULTS), or None (no
+    MOST_REACH (+ "area": STIR_AREAS, only with a reach), "flip_side" / "flip_up": True}, each only when not its default (STIR_DEFAULTS), or None (no
     stir)."""
     if not isinstance(s, dict):
         return None
@@ -177,6 +179,8 @@ def one_stir(s):
     r = s.get("reach")
     if number(r) and LEAST_REACH <= round(r, 3) <= MOST_REACH:
         out["reach"] = round(float(r), 3)
+        if s.get("area") in STIR_AREAS[1:]:
+            out["area"] = s["area"]
     return out or None
 
 
@@ -612,7 +616,7 @@ def stir_from(at, rc, box, own):
     turn = st["turn"] / 360
     reach = st["reach"]
     if reach:  # (Only inside a circle: Twist winds out to its edge, everything fades smoothly to none there)
-        q = np.clip(np.hypot(dx, dy) / (reach / 200), 0.0, 1.0)
+        q = np.clip(area_dist(dx, dy, st["area"]) / (reach / 200), 0.0, 1.0)
         w = 1 - q * q * (3 - 2 * q)
         if st["twist"]:
             turn = turn + st["twist"] * np.sqrt(q)
@@ -642,6 +646,27 @@ def stir_from(at, rc, box, own):
     elif edge == "bend":
         mid = rows.unstretched(mid, key, t0, t1)
     return mid, key
+
+
+def area_dist(dx, dy, area):
+    """How far (dx, dy) is from the Centre point, measured the Stir area's way: its outline at distance 1 is a
+    circle of radius 1 / a square of half-side 1 / a diamond with its tips 1 away."""
+    if area == "square":
+        return np.maximum(np.abs(dx), np.abs(dy))
+    if area == "diamond":
+        return np.abs(dx) + np.abs(dy)
+    return np.hypot(dx, dy)
+
+
+def area_outline(area, n):
+    """The Stir area's outline at distance 1 (area_dist), closed, as (dx, dy) arrays: n + 1 points round a circle,
+    only the corners for a square / diamond (straight sides)."""
+    if area == "square":
+        return np.array([1.0, -1.0, -1.0, 1.0, 1.0]), np.array([1.0, 1.0, -1.0, -1.0, 1.0])
+    if area == "diamond":
+        return np.array([1.0, 0.0, -1.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0, -1.0, 0.0])
+    a = np.linspace(0, 2 * np.pi, n + 1)
+    return np.cos(a), np.sin(a)
 
 
 def flipped(at, mid, key, side, up):
