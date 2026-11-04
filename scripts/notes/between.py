@@ -344,6 +344,11 @@ class Pair:
                     sy[j] = calm(sx[j])
                 # (the screen look ("seen") blends only when both ends use it for the same round ticks; else
                 # each step takes the look of the end whose ticks it has (they switch halfway), hunt 11-04)
+                # (an area with its own spot at one end only: the other end's sits on its Centre point, so the area
+                # slides from one to the other, PLAN C1)
+                if sx[j]["reach"] is not None and sy[j]["reach"] is not None and \
+                        (sx[j]["spot"] is None) != (sy[j]["spot"] is None):
+                    sx[j], sy[j] = (dict(s, spot=s["spot"] or list(s["centre"])) for s in (sx[j], sy[j]))
                 uses = lambda s: (bool(s["round"] and s["reach"] is not None), bool(s["spin"]))
                 if uses(sx[j]) != uses(sy[j]):
                     seen = (sx[j] if f < 0.5 else sy[j])["seen"]

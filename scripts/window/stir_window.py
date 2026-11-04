@@ -126,7 +126,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
         self.reach_last = 50.0  # (the size picking an area brings back: the last one shown)
-        self.area_last = {"round": False, "stretch": 100.0, "seen": None}  # (likewise, hunt 11-04)
+        self.area_last = {"round": False, "stretch": 100.0, "seen": None, "spot": None}  # (likewise, hunt 11-04)
         w = ttk.Label(row, text=tr("stir.area"))
         w.pack(side="left")
         Tooltip(w, tr("stir.area_tip"))
@@ -141,6 +141,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(w, tr("stir.reach_tip"))
         self._number_box(row, "reach", LEAST_REACH, MOST_REACH, w)
         ttk.Label(row, text="%").pack(side="left")
+        # (PLAN C1, user 11-04: unticked = the area keeps its own spot, a square on the piano roll; Turn / Twist
+        # still go round the Centre point)
+        self.tied = tk.BooleanVar(value=True)
+        self.tied_tick = ttk.Checkbutton(box, text=tr("stir.tied"), variable=self.tied, command=self.on_tied)
+        self.tied_tick.pack(anchor="w", pady=(4, 0))
+        Tooltip(self.tied_tick, tr("stir.tied_tip"))
         # (proportion, user's own idea 11-04: the area round as the piano roll shows it when ticked, + Stretch;
         # the spin round as seen too)
         row = ttk.Frame(box)
@@ -352,10 +358,15 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         b["shown"] = text
         b["entry"].config(state="normal" if on and sizes else "disabled")
         areas = [s for s in sts if s["reach"] is not None]  # (Round as seen + Stretch: only with an area)
-        looks = {(s["round"], s["stretch"], s["seen"] if s["round"] else None) for s in areas}
+        looks = {(s["round"], s["stretch"], s["seen"] if s["round"] else None, tuple(s["spot"] or ()))
+                 for s in areas}
         if len(looks) == 1:  # (what picking an area again brings back)
-            r, w, v = next(iter(looks))
-            self.area_last = {"round": r, "stretch": w, "seen": v}
+            r, w, v, p = next(iter(looks))
+            self.area_last = {"round": r, "stretch": w, "seen": v, "spot": list(p) or None}
+        tied = {s["spot"] is None for s in areas}
+        self.tied.set(tied != {False})
+        self.tied_tick.state(["alternate" if len(tied) > 1 else "!alternate",
+                              "!disabled" if on and areas else "disabled"])
         for key, (var, tick) in self.rounds.items():
             vals = {s[key] for s in (areas if key == "round" else sts)}
             var.set(vals == {True})
@@ -423,10 +434,16 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                         st["reach"] = self.reach_last
                         last = self.area_last
                         st["stretch"] = last["stretch"]
+                        st["spot"] = last["spot"]
                         if last["round"] and last["seen"]:
                             st["round"] = True
                             if not st["spin"]:  # (a look already used by the spin tick stays)
                                 st["seen"] = last["seen"]
+            elif key == "tied":  # (unticked: the area stays where it is now, on its own spot)
+                if value:
+                    st["spot"] = None
+                elif not st["spot"]:
+                    st["spot"] = list(st["centre"])
             elif key.startswith("centre"):
                 c = list(st["centre"])
                 c[int(key[-1])] = value
@@ -435,6 +452,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 st[key] = value
             return st
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
+                "tied": lambda st: st["reach"] is not None,
                 "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)
         self.fresh = False
         i = self.tab
@@ -510,6 +528,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.wheel = None
             self.set_stir("area", self.areas[i] if i else None, tr("stir.undo_area"))
             self.sync()
+
+    def on_tied(self):
+        self.wheel = None
+        self.set_stir("tied", bool(self.tied.get()), tr("stir.undo_tied"))
+        self.sync()
 
     def on_squeeze(self):
         self.wheel = None

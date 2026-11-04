@@ -59,7 +59,9 @@ MOST_SEED = 2 ** 31 - 1
 # round (user picked "works either way"))
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
                  "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
-                 "spin": False, "seen": None, "flip_side": False, "flip_up": False}
+                 "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None}
+# (spot: the area's own middle [% across, % up] when it doesn't move with the Centre point (PLAN C1, user 11-04:
+# Turn / Twist still go round the Centre point, the area sits here); None = on the Centre point; only with a reach)
 MOST_REACH, LEAST_REACH = 100.0, 0.01
 MOST_TURN = 360000.0  # (Stir's Turn: 1000 whole turns, only so a file can't hold nonsense; user 11-04 dropped +-360)
 MOST_STRETCH, LEAST_STRETCH = 1000.0, 10.0
@@ -194,6 +196,9 @@ def one_stir(s):
         w = s.get("stretch")
         if number(w) and LEAST_STRETCH <= round(w, 3) <= MOST_STRETCH and round(w, 3) != 100:
             out["stretch"] = round(float(w), 3)
+        p = s.get("spot")
+        if isinstance(p, list) and len(p) == 2 and all(number(x) and 0 <= x <= 100 for x in p):
+            out["spot"] = [round(float(x), 3) for x in p]
     v = s.get("seen")
     if number(v) and 1e-9 < v < 1e9:
         if s.get("round") is True and "reach" in out:
@@ -637,8 +642,10 @@ def stir_from(at, rc, box, own):
     turn = st["turn"] / 360
     reach = st["reach"]
     (kx, ky), (rx, ry) = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))
-    if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there)
-        q = np.clip(area_dist(dx * kx, dy * ky, st["area"]) / (reach / 200), 0.0, 1.0)
+    if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there; measured from the
+        # area's own spot when it has one)
+        ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
+        q = np.clip(area_dist((x - ax) * kx, (y - ay) * ky, st["area"]) / (reach / 200), 0.0, 1.0)
         w = 1 - q * q * (3 - 2 * q)
         if st["twist"]:
             turn = turn + st["twist"] * np.sqrt(q)

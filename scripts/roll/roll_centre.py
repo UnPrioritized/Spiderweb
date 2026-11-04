@@ -41,7 +41,8 @@ class CentreDots:
         for sh in app.recolour_targets():
             rc = clean_recolour(sh.get("recolour"))
             for kind in kinds:
-                c = app.stir_window.shown_stir(rc)["centre"] if kind == "stir" else clumps_centre(rc)
+                st = app.stir_window.shown_stir(rc) if kind == "stir" else None
+                c = st["centre"] if st else clumps_centre(rc)
                 if c is None:
                     continue
                 plain = without_recolour(sh)
@@ -50,8 +51,11 @@ class CentreDots:
                     continue
                 own = free_box(plain, notes, app.notes_tracks, app.keys)
                 out.append((sh, (rc or {}, notes, own, kind), centre_spot(rc or {}, notes, own, c)))
+                if st and st["reach"] is not None and st["spot"]:  # (the area's own spot: a square, PLAN C1)
+                    out.append((sh, (rc or {}, notes, own, "spot"), centre_spot(rc or {}, notes, own, st["spot"])))
         # (both windows open: the dots of the one used last drawn on top and grabbed first, hunt 2026-11-02)
-        out.sort(key=lambda d: d[1][3] == getattr(app, "centre_first", None))
+        first = getattr(app, "centre_first", None) == "clumps"
+        out.sort(key=lambda d: (d[1][3] == "clumps") == first)
         return out
 
     def centre_xy(self, spot):
@@ -65,7 +69,7 @@ class CentreDots:
         st = w.shown_stir(rc) if kind == "stir" and w else None
         if not st or not st["reach"]:
             return None
-        cx, cy = st["centre"]
+        cx, cy = st["spot"] or st["centre"]
         r = st["reach"] / 2
         kx, ky = self.area_k(made, st)
         dx, dy = area_outline(st["area"], RING_POINTS)  # (all points at once: the box is measured once, hunt 11-03)
@@ -108,6 +112,13 @@ class CentreDots:
                                      tags="rccentre")
                 for piece in pieces:
                     self.create_line(*piece, fill=look.STIR_RING, width=line, dash=(6, 4), tags="rccentre")
+            if made[3] == "spot":  # (the area's own spot: a square, apart from the Centre point's ring)
+                q = r * 0.85
+                self.create_rectangle(x - q, y - q, x + q, y + q, outline=col, fill=look.ROLL_BG, width=line,
+                                      tags="rccentre")
+                q = r * 0.3
+                self.create_rectangle(x - q, y - q, x + q, y + q, outline="", fill=col, tags="rccentre")
+                continue
             if made[3] == "stir":  # (the Stir's: a ring with a dot, apart from Clumps' cross)
                 self.create_oval(x - r, y - r, x + r, y + r, outline=col, fill=look.ROLL_BG, width=line,
                                  tags="rccentre")
@@ -152,7 +163,8 @@ class CentreDots:
             x, y = self.centre_xy(next(spot for _, m, spot in dots if m is made))
             if ring[1] < math.hypot(x - e.x, y - e.y):
                 return False
-        self.app.push_undo(name=tr("stir.undo_centre" if made[3] == "stir" else "shares.undo_centre"))
+        self.app.push_undo(name=tr({"stir": "stir.undo_centre", "spot": "stir.undo_spot"}.get(
+            made[3], "shares.undo_centre")))
         self.drag = ("rccentre", made)
         return True
 
@@ -172,8 +184,8 @@ class CentreDots:
         made = self.centre_hit(e)
         if made is None:
             return False
-        if made[3] == "stir":
-            self.set_centre("stir", [50.0, 50.0], tr("stir.undo_centre"))
+        if made[3] in ("stir", "spot"):  # (the area's own spot: back to the middle too)
+            self.set_centre(made[3], [50.0, 50.0], tr("stir.undo_" + ("centre" if made[3] == "stir" else "spot")))
         else:
             self.app.change_recolour(lambda old, sh: {k: v for k, v in old.items() if k != "centre"}
                                      if old and old["mode"] == "clumps" else old, tr("shares.undo_centre"))
@@ -186,6 +198,14 @@ class CentreDots:
 
             def changed(old, sh):
                 return with_stir(old, i, lambda st: dict(st, centre=c))
+        elif kind == "spot":  # (only stirs whose area has its own spot: the others stay as they are)
+            from window.stir_window import stir_at, with_stir
+            i = self.app.stir_window.tab
+
+            def changed(old, sh):
+                st = stir_at(old, i)
+                return with_stir(old, i, lambda st: dict(st, spot=c)) if st["reach"] is not None and st["spot"] \
+                    else old
         else:
             def changed(old, sh):
                 return dict(old, centre=c) if old and old["mode"] == "clumps" else old
@@ -193,7 +213,7 @@ class CentreDots:
 
     def centre_drag(self, e):
         rc, notes, own, kind = self.drag[1]
-        if not getattr(self.app, "stir_window" if kind == "stir" else "shares_window", None):
+        if not getattr(self.app, "shares_window" if kind == "clumps" else "stir_window", None):
             self.drag = None  # (the window closed mid-drag: let go)
             return
         b, p = self.from_xy(e.x, e.y)
@@ -203,7 +223,7 @@ class CentreDots:
             from window.stir_window import stir_at, with_stir
             w = self.app.stir_window
             st, i = w.shown_stir(rc), w.tab
-            m = st["centre"]
+            m = st["spot"] or st["centre"]
             kx, ky = self.area_k(self.drag[1], st)
             size = 2 * float(area_dist((c[0] - m[0]) * kx, (c[1] - m[1]) * ky, st["area"]))
             size = round(size, 3) if e.state & SHIFT else float(round(size))
