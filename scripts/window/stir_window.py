@@ -14,7 +14,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MAKE_SHAPE_POINTS, MOST_STIRS,
-                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_IN, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
+                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_BY, FLIP_IN, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, new_seed, stir_stack)
 from roll.roll_live import STROKE_TOOLS
 from window import look
@@ -25,7 +25,8 @@ from window.widgets import (Scrub, ShortLabel, Tooltip, bad, good, grid_shown, n
                             set_names, show_mixed, unhighlight)
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
-AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "flip_in")  # (brought back with an area)
+AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "flip_in", "mirror",
+             "size_of")  # (brought back with an area)
 
 
 def stirred_rc(old, stir):
@@ -199,7 +200,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.area_box.bind("<<ComboboxSelected>>", lambda e: self.on_area())
         self.area_tip = Tooltip(self.area_box, tr("stir.area_tip"))
         self._put("area", (1, word), (2, self.area_box),
-                  (3, self._cell(form, "reach", LEAST_REACH, MOST_REACH, "stir.reach_size", "stir.reach_tip", "%")))
+                  (3, self._cell(form, "reach", LEAST_REACH, MOST_REACH, "stir.reach_size", "stir.reach_tip", "%")),
+                  (4, self._pick(form, "size_of", SIZE_OF, None)))  # (PLAN D: "% of the circle inside")
         # (PLAN C1, user 11-04: unticked = the area keeps its own spot, a square on the piano roll; Turn / Twist
         # still go round the Centre point)
         self.tied = tk.BooleanVar(value=True)
@@ -251,6 +253,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         word = ttk.Label(form, text=tr("stir.flip_in"))
         self._put("flips", (1, word), (2, self._pick(form, "flip_in", FLIP_IN, word), 3))
         self.flip_in = self.picks["flip_in"]
+        for key, choices in (("mirror", MIRROR), ("flip_by", FLIP_BY)):  # (PLAN C / B, tester 11-04)
+            word = ttk.Label(form, text=tr("stir." + key))
+            self._put("flips", (1, word), (2, self._pick(form, key, choices, word), 3))
         self._put("flips", (1, self._area_tick(form, "reverse", False, tr("stir.reverse_tip")), 4))
         self.hint = ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
@@ -329,7 +334,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         names = [tr(f"stir.{key}_{c}") for c in choices]
         cb = ttk.Combobox(parent, values=names, state="readonly", width=max(len(n) for n in names) + 1)
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_pick(key))
-        Tooltip(word, tr(f"stir.{key}_tip"))
+        if word is not None:
+            Tooltip(word, tr(f"stir.{key}_tip"))
         self.picks[key] = {"word": word, "box": cb, "tip": Tooltip(cb, tr(f"stir.{key}_tip")), "choices": choices}
         return cb
 
@@ -391,8 +397,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         if sts:
             name = self.area_box.get()
             sizes = {s["reach"] for s in areas}
-            words = [tr("stir.short_size", name=name, size=fmt(next(iter(sizes))))
-                     if areas and len(sizes) == 1 and name != mixed else name]
+            inner = every("round", areas) and all(s["size_of"] == "inside" for s in areas)
+            words = [tr("stir.short_size_inside" if inner else "stir.short_size", name=name,
+                        size=fmt(next(iter(sizes)))) if areas and len(sizes) == 1 and name != mixed else name]
             if every("spot", areas):
                 words.append(tr("stir.short_spot"))
             for key in ("hard", "round"):
@@ -408,9 +415,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             elif sides != {(False, False)}:
                 side, up = next(iter(sides))
                 words.append(tr("stir.short_both" if side and up else "stir.short_side" if side else "stir.short_up"))
+                if side and all(s["flip_by"] == "order" for s in sts):
+                    words.append(tr("stir.short_order"))
                 where = {s["flip_in"] for s in areas}
                 if len(where) == 1 and where != {"whole"}:
                     words.append(tr("stir.short_" + next(iter(where))))
+                    if all(s["mirror"] == "area" for s in areas):
+                        words.append(tr("stir.short_mirror"))
             if every("reverse", areas):
                 words.append(tr("stir.short_reverse"))
             text = ", ".join(words) or tr("stir.short_off")
@@ -628,6 +639,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             var.set(vals == {True} if vals else key.startswith("area_"))
             tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if on and areas else "disabled"])
         self.flip_in["box"].config(state="readonly" if on and areas else "disabled")
+        # (Mirror across: only flips in / outside the area; Size of the circle inside: only with Round as seen
+        # (without it the box counts as square: both the same); Sideways by: only with the sideways flip)
+        live = {"mirror": any(s["flip_in"] != "whole" for s in areas),
+                "size_of": any(s["round"] for s in areas), "flip_by": any(s["flip_side"] for s in sts)}
+        for key, ok in live.items():
+            self.picks[key]["box"].config(state="readonly" if on and ok else "disabled")
         for key, empty in (("stretch", 100), ("tilt", 0)):
             b = self.boxes[key]
             vals = {s[key] for s in areas}
@@ -724,7 +741,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
                 "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
                 **{k: lambda st: st["reach"] is not None for k in ("hard", "reverse", "area_turn", "area_twist",
-                                                                   "area_squeeze", "flip_in")},
+                                                                   "area_squeeze", "flip_in", "mirror",
+                                                                   "size_of")},
                 "spot0": lambda st: st["reach"] is not None and st["spot"],
                 "spot1": lambda st: st["reach"] is not None and st["spot"],
                 "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)

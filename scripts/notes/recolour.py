@@ -64,7 +64,16 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
                  "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
-                 "area_squeeze": True, "reverse": False, "flip_in": "whole"}
+                 "area_squeeze": True, "reverse": False, "flip_in": "whole", "flip_by": "time", "mirror": "shape",
+                 "size_of": "box"}
+# (Chinese tester's feedback 11-04, PLAN.md, each a second choice with the old way as the default (user):
+# "flip_by" = the sideways colour flip by "time" (mirrored across the row's notes' span) / "order" (each key row's
+# 1st note <-> its last, 2nd <-> 2nd-last, lengths left out); "mirror" = with flips inside / outside the area, they
+# mirror across "shape" (the whole shape's rows / height) / "area" (only that part's notes: it flips in place);
+# "size_of" = Size in % of the "box" / of the circle "inside" it (its shorter side as seen, with Round as seen))
+FLIP_BY = ("time", "order")
+MIRROR = ("shape", "area")
+SIZE_OF = ("box", "inside")
 # (BMC tester's round 3 answers 11-04, all only with a reach: "hard" = the area cut clean at its edge, Turn and
 # Twist alike (a lazy susan), else the soft fade; "area_turn" / "area_twist" / "area_squeeze" = what the area
 # limits (unticked = that part works on the whole shape); "reverse" = inside the area the colours' (tracks') order
@@ -210,6 +219,8 @@ def one_stir(s):
     for k in ("flip_side", "flip_up"):
         if s.get(k) is True:
             out[k] = True
+    if s.get("flip_by") in FLIP_BY[1:]:
+        out["flip_by"] = s["flip_by"]
     r = s.get("reach")
     if number(r) and LEAST_REACH <= round(r, 3) <= MOST_REACH:
         out["reach"] = round(float(r), 3)
@@ -239,6 +250,10 @@ def one_stir(s):
                 out[k] = False
         if s.get("flip_in") in FLIP_IN[1:]:
             out["flip_in"] = s["flip_in"]
+        if s.get("mirror") in MIRROR[1:]:
+            out["mirror"] = s["mirror"]
+        if s.get("size_of") in SIZE_OF[1:]:
+            out["size_of"] = s["size_of"]
     v = s.get("seen")
     if number(v) and 1e-9 < v < 1e9:
         if s.get("round") is True and "reach" in out:
@@ -641,12 +656,26 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     inside = area_inside(at, rc, box, own) if full["reach"] and (full["reverse"] or full["flip_in"] != "whole") \
         else None
     mid, key = stir_from(at, rc, box, own)
-    fm, fk = flipped(at, mid, key, st.get("flip_side"), st.get("flip_up"))
+    there = None
     if inside is not None and full["flip_in"] != "whole":  # (flips only inside / outside the area, tester 11-04)
         there = inside if full["flip_in"] == "inside" else ~inside
+    # (Mirror across the area: only that part's notes are the outline the flips mirror at, so it flips in place;
+    # sideways by Note order: each key row's notes swapped by their order, PLAN B / C)
+    part = there if there is not None and full["mirror"] == "area" and there.any() else None
+    order = full["flip_side"] and full["flip_by"] == "order"
+    if part is not None and full["flip_in"] == "inside":  # (across the area's own outline, row by row / time by
+        # time: the inside notes' first start / last end jittered the line on notes of different lengths, 11-05)
+        fm, fk = area_mirrored(mid, key, rc, box, own, full["flip_side"] and not order, full["flip_up"])
+    else:  # (outside the area: across the outside notes' own outline)
+        fm, fk = flipped(at if part is None else at[part], mid, key, full["flip_side"] and not order,
+                         full["flip_up"])
+    if there is not None:
         fm, fk = np.where(there, fm, mid), np.where(there, fk, key)
     mid, key = fm, fk
     src = nearest(at, mid, key)
+    if order:
+        twin = row_twins(at, now, part)
+        src = twin[src] if there is None else np.where(there, twin[src], src)
     move = st.get("sets") == "move" or len(pals) < 2
     if move:
         new = now[src]
@@ -844,7 +873,7 @@ def area_local(dx, dy, st, k):
     """(dx, dy) from the area's middle (the colour box 0..1 across / up) -> the area's own (X, Y) (its outline at
     about 1: area_q): k = area_scales' (kx, ky), then the area's Angle (tilt) and slant (skew) undone, Stretch
     along its own width (PLAN C2b; tilt 0 / skew 0 = exactly the old way)."""
-    r = st["reach"] / 200
+    r = st["reach"] / 200 * size_scale(st, k)
     X, Y = np.asarray(dx, np.float64) * k[0] / r, np.asarray(dy, np.float64) * k[1] / r
     if st["tilt"]:
         a = math.radians(st["tilt"])
@@ -862,8 +891,15 @@ def area_global(X, Y, st, k):
     if st["tilt"]:
         a = math.radians(st["tilt"])
         X, Y = X * math.cos(a) - Y * math.sin(a), X * math.sin(a) + Y * math.cos(a)
-    r = st["reach"] / 200
+    r = st["reach"] / 200 * size_scale(st, k)
     return X * r / k[0], Y * r / k[1]
+
+
+def size_scale(st, k):
+    """What 100 % Size is, in the area's measure (k = area_scales' (kx, ky)): the box's longer side (1), or with Size
+    of "the circle inside" the box's shorter one (tester 11-04: "100 % = the diameter of a circle inside the
+    shape"; only differs with Round as seen: without it the box counts as square)."""
+    return min(k) / max(max(k), 1e-12) if st["size_of"] == "inside" else 1.0
 
 
 def area_aspect(st):
@@ -891,7 +927,8 @@ def area_from_box(st, p0, pu, pv, k):
     if r <= 1e-9:
         return None
     middle = (pu + pv) / 2 * 100
-    return {"middle": [float(v) for v in middle], "reach": 200 * r, "stretch": 100 * math.hypot(*c1) / r,
+    return {"middle": [float(v) for v in middle], "reach": 200 * r / size_scale(st, k),
+            "stretch": 100 * math.hypot(*c1) / r,
             "tilt": math.degrees(tilt), "skew": wx / wy}
 
 
@@ -1064,6 +1101,85 @@ def flipped(at, mid, key, side, up):
     if up:
         key = Cols(at).mirrored(mid, key)
     return mid, key
+
+
+CHORD_BANDS = 256  # (Mirror across only that part: the area's outline found on this many rows / columns of it)
+
+
+def area_mirrored(mid, key, rc, box, own, side, up):
+    """Spots (mid, key) mirrored across the Stir area's own outline (PLAN C): sideways across the area's width on the
+    spot's row, upside down across its height at the spot's time (sideways first). The outline is found on
+    CHORD_BANDS rows / columns across the area, each end exact (halved 30 times); a spot on a row / column the area
+    doesn't reach stays."""
+    st = full_stir(rc.get("stir"))
+    kxy = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))[0]
+    x, y = unit_xy(mid, key, rc, box, own)
+    x, y = np.array(x, np.float64), np.array(y, np.float64)
+    ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
+    cx, cy = area_corners(st, kxy)
+    lo = np.array([ax + cx.min(), ay + cy.min()])
+    hi = np.array([ax + cx.max(), ay + cy.max()])
+    pad = (hi - lo) * 0.01 + 1e-9
+    lo, hi = lo - pad, hi + pad
+
+    def inside(u, v):
+        return area_spot_q(u, v, st, kxy) < 1
+
+    for axis, on in ((0, side), (1, up)):
+        if not on:
+            continue
+        a, b = 1 - axis, axis  # (bands across axis a, the chord along axis b)
+        n = CHORD_BANDS
+        band = lo[a] + (np.arange(n) + 0.5) / n * (hi[a] - lo[a])
+        g = lo[b] + (np.arange(4 * n) + 0.5) / (4 * n) * (hi[b] - lo[b])
+        B, G = np.meshgrid(band, g, indexing="ij")
+        G, B = G.ravel(), B.ravel()
+        ins = inside(*((G, B) if axis == 0 else (B, G))).reshape(n, 4 * n)
+        has = ins.any(axis=1)
+        first = np.argmax(ins, axis=1)
+        last = 4 * n - 1 - np.argmax(ins[:, ::-1], axis=1)
+        ends = []
+        for idx, step in ((first, -1), (last, 1)):  # (between the last spot in and the next one out: halved)
+            pin, pout = g[idx], np.where((idx + step >= 0) & (idx + step < 4 * n),
+                                         g[np.clip(idx + step, 0, 4 * n - 1)], g[idx] + step * (g[1] - g[0]))
+            for _ in range(30):
+                m = (pin + pout) / 2
+                got = inside(*((m, band) if axis == 0 else (band, m)))
+                pin, pout = np.where(got, m, pin), np.where(got, pout, m)
+            ends.append(pin)
+        p, q = (x, y) if axis == 0 else (y, x)  # (p = mirrored, q = which band)
+        i = np.floor((q - lo[a]) / (hi[a] - lo[a]) * n).astype(np.int64)
+        ok = (i >= 0) & (i < n)
+        i = np.clip(i, 0, n - 1)
+        ok &= has[i]
+        p = np.where(ok, ends[0][i] + ends[1][i] - p, p)
+        if axis == 0:
+            x = p
+        else:
+            y = p
+    return from_unit(x, y, rc, box, own)
+
+
+def row_twins(at, colours, among=None):
+    """Each note's twin for the sideways colour flip by Note order (tester 11-04, PLAN B): on its key row, counted by
+    start (then colour), the 1st note <-> the last, the 2nd <-> the 2nd-last and so on, whatever their lengths; a
+    row of one note keeps its own. among (a mask): only those notes count, each row's part among them (the rest
+    stay their own twin)."""
+    n = len(at)
+    twin = np.arange(n)
+    idx = twin.copy() if among is None else np.flatnonzero(among)
+    if not len(idx):
+        return twin
+    k = np.asarray(at[idx, 2], np.int64)
+    o = np.lexsort((np.asarray(colours)[idx], np.asarray(at[idx, 0], np.int64), k))
+    ks = k[o]
+    starts = np.flatnonzero(np.r_[True, ks[1:] != ks[:-1]])
+    sizes = np.diff(np.r_[starts, len(ks)])
+    first = np.repeat(starts, sizes)
+    last = first + np.repeat(sizes, sizes) - 1
+    got = idx[o]
+    twin[got] = got[first + last - np.arange(len(ks))]
+    return twin
 
 
 class Cols:
