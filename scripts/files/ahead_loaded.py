@@ -554,7 +554,9 @@ class LoadedSong:
                 t = lm.tracks[j]
                 if t.last_tick < t_pre or (t.notes and t.first > t_copy and not len(t.c_tick)):
                     continue
-                c = max(0, int(np.searchsorted(t.cp_tick, t_pre, "right")) - 1)
+                # (the checkpoint BEFORE t_pre: one on t_pre can sit amid that tick's events, the notes struck there
+                # before it then held copies on t_pre = order against the counted notes lost, Shinki 458 s)
+                c = max(0, int(np.searchsorted(t.cp_tick, t_pre, "left")) - 1)
                 k = int(np.searchsorted(t.cp_tick, t_copy, "right"))
                 lo = int(t.cp_off[c])
                 hi = int(t.cp_off[k]) if k < len(t.cp_off) else int(t.limit)
@@ -632,9 +634,11 @@ class LoadedSong:
         origin = min([t0] + [int(g[2].min()) for g in got if len(g[2])])
         counted_tracks = []
         if runs is not None:
-            # (a SysEx copied, or a held copy on t_pre itself (the floor there): ordered against the tracks'
-            # own notes / set-up as written only: this piece plain)
-            if runs.sysex or any(len(g[2]) and int(g[2].max()) >= t_pre for g in got):
+            # (a SysEx copied, or a held copy on t_pre itself whose order there matters (a controller on its
+            # channel at t_pre, or a note of its key at t_pre: written as a track holds it only): this piece plain)
+            at_pre = [e[0] for e in got if len(e[2]) and runs.clash_at(e[0], e[2], e[3], e[4], t_pre)]
+            if runs.sysex or at_pre:
+                self.counted_why = ("sysex" if runs.sysex else "held at t_pre", at_pre[:5])  # (for checks)
                 if self.bytes_in(f0, f1) > PIECE_MOST:  # (sized for counted notes: plain it would take GBs)
                     raise TooBigPlain()
                 return self.midi(f0, f1)
@@ -810,6 +814,41 @@ class _Runs:
         self.s[self.n:self.n + n] = np.maximum(vel, 1)
         self.c[self.n:self.n + n] = 1 if cnt is None else cnt[order]
         self.n += n
+
+    def clash_at(self, j, start, qs, vel, t_pre):
+        """Whether track j's held copies (start ticks, channel x 256 + key, velocities) hold one on t_pre (or after)
+        whose order there matters (call before held()). One on t_pre = struck at t_pre before the checkpoint there
+        (Shinki 458 s: notes begun and ended at t_pre, a checkpoint between). Written in its track's head it comes
+        after the tracks before it and before the rest's events at t_pre; counted, after every track's. The same
+        then when: no controller of its port + channel at t_pre (those stay in the tracks), and among the counted
+        notes of its port + channel + key at t_pre no note-on of another velocity (an order between note-ons decides
+        which copy an off ends later; offs before ons: midi_piece.order_ok checks them), none at all on a channel
+        kept in order (bar_ch bit 2: ons and offs there in the order put in)."""
+        at = start >= t_pre
+        if not at.any():
+            return False
+        if (start > t_pre).any():
+            return True
+        nc = int(self.song.newch[j])
+        q = qs[at].astype(np.int64)
+        pc = int(self.song.tport[j]) * 16 + (np.full(len(q), nc, np.int64) if nc >= 0 else q >> 8)
+        if np.isin((t_pre << 8) | pc, self.bars).any():
+            return True
+        ak, asg, _ = self.acc
+        lo = int(np.searchsorted(ak, (t_pre - self.base) << 16))
+        hi = int(np.searchsorted(ak, (t_pre - self.base + 1) << 16))
+        if lo == hi:
+            return False
+        there = {}  # port + channel + key -> velocities of its note-ons at t_pre (0 = an off, or kept in order)
+        for k, s in zip((ak[lo:hi] & 0xFFFF).tolist(), asg[lo:hi].tolist()):
+            there.setdefault(k >> 1, set()).add(s if k & 1 else -1)
+        for p, key, v in zip(pc.tolist(), (q & 255).tolist(), np.maximum(vel[at], 1).tolist()):
+            got = there.get((p << 8) | key)
+            if got is None:
+                continue
+            if self.bar_ch[p] & 2 or (got - {-1, v}):
+                return True
+        return False
 
     def flush(self):
         """The batch sorted + folded onto the stack of folded lists (oldest = earlier tracks first); neighbours

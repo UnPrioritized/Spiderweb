@@ -394,11 +394,11 @@ def _clean_old_pieces():
             pass
 
 
-def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress):
+def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=False):
     """One piece on the card (card_piece's part): float32 (frames, 2), maybe shorter (silence at its end left out),
-    or None when cancelled."""
+    or None when cancelled. plain = never counted (a re-cut part, see card_piece)."""
     from files import kestrel
-    if engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
+    if not plain and engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
         data, skip = song.midi(f0, f1, counted=True)  # (stacks of identical notes sent once, PLAN D2)
     else:
         data, skip = song.midi(f0, f1)
@@ -441,17 +441,17 @@ def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None, p
     piece_most = bytes a loaded MIDI's piece copies at most (Maker.piece_most): more = made in parts.
     one(a, b, cancel, progress) = what makes one part instead of the card (BASSMIDI with a loaded MIDI, L4)."""
     if one is None:
-        def on_card(a, b, c, p):
-            return _card_one(song, engine, opts, fonts, card, a, b, c, p)
+        def on_card(a, b, c, p, plain=False):
+            return _card_one(song, engine, opts, fonts, card, a, b, c, p, plain)
 
         def one(a, b, c, p):
             from files.ahead_loaded import TooBigPlain
             try:
                 return on_card(a, b, c, p)
-            except TooBigPlain:  # (a counted piece that has to go plain, PLAN D2: re-cut to plain sizes)
-                parts = []
+            except TooBigPlain:  # (a counted piece that has to go plain, PLAN D2: re-cut to plain sizes, each
+                parts = []      # part plain: counted again it raised again, uncaught = playing stopped)
                 for a2, b2 in song.spans(a, b, PIECE_MOST):
-                    got = on_card(a2, b2, c, None)
+                    got = on_card(a2, b2, c, None, True)
                     if got is None:
                         return None
                     if len(got) < b2 - a2:
