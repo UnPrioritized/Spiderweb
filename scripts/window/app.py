@@ -90,7 +90,7 @@ from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, STACK_MODES, painting_order, stack_rule
-from files import clipboard, errors, notes_clip, speed
+from files import clipboard, errors, notes_clip, speed, system
 from files.about import ICONS, VERSION
 from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, KESTREL, MidiOut, Player
 from files.slow_down import SlowDown
@@ -541,6 +541,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_clip = None  # the Tempo pane's copy (tempo_pane.copy): its own, never the Windows clipboard
         self.seen_clip = None  # the Windows clipboard's copy count at Spiderweb's last copy (shared_clip)
         self.own_domino_copy = None  # ... and at its last Copy to Domino (paste_from_domino)
+        self.companion = None  # drawing on Domino's piano roll (window/domino_companion.py) while on
+        self.companion_tops = ()  # ... its windows: shortcuts work in them as in the main window
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
         self.out = MidiOut(self.make_live, self.make_kestrel)
@@ -1347,6 +1349,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         # (New / Open… / Save… are in the File menu: the row got too crammed, user 2026-10-22)
         ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(side="right")  # (under Export)
+        if system.WINDOWS:  # (Domino companion: Spiderweb's tools right on Domino's piano roll)
+            b = ttk.Button(btns, text=tr("companion.button"), command=self.start_companion)
+            b.pack(side="left")
+            Tooltip(b, tr("companion.button_tip"))
 
     def _build_shape_list(self, side):
         box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)
@@ -3499,6 +3505,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if self._rows[key]:
                 w.pack(fill="x", pady=(4, 0), before=self.points_box)
 
+    def start_companion(self):
+        """Draw on Domino: Spiderweb's tools right on Domino's piano roll (window/domino_companion.py)."""
+        from window.domino_companion import start
+        start(self)
+
     def snap_beats(self):
         return snap_beats(self.snap.get(), self.beats)
 
@@ -3617,8 +3628,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return None  # (Settings, Help, the update popup: the shapes behind stay as they are)
             if self.grabbed_elsewhere():
                 return None  # (a window like Range… is working on the picked shapes: nothing changes behind it)
-            if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):
-                return None
+            if main_only and not (isinstance(w, tk.Misc) and (w.winfo_toplevel() is self or w.winfo_toplevel()
+                                                                in self.companion_tops)):
+                return None  # (companion_tops: drawing on Domino, window/domino_companion.py, is the main window)
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
             if self.tracks_shown() and fn not in (self.toggle_tracks, self.toggle_play, self.generate,

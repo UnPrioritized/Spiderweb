@@ -50,11 +50,13 @@ def front_domino(pid=None):
 class DominoOverlay:
     """overlay = DominoOverlay(root, on_view=..., on_state=...); overlay.stop() ends it."""
 
-    def __init__(self, root, on_view=None, on_state=None, pid=None):
+    def __init__(self, root, on_view=None, on_state=None, pid=None, make_canvas=None, on_tick=None):
         self.root = root
         self.on_view = on_view      # (ViewState) when what Domino shows changed
         self.on_state = on_state    # (reason or None) when following starts / stops working
+        self.on_tick = on_tick      # () each tick while following (after the windows were placed)
         self.pid = pid              # follow only this Domino (None = the front-most one)
+        self.above = []             # more windows of ours kept above Domino (the floating bar), top-most first
         self.domino = None
         self.view = None
         self.state = "starting"
@@ -68,7 +70,9 @@ class DominoOverlay:
         self.win.overrideredirect(True)
         self.win.configure(bg=SEE_THROUGH)
         self.win.attributes("-transparentcolor", SEE_THROUGH)
-        self.canvas = tk.Canvas(self.win, bg=SEE_THROUGH, highlightthickness=0, bd=0)
+        # (make_canvas(parent): what draws on it, e.g. roll.overlay_roll; a plain canvas otherwise)
+        self.canvas = (make_canvas(self.win) if make_canvas else
+                       tk.Canvas(self.win, bg=SEE_THROUGH, highlightthickness=0, bd=0))
         self.canvas.pack(fill="both", expand=True)
         # Windows lets clicks on see-through pixels go through whatever the style says, so while drawing a
         # nearly invisible window (1/255) lies over the overlay and takes the mouse: bind drawing on .mouse
@@ -84,7 +88,35 @@ class DominoOverlay:
         self.catch_hwnd = self._own_hwnd(self.catch)
         self._style(self.hwnd, click_through=True)
         self._style(self.catch_hwnd, click_through=False)
+        self.forwarded = None
         self._job = root.after(1, self._tick)  # (not at once: the caller gets the overlay first)
+
+    # --- the mouse while drawing: from the catcher to what draws ---
+    FORWARD = ("ButtonPress-1", "ButtonPress-2", "ButtonPress-3", "ButtonRelease-1", "ButtonRelease-2",
+               "ButtonRelease-3", "Motion")
+
+    def forward_to(self, widget, wheel=None, pressed=None):
+        """The catcher's mouse goes on to widget as if it happened there (Tk makes double clicks and drags out of
+        them as usual); its pointer copies widget's. wheel(e): the wheel; pressed(): before each press."""
+        self.forwarded = widget
+        m = self.mouse
+
+        def send(e, seq):
+            if pressed and seq.startswith("ButtonPress"):
+                pressed()
+            try:
+                widget.event_generate(f"<{seq}>", x=e.x, y=e.y, state=e.state, when="now")
+                cur = widget.cget("cursor")
+                if m.cget("cursor") != (cur or "crosshair"):
+                    m.configure(cursor=cur or "crosshair")
+            except tk.TclError:
+                pass
+            return "break"
+
+        for seq in self.FORWARD:
+            m.bind(f"<{seq}>", lambda e, seq=seq: send(e, seq))
+        if wheel:
+            m.bind("<MouseWheel>", wheel)
 
     # --- Windows bits ---
     @staticmethod
@@ -111,11 +143,12 @@ class DominoOverlay:
         u = ctypes.windll.user32
         u.GetWindow.restype = W.HWND
         u.SetWindowPos.argtypes = [W.HWND, W.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, W.UINT]
-        mine = (self.hwnd, self.catch_hwnd)
+        extra = [h for h in (self._own_hwnd(w) for w in self.above if w.winfo_exists() and w.winfo_viewable())]
+        mine = (self.hwnd, self.catch_hwnd, *extra)
         above = u.GetWindow(self.domino.top, 3)  # GW_HWNDPREV
         while above in mine:
             above = u.GetWindow(above, 3)
-        want = [self.hwnd] + ([self.catch_hwnd] if self.drawing else [])
+        want = [self.hwnd] + ([self.catch_hwnd] if self.drawing else []) + extra[::-1]
         now, h = [], u.GetWindow(self.domino.top, 3)
         while h in mine:
             now.append(h)
@@ -208,6 +241,8 @@ class DominoOverlay:
             if self.on_view:
                 self.on_view(v)
         self._keep_above()
+        if self.on_tick:
+            self.on_tick()
 
     def stop(self):
         if self._job:

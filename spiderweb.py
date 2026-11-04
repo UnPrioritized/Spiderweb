@@ -33,6 +33,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
     domino_overlay.py Domino companion: the see-through window lying over Domino's note grid, following it
+    domino_companion.py Draw on Domino: the floating bar, switching app.roll to the overlay piano roll and back
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
@@ -95,6 +96,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_melody.py   Fill with tempo jumps: the notes it follows outlined on the piano roll
     roll_shared.py   colours, key names, modifier keys, outline caches
     tiles.py         the notes' picture on screen as tiles (moved along when the view scrolls)
+    overlay_roll.py  Draw on Domino: the see-through piano roll over Domino's grid (its view = Domino's)
     zoombar.py       the piano roll's scrollbars (drag an end to zoom) and zoom buttons
   notes/             shapes -> notes
     engine.py        shapes -> notes, overlap handling, channel assignment
