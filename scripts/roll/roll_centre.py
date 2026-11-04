@@ -141,19 +141,20 @@ class CentreDots:
                 for piece in pieces:
                     self.create_line(*piece, fill=look.STIR_RING, width=line, dash=(6, 4), tags="rccentre")
             box = self.area_box(made) if made[3] == "stir" and self.app.tool.get() == "select" else None
-            if box:  # (its box: short dashes over a background band like the area line, big round handles; a
-                # shape's box has long dashes + squares. User 11-04: the thin dotted box was hard to see)
+            if box:  # (its box: a solid green line over a white band, big filled handles (user 11-04); the area line =
+                # white + black dashes, a shape's box = long dashes + squares)
                 c = box[1]
                 pieces = clip_polyline([v for p in c + c[:1] for v in p], room)
                 for piece in pieces:
-                    self.create_line(*piece, fill=look.ROLL_BG, width=line + 2 * max(1, round(s)), tags="rccentre")
+                    self.create_line(*piece, fill=look.STIR_BOX_BAND, width=line + 2 * max(1, round(s)),
+                                     tags="rccentre")
                 for piece in pieces:
-                    self.create_line(*piece, fill=look.STIR_RING, width=line, dash=(2, 3), tags="rccentre")
+                    self.create_line(*piece, fill=look.STIR_BOX, width=line, dash=look.STIR_BOX_DASH, tags="rccentre")
                 mids = [((c[i][0] + c[(i + 1) % 4][0]) / 2, (c[i][1] + c[(i + 1) % 4][1]) / 2) for i in range(4)]
                 for (hx, hy), hr in [(p, 6 * s) for p in c] + [(p, 5 * s) for p in mids]:
                     if -20 < hx < room[2] + 10 and -20 < hy < room[3] + 10:
-                        self.create_oval(hx - hr, hy - hr, hx + hr, hy + hr, outline=look.STIR_RING,
-                                         fill=look.ROLL_BG, width=line + 1, tags="rccentre")
+                        self.create_oval(hx - hr, hy - hr, hx + hr, hy + hr, outline=look.STIR_BOX_BAND,
+                                         fill=look.STIR_BOX_FILL, width=line + 1, tags="rccentre")
             if made[3] == "spot":  # (the area's own spot: a square, apart from the Centre point's ring)
                 q = r * 0.85
                 self.create_rectangle(x - q, y - q, x + q, y + q, outline=col, fill=look.ROLL_BG, width=line,

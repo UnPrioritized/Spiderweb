@@ -234,6 +234,11 @@ MASKED_LINE = pick("#f0c8c8", "#6a5a5a")  # the line of a shape a mask covers: f
 CUT, CUT_UNDER = pick("#d00000", "#ff5050"), pick("#ffffff")  # Slice line, cut marks, scissors (+ the white under a mark)
 PATH_LINE = pick("#0d8f46", "#62d996")  # Copy along a path: the path on the piano roll, its points A / middle / B
 STIR_RING = pick("#1f1f22", "#f2f2f4")  # Stir's Only inside a circle dashes (over a ROLL_BG band: busy colours, 11-03)
+STIR_BOX = pick("#0d8f46", "#62d996")  # the Stir area's box: a solid line + filled handles, the Centre point's green
+# (user 11-04: apart from the area's white + black dashes; a dark band (orange mock) blurred into gate-1 spam)
+STIR_BOX_BAND = pick("#ffffff", "#3c3c3f")  # under them
+STIR_BOX_FILL = STIR_BOX  # inside the handles
+STIR_BOX_DASH = None  # (solid)
 MELODY_LIT = pick("#111111", "#ffffff")  # Fill with tempo jumps: outline round the notes it follows (roll_melody.py)
 MELODY_PREVIEW = pick("#f0a070", "#9a5a36")  # Fill with tempo jumps: the faint line of what Fill would lay
 MELODY_EDGE = pick("#c2410c", "#fb923c")  # Jump areas: the clicked edges + "Area n" words (jump_areas.py)
