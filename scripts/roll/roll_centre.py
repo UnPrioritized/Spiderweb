@@ -13,6 +13,7 @@ from files.lang import tr
 from notes.engine import free_box
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, SPOT_LEAST, SPOT_MOST, LEAST_STRETCH, MOST_REACH, MOST_SKEW, MOST_STRETCH, area_corners,
                             area_dist, area_from_box, area_global, area_local, area_outlines, area_scales, centre_at,
+                            most_reach,
                             centre_spot, clean_recolour, drawn_gauge, without_recolour)
 from roll.roll_shared import CTRL
 from roll.roll_gliss import clip_polyline
@@ -291,7 +292,8 @@ class CentreDots:
         got = area_from_box(st2, *pcts, self.area_k(made, st2))
         if got is None:
             return
-        put = {"round": True, "seen": st2["seen"], "reach": got["reach"], "stretch": got["stretch"],
+        put = {"round": True, "seen": st2["seen"],
+               "reach": min(got["reach"], most_reach(st2, self.area_k(made, st2))), "stretch": got["stretch"],
                "tilt": got["tilt"], "skew": got["skew"]}
         i = self.app.stir_window.tab
         self.app.change_recolour(lambda old, sh: with_stir(old, i, lambda s: dict(s, **put)) if sh is target else old,
@@ -322,7 +324,7 @@ class CentreDots:
             return
         lo, hi = (SPOT_LEAST, SPOT_MOST) if self.target_stir(target)["spot"] else (0.0, 100.0)
         middle = [round(min(max(v, lo), hi), 3) for v in got["middle"]]
-        put = {"reach": round(min(max(got["reach"], LEAST_REACH), MOST_REACH), 3),
+        put = {"reach": round(min(max(got["reach"], LEAST_REACH), most_reach(st, self.area_k(made, st))), 3),
                "stretch": round(min(max(got["stretch"], LEAST_STRETCH), MOST_STRETCH), 3),
                "tilt": round(got["tilt"], 3), "skew": round(min(max(got["skew"], -MOST_SKEW), MOST_SKEW), 4)}
         i = w.tab
@@ -448,7 +450,8 @@ class CentreDots:
             size = st["reach"] * (drawn_gauge(X, Y, st["shape"]) if st["area"] == DRAWN and st["shape"] else
                                   float(area_dist(X, Y, st["area"])))
             size = round(size, 3) if e.state & SHIFT else float(round(size))
-            size = min(max(size, LEAST_REACH if e.state & SHIFT else 1.0), MOST_REACH)
+            size = min(max(size, LEAST_REACH if e.state & SHIFT else 1.0),
+                       most_reach(st, self.area_k(self.drag[1], st)))
             # (only shapes whose shown stir has a circle: a whole-shape stir stays one, hunt 11-03)
             self.app.change_recolour(lambda old, sh: with_stir(old, i, lambda st: dict(st, reach=size))
                                      if stir_at(old, i)["reach"] else old, None, False)

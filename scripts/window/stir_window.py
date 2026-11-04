@@ -14,13 +14,14 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MAKE_SHAPE_POINTS, MOST_STIRS,
-                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_BY, FLIP_IN, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
-                            centre_at, clean_area_shape, clean_recolour, full_stir, new_seed, stir_stack)
+                            MOST_REACH_INSIDE, MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_BY, FLIP_IN, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
+                            centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
+                            stir_stack)
 from roll.roll_live import STROKE_TOOLS
 from window import look
 from window.drawer import library_lists, shape_path
 from window.shares_window import AngleKnob, HeldKnobs
-from window.tool_window import Knob
+from window.tool_window import Knob, ThinBar
 from window.widgets import (Scrub, ShortLabel, Tooltip, bad, good, grid_shown, name_index, name_list, remember_place,
                             set_names, show_mixed, unhighlight)
 
@@ -97,18 +98,29 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.boxes = {}  # name -> {var, entry, shown, lo, hi}
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
-        self.what = ttk.Label(box, text="", foreground=look.HINT)
-        self.what.pack(anchor="w")
+        # (cut with "…" + the whole name in a tip: a long name never makes the window wider, hunt 11-05 7)
+        self.what = ShortLabel(box, text="", foreground=look.HINT)
+        self.what.pack(anchor="w", fill="x")
         # STACKED STIRS (BMC tester 11-03): a tab per stir, in order; "+" shows a new one (saved once a setting
-        # changes, like the note tool pages), × takes the shown one away
+        # changes, like the note tool pages), × takes the shown one away. The tabs scroll sideways under a thin bar
+        # once they don't fit, like Claw / Strum's (the window never grows with them, hunt 11-05 7)
         self.tab, self.fresh, self.tab_count = 0, False, 0
         self.tab_var = tk.IntVar(value=0)
         self.tab_row = ttk.Frame(box)
         self.tab_row.pack(anchor="w", fill="x", pady=(6, 0))
-        self.tab_buttons = ttk.Frame(self.tab_row)
-        self.tab_buttons.pack(side="left")
-        self.tab_add = ttk.Button(self.tab_row, text="+", width=3, command=self.on_add)
+        self.tab_view = tk.Canvas(self.tab_row, width=1, height=1, highlightthickness=0, borderwidth=0,
+                                  background=ttk.Style().lookup("TFrame", "background") or "#f0f0f0")
+        self.tab_view.pack(fill="x")
+        self.tab_bar = ThinBar(self.tab_row, self.tab_view.xview, app.scale)
+        self.tab_view.config(xscrollcommand=self.tab_bar.set)
+        self.tab_buttons = ttk.Frame(self.tab_view)
+        self.tab_view.create_window(0, 0, window=self.tab_buttons, anchor="nw")
+        for w in (self.tab_buttons, self.tab_view):
+            w.bind("<Configure>", lambda e: self.fit_tabs())
+            self.tab_wheel(w)
+        self.tab_add = ttk.Button(self.tab_buttons, text="+", width=3, command=self.on_add)
         self.tab_add.pack(side="left", padx=(4, 0))
+        self.tab_wheel(self.tab_add)
         Tooltip(self.tab_add, tr("stir.add_tip", most=MOST_STIRS))
         # (each tab has its own × right after it, like Claw / Strum's pages, user 11-05; was one × at the right end)
         self.tab_drops, self.drop_live = [], False
@@ -199,7 +211,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.area_box.bind("<<ComboboxSelected>>", lambda e: self.on_area())
         self.area_tip = Tooltip(self.area_box, tr("stir.area_tip"))
         self._put("area", (1, word), (2, self.area_box),
-                  (3, self._cell(form, "reach", LEAST_REACH, MOST_REACH, "stir.reach_size", "stir.reach_tip", "%")),
+                  (3, self._cell(form, "reach", LEAST_REACH, MOST_REACH_INSIDE, "stir.reach_size", "stir.reach_tip",
+                                 "%")),  # (each shape stops at its own most: set_stir)
                   (4, self._pick(form, "size_of", SIZE_OF, None)))  # (PLAN D: "% of the circle inside")
         # (PLAN C1, user 11-04: unticked = the area keeps its own spot, a square on the piano roll; Turn / Twist
         # still go round the Centre point)
@@ -498,20 +511,29 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.tab = min(self.tab, count - 1)
         if count != self.tab_count:
             for w in self.tab_buttons.winfo_children():
-                w.destroy()
+                if w is not self.tab_add:
+                    w.destroy()
+            self.tab_add.pack_forget()
             self.tab_drops = []
             for i in range(count):
-                ttk.Radiobutton(self.tab_buttons, text=tr("stir.tab", n=i + 1), variable=self.tab_var, value=i,
-                                style="Toolbutton", command=self.on_tab).pack(side="left")
+                b = ttk.Radiobutton(self.tab_buttons, text=tr("stir.tab", n=i + 1), variable=self.tab_var, value=i,
+                                    style="Toolbutton", command=self.on_tab)
+                b.pack(side="left")
+                self.tab_wheel(b)
                 x = ttk.Label(self.tab_buttons, text="×", foreground=look.CLOSE, cursor="hand2", padding=(2, 0, 6, 0))
                 x.pack(side="left")
+                self.tab_wheel(x)
                 x.bind("<Enter>", lambda e, x=x: self.drop_live and x.config(foreground=look.CLOSE_HOT))
                 x.bind("<Leave>", lambda e, x=x: x.config(foreground=look.CLOSE if self.drop_live else
                                                           look.LABEL_OFF))
                 x.bind("<ButtonRelease-1>", lambda e, i=i: self.drop_tab(e, i))
                 Tooltip(x, tr("stir.drop_tip"))
                 self.tab_drops.append(x)
+            self.tab_add.pack(side="left", padx=(4, 0))
             self.tab_count = count
+            self.after_idle(lambda: (self.fit_tabs(), self.see_tab()) if self.winfo_exists() else None)
+        elif self.tab_var.get() != self.tab:
+            self.after_idle(lambda: self.see_tab() if self.winfo_exists() else None)
         self.tab_var.set(self.tab)
         on = bool(tgts) and not self.drawing  # (an area being drawn: the whole window waits, hunt C 6)
         for w in self.tab_buttons.winfo_children():
@@ -523,6 +545,46 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         for x in self.tab_drops:
             x.config(foreground=look.CLOSE if self.drop_live else look.LABEL_OFF,
                      cursor="hand2" if self.drop_live else "")
+
+    def tab_wheel(self, w):
+        """The mouse wheel over the tabs scrolls them sideways (like Claw / Strum's)."""
+        w.bind("<MouseWheel>", lambda e: self.tab_view.xview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+    def fit_tabs(self):
+        """The tab row as tall as its tabs; the thin bar shows only while they're wider than the window."""
+        v, t = self.tab_view, self.tab_buttons
+        w, h = t.winfo_reqwidth(), t.winfo_reqheight()
+        if int(v.cget("height")) != h:
+            v.config(height=h)
+        v.config(scrollregion=(0, 0, w, h))
+        if w > v.winfo_width() > 1:
+            if not self.tab_bar.winfo_manager():
+                self.tab_bar.pack(fill="x", pady=(2, 0))
+        elif self.tab_bar.winfo_manager():
+            self.tab_bar.pack_forget()
+            v.xview_moveto(0)
+        self.see_tab()  # (here too: the row laid out at last, a new tab's place is known)
+
+    def see_tab(self):
+        """The shown tab (with its ×; the "+" while a new one waits) scrolled into view."""
+        if not self.winfo_exists():
+            return
+        self.tab_buttons.update_idletasks()  # (the tabs' places settled first: else a new tab sat at 0)
+        kids = [w for w in self.tab_buttons.winfo_children() if w is not self.tab_add]
+        whole = self.tab_buttons.winfo_reqwidth()
+        if whole <= 0:
+            return
+        if self.fresh or 2 * self.tab + 1 >= len(kids):
+            b = end = self.tab_add
+        else:
+            b, end = kids[2 * self.tab], kids[2 * self.tab + 1]
+        v = self.tab_view
+        left, room = v.canvasx(0), v.winfo_width()
+        x0, x1 = b.winfo_x(), end.winfo_x() + end.winfo_width()
+        if x0 < left:
+            v.xview_moveto(x0 / whole)
+        elif x1 > left + room:
+            v.xview_moveto((x1 - room) / whole)
 
     def drop_tab(self, e, i):
         """A tab's × let go on (like a button): that stir goes."""
@@ -596,8 +658,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 b["var"].set(text)
             b["shown"] = text
             b["entry"].config(state="normal" if on else "disabled")
+        with_area = [s for s in sts if s["reach"] is not None]
         for key, p in self.picks.items():
-            vals = {s[key] for s in sts}
+            # (the area's own settings: only stirs with an area, like the ticks beside them; a shape without one
+            # made them "Mixed" for good, hunt 11-05 5)
+            among = with_area if key in ("flip_in", "mirror", "size_of") and with_area else sts
+            vals = {s[key] for s in among}
             if len(vals) == 1:
                 p["box"].current(p["choices"].index(next(iter(vals))))
             show_mixed(p["box"], len(vals) > 1, p["tip"], tr(f"stir.{key}_tip"))
@@ -712,9 +778,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         point); one undo step (push False: part of the step taken before). Size / Stretch only go to stirs with an
         area, Match the screen ("seen") only to stirs with a round tick on (hunt 11-04, like the area line's drag):
         the others are left exactly as they are (no stir padded in either)."""
-        def change(st):
+        def change(st, sh):
             if key == "centre":  # (the Middle button)
                 st["centre"] = [50.0, 50.0]
+            elif key == "size_of":  # (the area stays as big as it is: only Size is counted the new way, hunt 11-05 8)
+                k = self.shape_k(sh, st)
+                before = size_scale(st, k)
+                st["size_of"] = value
+                st["reach"] = round(max(st["reach"] * before / size_scale(st, k), LEAST_REACH), 3)
             elif key in ("round", "spin"):  # (ticked: the piano roll's look right now, kept; zoom never changes it;
                 # only for stirs that didn't have the tick: a half-ticked box keeps the others' look, hunt 11-04)
                 if value and not st[key]:
@@ -755,6 +826,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 st["centre"] = c
             else:
                 st[key] = value
+            # (never past 100 % of the box, however Size is counted, hunt 11-05 8; the shape's proportions only
+            # looked up for the settings that change that limit)
+            if st["reach"] is not None and key in ("reach", "area", "round", "spin", "seen", "size_of"):
+                most = most_reach(st, self.shape_k(sh, st)) if st["size_of"] == "inside" else MOST_REACH
+                st["reach"] = min(st["reach"], round(most, 3))
             return st
         if self.drawing:  # (an area being drawn: the selection is the drawing, not the stirred shapes)
             return False
@@ -769,8 +845,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.fresh = False
         i = self.tab
         return self.app.change_recolour(
-            lambda old, sh: with_stir(old, i, change) if only is None or only(stir_at(old, i)) else old,
-            name or tr("stir.undo"), push)
+            lambda old, sh: with_stir(old, i, lambda st: change(st, sh)) if only is None or only(stir_at(old, i))
+            else old, name or tr("stir.undo"), push)
+
+    def shape_k(self, sh, st):
+        """The Stir area's (kx, ky) on shape sh (its box as seen, Round as seen), (1, 1) without notes."""
+        made = self.app.roll.stir_made(sh) if sh is not None else None
+        return self.app.roll.area_k(made, st) if made else (1.0, 1.0)
 
     def on_turned(self, name, v, done):
         knob = self.turn_knob if name == "turn" else self.twist_knob

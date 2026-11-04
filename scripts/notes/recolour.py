@@ -65,7 +65,10 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
                  "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
                  "area_squeeze": True, "reverse": False, "flip_in": "whole", "flip_by": "time", "mirror": "shape",
-                 "size_of": "box"}
+                 "size_of": "box", "size_mix": None}
+# ("size_mix": only Add between's steps, 0..1 = how far Size counts from the box to the circle inside, so the area
+# grows smoothly between an end of each kind, hunt 11-05 6; never set from the window)
+MOST_REACH_INSIDE = 1000.0  # (Size of the circle inside may go as far as the box's own 100 %, hunt 11-05 8)
 # (Chinese tester's feedback 11-04, PLAN.md, each a second choice with the old way as the default (user):
 # "flip_by" = the sideways colour flip by "time" (mirrored across the row's notes' span) / "order" (each key row's
 # 1st note <-> its last, 2nd <-> 2nd-last, lengths left out); "mirror" = with flips inside / outside the area, they
@@ -222,7 +225,8 @@ def one_stir(s):
     if s.get("flip_by") in FLIP_BY[1:]:
         out["flip_by"] = s["flip_by"]
     r = s.get("reach")
-    if number(r) and LEAST_REACH <= round(r, 3) <= MOST_REACH:
+    if number(r) and LEAST_REACH <= round(r, 3) <= (MOST_REACH_INSIDE if s.get("size_of") == "inside" or
+                                                     number(s.get("size_mix")) else MOST_REACH):
         out["reach"] = round(float(r), 3)
         if s.get("area") in STIR_AREAS[1:]:
             out["area"] = s["area"]
@@ -254,6 +258,9 @@ def one_stir(s):
             out["mirror"] = s["mirror"]
         if s.get("size_of") in SIZE_OF[1:]:
             out["size_of"] = s["size_of"]
+        v = s.get("size_mix")
+        if number(v) and 0 < round(v, 6) < 1:
+            out["size_mix"] = round(float(v), 6)
     v = s.get("seen")
     if number(v) and 1e-9 < v < 1e9:
         if s.get("round") is True and "reach" in out:
@@ -663,9 +670,10 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     # sideways by Note order: each key row's notes swapped by their order, PLAN B / C)
     part = there if there is not None and full["mirror"] == "area" and there.any() else None
     order = full["flip_side"] and full["flip_by"] == "order"
-    if part is not None and full["flip_in"] == "inside":  # (across the area's own outline, row by row / time by
-        # time: the inside notes' first start / last end jittered the line on notes of different lengths, 11-05)
-        fm, fk = area_mirrored(mid, key, rc, box, own, full["flip_side"] and not order, full["flip_up"])
+    if part is not None and full["flip_in"] == "inside":  # (across where the area and the notes overlap, row by
+        # row / time by time: the inside notes' first start / last end jittered the line on notes of different
+        # lengths, 11-05)
+        fm, fk = area_mirrored(at, mid, key, rc, box, own, full["flip_side"] and not order, full["flip_up"])
     else:  # (outside the area: across the outside notes' own outline)
         fm, fk = flipped(at if part is None else at[part], mid, key, full["flip_side"] and not order,
                          full["flip_up"])
@@ -898,8 +906,18 @@ def area_global(X, Y, st, k):
 def size_scale(st, k):
     """What 100 % Size is, in the area's measure (k = area_scales' (kx, ky)): the box's longer side (1), or with Size
     of "the circle inside" the box's shorter one (tester 11-04: "100 % = the diameter of a circle inside the
-    shape"; only differs with Round as seen: without it the box counts as square)."""
-    return min(k) / max(max(k), 1e-12) if st["size_of"] == "inside" else 1.0
+    shape"; only differs with Round as seen: without it the box counts as square); an Add between step's size_mix =
+    part way between the two."""
+    share = st.get("size_mix")
+    if share is None:
+        share = 1.0 if st["size_of"] == "inside" else 0.0
+    return 1.0 + (min(k) / max(max(k), 1e-12) - 1.0) * share
+
+
+def most_reach(st, k):
+    """The largest Size for stir st (filled in, k = area_scales' (kx, ky)): 100 % of the box, also when counting by
+    the circle inside (then more than 100, up to MOST_REACH_INSIDE)."""
+    return min(MOST_REACH / size_scale(st, k), MOST_REACH_INSIDE)
 
 
 def area_aspect(st):
@@ -1103,61 +1121,78 @@ def flipped(at, mid, key, side, up):
     return mid, key
 
 
-CHORD_BANDS = 256  # (Mirror across only that part: the area's outline found on this many rows / columns of it)
+_CHORDS = OrderedDict()  # (Mirror across only that part: the area's ends on each row / time, kept per area + notes)
 
 
-def area_mirrored(mid, key, rc, box, own, side, up):
-    """Spots (mid, key) mirrored across the Stir area's own outline (PLAN C): sideways across the area's width on the
-    spot's row, upside down across its height at the spot's time (sideways first). The outline is found on
-    CHORD_BANDS rows / columns across the area, each end exact (halved 30 times); a spot on a row / column the area
-    doesn't reach stays."""
+def chord_ends(test, a, b, n):
+    """For each line j from a[j] to b[j] (time along a key row, or keys at one time): the first and the last spot
+    where test(spots, lines) is True, each end found exactly (halved 30 times between the last spot in and the next
+    one out; inside right up to a line's end = that end); NaN on a line where it never is. n spots tried a line."""
+    m = len(a)
+    u = np.linspace(0.0, 1.0, n)
+    P = np.asarray(a, np.float64)[:, None] + (np.asarray(b, np.float64) - a)[:, None] * u[None, :]
+    ins = test(P.ravel(), np.repeat(np.arange(m), n)).reshape(m, n)
+    has = ins.any(axis=1)
+    lines = np.arange(m)
+    out = []
+    for idx, step in ((np.argmax(ins, axis=1), -1), (n - 1 - np.argmax(ins[:, ::-1], axis=1), 1)):
+        pin = P[lines, idx]
+        pout = P[lines, np.clip(idx + step, 0, n - 1)]  # (at a line's end: the same spot, it stays)
+        for _ in range(30):
+            mm = (pin + pout) / 2
+            got = test(mm, lines)
+            pin, pout = np.where(got, mm, pin), np.where(got, pout, mm)
+        out.append(np.where(has, pin, np.nan))
+    return out
+
+
+def area_mirrored(at, mid, key, rc, box, own, side, up):
+    """Spots (mid, key) mirrored across where the Stir area and the notes overlap (PLAN C; hunt 11-05): sideways
+    along the spot's key row, from where the area starts on that row (never before the row's first note) to where it
+    ends (never past its last); upside down along the keys at the spot's time (within the notes there, Cols' slices);
+    sideways first. Worked out as the piano roll shows the notes, so a turned shape flips the way it looks; each
+    row's own ends, so a turned or slanted area's line is straight. Kept per area + notes: Turn / Twist changing
+    don't work it out again. A spot on a row / time the area doesn't reach stays."""
     st = full_stir(rc.get("stir"))
     kxy = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))[0]
-    x, y = unit_xy(mid, key, rc, box, own)
-    x, y = np.array(x, np.float64), np.array(y, np.float64)
-    ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
-    cx, cy = area_corners(st, kxy)
-    lo = np.array([ax + cx.min(), ay + cy.min()])
-    hi = np.array([ax + cx.max(), ay + cy.max()])
-    pad = (hi - lo) * 0.01 + 1e-9
-    lo, hi = lo - pad, hi + pad
 
-    def inside(u, v):
-        return area_spot_q(u, v, st, kxy) < 1
+    def inside(t, k):
+        x, y = unit_xy(np.asarray(t, np.float64), np.asarray(k, np.float64), rc, box, own)
+        return area_spot_q(np.asarray(x, np.float64), np.asarray(y, np.float64), st, kxy) < 1
 
-    for axis, on in ((0, side), (1, up)):
-        if not on:
-            continue
-        a, b = 1 - axis, axis  # (bands across axis a, the chord along axis b)
-        n = CHORD_BANDS
-        band = lo[a] + (np.arange(n) + 0.5) / n * (hi[a] - lo[a])
-        g = lo[b] + (np.arange(4 * n) + 0.5) / (4 * n) * (hi[b] - lo[b])
-        B, G = np.meshgrid(band, g, indexing="ij")
-        G, B = G.ravel(), B.ravel()
-        ins = inside(*((G, B) if axis == 0 else (B, G))).reshape(n, 4 * n)
-        has = ins.any(axis=1)
-        first = np.argmax(ins, axis=1)
-        last = 4 * n - 1 - np.argmax(ins[:, ::-1], axis=1)
-        ends = []
-        for idx, step in ((first, -1), (last, 1)):  # (between the last spot in and the next one out: halved)
-            pin, pout = g[idx], np.where((idx + step >= 0) & (idx + step < 4 * n),
-                                         g[np.clip(idx + step, 0, 4 * n - 1)], g[idx] + step * (g[1] - g[0]))
-            for _ in range(30):
-                m = (pin + pout) / 2
-                got = inside(*((m, band) if axis == 0 else (band, m)))
-                pin, pout = np.where(got, m, pin), np.where(got, pout, m)
-            ends.append(pin)
-        p, q = (x, y) if axis == 0 else (y, x)  # (p = mirrored, q = which band)
-        i = np.floor((q - lo[a]) / (hi[a] - lo[a]) * n).astype(np.int64)
-        ok = (i >= 0) & (i < n)
-        i = np.clip(i, 0, n - 1)
-        ok &= has[i]
-        p = np.where(ok, ends[0][i] + ends[1][i] - p, p)
-        if axis == 0:
-            x = p
-        else:
-            y = p
-    return from_unit(x, y, rc, box, own)
+    sig = (st["reach"], st["area"], id(st["shape"]), st["stretch"], st["tilt"], st["skew"],
+           tuple(st["spot"] or st["centre"]), st["round"], st["seen"], st["size_of"], st.get("size_mix"),
+           tuple(float(v) for v in box), tuple(float(v) for v in own), json.dumps(rc.get("frame")),
+           json.dumps(rc.get("whole")), rc.get("ppq"))
+    mid, key = np.array(mid, np.float64), np.array(key, np.float64)
+    if side:
+        rows = Rows(at)
+        ks = rows.keys.astype(np.float64)
+        lo, hi = _chords(("rows", sig, rows.keys.tobytes(), rows.a.tobytes(), rows.b.tobytes()),
+                         lambda: chord_ends(lambda p, j: inside(p, ks[j]), rows.a, rows.b, 256))
+        r = rows.row(key)
+        ok = np.isfinite(lo[r])
+        mid = np.where(ok, np.nan_to_num(lo[r] + hi[r]) - mid, mid)
+    if up:
+        cols = Cols(at)
+        tc = cols.t0 + (np.arange(cols.n) + 0.5) * cols.w
+        lo, hi = _chords(("cols", sig, cols.t0, cols.w, cols.lo.tobytes(), cols.hi.tobytes()),
+                         lambda: chord_ends(lambda p, j: inside(tc[j], p), cols.lo, cols.hi, 64))
+        s = cols.slice(mid)
+        ok = np.isfinite(lo[s])
+        key = np.where(ok, np.nan_to_num(lo[s] + hi[s]) - key, key)
+    return mid, key
+
+
+def _chords(k, make):
+    got = _CHORDS.get(k)
+    if got is None:
+        got = _CHORDS[k] = make()
+        while len(_CHORDS) > 32:
+            _CHORDS.popitem(last=False)
+    else:
+        _CHORDS.move_to_end(k)
+    return got
 
 
 def row_twins(at, colours, among=None):
@@ -1200,7 +1235,8 @@ class Cols:
         i = np.clip(np.searchsorted(full, np.arange(self.n)), 0, len(full) - 1)
         j = np.maximum(i - 1, 0)
         near = full[np.where(np.abs(full[j] - np.arange(self.n)) <= np.abs(full[i] - np.arange(self.n)), j, i)]
-        self.sum = lo[near] + hi[near]
+        self.lo, self.hi = lo[near], hi[near]
+        self.sum = self.lo + self.hi
 
     def slice(self, mid):
         return np.clip(((np.asarray(mid, np.float64) - self.t0) / self.w).astype(np.int64), 0, self.n - 1)

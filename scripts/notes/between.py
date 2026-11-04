@@ -350,6 +350,11 @@ class Pair:
                 if sx[j]["reach"] is not None and sy[j]["reach"] is not None and \
                         (sx[j]["spot"] is None) != (sy[j]["spot"] is None):
                     sx[j], sy[j] = (dict(s, spot=s["spot"] or list(s["centre"])) for s in (sx[j], sy[j]))
+                if sx[j]["reach"] is not None and sy[j]["reach"] is not None and \
+                        sx[j]["size_of"] != sy[j]["size_of"]:  # (Size counted from the box at one end, the circle
+                    # inside at the other: the steps count part way, so the area grows smoothly, hunt 11-05 6)
+                    sx[j], sy[j] = (dict(s, size_mix=s["size_mix"] if s["size_mix"] is not None else
+                                         float(s["size_of"] == "inside")) for s in (sx[j], sy[j]))
                 if sx[j]["shape"] != sy[j]["shape"]:  # (two drawn areas never blend point by point: they switch
                     # halfway, like the area itself, PLAN C2)
                     shape = (sx[j] if f < 0.5 else sy[j])["shape"]

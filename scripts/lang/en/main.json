@@ -1617,7 +1617,7 @@
  "stir.mirror_tip": "With the flips only inside (or outside) the area: what they mirror across.\nThe whole shape: each key row's whole width and the shape's whole height, so an area off to one side shows colours from the shape's other side.\nOnly that part: only the notes being flipped count, so the part inside the area flips in place.",
  "stir.size_of_box": "of the box",
  "stir.size_of_inside": "of the circle inside",
- "stir.size_of_tip": "What 100 % Size is.\nOf the box: the shape's box (its longer side with \"Round as seen\").\nOf the circle inside: the biggest circle that fits inside the box, so 100 % touches its shorter sides.\nNeeds \"Round as seen\": without it the area stretches with the box, and both are the same.",
+ "stir.size_of_tip": "What 100 % Size is.\nOf the box: the shape's box (its longer side with \"Round as seen\").\nOf the circle inside: the biggest circle that fits inside the box, so 100 % touches its shorter sides; Size can go past 100 % then, up to as big as the box's own 100 %.\nSwitching keeps the area as big as it is: only the Size number changes.\nNeeds \"Round as seen\": without it the area stretches with the box, and both are the same.",
  "stir.sets_tip": "This shape has more than one set of channels (15 colours each, 16 with channel 10).\nStay in their set: each note keeps its own set of tracks and takes the matching colour in it, so the pattern bends as a whole.\nMove between sets: each note takes the colour and track of the note it's stirred from, so notes can end up in another set.",
  "panel_custom.hz_bass": "Hz bass",
  "panel_custom.hz_not_merged": "\n\nNot on a merged shape (Gate sensitive merge): split it first.",
