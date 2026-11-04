@@ -54,6 +54,8 @@ Push bunches the areas toward one side, a step per click; the dot in the middle 
 
 Stir… (beside the Recolour dropdown) bends the colours the notes have now, without adding or taking away any colour and without anything random. It works with Recolour Off (the shape's own colours) and on top of Shuffle and Split (their result gets stirred). Each note takes the colour of the note found where the stir brings it from, so the colours keep about the same amounts.
 
+The Stir window shows Turn, Twist and the Centre point at the top. Area and Flip and reverse fold away: click their name to open or fold them. Folded, the grey words beside the name say what they're set to (for example "Circle, 50 %"). The window remembers which ones you leave open.
+
 Turn turns all the colours around the Centre point, in degrees. It can go past a whole turn (360): the knob's ring changes colour for each further turn. On the whole shape a whole turn looks like none, but inside an Area each extra turn winds the colours tighter towards the area's edge.
 
 Twist winds the colours into a swirl around the Centre point: how many times they wind round from the centre to the edge, minus for the other way. It twists most near the centre.
@@ -76,7 +78,7 @@ Hard edge (with an Area): the area is cut clean at its outline, like a turntable
 
 The area limits: Turn, Twist and Squeeze are ticked at the start, so all three happen only inside the area. Untick one to let it work on the whole shape again; for example Twist inside the area while Turn turns everything.
 
-Reverse the track order inside (with an Area): inside the area the order of the colours (tracks) is turned round, the first colour becomes the last and so on (each colour set on its own). Outside the area nothing changes.
+Reverse the track order inside the area (under Flip and reverse, with an Area): inside the area the order of the colours (tracks) is turned round, the first colour becomes the last and so on (each colour set on its own). Outside the area nothing changes.
 
 Round as seen (with an Area): the area keeps the shape it has on the screen when you tick it, so a circle stays a circle on a long or tall shape, and Size is then in % of the box's longer side. Zooming later doesn't change it; press "Match the screen" to take the screen's look again (for both round ticks). Stretch makes the area wider across (over 100 %) or narrower (under 100 %), with or without Round as seen. "Turn and twist round as seen" does the same for Turn and Twist: the colours turn the way they look on the screen when you tick it, so a turned stripe keeps its width on a long shape.
 

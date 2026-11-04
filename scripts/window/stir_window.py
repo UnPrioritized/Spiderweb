@@ -21,8 +21,8 @@ from window import look
 from window.drawer import library_lists, shape_path
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
-from window.widgets import (Scrub, Tooltip, bad, good, name_index, name_list, remember_place, set_names, show_mixed,
-                            unhighlight)
+from window.widgets import (Scrub, ShortLabel, Tooltip, bad, good, grid_shown, name_index, name_list, remember_place,
+                            set_names, show_mixed, unhighlight)
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
 AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "flip_in")  # (brought back with an area)
@@ -130,12 +130,18 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         w = ttk.Button(row, text=tr("stir.draw_cancel"), command=self.end_draw)
         w.pack(side="left", padx=(6, 0))
         Tooltip(w, tr("stir.draw_cancel_tip"))
-        knobs = row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(8, 0))
+        # (PLAN A, user 2026-11-05: ONE grid, so labels, boxes and buttons line up with the rows above and below;
+        # Area and Flip and reverse fold away, a grey line then says what they're set to. The columns keep the width
+        # they need with everything shown (fix_columns), so opening or folding a part never moves anything sideways.
+        # Columns: 0 = a part's arrow, 1 = the row's name (ticks start here too), 2 / 3 / 4 = its controls.)
+        form = self.form = ttk.Frame(box)
+        form.pack(anchor="w", fill="x", pady=(8, 0))
+        self.grid_row, self.parts, self.gap = 0, {}, int(8 * app.scale)
+        knobs = ttk.Frame(form)
         for name, unit, lo, hi in (("turn", "°", -MOST_TURN, MOST_TURN), ("twist", "", -MOST_TIGHT, MOST_TIGHT)):
-            cell = ttk.Frame(row, padding=(0, 0, 14, 0))
+            cell = ttk.Frame(knobs, padding=(0, 0, 14, 0))
             cell.pack(side="left", anchor="n")
-            word = ttk.Label(cell, text=tr("stir." + name))
+            word = ttk.Label(cell, text=tr(f"stir.{name}_head"))  # (the unit in the name: both boxes alike, user 11-05)
             word.pack()
             turned = lambda v, done, name=name: self.on_turned(name, v, done)
             if name == "turn":
@@ -147,161 +153,105 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 knob.bind("<ButtonPress-2>", lambda e: self.twist_to_zero())
             r = ttk.Frame(cell)
             r.pack()
-            # (Turn goes past +-360 now: room for "-1234.567" whole, hunt 11-04)
-            self._number_box(r, name, lo, hi, word, 10 if name == "turn" else 7)
-            ttk.Label(r, text=unit or tr("stir.turns")).pack(side="left")
+            # (Turn goes past +-360 now: room for "-1234.567" whole, hunt 11-04; Twist as wide, centred, user 11-05)
+            self._number_box(r, name, lo, hi, word, 10, alone=True)
             for w in (word, knob):
                 Tooltip(w, tr(f"stir.{name}_tip"))
-        row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(8, 0))
-        word = ttk.Label(row, text=tr("stir.centre"))
-        word.pack(side="left")
+        # (a user's feedback 2026-11-02, recolour.stir_from / stirred: At the edges beside the knobs, where the
+        # user's picture asked, name over the dropdown)
+        self.picks = {}  # key -> {row, box, tip, choices}
+        cell = ttk.Frame(knobs)
+        cell.pack(side="left", anchor="n")
+        self._pick(cell, "edge", STIR_EDGES, ttk.Label(cell, text=tr("stir.edge"))).pack(anchor="w", pady=(4, 0))
+        self.picks["edge"]["word"].pack(anchor="w", before=self.picks["edge"]["box"])
+        self._put(None, (1, knobs, 4), pady=0)
+        word = ttk.Label(form, text=tr("stir.centre"))
         Tooltip(word, tr("stir.centre_tip"))
-        for k, name in enumerate(("across", "up")):
-            w = ttk.Label(row, text=tr("shares.centre_" + name))
-            w.pack(side="left", padx=(6, 0))
-            self._number_box(row, "centre" + str(k), 0, 100, w)
-            ttk.Label(row, text="%").pack(side="left")
-        self.middle = ttk.Button(row, text=tr("stir.middle"), command=self.on_middle)  # (BMC tester 11-04)
-        self.middle.pack(side="left", padx=(6, 0))
+        self.middle = ttk.Button(form, text=tr("stir.middle"), command=self.on_middle)  # (BMC tester 11-04)
         Tooltip(self.middle, tr("stir.middle_tip"))
-        self.squeeze =tk.BooleanVar(value=True)  # (BMC tester 11-03: off = the point only says where it turns)
-        self.squeeze_tick = ttk.Checkbutton(box, text=tr("stir.squeeze"), variable=self.squeeze,
+        self._put(None, (1, word), (2, self._pair(form, "centre", 0, 100)), (3, self._pair(form, "centre", 0, 100, 1)),
+                  (4, self.middle), pady=8)
+        self.squeeze = tk.BooleanVar(value=True)  # (BMC tester 11-03: off = the point only says where it turns)
+        self.squeeze_tick = ttk.Checkbutton(form, text=tr("stir.squeeze"), variable=self.squeeze,
                                             command=self.on_squeeze)
-        self.squeeze_tick.pack(anchor="w", pady=(6, 0))
         Tooltip(self.squeeze_tick, tr("stir.squeeze_tip"))
-        # (Area, BMC tester 11-03 + the user's own idea 11-04: the stir only inside a circle / square / diamond
-        # round the Centre point; Size = its width in % of the box; Whole shape = no area)
-        row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(4, 0))
+        self._put(None, (1, self.squeeze_tick, 4), pady=6)
+        # (Colour sets: only while a shape has 2+ sets, sync)
+        word = ttk.Label(form, text=tr("stir.sets"))
+        self.sets_row = [word, self._pick(form, "sets", STIR_SETS, word)]
+        self._put(None, (1, word), (2, self.sets_row[1], 3), pady=6)
+        # ---- Area (BMC tester 11-03 + the user's own idea 11-04: the stir only inside a circle / square / diamond /
+        # a drawing round the Centre point; Size = its width in % of the box; Whole shape = no area)
+        self._part("area")
         self.reach_last = 50.0  # (the size picking an area brings back: the last one shown)
         self.area_last = {"round": False, "stretch": 100.0, "seen": None, "spot": None, "tilt": 0.0,
                           "skew": 0.0}  # (likewise, hunt 11-04)
-        w = ttk.Label(row, text=tr("stir.area"))
-        w.pack(side="left")
-        Tooltip(w, tr("stir.area_tip"))
+        word = ttk.Label(form, text=tr("stir.area"))
+        Tooltip(word, tr("stir.area_tip"))
         self.areas = ("whole",) + STIR_AREAS
         # (then, below a divider, the shape library's drawings: a drawn area, PLAN C2, user 11-04)
         self.library = []
         names = [tr("stir.area_" + a) for a in self.areas]
-        self.area_box = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 4,
+        self.area_box = ttk.Combobox(form, values=names, state="readonly", width=max(len(n) for n in names) + 4,
                                      postcommand=self.refresh_areas)
         name_list(self.area_box)
         self.refresh_areas()
-        self.area_box.pack(side="left", padx=(5, 0))
         self.area_box.bind("<<ComboboxSelected>>", lambda e: self.on_area())
         self.area_tip = Tooltip(self.area_box, tr("stir.area_tip"))
-        w = ttk.Label(row, text=tr("stir.reach_size"))
-        w.pack(side="left", padx=(8, 0))
-        Tooltip(w, tr("stir.reach_tip"))
-        self._number_box(row, "reach", LEAST_REACH, MOST_REACH, w)
-        ttk.Label(row, text="%").pack(side="left")
+        self._put("area", (1, word), (2, self.area_box),
+                  (3, self._cell(form, "reach", LEAST_REACH, MOST_REACH, "stir.reach_size", "stir.reach_tip", "%")))
         # (PLAN C1, user 11-04: unticked = the area keeps its own spot, a square on the piano roll; Turn / Twist
         # still go round the Centre point)
         self.tied = tk.BooleanVar(value=True)
-        self.tied_tick = ttk.Checkbutton(box, text=tr("stir.tied"), variable=self.tied, command=self.on_tied)
-        self.tied_tick.pack(anchor="w", pady=(4, 0))
+        self.tied_tick = ttk.Checkbutton(form, text=tr("stir.tied"), variable=self.tied, command=self.on_tied)
         Tooltip(self.tied_tick, tr("stir.tied_tip"))
-        row = ttk.Frame(box)  # (the own spot as numbers too, user 11-04)
-        row.pack(anchor="w", padx=(20, 0), pady=(2, 0))
-        word = ttk.Label(row, text=tr("stir.spot"))
-        word.pack(side="left")
+        self._put("area", (1, self.tied_tick, 4))
+        word = ttk.Label(form, text=tr("stir.spot"))  # (the own spot as numbers too, user 11-04)
         Tooltip(word, tr("stir.spot_tip"))
-        for k, name in enumerate(("across", "up")):
-            w = ttk.Label(row, text=tr("shares.centre_" + name))
-            w.pack(side="left", padx=(6, 0))
-            self._number_box(row, "spot" + str(k), SPOT_LEAST, SPOT_MOST, w)
-            ttk.Label(row, text="%").pack(side="left")
+        self._put("area", (1, word), (2, self._pair(form, "spot", SPOT_LEAST, SPOT_MOST)),
+                  (3, self._pair(form, "spot", SPOT_LEAST, SPOT_MOST, 1)))
         # (BMC tester's round 3 answers 11-04: a hard edge, what the area limits, the tracks' order reversed inside)
         self.area_ticks = {}
-        row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(4, 0))
-        for key in ("hard", "reverse"):
-            self._area_tick(row, key, False, tr(f"stir.{key}_tip")).pack(side="left", padx=(0, 10))
-        row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(2, 0))
-        w = ttk.Label(row, text=tr("stir.affects"))
-        w.pack(side="left")
-        Tooltip(w, tr("stir.affects_tip"))
-        for key in ("area_turn", "area_twist", "area_squeeze"):
-            self._area_tick(row, key, True, tr("stir.affects_tip")).pack(side="left", padx=(6, 0))
+        self._put("area", (1, self._area_tick(form, "hard", False, tr("stir.hard_tip")), 4))
+        word = ttk.Label(form, text=tr("stir.affects"))
+        Tooltip(word, tr("stir.affects_tip"))
+        self._put("area", (1, word), *((c, self._area_tick(form, key, True, tr("stir.affects_tip")))
+                                       for c, key in ((2, "area_turn"), (3, "area_twist"), (4, "area_squeeze"))))
         # (proportion, user's own idea 11-04: the area round as the piano roll shows it when ticked, + Stretch;
         # the spin round as seen too)
-        row = ttk.Frame(box)
-        row.pack(anchor="w", pady=(4, 0))
         self.rounds = {}
-        for key, parent in (("round", row), ("spin", box)):
+        for key in ("round", "spin"):
             var = tk.BooleanVar(value=False)
-            tick = ttk.Checkbutton(parent, text=tr("stir." + key), variable=var,
+            tick = ttk.Checkbutton(form, text=tr("stir." + key), variable=var,
                                    command=lambda key=key: self.on_round(key))
             Tooltip(tick, tr(f"stir.{key}_tip"))
             self.rounds[key] = (var, tick)
-            if key == "round":
-                tick.pack(side="left")
-                w = ttk.Label(row, text=tr("stir.stretch"))
-                w.pack(side="left", padx=(8, 0))
-                Tooltip(w, tr("stir.stretch_tip"))
-                self._number_box(row, "stretch", LEAST_STRETCH, MOST_STRETCH, w)
-                ttk.Label(row, text="%").pack(side="left")
-                w = ttk.Label(row, text=tr("stir.angle"))  # (the area box turned, PLAN C2b)
-                w.pack(side="left", padx=(8, 0))
-                Tooltip(w, tr("stir.angle_tip"))
-                self._number_box(row, "tilt", -360, 360, w)
-                ttk.Label(row, text="°").pack(side="left")
-            else:
-                tick.pack(anchor="w", pady=(4, 0))
+        self._put("area", (1, self.rounds["round"][1]),
+                  (2, self._cell(form, "stretch", LEAST_STRETCH, MOST_STRETCH, "stir.stretch", "stir.stretch_tip", "%")),
+                  (3, self._cell(form, "tilt", -360, 360, "stir.angle", "stir.angle_tip", "°")))  # (PLAN C2b)
+        self._put("area", (1, self.rounds["spin"][1], 4))
         # (user 11-04: a button takes the piano roll's look again, for both ticks; zoom alone never does)
-        row = ttk.Frame(box)
-        row.pack(anchor="w", fill="x", padx=(20, 0), pady=(4, 0))
-        self.match = ttk.Button(row, text=tr("stir.match"), command=self.on_match)
-        self.match.pack(side="left")
+        self.match = ttk.Button(form, text=tr("stir.match"), command=self.on_match)
         Tooltip(self.match, tr("stir.match_tip"))
-        self.to_shape = ttk.Button(row, text=tr("stir.to_shape"), command=self.on_to_shape)  # (user 11-04)
-        self.to_shape.pack(side="right")
+        self.to_shape = ttk.Button(form, text=tr("stir.to_shape"), command=self.on_to_shape)  # (user 11-04)
         Tooltip(self.to_shape, tr("stir.to_shape_tip"))
-        row = ttk.Frame(box)  # (colour flips at this stir's step, BMC tester 11-04: notes stay, colours mirrored)
-        row.pack(anchor="w", pady=(4, 0))
-        w = ttk.Label(row, text=tr("stir.flip"))
-        w.pack(side="left")
-        Tooltip(w, tr("stir.flip_tip"))
+        self._put("area", (1, self.match), (2, self.to_shape, 3))
+        # ---- Flip and reverse (colour flips at this stir's step, BMC tester 11-04: notes stay, colours mirrored)
+        self._part("flips")
+        word = ttk.Label(form, text=tr("stir.flip"))
+        Tooltip(word, tr("stir.flip_tip"))
         self.flips = {}
         for key in ("flip_side", "flip_up"):
             var = tk.BooleanVar(value=False)
-            tick = ttk.Checkbutton(row, text=tr("stir." + key), variable=var,
+            tick = ttk.Checkbutton(form, text=tr("stir." + key), variable=var,
                                    command=lambda key=key: self.on_flip(key))
-            tick.pack(side="left", padx=(6, 0))
             Tooltip(tick, tr("stir.flip_tip"))
             self.flips[key] = (var, tick)
-        w = ttk.Label(row, text=tr("stir.flip_in"))
-        w.pack(side="left", padx=(6, 0))
-        names = [tr("stir.flip_in_" + c) for c in FLIP_IN]
-        cb = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 1)
-        cb.pack(side="left", padx=(4, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: self.on_pick("flip_in"))
-        Tooltip(w, tr("stir.flip_in_tip"))
-        self.flip_in = {"row": row, "box": cb, "tip": Tooltip(cb, tr("stir.flip_in_tip")), "choices": FLIP_IN}
-        # (a user's feedback 2026-11-02, recolour.stir_from / stirred; Colour sets only while a shape has 2+ sets)
-        self.picks = {}  # key -> {row, box, tip, choices}
-        for key, choices in (("edge", STIR_EDGES), ("sets", STIR_SETS)):
-            if key == "edge":  # (beside the knobs, where the user's picture asked: name over the dropdown)
-                row = ttk.Frame(knobs)
-                row.pack(side="left", anchor="n")
-                side, pad = "top", (4, 0)
-            else:
-                row = ttk.Frame(box)
-                side, pad = "left", (5, 0)
-            word = ttk.Label(row, text=tr(f"stir.{key}"))
-            word.pack(side=side, anchor="w")
-            names = [tr(f"stir.{key}_{c}") for c in choices]
-            cb = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 1)
-            if side == "top":
-                cb.pack(side=side, anchor="w", pady=pad)
-            else:
-                cb.pack(side=side, anchor="w", padx=pad)
-            cb.bind("<<ComboboxSelected>>", lambda e, key=key: self.on_pick(key))
-            Tooltip(word, tr(f"stir.{key}_tip"))
-            self.picks[key] = {"row": row, "box": cb, "tip": Tooltip(cb, tr(f"stir.{key}_tip")), "choices": choices}
-        self.picks["flip_in"] = self.flip_in
+        self._put("flips", (1, word), (2, self.flips["flip_side"][1]), (3, self.flips["flip_up"][1]))
+        word = ttk.Label(form, text=tr("stir.flip_in"))
+        self._put("flips", (1, word), (2, self._pick(form, "flip_in", FLIP_IN, word), 3))
+        self.flip_in = self.picks["flip_in"]
+        self._put("flips", (1, self._area_tick(form, "reverse", False, tr("stir.reverse_tip")), 4))
         self.hint = ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
@@ -315,6 +265,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(self.reset, tr("stir.reset_tip"))
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
+        self.fix_columns()
         self.sync()
         self.update_idletasks()
         x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
@@ -334,15 +285,150 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.area_ticks[key] = (var, tick)
         return tick
 
+    def _put(self, part, *cells, pady=4):
+        """One row of the window's grid: cells = (column, widget[, columns it spans]); part = the fold-away part it
+        belongs to (None = always shown)."""
+        r = self.grid_row
+        self.grid_row += 1
+        for cell in cells:
+            col, w, span = (cell + (1,))[:3]
+            w.grid(row=r, column=col, columnspan=span, sticky="w", pady=(pady, 0),
+                   padx=(0, self.gap if col + span < 5 else 0))
+            if part:
+                self.parts[part]["rows"].append(w)
+
+    def _part(self, name):
+        """A fold-away part's header: a line across, then ▶ / ▼ + its name + (folded) a grey line of what it's set
+        to; a click anywhere on it folds / unfolds (remembered, autosave)."""
+        line = ttk.Separator(self.form)
+        line.grid(row=self.grid_row, column=0, columnspan=5, sticky="ew", pady=(10, 0))
+        self.grid_row += 1
+        # (the arrow in a spot of its own: ▶ and ▼ differ in width, the name must not jump; the grey line right
+        # after the name, cut with "…" + a tip if long: it never makes the window wider)
+        head = ttk.Frame(self.form, cursor="hand2")
+        head.grid(row=self.grid_row, column=1, columnspan=4, sticky="ew", pady=(6, 0))
+        self.grid_row += 1
+        arrow = ttk.Label(head, width=2, cursor="hand2")
+        arrow.pack(side="left")
+        word = ttk.Label(head, text=tr("stir.part_" + name), font=look.font(9, "bold"), cursor="hand2")
+        word.pack(side="left")
+        short = ShortLabel(head, foreground=look.HINT, cursor="hand2")
+        short.pack(side="left", fill="x", expand=True, padx=(self.gap, 0))
+        for w in (head, arrow, word, short):
+            Tooltip(w, tr("stir.fold_tip"))
+            w.bind("<Button-1>", lambda e: self.on_fold(name))
+        self.parts[name] = {"rows": [], "arrow": arrow, "short": short}
+
+    def on_fold(self, name):
+        self.take_typing()
+        self.app.stir_open ^= {name}
+        self.sync()
+
+    def _pick(self, parent, key, choices, word):
+        """A dropdown of choices for stir setting key (not placed yet), word = its name beside it."""
+        names = [tr(f"stir.{key}_{c}") for c in choices]
+        cb = ttk.Combobox(parent, values=names, state="readonly", width=max(len(n) for n in names) + 1)
+        cb.bind("<<ComboboxSelected>>", lambda e: self.on_pick(key))
+        Tooltip(word, tr(f"stir.{key}_tip"))
+        self.picks[key] = {"word": word, "box": cb, "tip": Tooltip(cb, tr(f"stir.{key}_tip")), "choices": choices}
+        return cb
+
+    def _pair(self, parent, name, lo, hi, k=0):
+        """One side of a spot (k 0 = across, 1 = up) as a word + a % box: number box name + k."""
+        cell = ttk.Frame(parent)
+        w = ttk.Label(cell, text=tr("shares.centre_" + ("across", "up")[k]))
+        w.pack(side="left")
+        self._number_box(cell, name + str(k), lo, hi, w)
+        ttk.Label(cell, text="%").pack(side="left")
+        return cell
+
+    def _cell(self, parent, name, lo, hi, word, tip, unit):
+        """A word + number box name + its unit, in one cell of the grid."""
+        cell = ttk.Frame(parent)
+        w = ttk.Label(cell, text=tr(word))
+        w.pack(side="left")
+        Tooltip(w, tr(tip))
+        self._number_box(cell, name, lo, hi, w)
+        ttk.Label(cell, text=unit).pack(side="left")
+        return cell
+
+    def fix_columns(self):
+        """Every column keeps the width it needs with every part shown (user 2026-11-05: nothing may move sideways
+        when a part opens or folds); the lines under the grid wrap at its width."""
+        form = self.form
+        for part in self.parts.values():
+            for w in part["rows"]:
+                grid_shown(w, True)
+        for w in self.sets_row:
+            grid_shown(w, True)
+        form.update_idletasks()
+        for c in range(5):
+            form.columnconfigure(c, minsize=form.grid_bbox(c, 0, c, self.grid_row - 1)[2])
+        form.columnconfigure(4, weight=1)
+        width = max(form.winfo_reqwidth(), int(300 * self.app.scale))
+        for w in (self.hint, self.warn, self.draw_text):
+            w.config(wraplength=width)
+
+    def sync_parts(self, sts, areas):
+        """The fold-away parts shown or folded; folded, the grey line says what the part is set to."""
+        app, mixed = self.app, tr("widgets.mixed")
+        for name, p in self.parts.items():
+            shown = name in app.stir_open
+            if p["arrow"].cget("text") != ("▼" if shown else "▶"):
+                p["arrow"].config(text="▼" if shown else "▶")
+            for w in p["rows"]:
+                grid_shown(w, shown)
+            if shown == bool(p["short"].winfo_manager()):
+                if shown:
+                    p["short"].pack_forget()
+                else:
+                    p["short"].pack(side="left", fill="x", expand=True, padx=(self.gap, 0))
+
+        def every(key, among):
+            return bool(among) and all(s[key] for s in among)
+
+        texts = {"area": "", "flips": ""}
+        if sts:
+            name = self.area_box.get()
+            sizes = {s["reach"] for s in areas}
+            words = [tr("stir.short_size", name=name, size=fmt(next(iter(sizes))))
+                     if areas and len(sizes) == 1 and name != mixed else name]
+            if every("spot", areas):
+                words.append(tr("stir.short_spot"))
+            for key in ("hard", "round"):
+                if every(key, areas):
+                    words.append(tr("stir.short_" + key))
+            if every("spin", sts):
+                words.append(tr("stir.short_spin"))
+            texts["area"] = ", ".join(words)
+            sides = {(s["flip_side"], s["flip_up"]) for s in sts}
+            words = []
+            if len(sides) > 1:
+                words.append(mixed)
+            elif sides != {(False, False)}:
+                side, up = next(iter(sides))
+                words.append(tr("stir.short_both" if side and up else "stir.short_side" if side else "stir.short_up"))
+                where = {s["flip_in"] for s in areas}
+                if len(where) == 1 and where != {"whole"}:
+                    words.append(tr("stir.short_" + next(iter(where))))
+            if every("reverse", areas):
+                words.append(tr("stir.short_reverse"))
+            text = ", ".join(words) or tr("stir.short_off")
+            texts["flips"] = text[:1].upper() + text[1:]
+        for name, p in self.parts.items():
+            if p["short"].cget("text") != texts[name]:
+                p["short"].config(text=texts[name])
+
     def on_area_tick(self, key):
         self.wheel = None
         self.set_stir(key, bool(self.area_ticks[key][0].get()))
         self.sync()
 
-    def _number_box(self, parent, name, lo, hi, word, width=7):
+    def _number_box(self, parent, name, lo, hi, word, width=7, alone=False):
+        """A number box (text centred, user 11-05); alone = under a knob, no word beside it."""
         var = tk.StringVar()
-        e = ttk.Entry(parent, textvariable=var, width=width, justify="right")
-        e.pack(side="left", padx=(4, 1))
+        e = ttk.Entry(parent, textvariable=var, width=width, justify="center")
+        e.pack(side="left", padx=0 if alone else (4, 1))
         self.boxes[name] = {"var": var, "entry": e, "shown": "", "lo": lo, "hi": hi}
         e.bind("<Return>", lambda ev: self.on_box(name))
         e.bind("<FocusOut>", lambda ev: self.on_box(name))
@@ -559,13 +645,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             var.set(vals == {True})
             tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if on else "disabled"])
         self.middle.state(["!disabled" if on and any(s["centre"] != [50.0, 50.0] for s in sts) else "disabled"])
-        many =any(len(app.colour_owns(t)) > 1 for t in tgts)
-        row = self.picks["sets"]["row"]
-        if many != bool(row.winfo_manager()):
-            if many:
-                row.pack(anchor="w", pady=(6, 0), before=self.hint)
-            else:
-                row.pack_forget()
+        many = any(len(app.colour_owns(t)) > 1 for t in tgts)
+        for w in self.sets_row:
+            grid_shown(w, many)
+        self.sync_parts(sts, areas)
         self.reset.state(["!disabled" if on and any(s != full_stir(None) for s in sts) else "disabled"])
         d = self.drawing
         if d and d["pick"] and app.sels:  # (a shape clicked while picking: its outline = the area; a selection

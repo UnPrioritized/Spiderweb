@@ -629,6 +629,7 @@ class ProjectFiles:
                               "velocity": self.show_velocity.get(), "history": self.show_history.get(),
                               "show_lines": self.show_lines.get(), "show_notes": self.show_notes.get(),
                               "channels_folded": self.channels_folded.get(),
+                              "stir_open": sorted(self.stir_open),
                               "velocity_height": self.velocity_height() / self.scale,
                               "tempo": self.show_tempo.get(), "tempo_height": self.tempo_height() / self.scale,
                               "tempo_view": list(self.tempo_pane.view) if self.tempo_pane.view else None,
@@ -803,6 +804,8 @@ class ProjectFiles:
             self.show_lines.set(win.get("show_lines") is not False)
             self.show_notes.set(win.get("show_notes") is not False)
             self.channels_folded.set(win.get("channels_folded") is True)
+            got = win.get("stir_open")
+            self.stir_open = {p for p in got if p in ("area", "flips")} if isinstance(got, list) else set()
         kept(ticks)
 
         def places():
