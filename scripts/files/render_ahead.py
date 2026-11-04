@@ -24,6 +24,9 @@ BASS_VOICES = (1, 100000)  # (BASSMIDI's voice limit, as Built-in's)
 DEFAULTS = {"voices": 1 << 20,  # (Kestrel's own default: making ahead can afford more than live play's 300k)
             "block": 4096, "interpolation": 1, "min_velocity": 0,
             "limiter": 2, "ceiling_db": 0.0,  # (Spiderweb's own limiter over the joined pieces: Balanced first)
+            # (user 2026-11-04, ON: a 15 Hz high-pass ahead of that limiter, as Kestrel's: a dense wall's end was nearly
+            # all DC, the limiter pulled the music down with it)
+            "dc_blocker": True,
             "bass_voices": 1000, "lower": False,
             # (user 2026-11-03: speed over exactness: Merlin makes what it can't do exactly yet too (CC lines, a
             # loaded MIDI's controllers); ticked = those go to Kestrel by itself, as before. Several soundfonts go to
@@ -32,13 +35,14 @@ DEFAULTS = {"voices": 1 << 20,  # (Kestrel's own default: making ahead can affor
             # (M2, user 2026-11-03, ON at first: stopped, the play line rested REST_S = made from there, so a heavy
             # song can be waited out before Play)
             "while_stopped": True}
-BOOLS = ("lower", "exact", "while_stopped")  # (ticks: True / False)
+BOOLS = ("lower", "exact", "while_stopped", "dc_blocker")  # (ticks: True / False)
 REST_S = 0.5  # seconds the play line / notes rest before making starts while stopped
 # rows shown for each engine ("card" = the shared one; Merlin reads neither Max voices nor Interpolation, and
 # can't skip quiet notes yet: those pieces would go to Kestrel)
-ROWS = {"merlin": ("exact", "card", "block", "limiter", "ceiling_db"),
-        "kestrel": ("card", "voices", "lower", "block", "interpolation", "min_velocity", "limiter", "ceiling_db"),
-        "bassmidi": ("bass_voices", "lower", "limiter", "ceiling_db")}
+ROWS = {"merlin": ("exact", "card", "block", "limiter", "ceiling_db", "dc_blocker"),
+        "kestrel": ("card", "voices", "lower", "block", "interpolation", "min_velocity", "limiter", "ceiling_db",
+                    "dc_blocker"),
+        "bassmidi": ("bass_voices", "lower", "limiter", "ceiling_db", "dc_blocker")}
 
 
 def check_opt(key, value):

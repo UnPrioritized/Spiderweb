@@ -798,6 +798,29 @@ LIM_TOP = 2 * LIM_SLOTS  # (_LIM_ALL: handles, then loudness, then each slot's r
 LIM_ALL = LIM_TOP + LIM_SLOTS * LIM_SIZE
 _LIM_ALL = np.zeros(LIM_ALL)  # (never freed: BASS's threads read it)
 _lim_lock = threading.Lock()
+DC_HZ = 15.0  # DC blocker (Rendered ahead): a high-pass this low, as Kestrel's --dc-blocker
+
+
+def dc_coefficients(hz=DC_HZ):
+    """The RBJ cookbook's 2nd-order high-pass at Q = 1/sqrt(2) (Kestrel's DcBlocker): b0, b1, b2, a1, a2."""
+    w0 = 2 * math.pi * hz / RATE
+    sin, cos = math.sin(w0), math.cos(w0)
+    alpha = sin / math.sqrt(2)
+    a0 = 1 + alpha
+    return np.array([(1 + cos) / 2 / a0, -(1 + cos) / a0, (1 + cos) / 2 / a0, -2 * cos / a0, (1 - alpha) / a0])
+
+
+def dc_block(x, c, z):
+    """x (frames, 2) float32 high-passed in place: c = dc_coefficients(), z = (2, 2) float64 state (z1, z2 a
+    channel), kept between calls. Compiled: fastloops.dc_block."""
+    b0, b1, b2, a1, a2 = c[0], c[1], c[2], c[3], c[4]
+    for i in range(x.shape[0]):
+        for ch in range(2):
+            s = np.float64(x[i, ch])
+            y = b0 * s + z[ch, 0]
+            z[ch, 0] = b1 * s - a1 * y + z[ch, 1]
+            z[ch, 1] = b2 * s - a2 * y
+            x[i, ch] = y
 
 
 def limit_state():

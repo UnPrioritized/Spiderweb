@@ -50,6 +50,8 @@ Settings (Help menu) → Sound, while Rendered ahead is picked:
 
 • Limiter: keeps very loud parts from clipping, over the whole sound (no jumps where pieces meet). Balanced first evens out long loud parts a little, then catches the peaks; Brickwall only catches the peaks; Off lets them clip. Ceiling = the loudest it lets through, in dB.
 
+• DC blocker (on at first): takes out the slow drift away from the middle that millions of stacked notes add up to, before the limiter. Without it the limiter turns the music down along with that drift: a dense wall's end then sounds dull, with a noisy tail after it.
+
 Render ahead, Slow down to keep up and Lower it by itself work at once, even while playing. The Engine and the other settings are used from the next Play.
 
 ## Also

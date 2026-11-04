@@ -42,6 +42,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   piece_runs_sort, piece_runs_merge, piece_counted_track, piece_order_ok, piece_open_at   midi_piece's (Merlin pieces' counted
                  notes, PLAN D2)
   all_tops       track_list.loaded_tops: a loaded MIDI's tracks in the track list's All tracks row
+  dc_block       synth.dc_block (Rendered ahead's DC blocker, ahead of its limiter)
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
 
@@ -55,6 +56,7 @@ from numba.core import caching
 from numba.typed import List
 
 from files import midi_index as _index, midi_piece, midi_play, midi_scan
+from files.synth import dc_block as _dc_block
 from files.synth import (LIM_ALL, LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD,
                          LIM_MIX, LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_SLOTS, LIM_STEP, LIM_TOP)
 
@@ -1797,6 +1799,7 @@ piece_runs_merge = njit(cache=CACHE, nogil=True)(midi_piece.runs_merge)
 piece_counted_track = njit(cache=CACHE, nogil=True)(midi_piece.counted_track)
 piece_order_ok = njit(cache=CACHE, nogil=True)(midi_piece.order_ok)
 piece_open_at = njit(cache=CACHE, nogil=True)(midi_piece.open_at)
+dc_block = njit(cache=CACHE, nogil=True)(_dc_block)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -2001,6 +2004,7 @@ def warm():
     piece_counted_track(rk, rs, rc, 2, 0, 0, np.zeros(96, np.uint8))
     piece_order_ok(rk, rs, rc, 2, np.zeros(256, np.uint8))
     piece_open_at(rk, rs, rc, 2, 1 << 40, 1 << 30, np.zeros(2, np.int64))
+    dc_block(np.zeros((4, 2), np.float32), np.ones(5), np.zeros((2, 2)))
     piece_held_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0, q, q.copy(),
                    np.zeros(1, np.int64), np.zeros(1, np.int64), q.copy())
     piece_held_head(np.zeros(1, np.int64), np.zeros(1, np.int64), np.ones(1, np.int64), -1, 0, np.zeros(16, np.uint8))

@@ -65,6 +65,56 @@ def loaded_gap(lm):
     return None
 
 
+class DcCompiled:
+    """The DC blocker (synth.dc_block, Kestrel's 15 Hz high-pass) compiled: a frame at a time."""
+
+    def __init__(self, fn):
+        from files.synth import dc_coefficients
+        self.fn, self.c, self.z = fn, dc_coefficients(), np.zeros((2, 2))
+
+    def process(self, x):
+        x = np.array(x, np.float32)  # (its own copy, filtered in place)
+        self.fn(x, self.c, self.z)
+        return x
+
+
+class DcNumpy:
+    """The same filter without Numba, a CHUNK at a time: its two poles are a conjugate pair p, p*, so the recursive
+    part is 2 Re(A v) with v[n] = p v[n-1] + x[n] (A = p / (p - p*)), and v over a chunk = p^k (p v_before +
+    cumsum(x p^-j)) (|p|^-CHUNK stays near 2); then b0 w + b1 w[-1] + b2 w[-2]. Matches the compiled one to ~1e-9."""
+    CHUNK = 512
+
+    def __init__(self):
+        from files.synth import dc_coefficients
+        b0, b1, b2, a1, a2 = dc_coefficients()
+        self.b = (b0, b1, b2)
+        p = complex(-a1 / 2, math.sqrt(max(0.0, a2 - a1 * a1 / 4)))
+        self.p, self.A = p, p / (p - p.conjugate())
+        k = np.arange(self.CHUNK)
+        self.pk, self.pinv = p ** (k + 1), p ** -k.astype(np.float64)
+        self.v = np.zeros(2, complex)
+        self.w1, self.w2 = np.zeros(2), np.zeros(2)  # (w a frame and two frames back)
+
+    def process(self, x):
+        x = np.asarray(x, np.float64)
+        out = np.empty((len(x), 2), np.float32)
+        b0, b1, b2 = self.b
+        for a in range(0, len(x), self.CHUNK):
+            c = x[a:a + self.CHUNK]
+            n = len(c)
+            # v[a + k] = p^(k+1) v_before + sum_j<=k p^(k-j) x_j = p^k (p v_before + cumsum(x p^-j))
+            s = np.cumsum(c * self.pinv[:n, None], axis=0)
+            v = (self.pk[:n, None] / self.p) * (self.p * self.v[None, :] + s)
+            w = 2 * (self.A * v).real
+            w_1 = np.concatenate([self.w1[None, :], w[:-1]])
+            w_2 = np.concatenate([self.w2[None, :], self.w1[None, :], w[:-2]])[:n]
+            out[a:a + n] = b0 * w + b1 * w_1 + b2 * w_2
+            self.v = v[-1]
+            self.w2 = w[-2] if n > 1 else self.w1
+            self.w1 = w[-1]
+        return out
+
+
 class AheadLimiter:
     """Keeps the joined sound under the ceiling (looking one block ahead, nothing gets through). Brickwall comes back
     up quickly (FAST s), Balanced slowly (SLOW s: less pulling at low notes). Both HOLD the gain HOLD_S first. Off =
@@ -73,8 +123,16 @@ class AheadLimiter:
     DELAY = 2 * BLOCK
     FAST, SLOW, HOLD_S = 0.05, 0.3, 0.02
 
-    def __init__(self, mode=2, ceiling_db=0.0):
+    def __init__(self, mode=2, ceiling_db=0.0, dc=True):
         self.mode = mode
+        # (DC blocker ahead of it, user 2026-11-04: Shinki's wall end is nearly all DC (117 dB of 117.5 dB), the
+        # limiter pulled everything down with it: a dark dip before the end, a noisy tail after)
+        self.dc = None
+        if dc:
+            from files import speed
+            fast = speed.loops()
+            # (picked once: the two keep their own states, switching mid-song would click)
+            self.dc = DcCompiled(fast.dc_block) if fast is not None else DcNumpy()
         self.top = 10 ** (ceiling_db / 20)
         self.inp = np.zeros((self.BLOCK, 2), np.float32)
         self.out = [np.zeros((self.BLOCK, 2), np.float32)]
@@ -84,6 +142,8 @@ class AheadLimiter:
         self.hold = max(1, int(self.HOLD_S * RATE / self.BLOCK))
 
     def process(self, x):
+        if self.dc is not None and len(x):
+            x = self.dc.process(x)
         if self.mode == 0:  # (Off: as it is, the same delay so the play line's sums stay right)
             inp = self.inp = np.concatenate([self.inp, x])
             out, self.inp = inp[:len(x)], inp[len(x):]
@@ -159,7 +219,8 @@ class AheadPlay:
     def _want_key(self, engine):
         from window.hz_preview import font_list
         app = self.app
-        opts = {k: v for k, v in app.ahead_opts.items() if k not in ("lower", "limiter", "ceiling_db", "while_stopped")}
+        opts = {k: v for k, v in app.ahead_opts.items() if k not in ("lower", "limiter", "ceiling_db", "while_stopped",
+                                                                   "dc_blocker")}
         return engine, tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)), app.kestrel_opts.get("card", "")
 
     def engine_for(self, ccs):
@@ -276,7 +337,8 @@ class AheadPlay:
         from files.render_ahead import take_opts
         o = take_opts(self.app.ahead_opts)
         try:
-            self.audio = Player(self.app.synth, self.pull, 1.0, limiter=AheadLimiter(o["limiter"], o["ceiling_db"]))
+            self.audio = Player(self.app.synth, self.pull, 1.0, limiter=AheadLimiter(o["limiter"], o["ceiling_db"],
+                                                                                    o["dc_blocker"]))
         except SynthError as e:
             self.audio = None
             return str(e)

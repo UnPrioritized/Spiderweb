@@ -286,6 +286,14 @@ class BuiltinPanel(ttk.Frame):
         keyed("ceiling_db", lambda r: self.number_row(r, "ceiling_db", "ks.ceiling", (-24.0, 0.0),
                                                       unit=tr("ks.ceiling_unit"), steps=(0.5, 3, 0.1), ahead=True,
                                                       tip="ks.ceiling_tip"))
+
+        def dc_row(r):  # (user 2026-11-04: beside its limiter, as Kestrel's own)
+            c = ttk.Checkbutton(box, text=tr("ks.dc"), variable=app.ahead_vars["dc_blocker"],
+                                command=lambda: app.on_ahead_opt("dc_blocker"), takefocus=False)
+            c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+            Tooltip(c, tr("ks.dc_tip"))
+            return r + 1
+        keyed("dc_blocker", dc_row)
         self.a_rows = [w for w in box.grid_slaves() if w not in before]
         return r
 

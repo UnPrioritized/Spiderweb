@@ -140,6 +140,7 @@ APP_KEYS = {
     "ahead_lower": ("sound", "rendered_ahead_lower_by_itself", bool),
     "ahead_exact": ("sound", "rendered_ahead_kestrel_where_merlin_not_exact", bool),
     "ahead_while_stopped": ("sound", "rendered_ahead_make_while_stopped", bool),
+    "ahead_dc_blocker": ("sound", "rendered_ahead_dc_blocker", bool),
     "soundfont": ("sound", "soundfont", str),  # (the Hz bass preview's "font": shared with Built-in BASSMIDI)
     "more_soundfonts": ("sound", "more_soundfonts", PATHS),  # (the ones under it in the list, user 2026-10-25)
     "hz_on": ("hz_preview", "on", bool),
