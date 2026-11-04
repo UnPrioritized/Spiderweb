@@ -152,7 +152,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
         self.reach_last = 50.0  # (the size picking an area brings back: the last one shown)
-        self.area_last = {"round": False, "stretch": 100.0, "seen": None, "spot": None}  # (likewise, hunt 11-04)
+        self.area_last = {"round": False, "stretch": 100.0, "seen": None, "spot": None, "tilt": 0.0,
+                          "skew": 0.0}  # (likewise, hunt 11-04)
         w = ttk.Label(row, text=tr("stir.area"))
         w.pack(side="left")
         Tooltip(w, tr("stir.area_tip"))
@@ -196,6 +197,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 Tooltip(w, tr("stir.stretch_tip"))
                 self._number_box(row, "stretch", LEAST_STRETCH, MOST_STRETCH, w)
                 ttk.Label(row, text="%").pack(side="left")
+                w = ttk.Label(row, text=tr("stir.angle"))  # (the area box turned, PLAN C2b)
+                w.pack(side="left", padx=(8, 0))
+                Tooltip(w, tr("stir.angle_tip"))
+                self._number_box(row, "tilt", -360, 360, w)
+                ttk.Label(row, text="°").pack(side="left")
             else:
                 tick.pack(anchor="w", pady=(4, 0))
         # (user 11-04: a button takes the piano roll's look again, for both ticks; zoom alone never does)
@@ -394,11 +400,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         b["shown"] = text
         b["entry"].config(state="normal" if on and sizes else "disabled")
         areas = [s for s in sts if s["reach"] is not None]  # (Round as seen + Stretch: only with an area)
-        looks = {(s["round"], s["stretch"], s["seen"] if s["round"] else None, tuple(s["spot"] or ()))
-                 for s in areas}
+        looks = {(s["round"], s["stretch"], s["seen"] if s["round"] else None, tuple(s["spot"] or ()), s["tilt"],
+                  s["skew"]) for s in areas}
         if len(looks) == 1:  # (what picking an area again brings back)
-            r, w, v, p = next(iter(looks))
-            self.area_last = {"round": r, "stretch": w, "seen": v, "spot": list(p) or None}
+            r, w, v, p, t, k = next(iter(looks))
+            self.area_last = {"round": r, "stretch": w, "seen": v, "spot": list(p) or None, "tilt": t, "skew": k}
         tied = {s["spot"] is None for s in areas}
         self.tied.set(tied != {False})
         self.tied_tick.state(["alternate" if len(tied) > 1 else "!alternate",
@@ -410,13 +416,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if live else "disabled"])
         self.match.state(["!disabled" if on and any(s["spin"] or (s["round"] and s["reach"] is not None)
                                                     for s in sts) else "disabled"])
-        b = self.boxes["stretch"]
-        vals = {s["stretch"] for s in areas}
-        text = fmt(next(iter(vals))) if len(vals) == 1 else "" if vals else fmt(100)
-        if self.focus_get() is not b["entry"] or b["var"].get() == b["shown"]:
-            b["var"].set(text)
-        b["shown"] = text
-        b["entry"].config(state="normal" if on and areas else "disabled")
+        for key, empty in (("stretch", 100), ("tilt", 0)):
+            b = self.boxes[key]
+            vals = {s[key] for s in areas}
+            text = fmt(next(iter(vals))) if len(vals) == 1 else "" if vals else fmt(empty)
+            if self.focus_get() is not b["entry"] or b["var"].get() == b["shown"]:
+                b["var"].set(text)
+            b["shown"] = text
+            b["entry"].config(state="normal" if on and areas else "disabled")
         squeezes = {s["squeeze"] for s in sts}
         self.squeeze.set(squeezes != {False})
         self.squeeze_tick.state(["alternate" if len(squeezes) > 1 else "!alternate",
@@ -474,6 +481,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                         last = self.area_last
                         st["stretch"] = last["stretch"]
                         st["spot"] = last["spot"]
+                        st["tilt"], st["skew"] = last.get("tilt", 0.0), last.get("skew", 0.0)
                         if last["round"] and last["seen"]:
                             st["round"] = True
                             if not st["spin"]:  # (a look already used by the spin tick stays)
@@ -491,7 +499,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 st[key] = value
             return st
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
-                "tied": lambda st: st["reach"] is not None,
+                "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
                 "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)
         self.fresh = False
         i = self.tab

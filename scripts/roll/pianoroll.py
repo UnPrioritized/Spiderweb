@@ -1850,6 +1850,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         app, tool = self.app, self.app.tool.get()
         if self.draft or hit and hit[0] != "inside":
             return name
+        area = self.area_box_hit(e) if tool == "select" and getattr(app, "stir_window", None) else None
+        if area:  # (a Stir area box's handle, PLAN C2b)
+            return self.area_cursor(area)
         if tool == "select" and (self.hit_shape(e.x, e.y, self.near_shapes(e.x, e.y)) is not None
                                  or self.note_owner(e.x, e.y) is not None):
             return "fleur"  # (as shape_at, without a mask found only by its area)

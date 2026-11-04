@@ -60,7 +60,11 @@ MOST_SEED = 2 ** 31 - 1
 # round (user picked "works either way"))
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
                  "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
-                 "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None}
+                 "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
+                 "tilt": 0.0, "skew": 0.0}
+# (tilt / skew: the area's box turned (degrees, counterclockwise as measured) / slanted (its top slid along by
+# this much of its height), PLAN C2b; only with a reach)
+MOST_SKEW = 10.0
 # (shape: area "drawn" = a library drawing's own copy (PLAN C2, user 11-04): {"name", "loops": [[[u, v], ...], ...]
 # its filled outline in its 0..1 box (v up), "aspect": its width / height as drawn}; Size = its box's width)
 # (spot: the area's own middle [% across, % up] when it doesn't move with the Centre point (PLAN C1, user 11-04:
@@ -210,6 +214,12 @@ def one_stir(s):
         p = s.get("spot")
         if isinstance(p, list) and len(p) == 2 and all(number(x) and 0 <= x <= 100 for x in p):
             out["spot"] = [round(float(x), 3) for x in p]
+        a = s.get("tilt")
+        if number(a) and abs(a) <= 360 and round(a, 3) % 360:
+            out["tilt"] = round(float(a), 3)
+        a = s.get("skew")
+        if number(a) and abs(a) <= MOST_SKEW and round(a, 4):
+            out["skew"] = round(float(a), 4)
     v = s.get("seen")
     if number(v) and 1e-9 < v < 1e9:
         if s.get("round") is True and "reach" in out:
@@ -686,7 +696,7 @@ def stir_from(at, rc, box, own):
     if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there; measured from the
         # area's own spot when it has one)
         ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
-        q = np.clip(area_q((x - ax) * kx / (reach / 200), (y - ay) * ky / (reach / 200), st), 0.0, 1.0)
+        q = np.clip(area_q(*area_local(x - ax, y - ay, st, (kx, ky)), st), 0.0, 1.0)
         w = 1 - q * q * (3 - 2 * q)
         if st["twist"]:
             turn = turn + st["twist"] * np.sqrt(q)
@@ -731,19 +741,73 @@ def area_dist(dx, dy, area):
 
 def area_scales(st, spot, ppq):
     """((kx, ky), (rx, ry)) for one stir (filled in): the colour box's across / up distances times these = the
-    area's own measure (area_dist; kx also takes Stretch), and the turn's (spin). spot(u, v) = (tick, key) of % of
+    area's own measure before its Angle / slant / Stretch (area_local), and the turn's (spin). spot(u, v) = (tick, key) of % of
     the colour box (numpy arrays). Without "seen" (or the PPQ): the box's own way, 1 / 1."""
-    s = st["stretch"] / 100
     c = st["seen"]
     if not c or not ppq or not (st["round"] or st["spin"]):
-        return (1 / s, 1.0), (1.0, 1.0)
+        return (1.0, 1.0), (1.0, 1.0)
     t, k = spot(np.array([0.0, 100.0, 0.0]), np.array([0.0, 0.0, 100.0]))
     lx = math.hypot((t[1] - t[0]) / ppq, (k[1] - k[0]) * c)  # (the box's sides as seen, in beats)
     ly = math.hypot((t[2] - t[0]) / ppq, (k[2] - k[0]) * c)
     big = max(lx, ly, 1e-12)
     lx, ly = max(lx, 1e-9 * big) / big, max(ly, 1e-9 * big) / big  # (a flat box: never 0)
-    area = (lx / s, ly) if st["round"] else (1 / s, 1.0)
+    area = (lx, ly) if st["round"] else (1.0, 1.0)
     return area, ((lx, ly) if st["spin"] else (1.0, 1.0))
+
+
+def area_local(dx, dy, st, k):
+    """(dx, dy) from the area's middle (the colour box 0..1 across / up) -> the area's own (X, Y) (its outline at
+    about 1: area_q): k = area_scales' (kx, ky), then the area's Angle (tilt) and slant (skew) undone, Stretch
+    along its own width (PLAN C2b; tilt 0 / skew 0 = exactly the old way)."""
+    r = st["reach"] / 200
+    X, Y = np.asarray(dx, np.float64) * k[0] / r, np.asarray(dy, np.float64) * k[1] / r
+    if st["tilt"]:
+        a = math.radians(st["tilt"])
+        X, Y = X * math.cos(a) + Y * math.sin(a), Y * math.cos(a) - X * math.sin(a)
+    if st["skew"]:
+        X = X - st["skew"] * Y
+    return X / (st["stretch"] / 100), Y
+
+
+def area_global(X, Y, st, k):
+    """area_local's way back: the area's own (X, Y) -> (dx, dy) from its middle, the colour box 0..1."""
+    X, Y = np.asarray(X, np.float64) * (st["stretch"] / 100), np.asarray(Y, np.float64)
+    if st["skew"]:
+        X = X + st["skew"] * Y
+    if st["tilt"]:
+        a = math.radians(st["tilt"])
+        X, Y = X * math.cos(a) - Y * math.sin(a), X * math.sin(a) + Y * math.cos(a)
+    r = st["reach"] / 200
+    return X * r / k[0], Y * r / k[1]
+
+
+def area_aspect(st):
+    """The area's width over its height before Stretch: a drawing's as drawn, else 1."""
+    return st["shape"]["aspect"] if st["area"] == DRAWN and st["shape"] else 1.0
+
+
+def area_corners(st, k):
+    """The area's box (filled in), as (dx, dy) from its middle in the colour box 0..1: its corners going round
+    from (-, -), (+, -), (+, +), (-, +) of its own (X, Y)."""
+    h = 1 / area_aspect(st)
+    return area_global(np.array([-1.0, 1.0, 1.0, -1.0]), np.array([-h, -h, h, h]), st, k)
+
+
+def area_from_box(st, p0, pu, pv, k):
+    """An area's settings for a box dragged on the piano roll (PLAN C2b: its corners (-, -), (+, -), (-, +) in % of
+    the colour box): {"middle" [% across, % up], "reach", "stretch", "tilt", "skew"}, or None (a box turned
+    inside out / flat)."""
+    p0, pu, pv = (np.asarray(p, np.float64) / 100 for p in (p0, pu, pv))
+    c1, c2 = (pu - p0) / 2 * k, (pv - p0) / 2 * k  # (half its width / height, measured the area's way)
+    tilt = math.atan2(c1[1], c1[0])
+    cw, sw = math.cos(tilt), math.sin(tilt)
+    wx, wy = c2[0] * cw + c2[1] * sw, c2[1] * cw - c2[0] * sw
+    r = wy * area_aspect(st)
+    if r <= 1e-9:
+        return None
+    middle = (pu + pv) / 2 * 100
+    return {"middle": [float(v) for v in middle], "reach": 200 * r, "stretch": 100 * math.hypot(*c1) / r,
+            "tilt": math.degrees(tilt), "skew": wx / wy}
 
 
 def area_outline(area, n):
