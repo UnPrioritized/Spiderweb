@@ -51,6 +51,8 @@ BYTES_A_SECOND = RATE * 2 * 4  # (made sound: stereo float32)
 MEMORY_SHARE = 0.25  # the made sound never takes more than this share of the free memory (less is made ahead)
 FREE_EVERY = 2.0  # seconds between asking the system for free memory
 GPU_WORKERS = 1  # Merlin / Kestrel pieces made at once (one graphics card)
+OVERLAP_WORKERS = 2  # ... a loaded MIDI's counted Merlin pieces: the next one's MIDI made while Merlin plays the one
+# before (CARD_LOCK keeps the card to one; PLAN E3: Shinki's 432 s, 10 s pieces = MIDI 10 s + Merlin 9 s in a row)
 CPU_WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))  # BASSMIDI pieces made at once (one core each)
 BUSY_MOST = 2  # a loaded MIDI's BASSMIDI pieces being made at once copy at most this many piece caps together
 # (BASSMIDI holds ~2x a piece's bytes, measured on a dense wall: a full 512 MB cap piece = +1 GB)
@@ -394,16 +396,21 @@ def _clean_old_pieces():
             pass
 
 
-def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=False):
+def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=False, built=None):
     """One piece on the card (card_piece's part): float32 (frames, 2), maybe shorter (silence at its end left out),
-    or None when cancelled. plain = never counted (a re-cut part, see card_piece)."""
+    or None when cancelled. plain = never counted (a re-cut part, see card_piece). built() = called once its MIDI is
+    made (the next piece may start making its own: Maker, PLAN E3)."""
     from files import kestrel
-    if not plain and engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
-        data, skip = song.midi(f0, f1, counted=True, cancel=cancel)  # (stacks of identical notes sent once, PLAN D2)
-        if cancel.is_set():  # (stopped during a lead-up, PLAN E)
-            return None
-    else:
-        data, skip = song.midi(f0, f1)
+    try:
+        if not plain and engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
+            data, skip = song.midi(f0, f1, counted=True, cancel=cancel)  # (stacks of identical notes sent once, D2)
+            if cancel.is_set():  # (stopped during a lead-up, PLAN E)
+                return None
+        else:
+            data, skip = song.midi(f0, f1)
+    finally:
+        if built is not None:
+            built()
     if data is None:  # (nothing sounds here: silence, no piece)
         return np.zeros((f1 - f0, 2), np.float32)
     with CARD_LOCK:
@@ -436,15 +443,17 @@ def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=F
             piece.close()
 
 
-def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None, piece_most=None, one=None):
+def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None, piece_most=None, one=None,
+               built=None):
     """(a piece's thread) Song frames f0 .. f1 made on the graphics card by "merlin" / "kestrel" with the soundfonts
     already there (kestrel.loaded_for: read once, kept); opts = App.ahead_opts. Returns (float32 (frames, 2) or None
     when cancelled, the frame the ring died away at when it did in this piece, else None). progress(0..1).
     piece_most = bytes a loaded MIDI's piece copies at most (Maker.piece_most): more = made in parts.
-    one(a, b, cancel, progress) = what makes one part instead of the card (BASSMIDI with a loaded MIDI, L4)."""
+    one(a, b, cancel, progress) = what makes one part instead of the card (BASSMIDI with a loaded MIDI, L4).
+    built() = called once the last part's MIDI is made (_card_one)."""
     if one is None:
         def on_card(a, b, c, p, plain=False):
-            return _card_one(song, engine, opts, fonts, card, a, b, c, p, plain)
+            return _card_one(song, engine, opts, fonts, card, a, b, c, p, plain, built if b == f1 else None)
 
         def one(a, b, c, p):
             from files.ahead_loaded import TooBigPlain
@@ -511,6 +520,8 @@ class _Job:
         self.took = 0.0
         self.lowered = False  # (made with a lowered voice limit)
         self.finished = False
+        self.built = threading.Event()  # (its MIDI made: the piece right after it may make its own, PLAN E3)
+        self.prev = None  # (the job right before it, still being made when it started)
 
 
 class Maker:
@@ -660,6 +671,8 @@ class Maker:
         if self.song is None or self.error:
             return changed
         most = GPU_WORKERS if self.engine in ("merlin", "kestrel") else CPU_WORKERS
+        if self.engine == "merlin" and getattr(self.song, "counted_here", lambda: False)():
+            most = OVERLAP_WORKERS  # (the next piece's MIDI made while Merlin plays this one: the card still one at a time)
         k = 0
         while k < len(want) and len(self.threads) < most:
             i = want[k]
@@ -694,6 +707,7 @@ class Maker:
             job.most = cap  # (a block still over it: made in parts, card_piece)
             job.lowered = self.lowered
             with self._lock:
+                job.prev = next((j for j in self.jobs if j.first + j.count == i and not j.finished), None)
                 self.jobs.append(job)
             t = threading.Thread(target=self._work, args=(job, self.song), daemon=True)
             t.start()
@@ -739,6 +753,11 @@ class Maker:
         started = time.perf_counter()
         f0 = job.first * BLOCK
         f1 = min((job.first + job.count) * BLOCK, max(self.span[1], f0 + 1))
+        prev = job.prev
+        job.prev = None  # (no chain of finished jobs kept)
+        while prev is not None and not (prev.built.is_set() or prev.finished or prev.cancel.is_set() or
+                                        job.cancel.is_set()):
+            prev.built.wait(0.05)  # (its MIDI first: it hands this piece the notes still sounding, PLAN E3)
         try:
             if self.engine == "bassmidi":
                 out = self._bass(job, song, f0, f1)
@@ -754,6 +773,7 @@ class Maker:
             if not isinstance(e, SynthError):
                 errors.write_log(type(e), e, e.__traceback__, "Rendered ahead piece")
         job.took = time.perf_counter() - started
+        job.built.set()
         job.finished = True
 
     def _bass(self, job, song, f0, f1):
@@ -781,7 +801,7 @@ class Maker:
 
     def _card(self, job, song, f0, f1):
         out, end = card_piece(song, self.engine, self.opts, self.fonts, self.card, f0, f1, job.cancel,
-                              lambda p: setattr(job, "progress", p), getattr(job, "most", None))
+                              lambda p: setattr(job, "progress", p), getattr(job, "most", None), built=job.built.set)
         job.end = end
         return out
 
