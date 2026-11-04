@@ -309,6 +309,9 @@ class AheadPlay:
         self.stop()
         self.idle_anchor, self._dirty, self._why_said = None, True, None
         if self.maker is not None:
+            lm = getattr(self.maker.song, "lm", None)
+            if lm is not None:  # (the hand-overs kept on the loaded MIDI let go too: up to ~600 MB, hunt 11-04)
+                lm._ahead_carries = None
             self.maker.close()
         self.maker, self.key = None, None
         try:  # (its grey goes at once: another MIDI out picked while making stopped left it, hunt 2026-11-03)
@@ -606,12 +609,11 @@ class AheadPlay:
         made = min(m.made_ahead(at), rest, ahead)
         if self.audio is not None and not self.started:  # (PLAN F, user: a loading sign at the first Play, as
             # Kestrel's live play says it starts: the play line waits for the soundfont on the card + START_S)
-            if m.engine in ("merlin", "kestrel"):
-                from files import kestrel
-                if kestrel.kept_for(m.fonts, m.card) is None:
-                    return tr("ra.starting_card")
+            if m.card_loading():  # (only while the soundfonts really go to the card, hunt 11-04)
+                return tr("ra.starting_card")
             need = min(START_S, ahead, m.room(), rest)
-            return tr("ra.starting", n=f"{min(made, need):.1f}", m=f"{need:g}")
+            # (one decimal at most: less free memory / the ring's end gave "4.87393", hunt 11-04)
+            return tr("ra.starting", n=f"{min(made, need):.1f}", m=f"{need:.1f}".rstrip("0").rstrip("."))
         key = "ra.buffer_end" if rest < ahead and made >= rest - 1e-6 else "ra.buffer"
         return tr(key, n=f"{made:.1f}", m=f"{ahead:,}")
 

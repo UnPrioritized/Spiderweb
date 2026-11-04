@@ -217,7 +217,7 @@ class LoadedSong:
 
     _NONE = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64))
 
-    def _walk_sliced(self, f, j, c, k, t_pre, t_copy, cnt, vel, ontk, t_on, opn, floor, runs, loop):
+    def _walk_sliced(self, f, j, c, k, t_pre, t_copy, cnt, vel, ontk, t_on, opn, floor, runs, loop, cancel=None):
         """(PLAN D2, counted pieces) piece_track over track j's checkpoints c .. k, about COUNTED_SLICE bytes at a
         time (a 2 GB track's stretch: its read + room for all its notes was GBs, 10.7 GB at Shinki's 457 s). Each
         slice starts at a checkpoint (its tick + running status); carried on: the counts before t_pre (cnt) until
@@ -229,6 +229,8 @@ class LoadedSong:
         parts, last, a = [], t_pre, c
         opn[:] = -1  # (the copy not started yet: piece_track sets opn from cnt when it starts)
         while a < k:
+            if cancel is not None and cancel.is_set():  # (stopped: the caller lets the piece go)
+                break
             e = min(max(int(np.searchsorted(offs, int(offs[a]) + COUNTED_SLICE, "right")) - 1, a + 1), k)
             lo = int(offs[a])
             hi = int(offs[e]) if e < n_cp else int(t.limit)
@@ -527,7 +529,9 @@ class LoadedSong:
         got = self.own.piece_start(f0, self.last, pre)
         down = self._pedal_since(got[1])
         if down is not None:  # (PLAN E4: from where the pedal went down: the notes let go under it still sound)
-            d = max(down, self.tick_at(max(0, at - int(HELD_PRE * RATE))))
+            # (one tick inside HELD_PRE: on it the floor = the early start, and the piece couldn't go counted: hunt
+            # 11-04, a pedal held 30 s+ made pieces plain, handing nothing on)
+            d = max(down, self.tick_at(max(0, at - int(HELD_PRE * RATE))) + 1)
             if d < got[1] and self._span_bytes(d, got[1]) <= PRE_MOST:
                 got = (min(got[0], d), d)
         if len(self._starts) > 256:
@@ -537,14 +541,26 @@ class LoadedSong:
 
     def _pedal_since(self, tick):
         """The earliest tick a sustain / sostenuto pedal still down at tick went down (Merlin's down: >= 64), over
-        every port + channel; None = none down. (A piece starting early at tick strikes only notes still held there:
-        ones let go under the pedal were missing, 7 dB off a whole render, dev/scratch/pedal_check.py.)"""
+        the port + channels with notes between then and tick (hunt 11-04: a pedal on a channel without notes there
+        pulled pieces up to 30 s early); None = none. (A piece starting early at tick strikes only notes still held
+        there: ones let go under the pedal were missing, 7 dB off a whole render, dev/scratch/pedal_check.py.)"""
         ev = getattr(self, "_pedals", None)
-        if ev is None:  # (every pedal change of the playing tracks, once a song)
+        if ev is None:  # (every pedal change of the playing tracks + each port + channel's tracks' note spans, once)
             t, code = self._controls(-1, FAR)
             d1 = (code >> 8) & 127
             keep = ((code & 0xF0) == 0xB0) & ((d1 == 64) | (d1 == 66))
             slot = (((code >> 24) & 15) * 16 + (code & 15)) * 2 + (d1 == 66)
+            spans = {}  # port + channel -> [(first note tick, last note end)] of its tracks
+            for j in self.playing:
+                tr = self.lm.tracks[j]
+                if not tr.notes:
+                    continue
+                nc = int(self.newch[j])
+                chn = getattr(tr, "chn", None)
+                chans = [nc] if nc >= 0 else (np.flatnonzero(chn).tolist() if chn is not None else range(16))
+                for ch in chans:
+                    spans.setdefault(int(self.tport[j]) * 16 + ch, []).append((int(tr.first), int(tr.end)))
+            self._pc_spans = spans
             ev = self._pedals = (t[keep], slot[keep], ((code >> 16) & 127)[keep] >= 64)
         t, slot, on = ev
         k = int(np.searchsorted(t, tick, "left"))
@@ -558,26 +574,36 @@ class LoadedSong:
                 continue
             ups = idx[~on[idx]]
             first = idx[np.searchsorted(idx, ups[-1], "right")] if len(ups) else idx[0]
-            best = int(t[first]) if best is None else min(best, int(t[first]))
+            d = int(t[first])
+            if not any(a < tick and b > d for a, b in self._pc_spans.get(s // 2, ())):
+                continue  # (no notes on its channel meanwhile: nothing let go under it)
+            best = d if best is None else min(best, d)
         return best
 
     def pre_frames(self, f0):
         return f0 - self.frame(self.piece_start(f0)[0])
 
-    def _carries(self):
+    def _carries(self, make=True):
         """The carried notes kept for this sound (PLAN E): {tick a piece starts early at: what's handed to it}, oldest
         first. On the LoadedMidi (a remake or a new Play makes a new LoadedSong: the chain goes on), dropped when the
-        mutes / hidden notes / tempo change."""
+        mutes / hidden notes / tempo change: a piece of the new sound starting makes them anew (make); None when
+        they're another sound's and make is off."""
         from files.ahead_pieces import same_tempo
         kept = getattr(self.lm, "_ahead_carries", None)
         if kept is None or kept[0] != self.key or not same_tempo(kept[1], self):
+            if not make:
+                return None
             kept = (self.key, self, OrderedDict())
             self.lm._ahead_carries = kept
         return kept[2]
 
     def _keep_carry(self, carry):
-        """A piece's hand-over kept (_Runs._carry); the oldest let go past CARRY_KEPT_ROWS rows in all."""
-        got = self._carries()
+        """A piece's hand-over kept (_Runs._carry); the oldest let go past CARRY_KEPT_ROWS rows in all. A piece of a
+        sound changed since (a mute while it was made) keeps nothing (hunt 11-04: it swapped the new sound's kept
+        hand-overs out, its lead-up then stopped halfway or ran again)."""
+        got = self._carries(make=False)
+        if got is None:
+            return
         got.pop(carry["at"], None)
         got[carry["at"]] = carry
         rows = sum(len(c["tick"]) for c in got.values())
@@ -641,10 +667,11 @@ class LoadedSong:
             if cancel is not None and cancel.is_set():
                 return False
             try:
-                self.midi(a, b, counted=True, dry=True)
+                self.midi(a, b, counted=True, dry=True, cancel=cancel)
             except TooBigPlain:
                 return False
-            if self.piece_start(b)[1] not in kept:  # (the chain broke there: no hand-over)
+            now = self._carries(make=False)  # (looked up again: another sound may have started meanwhile, hunt 11-04)
+            if now is None or self.piece_start(b)[1] not in now:  # (the chain broke there: no hand-over)
                 return False
         return True
 
@@ -652,8 +679,10 @@ class LoadedSong:
         """The piece f0 .. f1 (frames) as MIDI file bytes + the frames to drop at its start (None: silence).
         counted = for our Merlin (kestrel.repeat_marks()): the notes of all tracks sent as stacks with a count (PLAN
         D2: a dense wall's piece held 253 M note-ons, 402 k of them different), the rest as before. dry = counted,
-        only its hand-over to the next piece kept, nothing written (_lead_up: (None, 0)); cancel = a threading.Event
-        that stops a lead-up."""
+        only its hand-over to the next piece kept, nothing written (_lead_up: (None, 0)); cancel = a threading.Event:
+        set = stopped at the next track / slice, (None, 0) back (hunt 11-04: a wall's piece let go only when done)."""
+        if cancel is not None and cancel.is_set():
+            return None, 0
         lm = self.lm
         t_copy = self.tick_at(f1 + int(POST_S * RATE))
         t0, t_pre = self.piece_start(f0)
@@ -697,6 +726,8 @@ class LoadedSong:
             raise SynthError("load.file_changed")
         with open(lm.path, "rb") if from_file else _NoFile() as f:
             for j in self.playing:
+                if cancel is not None and cancel.is_set():  # (stopped: let go now, hunt 11-04)
+                    return None, 0
                 t = lm.tracks[j]
                 if t.last_tick < t_pre or (t.notes and t.first > t_copy and not len(t.c_tick)):
                     continue
@@ -723,7 +754,10 @@ class LoadedSong:
                     cnt[((mask >> chans) & 1) == 1] = 0
                 cnt[np.arange(midi_piece.QS) % 256 > 127] = 0
                 if runs is not None and hi - lo > COUNTED_SLICE:  # (a huge track's stretch: a slice at a time)
-                    body = self._walk_sliced(f, j, c, k, t_pre, t_copy, cnt, vel, ontk, t_on, opn, floor, runs, loop)
+                    body = self._walk_sliced(f, j, c, k, t_pre, t_copy, cnt, vel, ontk, t_on, opn, floor, runs, loop,
+                                             cancel)
+                    if cancel is not None and cancel.is_set():
+                        return None, 0
                     w, b, out = len(body), None, None
                 else:
                     b = self._read(f, j, lo, hi)
@@ -814,7 +848,7 @@ class LoadedSong:
             got = [e for e in got if e[1]]  # (a track left with nothing but its notes: none of its own)
             counted_tracks = runs.tracks(origin)
             if counted_tracks is None:  # (offs before ons would pair differently somewhere: tracks' order kept)
-                return self.midi(f0, f1, counted="keep order", dry=dry)
+                return self.midi(f0, f1, counted="keep order", dry=dry, cancel=cancel)
             if dry:
                 return None, 0
         rows = self._setup(origin)  # (the state where the piece begins, then every change up to t_pre: PLAN B3)
@@ -1106,7 +1140,10 @@ class _Runs:
             m = sort(k, s, c, n, np.empty(n, np.int64), np.empty(n, np.uint8), np.empty(n, np.int64), bits)
             return k[:m].copy(), s[:m].copy(), c[:m].copy()
         # (PLAN E3: sorted on the other cores while the walk goes on; Shinki's 432 s, 137 batches = 9 s on one)
-        self.stack.append(_sort_pool().submit(job))
+        try:
+            self.stack.append(_sort_pool().submit(job))
+        except RuntimeError:  # (the program is closing: its pool won't take more, hunt 11-04: errors.log at close)
+            self.stack.append(job())
         self.k = np.zeros(self.cap, np.int64)
         self.s = np.zeros(self.cap, np.uint8)
         self.c = np.ones(self.cap, np.int64)
@@ -1132,7 +1169,10 @@ class _Runs:
         while len(parts) > 1:
             pairs = [(parts[i], parts[i + 1]) for i in range(0, len(parts) - 1, 2)]
             last = [parts[-1]] if len(parts) % 2 else []
-            parts = list(_sort_pool().map(lambda p: two(*p), pairs)) + last
+            try:
+                parts = list(_sort_pool().map(lambda p: two(*p), pairs)) + last
+            except RuntimeError:  # (closing: merged here)
+                parts = [two(*p) for p in pairs] + last
             del pairs
         self.stack = parts
         return self.stack[0] if self.stack else (np.zeros(0, np.int64), np.zeros(0, np.uint8), np.zeros(0, np.int64))

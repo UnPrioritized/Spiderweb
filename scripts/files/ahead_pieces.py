@@ -401,14 +401,16 @@ def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=F
     or None when cancelled. plain = never counted (a re-cut part, see card_piece). built() = called once its MIDI is
     made (the next piece may start making its own: Maker, PLAN E3)."""
     from files import kestrel
-    try:
-        if not plain and engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
-            data, skip = song.midi(f0, f1, counted=True, cancel=cancel)  # (stacks of identical notes sent once, D2)
-            if cancel.is_set():  # (stopped during a lead-up, PLAN E)
-                return None
-        else:
-            data, skip = song.midi(f0, f1)
-    finally:
+    # (built() after the MIDI only: a counted try that has to be re-cut plain (TooBigPlain) leaves it to the re-cut's
+    # last part, else the next piece was made beside the plain parts, hunt 11-04; an error = _work sets it at its end)
+    if not plain and engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
+        data, skip = song.midi(f0, f1, counted=True, cancel=cancel)  # (stacks of identical notes sent once, PLAN D2)
+        if built is not None:
+            built()
+        if cancel.is_set():  # (stopped while it was made, PLAN E)
+            return None
+    else:
+        data, skip = song.midi(f0, f1)
         if built is not None:
             built()
     if data is None:  # (nothing sounds here: silence, no piece)
@@ -544,6 +546,7 @@ class Maker:
         self._free = (0.0, None)  # (when free memory was last asked, the answer)
         self.lowered = False  # (Lower it by itself: new pieces made with a lowered voice limit, ahead_play)
         self.low = set()  # blocks made lowered (R5: made again at the full limit once calm)
+        self._to_card = None  # (the soundfonts' trip to the graphics card: a Thread, False = already there)
 
     def held_bytes(self):
         return sum(b.nbytes for b in list(self.blocks.values()))
@@ -670,8 +673,11 @@ class Maker:
         self.threads = [t for t in self.threads if t.is_alive()]
         if self.song is None or self.error:
             return changed
+        if want and self.engine in ("merlin", "kestrel") and self._to_card is None:
+            self._warm_card()
         most = GPU_WORKERS if self.engine in ("merlin", "kestrel") else CPU_WORKERS
-        if self.engine == "merlin" and getattr(self.song, "counted_here", lambda: False)():
+        chained = self.engine == "merlin" and getattr(self.song, "counted_here", lambda: False)()
+        if chained:
             most = OVERLAP_WORKERS  # (the next piece's MIDI made while Merlin plays this one: the card still one at a time)
         k = 0
         while k < len(want) and len(self.threads) < most:
@@ -707,7 +713,9 @@ class Maker:
             job.most = cap  # (a block still over it: made in parts, card_piece)
             job.lowered = self.lowered
             with self._lock:
-                job.prev = next((j for j in self.jobs if j.first + j.count == i and not j.finished), None)
+                # (only counted Merlin pieces wait for the one before: BASSMIDI makes several side by side, hunt 11-04)
+                job.prev = next((j for j in self.jobs if j.first + j.count == i and not j.finished),
+                                None) if chained else None
                 self.jobs.append(job)
             t = threading.Thread(target=self._work, args=(job, self.song), daemon=True)
             t.start()
@@ -715,6 +723,27 @@ class Maker:
             k += len(run)
             changed = True
         return changed
+
+    def _warm_card(self):
+        """The soundfonts sent to the graphics card on a thread of their own, beside the first piece's MIDI (hunt
+        11-04: they went only once that MIDI was made, a dense wall's lead-up = a minute later; the status line
+        said "putting the soundfont on the graphics card" all along). A failure is left to the piece (it says it)."""
+        from files import kestrel
+        if kestrel.kept_for(self.fonts, self.card) is not None:
+            self._to_card = False
+            return
+
+        def go():
+            try:
+                kestrel.loaded_for(self.fonts, self.card)
+            except Exception:  # (said by the piece that needs it)
+                pass
+        self._to_card = threading.Thread(target=go, daemon=True, name="soundfonts to the card")
+        self._to_card.start()
+
+    def card_loading(self):
+        """True while the soundfonts are being sent to the graphics card (_warm_card)."""
+        return bool(self._to_card) and self._to_card.is_alive()
 
     def _collect(self):
         changed = False
