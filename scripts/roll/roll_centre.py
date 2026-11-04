@@ -11,7 +11,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.engine import free_box
-from notes.recolour import (LEAST_REACH, MOST_REACH, area_dist, area_outline, centre_at, centre_spot,
+from notes.recolour import (LEAST_REACH, MOST_REACH, area_dist, area_outline, area_scales, centre_at, centre_spot,
                             clean_recolour, without_recolour)
 from roll.roll_gliss import clip_polyline
 from roll.roll_shared import SHIFT
@@ -67,12 +67,18 @@ class CentreDots:
             return None
         cx, cy = st["centre"]
         r = st["reach"] / 2
+        kx, ky = self.area_k(made, st)
         dx, dy = area_outline(st["area"], RING_POINTS)  # (all points at once: the box is measured once, hunt 11-03)
-        t, k = centre_spot(rc, notes, own, [cx + r * dx, cy + r * dy])
+        t, k = centre_spot(rc, notes, own, [cx + r * dx / kx, cy + r * dy / ky])
         x, y = self.to_xy((np.asarray(t, np.float64) / self.app.ppq, np.asarray(k, np.float64)))
         out = np.empty(2 * len(dx))
         out[0::2], out[1::2] = x, y
         return out.tolist()
+
+    def area_k(self, made, st):
+        """The Stir area's (kx, ky) for this shape (recolour.area_scales: Stretch, Round as seen)."""
+        rc, notes, own, _ = made
+        return area_scales(st, lambda u, v: centre_spot(rc, notes, own, [u, v]), self.app.ppq)[0]
 
     def ring_near(self, line, x, y):
         """How near (px) the point x, y is to the polyline line."""
@@ -198,7 +204,8 @@ class CentreDots:
             w = self.app.stir_window
             st, i = w.shown_stir(rc), w.tab
             m = st["centre"]
-            size = 2 * float(area_dist(c[0] - m[0], c[1] - m[1], st["area"]))
+            kx, ky = self.area_k(self.drag[1], st)
+            size = 2 * float(area_dist((c[0] - m[0]) * kx, (c[1] - m[1]) * ky, st["area"]))
             size = round(size, 3) if e.state & SHIFT else float(round(size))
             size = min(max(size, LEAST_REACH if e.state & SHIFT else 1.0), MOST_REACH)
             # (only shapes whose shown stir has a circle: a whole-shape stir stays one, hunt 11-03)

@@ -10,8 +10,8 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import (KEEP, LEAST_REACH, MOST_REACH, MOST_STIRS, MOST_TIGHT, STIR_AREAS, STIR_EDGES,
-                            STIR_SETS, clean_recolour, full_stir, new_seed, stir_stack)
+from notes.recolour import (KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_STIRS, MOST_STRETCH, MOST_TIGHT,
+                            STIR_AREAS, STIR_EDGES, STIR_SETS, clean_recolour, full_stir, new_seed, stir_stack)
 from window import look
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
@@ -138,6 +138,30 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(w, tr("stir.reach_tip"))
         self._number_box(row, "reach", LEAST_REACH, MOST_REACH, w)
         ttk.Label(row, text="%").pack(side="left")
+        # (proportion, user's own idea 11-04: the area round as the piano roll shows it when ticked, + Stretch;
+        # the spin round as seen too)
+        row = ttk.Frame(box)
+        row.pack(anchor="w", pady=(4, 0))
+        self.rounds = {}
+        for key, parent in (("round", row), ("spin", box)):
+            var = tk.BooleanVar(value=False)
+            tick = ttk.Checkbutton(parent, text=tr("stir." + key), variable=var,
+                                   command=lambda key=key: self.on_round(key))
+            Tooltip(tick, tr(f"stir.{key}_tip"))
+            self.rounds[key] = (var, tick)
+            if key == "round":
+                tick.pack(side="left")
+                w = ttk.Label(row, text=tr("stir.stretch"))
+                w.pack(side="left", padx=(8, 0))
+                Tooltip(w, tr("stir.stretch_tip"))
+                self._number_box(row, "stretch", LEAST_STRETCH, MOST_STRETCH, w)
+                ttk.Label(row, text="%").pack(side="left")
+            else:
+                tick.pack(anchor="w", pady=(4, 0))
+        # (user 11-04: a button takes the piano roll's look again, for both ticks; zoom alone never does)
+        self.match = ttk.Button(box, text=tr("stir.match"), command=self.on_match)
+        self.match.pack(anchor="w", padx=(20, 0), pady=(4, 0))
+        Tooltip(self.match, tr("stir.match_tip"))
         row = ttk.Frame(box)  # (colour flips at this stir's step, BMC tester 11-04: notes stay, colours mirrored)
         row.pack(anchor="w", pady=(4, 0))
         w = ttk.Label(row, text=tr("stir.flip"))
@@ -324,6 +348,21 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             b["var"].set(text)
         b["shown"] = text
         b["entry"].config(state="normal" if on and sizes else "disabled")
+        areas = [s for s in sts if s["reach"] is not None]  # (Round as seen + Stretch: only with an area)
+        for key, (var, tick) in self.rounds.items():
+            vals = {s[key] for s in (areas if key == "round" else sts)}
+            var.set(vals == {True})
+            live = on and (bool(areas) or key == "spin")
+            tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if live else "disabled"])
+        self.match.state(["!disabled" if on and any(s["spin"] or (s["round"] and s["reach"] is not None)
+                                                    for s in sts) else "disabled"])
+        b = self.boxes["stretch"]
+        vals = {s["stretch"] for s in areas}
+        text = fmt(next(iter(vals))) if len(vals) == 1 else "" if vals else fmt(100)
+        if self.focus_get() is not b["entry"] or b["var"].get() == b["shown"]:
+            b["var"].set(text)
+        b["shown"] = text
+        b["entry"].config(state="normal" if on and areas else "disabled")
         squeezes = {s["squeeze"] for s in sts}
         self.squeeze.set(squeezes != {False})
         self.squeeze_tick.state(["alternate" if len(squeezes) > 1 else "!alternate",
@@ -360,6 +399,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         def change(st):
             if key == "centre":  # (the Middle button)
                 st["centre"] = [50.0, 50.0]
+            elif key in ("round", "spin"):  # (ticked: the piano roll's look right now, kept; zoom never changes it)
+                st[key] = value
+                if value:
+                    st["seen"] = self.seen_now()
             elif key == "area":  # (None = Whole shape; an area on a whole-shape stir starts at the last size)
                 if value is None:
                     st["reach"] = None
@@ -421,6 +464,22 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.wheel = None
             self.set_stir(key, p["choices"][i])
             self.sync()
+
+    def seen_now(self):
+        """Beats per key as the piano roll shows them now (a key is as tall as this many beats are wide)."""
+        roll = self.app.roll
+        return roll.sy / roll.sx if roll.sx and roll.sy else 1.0
+
+    def on_round(self, key):
+        self.wheel = None
+        self.set_stir(key, bool(self.rounds[key][0].get()), tr("stir.undo_round"))
+        self.sync()
+
+    def on_match(self):
+        """Match the screen: the round ticks take the piano roll's look right now (one undo step)."""
+        self.wheel = None
+        self.set_stir("seen", self.seen_now(), tr("stir.undo_match"))
+        self.sync()
 
     def on_area(self):
         i = self.area_box.current()

@@ -29,6 +29,7 @@ one throw of the dice, the first note's, so they change together and take one co
 """
 
 import heapq
+import math
 import random
 
 import numpy as np
@@ -38,7 +39,7 @@ from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
-KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most")  # (what mode KEEP looks at: recoloured)
+KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq")  # (what mode KEEP looks at: recoloured)
 SPLIT = ("scatter", "clumps")  # (Split modes: work from one colour, 2 colours when Colours isn't set)
 BY = ("note", "chord", "run")
 PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
@@ -51,9 +52,16 @@ MOST_SEED = 2 ** 31 - 1
 # counts), None = the whole shape; the turn fades to nothing at its edge, BMC tester 11-03)
 # (area: that area's shape round the Centre point (STIR_AREAS), kept only with a reach; user's own idea 11-04)
 # (flip_side / flip_up: the colours mirrored at the notes' own outline before this stir bends them, BMC tester 11-04)
+# (PROPORTION, user's own idea 11-04, PLAN stage B: "seen" = beats per key the piano roll showed when a "round"
+# tick was ticked (a key looked as tall as that many beats are wide; zoom never changes it afterwards); "round" =
+# the area measured that way (a circle stays round on a long shape, Size = % of the box's longer side as seen);
+# "spin" = Turn / Twist turn the colours that way too; "stretch" = the area's width across in %, with or without
+# round (user picked "works either way"))
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
-                 "squeeze": True, "reach": None, "area": "circle", "flip_side": False, "flip_up": False}
+                 "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
+                 "spin": False, "seen": None, "flip_side": False, "flip_up": False}
 MOST_REACH, LEAST_REACH = 100.0, 0.01
+MOST_STRETCH, LEAST_STRETCH = 1000.0, 10.0
 STIR_AREAS = ("circle", "square", "diamond")  # (Size = the circle's width / the square's side / the diamond's tip to tip)
 MOST_STIRS = 20  # (stacked stirs on one shape)
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
@@ -152,7 +160,8 @@ def stir_stack(s):
 def one_stir(s):
     """One saved stir -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
     % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False, "reach": % LEAST_REACH..
-    MOST_REACH (+ "area": STIR_AREAS, only with a reach), "flip_side" / "flip_up": True}, each only when not its default (STIR_DEFAULTS), or None (no
+    MOST_REACH (+ "area": STIR_AREAS, "stretch": %, "round": True, only with a reach), "spin": True, "seen":
+    beats per key (only with round / spin), "flip_side" / "flip_up": True}, each only when not its default (STIR_DEFAULTS), or None (no
     stir)."""
     if not isinstance(s, dict):
         return None
@@ -181,6 +190,17 @@ def one_stir(s):
         out["reach"] = round(float(r), 3)
         if s.get("area") in STIR_AREAS[1:]:
             out["area"] = s["area"]
+        w = s.get("stretch")
+        if number(w) and LEAST_STRETCH <= round(w, 3) <= MOST_STRETCH and round(w, 3) != 100:
+            out["stretch"] = round(float(w), 3)
+    v = s.get("seen")
+    if number(v) and 1e-9 < v < 1e9:
+        if s.get("round") is True and "reach" in out:
+            out["round"] = True
+        if s.get("spin") is True:
+            out["spin"] = True
+        if out.get("round") or out.get("spin"):
+            out["seen"] = float(v)
     return out or None
 
 
@@ -615,18 +635,20 @@ def stir_from(at, rc, box, own):
     dx, dy = x - cx, y - cy
     turn = st["turn"] / 360
     reach = st["reach"]
-    if reach:  # (Only inside a circle: Twist winds out to its edge, everything fades smoothly to none there)
-        q = np.clip(area_dist(dx, dy, st["area"]) / (reach / 200), 0.0, 1.0)
+    (kx, ky), (rx, ry) = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))
+    if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there)
+        q = np.clip(area_dist(dx * kx, dy * ky, st["area"]) / (reach / 200), 0.0, 1.0)
         w = 1 - q * q * (3 - 2 * q)
         if st["twist"]:
             turn = turn + st["twist"] * np.sqrt(q)
         turn = turn * w
     elif st["twist"]:
-        far = max(np.hypot(X - cx, Y - cy) for X in (0, 1) for Y in (0, 1))
-        turn = turn + st["twist"] * np.sqrt(np.hypot(dx, dy) / max(far, 1e-12))
+        far = max(np.hypot((X - cx) * rx, (Y - cy) * ry) for X in (0, 1) for Y in (0, 1))
+        turn = turn + st["twist"] * np.sqrt(np.hypot(dx * rx, dy * ry) / max(far, 1e-12))
     a = -2 * np.pi * np.asarray(turn, np.float64)
     ca, sa = np.cos(a), np.sin(a)
-    x, y = cx + dx * ca - dy * sa, cy + dx * sa + dy * ca
+    X, Y = dx * rx, dy * ry  # (spin: turned round as seen; else rx = ry = 1, the box's own way)
+    x, y = cx + (X * ca - Y * sa) / rx, cy + (X * sa + Y * ca) / ry
     if edge != "escape":  # (what went out one side comes back in the other: the colours tiled, user 11-02)
         out = lambda v: (v < -1e-9) | (v > 1 + 1e-9)  # (on the edge, or a hair past it: stays on it)
         x = np.clip(np.where(out(x), np.mod(x, 1.0), x), 0, 1)
@@ -656,6 +678,23 @@ def area_dist(dx, dy, area):
     if area == "diamond":
         return np.abs(dx) + np.abs(dy)
     return np.hypot(dx, dy)
+
+
+def area_scales(st, spot, ppq):
+    """((kx, ky), (rx, ry)) for one stir (filled in): the colour box's across / up distances times these = the
+    area's own measure (area_dist; kx also takes Stretch), and the turn's (spin). spot(u, v) = (tick, key) of % of
+    the colour box (numpy arrays). Without "seen" (or the PPQ): the box's own way, 1 / 1."""
+    s = st["stretch"] / 100
+    c = st["seen"]
+    if not c or not ppq or not (st["round"] or st["spin"]):
+        return (1 / s, 1.0), (1.0, 1.0)
+    t, k = spot(np.array([0.0, 100.0, 0.0]), np.array([0.0, 0.0, 100.0]))
+    lx = math.hypot((t[1] - t[0]) / ppq, (k[1] - k[0]) * c)  # (the box's sides as seen, in beats)
+    ly = math.hypot((t[2] - t[0]) / ppq, (k[2] - k[0]) * c)
+    big = max(lx, ly, 1e-12)
+    lx, ly = max(lx, 1e-9 * big) / big, max(ly, 1e-9 * big) / big  # (a flat box: never 0)
+    area = (lx / s, ly) if st["round"] else (1 / s, 1.0)
+    return area, ((lx, ly) if st["spin"] else (1.0, 1.0))
 
 
 def area_outline(area, n):

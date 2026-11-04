@@ -850,6 +850,8 @@ def fx_notes(sh, ppq, keys, get):
         held_ = is_sustained(sh) or sh.get("held") is True or pasted_notes(sh)
         gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
         rule = rule_of(sh["recolour"])
+        if rule.get("stir"):  # (a stir round as seen counts beats: recolour.area_scales)
+            rule["ppq"] = ppq
         if rule.get("stir") and sh.get("cut") and not (rule.get("frame") or (1, 0))[1]:  # (turned: notes made anew)
             got = stirred_piece(sh, notes, tracks, held_, get, gate, rule)
             if got is not None:
