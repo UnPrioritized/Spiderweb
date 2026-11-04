@@ -459,6 +459,7 @@ class Companion:
             self.bar.deiconify()
             self._placed = None
             self.place_bar()
+            self.app.tips.show("companion", parent=self.bar, wait=True)  # (the first time only, under the bar)
 
     def saved_bar_at(self):
         try:

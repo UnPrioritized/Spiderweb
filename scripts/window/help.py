@@ -12,6 +12,7 @@ from tkinter import font as tkfont, ttk
 
 from files.lang import size as lang_size, tr
 from files.about import BANNER, HERE, LICENSE, VERSION, WEBSITE
+from files import system
 from files.system import open_path
 from window import look
 from window.widgets import WrapRow, placed, remember_place, set_least
@@ -122,6 +123,16 @@ class Clip:
             self.job = None
 
 
+def companion_bar(app):
+    """The floating bar while drawing on Domino (window/domino_companion.py), else None."""
+    c = getattr(app, "companion", None)
+    bar = getattr(c, "bar", None)
+    try:
+        return bar if bar is not None and bar.winfo_exists() else None
+    except tk.TclError:
+        return None
+
+
 def topic_words(t):
     return " ".join((t["title"], t["tip"], t["text"], t.get("words", ""))).lower()
 
@@ -154,6 +165,9 @@ class Tips:
         self.seen.add(topic_id)
         self.app.schedule_autosave()
         parent = parent or self.app
+        bar = companion_bar(self.app)
+        if parent is self.app and bar is not None:
+            parent = bar  # (drawing on Domino: the main window is hidden, so is anything it owns)
         if open_now and self.popup.master is parent:
             self.popup.set_topic(topic_id)
         else:
@@ -238,9 +252,15 @@ class TipPopup(tk.Toplevel):
         self.body.config(text=t["tip"])
         self.update_idletasks()
         p = self.parent
-        area = getattr(p, "roll", None) or getattr(p, "canvas", None) or p
-        x = area.winfo_rootx() + area.winfo_width() - self.winfo_reqwidth() - int(16 * self.scale)
-        y = area.winfo_rooty() + int(16 * self.scale)
+        if p is companion_bar(self.tips.app):  # (drawing on Domino: right under the floating bar)
+            x = p.winfo_rootx() + p.winfo_width() - self.winfo_reqwidth()
+            y = p.winfo_rooty() + p.winfo_height() + int(8 * self.scale)
+            left, top, right, bottom = system.work_area(self, x, y)
+            x, y = min(max(x, left), right - self.winfo_reqwidth()), min(max(y, top), bottom - self.winfo_reqheight())
+        else:
+            area = getattr(p, "roll", None) or getattr(p, "canvas", None) or p
+            x = area.winfo_rootx() + area.winfo_width() - self.winfo_reqwidth() - int(16 * self.scale)
+            y = area.winfo_rooty() + int(16 * self.scale)
         # dragged once: every tip stays where it was put; until then each one goes to its own window's corner
         places = self._root().__dict__.setdefault("window_places", {})
         moved = placed(self, places.get(TIP_PLACE, ""))

@@ -1,0 +1,39 @@
+Draw on Domino (Project, beside Export MIDI; Windows only) puts Spiderweb's drawing tools right on Domino's piano roll. Spiderweb's window hides and a small bar floats over Domino instead. What you draw lands on Domino's own grid and goes into Domino as real notes. If Domino isn't running, Spiderweb starts it (the first time it asks where Domino.exe is).
+
+[clip:companion-draw]
+
+## The bar
+
+[clip:companion-bar]
+
+• Domino: Domino's own mouse. Clicks go to Domino, so you select, edit and play there as usual. Esc does this too.
+
+• The tool button (Line, Curve, Funnel, Custom shape...): draw on Domino's piano roll with that tool, exactly like in Spiderweb. Undo / Redo and the shortcuts work as usual.
+
+• Take / Send: see below. ↔ and ↕ flip the selected shapes, Stir… and Sustain… open those windows for them.
+
+• Spiderweb: stop drawing on Domino and bring Spiderweb's window back.
+
+Drag the dots at the bar's left end to move it: it stays at that spot on Domino's piano roll, follows Domino's window, and hides while Domino is minimised. A short line at the bar's end says what just happened.
+
+## Drawing
+
+The mouse wheel scrolls and zooms Domino as if you turned it over Domino itself (Shift and Ctrl too), and what you draw follows Domino's scroll and zoom. Spiderweb takes Domino's PPQ while this is on, and gives yours back when you go back to Spiderweb.
+
+A finished shape goes into Domino's current track by itself, a moment after you let go, at the spot where you drew it, and leaves Spiderweb's layer. With Multi channel, each channel goes on its own track, from the current one down. Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
+
+## Changing Domino's notes
+
+There is one selection: Domino's own. Select notes in Domino with its select box, then press Take: they come out of Domino into Spiderweb, at the same spot, as one shape. Change it with Spiderweb's tools (flip it, Sustain…, move or stretch it), then press Send and it goes back into Domino. In Domino that is two steps to undo (the delete and the paste).
+
+Take puts the notes back at the right spot for a box selection. After Select All, or notes picked one by one, they may land at Domino's cursor instead.
+
+## Good to know
+
+• It works with Domino 1.43 (the version Spiderweb knows). Another version: Spiderweb says so and stays as it is.
+
+• It doesn't work while a MIDI file is loaded in Spiderweb.
+
+• Nothing is changed inside Domino's memory: the notes go in through Domino's own Copy and Paste, so the clipboard holds the last notes sent.
+
+• Domino can hold only one note on the same key at the same tick, so stacked notes become one there.
