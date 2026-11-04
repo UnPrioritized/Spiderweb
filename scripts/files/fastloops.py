@@ -1985,7 +1985,7 @@ def warm():
                    *line.arrays())
     q = np.zeros(midi_piece.QS, np.int64)
     piece_track(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 0, 10, i1[:0], q, q.copy(),
-                q.copy(), 0, -1, 0, np.zeros(32, np.uint8))
+                q.copy(), 0, -1, 0, np.zeros(32, np.uint8), 5, q.copy())
     piece_held_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0, q, q.copy(),
                    np.zeros(1, np.int64), np.zeros(1, np.int64), q.copy())
     piece_held_head(np.zeros(1, np.int64), np.zeros(1, np.int64), np.ones(1, np.int64), -1, 0, np.zeros(16, np.uint8))

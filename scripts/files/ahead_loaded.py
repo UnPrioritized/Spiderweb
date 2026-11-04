@@ -4,7 +4,8 @@ own shapes (an ahead_pieces.Song) on the same clock (the tempo as heard). A piec
 - each loaded track that plays (not muted / removed, with events there): its port (as live play numbers them), the
   controllers / instruments / bends in force at the piece's early start (the CC events kept in memory), the notes
   sounding there struck where they began (found back over the checkpoints, at most HELD_PRE early), then its own
-  bytes COPIED as they are to the piece's end + POST_S (files/midi_piece.py piece_track),
+  bytes COPIED as they are to the piece's end, then up to POST_S past it only the offs of notes still open
+  (files/midi_piece.py piece_track),
 - your shapes' notes + CC lines (Song.tracks), channel 10 melodic only on ports the loaded MIDI doesn't use.
 Measured (dev/scratch/loaded_piece_bytes.py + lp_compare.py): the same sound as Merlin's render of the whole file
 over that stretch (-113..-164 dB), Shinki 4.5 s of music made in ~2 s."""
@@ -135,7 +136,7 @@ class LoadedSong:
                 ontk = np.full(midi_piece.QS, -1, np.int64)
                 sk = skip[(skip >= lo) & (skip < hi)]
                 loop(b, lo, int(t.cp_tick[m]), int(t.cp_run[m]), FAR, FAR, sk, cnt, vel, ontk,
-                     int(self.masks[j]), -1, 0, np.zeros(0, np.uint8))
+                     int(self.masks[j]), -1, 0, np.zeros(0, np.uint8), FAR, np.zeros(midi_piece.QS, np.int64))
                 for q in gone:
                     if ontk[q] >= 0:
                         out[todo[q]] = max(floor, int(ontk[q]))
@@ -400,8 +401,9 @@ class LoadedSong:
 
     def bytes_in(self, f0, f1):
         """About how many of the file's bytes a piece f0 .. f1 copies: each playing track's checkpoints around it
-        (the index only, nothing read; from the same early start as midi(), clamped before the last note)."""
-        return self._span_bytes(self.piece_start(f0)[1], self.tick_at(f1 + int(POST_S * RATE)))
+        (the index only, nothing read; from the same early start as midi(), clamped before the last note). Up to
+        f1 only: past it a piece copies just the offs of notes still open (PLAN B2: a few bytes)."""
+        return self._span_bytes(self.piece_start(f0)[1], self.tick_at(f1))
 
     def _span_bytes(self, t_pre, t_copy):
         """About how many bytes the piece from tick t_pre to t_copy WRITES (the events copied: what Merlin gets and
@@ -490,6 +492,8 @@ class LoadedSong:
         # (past the last note the piece starts PRE before it: the floor from there too, never after t_pre; a
         # floor after it gave a negative wait = _vlq's endless loop, 22 GB on Shinki's ring-out)
         floor = min(t_pre, self.tick_at(max(0, min(f0, self.last) - int(HELD_PRE * RATE))))
+        t_on = self.tick_at(f1)  # (past it only the offs of notes still open, PLAN B2)
+        opn = np.zeros(midi_piece.QS, np.int64)
         loop = _loop()
         got = []
         pend = {}  # track -> (checkpoint, its held places, counts, velocities, newest on ticks, ends, own copies)
@@ -527,7 +531,7 @@ class LoadedSong:
                 out = np.zeros(len(b) + len(b) * 2 // 3 + 64, np.uint8)
                 # (the copy's waits count from t_pre: the held notes / controllers are written before it)
                 w, _, bad = loop(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), t_pre, t_copy, sk, cnt, vel, ontk,
-                                 mask, int(self.newch[j]), t_pre, out)
+                                 mask, int(self.newch[j]), t_pre, out, t_on, opn)
                 held = np.flatnonzero(cnt > 0)
                 if not w and not len(held):
                     continue

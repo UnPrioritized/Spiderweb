@@ -3,8 +3,9 @@ checkpoint, never read into notes and written again (measured 2026-11-03: ~5x qu
 in 2 s instead of 9.3). Plain Python that files/fastloops.py compiles (piece_track; the same function both ways).
 
 piece_track walks a track's bytes from a checkpoint. Before t_pre it only counts: which notes sound there (cnt,
-channel x 256 + key, and the newest one's velocity / tick). From the first event at / after t_pre up to the first
-past t_end it copies the events into out, changing only what playing would change:
+channel x 256 + key, and the newest one's velocity / tick). From the first event at / after t_pre up to t_on (the
+piece's end) it copies the events into out, then up to the first past t_end only the offs of notes still open,
+changing only what playing would change:
 - hidden events (Extract: byte places sk) and keys past 127 (a synth has 128; live play leaves them out) left out,
   their wait added to the next event's;
 - channels muted in the track list (muted: a bit each) left out;
@@ -21,16 +22,20 @@ FAR = 1 << 62
 QS = 16 * 256  # channel x key (cnt's places)
 
 
-def piece_track(b, base, tick, run, t_pre, t_end, sk, cnt, vel, ontk, muted, newch, last, out):
+def piece_track(b, base, tick, run, t_pre, t_end, sk, cnt, vel, ontk, muted, newch, last, out, t_on, opn):
     """b = a track's bytes from a checkpoint at byte place base in the track (tick, running status there). Returns
     (bytes written to out, the tick of the last event written (last when none), bad = 1 when the track's bytes end
-    or break before t_end). out must hold len(b) + 4 x hidden events + 16 bytes."""
+    or break before t_end). out must hold len(b) + 4 x hidden events + 16 bytes.
+    Past t_on (the piece's end) only the note-offs of notes still open are copied, and the walk stops once none is
+    (PLAN B2: the wall's 0.3 s past each part was ~90 % of what Merlin got; Merlin only needs those offs, measured
+    -115..-130 dB vs copying everything). opn = QS scratch counts (the open notes per place)."""
     n = len(b)
     p = 0
     w = 0
     si = 0
     nsk = len(sk)
     copying = False
+    nopen = 0
     wrote = -1  # (the status byte the copy's running status is, -1 = none: the next channel event writes one)
     while p < n:
         pos = base + p
@@ -52,6 +57,12 @@ def piece_track(b, base, tick, run, t_pre, t_end, sk, cnt, vel, ontk, muted, new
             return w, last, 1
         if not copying and t >= t_pre:
             copying = True
+            nopen = 0
+            for i in range(len(cnt)):  # (the notes sounding at t_pre are open)
+                opn[i] = cnt[i]
+                nopen += cnt[i]
+        if copying and t > t_on and nopen <= 0:
+            return w, last, 0
         s = np.int64(b[q])
         if s >= 128:
             q += 1
@@ -69,6 +80,20 @@ def piece_track(b, base, tick, run, t_pre, t_end, sk, cnt, vel, ontk, muted, new
             skip = hid or (muted >> ch) & 1 == 1
             if (hi == 0x9 or hi == 0x8 or hi == 0xA) and np.int64(b[q]) > 127:
                 skip = True
+            if copying and not skip:  # (open notes counted; past t_on only their offs kept)
+                is_on = hi == 0x9 and np.int64(b[q + 1]) > 0
+                if is_on or hi == 0x8 or hi == 0x9:
+                    k = ch * 256 + np.int64(b[q])
+                    if t > t_on and (is_on or opn[k] <= 0):
+                        skip = True
+                    elif is_on:
+                        opn[k] += 1
+                        nopen += 1
+                    elif opn[k] > 0:
+                        opn[k] -= 1
+                        nopen -= 1
+                elif t > t_on:
+                    skip = True
             if not copying:
                 if not skip and (hi == 0x9 or hi == 0x8):
                     k = ch * 256 + np.int64(b[q])
@@ -123,7 +148,7 @@ def piece_track(b, base, tick, run, t_pre, t_end, sk, cnt, vel, ontk, muted, new
                 return w, last, 1
             if mt == 0x2F:
                 return w, last, 0
-            if copying and not hid:
+            if copying and not hid and t <= t_on:
                 dd = t - last
                 m = 0
                 tmp = dd
