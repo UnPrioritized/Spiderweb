@@ -11,8 +11,8 @@ import numpy as np
 
 from files.lang import tr
 from notes.engine import free_box
-from notes.recolour import (LEAST_REACH, MOST_REACH, area_dist, area_outline, area_scales, centre_at, centre_spot,
-                            clean_recolour, without_recolour)
+from notes.recolour import (DRAWN, LEAST_REACH, MOST_REACH, area_dist, area_outlines, area_scales, centre_at,
+                            centre_spot, clean_recolour, drawn_gauge, without_recolour)
 from roll.roll_gliss import clip_polyline
 from roll.roll_shared import SHIFT
 from window import look
@@ -62,22 +62,35 @@ class CentreDots:
         return self.to_xy((spot[0] / self.app.ppq, spot[1]))
 
     def reach_ring(self, made):
-        """The Stir's area line (circle / square / diamond) on the piano roll, [x0, y0, x1, y1, ...] closed (in the
-        colour box, so an oval on a box that isn't square; flipped / turned with the shape), or None."""
+        """The Stir's area line on the piano roll (its first loop: reach_rings), or None."""
+        rings = self.reach_rings(made)
+        return rings[0] if rings else None
+
+    def reach_rings(self, made):
+        """The Stir's area lines (circle / square / diamond: one; a drawn area: one per loop) on the piano roll, each
+        [x0, y0, x1, y1, ...] closed (in the colour box, so an oval on a box that isn't square; flipped / turned
+        with the shape); [] = none."""
         rc, notes, own, kind = made
         w = self.app.stir_window
         st = w.shown_stir(rc) if kind == "stir" and w else None
         if not st or not st["reach"]:
-            return None
+            return []
         cx, cy = st["spot"] or st["centre"]
         r = st["reach"] / 2
         kx, ky = self.area_k(made, st)
-        dx, dy = area_outline(st["area"], RING_POINTS)  # (all points at once: the box is measured once, hunt 11-03)
+        lines = area_outlines(st, RING_POINTS)
+        dx, dy = np.concatenate([d for d, _ in lines]), np.concatenate([e for _, e in lines])
+        # (all points at once: the box is measured once, hunt 11-03)
         t, k = centre_spot(rc, notes, own, [cx + r * dx / kx, cy + r * dy / ky])
         x, y = self.to_xy((np.asarray(t, np.float64) / self.app.ppq, np.asarray(k, np.float64)))
         out = np.empty(2 * len(dx))
         out[0::2], out[1::2] = x, y
-        return out.tolist()
+        out, at = out.tolist(), 0
+        rings = []
+        for d, _ in lines:
+            rings.append(out[2 * at:2 * (at + len(d))])
+            at += len(d)
+        return rings
 
     def area_k(self, made, st):
         """The Stir area's (kx, ky) for this shape (recolour.area_scales: Stretch, Round as seen)."""
@@ -86,13 +99,12 @@ class CentreDots:
 
     def ring_near(self, line, x, y):
         """How near (px) the point x, y is to the polyline line."""
-        best = math.inf
-        for j in range(0, len(line) - 2, 2):
-            x0, y0, x1, y1 = line[j:j + 4]
-            dx, dy = x1 - x0, y1 - y0
-            t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / max(dx * dx + dy * dy, 1e-12)))
-            best = min(best, math.hypot(x0 + t * dx - x, y0 + t * dy - y))
-        return best
+        p = np.asarray(line, np.float64).reshape(-1, 2)
+        if len(p) < 2:
+            return math.inf
+        a, d = p[:-1], p[1:] - p[:-1]  # (all pieces at once: a drawn area's line can have thousands)
+        t = np.clip(((x - a[:, 0]) * d[:, 0] + (y - a[:, 1]) * d[:, 1]) / np.maximum((d * d).sum(1), 1e-12), 0, 1)
+        return float(np.hypot(a[:, 0] + t * d[:, 0] - x, a[:, 1] + t * d[:, 1] - y).min())
 
     def draw_centre_dots(self):
         self.delete("rccentre")
@@ -103,10 +115,10 @@ class CentreDots:
         for _, made, spot in self.centre_boxes():
             x, y = self.centre_xy(spot)
             col = look.PATH_LINE
-            ring = self.reach_ring(made)
-            if ring:  # (cut to the view: never one long dashed line far off screen; a solid band in the background
+            rings = self.reach_rings(made)
+            if rings:  # (cut to the view: never one long dashed line far off screen; a solid band in the background
                 # colour under the dashes so it shows over busy colours, user 11-03)
-                pieces = clip_polyline(ring, room)
+                pieces = [piece for ring in rings for piece in clip_polyline(ring, room)]
                 for piece in pieces:
                     self.create_line(*piece, fill=look.ROLL_BG, width=line + 2 * max(1, round(s)),
                                      tags="rccentre")
@@ -145,8 +157,7 @@ class CentreDots:
             return None
         g, best = GRAB * self.scale, None
         for sh, made, spot in reversed(self.centre_boxes() if dots is None else dots):
-            ring = self.reach_ring(made)
-            d = self.ring_near(ring, e.x, e.y) if ring else math.inf
+            d = min([self.ring_near(ring, e.x, e.y) for ring in self.reach_rings(made)] + [math.inf])
             if d <= g and (best is None or d < best[1]):
                 best = (made, d)
         return best
@@ -225,7 +236,9 @@ class CentreDots:
             st, i = w.shown_stir(rc), w.tab
             m = st["spot"] or st["centre"]
             kx, ky = self.area_k(self.drag[1], st)
-            size = 2 * float(area_dist((c[0] - m[0]) * kx, (c[1] - m[1]) * ky, st["area"]))
+            X, Y = (c[0] - m[0]) * kx, (c[1] - m[1]) * ky
+            size = 2 * (drawn_gauge(X, Y, st["shape"]) if st["area"] == DRAWN and st["shape"] else
+                        float(area_dist(X, Y, st["area"])))
             size = round(size, 3) if e.state & SHIFT else float(round(size))
             size = min(max(size, LEAST_REACH if e.state & SHIFT else 1.0), MOST_REACH)
             # (only shapes whose shown stir has a circle: a whole-shape stir stays one, hunt 11-03)

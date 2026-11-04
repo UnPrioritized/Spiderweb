@@ -5,18 +5,23 @@ Recolour is mode KEEP: the dropdown still shows Off). Stays open and follows the
 turn / wheel run / typed number is one undo step; Reset = no stir (one step). The Centre point is also a dot on the
 piano roll while this window is open (roll_centre.py)."""
 
+import json
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
+
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import (KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_STIRS, MOST_STRETCH, MOST_TIGHT,
-                            MOST_TURN, STIR_AREAS, STIR_EDGES, STIR_SETS, clean_recolour, full_stir, new_seed,
-                            stir_stack)
+from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_SHAPE_POINTS, MOST_STIRS,
+                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, STIR_AREAS, STIR_EDGES, STIR_SETS,
+                            clean_area_shape, clean_recolour, full_stir, new_seed, stir_stack)
 from window import look
+from window.drawer import library_lists, shape_path
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob
-from window.widgets import Scrub, Tooltip, bad, good, remember_place, show_mixed, unhighlight
+from window.widgets import (Scrub, Tooltip, bad, good, name_index, name_list, remember_place, set_names, show_mixed,
+                            unhighlight)
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
 
@@ -36,6 +41,27 @@ def stir_at(rc, i):
     """Stir number i (0 = the first) of a Recolour, every setting filled in (none there yet: the defaults)."""
     stack = stir_stack((rc or {}).get("stir"))
     return stack[i] if i < len(stack) else full_stir(None)
+
+
+def library_area(app, name):
+    """A library drawing as a Stir area's own copy (recolour stir["shape"]): its filled loops (as Fill sees them) in
+    its 0..1 box, its proportions as drawn; None when it has no inside (only open lines) or can't be read."""
+    from notes.custom import fill_plan
+    tpl = app.custom_template(name)
+    if not tpl:
+        return None
+    strokes, drawn = tpl[0], tpl[1] or 1.0
+    try:
+        polys = fill_plan(app.new_custom(strokes, 0, 0, 1, 1, drawn=drawn))["polys"]
+    except (ValueError, MemoryError):
+        return None
+    loops = [np.asarray(p, np.float64).reshape(-1, 2) for p in polys]
+    loops = [p for p in loops if len(p) >= 3]
+    total = sum(len(p) for p in loops)
+    if total > MOST_SHAPE_POINTS:  # (a very busy drawing: every k-th point, enough for an area's fade)
+        k = -(-total // MOST_SHAPE_POINTS)
+        loops = [p[::k] for p in loops if len(p[::k]) >= 3]
+    return clean_area_shape({"name": name, "loops": [p.tolist() for p in loops], "aspect": float(drawn)})
 
 
 def with_stir(old, i, change):
@@ -131,8 +157,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         w.pack(side="left")
         Tooltip(w, tr("stir.area_tip"))
         self.areas = ("whole",) + STIR_AREAS
+        # (then, below a divider, the shape library's drawings: a drawn area, PLAN C2, user 11-04)
+        self.library = []
         names = [tr("stir.area_" + a) for a in self.areas]
-        self.area_box = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 1)
+        self.area_box = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 4,
+                                     postcommand=self.refresh_areas)
+        name_list(self.area_box)
+        self.refresh_areas()
         self.area_box.pack(side="left", padx=(5, 0))
         self.area_box.bind("<<ComboboxSelected>>", lambda e: self.on_area())
         self.area_tip = Tooltip(self.area_box, tr("stir.area_tip"))
@@ -341,9 +372,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             show_mixed(p["box"], len(vals) > 1, p["tip"], tr(f"stir.{key}_tip"))
             p["box"].config(state="readonly" if on else "disabled")
         reaches = [s["reach"] for s in sts]
-        kinds = {"whole" if s["reach"] is None else s["area"] for s in sts}
+        kinds = {"whole" if s["reach"] is None else s["area"] if s["area"] != DRAWN else
+                 json.dumps(s["shape"], sort_keys=True) for s in sts}
         if len(kinds) == 1:
-            self.area_box.current(self.areas.index(next(iter(kinds))))
+            kind = next(iter(kinds))
+            if kind in self.areas:
+                self.area_box.current(self.areas.index(kind))
+            else:  # (a drawn area: its name, also when the library has none by it any more)
+                self.area_box.set(json.loads(kind)["name"] or tr("stir.area_drawn"))
         elif not kinds:
             self.area_box.current(0)
         show_mixed(self.area_box, len(kinds) > 1, self.area_tip, tr("stir.area_tip"))
@@ -429,7 +465,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 if value is None:
                     st["reach"] = None
                 else:
-                    st["area"] = value
+                    if isinstance(value, dict):  # (a library drawing's own copy)
+                        st["area"], st["shape"] = DRAWN, value
+                    else:
+                        st["area"], st["shape"] = value, None
                     if st["reach"] is None:
                         st["reach"] = self.reach_last
                         last = self.area_last
@@ -521,13 +560,31 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.set_stir("seen", self.seen_now(), tr("stir.undo_match"))
         self.sync()
 
+    def refresh_areas(self):
+        """The Area dropdown's choices: Whole shape and the built-in areas, then the shape library's drawings (the
+        built-in Circle / Square left out: the areas above are those exactly)."""
+        top, saved = library_lists()
+        self.library = [n for n in top if shape_path(n) or n.lower() not in ("circle", "square")] + saved
+        shown = self.area_box.get()
+        set_names(self.area_box, [tr("stir.area_" + a) for a in self.areas], self.library)
+        self.area_box.set(shown)
+
     def on_area(self):
-        i = self.area_box.current()
+        i = name_index(self.area_box)
         unhighlight(self.area_box)
-        if i >= 0:
-            self.wheel = None
+        if i < 0:
+            return self.sync()
+        self.wheel = None
+        if i < len(self.areas):
             self.set_stir("area", self.areas[i] if i else None, tr("stir.undo_area"))
-            self.sync()
+        else:
+            name = self.library[i - len(self.areas)]
+            shape = library_area(self.app, name)
+            if shape is None:  # (only open lines, or the file can't be read: nothing to stir inside)
+                self.app.status.config(text=tr("stir.area_no_inside", name=name))
+                return self.sync()
+            self.set_stir("area", shape, tr("stir.undo_area"))
+        self.sync()
 
     def on_tied(self):
         self.wheel = None

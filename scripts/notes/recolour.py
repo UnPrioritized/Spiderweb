@@ -29,6 +29,7 @@ one throw of the dice, the first note's, so they change together and take one co
 """
 
 import heapq
+import json
 import math
 import random
 
@@ -59,13 +60,19 @@ MOST_SEED = 2 ** 31 - 1
 # round (user picked "works either way"))
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
                  "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
-                 "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None}
+                 "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None}
+# (shape: area "drawn" = a library drawing's own copy (PLAN C2, user 11-04): {"name", "loops": [[[u, v], ...], ...]
+# its filled outline in its 0..1 box (v up), "aspect": its width / height as drawn}; Size = its box's width)
 # (spot: the area's own middle [% across, % up] when it doesn't move with the Centre point (PLAN C1, user 11-04:
 # Turn / Twist still go round the Centre point, the area sits here); None = on the Centre point; only with a reach)
 MOST_REACH, LEAST_REACH = 100.0, 0.01
 MOST_TURN = 360000.0  # (Stir's Turn: 1000 whole turns, only so a file can't hold nonsense; user 11-04 dropped +-360)
 MOST_STRETCH, LEAST_STRETCH = 1000.0, 10.0
 STIR_AREAS = ("circle", "square", "diamond")  # (Size = the circle's width / the square's side / the diamond's tip to tip)
+DRAWN = "drawn"  # (an area shaped like a library drawing: stir["shape"])
+MOST_SHAPE_POINTS = 20000  # (a drawn area's outline points, all loops: more = the shape dropped)
+FIELD_STEPS = 200  # (a drawn area's distances worked out on this many spots along its longer side, once per shape)
+FIELD_PIECES = 600  # (from at most this many pieces of its outline)
 MOST_STIRS = 20  # (stacked stirs on one shape)
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
 # (colours stirred past the edge: gone / back in on the other side OF THE NOTES (each key row's own span) / back in
@@ -193,6 +200,10 @@ def one_stir(s):
         out["reach"] = round(float(r), 3)
         if s.get("area") in STIR_AREAS[1:]:
             out["area"] = s["area"]
+        elif s.get("area") == DRAWN:
+            shape = clean_area_shape(s.get("shape"))
+            if shape:
+                out["area"], out["shape"] = DRAWN, shape
         w = s.get("stretch")
         if number(w) and LEAST_STRETCH <= round(w, 3) <= MOST_STRETCH and round(w, 3) != 100:
             out["stretch"] = round(float(w), 3)
@@ -208,6 +219,36 @@ def one_stir(s):
         if out.get("round") or out.get("spin"):
             out["seen"] = float(v)
     return out or None
+
+
+_CLEAN_SHAPES = {}  # id -> (the saved object, its clean copy): clean_recolour runs on every redraw
+
+
+def clean_area_shape(d):
+    """A saved stir["shape"] -> {"name": str, "loops": [[[u, v], ...] 3+ points each], "aspect": > 0}, or None."""
+    got = _CLEAN_SHAPES.get(id(d))
+    if got is not None and got[0] is d:
+        return got[1]
+    out = None
+    if isinstance(d, dict) and isinstance(d.get("loops"), list) and number(d.get("aspect")) and \
+            1e-3 <= d["aspect"] <= 1e3:
+        loops = []
+        try:
+            for lp in d["loops"][:1000]:
+                a = np.asarray(lp, np.float64)
+                if a.ndim == 2 and a.shape[1] == 2 and len(a) >= 3 and np.isfinite(a).all() and \
+                        np.abs(a).max() < 100:
+                    loops.append(np.round(a, 5).tolist())
+        except (TypeError, ValueError):
+            loops = []
+        if loops and sum(len(lp) for lp in loops) <= MOST_SHAPE_POINTS:
+            out = {"name": str(d.get("name", ""))[:200], "loops": loops, "aspect": round(float(d["aspect"]), 6)}
+    if len(_CLEAN_SHAPES) > 64:
+        _CLEAN_SHAPES.clear()
+    _CLEAN_SHAPES[id(d)] = (d, out)
+    if out is not None:
+        _CLEAN_SHAPES[id(out)] = (out, out)
+    return out
 
 
 def full_stir(s):
@@ -645,7 +686,7 @@ def stir_from(at, rc, box, own):
     if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there; measured from the
         # area's own spot when it has one)
         ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
-        q = np.clip(area_dist((x - ax) * kx, (y - ay) * ky, st["area"]) / (reach / 200), 0.0, 1.0)
+        q = np.clip(area_q((x - ax) * kx / (reach / 200), (y - ay) * ky / (reach / 200), st), 0.0, 1.0)
         w = 1 - q * q * (3 - 2 * q)
         if st["twist"]:
             turn = turn + st["twist"] * np.sqrt(q)
@@ -714,6 +755,146 @@ def area_outline(area, n):
         return np.array([1.0, 0.0, -1.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0, -1.0, 0.0])
     a = np.linspace(0, 2 * np.pi, n + 1)
     return np.cos(a), np.sin(a)
+
+
+def area_outlines(st, n):
+    """area_outline for one stir (filled in), as a list of closed (dx, dy) lines: a drawn area has one per loop."""
+    if st["area"] != DRAWN or not st["shape"]:
+        return [area_outline(st["area"], n)]
+    return [(lp[:, 0].copy(), lp[:, 1].copy()) for lp in drawn_loops(st["shape"], True)]
+
+
+def area_q(X, Y, st):
+    """How far (X, Y) (the area's own measure: its outline at about 1, area_dist's) is from the area's middle out
+    to its edge: 0 in the middle, 1 on the outline and past it."""
+    if st["area"] == DRAWN and st["shape"]:
+        return drawn_q(X, Y, st["shape"])
+    return area_dist(X, Y, st["area"])
+
+
+def drawn_loops(shape, closed=False):
+    """A drawn area's loops in its own measure: its box 2 wide (-1..1 across), as tall as drawn, middle at 0, 0;
+    closed = each ending on its first point."""
+    a = shape["aspect"]
+    out = []
+    for lp in shape["loops"]:
+        p = np.asarray(lp, np.float64)
+        p = np.column_stack((2 * p[:, 0] - 1, (2 * p[:, 1] - 1) / a))
+        if closed and (p[0] != p[-1]).any():
+            p = np.vstack((p, p[:1]))
+        out.append(p)
+    return out
+
+
+_FIELDS = {}  # a drawn area's outline (json) -> (grid corner, step, signed distances): worked out once per shape
+
+
+def drawn_field(shape):
+    """(lo, step, q): q[j, i] = area_q of the spot lo + (i, j) * step in a drawn area, measured along the ray from
+    its middle (like the mock pictures the user picked: a star's arms stir out to their tips), 1 outside (inside =
+    odd crossings, like Overlaps cancel out)."""
+    key = json.dumps([shape["loops"], shape["aspect"]])
+    got = _FIELDS.get(key)
+    if got is not None:
+        return got
+    loops = drawn_loops(shape, True)
+    a = np.concatenate([lp[:-1] for lp in loops])
+    b = np.concatenate([lp[1:] for lp in loops])
+    lo, hi = np.minimum(a.min(0), b.min(0)), np.maximum(a.max(0), b.max(0))
+    pad = 0.02 * max(hi - lo) + 1e-6
+    lo, hi = lo - pad, hi + pad
+    step = max(hi - lo) / (FIELD_STEPS - 1)
+    nx, ny = (int(math.ceil((hi[k] - lo[k]) / step)) + 1 for k in (0, 1))
+    xs, ys = lo[0] + np.arange(nx) * step, lo[1] + np.arange(ny) * step
+    gx, gy = np.meshgrid(xs, ys)
+    px, py = gx.ravel(), gy.ravel()
+    m = np.hypot(px, py)
+    ux, uy = px / np.maximum(m, 1e-12), py / np.maximum(m, 1e-12)
+    ux[m < 1e-12] = 1.0  # (the middle itself: any way out)
+    s_in = np.zeros(len(px))  # (the outline's last crossing before the spot on the ray from the middle; 0 = none)
+    s_out = np.full(len(px), np.inf)  # (its first crossing past the spot)
+    beyond = np.zeros(len(px), np.int64)  # (crossings past the spot: odd = inside)
+    a, b = field_segments(loops)  # (from fewer pieces: a busy outline's 5,000 points took 5.6 s)
+    e = b - a
+    for k in range(0, len(a), 64):  # (pieces in chunks: the grid times 64 at a time)
+        ax, ay, ex, ey = a[k:k + 64, 0], a[k:k + 64, 1], e[k:k + 64, 0], e[k:k + 64, 1]
+        den = ux[:, None] * ey - uy[:, None] * ex
+        ok = np.abs(den) > 1e-15
+        den = np.where(ok, den, 1.0)
+        s = (ax * ey - ay * ex) / den  # (how far along the ray the piece is crossed)
+        u = (ax * uy[:, None] - ay * ux[:, None]) / den  # (where on the piece: 0..1, its end left to the next)
+        hit = ok & (u >= 0) & (u < 1) & (s > 0)
+        past = hit & (s > m[:, None])
+        beyond += past.sum(1)
+        s_out = np.minimum(s_out, np.where(past, s, np.inf).min(1))
+        s_in = np.maximum(s_in, np.where(hit & ~past, s, 0.0).max(1))
+    inside = beyond % 2 == 1
+    # (the piece of the ray the spot is on: from the middle = 0 there, 1 at the outline, exactly a circle's /
+    # square's own measure on such shapes; a piece away from the middle (a frame round a hole) = 0 halfway along
+    # it, 1 at both its ends, so no seam at the hole)
+    t = (m - s_in) / np.maximum(s_out - s_in, 1e-12)
+    q = np.where(s_in > 0, np.abs(2 * t - 1), m / np.maximum(s_out, 1e-12))
+    got = (lo, step, np.where(inside & np.isfinite(s_out), np.clip(q, 0.0, 1.0), 1.0).reshape(ny, nx))
+    if len(_FIELDS) > 16:
+        _FIELDS.clear()
+    _FIELDS[key] = got
+    return got
+
+
+def field_segments(loops):
+    """(starts, ends) of a drawn area's outline pieces for its distances: at most FIELD_PIECES in all (each loop
+    keeps every k-th point, its share; at least 8 pieces), enough for a fade."""
+    total = sum(len(lp) - 1 for lp in loops)
+    k = max(1, -(-total // FIELD_PIECES))
+    a, b = [], []
+    for lp in loops:
+        n = len(lp) - 1
+        step = min(k, max(1, n // 8))
+        p = lp[:-1:step]
+        p = np.vstack((p, lp[-1:]))  # (closed again on its first point)
+        a.append(p[:-1])
+        b.append(p[1:])
+    return np.concatenate(a), np.concatenate(b)
+
+
+def drawn_q(X, Y, shape):
+    """area_q of a drawn area (drawn_field, read between its spots): 0 in the middle, 1 on the outline and
+    outside."""
+    lo, step, qs = drawn_field(shape)
+    X, Y = np.asarray(X, np.float64), np.asarray(Y, np.float64)
+    ny, nx = qs.shape
+    fx, fy = (X - lo[0]) / step, (Y - lo[1]) / step
+    inb = (fx >= 0) & (fx <= nx - 1) & (fy >= 0) & (fy <= ny - 1)
+    i = np.clip(np.floor(fx), 0, nx - 2).astype(np.int64)
+    j = np.clip(np.floor(fy), 0, ny - 2).astype(np.int64)
+    tx, ty = np.clip(fx - i, 0.0, 1.0), np.clip(fy - j, 0.0, 1.0)
+    q = (qs[j, i] * (1 - tx) * (1 - ty) + qs[j, i + 1] * tx * (1 - ty) + qs[j + 1, i] * (1 - tx) * ty +
+         qs[j + 1, i + 1] * tx * ty)
+    return np.where(inb, q, 1.0)
+
+
+def drawn_gauge(X, Y, shape):
+    """How big a drawn area must be (its Size over this one) for its outline to pass (X, Y): the spot's distance
+    from the middle over the outline's farthest crossing in that direction (the area line's drag)."""
+    r = math.hypot(X, Y)
+    if r < 1e-12:
+        return 0.0
+    dx, dy = X / r, Y / r
+    best = 0.0
+    for p in drawn_loops(shape, True):
+        a, b = p[:-1], p[1:]
+        ex, ey = b[:, 0] - a[:, 0], b[:, 1] - a[:, 1]
+        den = dx * ey - dy * ex
+        ok = np.abs(den) > 1e-12
+        den = np.where(ok, den, 1.0)
+        s = (a[:, 0] * ey - a[:, 1] * ex) / den
+        u = (a[:, 0] * dy - a[:, 1] * dx) / den
+        hit = ok & (s > 0) & (u >= -1e-9) & (u <= 1 + 1e-9)
+        if hit.any():
+            best = max(best, float(s[hit].max()))
+    if best <= 0:  # (no crossing that way: the farthest point of the outline)
+        best = max(float(np.hypot(p[:, 0], p[:, 1]).max()) for p in drawn_loops(shape))
+    return r / best
 
 
 def flipped(at, mid, key, side, up):

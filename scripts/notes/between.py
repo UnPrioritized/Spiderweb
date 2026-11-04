@@ -349,6 +349,10 @@ class Pair:
                 if sx[j]["reach"] is not None and sy[j]["reach"] is not None and \
                         (sx[j]["spot"] is None) != (sy[j]["spot"] is None):
                     sx[j], sy[j] = (dict(s, spot=s["spot"] or list(s["centre"])) for s in (sx[j], sy[j]))
+                if sx[j]["shape"] != sy[j]["shape"]:  # (two drawn areas never blend point by point: they switch
+                    # halfway, like the area itself, PLAN C2)
+                    shape = (sx[j] if f < 0.5 else sy[j])["shape"]
+                    sx[j], sy[j] = dict(sx[j], shape=shape), dict(sy[j], shape=shape)
                 uses = lambda s: (bool(s["round"] and s["reach"] is not None), bool(s["spin"]))
                 if uses(sx[j]) != uses(sy[j]):
                     seen = (sx[j] if f < 0.5 else sy[j])["seen"]
