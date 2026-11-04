@@ -301,6 +301,15 @@ fn bank_config(sample_rate: u32, filter: bool) -> Config {
     Config { sample_rate, filter_enabled: filter, ..Config::default() }
 }
 
+/// The backends Kestrel's own pick looks at here: on Windows every one but GL (Spiderweb never plays on GL, and
+/// Kestrel's pick ranks it last). Looking at GL starts wgpu's "WGL Instance Thread", which ends a moment later
+/// inside the NVIDIA driver while the Vulkan start runs there too: the driver's thread-end waits on its own lock
+/// held by the Vulkan start, which waits on Windows' DLL loader lock held by the thread-end = hung for good
+/// (Spiderweb PLAN E, 2026-11-04: 3 programs starting at once hung 9 of 30; dev/scratch/hang_start.py).
+fn own_pick() -> Option<&'static str> {
+    cfg!(windows).then_some("no-gl")
+}
+
 /// One soundfont read into memory, no graphics card (`kb_font_load`): Spiderweb keeps these by file, so a changed
 /// soundfont list reads only the new file (reading is ~90 % of a start: 5 s for a 390 MB piano, 2026-10-29).
 pub struct FontBank {
@@ -341,8 +350,16 @@ impl Loaded {
     }
 
     /// `new` on one graphics card: `backend` ("vulkan", "dx12", ...) + a part of its name, as `kb_cards` lists
-    /// them (None = Kestrel's own pick, the strongest card).
+    /// them (None = Kestrel's own pick, the strongest card: on Windows without GL, see `own_pick`).
     pub fn new_on(fonts: &[&FontBank], backend: Option<String>, card: Option<String>) -> Result<Loaded> {
+        match (backend, own_pick()) {
+            (None, Some(no_gl)) => Loaded::new_exact(fonts, Some(no_gl.into()), card.clone())
+                .or_else(|_| Loaded::new_exact(fonts, None, card)),  // (a PC with GL alone: as before)
+            (backend, _) => Loaded::new_exact(fonts, backend, card),
+        }
+    }
+
+    fn new_exact(fonts: &[&FontBank], backend: Option<String>, card: Option<String>) -> Result<Loaded> {
         let (first, rest) = fonts.split_first().context("no soundfont given")?;
         let sample_rate = first.sample_rate;
         if rest.iter().any(|f| f.sample_rate != sample_rate) {
@@ -1090,7 +1107,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.7.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
+    static V: &CStr = c"0.7.1; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
     V.as_ptr()
 }
 
@@ -1199,7 +1216,8 @@ pub unsafe extern "C" fn kb_load_on(
 #[no_mangle]
 pub extern "C" fn kb_cards() -> *const c_char {
     static CARDS: Mutex<Option<CString>> = Mutex::new(None);
-    guard(std::ptr::null(), || match kestrel::gpu::survey(&Config::default()) {
+    let cfg = Config { gpu_backend: own_pick().map(Into::into), ..Config::default() };  // (no GL instance: own_pick)
+    guard(std::ptr::null(), || match kestrel::gpu::survey(&cfg) {
         Ok(survey) => {
             let lines: Vec<String> = survey
                 .adapters
