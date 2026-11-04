@@ -129,6 +129,7 @@ def _api():
         u.GetWindowDpiAwarenessContext.restype = ctypes.c_void_p
         u.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
         u.MonitorFromWindow.restype = ctypes.c_void_p
+        u.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
         _api.done = True
     return u, k
 
@@ -184,6 +185,7 @@ class Domino:
     path: str
     build: object     # Build or None
     _handle: int = 0
+    grid: object = None  # (grid window, its scroll bar) last found
 
     def handle(self):
         if not self._handle:
@@ -207,6 +209,8 @@ def find_all():
     found = []
     for h in tops:
         if not u.IsWindowVisible(h) or u.GetParent(h) or u.GetWindow(h, 4):  # child / owned windows: skip
+            continue
+        if u.GetWindowLongW(h, -16) & 0xC00000 != 0xC00000:  # no title bar (Domino's start-up windows)
             continue
         pid = _pid(h)
         path = exe_path(pid)
@@ -240,10 +244,17 @@ def grid_window(top):
 
 
 def scale_of(hwnd):
-    """Real pixels per Domino pixel (1 unless Windows stretches a Domino that isn't high DPI aware)."""
+    """Our pixels per Domino pixel: 1 unless Windows stretches Domino (not high DPI aware, or on a monitor with
+    another DPI) differently from us. "Our pixels" = what Windows tells this thread (Spiderweb is system DPI
+    aware, the checks in dev/scratch per-monitor aware)."""
     u, _ = _api()
-    own = u.GetDpiForWindow(hwnd) or 96
     try:
+        own = u.GetDpiForWindow(hwnd) or 96
+        ours = u.GetAwarenessFromDpiAwarenessContext(ctypes.c_void_p(u.GetThreadDpiAwarenessContext()))
+        if ours == 0:
+            return 96 / own
+        if ours == 1:
+            return u.GetDpiForSystem() / own
         mon = u.MonitorFromWindow(hwnd, 2)
         x, y = ctypes.c_uint(), ctypes.c_uint()
         if ctypes.windll.shcore.GetDpiForMonitor(ctypes.c_void_p(mon), 0, ctypes.byref(x), ctypes.byref(y)) == 0:
@@ -292,7 +303,9 @@ def view(d, tries=4):
             return None, "closed"
         if u.IsIconic(d.top):
             return None, "hidden"
-        g = grid_window(d.top)
+        g = d.grid
+        if not g or not all(u.IsChild(d.top, h) and u.IsWindowVisible(h) for h in g):
+            g = d.grid = grid_window(d.top)  # (looked for again only when the old one is gone / hidden)
         if g is None:
             return None, "hidden"
         nums = read_numbers(d)

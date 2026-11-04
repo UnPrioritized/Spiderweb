@@ -32,6 +32,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     tool_picker.py   the drawing tools' button: the tool picked last, its list and pinned tools
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
+    domino_overlay.py Domino companion: the see-through window lying over Domino's note grid, following it
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
