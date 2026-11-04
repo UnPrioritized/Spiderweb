@@ -211,12 +211,55 @@ def load():
                             ("kb_piece_wait", [p, u32], u32), ("kb_piece_cancel", [p], None),
                             ("kb_piece_audio", [p, ctypes.POINTER(ctypes.c_uint64)], ctypes.POINTER(ctypes.c_float)),
                             ("kb_piece_error", [p], ctypes.c_char_p), ("kb_piece_free", [p], None),
-                            ("kb_repeat_marks", [], u32)):
+                            ("kb_repeat_marks", [], u32),
+                            # (Kestrel's own output stage for Rendered ahead's joined sound, connector 0.7.0 on)
+                            ("kb_stage_new", [ctypes.POINTER(_Options)], p), ("kb_stage_latency", [p], u32),
+                            ("kb_stage_process", [p, p, u32], None), ("kb_stage_free", [p], None)):
         fn = getattr(d, name, None)
         if fn is not None:
             fn.argtypes, fn.restype = args, res
     _dll = d
     return d
+
+
+class Stage:
+    """Kestrel's own output stage (DC blocker + Balanced / Brickwall limiter, exactly as its renders run it) over a
+    sound joined by Spiderweb (Rendered ahead, user 2026-11-04: our simpler limiter let a dense wall's fading end go
+    dull, official renders level it). Stage.make(...) = None without a connector that has it (0.7.0). process(x) =
+    float32 (frames, 2) back, held back `latency` frames."""
+
+    def __init__(self, d, handle):
+        self.d, self.handle = d, handle
+        self.latency = int(d.kb_stage_latency(handle))
+
+    @classmethod
+    def make(cls, limiter=2, ceiling_db=0.0, dc_blocker=True):
+        try:
+            d = load()
+        except SynthError:
+            return None
+        if getattr(d, "kb_stage_new", None) is None:
+            return None
+        opts = _options(limiter=limiter, ceiling_db=ceiling_db, dc_blocker=dc_blocker)
+        h = d.kb_stage_new(ctypes.byref(opts))
+        return cls(d, h) if h else None
+
+    def process(self, x):
+        out = np.ascontiguousarray(x, np.float32).copy()
+        if len(out) and self.handle:
+            self.d.kb_stage_process(self.handle, out.ctypes.data, len(out))
+        return out
+
+    def close(self):
+        if self.handle:
+            self.d.kb_stage_free(self.handle)
+            self.handle = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def repeat_marks():

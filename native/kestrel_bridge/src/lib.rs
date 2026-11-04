@@ -1090,7 +1090,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.6.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
+    static V: &CStr = c"0.7.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
     V.as_ptr()
 }
 
@@ -1409,6 +1409,74 @@ pub unsafe extern "C" fn kb_stats(h: *const Synth, out: *mut KbStats) {
 pub unsafe extern "C" fn kb_fill(h: *const Synth, out: *mut f32, frames: u32) {
     if !h.is_null() && !out.is_null() {
         guard((), || (*h).fill(std::slice::from_raw_parts_mut(out, frames as usize * 2)))
+    }
+}
+
+/// Kestrel's own output stage (DC blocker + limiter, exactly as its renders run it) on a sound Spiderweb joins
+/// itself: Rendered ahead's pieces are made without one, then the joined sound goes through this (user 2026-11-04:
+/// Spiderweb's simpler limiter let a dense wall's fading end go dull and a noisy tail through; official renders
+/// level them).
+pub struct Stage {
+    stage: kestrel::limiter::OutputStage,
+    latency: u32,
+    block: u64,
+}
+
+/// A new output stage from `opts`' limiter (0 off, 1 Brickwall, 2 Balanced), ceiling and DC blocker; null on bad
+/// options. Free it with kb_stage_free.
+#[no_mangle]
+pub unsafe extern "C" fn kb_stage_new(opts: *const KbOptions) -> *mut Stage {
+    if opts.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard(std::ptr::null_mut(), || {
+        let Ok(mut cfg) = config(&*opts) else { return std::ptr::null_mut() };
+        cfg.nan_guard = false;
+        let latency = if cfg.limiter {
+            kestrel::limiter::Brickwall::new(
+                cfg.sample_rate,
+                cfg.limiter_ceiling(),
+                cfg.limiter_lookahead_ms,
+                cfg.limiter_release_ms,
+                cfg.limiter_sustain_ms,
+                cfg.limiter_true_peak,
+            )
+            .with_hold_ms(cfg.sample_rate, cfg.limiter_hold_ms)
+            .latency() as u32
+        } else {
+            0
+        };
+        Box::into_raw(Box::new(Stage { stage: kestrel::limiter::OutputStage::new(&cfg), latency, block: 0 }))
+    })
+}
+
+/// Frames the stage holds the sound back by (the brickwall's look-ahead; 0 with the limiter off).
+#[no_mangle]
+pub unsafe extern "C" fn kb_stage_latency(h: *const Stage) -> u32 {
+    if h.is_null() {
+        0
+    } else {
+        (*h).latency
+    }
+}
+
+/// `frames` interleaved stereo float frames through the stage, in place.
+#[no_mangle]
+pub unsafe extern "C" fn kb_stage_process(h: *mut Stage, buf: *mut f32, frames: u32) {
+    if h.is_null() || buf.is_null() || frames == 0 {
+        return;
+    }
+    guard((), || {
+        let s = &mut *h;
+        let _ = s.stage.process(std::slice::from_raw_parts_mut(buf, frames as usize * 2), s.block);
+        s.block += 1;
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn kb_stage_free(h: *mut Stage) {
+    if !h.is_null() {
+        drop(Box::from_raw(h));
     }
 }
 

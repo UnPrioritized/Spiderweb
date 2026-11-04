@@ -785,10 +785,14 @@ class _Runs:
         self.bar_ch = np.zeros(256, np.uint8)
         self.bar_ch[np.unique(pc)] = 1
         # (bit 2: a tick's offs NOT sorted before its ons: everywhere when asked, else on channels that ever had a
-        # pedal / all-notes-off / mode change: they pair offs in ways counting can't follow, midi_piece.order_ok)
+        # pedal pressed / all-notes-off / mode change: they pair offs in ways counting can't follow,
+        # midi_piece.order_ok. A pedal only LET GO (value < 64: Merlin's down is >= 64, and up then changes nothing)
+        # doesn't count: Shinki lets go of it on 11 channels at 1.5 s, which left them out of the carried notes and
+        # rang a tail on after the end)
         _, every = song._controls(-1, t_copy + 1)
         d1 = (every >> 8) & 127
-        odd = ((every & 0xF0) == 0xB0) & np.isin(d1, _PAIRING_CCS)
+        pressed = ~np.isin(d1, (64, 66)) | (((every >> 16) & 127) >= 64)
+        odd = ((every & 0xF0) == 0xB0) & np.isin(d1, _PAIRING_CCS) & pressed
         self.pedal = np.zeros(256, bool)  # (port + channels pairing in ways counting can't follow: never carried)
         self.pedal[np.unique(((every[odd] >> 24) & 15) * 16 + (every[odd] & 15))] = True
         self.bar_ch[self.pedal] |= 2

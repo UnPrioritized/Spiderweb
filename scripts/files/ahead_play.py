@@ -116,9 +116,10 @@ class DcNumpy:
 
 
 class AheadLimiter:
-    """Keeps the joined sound under the ceiling (looking one block ahead, nothing gets through). Brickwall comes back
-    up quickly (FAST s), Balanced slowly (SLOW s: less pulling at low notes). Both HOLD the gain HOLD_S first. Off =
-    the sound as it is (it may clip)."""
+    """Keeps the joined sound under the ceiling. With the Kestrel connector (0.7.0): Kestrel's own output stage
+    (kestrel.Stage: DC blocker, Balanced = leveler + look-ahead brickwall, as its renders), DELAY = its look-ahead.
+    Without (fallback): looking one block ahead, nothing gets through; Brickwall comes back up quickly (FAST s),
+    Balanced slowly (SLOW s); both HOLD the gain HOLD_S first; Off = the sound as it is (it may clip)."""
     BLOCK = 64
     DELAY = 2 * BLOCK
     FAST, SLOW, HOLD_S = 0.05, 0.3, 0.02
@@ -128,6 +129,13 @@ class AheadLimiter:
         # (DC blocker ahead of it, user 2026-11-04: Shinki's wall end is nearly all DC (117 dB of 117.5 dB), the
         # limiter pulled everything down with it: a dark dip before the end, a noisy tail after)
         self.dc = None
+        # (user 2026-11-04: KESTREL'S OWN output stage when the connector has it (0.7.0): DC blocker + its Balanced /
+        # Brickwall, exactly as official renders sound; ours below = the fallback (BASSMIDI-only setups))
+        from files import kestrel
+        self.kestrel = kestrel.Stage.make(mode, ceiling_db, dc)
+        if self.kestrel is not None:
+            self.DELAY = self.kestrel.latency
+            return
         if dc:
             from files import speed
             fast = speed.loops()
@@ -142,6 +150,8 @@ class AheadLimiter:
         self.hold = max(1, int(self.HOLD_S * RATE / self.BLOCK))
 
     def process(self, x):
+        if self.kestrel is not None:
+            return self.kestrel.process(x)
         if self.dc is not None and len(x):
             x = self.dc.process(x)
         if self.mode == 0:  # (Off: as it is, the same delay so the play line's sums stay right)
