@@ -3232,6 +3232,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         (paste_shared, paste_from_domino). The Tempo pane clicked last: its copied tempo at the play line."""
         if not whole and at is None and getattr(self, "key_pane", None) is self.tempo_pane:
             return self.tempo_pane.paste()
+        if getattr(getattr(self, "stir_window", None), "drawing", None):  # (a Stir area being drawn: only new
+            # strokes make it, a paste would be left behind, hunt C 3)
+            self.status.config(text=tr("stir.draw_no_paste"))
+            return
         text = self.shared_clip()
         if text == "":  # (busy: what's on it can't be told, so nothing older is pasted in its place)
             self.status.config(text=tr("app.clipboard_busy"))

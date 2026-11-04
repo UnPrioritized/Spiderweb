@@ -32,6 +32,7 @@ import heapq
 import json
 import math
 import random
+from collections import OrderedDict
 
 import numpy as np
 
@@ -65,6 +66,7 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
 # (tilt / skew: the area's box turned (degrees, counterclockwise as measured) / slanted (its top slid along by
 # this much of its height), PLAN C2b; only with a reach)
 MOST_SKEW = 10.0
+SPOT_LEAST, SPOT_MOST = -100.0, 200.0  # (the area's own spot may sit past the box: an area drawn beside the shape, hunt C 7)
 # (shape: area "drawn" = a library drawing's own copy (PLAN C2, user 11-04): {"name", "loops": [[[u, v], ...], ...]
 # its filled outline in its 0..1 box (v up), "aspect": its width / height as drawn}; Size = its box's width)
 # (spot: the area's own middle [% across, % up] when it doesn't move with the Centre point (PLAN C1, user 11-04:
@@ -212,7 +214,7 @@ def one_stir(s):
         if number(w) and LEAST_STRETCH <= round(w, 3) <= MOST_STRETCH and round(w, 3) != 100:
             out["stretch"] = round(float(w), 3)
         p = s.get("spot")
-        if isinstance(p, list) and len(p) == 2 and all(number(x) and 0 <= x <= 100 for x in p):
+        if isinstance(p, list) and len(p) == 2 and all(number(x) and SPOT_LEAST <= x <= SPOT_MOST for x in p):
             out["spot"] = [round(float(x), 3) for x in p]
         a = s.get("tilt")
         if number(a) and abs(a) <= 360 and round(a, 3) % 360:
@@ -231,13 +233,16 @@ def one_stir(s):
     return out or None
 
 
-_CLEAN_SHAPES = {}  # id -> (the saved object, its clean copy): clean_recolour runs on every redraw
+_CLEAN_SHAPES = OrderedDict()  # id -> (the saved object, its clean copy): clean_recolour runs on every redraw
+_SAME_SHAPES = OrderedDict()  # its content -> the one clean copy (shapes from undo / a file share it: hunt C 8)
 
 
 def clean_area_shape(d):
-    """A saved stir["shape"] -> {"name": str, "loops": [[[u, v], ...] 3+ points each], "aspect": > 0}, or None."""
+    """A saved stir["shape"] -> {"name": str, "loops": [[[u, v], ...] 3+ points each], "aspect": > 0}, or None.
+    Equal drawings come back as the SAME object (so the window and the distance grid compare them by identity)."""
     got = _CLEAN_SHAPES.get(id(d))
     if got is not None and got[0] is d:
+        _CLEAN_SHAPES.move_to_end(id(d))
         return got[1]
     out = None
     if isinstance(d, dict) and isinstance(d.get("loops"), list) and number(d.get("aspect")) and \
@@ -253,8 +258,13 @@ def clean_area_shape(d):
             loops = []
         if loops and sum(len(lp) for lp in loops) <= MOST_SHAPE_POINTS:
             out = {"name": str(d.get("name", ""))[:200], "loops": loops, "aspect": round(float(d["aspect"]), 6)}
-    if len(_CLEAN_SHAPES) > 64:
-        _CLEAN_SHAPES.clear()
+            key = json.dumps(out)
+            out = _SAME_SHAPES.setdefault(key, out)
+            _SAME_SHAPES.move_to_end(key)
+            while len(_SAME_SHAPES) > 64:
+                _SAME_SHAPES.popitem(last=False)
+    while len(_CLEAN_SHAPES) > 1024:  # (the oldest go first; never all at once, hunt C 8)
+        _CLEAN_SHAPES.popitem(last=False)
     _CLEAN_SHAPES[id(d)] = (d, out)
     if out is not None:
         _CLEAN_SHAPES[id(out)] = (out, out)
@@ -851,15 +861,20 @@ def drawn_loops(shape, closed=False):
 
 
 _FIELDS = {}  # a drawn area's outline (json) -> (grid corner, step, signed distances): worked out once per shape
+_FIELD_IDS = {}  # id -> (the clean shape, its field): no json each make
 
 
 def drawn_field(shape):
     """(lo, step, q): q[j, i] = area_q of the spot lo + (i, j) * step in a drawn area, measured along the ray from
     its middle (like the mock pictures the user picked: a star's arms stir out to their tips), 1 outside (inside =
     odd crossings, like Overlaps cancel out)."""
+    got = _FIELD_IDS.get(id(shape))
+    if got is not None and got[0] is shape:
+        return got[1]
     key = json.dumps([shape["loops"], shape["aspect"]])
     got = _FIELDS.get(key)
     if got is not None:
+        _FIELD_IDS[id(shape)] = (shape, got)
         return got
     loops = drawn_loops(shape, True)
     a = np.concatenate([lp[:-1] for lp in loops])
@@ -899,9 +914,12 @@ def drawn_field(shape):
     t = (m - s_in) / np.maximum(s_out - s_in, 1e-12)
     q = np.where(s_in > 0, np.abs(2 * t - 1), m / np.maximum(s_out, 1e-12))
     got = (lo, step, np.where(inside & np.isfinite(s_out), np.clip(q, 0.0, 1.0), 1.0).reshape(ny, nx))
-    if len(_FIELDS) > 16:
-        _FIELDS.clear()
+    while len(_FIELDS) > 16:
+        _FIELDS.pop(next(iter(_FIELDS)))
     _FIELDS[key] = got
+    while len(_FIELD_IDS) > 256:
+        _FIELD_IDS.pop(next(iter(_FIELD_IDS)))
+    _FIELD_IDS[id(shape)] = (shape, got)
     return got
 
 

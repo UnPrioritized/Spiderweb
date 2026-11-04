@@ -11,7 +11,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.engine import free_box
-from notes.recolour import (DRAWN, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_SKEW, MOST_STRETCH, area_corners,
+from notes.recolour import (DRAWN, KEEP, LEAST_REACH, SPOT_LEAST, SPOT_MOST, LEAST_STRETCH, MOST_REACH, MOST_SKEW, MOST_STRETCH, area_corners,
                             area_dist, area_from_box, area_global, area_local, area_outlines, area_scales, centre_at,
                             centre_spot, clean_recolour, drawn_gauge, without_recolour)
 from roll.roll_shared import CTRL
@@ -46,6 +46,8 @@ class CentreDots:
         for sh in app.recolour_targets():
             rc = clean_recolour(sh.get("recolour"))
             for kind in kinds:
+                if kind == "stir" and app.recolour_trouble([sh], [rc or {"mode": KEEP}])[1]:
+                    continue  # (nothing to stir, e.g. one colour: no dot that quietly adds a stir, hunt C 4)
                 st = app.stir_window.shown_stir(rc) if kind == "stir" else None
                 c = st["centre"] if st else clumps_centre(rc)
                 if c is None:
@@ -139,15 +141,19 @@ class CentreDots:
                 for piece in pieces:
                     self.create_line(*piece, fill=look.STIR_RING, width=line, dash=(6, 4), tags="rccentre")
             box = self.area_box(made) if made[3] == "stir" and self.app.tool.get() == "select" else None
-            if box:  # (its box: dotted, round handles, apart from a shape's dashed box with squares, user 11-04)
+            if box:  # (its box: short dashes over a background band like the area line, big round handles; a
+                # shape's box has long dashes + squares. User 11-04: the thin dotted box was hard to see)
                 c = box[1]
-                for piece in clip_polyline([v for p in c + c[:1] for v in p], room):
-                    self.create_line(*piece, fill=look.STIR_RING, width=1, dash=(2, 3), tags="rccentre")
+                pieces = clip_polyline([v for p in c + c[:1] for v in p], room)
+                for piece in pieces:
+                    self.create_line(*piece, fill=look.ROLL_BG, width=line + 2 * max(1, round(s)), tags="rccentre")
+                for piece in pieces:
+                    self.create_line(*piece, fill=look.STIR_RING, width=line, dash=(2, 3), tags="rccentre")
                 mids = [((c[i][0] + c[(i + 1) % 4][0]) / 2, (c[i][1] + c[(i + 1) % 4][1]) / 2) for i in range(4)]
-                for (hx, hy), hr in [(p, 4.5 * s) for p in c] + [(p, 3.5 * s) for p in mids]:
+                for (hx, hy), hr in [(p, 6 * s) for p in c] + [(p, 5 * s) for p in mids]:
                     if -20 < hx < room[2] + 10 and -20 < hy < room[3] + 10:
                         self.create_oval(hx - hr, hy - hr, hx + hr, hy + hr, outline=look.STIR_RING,
-                                         fill=look.ROLL_BG, width=line, tags="rccentre")
+                                         fill=look.ROLL_BG, width=line + 1, tags="rccentre")
             if made[3] == "spot":  # (the area's own spot: a square, apart from the Centre point's ring)
                 q = r * 0.85
                 self.create_rectangle(x - q, y - q, x + q, y + q, outline=col, fill=look.ROLL_BG, width=line,
@@ -205,7 +211,7 @@ class CentreDots:
 
     # ---- the area's box (PLAN C2b, user 11-04: worked like a custom shape's box, looking different from it)
 
-    def area_box(self, made):
+    def area_box(self, made, least=BOX_LEAST):
         """The shown stir's area box for made (a "stir" dot): (its frame [corner (-, -), (+, -), (-, +)] in beats /
         keys, its four corners on screen going round), or None (no area)."""
         rc, notes, own, kind = made
@@ -218,7 +224,7 @@ class CentreDots:
         t, k = centre_spot(rc, notes, own, [m[0] + 100 * dx, m[1] + 100 * dy])
         b, k = np.asarray(t, np.float64) / self.app.ppq, np.asarray(k, np.float64)
         x, y = (np.asarray(v, np.float64) for v in self.to_xy((b, k)))
-        if min(math.hypot(x[1] - x[0], y[1] - y[0]), math.hypot(x[3] - x[0], y[3] - y[0])) < BOX_LEAST * self.scale:
+        if min(math.hypot(x[1] - x[0], y[1] - y[0]), math.hypot(x[3] - x[0], y[3] - y[0])) < least * self.scale:
             return None  # (a small area: its handles would crowd its line and dot; the line still sizes it)
         return ([[float(b[0]), float(k[0])], [float(b[1]), float(k[1])], [float(b[3]), float(k[3])]],
                 list(zip(x.tolist(), y.tolist())))
@@ -240,9 +246,9 @@ class CentreDots:
             k = min(range(4), key=lambda i: dist(c[i]))
             m = min(range(4), key=lambda i: dist(mids[i]))
             hit = None
-            if dist(c[k]) <= 8 * s:
+            if dist(c[k]) <= 9 * s:
                 hit = ("corner", k)
-            elif dist(mids[m]) <= 7 * s:
+            elif dist(mids[m]) <= 8 * s:
                 hit = ("side", m)
             elif not self.inside_box(c, e.x, e.y):
                 if dist(mids[m]) <= 20 * s and dist(mids[m]) < dist(c[k]):
@@ -313,7 +319,8 @@ class CentreDots:
         got = area_from_box(st, *pcts, self.area_k(made, st))
         if got is None:  # (turned inside out / flat: stays as it was last)
             return
-        middle = [round(min(max(v, 0.0), 100.0), 3) for v in got["middle"]]
+        lo, hi = (SPOT_LEAST, SPOT_MOST) if self.target_stir(target)["spot"] else (0.0, 100.0)
+        middle = [round(min(max(v, lo), hi), 3) for v in got["middle"]]
         put = {"reach": round(min(max(got["reach"], LEAST_REACH), MOST_REACH), 3),
                "stretch": round(min(max(got["stretch"], LEAST_STRETCH), MOST_STRETCH), 3),
                "tilt": round(got["tilt"], 3), "skew": round(min(max(got["skew"], -MOST_SKEW), MOST_SKEW), 4)}
@@ -340,11 +347,48 @@ class CentreDots:
             self.drag = ("rccentre", made, "box", kind, k, frame, self.event_pt(e, snap=False),
                          self.screen_angle(frame, e.x, e.y), sh)
             return True
-        ring = self.ring_hit(e)
-        if ring is None:
+        dots = self.centre_boxes()
+        ring = self.ring_hit(e, dots)
+        if ring is not None and not self.area_box(ring[0]):  # (a small area has no box: its line sizes it)
+            self.app.push_undo(name=tr("stir.undo_reach"))
+            self.drag = ("rccentre", ring[0], "reach")
+            return True
+        made = ring[0] if ring is not None else self.area_under(e, dots)
+        if made is None:
             return False
-        self.app.push_undo(name=tr("stir.undo_reach"))
-        self.drag = ("rccentre", ring[0], "reach")
+        return self.area_grab(made, e)
+
+    def area_under(self, e, dots=None):
+        """The "stir" made whose area holds the mouse (inside its outline, a hole left out; Select tool only), the
+        last drawn first; else None."""
+        if self.app.tool.get() != "select":
+            return None
+        for sh, made, _ in reversed(self.centre_boxes() if dots is None else dots):
+            if made[3] != "stir":
+                continue
+            inside = False
+            for ring in self.reach_rings(made):
+                p = np.asarray(ring, np.float64).reshape(-1, 2)
+                a, b = p[:-1], p[1:]
+                cross = (a[:, 1] > e.y) != (b[:, 1] > e.y)
+                if cross.any():
+                    a, b = a[cross], b[cross]
+                    x = a[:, 0] + (e.y - a[:, 1]) * (b[:, 0] - a[:, 0]) / (b[:, 1] - a[:, 1])
+                    inside ^= bool((x > e.x).sum() % 2)
+            if inside:
+                return made
+        return None
+
+    def area_grab(self, made, e):
+        """The area grabbed by its inside or its line (user 11-04: it moved the whole shape, and the line resized
+        it): dragged, it moves; moving with the Centre point = the Centre point moves too, else its own spot."""
+        st = self.app.stir_window.shown_stir(made[0])
+        kind = "spot" if st["spot"] else "stir"
+        b, p = self.from_xy(e.x, e.y)
+        c = centre_at(made[0], made[1], made[2], b * self.app.ppq, p)
+        m = st["spot"] or st["centre"]
+        self.app.push_undo(name=tr("stir.undo_" + ("spot" if kind == "spot" else "centre")))
+        self.drag = ("rccentre", made[:3] + (kind,), "move", (m[0] - c[0], m[1] - c[1]))
         return True
 
     def centre_right(self, e):
@@ -389,7 +433,10 @@ class CentreDots:
             return self.area_box_drag(e)
         b, p = self.from_xy(e.x, e.y)
         c = centre_at(rc, notes, own, b * self.app.ppq, p)  # (the grabbed shape's box: under the mouse)
-        if len(self.drag) > 2:  # (the area line: its size = twice the mouse's distance from the Centre point,
+        if len(self.drag) > 2 and self.drag[2] == "move":  # (the area grabbed: kept where it was held)
+            off = self.drag[3]
+            c = [c[0] + off[0], c[1] + off[1]]
+        elif len(self.drag) > 2:  # (the area line: its size = twice the mouse's distance from the Centre point,
             # measured the area's way, so the line stays under the mouse on a square / diamond too)
             from window.stir_window import stir_at, with_stir
             w = self.app.stir_window
@@ -405,6 +452,7 @@ class CentreDots:
             self.app.change_recolour(lambda old, sh: with_stir(old, i, lambda st: dict(st, reach=size))
                                      if stir_at(old, i)["reach"] else old, None, False)
             return
-        c = [min(max(v, 0.0), 100.0) for v in c]
+        lo, hi = (SPOT_LEAST, SPOT_MOST) if kind == "spot" else (0.0, 100.0)  # (an own spot may sit past the box)
+        c = [min(max(v, lo), hi) for v in c]
         c = [round(v, 3) if e.state & SHIFT else float(round(v)) for v in c]
         self.set_centre(kind, c, None, push=False)

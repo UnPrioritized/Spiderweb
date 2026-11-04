@@ -353,6 +353,11 @@ class Pair:
                     # halfway, like the area itself, PLAN C2)
                     shape = (sx[j] if f < 0.5 else sy[j])["shape"]
                     sx[j], sy[j] = dict(sx[j], shape=shape), dict(sy[j], shape=shape)
+                # (the area's Angle turns the short way: 170° to -170° goes through 180°, not 0°, hunt C 10)
+                ta = sx[j]["tilt"]
+                tb = ta + (sy[j]["tilt"] - ta + 180.0) % 360.0 - 180.0
+                shift = -360.0 if max(ta, tb) > 360 else 360.0 if min(ta, tb) < -360 else 0.0  # (kept in +-360)
+                sx[j], sy[j] = dict(sx[j], tilt=ta + shift), dict(sy[j], tilt=tb + shift)
                 uses = lambda s: (bool(s["round"] and s["reach"] is not None), bool(s["spin"]))
                 if uses(sx[j]) != uses(sy[j]):
                     seen = (sx[j] if f < 0.5 else sy[j])["seen"]
