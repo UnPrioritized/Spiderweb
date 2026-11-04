@@ -2,7 +2,7 @@ Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead 
 
 ## Playing
 
-Play waits a moment first, until the first 5 seconds from the play line are made (less if the song ends sooner), so the start sounds just like a replay. While it plays, making goes on in the background, always keeping Render ahead seconds ahead of the play line.
+Play waits a moment first, until the first 5 seconds from the play line are made (less if the song ends sooner), so the start sounds just like a replay. Meanwhile the right end of the status line says what it's doing: "putting the soundfont on the graphics card…" (the first Play with Merlin or Kestrel), then "making the first seconds… 2.1 / 5". While it plays, making goes on in the background, always keeping Render ahead seconds ahead of the play line.
 
 While playing, the part not made yet shows a very faint grey over the piano roll, and clears as it's made. The right end of the status line says how much is made ahead of the play line, in seconds, of Render ahead: "Audio buffer: 12.4 / 60" ("(to the end)" once the rest of the song is made). Stop and Play again from the same place: what's already made is played at once.
 
@@ -12,7 +12,7 @@ Playing stops once the sound has died away, not a beat after the last note.
 
 While stopped, the sound is made from the play line too (Make ahead while stopped, on at first): once the play line rests half a second, making starts there, up to Render ahead seconds, with the faint grey over what's not made yet. So a heavy song can be waited out: when the grey is gone, Play starts at once. Moving the play line makes from the new place; what was already made elsewhere is kept for a while, so going back plays at once too.
 
-A loaded MIDI plays too, with your own shapes on top (muted tracks are left out). Changing it while playing (muting a track, Track Properties, Remove track, Extract, the Conductor pane) makes everything again from the play line; playing goes on. If the MIDI file itself changes on disk, playing stops and says so (load it again). Very dense parts are made in shorter pieces, so a heavy wall may take longer to make than to play: the time made ahead before it is used up while it's made.
+A loaded MIDI plays too, with your own shapes on top (muted tracks are left out). Changing it while playing (muting a track, Track Properties, Remove track, Extract, the Conductor pane) makes everything again from the play line; playing goes on. If the MIDI file itself changes on disk, playing stops and says so (load it again). Starting or jumping into the ring right after a heavy wall takes longer the first time (up to a minute): the notes still ringing there are worked out from the wall before it, so they sound as they should. Once made, going back there plays at once.
 
 Right-drag listening, piano keys and the Hz bass window's keys can't be made ahead (the mouse decides them as you go): they sound through Built-in BASSMIDI, with the same soundfonts.
 
@@ -48,7 +48,7 @@ Settings (Help menu) → Sound, while Rendered ahead is picked:
 
 • Block size, Interpolation, Velocity threshold: as in Kestrel (GPU) playback.
 
-• Limiter: keeps very loud parts from clipping, over the whole sound (no jumps where pieces meet). Balanced first evens out long loud parts a little, then catches the peaks; Brickwall only catches the peaks; Off lets them clip. Ceiling = the loudest it lets through, in dB.
+• Limiter: keeps very loud parts from clipping, over the whole sound (no jumps where pieces meet). Balanced first evens out long loud parts a little, then catches the peaks; Brickwall only catches the peaks; Off lets them clip. Ceiling = the loudest it lets through, in dB. It's Kestrel's own limiter, so the sound matches Kestrel's renders.
 
 • DC blocker (on at first): takes out the slow drift away from the middle that millions of stacked notes add up to, before the limiter. Without it the limiter turns the music down along with that drift: a dense wall's end then sounds dull, with a noisy tail after it.
 
