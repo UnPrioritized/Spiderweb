@@ -1016,7 +1016,10 @@ def free_box(sh, notes, get, keys):
     """The box (recolour.box_of) of sh's notes (without Recolour: notes) as they'd be without the piano roll's
     edges cutting them, so a shape pushed partly past the song's start / the keys keeps its colours (Recolour counts
     from it); None when they reach no edge (the notes' own box)."""
-    if not len(notes) or (notes[:, 0].min() > 0 and notes[:, 2].min() > 0 and notes[:, 2].max() < keys - 1):
+    if not len(notes):
+        return None
+    b = box_of(notes)  # (remembered for big notes: asked at every mouse move with the Stir window open)
+    if b[0] > 0 and b[2] > 0 and b[3] < keys - 1:
         return None
     plain = dict(without_recolour(sh), _free=True)
     up = 0

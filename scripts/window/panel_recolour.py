@@ -124,7 +124,17 @@ class RecolourPanel:
             return [np.zeros(1, np.int64)] if len(notes) else []
         if not len(tracks):
             return []
-        return colour_sets(np.asarray(tracks, np.int64) % ROUND)[1]
+        # (worked out once per remembered notes: the Stir window asks at every mouse move, 78 ms a move on 1 M
+        # notes, hunt 11-04 T1; the cache holds the tracks themselves, so an id is never another's)
+        cache = self.__dict__.setdefault("_owns_cache", {})
+        got = cache.get(id(tracks))
+        if got is not None and got[0] is tracks:
+            return got[1]
+        owns = colour_sets(np.asarray(tracks, np.int64) % ROUND)[1]
+        if len(cache) >= 64:
+            del cache[next(iter(cache))]
+        cache[id(tracks)] = (tracks, owns)
+        return owns
 
     def colour_count(self, sh):
         """How many colours sh's notes have before Recolour (the most in one set)."""

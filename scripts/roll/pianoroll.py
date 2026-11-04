@@ -137,9 +137,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self._end_of = self._end = None  # the last note's end, and the notes it was worked out for
 
         self.bind("<Configure>", self.on_configure)
-        self.bind("<ButtonPress-1>", self.on_press)
+        self.left_down = False   # the left button pressed on the piano roll and not let go yet (Stir's Pick a shape…)
+        self.bind("<ButtonPress-1>", self.on_left_down)
         self.bind("<B1-Motion>", self.on_drag)
-        self.bind("<ButtonRelease-1>", self.on_release)
+        self.bind("<ButtonRelease-1>", self.on_left_up)
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
         bind_double_right(self, self.on_right, self.on_double_right)
@@ -1100,6 +1101,14 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         key = math.floor(self.y2p(e.y) + 0.5)
         if 0 <= key < self.app.keys and self.app.gliss_picks() is not None:
             self.key_hold(key, bool(e.state & CTRL))
+
+    def on_left_down(self, e):
+        self.left_down = True
+        return self.on_press(e)
+
+    def on_left_up(self, e):
+        self.left_down = False
+        return self.on_release(e)
 
     def on_press(self, e):
         self.app.commit_typing()  # (a number typed in a panel box goes to the shapes picked now, before this click)

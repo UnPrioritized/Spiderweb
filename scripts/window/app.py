@@ -2677,6 +2677,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         left_out = self.put_into_current(sh)
         self.shapes.append(sh)
+        if getattr(self, "stir_window", None):  # (a Stir area being drawn: this stroke goes into it)
+            self.stir_window.took(sh)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
         if left_out:

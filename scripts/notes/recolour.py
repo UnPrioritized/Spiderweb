@@ -32,6 +32,7 @@ import heapq
 import json
 import math
 import random
+import weakref
 from collections import OrderedDict
 
 import numpy as np
@@ -83,6 +84,8 @@ MOST_STRETCH, LEAST_STRETCH = 1000.0, 10.0
 STIR_AREAS = ("circle", "square", "diamond")  # (Size = the circle's width / the square's side / the diamond's tip to tip)
 DRAWN = "drawn"  # (an area shaped like a library drawing: stir["shape"])
 MOST_SHAPE_POINTS = 20000  # (a drawn area's outline points, all loops: more = the shape dropped)
+MAKE_SHAPE_POINTS = 2000  # (a new area from a drawing / shape keeps at most this many: every undo step and notes
+# lookup carries the outline, 387 KB a shape at 20,000; the fade looks the same, hunt 11-04 T2)
 FIELD_STEPS = 200  # (a drawn area's distances worked out on this many spots along its longer side, once per shape)
 FIELD_PIECES = 600  # (from at most this many pieces of its outline)
 MOST_STIRS = 20  # (stacked stirs on one shape)
@@ -511,9 +514,28 @@ def centre_at(rc, notes, own, t, k):
     return [100 * (u - a0) / max(a1 - a0, 1e-12), 100 * (v - b0) / (b1 - b0) if b1 > b0 else 50.0]
 
 
+_BOXES = OrderedDict()  # id(notes) -> (weak link to them, their box): big remembered notes asked again and again
+
+
 def box_of(notes):
-    """(first start, last end, lowest key, highest key) of notes."""
-    return int(notes[:, 0].min()), int(notes[:, 1].max()), int(notes[:, 2].min()), int(notes[:, 2].max())
+    """(first start, last end, lowest key, highest key) of notes. Big arrays' boxes are remembered (the Stir window
+    asks at every mouse move: 4 x 1 M notes looked at a move, hunt 11-04 T1); the remembered notes are never changed
+    in place, and the weak link never keeps them alive."""
+    big = isinstance(notes, np.ndarray) and len(notes) > 20000
+    if big:
+        got = _BOXES.get(id(notes))
+        if got is not None and got[0]() is notes:
+            _BOXES.move_to_end(id(notes))
+            return got[1]
+    box = int(notes[:, 0].min()), int(notes[:, 1].max()), int(notes[:, 2].min()), int(notes[:, 2].max())
+    if big:
+        try:
+            _BOXES[id(notes)] = (weakref.ref(notes), box)
+        except TypeError:  # (a view of another array can't be linked weakly: not remembered)
+            return box
+        if len(_BOXES) > 64:
+            _BOXES.popitem(last=False)
+    return box
 
 
 def places_of(notes, rc, gate, box):
@@ -776,7 +798,8 @@ def area_spot_q(x, y, st, k):
     """area_q of spots (x, y) in the colour box for stir st (filled in, with a reach), from its own spot or Centre
     point: 0 in its middle, 1 on the outline and past it."""
     ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
-    return np.clip(area_q(*area_local(x - ax, y - ay, st, k), st), 0.0, 1.0)
+    # (rounded: a note right on the outline is out on both sides, not in on one by a float hair, hunt 11-04 2)
+    return np.clip(np.round(area_q(*area_local(x - ax, y - ay, st, k), st), 9), 0.0, 1.0)
 
 
 def area_inside(at, rc, box, own):

@@ -13,7 +13,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_SHAPE_POINTS, MOST_STIRS,
+from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MAKE_SHAPE_POINTS, MOST_STIRS,
                             MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_IN, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, new_seed, stir_stack)
 from roll.roll_live import STROKE_TOOLS
@@ -25,6 +25,7 @@ from window.widgets import (Scrub, Tooltip, bad, good, name_index, name_list, re
                             unhighlight)
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
+AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "flip_in")  # (brought back with an area)
 
 
 def stirred_rc(old, stir):
@@ -59,8 +60,8 @@ def library_area(app, name):
     loops = [np.asarray(p, np.float64).reshape(-1, 2) for p in polys]
     loops = [p for p in loops if len(p) >= 3]
     total = sum(len(p) for p in loops)
-    if total > MOST_SHAPE_POINTS:  # (a very busy drawing: every k-th point, enough for an area's fade)
-        k = -(-total // MOST_SHAPE_POINTS)
+    if total > MAKE_SHAPE_POINTS:  # (a very busy drawing: every k-th point, enough for an area's fade)
+        k = -(-total // MAKE_SHAPE_POINTS)
         loops = [p[::k] for p in loops if len(p[::k]) >= 3]
     return clean_area_shape({"name": name, "loops": [p.tolist() for p in loops], "aspect": float(drawn)})
 
@@ -73,7 +74,10 @@ def with_stir(old, i, change):
     if change is None:
         del stack[i]
     else:
-        stack[i] = change(dict(stack[i]))
+        was = stack[i]
+        stack[i] = change(dict(was))
+        if stack[i] == was:  # (nothing changed: old as it is, no plain stir padded in, hunt 11-04 8)
+            return old
     return stirred_rc(old, stack or None)
 
 
@@ -349,9 +353,35 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     def targets(self):
         """The selected shapes the window stirs; while an area is drawn: the ones it stirred when drawing began."""
         d, shapes = self.drawing, self.app.shapes
-        if d:  # (by place: Ctrl+Z while drawing makes every shape anew, hunt C 4)
-            return [shapes[i] for i in d["idx"] if i < len(shapes)]
+        if d:
+            self.follow()
+            return [shapes[i] for i in d["idx"]]
         return self.app.recolour_targets()
+
+    def follow(self):
+        """While drawing / picking an area: the stirred shapes' places (d["idx"]) and the drawn strokes' places
+        (d["made_at"]) brought up to date. The shapes themselves are followed (deleting one before them shifts every
+        place, hunt 11-04 3); when Ctrl+Z / Y made every shape anew, by their last places (hunt C 4), then followed
+        again from there. d keeps the shapes themselves, so their id()s can't go to a new shape."""
+        d, shapes = self.drawing, self.app.shapes
+        pos = {id(s): i for i, s in enumerate(shapes)}
+        if any(id(t) in pos for t in d["tg"]) or any(id(m) in pos for m in d["made"]):
+            d["idx"] = [pos[id(t)] for t in d["tg"] if id(t) in pos]
+            d["made"] = [m for m in d["made"] if id(m) in pos]
+            d["made_at"] = [pos[id(m)] for m in d["made"]]
+        else:
+            n = len(shapes)
+            d["idx"] = [i for i in d["idx"] if i < n]
+            d["tg"] = [shapes[i] for i in d["idx"]]
+            d["made"] = [shapes[i] for i in d["made_at"] if i < n and i not in d["idx"]]
+
+    def took(self, sh):
+        """A shape just drawn on the piano roll (App.add_shape): while drawing an area it goes into the area (only
+        drawn ones: a duplicate / join / paste never does, hunt 11-04 6)."""
+        d = self.drawing
+        if d and not d["pick"]:
+            d["made"].append(sh)
+            d["made_at"].append(len(self.app.shapes) - 1)
 
     def stirs(self):
         """The shown tab's stir of each selected shape (filled in)."""
@@ -481,10 +511,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         b["entry"].config(state="normal" if on and sizes else "disabled")
         areas = [s for s in sts if s["reach"] is not None]  # (Round as seen + Stretch: only with an area)
         looks = {(s["round"], s["stretch"], s["seen"] if s["round"] else None, tuple(s["spot"] or ()), s["tilt"],
-                  s["skew"]) for s in areas}
-        if len(looks) == 1:  # (what picking an area again brings back)
-            r, w, v, p, t, k = next(iter(looks))
-            self.area_last = {"round": r, "stretch": w, "seen": v, "spot": list(p) or None, "tilt": t, "skew": k}
+                  s["skew"]) + tuple(s[k] for k in AREA_KEPT) for s in areas}
+        if len(looks) == 1:  # (what picking an area again brings back; the round-3 settings too, hunt 11-04 5)
+            r, w, v, p, t, k, *more = next(iter(looks))
+            self.area_last = {"round": r, "stretch": w, "seen": v, "spot": list(p) or None, "tilt": t, "skew": k,
+                              **dict(zip(AREA_KEPT, more))}
         tied = {s["spot"] is None for s in areas}
         self.tied.set(tied != {False})
         self.tied_tick.state(["alternate" if len(tied) > 1 else "!alternate",
@@ -537,8 +568,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 row.pack_forget()
         self.reset.state(["!disabled" if on and any(s != full_stir(None) for s in sts) else "disabled"])
         d = self.drawing
-        if d and d["pick"] and any(i >= len(app.shapes) or i not in d["idx"] for i in app.sels):
-            self.after_idle(self.on_picked)  # (a shape clicked while picking: its outline = the area)
+        if d and d["pick"] and app.sels:  # (a shape clicked while picking: its outline = the area; a selection
+            # from anything else (Ctrl+Z / Ctrl+A / the Shapes list) picks nothing and is let go, hunt 11-04 1)
+            if app.roll.left_down:
+                self.after_idle(self.on_picked)
+            else:
+                self.after_idle(lambda: self.drawing and self.drawing["pick"] and app.select(None))
         lonely, single = app.recolour_trouble(tgts, [clean_recolour(t.get("recolour")) or {"mode": KEEP}
                                                      for t in tgts])
         text = tr("stir.needs") if lonely else tr("stir.one") if single else ""
@@ -580,6 +615,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                         st["stretch"] = last["stretch"]
                         st["spot"] = last["spot"]
                         st["tilt"], st["skew"] = last.get("tilt", 0.0), last.get("skew", 0.0)
+                        st.update({k: last[k] for k in AREA_KEPT if k in last})
                         if last["round"] and last["seen"]:
                             st["round"] = True
                             if not st["spin"]:  # (a look already used by the spin tick stays)
@@ -756,8 +792,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             return self.sync()
         self.take_typing()
         idx = [i for i, s in enumerate(app.shapes) if any(s is t for t in tgts)]
-        self.drawing = {"idx": idx, "count": len(app.shapes), "tab": self.tab, "live": app.live.get(),
-                        "tool": app.tool.get(), "pick": pick}
+        self.drawing = {"idx": idx, "tg": [app.shapes[i] for i in idx], "made": [], "made_at": [], "tab": self.tab,
+                        "live": app.live.get(), "tool": app.tool.get(), "pick": pick}
         app.select(None)
         app.live.set(False)
         if pick:
@@ -779,7 +815,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         d = self.drawing
         if not d:
             return
-        idx = {i for i in d["idx"] if i < len(self.app.shapes)}
+        self.follow()
+        idx = set(d["idx"])
         self.drawing = None
         self.draw_bar.pack_forget()
         app = self.app
@@ -796,11 +833,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         app, d = self.app, self.drawing
         if not d:
             return
-        if len(app.shapes) < d["count"] or len(self.targets()) != len(d["idx"]):
+        app.roll.cancel_draft()  # (a stroke half made: finished first, it counts)
+        self.follow()
+        if len(d["idx"]) != len(d["tg"]) or not d["idx"]:  # (a stirred shape deleted meanwhile)
             app.status.config(text=tr("stir.draw_lost"))
             return self.end_draw()
-        app.roll.cancel_draft()
-        drawn = list(range(d["count"], len(app.shapes)))
+        drawn = list(d["made_at"])
         if not drawn:
             app.status.config(text=tr("stir.draw_none"))
             return
@@ -809,14 +847,17 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     def on_picked(self):
         """A shape clicked while picking: its outline becomes the area, where it is; it stays as it is."""
         app, d = self.app, self.drawing
-        if not d or not d["pick"]:
+        if not d or not d["pick"] or not app.sels:
             return
-        olds = [app.shapes[i] for i in sorted(app.sels) if i < len(app.shapes) and i not in d["idx"]]
-        if not olds:
-            return
-        if (app.roll.drag or ("",))[0] == "move":  # (the click picks; it doesn't move the shape)
-            app.roll.drag = None
-        self.area_from(olds[:1], (), "stir.pick_none", tr("stir.undo_picked"))
+        roll = app.roll
+        i = getattr(roll, "grabbed", None)
+        i = i if i in app.sels else min(app.sels)
+        if (roll.drag or ("",))[0] == "move":  # (the click picks; it doesn't move the shape)
+            roll.drag = None
+        if i >= len(app.shapes):
+            return app.select(None)
+        # (the stirred shape itself may lend its own outline too, hunt 11-04 7)
+        self.area_from([app.shapes[i]], (), "stir.pick_none", tr("stir.undo_picked"))
 
     def area_from(self, olds, drop, why, name):
         """The outline of shapes olds (several = one live shape, like Turn into live shape; open ends closed like
@@ -847,8 +888,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 app.select(None)
             return
         total = sum(len(p) for p in loops)
-        if total > MOST_SHAPE_POINTS:
-            k = -(-total // MOST_SHAPE_POINTS)
+        if total > MAKE_SHAPE_POINTS:
+            k = -(-total // MAKE_SHAPE_POINTS)
             loops = [p[::k] for p in loops if len(p[::k]) >= 3]
         seen, i = self.seen_now(), d["tab"]
         loops = [p.tolist() for p in loops]

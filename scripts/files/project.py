@@ -646,7 +646,10 @@ class ProjectFiles:
                               "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
                               "loud_on_top": self.stack_order.get() == "loud",
                               "hidden_shade": self.hidden_shade.get(),
-                              "live": self.live.get(), "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
+                              "live": (getattr(getattr(self, "stir_window", None), "drawing", None)
+                                       or {"live": self.live.get()})["live"],  # (a Stir area being drawn turned
+                              # Live shape off for a while: the user's own tick is saved, hunt 11-04 4)
+                              "mask": self.mask.get(), "mask_defaults": self.mask_defaults,
                               "mask_preview": self.mask_preview.get(), "mask_fade": GHOST_FADE[0],
                               "tracks": self.track_list.state(),
                               "tumour_window": self.tumour_pos, "graph_window": self.graph_pos,
