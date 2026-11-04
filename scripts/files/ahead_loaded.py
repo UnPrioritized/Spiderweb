@@ -525,10 +525,41 @@ class LoadedSong:
             if self._span_bytes(self.tick_at(a), self.tick_at(at)) <= PRE_MOST:
                 break
         got = self.own.piece_start(f0, self.last, pre)
+        down = self._pedal_since(got[1])
+        if down is not None:  # (PLAN E4: from where the pedal went down: the notes let go under it still sound)
+            d = max(down, self.tick_at(max(0, at - int(HELD_PRE * RATE))))
+            if d < got[1] and self._span_bytes(d, got[1]) <= PRE_MOST:
+                got = (min(got[0], d), d)
         if len(self._starts) > 256:
             self._starts.clear()
         self._starts[key] = got
         return got
+
+    def _pedal_since(self, tick):
+        """The earliest tick a sustain / sostenuto pedal still down at tick went down (Merlin's down: >= 64), over
+        every port + channel; None = none down. (A piece starting early at tick strikes only notes still held there:
+        ones let go under the pedal were missing, 7 dB off a whole render, dev/scratch/pedal_check.py.)"""
+        ev = getattr(self, "_pedals", None)
+        if ev is None:  # (every pedal change of the playing tracks, once a song)
+            t, code = self._controls(-1, FAR)
+            d1 = (code >> 8) & 127
+            keep = ((code & 0xF0) == 0xB0) & ((d1 == 64) | (d1 == 66))
+            slot = (((code >> 24) & 15) * 16 + (code & 15)) * 2 + (d1 == 66)
+            ev = self._pedals = (t[keep], slot[keep], ((code >> 16) & 127)[keep] >= 64)
+        t, slot, on = ev
+        k = int(np.searchsorted(t, tick, "left"))
+        if not k:
+            return None
+        t, slot, on = t[:k], slot[:k], on[:k]
+        best = None
+        for s in np.unique(slot).tolist():
+            idx = np.flatnonzero(slot == s)
+            if not on[idx[-1]]:
+                continue
+            ups = idx[~on[idx]]
+            first = idx[np.searchsorted(idx, ups[-1], "right")] if len(ups) else idx[0]
+            best = int(t[first]) if best is None else min(best, int(t[first]))
+        return best
 
     def pre_frames(self, f0):
         return f0 - self.frame(self.piece_start(f0)[0])
@@ -792,7 +823,13 @@ class LoadedSong:
         if not got and not own and not counted_tracks:
             return None, 0
         ports = sorted(set(rows) | set(sysex) | set(replay))
-        count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks)
+        # (PLAN E4: a pedal down at the piece's end: the file runs to t_copy, as Merlin lets every note go at its end;
+        # the last note-off under the pedal ended it there, its last 0.3 s faded where a whole render rings)
+        hold = b""
+        if self._pedal_since(t_on) is not None and t_copy > origin:
+            body = _vlq(t_copy - origin) + b"\xff\x2f\x00"
+            hold = b"MTrk" + len(body).to_bytes(4, "big") + body
+        count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks) + bool(hold)
         buf = bytearray(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
                         + self.ppq.to_bytes(2, "big"))
         buf += self.own.tempo_track(origin, t_copy)
@@ -840,6 +877,7 @@ class LoadedSong:
             buf += chunk
         for chunk in own:
             buf += chunk
+        buf += hold
         return buf, f0 - self.frame(origin)
 
     def bass_events(self):
