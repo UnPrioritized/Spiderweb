@@ -336,7 +336,7 @@ class Pair:
             n = max(len(stir_stack(x.get("stir"))), len(stir_stack(y.get("stir"))), 1)
             plain = full_stir(None)
             sx, sy = ((stir_stack(r.get("stir")) + [plain] * n)[:n] for r in (x, y))
-            calm = lambda s: dict(s, turn=0.0, twist=0.0, squeeze=False)
+            calm = lambda s: dict(s, turn=0.0, twist=0.0, squeeze=False, flip_side=False, flip_up=False)
             for j in range(n):
                 if sx[j] == plain and sy[j] != plain:
                     sx[j] = calm(sy[j])

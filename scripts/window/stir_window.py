@@ -111,7 +111,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             w.pack(side="left", padx=(6, 0))
             self._number_box(row, "centre" + str(k), 0, 100, w)
             ttk.Label(row, text="%").pack(side="left")
-        self.squeeze = tk.BooleanVar(value=True)  # (BMC tester 11-03: off = the point only says where it turns)
+        self.middle = ttk.Button(row, text=tr("stir.middle"), command=self.on_middle)  # (BMC tester 11-04)
+        self.middle.pack(side="left", padx=(6, 0))
+        Tooltip(self.middle, tr("stir.middle_tip"))
+        self.squeeze =tk.BooleanVar(value=True)  # (BMC tester 11-03: off = the point only says where it turns)
         self.squeeze_tick = ttk.Checkbutton(box, text=tr("stir.squeeze"), variable=self.squeeze,
                                             command=self.on_squeeze)
         self.squeeze_tick.pack(anchor="w", pady=(6, 0))
@@ -128,6 +131,19 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(w, tr("stir.reach_tip"))
         self._number_box(row, "reach", LEAST_REACH, MOST_REACH, w)
         ttk.Label(row, text="%").pack(side="left")
+        row = ttk.Frame(box)  # (colour flips at this stir's step, BMC tester 11-04: notes stay, colours mirrored)
+        row.pack(anchor="w", pady=(4, 0))
+        w = ttk.Label(row, text=tr("stir.flip"))
+        w.pack(side="left")
+        Tooltip(w, tr("stir.flip_tip"))
+        self.flips = {}
+        for key in ("flip_side", "flip_up"):
+            var = tk.BooleanVar(value=False)
+            tick = ttk.Checkbutton(row, text=tr("stir." + key), variable=var,
+                                   command=lambda key=key: self.on_flip(key))
+            tick.pack(side="left", padx=(6, 0))
+            Tooltip(tick, tr("stir.flip_tip"))
+            self.flips[key] = (var, tick)
         # (a user's feedback 2026-11-02, recolour.stir_from / stirred; Colour sets only while a shape has 2+ sets)
         self.picks = {}  # key -> {row, box, tip, choices}
         for key, choices in (("edge", STIR_EDGES), ("sets", STIR_SETS)):
@@ -301,7 +317,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.squeeze.set(squeezes != {False})
         self.squeeze_tick.state(["alternate" if len(squeezes) > 1 else "!alternate",
                                  "!disabled" if on else "disabled"])
-        many = any(len(app.colour_owns(t)) > 1 for t in tgts)
+        for key, (var, tick) in self.flips.items():
+            vals = {s[key] for s in sts}
+            var.set(vals == {True})
+            tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if on else "disabled"])
+        self.middle.state(["!disabled" if any(s["centre"] != [50.0, 50.0] for s in sts) else "disabled"])
+        many =any(len(app.colour_owns(t)) > 1 for t in tgts)
         row = self.picks["sets"]["row"]
         if many != bool(row.winfo_manager()):
             if many:
@@ -326,7 +347,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         """Each selected shape's shown stir (its tab's) key = value (centre0 / centre1: one side of the Centre
         point); one undo step (push False: part of the step taken before)."""
         def change(st):
-            if key.startswith("centre"):
+            if key == "centre":  # (the Middle button)
+                st["centre"] = [50.0, 50.0]
+            elif key.startswith("centre"):
                 c = list(st["centre"])
                 c[int(key[-1])] = value
                 st["centre"] = c
@@ -390,6 +413,18 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     def on_squeeze(self):
         self.wheel = None
         self.set_stir("squeeze", bool(self.squeeze.get()))
+        self.sync()
+
+    def on_flip(self, key):
+        self.wheel = None
+        self.set_stir(key, bool(self.flips[key][0].get()), tr("stir.undo_flip"))
+        self.sync()
+
+    def on_middle(self):
+        """The shown stir's Centre point back to the middle (50 / 50), one undo step."""
+        self.take_typing()
+        self.wheel = None
+        self.set_stir("centre", None, tr("stir.undo_centre"))
         self.sync()
 
     def on_reset(self):

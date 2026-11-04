@@ -49,8 +49,9 @@ MOST_SEED = 2 ** 31 - 1
 # turn / twist happens, BMC tester 11-03)
 # (reach: Only inside a circle, its diameter in % of the colour box (an oval on a box that isn't square, as Turn
 # counts), None = the whole shape; the turn fades to nothing at its edge, BMC tester 11-03)
+# (flip_side / flip_up: the colours mirrored at the notes' own outline before this stir bends them, BMC tester 11-04)
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
-                 "squeeze": True, "reach": None}
+                 "squeeze": True, "reach": None, "flip_side": False, "flip_up": False}
 MOST_REACH, LEAST_REACH = 100.0, 0.01
 MOST_STIRS = 20  # (stacked stirs on one shape)
 STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its set / takes the colour found itself)
@@ -149,7 +150,8 @@ def stir_stack(s):
 def one_stir(s):
     """One saved stir -> {"turn": degrees -360..360, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
     % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False, "reach": % LEAST_REACH..
-    MOST_REACH}, each only when not its default (STIR_DEFAULTS), or None (no stir)."""
+    MOST_REACH, "flip_side" / "flip_up": True}, each only when not its default (STIR_DEFAULTS), or None (no
+    stir)."""
     if not isinstance(s, dict):
         return None
     out = {}
@@ -169,6 +171,9 @@ def one_stir(s):
         out["edge"] = s["edge"]
     if s.get("squeeze") is False:
         out["squeeze"] = False
+    for k in ("flip_side", "flip_up"):
+        if s.get(k) is True:
+            out[k] = True
     r = s.get("reach")
     if number(r) and LEAST_REACH <= round(r, 3) <= MOST_REACH:
         out["reach"] = round(float(r), 3)
@@ -506,6 +511,7 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     if not st or not len(at):
         return now
     mid, key = stir_from(at, rc, box, own)
+    mid, key = flipped(at, mid, key, st.get("flip_side"), st.get("flip_up"))
     src = nearest(at, mid, key)
     move = st.get("sets") == "move" or len(pals) < 2
     if move:
@@ -638,9 +644,49 @@ def stir_from(at, rc, box, own):
     return mid, key
 
 
+def flipped(at, mid, key, side, up):
+    """Stir's colour flips: spots (mid, key) mirrored at the notes' own outline, sideways across their key row's
+    notes (first start <-> last end), upside down across the notes around their time (lowest <-> highest key), so
+    a round or slanted shape flips into itself, never into empty space. Done on where the stir looks = the colours
+    flipped first, then bent: the swirl stays at the Centre point."""
+    if side:
+        mid = Rows(at).mirrored(mid, key)
+    if up:
+        key = Cols(at).mirrored(mid, key)
+    return mid, key
+
+
+class Cols:
+    """The lowest and highest key of at's notes around each time (notes put in slices by their middle; a slice
+    without notes counts as the nearest one with notes), for Stir's upside-down colour flip."""
+
+    def __init__(self, at):
+        mid = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
+        k = np.asarray(at[:, 2], np.float64)
+        self.t0 = float(mid.min())
+        self.n = int(max(1, min(1024, len(at) // 8)))  # (about 8 notes a slice)
+        self.w = max(float(mid.max()) - self.t0, 1.0) / self.n
+        b = self.slice(mid)
+        lo, hi = np.full(self.n, np.inf), np.full(self.n, -np.inf)
+        np.minimum.at(lo, b, k)
+        np.maximum.at(hi, b, k)
+        full = np.flatnonzero(np.isfinite(lo))
+        i = np.clip(np.searchsorted(full, np.arange(self.n)), 0, len(full) - 1)
+        j = np.maximum(i - 1, 0)
+        near = full[np.where(np.abs(full[j] - np.arange(self.n)) <= np.abs(full[i] - np.arange(self.n)), j, i)]
+        self.sum = lo[near] + hi[near]
+
+    def slice(self, mid):
+        return np.clip(((np.asarray(mid, np.float64) - self.t0) / self.w).astype(np.int64), 0, self.n - 1)
+
+    def mirrored(self, mid, key):
+        return self.sum[self.slice(mid)] - np.asarray(key, np.float64)
+
+
 class Rows:
-    """Each key row's notes' span (first start, last end) of at, for Stir's Wrap around and Bend with the outline;
-    a key without notes counts as the nearest one with notes (lower on a tie, as nearest does)."""
+    """Each key row's notes' span (first start, last end) of at, for Stir's Wrap around, Bend with the outline and
+    the sideways colour flip; a key without notes counts as the nearest one with notes (lower on a tie, as nearest
+    does)."""
 
     def __init__(self, at):
         k = np.asarray(at[:, 2], np.int64)
@@ -661,6 +707,10 @@ class Rows:
         a, b = self.a[r], self.b[r]
         w = np.maximum(b - a, 1.0)
         return np.where((mid < a) | (mid > b), a + np.mod(mid - a, w), mid)
+
+    def mirrored(self, mid, key):
+        r = self.row(key)
+        return self.a[r] + self.b[r] - np.asarray(mid, np.float64)
 
     def stretched(self, mid, key, t0, t1):
         r = self.row(key)
