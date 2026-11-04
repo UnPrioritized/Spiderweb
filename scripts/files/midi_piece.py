@@ -473,6 +473,41 @@ def order_ok(key, sig, cnt, n, bar_ch):
     return True
 
 
+def open_at(key, sig, cnt, n, lim, wlim, take):
+    """(Rendered ahead, carried notes) The counted notes key / sig / cnt[:n] (sorted: the order the piece's synth
+    pairs them in) before key lim (a tick << 16), paired as a synth pairs them (an off ends its place's OLDEST copy,
+    first in first out): take[:n] = the copies of each note-on still sounding at lim or ended from wlim on, and every
+    note-off from wlim on (whole). The same pairing again from just these: those ended from wlim on are the oldest
+    ones present when their offs come. Returns the rows taken."""
+    opn = np.zeros(1 << 15, np.int64)
+    gone = np.zeros(1 << 15, np.int64)  # (copies ended before wlim: each place's oldest, left out)
+    m = 0
+    while m < n and key[m] < lim:
+        m += 1
+    for i in range(m):
+        place = (key[i] >> 1) & 32767
+        if sig[i] > 0:
+            opn[place] += cnt[i]
+        else:
+            k = min(cnt[i], opn[place])
+            opn[place] -= k
+            if key[i] < wlim:
+                gone[place] += k
+    rows = 0
+    for i in range(m):
+        take[i] = 0
+        place = (key[i] >> 1) & 32767
+        if sig[i] > 0:
+            k = min(gone[place], cnt[i])
+            gone[place] -= k
+            take[i] = cnt[i] - k
+        elif key[i] >= wlim:
+            take[i] = cnt[i]
+        if take[i] > 0:
+            rows += 1
+    return rows
+
+
 def counted_track(key, sig, cnt, n, port, rel, out):
     """(PLAN D2) The counted notes of one port (key / sig / cnt[:n], sorted: runs_sort_fold) as a track's events
     from tick 0 = the piece's origin (a note's tick = (key >> 16) + rel): a run of 5 or more = the repeat mark

@@ -39,7 +39,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   play_condense, play_stamp_pre   midi_play's functions (playing a loaded MIDI), compiled
   piece_track    midi_piece.piece_track (Rendered ahead: a loaded track's piece copied from its bytes), compiled
   piece_held_ons, piece_held_head, piece_note_ons   midi_piece's (a piece's held copies, each at its own note-on)
-  piece_runs_sort, piece_runs_merge, piece_counted_track, piece_order_ok   midi_piece's (Merlin pieces' counted
+  piece_runs_sort, piece_runs_merge, piece_counted_track, piece_order_ok, piece_open_at   midi_piece's (Merlin pieces' counted
                  notes, PLAN D2)
   all_tops       track_list.loaded_tops: a loaded MIDI's tracks in the track list's All tracks row
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
@@ -1796,6 +1796,7 @@ piece_runs_sort = njit(cache=CACHE, nogil=True)(midi_piece.runs_sort_fold)
 piece_runs_merge = njit(cache=CACHE, nogil=True)(midi_piece.runs_merge)
 piece_counted_track = njit(cache=CACHE, nogil=True)(midi_piece.counted_track)
 piece_order_ok = njit(cache=CACHE, nogil=True)(midi_piece.order_ok)
+piece_open_at = njit(cache=CACHE, nogil=True)(midi_piece.open_at)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1999,6 +2000,7 @@ def warm():
                          np.zeros(6, np.uint8), np.zeros(6, np.int64))
     piece_counted_track(rk, rs, rc, 2, 0, 0, np.zeros(96, np.uint8))
     piece_order_ok(rk, rs, rc, 2, np.zeros(256, np.uint8))
+    piece_open_at(rk, rs, rc, 2, 1 << 40, 1 << 30, np.zeros(2, np.int64))
     piece_held_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0, q, q.copy(),
                    np.zeros(1, np.int64), np.zeros(1, np.int64), q.copy())
     piece_held_head(np.zeros(1, np.int64), np.zeros(1, np.int64), np.ones(1, np.int64), -1, 0, np.zeros(16, np.uint8))

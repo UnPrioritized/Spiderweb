@@ -543,6 +543,17 @@ class LoadedSong:
             runs = _Runs(self, floor, t_pre, t_copy, reorder=counted != "keep order")
         self.counted_way = "plain" if runs is None else counted  # (which way the last piece went: for checks)
         evs = runs.views if runs is not None else _NO_EVENTS
+        carry, use = None, None  # (the notes still sounding at t_pre, handed over by the piece before: _Runs._carry)
+        if runs is not None:
+            got_c = getattr(self, "_carried", None)
+            if got_c is not None and got_c["at"] == t_pre:
+                use = got_c["pcs"] & ~runs.pedal
+                keep = use[got_c["pk"] >> 7]
+                carry = {k: (v[keep] if isinstance(v, np.ndarray) and k != "pcs" else v) for k, v in got_c.items()}
+            t_next = self.piece_start(f1)[1]  # (where the piece after this one starts early)
+            if t_pre < t_next <= t_on:
+                runs.carry_at = t_next
+        self.carried_way = carry is not None  # (for checks)
         got = []
         pend = {}  # track -> (checkpoint, its held places, counts, velocities, newest on ticks, ends, own copies)
         copies = 0
@@ -592,6 +603,10 @@ class LoadedSong:
                         runs.took()
                     body = None
                 held = np.flatnonzero(cnt > 0)
+                if use is not None and len(held):  # (handed over by the piece before: not found track by track)
+                    nc = int(self.newch[j])
+                    pcs = int(self.tport[j]) * 16 + (np.full(len(held), nc, np.int64) if nc >= 0 else held >> 8)
+                    held = held[~use[pcs]]
                 if not w and not len(held):
                     continue
                 copies += int(cnt[held].sum())
@@ -632,6 +647,8 @@ class LoadedSong:
                     if tk < t_pre:
                         sysex.setdefault(int(self.tport[j]), []).append((tk, n, ev))
         origin = min([t0] + [int(g[2].min()) for g in got if len(g[2])])
+        if carry is not None and len(carry["tick"]):
+            origin = min(origin, max(floor, int(carry["tick"].min())))
         counted_tracks = []
         if runs is not None:
             # (a SysEx copied, or a held copy on t_pre itself whose order there matters (a controller on its
@@ -642,6 +659,8 @@ class LoadedSong:
                 if self.bytes_in(f0, f1) > PIECE_MOST:  # (sized for counted notes: plain it would take GBs)
                     raise TooBigPlain()
                 return self.midi(f0, f1)
+            if carry is not None:
+                runs.carried(carry, floor)
             for e in got:  # (held copies too, in track order: the order a synth reads them in)
                 if len(e[2]):
                     runs.held(e[0], e[2], e[3], e[4], e[5])
@@ -729,6 +748,9 @@ _NO_EVENTS = (np.zeros(0, np.int64), np.zeros(256, np.uint8), np.zeros(0, np.int
 _EMPTY = np.zeros(0, np.int64)
 COUNTED_BATCH = 4 << 20  # notes gathered before they're sorted + folded (PLAN D2: ~70 MB; the folded runs stay)
 COUNTED_SLICE = 8 << 20  # bytes of a track walked at a time in a counted piece (checkpoints are <= 0.5 MB apart)
+CARRY_ENDED_S = (5.0, 2.0, 1.0, 0.5, 0.25, 0.0)  # seconds of notes ended before a piece handed to it too (their release
+# tails: Shinki 470 s needed 5 s, 1 s left a click; a dense wall starts its pieces 0.02 s early), less when ...
+CARRY_ROWS_MOST = 16 << 20  # ... that is more than this many rows (19 bytes each: ~300 MB at most)
 
 
 _PAIRING_CCS = np.array([64, 66, 120, 123, 124, 125, 126, 127])  # (sustain, sostenuto, all sound / notes off, modes)
@@ -740,6 +762,12 @@ def _counted_loops():
     if fast is not None:
         return fast.piece_runs_sort, fast.piece_runs_merge, fast.piece_counted_track, fast.piece_order_ok
     return midi_piece.runs_sort_fold, midi_piece.runs_merge, midi_piece.counted_track, midi_piece.order_ok
+
+
+def _open_loop():
+    from files import speed
+    fast = speed.loops()
+    return fast.piece_open_at if fast is not None else midi_piece.open_at
 
 
 class _Runs:
@@ -758,13 +786,15 @@ class _Runs:
         self.bar_ch[np.unique(pc)] = 1
         # (bit 2: a tick's offs NOT sorted before its ons: everywhere when asked, else on channels that ever had a
         # pedal / all-notes-off / mode change: they pair offs in ways counting can't follow, midi_piece.order_ok)
+        _, every = song._controls(-1, t_copy + 1)
+        d1 = (every >> 8) & 127
+        odd = ((every & 0xF0) == 0xB0) & np.isin(d1, _PAIRING_CCS)
+        self.pedal = np.zeros(256, bool)  # (port + channels pairing in ways counting can't follow: never carried)
+        self.pedal[np.unique(((every[odd] >> 24) & 15) * 16 + (every[odd] & 15))] = True
+        self.bar_ch[self.pedal] |= 2
         if not reorder:
             self.bar_ch |= 2
-        else:
-            _, every = song._controls(-1, t_copy + 1)
-            d1 = (every >> 8) & 127
-            odd = ((every & 0xF0) == 0xB0) & np.isin(d1, _PAIRING_CCS)
-            self.bar_ch[np.unique(((every[odd] >> 24) & 15) * 16 + (every[odd] & 15))] |= 2
+        self.carry_at = None  # (a tick the notes still sounding at are handed to the next piece: midi())
         self.bits = int(t_copy - base_t + 1).bit_length() + 16
         self.cap, self.n = COUNTED_BATCH, 0
         self.k = np.zeros(self.cap, np.int64)
@@ -813,6 +843,46 @@ class _Runs:
         self.k[self.n:self.n + n] = keys
         self.s[self.n:self.n + n] = np.maximum(vel, 1)
         self.c[self.n:self.n + n] = 1 if cnt is None else cnt[order]
+        self.n += n
+
+    def _carry(self, ak, asg, ac):
+        """The notes still sounding at carry_at, as this piece's synth pairs them (held copies + every note up to
+        there, first in first out), handed to the piece starting there (song._carried): each at its own note-on with
+        its count, all tracks together (over HELD_EXACT_MOST a key's copies were struck at its newest note-on: after
+        Shinki's wall 800 M copies begun at 457.5 s struck again at every piece, a held chord instead of a decay).
+        Port + channels with a pedal / all-notes-off, or a controller in the piece (notes left in the tracks' bytes),
+        aren't carried: the next piece finds theirs track by track."""
+        take = np.zeros(len(ak), np.int64)
+        lim = (self.carry_at - self.base) << 16
+        song = self.song
+        at_f = song.frame(self.carry_at)
+        for back in CARRY_ENDED_S:  # (notes ended this long before too: their release tails, 0.02 s early in walls)
+            w = max(self.base, song.tick_at(max(0, at_f - int(back * RATE))))
+            if _open_loop()(ak, asg, ac, len(ak), lim, (w - self.base) << 16, take) <= CARRY_ROWS_MOST:
+                break
+        pick = np.flatnonzero(take)
+        carried = ~(self.pedal | ((self.bar_ch & 1) == 1))
+        pick = pick[carried[(ak[pick] >> 8) & 255]]
+        # (19 bytes a row: tick, port + channel x 128 + key, velocity (0 = an off), count)
+        song._carried = {"at": self.carry_at, "pcs": carried, "tick": (ak[pick] >> 16) + self.base,
+                         "pk": ((ak[pick] >> 1) & 32767).astype(np.uint16), "vel": asg[pick], "cnt": take[pick]}
+
+    def carried(self, carry, floor):
+        """The notes handed over by the piece before (_carry), into this piece (before held(): all before t_pre, in
+        the order that piece's synth paired them): note-ons (vel > 0; older than floor = at floor) and offs."""
+        n = len(carry["tick"])
+        if not n:
+            return
+        pk, vel = carry["pk"].astype(np.int64), carry["vel"]
+        pc = pk >> 7
+        is_on = vel > 0
+        on = ((self.bar_ch[pc] & 2) == 0) & is_on
+        tick = np.where(is_on, np.maximum(carry["tick"], floor), carry["tick"])
+        keys = ((tick - self.base) << 16) | (pk << 1) | on
+        self.room(n)
+        self.k[self.n:self.n + n] = keys
+        self.s[self.n:self.n + n] = vel
+        self.c[self.n:self.n + n] = carry["cnt"]
         self.n += n
 
     def clash_at(self, j, start, qs, vel, t_pre):
@@ -893,6 +963,8 @@ class _Runs:
         _, _, write, ok = _counted_loops()
         if not ok(ak, asg, ac, len(ak), self.bar_ch):
             return None
+        if self.carry_at is not None:
+            self._carry(ak, asg, ac)
         port_of = (ak >> 12) & 15
         for port in np.unique(port_of).tolist():
             mem = np.zeros(int((port_of == port).sum()) * 32 + 16, np.uint8)
