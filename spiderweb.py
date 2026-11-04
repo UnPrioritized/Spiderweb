@@ -167,6 +167,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     play_loaded.py   playing a loaded MIDI along with the shapes: read ahead from the file, sent to the synths
     play_dense.py    Kestrel (GPU): a loaded MIDI's parts too dense to read live, read once ahead, copies collapsed
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
+    domino_view.py   Domino companion: where a running Domino's piano roll is on the screen and what it shows
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
     unzip.py         unpacking outside data with a size limit (no "zip bomb" can fill the memory)
