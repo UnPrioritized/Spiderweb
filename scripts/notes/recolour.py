@@ -62,7 +62,13 @@ MOST_SEED = 2 ** 31 - 1
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
                  "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
-                 "tilt": 0.0, "skew": 0.0}
+                 "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
+                 "area_squeeze": True, "reverse": False, "flip_in": "whole"}
+# (BMC tester's round 3 answers 11-04, all only with a reach: "hard" = the area cut clean at its edge, Turn and
+# Twist alike (a lazy susan), else the soft fade; "area_turn" / "area_twist" / "area_squeeze" = what the area
+# limits (unticked = that part works on the whole shape); "reverse" = inside the area the colours' (tracks') order
+# turned round, first <-> last; "flip_in" = where the colour flips work: "whole" / "inside" / "outside" the area)
+FLIP_IN = ("whole", "inside", "outside")
 # (tilt / skew: the area's box turned (degrees, counterclockwise as measured) / slanted (its top slid along by
 # this much of its height), PLAN C2b; only with a reach)
 MOST_SKEW = 10.0
@@ -222,6 +228,14 @@ def one_stir(s):
         a = s.get("skew")
         if number(a) and abs(a) <= MOST_SKEW and round(a, 4):
             out["skew"] = round(float(a), 4)
+        for k in ("hard", "reverse"):
+            if s.get(k) is True:
+                out[k] = True
+        for k in ("area_turn", "area_twist", "area_squeeze"):
+            if s.get(k) is False:
+                out[k] = False
+        if s.get("flip_in") in FLIP_IN[1:]:
+            out["flip_in"] = s["flip_in"]
     v = s.get("seen")
     if number(v) and 1e-9 < v < 1e9:
         if s.get("round") is True and "reach" in out:
@@ -601,8 +615,15 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     st = rc.get("stir")
     if not st or not len(at):
         return now
+    full = full_stir(st)
+    inside = area_inside(at, rc, box, own) if full["reach"] and (full["reverse"] or full["flip_in"] != "whole") \
+        else None
     mid, key = stir_from(at, rc, box, own)
-    mid, key = flipped(at, mid, key, st.get("flip_side"), st.get("flip_up"))
+    fm, fk = flipped(at, mid, key, st.get("flip_side"), st.get("flip_up"))
+    if inside is not None and full["flip_in"] != "whole":  # (flips only inside / outside the area, tester 11-04)
+        there = inside if full["flip_in"] == "inside" else ~inside
+        fm, fk = np.where(there, fm, mid), np.where(there, fk, key)
+    mid, key = fm, fk
     src = nearest(at, mid, key)
     move = st.get("sets") == "move" or len(pals) < 2
     if move:
@@ -619,6 +640,16 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
         new = np.where(pool[i] == want, want, now[src])
     if rc.get("by"):
         new = new[leaders(at, rc["by"])]
+    if inside is not None and full["reverse"] and inside.any():  # (tester 11-04: inside the area the tracks'
+        # order turned round, each colour set on its own: its first colour <-> its last)
+        new = new.copy()
+        for p in pals:
+            p = np.sort(np.asarray(p, np.int64))
+            if len(p) < 2:
+                continue
+            j = np.clip(np.searchsorted(p, new), 0, len(p) - 1)
+            m = inside & (p[j] == new)
+            new[m] = p[::-1][j[m]]
     if move and len(pals) > 1:
         return kept_apart(notes, low, new, np.unique(np.concatenate(pals)), pick)
     if move:
@@ -703,15 +734,17 @@ def stir_from(at, rc, box, own):
     turn = st["turn"] / 360
     reach = st["reach"]
     (kx, ky), (rx, ry) = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))
-    if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there; measured from the
-        # area's own spot when it has one)
-        ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
-        q = np.clip(area_q(*area_local(x - ax, y - ay, st, (kx, ky)), st), 0.0, 1.0)
-        w = 1 - q * q * (3 - 2 * q)
-        if st["twist"]:
-            turn = turn + st["twist"] * np.sqrt(q)
-        turn = turn * w
-    elif st["twist"]:
+    whole_twist = st["twist"] and not (reach and st["area_twist"])
+    if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there (Hard edge: cut
+        # clean, tester 11-04); measured from the area's own spot when it has one. What the area limits is ticked:
+        # an unticked part works on the whole shape)
+        q = area_spot_q(x, y, st, (kx, ky))
+        w = (q < 1).astype(np.float64) if st["hard"] else 1 - q * q * (3 - 2 * q)
+        if st["area_turn"]:
+            turn = turn * w
+        if st["twist"] and st["area_twist"]:
+            turn = turn + st["twist"] * np.sqrt(q) * w
+    if whole_twist:
         far = max(np.hypot((X - cx) * rx, (Y - cy) * ry) for X in (0, 1) for Y in (0, 1))
         turn = turn + st["twist"] * np.sqrt(np.hypot(dx * rx, dy * ry) / max(far, 1e-12))
     a = -2 * np.pi * np.asarray(turn, np.float64)
@@ -727,7 +760,7 @@ def stir_from(at, rc, box, own):
     if st["squeeze"]:
         sx = np.where(x < cx, 0.5 * x / max(cx, 1e-12), 0.5 + 0.5 * (x - cx) / max(1 - cx, 1e-12))
         sy = np.where(y < cy, 0.5 * y / max(cy, 1e-12), 0.5 + 0.5 * (y - cy) / max(1 - cy, 1e-12))
-        if reach:  # (the squeeze fades with the circle too: outside it nothing moves)
+        if reach and st["area_squeeze"]:  # (the squeeze fades with the circle too: outside it nothing moves)
             sx, sy = x + (sx - x) * w, y + (sy - y) * w
         x, y = sx, sy
     mid, key = from_unit(x, y, rc, box, own)
@@ -737,6 +770,25 @@ def stir_from(at, rc, box, own):
     elif edge == "bend":
         mid = rows.unstretched(mid, key, t0, t1)
     return mid, key
+
+
+def area_spot_q(x, y, st, k):
+    """area_q of spots (x, y) in the colour box for stir st (filled in, with a reach), from its own spot or Centre
+    point: 0 in its middle, 1 on the outline and past it."""
+    ax, ay = (v / 100 for v in (st["spot"] or st["centre"]))
+    return np.clip(area_q(*area_local(x - ax, y - ay, st, k), st), 0.0, 1.0)
+
+
+def area_inside(at, rc, box, own):
+    """Which notes of at sit inside rc's Stir area (where they are, before any stir; the area line as the piano
+    roll draws it), or None (no area)."""
+    st = full_stir(rc.get("stir"))
+    if not st["reach"]:
+        return None
+    s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
+    x, y = unit_xy((s + e) / 2, k, rc, box, own)
+    kxy = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))[0]
+    return area_spot_q(x, y, st, kxy) < 1
 
 
 def area_dist(dx, dy, area):

@@ -14,7 +14,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MOST_SHAPE_POINTS, MOST_STIRS,
-                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
+                            MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_IN, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, new_seed, stir_stack)
 from roll.roll_live import STROKE_TOOLS
 from window import look
@@ -204,6 +204,19 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             w.pack(side="left", padx=(6, 0))
             self._number_box(row, "spot" + str(k), SPOT_LEAST, SPOT_MOST, w)
             ttk.Label(row, text="%").pack(side="left")
+        # (BMC tester's round 3 answers 11-04: a hard edge, what the area limits, the tracks' order reversed inside)
+        self.area_ticks = {}
+        row = ttk.Frame(box)
+        row.pack(anchor="w", pady=(4, 0))
+        for key in ("hard", "reverse"):
+            self._area_tick(row, key, False, tr(f"stir.{key}_tip")).pack(side="left", padx=(0, 10))
+        row = ttk.Frame(box)
+        row.pack(anchor="w", pady=(2, 0))
+        w = ttk.Label(row, text=tr("stir.affects"))
+        w.pack(side="left")
+        Tooltip(w, tr("stir.affects_tip"))
+        for key in ("area_turn", "area_twist", "area_squeeze"):
+            self._area_tick(row, key, True, tr("stir.affects_tip")).pack(side="left", padx=(6, 0))
         # (proportion, user's own idea 11-04: the area round as the piano roll shows it when ticked, + Stretch;
         # the spin round as seen too)
         row = ttk.Frame(box)
@@ -251,6 +264,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             tick.pack(side="left", padx=(6, 0))
             Tooltip(tick, tr("stir.flip_tip"))
             self.flips[key] = (var, tick)
+        w = ttk.Label(row, text=tr("stir.flip_in"))
+        w.pack(side="left", padx=(6, 0))
+        names = [tr("stir.flip_in_" + c) for c in FLIP_IN]
+        cb = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names) + 1)
+        cb.pack(side="left", padx=(4, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: self.on_pick("flip_in"))
+        Tooltip(w, tr("stir.flip_in_tip"))
+        self.flip_in = {"row": row, "box": cb, "tip": Tooltip(cb, tr("stir.flip_in_tip")), "choices": FLIP_IN}
         # (a user's feedback 2026-11-02, recolour.stir_from / stirred; Colour sets only while a shape has 2+ sets)
         self.picks = {}  # key -> {row, box, tip, choices}
         for key, choices in (("edge", STIR_EDGES), ("sets", STIR_SETS)):
@@ -272,6 +293,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             cb.bind("<<ComboboxSelected>>", lambda e, key=key: self.on_pick(key))
             Tooltip(word, tr(f"stir.{key}_tip"))
             self.picks[key] = {"row": row, "box": cb, "tip": Tooltip(cb, tr(f"stir.{key}_tip")), "choices": choices}
+        self.picks["flip_in"] = self.flip_in
         self.hint = ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
@@ -294,6 +316,20 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         app.centre_first = "stir"  # (its dots win over Clumps' on one spot: roll_centre.centre_boxes)
         self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
         self.deiconify()
+
+    def _area_tick(self, parent, key, start, tip):
+        """A tick for an area setting (only stirs with an area take it), its own undo step."""
+        var = tk.BooleanVar(value=start)
+        tick = ttk.Checkbutton(parent, text=tr("stir." + key), variable=var,
+                               command=lambda: self.on_area_tick(key))
+        Tooltip(tick, tip)
+        self.area_ticks[key] = (var, tick)
+        return tick
+
+    def on_area_tick(self, key):
+        self.wheel = None
+        self.set_stir(key, bool(self.area_ticks[key][0].get()))
+        self.sync()
 
     def _number_box(self, parent, name, lo, hi, word, width=7):
         var = tk.StringVar()
@@ -466,6 +502,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             b["shown"] = text
             b["entry"].config(state="normal" if on and spots else "disabled")
         self.to_shape.state(["!disabled" if on and areas else "disabled"])
+        for key, (var, tick) in self.area_ticks.items():
+            vals = {s[key] for s in areas}
+            var.set(vals == {True} if vals else key.startswith("area_"))
+            tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if on and areas else "disabled"])
+        self.flip_in["box"].config(state="readonly" if on and areas else "disabled")
         for key, empty in (("stretch", 100), ("tilt", 0)):
             b = self.boxes[key]
             vals = {s[key] for s in areas}
@@ -559,6 +600,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             return False
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
                 "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
+                **{k: lambda st: st["reach"] is not None for k in ("hard", "reverse", "area_turn", "area_twist",
+                                                                   "area_squeeze", "flip_in")},
                 "spot0": lambda st: st["reach"] is not None and st["spot"],
                 "spot1": lambda st: st["reach"] is not None and st["spot"],
                 "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)
