@@ -24,12 +24,22 @@ SPAN_LEAST = RATE // 20  # (50 ms: a piece is never cut shorter, however dense: 
 HELD_EXACT_MOST = 1 << 24  # held copies a piece strikes EACH AT ITS OWN NOTE-ON (PLAN B1, 2026-11-04: all of a key's
 # copies struck at one tick = a burst of that key at block edges, +15..+27 dB, Shinki 442 s); over it (Shinki's end
 # holds 788 M copies = 12 GB of starts) the rest go the old way: one tick a key
+MERGED_READ_MOST = 512 << 20  # bytes read again to find the copies sounding as all tracks pair them (PLAN B3); more
+# = each track's own copies (B1)
+MERGED_STEPS_S = (0.25, 2.0)  # ... over these stretches before the early start, the slots still short only in the
+# next (older copies: each track's own); busy music finds its newest copies in the first quarter second
 
 
 def _loop():
     from files import speed
     fast = speed.loops()
     return fast.piece_track if fast is not None else midi_piece.piece_track
+
+
+def _note_ons_loop():
+    from files import speed
+    fast = speed.loops()
+    return fast.piece_note_ons if fast is not None else midi_piece.note_ons
 
 
 def _held_loops():
@@ -141,6 +151,12 @@ class LoadedSong:
         newest velocity."""
         t = self.lm.tracks[j]
         ons, _ = _held_loops()
+        if b is None:  # (read again: checkpoint c's stretch)
+            lo = int(t.cp_off[c])
+            hi = int(t.cp_off[c + 1]) if c + 1 < len(t.cp_off) else int(t.limit)
+            b = self._read(f, j, lo, hi)
+            skip = self.lm.skip_of(j)
+            sk = skip[(skip >= lo) & (skip < hi)]
         need = np.zeros(midi_piece.QS, np.int64)
         need[held] = cnt[held]
         parts = []
@@ -180,6 +196,131 @@ class LoadedSong:
         tk, qs, vl = (np.concatenate(x) for x in zip(*parts))
         return np.maximum(tk, floor), qs, vl
 
+    _NONE = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64))
+
+    def _gslots(self, j):
+        """Track j's places (channel x 256 + key) as the synth pairs them: port << 12 | channel played << 8 | key."""
+        q = np.arange(midi_piece.QS, dtype=np.int64)
+        nc = int(self.newch[j])
+        ch = np.full(len(q), nc, np.int64) if nc >= 0 else q >> 8
+        return (np.int64(self.tport[j]) << 12) | (ch << 8) | (q & 255)
+
+    def _merged_copies(self, f, pend, floor, t_pre):
+        """(PLAN B3) {track: (ticks, places, velocities)}: the copies sounding at t_pre as a whole render pairs them.
+        The synth pairs ALL tracks together (an off ends its port + channel + key's OLDEST copy, whichever track:
+        Kestrel / Merlin / BASSMIDI alike), so the copies sounding = each slot's NEWEST G note-ons over all tracks,
+        G = the tracks' counts added up (Shinki 313 s: per track a key held 11,316 copies a whole render had ended).
+        No rounds over everything: all tracks' note-ons of the last MERGED_STEPS_S[0] before t_pre (read again; busy
+        music holds its newest copies there) give each slot's newest G exactly; slots with fewer there look in the
+        next stretch (only they); still short = the rest from the tracks' own copies (B1, pend's 7th) begun
+        before, newest first; then at the floor. None = more than MERGED_READ_MOST to read again (the caller uses the own copies)."""
+        lm = self.lm
+        G = np.zeros(1 << 16, np.int64)
+        gmap = {}
+        for j, p in pend.items():
+            gmap[j] = self._gslots(j)
+            np.add.at(G, gmap[j][p[1]], p[2])
+        ons = _note_ons_loop()
+        frame_pre = self.frame(t_pre)
+        read = 0
+
+        def stretch(w_from, w_to, limit):
+            """Every track's note-ons from w_from to before w_to on slots with limit > 0, each track's newest
+            limit[slot] a slot (more never needed) -> rows (ticks, gslots, places, velocities, tracks) or None
+            (over MERGED_READ_MOST)."""
+            nonlocal read
+            want_g = limit > 0
+            rows = []
+            for j in self.playing:
+                t = lm.tracks[j]
+                if not t.notes or t.first >= w_to or t.last_tick < w_from:
+                    continue
+                m0 = max(0, int(np.searchsorted(t.cp_tick, w_from, "right")) - 1)
+                c = max(0, int(np.searchsorted(t.cp_tick, w_to, "right")) - 1)
+                lo = int(t.cp_off[m0])
+                hi = int(t.cp_off[c + 1]) if c + 1 < len(t.cp_off) else int(t.limit)
+                read += hi - lo
+                if read > MERGED_READ_MOST:
+                    return None
+                if hi <= lo:
+                    continue
+                g = gmap.setdefault(j, self._gslots(j))
+                want = want_g[g].astype(np.int8)
+                if not want.any():
+                    continue
+                b = self._read(f, j, lo, hi)
+                skip = lm.skip_of(j)
+                n = len(b) // 3 + 1
+                tk, qq, vv = np.zeros(n, np.int64), np.zeros(n, np.int64), np.zeros(n, np.int64)
+                k = ons(b, lo, int(t.cp_tick[m0]), int(t.cp_run[m0]), w_to, skip[(skip >= lo) & (skip < hi)],
+                        int(self.masks[j]), want, tk, qq, vv)
+                del b
+                m = tk[:k] >= w_from
+                tk, qq, vv = tk[:k][m], qq[:k][m], vv[:k][m]
+                if not len(tk):
+                    continue
+                gs = g[qq]
+                o = np.lexsort((-tk, gs))
+                tk, gs, qq, vv = tk[o], gs[o], qq[o], vv[o]
+                keep = np.arange(len(gs)) - np.searchsorted(gs, gs, "left") < limit[gs]
+                rows.append((tk[keep], gs[keep].astype(np.int32), qq[keep].astype(np.int16), vv[keep].astype(np.int16),
+                             np.full(int(keep.sum()), j, np.int32)))
+            return rows
+
+        out = {}
+        parts = {}  # track -> [(ticks, places, velocities)]
+
+        def newest(rows, limit):
+            """rows (ticks, gslots, places, velocities, tracks): each slot's newest limit[slot] -> parts; returns
+            how many each slot took."""
+            if not rows:
+                return np.zeros(1 << 16, np.int64)
+            tk, gs, qq, vv, tr = (np.concatenate(x) for x in zip(*rows))
+            o = np.lexsort((-tk, gs))
+            tk, gs, qq, vv, tr = tk[o], gs[o], qq[o], vv[o], tr[o]
+            keep = np.arange(len(gs)) - np.searchsorted(gs, gs, "left") < limit[gs]
+            tk, gs, qq, vv, tr = tk[keep], gs[keep], qq[keep], vv[keep], tr[keep]
+            o = np.argsort(tr, kind="stable")  # (by track, one sort: not each track against all)
+            tr_s = tr[o]
+            cut = np.flatnonzero(np.diff(tr_s)) + 1
+            for a, b in zip(np.concatenate([[0], cut]).tolist(), np.concatenate([cut, [len(o)]]).tolist()):
+                i = o[a:b]
+                parts.setdefault(int(tr_s[a]), []).append((tk[i], qq[i].astype(np.int64), vv[i].astype(np.int64)))
+            return np.bincount(gs, minlength=1 << 16)
+
+        rest = G.copy()
+        w_to = t_pre
+        for back in MERGED_STEPS_S:  # (the last moment first: busy music finds its newest copies there)
+            w0 = max(floor, self.tick_at(max(0, frame_pre - int(back * RATE))))
+            if w0 >= w_to:
+                continue
+            rows = stretch(w0, w_to, rest)
+            if rows is None:
+                return None
+            rest -= newest(rows, rest)
+            w_to = w0
+            if not rest.any():
+                break
+        if rest.any():  # (begun before the stretch: the tracks' own copies, newest first)
+            old = []
+            for j, p in pend.items():
+                tk, qq, vv = p[6]
+                m = tk < w_to
+                if m.any():
+                    old.append((tk[m], gmap[j][qq[m]], qq[m], vv[m], np.full(int(m.sum()), j, np.int64)))
+            rest -= newest(old, rest)
+        if rest.any():  # (still short: at the floor, on tracks holding that slot)
+            for j, p in pend.items():
+                held, cn, vl = p[1], p[2], p[3]
+                take = np.minimum(cn, rest[gmap[j][held]])
+                if take.any():
+                    rest[gmap[j][held]] -= take
+                    parts.setdefault(j, []).append((np.full(int(take.sum()), floor, np.int64), np.repeat(held, take),
+                                                    np.repeat(vl, take)))
+        for j, ps in parts.items():
+            out[j] = tuple(np.concatenate(x) for x in zip(*ps))
+        return out
+
     def _setup(self, t_pre):
         """{port: [(status, data 1, data 2)]}: what's in force on each port + channel before t_pre, from ALL the
         playing tracks together (hunt 2026-11-03: a set-up track, or one that ended, set a channel's instrument /
@@ -187,15 +328,31 @@ class LoadedSong:
         track). Order kept where it matters: the bank as it was at the last instrument, then the bank now; pitch
         bend range / other RPN / NRPN as whole select + value groups, then the selection in force; "reset all
         controllers" drops what it resets. Muted channels left out, Track Properties' channel / port followed."""
+        _, code = self._controls(-1, t_pre)
+        if not len(code):
+            return {}
+        out = {}
+        chan = code >> 24 << 4 | (code & 15)
+        for pc in np.unique(chan).tolist():
+            rows = _channel_rows(code[chan == pc])
+            if rows:
+                out.setdefault(pc >> 4, []).extend(rows)
+        return out
+
+    def _controls(self, t_from, t_to):
+        """(ticks, codes) of ALL the playing tracks' controller / instrument / bend / pressure events from t_from to
+        before t_to, in time (same tick: track order, then file); code = status | data 1 << 8 | data 2 << 16 | port
+        << 24. Muted channels left out, Track Properties' channel / port followed, key pressure left out."""
         ticks, codes, tracks = [], [], []
         for n, j in enumerate(self.playing):
             t = self.lm.tracks[j]
             if not len(t.c_tick):
                 continue
-            k = int(np.searchsorted(t.c_tick, t_pre, "left"))
-            if not k:
+            a = int(np.searchsorted(t.c_tick, t_from, "left")) if t_from > 0 else 0
+            k = int(np.searchsorted(t.c_tick, t_to, "left"))
+            if k <= a:
                 continue
-            c = t.c_code[:k].astype(np.int64)
+            c = t.c_code[a:k].astype(np.int64)
             keep = ((c & 0xF0) != 0xA0) & (((int(self.masks[j]) >> (c & 15)) & 1) == 0)
             c = c[keep]
             if not len(c):
@@ -204,18 +361,23 @@ class LoadedSong:
             if nc >= 0:
                 c = (c & ~np.int64(15)) | nc
             codes.append(c | (np.int64(self.tport[j]) << 24))
-            ticks.append(t.c_tick[:k][keep].astype(np.int64))
+            ticks.append(t.c_tick[a:k][keep].astype(np.int64))
             tracks.append(np.full(len(c), n, np.int64))
         if not codes:
-            return {}
+            return np.zeros(0, np.int64), np.zeros(0, np.int64)
         tick, code, trk = np.concatenate(ticks), np.concatenate(codes), np.concatenate(tracks)
-        code = code[np.lexsort((np.arange(len(code)), trk, tick))]  # (in time; same tick: track order, then file)
+        order = np.lexsort((np.arange(len(code)), trk, tick))
+        return tick[order], code[order]
+
+    def _replay(self, t_from, t_to):
+        """{port: [(tick, status, data 1, data 2)]}: the controller changes from t_from to before t_to, in time (PLAN
+        B3, 2026-11-04: a piece's held copies begun before its early start get the volume / instrument / bend of
+        THEIR note-on, as a whole render gives them; set to t_to's state at once, a fade-out held the copies begun
+        loud at the faded volume = silent seconds early)."""
+        tick, code = self._controls(t_from, t_to)
         out = {}
-        chan = code >> 24 << 4 | (code & 15)
-        for pc in np.unique(chan).tolist():
-            rows = _channel_rows(code[chan == pc])
-            if rows:
-                out.setdefault(pc >> 4, []).extend(rows)
+        for tk, c in zip(tick.tolist(), code.tolist()):
+            out.setdefault(c >> 24, []).append((tk, c & 0xFF, (c >> 8) & 127, (c >> 16) & 127))
         return out
 
     def _sysex(self, f, j):
@@ -330,7 +492,8 @@ class LoadedSong:
         floor = min(t_pre, self.tick_at(max(0, min(f0, self.last) - int(HELD_PRE * RATE))))
         loop = _loop()
         got = []
-        exact_left = HELD_EXACT_MOST  # (held copies this piece may still strike at their own note-on)
+        pend = {}  # track -> (checkpoint, its held places, counts, velocities, newest on ticks, ends, own copies)
+        copies = 0
         from_file = any(lm.tracks[j].data is None for j in self.playing)
         if from_file and not self._same_file():  # (L3: changed on disk = nothing more read, said: playing stops)
             raise SynthError("load.file_changed")
@@ -368,32 +531,49 @@ class LoadedSong:
                 held = np.flatnonzero(cnt > 0)
                 if not w and not len(held):
                     continue
-                copies = int(cnt[held].sum())
-                if copies <= exact_left:  # (each copy at its own note-on, PLAN B1)
-                    exact_left -= copies
-                    start, qs, vels = self._held_copies(f, j, c, b, lo, sk, cnt, held, vel, floor, t_pre, mask)
-                    reps = None
-                else:  # (over HELD_EXACT_MOST: one tick a key, the newest note-on)
-                    start = ontk[held].copy()
-                    old = start < 0  # (began before the checkpoint)
-                    if old.any():
-                        start[old] = self._held_starts(f, j, c, held[old], ends[held[old]], floor)
-                    start, qs, vels, reps = np.maximum(start, floor), held, vel[held], cnt[held]
+                copies += int(cnt[held].sum())
+                own = None  # (each copy at its own note-on, PLAN B1: while the piece stays under HELD_EXACT_MOST)
+                if copies <= HELD_EXACT_MOST:
+                    own = self._held_copies(f, j, c, b, lo, sk, cnt, held, vel, floor, t_pre, mask)
                 # (its own small copy: the walk's buffer (1.67x the read) and the read let go at once, M1)
                 body = out[:w].tobytes()
                 del out, b
-                got.append((j, body, start, qs, vels, reps))
+                got.append([j, body, None, None, None, None])
+                pend[j] = (c, held, cnt[held], vel[held], ontk[held], ends[held], own)
+            merged = None
+            if 0 < copies <= HELD_EXACT_MOST:  # (as a whole render pairs them: all tracks together, PLAN B3)
+                merged = self._merged_copies(f, pend, floor, t_pre)
+            if merged is not None:
+                for e in got:
+                    e[2:] = list(merged.pop(e[0], self._NONE)) + [None]
+                for j in sorted(merged, key=self.playing.index):  # (tracks sounding there with nothing else)
+                    got.append([j, b"", *merged[j], None])
+                got.sort(key=lambda e: self.playing.index(e[0]))
+            for e in got:
+                if e[2] is not None:
+                    continue
+                j = e[0]
+                c, held, cn, vl, ot, en, own = pend[j]
+                if copies <= HELD_EXACT_MOST:  # (each track's own copies, PLAN B1)
+                    e[2:] = [*own, None]
+                else:  # (over HELD_EXACT_MOST: one tick a key, the newest note-on)
+                    start = ot.copy()
+                    old = start < 0  # (began before the checkpoint)
+                    if old.any():
+                        start[old] = self._held_starts(f, j, c, held[old], en[old], floor)
+                    e[2:] = [np.maximum(start, floor), held, vl, cn]
             sysex = {}  # port -> [(tick, track order, bytes)]
             for n, j in enumerate(self.playing):
                 for tk, ev in self._sysex(f, j):
                     if tk < t_pre:
                         sysex.setdefault(int(self.tport[j]), []).append((tk, n, ev))
-        rows = self._setup(t_pre)
         origin = min([t0] + [int(g[2].min()) for g in got if len(g[2])])
+        rows = self._setup(origin)  # (the state where the piece begins, then every change up to t_pre: PLAN B3)
+        replay = self._replay(origin, t_pre)
         own = self.own.tracks(origin, t_pre, t_copy, self.file_ports)
         if not got and not own:
             return None, 0
-        ports = sorted(set(rows) | set(sysex))
+        ports = sorted(set(rows) | set(sysex) | set(replay))
         count = 1 + len(ports) + len(got) + len(own)
         buf = bytearray(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
                         + self.ppq.to_bytes(2, "big"))
@@ -404,6 +584,10 @@ class LoadedSong:
                 head += b"\x00" + ev
             for s, d1, d2 in rows.get(port, ()):
                 head += bytes([0, s, d1]) + (b"" if (s & 0xF0) in (0xC0, 0xD0) else bytes([d2]))
+            last = origin
+            for tk, s, d1, d2 in replay.get(port, ()):
+                head += _vlq(tk - last) + bytes([s, d1]) + (b"" if (s & 0xF0) in (0xC0, 0xD0) else bytes([d2]))
+                last = tk
             head += b"\x00\xff\x2f\x00"
             buf += b"MTrk" + len(head).to_bytes(4, "big") + head
         got.reverse()  # (popped from the end: each track's body let go once it's in buf)

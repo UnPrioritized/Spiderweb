@@ -229,6 +229,79 @@ def held_ons(b, base, tick, run, t_stop, sk, muted, need, off, tk, vl, pos):
     return 0
 
 
+def note_ons(b, base, tick, run, t_stop, sk, muted, want, out_t, out_q, out_v):
+    """(PLAN B3) b = a track's bytes from a checkpoint (as piece_track): every note-on before t_stop that would be
+    copied (not hidden / muted / a key past 127) on a place with want[k] != 0 -> out_t / out_q / out_v (tick, place,
+    velocity), in order. Returns how many (out holds len(b) // 3 + 1: an event takes 3 bytes at least)."""
+    n = len(b)
+    p = 0
+    si = 0
+    nsk = len(sk)
+    got = 0
+    while p < n:
+        pos_b = base + p
+        while si < nsk and sk[si] < pos_b:
+            si += 1
+        hid = si < nsk and sk[si] == pos_b
+        q = p
+        d = 0
+        while q < n:
+            c = np.int64(b[q])
+            q += 1
+            d = (d << 7) | (c & 127)
+            if c < 128:
+                break
+        t = tick + d
+        if t >= t_stop or q >= n:
+            return got
+        s = np.int64(b[q])
+        if s >= 128:
+            q += 1
+        elif run == 0:
+            return got
+        else:
+            s = run
+        if s < 0xF0:
+            hi = s >> 4
+            need_b = 1 if hi == 0xC or hi == 0xD else 2
+            if q + need_b > n:
+                return got
+            run = s
+            ch = s & 15
+            if hi == 0x9 and not hid and (muted >> ch) & 1 == 0:
+                key = np.int64(b[q])
+                v = np.int64(b[q + 1])
+                k = ch * 256 + key
+                if key < 128 and v > 0 and want[k] != 0 and got < len(out_t):
+                    out_t[got] = t
+                    out_q[got] = k
+                    out_v[got] = v
+                    got += 1
+            q += need_b
+        elif s == 0xFF or s == 0xF0 or s == 0xF7:
+            mt = -1
+            if s == 0xFF:
+                if q >= n:
+                    return got
+                mt = np.int64(b[q])
+                q += 1
+            ln = 0
+            while q < n:
+                c = np.int64(b[q])
+                q += 1
+                ln = (ln << 7) | (c & 127)
+                if c < 128:
+                    break
+            if q + ln > n or mt == 0x2F:
+                return got
+            q += ln
+        else:
+            return got
+        tick = t
+        p = q
+    return got
+
+
 def held_head(tk, qs, vl, newch, last, out):
     """(PLAN B1) The held copies as note-on events, each where it began: tk (ticks, in order), qs (channel x 256 +
     key), vl (velocities); waits from `last`. Returns (bytes written, the last tick). out holds 13 bytes a copy."""
