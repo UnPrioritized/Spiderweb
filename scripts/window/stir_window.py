@@ -1201,3 +1201,4 @@ def open_stir(app):
         w.focus_set()
     else:
         StirWindow(app)
+        app.tips.show("stir", wait=True)  # (the first time: what it does, Help → Stir)
