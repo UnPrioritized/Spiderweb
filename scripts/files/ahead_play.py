@@ -604,6 +604,14 @@ class AheadPlay:
         ahead = self.app.ahead_seconds
         rest = (hi - at) / RATE
         made = min(m.made_ahead(at), rest, ahead)
+        if self.audio is not None and not self.started:  # (PLAN F, user: a loading sign at the first Play, as
+            # Kestrel's live play says it starts: the play line waits for the soundfont on the card + START_S)
+            if m.engine in ("merlin", "kestrel"):
+                from files import kestrel
+                if kestrel.kept_for(m.fonts, m.card) is None:
+                    return tr("ra.starting_card")
+            need = min(START_S, ahead, m.room(), rest)
+            return tr("ra.starting", n=f"{min(made, need):.1f}", m=f"{need:g}")
         key = "ra.buffer_end" if rest < ahead and made >= rest - 1e-6 else "ra.buffer"
         return tr(key, n=f"{made:.1f}", m=f"{ahead:,}")
 

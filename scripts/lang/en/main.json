@@ -1002,6 +1002,8 @@
  "ra.exact_tip": "Merlin doesn't play controllers exactly yet (volume, expression, pan, sustain pedal and CC lines other than pitch bends), in your shapes and in a loaded MIDI. Unticked: Merlin makes them anyway, fast but a little off. Ticked: songs with them are made with Kestrel, exact but much slower (the status line says so). Used from the next Play.",
  "ra.buffer": "Audio buffer: {n} / {m}",
  "ra.buffer_end": "Audio buffer: {n} / {m} (to the end)",
+ "ra.starting_card": "Rendered ahead: putting the soundfont on the graphics card…",
+ "ra.starting": "Rendered ahead: making the first seconds… {n} / {m}",
  "ra.fonts_note":"More than one soundfont is in the list: Merlin can't use several yet, so Kestrel makes the sound (slower).",
  "ra.seconds": "Render ahead:",
  "ra.seconds_tip": "How far ahead of the play line the sound is made (5 to 300 seconds). Playing starts once the first 5 seconds are made; making goes on in the background, keeping this far ahead. More = fewer waits in busy parts, but more memory.",
