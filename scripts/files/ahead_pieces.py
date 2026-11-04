@@ -399,7 +399,9 @@ def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=F
     or None when cancelled. plain = never counted (a re-cut part, see card_piece)."""
     from files import kestrel
     if not plain and engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
-        data, skip = song.midi(f0, f1, counted=True)  # (stacks of identical notes sent once, PLAN D2)
+        data, skip = song.midi(f0, f1, counted=True, cancel=cancel)  # (stacks of identical notes sent once, PLAN D2)
+        if cancel.is_set():  # (stopped during a lead-up, PLAN E)
+            return None
     else:
         data, skip = song.midi(f0, f1)
     if data is None:  # (nothing sounds here: silence, no piece)

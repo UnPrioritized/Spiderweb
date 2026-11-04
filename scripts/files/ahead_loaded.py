@@ -10,6 +10,8 @@ own shapes (an ahead_pieces.Song) on the same clock (the tempo as heard). A piec
 Measured (dev/scratch/loaded_piece_bytes.py + lp_compare.py): the same sound as Merlin's render of the whole file
 over that stretch (-113..-164 dB), Shinki 4.5 s of music made in ~2 s."""
 
+from collections import OrderedDict
+
 import numpy as np
 
 from files import midi_piece
@@ -29,6 +31,11 @@ MERGED_READ_MOST = 512 << 20  # bytes read again to find the copies sounding as 
 # = each track's own copies (B1)
 MERGED_STEPS_S = (0.25, 2.0)  # ... over these stretches before the early start, the slots still short only in the
 # next (older copies: each track's own); busy music finds its newest copies in the first quarter second
+CARRY_KEPT_ROWS = 32 << 20  # rows of hand-overs kept in all (PLAN E: a jump back or a remake picks the chain up from
+CARRY_KEPT_MOST = 4096  # ... the latest one before it; 19 bytes a row: ~600 MB at most) and at most this many of them
+LEAD_STEP_S = 0.5  # (a lead-up looks back this far first, doubling; then halves down to within this)
+LEAD_MOST = 4 << 30  # bytes a lead-up's dry part copies at most, less with little free memory (as a counted piece,
+# ahead_pieces.COUNTED_MOST: Shinki's wall in 82 ms parts took 6 x 8 s, each reading the tracks' checkpoints again)
 
 
 def _loop():
@@ -68,6 +75,7 @@ class LoadedSong:
         from files.play_loaded import mute_masks, track_ports
         self.lm, self.own = lm, own
         self._starts = {}  # (piece_start per frame: asked again by bytes_in / spans / midi)
+        self._led = set()  # (ticks a lead-up was tried for, PLAN E: once each)
         self.ppq, self.tempo, self.map, self.edo_first = own.ppq, own.tempo, own.map, own.edo_first
         self.bends = own.bends
         n = len(lm.tracks)
@@ -524,10 +532,96 @@ class LoadedSong:
     def pre_frames(self, f0):
         return f0 - self.frame(self.piece_start(f0)[0])
 
-    def midi(self, f0, f1, counted=False):
+    def _carries(self):
+        """The carried notes kept for this sound (PLAN E): {tick a piece starts early at: what's handed to it}, oldest
+        first. On the LoadedMidi (a remake or a new Play makes a new LoadedSong: the chain goes on), dropped when the
+        mutes / hidden notes / tempo change."""
+        from files.ahead_pieces import same_tempo
+        kept = getattr(self.lm, "_ahead_carries", None)
+        if kept is None or kept[0] != self.key or not same_tempo(kept[1], self):
+            kept = (self.key, self, OrderedDict())
+            self.lm._ahead_carries = kept
+        return kept[2]
+
+    def _keep_carry(self, carry):
+        """A piece's hand-over kept (_Runs._carry); the oldest let go past CARRY_KEPT_ROWS rows in all."""
+        got = self._carries()
+        got.pop(carry["at"], None)
+        got[carry["at"]] = carry
+        rows = sum(len(c["tick"]) for c in got.values())
+        while len(got) > 1 and (rows > CARRY_KEPT_ROWS or len(got) > CARRY_KEPT_MOST):
+            rows -= len(got.popitem(last=False)[1]["tick"])
+
+    def _held_guess(self, tick):
+        """About how many note copies sound at tick (each playing track's checkpoint before it: the index only)."""
+        n = 0
+        for j in self.playing:
+            t = self.lm.tracks[j]
+            if not t.notes or not len(t.cp_tick):
+                continue
+            c = max(0, int(np.searchsorted(t.cp_tick, tick, "left")) - 1)
+            n += int(t.e_cnt[int(t.cp_ent[c]):int(t.cp_ent[c + 1])].sum())
+        return n
+
+    def _lead_up(self, f0, t_pre, cancel=None):
+        """(PLAN E) Nothing handed over at t_pre and more held there than HELD_EXACT_MOST (the first piece after a
+        Play / jump / remake in a dense wall's ring: the newest-note-on guess struck them all at once, "128 keys
+        pressed" instead of the decay; user 11-04: "you really need to wait it out"): the stretch before is walked
+        counted without making sound (dry pieces, each handing its notes to the next), from the latest kept
+        hand-over or a spot holding few enough, so this piece gets them as a chain of pieces would. False = not
+        done (cancelled, nothing to start from, or a part couldn't go counted: the guess then)."""
+        kept = self._carries()
+        start = max([c["f0"] for at, c in kept.items() if at < t_pre and c["f0"] < f0] + [-1])
+        ok, far, back = None, f0, LEAD_STEP_S
+        least = max(self.first, int(PRE * RATE) + 1)  # (a piece starting early at the song's tick 0 isn't counted)
+        while far > least:  # (back from f0, doubling, to a spot holding few enough; then halved down to it)
+            a = max(least, f0 - int(back * RATE))
+            if a <= start:
+                break
+            if self._held_guess(self.piece_start(a)[1]) <= HELD_EXACT_MOST:
+                ok = a
+                break
+            far, back = a, back * 2
+        if ok is not None:
+            while far - ok > int(LEAD_STEP_S * RATE):
+                m = (ok + far) // 2
+                if self._held_guess(self.piece_start(m)[1]) <= HELD_EXACT_MOST:
+                    ok = m
+                else:
+                    far = m
+        start = max(start, -1 if ok is None else ok)
+        if start < 0 or start >= f0:
+            return False
+        from files.system import free_memory
+        free = free_memory()
+        most = LEAD_MOST if free is None else max(LEAD_MOST >> 4, min(LEAD_MOST, free // 2))  # (as Maker.piece_most)
+        parts = self.spans(start, f0, most)
+        k = 0
+        while k < len(parts):  # (a part hands over where the next starts early: after its own early start, else
+            a, b = parts[k]    # joined with the next; a wall's parts start 0.02 s early, the next piece 1 s)
+            if len(parts) > 1 and self.piece_start(b)[1] <= self.piece_start(a)[1]:
+                j = k if k + 1 < len(parts) else k - 1
+                parts[j:j + 2] = [(parts[j][0], parts[j + 1][1])]
+                k = max(0, j - 1)
+                continue
+            k += 1
+        for a, b in parts:
+            if cancel is not None and cancel.is_set():
+                return False
+            try:
+                self.midi(a, b, counted=True, dry=True)
+            except TooBigPlain:
+                return False
+            if self.piece_start(b)[1] not in kept:  # (the chain broke there: no hand-over)
+                return False
+        return True
+
+    def midi(self, f0, f1, counted=False, dry=False, cancel=None):
         """The piece f0 .. f1 (frames) as MIDI file bytes + the frames to drop at its start (None: silence).
         counted = for our Merlin (kestrel.repeat_marks()): the notes of all tracks sent as stacks with a count (PLAN
-        D2: a dense wall's piece held 253 M note-ons, 402 k of them different), the rest as before."""
+        D2: a dense wall's piece held 253 M note-ons, 402 k of them different), the rest as before. dry = counted,
+        only its hand-over to the next piece kept, nothing written (_lead_up: (None, 0)); cancel = a threading.Event
+        that stops a lead-up."""
         lm = self.lm
         t_copy = self.tick_at(f1 + int(POST_S * RATE))
         t0, t_pre = self.piece_start(f0)
@@ -539,20 +633,29 @@ class LoadedSong:
         loop = _loop()
         # (your own shapes ride in tracks of their own, unordered against the counted notes: those pieces plain)
         runs = None
-        if counted and not len(self.own) and floor < t_pre:
+        can = counted and not len(self.own) and floor < t_pre
+        lead = can and not dry and t_pre not in self._carries() and t_pre not in self._led
+        if lead and self._held_guess(t_pre) > HELD_EXACT_MOST:
+            self._led.add(t_pre)
+            self.lead_way = self._lead_up(f0, t_pre, cancel)  # (for checks)
+            if cancel is not None and cancel.is_set():
+                self._led.discard(t_pre)  # (tried again when the piece is wanted again)
+                return None, 0
+        if can:
             runs = _Runs(self, floor, t_pre, t_copy, reorder=counted != "keep order")
+            runs.dry = dry
         self.counted_way = "plain" if runs is None else counted  # (which way the last piece went: for checks)
         evs = runs.views if runs is not None else _NO_EVENTS
         carry, use = None, None  # (the notes still sounding at t_pre, handed over by the piece before: _Runs._carry)
         if runs is not None:
-            got_c = getattr(self, "_carried", None)
-            if got_c is not None and got_c["at"] == t_pre:
+            got_c = self._carries().get(t_pre)
+            if got_c is not None:
                 use = got_c["pcs"] & ~runs.pedal
                 keep = use[got_c["pk"] >> 7]
                 carry = {k: (v[keep] if isinstance(v, np.ndarray) and k != "pcs" else v) for k, v in got_c.items()}
             t_next = self.piece_start(f1)[1]  # (where the piece after this one starts early)
             if t_pre < t_next <= t_on:
-                runs.carry_at = t_next
+                runs.carry_at, runs.carry_f = t_next, f1
         self.carried_way = carry is not None  # (for checks)
         got = []
         pend = {}  # track -> (checkpoint, its held places, counts, velocities, newest on ticks, ends, own copies)
@@ -619,6 +722,15 @@ class LoadedSong:
                 del out, b
                 got.append([j, body, None, None, None, None])
                 pend[j] = (c, held, cnt[held], vel[held], ontk[held], ends[held], own)
+            if lead and copies > HELD_EXACT_MOST and t_pre not in self._led:  # (the index's guess said fewer: a
+                # track's checkpoints far apart; walked, the true count is over: led up now, the piece made again)
+                self._led.add(t_pre)
+                del got, pend
+                self.lead_way = self._lead_up(f0, t_pre, cancel)
+                if cancel is not None and cancel.is_set():
+                    self._led.discard(t_pre)
+                    return None, 0
+                return self.midi(f0, f1, counted, cancel=cancel)
             merged = None
             if 0 < copies <= HELD_EXACT_MOST:  # (as a whole render pairs them: all tracks together, PLAN B3)
                 merged = self._merged_copies(f, pend, floor, t_pre)
@@ -656,6 +768,8 @@ class LoadedSong:
             at_pre = [e[0] for e in got if len(e[2]) and runs.clash_at(e[0], e[2], e[3], e[4], t_pre)]
             if runs.sysex or at_pre:
                 self.counted_why = ("sysex" if runs.sysex else "held at t_pre", at_pre[:5])  # (for checks)
+                if dry:  # (no hand-over from here: the lead-up stops)
+                    return None, 0
                 if self.bytes_in(f0, f1) > PIECE_MOST:  # (sized for counted notes: plain it would take GBs)
                     raise TooBigPlain()
                 return self.midi(f0, f1)
@@ -668,7 +782,9 @@ class LoadedSong:
             got = [e for e in got if e[1]]  # (a track left with nothing but its notes: none of its own)
             counted_tracks = runs.tracks(origin)
             if counted_tracks is None:  # (offs before ons would pair differently somewhere: tracks' order kept)
-                return self.midi(f0, f1, counted="keep order")
+                return self.midi(f0, f1, counted="keep order", dry=dry)
+            if dry:
+                return None, 0
         rows = self._setup(origin)  # (the state where the piece begins, then every change up to t_pre: PLAN B3)
         replay = self._replay(origin, t_pre)
         own = self.own.tracks(origin, t_pre, t_copy, self.file_ports)
@@ -799,6 +915,8 @@ class _Runs:
         if not reorder:
             self.bar_ch |= 2
         self.carry_at = None  # (a tick the notes still sounding at are handed to the next piece: midi())
+        self.carry_f = None  # (... the frame that next piece starts at)
+        self.dry = False  # (a lead-up's piece: only the hand-over, no tracks written)
         self.bits = int(t_copy - base_t + 1).bit_length() + 16
         self.cap, self.n = COUNTED_BATCH, 0
         self.k = np.zeros(self.cap, np.int64)
@@ -868,8 +986,9 @@ class _Runs:
         carried = ~(self.pedal | ((self.bar_ch & 1) == 1))
         pick = pick[carried[(ak[pick] >> 8) & 255]]
         # (19 bytes a row: tick, port + channel x 128 + key, velocity (0 = an off), count)
-        song._carried = {"at": self.carry_at, "pcs": carried, "tick": (ak[pick] >> 16) + self.base,
-                         "pk": ((ak[pick] >> 1) & 32767).astype(np.uint16), "vel": asg[pick], "cnt": take[pick]}
+        song._keep_carry({"at": self.carry_at, "f0": self.carry_f, "pcs": carried,
+                          "tick": (ak[pick] >> 16) + self.base, "pk": ((ak[pick] >> 1) & 32767).astype(np.uint16),
+                          "vel": asg[pick].copy(), "cnt": take[pick]})
 
     def carried(self, carry, floor):
         """The notes handed over by the piece before (_carry), into this piece (before held(): all before t_pre, in
@@ -963,12 +1082,16 @@ class _Runs:
         self.stack = []
         out = []
         if not len(ak):
+            if self.carry_at is not None:  # (nothing sounding: an empty hand-over, the chain goes on)
+                self._carry(ak, asg, ac)
             return out
         _, _, write, ok = _counted_loops()
         if not ok(ak, asg, ac, len(ak), self.bar_ch):
             return None
         if self.carry_at is not None:
             self._carry(ak, asg, ac)
+        if self.dry:
+            return out
         port_of = (ak >> 12) & 15
         for port in np.unique(port_of).tolist():
             mem = np.zeros(int((port_of == port).sum()) * 32 + 16, np.uint8)
