@@ -21,12 +21,23 @@ PRE_MOST = 64 << 20  # bytes the early start (PRE) writes at most: shorter in de
 PRE_STEPS = (PRE, 0.5, 0.25, 0.1, 0.05, 0.02)  # ... trying these seconds (the last one goes whatever it costs)
 SPAN_LEAST = RATE // 20  # (50 ms: a piece is never cut shorter, however dense: each part reads ~320 MB again on
 # a 2,788-track MIDI)
+HELD_EXACT_MOST = 1 << 24  # held copies a piece strikes EACH AT ITS OWN NOTE-ON (PLAN B1, 2026-11-04: all of a key's
+# copies struck at one tick = a burst of that key at block edges, +15..+27 dB, Shinki 442 s); over it (Shinki's end
+# holds 788 M copies = 12 GB of starts) the rest go the old way: one tick a key
 
 
 def _loop():
     from files import speed
     fast = speed.loops()
     return fast.piece_track if fast is not None else midi_piece.piece_track
+
+
+def _held_loops():
+    from files import speed
+    fast = speed.loops()
+    if fast is not None:
+        return fast.piece_held_ons, fast.piece_held_head
+    return midi_piece.held_ons, midi_piece.held_head
 
 
 class LoadedSong:
@@ -121,6 +132,53 @@ class LoadedSong:
                     del todo[q]
             m -= 1
         return out
+
+    def _held_copies(self, f, j, c, b, lo, sk, cnt, held, vel, floor, t_pre, mask):
+        """(PLAN B1) Each copy sounding at t_pre on track j, where it began: (ticks, places, velocities), one row a
+        copy. Notes pair first in, first out, so a place's n copies there are its NEWEST n note-ons before t_pre:
+        found from checkpoint c (bytes b from byte place lo), then back over the checkpoints for the ones begun
+        earlier (at most as many as the checkpoint says still sound). Older than floor / not found = floor, the
+        newest velocity."""
+        t = self.lm.tracks[j]
+        ons, _ = _held_loops()
+        need = np.zeros(midi_piece.QS, np.int64)
+        need[held] = cnt[held]
+        parts = []
+
+        def take(data, base, tick, run, stop, skp, want):
+            off = np.zeros(midi_piece.QS + 1, np.int64)
+            off[1:] = np.cumsum(want)
+            tk, vl = np.zeros(int(off[-1]), np.int64), np.zeros(int(off[-1]), np.int64)
+            pos = np.zeros(midi_piece.QS, np.int64)
+            ons(data, base, tick, run, stop, skp, mask, want, off, tk, vl, pos)
+            got = np.minimum(pos, want)
+            if got.any():  # (a ring's first got places are filled, wrapped or not)
+                cum = np.cumsum(got)
+                idx = np.repeat(off[:-1], got) + np.arange(int(cum[-1])) - np.repeat(cum - got, got)
+                parts.append((tk[idx], np.repeat(np.arange(midi_piece.QS), got), vl[idx]))
+            return got
+
+        rest = need - take(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), t_pre, sk, need)
+        skip = self.lm.skip_of(j)
+        m = c - 1
+        while rest.any() and m >= 0 and t.cp_tick[m + 1] > floor:
+            e0, e1 = int(t.cp_ent[m + 1]), int(t.cp_ent[m + 2])
+            there = np.zeros(midi_piece.QS, np.int64)  # (sounding at checkpoint m + 1: begun before it at most)
+            there[t.e_q[e0:e1].astype(np.int64)] = t.e_cnt[e0:e1]
+            np.minimum(rest, there, out=rest)
+            if not rest.any():
+                break
+            lo2, hi2 = int(t.cp_off[m]), int(t.cp_off[m + 1])
+            rest = rest - take(self._read(f, j, lo2, hi2), lo2, int(t.cp_tick[m]), int(t.cp_run[m]), FAR,
+                               skip[(skip >= lo2) & (skip < hi2)], rest)
+            m -= 1
+        if rest.any():
+            keys = np.repeat(np.arange(midi_piece.QS), rest)
+            parts.append((np.full(len(keys), floor, np.int64), keys, vel[keys]))
+        if not parts:
+            return np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64)
+        tk, qs, vl = (np.concatenate(x) for x in zip(*parts))
+        return np.maximum(tk, floor), qs, vl
 
     def _setup(self, t_pre):
         """{port: [(status, data 1, data 2)]}: what's in force on each port + channel before t_pre, from ALL the
@@ -272,6 +330,7 @@ class LoadedSong:
         floor = min(t_pre, self.tick_at(max(0, min(f0, self.last) - int(HELD_PRE * RATE))))
         loop = _loop()
         got = []
+        exact_left = HELD_EXACT_MOST  # (held copies this piece may still strike at their own note-on)
         from_file = any(lm.tracks[j].data is None for j in self.playing)
         if from_file and not self._same_file():  # (L3: changed on disk = nothing more read, said: playing stops)
             raise SynthError("load.file_changed")
@@ -307,24 +366,30 @@ class LoadedSong:
                 w, _, bad = loop(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), t_pre, t_copy, sk, cnt, vel, ontk,
                                  mask, int(self.newch[j]), t_pre, out)
                 held = np.flatnonzero(cnt > 0)
-                start = ontk[held].copy()
-                old = start < 0  # (began before the checkpoint)
-                if old.any():
-                    start[old] = self._held_starts(f, j, c, held[old], ends[held[old]], floor)
-                start = np.maximum(start, floor)
                 if not w and not len(held):
                     continue
+                copies = int(cnt[held].sum())
+                if copies <= exact_left:  # (each copy at its own note-on, PLAN B1)
+                    exact_left -= copies
+                    start, qs, vels = self._held_copies(f, j, c, b, lo, sk, cnt, held, vel, floor, t_pre, mask)
+                    reps = None
+                else:  # (over HELD_EXACT_MOST: one tick a key, the newest note-on)
+                    start = ontk[held].copy()
+                    old = start < 0  # (began before the checkpoint)
+                    if old.any():
+                        start[old] = self._held_starts(f, j, c, held[old], ends[held[old]], floor)
+                    start, qs, vels, reps = np.maximum(start, floor), held, vel[held], cnt[held]
                 # (its own small copy: the walk's buffer (1.67x the read) and the read let go at once, M1)
                 body = out[:w].tobytes()
                 del out, b
-                got.append((j, body, held, start, cnt[held], vel[held]))
+                got.append((j, body, start, qs, vels, reps))
             sysex = {}  # port -> [(tick, track order, bytes)]
             for n, j in enumerate(self.playing):
                 for tk, ev in self._sysex(f, j):
                     if tk < t_pre:
                         sysex.setdefault(int(self.tport[j]), []).append((tk, n, ev))
         rows = self._setup(t_pre)
-        origin = min([t0] + [int(g[3].min()) for g in got if len(g[3])])
+        origin = min([t0] + [int(g[2].min()) for g in got if len(g[2])])
         own = self.own.tracks(origin, t_pre, t_copy, self.file_ports)
         if not got and not own:
             return None, 0
@@ -343,16 +408,25 @@ class LoadedSong:
             buf += b"MTrk" + len(head).to_bytes(4, "big") + head
         got.reverse()  # (popped from the end: each track's body let go once it's in buf)
         while got:
-            j, body, held, start, cnt, vel = got.pop()
+            j, body, start, held, vel, cnt = got.pop()
             nc = int(self.newch[j])
             head = bytearray(b"\x00\xff\x21\x01" + bytes([int(self.tport[j])]))
             last = origin
-            for i in np.argsort(start, kind="stable").tolist():  # (each held note struck where it began)
-                q = int(held[i])
-                ch = nc if nc >= 0 else q >> 8
-                on = bytes([0x90 | ch, q & 255, max(1, int(vel[i]))])
-                head += _vlq(int(start[i]) - last) + on + (b"\x00" + on) * (int(cnt[i]) - 1)
-                last = int(start[i])
+            order = np.argsort(start, kind="stable")
+            if cnt is None:  # (each copy where it began, PLAN B1)
+                if len(order):
+                    mem = np.zeros(13 * len(order) + 16, np.uint8)
+                    w, last = _held_loops()[1](start[order], held[order], vel[order], nc, origin, mem)
+                    head += mem[:w].tobytes()
+                    del mem
+                last = int(last)
+            else:
+                for i in order.tolist():  # (a key's copies together, at its newest note-on)
+                    q = int(held[i])
+                    ch = nc if nc >= 0 else q >> 8
+                    on = bytes([0x90 | ch, q & 255, max(1, int(vel[i]))])
+                    head += _vlq(int(start[i]) - last) + on + (b"\x00" + on) * (int(cnt[i]) - 1)
+                    last = int(start[i])
             # (the copy's first wait was counted from t_pre: the gap from the last held note to t_pre first)
             head += _vlq(t_pre - last) + b"\xff\x01\x00"
             buf += b"MTrk" + (len(head) + len(body) + 4).to_bytes(4, "big")

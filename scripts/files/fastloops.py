@@ -38,6 +38,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   play_read, play_order, play_order_count, play_order_place, play_hist, play_emit, play_programs, play_stamp,
   play_condense, play_stamp_pre   midi_play's functions (playing a loaded MIDI), compiled
   piece_track    midi_piece.piece_track (Rendered ahead: a loaded track's piece copied from its bytes), compiled
+  piece_held_ons, piece_held_head   midi_piece.held_ons / held_head (a piece's held copies, each at its own note-on)
   all_tops       track_list.loaded_tops: a loaded MIDI's tracks in the track list's All tracks row
 The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
 the exe's user/compiled-loops (keep_exe_loops)."""
@@ -1786,6 +1787,8 @@ play_stamp = njit(cache=CACHE, nogil=True)(midi_play.stamp)
 play_condense = njit(cache=CACHE, nogil=True)(midi_play.condense)
 play_stamp_pre = njit(cache=CACHE, nogil=True)(midi_play.stamp_pre)
 piece_track = njit(cache=CACHE, nogil=True)(midi_piece.piece_track)
+piece_held_ons = njit(cache=CACHE, nogil=True)(midi_piece.held_ons)
+piece_held_head = njit(cache=CACHE, nogil=True)(midi_piece.held_head)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1982,3 +1985,6 @@ def warm():
     q = np.zeros(midi_piece.QS, np.int64)
     piece_track(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 0, 10, i1[:0], q, q.copy(),
                 q.copy(), 0, -1, 0, np.zeros(32, np.uint8))
+    piece_held_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0, q, q.copy(),
+                   np.zeros(1, np.int64), np.zeros(1, np.int64), q.copy())
+    piece_held_head(np.zeros(1, np.int64), np.zeros(1, np.int64), np.ones(1, np.int64), -1, 0, np.zeros(16, np.uint8))
