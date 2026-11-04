@@ -110,9 +110,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.tab_add = ttk.Button(self.tab_row, text="+", width=3, command=self.on_add)
         self.tab_add.pack(side="left", padx=(4, 0))
         Tooltip(self.tab_add, tr("stir.add_tip", most=MOST_STIRS))
-        self.tab_drop = ttk.Button(self.tab_row, text="×", width=3, command=self.on_drop)
-        self.tab_drop.pack(side="right")
-        Tooltip(self.tab_drop, tr("stir.drop_tip"))
+        # (each tab has its own × right after it, like Claw / Strum's pages, user 11-05; was one × at the right end)
+        self.tab_drops, self.drop_live = [], False
         # (Area "Draw one…", PLAN C3: shown while an area is being drawn on the piano roll)
         self.drawing = None
         self.draw_bar = ttk.Frame(box)
@@ -500,18 +499,39 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         if count != self.tab_count:
             for w in self.tab_buttons.winfo_children():
                 w.destroy()
+            self.tab_drops = []
             for i in range(count):
                 ttk.Radiobutton(self.tab_buttons, text=tr("stir.tab", n=i + 1), variable=self.tab_var, value=i,
-                                style="Toolbutton", command=self.on_tab).pack(side="left", padx=(0, 2))
+                                style="Toolbutton", command=self.on_tab).pack(side="left")
+                x = ttk.Label(self.tab_buttons, text="×", foreground=look.CLOSE, cursor="hand2", padding=(2, 0, 6, 0))
+                x.pack(side="left")
+                x.bind("<Enter>", lambda e, x=x: self.drop_live and x.config(foreground=look.CLOSE_HOT))
+                x.bind("<Leave>", lambda e, x=x: x.config(foreground=look.CLOSE if self.drop_live else
+                                                          look.LABEL_OFF))
+                x.bind("<ButtonRelease-1>", lambda e, i=i: self.drop_tab(e, i))
+                Tooltip(x, tr("stir.drop_tip"))
+                self.tab_drops.append(x)
             self.tab_count = count
         self.tab_var.set(self.tab)
         on = bool(tgts) and not self.drawing  # (an area being drawn: the whole window waits, hunt C 6)
         for w in self.tab_buttons.winfo_children():
-            w.state(["!disabled" if on else "disabled"])
+            if isinstance(w, ttk.Radiobutton):
+                w.state(["!disabled" if on else "disabled"])
         self.tab_add.state(["!disabled" if on and count < MOST_STIRS and not self.fresh else "disabled"])
         shown = self.stirs()
-        self.tab_drop.state(["!disabled" if on and (count > 1 or any(s != full_stir(None) for s in shown))
-                             else "disabled"])
+        self.drop_live = on and (count > 1 or any(s != full_stir(None) for s in shown))
+        for x in self.tab_drops:
+            x.config(foreground=look.CLOSE if self.drop_live else look.LABEL_OFF,
+                     cursor="hand2" if self.drop_live else "")
+
+    def drop_tab(self, e, i):
+        """A tab's × let go on (like a button): that stir goes."""
+        if self.drop_live and 0 <= e.x < e.widget.winfo_width() and 0 <= e.y < e.widget.winfo_height():
+            if self.tab != i:
+                self.take_typing()
+                self.tab, self.fresh = i, self.fresh and i == self.tab_count - 1
+                self.tab_var.set(i)
+            self.on_drop()
 
     def on_tab(self):
         self.take_typing()
