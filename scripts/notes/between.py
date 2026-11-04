@@ -342,6 +342,12 @@ class Pair:
                     sx[j] = calm(sy[j])
                 elif sy[j] == plain and sx[j] != plain:
                     sy[j] = calm(sx[j])
+                # (the screen look ("seen") blends only when both ends use it for the same round ticks; else
+                # each step takes the look of the end whose ticks it has (they switch halfway), hunt 11-04)
+                uses = lambda s: (bool(s["round"] and s["reach"] is not None), bool(s["spin"]))
+                if uses(sx[j]) != uses(sy[j]):
+                    seen = (sx[j] if f < 0.5 else sy[j])["seen"]
+                    sx[j], sy[j] = dict(sx[j], seen=seen), dict(sy[j], seen=seen)
             stacks = {id(x): sx, id(y): sy}
             x, y = ({k: stacks[id(r)] if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
                      for k in set(x) | set(y)} for r in (x, y))

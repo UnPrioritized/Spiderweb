@@ -98,7 +98,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 knob.bind("<ButtonPress-2>", lambda e: self.twist_to_zero())
             r = ttk.Frame(cell)
             r.pack()
-            self._number_box(r, name, lo, hi, word)
+            # (Turn goes past +-360 now: room for "-1234.567" whole, hunt 11-04)
+            self._number_box(r, name, lo, hi, word, 10 if name == "turn" else 7)
             ttk.Label(r, text=unit or tr("stir.turns")).pack(side="left")
             for w in (word, knob):
                 Tooltip(w, tr(f"stir.{name}_tip"))
@@ -125,6 +126,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
         self.reach_last = 50.0  # (the size picking an area brings back: the last one shown)
+        self.area_last = {"round": False, "stretch": 100.0, "seen": None}  # (likewise, hunt 11-04)
         w = ttk.Label(row, text=tr("stir.area"))
         w.pack(side="left")
         Tooltip(w, tr("stir.area_tip"))
@@ -220,9 +222,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
         self.deiconify()
 
-    def _number_box(self, parent, name, lo, hi, word):
+    def _number_box(self, parent, name, lo, hi, word, width=7):
         var = tk.StringVar()
-        e = ttk.Entry(parent, textvariable=var, width=7, justify="right")
+        e = ttk.Entry(parent, textvariable=var, width=width, justify="right")
         e.pack(side="left", padx=(4, 1))
         self.boxes[name] = {"var": var, "entry": e, "shown": "", "lo": lo, "hi": hi}
         e.bind("<Return>", lambda ev: self.on_box(name))
@@ -350,6 +352,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         b["shown"] = text
         b["entry"].config(state="normal" if on and sizes else "disabled")
         areas = [s for s in sts if s["reach"] is not None]  # (Round as seen + Stretch: only with an area)
+        looks = {(s["round"], s["stretch"], s["seen"] if s["round"] else None) for s in areas}
+        if len(looks) == 1:  # (what picking an area again brings back)
+            r, w, v = next(iter(looks))
+            self.area_last = {"round": r, "stretch": w, "seen": v}
         for key, (var, tick) in self.rounds.items():
             vals = {s[key] for s in (areas if key == "round" else sts)}
             var.set(vals == {True})
@@ -396,20 +402,31 @@ class StirWindow(HeldKnobs, tk.Toplevel):
 
     def set_stir(self, key, value, name=None, push=True):
         """Each selected shape's shown stir (its tab's) key = value (centre0 / centre1: one side of the Centre
-        point); one undo step (push False: part of the step taken before)."""
+        point); one undo step (push False: part of the step taken before). Size / Stretch only go to stirs with an
+        area, Match the screen ("seen") only to stirs with a round tick on (hunt 11-04, like the area line's drag):
+        the others are left exactly as they are (no stir padded in either)."""
         def change(st):
             if key == "centre":  # (the Middle button)
                 st["centre"] = [50.0, 50.0]
-            elif key in ("round", "spin"):  # (ticked: the piano roll's look right now, kept; zoom never changes it)
-                st[key] = value
-                if value:
+            elif key in ("round", "spin"):  # (ticked: the piano roll's look right now, kept; zoom never changes it;
+                # only for stirs that didn't have the tick: a half-ticked box keeps the others' look, hunt 11-04)
+                if value and not st[key]:
                     st["seen"] = self.seen_now()
-            elif key == "area":  # (None = Whole shape; an area on a whole-shape stir starts at the last size)
+                st[key] = value
+            elif key == "area":  # (None = Whole shape; an area on a whole-shape stir starts at the last size, Round
+                # as seen / Stretch / look as last shown too, hunt 11-04)
                 if value is None:
                     st["reach"] = None
                 else:
                     st["area"] = value
-                    st["reach"] = st["reach"] or self.reach_last
+                    if st["reach"] is None:
+                        st["reach"] = self.reach_last
+                        last = self.area_last
+                        st["stretch"] = last["stretch"]
+                        if last["round"] and last["seen"]:
+                            st["round"] = True
+                            if not st["spin"]:  # (a look already used by the spin tick stays)
+                                st["seen"] = last["seen"]
             elif key.startswith("centre"):
                 c = list(st["centre"])
                 c[int(key[-1])] = value
@@ -417,9 +434,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             else:
                 st[key] = value
             return st
+        only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
+                "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)
         self.fresh = False
         i = self.tab
-        return self.app.change_recolour(lambda old, sh: with_stir(old, i, change), name or tr("stir.undo"), push)
+        return self.app.change_recolour(
+            lambda old, sh: with_stir(old, i, change) if only is None or only(stir_at(old, i)) else old,
+            name or tr("stir.undo"), push)
 
     def on_turned(self, name, v, done):
         knob = self.turn_knob if name == "turn" else self.twist_knob

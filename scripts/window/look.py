@@ -304,6 +304,9 @@ TOOL_PICKED = pick("#cce4f7", "#2f5a8a")
 KNOB_ORANGE, KNOB_GREEN = pick("#f5a623"), pick("#7cc21b")  # Claw / Strum / Chop knobs
 # (Stir's Turn past a whole turn: the ring's colour for each further turn, then round again; user 11-04)
 KNOB_LAPS = (KNOB_GREEN, pick("#3d9be9", "#5aa9ef"), pick("#a15be0", "#b47ce8"), KNOB_ORANGE)
+# (the same turns the other way (minus): darker shades, so -360 and +360 look apart; hunt 11-04)
+KNOB_LAPS_BACK = (pick("#4a7a0c", "#5c9412"), pick("#1d5f9c", "#2f78bd"), pick("#6a2fa3", "#8148bd"),
+                  pick("#b06d00", "#c98410"))
 KNOB_RING, KNOB_RING_FOCUS, KNOB_RING_OFF = pick("#bbb", "#6c6c70"), pick("#888", "#a0a0a4"), pick("#ccc", "#4f4f52")
 KNOB_BODY, KNOB_BODY_OFF, KNOB_POINTER = pick("#555", "#252527"), pick("#aaa", "#4a4a4d"), pick("white", "#e2e2e4")
 LOCK_ON, LOCK_OFF = pick("#333", "#e2e2e4"), pick("#aaa", "#6c6c70")  # Shares window's padlocks (locked / open)

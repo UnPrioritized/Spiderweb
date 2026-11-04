@@ -102,7 +102,8 @@ class AngleKnob(ShareKnob):
         if self.value:
             laps = int(abs(self.value) // 360)
             rest = math.copysign(abs(self.value) - 360 * laps, self.value)
-            colour = lambda n: (look.KNOB_LAPS[n % len(look.KNOB_LAPS)] if self.most > 360 else self.color) \
+            laps_of = look.KNOB_LAPS_BACK if self.value < 0 else look.KNOB_LAPS  # (minus: darker, hunt 11-04)
+            colour = lambda n: (laps_of[n % len(laps_of)] if self.most > 360 else self.color) \
                 if self.enabled else look.KNOB_RING_OFF
             if laps:  # (whole turns done: the ring full in the last one's colour)
                 self.create_oval(m, m, s - m, s - m, outline=colour(laps - 1), width=max(2, m // 2))
