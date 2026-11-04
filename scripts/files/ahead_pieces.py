@@ -44,6 +44,9 @@ KEPT_MOST_S = 600.0  # made sound kept outside what's wanted (M2, user 2026-11-0
 PIECE_MOST = 512 << 20  # a loaded MIDI's piece WRITES about this many bytes at most (more blocks = shorter piece; a
 # block over it = made in parts) ...
 PIECE_LEAST = 32 << 20  # ... or 1/16 of the free memory, not below this (Merlin holds ~5x the piece)
+COUNTED_MOST = 4 << 30  # ... a piece for our Merlin with its notes counted (PLAN D2): the same bytes estimate, up to
+# this or 1/2 of the free memory (Shinki's 457 s, 1 s in one piece: ~3.5 GB of notes walked, +1.4 GB at most; cut
+# small, each part walked every track again: 32 parts = ~290 s, one = 27 s)
 BYTES_A_SECOND = RATE * 2 * 4  # (made sound: stereo float32)
 MEMORY_SHARE = 0.25  # the made sound never takes more than this share of the free memory (less is made ahead)
 FREE_EVERY = 2.0  # seconds between asking the system for free memory
@@ -395,7 +398,10 @@ def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress):
     """One piece on the card (card_piece's part): float32 (frames, 2), maybe shorter (silence at its end left out),
     or None when cancelled."""
     from files import kestrel
-    data, skip = song.midi(f0, f1)
+    if engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
+        data, skip = song.midi(f0, f1, counted=True)  # (stacks of identical notes sent once, PLAN D2)
+    else:
+        data, skip = song.midi(f0, f1)
     if data is None:  # (nothing sounds here: silence, no piece)
         return np.zeros((f1 - f0, 2), np.float32)
     with CARD_LOCK:
@@ -435,8 +441,23 @@ def card_piece(song, engine, opts, fonts, card, f0, f1, cancel, progress=None, p
     piece_most = bytes a loaded MIDI's piece copies at most (Maker.piece_most): more = made in parts.
     one(a, b, cancel, progress) = what makes one part instead of the card (BASSMIDI with a loaded MIDI, L4)."""
     if one is None:
-        def one(a, b, c, p):
+        def on_card(a, b, c, p):
             return _card_one(song, engine, opts, fonts, card, a, b, c, p)
+
+        def one(a, b, c, p):
+            from files.ahead_loaded import TooBigPlain
+            try:
+                return on_card(a, b, c, p)
+            except TooBigPlain:  # (a counted piece that has to go plain, PLAN D2: re-cut to plain sizes)
+                parts = []
+                for a2, b2 in song.spans(a, b, PIECE_MOST):
+                    got = on_card(a2, b2, c, None)
+                    if got is None:
+                        return None
+                    if len(got) < b2 - a2:
+                        got = np.concatenate([got, np.zeros((b2 - a2 - len(got), 2), np.float32)])
+                    parts.append(got)
+                return np.concatenate(parts)
     spans = song.spans(f0, f1, piece_most) if piece_most and hasattr(song, "spans") else [(f0, f1)]
     if len(spans) == 1:
         out = one(f0, f1, cancel, progress)
@@ -531,6 +552,8 @@ class Maker:
         memory is ~5x the piece, measured: a 249 MB piece added 1.3 GB; the copy + its read ~3x more)."""
         self.room()  # (free memory asked again when due)
         free = self._free[1]
+        if self.engine == "merlin" and getattr(self.song, "counted_here", lambda: False)():
+            return COUNTED_MOST if free is None else max(PIECE_LEAST, min(COUNTED_MOST, int(free / 2)))
         return PIECE_MOST if free is None else max(PIECE_LEAST, min(PIECE_MOST, int(free / 16)))
 
     # ------------------------------------------------------------ the song

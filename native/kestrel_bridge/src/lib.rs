@@ -1090,8 +1090,16 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.5.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 21df623)";
+    static V: &CStr = c"0.6.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
     V.as_ptr()
+}
+
+/// 1: Merlin pieces may carry repeat marks (Kestrel's `midi::REPEAT_MARK`, FF 7F 08 "SWn" key count before a note:
+/// a stack of identical notes sent once). A connector without this function: notes written out (Spiderweb asks).
+#[no_mangle]
+pub extern "C" fn kb_repeat_marks() -> u32 {
+    let _ = kestrel::midi::REPEAT_MARK;
+    1
 }
 
 /// The last error text (kb_open failing, or the render thread's), UTF-8; valid until the next kb_* call.

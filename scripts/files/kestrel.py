@@ -210,12 +210,24 @@ def load():
                             ("kb_piece_status", [p, ctypes.POINTER(_PieceStatus)], None),
                             ("kb_piece_wait", [p, u32], u32), ("kb_piece_cancel", [p], None),
                             ("kb_piece_audio", [p, ctypes.POINTER(ctypes.c_uint64)], ctypes.POINTER(ctypes.c_float)),
-                            ("kb_piece_error", [p], ctypes.c_char_p), ("kb_piece_free", [p], None)):
+                            ("kb_piece_error", [p], ctypes.c_char_p), ("kb_piece_free", [p], None),
+                            ("kb_repeat_marks", [], u32)):
         fn = getattr(d, name, None)
         if fn is not None:
             fn.argtypes, fn.restype = args, res
     _dll = d
     return d
+
+
+def repeat_marks():
+    """Our Merlin reads repeat marks (connector 0.6.0 on, PLAN D2): Merlin pieces may send a stack of identical notes
+    once with a count (LoadedSong.midi counted=True). An older connector: written out, as before."""
+    try:
+        d = load()
+    except SynthError:
+        return False
+    fn = getattr(d, "kb_repeat_marks", None)
+    return fn is not None and fn() == 1
 
 
 def version():

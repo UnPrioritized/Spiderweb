@@ -13,7 +13,7 @@ over that stretch (-113..-164 dB), Shinki 4.5 s of music made in ~2 s."""
 import numpy as np
 
 from files import midi_piece
-from files.ahead_pieces import HELD_PRE, POST_S, PRE, Song
+from files.ahead_pieces import HELD_PRE, PIECE_MOST, POST_S, PRE, Song
 from files.synth import RATE, SynthError
 
 
@@ -55,6 +55,14 @@ class LoadedSong:
     """lm = the LoadedMidi; own = a Song of your shapes (its tempo = the heard tempo, ticks = the file's, the
     project's PPQ is the file's); muted = TrackList.loaded_mutes()' list (track numbers, (track, channel) pairs).
     Answers what the Maker asks a Song (frame / tick_at / first / last / midi / ...)."""
+
+    counts_notes = True  # (midi(counted=True) for our Merlin: stacks of identical notes sent once, PLAN D2)
+
+    def counted_here(self):
+        """Merlin pieces of this song go counted (PLAN D2): our connector reads repeat marks, and no shapes of your
+        own ride along (their tracks can't be ordered against counted notes). The Maker sizes them bigger."""
+        from files import kestrel
+        return not len(self.own) and kestrel.repeat_marks()
 
     def __init__(self, lm, own, muted=()):
         from files.play_loaded import mute_masks, track_ports
@@ -136,7 +144,8 @@ class LoadedSong:
                 ontk = np.full(midi_piece.QS, -1, np.int64)
                 sk = skip[(skip >= lo) & (skip < hi)]
                 loop(b, lo, int(t.cp_tick[m]), int(t.cp_run[m]), FAR, FAR, sk, cnt, vel, ontk,
-                     int(self.masks[j]), -1, 0, np.zeros(0, np.uint8), FAR, np.zeros(midi_piece.QS, np.int64))
+                     int(self.masks[j]), -1, 0, np.zeros(0, np.uint8), FAR, np.zeros(midi_piece.QS, np.int64), 0, 0,
+                     *_NO_EVENTS)
                 for q in gone:
                     if ontk[q] >= 0:
                         out[todo[q]] = max(floor, int(ontk[q]))
@@ -198,6 +207,37 @@ class LoadedSong:
         return np.maximum(tk, floor), qs, vl
 
     _NONE = (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64))
+
+    def _walk_sliced(self, f, j, c, k, t_pre, t_copy, cnt, vel, ontk, t_on, opn, floor, runs, loop):
+        """(PLAN D2, counted pieces) piece_track over track j's checkpoints c .. k, about COUNTED_SLICE bytes at a
+        time (a 2 GB track's stretch: its read + room for all its notes was GBs, 10.7 GB at Shinki's 457 s). Each
+        slice starts at a checkpoint (its tick + running status); carried on: the counts before t_pre (cnt) until
+        the copy starts, then the notes open (opn), and the last tick written. Returns the track's body (bytes)."""
+        t = self.lm.tracks[j]
+        skip = self.lm.skip_of(j)
+        mask, nc, port = int(self.masks[j]), int(self.newch[j]), int(self.tport[j])
+        offs, n_cp = t.cp_off, len(t.cp_off)
+        parts, last, a = [], t_pre, c
+        opn[:] = -1  # (the copy not started yet: piece_track sets opn from cnt when it starts)
+        while a < k:
+            e = min(max(int(np.searchsorted(offs, int(offs[a]) + COUNTED_SLICE, "right")) - 1, a + 1), k)
+            lo = int(offs[a])
+            hi = int(offs[e]) if e < n_cp else int(t.limit)
+            b = self._read(f, j, lo, hi)
+            sk = skip[(skip >= lo) & (skip < hi)]
+            out = np.zeros(len(b) + len(b) * 2 // 3 + 64, np.uint8)
+            started = opn[0] >= 0
+            evs = runs.room(len(b) // 3 + 1)
+            # (to the stretch's end, as one walk reads: piece_track says the same when it ran past t_copy and when
+            # its bytes simply ended)
+            w, last, _ = loop(b, lo, int(t.cp_tick[a]), int(t.cp_run[a]), t_pre, t_copy, sk,
+                              opn.copy() if started else cnt, vel, ontk, mask, nc, int(last), out, t_on, opn, port,
+                              floor, *evs)
+            runs.took()
+            parts.append(out[:w].tobytes())
+            del out, b
+            a = e
+        return b"".join(parts)
 
     def _gslots(self, j):
         """Track j's places (channel x 256 + key) as the synth pairs them: port << 12 | channel played << 8 | key."""
@@ -484,8 +524,10 @@ class LoadedSong:
     def pre_frames(self, f0):
         return f0 - self.frame(self.piece_start(f0)[0])
 
-    def midi(self, f0, f1):
-        """The piece f0 .. f1 (frames) as MIDI file bytes + the frames to drop at its start (None: silence)."""
+    def midi(self, f0, f1, counted=False):
+        """The piece f0 .. f1 (frames) as MIDI file bytes + the frames to drop at its start (None: silence).
+        counted = for our Merlin (kestrel.repeat_marks()): the notes of all tracks sent as stacks with a count (PLAN
+        D2: a dense wall's piece held 253 M note-ons, 402 k of them different), the rest as before."""
         lm = self.lm
         t_copy = self.tick_at(f1 + int(POST_S * RATE))
         t0, t_pre = self.piece_start(f0)
@@ -495,6 +537,12 @@ class LoadedSong:
         t_on = self.tick_at(f1)  # (past it only the offs of notes still open, PLAN B2)
         opn = np.zeros(midi_piece.QS, np.int64)
         loop = _loop()
+        # (your own shapes ride in tracks of their own, unordered against the counted notes: those pieces plain)
+        runs = None
+        if counted and not len(self.own) and floor < t_pre:
+            runs = _Runs(self, floor, t_pre, t_copy, reorder=counted != "keep order")
+        self.counted_way = "plain" if runs is None else counted  # (which way the last piece went: for checks)
+        evs = runs.views if runs is not None else _NO_EVENTS
         got = []
         pend = {}  # track -> (checkpoint, its held places, counts, velocities, newest on ticks, ends, own copies)
         copies = 0
@@ -510,9 +558,7 @@ class LoadedSong:
                 k = int(np.searchsorted(t.cp_tick, t_copy, "right"))
                 lo = int(t.cp_off[c])
                 hi = int(t.cp_off[k]) if k < len(t.cp_off) else int(t.limit)
-                b = self._read(f, j, lo, hi)
                 skip = lm.skip_of(j)
-                sk = skip[(skip >= lo) & (skip < hi)]
                 cnt, vel = np.zeros(midi_piece.QS, np.int64), np.full(midi_piece.QS, 64, np.int64)
                 ontk = np.full(midi_piece.QS, -1, np.int64)
                 ends = np.full(midi_piece.QS, -1, np.int64)
@@ -528,19 +574,31 @@ class LoadedSong:
                     chans = np.arange(midi_piece.QS) // 256
                     cnt[((mask >> chans) & 1) == 1] = 0
                 cnt[np.arange(midi_piece.QS) % 256 > 127] = 0
-                out = np.zeros(len(b) + len(b) * 2 // 3 + 64, np.uint8)
-                # (the copy's waits count from t_pre: the held notes / controllers are written before it)
-                w, _, bad = loop(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), t_pre, t_copy, sk, cnt, vel, ontk,
-                                 mask, int(self.newch[j]), t_pre, out, t_on, opn)
+                if runs is not None and hi - lo > COUNTED_SLICE:  # (a huge track's stretch: a slice at a time)
+                    body = self._walk_sliced(f, j, c, k, t_pre, t_copy, cnt, vel, ontk, t_on, opn, floor, runs, loop)
+                    w, b, out = len(body), None, None
+                else:
+                    b = self._read(f, j, lo, hi)
+                    sk = skip[(skip >= lo) & (skip < hi)]
+                    out = np.zeros(len(b) + len(b) * 2 // 3 + 64, np.uint8)
+                    if runs is not None:
+                        evs = runs.room(len(b) // 3 + 1)
+                    # (the copy's waits count from t_pre: the held notes / controllers are written before it)
+                    w, _, bad = loop(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), t_pre, t_copy, sk, cnt, vel, ontk,
+                                     mask, int(self.newch[j]), t_pre, out, t_on, opn, int(self.tport[j]), floor, *evs)
+                    if runs is not None:
+                        runs.took()
+                    body = None
                 held = np.flatnonzero(cnt > 0)
                 if not w and not len(held):
                     continue
                 copies += int(cnt[held].sum())
                 own = None  # (each copy at its own note-on, PLAN B1: while the piece stays under HELD_EXACT_MOST)
                 if copies <= HELD_EXACT_MOST:
-                    own = self._held_copies(f, j, c, b, lo, sk, cnt, held, vel, floor, t_pre, mask)
-                # (its own small copy: the walk's buffer (1.67x the read) and the read let go at once, M1)
-                body = out[:w].tobytes()
+                    own = self._held_copies(f, j, c, b, lo, None if b is None else sk, cnt, held, vel, floor, t_pre,
+                                            mask)
+                if body is None:  # (its own small copy: the walk's buffer (1.67x the read) and the read let go, M1)
+                    body = out[:w].tobytes()
                 del out, b
                 got.append([j, body, None, None, None, None])
                 pend[j] = (c, held, cnt[held], vel[held], ontk[held], ends[held], own)
@@ -572,13 +630,29 @@ class LoadedSong:
                     if tk < t_pre:
                         sysex.setdefault(int(self.tport[j]), []).append((tk, n, ev))
         origin = min([t0] + [int(g[2].min()) for g in got if len(g[2])])
+        counted_tracks = []
+        if runs is not None:
+            # (a SysEx copied, or a held copy on t_pre itself (the floor there): ordered against the tracks'
+            # own notes / set-up as written only: this piece plain)
+            if runs.sysex or any(len(g[2]) and int(g[2].max()) >= t_pre for g in got):
+                if self.bytes_in(f0, f1) > PIECE_MOST:  # (sized for counted notes: plain it would take GBs)
+                    raise TooBigPlain()
+                return self.midi(f0, f1)
+            for e in got:  # (held copies too, in track order: the order a synth reads them in)
+                if len(e[2]):
+                    runs.held(e[0], e[2], e[3], e[4], e[5])
+                    e[2:] = [_EMPTY, _EMPTY, _EMPTY, None]
+            got = [e for e in got if e[1]]  # (a track left with nothing but its notes: none of its own)
+            counted_tracks = runs.tracks(origin)
+            if counted_tracks is None:  # (offs before ons would pair differently somewhere: tracks' order kept)
+                return self.midi(f0, f1, counted="keep order")
         rows = self._setup(origin)  # (the state where the piece begins, then every change up to t_pre: PLAN B3)
         replay = self._replay(origin, t_pre)
         own = self.own.tracks(origin, t_pre, t_copy, self.file_ports)
-        if not got and not own:
+        if not got and not own and not counted_tracks:
             return None, 0
         ports = sorted(set(rows) | set(sysex) | set(replay))
-        count = 1 + len(ports) + len(got) + len(own)
+        count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks)
         buf = bytearray(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
                         + self.ppq.to_bytes(2, "big"))
         buf += self.own.tempo_track(origin, t_copy)
@@ -622,6 +696,8 @@ class LoadedSong:
             buf += body
             buf += b"\x00\xff\x2f\x00"
             del body
+        for chunk in counted_tracks:
+            buf += chunk
         for chunk in own:
             buf += chunk
         return buf, f0 - self.frame(origin)
@@ -630,12 +706,161 @@ class LoadedSong:
         raise NotImplementedError("BASSMIDI pieces of a loaded MIDI: PLAN.md L4")
 
 
+class TooBigPlain(Exception):
+    """A piece sized for counted notes (Maker.piece_most, COUNTED_MOST) that has to go plain: the caller cuts it to
+    plain sizes (ahead_pieces.card_piece)."""
+
+
 class _NoFile:
     def __enter__(self):
         return None
 
     def __exit__(self, *a):
         return False
+
+
+# (piece_track's counted-notes arguments when a piece isn't counted: bars, bar_ch, ev_key, ev_sig, nev)
+_NO_EVENTS = (np.zeros(0, np.int64), np.zeros(256, np.uint8), np.zeros(0, np.int64), np.zeros(0, np.uint8),
+              np.zeros(2, np.int64))
+_EMPTY = np.zeros(0, np.int64)
+COUNTED_BATCH = 4 << 20  # notes gathered before they're sorted + folded (PLAN D2: ~70 MB; the folded runs stay)
+COUNTED_SLICE = 8 << 20  # bytes of a track walked at a time in a counted piece (checkpoints are <= 0.5 MB apart)
+
+
+_PAIRING_CCS = np.array([64, 66, 120, 123, 124, 125, 126, 127])  # (sustain, sostenuto, all sound / notes off, modes)
+
+
+def _counted_loops():
+    from files import speed
+    fast = speed.loops()
+    if fast is not None:
+        return fast.piece_runs_sort, fast.piece_runs_merge, fast.piece_counted_track, fast.piece_order_ok
+    return midi_piece.runs_sort_fold, midi_piece.runs_merge, midi_piece.counted_track, midi_piece.order_ok
+
+
+class _Runs:
+    """(PLAN D2) A Merlin piece's notes from all its tracks as stacks with a count: gathered a batch at a time
+    (piece_track puts them in), each batch sorted by tick + place (stable: the tracks' order kept, as a synth merges
+    them) and folded (identical ones back to back = one with a count), merged into what came before. Notes on a port +
+    channel with a controller at that tick inside the tracks' own bytes stay there (bars: the order between tracks
+    matters there). Memory: a batch + the folded runs (a dense wall's piece: 402 k of 253 M)."""
+
+    def __init__(self, song, base_t, t_pre, t_copy, reorder=True):
+        self.song, self.base = song, base_t
+        tick, code = song._controls(t_pre, t_copy + 1)
+        pc = ((code >> 24) & 15) * 16 + (code & 15)
+        self.bars = np.unique((tick << 8) | pc).astype(np.int64)
+        self.bar_ch = np.zeros(256, np.uint8)
+        self.bar_ch[np.unique(pc)] = 1
+        # (bit 2: a tick's offs NOT sorted before its ons: everywhere when asked, else on channels that ever had a
+        # pedal / all-notes-off / mode change: they pair offs in ways counting can't follow, midi_piece.order_ok)
+        if not reorder:
+            self.bar_ch |= 2
+        else:
+            _, every = song._controls(-1, t_copy + 1)
+            d1 = (every >> 8) & 127
+            odd = ((every & 0xF0) == 0xB0) & np.isin(d1, _PAIRING_CCS)
+            self.bar_ch[np.unique(((every[odd] >> 24) & 15) * 16 + (every[odd] & 15))] |= 2
+        self.bits = int(t_copy - base_t + 1).bit_length() + 16
+        self.cap, self.n = COUNTED_BATCH, 0
+        self.k = np.zeros(self.cap, np.int64)
+        self.s = np.zeros(self.cap, np.uint8)
+        self.c = np.ones(self.cap, np.int64)
+        self.nev = np.zeros(2, np.int64)
+        self.stack = []  # (folded lists, oldest first: flush)
+        self.sysex = False
+
+    @property
+    def views(self):
+        return self.bars, self.bar_ch, self.k[self.n:], self.s[self.n:], self.nev
+
+    def room(self, need):
+        """Room for `need` more (a track's read // 3: an event takes 3 bytes at least); piece_track's arguments."""
+        if self.n + need > self.cap:
+            self.flush()
+            if need > self.cap:
+                self.cap = need
+                self.k = np.zeros(need, np.int64)
+                self.s = np.zeros(need, np.uint8)
+                self.c = np.ones(need, np.int64)
+        self.nev[:] = 0
+        return self.views
+
+    def took(self):
+        """After piece_track: what it put in counted (one each)."""
+        got = int(self.nev[0])
+        self.c[self.n:self.n + got] = 1
+        self.n += got
+        self.sysex |= bool(self.nev[1])
+
+    def held(self, j, start, qs, vel, cnt):
+        """Track j's held copies (start ticks, channel x 256 + key, velocities, counts or None = one each), in the
+        order its head would write them."""
+        song = self.song
+        order = np.argsort(start, kind="stable")
+        start, qs, vel = start[order], qs[order], vel[order]
+        nc = int(song.newch[j])
+        ch = np.full(len(qs), nc, np.int64) if nc >= 0 else qs >> 8
+        pc = int(song.tport[j]) * 16 + ch
+        on = (self.bar_ch[pc] & 2) == 0
+        keys = ((start.astype(np.int64) - self.base) << 16) | (pc << 8) | ((qs & 255) << 1) | on
+        n = len(keys)
+        self.room(n)
+        self.k[self.n:self.n + n] = keys
+        self.s[self.n:self.n + n] = np.maximum(vel, 1)
+        self.c[self.n:self.n + n] = 1 if cnt is None else cnt[order]
+        self.n += n
+
+    def flush(self):
+        """The batch sorted + folded onto the stack of folded lists (oldest = earlier tracks first); neighbours
+        merged while the older one is at most twice the newer (each run copied a few times, not once a batch:
+        Shinki's 457 s, 359 batches into 15 M runs, took 50 s merged one by one)."""
+        if not self.n:
+            return
+        sort, _, _, _ = _counted_loops()
+        n = self.n
+        m = sort(self.k, self.s, self.c, n, np.empty(n, np.int64), np.empty(n, np.uint8), np.empty(n, np.int64),
+                 self.bits)
+        self.stack.append((self.k[:m].copy(), self.s[:m].copy(), self.c[:m].copy()))
+        self.n = 0
+        while len(self.stack) > 1 and len(self.stack[-2][0]) <= 2 * len(self.stack[-1][0]):
+            self._merge_top()
+
+    def _merge_top(self):
+        _, merge, _, _ = _counted_loops()
+        (ak, asg, ac), (bk, bsg, bc) = self.stack[-2], self.stack[-1]
+        size = len(ak) + len(bk)
+        ok, osg, oc = np.empty(size, np.int64), np.empty(size, np.uint8), np.empty(size, np.int64)
+        got = merge(ak, asg, ac, len(ak), bk, bsg, bc, len(bk), ok, osg, oc)
+        self.stack[-2:] = [(ok[:got], osg[:got], oc[:got])]
+
+    @property
+    def acc(self):
+        """Everything folded so far as one list (the stack merged down)."""
+        self.flush()
+        while len(self.stack) > 1:
+            self._merge_top()
+        return self.stack[0] if self.stack else (np.zeros(0, np.int64), np.zeros(0, np.uint8), np.zeros(0, np.int64))
+
+    def tracks(self, origin):
+        """The counted notes as track chunks, one a port, ticks from the piece's origin; let go of after. None
+        when a tick's offs sorted before its ons would pair differently (the caller keeps the tracks' order)."""
+        ak, asg, ac = self.acc
+        self.k = self.s = self.c = None
+        self.stack = []
+        out = []
+        if not len(ak):
+            return out
+        _, _, write, ok = _counted_loops()
+        if not ok(ak, asg, ac, len(ak), self.bar_ch):
+            return None
+        port_of = (ak >> 12) & 15
+        for port in np.unique(port_of).tolist():
+            mem = np.zeros(int((port_of == port).sum()) * 32 + 16, np.uint8)
+            w, _ = write(ak, asg, ac, len(ak), port, self.base - origin, mem)
+            body = b"\x00\xff\x21\x01" + bytes([port]) + mem[:w].tobytes() + b"\x00\xff\x2f\x00"
+            out.append(b"MTrk" + len(body).to_bytes(4, "big") + body)
+        return out
 
 
 SYSEX_SCAN = 1 << 20  # bytes of a track looked through for SysEx before its first note (set-up sits at the start)
