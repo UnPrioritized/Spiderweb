@@ -21,6 +21,9 @@ kestrel = { git = "https://github.com/UnPrioritized/kestrel-midi", rev = "55519b
 [target.'cfg(not(windows))'.dependencies]
 kestrel = { git = "https://github.com/UnPrioritized/kestrel-midi", rev = "55519b3aa8c1dfe8a65ca3cb5e6c86b0d65d5709", default-features = false }
 
+[dev-dependencies]
+log = "0.4"
+
 [profile.release]
 opt-level = 3
 lto = "thin"
