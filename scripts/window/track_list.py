@@ -31,7 +31,7 @@ from notes.loaded import KEY_SIG, TEMPO, TIME_SIG, tempo_tracks, track_port as f
 from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text, tempo_text
-from notes.tempo_file import heard_tempo
+from notes.tempo_file import heard_tempo, kept_drawn
 from roll import roll_loaded as RL
 from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import (BOX_STILL, COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow,
@@ -113,6 +113,9 @@ class TrackList(tk.Canvas):
         self.top = 0       # pixels the track rows are scrolled up
         self.current = None  # the highlighted track's slot (None: the Conductor row / nothing)
         self.current_ch = None  # ... only this channel of it (a folder's sub-row clicked), None = the whole track
+        # the Conductor row highlighted (user 11-05, like Domino): the piano roll keeps showing current's notes, Tab
+        # goes to the Conductor pane; any track / All tracks highlighted again turns it off (set_conductor)
+        self.conductor_on = False
         # folders (PLAN #11 B, user 2026-10-28): tracks holding notes on 2+ channels whose sub-rows show (track ids);
         # each row's channels (row_chans) and the lines shown (lines) kept while what they come from stays
         self.open = set()
@@ -1195,8 +1198,9 @@ class TrackList(tk.Canvas):
         if e.x >= self.name_w and self.sx and not playing:  # (like many MIDI programs: the play line there, snapped)
             beat = max(0.0, self.x2t(e.x))  # (Shift: free, as the Select box's corner)
             self.app.set_playhead(self.ticked(beat) if e.state & 0x1 else self.snapped(beat))
-        if row == CONDUCTOR_ROW:  # (the tempo's row: the highlight stays; All tracks is the row above it)
-            return
+        if row == CONDUCTOR_ROW:  # (the tempo's row highlighted; the piano roll keeps what it showed)
+            return self.set_conductor(True)
+        self.conductor_on = False
         self.current = None if row < 0 else int(self.tracks()[row])
         if c >= 0:  # (a sub-row: only that channel shown, user 2026-10-28; a Shift+click's range starts here)
             self.current_ch = c
@@ -1215,6 +1219,7 @@ class TrackList(tk.Canvas):
         Leaving out the highlighted track gives its deep blue to the first selected one left (never none)."""
         rows = [int(s) for s in self.tracks()]
         slot = rows[row]
+        self.set_conductor(False)
         if self.current_ch is not None:  # (Ch rows picked: tracks OR Ch rows, never both: a new pick, hunt C B)
             self.current, self.selected, self.anchor, self._sub_anchor = slot, set(), (slot, slot), None
             return self.shown_changed()
@@ -1505,6 +1510,7 @@ class TrackList(tk.Canvas):
         at = steps.index(now) if now in steps else (steps.index((self.current, None))
                                                     if (self.current, None) in steps else 0)
         k = min(max(at + way, 0), len(steps) - 1)
+        self.set_conductor(False)
         if steps[k] != now:
             self.current, self.selected = steps[k][0], set()
             self.current_ch = steps[k][1]
@@ -1522,10 +1528,17 @@ class TrackList(tk.Canvas):
         """The All tracks row highlighted (current None): the piano roll shows every track and Spiderweb picks new
         shapes' channels (Esc, a click on the row, All tracks in the ▾ list)."""
         self.selected = set()
+        self.conductor_on = False
         if self.current is not None:
             self.current = None
             self.shown_changed()
         else:
+            self.request_redraw()
+
+    def set_conductor(self, on):
+        """The Conductor row highlighted (on) or not; the tracks' highlight shows again when it goes."""
+        if self.conductor_on != on:
+            self.conductor_on = on
             self.request_redraw()
 
     def picked_tracks(self):
@@ -3066,7 +3079,8 @@ class TrackList(tk.Canvas):
             got = self.line_of(s, c)
             if got is not None:
                 out[got] = 4
-        at = self.line_of(self.current, self.current_ch) if self.current is not None else None
+        at = (self.line_of(self.current, self.current_ch) if self.current is not None and not self.conductor_on
+              else None)  # (the Conductor row highlighted: no track is)
         if at is not None:
             out[at] = 2
         return out
@@ -3528,22 +3542,34 @@ class TrackList(tk.Canvas):
         if self._heard is not None and self._heard[0] == key:
             return self._heard[1]
         got = heard_tempo(app.tempo, base, app.ppq, end)
+        kept = kept_drawn(app.tempo, base, app.ppq, end)  # (Keep timing parts' drawn tempo: purple, user 11-05)
+        k_ticks = np.array([t for t, _ in kept], np.int64)
+        k_bpm = 60_000_000 / np.array([u for _, u in kept] or [1], float)[:len(kept)]
         if got:
             ticks = np.array([t for t, _ in got], np.int64)
             bpm = 60_000_000 / np.array([u for _, u in got], float)
-            got = (ticks, bpm, float(bpm.min()), float(bpm.max()))
         else:
-            got = (np.zeros(1, np.int64), np.array([float(base)]), float(base), float(base))
+            ticks, bpm = np.zeros(1, np.int64), np.array([float(base)])
+        both = np.concatenate([bpm, k_bpm])
+        got = (ticks, bpm, float(both.min()), float(both.max()))
         self._heard = (key, got)
+        self._kept_line = (k_ticks, k_bpm)
         return got
 
-    def bpm_heights(self, xs, inner, cx=None):
+    def kept_line(self):
+        """(ticks, BPMs) of the Keep timing parts' drawn tempo (tempo_file.kept_drawn), worked out with heard()."""
+        self.heard()
+        return self._kept_line
+
+    def bpm_heights(self, xs, inner, cx=None, line=None):
         """The line height (pixels) at each pixel column xs of the notes' part: a line only where the tempo changes
         (like Domino's Conductor track, user 2026-10-23: no blocks between), the fastest of the changes in that
         column, scaled from the song's slowest (1 px) to its fastest (inner); on the doubling scale when the fastest
         is more than 4 x the slowest (a jump to 2000 BPM would flatten the rest). 0 = no change there. xs count from
-        pixel cx of the song (None: the view's left edge)."""
+        pixel cx of the song (None: the view's left edge). line: other (ticks, BPMs) on the same scale (kept_line)."""
         ticks, bpm, lo, hi = self.heard()
+        if line is not None:
+            ticks, bpm = line
         cx = self.left_px() if cx is None else cx
         col = np.floor(ticks / self.app.ppq * self.sx).astype(np.int64) - cx
         on = (col >= 0) & (col < len(xs))
@@ -3566,7 +3592,7 @@ class TrackList(tk.Canvas):
             lm = self.app.loaded
             # (only what it shows: a click / Ctrl+click on a track left it as it was but painted it again, ~0.6 s
             # with 2788 tracks, Shinki 2026-10-28)
-            key = (id(self._made[0]) if self._made else None, id(self._all), self.current is None,
+            key = (id(self._made[0]) if self._made else None, id(self._all), self.current is None and not self.conductor_on,
                    frozenset(self.muted), json.dumps(sigs_of(self.app.tempo)), self.sx, self.app.ppq, self.app.keys,
                    rh, lm.hide_ver if lm is not None else None)
             ox = self.left_px()
@@ -3581,7 +3607,7 @@ class TrackList(tk.Canvas):
         an earlier one; Spiderweb's own over a loaded MIDI's (as in the export). A loaded MIDI's tracks come from
         the loading pass's small pictures (small_mask)."""
         img = np.empty((h, cw, 3), np.uint8)
-        img[:] = hex_rgb(look.TRACK_PICKED if self.current is None else look.TRACK_ROW)
+        img[:] = hex_rgb(look.TRACK_PICKED if self.current is None and not self.conductor_on else look.TRACK_ROW)
         sigs = sigs_of(self.app.tempo)
         xs = np.array([round(b * self.sx) - cx for b, _ in bar_lines(sigs, cx / self.sx, (cx + cw) / self.sx,
                                                                      COLUMN * self.scale / self.sx)], np.int64)
@@ -3735,16 +3761,21 @@ class TrackList(tk.Canvas):
         if self.sx and self.row_h > 4 and w > x0:  # (in squares like the rows' picture)
             h = self.row_h - 1
             lo_hi = self.heard()[2:]
-            key = (self._heard[0], lo_hi, self.sx, h)
+            picked = self.conductor_on
+            key = (self._heard[0], lo_hi, self.sx, h, picked)
 
             def paint(cx, cy, cw, ch):
                 inner = self.row_h - 2 * round(PAD * s) - 1
-                tall = self.bpm_heights(np.arange(cw), inner, cx)
-                img = np.empty((ch, cw, 3), np.uint8)
-                img[:] = hex_rgb(look.TRACK_ROW)
                 ys = np.arange(ch)[:, None]
                 bottom = ch - round(PAD * s)
-                img[(ys >= bottom - tall[None, :]) & (ys < bottom)] = hex_rgb(look.TRACK_TEMPO)
+                img = np.empty((ch, cw, 3), np.uint8)
+                # (highlighted like a track; else the colour before Track 1's, so the rows alternate, user 11-05)
+                img[:] = hex_rgb(look.TRACK_PICKED if picked else look.TRACK_ROW_ALT)
+                for line, colour in ((None, look.TRACK_TEMPO), (self.kept_line(), look.TEMPO_KEEP)):
+                    if line is not None and not len(line[0]):
+                        continue
+                    tall = self.bpm_heights(np.arange(cw), inner, cx, line)
+                    img[(ys >= bottom - tall[None, :]) & (ys < bottom)] = hex_rgb(colour)
                 return img
             ox = self.left_px()
             xs, xw = squares(ox, w - x0)
@@ -3789,7 +3820,7 @@ class TrackList(tk.Canvas):
                 row, c = int(line_row[line]), int(line_ch[line])
                 slot = int(slots[row])
                 if c >= 0:  # (an open folder's sub-row: indented "Ch n" in its colour, its own speaker)
-                    picked = slot == self.current and self.current_ch == c
+                    picked = slot == self.current and self.current_ch == c and not self.conductor_on
                     chosen = (slot, c) in self.sel_ch  # (picked along with it: fainter, as tracks)
                     if picked or chosen:
                         self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK if picked else look.TRACK_SELECT,
@@ -3809,7 +3840,7 @@ class TrackList(tk.Canvas):
                     self.create_line(ind, yb - 1, x1, yb - 1, fill=look.TRACK_LINE)
                     continue
                 folder = len(chans[row]) > 1
-                picked = slot == self.current and self.current_ch is None
+                picked = slot == self.current and self.current_ch is None and not self.conductor_on
                 chosen = not picked and slot in self.selected  # (selected along with it: a fainter blue, like Domino)
                 if picked or chosen:
                     self.create_rectangle(0, max(ya, top), x1, yb, fill=look.TRACK_PICK if picked else look.TRACK_SELECT,
@@ -3844,7 +3875,7 @@ class TrackList(tk.Canvas):
         with self.layer("names_top"):
             self.create_rectangle(0, y0, x1, top, fill=look.TRACK_NAME_BG, outline="")  # (rows scrolled under it)
             ya = self.conductor_y()
-            picked = self.current is None  # (the All tracks row: highlighted like a track)
+            picked = self.current is None and not self.conductor_on  # (the All tracks row: highlighted like a track)
             if picked:
                 self.create_rectangle(0, y0, x1, ya - 1, fill=look.TRACK_PICK, outline="")
             self.create_text(18 * s, (y0 + ya) / 2, text=tr("tracks.all"), anchor="w",
@@ -3852,8 +3883,10 @@ class TrackList(tk.Canvas):
             if self.cc_rows():  # (some track sends CC events: user 2026-10-29)
                 self.draw_cc_mark(x1 - 26 * s, (y0 + ya) / 2, font, picked)
             self.create_line(0, ya - 1, x1, ya - 1, fill=look.ROLL_EDGE)
-            self.create_text(18 * s, ya + self.row_h / 2, text=tr("tracks.conductor"), anchor="w", fill=look.TRACK_TEXT,
-                             font=font)
+            if self.conductor_on:  # (highlighted like a track, user 11-05)
+                self.create_rectangle(0, ya, x1, top, fill=look.TRACK_PICK, outline="")
+            self.create_text(18 * s, ya + self.row_h / 2, text=tr("tracks.conductor"), anchor="w",
+                             fill=look.TRACK_PICK_TEXT if self.conductor_on else look.TRACK_TEXT, font=font)
             self.create_line(0, top, x1, top, fill=look.ROLL_EDGE)
             self.create_line(x1, 0, x1, h, fill=look.ROLL_EDGE)
 

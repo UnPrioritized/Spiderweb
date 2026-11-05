@@ -643,6 +643,33 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     return out
 
 
+def kept_drawn(tempo, base, ppq, end=0):
+    """[(tick, us)] of the DRAWN tempo inside the Keep timing parts (what the file holds there, its notes moved to
+    keep their time), each part's first value at its start; [] without a part. The track list's Conductor row shows
+    them purple (user 2026-11-05: heard_tempo holds the part at one tempo, the row showed nothing there)."""
+    if not has_tempo(tempo):
+        return []
+    lay = layout(tempo, base, ppq)
+    if not lay["keeps"]:
+        return []
+    segs = file_segments(tempo, base, ppq, end)[0]
+    last = segs[-1][1]
+    out = []
+    for _, a, e, _ in lay["keeps"]:
+        e = last if e is None else e
+        if e <= a:
+            continue
+        part = []
+        for sa, sb, u in segs:
+            lo, hi = max(a, sa), min(e, sb)
+            if lo >= hi:
+                continue
+            part.append((lo, hi, u if isinstance(u, int) else u[lo - sa:hi - sa]))
+        runs = _runs(part)
+        out += runs
+    return out
+
+
 def heard_tempo(tempo, base, ppq, end=0, heard=None):
     """[(tick, us)] on Spiderweb's ticks for built-in playback: what a player of the MIDI file really plays where
     (catch-ups in place, Keep timing parts at the tempo heard before them, so their notes sound when the file's do).

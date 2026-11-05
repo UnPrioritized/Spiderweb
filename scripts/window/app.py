@@ -1123,8 +1123,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 # Domino; whole pixels)
                 r.clamp_view()
             r.request_redraw()
+            if self.track_list.conductor_on:  # (the Conductor row highlighted = into the Conductor pane, like
+                if not self.show_tempo.get():  # Domino's Conductor track; turned on when hidden, user 11-05)
+                    self.show_tempo.set(True)
+                    self.toggle_tempo()
+                self.key_pane = self.tempo_pane  # (Delete / Ctrl+C / V: the tempo's, as after clicking the pane)
+            elif getattr(self, "key_pane", None) is self.tempo_pane:  # (from a track: that track's piano roll keys)
+                self.key_pane = None
         else:
             self.tips.show("tracks")
+            # (back from the Conductor pane: its row highlighted again)
+            self.track_list.set_conductor(getattr(self, "key_pane", None) is self.tempo_pane)
             self.panes.pack_forget()
             self.track_box.pack(**place)
             self.snap_picker.use(self.track_list.snap, tr("tracks.snap_tip"))
