@@ -49,6 +49,7 @@ DOMINO_KEYS = 128
 MARK = "domino_send"  # (a shape key: drawn / taken here, goes into Domino with Send; dropped when this ends)
 REST_S = 0.25  # Domino's song PPQ checked once nothing changed for this long (no drag / typing going on)
 SAID_MS = 4000
+SELECTED_S = 0.25  # Domino's selection read this often for the outlines of remembered shapes picked there
 LOOK_AGAIN_S = 1.5  # the remembered shapes looked at again this often even when Domino's undo count stays (a full list)
 KEY_TAG = "DominoCompanionKeys"
 ALONE_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Caps_Lock", "Num_Lock",
@@ -146,6 +147,8 @@ class Companion:
         self._saved = ()       # (the records as last written beside the song)
         self._pending = None   # (records changed: (how, since when); written once they rest)
         self._save_failed = None
+        self._sel_at = 0.0     # (when Domino's selection was last read for the outlines)
+        self._shown_sel = ()   # (the remembered shapes shown outlined)
         self.bar = self.make_bar()  # (first: the overlay's first look at Domino places it)
         self.overlay = dov.DominoOverlay(app, pid=pid, on_view=self.on_view, on_state=self.on_state,
                                          on_tick=self.on_tick,
@@ -628,10 +631,10 @@ class Companion:
         self.keep_saved(d, now)
         mine = self.mine(d)
         if not mine or dl.mouse_down():
-            return
-        depth, now = dv.undo_depth(d), time.monotonic()
+            return self.show_selected(d, [], now)
+        depth = dv.undo_depth(d)
         if depth == self.looked[0] and now - self.looked[1] < LOOK_AGAIN_S:
-            return
+            return self.show_selected(d, mine, now)
         self.looked = (depth, now)
         want = sorted({int(t) for r in mine for t in np.unique(r["notes"][:, 0])})
         tracks = {t: dv.track_notes(d, t) for t in want}
@@ -641,6 +644,42 @@ class Companion:
             r["pid"], r["ppq"], r["song"] = d.pid, mine[0].get("ppq"), self.song
         self.records.extend(made)
         self.last_events = events
+        self._sel_at = 0.0  # (shown again at once)
+
+    def show_selected(self, d, mine, now, tracks=None):
+        """Remembered shapes with a note selected in Domino show their outline on the overlay (user 2026-11-06), where
+        Domino has them now. Domino's selection changes nothing else: read every SELECTED_S."""
+        if mine and tracks is None:
+            if now - self._sel_at < SELECTED_S:
+                return
+            want = sorted({int(t) for r in mine if r["alive"] for t in np.unique(r["notes"][:, 0])})
+            tracks = {t: dv.track_notes(d, t) for t in want}
+        self._sel_at = now
+        picked = []
+        for r in mine:
+            if not r["alive"]:
+                continue
+            for t in np.unique(r["notes"][:, 0]).tolist():
+                a = (tracks or {}).get(t)
+                if a is None or not len(a) or not a[:, 4].any():
+                    continue
+                spots = {(x[0], x[2]) for x in a[a[:, 4] != 0][:, :3].tolist()}
+                if any((b + r["dt"], e + r["dk"]) in spots for c, b, _, e, _ in r["notes"].tolist() if c == t):
+                    picked.append(r)
+                    break
+        key = tuple((r["id"], r["dt"], r["dk"]) for r in picked)
+        if key == self._shown_sel:
+            return
+        self._shown_sel = key
+        ppq = self.app.ppq
+        ghosts = []
+        for r in picked:
+            for one in r["shape"]:
+                g = dict(one)
+                g["pts"] = [[b + r["dt"] / ppq, p + r["dk"]] for b, p in one["pts"]]
+                ghosts.append(g)
+        self.roll.ghosts = ghosts
+        self.roll.request_redraw()
 
     def song_changed(self, d, path):
         """Domino's song file is now path ("" = never saved): the shapes of an unsaved song go with it when it's
