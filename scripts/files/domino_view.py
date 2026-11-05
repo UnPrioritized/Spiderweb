@@ -44,6 +44,7 @@ class Build:
     events_at: int = 0  # a track + this -> its events (pointers, tick order, every kind; + 4 = how many)
     note_vt: int = 0    # a note event's first 4 bytes (+4 tick, +8 selected byte, +0xC key, +0xD velocity, +0x10 gate)
     undo_at: int = 0    # C + this -> the undo list; + 0x10 there = how many steps it holds
+    path_at: int = 0    # S + this -> an object whose + 4 -> the open song's file path (ANSI text, NUL-ended)
 
 
 # sha256 of Domino.exe -> Build. Only builds checked by hand: an unknown one is never guessed at.
@@ -52,7 +53,7 @@ BUILDS = {
         "Domino 1.43 (with dominohook)", p_slot=0x5B49C8, p_vtable=0x55F490, top_row=0xB8, row_px=0x1CC,
         beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234,
         c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC,
-        tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, note_vt=0x55AB28, undo_at=0x188),
+        tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, note_vt=0x55AB28, undo_at=0x188, path_at=0xA8),
 }
 UNITS_PER_BEAT = 24
 
@@ -346,6 +347,27 @@ def undo_depth(d):
     ph, c, _ = got
     u = _i32(ph, c + d.build.undo_at)
     return _i32(ph, (u & 0xFFFFFFFF) + 0x10) if u else None
+
+
+def song_path(d):
+    """The file Domino has open (full path), "" for a song never saved, or None (unknown / unreadable). Found
+    2026-11-06 (dev/scratch/dk_path.py: [[S + 0xA8] + 4] = the path text, two files checked)."""
+    got = _song_obj(d)
+    if got is None or not d.build.path_at:
+        return None
+    ph, _, s = got
+    q = _i32(ph, s + d.build.path_at)
+    p = _i32(ph, (q & 0xFFFFFFFF) + 4) if q else None
+    if not p:
+        return None if p is None else ""
+    raw = _read(ph, p & 0xFFFFFFFF, 1040).split(b"\0", 1)[0]
+    if not raw:
+        return ""
+    try:
+        text = raw.decode("mbcs")
+    except (UnicodeDecodeError, LookupError):
+        return None
+    return text if len(text) > 3 and (text[1:3] == ":\\" or text.startswith("\\\\")) else None
 
 
 def _read(ph, addr, size):

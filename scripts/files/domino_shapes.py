@@ -11,6 +11,8 @@ Plain Python + NumPy, no windows: the "finding" part, so another way of finding 
 
 import copy
 import itertools
+import json
+import os
 
 import numpy as np
 
@@ -186,3 +188,61 @@ def trimmed(record, tracks):
     record["notes"] = n.copy()
     record["notes"][:, 2] = new
     return True
+
+
+# --- kept beside the song (user 2026-11-06): <song file>.spiderweb ---
+FILE_END = ".spiderweb"
+FILE_VERSION = 1
+
+
+def file_for(song):
+    return song + FILE_END if song else None
+
+
+def _plain(o):
+    if hasattr(o, "tolist"):
+        return o.tolist()
+    if hasattr(o, "item"):
+        return o.item()
+    raise TypeError(type(o).__name__)
+
+
+def save(song, records, ppq):
+    """Write the song's records beside it (no records = the file removed). Raises OSError when it can't."""
+    from files.safefile import write_text
+    path = file_for(song)
+    if not records:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    data = {"app": "Spiderweb", "what": "shapes remembered inside a Domino song", "version": FILE_VERSION,
+            "ppq": ppq, "records": [{"shapes": r["shape"], "notes": r["notes"], "dt": r["dt"], "dk": r["dk"]}
+                                     for r in records]}
+    write_text(path, json.dumps(data, default=_plain, separators=(",", ":")))
+
+
+def load(song):
+    """The records kept beside the song ([] when none / unreadable / newer): all asleep until looked at."""
+    from notes.engine import clean_shape
+    path = file_for(song)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict) or data.get("version") != FILE_VERSION:
+        return []
+    out = []
+    for r in data.get("records") or []:
+        try:
+            shapes = [clean_shape(s) for s in r["shapes"]]
+            notes = np.asarray(r["notes"], np.int64).reshape(-1, 5)
+            if any(s is None for s in shapes) or not len(notes):
+                continue
+            rec = new_record(shapes, notes)
+            rec["dt"], rec["dk"], rec["alive"] = int(r["dt"]), int(r["dk"]), False
+            rec["ppq"] = data.get("ppq")
+            out.append(rec)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out

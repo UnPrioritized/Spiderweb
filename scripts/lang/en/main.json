@@ -2905,6 +2905,7 @@
  "companion.took_shapes_only": "Took {shapes} from Domino: change them, then press Send",
  "companion.n_shapes": "{n} shapes",
  "companion.n_shapes_one": "1 shape",
+ "companion.shapes_not_saved": "Couldn't save which notes are Spiderweb shapes beside the song ({name}): they're kept until Spiderweb closes",
  "companion.send": "Send",
  "companion.send_tip": "Put the shapes on Domino's piano roll into Domino's current track (Enter does this too).\nA shape you draw stays here to be changed until you're done with it: it goes in by itself when you draw the next one, go back to Domino's mouse or press a key of Domino's",
  "companion.flip_sideways": "↔",

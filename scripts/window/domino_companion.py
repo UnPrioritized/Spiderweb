@@ -141,6 +141,11 @@ class Companion:
         self.step_records = {}  # id(linked step) -> its record (Spiderweb's Ctrl+Z of a send drops it, Ctrl+Y back)
         self.looked = (None, 0.0)  # (Domino's undo depth, when) at the last look at the records
         self.last_events = []  # (what the last look found: tests)
+        self.song = None       # the file Domino has open ("" = never saved; None = not read yet): its records
+        self._song_at = 0.0
+        self._saved = ()       # (the records as last written beside the song)
+        self._pending = None   # (records changed: (how, since when); written once they rest)
+        self._save_failed = None
         self.bar = self.make_bar()  # (first: the overlay's first look at Domino places it)
         self.overlay = dov.DominoOverlay(app, pid=pid, on_view=self.on_view, on_state=self.on_state,
                                          on_tick=self.on_tick,
@@ -590,12 +595,11 @@ class Companion:
         if any(v is None for v in tracks.values()):
             return
         sent = np.column_stack([track, rows[:, 0], rows[:, 1] - rows[:, 0], rows[:, 2], rows[:, 3]])
-        import copy as _copy
-        rec = dsh.new_record([_copy.deepcopy(s) for s in shapes], dsh.landed(sent, tracks))
-        rec["pid"], rec["ppq"] = d.pid, self.app.ppq
-        for r in self.records:
+        rec = dsh.new_record([copy.deepcopy(s) for s in shapes], dsh.landed(sent, tracks))
+        rec["pid"], rec["ppq"], rec["song"] = d.pid, self.app.ppq, self.song
+        for r in self.mine(d):
             on = {int(t) for t in np.unique(r["notes"][:, 0])}
-            if r.get("pid") == d.pid and on & set(tracks):
+            if on & set(tracks):
                 need = {t: tracks[t] if t in tracks else dv.track_notes(d, t) for t in on}
                 if all(a is not None for a in need.values()):
                     dsh.trimmed(r, need)
@@ -604,12 +608,25 @@ class Companion:
             self.new_records.append((shapes, rec))
         self.looked = (dv.undo_depth(d), time.monotonic())
 
+    def mine(self, d):
+        """The records of the song Domino d has open."""
+        return [r for r in self.records if r.get("pid") == d.pid and r.get("song") == self.song]
+
     def watch(self):
-        """Each tick: Domino changed (its undo count moved, or a while passed) = the records looked at again."""
+        """Each tick: Domino changed (its undo count moved, or a while passed) = the records looked at again; the
+        song's file checked now and then (another one opened / saved under a name: its records), saved after
+        changes."""
         d = self.overlay.domino
         if d is None or self.busy or self.leaving:
             return
-        mine = [r for r in self.records if r.get("pid") == d.pid]
+        now = time.monotonic()
+        if now - self._song_at > LOOK_AGAIN_S:
+            self._song_at = now
+            path = dv.song_path(d)
+            if path is not None and path != self.song:
+                self.song_changed(d, path)
+        self.keep_saved(d, now)
+        mine = self.mine(d)
         if not mine or dl.mouse_down():
             return
         depth, now = dv.undo_depth(d), time.monotonic()
@@ -621,9 +638,58 @@ class Companion:
         tracks = {t: a for t, a in tracks.items() if a is not None}  # (a track gone: its records' notes not found)
         events, made = dsh.look(mine, tracks)
         for r in made:
-            r["pid"], r["ppq"] = d.pid, mine[0].get("ppq")
+            r["pid"], r["ppq"], r["song"] = d.pid, mine[0].get("ppq"), self.song
         self.records.extend(made)
         self.last_events = events
+
+    def song_changed(self, d, path):
+        """Domino's song file is now path ("" = never saved): the shapes of an unsaved song go with it when it's
+        saved under a name; another song = its own records, read from beside it."""
+        self.save_now(d)
+        old, self.song = self.song, path
+        adopted = False
+        if old in (None, "") and path:
+            for r in self.records:
+                if r.get("pid") == d.pid and r.get("song") in (None, ""):
+                    r["song"], adopted = path, True
+        if path and not self.mine(d):
+            for r in dsh.load(path):
+                r["pid"], r["song"] = d.pid, path
+                self.records.append(r)
+        self._saved = () if adopted else self.saved_sig(d)  # (as the file has them; adopted ones: not written yet)
+        self._pending = None
+        self.looked = (None, 0.0)  # (looked at again at once: found in Domino = alive)
+
+    def saved_sig(self, d):
+        return tuple((r["id"], r["dt"], r["dk"], len(r["notes"]), int(r["notes"][:, 2].sum())) for r in self.mine(d))
+
+    def keep_saved(self, d, now):
+        """The song's records written beside it once they stop changing for a second."""
+        if not self.song:
+            return
+        sig = self.saved_sig(d)
+        if sig == self._saved:
+            self._pending = None
+            return
+        if self._pending is None or self._pending[0] != sig:
+            self._pending = (sig, now)
+        elif now - self._pending[1] > 1.0:
+            self.save_now(d)
+
+    def save_now(self, d):
+        if not self.song or d is None:
+            return
+        sig = self.saved_sig(d)
+        if sig == self._saved:
+            return
+        try:
+            dsh.save(self.song, self.mine(d), self.app.ppq)
+            self._saved, self._pending = sig, None
+        except OSError:
+            if self._save_failed != self.song:  # (said once a song)
+                self._save_failed = self.song
+                self.say(tr("companion.shapes_not_saved", name=os.path.basename(self.song)), warn=True)
+            self._saved = sig
 
     def take_off(self, now=False):
         """Shapes now in Domino leave the overlay (one undo step each send) once nothing is held there: a shape
@@ -755,7 +821,7 @@ class Companion:
         """Remembered shapes alive in Domino whose notes were ALL taken (rows = Domino's copied selection: tick from
         start, gate, key, velocity, copied track from the current one down) -> (those records, the rows left)."""
         now = dv.song_tracks(d)
-        mine = [r for r in self.records if r.get("pid") == d.pid and r["alive"]]
+        mine = [r for r in self.mine(d) if r["alive"]]
         if not mine or now is None or not len(rows):
             return [], rows
         cur = now[0]
@@ -780,7 +846,7 @@ class Companion:
         d = self.overlay.domino
         if d is None or self.busy:
             return
-        mine = [r for r in self.records if r.get("pid") == d.pid and r["alive"]]
+        mine = [r for r in self.mine(d) if r["alive"]]
         tracks = {t: dv.track_notes(d, t) for t in sorted({int(t) for r in mine for t in np.unique(r["notes"][:, 0])})}
         gone = []
         for r in mine:
@@ -1140,6 +1206,10 @@ class Companion:
 
     def finish_stop(self):
         app = self.app
+        try:  # (the song's remembered shapes written beside it before leaving)
+            self.save_now(self.overlay.domino)
+        except Exception:
+            pass
         try:
             app.tool.trace_remove("write", self._trace)
         except tk.TclError:
