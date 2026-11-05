@@ -2606,6 +2606,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         if clip is None:
             self.app.status.config(text=tr("tempo.copy_nothing"))
             return False
+        clip["n"] = self.app.copy_stamp()  # (newer than the shapes copied: the track list's Ctrl+V pastes it)
         self.app.tempo_clip = clip
         self.app.drop_own_copy()  # (Spiderweb's older copy off the clipboard, like a stroke copy: hunt 2026-10-29)
         n = len(clip["points"]) + len(clip["catch"])
@@ -2623,16 +2624,17 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         else:
             self.delete_items(list(self.sel), tr("tempo.step_cut"))
 
-    def empty_spans(self, spans, name):
+    def empty_spans(self, spans, name, push=True):
         """Everything inside the boxes goes (one undo step), like deleting tempo events in Domino (user 2026-10-26:
         a point came back at the box's end): the tempo arriving at each box's start holds on to the next point
         after it. A curved part running into the box is cut on its start first, so the line before stays as it
-        was (Ctrl+X / Delete with a box)."""
+        was (Ctrl+X / Delete with a box). push False: in the caller's undo step (the track list's boxes)."""
         tempo, base = self.ed(), self.ed_base()
         spans = [(lo, hi) for lo, hi in joined(spans) if hi - lo > 1e-9]
         if not spans:
             return
-        self.app.push_undo(name=name)
+        if push:
+            self.app.push_undo(name=name)
         tempo["catch"][:] = [c for c in tempo["catch"] if not any(lo - 1e-9 <= c[0] < hi - 1e-9 for lo, hi in spans)]
         pts = tempo["points"]
         for lo, hi in spans:

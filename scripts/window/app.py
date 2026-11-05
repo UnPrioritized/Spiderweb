@@ -3084,15 +3084,24 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     sh["cols"] = cols[i]
             self.put_clipboard(shapes)
 
-    def put_clipboard(self, shapes, loaded=False):
+    def put_clipboard(self, shapes, loaded=False, tempo=None):
         """shapes (copies, their "cols" set) are what Ctrl+V pastes now (also the track list's Ctrl+C; loaded: its
-        boxes held a loaded MIDI's notes, which never go into a copy for other programs: said, hunt 2026-10-29)."""
+        boxes held a loaded MIDI's notes, which never go into a copy for other programs: said, hunt 2026-10-29).
+        tempo: the Conductor's changes copied with them (the track list's boxes, track_tempo): the tempo copy too,
+        pasted along with these shapes (track_list.key_paste)."""
         for sh in shapes:
             sh["into_from"] = self.project_token  # (its tracks are this project's: put_into_current)
         self.clipboard = shapes
         self.clip_kind = "shapes"
+        self.shapes_stamp = self.copy_stamp()
+        if tempo is not None:
+            tempo["with"], tempo["n"] = shapes, self.shapes_stamp
+            self.tempo_clip = tempo
         line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
         msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
+        if tempo is not None:
+            from window.track_tempo import count
+            msg += trn("app.copied_tempo_too", count(tempo), n=count(tempo))
         also, domino, notes, why = [], None, None, ""
         # (what both extras copy, worked out once: a big song's Keep timing took twice as long, hunt 2026-10-29)
         got = self.copy_music() if RAW and (self.copy_domino.get() or self.copy_notes.get()) else False
@@ -3147,6 +3156,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.sels:
             self.copy_selected(whole=True, cut=True)
             self.delete_selected(name=tr("app.cut"))
+
+    def copy_stamp(self):
+        """A number for each copy (shapes / tempo), counting up: the track list's Ctrl+V pastes the newer."""
+        self._copy_n = getattr(self, "_copy_n", 0) + 1
+        return self._copy_n
 
     def remember_clip(self):
         """Spiderweb copied something: what the Windows clipboard holds now is older than that copy."""
@@ -3225,6 +3239,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             clip = self.clipboard, self.clip_kind, self.seen_clip
             self.remember_clip()
             self.clipboard, self.clip_kind = shapes, "shapes"
+            self.shapes_stamp = self.copy_stamp()  # (newer than a tempo copy: the track list's Ctrl+V)
             clamped = self.paste(whole=True, at=at)
         except Exception as e:  # (out of memory, or anything else: the shapes never stay half pasted, user)
             if self.last_step() is not top:  # (the paste's step: taken back, not kept for Ctrl+Y)

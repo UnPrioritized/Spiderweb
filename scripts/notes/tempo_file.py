@@ -652,22 +652,38 @@ def kept_drawn(tempo, base, ppq, end=0):
     lay = layout(tempo, base, ppq)
     if not lay["keeps"]:
         return []
-    segs = file_segments(tempo, base, ppq, end)[0]
+    segs = _file_segs(tempo, base, ppq, end)
+    starts = [s[0] for s in segs]  # (in order, not overlapping: each part's pieces found by halving, never all)
     last = segs[-1][1]
     out = []
     for _, a, e, _ in lay["keeps"]:
         e = last if e is None else e
         if e <= a:
             continue
-        part = []
-        for sa, sb, u in segs:
+        part, i = [], max(0, bisect.bisect_right(starts, a) - 1)
+        while i < len(segs) and segs[i][0] < e:  # (no slice of the rest: that copied it for every part)
+            sa, sb, u = segs[i]
             lo, hi = max(a, sa), min(e, sb)
-            if lo >= hi:
-                continue
-            part.append((lo, hi, u if isinstance(u, int) else u[lo - sa:hi - sa]))
-        runs = _runs(part)
-        out += runs
+            if lo < hi:
+                part.append((lo, hi, u if isinstance(u, int) else u[lo - sa:hi - sa]))
+            i += 1
+        out += _runs(part)
     return out
+
+
+def _file_segs(tempo, base, ppq, end):
+    """file_segments' pieces, the last few remembered: heard_tempo and kept_drawn both ask after each tempo change
+    (worked out twice doubled the track list's wait on a big tempo map)."""
+    key = (tempo_text(tempo), base, ppq, end)
+    got = _segs.get(key)
+    if got is None:
+        if len(_segs) > 4:
+            _segs.clear()
+        got = _segs[key] = file_segments(tempo, base, ppq, end)[0]
+    return got
+
+
+_segs = {}
 
 
 def heard_tempo(tempo, base, ppq, end=0, heard=None):
@@ -680,7 +696,7 @@ def heard_tempo(tempo, base, ppq, end=0, heard=None):
     key = (tempo_text(tempo), base, ppq, end, id(heard))
     if key in _heard:  # (Play / each tempo edit while playing: remembered until the line changes)
         return _heard[key]
-    segs, _ = file_segments(tempo, base, ppq, end)
+    segs = _file_segs(tempo, base, ppq, end)
     lay = layout(tempo, base, ppq)
     known = None if heard is None else FileTempo(heard, lay)
     puts = []

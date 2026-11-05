@@ -64,7 +64,8 @@ FOLD_W = 14  # px (x scale): a press this near the names' left edge on a folder 
 OPEN_MOST = 65534  # open folders read back from a saved view at most (a MIDI file's most tracks)
 # redraw's parts, bottom to top (TrackList.layer's tags; each name row is its own part in "names")
 # (never "all" / "current": Tk's own tags, "all" = every item: deleting it blanked the whole list)
-LAYER_ORDER = ("pic", "boxes", "ruler", "allrow", "cond", "names_bg", "names", "names_top", "move", "playhead")
+# (boxes over the Conductor row: boxes on it, user 2026-11-05; they never reach above it)
+LAYER_ORDER = ("pic", "ruler", "allrow", "cond", "boxes", "names_bg", "names", "names_top", "move", "playhead")
 SQUARES_KEPT = 96 # squares of each picture kept at least (twice the ones in use when more)
 MENU_CLICK_S = 0.25  # a press this soon after the right-click menu closed = the click that closed it (Windows)
 MOVE_PX = 5  # a press on a track's name moved this far (x scale) = dragging the tracks to another place
@@ -1177,6 +1178,9 @@ class TrackList(tk.Canvas):
             return self.select_click(row, e.state & 0x4, e.state & 0x1)
         if picture and self.box_press(e, max(0.0, self.x2t(e.x)), row):  # (a drag on the picture: a Select box;
             return  # a click: the play line + the track, as before; inside the boxes: box_release)
+        if row == CONDUCTOR_ROW and e.x >= self.name_w and self.sx and \
+                self.box_press(e, max(0.0, self.x2t(e.x)), row):  # (the Conductor's picture too, user 11-05)
+            return
         if row >= 0 and e.x < self.name_w and c < 0:  # (a track's name: dragged = the tracks moved, group C)
             s, group = int(self.tracks()[row]), self.picked_tracks()
             # (on one of several selected: they stay selected for the drag; let go without one = that track alone,
@@ -1269,7 +1273,7 @@ class TrackList(tk.Canvas):
         row = self.row_at(y)
         if y < self.ruler_h:
             return any(b["rows"] is None and b["t0"] <= t <= b["t1"] for b in self.boxes)
-        if row is None or row < 0:
+        if row is None or row < CONDUCTOR_ROW:
             return False
         # (a ruler band shows on the ruler only, user 2026-10-26: its notes are dragged from there)
         return any(b["rows"] is not None and b["t0"] <= t <= b["t1"] and b["rows"][0] <= row <= b["rows"][1]
@@ -1296,7 +1300,10 @@ class TrackList(tk.Canvas):
             top = self.area()[1]
             y = min(max(e.y, top), self.winfo_height() - 1)
             lines = self.lines()[0]
-            row = int(lines[min(max(int((y - top + self.top) // self.row_h), 0), len(lines) - 1)])
+            if e.y < top or not len(lines):  # (above the tracks: the Conductor row, user 11-05)
+                row = CONDUCTOR_ROW
+            else:
+                row = int(lines[min(max(int((y - top + self.top) // self.row_h), 0), len(lines) - 1)])
             lo, hi = self.box_span(b["t"], t, b["shift"], shift)
             b["box"] = {"t0": lo, "t1": hi, "rows": tuple(sorted((b["row"], row)))}
         self.request_redraw()
@@ -1308,7 +1315,7 @@ class TrackList(tk.Canvas):
         left = min(x["t0"] for x in self.boxes)
         want = left + t - b["t"]
         b["dt"] = max(0.0, self.ticked(want) if shift else self.snapped(want)) - left
-        if any(x["rows"] is None for x in self.boxes):
+        if any(x["rows"] is None or x["rows"][0] < 0 for x in self.boxes):  # (the Conductor's: time only)
             b["drow"] = 0
         else:
             top = self.area()[1]
@@ -1327,8 +1334,7 @@ class TrackList(tk.Canvas):
         b, self._box = self._box, None
         if b["move"]:
             if b["on"] and (b["dt"] or b["drow"] or b["ctrl"]):
-                from window.track_moves import move_boxed
-                move_boxed(self.app, self.boxes, b["dt"], b["drow"], copying=b["ctrl"])
+                self.box_work("copy" if b["ctrl"] else "move", b["dt"], b["drow"])
             elif not b["on"] and b["pick"]:
                 self.select_click(b["row"], b["ctrl"], b["shift"])
             # (a plain click inside: nothing, the play line and the highlight stay; user 2026-10-26)
@@ -1343,29 +1349,65 @@ class TrackList(tk.Canvas):
         elif b["pick"]:
             self.select_click(b["row"], b["ctrl"], b["shift"])
 
+    def box_tempo(self, kind):
+        """{"spans", "clip"} of the Conductor's changes in the boxes (a box from its row, a ruler band; user
+        2026-11-05), None when no box holds the Conductor row. Ctrl+C / X: the clip is the tempo copy from now."""
+        from window import track_tempo
+        spans = track_tempo.tempo_spans(self.boxes)
+        if not spans:
+            return None
+        # (no change inside = nothing, like Domino: a held stretch pasted with notes would change the tempo there)
+        clip = track_tempo.clip_of(self.app, spans) if track_tempo.changes(self.app, spans) else None
+        if clip is not None and kind in ("clip", "cut"):
+            clip["n"] = self.app.copy_stamp()
+            self.app.tempo_clip = clip
+        return {"spans": spans, "clip": clip}
+
+    def box_work(self, kind, dt=0.0, drow=0):
+        """Ctrl+C ("clip") / Ctrl+X ("cut") / Delete ("delete") / a drag of the boxes ("move" / "copy"): their
+        notes (track_moves.box_job) and the Conductor's changes they hold (track_tempo), one undo step."""
+        from window.track_moves import box_job, has_notes, tempo_only
+        from window.track_tempo import note_boxes
+        if not self.boxes:
+            return
+        tempo = self.box_tempo(kind)
+        notes = note_boxes(self.boxes)
+        if tempo is not None and not has_notes(self.app, notes):
+            return tempo_only(self.app, kind, tempo, dt)
+        return box_job(self.app, notes, kind, dt, drow, tempo=tempo)
+
     def key_copy(self):
-        """Ctrl+C in the list: the Select boxes' notes (track_moves.clip_boxed)."""
-        from window.track_moves import box_job
-        if self.boxes:
-            box_job(self.app, self.boxes, "clip")
+        """Ctrl+C in the list: the Select boxes' notes (track_moves.clip_boxed) + the Conductor's changes."""
+        self.box_work("clip")
 
     def key_cut(self):
-        from window.track_moves import box_job
-        if self.boxes:
-            box_job(self.app, self.boxes, "cut")
+        self.box_work("cut")
 
     def key_delete(self):
-        from window.track_moves import box_job
-        if self.boxes:
-            box_job(self.app, self.boxes, "delete")
+        self.box_work("delete")
 
-    def key_paste(self):
+    def key_paste(self, conductor=False):
         """Ctrl+V in the list (Domino's): what was copied, at the play line, laid from the highlighted track down
-        (App.paste); a Select box round what came in."""
+        (App.paste); a Select box round what came in. The Conductor row highlighted: the copied tempo there; a copy
+        holding notes and the Conductor's changes: both, the tempo the same distance from the notes as copied (user
+        2026-11-05)."""
         app = self.app
+        clip = getattr(app, "tempo_clip", None)
+        own = app.shared_clip() is None and not app.domino_newer()  # (else what was copied elsewhere comes in)
+        if self.conductor_on or conductor or own and clip is not None and \
+                clip.get("n", 0) > getattr(app, "shapes_stamp", 0):
+            return self.paste_tempo(clip)  # (the Conductor row lit, or the tempo copied last)
+        both = (own and clip is not None and clip.get("with") is not None and clip["with"] is app.clipboard
+                and app.clip_kind == "shapes")
         before = len(app.shapes)
+        top = app.last_step()
         app.paste()
         new = list(range(before, len(app.shapes)))
+        if both and new and app.last_step() is not top:  # (in the paste's undo step)
+            from notes.engine import cached_path
+            start = min(b for sh in app.clipboard for b, _ in cached_path(sh))
+            moved = min(b for i in new for b, _ in cached_path(app.shapes[i])) - start
+            self.put_tempo(clip, clip["from"] + moved, tr("tempo.step_paste"))
         r = app.rendered
         mine = np.isin(r[:, 5], new) if new and len(r) else np.zeros(len(r), bool)
         rows = self.note_rows()[mine]
@@ -1375,6 +1417,28 @@ class TrackList(tk.Canvas):
         self.boxes = [{"t0": int(r[mine, 0].min()) / app.ppq, "t1": int(r[mine, 1].max()) / app.ppq,
                        "rows": (int(rows.min()), int(rows.max()))}]
         self.request_redraw()
+
+    def paste_tempo(self, clip):
+        """The copied tempo (a Conductor row box's or the Conductor pane's) at the play line, one undo step; a box on
+        the Conductor row round it."""
+        app = self.app
+        if not clip:
+            app.status.config(text=tr("tempo.paste_nothing"))
+            return
+        name = tr("tempo.step_paste")
+        app.push_undo(name=name)
+        at = self.put_tempo(clip, app.playhead, name)
+        self.boxes = [{"t0": at, "t1": at + clip["length"], "rows": (CONDUCTOR_ROW, CONDUCTOR_ROW)}] \
+            if clip["length"] > 0 else []
+        self.request_redraw()
+
+    def put_tempo(self, clip, at, name):
+        """clip laid from beat at (on a tick; in the caller's undo step) -> where it went."""
+        from window import track_tempo
+        pane = self.app.tempo_pane
+        at = pane.tick_beat(max(0.0, at), skip=pane.ed()["points"])
+        track_tempo.put(self.app, clip, at, name)
+        return at
 
     def busy(self):
         """A drag going on in the list (tracks, a box, speakers): its keys wait."""
@@ -1455,8 +1519,11 @@ class TrackList(tk.Canvas):
             if b["rows"] is None:
                 continue
             r0, r1 = b["rows"]  # (a row's open sub-rows inside its box too)
-            out.append((self.t2x(b["t0"]), top + first[r0] * rh - self.top, self.t2x(b["t1"]),
-                        top + first[r1 + 1] * rh - self.top))
+            # (the Conductor row (-1) stays put above the scrolled tracks: a box from it reaches down from there)
+            y0 = self.conductor_y() if r0 < 0 else max(top, top + first[r0] * rh - self.top)
+            y1 = top if r1 < 0 else max(top, top + first[r1 + 1] * rh - self.top)
+            if y1 > y0:  # (scrolled away above: not drawn)
+                out.append((self.t2x(b["t0"]), y0, self.t2x(b["t1"]), y1))
         return out
 
     def draw_boxes(self, w, h):
@@ -1466,6 +1533,7 @@ class TrackList(tk.Canvas):
         if not rects:
             return
         left, top = self.area()
+        top = self.conductor_y()  # (box_rects keeps track boxes under the Conductor row)
         tile = FILL_TILE
         for x0, y0, x1, y1 in rects:
             a, b = max(round(x0), left), min(round(x1), w)
@@ -2257,10 +2325,11 @@ class TrackList(tk.Canvas):
         if not self.box_at(e.x, e.y):
             self.drop_boxes()
         has = "normal" if self.boxes else "disabled"
+        on_cond = self.row_at(e.y) == CONDUCTOR_ROW  # (Paste there = the tempo, as with the row highlighted)
         menu = tk.Menu(self, tearoff=0)
         for item in ((tr("menu.cut"), tr("roll_menu.ctrl_x"), self.key_cut, has),
                      (tr("menu.copy"), tr("roll_menu.ctrl_c"), self.key_copy, has),
-                     (tr("menu.paste"), tr("roll_menu.ctrl_v"), self.key_paste, "normal"),
+                     (tr("menu.paste"), tr("roll_menu.ctrl_v"), lambda: self.key_paste(on_cond), "normal"),
                      (tr("app.delete"), tr("roll_menu.del"), self.key_delete, has), None,
                      (tr("menu.domino_copy"), tr("menu.ctrl_shift_c"), self.app.copy_to_domino, has), None,
                      (tr("menu.select_all"), tr("menu.ctrl_a"), self.select_all, "normal")):
@@ -2919,14 +2988,14 @@ class TrackList(tk.Canvas):
         lines = self.shown_bars(w)
         with self.layer("pic"):
             self.paint(w, h)
-        with self.layer("boxes"):
-            self.draw_boxes(w, h)
         with self.layer("ruler"):
             self.draw_ruler(w, lines)
         with self.layer("allrow"):
             self.draw_all(w)
         with self.layer("cond"):
             self.draw_conductor(w)
+        with self.layer("boxes"):  # (over the Conductor row too: boxes on it, user 11-05; never above it)
+            self.draw_boxes(w, h)
         self.draw_names(h)
         m = self._move
         thick = max(2, round(2 * self.scale))

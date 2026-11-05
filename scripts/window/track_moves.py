@@ -77,12 +77,52 @@ def lay_on(app, sh, rows):
 
 
 
-def move_boxed(app, boxes, dt, drow, copying=False):
+def move_boxed(app, boxes, dt, drow, copying=False, tempo=None):
     """The notes in the boxes moved dt beats and drow rows (copying: copies moved, the notes stay): one undo step."""
-    return box_job(app, boxes, "copy" if copying else "move", dt, drow)
+    return box_job(app, boxes, "copy" if copying else "move", dt, drow, tempo=tempo)
 
 
-def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None):
+def has_notes(app, boxes):
+    """Do the boxes hold any notes (Spiderweb's, or a loaded MIDI's tracks with notes on their rows)?"""
+    return bool(boxes) and (bool(boxed(app, boxes).any()) or bool(loaded_boxes(app, boxes)))
+
+
+def tempo_only(app, kind, tempo, dt=0.0):
+    """box_job for boxes holding the Conductor's changes but no notes (tempo = {"spans", "clip"}, track_tempo)."""
+    from window import track_tempo
+    spans, clip = tempo["spans"], tempo["clip"]
+    if kind in ("clip", "cut"):
+        if clip is None:
+            app.status.config(text=tr("tracks.tempo_empty"))
+            return False
+        n = track_tempo.count(clip)
+        app.status.config(text=trn("tracks.tempo_copied", n, n=n))
+        app.drop_own_copy()  # (Spiderweb's older copy off the clipboard, as the Conductor pane's copy)
+        if app.copy_domino.get():
+            app.tempo_to_domino(clip, quiet=True)
+        if kind == "clip":
+            return True
+    if clip is None or not track_tempo.changes(app, spans):  # (a held stretch: nothing to delete / move)
+        app.status.config(text=tr("tracks.tempo_empty"))
+        return False
+    names = {"cut": "app.cut", "delete": "tracks.tempo_delete_step", "move": "tracks.tempo_move_step",
+             "copy": "tracks.tempo_copy_step"}
+    name = tr(names[kind])
+    app.push_undo(name=name)
+    if kind in ("cut", "delete"):
+        track_tempo.empty(app, spans, name)
+    else:
+        track_tempo.move(app, spans, dt, kind == "copy", name)
+    tl = app.track_list
+    if kind in ("cut", "delete"):
+        tl.boxes = []
+    else:
+        tl.boxes = [dict(b, t0=b["t0"] + dt, t1=b["t1"] + dt) for b in tl.boxes]
+    tl.request_redraw()
+    return True
+
+
+def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None, tempo=None):
     """What's in the list's boxes: "move" / "copy" (dragged, Ctrl: copies), "clip" (Ctrl+C), "cut" (Ctrl+X),
     "delete", "remove" (Remove Track: deleted + extra = {"ids": the list's track ids, "own": your tracks' ids,
     "files": a loaded MIDI's track numbers} gone with them in the same step). A loaded MIDI's notes in them are read
@@ -104,9 +144,11 @@ def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None):
     files = loaded_boxes(app, boxes) if kind != "remove" else []
     if not files:
         if not inside.any() and kind != "remove":
+            if tempo is not None:  # (only the Conductor's changes in them)
+                return tempo_only(app, kind, tempo, dt)
             app.status.config(text=tr("tracks.box_empty"))
             return False
-        return finish_job(app, boxes, kind, dt, drow, extra=extra)
+        return finish_job(app, boxes, kind, dt, drow, extra=extra, tempo=tempo)
     if getattr(app, "_extracting", None):
         app.status.config(text=tr("extract.busy"))
         return False
@@ -152,27 +194,34 @@ def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None):
         if any(boxes_meet(a, b) for a in files for b in hidden_boxes(app)):  # (an undo while it read brought back
             return                                                             # an Extract of these notes)
         if not n and not boxed(app, boxes).any() and kind != "remove":
+            if tempo is not None:
+                tempo_only(app, kind, tempo, dt)
+                return
             app.status.config(text=tr("tracks.box_empty"))
             return
-        finish_job(app, boxes, kind, dt, drow, lm, files, got if n else [], extra)
+        finish_job(app, boxes, kind, dt, drow, lm, files, got if n else [], extra, tempo)
     threading.Thread(target=run, daemon=True, name="loaded notes in the track list's box").start()
     poll()
     return True
 
 
-def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=(), extra=None):
-    """box_job once a loaded MIDI's notes in the boxes are read (got: per box of files; none = no loaded notes)."""
+def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=(), extra=None, tempo=None):
+    """box_job once a loaded MIDI's notes in the boxes are read (got: per box of files; none = no loaded notes).
+    tempo: {"spans", "clip"} of the Conductor's changes going along (track_tempo; the same undo step)."""
     if kind in ("clip", "cut"):
-        clip_boxed(app, boxes, loaded_shape(app, lm, files, got, True) if got else None)
+        clip_boxed(app, boxes, loaded_shape(app, lm, files, got, True) if got else None,
+                   tempo["clip"] if tempo is not None else None)
         if kind == "clip":
             return True
     if kind == "remove":
         name = tr("tracks.remove_step" if len(extra["ids"]) == 1 else "tracks.remove_many_step")
         return delete_boxed(app, boxes, lm, files, got, name, extra)
     if kind in ("cut", "delete"):
-        return delete_boxed(app, boxes, lm, files, got, tr("app.cut" if kind == "cut" else "tracks.box_delete_step"))
+        return delete_boxed(app, boxes, lm, files, got, tr("app.cut" if kind == "cut" else "tracks.box_delete_step"),
+                            tempo=tempo)
     app.roll.end_typing()
-    app.push_undo(name=tr("tracks.box_copy_step" if kind == "copy" else "tracks.box_move_step"))
+    name = tr("tracks.box_copy_step" if kind == "copy" else "tracks.box_move_step")
+    app.push_undo(name=name)
     fresh = []
     if got:
         app.shapes.append(loaded_shape(app, lm, files, got, kind == "copy"))
@@ -180,7 +229,11 @@ def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=(), extra=None
         if kind == "move":
             sync_extract(app, {box_key(b): g for b, g in zip(files, got)})
         app.shapes_changed()
-    return move_now(app, boxes, dt, drow, kind == "copy", fresh)
+    done = move_now(app, boxes, dt, drow, kind == "copy", fresh)
+    if done and tempo is not None and tempo["clip"] is not None:
+        from window import track_tempo
+        track_tempo.move(app, tempo["spans"], dt, kind == "copy", name)
+    return done
 
 
 def loaded_boxes(app, boxes):
@@ -339,14 +392,16 @@ def move_now(app, boxes, dt, drow, copying=False, fresh=()):
     app.select_many(picked, picked[-1] if picked else None)
     # (the boxes go along, onto the tracks they landed on: rows come and go when tracks empty / fill)
     ids = tl.tracks()
-    ends = [None if b["rows"] is None else (int(ids[b["rows"][0] + drow]), int(ids[b["rows"][1] + drow]))
-            for b in tl.boxes]
+
+    def end_id(r):  # (the Conductor row (-1) stays itself: a box holding it moves in time only)
+        return r if r < 0 else int(ids[r + drow])
+    ends = [None if b["rows"] is None else (end_id(b["rows"][0]), end_id(b["rows"][1])) for b in tl.boxes]
     app.shapes_changed()
     boxes = []
     for b, e in zip(tl.boxes, ends):
         rows = None
         if e is not None:
-            got = [tl.row_of_id(s) for s in e]
+            got = [r if r < 0 else tl.row_of_id(s) for r, s in zip(b["rows"], e)]  # (r < 0: the Conductor row)
             rows = tuple(sorted(got)) if None not in got else (b["rows"][0] + drow, b["rows"][1] + drow)
         boxes.append(dict(b, t0=b["t0"] + dt, t1=b["t1"] + dt, rows=rows))
     tl.boxes = boxes
@@ -357,10 +412,11 @@ def move_now(app, boxes, dt, drow, copying=False, fresh=()):
     return True
 
 
-def clip_boxed(app, boxes, loaded=None):
+def clip_boxed(app, boxes, loaded=None, tempo=None):
     """Ctrl+C in the list: the notes in the boxes copied (shapes wholly inside as they are, parts of others as plain
     notes, loaded: a plain copy of the loaded MIDI's), each colour's row remembered from the copy's first row, so
-    Ctrl+V lays them out the same from the highlighted track (Domino's paste: App.fit_into's columns)."""
+    Ctrl+V lays them out the same from the highlighted track (Domino's paste: App.fit_into's columns). tempo: the
+    Conductor's changes copied with them (track_tempo.clip_of): pasted along with these notes."""
     tl = app.track_list
     plans = plans_of(app, boxes, 0) or []
     pieces, rows = [], []
@@ -378,6 +434,8 @@ def clip_boxed(app, boxes, loaded=None):
         pieces.append(loaded)
         rows.append([tl.row_of_id(FILE0 - 1 - v) for v in loaded["into"]])
     if not pieces:
+        if tempo is not None:
+            return tempo_only(app, "clip", {"spans": [], "clip": tempo})
         app.status.config(text=tr("tracks.box_empty"))
         return False
     first = min(min(r) for r in rows)
@@ -385,11 +443,11 @@ def clip_boxed(app, boxes, loaded=None):
         for key in ("into_gap", "into_rest", "into_new"):
             piece.pop(key, None)
         piece["cols"] = [v - first for v in r]
-    app.put_clipboard(pieces, loaded=loaded is not None)
+    app.put_clipboard(pieces, loaded=loaded is not None, tempo=tempo)
     return True
 
 
-def delete_boxed(app, boxes, lm, files, got, name, extra=None):
+def delete_boxed(app, boxes, lm, files, got, name, extra=None, tempo=None):
     """Delete (Ctrl+X's second half) in the list: the notes in the boxes go (shapes wholly inside deleted, the rest
     of others kept as plain notes, a loaded MIDI's = Delete loaded notes'), one undo step; the boxes go too."""
     tl = app.track_list
@@ -397,10 +455,15 @@ def delete_boxed(app, boxes, lm, files, got, name, extra=None):
     parts = {i: parts_of(app, i, m)[1] for i, whole, m, _ in plans if not whole}
     gone = {i for i, whole, _, _ in plans if whole} | {i for i, rest in parts.items() if rest is None}
     if not gone and not parts and not got and extra is None:
+        if tempo is not None:
+            return tempo_only(app, "delete", tempo)
         app.status.config(text=tr("tracks.box_empty"))
         return False
     app.roll.end_typing()
     app.push_undo(name=name)
+    if tempo is not None and tempo["clip"] is not None:  # (the Conductor's changes go in the same step)
+        from window import track_tempo
+        track_tempo.empty(app, tempo["spans"], name)
     for i, rest in parts.items():
         if rest is not None:
             app.shapes[i] = rest

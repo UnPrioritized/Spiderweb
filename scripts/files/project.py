@@ -1790,17 +1790,20 @@ class ProjectFiles:
     def list_boxed(self):
         """The track list showing with Select boxes kept: which of rendered's notes start inside them (Copy to
         Domino copies only those, user 2026-10-26: "copy only the selected area"); else None."""
-        if not self.tracks_shown() or not self.track_list.boxes:
+        from window.track_tempo import note_boxes
+        if not self.tracks_shown() or not note_boxes(self.track_list.boxes):
             return None
         from window.track_moves import boxed
-        return boxed(self, self.track_list.boxes)
+        return boxed(self, note_boxes(self.track_list.boxes))
 
     def copied_whole(self):
-        """True when what's copied was picked by Ctrl+A (every shape, or the track list's Ctrl+A band) and nothing
-        since: only then does a copy for Domino take the tempo along (user 2026-11-01)."""
+        """True when a copy for Domino takes the tempo along: what's copied was picked by Ctrl+A (every shape) and
+        nothing since (user 2026-11-01), or the track list's boxes hold the Conductor (a box from its row, a ruler
+        band: user 2026-11-05, like Domino's)."""
         tl = getattr(self, "track_list", None)
         if self.tracks_shown() and tl is not None and tl.boxes:
-            return len(tl.boxes) == 1 and tl.boxes[0] is getattr(tl, "all_band", None)
+            from window.track_tempo import tempo_spans
+            return bool(tempo_spans(tl.boxes))
         return bool(self.sels) and getattr(self, "picked_all", None) == frozenset(self.sels)
 
     def tempo_for_domino(self, lo, hi):
@@ -1854,6 +1857,13 @@ class ProjectFiles:
         if getattr(self, "key_pane", None) is self.tempo_pane:
             self.tempo_pane.copy(domino=True)
             return
+        tl = self.track_list
+        if self.tracks_shown() and tl.boxes:  # (boxes on the Conductor row alone: its stretch alone, user 11-05)
+            from window.track_tempo import note_boxes, tempo_spans
+            spans = tempo_spans(tl.boxes)
+            if spans and not note_boxes(tl.boxes):
+                self.tempo_to_domino({"from": spans[0][0], "length": spans[-1][1] - spans[0][0]}, quiet=False)
+                return
         got = self.domino_copy()
         if got is None:
             return
@@ -1886,7 +1896,8 @@ class ProjectFiles:
         only = set(sels) if sels else None
         time, by_time = None, boxed is not None or (bool(sels) and self.time_picked())
         if boxed is not None:
-            boxes = self.track_list.boxes
+            from window.track_tempo import note_boxes
+            boxes = note_boxes(self.track_list.boxes)
             time = min(b["t0"] for b in boxes), max(b["t1"] for b in boxes)
         elif by_time and self.roll.box_kept:
             areas = self.roll.box_kept[0]  # (ruler bands: (beat, top, beat, bottom))
@@ -1900,7 +1911,7 @@ class ProjectFiles:
             time = round(time[0] * ppq), round(time[1] * ppq)
         if boxed is not None:  # (their CC lines: only on a box's rows inside its time, hunt 2026-10-29: a box
             # over one track took the shape's other tracks' controllers too)
-            spans = [(round(b["t0"] * ppq), round(b["t1"] * ppq), b["rows"]) for b in self.track_list.boxes]
+            spans = [(round(b["t0"] * ppq), round(b["t1"] * ppq), b["rows"]) for b in boxes]
             slots = sorted(cc)
             rows = dict(zip(slots, self.track_list.rows_of(slots).tolist())) if slots else {}
             cc = {s: [m for m in ms if any(t0 <= m[0] < t1 and (r is None or r[0] <= rows[s] <= r[1])
