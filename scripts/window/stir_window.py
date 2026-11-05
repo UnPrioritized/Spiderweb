@@ -14,7 +14,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MAKE_SHAPE_POINTS, MOST_STIRS,
-                            MOST_REACH_INSIDE, MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_BY, FLIP_IN, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
+                            MOST_REACH_INSIDE, MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_stack)
 from roll.roll_live import STROKE_TOOLS
@@ -262,6 +262,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             Tooltip(tick, tr("stir.flip_tip"))
             self.flips[key] = (var, tick)
         self._put("flips", (1, word), (2, self.flips["flip_side"][1]), (3, self.flips["flip_up"][1]))
+        word = ttk.Label(form, text=tr("stir.flip_of"))  # (Chinese tester 11-05: the stirred pattern flipped)
+        self._put("flips", (1, word), (2, self._pick(form, "flip_of", FLIP_OF, word), 3))
         word = ttk.Label(form, text=tr("stir.flip_in"))
         self._put("flips", (1, word), (2, self._pick(form, "flip_in", FLIP_IN, word), 3))
         self.flip_in = self.picks["flip_in"]
@@ -429,6 +431,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 words.append(tr("stir.short_both" if side and up else "stir.short_side" if side else "stir.short_up"))
                 if side and all(s["flip_by"] == "order" for s in sts):
                     words.append(tr("stir.short_order"))
+                if all(s["flip_of"] == "after" for s in sts):
+                    words.append(tr("stir.short_after"))
                 where = {s["flip_in"] for s in areas}
                 if len(where) == 1 and where != {"whole"}:
                     words.append(tr("stir.short_" + next(iter(where))))
@@ -728,7 +732,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # (Mirror across: only flips in / outside the area; Size of the circle inside: only with Round as seen
         # (without it the box counts as square: both the same); Sideways by: only with the sideways flip)
         live = {"mirror": any(s["flip_in"] != "whole" for s in areas),
-                "size_of": any(s["round"] for s in areas), "flip_by": any(s["flip_side"] for s in sts)}
+                "size_of": any(s["round"] for s in areas), "flip_by": any(s["flip_side"] for s in sts),
+                "flip_of": any(s["flip_side"] or s["flip_up"] for s in sts)}
         for key, ok in live.items():
             self.picks[key]["box"].config(state="readonly" if on and ok else "disabled")
         for key, empty in (("stretch", 100), ("tilt", 0)):

@@ -65,7 +65,7 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
                  "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
                  "area_squeeze": True, "reverse": False, "flip_in": "whole", "flip_by": "time", "mirror": "shape",
-                 "size_of": "box", "size_mix": None}
+                 "size_of": "box", "size_mix": None, "flip_of": "before"}
 # ("size_mix": only Add between's steps, 0..1 = how far Size counts from the box to the circle inside, so the area
 # grows smoothly between an end of each kind, hunt 11-05 6; never set from the window)
 MOST_REACH_INSIDE = 1000.0  # (Size of the circle inside may go as far as the box's own 100 %, hunt 11-05 8)
@@ -76,6 +76,10 @@ MOST_REACH_INSIDE = 1000.0  # (Size of the circle inside may go as far as the bo
 # "size_of" = Size in % of the "box" / of the circle "inside" it (its shorter side as seen, with Round as seen))
 FLIP_BY = ("time", "order")
 MIRROR = ("shape", "area")
+# ("flip_of" = what the colour flips mirror: "before" = the colours, then this stir bends them (the swirl stays at
+# the Centre point) / "after" = this stir's finished pattern (the swirl turns over too, like the normal flips but
+# notes stay), Chinese tester 11-05: "flip the canvas", their flips looked like doing nothing on stripes)
+FLIP_OF = ("before", "after")
 SIZE_OF = ("box", "inside")
 # (BMC tester's round 3 answers 11-04, all only with a reach: "hard" = the area cut clean at its edge, Turn and
 # Twist alike (a lazy susan), else the soft fade; "area_turn" / "area_twist" / "area_squeeze" = what the area
@@ -224,6 +228,8 @@ def one_stir(s):
             out[k] = True
     if s.get("flip_by") in FLIP_BY[1:]:
         out["flip_by"] = s["flip_by"]
+    if s.get("flip_of") in FLIP_OF[1:]:
+        out["flip_of"] = s["flip_of"]
     r = s.get("reach")
     if number(r) and LEAST_REACH <= round(r, 3) <= (MOST_REACH_INSIDE if s.get("size_of") == "inside" or
                                                      number(s.get("size_mix")) else MOST_REACH):
@@ -662,7 +668,13 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     full = full_stir(st)
     inside = area_inside(at, rc, box, own) if full["reach"] and (full["reverse"] or full["flip_in"] != "whole") \
         else None
-    mid, key = stir_from(at, rc, box, own)
+    after = full["flip_of"] == "after" and (full["flip_side"] or full["flip_up"])
+    if after:  # (the stirred pattern mirrored: each note looks where its mirrored spot looks; below, the flips work
+        # on the notes' own spots instead of where the stir looks)
+        mid = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
+        key = np.asarray(at[:, 2], np.float64)
+    else:
+        mid, key = stir_from(at, rc, box, own)
     there = None
     if inside is not None and full["flip_in"] != "whole":  # (flips only inside / outside the area, tester 11-04)
         there = inside if full["flip_in"] == "inside" else ~inside
@@ -679,11 +691,12 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
                          full["flip_up"])
     if there is not None:
         fm, fk = np.where(there, fm, mid), np.where(there, fk, key)
-    mid, key = fm, fk
+    mid, key = stir_from(at, rc, box, own, (fm, fk)) if after else (fm, fk)
     src = nearest(at, mid, key)
-    if order:
+    if order:  # (before: the found note's twin's colour; after: the colour the note's twin found)
         twin = row_twins(at, now, part)
-        src = twin[src] if there is None else np.where(there, twin[src], src)
+        got = src[twin] if after else twin[src]
+        src = got if there is None else np.where(there, got, src)
     move = st.get("sets") == "move" or len(pals) < 2
     if move:
         new = now[src]
@@ -773,14 +786,17 @@ def from_unit(x, y, rc, box, own):
     return t0 + x * max(t1 - t0, 1.0), (k0 + y * (k1 - k0) if k1 > k0 else np.full(len(x), float(k0)))
 
 
-def stir_from(at, rc, box, own):
+def stir_from(at, rc, box, own, spots=None):
     """(middle in ticks, key) each note's colour comes from under rc's Stir: its place in the colour box turned
     back round the Centre point by Turn + Twist (turns, most near the centre: Swirl's way), then (Squeeze on) the
     Centre point taken back to the middle (the colours' middle moved there: squeezed on one side, stretched on the
-    other)."""
+    other). spots = (middles, keys) worked out instead of the notes' own places (the notes still make the rows)."""
     st = full_stir(rc.get("stir"))
-    s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
-    mid = (s + e) / 2
+    if spots is None:
+        s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
+        mid = (s + e) / 2
+    else:
+        mid, k = (np.asarray(v, np.float64) for v in spots)
     edge = st["edge"]
     if edge in ("wrap", "bend"):
         rows = Rows(at)

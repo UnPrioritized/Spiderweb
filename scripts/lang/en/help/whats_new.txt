@@ -16,6 +16,8 @@ What's new:
 
 • Help pages with many headings have a small "Back to top" link next to each heading.
 
+• Stir's colour flips have "Flip what": pick "the stirred pattern" to mirror the finished swirl (it turns over, like the normal flips, while the notes stay put) instead of the colours before the stir.
+
 • Gate aware flip now comes after the note tool pages (Claw machine, Strum, Chop, Copy along a path), so a Claw machine's spacing turns round too, as every key row should.
 
 • Help → About and saved files show which build made them (its code mark and day), so two builds of the same version can be told apart.
