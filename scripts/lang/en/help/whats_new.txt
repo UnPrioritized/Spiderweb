@@ -22,6 +22,10 @@ What's new:
 
 • Gate aware flip now comes after the note tool pages (Claw machine, Strum, Chop, Copy along a path), so a Claw machine's spacing turns round too, as every key row should.
 
+• The track list's Conductor row works like Domino's Conductor track: click it to highlight it, and Tab takes you to the Conductor pane (turned on if hidden). Draw a box on it to copy, cut, delete or drag the tempo and time and key signatures in that stretch, and paste them at the play line; Copy to Domino gives the Conductor track alone. A box reaching over the Conductor row and tracks, or a band on the bar numbers, takes the notes and the tempo together, and pasting it brings both back. Inside Keep timing parts, the row shows the tempo you drew there as purple lines. See Help → Track list.
+
+• Fixed: the track list's tips stayed hidden after a click until the mouse left the list.
+
 • Help → About and saved files show which build made them (its code mark and day), so two builds of the same version can be told apart.
 
 • Playing stops one beat after the last note (before, a quarter of a bar), in any time signature; with Rendered ahead, once the sound has died away.

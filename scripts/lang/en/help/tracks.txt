@@ -2,7 +2,9 @@ Press Tab to swap the piano roll for the track list, and Tab again to go back. I
 
 The All tracks row at the very top shows every track's notes together, each in its track's colour. It's taller than the tracks, so it doesn't look like one more track. It's highlighted while no track is: the piano roll then shows every track, and Spiderweb puts each new shape on channels itself (see Channels).
 
-The Conductor row under it has a line at each tempo change: the faster the tempo, the taller the line, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the heights use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures.
+The Conductor row under it has a line at each tempo change: the faster the tempo, the taller the line, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the heights use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures. Inside Keep timing parts, purple lines show the tempo you drew there (the file holds it, and its notes are moved so they keep their time).
+
+Click the Conductor row to highlight it, like a track: the piano roll keeps showing what it showed. Press Tab and you land in the Conductor pane (it's turned on if it was hidden), so Delete, Ctrl+C and Ctrl+V work on the tempo there. Press Tab again to come back with the Conductor row still highlighted.
 
 A new project starts with one empty Track 1 and nothing highlighted: shapes you draw go into it, and Spiderweb adds more tracks when it needs them. Track 1 stays in the list (and in Export MIDI) even when it's empty. If you remove it, add a track by hand to get one back, or just draw: Spiderweb makes a track for the notes by itself.
 
@@ -72,7 +74,9 @@ Drag on the tracks' pictures to draw a Select box over some tracks and some time
 • Moved notes stay on the tracks they land on: inside one of yours, pinned on one of Spiderweb's, drawn into one of a loaded MIDI's.
 • A loaded MIDI's notes in the box become an Extract first (see Load MIDI), then move with the rest. Copies of them are plain notes and hide nothing in the file.
 • Ctrl+C copies the notes in the box, Ctrl+X cuts them and Delete deletes them. Ctrl+V pastes at the play line, starting from the highlighted track and going down, like in Domino; a box goes round what came in.
-• Copy to Domino (Ctrl+Shift+C) copies only the notes in the box while a box is there.
+• Copy to Domino (Ctrl+Shift+C) copies only the notes in the box while a box is there (the tempo too when the box holds the Conductor row, see below).
+• The Conductor row works like a track here, as in Domino. A box on it holds the tempo changes and time and key signatures in its stretch: Ctrl+C copies them, Delete and Ctrl+X take them out (the tempo before the box goes on), and dragging the box moves them in time (Ctrl: copies). With the Conductor row highlighted, Ctrl+V pastes the copied tempo at the play line, replacing that stretch. Copy to Domino copies the Conductor track alone, ready to paste into Domino's Conductor track.
+• A box reaching from the Conductor row over tracks, and a band on the bar numbers, hold both: copying, cutting, deleting and dragging take the notes and the tempo together, as one step for Ctrl+Z. Copy to Domino then puts the Conductor track first. Pasting such a copy with a track highlighted brings both back: the notes from that track down, the tempo at the same distance from them. A stretch with no tempo change holds no tempo.
 • A click inside the box changes nothing: the play line and the highlighted track stay. Right-click the box for Cut, Copy, Paste, Delete, Copy to Domino and Select all. Right-clicking the pictures outside the box drops it; Paste and Select all still work there.
 • Every change is one step for Ctrl+Z. Pictures, masks, Hz basses and Channel per strip shapes can't be moved here: move them on the piano roll.
 

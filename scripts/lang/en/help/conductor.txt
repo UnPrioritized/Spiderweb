@@ -112,7 +112,7 @@ Bar lines, bar numbers and the Bar snap follow the time signatures everywhere, t
 
 ## Export and Domino
 
-Export MIDI, Copy to Domino and Export to Domino write the tempo line and the signatures, using only tempo values Domino keeps exactly. Copy to Domino takes them only after Ctrl+A (everything picked); then they come first, so pick the Conductor track in Domino before pasting. To copy only the tempo: click this pane, pick what to copy and press Copy to Domino (or Ctrl+C with "Ctrl+C also copies for Domino" ticked), then paste it on Domino's Conductor track. Built-in playback follows the tempo line too.
+Export MIDI, Copy to Domino and Export to Domino write the tempo line and the signatures, using only tempo values Domino keeps exactly. Copy to Domino takes them only after Ctrl+A (everything picked), or from the track list with a band on the bar numbers or a box reaching over its Conductor row; then they come first, so pick the Conductor track in Domino before pasting. To copy only the tempo: draw a box on the track list's Conductor row, or click this pane and pick what to copy, and press Copy to Domino (or Ctrl+C with "Ctrl+C also copies for Domino" ticked), then paste it on Domino's Conductor track. Built-in playback follows the tempo line too.
 
 Paste from Domino brings in the tempo and signatures of the copied Conductor track. When the pane already has its own, Spiderweb asks: Replace that stretch, Add among them, or Notes only.
 
