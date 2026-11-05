@@ -201,13 +201,13 @@ def add_tracks(d, count, use10):
         new = len(chans) - 1  # (made right after the current one = the last: the next one goes after it, in order)
         if not switch_track(d, new):
             break
-        if chans[new] == 9 and not use10 and not drums:
-            drums = 1  # (removed after the others: while it's there, Domino gives the next one another channel)
+        if chans[new] == 9 and not use10 and drums < 8:
+            drums += 1  # (removed after the others: while it's there, Domino gives the next one another channel;
+            # one a port: past port A's 16 channels Domino goes on to port B, its channel 10 too)
         else:
             made += 1
-    if drums:
-        at = next((i for i in range(last + 1, len(chans)) if chans[i] == 9), None)
-        if at is not None and switch_track(d, at):
+    for at in [i for i in range(len(chans) - 1, last, -1) if chans[i] == 9][:drums] if drums else ():
+        if switch_track(d, at):  # (from the bottom up: the ones above keep their place)
             command(d, REMOVE_TRACK)  # (an empty track: Domino asks nothing)
             steps += 1
     switch_track(d, back)
