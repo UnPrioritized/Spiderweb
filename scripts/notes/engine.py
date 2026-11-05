@@ -874,8 +874,22 @@ def fx_notes(sh, ppq, keys, get):
     fx = sh.get("fx")
     if fx and (is_pasted_flipped(sh) or is_gate_flipped(sh)):
         # (note tool pages first, then each key row reversed: a Claw's spacing turns round too, user 2026-11-05)
-        notes, tracks = get({k: v for k, v in sh.items() if k != "gate_flip"})
-        return mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
+        # (velocity lines drawn after the last page come AFTER the flip: they were drawn on the notes as shown, so
+        # they change only the notes under them there; before it, the flip carried them onto other notes, partial
+        # sweep 11-05)
+        k = len(fx)
+        while k and fx[k - 1]["tool"] == "vel":
+            k -= 1
+        base = {key: v for key, v in sh.items() if key not in ("gate_flip", "fx")}
+        if k:
+            base["fx"] = fx[:k]
+        if k == len(fx):
+            base = {key: v for key, v in sh.items() if key != "gate_flip"}
+        notes, tracks = get(base)
+        notes, tracks = mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
+        for step in fx[k:]:
+            notes, tracks = fx_step(notes, tracks, step, sh, ppq, keys)
+        return notes, tracks
     if fx:
         if len(fx) > DEEP and not getattr(_warming, "on", False):
             # (a long list: the notes before each step made first, from the first step up, so making them never goes
