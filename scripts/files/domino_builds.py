@@ -18,10 +18,11 @@ from dataclasses import replace
 FAMILY_32 = dict(top_row=0xB8, row_px=0x1CC, beat_px=0x1D0, left=0x234, cursor=0x190, song=0x184, ppq_at=0xC,
                  tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, undo_at=0x188, path_at=0xA8,
                  doc_path_at=0x18C)
-# the same in both 64-bit builds measured (1.45 dev002, 1.45 dev009-en); the .mid import path: not found (0)
+# the same in both 64-bit builds measured (1.45 dev002, 1.45 dev009-en); the .mid import path [[S+0x140]+8]
+# (found 2026-11-06, dev/scratch/rm_midpath.py)
 FAMILY_64 = dict(top_row=0x228, row_px=0x4D0, beat_px=0x4D4, left=0x6A8, cursor=0x448, song=0x430, ppq_at=0x18,
                  tracks_at=0x28, track_now=0x48, track_ch=0xC, events_at=0x28, undo_at=0x438, undo_n=0x20,
-                 path_at=0, doc_path_at=0x440, n_tick=8, n_sel=0xC, n_key=0x10, n_vel=0x11, n_gate=0x14,
+                 path_at=0x140, path_obj=8, doc_path_at=0x440, n_tick=8, n_sel=0xC, n_key=0x10, n_vel=0x11, n_gate=0x14,
                  rows_at=0x218, ptr=8)
 CLASSES = {"p_vtable": b".?AVCPianoRollWnd@@", "h_vtable": b".?AVCTrackSheet@@", "c_vtable": b".?AVCMainFrame@@",
            "note_vt": b".?AVCEventNote@@"}
