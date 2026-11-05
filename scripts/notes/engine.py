@@ -872,6 +872,10 @@ def fx_notes(sh, ppq, keys, get):
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
         return kind_notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")
+    if fx and (is_pasted_flipped(sh) or is_gate_flipped(sh)):
+        # (note tool pages first, then each key row reversed: a Claw's spacing turns round too, user 2026-11-05)
+        notes, tracks = get({k: v for k, v in sh.items() if k != "gate_flip"})
+        return mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
     if fx:
         if len(fx) > DEEP and not getattr(_warming, "on", False):
             # (a long list: the notes before each step made first, from the first step up, so making them never goes
