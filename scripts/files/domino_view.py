@@ -38,6 +38,9 @@ class Build:
     cursor: int = 0     # C + this: Domino's cursor (where it pastes), in ticks
     song: int = 0       # C + this -> the song object S
     ppq_at: int = 0     # S + this: the song's PPQ
+    tracks_at: int = 0  # S + this -> the track list (pointers; an MFC array: + 4 = how many, then its room)
+    track_now: int = 0  # S + this: the current track (0 = Conductor)
+    track_ch: int = 0   # a track + this: its channel (byte, 0-based)
 
 
 # sha256 of Domino.exe -> Build. Only builds checked by hand: an unknown one is never guessed at.
@@ -45,7 +48,8 @@ BUILDS = {
     "ba4d007be174626387a59dd0f127d5fd63d0c67cab2219b71aa087ba6725db9d": Build(
         "Domino 1.43 (with dominohook)", p_slot=0x5B49C8, p_vtable=0x55F490, top_row=0xB8, row_px=0x1CC,
         beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234,
-        c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC),
+        c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC,
+        tracks_at=0x14, track_now=0x24, track_ch=0x8),
 }
 UNITS_PER_BEAT = 24
 
@@ -312,6 +316,38 @@ def song_place(d):
     if tick is None or ppq is None or not 0 <= tick < 2 ** 31 or not 1 <= ppq <= 65535:
         return None
     return tick, ppq
+
+
+def song_tracks(d):
+    """(current track, [each track's channel, 0-based]) read from Domino's memory, or None. Track 0 = Conductor.
+    Found 2026-11-06 on 1.43 (dev/scratch/di_probe.py: a MIDI with known channels, Domino's track commands)."""
+    b, ph = d.build, d.handle()
+    if b is None or not b.tracks_at or not ph:
+        return None
+    c = _i32(ph, b.c_slot)
+    if not c or (_i32(ph, c & 0xFFFFFFFF) or 0) & 0xFFFFFFFF != b.c_vtable:
+        return None
+    s = _i32(ph, (c & 0xFFFFFFFF) + b.song)
+    if not s:
+        return None
+    s &= 0xFFFFFFFF
+    arr, n, now = _i32(ph, s + b.tracks_at), _i32(ph, s + b.tracks_at + 4), _i32(ph, s + b.track_now)
+    if not arr or n is None or now is None or not 1 <= n <= 65535 or not 0 <= now < n:
+        return None
+    _, k = _api()
+    ptrs = (ctypes.c_uint32 * n)()
+    got = ctypes.c_size_t()
+    if not k.ReadProcessMemory(ph, ctypes.c_void_p(arr & 0xFFFFFFFF), ptrs, 4 * n, ctypes.byref(got)) \
+            or got.value != 4 * n:
+        return None
+    chans = []
+    one = ctypes.c_uint8()
+    for p in ptrs:
+        if not p or not k.ReadProcessMemory(ph, ctypes.c_void_p(p + b.track_ch), ctypes.byref(one), 1,
+                                            ctypes.byref(got)):
+            return None
+        chans.append(one.value & 15)
+    return now, chans
 
 
 def view(d, tries=4):

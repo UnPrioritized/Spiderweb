@@ -111,13 +111,14 @@ class Companion:
         self._placed = None
         self.pending = []      # the shape drawn last here: changed still, goes into Domino when you're done with it
         self.ready = []        # shapes done with: into Domino as soon as nothing else is going to Domino
-        self.landed = []       # (shapes, n) in Domino now: off the overlay once nothing is held there
+        self.landed = []       # (shapes, n, Domino steps) in Domino now: off the overlay once nothing is held there
         self.after_send = None  # (key code, state): a key of Domino's pressed while sending, pressed there after
         self.quick = None      # a flip on Domino's selection (Take + flip + Send): its steps leave the history
         self._then = None      # (what a Take does next with the shape it made)
         held = self._before_held = app.undo_stack + app.redo_stack  # (kept: their ids stay theirs)
         self.before = {id(s) for s in held}  # (steps from before this started: never undone from here)
         self.linked = []       # undo / redo steps that changed Domino too (sent, taken): Ctrl+Z there = Domino's
+        self.domino_steps = {}  # id(linked step) -> how many Domino undo steps it is (tracks added + the paste)
         self.busy = False      # (a paste / copy going on with Domino)
         self.was_front = None  # (the window with the keyboard before it: given back after, domino_link.give_back)
         self._own = 0.0        # (when Spiderweb last sent something to Domino: Domino in front just then = ours)
@@ -319,7 +320,7 @@ class Companion:
 
     def alive(self, shapes):
         """Those still on the overlay (not undone / deleted, not in Domino already)."""
-        gone = [s for shs, _ in self.landed for s in shs]
+        gone = [s for shs, *_ in self.landed for s in shs]
         return [sh for sh in shapes if any(sh is s for s in self.app.shapes) and not any(sh is s for s in gone)]
 
     def queue(self, shapes):
@@ -353,7 +354,9 @@ class Companion:
             self.say(tr("companion.nothing_to_send"))
 
     def send(self, shapes):
-        """shapes (on the overlay) -> pasted into Domino's current track at their place, then off the overlay."""
+        """shapes (on the overlay) -> pasted into Domino at their place, then off the overlay. Single channel: into
+        the current track, overlaps removed with the notes already there too; Multi channel / As drawn: a track per
+        channel from the current one down, new tracks added at the bottom when the list runs out (user 2026-11-06)."""
         app, d = self.app, self.overlay.domino
         if d is None or not self.match_ppq():
             return self.say(tr("companion.send_failed_domino"), warn=True)
@@ -362,24 +365,87 @@ class Companion:
         self.pending = [s for s in self.pending if not any(s is x for x in shapes)]
         if not len(rows):
             return self.say(tr("companion.no_notes"), warn=True)
-        first = int(rows[:, 0].min())
         self.was_front = dl.front_window()  # (before the ruler click: Domino may take the keyboard)
+        self.busy = True
+        if app.channel_mode.get() == "single":
+            there = []
+            dl.Copy(self.bar, d, lambda got, ppq, start: self.send_single(shapes, rows, got, ppq, start, there),
+                    whole=True, passengers=there)
+            return
+        steps = 0
+        need = len(np.unique(rows[:, 4]))
+        got = dv.song_tracks(d)
+        if need > 1 and got is not None and need > len(got[1]) - got[0]:
+            steps = dl.add_tracks(d, need - (len(got[1]) - got[0]), app.all16())
+            if steps is None:
+                return self.not_sent(tr("companion.send_failed_tracks"))
+        self.paste_rows(shapes, rows, int(rows[:, 0].min()), None, steps)
+
+    def not_sent(self, text):
+        """A send stopped before anything was pasted: the shapes stay on the overlay (Send tries again)."""
+        self.busy = False
+        d = self.overlay.domino
+        if d is not None and self.drawing():
+            dl.give_back(d, self.was_front)
+        self.say(text, warn=True)
+        self.app.after_idle(self.flush)
+
+    def paste_rows(self, shapes, rows, first, end, steps, swap=False, cc=None):
+        """rows (start, end, key, velocity, slot...) pasted at Domino's cursor put on first (or the grid place
+        before it); swap: Domino's Substitute Paste over [cursor, end) (the stretch's notes and other events
+        replaced). steps = Domino steps made before this send's paste (tracks added)."""
+        app, d = self.app, self.overlay.domino
         at = dl.put_cursor(d, first)
-        if at is None:  # (they stay on the overlay: Send tries again)
-            if self.drawing():
-                dl.give_back(d, self.was_front)
-            return self.say(tr("companion.send_failed_cursor"), warn=True)
+        if at is None:
+            return self.not_sent(tr("companion.send_failed_cursor"))
+        if swap:  # (the notes from the cursor on: the grid may have put it before first)
+            rows = rows[(rows[:, 0] >= at) & (rows[:, 0] < end)]
+            cc = {0: [e for e in cc if at <= e[0] < end]} if cc else None
         notes, _ = cut_gates(rows)
         ppq = app.ppq
-        raw = clip_data(notes, ppq, int(app.beats * ppq), "note", span=(at, max(int(notes[:, 1].max()) - at, 1)),
-                        own=())  # (notes_for: no tracks of yours, Domino's current one)
-        self.busy = True
-        dl.Paste(self.bar, d, raw, lambda ok, why: self.sent(shapes, ok, why, len(notes)))
+        length = end - at if swap else max(int(notes[:, 1].max()) - at, 1)
+        raw = clip_data(notes, ppq, int(app.beats * ppq), "note", span=(at, length), cc=cc,
+                        own=())  # (notes_for: no tracks of yours, Domino's)
+        n = len(notes)
+        dl.Paste(self.bar, d, raw, lambda ok, why: self.sent(shapes, ok, why, n, steps + 1),
+                 cmd=dl.SWAP_PASTE if swap else dl.PASTE)
+
+    def send_single(self, shapes, rows, there, ppq, start, rides):
+        """Single channel (user 2026-11-06): the current track's notes read (Select All + Copy), overlaps removed
+        over both like Spiderweb's Single channel; Domino's notes that change = the stretch from the first changed
+        note on replaced (Substitute Paste, with that stretch's other events as they were): one Domino step."""
+        app, d = self.app, self.overlay.domino
+        if d is None:
+            return self.not_sent(tr("companion.send_failed_domino"))
+        if there is None and ppq != "nothing":  # (Domino couldn't copy: only the new notes' own overlaps go)
+            self.say(tr("companion.track_unread"), warn=True)
+        if there is not None and ppq != app.ppq:
+            return self.not_sent(tr("companion.send_failed_domino"))
+        old = np.zeros((0, 4), np.int64)
+        if there is not None:
+            old = np.asarray(there, np.int64)[:, :4].copy()
+            old[:, 0] += start
+        merged, changed, new = dl.merge_single(old, rows[:, :4])
+        out = np.zeros((len(merged), 6), np.int64)
+        out[:, :4] = merged
+        if not len(changed):  # (Domino's notes stay as they are: a plain paste of the new ones)
+            if not len(new):
+                self.busy = False
+                self.landed.append((shapes, 0, 0))  # (all already there: nothing pasted, nothing to undo there)
+                self.take_off()
+                return self.app.after_idle(self.flush)
+            add = np.zeros((len(new), 6), np.int64)
+            add[:, :4] = new
+            return self.paste_rows(shapes, add, int(new[:, 0].min()), None, 0)
+        moved = np.concatenate([changed[:, 0], new[:, 0]])
+        a, b = int(moved.min()), int(moved.max()) + 1
+        cc = sorted(((int(t) + start, 0, 0, 0, (tag, body)) for t, _tr, tag, body in rides), key=lambda e: e[0])
+        self.paste_rows(shapes, out, a, b, 0, swap=True, cc=cc)
 
     def notes_for(self, shapes):
         """The notes shapes put into Domino: made for them ALONE (other shapes shown on the overlay never cut them),
-        overlaps kept like Domino keeps them (Single channel = one track, its notes as drawn: a Take -> Send round trip
-        gives Domino's notes back exactly; Multi channel = a track per channel, from Domino's current one down)."""
+        overlaps kept here (Single channel = one track: send_single removes them together with the notes already in
+        Domino's track; Multi channel = a track per channel, from Domino's current one down)."""
         from window.app import all_notes  # (app.py imports this file's caller)
         app = self.app
         mode = app.channel_mode.get()
@@ -391,7 +457,7 @@ class Companion:
             rows[:, 4] = 0
         return rows
 
-    def sent(self, shapes, ok, why, n):
+    def sent(self, shapes, ok, why, n, steps=1):
         self.busy, self._own = False, time.monotonic()
         d = self.overlay.domino
         if d is not None:
@@ -399,11 +465,11 @@ class Companion:
                 self.pass_waiting_key()
             elif self.drawing():  # (Domino's mouse: Domino keeps the keyboard the paste gave it)
                 dl.give_back(d, self.was_front)
-        if not ok:  # (they stay on the overlay: Send tries again)
+        if not ok:  # (they stay on the overlay: Send tries again; tracks added for them stay, empty)
             self.quick = None
             self.say(tr("companion.send_failed_" + why), warn=True)
         else:
-            self.landed.append((shapes, n))
+            self.landed.append((shapes, n, steps))
             self.take_off()
         self.app.after_idle(self.flush)
 
@@ -414,7 +480,7 @@ class Companion:
         if not now and (r.drag or r.draft or r.typing):
             return
         landed, self.landed = self.landed, []
-        for shapes, n in landed:
+        for shapes, n, steps in landed:
             gone = {i for i, s in enumerate(app.shapes) if any(s is x for x in shapes)}
             if gone:
                 keep = [app.shapes[i] for i in sorted(app.sels) if i not in gone]
@@ -428,7 +494,7 @@ class Companion:
                 else:
                     app.select(None)
                 app.shapes_changed()
-                self.link(app.undo_stack[-1])
+                self.link(app.undo_stack[-1], steps)
                 if self.quick and any(s is self.quick.get("shape") for s in shapes):
                     self.quick_done()
             self._gen = (app.shapes_gen, time.monotonic())
@@ -512,8 +578,11 @@ class Companion:
         self.take(then=flipped)
 
     # --- undo: steps that changed Domino too ---
-    def link(self, step):
+    def link(self, step, steps=1):
+        """step changed Domino too: steps = how many of Domino's own undo steps it made there (tracks added + the
+        paste; 0 = nothing pasted)."""
         self.linked.append(step)
+        self.domino_steps[id(step)] = steps
 
     def undo_step(self, redo):
         """history.undo_roll: the next step changed Domino too (sent / taken) = undone / redone in Domino as well.
@@ -536,10 +605,16 @@ class Companion:
         if not new or old is new[0]:
             return True
         was = dl.front_window()
-        dl.command(d, dl.REDO if redo else dl.UNDO)
+        steps = self.domino_steps.pop(id(old), 1)
+        now = dv.song_tracks(d) if steps > 1 else None
+        for _ in range(steps):
+            dl.command(d, dl.REDO if redo else dl.UNDO)
+        if now is not None:  # (undoing added tracks moves Domino's current track: back to the one it was)
+            dl.switch_track(d, now[0])
         dl.give_back(d, was)
         self._own = time.monotonic()
         self.linked = [s for s in self.linked if s is not old] + new
+        self.domino_steps[id(new[0])] = steps
         self.pending = []  # (a shape given back stays on the overlay until Send)
         self._gen = (app.shapes_gen, time.monotonic())
         return True

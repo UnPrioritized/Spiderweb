@@ -2880,6 +2880,8 @@
  "companion.send_failed_domino": "Domino couldn't take the notes: the shape stays here (press Send to try again)",
  "companion.send_failed_cursor": "Couldn't move Domino's cursor there: the shape stays here (scroll it into view and press Send)",
  "companion.send_failed_clipboard": "Couldn't use the clipboard: the shape stays here (press Send to try again)",
+ "companion.send_failed_tracks": "Couldn't add the tracks this shape needs in Domino: the shape stays here (press Send to try again)",
+ "companion.track_unread": "Couldn't read the notes already in Domino's track: overlaps were only removed among the new notes",
  "companion.take": "Take",
  "companion.take_tip": "Take the notes selected in Domino into Spiderweb, at the same spot, to change them with Spiderweb's tools (they leave Domino until you press Send)",
  "companion.send": "Send",

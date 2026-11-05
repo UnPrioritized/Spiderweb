@@ -24,7 +24,7 @@ A shape you draw stays on Spiderweb's layer until you're done with it, so you ca
 
 Keys: while drawing, Esc, Enter, Ctrl+Z / Ctrl+Y for what you did here, Delete for selected shapes and the drawing tools' letters are Spiderweb's. Every other key (Space, Ctrl+S, the arrows...) goes on to Domino.
 
-Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With Multi channel, each channel goes on its own track, from the current one down. Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
+Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With Single channel, overlapping notes on a key are fixed the way Single channel always does it, together with the notes already in that Domino track: a note of Domino's that your new note starts inside is cut where yours starts. With Multi channel, each channel goes on its own track, from the current one down, with the channels those tracks already have; when the track list runs out, Spiderweb adds new tracks at the bottom with Domino's own Add Track (channel 10 is skipped unless "Use channel 10" is ticked). Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
 
 ## Changing Domino's notes
 

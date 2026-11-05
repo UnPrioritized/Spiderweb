@@ -16,6 +16,11 @@ from files import clipboard, domino_clip as dc, domino_view as dv, system
 
 # Domino 1.43's menu commands (read from its menus)
 PASTE, COPY, DELETE, UNDO, REDO, PREV_UNIT, DESELECT = 57637, 57634, 32795, 57643, 57644, 33326, 32797
+SELECT_ALL = 57642     # (the current track's events)
+SWAP_PASTE = 33318     # "Substitute Paste": the current track's events in the pasted stretch are replaced, CC too
+ADD_TRACK, REMOVE_TRACK = 32902, 32903  # (a new track goes right after the current one, on the lowest free channel)
+PREV_TRACK, NEXT_TRACK, TRACK_0 = 32905, 32906, 32907  # (TRACK_0 + n = track n, n up to MENU_TRACKS)
+MENU_TRACKS = 33
 WM_COMMAND = 0x0111
 BOX_CLASS = "#32770"
 
@@ -97,6 +102,105 @@ def put_cursor(d, tick):
         if (dv.song_place(d) or (before,))[0] >= before:
             return None  # (didn't move: nothing more to step back)
     return None
+
+
+def switch_track(d, n):
+    """Domino's current track -> track n (its own track commands). True when it is there."""
+    got = dv.song_tracks(d)
+    if got is None or not 0 <= n < len(got[1]):
+        return False
+    if n <= MENU_TRACKS:
+        command(d, TRACK_0 + n)
+    for _ in range(len(got[1]) + 1):
+        got = dv.song_tracks(d)
+        if got is None:
+            return False
+        if got[0] == n:
+            return True
+        before = got[0]
+        command(d, NEXT_TRACK if got[0] < n else PREV_TRACK)
+        if (dv.song_tracks(d) or (before,))[0] == before:
+            return False
+    return False
+
+
+def add_tracks(d, count, use10):
+    """count new tracks at the bottom of Domino's track list, made by Domino's own Add Track (the lowest channel no
+    track uses; channel 10 skipped when use10 is off: one more is added and that one removed again, still empty).
+    The current track stays. -> how many Domino steps (undo steps) that took, or None when it couldn't."""
+    got = dv.song_tracks(d)
+    if got is None:
+        return None
+    back, chans = got[0], got[1]
+    last = len(chans) - 1
+    if not switch_track(d, last):
+        return None
+    steps, made, drums = 0, 0, 0
+    while made < count:
+        n = len(chans)
+        command(d, ADD_TRACK)
+        got = dv.song_tracks(d)
+        if got is None or len(got[1]) != n + 1:
+            break
+        steps += 1
+        chans = got[1]
+        if chans[last + 1] == 9 and not use10 and not drums:
+            drums = 1  # (removed after the others: while it's there, Domino gives the next one another channel)
+        else:
+            made += 1
+    if drums:
+        at = next((i for i in range(last + 1, len(chans)) if chans[i] == 9), None)
+        if at is not None and switch_track(d, at):
+            command(d, REMOVE_TRACK)  # (an empty track: Domino asks nothing)
+            steps += 1
+    switch_track(d, back)
+    return steps if made == count else None
+
+
+def merge_single(there, new):
+    """Single channel against the notes already in the Domino track (user 2026-11-06): there = its notes (tick, gate,
+    key, velocity, ...), new = the notes going in (tick, end, key, velocity, ...) -> (rows, changed, added), all
+    (tick, end, key, velocity): rows = every note after Spiderweb's Single channel rule (resolve_overlaps over both),
+    changed = notes of there no longer as they were (cut, or merged into a note on the same tick), added = rows not
+    in Domino as they are (what goes in when nothing there changed). Rows sorted by tick, then key."""
+    from notes.engine import resolve_overlaps
+    import numpy as np
+    there = np.asarray(there, np.int64)
+    there = there.reshape(0, 4) if not there.size else there
+    new = np.asarray(new, np.int64)
+    new = new.reshape(0, 4) if not new.size else new
+    old = np.zeros((len(there), 6), np.int64)
+    if len(there):
+        old[:, 0], old[:, 1], old[:, 2], old[:, 3] = there[:, 0], there[:, 0] + there[:, 1], there[:, 2], there[:, 3]
+    mine = np.zeros((len(new), 6), np.int64)
+    mine[:, :4] = new[:, :4]
+    old[:, 5], mine[:, 5] = 0, 1
+    # only Domino's notes that can be touched go through the rule (a dense track: seconds otherwise): those in a run
+    # of touching notes on one key (new ones counted) that holds a new note
+    near = np.zeros(len(old), bool)
+    if len(old) and len(mine):
+        on = np.flatnonzero(np.isin(old[:, 2], np.unique(mine[:, 2])))
+        both = np.concatenate([old[on], mine])
+        src = np.concatenate([on, np.full(len(mine), -1)])
+        shift = both[:, 2] << 34  # (keys apart: ticks stay under 2^33)
+        s, e = both[:, 0] + shift, both[:, 1] + shift
+        order = np.lexsort((s,))
+        s, e, src = s[order], e[order], src[order]
+        reach = np.maximum.accumulate(e)
+        run = np.cumsum(np.concatenate([[1], s[1:] > reach[:-1]]))  # (a new run where a note starts after all before)
+        hit = np.isin(run, run[src < 0])
+        near[src[hit & (src >= 0)]] = True
+    part = old[near]
+    fixed = resolve_overlaps(np.concatenate([part, mine]))[:, :4]
+
+    def view(a):
+        return np.ascontiguousarray(a[:, :4]).view([("", np.int64)] * 4).ravel()
+    changed = part[~np.isin(view(part), view(fixed)), :4] if len(part) else part[:, :4]
+    added = fixed[~np.isin(view(fixed), view(part))] if len(part) else fixed
+    rows = np.concatenate([old[~near, :4], fixed])
+    rows = rows[np.lexsort((rows[:, 2], rows[:, 0]))]
+    added = added[np.lexsort((added[:, 2], added[:, 0]))]
+    return rows, changed, added
 
 
 def boxes(d):
@@ -216,8 +320,8 @@ class Paste:
     SETTLE_MS = 120  # (clipboard watchers look at a new copy right away)
     CHECK_MS = 350   # (a "Failed to open clipboard" box shows within this)
 
-    def __init__(self, widget, d, raw, done):
-        self.w, self.d, self.done, self.tries = widget, d, done, 0
+    def __init__(self, widget, d, raw, done, cmd=PASTE):
+        self.w, self.d, self.done, self.tries, self.cmd = widget, d, done, 0, cmd
         self.started = time.monotonic()
         if not dc.put_on_clipboard(raw):
             widget.after_idle(done, False, "clipboard")
@@ -228,7 +332,7 @@ class Paste:
         if not clipboard_free() and time.monotonic() - self.started < 1.5:
             return self.w.after(30, self.free)
         self.before = boxes(self.d)
-        command(self.d, PASTE, wait=False)
+        command(self.d, self.cmd, wait=False)
         self.w.after(self.CHECK_MS, self.check)
 
     def check(self):
@@ -249,16 +353,25 @@ class Copy:
     start; start = that stretch's tick in the song) or done(None, why, None): "nothing" (nothing selected / copied),
     "domino" (Domino couldn't use the clipboard), "read" (not readable)."""
 
-    def __init__(self, widget, d, done, wait_s=1.5):
-        self.w, self.d, self.done = widget, d, done
+    def __init__(self, widget, d, done, wait_s=1.5, whole=False, passengers=None):
+        """whole: the current track's every event (Select All first, Deselect after); passengers = a list: the
+        notes' other events added (read_notes)."""
+        self.w, self.d, self.done, self.whole, self.passengers = widget, d, done, whole, passengers
         self.count = clipboard.copy_count()
         self.before = boxes(d)
+        if whole:  # (sent, not posted: back when Domino is done copying, so an empty track needs no long wait)
+            command(d, SELECT_ALL)
+            command(d, COPY)
+            wait_s = 0.25
+        else:
+            command(d, COPY, wait=False)
         self.until = time.monotonic() + wait_s
-        command(d, COPY, wait=False)
         widget.after(40, self.check)
 
     def check(self):
         new = boxes(self.d) - self.before
+        if self.whole and (new or clipboard.copy_count() != self.count or time.monotonic() >= self.until):
+            command(self.d, DESELECT, wait=False)
         if new:
             for b in new:
                 answer(b)
@@ -270,9 +383,11 @@ class Copy:
         raw = dc.get_from_clipboard()
         place = dv.song_place(self.d)
         try:
-            rows, ppq = dc.read_notes(raw) if raw else (None, None)
+            rows, ppq = dc.read_notes(raw, passengers=self.passengers) if raw else (None, None)
         except ValueError:
             return self.done(None, "read", None)
         if rows is None or not len(rows) or place is None:
             return self.done(None, "nothing" if place is not None else "read", None)
-        self.done(rows, ppq or place[1], place[0])
+        # (a whole track's copy runs from the song's start, wherever the cursor is: measured 2026-11-06,
+        # dev/scratch/di_real.py)
+        self.done(rows, ppq or place[1], 0 if self.whole else place[0])
