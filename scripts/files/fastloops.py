@@ -1787,6 +1787,8 @@ play_order_place = njit(cache=CACHE, nogil=True)(midi_play.order_place)
 play_hist = njit(cache=CACHE, nogil=True)(midi_play.hist)
 play_emit = njit(cache=CACHE, nogil=True)(midi_play.emit)
 play_programs = njit(cache=CACHE, nogil=True)(midi_play.programs)
+# (saved loops of midi_play's are made again only when THIS file changes: 2026-11-05, stamp / stamp_pre end a sent
+# note at its longest exact copy)
 play_stamp = njit(cache=CACHE, nogil=True)(midi_play.stamp)
 play_condense = njit(cache=CACHE, nogil=True)(midi_play.condense)
 play_stamp_pre = njit(cache=CACHE, nogil=True)(midi_play.stamp_pre)

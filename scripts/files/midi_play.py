@@ -269,9 +269,10 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least
     at `least` (a whole block's start); everything else goes: Kestrel's own note budget chooses. counts[0] +=
     note-ons wanted, counts[1] += note-ons sent.
     EXACT COPIES (same tick, message and port; Shinki's dense part: 4.5 note-ons for each different one) go ONCE,
-    cp[k] = how many (kb_push_copies: their loudness adds as amplitudes); the copies' note-offs are left out: the
-    first one's off ends the note. tab_* = a table over the tick being read, counts[2] = its generation. The line
-    needs room for a node per note-on (Line.room)."""
+    cp[k] = how many (kb_push_copies: their loudness adds as amplitudes); the note sent ends at the LAST of its
+    copies' note-offs (user 2026-11-05: the first one cut the longer copies short), the others are left out (the
+    line: the sent note's group, Line). tab_* = a table over the tick being read (tab_at = place in out | the
+    group's node << 32), counts[2] = its generation. The line needs room for a node per note-on (Line.room)."""
     n = 0
     j = 0
     while j + 1 < len(mt) and mt[j + 1] <= ticks[i0]:
@@ -295,6 +296,7 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least
             q = ((port % 16) * 16 + (m & 15)) * 128 + ((m >> 8) & 127)
             if hi == 0x9 and (m >> 16) & 127 > 0:
                 d = 1  # (left out)
+                hh = -1  # (its place in the copy table)
                 # (muted = not wanted: never counted as thinned, it showed "Overloaded", hunt 2026-10-27)
                 if not (muted[trk[i]] >> (m & 15)) & 1:
                     counts[0] += 1
@@ -307,19 +309,29 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least
                             if tab_gen[h] != counts[2]:
                                 tab_gen[h] = counts[2]
                                 tab_key[h] = key
-                                tab_at[h] = n
+                                hh = h
                                 break
                             if tab_key[h] == key:
                                 found = tab_at[h]
+                                hh = h
                                 break
                             h = (h + 1) & (COPY_TABLE - 1)
-                        if found >= 0:
-                            cp[found] += 1  # (its off left out: the copy sent first ends with the first one)
-                        else:
-                            d = -1
-                # (at the back of its key's line: Line)
+                        # (the sent one's group still in this key's line: an off of this tick may have ended it,
+                        # its node gone back to the free nodes; else this one is sent as a note of its own)
+                        if found >= 0 and val[found >> 32] < 0:
+                            w = found >> 32
+                            for _ in range(COPY_PROBES):
+                                if w == tail[q] or w < 0:
+                                    break
+                                w = nxt[w]
+                            if w >= 0 and w == tail[q]:
+                                cp[found & 0xFFFFFFFF] += 1  # (one more of the sent note's group: its off waits)
+                                val[found >> 32] -= 1
+                                continue
+                        d = -1
+                # (at the back of its key's line: Line; a sent note = a group of its own)
                 b = tail[q]
-                if b >= 0 and (val[b] > 0) == (d > 0):
+                if b >= 0 and d > 0 and val[b] > 0:
                     val[b] += d
                 else:
                     k = st[0]
@@ -335,11 +347,14 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least
                     else:
                         head[q] = k
                     tail[q] = k
+                    if d < 0 and hh >= 0:
+                        tab_at[hh] = np.int64(n) | (np.int64(k) << 32)
                 if d > 0:
                     continue
                 st[3] += 1
             else:
-                # (ends its key's oldest note: left out = this off too; nothing there = it goes, ending nothing)
+                # (ends its key's oldest note: left out = this off too, a sent note's group only at its last one;
+                # nothing there = it goes, ending nothing)
                 k = head[q]
                 if k >= 0:
                     v = val[k]
@@ -350,7 +365,7 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least
                             tail[q] = -1
                         nxt[k] = st[0]
                         st[0] = k
-                    if v > 0:
+                    if v > 0 or v < -1:
                         continue
                     st[3] -= 1
         # (a late note-off / controller: at `least`, the first block not made yet; for a frame made already it went
@@ -436,7 +451,8 @@ def stamp_pre(ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr
     returns how many (room: pre_room). A note-on for a frame before `least` is left out with its offs (the line, as
     stamp); other late events go at `least`. dry: nothing written, every note-on left out (the line then holds the
     notes sounding where playing starts inside the part). counts[0] / [1] += note-ons wanted / sent (copies
-    counted). A run of cps[i] offs alike ends that many of its key's oldest notes: one off goes for each sent."""
+    counted). A run of cps[i] offs alike ends that many of its key's oldest notes: one off goes for each sent note
+    whose group (it + its copies, Line) ends there."""
     n = 0
     j = 0
     while j + 1 < len(mt) and mt[j + 1] <= ts[i0] + t0:
@@ -458,31 +474,28 @@ def stamp_pre(ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr
                 if sent:
                     counts[1] += c
                     st[3] += 1
-                # (at the back of its key's line, Line: sent = one sent then its copies left out)
-                for part in range(2):
-                    d = (-1 if part == 0 else c - 1) if sent else (c if part == 0 else 0)
-                    if d == 0:
-                        continue
-                    b = tail[q]
-                    if b >= 0 and (val[b] > 0) == (d > 0):
-                        val[b] += d
+                # (at the back of its key's line, Line: sent = one group of c, its off at the last of theirs)
+                d = -c if sent else c
+                b = tail[q]
+                if b >= 0 and d > 0 and val[b] > 0:
+                    val[b] += d
+                else:
+                    k = st[0]
+                    if k >= 0:
+                        st[0] = nxt[k]
                     else:
-                        k = st[0]
-                        if k >= 0:
-                            st[0] = nxt[k]
-                        else:
-                            k = st[2]
-                            st[2] += 1
-                        val[k] = d
-                        nxt[k] = -1
-                        if b >= 0:
-                            nxt[b] = k
-                        else:
-                            head[q] = k
-                        tail[q] = k
+                        k = st[2]
+                        st[2] += 1
+                    val[k] = d
+                    nxt[k] = -1
+                    if b >= 0:
+                        nxt[b] = k
+                    else:
+                        head[q] = k
+                    tail[q] = k
                 if not sent:
                     continue
-            else:  # (c offs alike: each ends its key's oldest note; one goes for each sent)
+            else:  # (c offs alike: each ends its key's oldest note; one goes for each sent group ended)
                 s = 0
                 while c > 0 and head[q] >= 0:
                     k = head[q]
@@ -493,7 +506,8 @@ def stamp_pre(ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr
                     else:
                         take = -v if -v < c else c
                         val[k] = v + take
-                        s += take
+                        if val[k] == 0:
+                            s += 1
                     c -= take
                     if val[k] == 0:
                         head[q] = nxt[k]
@@ -531,10 +545,11 @@ class Line:
     THEIR note-offs: leaving out the key's next ones (2026-10-27) ended the wrong notes, in Shinki's build-up ~40,000
     wait on a key, the older ones rang on (beats 834-846: 3.6x the notes sounding, its fade 1.3 s late; caught by
     dev/harness/app_check.py). So each place keeps the file's notes in order as runs, one a node of a linked list:
-    val > 0 = that many left out, < 0 = that many sent; an off takes the oldest. head / tail per place, nxt per node
-    (-1 = none); st = [first free node, -, next node never used, notes sent and not ended]. arrays() = stamp's /
-    stamp_pre's last 5 arguments; room(n) before a call adding up to n nodes (stamp / emit: one per note-on;
-    stamp_pre: two, one sent + its copies left out)."""
+    val > 0 = that many left out; < 0 = stamp / stamp_pre: ONE note sent and its exact copies, -val of them (its off
+    goes at the last of their offs: the longest copy, user 2026-11-05), emit: that many sent; an off takes the
+    oldest. head / tail per place, nxt per node (-1 = none); st = [first free node, -, next node never used, notes
+    sent and not ended]. arrays() = stamp's / stamp_pre's last 5 arguments; room(n) before a call adding up to n
+    nodes (one per note-on)."""
 
     def __init__(self, nodes=1 << 16, places=OPEN):
         """places: OPEN for Kestrel; Built-in BASSMIDI's emit = SKIP's (port % 64 x channel x key)."""
