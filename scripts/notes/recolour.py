@@ -42,7 +42,12 @@ from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
-KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq")  # (what mode KEEP looks at: recoloured)
+KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned")  # (what mode KEEP looks at)
+# ("turned" = Reverse track order on a stirred shape, sweep 11-06: [[colour before, colour now], ...] of the colours
+# it swapped (only those moved). The Stir works out the colours from the ones before and the result is swapped the
+# same way, so the reverse is EXACTLY the stirred pattern with its tracks turned round: the stir's dice and "two
+# notes on a key kept apart" read the colours, so stirring the swapped colours again gave another pattern, even an
+# extra track. Its own notes keep the swapped colours too: with the Stir taken off they stay reversed.)
 SPLIT = ("scatter", "clumps")  # (Split modes: work from one colour, 2 colours when Colours isn't set)
 BY = ("note", "chord", "run")
 PATTERNS = ("bands", "swirl", "wedges")  # (Split: Clumps' areas)
@@ -188,7 +193,55 @@ def clean_recolour(r):
         out["whole"] = [int(x) for x in w]
     if stir:
         out["stir"] = stir
+    tw = clean_turned(r.get("turned"))
+    if tw:
+        out["turned"] = tw
     return out
+
+
+def clean_turned(tw):
+    """A saved rc["turned"] -> sorted [[before, now], ...] that swap colours one for one (no colour staying), or
+    None."""
+    if not isinstance(tw, list) or not tw or len(tw) > ROUND:
+        return None
+    pairs = []
+    for p in tw:
+        if not (isinstance(p, list) and len(p) == 2 and all(number(x) and x == int(x) and 0 <= x < ROUND for x in p)):
+            return None
+        if int(p[0]) != int(p[1]):
+            pairs.append([int(p[0]), int(p[1])])
+    a, b = [p[0] for p in pairs], [p[1] for p in pairs]
+    if not pairs or len(set(a)) != len(a) or set(a) != set(b):
+        return None
+    return sorted(pairs)
+
+
+def turned_map(tw, back=False):
+    """The colours swap of a "turned" list: f(colours) -> colours (back: the other way); colours not in it stay."""
+    a = np.array([p[0] for p in tw], np.int64)
+    b = np.array([p[1] for p in tw], np.int64)
+    if back:
+        a, b = b, a
+    o = np.argsort(a)
+    a, b = a[o], b[o]
+
+    def f(x):
+        x = np.asarray(x, np.int64)
+        j = np.clip(np.searchsorted(a, x), 0, len(a) - 1)
+        return np.where(a[j] == x, b[j], x)
+    return f
+
+
+def turn_again(tw, swap):
+    """The "turned" list after one more swap {colour now: new colour} on top of tw (None: none before); None when it
+    all comes back to the colours before."""
+    before = {now: was for was, now in (tw or [])}  # (colour now -> the one it was before)
+    out = {}
+    for now, new in swap.items():
+        out[before.pop(now, now)] = new
+    for now, was in before.items():
+        out[was] = now
+    return clean_turned([[a, b] for a, b in out.items()])
 
 
 def clean_stir(s):
@@ -624,6 +677,9 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     t = np.asarray(tracks, np.int64)
     if not held:
         notes, t = settled(notes, t)
+    tw = rc.get("turned") if rc["mode"] == KEEP else None
+    if tw:  # (Reverse track order: stirred from the colours before it, then swapped the same way, KEEP_KEYS)
+        t = t - t % ROUND + turned_map(tw, back=True)(t % ROUND)
     which, pals = plan(t, rc)
     low = t % ROUND
     lap = t - low  # (each note's round, put back after)
@@ -632,6 +688,8 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     corner = (box[0], box[2])
     pick = dice(at, low, rc["seed"], 1, corner)
     if rc["mode"] == KEEP:
+        if tw:
+            return notes, lap + turned_map(tw)(all_stirred(notes, at, low, low, rc, which, pals, pick, box, own))
         return notes, lap + all_stirred(notes, at, low, low, rc, which, pals, pick, box, own)
     roll = dice(at, low, rc["seed"], 0, corner)
     clumps = rc["mode"] == "clumps"
@@ -778,6 +836,25 @@ def from_whole(notes, tracks, wn, wt, held=False, back=None):
     c = o[np.maximum(j, 0)]
     ok &= (wk[c] == key) & (we[c] > mid)
     got = np.where(ok, c, got)
+    # (stacked notes on one key (Sustain, held notes) all cover the middle: the one the piece was cut from wins, by
+    # the same start (a left half / an uncut note), else the same end + velocity (a right half); the covering one
+    # starting last took another stacked note's colour, sweep 11-06)
+    ps, pe = np.asarray(at[:, 0], np.int64), np.asarray(at[:, 1], np.int64)
+    k64 = key.astype(np.int64) << 41
+    line = (wk[o] << 41) + ws[o]
+    j = np.minimum(np.searchsorted(line, k64 + ps), len(o) - 1)
+    c = o[j]
+    same_start = (line[j] == k64 + ps) & (we[c] >= pe)
+    if np.asarray(wn).shape[1] > 3 and np.asarray(notes).shape[1] > 3:
+        wv = np.asarray(wn[:, 3], np.int64)
+        oe = np.lexsort((wv, we, wk))
+        line_e = (((wk[oe] << 41) + we[oe]) << 7) + wv[oe]
+        want = ((k64 + pe) << 7) + np.asarray(notes[:, 3], np.int64)
+        je = np.minimum(np.searchsorted(line_e, want), len(oe) - 1)
+        ce = oe[je]
+        same_end = (line_e[je] == want) & (ws[ce] <= ps)
+        got = np.where(same_end & ~same_start, ce, got)
+    got = np.where(same_start, c, got)
     return notes, t - t % ROUND + np.asarray(wt, np.int64)[got] % ROUND
 
 

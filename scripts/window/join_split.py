@@ -29,7 +29,7 @@ from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
 from notes.engine import free_box
 from notes.custom import ROUND
-from notes.recolour import KEEP, box_of, carried, colour_sets, is_recoloured, without_recolour
+from notes.recolour import KEEP, box_of, carried, colour_sets, is_recoloured, turn_again, without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
@@ -1653,6 +1653,13 @@ class JoinSplit:
                 for s, own in enumerate(owns):
                     m = which == s
                     new[m] = own[::-1][np.searchsorted(own, low[m])]
+                # (and the Stir told: it stirs from the colours before and swaps its result the same way, so the
+                # pattern stays exactly, tracks turned round; stirring the swapped colours made another one, sweep
+                # 11-06: even an extra track)
+                swap = {int(a): int(b) for own in owns for a, b in zip(own.tolist(), own[::-1].tolist())}
+                rc = dict(sh["recolour"])
+                tw = turn_again(rc.pop("turned", None), swap)
+                sh["recolour"] = dict(rc, turned=tw) if tw else rc
             else:
                 olds = np.unique(low)
                 new = olds[::-1][np.searchsorted(olds, low)]
