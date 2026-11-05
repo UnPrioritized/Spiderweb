@@ -48,7 +48,7 @@ Spiderweb keeps this in a small file next to the song with the same name plus ".
 
 ## Good to know
 
-• It works with Domino 1.41b, 1.42, 1.43 and 1.44 (the official versions, translated ones too) and the 64-bit 1.45 test builds, the 256 keys mod among them (Spiderweb sees its 256 rows and draws on all of them). Spiderweb finds what it needs inside Domino by name and checks it all first: a Domino where something doesn't add up (a newer version that changed inside) is left alone, with a message, never guessed at.
+• It works with Domino 1.41b, 1.42, 1.43 and 1.44 (the official versions, translated ones too) and the 64-bit 1.45 test builds, the 256 keys mod among them (Spiderweb sees its 256 rows and draws on all of them). Spiderweb finds what it needs inside Domino by name and checks it all first: a Domino where something doesn't add up (a newer version that changed inside) is left alone, with a message, never guessed at. If Spiderweb found its way around that Domino and only the checks failed, the message offers "Try anyway": it's at your own risk (notes could land in the wrong place, or Domino could close), so save your song first. A renamed Domino (like "Domino (2).exe") is followed too.
 
 • It doesn't work while a MIDI file is loaded in Spiderweb.
 

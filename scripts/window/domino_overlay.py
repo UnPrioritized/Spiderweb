@@ -41,7 +41,7 @@ def front_domino(pid=None):
         ds = [d for d in ds if d.pid == pid]
     if not ds:
         return None, "not running"
-    known = [d for d in ds if d.build is not None]
+    known = [d for d in ds if d.build is not None and not d.odd]  # (odd: its numbers didn't add up = not known)
     if not known:
         return None, "unknown build"
     return known[0], None
@@ -80,6 +80,7 @@ class DominoOverlay:
         self.on_state = on_state    # (reason or None) when following starts / stops working
         self.on_tick = on_tick      # () each tick while following (after the windows were placed)
         self.pid = pid              # follow only this Domino (None = the front-most one)
+        self.may_switch = None      # (old, new) -> False = keep following old for now (what was drawn on it goes in)
         self.above = []             # more windows of ours kept above Domino (the floating bar), top-most first
         self.domino = None
         self.view = None
@@ -255,9 +256,10 @@ class DominoOverlay:
                 self.domino = None
                 return self._hide(why)
             if self.domino is None or d.pid != self.domino.pid:
-                if self.domino is not None:
-                    self.domino.close()
-                self.domino = d
+                if self.domino is not None and self.may_switch and not self.may_switch(self.domino, d):
+                    self._found_at = self._clock - FIND_MS + 100  # (asked again soon)
+                else:
+                    self.domino = d
         v, why = dv.view(self.domino)
         if v is None:
             if why == "busy":  # Domino mid-change: keep what's shown, the next tick reads again

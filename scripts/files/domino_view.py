@@ -145,6 +145,13 @@ def _key(path):
 
 _slot_tries = {}  # exe key -> time of the last failed look (looked again after SLOT_AGAIN_S)
 SLOT_AGAIN_S = 2.0
+# A Domino found by name whose numbers don't add up (hunt 2026-11-06): after ODD_AFTER failed looks WITH ITS PIANO
+# ROLL SHOWN (still starting doesn't count) it counts as a version not known: refused with the "isn't known" message,
+# never a forever "Can't read". The user may still say "Try anyway" (user 2026-11-06: their choice, warned in red):
+# then the spots found are used without the checks, for this run of that Domino only.
+ODD_AFTER = 3
+_odd = {}        # exe key (+ load address) -> (failed looks, the build with its spots found or None)
+_forced = set()  # exe keys (+ load address) the user said "Try anyway" for (until Spiderweb closes)
 
 
 def with_slots(d):
@@ -161,21 +168,73 @@ def with_slots(d):
         return d
     if b.ptr == 8:  # (64-bit: everything moved by where Windows loaded it this time)
         base = _module_base(ph)
-        if not base:
-            return d
+        if not base:  # (e.g. Spiderweb run by a 32-bit Python: a 64-bit Domino can't be read from there)
+            return _failed(d, key, None) if time.monotonic() - _slot_tries.get(key, -1e9) >= SLOT_AGAIN_S else \
+                _mark(d, key)
         key += (base,)
         if key in _known:
             d.build = _known[key]
             return d
         b = moved(b, base - b.file_base)
+    d.key = key
+    got = _odd.get(key, (0, None))[1]
+    if key in _forced and got is not None:
+        d.build, d.forced = got, True
+        return d
     if time.monotonic() - _slot_tries.get(key, -1e9) < SLOT_AGAIN_S:
-        return d
+        return _mark(d, key)
     from files import domino_builds
-    got = domino_builds.find_slots(b, lambda a, n: _read(ph, a, n))
-    if got is None:
-        _slot_tries[key] = time.monotonic()
+    read = lambda a, n: _read(ph, a, n)  # noqa: E731
+    got = domino_builds.find_slots(b, read, check=False)
+    if got is not None and domino_builds.adds_up(got, read):
+        _known[key] = d.build = got
+        _odd.pop(key, None)
+        d.odd = False
         return d
-    _known[key] = d.build = got
+    return _failed(d, key, got)
+
+
+def _failed(d, key, got):
+    """A look that found nothing readable: counted only while Domino shows its piano roll."""
+    import time
+    _slot_tries[key] = time.monotonic()
+    d.key = key
+    n, old = _odd.get(key, (0, None))
+    if system.WINDOWS and grid_window(d.top) is not None:
+        _odd[key] = (n + 1, got or old)
+    return _mark(d, key)
+
+
+def _mark(d, key):
+    d.odd = _odd.get(key, (0, None))[0] >= ODD_AFTER
+    return d
+
+
+def can_force(d):
+    """Can "Try anyway" read anything in this Domino (its spots were found, only the checks failed)?"""
+    return bool(d.odd and d.key is not None and _odd.get(d.key, (0, None))[1] is not None)
+
+
+def force(d):
+    """The user's "Try anyway" (warned first): the spots found are used without the checks, for this run."""
+    if can_force(d):
+        _forced.add(d.key)
+        d.build, d.forced, d.odd = _odd[d.key][1], True, False
+    return d
+
+
+def settle(d):
+    """At the button: a Domino whose spots aren't found yet is looked at again at once, so a version that doesn't
+    add up is told now (still starting = no answer yet: the overlay waits as before)."""
+    import time
+    for _ in range(ODD_AFTER):
+        if d.build is None or d.build.p_slot or d.odd:
+            break
+        for k in (d.key, _key(d.path)):
+            _slot_tries.pop(k, None)
+        with_slots(d)
+        if not d.odd and not d.build.p_slot:
+            time.sleep(0.15)
     return d
 
 
@@ -209,6 +268,15 @@ def view_from(numbers, grid_win, scale, keys=128):
     bottom = min(grid_win[3], y0 + (keys - top_row) * row_px * scale)
     return ViewState(left / UNITS_PER_BEAT, beat_px * scale, top_row, row_px * scale,
                      (round(x0), round(y0), grid_win[2], round(bottom)), scale, keys)
+
+
+ROWS_OFF_MOST = 40  # (reads: about 0.6 s of ticks)
+
+
+def rows_fit(nums, grid_h, scale, ruler_h):
+    """Do the rows Domino says are on screen fill its grid (within 2 rows)? 1.45: 57 rows x 12 px in 686 px."""
+    row_px = nums[1]
+    return abs(nums[5] - (grid_h / (scale or 1) - ruler_h) / row_px) <= 2
 
 
 def sane(numbers, keys=128):
@@ -289,6 +357,10 @@ class Domino:
     build: object     # Build or None
     _handle: int = 0
     grid: object = None  # (grid window, its scroll bar) last found
+    key: object = None   # (its exe key, + load address when 64-bit: with_slots)
+    odd: bool = False    # found by name, but its numbers didn't add up (a version not known: refused)
+    forced: bool = False  # read anyway, the user's "Try anyway" (no checks)
+    rows_off: int = 0    # (reads in a row whose key rows didn't match the grid's height)
 
     def handle(self):
         if not self._handle:
@@ -302,10 +374,26 @@ class Domino:
             self._handle = 0
 
 
+_alive = {}  # pid -> Domino: kept between looks, so each running Domino has ONE process handle (hunt 2026-11-06:
+# a new one every half second was never closed); closed when that Domino is gone
+
+
+def is_domino(path, saved=""):
+    """A program Spiderweb follows: named Domino*.exe (renamed copies like "Domino (2).exe", "Domino145.exe"), or
+    the Domino.exe picked in Spiderweb (settings.ini [domino] exe) whatever its name (hunt 2026-11-06). Its version
+    check still decides whether it can be read."""
+    name = os.path.basename(path).lower()
+    if name.startswith("domino") and name.endswith(".exe"):
+        return True
+    return bool(saved and path) and os.path.normcase(saved) == os.path.normcase(path)
+
+
 def find_all():
-    """Every running Domino with a visible main window (a program named Domino.exe), front-most first."""
+    """Every running Domino with a visible main window, front-most first."""
     if not system.WINDOWS:
         return []
+    from files import settings
+    saved = settings.get("domino", "exe") or ""
     u, _ = _api()
     tops = []
     u.EnumWindows(_PROC(lambda h, _l: tops.append(h) or True), 0)
@@ -316,9 +404,20 @@ def find_all():
         if u.GetWindowLongW(h, -16) & 0xC00000 != 0xC00000:  # no title bar (Domino's start-up windows)
             continue
         pid = _pid(h)
+        if any(d.pid == pid for d in found):
+            continue
         path = exe_path(pid)
-        if os.path.basename(path).lower() == "domino.exe" and not any(d.pid == pid for d in found):
-            found.append(with_slots(Domino(h, pid, path, build_of(path))))
+        if not is_domino(path, saved):
+            continue
+        d = _alive.get(pid)
+        if d is None or os.path.normcase(d.path) != os.path.normcase(path):
+            if d is not None:
+                d.close()
+            d = _alive[pid] = Domino(h, pid, path, build_of(path))
+        d.top = h
+        found.append(with_slots(d))
+    for pid in [p for p in _alive if not any(d.pid == p for d in found)]:
+        _alive.pop(pid).close()
     return found
 
 
@@ -392,19 +491,21 @@ def _obj(ph, slot, vtable, b):
 
 
 def read_numbers(d):
-    """(top_row, row_px, beat_px, left units, keys) read from Domino's memory, or None."""
+    """(top_row, row_px, beat_px, left units, keys, rows on screen or 0) read from Domino's memory, or None."""
     b, ph = d.build, d.handle()
     if b is None or not ph:
         return None
     p, h = _obj(ph, b.p_slot, b.p_vtable, b), _obj(ph, b.h_slot, b.h_vtable, b)
     if not p or not h:
         return None
-    keys = 128
-    if b.rows_at:
+    keys, shown = 128, 0
+    if b.rows_at:  # (rows it can scroll + rows on screen: exactly 128 or 256, anything else = not this place)
         a, c = _i32(ph, p + b.rows_at), _i32(ph, p + b.rows_at + 4)
-        keys = 256 if a is not None and c is not None and a + c == 256 else 128
+        if a is None or c is None or a + c not in (128, 256) or c < 1:
+            return None
+        keys, shown = a + c, c
     out = (_i32(ph, p + b.top_row), _i32(ph, p + b.row_px), _i32(ph, p + b.beat_px), _i32(ph, h + b.left))
-    return out + (keys,) if None not in out and sane(out, keys) else None
+    return out + (keys, shown) if None not in out and sane(out, keys) else None
 
 
 def song_place(d):
@@ -610,6 +711,15 @@ def view(d, tries=4):
             return None, "not readable"
         win, bar = _rect(g[0]), _rect(g[1])
         now = (nums, (win[0], win[1], bar[0], win[3]), scale_of(d.top))
+        if nums[5] and not rows_fit(nums, win[3] - win[1], now[2], d.build.ruler_h):
+            # (the rows on screen say how tall the grid is: a key count read from the wrong place shows here,
+            # measured 2026-11-06; a resize may be half done: wrong for a while = not readable)
+            d.rows_off += 1
+            if d.rows_off > ROWS_OFF_MOST:
+                return None, "not readable"
+            last = None
+            continue
+        d.rows_off = 0
         if now == last:
             n, rect, scale = now
             return view_from(n[:4] + (d.build.keys_w, d.build.ruler_h), rect, scale, n[4]), None

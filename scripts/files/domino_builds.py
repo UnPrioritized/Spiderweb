@@ -130,6 +130,13 @@ def from_file(path, build_type):
     """A Build for a Domino.exe without a hand-made table (its slots still 0: found in the running Domino by
     find_slots; a 64-bit one's addresses moved there first), or None when it isn't a Domino this can read."""
     try:
+        return _from_file(path, build_type)
+    except Exception:  # (an odd program file: "not a Domino we can read", never an error loop, hunt 2026-11-06)
+        return None
+
+
+def _from_file(path, build_type):
+    try:
         with open(path, "rb") as f:
             pe = _PE(f.read())
     except (OSError, ValueError, struct.error):
@@ -150,9 +157,10 @@ def from_file(path, build_type):
                       data_size=size, **got, **family, **extra)
 
 
-def find_slots(build, read):
+def find_slots(build, read, check=True):
     """The build with the spots where this running Domino keeps its piano roll view, ruler and main window, or
-    None (not found / more than one view / numbers that don't add up). read(addr, n) -> bytes or None."""
+    None (not found / more than one view / numbers that don't add up). read(addr, n) -> bytes or None. check=False:
+    the spots found without adds_up (domino_view asks it apart: "Try anyway" may use them)."""
     raw = read(build.data_at, build.data_size) or b""
     if len(raw) < 1024:
         return None
@@ -176,7 +184,7 @@ def find_slots(build, read):
     if len({p for _, p in hits["c_slot"]}) != 1:
         return None  # (two main windows: can't be)
     out = replace(build, p_slot=hits["p_slot"][0][0], h_slot=hits["h_slot"][0][0], c_slot=hits["c_slot"][-1][0])
-    return out if adds_up(out, read) else None
+    return out if not check or adds_up(out, read) else None
 
 
 def adds_up(b, read):
@@ -193,8 +201,13 @@ def adds_up(b, read):
     if not s:
         return False
     ppq, arr, n = u32(s + b.ppq_at), ptr(s + b.tracks_at), u32(s + b.tracks_at + b.ptr)
-    if ppq is None or not 1 <= ppq & 0xFFFF <= 65535 or not arr or not n or not 1 <= n <= 65535:
-        return False
+    if ppq is None or not 1 <= ppq <= 65535 or not arr or not n or not 1 <= n <= 65535:  # (the whole number, as
+        return False  # domino_view.song_place reads it: one test passing and the other failing = every send refused)
+    if b.undo_at:  # (hunt 2026-11-06: the undo count is read too, every look)
+        u = ptr(c + b.undo_at)
+        depth = u32(u + b.undo_n) if u else None
+        if depth is None or depth > 10_000_000:
+            return False
     now, cursor = u32(s + b.track_now), u32(c + b.cursor)
     if now is None or not 0 <= now < n or cursor is None or cursor >= 2 ** 31:
         return False
@@ -216,9 +229,26 @@ def adds_up(b, read):
         ev, m = ptr(t + b.events_at), u32(t + b.events_at + b.ptr)
         if m is None or m > 50_000_000 or (m and not ev):
             return False
+        last = -1
         for j in range(min(m, 4)):
             e = ptr(ev + j * b.ptr)
             vt = ptr(e) if e else None
             if vt is None or not lo <= vt < hi:
                 return False
+            if vt == b.note_vt:  # (hunt 2026-11-06: the note's own layout: a Domino keeping tick / velocity /
+                last = _note_tick(b, read, e, last)  # gate elsewhere must fail, never be misread)
+                if last is None:
+                    return False
     return True
+
+
+def _note_tick(b, read, e, last):
+    """A note read through the build's places: its tick when it looks like a note (a tick never before the note
+    before it, velocity 0-127, a gate), else None."""
+    raw = read(e, b.n_gate + 4)
+    if not raw or len(raw) < b.n_gate + 4:
+        return None
+    tick = struct.unpack_from("<I", raw, b.n_tick)[0]
+    gate = struct.unpack_from("<I", raw, b.n_gate)[0]
+    ok = last <= tick < 2 ** 31 and raw[b.n_vel] <= 127 and gate < 2 ** 31
+    return tick if ok else None

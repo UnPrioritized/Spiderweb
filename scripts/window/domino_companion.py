@@ -72,8 +72,13 @@ def start(app):
     if getattr(app, "loaded", None) is not None:
         return messagebox.showinfo(tr("companion.title"), tr("companion.no_loaded"), parent=app)
     d, why = dov.front_domino()
+    if d is not None and d.build is not None and not d.build.p_slot:  # (found by name, spots not found yet: looked
+        dv.settle(d)  # at again now, so a version that doesn't add up is told at the button)
+        d, why = dov.front_domino()
     if d is None and why == "unknown build":
-        return unknown_build(app)
+        if not unknown_build(app):
+            return None
+        d, why = dov.front_domino()
     if not warned(app):
         return None
     if d is None:
@@ -99,9 +104,27 @@ def warned(app):
     return go
 
 
-def unknown_build(app):
+def unknown_build(app, parent=None, skip=()):
+    """A Domino version Spiderweb can't read: said so. When its reading spots were found and only the checks
+    failed, "Try anyway" is offered (user 2026-11-06: their choice, with a clear red warning; No is the default):
+    True = the user took it (that Domino is read without the checks, until Spiderweb closes). skip: Domino keys
+    already asked about (nothing asked again for them)."""
+    parent = parent or app
     known = dv.KNOWN_VERSIONS
-    messagebox.showinfo(tr("companion.title"), tr("companion.unknown_build", known=known), parent=app)
+    odd = [d for d in dv.find_all() if dv.can_force(d)]
+    if odd and all(d.key in skip for d in odd):
+        return False
+    if not odd:
+        if not skip:
+            messagebox.showinfo(tr("companion.title"), tr("companion.unknown_build", known=known), parent=parent)
+        return False
+    from window.big_ask import dialog
+    go, _ = dialog(parent, tr("companion.title"), tr("companion.unknown_build", known=known), True, tick=False,
+                   danger=tr("companion.try_anyway_warning"), yes=tr("companion.try_anyway"),
+                   no=tr("companion.dont_try"))
+    if go:
+        dv.force(odd[0])
+    return go
 
 
 def domino_exe(app):
@@ -110,7 +133,7 @@ def domino_exe(app):
     if os.path.isfile(path) and dv.build_of(path) is not None:
         return path
     path = filedialog.askopenfilename(parent=app, title=tr("companion.pick_exe"),
-                                      filetypes=[("Domino.exe", "Domino.exe"), ("*.exe", "*.exe")])
+                                      filetypes=[("Domino.exe", "Domino*.exe"), ("*.exe", "*.exe")])
     if not path:
         return None
     path = os.path.normpath(path)
@@ -184,6 +207,10 @@ class Companion:
         self.roll = self.overlay.canvas
         self.roll.fit_view()
         self.overlay.forward_to(self.roll, wheel=self.wheel, pressed=self.pressed)
+        self.overlay.may_switch = self.may_switch
+        self._switch_wait = None  # (since when another Domino in front waits for what goes into this one)
+        self._offered = set()     # (Domino versions not known that "Try anyway" was offered for)
+        self._left_out = 0        # (notes of the send going on above the Domino's keys: said with its result)
         self.overlay.above = [self.bar]
         app.companion_tops = (self.overlay.win, self.overlay.catch, self.bar)
         app.roll = self.roll
@@ -444,6 +471,32 @@ class Companion:
         if not self.busy and self.after_send:  # (nothing went: the key of Domino's goes on anyway)
             self.pass_waiting_key()
 
+    SWITCH_WAIT_S = 3.0
+
+    def may_switch(self, old, new):
+        """Another Domino came in front (hunt 2026-11-06): what was drawn on this one goes into THIS one first
+        (switching counts as done drawing); the overlay follows the new one once nothing waits. This one busy (a
+        dialog open) for SWITCH_WAIT_S = switched anyway, the shapes stay on the overlay for Send (never sent into
+        the other Domino by themselves)."""
+        if not dl.alive(old) or self.leaving:
+            return True
+        if self.pending:
+            self.done_drawing()
+        if not (self.ready or self.busy):
+            self._switch_wait = None
+            return True
+        now = time.monotonic()
+        if self._switch_wait is None:
+            self._switch_wait = now
+        if now - self._switch_wait < self.SWITCH_WAIT_S:
+            return False
+        self._switch_wait = None
+        if self.busy:  # (a paste going on: it ends with its own Domino, Companion.job)
+            return True
+        self.ready = []
+        self.say(tr("companion.left_waiting"), warn=True)
+        return True
+
     def marked(self):
         return [sh for sh in self.app.shapes if sh.get(MARK)]
 
@@ -464,7 +517,9 @@ class Companion:
         if d is None or not self.match_ppq():
             return self.say(tr("companion.send_failed_domino"), warn=True)
         rows = self.notes_for(shapes)
-        rows = rows[(rows[:, 2] >= 0) & (rows[:, 2] < self.domino_keys())]  # (the 256 keys mod: up to 255)
+        fit = (rows[:, 2] >= 0) & (rows[:, 2] < self.domino_keys())  # (the 256 keys mod: up to 255)
+        self._left_out = int((~fit).sum())  # (said with the result: never dropped without a word, hunt 2026-11-06)
+        rows = rows[fit]
         self.pending = [s for s in self.pending if not any(s is x for x in shapes)]
         if not len(rows):
             return self.say(tr("companion.no_notes"), warn=True)
@@ -876,7 +931,12 @@ class Companion:
                 if self.quick and any(s is x for s in shapes for x in self.quick.get("shapes", ())):
                     self.quick_done()
             self._gen = (app.shapes_gen, time.monotonic())
-            self.say(trn("companion.sent_n", n, n=n))
+            out, self._left_out = self._left_out, 0
+            if out:
+                self.say(trn("companion.sent_n", n, n=n) + "\n" + trn("companion.left_out_n", out, n=out,
+                                                                      keys=self.domino_keys()), warn=True)
+            else:
+                self.say(trn("companion.sent_n", n, n=n))
 
     def quick_done(self):
         """A flip on Domino's selection is in Domino: its steps (Take, flip, sent) leave Spiderweb's history, it's
@@ -1150,7 +1210,15 @@ class Companion:
             pass
 
     def on_state(self, reason):
-        if reason is None:
+        d = self.overlay.domino if hasattr(self, "overlay") else None
+        if reason is None and d is not None and d.forced:  # ("Try anyway": said in red as long as it's followed)
+            self.status.configure(text=tr("companion.state_forced"), foreground=look.ERROR,
+                                  wraplength=self.note_room())
+            if not self.status.winfo_manager():
+                self.status.pack(anchor="w", before=self.said if self.said.winfo_manager() else None)
+            self.sync_notes()
+            self.show_bar()
+        elif reason is None:
             self.status.configure(text="")
             self.status.pack_forget()
             self.sync_notes()
@@ -1158,11 +1226,23 @@ class Companion:
         elif reason == "hidden" and self.overlay.domino is not None:
             self.bar.withdraw()  # (Domino minimised: the bar goes with it)
         else:
-            self.status.configure(text=tr("companion.state_" + reason.replace(" ", "_")), wraplength=self.note_room())
+            self.status.configure(text=tr("companion.state_" + reason.replace(" ", "_")), wraplength=self.note_room(),
+                                  foreground=look.WARN)
             if not self.status.winfo_manager():
                 self.status.pack(anchor="w", before=self.said if self.said.winfo_manager() else None)
             self.sync_notes()
             self.show_bar()
+            if reason == "unknown build":  # (a Domino in front that turned out not to add up: "Try anyway" offered
+                self.app.after_idle(self.offer_force)  # once for it, hunt 2026-11-06)
+
+    def offer_force(self):
+        if self.app.companion is not self:
+            return
+        odd = [d.key for d in dv.find_all() if dv.can_force(d)]
+        skip = set(self._offered)
+        self._offered.update(odd)
+        if unknown_build(self.app, parent=self.bar, skip=skip | {None}):
+            self.overlay._found_at = -dov.FIND_MS  # (looked at again at once)
 
     # --- the floating bar ---
     def make_bar(self):

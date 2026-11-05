@@ -77,9 +77,10 @@ def ask_drums(app, tracks):
     return go
 
 
-def dialog(parent, title, text, strong, tick=None):
+def dialog(parent, title, text, strong, tick=None, danger=None, yes=None, no=None):
     """(Yes pressed, tick box ticked). strong = No is the default button (it may not fit in memory). tick = the
-    tick box's text (default "Don't ask again until Spiderweb is closed")."""
+    tick box's text (default "Don't ask again until Spiderweb is closed"; False = no tick box). danger = a warning
+    in red under the text; yes / no = the buttons' own words."""
     win = tk.Toplevel(parent)
     win.withdraw()
     win.title(title)
@@ -89,8 +90,14 @@ def dialog(parent, title, text, strong, tick=None):
     body.pack(fill="both", expand=True)
     ttk.Label(body, image="::tk::icons::warning").grid(row=0, column=0, sticky="n", padx=(0, 12))
     ttk.Label(body, text=text, wraplength=420, justify="left").grid(row=0, column=1, sticky="w")
+    if danger:
+        from window import look
+        ttk.Label(body, text=danger, wraplength=420, justify="left", foreground=look.ERROR,
+                  font=look.font(9, "bold")).grid(row=2, column=1, sticky="w", pady=(10, 0))
     skip = tk.BooleanVar(win, value=False)
-    ttk.Checkbutton(body, text=tick or tr("big_ask.dont_ask"), variable=skip).grid(row=1, column=1, sticky="w", pady=(12, 0))
+    if tick is not False:
+        ttk.Checkbutton(body, text=tick or tr("big_ask.dont_ask"), variable=skip).grid(row=1, column=1, sticky="w",
+                                                                                     pady=(12, 0))
     btns = ttk.Frame(win, padding=(14, 0, 14, 12))
     btns.pack(fill="x")
     answer = [False]
@@ -98,9 +105,9 @@ def dialog(parent, title, text, strong, tick=None):
     def close(go):
         answer[0] = go
         win.destroy()
-    no = ttk.Button(btns, text=tr("big_ask.no"), command=lambda: close(False))
+    no = ttk.Button(btns, text=no or tr("big_ask.no"), command=lambda: close(False))
     no.pack(side="right")
-    yes = ttk.Button(btns, text=tr("big_ask.yes"), command=lambda: close(True))
+    yes = ttk.Button(btns, text=yes or tr("big_ask.yes"), command=lambda: close(True))
     yes.pack(side="right", padx=(0, 6))
     first = no if strong else yes
     win.bind("<Return>", lambda e: close(yes is (e.widget if e.widget in (yes, no) else first)))  # (the highlighted)
