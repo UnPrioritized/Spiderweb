@@ -18,6 +18,8 @@ What's new:
 
 • Stir's colour flips have "Flip what": pick "the stirred pattern" to mirror the finished swirl (it turns over, like the normal flips, while the notes stay put) instead of the colours before the stir.
 
+• Stir's colour flips and "Bend with the outline" have "Smooth corners": where the shape's outline has a corner (or an area is cut off by the shape's edge), the colours no longer break along a straight seam. New stirs start at 20 %; 0 keeps the sharp look. Flipped colours no longer turn into flat patches near the edges.
+
 • Gate aware flip now comes after the note tool pages (Claw machine, Strum, Chop, Copy along a path), so a Claw machine's spacing turns round too, as every key row should.
 
 • Help → About and saved files show which build made them (its code mark and day), so two builds of the same version can be told apart.

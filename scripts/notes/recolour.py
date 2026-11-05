@@ -65,7 +65,13 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
                  "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
                  "area_squeeze": True, "reverse": False, "flip_in": "whole", "flip_by": "time", "mirror": "shape",
-                 "size_of": "box", "size_mix": None, "flip_of": "before"}
+                 "size_of": "box", "size_mix": None, "flip_of": "before", "smooth": 0.0, "bend_smooth": 0.0}
+# ("smooth" / "bend_smooth" = Smooth corners, % (Chinese tester 11-05, user picked a setting): the row ends (time
+# slices' lowest / highest keys) the colour flips mirror across / Bend with the outline stretches by, averaged over
+# this much of the shape's height (width for the upside-down flip), so an outline's corner (a triangle's tip, an area
+# cut off by the shape's edge) rounds instead of turning sharply = a straight seam. 0 = the sharp old way (old
+# files); a stir made now starts at NEW_SMOOTH (window.stir_window.with_stir). Straight outlines never change)
+MOST_SMOOTH, NEW_SMOOTH = 100.0, 20.0  # (20: the least that took the tester's seams away, fuzz/stir_sweep --known)
 # ("size_mix": only Add between's steps, 0..1 = how far Size counts from the box to the circle inside, so the area
 # grows smoothly between an end of each kind, hunt 11-05 6; never set from the window)
 MOST_REACH_INSIDE = 1000.0  # (Size of the circle inside may go as far as the box's own 100 %, hunt 11-05 8)
@@ -230,6 +236,10 @@ def one_stir(s):
         out["flip_by"] = s["flip_by"]
     if s.get("flip_of") in FLIP_OF[1:]:
         out["flip_of"] = s["flip_of"]
+    for k in ("smooth", "bend_smooth"):
+        v = s.get(k)
+        if number(v) and 0 < round(v, 3) <= MOST_SMOOTH:
+            out[k] = round(float(v), 3)
     r = s.get("reach")
     if number(r) and LEAST_REACH <= round(r, 3) <= (MOST_REACH_INSIDE if s.get("size_of") == "inside" or
                                                      number(s.get("size_mix")) else MOST_REACH):
@@ -275,7 +285,9 @@ def one_stir(s):
             out["spin"] = True
         if out.get("round") or out.get("spin"):
             out["seen"] = float(v)
-    return out or None
+    if set(out) <= {"smooth", "bend_smooth"}:  # (Smooth corners alone stirs nothing: no stir, like the plain one)
+        return None
+    return out
 
 
 _CLEAN_SHAPES = OrderedDict()  # id -> (the saved object, its clean copy): clean_recolour runs on every redraw
@@ -682,13 +694,18 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     # sideways by Note order: each key row's notes swapped by their order, PLAN B / C)
     part = there if there is not None and full["mirror"] == "area" and there.any() else None
     order = full["flip_side"] and full["flip_by"] == "order"
+    side, up, smooth = full["flip_side"] and not order, full["flip_up"], full["smooth"]
     if part is not None and full["flip_in"] == "inside":  # (across where the area and the notes overlap, row by
         # row / time by time: the inside notes' first start / last end jittered the line on notes of different
         # lengths, 11-05)
-        fm, fk = area_mirrored(at, mid, key, rc, box, own, full["flip_side"] and not order, full["flip_up"])
+        fm, fk = area_mirrored(at, mid, key, rc, box, own, side, up, smooth)
     else:  # (outside the area: across the outside notes' own outline)
-        fm, fk = flipped(at if part is None else at[part], mid, key, full["flip_side"] and not order,
-                         full["flip_up"])
+        fm, fk = flipped(at if part is None else at[part], mid, key, side, up, smooth)
+    if side or up:  # (a spot the MIRROR pushed past its row's end (or its time's lowest / highest key) bounces back
+        # in, as a mirror would: else every note there took the row's last note = a flat patch, Chinese tester
+        # 11-05. A spot already past it before the mirror stays: one stir flipping + turning = a flip stir, then a
+        # turn stir, still)
+        fm, fk = bounced(at, fm, fk, side, up, mid, key)
     if there is not None:
         fm, fk = np.where(there, fm, mid), np.where(there, fk, key)
     mid, key = stir_from(at, rc, box, own, (fm, fk)) if after else (fm, fk)
@@ -798,8 +815,8 @@ def stir_from(at, rc, box, own, spots=None):
     else:
         mid, k = (np.asarray(v, np.float64) for v in spots)
     edge = st["edge"]
-    if edge in ("wrap", "bend"):
-        rows = Rows(at)
+    if edge in ("wrap", "bend"):  # (Bend's rows with Smooth corners: an outline's corner rounds, no straight seam)
+        rows = Rows(at, st["bend_smooth"] if edge == "bend" else 0.0)
         t0, t1 = float(at[:, 0].min()), float(at[:, 1].max())
     if edge == "bend":  # (each key row stretched to the notes' whole width: no empty spot left to come from)
         mid = rows.stretched(mid, k, t0, t1)
@@ -1125,15 +1142,45 @@ def drawn_gauge(X, Y, shape):
     return r / best
 
 
-def flipped(at, mid, key, side, up):
+def flipped(at, mid, key, side, up, smooth=0.0):
     """Stir's colour flips: spots (mid, key) mirrored at the notes' own outline, sideways across their key row's
     notes (first start <-> last end), upside down across the notes around their time (lowest <-> highest key), so
     a round or slanted shape flips into itself, never into empty space. Done on where the stir looks = the colours
-    flipped first, then bent: the swirl stays at the Centre point."""
+    flipped first, then bent: the swirl stays at the Centre point. smooth: Smooth corners, %."""
     if side:
-        mid = Rows(at).mirrored(mid, key)
+        mid = Rows(at, smooth).mirrored(mid, key)
     if up:
-        key = Cols(at).mirrored(mid, key)
+        key = Cols(at, smooth).mirrored(mid, key)
+    return mid, key
+
+
+def bounce(v, lo, hi):
+    """v folded back into lo..hi at its ends, as a mirror would (lo..hi of no width: lo)."""
+    v, lo, hi = (np.asarray(x, np.float64) for x in (v, lo, hi))
+    w = np.maximum(hi - lo, 0.0)
+    u = np.mod(v - lo, np.maximum(2 * w, 1e-12))
+    return np.where(w > 0, lo + np.where(u > w, 2 * w - u, u), lo)
+
+
+def bounced(at, mid, key, side, up, mid0, key0):
+    """Mirrored spots (mid, key) kept on the notes: sideways, a middle past its key row's first / last note's middle
+    bounces back in; upside down, a key past the lowest / highest key around its time likewise. Only where the
+    spot before the mirror (mid0, key0) was on the notes that way; spots on the notes never move."""
+    if side:
+        rows = Rows(at)
+        half = np.asarray(at[:, 1] - at[:, 0], np.float64)
+        g = np.full(len(rows.keys), np.inf)  # (each row's shortest note's half: its first / last middle, not its ends)
+        np.minimum.at(g, np.searchsorted(rows.keys, np.asarray(at[:, 2], np.int64)), half / 2)
+        r0 = rows.row(key0)
+        was = (mid0 >= rows.a[r0] + g[r0] - 1e-9) & (mid0 <= rows.b[r0] - g[r0] + 1e-9)
+        r = rows.row(key)
+        mid = np.where(was, bounce(mid, rows.a[r] + g[r], rows.b[r] - g[r]), mid)
+    if up:
+        cols = Cols(at)
+        s0 = cols.slice(mid0)
+        was = (key0 >= cols.lo[s0] - 1e-9) & (key0 <= cols.hi[s0] + 1e-9)
+        s = cols.slice(mid)
+        key = np.where(was, bounce(key, cols.lo[s], cols.hi[s]), key)
     return mid, key
 
 
@@ -1162,13 +1209,15 @@ def chord_ends(test, a, b, n):
     return out
 
 
-def area_mirrored(at, mid, key, rc, box, own, side, up):
+def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0):
     """Spots (mid, key) mirrored across where the Stir area and the notes overlap (PLAN C; hunt 11-05): sideways
     along the spot's key row, from where the area starts on that row (never before the row's first note) to where it
     ends (never past its last); upside down along the keys at the spot's time (within the notes there, Cols' slices);
     sideways first. Worked out as the piano roll shows the notes, so a turned shape flips the way it looks; each
     row's own ends, so a turned or slanted area's line is straight. Kept per area + notes: Turn / Twist changing
-    don't work it out again. A spot on a row / time the area doesn't reach stays."""
+    don't work it out again. A spot on a row / time the area doesn't reach stays. smooth: Smooth corners, % of the
+    height (width upside down): where the shape's edge cuts the area off, the ends turned sharply = a straight seam
+    (Chinese tester 11-05)."""
     st = full_stir(rc.get("stir"))
     kxy = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))[0]
 
@@ -1186,6 +1235,9 @@ def area_mirrored(at, mid, key, rc, box, own, side, up):
         ks = rows.keys.astype(np.float64)
         lo, hi = _chords(("rows", sig, rows.keys.tobytes(), rows.a.tobytes(), rows.b.tobytes()),
                          lambda: chord_ends(lambda p, j: inside(p, ks[j]), rows.a, rows.b, 256))
+        if smooth > 0 and len(ks) > 2:
+            reach = smooth / 100 * float(ks[-1] - ks[0]) / 2
+            lo, hi = smooth_ends(ks, lo, reach), smooth_ends(ks, hi, reach)
         r = rows.row(key)
         ok = np.isfinite(lo[r])
         mid = np.where(ok, np.nan_to_num(lo[r] + hi[r]) - mid, mid)
@@ -1194,6 +1246,9 @@ def area_mirrored(at, mid, key, rc, box, own, side, up):
         tc = cols.t0 + (np.arange(cols.n) + 0.5) * cols.w
         lo, hi = _chords(("cols", sig, cols.t0, cols.w, cols.lo.tobytes(), cols.hi.tobytes()),
                          lambda: chord_ends(lambda p, j: inside(tc[j], p), cols.lo, cols.hi, 64))
+        if smooth > 0:
+            reach = smooth / 100 * cols.n / 2
+            lo, hi = smooth_ends(np.arange(cols.n), lo, reach), smooth_ends(np.arange(cols.n), hi, reach)
         s = cols.slice(mid)
         ok = np.isfinite(lo[s])
         key = np.where(ok, np.nan_to_num(lo[s] + hi[s]) - key, key)
@@ -1233,11 +1288,30 @@ def row_twins(at, colours, among=None):
     return twin
 
 
+def smooth_ends(pos, vals, r):
+    """vals (at sorted places pos) each averaged with the ones within r of it, the reach shrunk near either end so
+    it stays even on both sides: a straight line stays exactly as it is (evenly spaced places), a corner rounds over
+    about 2 r. NaN values: left out, and stay NaN."""
+    vals = np.asarray(vals, np.float64)
+    ok = np.isfinite(vals)
+    if r <= 0 or ok.sum() < 3:
+        return vals
+    p, v = np.asarray(pos, np.float64)[ok], vals[ok]
+    reach = np.minimum(r, np.minimum(p - p[0], p[-1] - p))
+    lo = np.searchsorted(p, p - reach - 1e-9, side="left")
+    hi = np.searchsorted(p, p + reach + 1e-9, side="right")
+    c = np.concatenate([[0.0], np.cumsum(v)])
+    out = vals.copy()
+    out[ok] = (c[hi] - c[lo]) / (hi - lo)
+    return out
+
+
 class Cols:
     """The lowest and highest key of at's notes around each time (notes put in slices by their middle; a slice
-    without notes counts as the nearest one with notes), for Stir's upside-down colour flip."""
+    without notes counts as the nearest one with notes), for Stir's upside-down colour flip. smooth: Smooth corners,
+    % of the width the lowest / highest keys are averaged over."""
 
-    def __init__(self, at):
+    def __init__(self, at, smooth=0.0):
         mid = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
         k = np.asarray(at[:, 2], np.float64)
         self.t0 = float(mid.min())
@@ -1252,6 +1326,10 @@ class Cols:
         j = np.maximum(i - 1, 0)
         near = full[np.where(np.abs(full[j] - np.arange(self.n)) <= np.abs(full[i] - np.arange(self.n)), j, i)]
         self.lo, self.hi = lo[near], hi[near]
+        if smooth > 0:
+            at_ = np.arange(self.n, dtype=np.float64)
+            r = smooth / 100 * self.n / 2
+            self.lo, self.hi = smooth_ends(at_, self.lo, r), smooth_ends(at_, self.hi, r)
         self.sum = self.lo + self.hi
 
     def slice(self, mid):
@@ -1264,15 +1342,19 @@ class Cols:
 class Rows:
     """Each key row's notes' span (first start, last end) of at, for Stir's Wrap around, Bend with the outline and
     the sideways colour flip; a key without notes counts as the nearest one with notes (lower on a tie, as nearest
-    does)."""
+    does). smooth: Smooth corners, % of the height the rows' ends are averaged over (never for Wrap around: it
+    wraps at the real notes)."""
 
-    def __init__(self, at):
+    def __init__(self, at, smooth=0.0):
         k = np.asarray(at[:, 2], np.int64)
         self.keys, inv = np.unique(k, return_inverse=True)
         self.a = np.full(len(self.keys), np.inf)
         self.b = np.full(len(self.keys), -np.inf)
         np.minimum.at(self.a, inv, np.asarray(at[:, 0], np.float64))
         np.maximum.at(self.b, inv, np.asarray(at[:, 1], np.float64))
+        if smooth > 0 and len(self.keys) > 2:
+            r = smooth / 100 * float(self.keys[-1] - self.keys[0]) / 2
+            self.a, self.b = smooth_ends(self.keys, self.a, r), smooth_ends(self.keys, self.b, r)
 
     def row(self, key):
         q = np.rint(np.asarray(key, np.float64))

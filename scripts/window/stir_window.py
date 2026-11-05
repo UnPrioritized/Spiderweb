@@ -14,7 +14,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MAKE_SHAPE_POINTS, MOST_STIRS,
-                            MOST_REACH_INSIDE, MOST_STRETCH, MOST_TIGHT, MOST_TURN, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
+                            MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_stack)
 from roll.roll_live import STROKE_TOOLS
@@ -77,6 +77,8 @@ def with_stir(old, i, change):
         del stack[i]
     else:
         was = stack[i]
+        if was == full_stir(None):  # (a stir made now: Smooth corners on from the start; old files keep their 0)
+            was = dict(was, smooth=NEW_SMOOTH, bend_smooth=NEW_SMOOTH)
         stack[i] = change(dict(was))
         if stack[i] == was:  # (nothing changed: old as it is, no plain stir padded in, hunt 11-04 8)
             return old
@@ -176,6 +178,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         cell.pack(side="left", anchor="n")
         self._pick(cell, "edge", STIR_EDGES, ttk.Label(cell, text=tr("stir.edge"))).pack(anchor="w", pady=(4, 0))
         self.picks["edge"]["word"].pack(anchor="w", before=self.picks["edge"]["box"])
+        # (Bend with the outline's Smooth corners, under its dropdown: live only with Bend, Chinese tester 11-05)
+        self._cell(cell, "bend_smooth", 0, MOST_SMOOTH, "stir.bend_smooth", "stir.bend_smooth_tip",
+                   "%").pack(anchor="w", pady=(4, 0))
         self._put(None, (1, knobs, 4), pady=0)
         word = ttk.Label(form, text=tr("stir.centre"))
         Tooltip(word, tr("stir.centre_tip"))
@@ -270,6 +275,15 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         for key, choices in (("mirror", MIRROR), ("flip_by", FLIP_BY)):  # (PLAN C / B, tester 11-04)
             word = ttk.Label(form, text=tr("stir." + key))
             self._put("flips", (1, word), (2, self._pick(form, key, choices, word), 3))
+            if key == "mirror":  # (Smooth corners right under it: the line the flips mirror at, how sharp it
+                # turns; Chinese tester 11-05, user picked the place)
+                word = ttk.Label(form, text=tr("stir.smooth"))
+                Tooltip(word, tr("stir.smooth_tip"))
+                cell = ttk.Frame(form)
+                self._number_box(cell, "smooth", 0, MOST_SMOOTH, word)
+                self.boxes["smooth"]["entry"].pack_configure(padx=(0, 1))  # (lined up with the dropdowns above)
+                ttk.Label(cell, text="%").pack(side="left")
+                self._put("flips", (1, word), (2, cell))
         self._put("flips", (1, self._area_tick(form, "reverse", False, tr("stir.reverse_tip")), 4))
         self.hint = ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
@@ -736,6 +750,17 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 "flip_of": any(s["flip_side"] or s["flip_up"] for s in sts)}
         for key, ok in live.items():
             self.picks[key]["box"].config(state="readonly" if on and ok else "disabled")
+        # (Smooth corners: the flips' one live with a flip by time / upside down, Bend's only with Bend; a shape
+        # with no stir yet shows what a new stir starts with)
+        for key, live_ in (("smooth", any((s["flip_side"] and s["flip_by"] == "time") or s["flip_up"] for s in sts)),
+                           ("bend_smooth", any(s["edge"] == "bend" for s in sts))):
+            b = self.boxes[key]
+            vals = {s[key] for s in sts if s != full_stir(None)} or {NEW_SMOOTH}
+            text = fmt(next(iter(vals))) if len(vals) == 1 else ""
+            if self.focus_get() is not b["entry"] or b["var"].get() == b["shown"]:
+                b["var"].set(text)
+            b["shown"] = text
+            b["entry"].config(state="normal" if on and live_ else "disabled")
         for key, empty in (("stretch", 100), ("tilt", 0)):
             b = self.boxes[key]
             vals = {s[key] for s in areas}
