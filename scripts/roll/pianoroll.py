@@ -303,6 +303,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.drag = ("box", self.x2t(x), 0.0, x, self.ruler_h, set(app.sels), app.sel)
 
     ruler_boxes = staticmethod(ruler_boxes)  # (roll_shared: the Hz window's too)
+    note_x_shift = 0.0  # added to a note's x before rounding to a pixel (roll/overlay_roll: Domino's rule)
 
     def ruler_band(self, e, kept, vel=False):
         """The mouse on the ruler's black band (black_bands of the kept boxes; vel: the velocity pane's own bands

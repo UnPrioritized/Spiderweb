@@ -10,6 +10,9 @@ from roll.roll_shared import SHIFT
 
 
 class OverlayRoll(PianoRoll):
+    # Domino cuts a note's x down to the pixel, Spiderweb rounds: half a pixel less = the same edges as Domino's
+    # (measured 2026-11-06, dev/scratch/dj_check.py; user: what you see is what you get). Thin notes still get 1 px.
+    note_x_shift = -0.4999
     def __init__(self, parent, app, scale, see_through, wheel=None):
         super().__init__(parent, app, scale)
         self.see_through = see_through
