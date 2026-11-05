@@ -198,7 +198,10 @@ def add_tracks(d, count, use10):
             break
         steps += 1
         chans = got[1]
-        if chans[last + 1] == 9 and not use10 and not drums:
+        new = len(chans) - 1  # (made right after the current one = the last: the next one goes after it, in order)
+        if not switch_track(d, new):
+            break
+        if chans[new] == 9 and not use10 and not drums:
             drums = 1  # (removed after the others: while it's there, Domino gives the next one another channel)
         else:
             made += 1
