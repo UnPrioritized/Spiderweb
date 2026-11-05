@@ -12,7 +12,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import NOTE_BEND_MOST, TUNE, pitch
-from roll.roll_shared import note_name
+from roll.roll_shared import CTRL, note_name
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, remember_place
 
@@ -135,7 +135,126 @@ def joined(notes):
     return out
 
 
+DETUNE_STEP = 50.0  # cents: the pull snaps to half a key (the plugin's; Ctrl = any whole cent)
+DETUNE_MOST = 1200.0  # cents each way at most (my pick: an octave)
+VOICES = (2, 9)  # copies a Quick detune makes, fewest / most (the plugin's)
+VOICES_START = 3  # ... to start with (wheel / Up / Down while pulling)
+
+
+def fanned(n, spread, count, ids):
+    """Note n fanned into `count` copies spread evenly from `spread` cents below to `spread` above its pitch, each
+    on the row nearest its pitch with its own tune (key + cents, as Set Pitch). The copy nearest the middle is n
+    itself (its id + slides); the others get ids from `ids` (an iterator) and no slides. Copies past the rows left
+    out."""
+    offs = [spread * (2.0 * k / (count - 1) - 1.0) for k in range(count)]
+    mid = min(range(count), key=lambda k: abs(offs[k]))
+    out = []
+    for k, off in enumerate(offs):
+        to = moved_to(n, pitch(n) + off / 100.0)
+        if to is None:
+            continue
+        m = copy.deepcopy(n)
+        m["key"], m["cents"] = to
+        if k != mid:
+            m["id"], m["to"] = next(ids), []
+        out.append(m)
+    return out
+
+
 class HzNoteTools:
+    def detune_edge(self, x, y):
+        """Quick detune (the plugin's): the selected note's index when (x, y) is on the top or bottom edge of its row
+        and it's the only one selected (Select tool; its bend stays inside its row), with "top" / "bottom"; else
+        None."""
+        if self.tool.get() != "select" or len(self.sel) != 1 or self.drag:
+            return None
+        i = next(iter(self.sel))
+        if i >= len(self.tones):
+            return None
+        n = self.tones[i]
+        if any(abs(p[1]) >= 0.5 for p in n.get("bend") or ()) or n.get("wobble"):
+            return None
+        x0, x1, y0 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
+        end = min(5 * self.s, (x1 - x0) / 3)  # (the ends stay the length's: hit)
+        band = max(2.0, min(3 * self.s, self.sy / 4))
+        if not x0 + end < x < x1 - end:
+            return None
+        if abs(y - y0) <= band:
+            return i, "top"
+        if abs(y - (y0 + self.sy)) <= band:
+            return i, "bottom"
+        return None
+
+    def detune_press(self, e):
+        got = self.detune_edge(e.x, e.y)
+        if got is None:
+            return False
+        i, edge = got
+        self.press_was = (set(self.sel), self.kept_box())
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        self.box_kept = None
+        self.drag = {"kind": "detune", "i": i, "edge": edge, "y": e.y, "before": before, "spread": 0.0,
+                     "count": VOICES_START, "note": copy.deepcopy(self.tones[i]),
+                     "rest": [copy.deepcopy(n) for j, n in enumerate(self.tones) if j != i]}
+        self.redraw()
+        self.show_status(e)
+        return True
+
+    def detune_drag(self, e):
+        d = self.drag
+        if not d or d["kind"] != "detune":
+            return False
+        rows = (d["y"] - e.y if d["edge"] == "top" else e.y - d["y"]) / self.sy
+        cents = max(0.0, min(DETUNE_MOST, rows * 100.0))
+        d["spread"] = float(round(cents)) if e.state & CTRL else round(cents / DETUNE_STEP) * DETUNE_STEP
+        self.detune_show(d)
+        self.show_status(e)
+        return True
+
+    def detune_count(self, step):
+        """Wheel / Up / Down while pulling: one voice more / fewer (VOICES). True when a Quick detune is held."""
+        d = self.drag
+        if not d or d["kind"] != "detune":
+            return False
+        d["count"] = max(VOICES[0], min(VOICES[1], d["count"] + step))
+        self.detune_show(d)
+        self.show_status()
+        return True
+
+    def detune_show(self, d):
+        """The notes as the pull has them now (the held note's copies in place of it; spread 0 = as it was)."""
+        n = d["note"]
+        if d["spread"] <= 0:
+            self.tones, self.sel = copy.deepcopy(d["before"]), {d["i"]}
+        else:
+            top = max([m["id"] for m in d["rest"]] + [n["id"]])
+            copies = fanned(n, d["spread"], d["count"], iter(range(top + 1, top + 100)))
+            self.tones = copy.deepcopy(d["rest"]) + copies
+            self.sel = set(range(len(d["rest"]), len(self.tones)))
+        self.redraw()
+
+    def detune_release(self, e):
+        d = self.drag
+        if not d or d["kind"] != "detune":
+            return False
+        self.drop_drag()
+        if d["spread"] <= 0 or self.tones == d["before"]:
+            self.tones, self.sel = copy.deepcopy(d["before"]), {d["i"]}
+            self.sel_before = None
+            self.redraw()
+        else:
+            self.commit(tr("hz.step_detune"), d["before"])
+        self.point_again()
+        return True
+
+    def detune_status(self):
+        d = self.drag
+        if not d or d["kind"] != "detune":
+            return ""
+        return "     " + tr("hz.detune_held", n=d["count"], cents=fmt(d["spread"]))
+
     def picked_or(self, i):
         return sorted(self.sel) if i in self.sel else [i]
 

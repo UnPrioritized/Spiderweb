@@ -250,6 +250,9 @@ class HzMouse:
     def on_motion(self, e):
         if self.draw_motion(e) or self.bend_motion(e):  # (a drawing tool: hz_draw.py; Bend: hz_bend.py)
             return
+        if self.detune_edge(e.x, e.y):  # (the one selected note's top / bottom edge: Quick detune, hz_note_tools.py)
+            self.canvas.config(cursor="sb_v_double_arrow")
+            return self.show_status(e)
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
@@ -279,8 +282,8 @@ class HzMouse:
         if self.fx.sel:  # (the effect points selected aren't any more)
             self.fx.sel = set()
             self.fx.redraw()
-        if not place and self.bend_press(e):  # (the Bend tool on a note: hz_bend.py)
-            return
+        if not place and (self.bend_press(e) or self.detune_press(e)):  # (the Bend tool on a note: hz_bend.py;
+            return  # the one selected note's top / bottom edge: Quick detune, hz_note_tools.py)
         kept, self.box_kept, sel0 = self.kept_box(), None, set(self.sel)
         self.press_was = (sel0, kept)  # (what Esc / Ctrl+Z while the mouse is held go back to: cancel_drag)
         self.drop_drag()
@@ -431,7 +434,7 @@ class HzMouse:
             self.drag["double"] = True
 
     def on_drag(self, e):
-        if self.draw_drag(e) or self.bend_drag(e):
+        if self.draw_drag(e) or self.bend_drag(e) or self.detune_drag(e):
             return
         d = self.drag
         if not d:
@@ -699,7 +702,7 @@ class HzMouse:
                     s["in"] = min(max(0.0, s0["in"] - (n["t"] - was["t"])), n["len"])
 
     def on_release(self, e):
-        if self.draw_release(e) or self.bend_release(e):
+        if self.draw_release(e) or self.bend_release(e) or self.detune_release(e):
             return
         d = self.drag
         self.drop_drag()
@@ -992,7 +995,7 @@ class HzMouse:
         if d["kind"] in ("box", "boxmove", "seek"):  # (nothing selected by it yet / in it: user, like many MIDI
             #                                           programs)
             return
-        if d["kind"] == "new":
+        if d["kind"] in ("new", "detune"):  # (a Quick detune being pulled: called off, the note as it was)
             return self.cancel_drag()
         if d["kind"] in ("bendpt", "bendcurve", "wobbledepth", "wobblerate"):  # (a bend point held: it goes; a curve
             # square: straight again; a wobble depth line or speed post: no wobble)

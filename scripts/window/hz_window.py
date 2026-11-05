@@ -279,6 +279,8 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzMouse, HzGates, HzSound,
             for k in (k, k.upper()):  # keys: Quick Ramp, Align Note-On, Join; hz_bend.py / hz_note_tools.py)
                 c.bind(f"<KeyPress-{k}>", lambda e, fn=fn: None if e.state & CTRL else
                        "break" if self.drag or self.loudness.held() else fn() or "break")
+        for k, step in (("<Up>", 1), ("<Down>", -1)):  # (a Quick detune pulled: one voice more / fewer)
+            c.bind(k, lambda e, step=step: "break" if self.detune_count(step) else None)
         for k in ("Alt_L", "Alt_R"):  # (Sketch: every piece's curve square shown while Alt is held, hz_sketch.py)
             c.bind(f"<KeyPress-{k}>", lambda e: self.sketch_alt_to(True))
             c.bind(f"<KeyRelease-{k}>", lambda e: self.sketch_alt_to(False))
