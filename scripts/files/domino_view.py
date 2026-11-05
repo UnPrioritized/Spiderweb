@@ -12,6 +12,7 @@ Windows only: elsewhere every function answers "no Domino".
 """
 
 import ctypes
+import struct
 import hashlib
 import os
 from dataclasses import dataclass
@@ -347,6 +348,20 @@ def undo_depth(d):
     ph, c, _ = got
     u = _i32(ph, c + d.build.undo_at)
     return _i32(ph, (u & 0xFFFFFFFF) + 0x10) if u else None
+
+
+def track_ids(d):
+    """Each track's object in Domino's memory, in track-list order (stays the same while the track exists and the
+    same Domino runs: tracks added / removed / moved above are found again by it), or None."""
+    got = _song_obj(d)
+    if got is None or not d.build.tracks_at:
+        return None
+    ph, _, s = got
+    arr, n = _i32(ph, s + d.build.tracks_at), _i32(ph, s + d.build.tracks_at + 4)
+    if not arr or n is None or not 1 <= n <= 65535:
+        return None
+    raw = _read(ph, arr & 0xFFFFFFFF, 4 * n)
+    return list(struct.unpack(f"<{n}I", raw)) if len(raw) == 4 * n else None
 
 
 def song_path(d):
