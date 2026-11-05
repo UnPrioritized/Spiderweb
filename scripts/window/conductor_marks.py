@@ -6,11 +6,12 @@ items and boxes, user: like Domino's separate windows), put on the bar line at o
 already = that one is changed. Right-click on a mark: Change... / Remove (RIGHT-CLICK NEVER DELETES by itself, the
 pane's rule). The first time signature (beat 0) can't be removed, only changed. Each change = one undo step."""
 
+import bisect
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr, trn
-from notes.meter import BOTTOMS, TOPS, at_beat, bar_line, key_name, on_bars, sig_text, sigs_of
+from notes.meter import BOTTOMS, TOPS, at_beat, bar_at, bar_line, key_name, on_bars, sig_text, sigs_of
 from window import look
 
 MARK_LEN = 10  # px (x the window's scale): a mark's line down from the pane's top edge
@@ -217,14 +218,16 @@ class ConductorMarks:
         tempo["keysigs"] = sorted(keys, key=lambda k: k[0])
         self.app.meter_changed()
 
-    def put_domino_sigs(self, sigs, keys, at, length, how):
+    def put_domino_sigs(self, sigs, keys, at, length, how, backs=None):
         """Paste from Domino's time / key signatures ([(beat from the paste's start, top, bottom)], [(beat, sharps,
         minor)]) from beat at, in the same undo step as the paste. Each goes on the project's BAR LINE at or before
         its spot (hunt 2026-10-23: one at a mid-bar play line cut the bar before short; Domino only has them on bar
         lines), the time signatures one by one (each moves the bar lines after it). "replace": the project's inside
         the pasted stretch go, and what was in effect at its end comes back on the next bar line when it differs
         (Domino ADDS a pasted Conductor's items, so this is what the song looks like after); "add": among them (one
-        on the same beat: replaced). The first time signature stays on beat 0. How many were put."""
+        on the same beat: replaced). The first time signature stays on beat 0. How many were put. backs: {key: the
+        mark to come back at the end, or None for none} in place of the one in effect there now (a stretch moved
+        in the track list: worked out before its old place was emptied, track_tempo.move)."""
         tempo = self.app.tempo
         end = at + length
         cur = [list(m) for m in sigs_of(tempo)]
@@ -232,18 +235,25 @@ class ConductorMarks:
         for key, new in (("sigs", sigs), ("keysigs", keys)):
             if not new:
                 continue
-            old = cur if key == "sigs" else [list(m) for m in tempo.get(key) or []]
-            back = at_beat(old, end)
+            old = [list(m) for m in cur] if key == "sigs" else [list(m) for m in tempo.get(key) or []]
+            back = backs[key] if backs is not None else at_beat(old, end)
             if how == "replace":
                 old = [m for m in old if not at - 1e-9 <= m[0] <= end + 1e-9 or key == "sigs" and m[0] == 0]
+            # (one pass, each mark found by halving: a list made again per mark froze thousands, hunt 2026-11-05)
+            cur_starts, starts = [m[0] for m in cur], [m[0] for m in old]
             for b, *rest in sorted(new, key=lambda m: m[0]):
-                pos = round(bar_line(cur, at + b), 9)
-                if not any(abs(m[0] - pos) < 1e-9 for m in old) and \
-                        (at_beat(old, pos) or [None])[1:] == rest:  # (a repeat of the one before: not added)
+                pos = round(bar_at(cur, cur_starts, at + b), 9)
+                j = bisect.bisect_left(starts, pos - 1e-9)
+                if j < len(old) and abs(old[j][0] - pos) < 1e-9:
+                    old[j] = [pos, *rest]
+                    starts[j] = pos
+                elif j and old[j - 1][1:] == rest:  # (a repeat of the one before: not added)
                     continue
-                old = sorted([m for m in old if abs(m[0] - pos) >= 1e-9] + [[pos, *rest]], key=lambda m: m[0])
+                else:
+                    old.insert(j, [pos, *rest])
+                    starts.insert(j, pos)
                 if key == "sigs":
-                    cur = old
+                    cur, cur_starts = old, starts
             if how == "replace" and back is not None and not any(abs(m[0] - end) < 1e-9 for m in old) \
                     and (at_beat(old, end) or [None])[1:] != back[1:]:
                 old = sorted(old + [[round(end, 9), *back[1:]]], key=lambda m: m[0])
@@ -265,9 +275,10 @@ class ConductorMarks:
         if not keys:
             return
         sigs = sigs_of(tempo)
+        starts = [m[0] for m in sigs]  # (bar_at: no bar list made per key, hunt 2026-11-05)
         on = {}
         for k in keys:
-            on[round(bar_line(sigs, k[0]), 9)] = k[1:]
+            on[round(bar_at(sigs, starts, k[0]), 9)] = k[1:]
         tempo["keysigs"] = [[b, *rest] for b, rest in sorted(on.items())]
 
     def remove_sig(self, mark, row):

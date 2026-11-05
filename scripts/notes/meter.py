@@ -44,14 +44,25 @@ def on_bars(sigs):
     """Time signatures, in order, each moved back to the start of the bar it lands in (Domino's rule, user
     2026-10-23: changing bar 3's 3/4 to 5/4 moved the 4/4 from bar 5 back to bar 4's start); two on one bar line:
     the later one."""
-    out = []
+    out, starts = [], []  # (starts: out's beats, kept beside it: bar_at, no bar list made per signature)
     for s in sorted(sigs, key=lambda s: s[0]):
-        b = round(bar_line(out, s[0]), 9) if out else s[0]
+        b = round(bar_at(out, starts, s[0]), 9) if out else s[0]
         if out and abs(out[-1][0] - b) < 1e-9:
             out[-1] = [b, *s[1:]]
+            starts[-1] = b
         else:
             out.append([b, *s[1:]])
+            starts.append(b)
     return out
+
+
+def bar_at(sigs, starts, beat):
+    """bar_line(sigs, beat) for sigs whose beats the caller keeps in starts: nothing made per call (thousands of
+    signatures moved or pasted at once froze for seconds, hunt 2026-11-05). The same answer as bar_line."""
+    i = max(0, bisect.bisect_right(starts, beat + EPS) - 1)
+    start, top, bottom = sigs[i][:3]
+    n = bar_len(top, bottom)
+    return start + math.floor((beat - start) / n + EPS) * n
 
 
 def clean_keysigs(data):

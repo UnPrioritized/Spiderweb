@@ -95,6 +95,8 @@ def tempo_only(app, kind, tempo, dt=0.0):
         if clip is None:
             app.status.config(text=tr("tracks.tempo_empty"))
             return False
+        clip["n"] = app.copy_stamp()  # (the tempo copy from now: newer than the shapes copied)
+        app.tempo_clip = clip
         n = track_tempo.count(clip)
         app.status.config(text=trn("tracks.tempo_copied", n, n=n))
         app.drop_own_copy()  # (Spiderweb's older copy off the clipboard, as the Conductor pane's copy)

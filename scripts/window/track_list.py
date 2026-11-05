@@ -1204,7 +1204,7 @@ class TrackList(tk.Canvas):
             self.app.set_playhead(self.ticked(beat) if e.state & 0x1 else self.snapped(beat))
         if row == CONDUCTOR_ROW:  # (the tempo's row highlighted; the piano roll keeps what it showed)
             return self.set_conductor(True)
-        self.conductor_on = False
+        self.set_conductor(False)
         self.current = None if row < 0 else int(self.tracks()[row])
         if c >= 0:  # (a sub-row: only that channel shown, user 2026-10-28; a Shift+click's range starts here)
             self.current_ch = c
@@ -1357,10 +1357,9 @@ class TrackList(tk.Canvas):
         if not spans:
             return None
         # (no change inside = nothing, like Domino: a held stretch pasted with notes would change the tempo there)
+        # (kept as the tempo copy only once the copy worked: tempo_only / App.put_clipboard; a refused copy left the
+        # old copies alone, hunt 2026-11-05)
         clip = track_tempo.clip_of(self.app, spans) if track_tempo.changes(self.app, spans) else None
-        if clip is not None and kind in ("clip", "cut"):
-            clip["n"] = self.app.copy_stamp()
-            self.app.tempo_clip = clip
         return {"spans": spans, "clip": clip}
 
     def box_work(self, kind, dt=0.0, drow=0):
@@ -1371,6 +1370,9 @@ class TrackList(tk.Canvas):
         if not self.boxes:
             return
         tempo = self.box_tempo(kind)
+        if tempo is not None and tempo["clip"] is not None and kind in ("move", "copy"):
+            from window.track_tempo import sig_dt  # (a time signature moved lands on a bar line, all with it)
+            dt = sig_dt(self.app, tempo["spans"], dt, kind == "copy")
         notes = note_boxes(self.boxes)
         if tempo is not None and not has_notes(self.app, notes):
             return tempo_only(self.app, kind, tempo, dt)
@@ -1393,9 +1395,11 @@ class TrackList(tk.Canvas):
         2026-11-05)."""
         app = self.app
         clip = getattr(app, "tempo_clip", None)
-        own = app.shared_clip() is None and not app.domino_newer()  # (else what was copied elsewhere comes in)
-        if self.conductor_on or conductor or own and clip is not None and \
-                clip.get("n", 0) > getattr(app, "shapes_stamp", 0):
+        # (a copy made in Domino / a shared line copied since Spiderweb's last copy comes in first, also with the
+        # Conductor row lit: the ONE PASTE rule, hunt 2026-11-05)
+        own = app.shared_clip() is None and not app.domino_newer()
+        if own and (self.conductor_on or conductor or clip is not None and
+                    clip.get("n", 0) > getattr(app, "shapes_stamp", 0)):
             return self.paste_tempo(clip)  # (the Conductor row lit, or the tempo copied last)
         both = (own and clip is not None and clip.get("with") is not None and clip["with"] is app.clipboard
                 and app.clip_kind == "shapes")
@@ -1403,19 +1407,23 @@ class TrackList(tk.Canvas):
         top = app.last_step()
         app.paste()
         new = list(range(before, len(app.shapes)))
+        tempo_at = None
         if both and new and app.last_step() is not top:  # (in the paste's undo step)
             from notes.engine import cached_path
             start = min(b for sh in app.clipboard for b, _ in cached_path(sh))
             moved = min(b for i in new for b, _ in cached_path(app.shapes[i])) - start
-            self.put_tempo(clip, clip["from"] + moved, tr("tempo.step_paste"))
+            tempo_at = self.put_tempo(clip, clip["from"] + moved, tr("tempo.step_paste"))
         r = app.rendered
         mine = np.isin(r[:, 5], new) if new and len(r) else np.zeros(len(r), bool)
         rows = self.note_rows()[mine]
         rows = rows[rows >= 0]
         if not len(rows):
             return
-        self.boxes = [{"t0": int(r[mine, 0].min()) / app.ppq, "t1": int(r[mine, 1].max()) / app.ppq,
-                       "rows": (int(rows.min()), int(rows.max()))}]
+        t0, t1 = int(r[mine, 0].min()) / app.ppq, int(r[mine, 1].max()) / app.ppq
+        lo = int(rows.min())
+        if tempo_at is not None:  # (the tempo came along: the box holds it too, so a drag / Delete takes both, hunt)
+            t0, t1, lo = min(t0, tempo_at), max(t1, tempo_at + clip["length"]), CONDUCTOR_ROW
+        self.boxes = [{"t0": t0, "t1": t1, "rows": (lo, int(rows.max()))}]
         self.request_redraw()
 
     def paste_tempo(self, clip):
@@ -1435,7 +1443,7 @@ class TrackList(tk.Canvas):
     def put_tempo(self, clip, at, name):
         """clip laid from beat at (on a tick; in the caller's undo step) -> where it went."""
         from window import track_tempo
-        pane = self.app.tempo_pane
+        pane = track_tempo.visual(self.app)  # (never kept inside a Keep timing part: Draw: Heard tempo, hunt)
         at = pane.tick_beat(max(0.0, at), skip=pane.ed()["points"])
         track_tempo.put(self.app, clip, at, name)
         return at
@@ -1596,7 +1604,7 @@ class TrackList(tk.Canvas):
         """The All tracks row highlighted (current None): the piano roll shows every track and Spiderweb picks new
         shapes' channels (Esc, a click on the row, All tracks in the ▾ list)."""
         self.selected = set()
-        self.conductor_on = False
+        self.set_conductor(False)
         if self.current is not None:
             self.current = None
             self.shown_changed()
@@ -1604,7 +1612,11 @@ class TrackList(tk.Canvas):
             self.request_redraw()
 
     def set_conductor(self, on):
-        """The Conductor row highlighted (on) or not; the tracks' highlight shows again when it goes."""
+        """The Conductor row highlighted (on) or not; the tracks' highlight shows again when it goes, and the
+        Conductor pane gives the keys back (hunt 2026-11-05: after a Tab round trip a track's Ctrl+V pasted tempo)."""
+        app = self.app
+        if not on and getattr(app, "key_pane", None) is getattr(app, "tempo_pane", None) is not None:
+            app.key_pane = None
         if self.conductor_on != on:
             self.conductor_on = on
             self.request_redraw()
