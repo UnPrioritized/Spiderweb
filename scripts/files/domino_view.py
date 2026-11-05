@@ -41,6 +41,9 @@ class Build:
     tracks_at: int = 0  # S + this -> the track list (pointers; an MFC array: + 4 = how many, then its room)
     track_now: int = 0  # S + this: the current track (0 = Conductor)
     track_ch: int = 0   # a track + this: its channel (byte, 0-based)
+    events_at: int = 0  # a track + this -> its events (pointers, tick order, every kind; + 4 = how many)
+    note_vt: int = 0    # a note event's first 4 bytes (+4 tick, +8 selected byte, +0xC key, +0xD velocity, +0x10 gate)
+    undo_at: int = 0    # C + this -> the undo list; + 0x10 there = how many steps it holds
 
 
 # sha256 of Domino.exe -> Build. Only builds checked by hand: an unknown one is never guessed at.
@@ -49,7 +52,7 @@ BUILDS = {
         "Domino 1.43 (with dominohook)", p_slot=0x5B49C8, p_vtable=0x55F490, top_row=0xB8, row_px=0x1CC,
         beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234,
         c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC,
-        tracks_at=0x14, track_now=0x24, track_ch=0x8),
+        tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, note_vt=0x55AB28, undo_at=0x188),
 }
 UNITS_PER_BEAT = 24
 
@@ -316,6 +319,93 @@ def song_place(d):
     if tick is None or ppq is None or not 0 <= tick < 2 ** 31 or not 1 <= ppq <= 65535:
         return None
     return tick, ppq
+
+
+def _song_obj(d):
+    """(process handle, C, S) or None: the song position object and the song, checked."""
+    b, ph = d.build, d.handle()
+    if b is None or not b.c_slot or not ph:
+        return None
+    c = _i32(ph, b.c_slot)
+    if not c or (_i32(ph, c & 0xFFFFFFFF) or 0) & 0xFFFFFFFF != b.c_vtable:
+        return None
+    c &= 0xFFFFFFFF
+    s = _i32(ph, c + b.song)
+    return (ph, c, s & 0xFFFFFFFF) if s else None
+
+
+def undo_depth(d):
+    """How many steps Domino's undo list holds (changes with every edit, undo, redo), or None. Found 2026-11-06
+    (dev/scratch/dk_undo.py, dev/data/domino-notes-memory.md)."""
+    got = _song_obj(d)
+    if got is None or not d.build.undo_at:
+        return None
+    ph, c, _ = got
+    u = _i32(ph, c + d.build.undo_at)
+    return _i32(ph, (u & 0xFFFFFFFF) + 0x10) if u else None
+
+
+def _read(ph, addr, size):
+    _, k = _api()
+    buf = ctypes.create_string_buffer(size)
+    got = ctypes.c_size_t()
+    if not k.ReadProcessMemory(ph, ctypes.c_void_p(addr), buf, size, ctypes.byref(got)):
+        return b""
+    return buf.raw[:got.value]
+
+
+def track_notes(d, track):
+    """Track's notes as an int64 array (tick, gate, key, velocity, selected 0/1), Domino's order (by tick), read from
+    its memory (read-only), or None. 100,000 notes ~0.04 s: the pointer list in one read, then only the memory
+    pages the notes sit on (dev/scratch/dk_big.py)."""
+    import numpy as np
+    got = _song_obj(d)
+    b = d.build
+    if got is None or not b.events_at:
+        return None
+    ph, _, s = got
+    arr, n = _i32(ph, s + b.tracks_at), _i32(ph, s + b.tracks_at + 4)
+    if not arr or n is None or not 0 <= track < n:
+        return None
+    t = _i32(ph, (arr & 0xFFFFFFFF) + 4 * track)
+    if not t:
+        return None
+    t &= 0xFFFFFFFF
+    ev, m = _i32(ph, t + b.events_at), _i32(ph, t + b.events_at + 4)
+    if m is None or not 0 <= m <= 50_000_000:
+        return None
+    if m == 0:
+        return np.zeros((0, 5), np.int64)
+    raw = _read(ph, ev & 0xFFFFFFFF, 4 * m)
+    if len(raw) != 4 * m:
+        return None
+    ptrs = np.frombuffer(raw, np.uint32).astype(np.int64)
+    pages = np.unique(np.concatenate([ptrs >> 12, (ptrs + 0x13) >> 12]))
+    blobs = []
+    for run in np.split(pages, np.flatnonzero(np.diff(pages) > 1) + 1):
+        lo, size = int(run[0]) << 12, len(run) << 12
+        data = _read(ph, lo, size)
+        if len(data) == size:
+            blobs.append((lo, np.frombuffer(data, np.uint8)))
+        else:  # (a page that can't be read: page by page, unreadable ones as zeros = not notes)
+            for pg in run:
+                blobs.append((int(pg) << 12, np.frombuffer(_read(ph, int(pg) << 12, 4096).ljust(4096, b"\0"), np.uint8)))
+    los = np.array([lo for lo, _ in blobs], np.int64)
+    which = np.searchsorted(los, ptrs, side="right") - 1
+    out = np.zeros((m, 6), np.int64)
+    for j, (lo, data) in enumerate(blobs):
+        sel = np.flatnonzero(which == j)
+        off = ptrs[sel] - lo
+        off = off[off + 0x14 <= len(data)]
+        sel = sel[:len(off)]
+        word = lambda o: data[(off + o)[:, None] + np.arange(4)].copy().view(np.uint32).ravel()  # noqa: E731
+        out[sel, 0] = word(0)
+        out[sel, 1] = word(4).view(np.int32)
+        out[sel, 2] = word(0x10).view(np.int32)
+        out[sel, 3] = data[off + 0xC]
+        out[sel, 4] = data[off + 0xD]
+        out[sel, 5] = data[off + 8] != 0
+    return out[out[:, 0] == b.note_vt, 1:]
 
 
 def song_tracks(d):
