@@ -2690,10 +2690,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         left_out = self.put_into_current(sh)
         self.shapes.append(sh)
-        if getattr(self, "stir_window", None):  # (a Stir area being drawn: this stroke goes into it)
-            self.stir_window.took(sh)
-        elif self.companion is not None:  # (drawn on Domino: goes into Domino once finished, domino_companion.py)
-            self.companion.drawn(sh)
+        stir = getattr(self, "stir_window", None)
+        if stir and stir.drawing and not stir.drawing["pick"]:  # (a Stir area being drawn: this stroke goes into it)
+            stir.took(sh)
+            if self.companion is not None:  # (shown on Domino while it's drawn, never sent: Stir uses it up)
+                sh["domino_send"] = 1
+        elif self.companion is not None:  # (drawn on Domino: goes into Domino once finished, domino_companion.py;
+            self.companion.drawn(sh)      # also with the Stir window open, hunt 2026-11-06)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
         if left_out:
@@ -3835,6 +3838,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def on_close(self):
         if self.drawer and self.drawer.winfo_exists() and not self.drawer.may_quit():
             return
+        if self.companion is not None:  # (drawing on Domino: back first, so the project's own PPQ is what's saved)
+            self.companion.stop(now=True)
         if self.hz_window and self.hz_window.draft is not None:  # (a path drawn there: made, as when the Hz bass
             self.hz_window.make_draft()  # window itself is closed)
         job = getattr(self, "_exporting", None)

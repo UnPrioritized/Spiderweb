@@ -29,13 +29,14 @@ import numpy as np
 from files import domino_link as dl
 from files import domino_view as dv
 from files import settings, system
-from files.domino_clip import clip_data, cut_gates
+from files.domino_clip import LONGEST, MOST_NOTES, clip_data, cut_gates
 from files.lang import tr, trn
 from notes.custom import notes_shape
 from notes.engine import SHAPE_DEFAULTS, clean_shape
 from roll.overlay_roll import OverlayRoll
 from window import domino_overlay as dov
 from window import look
+from window.big_ask import ask as ask_big
 from window.tool_picker import ToolPicker
 from window.widgets import Tooltip
 
@@ -112,7 +113,12 @@ class Companion:
         self.pending = []      # the shape drawn last here: changed still, goes into Domino when you're done with it
         self.ready = []        # shapes done with: into Domino as soon as nothing else is going to Domino
         self.landed = []       # (shapes, n, Domino steps) in Domino now: off the overlay once nothing is held there
-        self.after_send = None  # (key code, state): a key of Domino's pressed while sending, pressed there after
+        self.after_send = []   # (key code, state) of Domino's pressed while sending: pressed there after, in order
+        self.job = None        # the Domino a send / Take going on talks to (from start to end, hunt 2026-11-06)
+        self.leaving = False   # (Spiderweb pressed: what waits goes in first, then back to the main window)
+        self.adopted = []      # (windows of the main window's shown over Domino: given back when this ends)
+        self.old_tops = {str(w) for w in app.winfo_children() if isinstance(w, tk.Toplevel)}  # (made before: left be)
+        self._ticks = 0
         self.quick = None      # a flip on Domino's selection (Take + flip + Send): its steps leave the history
         self._then = None      # (what a Take does next with the shape it made)
         held = self._before_held = app.undo_stack + app.redo_stack  # (kept: their ids stay theirs)
@@ -226,16 +232,17 @@ class Companion:
             return "break"
         k = (e.keycode, e.state)
         if self.pending or self.ready or self.busy:
-            self.after_send = k
+            self.after_send.append(k)
             self.done_drawing()
         else:
             dl.pass_key(d, *k)
         return "break"
 
     def pass_waiting_key(self):
-        k, self.after_send = self.after_send, None
-        if k and self.overlay.domino is not None:
-            dl.pass_key(self.overlay.domino, *k)
+        keys, self.after_send = self.after_send, []
+        d = self.overlay.domino
+        for k in keys if d is not None else ():
+            dl.pass_key(d, *k)
 
     def pressed(self):
         """A press on the overlay: Spiderweb takes the keyboard (Esc, Ctrl+Z, Delete... for what's drawn)."""
@@ -270,6 +277,9 @@ class Companion:
             # its own Ctrl+Z from now on)
             self.unlink()
         self.close_list_elsewhere()
+        self._ticks += 1
+        if self._ticks % 10 == 0:
+            self.adopt_windows()
         if self.landed:
             self.take_off()
         self.flush()
@@ -277,6 +287,25 @@ class Companion:
             return
         if self.app.ppq != (self.domino_ppq() or self.app.ppq):  # (another song opened in Domino)
             self.match_ppq()
+
+    def adopt_windows(self):
+        """Windows opened from the overlay (its right-click menu: Claw machine, Tumours, Copy along a path...) belong
+        to the main window, hidden while this is on, so they never showed (hunt 2026-11-06): shown over Domino,
+        belonging to the bar until back."""
+        app = self.app
+        mine = {str(w) for w in app.companion_tops} | self.old_tops
+        for w in app.winfo_children():
+            if not isinstance(w, tk.Toplevel) or str(w) in mine or any(w is a for a in self.adopted):
+                continue
+            try:  # (a transient of the withdrawn main window is withdrawn with it: only windows made since this
+                # started, so ones kept hidden on purpose never pop up)
+                if not w.winfo_viewable() and str(w.wm_transient()) == str(app):
+                    w.transient(self.bar)
+                    w.deiconify()
+                    w.lift()
+                    self.adopted.append(w)
+            except tk.TclError:
+                pass
 
     def close_list_elsewhere(self):
         """The bar's tool list closes when clicked outside it (it never has the keyboard, so it can't tell)."""
@@ -332,10 +361,15 @@ class Companion:
             self.pass_waiting_key()
 
     def flush(self):
-        """The shapes done with go into Domino (one paste at a time)."""
+        """The shapes done with go into Domino (one paste at a time; never while Domino is mid-action: the mouse
+        held, a menu / window of Domino's open: tried again on the next tick, hunt 2026-11-06)."""
         if self.busy:
             return
-        shapes, self.ready = self.alive(self.ready), []
+        self.ready = self.alive(self.ready)
+        d = self.overlay.domino
+        if self.ready and d is not None and dl.alive(d) and dl.busy(d):
+            return
+        shapes, self.ready = self.ready, []
         if shapes:
             self.send(shapes)
         if not self.busy and self.after_send:  # (nothing went: the key of Domino's goes on anyway)
@@ -365,37 +399,73 @@ class Companion:
         self.pending = [s for s in self.pending if not any(s is x for x in shapes)]
         if not len(rows):
             return self.say(tr("companion.no_notes"), warn=True)
-        self.was_front = dl.front_window()  # (before the ruler click: Domino may take the keyboard)
-        self.busy = True
-        if app.channel_mode.get() == "single":
-            there = []
-            dl.Copy(self.bar, d, lambda got, ppq, start: self.send_single(shapes, rows, got, ppq, start, there),
-                    whole=True, passengers=there)
-            return
-        steps = 0
-        need = len(np.unique(rows[:, 4]))
+        # Copy to Domino's own limits (hunt 2026-11-06): too long / too many refused, a big one asked first
+        if int(rows[:, 1].max()) - int(rows[:, 0].min()) > LONGEST:
+            return self.say(tr("project.too_long_to_copy_for_domino", longest=LONGEST), warn=True)
+        if len(rows) > MOST_NOTES:
+            return self.say(tr("project.too_many_to_copy_for_domino", notes=len(rows), most=MOST_NOTES), warn=True)
         got = dv.song_tracks(d)
-        if need > 1 and got is not None and need > len(got[1]) - got[0]:
-            steps = dl.add_tracks(d, need - (len(got[1]) - got[0]), app.all16())
-            if steps is None:
-                return self.not_sent(tr("companion.send_failed_tracks"))
-        self.paste_rows(shapes, rows, int(rows[:, 0].min()), None, steps)
+        if got is not None and got[0] == 0:  # (the Conductor track: tempos there, never notes, hunt 2026-11-06)
+            return self.say(tr("companion.conductor_current"), warn=True)
+        if not ask_big(app, "domino", len(rows), parent=self.bar):
+            return None
+        self.was_front = dl.front_window()  # (before the ruler click: Domino may take the keyboard)
+        self.busy, self.job = True, d
+        try:
+            if app.channel_mode.get() == "single":
+                there = []
+                dl.Copy(self.bar, d, lambda got, ppq, start: self.safely(
+                    self.send_single, shapes, rows, got, ppq, start, there), whole=True, passengers=there)
+                return None
+            steps = 0
+            need = len(np.unique(rows[:, 4]))
+            if need > 1 and got is not None and need > len(got[1]) - got[0]:
+                steps = dl.add_tracks(d, need - (len(got[1]) - got[0]), app.all16())
+                if steps is None:
+                    return self.not_sent(tr("companion.send_failed_tracks"))
+            self.paste_rows(shapes, rows, int(rows[:, 0].min()), None, steps)
+        except Exception:
+            self.failed()
+        return None
+
+    def safely(self, run, *args):
+        """run(*args) for a step of a send / Take coming back later: a failure never leaves it busy for good (no
+        send would go any more, hunt 2026-11-06)."""
+        try:
+            run(*args)
+        except Exception:
+            self.failed()
+
+    def failed(self):
+        import sys
+        from files.errors import write_log
+        write_log(*sys.exc_info(), "(Draw on Domino)")
+        self.busy, self.quick = False, None
+        self.say(tr("companion.send_failed_error"), warn=True)
+        self.app.after_idle(self.flush)
 
     def not_sent(self, text):
         """A send stopped before anything was pasted: the shapes stay on the overlay (Send tries again)."""
         self.busy = False
-        d = self.overlay.domino
-        if d is not None and self.drawing():
+        d = self.job
+        if d is not None and self.drawing() and dl.alive(d):
             dl.give_back(d, self.was_front)
         self.say(text, warn=True)
         self.app.after_idle(self.flush)
 
-    def paste_rows(self, shapes, rows, first, end, steps, swap=False, cc=None):
+    def paste_rows(self, shapes, rows, first, end, steps, swap=False, cc=None, since=None):
         """rows (start, end, key, velocity, slot...) pasted at Domino's cursor put on first (or the grid place
         before it); swap: Domino's Substitute Paste over [cursor, end) (the stretch's notes and other events
-        replaced). steps = Domino steps made before this send's paste (tracks added)."""
-        app, d = self.app, self.overlay.domino
+        replaced). steps = Domino steps made before this send's paste (tracks added). Domino mid-action (the
+        mouse held, a menu / window open): tried again a little later (since = when the first try was)."""
+        app, d = self.app, self.job
+        if not dl.alive(d):
+            return self.not_sent(tr("companion.send_failed_domino"))
+        since = since or time.monotonic()
         at = dl.put_cursor(d, first)
+        if at is None and (dl.busy(d) or dl.mouse_down()) and time.monotonic() - since < 20:
+            self.bar.after(60, lambda: self.safely(self.paste_rows, shapes, rows, first, end, steps, swap, cc, since))
+            return None
         if at is None:
             return self.not_sent(tr("companion.send_failed_cursor"))
         if swap:  # (the notes from the cursor on: the grid may have put it before first)
@@ -414,9 +484,11 @@ class Companion:
         """Single channel (user 2026-11-06): the current track's notes read (Select All + Copy), overlaps removed
         over both like Spiderweb's Single channel; Domino's notes that change = the stretch from the first changed
         note on replaced (Substitute Paste, with that stretch's other events as they were): one Domino step."""
-        app, d = self.app, self.overlay.domino
-        if d is None:
+        app, d = self.app, self.job
+        if not dl.alive(d) or there is None and ppq == "domino":
             return self.not_sent(tr("companion.send_failed_domino"))
+        if there is None and ppq == "busy":
+            return self.not_sent(tr("companion.send_failed_busy"))
         if there is None and ppq != "nothing":  # (Domino couldn't copy: only the new notes' own overlaps go)
             self.say(tr("companion.track_unread"), warn=True)
         if there is not None and ppq != app.ppq:
@@ -431,7 +503,7 @@ class Companion:
         if not len(changed):  # (Domino's notes stay as they are: a plain paste of the new ones)
             if not len(new):
                 self.busy = False
-                self.landed.append((shapes, 0, 0))  # (all already there: nothing pasted, nothing to undo there)
+                self.landed.append((shapes, 0, (0, d)))  # (all already there: nothing pasted, nothing to undo there)
                 self.take_off()
                 return self.app.after_idle(self.flush)
             add = np.zeros((len(new), 6), np.int64)
@@ -459,8 +531,8 @@ class Companion:
 
     def sent(self, shapes, ok, why, n, steps=1):
         self.busy, self._own = False, time.monotonic()
-        d = self.overlay.domino
-        if d is not None:
+        d = self.job
+        if dl.alive(d):
             if self.after_send:  # (a key of Domino's pressed meanwhile: Domino gets the keyboard and the key)
                 self.pass_waiting_key()
             elif self.drawing():  # (Domino's mouse: Domino keeps the keyboard the paste gave it)
@@ -469,7 +541,7 @@ class Companion:
             self.quick = None
             self.say(tr("companion.send_failed_" + why), warn=True)
         else:
-            self.landed.append((shapes, n, steps))
+            self.landed.append((shapes, n, (steps, d)))
             self.take_off()
         self.app.after_idle(self.flush)
 
@@ -519,15 +591,23 @@ class Companion:
             self.quick = None
             return
         self.done_drawing()  # (what was drawn here first goes in first)
-        self.busy, self.was_front, self._then = True, dl.front_window(), then
-        dl.Copy(self.bar, d, self.took)
+        self.busy, self.was_front, self._then, self.job = True, dl.front_window(), then, d
+        dl.Copy(self.bar, d, lambda rows, ppq, start: self.safely(self.took, rows, ppq, start))
 
-    def took(self, rows, ppq, start):
+    def took(self, rows, ppq, start, tries=0):
+        d = self.job
+        if rows is not None and dl.alive(d) and dl.busy(d) and tries < 5:
+            # (the user acts in Domino right now: the selection may change before the Delete: copied again once
+            # Domino is free, so the Delete takes exactly what was copied, hunt 2026-11-06)
+            dl.Copy(self.bar, d, lambda r, p, s: self.safely(self.took, r, p, s, tries + 1))
+            return
         self.busy, self._own = False, time.monotonic()
         then, self._then = self._then, None
-        if self.overlay.domino is not None:
-            dl.give_back(self.overlay.domino, self.was_front)
-        app, d = self.app, self.overlay.domino
+        app, d = self.app, self.job  # (the Domino it was taken from, even if another one is in front now)
+        if not dl.alive(d):
+            d = None
+        if d is not None:
+            dl.give_back(d, self.was_front)
         if rows is None or d is None or ppq != app.ppq:
             self.quick = None
             self.app.after_idle(self.flush)
@@ -579,8 +659,10 @@ class Companion:
 
     # --- undo: steps that changed Domino too ---
     def link(self, step, steps=1):
-        """step changed Domino too: steps = how many of Domino's own undo steps it made there (tracks added + the
-        paste; 0 = nothing pasted)."""
+        """step changed Domino too: steps = (how many of Domino's own undo steps it made there (tracks added + the
+        paste; 0 = nothing pasted), which Domino: undone there even when another one is in front, hunt 11-06)."""
+        if not isinstance(steps, tuple):
+            steps = (steps, self.job or self.overlay.domino)
         self.linked.append(step)
         self.domino_steps[id(step)] = steps
 
@@ -591,21 +673,31 @@ class Companion:
         stack = app.redo_stack if redo else app.undo_stack
         if not stack or id(stack[-1]) in self.before:  # (nothing of ours: the project's hidden shapes never change
             # out of sight, user 2026-11-06; Domino's own Undo / Redo instead, the bar's buttons work like its keys)
-            if d is not None and not self.busy:
+            if d is not None and not self.busy and dl.alive(d) and not dl.busy(d):
                 dl.command(d, dl.REDO if redo else dl.UNDO)
                 self._own = time.monotonic()
             return True
         if not any(stack[-1] is s for s in self.linked):
             return False
-        if d is None or self.busy:
-            return True  # (Domino gone / busy: nothing undone on one side only)
+        if self.busy:
+            return True  # (a send / Take going on: nothing undone on one side only)
         old = stack[-1]
+        steps, d = self.domino_steps.get(id(old), (1, d))  # (the Domino that step changed, hunt 2026-11-06)
+        gone = not dl.alive(d)
+        if not gone and steps and dl.busy(d):  # (a window / menu of Domino's open: never sent into it mid-action)
+            self.say(tr("companion.undo_busy"), warn=True)
+            return True
         app.redo() if redo else app.undo()
         new = (app.undo_stack if redo else app.redo_stack)[-1:]
         if not new or old is new[0]:
             return True
+        self.domino_steps.pop(id(old), None)
+        if gone:  # (Domino closed / crashed: the shape comes back here, Domino untouched; no longer linked)
+            self.linked = [s for s in self.linked if s is not old]
+            self.say(tr("companion.undo_gone"), warn=True)
+            self._gen = (app.shapes_gen, time.monotonic())
+            return True
         was = dl.front_window()
-        steps = self.domino_steps.pop(id(old), 1)
         now = dv.song_tracks(d) if steps > 1 else None
         for _ in range(steps):
             dl.command(d, dl.REDO if redo else dl.UNDO)
@@ -614,7 +706,7 @@ class Companion:
         dl.give_back(d, was)
         self._own = time.monotonic()
         self.linked = [s for s in self.linked if s is not old] + new
-        self.domino_steps[id(new[0])] = steps
+        self.domino_steps[id(new[0])] = (steps, d)
         self.pending = []  # (a shape given back stays on the overlay until Send)
         self._gen = (app.shapes_gen, time.monotonic())
         return True
@@ -623,8 +715,22 @@ class Companion:
         """Domino was used: its own Ctrl+Z takes over. The steps that changed Domino leave Spiderweb's history (undoing
         them here would change the shapes without Domino)."""
         app = self.app
+        # the steps made here up to the last one that changed Domino go too (hunt 2026-11-06): their shapes are in
+        # Domino now, so undoing them changed nothing (a Ctrl+Z eaten) or brought a sent shape back to be sent twice
+        last = max((i for i, s in enumerate(app.undo_stack) if any(s is x for x in self.linked)), default=-1)
+        app.undo_stack[:] = [s for i, s in enumerate(app.undo_stack)
+                             if id(s) in self.before or i > last and not any(s is x for x in self.linked)]
+        if self.linked:  # (redoing past a step Domino now owns: nothing to redo here)
+            app.redo_stack[:] = [s for s in app.redo_stack if id(s) in self.before]
+        self.linked = []
+        app.sync_history(force=True)
+
+    def drop_own_steps(self):
+        """Back to the main window: every step made here leaves the history (their shapes are in Domino, its own
+        undo has them; one undone in the main window brought a sent shape back to be sent twice, hunt 2026-11-06)."""
+        app = self.app
         for stack in (app.undo_stack, app.redo_stack):
-            stack[:] = [s for s in stack if not any(s is x for x in self.linked)]
+            stack[:] = [s for s in stack if id(s) in self.before]
         self.linked = []
         app.sync_history(force=True)
 
@@ -762,6 +868,13 @@ class Companion:
             self.bar.deiconify()
             self._placed = None
             self.place_bar()
+            try:  # (the folder's label on the bar too: a second start finds it, the main window is hidden; hunt 11-06)
+                import __main__
+                label = getattr(__main__, "label_window", None)
+                if label:
+                    label(self.bar)
+            except Exception:
+                pass
             self.app.tips.show("companion", parent=self.bar, wait=True)  # (the first time only, under the bar)
 
     def saved_bar_at(self):
@@ -820,7 +933,34 @@ class Companion:
         self.place_bar()
 
     # --- back to the main window ---
-    def stop(self):
+    def stop(self, now=False):
+        """The bar's Spiderweb: going back = done with what's drawn here (hunt 2026-11-06, A): every shape waiting
+        goes into Domino first and a paste going on finishes, then the main window comes back. now: at once (a
+        send that can't go: the shapes become shapes of the project)."""
+        if self.leaving and not now:
+            return
+        self.roll.cancel_draft()
+        self.roll.end_typing()
+        d = self.overlay.domino
+        waiting = self.alive(self.marked()) if d is not None and dl.alive(d) else []
+        if now or not (waiting or self.busy or self.ready):
+            return self.finish_stop()
+        self.leaving = True
+        self.pending = []
+        self.queue(waiting)
+        self.say(tr("companion.leaving"))
+        self.bar.after(30, self.leave_when_done)
+        return None
+
+    def leave_when_done(self, since=None):
+        """Back once nothing goes into Domino any more (a failed send leaves its shapes as the project's)."""
+        since = since or time.monotonic()
+        if (self.busy or self.ready) and time.monotonic() - since < 60:
+            self.bar.after(40, lambda: self.leave_when_done(since))
+            return
+        self.finish_stop()
+
+    def finish_stop(self):
         app = self.app
         try:
             app.tool.trace_remove("write", self._trace)
@@ -833,7 +973,19 @@ class Companion:
         self.take_off(now=True)  # (in Domino already: never left behind as shapes of the project)
         for sh in app.shapes:  # (not sent: normal shapes of the project now)
             sh.pop(MARK, None)
-        self.unlink()  # (Domino's own Ctrl+Z for what went into it)
+        self.drop_own_steps()  # (Domino's own Ctrl+Z for what went into it)
+        for w in self.adopted:  # (back to the main window they belong to)
+            try:
+                w.transient(app)
+            except tk.TclError:
+                pass
+        for name in ("stir_window", "sustain_window"):  # (theirs belonged to the bar: closed, hunt 2026-11-06)
+            w = getattr(app, name, None)
+            if w:
+                try:
+                    w.close()
+                except tk.TclError:
+                    setattr(app, name, None)
         app.unbind_class(KEY_TAG, "<KeyPress>")
         app.roll = self.main_roll
         app.companion = None
@@ -851,6 +1003,7 @@ class Companion:
         app.deiconify()
         self.main_roll.request_redraw()
         self.main_roll.focus_set()
+        app.schedule_autosave()  # (none while this was on: it would have kept Domino's PPQ as the project's)
 
 
 def send_wheel(hwnd, delta, state, x, y):

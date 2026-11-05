@@ -59,19 +59,71 @@ def _mouse(hwnd, msg, x, y, keys):
     u.SendMessageTimeoutW(hwnd, msg, keys, ((pt.y & 0xFFFF) << 16) | (pt.x & 0xFFFF), 0x2, 1000, ctypes.byref(res))
 
 
+def alive(d):
+    """Domino's window is still there (closed / crashed: False)."""
+    return bool(system.WINDOWS and d is not None and _u().IsWindow(d.top))
+
+
+def busy(d):
+    """Domino can't be sent anything safely right now (hunt 2026-11-06: a send landing mid-action could select notes
+    before the ruler click = Domino closes): a mouse button held (the user drags / clicks), a window of Domino's
+    open over it (its main window disabled: a dialog / message box), one of its menus open, or it doesn't answer."""
+    if not system.WINDOWS:
+        return False
+    u = _u()
+    if mouse_down() or not u.IsWindowEnabled(d.top):
+        return True
+    if menu_open(d):
+        return True
+    res = ctypes.c_size_t()
+    return not u.SendMessageTimeoutW(d.top, 0, 0, 0, 0x2, 300, ctypes.byref(res))  # WM_NULL: answers?
+
+
+def menu_open(d):
+    """One of Domino's menus (menu bar / right-click) is open."""
+    from files.system import wintypes as W
+    u = _u()
+    found = []
+    cb = ctypes.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)(
+        lambda h, _l: (found.append(h) if u.IsWindowVisible(h) and dv._class(h) == "#32768" and dv._pid(h) == d.pid
+                       else None) or not found)
+    u.EnumWindows(cb, 0)
+    return bool(found)
+
+
+def when_free(widget, d, run, gone, give_up_s=20.0):
+    """run() once Domino can be sent things (busy() False); gone(why) when it closed ("domino") or stayed busy past
+    give_up_s ("busy"). Waits on widget's Tk loop."""
+    end = time.monotonic() + give_up_s
+
+    def check():
+        if not alive(d):
+            return gone("domino")
+        if busy(d):
+            if time.monotonic() > end:
+                return gone("busy")
+            return widget.after(40, check)
+        run()
+    check()
+
+
 def ruler_click(d, v, beat):
-    """A click on Domino's ruler above beat (ViewState v): Domino's cursor goes there (to its own grid).
+    """A click on Domino's ruler above beat (ViewState v): Domino's cursor goes there (to its own grid). False =
+    not clicked (Domino busy / the user pressed a button meanwhile: tried again later).
     DESELECTS FIRST: a click sent while anything is selected CLOSES DOMINO (measured 2026-11-05 on 1.43, at any
     spot, Select / pen tool; a real click doesn't; after Deselect 36 of 36 clicks were fine: dev/scratch/
     de_crash.py, de_safe.py)."""
     g = d.grid
-    if not g:
-        return
+    if not g or busy(d):
+        return False
     if not command(d, DESELECT):
-        return
+        return False
+    if mouse_down():  # (pressed between the two: a select box may be on its way, hunt 2026-11-06)
+        return False
     x, y = v.x_of(beat), v.grid[1] - d.build.ruler_h * v.scale / 2
     for msg, keys in ((0x0200, 0), (0x0201, 1), (0x0202, 0)):  # move, left down, left up
         _mouse(g[0], msg, x, y, keys)
+    return True
 
 
 def put_cursor(d, tick):
@@ -86,11 +138,13 @@ def put_cursor(d, tick):
     beat = tick / ppq
     left, right = v.left_beat, v.beat_of(v.grid[2])
     if left <= beat < right:
-        ruler_click(d, v, beat)
+        clicked = ruler_click(d, v, beat)
     elif beat >= left:  # (past the right edge: the last place in view, before tick)
-        ruler_click(d, v, max(left, right - 0.001))
+        clicked = ruler_click(d, v, max(left, right - 0.001))
     else:
-        ruler_click(d, v, left)
+        clicked = ruler_click(d, v, left)
+    if not clicked:
+        return None
     for _ in range(256):
         got = dv.song_place(d)
         if got is None:
@@ -290,17 +344,21 @@ EXTENDED = set(range(0x21, 0x29)) | {0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0x6F, 0x90}  
 
 def pass_key(d, vk, state):
     """A key pressed in Spiderweb that's Domino's (vk = Windows key code, state = Tk's modifier bits): the keyboard
-    to Domino, then that key pressed again there, with the Shift / Ctrl / Alt held (held for real: only their
-    presses again, their let go comes from the keyboard)."""
+    to Domino, then that key pressed again there, with the Shift / Ctrl / Alt it was pressed with. A modifier still
+    held for real is left alone; one let go already is pressed for the key and let go again after it (hunt
+    2026-11-06: a key passed on late left Ctrl held down in Windows)."""
     if not system.WINDOWS or not vk or not to_domino(d):
         return False
     u = _u()
     mods = [m for bit, m in ((0x1, 0x10), (0x4, 0x11), (0x20000, 0x12)) if state & bit]
-    for m in mods:
+    pressed = [m for m in mods if not u.GetAsyncKeyState(m) & 0x8000]
+    for m in pressed:
         u.keybd_event(m, 0, 0, 0)
     ext = 0x1 if vk in EXTENDED else 0
     u.keybd_event(vk, 0, ext, 0)
     u.keybd_event(vk, 0, ext | 0x2, 0)  # KEYEVENTF_KEYUP
+    for m in reversed(pressed):
+        u.keybd_event(m, 0, 0x2, 0)
     return True
 
 
@@ -329,13 +387,21 @@ class Paste:
         widget.after(self.SETTLE_MS, self.free)
 
     def free(self):
+        if not alive(self.d):
+            return self.done(False, "domino")
         if not clipboard_free() and time.monotonic() - self.started < 1.5:
             return self.w.after(30, self.free)
+        if busy(self.d):  # (the user holds the mouse / a menu or window of Domino's is open: wait, hunt 11-06)
+            if time.monotonic() - self.started > 20:
+                return self.done(False, "busy")
+            return self.w.after(40, self.free)
         self.before = boxes(self.d)
         command(self.d, self.cmd, wait=False)
         self.w.after(self.CHECK_MS, self.check)
 
     def check(self):
+        if not alive(self.d):  # (closed / crashed meanwhile: nothing landed, the shapes stay, hunt 2026-11-06)
+            return self.done(False, "domino")
         new = boxes(self.d) - self.before
         if not new:
             return self.done(True, "")
@@ -357,21 +423,36 @@ class Copy:
         """whole: the current track's every event (Select All first, Deselect after); passengers = a list: the
         notes' other events added (read_notes)."""
         self.w, self.d, self.done, self.whole, self.passengers = widget, d, done, whole, passengers
+        self.wait_s = wait_s
+        when_free(widget, d, self.start, lambda why: done(None, why, None))  # (hunt 2026-11-06: never mid-action)
+
+    def start(self):
+        d = self.d
         self.count = clipboard.copy_count()
         self.before = boxes(d)
-        if whole:  # (sent, not posted: back when Domino is done copying, so an empty track needs no long wait)
+        self.late = False
+        if self.whole:  # (sent, not posted: back when Domino is done copying, so an empty track needs no long wait)
             command(d, SELECT_ALL)
-            command(d, COPY)
-            wait_s = 0.25
+            done = command(d, COPY)
+            command(d, DESELECT)  # (at once: Select All held while Domino has the keyboard = a key acts on it all)
+            # still copying past the 2 s wait (a dense track): its copy may land late, ON TOP OF what's put on the
+            # clipboard next: waited for (long), never taken as "nothing" (hunt 2026-11-06)
+            self.late = not done
+            self.wait_s = 30.0 if self.late else 0.25
         else:
             command(d, COPY, wait=False)
-        self.until = time.monotonic() + wait_s
-        widget.after(40, self.check)
+        self.until = time.monotonic() + self.wait_s
+        self.w.after(40, self.check)
 
     def check(self):
+        if not alive(self.d):
+            return self.done(None, "domino", None)
         new = boxes(self.d) - self.before
-        if self.whole and (new or clipboard.copy_count() != self.count or time.monotonic() >= self.until):
-            command(self.d, DESELECT, wait=False)
+        if self.late and not new and clipboard.copy_count() == self.count and time.monotonic() < self.until:
+            res = ctypes.c_size_t()  # (Domino answering again with nothing on the clipboard: the copy is over)
+            if _u().SendMessageTimeoutW(self.d.top, 0, 0, 0, 0x2, 100, ctypes.byref(res)):
+                self.late, self.until = False, time.monotonic() + 0.25
+            return self.w.after(40, self.check)
         if new:
             for b in new:
                 answer(b)
