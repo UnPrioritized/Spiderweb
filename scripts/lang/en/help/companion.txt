@@ -10,7 +10,7 @@ Draw on Domino (Project, beside Export MIDI; Windows only) puts Spiderweb's draw
 
 • The tool button (Line, Curve, Funnel, Custom shape...): draw on Domino's piano roll with that tool, exactly like in Spiderweb. The tool you used last is picked again next time.
 
-• Take / Send: see below. ↔ and ↕ flip the shapes selected on Domino's piano roll; with none selected there, they flip the notes selected in Domino, in one click. Stir… and Sustain… open those windows for the selected shapes.
+• Take / Send / Bake: see below. ↔ and ↕ flip the shapes selected on Domino's piano roll; with none selected there, they flip the notes selected in Domino, in one click. Stir… and Sustain… open those windows for the selected shapes.
 
 • Spiderweb: stop drawing on Domino and bring Spiderweb's window back.
 
@@ -30,7 +30,19 @@ Your project's own shapes are hidden while you draw on Domino, and come back whe
 
 There is one selection: Domino's own. Select notes in Domino with its select box, then press Take: they come out of Domino into Spiderweb, at the same spot, as one shape. Change it with Spiderweb's tools (flip it, Sustain…, move or stretch it), then press Send and it goes back into Domino. In Domino that is two steps to undo (the delete and the paste).
 
-Take puts the notes back at the right spot for a box selection. After Select All, or notes picked one by one, they may land at Domino's cursor instead.
+## Shapes Spiderweb remembers
+
+A shape you sent stays a shape for Spiderweb after it goes into Domino. Select all its notes in Domino and press Take, and it comes back as the shape itself, with its curve, points and handles, ready to change, wherever it is now. Notes you select that aren't part of a sent shape come out as plain notes, as before.
+
+• Select notes of a remembered shape in Domino and a dashed blue outline shows around the whole shape.
+
+• Move the shape's notes together in Domino (drag them, cut and paste them somewhere else) and Spiderweb follows. Copy the whole shape in Domino and the copy is remembered too.
+
+• Change one of its notes on its own (move it, change its gate or velocity, delete it) and Spiderweb stops treating them as that shape. Put the note back, for example with Domino's Ctrl+Z, and the shape is back.
+
+• Bake: select notes of remembered shapes in Domino and press Bake to make them plain notes for good. Take then gives plain notes for them too. This can't be undone.
+
+Spiderweb keeps this in a small file next to the song with the same name plus ".spiderweb" (for example "song.dms.spiderweb"), so it's still there when you open the song again. Save the song in Domino first: until it has a file name, the shapes are remembered only while that Domino stays open. Keep the .spiderweb file next to the song if you move it; without it the song is just fine, its notes simply aren't remembered as shapes any more.
 
 ## Good to know
 
