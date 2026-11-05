@@ -191,6 +191,7 @@
  "join_split.new_free_done_one": "The shape takes the next free colours",
  "join_split.new_channel_done": "{n} shapes moved to channel {ch}",
  "join_split.reverse_tracks": "Reverse track order",
+ "join_split.reverse_colours": "Reverse track order (turn Colours off first)",
  "join_split.reverse_done": "Track order reversed in {n} shapes",
  "join_split.reverse_done_one": "Track order reversed: the first colour swaps with the last",
  "join_split.new_channel_done_one": "The shape moved to channel {ch}",

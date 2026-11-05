@@ -246,8 +246,9 @@ def one_stir(s):
         if number(v) and 0 < round(v, 3) <= MOST_SMOOTH:
             out[k] = round(float(v), 3)
     r = s.get("reach")
+    mixed = clean_size_mix(s.get("size_mix"))
     if number(r) and LEAST_REACH <= round(r, 3) <= (MOST_REACH_INSIDE if s.get("size_of") == "inside" or
-                                                     number(s.get("size_mix")) else MOST_REACH):
+                                                     mixed is not None else MOST_REACH):
         out["reach"] = round(float(r), 3)
         if s.get("area") in STIR_AREAS[1:]:
             out["area"] = s["area"]
@@ -279,9 +280,8 @@ def one_stir(s):
             out["mirror"] = s["mirror"]
         if s.get("size_of") in SIZE_OF[1:]:
             out["size_of"] = s["size_of"]
-        v = s.get("size_mix")
-        if number(v) and -1 < round(v, 6) < 1 and round(v, 6) != SIZE_SHARE[out.get("size_of", "box")]:
-            out["size_mix"] = round(float(v), 6)
+        if isinstance(mixed, list) or (mixed is not None and mixed != SIZE_SHARE[out.get("size_of", "box")]):
+            out["size_mix"] = mixed
     v = s.get("seen")
     if number(v) and 1e-9 < v < 1e9:
         if s.get("round") is True and "reach" in out:
@@ -941,25 +941,67 @@ def area_global(X, Y, st, k):
     return X * r / k[0], Y * r / k[1]
 
 
+MOST_SIZE_PARTS = 8  # (a step's size_mix list: [share, weight] parts, at most this many)
+
+
+def clean_size_mix(v):
+    """A saved size_mix: an old step's share (a number -1 < v < 1) or a step's list of [share -1..1, weight 0..1]
+    parts (blend_sizes), or None."""
+    if number(v):
+        return round(float(v), 6) if -1 < round(v, 6) < 1 else None
+    if isinstance(v, list) and 0 < len(v) <= MOST_SIZE_PARTS and all(
+            isinstance(p, list) and len(p) == 2 and number(p[0]) and number(p[1]) and -1 <= p[0] <= 1
+            and 0 < p[1] <= 1 for p in v):
+        return [[round(float(a), 6), round(float(w), 9)] for a, w in v]
+    return None
+
+
+def size_parts(st):
+    """Stir st's Size counting as [share, weight] parts (one part [share, 1] for a single kind)."""
+    v = st.get("size_mix")
+    if isinstance(v, list):
+        return [list(p) for p in v]
+    return [[SIZE_SHARE.get(st["size_of"], 0.0) if v is None else v, 1.0]]
+
+
+def blend_sizes(a, b, reach, f):
+    """size_mix for an Add between step f of the way from stir a to stir b (both with a reach) whose Size number
+    is reach: the area's REAL size (Size x what 100 % is, at the step's own box) blends straight from a's to b's,
+    so two ends of the same real size keep it on every step (hunt 11-06: blending the Size number and the counting
+    apart swelled the middle steps up to 2.5x). Each end's parts weighted by its share of the real size; equal
+    shares added up. A single part of weight 1 = that share as a plain number."""
+    got = {}
+    for s, w in ((a, (1 - f) * a["reach"] / reach), (b, f * b["reach"] / reach)):
+        for share, part in size_parts(s):
+            if part * w > 0:
+                got[share] = got.get(share, 0.0) + part * w
+    total = sum(got.values()) or 1.0
+    parts = sorted([sh, w / total] for sh, w in got.items())  # (rounding of the Size number: weights add up to 1)
+    if len(parts) == 1:
+        return parts[0][0]
+    return parts[:MOST_SIZE_PARTS]
+
+
 def size_scale(st, k):
     """What 100 % Size is, in the area's measure (k = area_scales' (kx, ky)): the box's longer side (1), or with Size
     of "the circle inside" the box's shorter one (tester 11-04: "100 % = the diameter of a circle inside the
     shape"; only differs with Round as seen: without it the box counts as square), or with "the circle around" the
     box's corner to corner (user 11-05; also without Round as seen: the square's diagonal); an Add between step's
     size_mix = part way between two of them (SIZE_SHARE: 0..1 box to inside, 0..-1 box to around)."""
-    share = st.get("size_mix")
-    if share is None:
-        share = SIZE_SHARE.get(st["size_of"], 0.0)
     short = min(k) / max(max(k), 1e-12)
-    if share >= 0:
-        return 1.0 + (short - 1.0) * share
-    return 1.0 + (math.hypot(1.0, short) - 1.0) * -share
+    out = 0.0
+    for share, w in size_parts(st):  # (a step's list: each part's counting, weighted: blend_sizes)
+        out += w * (1.0 + (short - 1.0) * share if share >= 0 else 1.0 + (math.hypot(1.0, short) - 1.0) * -share)
+    return out
 
 
 def most_reach(st, k):
-    """The largest Size for stir st (filled in, k = area_scales' (kx, ky)): 100 % of the box, also when counting by
-    the circle inside (then more than 100, up to MOST_REACH_INSIDE)."""
-    return min(MOST_REACH / size_scale(st, k), MOST_REACH_INSIDE)
+    """The largest Size for stir st (filled in, k = area_scales' (kx, ky)), the ONE rule for the window and the
+    piano roll's drags: 100 % of the box when counting by the circle inside (then more than 100, up to
+    MOST_REACH_INSIDE); else 100 (the circle around at 100 % = through the box's corners, user 11-05: the roll's
+    drags stopped at 70.7 %, hunt 11-06)."""
+    scale = size_scale(st, k)
+    return min(MOST_REACH / scale, MOST_REACH_INSIDE) if scale < 1.0 else MOST_REACH
 
 
 def area_aspect(st):
@@ -1236,7 +1278,7 @@ def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0, outside=Fals
         return area_spot_q(np.asarray(x, np.float64), np.asarray(y, np.float64), st, kxy) < 1
 
     sig = (st["reach"], st["area"], id(st["shape"]), st["stretch"], st["tilt"], st["skew"],
-           tuple(st["spot"] or st["centre"]), st["round"], st["seen"], st["size_of"], st.get("size_mix"),
+           tuple(st["spot"] or st["centre"]), st["round"], st["seen"], st["size_of"], json.dumps(st.get("size_mix")),
            tuple(float(v) for v in box), tuple(float(v) for v in own), json.dumps(rc.get("frame")),
            json.dumps(rc.get("whole")), rc.get("ppq"))
     mid, key = np.array(mid, np.float64), np.array(key, np.float64)

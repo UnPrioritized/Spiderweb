@@ -25,6 +25,6 @@ Custom shapes, pasted notes and text can be knives. Pasted notes under the knife
 
 The pieces keep their colours. To make a piece stand out, right-click it → New colours ▸ (Multi channel only). Next free colours gives it channels nothing else uses while it plays. Channel 1 to 16 puts all its notes on that channel.
 
-To turn a piece's track order round, right-click it → Reverse track order. Its first colour swaps with its last, the second with the second to last, and so on. It stays on the same tracks, just in the other order. This works on any pasted notes with two or more colours, not only pieces.
+To turn a piece's track order round, right-click it → Reverse track order. Its first colour swaps with its last, the second with the second to last, and so on. It stays on the same tracks, just in the other order. This works on any pasted notes with two or more colours, not only pieces. It's greyed when the colours play on one track in the current Channels setting, and while Colours shuffles or splits them (turn Colours off first). With a Stir, each colour set is turned round on its own.
 
 One Ctrl+Z puts everything back as it was.

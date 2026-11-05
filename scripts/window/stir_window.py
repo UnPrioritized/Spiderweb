@@ -862,7 +862,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             # (never past 100 % of the box, however Size is counted, hunt 11-05 8; the shape's proportions only
             # looked up for the settings that change that limit)
             if st["reach"] is not None and key in ("reach", "area", "round", "spin", "seen", "size_of"):
-                most = most_reach(st, self.shape_k(sh, st)) if st["size_of"] == "inside" else MOST_REACH
+                most = most_reach(st, self.shape_k(sh, st))  # (the roll's drags use the same rule)
                 st["reach"] = min(st["reach"], round(most, 3))
             return st
         if self.drawing:  # (an area being drawn: the selection is the drawing, not the stirred shapes)
