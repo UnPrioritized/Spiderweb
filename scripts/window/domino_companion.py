@@ -18,6 +18,7 @@ KEYS: the bar never takes the keyboard; on the overlay only Spiderweb's keys for
 Ctrl+Z / Y for its own steps, Delete for picked shapes, tool letters, typing), every other key goes on to Domino.
 """
 
+import copy
 import os
 import time
 import tkinter as tk
@@ -647,9 +648,9 @@ class Companion:
                 app.shapes_changed()
                 self.link(app.undo_stack[-1], steps)
                 for got in [g for g in self.new_records if g[0] is shapes]:
-                    self.step_records[id(app.undo_stack[-1])] = got[1]
+                    self.step_records[id(app.undo_stack[-1])] = [got[1]]
                     self.new_records.remove(got)
-                if self.quick and any(s is self.quick.get("shape") for s in shapes):
+                if self.quick and any(s is x for s in shapes for x in self.quick.get("shapes", ())):
                     self.quick_done()
             self._gen = (app.shapes_gen, time.monotonic())
             self.say(trn("companion.sent_n", n, n=n))
@@ -697,25 +698,110 @@ class Companion:
             return self.say(tr("companion.take_" + ppq), warn=True)
         if d is None or ppq != app.ppq:
             return self.say(tr("companion.send_failed_domino"), warn=True)
-        first = int(rows[:, 0].min())
-        rows = rows.copy()
-        rows[:, 0] -= first
-        made = notes_shape(rows, ppq, tr("companion.taken_name"))
-        tracks = np.unique(rows[:, 4])
-        made["cols"] = (tracks - tracks.min()).tolist()
-        sh = clean_shape({**SHAPE_DEFAULTS, **app.defaults, **made})
-        sh[MARK] = 1
+        start = self.copy_start(d, rows, start)
+        lifted, rows = self.lifted(d, rows, start)  # (shapes sent from here, all their notes taken: the shapes)
+        new = []
+        for r in lifted:
+            for one in r["shape"]:
+                one = copy.deepcopy(one)
+                one["pts"] = [[b + r["dt"] / ppq, p + r["dk"]] for b, p in one["pts"]]
+                one[MARK] = 1
+                new.append(one)
+        if len(rows):
+            first = int(rows[:, 0].min())
+            rows = rows.copy()
+            rows[:, 0] -= first
+            made = notes_shape(rows, ppq, tr("companion.taken_name"))
+            tracks = np.unique(rows[:, 4])
+            made["cols"] = (tracks - tracks.min()).tolist()
+            sh = clean_shape({**SHAPE_DEFAULTS, **app.defaults, **made})
+            sh[MARK] = 1
+            sh["pts"] = [[b + (start + first) / ppq, p] for b, p in sh["pts"]]
+            new.append(sh)
         dl.command(d, dl.DELETE)
         dl.give_back(d, self.was_front)
         app.roll.cancel_draft()
-        app.add_copies([sh], (start + first) / ppq, tr("companion.take_step"))
+        app.add_copies(new, 0, tr("companion.take_step"))
         self.link(app.undo_stack[-1])
+        if lifted:  # (out of Domino: forgotten; the Take undone = remembered again, step_records)
+            self.records[:] = [r for r in self.records if not any(r is x for x in lifted)]
+            self.step_records[id(app.undo_stack[-1])] = lifted
         self._gen = (app.shapes_gen, time.monotonic())
         n = len(rows)
-        self.say(trn("companion.took_n", n, n=n))
+        if lifted:
+            shapes = trn("companion.n_shapes", len(lifted), n=len(lifted))
+            self.say(tr("companion.took_shapes", shapes=shapes, notes=trn("n.notes", n, n=n)) if n
+                     else tr("companion.took_shapes_only", shapes=shapes))
+        else:
+            self.say(trn("companion.took_n", n, n=n))
         if then:
-            then(app.shapes[-1])
+            then(app.shapes[len(app.shapes) - len(new):])
         self.app.after_idle(self.flush)
+
+    @staticmethod
+    def copy_start(d, rows, start):
+        """Where Domino's copy of its selection really starts: read from its memory (the first selected note of the
+        current track), since its cursor is that place only after a box selection (Select All / clicked notes copy
+        from elsewhere: Take put them in the wrong place). Unreadable = the cursor, as before."""
+        mine = rows[rows[:, 4] == 0] if len(rows) else rows
+        now = dv.song_tracks(d)
+        got = dv.track_notes(d, now[0]) if now is not None and len(mine) else None
+        if got is None:
+            return start
+        sel = got[got[:, 4] != 0]
+        return int(sel[:, 0].min()) - int(mine[:, 0].min()) if len(sel) else start
+
+    def lifted(self, d, rows, start):
+        """Remembered shapes alive in Domino whose notes were ALL taken (rows = Domino's copied selection: tick from
+        start, gate, key, velocity, copied track from the current one down) -> (those records, the rows left)."""
+        now = dv.song_tracks(d)
+        mine = [r for r in self.records if r.get("pid") == d.pid and r["alive"]]
+        if not mine or now is None or not len(rows):
+            return [], rows
+        cur = now[0]
+        taken = {}
+        for i, (t, g, k, v, c) in enumerate(rows[:, :5].tolist()):
+            taken.setdefault((cur + c, start + t, g, k, v), []).append(i)
+        out, used = [], set()
+        for r in mine:
+            picks = []
+            for a, b, c, e, f in r["notes"].tolist():
+                free = [i for i in taken.get((a, b + r["dt"], c, e + r["dk"], f), ()) if i not in used and i not in picks]
+                if not free:
+                    break
+                picks.append(free[0])
+            else:
+                out.append(r)
+                used.update(picks)
+        return out, rows[[i for i in range(len(rows)) if i not in used]]
+
+    def bake(self):
+        """The bar's Bake: remembered shapes with a note selected in Domino become plain notes for good."""
+        d = self.overlay.domino
+        if d is None or self.busy:
+            return
+        mine = [r for r in self.records if r.get("pid") == d.pid and r["alive"]]
+        tracks = {t: dv.track_notes(d, t) for t in sorted({int(t) for r in mine for t in np.unique(r["notes"][:, 0])})}
+        gone = []
+        for r in mine:
+            for t in np.unique(r["notes"][:, 0]).tolist():
+                a = tracks.get(t)
+                if a is None or not len(a):
+                    continue
+                spots = {(x[0], x[2]) for x in a[a[:, 4] != 0][:, :3].tolist()}
+                if any((b + r["dt"], e + r["dk"]) in spots for c, b, _, e, _ in r["notes"].tolist() if c == t):
+                    gone.append(r)
+                    break
+        if not gone:
+            return self.say(tr("companion.bake_nothing"), warn=True)
+        self.records[:] = [r for r in self.records if not any(r is x for x in gone)]
+        for k, v in list(self.step_records.items()):  # (undoing their send / Take no longer brings them back)
+            left = [r for r in v if not any(r is x for x in gone)]
+            if left:
+                self.step_records[k] = left
+            else:
+                del self.step_records[k]
+        self.say(trn("companion.baked_n", len(gone), n=len(gone)))
 
     # --- the flips: on shapes picked here, else on Domino's selection ---
     def flip(self, sideways):
@@ -726,17 +812,18 @@ class Companion:
             return app.flip(sideways)
         if self.busy or self.overlay.domino is None:
             return
-        self.quick = {"steps": [], "shape": None}
+        self.quick = {"steps": [], "shapes": []}
 
-        def flipped(sh):
+        def flipped(made):  # (the shapes Take made: shapes sent from here come back as themselves, plain notes as one)
             if self.quick is None:
                 return
-            self.quick["shape"] = sh
+            self.quick["shapes"] = made
             self.quick["steps"].append(app.undo_stack[-1])  # (the Take)
-            app.select(len(app.shapes) - 1)
-            app.flip(sideways)
+            n = len(app.shapes)
+            app.select_many(range(n - len(made), n), n - 1)
+            app.flip(sideways)  # (flipped together, like Domino's own flip of a selection)
             self.quick["steps"].append(app.undo_stack[-1])  # (the flip)
-            self.queue([sh])
+            self.queue(list(made))
         self.take(then=flipped)
 
     # --- undo: steps that changed Domino too ---
@@ -774,14 +861,15 @@ class Companion:
         if not new or old is new[0]:
             return True
         self.domino_steps.pop(id(old), None)
-        rec = self.step_records.pop(id(old), None)  # (a send undone here: its shape isn't in Domino any more)
-        if rec is not None:
-            if any(r is rec for r in self.records):
-                self.records[:] = [r for r in self.records if r is not rec]
+        recs = self.step_records.pop(id(old), None)  # (a send undone = its shape out of Domino: forgotten; a Take
+        # undone = its shapes back in Domino: remembered again; back the other way on Ctrl+Y)
+        if recs is not None:
+            if any(r is x for r in self.records for x in recs):
+                self.records[:] = [r for r in self.records if not any(r is x for x in recs)]
             elif not gone:
-                self.records.append(rec)
+                self.records.extend(recs)
             if not gone:
-                self.step_records[id(new[0])] = rec
+                self.step_records[id(new[0])] = recs
         if gone:  # (Domino closed / crashed: the shape comes back here, Domino untouched; no longer linked)
             self.linked = [s for s in self.linked if s is not old]
             self.say(tr("companion.undo_gone"), warn=True)
@@ -906,8 +994,8 @@ class Companion:
         ttk.Button(row, text=tr("app.redo"), takefocus=False,
                    command=lambda: app.undo_roll(True)).pack(side="left", padx=(2, 0))
         ttk.Separator(row, orient="vertical").pack(side="left", fill="y", padx=3, pady=2)
-        for key, run in (("take", self.take), ("send", self.send_all), ("flip_sideways", lambda: self.flip(True)),
-                         ("flip_upside", lambda: self.flip(False)), ("stir", lambda: self.open_tool("stir")),
+        for key, run in (("take", self.take), ("send", self.send_all), ("bake", self.bake),
+                         ("flip_sideways", lambda: self.flip(True)), ("flip_upside", lambda: self.flip(False)), ("stir", lambda: self.open_tool("stir")),
                          ("sustain", lambda: self.open_tool("sustain"))):
             b = ttk.Button(row, text=tr("companion." + key), takefocus=False, command=run)
             b.pack(side="left", padx=(2, 0))
