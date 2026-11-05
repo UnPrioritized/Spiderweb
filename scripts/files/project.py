@@ -898,6 +898,8 @@ class ProjectFiles:
 
     def autosave(self):
         self._autosave_job = None
+        if getattr(self, "companion", None) is not None:  # (drawing on Domino: the project's PPQ is Domino's for now;
+            return                                         # saved once back, window/domino_companion.py, hunt 11-06)
         try:
             self.write_json(self.autosave_path, window=True)
             self._autosave_failed = False

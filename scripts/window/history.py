@@ -442,6 +442,9 @@ class HistoryPanel:
             return "break"
         if self.sustain_window and self.sustain_window.local_step(redo):
             return "break"
+        comp = getattr(self, "companion", None)  # (drawing on Domino: a step that went into Domino, undone there too)
+        if comp is not None and comp.undo_step(redo):
+            return "break"
         return self.redo() if redo else self.undo()
 
     def key_undo(self, e, redo=False):

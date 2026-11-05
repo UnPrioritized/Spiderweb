@@ -32,6 +32,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     tool_picker.py   the drawing tools' button: the tool picked last, its list and pinned tools
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
+    domino_overlay.py Domino companion: the see-through window lying over Domino's note grid, following it
+    domino_companion.py Draw on Domino: the floating bar, switching app.roll to the overlay piano roll and back
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
@@ -94,6 +96,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_melody.py   Fill with tempo jumps: the notes it follows outlined on the piano roll
     roll_shared.py   colours, key names, modifier keys, outline caches
     tiles.py         the notes' picture on screen as tiles (moved along when the view scrolls)
+    overlay_roll.py  Draw on Domino: the see-through piano roll over Domino's grid (its view = Domino's)
     zoombar.py       the piano roll's scrollbars (drag an end to zoom) and zoom buttons
   notes/             shapes -> notes
     engine.py        shapes -> notes, overlap handling, channel assignment
@@ -167,6 +170,9 @@ Files (the scripts live in scripts/, one subfolder per group):
     play_loaded.py   playing a loaded MIDI along with the shapes: read ahead from the file, sent to the synths
     play_dense.py    Kestrel (GPU): a loaded MIDI's parts too dense to read live, read once ahead, copies collapsed
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
+    domino_view.py   Domino companion: where a running Domino's piano roll is on the screen and what it shows
+    domino_builds.py Domino versions without a hand-made table: their reading spots found by class name
+    domino_link.py   Domino companion: notes into Domino (its cursor + paste) and its selection out (copy + delete)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
     unzip.py         unpacking outside data with a size limit (no "zip bomb" can fill the memory)

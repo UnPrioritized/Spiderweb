@@ -201,6 +201,7 @@ def bind_double_right(widget, single, double):
     def twice(e):
         widget._right_paired = not widget._right_paired
         return double(e) if widget._right_paired else single(e)
+    widget.right_twice = twice  # (a double right-click made by hand: clicks passed on from another window)
     widget.bind("<ButtonPress-3>", press)
     widget.bind("<Double-Button-3>", twice)
 

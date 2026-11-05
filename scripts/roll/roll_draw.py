@@ -923,7 +923,7 @@ class RollDrawing:
         (extra: how far past each corner)."""
         sides, tops = parts
         ax = self.sx / self.app.ppq
-        bx = self.kb_w - self.view_t * self.sx
+        bx = self.kb_w - self.view_t * self.sx + self.note_x_shift
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
 
         def row(k, lower):  # a key row's top / bottom pixel, as note_rects has it
@@ -1353,7 +1353,7 @@ class RollDrawing:
         only: True = just the selected shapes' notes, False = all but theirs (no draft either way).
         draft: "with" = the draft's notes too, "without" = all but them, "alone" = only them (paint_drafted)."""
         app, ppq = self.app, self.app.ppq
-        ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx  # x = tick * ax + bx
+        ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift  # x = tick * ax + bx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy  # y = pitch * ay + by
         kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
         keys = np.arange(app.keys)

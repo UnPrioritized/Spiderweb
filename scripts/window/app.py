@@ -90,7 +90,7 @@ from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, STACK_MODES, painting_order, stack_rule
-from files import clipboard, errors, notes_clip, speed
+from files import clipboard, errors, notes_clip, speed, system
 from files.about import ICONS, VERSION
 from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, KESTREL, MidiOut, Player
 from files.slow_down import SlowDown
@@ -541,6 +541,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tempo_clip = None  # the Tempo pane's copy (tempo_pane.copy): its own, never the Windows clipboard
         self.seen_clip = None  # the Windows clipboard's copy count at Spiderweb's last copy (shared_clip)
         self.own_domino_copy = None  # ... and at its last Copy to Domino (paste_from_domino)
+        self.companion = None  # drawing on Domino's piano roll (window/domino_companion.py) while on
+        self.companion_tops = ()  # ... its windows: shortcuts work in them as in the main window
         self.stroke_clip, self.clip_kind, self.stroke_pastes = None, None, 0  # a copied stroke (roll_live.py)
         self.playhead = 0.0  # beat of the play line
         self.out = MidiOut(self.make_live, self.make_kestrel)
@@ -1075,6 +1077,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                    | self.track_list.shown_mask(d, slots))
             seen = np.bincount(d[see, 5], minlength=n) > 0
             hidden = set(np.flatnonzero(some & ~seen).tolist())
+        if self.companion is not None:  # (drawing on Domino: only what's drawn / taken there shows, the project's
+            # own shapes are hidden till you're back, user 2026-11-06; window/domino_companion.py MARK)
+            away = [i for i, sh in enumerate(self.shapes) if not sh.get("domino_send")]
+            if away and len(self.drawn):
+                self.drawn = self.drawn[~np.isin(self.drawn[:, 5], away)]
+            hidden |= set(away)
         if hidden != self.hidden_shapes:
             self.hidden_shapes = hidden
             if self.sels & hidden:  # (a hidden shape can't stay picked: nothing changes out of sight)
@@ -1347,6 +1355,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         # (New / Open… / Save… are in the File menu: the row got too crammed, user 2026-10-22)
         ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(side="right")  # (under Export)
+        if system.WINDOWS:  # (Domino companion: Spiderweb's tools right on Domino's piano roll)
+            b = ttk.Button(btns, text=tr("companion.button"), command=self.start_companion)
+            b.pack(side="left")
+            Tooltip(b, tr("companion.button_tip"))
 
     def _build_shape_list(self, side):
         box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)
@@ -2678,8 +2690,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         left_out = self.put_into_current(sh)
         self.shapes.append(sh)
-        if getattr(self, "stir_window", None):  # (a Stir area being drawn: this stroke goes into it)
-            self.stir_window.took(sh)
+        stir = getattr(self, "stir_window", None)
+        if stir and stir.drawing and not stir.drawing["pick"]:  # (a Stir area being drawn: this stroke goes into it)
+            stir.took(sh)
+            if self.companion is not None:  # (shown on Domino while it's drawn, never sent: Stir uses it up)
+                sh["domino_send"] = 1
+        elif self.companion is not None:  # (drawn on Domino: goes into Domino once finished, domino_companion.py;
+            self.companion.drawn(sh)      # also with the Stir window open, hunt 2026-11-06)
         self.select(len(self.shapes) - 1)
         self.shapes_changed()
         if left_out:
@@ -3499,6 +3516,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if self._rows[key]:
                 w.pack(fill="x", pady=(4, 0), before=self.points_box)
 
+    def start_companion(self):
+        """Draw on Domino: Spiderweb's tools right on Domino's piano roll (window/domino_companion.py)."""
+        from window.domino_companion import start
+        start(self)
+
     def snap_beats(self):
         return snap_beats(self.snap.get(), self.beats)
 
@@ -3617,8 +3639,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return None  # (Settings, Help, the update popup: the shapes behind stay as they are)
             if self.grabbed_elsewhere():
                 return None  # (a window like Range… is working on the picked shapes: nothing changes behind it)
-            if main_only and not (isinstance(w, tk.Misc) and w.winfo_toplevel() is self):
-                return None
+            if main_only and not (isinstance(w, tk.Misc) and (w.winfo_toplevel() is self or w.winfo_toplevel()
+                                                                in self.companion_tops)):
+                return None  # (companion_tops: drawing on Domino, window/domino_companion.py, is the main window)
             if isinstance(w, (tk.Entry, ttk.Entry)) and str(w.cget("state")) != "readonly":
                 return None
             if self.tracks_shown() and fn not in (self.toggle_tracks, self.toggle_play, self.generate,
@@ -3815,6 +3838,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def on_close(self):
         if self.drawer and self.drawer.winfo_exists() and not self.drawer.may_quit():
             return
+        if self.companion is not None:  # (drawing on Domino: back first, so the project's own PPQ is what's saved)
+            self.companion.stop(now=True)
         if self.hz_window and self.hz_window.draft is not None:  # (a path drawn there: made, as when the Hz bass
             self.hz_window.make_draft()  # window itself is closed)
         job = getattr(self, "_exporting", None)

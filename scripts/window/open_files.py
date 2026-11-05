@@ -114,7 +114,9 @@ def open_given(app, paths):
 
 def _try_open(app):
     st = _state(app)
-    if app.grab_current() is not None or getattr(app, "_exporting", None):
+    # (drawing on Domino: held until back in the main window, hunt 2026-11-06: opened behind the overlay, the
+    # project took Domino's PPQ and lost its own)
+    if app.grab_current() is not None or getattr(app, "_exporting", None) or getattr(app, "companion", None):
         app.after(HANDED_POLL_MS, lambda: _try_open(app))
         return
     paths, st["pending"] = st["pending"], None
