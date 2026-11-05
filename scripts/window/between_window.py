@@ -312,6 +312,9 @@ class BetweenWindow(PointGraph, tk.Toplevel):
         if self.app.scrubbing:  # (closed while the pad / a point was held: its notes may be late)
             self.app.scrubbing = False
             self.app.catch_up_notes()
+        for cv in (self.pv, self.pad, self.canvas):  # (mouse events still waiting must not run: after Cancel the
+            for seq in cv.bind():                    # group is gone and they crashed looking for it)
+                cv.unbind(seq)
         self.update()  # (after a long wait Windows shows a "not responding" copy of the window: destroyed before
         self.grab_release()  # that's gone, Tk crashed)
         self.destroy()
