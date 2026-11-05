@@ -24,6 +24,8 @@ What's new:
 
 • Playing stops one beat after the last note (before, a quarter of a bar), in any time signature; with Rendered ahead, once the sound has died away.
 
+• Kestrel (GPU) with "Lower it by itself": a dense part that leaves notes out now keeps the same notes every time you play it. Before, it kept a few more each play from the third play on, so the sound kept changing.
+
 ## Version 1.7.1
 
 What's new:

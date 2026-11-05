@@ -786,7 +786,8 @@ impl Drop for Synth {
 }
 
 /// A remembered song block's limits go up by PLAN_RISE after a play where it left notes out with time to spare
-/// (made in under PLAN_ROOM of its real-time length).
+/// (made in under PLAN_ROOM of its real-time length), never past the limits it had the first time: climbing past
+/// them changed the sound every play (2026-11-05: a dense wall's limits rose ~6 % a play, play 5 vs 1 = 9 % same).
 const PLAN_ROOM: f64 = 0.6;
 const PLAN_RISE: f32 = 1.1;
 /// Messages other batches may have due in a block for its front batch to still be read the fast way (`apart`).
@@ -808,8 +809,8 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
     let mut span = 0usize;
     let mut cancels = 0u64;
     // each song block's limits as first played (note-ons, voices): played again with them (the same sound every
-    // play, 2026-10-28)
-    let mut plan: HashMap<i64, (f32, f32)> = HashMap::new();
+    // play, 2026-10-28): (note-ons, voices) now + the first play's (note-ons, voices), the most a rise goes back to
+    let mut plan: HashMap<i64, (f32, f32, f32, f32)> = HashMap::new();
     let mut plan_song = 0u32;
     // (measuring: KB_NOPLAN = nothing remembered, as before)
     let plan_on = std::env::var_os("KB_NOPLAN").is_none();
@@ -868,7 +869,7 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
             (((end - block as u64) as f64 - f64::from_bits(s.origin.load(Ordering::Relaxed))) / block as f64).round() as i64
         });
         let had = place.and_then(|p| plan.get(&p).copied());
-        if let Some((a, c)) = had {
+        if let Some((a, c, _, _)) = had {
             budget.follow(a, c);
             if budget.voice_cap() != cap {
                 cap = budget.voice_cap();
@@ -1017,20 +1018,23 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
                 // (only limits that kept up: a play's first busy block has none yet and took ~120 ms in Shinki;
                 // remembered, every play there began with that gap)
                 None if us <= block_us => {
-                    plan.insert(p, used);
+                    plan.insert(p, (used.0, used.1, used.0, used.1));
                 }
                 None if budget.cuts != cuts => {
-                    plan.insert(p, budget.limits());
+                    let (a, c) = budget.limits();
+                    plan.insert(p, (a, c, a, c));
                 }
                 // (too much for this PC now: lower here from now on, never higher)
-                Some((a, c)) if budget.cuts != cuts => {
+                Some((a, c, a0, c0)) if budget.cuts != cuts => {
                     let (a2, c2) = budget.limits();
-                    plan.insert(p, (a.min(a2), c.min(c2)));
+                    plan.insert(p, (a.min(a2), c.min(c2), a0, c0));
                 }
-                // (notes left out though this block had time to spare: a little more there next play. One slow
-                // moment (the card waking, Windows busy) kept a spot thinned for the whole session, hunt 2026-10-28)
-                Some((a, c)) if dropped > 0 && us < block_us * PLAN_ROOM => {
-                    plan.insert(p, (a * PLAN_RISE + 1.0, (c * PLAN_RISE).min(max_voices as f32)));
+                // (lowered after a slow moment, with time to spare now: a little more there next play, back up to the
+                // first play's limits at most. One slow moment (the card waking, Windows busy) kept a spot thinned for
+                // the whole session, hunt 2026-10-28)
+                Some((a, c, a0, c0)) if dropped > 0 && us < block_us * PLAN_ROOM && (a < a0 || c < c0) => {
+                    plan.insert(p, ((a * PLAN_RISE + 1.0).min(a0), (c * PLAN_RISE).min(c0).min(max_voices as f32),
+                                    a0, c0));
                 }
                 _ => {}
             }
