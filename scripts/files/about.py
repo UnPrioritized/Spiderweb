@@ -3,7 +3,7 @@
 import os
 import sys
 
-VERSION = "1.7.2-beta4"
+VERSION = "1.7.2-beta5"
 try:  # (written by build_version.py for a build: its commit + day, so builds with one version can be told apart)
     from files.build_stamp import BUILD
 except ImportError:
