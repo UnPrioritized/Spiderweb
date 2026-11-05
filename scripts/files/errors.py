@@ -12,7 +12,7 @@ import time
 import traceback
 
 from files.lang import tr
-from files.about import HERE, USER, VERSION
+from files.about import FULL_VERSION as VERSION, HERE, USER
 from files.system import error_box
 
 LOG = os.path.join(HERE, "spiderweb-error.log")

@@ -14,6 +14,10 @@ What's new:
 
 • Help pages with many headings have a small "Back to top" link next to each heading.
 
+• Gate aware flip now comes after the note tool pages (Claw machine, Strum, Chop, Copy along a path), so a Claw machine's spacing turns round too, as every key row should.
+
+• Help → About and saved files show which build made them (its code mark and day), so two builds of the same version can be told apart.
+
 • Playing stops one beat after the last note (before, a quarter of a bar), in any time signature; with Rendered ahead, once the sound has died away.
 
 ## Version 1.7.1

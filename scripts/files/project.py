@@ -52,7 +52,7 @@ from files.midi_out import (MAX_DELTA, MAX_TRACKS, PPQ_WARN, long_silences, note
                             track_slots, write_midi)
 from files.own_tracks import FILE0
 from files.playback import OLD_NAMES, keep_saved
-from files.about import HERE, USER, VERSION
+from files.about import BUILD, HERE, USER, VERSION
 from files.errors import write_log
 from files.midi_copy import Added, Retime
 from files.midi_read import M_CUT, M_RMID, Cancelled, FileChanged, MidiError
@@ -305,7 +305,7 @@ class ProjectFiles:
         return {
             # the file format (3: a loaded MIDI's link; older Spiderwebs say a newer one made it), and the
             # Spiderweb that saved it
-            "version": 3 if link else 2, "app_version": VERSION,
+            "version": 3 if link else 2, "app_version": VERSION, **({"build": BUILD} if BUILD else {}),
             **({"loaded": dict(link)} if link else {}),
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,

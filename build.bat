@@ -27,6 +27,8 @@ if exist dist\Spiderweb-source.zip del dist\Spiderweb-source.zip
   native\kestrel_bridge\src native\kestrel_bridge\tests native\kestrel_bridge\licences native\kestrel_bridge\Cargo.toml ^
   native\kestrel_bridge\Cargo.lock native\kestrel_bridge\make_notices.py native\kestrel_bridge\NOTICES.txt
 if errorlevel 1 (pause & exit /b 1)
+rem The build stamp was only for this build (and its source zip): running from this folder shows the plain version again.
+if exist scripts\files\build_stamp.py del scripts\files\build_stamp.py
 echo.
 echo Done: dist\Spiderweb.exe and dist\Spiderweb-source.zip
 pause
