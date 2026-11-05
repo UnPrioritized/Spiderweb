@@ -307,6 +307,10 @@ MIRROR_LINE = pick("#0097a7", "#26c6da")  # Mirror: the line it's mirrored acros
 TOOL_ROW, TOOL_HOVER = pick("#ffffff", "#2f2f31"), pick("#e5f3ff", "#3d4a5c")  # the drawing tools list
 TOOL_PICKED = pick("#cce4f7", "#2f5a8a")
 COMPANION_EDGE = pick("#8a8a8a", "#1e1e20")  # Draw on Domino: the floating bar's thin edge (on Domino's grey)
+# Draw on Domino: remembered shapes picked in Domino = a white line with bright orange dashes over it (seen on any
+# Domino colours; the plain dashed blue was hard to see and blue blends with Domino's bar lines, user 2026-11-06).
+COMPANION_OUTLINE = "#ff6a00"
+COMPANION_OUTLINE_BACK = "#ffffff"
 KNOB_ORANGE, KNOB_GREEN = pick("#f5a623"), pick("#7cc21b")  # Claw / Strum / Chop knobs
 # (Stir's Turn past a whole turn: the ring's colour for each further turn, then round again; user 11-04)
 KNOB_LAPS = (KNOB_GREEN, pick("#3d9be9", "#5aa9ef"), pick("#a15be0", "#b47ce8"), KNOB_ORANGE)

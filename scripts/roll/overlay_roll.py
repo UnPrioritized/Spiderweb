@@ -13,14 +13,17 @@ class OverlayRoll(PianoRoll):
     # Domino cuts a note's x down to the pixel, Spiderweb rounds: half a pixel less = the same edges as Domino's
     # (measured 2026-11-06, dev/scratch/dj_check.py; user: what you see is what you get). Thin notes still get 1 px.
     note_x_shift = -0.4999
-    GHOST = "#3b6fd6"  # remembered shapes whose notes are selected in Domino: a dashed outline (MY PICK colour)
-    ghosts = ()        # (those shapes, where Domino has their notes now: window/domino_companion.show_selected)
+    ghosts = ()        # (remembered shapes whose notes are selected in Domino, where Domino has their notes now:
+    # window/domino_companion.show_selected) = a white line with orange dashes over it, 3 px (look.COMPANION_OUTLINE)
 
     def redraw(self):
         super().redraw()
         self.delete("ghost")
+        from window import look
+        w = max(3, round(3 * self.scale))
         for sh in self.ghosts:
-            self.draw_path(sh, self.GHOST, max(1, round(self.scale)), dash=(5, 3), tags=("ghost",))
+            self.draw_path(sh, look.COMPANION_OUTLINE_BACK, w, tags=("ghost",))
+            self.draw_path(sh, look.COMPANION_OUTLINE, w, dash=(6, 4), tags=("ghost",))
     def __init__(self, parent, app, scale, see_through, wheel=None):
         super().__init__(parent, app, scale)
         self.see_through = see_through
