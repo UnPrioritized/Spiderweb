@@ -250,17 +250,20 @@ class HzMouse:
     def on_motion(self, e):
         if self.draw_motion(e) or self.bend_motion(e):  # (a drawing tool: hz_draw.py; Bend: hz_bend.py)
             return
-        if self.detune_edge(e.x, e.y):  # (the one selected note's top / bottom edge: Quick detune, hz_note_tools.py)
-            self.canvas.config(cursor="sb_v_double_arrow")
-            return self.show_status(e)
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
         empty = (SELECT_CURSOR if inside and self.tool.get() in ("select", "bend") else
                  self.pencil if inside and self.can_place() and not e.state & CTRL else "")
         on_box = self.on_kept_box(self.kept_box(), e, hit)
-        if on_box or self.ruler_band(e, self.kept_box()):  # (the bar numbers' band: moves in time)
+        if on_box and on_box != (0, 0) or self.ruler_band(e, self.kept_box()):  # (the bar numbers' band: moves in time)
             self.canvas.config(cursor=BOX_CURSORS[on_box] if on_box else "sb_h_double_arrow")
+            return self.show_status(e)
+        if self.detune_edge(e.x, e.y):  # (the one selected note's top / bottom strip: Quick detune, hz_note_tools.py)
+            self.canvas.config(cursor="sb_v_double_arrow")
+            return self.show_status(e)
+        if on_box:
+            self.canvas.config(cursor=BOX_CURSORS[on_box])
             return self.show_status(e)
         self.canvas.config(cursor={"in": "sb_h_double_arrow", "out": "sb_h_double_arrow", "left": "sb_h_double_arrow",
                                    "right": "sb_h_double_arrow", "tune": "sb_v_double_arrow",
@@ -282,8 +285,11 @@ class HzMouse:
         if self.fx.sel:  # (the effect points selected aren't any more)
             self.fx.sel = set()
             self.fx.redraw()
-        if not place and (self.bend_press(e) or self.detune_press(e)):  # (the Bend tool on a note: hz_bend.py;
-            return  # the one selected note's top / bottom edge: Quick detune, hz_note_tools.py)
+        if not place and self.bend_press(e):  # (the Bend tool on a note: hz_bend.py)
+            return
+        # (the one selected note's top / bottom strip: a press there is an ordinary note press, its first up / down
+        # move turns it into a Quick detune: hz_note_tools.detune_begin)
+        edge = None if place else self.detune_edge(e.x, e.y)
         kept, self.box_kept, sel0 = self.kept_box(), None, set(self.sel)
         self.press_was = (sel0, kept)  # (what Esc / Ctrl+Z while the mouse is held go back to: cancel_drag)
         self.drop_drag()
@@ -367,6 +373,8 @@ class HzMouse:
                 self.box_kept = (kept, set(self.sel))
             if dup:
                 self.drag.update(dup=dup, name=tr("hz.step_duplicate"))
+            elif kind == "note" and edge and edge[0] == i:
+                self.drag["edge"] = edge[1]
         self.redraw()
 
     def ruler_press(self, e, kept, before):
@@ -434,7 +442,7 @@ class HzMouse:
             self.drag["double"] = True
 
     def on_drag(self, e):
-        if self.draw_drag(e) or self.bend_drag(e) or self.detune_drag(e):
+        if self.draw_drag(e) or self.bend_drag(e) or self.detune_drag(e) or self.detune_begin(e):
             return
         d = self.drag
         if not d:

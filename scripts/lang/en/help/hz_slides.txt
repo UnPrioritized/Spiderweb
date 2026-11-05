@@ -26,10 +26,10 @@ Press R to put the shape you picked last on all the selected notes again (Scoop 
 
 Right-click a note → Set Pitch… to type the key it should sit on (like C4, F#2 or 60) and its tune in cents. Its bend keeps its shape; other selected notes move by as much.
 
-Align Note-On (N) moves a bent note to the key its bend starts on and moves the bend back by as much, so it sounds the same but sits on the row where it starts.
+Align Note-On (N) moves a bent note to the key its bend starts on and moves the bend back by as much, so it sounds the same but sits on the row where it starts. With the Arpeggio's scale on, notes that would sound different after the move are left as they are (the status line says so).
 
 With two or more notes selected, Join into one note (J) turns them into one bending note: from the first note's start to the last one's end, each note's pitch in turn. A gap between them keeps the pitch before it, then it jumps to the next note. The joined note keeps the first note's loudness and gate settings. Notes that overlap in time can't be joined (one note can't play two pitches at once).
 
-Quick detune: with the Select tool and one note selected, drag the top or bottom edge of its row to spread it into detuned copies, from as far below to as far above its pitch. The drag goes in half-key steps (hold Ctrl for any cent). While dragging, the wheel or Up / Down picks how many copies (2 to 9), and Esc cancels. Each copy is a note of its own with its own tune; copies more than half a key away sit on the row nearest their pitch.
+Quick detune: with the Select tool and one note selected, drag the top or bottom edge of its row up or down to spread it into detuned copies, from as far below to as far above its pitch. Dragging the edge sideways moves the note as usual, and a double-click still deletes it. Zoomed far out (small rows) there's no edge to drag: zoom in first. The drag goes in half-key steps (hold Ctrl for any cent). While dragging, the wheel or Up / Down picks how many copies (2 to 9), and Esc cancels. Each copy is a note of its own with its own tune; copies more than half a key away sit on the row nearest their pitch.
 
 The Sketch tool (S) shapes the same bend line by hand, with curves and wobbles too: see Sketch tool.

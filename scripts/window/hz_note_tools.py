@@ -94,11 +94,13 @@ def ask_pitch(win, key, cents):
 
 
 def moved_to(n, total):
-    """Note n's key + cents for the pitch `total` (keys): None when it falls off the rows."""
-    key = int(round(total))
-    if not LOWEST <= key <= HIGHEST:
+    """Note n's key + cents for the pitch `total` (keys): the nearest row, kept to the rows 0..127 with the rest as
+    its tune (±TUNE cents); None when it falls off the rows (past 127 + TUNE / 0 - TUNE)."""
+    key = min(HIGHEST, max(LOWEST, int(round(total))))
+    cents = round((total - key) * 100.0, 6)
+    if abs(cents) > TUNE + 1e-6:
         return None
-    return key, round((total - key) * 100.0, 6)
+    return key, max(-TUNE, min(TUNE, cents))
 
 
 def joined(notes):
@@ -112,7 +114,13 @@ def joined(notes):
     pts, wobs = [], []
     for n in notes:
         d = pitch(n) - pitch(a)
-        line = n.get("bend") or [[0.0, 0.0], [1.0, 0.0]]
+        line = [list(p) for p in n.get("bend") or [[0.0, 0.0], [1.0, 0.0]]]
+        # (a line starting late / ending early holds its first / last value there, as it sounds on its own: a Fall
+        # off must still jump at its note's start, not glide from the note before; hunt 2026-11-06)
+        if line[0][0] > 1e-9:
+            line.insert(0, [0.0, line[0][1]])
+        if line[-1][0] < 1.0 - 1e-9:
+            line.append([1.0, line[-1][1]])
         at = lambda u, n=n: (n["t"] - t0 + u * n["len"]) / length
         if pts:  # (the gap: held at the last pitch up to this note's start, then the jump)
             pts.append([at(0.0), pts[-1][1]])
@@ -143,16 +151,16 @@ VOICES_START = 3  # ... to start with (wheel / Up / Down while pulling)
 
 def fanned(n, spread, count, ids):
     """Note n fanned into `count` copies spread evenly from `spread` cents below to `spread` above its pitch, each
-    on the row nearest its pitch with its own tune (key + cents, as Set Pitch). The copy nearest the middle is n
-    itself (its id + slides); the others get ids from `ids` (an iterator) and no slides. Copies past the rows left
-    out."""
+    on the row nearest its pitch with its own tune (key + cents, as Set Pitch). Copies past the rows left out; of
+    the ones kept, the one nearest the note's pitch is n itself (its id + slides: never lost at the edge keys, hunt
+    2026-11-06); the others get ids from `ids` (an iterator) and no slides."""
     offs = [spread * (2.0 * k / (count - 1) - 1.0) for k in range(count)]
-    mid = min(range(count), key=lambda k: abs(offs[k]))
+    kept = [(off, to) for off in offs if (to := moved_to(n, pitch(n) + off / 100.0)) is not None]
+    if not kept:
+        return []
+    mid = min(range(len(kept)), key=lambda k: abs(kept[k][0]))
     out = []
-    for k, off in enumerate(offs):
-        to = moved_to(n, pitch(n) + off / 100.0)
-        if to is None:
-            continue
+    for k, (off, to) in enumerate(kept):
         m = copy.deepcopy(n)
         m["key"], m["cents"] = to
         if k != mid:
@@ -161,12 +169,18 @@ def fanned(n, spread, count, ids):
     return out
 
 
+DETUNE_ROWS = 8  # px: rows shorter than this have no Quick detune strip (zoomed out: the note must still move)
+DETUNE_MOVE = 4  # px the mouse moves before a press on the strip decides: up / down = detune, sideways = move
+
+
 class HzNoteTools:
     def detune_edge(self, x, y):
-        """Quick detune (the plugin's): the selected note's index when (x, y) is on the top or bottom edge of its row
-        and it's the only one selected (Select tool; its bend stays inside its row), with "top" / "bottom"; else
-        None."""
-        if self.tool.get() != "select" or len(self.sel) != 1 or self.drag:
+        """Quick detune (the plugin's): the selected note's index when (x, y) is on the top or bottom strip INSIDE
+        its own row (a quarter of the row at most; none on rows under DETUNE_ROWS px) and it's the only one selected
+        (Select tool; its bend stays inside its row), with "top" / "bottom"; else None. Whatever else is there wins
+        (slide dots, bend handles, the note's ends, other notes, the tune line: hit must find this note's body;
+        hunt 2026-11-06)."""
+        if self.tool.get() != "select" or len(self.sel) != 1 or self.drag or self.sy < DETUNE_ROWS * self.s:
             return None
         i = next(iter(self.sel))
         if i >= len(self.tones):
@@ -174,32 +188,36 @@ class HzNoteTools:
         n = self.tones[i]
         if any(abs(p[1]) >= 0.5 for p in n.get("bend") or ()) or n.get("wobble"):
             return None
-        x0, x1, y0 = self.x_of(n["t"]), self.x_of(n["t"] + n["len"]), self.y_of(n["key"])
-        end = min(5 * self.s, (x1 - x0) / 3)  # (the ends stay the length's: hit)
-        band = max(2.0, min(3 * self.s, self.sy / 4))
-        if not x0 + end < x < x1 - end:
+        if self.hit(x, y) != ("note", i):
             return None
-        if abs(y - y0) <= band:
+        y0 = self.y_of(n["key"])
+        band = min(3 * self.s, self.sy / 4)
+        if y0 <= y < y0 + band:
             return i, "top"
-        if abs(y - (y0 + self.sy)) <= band:
+        if y0 + self.sy - band <= y < y0 + self.sy:
             return i, "bottom"
         return None
 
-    def detune_press(self, e):
-        got = self.detune_edge(e.x, e.y)
-        if got is None:
+    def detune_begin(self, e):
+        """A note press that started on the strip (on_press marks drag["edge"]): the first DETUNE_MOVE px decide.
+        Up / down = the Quick detune takes over; sideways = an ordinary move (the mark goes). A double-click's
+        second press never detunes (it deletes the note: hunt 2026-11-06). True when the motion is used here."""
+        d = self.drag
+        if not d or d["kind"] != "note" or not d.get("edge") or d["moved"] or d.get("double"):
             return False
-        i, edge = got
-        self.press_was = (set(self.sel), self.kept_box())
-        self.drop_drag()
-        before = copy.deepcopy(self.tones)
-        self.sel_before = (before, self.sel_state())
+        dx, dy = abs(e.x - d["x"]), abs(e.y - d["y"])
+        if max(dx, dy) < DETUNE_MOVE:
+            return True  # (still deciding: nothing moves)
+        if dx >= dy:
+            d.pop("edge")
+            return False
+        i = d["i"]
+        self.sound(None)
         self.box_kept = None
-        self.drag = {"kind": "detune", "i": i, "edge": edge, "y": e.y, "before": before, "spread": 0.0,
-                     "count": VOICES_START, "note": copy.deepcopy(self.tones[i]),
-                     "rest": [copy.deepcopy(n) for j, n in enumerate(self.tones) if j != i]}
-        self.redraw()
-        self.show_status(e)
+        self.drag = {"kind": "detune", "i": i, "edge": d["edge"], "y": d["y"], "before": d["before"],
+                     "spread": 0.0, "count": VOICES_START, "note": copy.deepcopy(d["before"][i]),
+                     "rest": [copy.deepcopy(n) for j, n in enumerate(d["before"]) if j != i]}
+        self.detune_drag(e)
         return True
 
     def detune_drag(self, e):
@@ -240,8 +258,10 @@ class HzNoteTools:
         if not d or d["kind"] != "detune":
             return False
         self.drop_drag()
-        if d["spread"] <= 0 or self.tones == d["before"]:
-            self.tones, self.sel = copy.deepcopy(d["before"]), {d["i"]}
+        if d["spread"] <= 0 or self.tones == d["before"]:  # (nothing changed: as at the press, its Select box too)
+            sel, kept = self.press_was
+            self.tones, self.sel = copy.deepcopy(d["before"]), set(sel)
+            self.box_kept = (kept, set(sel)) if kept else None
             self.sel_before = None
             self.redraw()
         else:
@@ -281,7 +301,9 @@ class HzNoteTools:
         self.sel_before = (before, self.sel_state())
         for j in self.picked_or(i):
             m = self.tones[j]
-            to = (got[0], got[1]) if j == i else moved_to(m, min(HIGHEST, max(LOWEST, pitch(m) + moved)))
+            # (stopping only past the rows' tune range, 0 - TUNE .. 127 + TUNE cents: hunt 2026-11-06)
+            lo, hi = LOWEST - TUNE / 100.0, HIGHEST + TUNE / 100.0
+            to = (got[0], got[1]) if j == i else moved_to(m, min(hi, max(lo, pitch(m) + moved)))
             if to:
                 m["key"], m["cents"] = to
         if self.tones != before:
@@ -303,6 +325,7 @@ class HzNoteTools:
             return self.say(tr("hz.align_none"))
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
+        scaled = 0  # (left alone: the Arpeggio's scale would play them differently)
         for j in picked:
             n = self.tones[j]
             if not self.aligns(n):
@@ -311,14 +334,37 @@ class HzNoteTools:
             to = moved_to(n, pitch(n) + k0)
             if to is None:
                 continue
+            if not self.scale_keeps(n["key"], to[0]):
+                scaled += 1
+                continue
             shift = to[0] + to[1] / 100.0 - pitch(n)  # (= k0, but exactly what the key + cents make)
             n["key"], n["cents"] = to
             n["bend"] = [[p[0], round(p[1] - shift, 6), *p[2:]] for p in n["bend"]]
             self.tidy_after(n)
         if self.tones != before:
             self.commit(tr("hz.step_align"), before)
-        else:
+        if scaled:
+            self.say(tr("hz.align_scale"))
+        elif self.tones == before:
             self.say(tr("hz.align_none"))
+
+    def scale_keeps(self, key, to):
+        """True when the Arpeggio box (on, with a scale) plays a note moved from row `key` to row `to` (its bend moved
+        back as much) at the same pitches: its scale moves each row to the scale's nearest key BEFORE the bend is
+        added, so the move must shift every key it plays by exactly as much (hunt 2026-11-06: Align never changes
+        the sound). No Arpeggio / no scale / the steps pattern (no scale there) = True."""
+        arp = self.line_hz().get("arp")
+        if not arp or not arp.get("scale") or arp.get("pattern") == "steps":
+            return True
+        from notes.hz_arp import in_scale
+        from notes.hz_settings import CHORDS
+        root = arp.get("root", 0)
+        for k in CHORDS[arp["chord"]]:
+            for o in range(int(arp["octaves"])):
+                off = k + 12 * o
+                if in_scale(to + off, arp["scale"], root) - to != in_scale(key + off, arp["scale"], root) - key:
+                    return False
+        return True
 
     def tidy_after(self, n):
         from window.hz_bend import tidy_bend
