@@ -467,7 +467,8 @@ class Copy:
         raw = dc.get_from_clipboard()
         place = dv.song_place(self.d)
         try:
-            rows, ppq = dc.read_notes(raw, passengers=self.passengers) if raw else (None, None)
+            rows, ppq = dc.read_notes(raw, top=255, passengers=self.passengers) if raw else (None, None)  # (the
+            # 256 keys mod's keys too; any other Domino has none above 127)
         except ValueError:
             return self.done(None, "read", None)
         if rows is None or not len(rows) or place is None:

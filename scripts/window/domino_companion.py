@@ -159,6 +159,7 @@ class Companion:
         self._gen = (app.shapes_gen, time.monotonic())
         self._said = None
         self.old_ppq = None    # the project's PPQ before Domino's was put in (back when this ends)
+        self.old_keys = None   # the same for its keys (128 / 256: the 256 keys mod)
         # shapes remembered inside Domino (PLAN K, files/domino_shapes.py): kept on the app, so they outlive this
         self.records = app.__dict__.setdefault("domino_records", [])
         self.sending = None    # (shapes, rows, first track) of the send going on: remembered once it lands
@@ -305,13 +306,29 @@ class Companion:
 
     # --- following Domino ---
     def on_view(self, v):
-        self.roll.set_domino_view(v, DOMINO_KEYS)
+        self.roll.set_domino_view(v, v.keys)
+        self.match_keys()
         self.place_bar()
+
+    def domino_keys(self):
+        """Domino's key rows: 128, or 256 in the 256 keys mod (it says so itself, files/domino_builds.py)."""
+        v = self.overlay.view
+        return v.keys if v is not None else DOMINO_KEYS
+
+    def match_keys(self):
+        """The project's keys = Domino's rows while drawing on it (256 for the 256 keys mod: shapes up there make
+        notes; the old setting back when this ends, like the PPQ)."""
+        keys, app = self.domino_keys(), self.app
+        if keys != app.keys:
+            if self.old_keys is None:
+                self.old_keys = app.keys_var.get()
+            app.keys_var.set(str(keys))
+            app.on_project_change()
 
     def on_tick(self):
         v = self.overlay.view
         if v is not None:
-            self.roll.set_domino_view(v, DOMINO_KEYS)  # (only redraws when something moved our view)
+            self.roll.set_domino_view(v, v.keys)  # (only redraws when something moved our view)
             if self.bar.winfo_viewable():  # (hidden: placed when shown again, show_bar)
                 self.place_bar()
         d = self.overlay.domino
@@ -447,7 +464,7 @@ class Companion:
         if d is None or not self.match_ppq():
             return self.say(tr("companion.send_failed_domino"), warn=True)
         rows = self.notes_for(shapes)
-        rows = rows[(rows[:, 2] >= 0) & (rows[:, 2] <= 127)]
+        rows = rows[(rows[:, 2] >= 0) & (rows[:, 2] < self.domino_keys())]  # (the 256 keys mod: up to 255)
         self.pending = [s for s in self.pending if not any(s is x for x in shapes)]
         if not len(rows):
             return self.say(tr("companion.no_notes"), warn=True)
@@ -1371,6 +1388,9 @@ class Companion:
         if self.old_ppq is not None and app.pvar["ppq"].get() != self.old_ppq:  # (the project's own PPQ back)
             app.pvar["ppq"].set(self.old_ppq)
             app.on_project_change(True, ppq_done=True)
+        if self.old_keys is not None and app.keys_var.get() != self.old_keys:  # (and its keys)
+            app.keys_var.set(self.old_keys)
+            app.on_project_change()
         self.picker.close()
         self.overlay.stop()
         try:

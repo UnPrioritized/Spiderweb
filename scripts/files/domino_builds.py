@@ -5,7 +5,10 @@ window and a note are found by those names in the program file (CPianoRollWnd, C
 CEventNote), then the spots where the running Domino keeps them are found by looking through its global data for
 the one pointer to each. Measured on Domino 1.41b, 1.42, 1.43, 1.43 + English + dominohook and 1.44 (all 32-bit,
 dev/scratch/dx_scan.py): one spot each, the same as the hand-made 1.43 table, and 1.43's places inside each part
-read right in all of them (FAMILY_32). 64-bit Domino (1.45 builds): not yet (None = "not known").
+read right in all of them (FAMILY_32). 64-bit Domino (1.45 dev002 = the 256 keys mod's, 1.45 dev009-en nightly,
+PLAN L2 / L3, dev/scratch/dx64_*.py): the same classes, loaded somewhere else each start (domino_view.with_slots
+moves the addresses), 8-byte pointers, places in FAMILY_64 (both builds alike); the 256 keys mod says its 256 rows
+itself (rows_at).
 Read-only, like the rest. Anything that doesn't add up = None: never guessed."""
 
 import struct
@@ -15,6 +18,11 @@ from dataclasses import replace
 FAMILY_32 = dict(top_row=0xB8, row_px=0x1CC, beat_px=0x1D0, left=0x234, cursor=0x190, song=0x184, ppq_at=0xC,
                  tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, undo_at=0x188, path_at=0xA8,
                  doc_path_at=0x18C)
+# the same in both 64-bit builds measured (1.45 dev002, 1.45 dev009-en); the .mid import path: not found (0)
+FAMILY_64 = dict(top_row=0x228, row_px=0x4D0, beat_px=0x4D4, left=0x6A8, cursor=0x448, song=0x430, ppq_at=0x18,
+                 tracks_at=0x28, track_now=0x48, track_ch=0xC, events_at=0x28, undo_at=0x438, undo_n=0x20,
+                 path_at=0, doc_path_at=0x440, n_tick=8, n_sel=0xC, n_key=0x10, n_vel=0x11, n_gate=0x14,
+                 rows_at=0x218, ptr=8)
 CLASSES = {"p_vtable": b".?AVCPianoRollWnd@@", "h_vtable": b".?AVCTrackSheet@@", "c_vtable": b".?AVCMainFrame@@",
            "note_vt": b".?AVCEventNote@@"}
 SLOTS = {"p_slot": "p_vtable", "h_slot": "h_vtable", "c_slot": "c_vtable"}
@@ -91,23 +99,55 @@ def vtable_32(pe, name):
     return found[0] if len(found) == 1 else None
 
 
+def vtable_64(pe, name):
+    """The address (at the file's own load address) of a class's main vtable in a 64-bit program, or None. 64-bit
+    type info counts in offsets from the load address: the type descriptor = vtable pointer, spare, name (8 + 8);
+    the locator = signature 1, offset 0, ..., its type descriptor's offset at + 12, its own offset at + 20."""
+    rdata, at = pe.section(".rdata")
+    data, dat = pe.section(".data")
+    name += b"\0"
+    i = data.find(name)
+    if i < 16 or data.find(name, i + 1) >= 0:
+        return None
+    td = struct.pack("<I", dat - pe.base + i - 16)
+    found = []
+    j = rdata.find(td)
+    while j >= 0:
+        c = j - 12
+        if c >= 0 and c % 4 == 0 and rdata[c:c + 8] == b"\1\0\0\0\0\0\0\0" \
+                and struct.unpack_from("<I", rdata, c + 20)[0] == at - pe.base + c:
+            col = struct.pack("<Q", at + c)
+            m = rdata.find(col)
+            while m >= 0:
+                if m % 8 == 0:
+                    found.append(at + m + 8)
+                m = rdata.find(col, m + 1)
+        j = rdata.find(td, j + 1)
+    return found[0] if len(found) == 1 else None
+
+
 def from_file(path, build_type):
     """A Build for a Domino.exe without a hand-made table (its slots still 0: found in the running Domino by
-    find_slots), or None when it isn't a Domino this can read."""
+    find_slots; a 64-bit one's addresses moved there first), or None when it isn't a Domino this can read."""
     try:
         with open(path, "rb") as f:
             pe = _PE(f.read())
     except (OSError, ValueError, struct.error):
         return None
-    if pe.x64 or pe.moves or pe.base != 0x400000:
-        return None  # (64-bit / moving Domino: PLAN L2)
-    got = {k: vtable_32(pe, n) for k, n in CLASSES.items()}
+    if pe.x64:
+        family, find, extra = FAMILY_64, vtable_64, {"file_base": pe.base}
+    elif pe.moves or pe.base != 0x400000:
+        return None  # (a 32-bit Domino that moves: none seen)
+    else:
+        family, find, extra = FAMILY_32, vtable_32, {}
+    got = {k: find(pe, n) for k, n in CLASSES.items()}
     if None in got.values():
         return None
-    data, dat = pe.section(".data")
+    _, dat = pe.section(".data")
+    size = pe.secs.get(".data", (0, 0))[1]  # (as loaded: the part zero in the file too; 1.45's slots are there)
     ver = pe.version() or "?"
-    return build_type(f"Domino {ver}", p_slot=0, h_slot=0, c_slot=0, data_at=dat, data_size=len(data) or 0,
-                      **got, **FAMILY_32)
+    return build_type(f"Domino {ver}{' (64-bit)' if pe.x64 else ''}", p_slot=0, h_slot=0, c_slot=0, data_at=dat,
+                      data_size=size, **got, **family, **extra)
 
 
 def find_slots(build, read):
@@ -119,14 +159,15 @@ def find_slots(build, read):
     first = {}
     hits = {k: [] for k in SLOTS}
     want = {getattr(build, v): k for k, v in SLOTS.items()}
-    lo, hi = build.data_at - 0x200000, build.data_at + 0x400000  # (the program itself: not an object)
-    for o in range(0, len(raw) - 3, 4):
-        p = struct.unpack_from("<I", raw, o)[0]
-        if p < 0x10000 or lo <= p < hi or p & 3:
+    lo, hi = build.data_at - 0x800000, build.data_at + 0x800000  # (the program itself: not an object)
+    size, fmt = build.ptr, "<Q" if build.ptr == 8 else "<I"
+    for o in range(0, len(raw) - size + 1, size):
+        p = struct.unpack_from(fmt, raw, o)[0]
+        if p < 0x10000 or lo <= p < hi or p & (size - 1) or p >= 1 << 47:
             continue
         if p not in first:
-            b = read(p, 4)
-            first[p] = struct.unpack("<I", b)[0] if b and len(b) == 4 else None
+            b = read(p, size)
+            first[p] = struct.unpack(fmt, b)[0] if b and len(b) == size else None
         k = want.get(first[p])
         if k:
             hits[k].append((build.data_at + o, p))
@@ -143,13 +184,41 @@ def adds_up(b, read):
     def u32(a):
         x = read(a, 4)
         return struct.unpack("<I", x)[0] if x and len(x) == 4 else None
-    c = u32(b.c_slot)
-    s = u32(c + b.song) if c else None
+
+    def ptr(a):
+        x = read(a, b.ptr)
+        return int.from_bytes(x, "little") if x and len(x) == b.ptr else None
+    c = ptr(b.c_slot)
+    s = ptr(c + b.song) if c else None
     if not s:
         return False
-    ppq, arr, n = u32(s + b.ppq_at), u32(s + b.tracks_at), u32(s + b.tracks_at + 4)
+    ppq, arr, n = u32(s + b.ppq_at), ptr(s + b.tracks_at), u32(s + b.tracks_at + b.ptr)
     if ppq is None or not 1 <= ppq & 0xFFFF <= 65535 or not arr or not n or not 1 <= n <= 65535:
         return False
-    t = u32(arr)
-    ch = read(t + b.track_ch, 1) if t else None
-    return bool(ch) and ch[0] < 64
+    now, cursor = u32(s + b.track_now), u32(c + b.cursor)
+    if now is None or not 0 <= now < n or cursor is None or cursor >= 2 ** 31:
+        return False
+    # (PLAN L4: a new Domino with things moved must fail here, never be read wrong) the view's numbers ...
+    p, h = ptr(b.p_slot), ptr(b.h_slot)
+    nums = [u32(p + b.top_row), u32(p + b.row_px), u32(p + b.beat_px)] if p else [None]
+    left = u32(h + b.left) if h else None
+    if None in nums or left is None or not (nums[0] < 256 and 1 <= nums[1] <= 200 and 1 <= nums[2] <= 10000
+                                            and left < 2 ** 31):
+        return False
+    # ... and every track (up to 64): a channel byte, an event list whose events are objects of the program's
+    lo, hi = b.data_at - 0x1000000, b.data_at + 0x1000000
+    tracks = read(arr, b.ptr * min(n, 64)) or b""
+    for i in range(min(n, 64)):
+        t = int.from_bytes(tracks[i * b.ptr:(i + 1) * b.ptr], "little") if len(tracks) >= (i + 1) * b.ptr else 0
+        ch = read(t + b.track_ch, 1) if t else None
+        if not ch or ch[0] >= 64:
+            return False
+        ev, m = ptr(t + b.events_at), u32(t + b.events_at + b.ptr)
+        if m is None or m > 50_000_000 or (m and not ev):
+            return False
+        for j in range(min(m, 4)):
+            e = ptr(ev + j * b.ptr)
+            vt = ptr(e) if e else None
+            if vt is None or not lo <= vt < hi:
+                return False
+    return True
