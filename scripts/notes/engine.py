@@ -1614,8 +1614,9 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
     busy = range(n)
     group = list(range(n))
     for g in apart:
+        low = min(g, default=0)  # (once per group: a 4,096-colour shape made this 67 M steps)
         for a in g:
-            group[a] = min(g)
+            group[a] = low
     if group != list(range(n)):
         # a group's own lists get slots apart anyway (a shape's colours take turns note by note: lots of stretches):
         # only lists whose group, joined, clashes with another group can clash with anything
@@ -1629,22 +1630,25 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
     parts = [rows(i) for i in busy]
     # each list's clashes as one array (near(i)): thousands of shapes on top of each other = millions of pairs
     a, b = clash_arrays(np.concatenate(parts) if parts else np.zeros((0, 4), np.int64))
-    ends = [a, b]
-    starts = [b, a]
-    for group in apart:
-        g = np.asarray(sorted(set(group)), np.int64)
-        if len(g) > 1:
-            x, y = np.meshgrid(g, g)
-            off = x != y
-            starts.append(x[off])
-            ends.append(y[off])
-    starts, ends = np.concatenate(starts), np.concatenate(ends)
+    starts, ends = np.concatenate([b, a]), np.concatenate([a, b])
     by = np.argsort(starts, kind="stable")
     ends = ends[by]
     at = np.searchsorted(starts[by], np.arange(n + 1)).tolist()
+    # apart groups kept as groups, not as every pair in them (a shape with 4,096 colours = 16 M pairs; R:\333.spwb
+    # took 5 s here): near(i) = its clashes + its groups' lists (itself too: it never has a slot yet when asked)
+    member = {}
+    for g in apart:
+        g = np.asarray(sorted(set(g)), np.int64)
+        if len(g) > 1:
+            for a in g.tolist():
+                member.setdefault(a, []).append(g)
 
     def near(i):
-        return ends[at[i]:at[i + 1]]
+        own = member.get(i)
+        return np.concatenate([ends[at[i]:at[i + 1]]] + own) if own else ends[at[i]:at[i + 1]]
+
+    def alone(i):  # (clashes with nothing and in no group: most shapes in a big project)
+        return at[i] == at[i + 1] and i not in member
 
     first = [f if f is not None else int(notes[:, 0].min()) if len(notes) else math.inf
              for notes, f in zip(note_lists, first or [None] * n)]
@@ -1667,7 +1671,7 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
             if pins:
                 pinned[pins] = True
             for i in mine:
-                if at[i] == at[i + 1]:  # (clashes with nothing: most shapes in a big project)
+                if alone(i):
                     own[i] = 0
                     continue
                 j = near(i)
@@ -1675,7 +1679,7 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
             rows = set()
             if key not in loose:  # (its slots move again anyway: in_rounds)
                 for i in mine:
-                    if at[i] == at[i + 1]:
+                    if alone(i):
                         continue
                     j = near(i)
                     d = slots[j[done[j] & ~pinned[j] & roomy[j]]] - own[i]
@@ -1692,7 +1696,7 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
         return slots.tolist()
     for i in order:
         if not done[i]:
-            if at[i] < at[i + 1]:  # (else slot 0)
+            if not alone(i):  # (else slot 0)
                 j = near(i)
                 slots[i] = least_free(slots[j[done[j]]])
             done[i] = True
@@ -1707,9 +1711,10 @@ def least_free(used):
         while k in used:
             k += 1
         return k
-    u = np.unique(used[used >= 0])
-    gap = np.flatnonzero(u != np.arange(len(u)))
-    return int(gap[0]) if len(gap) else len(u)
+    # (marks, no sort: the answer is at most len(used); 16,384 lists of 4,096 each spent 1.7 s sorting)
+    seen = np.zeros(len(used) + 1, bool)
+    seen[used[(used >= 0) & (used < len(seen))]] = True
+    return int(np.argmin(seen))
 
 
 def stretches(notes, owner, split="key"):
