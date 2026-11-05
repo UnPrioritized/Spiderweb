@@ -32,3 +32,24 @@ os.makedirs(os.path.join(HERE, "build"), exist_ok=True)
 with open(os.path.join(HERE, "build", "version.txt"), "w", encoding="utf-8") as f:
     f.write(text)
 print("Version", VERSION)
+
+
+def git(*args):
+    import subprocess
+    try:
+        return subprocess.run(["git", *args], cwd=HERE, capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+# The build stamp (files/about.py BUILD): the commit and the day it was built, "+" when files were changed since that
+# commit. build.bat deletes it again after packing, so running from the source folder shows the plain version.
+import datetime  # noqa: E402
+
+commit = git("rev-parse", "--short", "HEAD") or "unknown"
+if git("status", "--porcelain", "--untracked-files=no"):
+    commit += "+"
+stamp = f"{commit}, {datetime.date.today().isoformat()}"
+with open(os.path.join(HERE, "scripts", "files", "build_stamp.py"), "w", encoding="utf-8", newline="\n") as f:
+    f.write(f'"""Written by build_version.py for one build (deleted again after it)."""\n\nBUILD = {stamp!r}\n')
+print("Build", stamp)

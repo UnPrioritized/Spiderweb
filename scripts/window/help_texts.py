@@ -15,7 +15,7 @@ there). A clip that isn't there is just left out."""
 
 import re
 
-from files.about import VERSION, WEBSITE
+from files.about import FULL_VERSION, WEBSITE
 from files.lang import texts, tr
 
 SECTIONS = ["Getting started", "Tools", "Shapes and settings", "Editing", "Sound and MIDI", "Hz bass",
@@ -130,7 +130,7 @@ TOPIC_LIST = [
 TOPICS = []
 for _id, _section in TOPIC_LIST:
     _t = dict(id=_id, section=_section, title=tr(f"help.{_id}.title"), tip=tr(f"help.{_id}.tip"),
-              text=tr(f"help.{_id}.text", VERSION=VERSION, WEBSITE=WEBSITE))
+              text=tr(f"help.{_id}.text", VERSION=FULL_VERSION, WEBSITE=WEBSITE))
     if f"help.{_id}.words" in texts():
         _t["words"] = tr(f"help.{_id}.words")
     TOPICS.append(_t)

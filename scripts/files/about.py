@@ -3,7 +3,12 @@
 import os
 import sys
 
-VERSION = "1.7.2-beta3"
+VERSION = "1.7.2-beta4"
+try:  # (written by build_version.py for a build: its commit + day, so builds with one version can be told apart)
+    from files.build_stamp import BUILD
+except ImportError:
+    BUILD = ""
+FULL_VERSION = f"{VERSION} ({BUILD})" if BUILD else VERSION  # (Help, errors.log; saved files keep it as "build")
 WEBSITE = "https://github.com/UnPrioritized/Spiderweb"  # new versions, the source code, problem reports
 
 # The spiderweb folder (scripts/<group>/ is two levels down); the .exe build unpacks to a temp folder, so there it's

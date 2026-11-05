@@ -11,7 +11,7 @@ import webbrowser
 from tkinter import font as tkfont, ttk
 
 from files.lang import size as lang_size, tr
-from files.about import BANNER, HERE, LICENSE, VERSION, WEBSITE
+from files.about import BANNER, FULL_VERSION, HERE, LICENSE, VERSION, WEBSITE
 from files import system
 from files.system import open_path
 from window import look
@@ -347,7 +347,7 @@ class HelpWindow(tk.Toplevel):
         ttk.Button(bottom, text=tr("help.show_all_tips_again"), command=self.reset_tips).pack(side="left", padx=(8, 0))
         self.reset_note = ttk.Label(bottom, text="", foreground=look.GOOD)
         self.reset_note.pack(side="left", padx=(6, 0))
-        version = ttk.Label(bottom, text=tr("help.spiderweb", VERSION=VERSION), foreground=look.FAINT_TEXT, cursor="hand2",
+        version = ttk.Label(bottom, text=tr("help.spiderweb", VERSION=FULL_VERSION), foreground=look.FAINT_TEXT, cursor="hand2",
                             font=look.font(9))  # (the hover's font from the start: it didn't change width on hover)
         version.pack(side="right")
         version.bind("<Button-1>", lambda e: self.open_topic("about"))

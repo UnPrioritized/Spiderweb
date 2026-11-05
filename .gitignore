@@ -29,3 +29,5 @@ user/
 # Kestrel connector DLL (built from native/kestrel_bridge; how it ships is decided at release)
 scripts/kestrel/**/*.dll
 scripts/kestrel/**/*.so
+# Build stamp (build_version.py writes it for one build)
+scripts/files/build_stamp.py
