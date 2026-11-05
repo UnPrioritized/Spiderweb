@@ -53,6 +53,7 @@ from window.hz_mouse import DOUBLE_MS, HzMouse  # noqa: F401
 from window.hz_draw import DRAW, HzDraw
 from window.hz_bend import HzBend
 from window.hz_sketch import HzSketch
+from window.hz_note_tools import HzNoteTools
 
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 
@@ -68,7 +69,7 @@ def open_hz(app):
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
 
 
-class HzWindow(HzDraw, HzSketch, HzBend, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
+class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -274,6 +275,10 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzMouse, HzGates, HzSound, HzView, tk.T
             c.bind(f"<KeyPress-{k}>", lambda e, tool=tool: None if e.state & CTRL else  # (Ctrl+Y: redo, the
                    "break" if self.drag or self.loudness.held() else  # program's own shortcuts; the mouse holding
                    self.tool.set(tool) or self.on_motion(e) or "break")  # something: waits, like the other keys)
+        for k, fn in (("r", self.quick_ramp), ("n", self.align_note_on), ("j", self.join_notes)):  # (the plugin's
+            for k in (k, k.upper()):  # keys: Quick Ramp, Align Note-On, Join; hz_bend.py / hz_note_tools.py)
+                c.bind(f"<KeyPress-{k}>", lambda e, fn=fn: None if e.state & CTRL else
+                       "break" if self.drag or self.loudness.held() else fn() or "break")
         for k in ("Alt_L", "Alt_R"):  # (Sketch: every piece's curve square shown while Alt is held, hz_sketch.py)
             c.bind(f"<KeyPress-{k}>", lambda e: self.sketch_alt_to(True))
             c.bind(f"<KeyRelease-{k}>", lambda e: self.sketch_alt_to(False))

@@ -645,6 +645,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.picture_use10 = False  # (shapes_changed: pictures use channel 10 too)
         self.hz_clip = None  # notes copied in it (HzWindow.copy_notes)
         self.hz_bend_clip = None  # a note's bend line copied in it (HzBend.copy_bend)
+        self.hz_ramp_last = None  # the ready bend shape picked last (R puts it on again: HzBend.quick_ramp)
         self.hz_copied = None  # the Windows clipboard's copy count at its last copy (a later Domino copy wins Ctrl+V)
         self.hz_pos = ""  # its size and place ("WxH+x+y", remembered in the autosave)
         self.hz_view = None  # its zoom + scroll when last closed (HzView.view_state, remembered in the autosave)

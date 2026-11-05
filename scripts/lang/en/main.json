@@ -2431,7 +2431,7 @@
  "help.hz_shape.words": "hz bass shape wave drawn line sine saw triangle square zigzag texture look note length gate % of a wave fraction bars strips preview",
  "help.hz_slides.title": "Slides (Hz bass)",
  "help.hz_slides.tip": "To make the tone slide from one note to another: select both, right-click → Slide between the selected notes. Or middle-click one note, then the other.",
- "help.hz_slides.words": "hz bass slide slides glide portamento bend middle-click dots curve s-curve double single handle bend tool per-note pitch scoop fall",
+ "help.hz_slides.words": "hz bass slide slides glide portamento bend middle-click dots curve s-curve double single handle bend tool per-note pitch scoop fall rise drop quick ramp set pitch align note-on join notes",
  "help.hz_sketch.title": "Sketch tool (Hz bass)",
  "help.hz_sketch.tip": "Sketch (S) in the Hz bass window draws notes as pitch lines: add points, drag pieces, Alt+drag to curve, click a piece and drag the orange line up for a wobble.",
  "help.hz_sketch.words": "hz bass sketch tool pitch line draw bend points pieces curve s-curve jump wobble vibrato lfo depth fade speed rate sine triangle saw square upside down bake",

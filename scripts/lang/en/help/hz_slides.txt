@@ -18,6 +18,16 @@ A small square sits half way between two points: drag it up or down to curve tha
 
 Right-click a note → Bend: Copy bend copies its bend line, Paste bend gives it to the note (or to all the selected notes, if it's one of them; the line stretches to each note), Clear bend takes it away.
 
-Below them are ready shapes that replace the bend: Scoop up (from 2 keys below onto the note in its first 1/8 beat), Fall off (down 5 keys in its last 1/4 beat) and Wobble (half a key up and down, 4 times a beat). They can be changed afterwards with the Bend tool.
+Below them are ready shapes that replace the bend: Scoop up (from 2 keys below onto the note in its first 1/8 beat), Fall off (down 5 keys in its last 1/4 beat), Wobble (half a key up and down, 4 times a beat), and four that move 2 keys over the first or last quarter of the note: Rise at the end, Drop in from above, Scoop up and rise at the end, Drop in and fall at the end. They can be changed afterwards with the Bend tool.
+
+Press R to put the shape you picked last on all the selected notes again (Scoop up until you pick one).
+
+## Pitch tools
+
+Right-click a note → Set Pitch… to type the key it should sit on (like C4, F#2 or 60) and its tune in cents. Its bend keeps its shape; other selected notes move by as much.
+
+Align Note-On (N) moves a bent note to the key its bend starts on and moves the bend back by as much, so it sounds the same but sits on the row where it starts.
+
+With two or more notes selected, Join into one note (J) turns them into one bending note: from the first note's start to the last one's end, each note's pitch in turn. A gap between them keeps the pitch before it, then it jumps to the next note. The joined note keeps the first note's loudness and gate settings. Notes that overlap in time can't be joined (one note can't play two pitches at once).
 
 The Sketch tool (S) shapes the same bend line by hand, with curves and wobbles too: see Sketch tool.

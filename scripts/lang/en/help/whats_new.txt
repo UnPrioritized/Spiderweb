@@ -24,6 +24,8 @@ What's new:
 
 • The track list's Conductor row works like Domino's Conductor track: click it to highlight it, and Tab takes you to the Conductor pane (turned on if hidden). Draw a box on it to copy, cut, delete or drag the tempo and time and key signatures in that stretch, and paste them at the play line; Copy to Domino gives the Conductor track alone. A box reaching over the Conductor row and tracks, or a band on the bar numbers, takes the notes and the tempo together, and pasting it brings both back. Inside Keep timing parts, the row shows the tempo you drew there as purple lines. See Help → Track list.
 
+• Hz bass notes have new right-click tools: four more ready bend shapes (Rise at the end, Drop in from above, and both ends), R to put the last shape on the selected notes again, Set Pitch… to type a note's key and tune, Align Note-On (N) to put a bent note on the key it starts on, and Join into one note (J) to turn several notes into one bending note. See Help → Slides (Hz bass).
+
 • Fixed: the track list's tips stayed hidden after a click until the mouse left the list.
 
 • Help → About and saved files show which build made them (its code mark and day), so two builds of the same version can be told apart.

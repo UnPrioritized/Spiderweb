@@ -448,6 +448,8 @@ class HzBend:
         length; a copy_bend clip: its line and wobbles), one undo step. Their wobbles go with the old line."""
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
+        if isinstance(pts, str) and pts in SHAPES:  # (R puts it on again: quick_ramp)
+            self.app.hz_ramp_last = pts
         for j in picked:
             n = self.tones[j]
             n.pop("wobble", None)
@@ -463,6 +465,17 @@ class HzBend:
             tidy_bend(n, self.sketching())
         if self.tones != before:
             self.commit(name, before)
+
+    def quick_ramp(self):
+        """R (Quick Ramp, like the plugin's): the ready bend shape picked last (Scoop up at first) on the selected
+        notes, one undo step; nothing selected = said."""
+        if self.drag or self.target() is None:
+            return
+        if not self.sel:
+            return self.say(tr("hz.ramp_none"))
+        kind = self.app.hz_ramp_last if self.app.hz_ramp_last in SHAPES else "scoop"
+        self.set_bends(sorted(self.sel), kind, tr("hz.step_note_bend_shape"))
+        self.say(tr("hz.ramp_done", shape=tr(f"hz.bend_{kind}")))
 
     def draw_bends(self):
         """With the Bend tool: each note's bend line in view (as it bends the note, dashed) and its points."""
@@ -494,12 +507,20 @@ def shaped(kind, length):
         return [[0.0, -SCOOP[1], 0.6], [min(0.5, SCOOP[0] / length), 0.0]]
     if kind == "fall":  # (from the note, down at the end: slow first)
         return [[max(0.5, 1.0 - FALL[0] / length), 0.0, -0.6], [1.0, -FALL[1]]]
+    # Quick Ramp shapes (user 2026-11-05): RAMP keys over RAMP_PART of the note (not beats: the user's pick)
+    start = {"drop": RAMP[1], "up_both": -RAMP[1], "down_both": RAMP[1]}.get(kind)
+    end = {"rise": RAMP[1], "up_both": RAMP[1], "down_both": -RAMP[1]}.get(kind)
+    if start is not None or end is not None:
+        pts = [[0.0, start, 0.6], [RAMP[0], 0.0]] if start is not None else [[0.0, 0.0]]
+        pts += [[1.0 - RAMP[0], 0.0, -0.6], [1.0, end]] if end is not None else [[1.0, 0.0]]
+        return pts
     rate, depth = WOBBLE  # wobble: quarter waves, each piece curved like a sine's (fast out of 0, slow at the tops)
     count = min(WOBBLE_MOST, max(2, round(4 * rate * length)))  # (a note under a wave long: part of one)
     return [[k / count, (0.0, depth, 0.0, -depth)[k % 4], 0.6 if k % 2 == 0 else -0.6] for k in range(count + 1)]
 
 
-SHAPES = ("scoop", "fall", "wobble")
+SHAPES = ("scoop", "fall", "rise", "drop", "up_both", "down_both", "wobble")
+RAMP = (0.25, 2.0)  # share of the note, keys: the Quick Ramp shapes (rise ... down_both)
 SCOOP = (0.125, 2.0)  # beats, keys below: Scoop up
 FALL = (0.25, 5.0)  # ... keys down at the end: Fall off
 WOBBLE = (4.0, 0.5)  # waves a beat, keys each way
