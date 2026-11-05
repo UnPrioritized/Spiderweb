@@ -46,16 +46,22 @@ class Build:
     note_vt: int = 0    # a note event's first 4 bytes (+4 tick, +8 selected byte, +0xC key, +0xD velocity, +0x10 gate)
     undo_at: int = 0    # C + this -> the undo list; + 0x10 there = how many steps it holds
     path_at: int = 0    # S + this -> an object whose + 4 -> the open song's file path (ANSI text, NUL-ended)
+    doc_path_at: int = 0  # C + this -> the song's own file path (ANSI; a .dms; for a .mid only "name.dms")
+    data_at: int = 0    # builds found by name (files/domino_builds.py): Domino's global data, where the slots are
+    data_size: int = 0  # looked for in the running Domino (slots 0 until then)
 
 
-# sha256 of Domino.exe -> Build. Only builds checked by hand: an unknown one is never guessed at.
+# sha256 of Domino.exe -> Build, checked by hand. Other Domino versions: found by name (files/domino_builds.py,
+# measured 1.41b - 1.44 32-bit); what doesn't add up there = not known, never guessed.
 BUILDS = {
     "ba4d007be174626387a59dd0f127d5fd63d0c67cab2219b71aa087ba6725db9d": Build(
         "Domino 1.43 (with dominohook)", p_slot=0x5B49C8, p_vtable=0x55F490, top_row=0xB8, row_px=0x1CC,
         beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234,
         c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC,
-        tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, note_vt=0x55AB28, undo_at=0x188, path_at=0xA8),
+        tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, note_vt=0x55AB28, undo_at=0x188, path_at=0xA8,
+        doc_path_at=0x18C),
 }
+KNOWN_VERSIONS = "Domino 1.41b, 1.42, 1.43, 1.44 (32-bit)"  # (shown when a Domino can't be read)
 UNITS_PER_BEAT = 24
 
 
@@ -101,15 +107,51 @@ _known = {}  # (path, size, mtime) -> Build or None
 
 
 def build_of(path):
-    """The Build for a Domino.exe, or None when it's a build we don't know."""
+    """The Build for a Domino.exe, or None when it's a build we can't read. A build found by name has its slots
+    0 until with_slots finds them in a running Domino."""
+    key = _key(path)
+    if key is None:
+        return None
+    if key not in _known:
+        b = BUILDS.get(fingerprint(path))
+        if b is None:
+            from files import domino_builds
+            b = domino_builds.from_file(path, Build)
+        _known[key] = b
+    return _known[key]
+
+
+def _key(path):
     try:
         st = os.stat(path)
     except OSError:
         return None
-    key = (os.path.normcase(path), st.st_size, st.st_mtime_ns)
-    if key not in _known:
-        _known[key] = BUILDS.get(fingerprint(path))
-    return _known[key]
+    return os.path.normcase(path), st.st_size, st.st_mtime_ns
+
+
+_slot_tries = {}  # exe key -> time of the last failed look (looked again after SLOT_AGAIN_S)
+SLOT_AGAIN_S = 2.0
+
+
+def with_slots(d):
+    """A Domino whose build was found by name: its slots looked for in the running Domino (once per program file;
+    the same each start: a 32-bit Domino never moves). Not found yet (still starting, no piano roll) = looked
+    again later; till then reading answers "not readable"."""
+    import time
+    b = d.build
+    if b is None or b.p_slot or not b.data_at:
+        return d
+    key = _key(d.path)
+    if key is None or time.monotonic() - _slot_tries.get(key, -1e9) < SLOT_AGAIN_S:
+        return d
+    ph = d.handle()
+    from files import domino_builds
+    got = domino_builds.find_slots(b, lambda a, n: _read(ph, a, n)) if ph else None
+    if got is None:
+        _slot_tries[key] = time.monotonic()
+        return d
+    _known[key] = d.build = got
+    return d
 
 
 def view_from(numbers, grid_win, scale):
@@ -230,7 +272,7 @@ def find_all():
         pid = _pid(h)
         path = exe_path(pid)
         if os.path.basename(path).lower() == "domino.exe" and not any(d.pid == pid for d in found):
-            found.append(Domino(h, pid, path, build_of(path)))
+            found.append(with_slots(Domino(h, pid, path, build_of(path))))
     return found
 
 
@@ -370,7 +412,11 @@ def song_path(d):
     got = _song_obj(d)
     if got is None or not d.build.path_at:
         return None
-    ph, _, s = got
+    ph, c, s = got
+    if d.build.doc_path_at:  # (2026-11-06: a .dms song's path is only here; a .mid's holds just "name.dms")
+        own = _text_at(ph, _i32(ph, c + d.build.doc_path_at))
+        if own:
+            return own
     q = _i32(ph, s + d.build.path_at)
     p = _i32(ph, (q & 0xFFFFFFFF) + 4) if q else None
     if not p:
@@ -378,11 +424,19 @@ def song_path(d):
     raw = _read(ph, p & 0xFFFFFFFF, 1040).split(b"\0", 1)[0]
     if not raw:
         return ""
+    return _text_at(ph, p) or None
+
+
+def _text_at(ph, p):
+    """A full file path (ANSI text) at p, or "" (none there / not a full path)."""
+    if not p:
+        return ""
+    raw = _read(ph, p & 0xFFFFFFFF, 1040).split(b"\0", 1)[0]
     try:
         text = raw.decode("mbcs")
     except (UnicodeDecodeError, LookupError):
-        return None
-    return text if len(text) > 3 and (text[1:3] == ":\\" or text.startswith("\\\\")) else None
+        return ""
+    return text if len(text) > 3 and (text[1:3] == ":\\" or text.startswith("\\\\")) else ""
 
 
 def _read(ph, addr, size):

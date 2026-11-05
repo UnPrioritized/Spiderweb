@@ -48,7 +48,7 @@ Spiderweb keeps this in a small file next to the song with the same name plus ".
 
 ## Good to know
 
-• It works with Domino 1.43 (the version Spiderweb knows). Another version: Spiderweb says so and stays as it is.
+• It works with Domino 1.41b, 1.42, 1.43 and 1.44 (the official 32-bit versions, translated ones too). Other versions, such as the 64-bit 1.45 test builds: Spiderweb says it doesn't know them yet and stays as it is.
 
 • It doesn't work while a MIDI file is loaded in Spiderweb.
 

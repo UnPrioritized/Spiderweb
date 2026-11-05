@@ -100,7 +100,7 @@ def warned(app):
 
 
 def unknown_build(app):
-    known = ", ".join(b.name for b in dv.BUILDS.values())
+    known = dv.KNOWN_VERSIONS
     messagebox.showinfo(tr("companion.title"), tr("companion.unknown_build", known=known), parent=app)
 
 

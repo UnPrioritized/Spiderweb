@@ -171,6 +171,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     play_dense.py    Kestrel (GPU): a loaded MIDI's parts too dense to read live, read once ahead, copies collapsed
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     domino_view.py   Domino companion: where a running Domino's piano roll is on the screen and what it shows
+    domino_builds.py Domino versions without a hand-made table: their reading spots found by class name
     domino_link.py   Domino companion: notes into Domino (its cursor + paste) and its selection out (copy + delete)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
