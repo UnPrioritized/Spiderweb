@@ -616,6 +616,20 @@ def track_notes(d, track):
     """Track's notes as an int64 array (tick, gate, key, velocity, selected 0/1), Domino's order (by tick), read from
     its memory (read-only), or None. 100,000 notes ~0.04 s: the pointer list in one read, then only the memory
     pages the notes sit on (dev/scratch/dk_big.py)."""
+    out = _track_events(d, track)
+    return None if out is None else out[out[:, 0] == d.build.note_vt, 1:]
+
+
+def track_others(d, track):
+    """The ticks of the track's events that aren't notes (control changes, track name, ...), or None. Their tick
+    sits where a note's does (measured 2026-11-06, dev/scratch/rm_others.py)."""
+    out = _track_events(d, track)
+    return None if out is None else out[out[:, 0] != d.build.note_vt, 1]
+
+
+def _track_events(d, track):
+    """Every event of a track: (vtable, tick, gate, key, velocity, selected) rows (only notes' last four mean
+    anything), or None."""
     import numpy as np
     b = d.build
     got = _track_list(d) if b is not None and b.events_at else None
@@ -629,7 +643,7 @@ def track_notes(d, track):
     if m is None or not 0 <= m <= 50_000_000:
         return None
     if m == 0:
-        return np.zeros((0, 5), np.int64)
+        return np.zeros((0, 6), np.int64)
     raw = _read(ph, ev, b.ptr * m)
     if len(raw) != b.ptr * m:
         return None
@@ -663,7 +677,7 @@ def track_notes(d, track):
         out[sel, 3] = data[off + b.n_key]
         out[sel, 4] = data[off + b.n_vel]
         out[sel, 5] = data[off + b.n_sel] != 0
-    return out[out[:, 0] == b.note_vt, 1:]
+    return out
 
 
 def song_tracks(d):

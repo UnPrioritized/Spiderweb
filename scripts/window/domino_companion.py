@@ -538,6 +538,10 @@ class Companion:
         self.sending = (shapes, rows.copy(), got[0] if got is not None else None)
         try:
             if app.channel_mode.get() == "single":
+                quick = self.from_memory(d, got[0] if got is not None else None, rows)
+                if quick is not None:  # (no Select All + Copy: only the touched stretch goes back, user 2026-11-06)
+                    self.safely(self.send_single, shapes, rows, quick[0], app.ppq, 0, [], quick[1])
+                    return None
                 there = []
                 dl.Copy(self.bar, d, lambda got, ppq, start: self.safely(
                     self.send_single, shapes, rows, got, ppq, start, there), whole=True, passengers=there)
@@ -605,7 +609,27 @@ class Companion:
         dl.Paste(self.bar, d, raw, lambda ok, why: self.sent(shapes, ok, why, n, steps + 1),
                  cmd=dl.SWAP_PASTE if swap else dl.PASTE)
 
-    def send_single(self, shapes, rows, there, ppq, start, rides):
+    def from_memory(self, d, track, rows):
+        """Single channel, the quick way (user 2026-11-06: "only the part where notes touch"): Domino's current
+        track read straight from its memory instead of Select All + Copy of the whole track; the stretch from the
+        first note that changes to the last goes back (Substitute Paste, one Domino step). (notes, merged) or None
+        = copy as before: unreadable, or anything that isn't a note (control change, ...) inside that stretch: it
+        must ride along, and only Domino's copy carries it."""
+        if track is None:
+            return None
+        notes, others = dv.track_notes(d, track), dv.track_others(d, track)
+        if notes is None or others is None:
+            return None
+        done = dl.merge_single(notes[:, :4].astype(np.int64), rows[:, :4])
+        _, changed, new = done
+        if len(changed):
+            moved = np.concatenate([changed[:, 0], new[:, 0]])
+            a, b = int(moved.min()), int(moved.max()) + 1
+            if ((others >= a) & (others < b)).any():
+                return None
+        return notes, done
+
+    def send_single(self, shapes, rows, there, ppq, start, rides, done=None):
         """Single channel (user 2026-11-06): the current track's notes read (Select All + Copy), overlaps removed
         over both like Spiderweb's Single channel; Domino's notes that change = the stretch from the first changed
         note on replaced (Substitute Paste, with that stretch's other events as they were): one Domino step."""
@@ -622,7 +646,7 @@ class Companion:
         if there is not None:
             old = np.asarray(there, np.int64)[:, :4].copy()
             old[:, 0] += start
-        merged, changed, new = dl.merge_single(old, rows[:, :4])
+        merged, changed, new = done if done is not None else dl.merge_single(old, rows[:, :4])
         out = np.zeros((len(merged), 6), np.int64)
         out[:, :4] = merged
         if not len(changed):  # (Domino's notes stay as they are: a plain paste of the new ones)
