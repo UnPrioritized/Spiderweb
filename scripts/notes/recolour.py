@@ -695,12 +695,12 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     part = there if there is not None and full["mirror"] == "area" and there.any() else None
     order = full["flip_side"] and full["flip_by"] == "order"
     side, up, smooth = full["flip_side"] and not order, full["flip_up"], full["smooth"]
-    if part is not None and full["flip_in"] == "inside":  # (across where the area and the notes overlap, row by
-        # row / time by time: the inside notes' first start / last end jittered the line on notes of different
-        # lengths, 11-05)
-        fm, fk = area_mirrored(at, mid, key, rc, box, own, side, up, smooth)
-    else:  # (outside the area: across the outside notes' own outline)
-        fm, fk = flipped(at if part is None else at[part], mid, key, side, up, smooth)
+    if part is not None:  # (inside: across where the area and the notes overlap, row by row / time by time: the
+        # inside notes' first start / last end jittered the line on notes of different lengths, 11-05; outside: each
+        # piece beside the area across itself: across both pieces' outline folded / jumped, sweep 11-05)
+        fm, fk = area_mirrored(at, mid, key, rc, box, own, side, up, smooth, full["flip_in"] == "outside")
+    else:
+        fm, fk = flipped(at, mid, key, side, up, smooth)
     if side or up:  # (a spot the MIRROR pushed past its row's end (or its time's lowest / highest key) bounces back
         # in, as a mirror would: else every note there took the row's last note = a flat patch, Chinese tester
         # 11-05. A spot already past it before the mirror stays: one stir flipping + turning = a flip stir, then a
@@ -1209,7 +1209,7 @@ def chord_ends(test, a, b, n):
     return out
 
 
-def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0):
+def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0, outside=False):
     """Spots (mid, key) mirrored across where the Stir area and the notes overlap (PLAN C; hunt 11-05): sideways
     along the spot's key row, from where the area starts on that row (never before the row's first note) to where it
     ends (never past its last); upside down along the keys at the spot's time (within the notes there, Cols' slices);
@@ -1217,7 +1217,10 @@ def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0):
     row's own ends, so a turned or slanted area's line is straight. Kept per area + notes: Turn / Twist changing
     don't work it out again. A spot on a row / time the area doesn't reach stays. smooth: Smooth corners, % of the
     height (width upside down): where the shape's edge cuts the area off, the ends turned sharply = a straight seam
-    (Chinese tester 11-05)."""
+    (Chinese tester 11-05). outside: the notes beside the area instead, each piece across itself (a row's piece
+    before the area: its first note's start <-> the area's start; after it: the area's end <-> its last note's end;
+    a row / time the area doesn't reach: across all of it), the piece picked by which side of the area's middle
+    the spot is."""
     st = full_stir(rc.get("stir"))
     kxy = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))[0]
 
@@ -1240,7 +1243,11 @@ def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0):
             lo, hi = smooth_ends(ks, lo, reach), smooth_ends(ks, hi, reach)
         r = rows.row(key)
         ok = np.isfinite(lo[r])
-        mid = np.where(ok, np.nan_to_num(lo[r] + hi[r]) - mid, mid)
+        if outside:
+            whole = Rows(at, smooth)
+            mid = pieces_mirrored(mid, whole.a[r], whole.b[r], lo[r], hi[r], ok)
+        else:
+            mid = np.where(ok, np.nan_to_num(lo[r] + hi[r]) - mid, mid)
     if up:
         cols = Cols(at)
         tc = cols.t0 + (np.arange(cols.n) + 0.5) * cols.w
@@ -1251,8 +1258,23 @@ def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0):
             lo, hi = smooth_ends(np.arange(cols.n), lo, reach), smooth_ends(np.arange(cols.n), hi, reach)
         s = cols.slice(mid)
         ok = np.isfinite(lo[s])
-        key = np.where(ok, np.nan_to_num(lo[s] + hi[s]) - key, key)
+        if outside:
+            whole = Cols(at, smooth)
+            key = pieces_mirrored(key, whole.lo[s], whole.hi[s], lo[s], hi[s], ok)
+        else:
+            key = np.where(ok, np.nan_to_num(lo[s] + hi[s]) - key, key)
     return mid, key
+
+
+def pieces_mirrored(v, a, b, lo, hi, ok):
+    """Spots v on lines (a key row's time or a time's keys, a..b each spot's line's notes) mirrored across the piece
+    of their line beside the area (lo..hi on it; ok False where it doesn't reach): before it = a..lo, after it =
+    hi..b, a line it doesn't reach = a..b. A piece of no width (the area covers that end): the spot stays."""
+    lo, hi = np.nan_to_num(lo), np.nan_to_num(hi)
+    before = v < (lo + hi) / 2
+    p0 = np.where(ok, np.where(before, a, hi), a)
+    p1 = np.where(ok, np.where(before, lo, b), b)
+    return np.where(p1 > p0, p0 + p1 - v, v)
 
 
 def _chords(k, make):
