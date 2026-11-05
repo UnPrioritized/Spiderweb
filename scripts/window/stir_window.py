@@ -426,7 +426,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             name = self.area_box.get()
             sizes = {s["reach"] for s in areas}
             inner = every("round", areas) and all(s["size_of"] == "inside" for s in areas)
-            words = [tr("stir.short_size_inside" if inner else "stir.short_size", name=name,
+            outer = bool(areas) and all(s["size_of"] == "around" for s in areas)
+            words = [tr("stir.short_size_inside" if inner else "stir.short_size_around" if outer else
+                        "stir.short_size", name=name,
                         size=fmt(next(iter(sizes)))) if areas and len(sizes) == 1 and name != mixed else name]
             if every("spot", areas):
                 words.append(tr("stir.short_spot"))
@@ -743,10 +745,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             var.set(vals == {True} if vals else key.startswith("area_"))
             tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if on and areas else "disabled"])
         self.flip_in["box"].config(state="readonly" if on and areas else "disabled")
-        # (Mirror across: only flips in / outside the area; Size of the circle inside: only with Round as seen
-        # (without it the box counts as square: both the same); Sideways by: only with the sideways flip)
+        # (Mirror across: only flips in / outside the area; Size of: with any area since the circle around differs
+        # without Round as seen too, 11-05 (the circle inside alone is the box then); Sideways by: only with the
+        # sideways flip)
         live = {"mirror": any(s["flip_in"] != "whole" for s in areas),
-                "size_of": any(s["round"] for s in areas), "flip_by": any(s["flip_side"] for s in sts),
+                "size_of": bool(areas), "flip_by": any(s["flip_side"] for s in sts),
                 "flip_of": any(s["flip_side"] or s["flip_up"] for s in sts)}
         for key, ok in live.items():
             self.picks[key]["box"].config(state="readonly" if on and ok else "disabled")

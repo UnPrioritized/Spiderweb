@@ -72,21 +72,26 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
 # cut off by the shape's edge) rounds instead of turning sharply = a straight seam. 0 = the sharp old way (old
 # files); a stir made now starts at NEW_SMOOTH (window.stir_window.with_stir). Straight outlines never change)
 MOST_SMOOTH, NEW_SMOOTH = 100.0, 20.0  # (20: the least that took the tester's seams away, fuzz/stir_sweep --known)
-# ("size_mix": only Add between's steps, 0..1 = how far Size counts from the box to the circle inside, so the area
+# ("size_mix": only Add between's steps, 0..1 = how far Size counts from the box to the circle inside (0..-1: to
+# the circle around, SIZE_SHARE), so the area
 # grows smoothly between an end of each kind, hunt 11-05 6; never set from the window)
 MOST_REACH_INSIDE = 1000.0  # (Size of the circle inside may go as far as the box's own 100 %, hunt 11-05 8)
 # (Chinese tester's feedback 11-04, PLAN.md, each a second choice with the old way as the default (user):
 # "flip_by" = the sideways colour flip by "time" (mirrored across the row's notes' span) / "order" (each key row's
 # 1st note <-> its last, 2nd <-> 2nd-last, lengths left out); "mirror" = with flips inside / outside the area, they
 # mirror across "shape" (the whole shape's rows / height) / "area" (only that part's notes: it flips in place);
-# "size_of" = Size in % of the "box" / of the circle "inside" it (its shorter side as seen, with Round as seen))
+# "size_of" = Size in % of the "box" / of the circle "inside" it (its shorter side as seen, with Round as seen) /
+# of the circle "around" it (its corner to corner))
 FLIP_BY = ("time", "order")
 MIRROR = ("shape", "area")
 # ("flip_of" = what the colour flips mirror: "before" = the colours, then this stir bends them (the swirl stays at
 # the Centre point) / "after" = this stir's finished pattern (the swirl turns over too, like the normal flips but
 # notes stay), Chinese tester 11-05: "flip the canvas", their flips looked like doing nothing on stripes)
 FLIP_OF = ("before", "after")
-SIZE_OF = ("box", "inside")
+SIZE_OF = ("box", "inside", "around")  # ("around" = the circle round the box, through its corners: user 11-05)
+# (each one's place on size_mix's line: box 0, the circle inside 1, the circle around -1, so Add between's steps
+# grow smoothly from any kind to any other)
+SIZE_SHARE = {"box": 0.0, "inside": 1.0, "around": -1.0}
 # (BMC tester's round 3 answers 11-04, all only with a reach: "hard" = the area cut clean at its edge, Turn and
 # Twist alike (a lazy susan), else the soft fade; "area_turn" / "area_twist" / "area_squeeze" = what the area
 # limits (unticked = that part works on the whole shape); "reverse" = inside the area the colours' (tracks') order
@@ -275,7 +280,7 @@ def one_stir(s):
         if s.get("size_of") in SIZE_OF[1:]:
             out["size_of"] = s["size_of"]
         v = s.get("size_mix")
-        if number(v) and 0 < round(v, 6) < 1:
+        if number(v) and -1 < round(v, 6) < 1 and round(v, 6) != SIZE_SHARE[out.get("size_of", "box")]:
             out["size_mix"] = round(float(v), 6)
     v = s.get("seen")
     if number(v) and 1e-9 < v < 1e9:
@@ -939,12 +944,16 @@ def area_global(X, Y, st, k):
 def size_scale(st, k):
     """What 100 % Size is, in the area's measure (k = area_scales' (kx, ky)): the box's longer side (1), or with Size
     of "the circle inside" the box's shorter one (tester 11-04: "100 % = the diameter of a circle inside the
-    shape"; only differs with Round as seen: without it the box counts as square); an Add between step's size_mix =
-    part way between the two."""
+    shape"; only differs with Round as seen: without it the box counts as square), or with "the circle around" the
+    box's corner to corner (user 11-05; also without Round as seen: the square's diagonal); an Add between step's
+    size_mix = part way between two of them (SIZE_SHARE: 0..1 box to inside, 0..-1 box to around)."""
     share = st.get("size_mix")
     if share is None:
-        share = 1.0 if st["size_of"] == "inside" else 0.0
-    return 1.0 + (min(k) / max(max(k), 1e-12) - 1.0) * share
+        share = SIZE_SHARE.get(st["size_of"], 0.0)
+    short = min(k) / max(max(k), 1e-12)
+    if share >= 0:
+        return 1.0 + (short - 1.0) * share
+    return 1.0 + (math.hypot(1.0, short) - 1.0) * -share
 
 
 def most_reach(st, k):

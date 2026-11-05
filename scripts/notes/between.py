@@ -321,7 +321,7 @@ class Pair:
         if x is not None and y is not None:  # (both ends with Gate extend: step by step when in the same unit)
             from notes.extend import mixed_extend
             out["extend"] = mixed_extend(x, y, f, mix)
-        from notes.recolour import BLEND_DEFAULTS, KEEP, clean_recolour, full_stir, stir_stack
+        from notes.recolour import BLEND_DEFAULTS, KEEP, SIZE_SHARE, clean_recolour, full_stir, stir_stack
         x, y = clean_recolour(a.get("recolour")), clean_recolour(b.get("recolour"))
         # (Off + a Stir at one end, plain Off at the other: the stir fades out step by step, hunt 2026-11-02)
         if x and not y and x["mode"] == KEEP:
@@ -354,7 +354,7 @@ class Pair:
                         sx[j]["size_of"] != sy[j]["size_of"]:  # (Size counted from the box at one end, the circle
                     # inside at the other: the steps count part way, so the area grows smoothly, hunt 11-05 6)
                     sx[j], sy[j] = (dict(s, size_mix=s["size_mix"] if s["size_mix"] is not None else
-                                         float(s["size_of"] == "inside")) for s in (sx[j], sy[j]))
+                                         SIZE_SHARE[s["size_of"]]) for s in (sx[j], sy[j]))
                 if sx[j]["shape"] != sy[j]["shape"]:  # (two drawn areas never blend point by point: they switch
                     # halfway, like the area itself, PLAN C2)
                     shape = (sx[j] if f < 0.5 else sy[j])["shape"]

@@ -28,6 +28,8 @@ What's new:
 
 • Reverse track order (right-click a Slice with shape piece, or any pasted notes, beside New colours ▸): the piece's first colour swaps with its last, the second with the second to last, so its track order turns round on the same tracks.
 
+• Stir's area Size can count "of the circle around" the shape's box: at 100 % a round area reaches the box's corners too, so the whole shape is inside.
+
 • Fixed: the track list's tips stayed hidden after a click until the mouse left the list.
 
 • Help → About and saved files show which build made them (its code mark and day), so two builds of the same version can be told apart.
