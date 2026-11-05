@@ -427,6 +427,9 @@ class ShapeMenu:
                 sub.add_command(label=tr("join_split.new_channel", n=ch), command=lambda ch=ch: app.new_colours(ch))
         m.add_cascade(label=tr("join_split.new_colours"), menu=sub,
                       state="normal" if app.channel_mode.get() == "auto" else "disabled")
+        # Reverse track order (user 11-05 picked A: right here, beside New colours; greyed with one colour)
+        m.add_command(label=tr("join_split.reverse_tracks"), command=app.reverse_tracks,
+                      state="normal" if app.reverse_targets() else "disabled")
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""

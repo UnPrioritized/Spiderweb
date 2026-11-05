@@ -1609,6 +1609,33 @@ class JoinSplit:
         self.status.config(text=trn("join_split.new_free_done", len(got), n=len(got)) if ch is None else
                            trn("join_split.new_channel_done", len(got), n=len(got), ch=ch))
 
+    def reverse_targets(self):
+        """The New colours ▸ shapes Reverse track order can turn round: 2+ colours, no Channel per strip (its
+        strips pick the channels, the colours wouldn't count)."""
+        return [i for i in self.new_colour_targets() if "strips" not in self.shapes[i]
+                and len(np.unique(unpack_notes(self.shapes[i]["notes"])[:, 4])) >= 2]
+
+    def reverse_tracks(self):
+        """Reverse track order (tester 11-04 + user 11-05 picked A: the cut piece's right-click, beside New
+        colours ▸; any plain notes): each selected shape's colours turned round, its first <-> its last (like the
+        Stir area's "reverse", on the whole shape). Same colours, same paste (it stays on the tracks it had, in
+        the other order); CC passengers stay with their tracks. One undo step."""
+        got = self.reverse_targets()
+        if not got:
+            return
+        self.commit_typing()
+        if self.notes_late:
+            self.shapes_changed(now=True)
+        self.push_undo(name=tr("join_split.reverse_tracks"))
+        for i in got:
+            sh = self.shapes[i]
+            rows = unpack_notes(sh["notes"]).copy()
+            olds = np.unique(rows[:, 4])
+            rows[:, 4] = olds[::-1][np.searchsorted(olds, rows[:, 4])]
+            sh["notes"] = pack_notes(rows)
+        self.shapes_changed()
+        self.status.config(text=trn("join_split.reverse_done", len(got), n=len(got)))
+
     def lasso_magnet_notes(self):
         """The notes a Magnetic lasso clings to: those it can cut as they are (pasted notes, lines; with Select boxes
         kept: only what they selected), (start, end, key) ticks."""
