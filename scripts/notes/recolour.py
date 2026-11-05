@@ -1168,9 +1168,7 @@ def bounced(at, mid, key, side, up, mid0, key0):
     spot before the mirror (mid0, key0) was on the notes that way; spots on the notes never move."""
     if side:
         rows = Rows(at)
-        half = np.asarray(at[:, 1] - at[:, 0], np.float64)
-        g = np.full(len(rows.keys), np.inf)  # (each row's shortest note's half: its first / last middle, not its ends)
-        np.minimum.at(g, np.searchsorted(rows.keys, np.asarray(at[:, 2], np.int64)), half / 2)
+        g = rows.g  # (its first / last middle, not its ends)
         r0 = rows.row(key0)
         was = (mid0 >= rows.a[r0] + g[r0] - 1e-9) & (mid0 <= rows.b[r0] - g[r0] + 1e-9)
         r = rows.row(key)
@@ -1238,43 +1236,69 @@ def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0, outside=Fals
         ks = rows.keys.astype(np.float64)
         lo, hi = _chords(("rows", sig, rows.keys.tobytes(), rows.a.tobytes(), rows.b.tobytes()),
                          lambda: chord_ends(lambda p, j: inside(p, ks[j]), rows.a, rows.b, 256))
+        los, his = lo, hi
         if smooth > 0 and len(ks) > 2:
             reach = smooth / 100 * float(ks[-1] - ks[0]) / 2
-            lo, hi = smooth_ends(ks, lo, reach), smooth_ends(ks, hi, reach)
+            los, his = smooth_ends(ks, lo, reach), smooth_ends(ks, hi, reach)
         r = rows.row(key)
         ok = np.isfinite(lo[r])
         if outside:
             whole = Rows(at, smooth)
-            mid = pieces_mirrored(mid, whole.a[r], whole.b[r], lo[r], hi[r], ok)
+            mid = pieces_mirrored(mid, (rows.a[r], rows.b[r], lo[r], hi[r]),
+                                  (whole.a[r], whole.b[r], los[r], his[r]), ok)
         else:
-            mid = np.where(ok, np.nan_to_num(lo[r] + hi[r]) - mid, mid)
+            mid = np.where(ok, soft_mirror(mid, lo[r], hi[r], los[r], his[r]), mid)
     if up:
         cols = Cols(at)
         tc = cols.t0 + (np.arange(cols.n) + 0.5) * cols.w
         lo, hi = _chords(("cols", sig, cols.t0, cols.w, cols.lo.tobytes(), cols.hi.tobytes()),
                          lambda: chord_ends(lambda p, j: inside(tc[j], p), cols.lo, cols.hi, 64))
+        los, his = lo, hi
         if smooth > 0:
             reach = smooth / 100 * cols.n / 2
-            lo, hi = smooth_ends(np.arange(cols.n), lo, reach), smooth_ends(np.arange(cols.n), hi, reach)
+            los, his = smooth_ends(np.arange(cols.n), lo, reach), smooth_ends(np.arange(cols.n), hi, reach)
         s = cols.slice(mid)
         ok = np.isfinite(lo[s])
         if outside:
             whole = Cols(at, smooth)
-            key = pieces_mirrored(key, whole.lo[s], whole.hi[s], lo[s], hi[s], ok)
+            key = pieces_mirrored(key, (cols.lo[s], cols.hi[s], lo[s], hi[s]),
+                                  (whole.lo[s], whole.hi[s], los[s], his[s]), ok)
         else:
-            key = np.where(ok, np.nan_to_num(lo[s] + hi[s]) - key, key)
+            key = np.where(ok, soft_mirror(key, lo[s], hi[s], los[s], his[s]), key)
     return mid, key
 
 
-def pieces_mirrored(v, a, b, lo, hi, ok):
-    """Spots v on lines (a key row's time or a time's keys, a..b each spot's line's notes) mirrored across the piece
-    of their line beside the area (lo..hi on it; ok False where it doesn't reach): before it = a..lo, after it =
-    hi..b, a line it doesn't reach = a..b. A piece of no width (the area covers that end): the spot stays."""
-    lo, hi = np.nan_to_num(lo), np.nan_to_num(hi)
+def soft_mirror(v, lo, hi, los, his):
+    """v mirrored across lo..hi, with Smooth corners across the smoothed ends los..his instead: that moves the
+    mirrored line by d, so near a corner the end of it would land past the real end (folded back by bounced = a
+    crease, sweep 11-05): its last L (a quarter of the line, 2 d at least) squeezed evenly more towards the end into
+    L - d (no bend where the squeeze starts), the real end <-> the real end. Spots mirrored past that (off the line
+    before): mirrored as they are."""
+    v, lo, hi = (np.nan_to_num(np.asarray(x, np.float64)) for x in (v, lo, hi))
+    w = np.maximum(hi - lo, 0.0)
+    d = np.clip(np.nan_to_num(np.asarray(los, np.float64) + his) - (lo + hi), -w / 4, w / 4)
+    x = lo + hi - v + d
+    e = np.abs(d)
+    L = np.maximum(w / 4, 2 * e)
+    sign = np.where(d > 0, 1.0, -1.0)
+    start = np.where(d > 0, hi, lo) + sign * (e - L)  # (where the squeeze starts; L further on: the moved end)
+    s = (x - start) * sign
+    u = np.clip(s, 0.0, L)
+    squeezed = start + sign * (u - e * (u / np.maximum(L, 1e-12)) ** 2)
+    return np.where((e > 0) & (s > 0), np.where(s <= L, squeezed, x - d), x)
+
+
+def pieces_mirrored(v, real, soft, ok):
+    """Spots v on lines (a key row's time or a time's keys) mirrored across the piece of their line beside the area:
+    real / soft = (a, b, lo, hi), the line's notes a..b and the area on it lo..hi, as they are / with Smooth corners
+    (ok False where the area doesn't reach): before it = a..lo, after it = hi..b, a line it doesn't reach = a..b
+    (soft_mirror). A piece of no width (the area covers that end): the spot stays."""
+    a, b, lo, hi = (np.nan_to_num(np.asarray(x, np.float64)) for x in real)
+    sa, sb, slo, shi = (np.nan_to_num(np.asarray(x, np.float64)) for x in soft)
     before = v < (lo + hi) / 2
-    p0 = np.where(ok, np.where(before, a, hi), a)
-    p1 = np.where(ok, np.where(before, lo, b), b)
-    return np.where(p1 > p0, p0 + p1 - v, v)
+    p0, q0 = np.where(ok, np.where(before, a, hi), a), np.where(ok, np.where(before, sa, shi), sa)
+    p1, q1 = np.where(ok, np.where(before, lo, b), b), np.where(ok, np.where(before, slo, sb), sb)
+    return np.where(p1 > p0, soft_mirror(v, p0, p1, q0, q1), v)
 
 
 def _chords(k, make):
@@ -1347,7 +1371,7 @@ class Cols:
         i = np.clip(np.searchsorted(full, np.arange(self.n)), 0, len(full) - 1)
         j = np.maximum(i - 1, 0)
         near = full[np.where(np.abs(full[j] - np.arange(self.n)) <= np.abs(full[i] - np.arange(self.n)), j, i)]
-        self.lo, self.hi = lo[near], hi[near]
+        self.lo, self.hi = self.lo0, self.hi0 = lo[near], hi[near]
         if smooth > 0:
             at_ = np.arange(self.n, dtype=np.float64)
             r = smooth / 100 * self.n / 2
@@ -1358,7 +1382,8 @@ class Cols:
         return np.clip(((np.asarray(mid, np.float64) - self.t0) / self.w).astype(np.int64), 0, self.n - 1)
 
     def mirrored(self, mid, key):
-        return self.sum[self.slice(mid)] - np.asarray(key, np.float64)
+        s = self.slice(mid)
+        return soft_mirror(key, self.lo0[s], self.hi0[s], self.lo[s], self.hi[s])
 
 
 class Rows:
@@ -1374,6 +1399,9 @@ class Rows:
         self.b = np.full(len(self.keys), -np.inf)
         np.minimum.at(self.a, inv, np.asarray(at[:, 0], np.float64))
         np.maximum.at(self.b, inv, np.asarray(at[:, 1], np.float64))
+        self.a0, self.b0 = self.a, self.b
+        self.g = np.full(len(self.keys), np.inf)  # (each row's shortest note's half: its first / last middle)
+        np.minimum.at(self.g, inv, np.asarray(at[:, 1] - at[:, 0], np.float64) / 2)
         if smooth > 0 and len(self.keys) > 2:
             r = smooth / 100 * float(self.keys[-1] - self.keys[0]) / 2
             self.a, self.b = smooth_ends(self.keys, self.a, r), smooth_ends(self.keys, self.b, r)
@@ -1392,7 +1420,8 @@ class Rows:
 
     def mirrored(self, mid, key):
         r = self.row(key)
-        return self.a[r] + self.b[r] - np.asarray(mid, np.float64)
+        g = self.g[r]  # (squeezed up to the first / last note's middle: the bounce's ends)
+        return soft_mirror(mid, self.a0[r] + g, self.b0[r] - g, self.a[r] + g, self.b[r] - g)
 
     def stretched(self, mid, key, t0, t1):
         r = self.row(key)
