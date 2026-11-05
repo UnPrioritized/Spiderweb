@@ -65,6 +65,8 @@ class LoadedSong:
     Answers what the Maker asks a Song (frame / tick_at / first / last / midi / ...)."""
 
     counts_notes = True  # (midi(counted=True) for our Merlin: stacks of identical notes sent once, PLAN D2)
+    release_s = None  # (the soundfonts' longest release, kestrel.Loaded.longest_release, set by the piece's maker:
+    # notes ended longer ago than that are silent, so they aren't carried; None = not known, CARRY_ENDED_S)
 
     def counted_here(self):
         """Merlin pieces of this song go counted (PLAN D2): our connector reads repeat marks, and no shapes of your
@@ -952,6 +954,7 @@ COUNTED_SLICE = 8 << 20  # bytes of a track walked at a time in a counted piece 
 CARRY_ENDED_S = (5.0, 2.0, 1.0, 0.5, 0.25, 0.0)  # seconds of notes ended before a piece handed to it too (their release
 # tails: Shinki 470 s needed 5 s, 1 s left a click; a dense wall starts its pieces 0.02 s early), less when ...
 CARRY_ROWS_MOST = 16 << 20  # ... that is more than this many rows (19 bytes each: ~300 MB at most)
+RELEASE_SPARE_S = 0.1  # carried past the soundfonts' longest release too (pieces start up to 0.02 s early in walls)
 
 
 _PAIRING_CCS = np.array([64, 66, 120, 123, 124, 125, 126, 127])  # (sustain, sostenuto, all sound / notes off, modes)
@@ -997,6 +1000,10 @@ class _Runs:
         self.pedal = np.zeros(256, bool)  # (port + channels pairing in ways counting can't follow: never carried)
         self.pedal[np.unique(((every[odd] >> 24) & 15) * 16 + (every[odd] & 15))] = True
         self.bar_ch[self.pedal] |= 2
+        # (CC 72 Release time above 64 lengthens every release: Kestrel adds 6e-5 s x (value - 64)^3, bank.rs TimeMod)
+        rt = ((every & 0xF0) == 0xB0) & (d1 == 72)
+        top = int(((every[rt] >> 16) & 127).max()) if rt.any() else 64
+        self.release_add = 6e-5 * max(0, top - 64) ** 3
         if not reorder:
             self.bar_ch |= 2
         self.carry_at = None  # (a tick the notes still sounding at are handed to the next piece: midi())
@@ -1052,6 +1059,18 @@ class _Runs:
         self.c[self.n:self.n + n] = 1 if cnt is None else cnt[order]
         self.n += n
 
+    def _carry_backs(self):
+        """How far back ended notes are carried, longest first (fewer when that is too many rows): CARRY_ENDED_S, or
+        no further than the soundfonts' longest release can still sound (+ CC 72 lengthening it, + RELEASE_SPARE_S).
+        Shinki's end: 1.6 G carried copies Merlin re-rendered gave a ~-60 dBFS rounding tail for ~4 s."""
+        most = getattr(self.song, "release_s", None)
+        if most is None:
+            return CARRY_ENDED_S
+        most = most + self.release_add + RELEASE_SPARE_S
+        if most >= CARRY_ENDED_S[0]:
+            return CARRY_ENDED_S
+        return (most,) + tuple(b for b in CARRY_ENDED_S if b < most)
+
     def _carry(self, ak, asg, ac):
         """The notes still sounding at carry_at, as this piece's synth pairs them (held copies + every note up to
         there, first in first out), handed to the piece starting there (song._carried): each at its own note-on with
@@ -1063,7 +1082,7 @@ class _Runs:
         lim = (self.carry_at - self.base) << 16
         song = self.song
         at_f = song.frame(self.carry_at)
-        for back in CARRY_ENDED_S:  # (notes ended this long before too: their release tails, 0.02 s early in walls)
+        for back in self._carry_backs():  # (notes ended this long before too: their release tails, 0.02 s early in walls)
             w = max(self.base, song.tick_at(max(0, at_f - int(back * RATE))))
             if _open_loop()(ak, asg, ac, len(ak), lim, (w - self.base) << 16, take) <= CARRY_ROWS_MOST:
                 break

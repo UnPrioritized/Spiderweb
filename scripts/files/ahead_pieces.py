@@ -404,6 +404,9 @@ def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=F
     # (built() after the MIDI only: a counted try that has to be re-cut plain (TooBigPlain) leaves it to the re-cut's
     # last part, else the next piece was made beside the plain parts, hunt 11-04; an error = _work sets it at its end)
     if not plain and engine == "merlin" and getattr(song, "counts_notes", False) and kestrel.repeat_marks():
+        kept = kestrel.kept_for(fonts, card)  # (the soundfonts' longest release: how far back ended notes still
+        if kept is not None:                  # sound into the next piece, LoadedSong.release_s)
+            song.release_s = kept.longest_release()
         data, skip = song.midi(f0, f1, counted=True, cancel=cancel)  # (stacks of identical notes sent once, PLAN D2)
         if built is not None:
             built()

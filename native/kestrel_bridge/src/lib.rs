@@ -1111,7 +1111,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.7.1; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
+    static V: &CStr = c"0.8.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
     V.as_ptr()
 }
 
@@ -1270,6 +1270,32 @@ pub unsafe extern "C" fn kb_voices_top(l: *const Loaded, opts: *const KbOptions)
             set_error(&format!("{e:#}"));
             0
         }
+    })
+}
+
+/// Rendered ahead: the longest any note of this set keeps sounding after its note-off, in seconds (every region's
+/// release down to the envelope floor `opts` gives, as Merlin counts it; sound controllers like CC 72 not counted).
+/// Below 0 = endless or not known (0.8.0 on).
+#[no_mangle]
+pub unsafe extern "C" fn kb_longest_release(l: *const Loaded, opts: *const KbOptions) -> f64 {
+    if l.is_null() {
+        return -1.0;
+    }
+    guard(-1.0, || {
+        let l = &*l;
+        let cfg = match config(&read_opts(opts)) {
+            Ok(c) => c,
+            Err(_) => return -1.0,
+        };
+        let mut most = 0usize;
+        for p in &l.bank.params {
+            let n = kestrel::merlin::kernel::release_frames(p, &cfg);
+            if n == usize::MAX {
+                return -1.0;
+            }
+            most = most.max(n);
+        }
+        most as f64 / l.sample_rate.max(1) as f64
     })
 }
 

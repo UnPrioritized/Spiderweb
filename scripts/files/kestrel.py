@@ -212,6 +212,7 @@ def load():
                             ("kb_piece_audio", [p, ctypes.POINTER(ctypes.c_uint64)], ctypes.POINTER(ctypes.c_float)),
                             ("kb_piece_error", [p], ctypes.c_char_p), ("kb_piece_free", [p], None),
                             ("kb_repeat_marks", [], u32),
+                            ("kb_longest_release", [p, ctypes.POINTER(_Options)], ctypes.c_double),  # (0.8.0 on)
                             # (Kestrel's own output stage for Rendered ahead's joined sound, connector 0.7.0 on)
                             ("kb_stage_new", [ctypes.POINTER(_Options)], p), ("kb_stage_latency", [p], u32),
                             ("kb_stage_process", [p, p, u32], None), ("kb_stage_free", [p], None)):
@@ -425,6 +426,19 @@ class Loaded:
         with _OPENING:
             top = self.dll.kb_voices_top(self.handle, ctypes.byref(opts)) if self.handle else 0
         return top or None
+
+    def longest_release(self):
+        """Seconds the longest note of these soundfonts keeps sounding after its note-off (its release down to
+        Kestrel's envelope floor), or None when not known (endless, or a connector before 0.8.0). Asked once."""
+        if not hasattr(self, "_release"):
+            fn = getattr(self.dll, "kb_longest_release", None)
+            got = -1.0
+            if fn is not None and self.handle:
+                opts = _options(block=BLOCK, ahead=3, voices=1, lower=False)
+                with _OPENING:
+                    got = fn(self.handle, ctypes.byref(opts)) if self.handle else -1.0
+            self._release = got if got >= 0 else None
+        return self._release
 
     def close(self):
         """The graphics card's copy freed (synths open on it keep their own share)."""
