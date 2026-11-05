@@ -145,6 +145,25 @@ def look(records, tracks):
     return events, made
 
 
+def landed(sent, tracks):
+    """sent = (track, tick, gate, key, velocity) as pasted -> the same notes as Domino holds them now (its overlap
+    rule may have cut gates; a note on a tick + key Domino kept another one of = left out)."""
+    sent = np.asarray(sent, np.int64).reshape(-1, 5)
+    dom = Notes(tracks)
+    if not len(sent) or not len(dom.code):
+        return np.zeros((0, 5), np.int64)
+    c = _code(sent[:, 0], sent[:, 1], sent[:, 3])
+    lo, hi = np.searchsorted(dom.code, c, "left"), np.searchsorted(dom.code, c, "right")
+    out = []
+    for i in range(len(sent)):
+        hits = [j for j in range(lo[i], hi[i]) if dom.rows[j, 4] == sent[i, 4] and not dom.claimed[j]]
+        if hits:
+            j = next((j for j in hits if dom.rows[j, 2] == sent[i, 2]), hits[0])  # (its own gate first)
+            dom.claimed[j] = True
+            out.append((sent[i, 0], sent[i, 1], dom.rows[j, 2], sent[i, 3], sent[i, 4]))
+    return np.array(out, np.int64).reshape(-1, 5)
+
+
 def trimmed(record, tracks):
     """Spiderweb's own Single channel send cut some of this record's notes short (a later shape over them): take
     the gates Domino has now at the same tick + key + velocity, so the record stays alive. Only for Spiderweb's

@@ -323,8 +323,11 @@ def song_place(d):
 
 def _song_obj(d):
     """(process handle, C, S) or None: the song position object and the song, checked."""
-    b, ph = d.build, d.handle()
-    if b is None or not b.c_slot or not ph:
+    b = getattr(d, "build", None)
+    if b is None or not b.c_slot:
+        return None
+    ph = d.handle()
+    if not ph:
         return None
     c = _i32(ph, b.c_slot)
     if not c or (_i32(ph, c & 0xFFFFFFFF) or 0) & 0xFFFFFFFF != b.c_vtable:

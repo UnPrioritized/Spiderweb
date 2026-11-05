@@ -27,6 +27,7 @@ from tkinter import font as tkfont
 import numpy as np
 
 from files import domino_link as dl
+from files import domino_shapes as dsh
 from files import domino_view as dv
 from files import settings, system
 from files.domino_clip import LONGEST, MOST_NOTES, clip_data, cut_gates
@@ -47,6 +48,7 @@ DOMINO_KEYS = 128
 MARK = "domino_send"  # (a shape key: drawn / taken here, goes into Domino with Send; dropped when this ends)
 REST_S = 0.25  # Domino's song PPQ checked once nothing changed for this long (no drag / typing going on)
 SAID_MS = 4000
+LOOK_AGAIN_S = 1.5  # the remembered shapes looked at again this often even when Domino's undo count stays (a full list)
 KEY_TAG = "DominoCompanionKeys"
 ALONE_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Caps_Lock", "Num_Lock",
               "Win_L", "Win_R", "App", "Super_L", "Super_R"}  # (pressed on their own: nothing to pass on)
@@ -131,6 +133,13 @@ class Companion:
         self._gen = (app.shapes_gen, time.monotonic())
         self._said = None
         self.old_ppq = None    # the project's PPQ before Domino's was put in (back when this ends)
+        # shapes remembered inside Domino (PLAN K, files/domino_shapes.py): kept on the app, so they outlive this
+        self.records = app.__dict__.setdefault("domino_records", [])
+        self.sending = None    # (shapes, rows, first track) of the send going on: remembered once it lands
+        self.new_records = []  # (shapes, record) landed, not yet off the overlay (take_off links them to the step)
+        self.step_records = {}  # id(linked step) -> its record (Spiderweb's Ctrl+Z of a send drops it, Ctrl+Y back)
+        self.looked = (None, 0.0)  # (Domino's undo depth, when) at the last look at the records
+        self.last_events = []  # (what the last look found: tests)
         self.bar = self.make_bar()  # (first: the overlay's first look at Domino places it)
         self.overlay = dov.DominoOverlay(app, pid=pid, on_view=self.on_view, on_state=self.on_state,
                                          on_tick=self.on_tick,
@@ -277,6 +286,14 @@ class Companion:
             # its own Ctrl+Z from now on)
             self.unlink()
         self.close_list_elsewhere()
+        try:
+            self.watch()
+        except Exception:  # (a failed look never stops following Domino; logged once a minute at most)
+            if time.monotonic() - getattr(self, "_watch_err", -99) > 60:
+                self._watch_err = time.monotonic()
+                import sys
+                from files.errors import write_log
+                write_log(*sys.exc_info(), "(Draw on Domino: looking at the remembered shapes)")
         self._ticks += 1
         if self._ticks % 10 == 0:
             self.adopt_windows()
@@ -411,6 +428,7 @@ class Companion:
             return None
         self.was_front = dl.front_window()  # (before the ruler click: Domino may take the keyboard)
         self.busy, self.job = True, d
+        self.sending = (shapes, rows.copy(), got[0] if got is not None else None)
         try:
             if app.channel_mode.get() == "single":
                 there = []
@@ -503,6 +521,7 @@ class Companion:
         if not len(changed):  # (Domino's notes stay as they are: a plain paste of the new ones)
             if not len(new):
                 self.busy = False
+                self.remember_safely(shapes, d)
                 self.landed.append((shapes, 0, (0, d)))  # (all already there: nothing pasted, nothing to undo there)
                 self.take_off()
                 return self.app.after_idle(self.flush)
@@ -541,9 +560,69 @@ class Companion:
             self.quick = None
             self.say(tr("companion.send_failed_" + why), warn=True)
         else:
+            self.remember_safely(shapes, d)
             self.landed.append((shapes, n, (steps, d)))
             self.take_off()
         self.app.after_idle(self.flush)
+
+    # --- shapes remembered inside Domino (PLAN K) ---
+    def remember_safely(self, shapes, d):
+        """remember(): a failure there never stops the send (the shape just isn't remembered; logged)."""
+        try:
+            self.remember(shapes, d)
+        except Exception:
+            import sys
+            from files.errors import write_log
+            self.sending = None
+            write_log(*sys.exc_info(), "(Draw on Domino: remembering a shape)")
+
+    def remember(self, shapes, d):
+        """A send landed: a record of the shapes + their notes as Domino holds them now (gates its overlaps cut,
+        notes Domino kept only one of left out); other records on those tracks take Spiderweb's own trims."""
+        got, self.sending = self.sending, None
+        if got is None or not any(s is x for s, x in zip(got[0], shapes)) or got[2] is None:
+            return
+        _, rows, first = got
+        slots = np.unique(rows[:, 4])
+        track = first + np.searchsorted(slots, rows[:, 4])  # (a track per channel used, from the current one down)
+        tracks = {int(t): dv.track_notes(d, int(t)) for t in np.unique(track)}
+        if any(v is None for v in tracks.values()):
+            return
+        sent = np.column_stack([track, rows[:, 0], rows[:, 1] - rows[:, 0], rows[:, 2], rows[:, 3]])
+        import copy as _copy
+        rec = dsh.new_record([_copy.deepcopy(s) for s in shapes], dsh.landed(sent, tracks))
+        rec["pid"], rec["ppq"] = d.pid, self.app.ppq
+        for r in self.records:
+            on = {int(t) for t in np.unique(r["notes"][:, 0])}
+            if r.get("pid") == d.pid and on & set(tracks):
+                need = {t: tracks[t] if t in tracks else dv.track_notes(d, t) for t in on}
+                if all(a is not None for a in need.values()):
+                    dsh.trimmed(r, need)
+        if len(rec["notes"]):
+            self.records.append(rec)
+            self.new_records.append((shapes, rec))
+        self.looked = (dv.undo_depth(d), time.monotonic())
+
+    def watch(self):
+        """Each tick: Domino changed (its undo count moved, or a while passed) = the records looked at again."""
+        d = self.overlay.domino
+        if d is None or self.busy or self.leaving:
+            return
+        mine = [r for r in self.records if r.get("pid") == d.pid]
+        if not mine or dl.mouse_down():
+            return
+        depth, now = dv.undo_depth(d), time.monotonic()
+        if depth == self.looked[0] and now - self.looked[1] < LOOK_AGAIN_S:
+            return
+        self.looked = (depth, now)
+        want = sorted({int(t) for r in mine for t in np.unique(r["notes"][:, 0])})
+        tracks = {t: dv.track_notes(d, t) for t in want}
+        tracks = {t: a for t, a in tracks.items() if a is not None}  # (a track gone: its records' notes not found)
+        events, made = dsh.look(mine, tracks)
+        for r in made:
+            r["pid"], r["ppq"] = d.pid, mine[0].get("ppq")
+        self.records.extend(made)
+        self.last_events = events
 
     def take_off(self, now=False):
         """Shapes now in Domino leave the overlay (one undo step each send) once nothing is held there: a shape
@@ -567,6 +646,9 @@ class Companion:
                     app.select(None)
                 app.shapes_changed()
                 self.link(app.undo_stack[-1], steps)
+                for got in [g for g in self.new_records if g[0] is shapes]:
+                    self.step_records[id(app.undo_stack[-1])] = got[1]
+                    self.new_records.remove(got)
                 if self.quick and any(s is self.quick.get("shape") for s in shapes):
                     self.quick_done()
             self._gen = (app.shapes_gen, time.monotonic())
@@ -692,6 +774,14 @@ class Companion:
         if not new or old is new[0]:
             return True
         self.domino_steps.pop(id(old), None)
+        rec = self.step_records.pop(id(old), None)  # (a send undone here: its shape isn't in Domino any more)
+        if rec is not None:
+            if any(r is rec for r in self.records):
+                self.records[:] = [r for r in self.records if r is not rec]
+            elif not gone:
+                self.records.append(rec)
+            if not gone:
+                self.step_records[id(new[0])] = rec
         if gone:  # (Domino closed / crashed: the shape comes back here, Domino untouched; no longer linked)
             self.linked = [s for s in self.linked if s is not old]
             self.say(tr("companion.undo_gone"), warn=True)
