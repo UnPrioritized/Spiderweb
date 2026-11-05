@@ -2708,6 +2708,8 @@ class TrackList(tk.Canvas):
         if text != self.tip.text:
             self.tip.hide()
             self.tip.text = text
+            if not e.state & self.tip.BUTTONS:  # (another row / spot: its tip may show again after a click or key;
+                self.tip.used = False            # used stayed on till the mouse left the whole list)
             if text and not self.tip.used and not e.state & self.tip.BUTTONS:
                 self.tip.schedule()
 
