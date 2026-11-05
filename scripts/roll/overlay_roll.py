@@ -3,6 +3,8 @@ grid, keyboard, ruler and play line, lying exactly over Domino's note grid. Whil
 app.roll, so every tool, the undo steps and the shapes work as in the main window; only the view comes from Domino
 (set_domino_view): Domino's scroll and zoom, never our own (the wheel goes to Domino, see window/domino_companion)."""
 
+from types import SimpleNamespace
+
 from roll.pianoroll import PianoRoll
 from roll.roll_shared import SHIFT
 
@@ -72,10 +74,27 @@ class OverlayRoll(PianoRoll):
     def draw_playhead(self, keep=False):
         self.delete("playhead")
 
+    def forwarded_double(self, e):
+        """A double click passed on from the mouse catcher (window/domino_overlay.forward_to: Tk can't see those):
+        what a real one does here. Double right-click while drawing = Domino's own mouse (user 2026-11-06), the
+        same toggle as the main piano roll."""
+        ev = SimpleNamespace(x=e.x, y=e.y, x_root=e.x_root, y_root=e.y_root, state=e.state, num=e.num, time=e.time,
+                             widget=self, delta=0, keysym="??", char="", type="4")
+        if e.num == 3:
+            return self.right_twice(ev)
+        return self.on_double(ev)
+
+    def idle(self):
+        return not (self.draft or self.drag or self.follow or self.typing)
+
     def on_key(self, e):
         # Esc with nothing going on: back to Domino's own mouse (the bar's pointer), instead of deselecting
-        if e.keysym == "Escape" and not (self.draft or self.drag or self.follow or self.typing) \
-                and not e.state & SHIFT:
+        if e.keysym == "Escape" and self.idle() and not e.state & SHIFT:
             self.app.tool.set("select")
+            return "break"
+        # Enter with nothing going on: what's drawn here goes into Domino (user 2026-11-06: "when I'm done")
+        if e.keysym in ("Return", "KP_Enter") and self.idle() and self.app.companion is not None \
+                and self.app.tool.get() != "lasso":
+            self.app.companion.send_all()
             return "break"
         return super().on_key(e)

@@ -47,6 +47,30 @@ def front_domino(pid=None):
     return known[0], None
 
 
+def double_click():
+    """(ms, (x px, y px)): how quick and how close a second click must be to make a double click (Windows')."""
+    if not system.WINDOWS:
+        return 500, (4, 4)
+    import ctypes
+    u = ctypes.windll.user32
+    return u.GetDoubleClickTime(), (max(1, u.GetSystemMetrics(36) // 2), max(1, u.GetSystemMetrics(37) // 2))
+
+
+def no_keyboard(win):
+    """win (a Toplevel of ours) never takes the keyboard when clicked: the window that has it keeps it (the
+    floating bar: Domino's own keys go on working, user 2026-11-06). Its buttons still work."""
+    if not system.WINDOWS:
+        return
+    import ctypes
+    try:
+        win.update_idletasks()
+        hwnd = DominoOverlay._own_hwnd(win)
+    except tk.TclError:
+        return
+    u = ctypes.windll.user32
+    u.SetWindowLongW(hwnd, -20, u.GetWindowLongW(hwnd, -20) | 0x80 | 0x8000000)  # tool window, never activated
+
+
 class DominoOverlay:
     """overlay = DominoOverlay(root, on_view=..., on_state=...); overlay.stop() ends it."""
 
@@ -96,15 +120,22 @@ class DominoOverlay:
                "ButtonRelease-3", "Motion")
 
     def forward_to(self, widget, wheel=None, pressed=None):
-        """The catcher's mouse goes on to widget as if it happened there (Tk makes double clicks and drags out of
-        them as usual); its pointer copies widget's. wheel(e): the wheel; pressed(): before each press."""
+        """The catcher's mouse goes on to widget as if it happened there (drags as usual); its pointer copies
+        widget's. wheel(e): the wheel; pressed(): before each press. DOUBLE CLICKS made here by hand: Tk never
+        sees one in passed-on presses (the catcher's own events sit between them), so a quick second left / right
+        press goes to widget.forwarded_double(e) instead (user 2026-11-06: double right-click did nothing)."""
         self.forwarded = widget
+        self._click = None
         m = self.mouse
 
         def send(e, seq):
             if pressed and seq.startswith("ButtonPress"):
                 pressed()
             try:
+                if seq in ("ButtonPress-1", "ButtonPress-3") and self._doubled(e) and \
+                        hasattr(widget, "forwarded_double"):
+                    widget.forwarded_double(e)
+                    return "break"
                 widget.event_generate(f"<{seq}>", x=e.x, y=e.y, state=e.state, when="now")
                 cur = widget.cget("cursor")
                 if m.cget("cursor") != (cur or "crosshair"):
@@ -117,6 +148,14 @@ class DominoOverlay:
             m.bind(f"<{seq}>", lambda e, seq=seq: send(e, seq))
         if wheel:
             m.bind("<MouseWheel>", wheel)
+
+    def _doubled(self, e):
+        """This press and the one before: the same button, quick and close enough for Windows' double click (a 3rd
+        quick one counts again, like Tk: the piano roll pairs right clicks itself)."""
+        ms, near = double_click()
+        last, self._click = self._click, (e.num, e.time, e.x_root, e.y_root)
+        return bool(last) and last[0] == e.num and 0 <= e.time - last[1] <= ms and \
+            abs(e.x_root - last[2]) <= near[0] and abs(e.y_root - last[3]) <= near[1]
 
     # --- Windows bits ---
     @staticmethod

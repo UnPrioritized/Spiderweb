@@ -6,21 +6,25 @@ Draw on Domino (Project, beside Export MIDI; Windows only) puts Spiderweb's draw
 
 [clip:companion-bar]
 
-• Domino: Domino's own mouse. Clicks go to Domino, so you select, edit and play there as usual. Esc does this too.
+• Domino: Domino's own mouse. Clicks go to Domino, so you select, edit and play there as usual. Esc or a double right-click while drawing does this too.
 
-• The tool button (Line, Curve, Funnel, Custom shape...): draw on Domino's piano roll with that tool, exactly like in Spiderweb. Undo / Redo and the shortcuts work as usual.
+• The tool button (Line, Curve, Funnel, Custom shape...): draw on Domino's piano roll with that tool, exactly like in Spiderweb. The tool you used last is picked again next time.
 
-• Take / Send: see below. ↔ and ↕ flip the selected shapes, Stir… and Sustain… open those windows for them.
+• Take / Send: see below. ↔ and ↕ flip the shapes selected on Domino's piano roll; with none selected there, they flip the notes selected in Domino, in one click. Stir… and Sustain… open those windows for the selected shapes.
 
 • Spiderweb: stop drawing on Domino and bring Spiderweb's window back.
 
-Drag the dots at the bar's left end to move it: it stays at that spot on Domino's piano roll, follows Domino's window, and hides while Domino is minimised. A short line at the bar's end says what just happened.
+Drag the dots at the bar's left end to move it: it stays at that spot on Domino's piano roll, follows Domino's window, and hides while Domino is minimised. A short line under the buttons says what just happened. Clicking the bar never takes the keyboard from Domino.
 
 ## Drawing
 
 The mouse wheel scrolls and zooms Domino as if you turned it over Domino itself (Shift and Ctrl too), and what you draw follows Domino's scroll and zoom. Spiderweb takes Domino's PPQ while this is on, and gives yours back when you go back to Spiderweb.
 
-A finished shape goes into Domino's current track by itself, a moment after you let go, at the spot where you drew it, and leaves Spiderweb's layer. With Multi channel, each channel goes on its own track, from the current one down. Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
+A shape you draw stays on Spiderweb's layer until you're done with it, so you can still change it (drag its points, a curve's handles...). It goes into Domino's current track, at the spot where you drew it, when you draw the next shape, go back to Domino's mouse, press Enter or Send, or press one of Domino's keys. Then it leaves Spiderweb's layer.
+
+Keys: while drawing, Esc, Enter, Ctrl+Z / Ctrl+Y for what you did here, Delete for selected shapes and the drawing tools' letters are Spiderweb's. Every other key (Space, Ctrl+S, the arrows...) goes on to Domino.
+
+Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With Multi channel, each channel goes on its own track, from the current one down. Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
 
 ## Changing Domino's notes
 

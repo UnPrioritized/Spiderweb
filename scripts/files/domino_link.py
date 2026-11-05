@@ -159,6 +159,55 @@ def give_back(d, was):
             u.AttachThreadInput(mine, theirs, False)
 
 
+def to_domino(d):
+    """The keyboard to Domino when Spiderweb has it (never taken from another program): Domino's own keys (Space,
+    Ctrl+Z ...) work again, user 2026-11-06. True when Domino has it now."""
+    if not system.WINDOWS:
+        return False
+    if in_front(d):
+        return True
+    u, k = _u(), ctypes.windll.kernel32
+    fg = u.GetForegroundWindow()
+    if not fg or dv._pid(fg) != os.getpid():
+        return False
+    theirs = u.GetWindowThreadProcessId(fg, None)
+    mine = k.GetCurrentThreadId()
+    attached = theirs and theirs != mine and u.AttachThreadInput(mine, theirs, True)
+    try:
+        u.SetForegroundWindow(d.top)
+    finally:
+        if attached:
+            u.AttachThreadInput(mine, theirs, False)
+    return in_front(d)
+
+
+EXTENDED = set(range(0x21, 0x29)) | {0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0x6F, 0x90}  # (arrows, Home, Insert, Delete...)
+
+
+def pass_key(d, vk, state):
+    """A key pressed in Spiderweb that's Domino's (vk = Windows key code, state = Tk's modifier bits): the keyboard
+    to Domino, then that key pressed again there, with the Shift / Ctrl / Alt held (held for real: only their
+    presses again, their let go comes from the keyboard)."""
+    if not system.WINDOWS or not vk or not to_domino(d):
+        return False
+    u = _u()
+    mods = [m for bit, m in ((0x1, 0x10), (0x4, 0x11), (0x20000, 0x12)) if state & bit]
+    for m in mods:
+        u.keybd_event(m, 0, 0, 0)
+    ext = 0x1 if vk in EXTENDED else 0
+    u.keybd_event(vk, 0, ext, 0)
+    u.keybd_event(vk, 0, ext | 0x2, 0)  # KEYEVENTF_KEYUP
+    return True
+
+
+def mouse_down():
+    """A mouse button is down right now (anywhere on the screen)."""
+    if not system.WINDOWS:
+        return False
+    u = _u()
+    return any(u.GetAsyncKeyState(b) & 0x8000 for b in (0x01, 0x02, 0x04))
+
+
 class Paste:
     """Put raw (Domino clipboard bytes) on the clipboard and paste it in Domino at its cursor; done(ok, why) when
     over (why: "" / "clipboard" (ours couldn't be used) / "domino" (Domino couldn't open it, twice)). Runs on the

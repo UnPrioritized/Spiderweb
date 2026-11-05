@@ -6,17 +6,23 @@ every tool, undo step and shape works as in the main window. A small floating ba
 "Domino" = Domino's own mouse (clicks go through to Domino; Domino's select box is the only selection, user
 2026-11-05), a drawing tool = drawing on the overlay, "Spiderweb" = back to the main window.
 The wheel always goes to Domino (its scroll and zoom are the view). Reading Domino: files/domino_view.py.
-NOTES INTO DOMINO (files/domino_link.py): a shape drawn here goes into Domino's current track right after it's
-finished (Domino's own paste at the shape's start; the shape leaves the overlay), with the project's PPQ set to
-Domino's song PPQ while this is on. Ctrl+Z right after takes it out of Domino again (Domino's own undo) and gives
-the shape back, until Domino is used (then Domino's own Ctrl+Z). "Take" lifts Domino's selection out (copied, then
-deleted in Domino) as a shape on the overlay, for Spiderweb's tools; "Send" puts the shapes on the overlay back in.
+NOTES INTO DOMINO (files/domino_link.py): a shape drawn here stays on the overlay to be changed (curve handles...)
+until you're done with it (user 2026-11-06): the next shape drawn, Domino's mouse picked (bar, Esc, double
+right-click), Send / Enter, or a key that's Domino's; then it goes into Domino's current track (Domino's own paste
+at the shape's start; the shape leaves the overlay), with the project's PPQ set to Domino's song PPQ while this is
+on. Ctrl+Z right after takes it out of Domino again (Domino's own undo) and gives the shape back, until Domino is
+used (then Domino's own Ctrl+Z). "Take" lifts Domino's selection out (copied, then deleted in Domino) as a shape on
+the overlay, for Spiderweb's tools; "Send" puts the shapes on the overlay back in; the flips on a Domino selection
+do Take + flip + Send in one click. Shapes of the project made before this started are hidden while it's on.
+KEYS: the bar never takes the keyboard; on the overlay only Spiderweb's keys for what's drawn here stay (Esc, Enter,
+Ctrl+Z / Y for its own steps, Delete for picked shapes, tool letters, typing), every other key goes on to Domino.
 """
 
 import os
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 import numpy as np
 
@@ -38,8 +44,12 @@ LEFT_OUT = ("hz", "picture")  # (they open windows of their own: from the main w
 BAR_GAP = 8  # px between the bar and the grid's top right corner at first
 DOMINO_KEYS = 128
 MARK = "domino_send"  # (a shape key: drawn / taken here, goes into Domino with Send; dropped when this ends)
-REST_S = 0.25  # a new shape goes into Domino once nothing changed for this long (no drag / typing going on)
+REST_S = 0.25  # Domino's song PPQ checked once nothing changed for this long (no drag / typing going on)
 SAID_MS = 4000
+KEY_TAG = "DominoCompanionKeys"
+ALONE_KEYS = {"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Caps_Lock", "Num_Lock",
+              "Win_L", "Win_R", "App", "Super_L", "Super_R"}  # (pressed on their own: nothing to pass on)
+CTRL, ALT = 0x4, 0x20000  # (Tk's modifier bits on Windows)
 
 
 def bar_tools():
@@ -99,7 +109,14 @@ class Companion:
         self.bar_at = self.saved_bar_at()
         self._grip = None
         self._placed = None
-        self.pending = []      # shapes drawn here, waiting to go into Domino (once nothing changes: REST_S)
+        self.pending = []      # the shape drawn last here: changed still, goes into Domino when you're done with it
+        self.ready = []        # shapes done with: into Domino as soon as nothing else is going to Domino
+        self.landed = []       # (shapes, n) in Domino now: off the overlay once nothing is held there
+        self.after_send = None  # (key code, state): a key of Domino's pressed while sending, pressed there after
+        self.quick = None      # a flip on Domino's selection (Take + flip + Send): its steps leave the history
+        self._then = None      # (what a Take does next with the shape it made)
+        held = self._before_held = app.undo_stack + app.redo_stack  # (kept: their ids stay theirs)
+        self.before = {id(s) for s in held}  # (steps from before this started: never undone from here)
         self.linked = []       # undo / redo steps that changed Domino too (sent, taken): Ctrl+Z there = Domino's
         self.busy = False      # (a paste / copy going on with Domino)
         self.was_front = None  # (the window with the keyboard before it: given back after, domino_link.give_back)
@@ -118,10 +135,22 @@ class Companion:
         self.overlay.above = [self.bar]
         app.companion_tops = (self.overlay.win, self.overlay.catch, self.bar)
         app.roll = self.roll
-        if app.tool.get() in NOT_DRAWING or app.tool.get() in LEFT_OUT:  # (MY PICK: it starts drawing)
-            app.tool.set(app.draw_tool if app.draw_tool not in LEFT_OUT else "line")
+        app.companion = self
+        dov.no_keyboard(self.bar)
+        self.roll.bindtags((KEY_TAG,) + self.roll.bindtags())
+        app.bind_class(KEY_TAG, "<KeyPress>", self.key)
+        # the tool used last here (user 2026-11-06: remembered), else the main window's drawing tool (MY PICK: it
+        # starts drawing)
+        keys = [t[0] for t in bar_tools()]
+        saved = settings.get("domino", "tool")
+        tool = saved if saved in keys else app.draw_tool if app.draw_tool in keys else "line"
+        if app.tool.get() != tool:
+            app.tool.set(tool)
         self._trace = app.tool.trace_add("write", lambda *_: self.sync_mode())
         self.sync_mode()
+        app.select(None)  # (the project's shapes are hidden while this is on: user 2026-11-06)
+        app.track_view()
+        self.roll.request_redraw()
         app.withdraw()
         self.match_ppq()
 
@@ -151,9 +180,61 @@ class Companion:
         return self.app.tool.get() not in NOT_DRAWING
 
     def sync_mode(self):
-        if self.app.tool.get() in LEFT_OUT:  # (a key pressed for one: the main window's tool, not here)
+        tool = self.app.tool.get()
+        if tool in LEFT_OUT:  # (a key pressed for one: the main window's tool, not here)
             return self.app.tool.set("line")
+        self.picker.tool_changed()  # (the bar's tool button shows the tool picked any way: list, key)
+        if self.drawing():
+            if settings.get("domino", "tool") != tool:
+                settings.put("domino", "tool", tool)
+        else:  # Domino's own mouse: what's drawn here is done (it goes in), and Domino gets the keyboard back
+            self.done_drawing()
+            d = self.overlay.domino
+            if d is not None and not self.busy:
+                dl.to_domino(d)
         self.overlay.set_drawing(self.drawing())
+
+    # --- keys: Spiderweb's for what's drawn here, the rest Domino's ---
+    def own_key(self, e):
+        """True when the key pressed on the overlay is Spiderweb's (user 2026-11-06: Space, Ctrl+Z ... must work in
+        Domino): typing, Esc / Enter, Ctrl+Z / Y while a step made here is next, Delete with shapes picked, a
+        drawing tool's letter. Domino's mouse picked: every key is Domino's."""
+        ks, r, app = e.keysym, self.roll, self.app
+        if ks in ALONE_KEYS or r.typing:
+            return True
+        if not self.drawing():
+            return False
+        ctrl, alt = e.state & CTRL, e.state & ALT
+        if ks in ("Escape", "Return", "KP_Enter"):
+            return True
+        if ks in ("Delete", "BackSpace") and not ctrl:
+            return bool(app.sels) or not r.idle()
+        if ctrl and ks.lower() in ("z", "y"):
+            redo = ks.lower() == "y" or bool(e.state & 0x1)
+            stack = app.redo_stack if redo else app.undo_stack
+            return not r.idle() or bool(stack) and id(stack[-1]) not in self.before
+        return not ctrl and not alt and ks.lower() in {t[2] for t in bar_tools()}
+
+    def key(self, e):
+        """A key on the overlay (its own bind tag, first): Spiderweb's goes on as usual; Domino's goes to Domino,
+        pressed again there, after what's drawn here went in (pressing a key of Domino's = done drawing)."""
+        if self.own_key(e):
+            return None
+        d = self.overlay.domino
+        if d is None:
+            return "break"
+        k = (e.keycode, e.state)
+        if self.pending or self.ready or self.busy:
+            self.after_send = k
+            self.done_drawing()
+        else:
+            dl.pass_key(d, *k)
+        return "break"
+
+    def pass_waiting_key(self):
+        k, self.after_send = self.after_send, None
+        if k and self.overlay.domino is not None:
+            dl.pass_key(self.overlay.domino, *k)
 
     def pressed(self):
         """A press on the overlay: Spiderweb takes the keyboard (Esc, Ctrl+Z, Delete... for what's drawn)."""
@@ -187,15 +268,29 @@ class Companion:
         if self.linked and dl.in_front(d) and time.monotonic() - self._own > 0.6:  # (the user works in Domino:
             # its own Ctrl+Z from now on)
             self.unlink()
+        self.close_list_elsewhere()
+        if self.landed:
+            self.take_off()
+        self.flush()
         if self.busy or not self.resting():
             return
         if self.app.ppq != (self.domino_ppq() or self.app.ppq):  # (another song opened in Domino)
             self.match_ppq()
+
+    def close_list_elsewhere(self):
+        """The bar's tool list closes when clicked outside it (it never has the keyboard, so it can't tell)."""
+        p = self.picker.popup
+        if p is None or not dl.mouse_down():
             return
-        here = [sh for sh in self.pending if any(sh is s for s in self.app.shapes)]
-        self.pending = here
-        if here:
-            self.send(here)
+        try:
+            x, y = p.winfo_pointerxy()
+            for w in (p, self.bar):
+                if w.winfo_rootx() <= x < w.winfo_rootx() + w.winfo_width() and \
+                        w.winfo_rooty() <= y < w.winfo_rooty() + w.winfo_height():
+                    return
+        except tk.TclError:
+            return
+        self.picker.close()
 
     def resting(self):
         """Nothing being drawn / dragged / typed, and no shape changed for REST_S."""
@@ -210,21 +305,52 @@ class Companion:
 
     # --- notes into Domino ---
     def drawn(self, sh):
-        """App.add_shape: a shape drawn here goes into Domino once it's finished."""
+        """App.add_shape: a shape drawn here waits, to be changed still; the one drawn before it is done now (user
+        2026-11-06: it goes into Domino when you start the next one)."""
         sh[MARK] = 1
-        self.pending.append(sh)
+        done = [s for s in self.pending if s is not sh]
+        self.pending = [sh]
+        self.queue(done)
+
+    def done_drawing(self):
+        """Done with the shape drawn last (Domino's mouse picked, a key of Domino's): it goes into Domino."""
+        done, self.pending = self.pending, []
+        self.queue(done)
+
+    def alive(self, shapes):
+        """Those still on the overlay (not undone / deleted, not in Domino already)."""
+        gone = [s for shs, _ in self.landed for s in shs]
+        return [sh for sh in shapes if any(sh is s for s in self.app.shapes) and not any(sh is s for s in gone)]
+
+    def queue(self, shapes):
+        shapes = [sh for sh in self.alive(shapes) if not any(sh is s for s in self.ready)]
+        if shapes:
+            self.ready += shapes
+            self.app.after_idle(self.flush)
+        elif self.after_send and not self.busy and not self.ready:
+            self.pass_waiting_key()
+
+    def flush(self):
+        """The shapes done with go into Domino (one paste at a time)."""
+        if self.busy:
+            return
+        shapes, self.ready = self.alive(self.ready), []
+        if shapes:
+            self.send(shapes)
+        if not self.busy and self.after_send:  # (nothing went: the key of Domino's goes on anyway)
+            self.pass_waiting_key()
 
     def marked(self):
         return [sh for sh in self.app.shapes if sh.get(MARK)]
 
     def send_all(self):
-        """The bar's Send: every shape drawn / taken here that's still on the overlay goes into Domino."""
-        if not self.busy:
-            shapes = self.marked()
-            if shapes:
-                self.send(shapes)
-            else:
-                self.say(tr("companion.nothing_to_send"))
+        """The bar's Send / Enter: every shape drawn / taken here that's still on the overlay goes into Domino."""
+        shapes = self.marked()
+        self.pending = []
+        if shapes:
+            self.queue(shapes)
+        elif not self.busy:
+            self.say(tr("companion.nothing_to_send"))
 
     def send(self, shapes):
         """shapes (on the overlay) -> pasted into Domino's current track at their place, then off the overlay."""
@@ -239,9 +365,9 @@ class Companion:
         first = int(rows[:, 0].min())
         self.was_front = dl.front_window()  # (before the ruler click: Domino may take the keyboard)
         at = dl.put_cursor(d, first)
-        if at is None:
-            self.pending += shapes
-            dl.give_back(d, self.was_front)
+        if at is None:  # (they stay on the overlay: Send tries again)
+            if self.drawing():
+                dl.give_back(d, self.was_front)
             return self.say(tr("companion.send_failed_cursor"), warn=True)
         notes, _ = cut_gates(rows)
         ppq = app.ppq
@@ -267,38 +393,78 @@ class Companion:
 
     def sent(self, shapes, ok, why, n):
         self.busy, self._own = False, time.monotonic()
-        if self.overlay.domino is not None:
-            dl.give_back(self.overlay.domino, self.was_front)
+        d = self.overlay.domino
+        if d is not None:
+            if self.after_send:  # (a key of Domino's pressed meanwhile: Domino gets the keyboard and the key)
+                self.pass_waiting_key()
+            elif self.drawing():  # (Domino's mouse: Domino keeps the keyboard the paste gave it)
+                dl.give_back(d, self.was_front)
+        if not ok:  # (they stay on the overlay: Send tries again)
+            self.quick = None
+            self.say(tr("companion.send_failed_" + why), warn=True)
+        else:
+            self.landed.append((shapes, n))
+            self.take_off()
+        self.app.after_idle(self.flush)
+
+    def take_off(self, now=False):
+        """Shapes now in Domino leave the overlay (one undo step each send) once nothing is held there: a shape
+        being changed keeps its place in the list meanwhile."""
+        app, r = self.app, self.roll
+        if not now and (r.drag or r.draft or r.typing):
+            return
+        landed, self.landed = self.landed, []
+        for shapes, n in landed:
+            gone = {i for i, s in enumerate(app.shapes) if any(s is x for x in shapes)}
+            if gone:
+                keep = [app.shapes[i] for i in sorted(app.sels) if i not in gone]
+                main = app.shapes[app.sel] if app.sel is not None and app.sel not in gone else None
+                app.push_undo(name=tr("companion.sent_step"))
+                for i in sorted(gone, reverse=True):
+                    del app.shapes[i]
+                at = {id(s): i for i, s in enumerate(app.shapes)}
+                if keep:  # (the shape being drawn / changed now stays picked)
+                    app.select_many({at[id(s)] for s in keep}, at[id(main)] if main is not None else None)
+                else:
+                    app.select(None)
+                app.shapes_changed()
+                self.link(app.undo_stack[-1])
+                if self.quick and any(s is self.quick.get("shape") for s in shapes):
+                    self.quick_done()
+            self._gen = (app.shapes_gen, time.monotonic())
+            self.say(trn("companion.sent_n", n, n=n))
+
+    def quick_done(self):
+        """A flip on Domino's selection is in Domino: its steps (Take, flip, sent) leave Spiderweb's history, it's
+        Domino's own (2 Domino steps: its Delete + its Paste) like any change made there."""
         app = self.app
-        if not ok:
-            self.pending += shapes  # (tried again once something changes; Send too)
-            return self.say(tr("companion.send_failed_" + why), warn=True)
-        gone = {i for i, s in enumerate(app.shapes) if any(s is x for x in shapes)}
-        if gone:
-            app.roll.cancel_draft()
-            app.push_undo(name=tr("companion.sent_step"))
-            for i in sorted(gone, reverse=True):
-                del app.shapes[i]
-            app.select(None)
-            app.shapes_changed()
-            self.link(app.undo_stack[-1])
-        self._gen = (app.shapes_gen, time.monotonic())
-        self.say(trn("companion.sent_n", n, n=n))
+        steps = self.quick["steps"] + app.undo_stack[-1:]  # (+ the step that took it off the overlay)
+        self.quick = None
+        app.undo_stack[:] = [s for s in app.undo_stack if not any(s is x for x in steps)]
+        self.linked = [s for s in self.linked if not any(s is x for x in steps)]
+        app.sync_history(force=True)
 
     # --- Domino's selection out ---
-    def take(self):
-        """The bar's Take: Domino's selection copied, deleted there, and on the overlay as a shape at its place."""
+    def take(self, then=None):
+        """The bar's Take: Domino's selection copied, deleted there, and on the overlay as a shape at its place.
+        then(shape): what's done with that shape next (a flip on Domino's selection)."""
         d = self.overlay.domino
         if d is None or self.busy or not self.match_ppq():
+            self.quick = None
             return
-        self.busy, self.was_front = True, dl.front_window()
+        self.done_drawing()  # (what was drawn here first goes in first)
+        self.busy, self.was_front, self._then = True, dl.front_window(), then
         dl.Copy(self.bar, d, self.took)
 
     def took(self, rows, ppq, start):
         self.busy, self._own = False, time.monotonic()
+        then, self._then = self._then, None
         if self.overlay.domino is not None:
             dl.give_back(self.overlay.domino, self.was_front)
         app, d = self.app, self.overlay.domino
+        if rows is None or d is None or ppq != app.ppq:
+            self.quick = None
+            self.app.after_idle(self.flush)
         if rows is None:
             return self.say(tr("companion.take_" + ppq), warn=True)
         if d is None or ppq != app.ppq:
@@ -319,6 +485,31 @@ class Companion:
         self._gen = (app.shapes_gen, time.monotonic())
         n = len(rows)
         self.say(trn("companion.took_n", n, n=n))
+        if then:
+            then(app.shapes[-1])
+        self.app.after_idle(self.flush)
+
+    # --- the flips: on shapes picked here, else on Domino's selection ---
+    def flip(self, sideways):
+        """↔ / ↕: shapes picked on the overlay = flipped there; none = Domino's selection flipped in one click
+        (user 2026-11-06): Take + flip + Send, Domino's own undo for it (2 steps: its Delete + its Paste)."""
+        app = self.app
+        if app.sels:
+            return app.flip(sideways)
+        if self.busy or self.overlay.domino is None:
+            return
+        self.quick = {"steps": [], "shape": None}
+
+        def flipped(sh):
+            if self.quick is None:
+                return
+            self.quick["shape"] = sh
+            self.quick["steps"].append(app.undo_stack[-1])  # (the Take)
+            app.select(len(app.shapes) - 1)
+            app.flip(sideways)
+            self.quick["steps"].append(app.undo_stack[-1])  # (the flip)
+            self.queue([sh])
+        self.take(then=flipped)
 
     # --- undo: steps that changed Domino too ---
     def link(self, step):
@@ -329,7 +520,13 @@ class Companion:
         True when done here."""
         app, d = self.app, self.overlay.domino
         stack = app.redo_stack if redo else app.undo_stack
-        if not stack or not any(stack[-1] is s for s in self.linked):
+        if not stack or id(stack[-1]) in self.before:  # (nothing of ours: the project's hidden shapes never change
+            # out of sight, user 2026-11-06; Domino's own Undo / Redo instead, the bar's buttons work like its keys)
+            if d is not None and not self.busy:
+                dl.command(d, dl.REDO if redo else dl.UNDO)
+                self._own = time.monotonic()
+            return True
+        if not any(stack[-1] is s for s in self.linked):
             return False
         if d is None or self.busy:
             return True  # (Domino gone / busy: nothing undone on one side only)
@@ -359,19 +556,25 @@ class Companion:
     def say(self, text, warn=False):
         """A short line on the bar (the main window's status line is hidden)."""
         try:
-            self.said.configure(text=text, foreground=look.WARN if warn else look.HINT)
+            self.said.configure(text=text, foreground=look.WARN if warn else look.HINT, wraplength=self.note_room())
             if not self.said.winfo_manager():
-                self.said.pack(side="left", padx=(6, 2))
+                self.said.pack(anchor="w")
+            self.sync_notes()
             if self._said:
                 self.bar.after_cancel(self._said)
             self._said = self.bar.after(SAID_MS, self.unsay)
         except tk.TclError:
             pass
 
+    def note_room(self):
+        """How wide a message may be: no wider than the buttons (a long one wraps, the bar keeps its width)."""
+        return max(120, self.row.winfo_reqwidth() - 12)
+
     def unsay(self):
         self._said = None
         try:
             self.said.pack_forget()
+            self.sync_notes()
         except tk.TclError:
             pass
 
@@ -379,13 +582,15 @@ class Companion:
         if reason is None:
             self.status.configure(text="")
             self.status.pack_forget()
+            self.sync_notes()
             self.show_bar()
         elif reason == "hidden" and self.overlay.domino is not None:
             self.bar.withdraw()  # (Domino minimised: the bar goes with it)
         else:
-            self.status.configure(text=tr("companion.state_" + reason.replace(" ", "_")))
+            self.status.configure(text=tr("companion.state_" + reason.replace(" ", "_")), wraplength=self.note_room())
             if not self.status.winfo_manager():
-                self.status.pack(side="left", padx=(6, 2))
+                self.status.pack(anchor="w", before=self.said if self.said.winfo_manager() else None)
+            self.sync_notes()
             self.show_bar()
 
     # --- the floating bar ---
@@ -397,8 +602,8 @@ class Companion:
         bar.title(tr("companion.title"))
         edge = tk.Frame(bar, bg=look.COMPANION_EDGE, padx=1, pady=1)
         edge.pack(fill="both", expand=True)
-        row = ttk.Frame(edge, padding=(2, 2))
-        row.pack(fill="both", expand=True)
+        row = self.row = ttk.Frame(edge, padding=(2, 2))
+        row.pack(fill="x")
         grip = self.grip = ttk.Label(row, text="⠿", cursor="fleur", padding=(3, 0))
         grip.pack(side="left")
         Tooltip(grip, tr("companion.grip_tip"))
@@ -412,14 +617,26 @@ class Companion:
         ttk.Separator(row, orient="vertical").pack(side="left", fill="y", padx=3, pady=2)
         self.picker = ToolPicker(app, row, bar_tools(), owner=bar, fit=lambda: None)
         self.picker.frame.pack(side="left")
+        # (as wide as its longest tool name: picking another tool never moves the buttons, user 2026-11-06)
+        font = tkfont.nametofont(look.TK)
+        widest = max(font.measure(t) for t in self.picker.label.values())
+        self.picker.main.configure(width=-(-widest // max(1, font.measure("0"))))
+        opened = self.picker.open
+
+        def open_list():  # (the list never takes the keyboard either: Domino keeps its keys)
+            opened()
+            if self.picker.popup is not None:
+                dov.no_keyboard(self.picker.popup)
+        self.picker.open = open_list
+        self.picker.arrow.configure(command=open_list)
         ttk.Separator(row, orient="vertical").pack(side="left", fill="y", padx=3, pady=2)
         ttk.Button(row, text=tr("app.undo"), takefocus=False,
                    command=lambda: app.undo_roll()).pack(side="left", padx=(2, 0))
         ttk.Button(row, text=tr("app.redo"), takefocus=False,
                    command=lambda: app.undo_roll(True)).pack(side="left", padx=(2, 0))
         ttk.Separator(row, orient="vertical").pack(side="left", fill="y", padx=3, pady=2)
-        for key, run in (("take", self.take), ("send", self.send_all), ("flip_sideways", lambda: app.flip(True)),
-                         ("flip_upside", lambda: app.flip(False)), ("stir", lambda: self.open_tool("stir")),
+        for key, run in (("take", self.take), ("send", self.send_all), ("flip_sideways", lambda: self.flip(True)),
+                         ("flip_upside", lambda: self.flip(False)), ("stir", lambda: self.open_tool("stir")),
                          ("sustain", lambda: self.open_tool("sustain"))):
             b = ttk.Button(row, text=tr("companion." + key), takefocus=False, command=run)
             b.pack(side="left", padx=(2, 0))
@@ -428,9 +645,20 @@ class Companion:
         b = ttk.Button(row, text=tr("companion.back"), takefocus=False, command=self.stop)
         b.pack(side="left", padx=(2, 0))
         Tooltip(b, tr("companion.back_tip"))
-        self.status = ttk.Label(row, text="", foreground=look.WARN)
-        self.said = ttk.Label(row, text="", foreground=look.HINT)
+        # messages on a line of their own under the buttons (user 2026-11-06: a message beside them moved them)
+        self.notes = ttk.Frame(edge, padding=(4, 0, 4, 2))
+        self.status = ttk.Label(self.notes, text="", foreground=look.WARN)
+        self.said = ttk.Label(self.notes, text="", foreground=look.HINT)
         return bar
+
+    def sync_notes(self):
+        """The message line shows only while it has something to say."""
+        on = bool(self.status.winfo_manager() or self.said.winfo_manager())
+        if on != bool(self.notes.winfo_manager()):
+            if on:
+                self.notes.pack(fill="x")
+            else:
+                self.notes.pack_forget()
 
     def open_tool(self, which):
         """Stir… / Sustain… for the selected shapes (a taken selection), shown over Domino (their window belongs
@@ -527,12 +755,15 @@ class Companion:
         self.roll.end_typing()
         if self._said:
             self.bar.after_cancel(self._said)
+        self.take_off(now=True)  # (in Domino already: never left behind as shapes of the project)
         for sh in app.shapes:  # (not sent: normal shapes of the project now)
             sh.pop(MARK, None)
         self.unlink()  # (Domino's own Ctrl+Z for what went into it)
+        app.unbind_class(KEY_TAG, "<KeyPress>")
         app.roll = self.main_roll
         app.companion = None
         app.companion_tops = ()
+        app.track_view()  # (the project's shapes shown again)
         if self.old_ppq is not None and app.pvar["ppq"].get() != self.old_ppq:  # (the project's own PPQ back)
             app.pvar["ppq"].set(self.old_ppq)
             app.on_project_change(True, ppq_done=True)

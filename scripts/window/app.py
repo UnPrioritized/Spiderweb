@@ -1077,6 +1077,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                    | self.track_list.shown_mask(d, slots))
             seen = np.bincount(d[see, 5], minlength=n) > 0
             hidden = set(np.flatnonzero(some & ~seen).tolist())
+        if self.companion is not None:  # (drawing on Domino: only what's drawn / taken there shows, the project's
+            # own shapes are hidden till you're back, user 2026-11-06; window/domino_companion.py MARK)
+            away = [i for i, sh in enumerate(self.shapes) if not sh.get("domino_send")]
+            if away and len(self.drawn):
+                self.drawn = self.drawn[~np.isin(self.drawn[:, 5], away)]
+            hidden |= set(away)
         if hidden != self.hidden_shapes:
             self.hidden_shapes = hidden
             if self.sels & hidden:  # (a hidden shape can't stay picked: nothing changes out of sight)
