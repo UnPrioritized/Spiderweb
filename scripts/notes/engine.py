@@ -606,6 +606,8 @@ SHAPE_KEYS = ("starts", "tumour", "k", "text", "smooth", "gaps", "splits",
 
 
 _held = threading.local()  # (same_shapes: {id(shape): (shape, its _cached)} while nothing changes the shapes)
+PATHS_KEPT = 3000  # _paths holds at least this many shapes' lines
+_last_pass = 0  # shapes the last whole same_shapes pass asked for
 
 
 @contextmanager
@@ -618,6 +620,9 @@ def same_shapes():
     try:
         yield
     finally:
+        global _last_pass
+        if outer is None:
+            _last_pass = len(_held.seen)
         _held.seen = outer
 
 
@@ -639,8 +644,10 @@ def _keyed(sh):
            if sh.get("cut") and (sh["kind"] == "funnel" or sh["cut"].get("mould") or snap_piece(sh)) else None)
     got = _paths.get(key)
     if got is None:
-        if len(_paths) > 3000:
-            _paths.clear()
+        seen = getattr(_held, "seen", None)
+        if len(_paths) > max(PATHS_KEPT, 2 * _last_pass, 2 * len(seen or ())):
+            _paths.clear()  # (room for twice the shapes a redraw uses: a fixed 3,000 emptied it mid-redraw past
+            # ~3,000 shapes, so every kept roll line was made again: 4,000 shapes 0.4 s a drag step, hunt 11-06)
         got = _paths[key] = {"strokes": shape_strokes(sh)}
     return got
 
