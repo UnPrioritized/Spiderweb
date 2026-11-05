@@ -74,6 +74,8 @@ def start(app):
     d, why = dov.front_domino()
     if d is None and why == "unknown build":
         return unknown_build(app)
+    if not warned(app):
+        return None
     if d is None:
         path = domino_exe(app)
         if not path:
@@ -82,6 +84,19 @@ def start(app):
             return messagebox.showerror(tr("companion.title"), tr("companion.not_started", path=path), parent=app)
     app.companion = Companion(app)
     return app.companion
+
+
+def warned(app):
+    """EXPERIMENTAL (user 2026-11-06): every start says things could break and that drawing in Spiderweb + Copy
+    to Domino is the safe way, until "Don't show this again" is ticked ([domino] experimental_ok). True = go on."""
+    if settings.get("domino", "experimental_ok") == "yes":
+        return True
+    from window.big_ask import dialog
+    go, skip = dialog(app, tr("companion.experimental_title"), tr("companion.experimental"), False,
+                      tick=tr("companion.experimental_tick"))
+    if go and skip:
+        settings.put("domino", "experimental_ok", "yes")
+    return go
 
 
 def unknown_build(app):

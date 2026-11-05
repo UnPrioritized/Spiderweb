@@ -77,8 +77,9 @@ def ask_drums(app, tracks):
     return go
 
 
-def dialog(parent, title, text, strong):
-    """(Yes pressed, tick box ticked). strong = No is the default button (it may not fit in memory)."""
+def dialog(parent, title, text, strong, tick=None):
+    """(Yes pressed, tick box ticked). strong = No is the default button (it may not fit in memory). tick = the
+    tick box's text (default "Don't ask again until Spiderweb is closed")."""
     win = tk.Toplevel(parent)
     win.withdraw()
     win.title(title)
@@ -89,7 +90,7 @@ def dialog(parent, title, text, strong):
     ttk.Label(body, image="::tk::icons::warning").grid(row=0, column=0, sticky="n", padx=(0, 12))
     ttk.Label(body, text=text, wraplength=420, justify="left").grid(row=0, column=1, sticky="w")
     skip = tk.BooleanVar(win, value=False)
-    ttk.Checkbutton(body, text=tr("big_ask.dont_ask"), variable=skip).grid(row=1, column=1, sticky="w", pady=(12, 0))
+    ttk.Checkbutton(body, text=tick or tr("big_ask.dont_ask"), variable=skip).grid(row=1, column=1, sticky="w", pady=(12, 0))
     btns = ttk.Frame(win, padding=(14, 0, 14, 12))
     btns.pack(fill="x")
     answer = [False]
