@@ -637,7 +637,8 @@ class RollDrawing:
         # (keyboard and ruler kept apart: a sideways scroll draws only the ruler again)
         picks = self.app.gliss_picks()
         kb_key = (h, self.kb_w, self.ruler_h, self.sy, self.view_top, self.scale, self.app.keys, self.app.edo(),
-                  None if picks is None else frozenset(picks), self.held_key)
+                  None if picks is None else frozenset(picks), self.held_key,
+                  getattr(self, "room_keys", lambda: 0)())
         frame_key = (w, self.kb_w, self.ruler_h, self.sx, self.view_t, self.scale, json.dumps(sigs_of(self.app.tempo)),
                      json.dumps(self.app.tempo.get("keysigs")), self.track_mark())
         if kb_key != self._kb_key:
@@ -834,7 +835,7 @@ class RollDrawing:
 
     def keep_grid(self, w, h, rows, cols):
         """The grid as canvas items: the ones already there stay when it's the same grid (redraw)."""
-        grid_key = (w, h, self.kb_w, self.ruler_h, tuple(rows), tuple(cols))
+        grid_key = (w, h, self.kb_w, self.ruler_h, tuple(rows), tuple(cols), getattr(self, "dark_x", None))
         if grid_key != self._grid_key:
             self.delete("grid")
             self.draw_grid(w, h, rows, cols)
@@ -1206,27 +1207,43 @@ class RollDrawing:
         """
         top = self.ruler_h
         rows = [(top, h, look.ROLL_BG)]
+        keys = self.app.keys
+        # Space past the keys (Settings → General): the key rows go on there, darker (look.space_shade); past it
+        # the flat OUTSIDE_KEYS as before
+        room = int(getattr(self, "room_keys", lambda: 0)())
+        lo_key, hi_key = -room, keys - 1 + room
         # (one more key each side, the ones off the picture dropped below: a key just past the edge can still have
         # its line rounded onto it, and panning moved that edge into view without the line until painted whole)
-        p_lo, p_hi = self.visible_pitches(h)
-        p_lo, p_hi = max(0, p_lo - 1), min(self.app.keys - 1, p_hi + 1)
+        p_lo = max(lo_key, math.ceil(self.y2p(h) - 0.5) - 1)
+        p_hi = min(hi_key, math.floor(self.y2p(self.ruler_h) + 0.5) + 1)
         edo = self.app.edo()
         size, black = (EDO, EDO_BLACK) if edo else (12, BLACK)
+
+        def shade(p, colour):
+            return colour if 0 <= p < keys else look.space_shade(colour)
+        if room:
+            if p_lo < 0:
+                rows.append((self.row_y(-1)[0], self.row_y(p_lo)[1], look.space_shade(look.ROLL_BG)))
+            if p_hi >= keys:
+                rows.append((self.row_y(p_hi)[0], self.row_y(keys)[1], look.space_shade(look.ROLL_BG)))
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
             if p % size in black:
-                rows.append((y0, y1, look.ROW_BLACK_EDO if edo else look.ROW_BLACK))
+                rows.append((y0, y1, shade(p, look.ROW_BLACK_EDO if edo else look.ROW_BLACK)))
             elif edo and p % size not in EDO_WHITE:
-                rows.append((y0, y1, look.ROW_HALF))
+                rows.append((y0, y1, shade(p, look.ROW_HALF)))
             elif self.sy >= 4:
-                rows.append((y1, None, look.ROW_LINE))
+                rows.append((y1, None, shade(p, look.ROW_LINE)))
         for p in range(p_lo, p_hi + 1):
             if p % size == 0:
-                rows.append((self.row_y(p)[1], None, look.OCTAVE_LINE))
-        if self.p2y(-0.5) < h:
-            rows.append((self.row_y(0)[1], h, look.OUTSIDE_KEYS))
-        if self.p2y(self.app.keys - 0.5) > top:
-            rows.append((top, self.row_y(self.app.keys - 1)[0], look.OUTSIDE_KEYS))
+                rows.append((self.row_y(p)[1], None, shade(p, look.OCTAVE_LINE)))
+        if self.p2y(lo_key - 0.5) < h:
+            rows.append((self.row_y(lo_key)[1], h, look.OUTSIDE_KEYS))
+        if self.p2y(hi_key + 0.5) > top:
+            rows.append((top, self.row_y(hi_key)[0], look.OUTSIDE_KEYS))
+        # Space before the start: everything left of beat 0 darker (draw_grid / paint_region read it)
+        x0 = round(self.t2x(0.0))
+        self.dark_x = x0 if x0 > self.kb_w else None
         top = int(top)  # (the picture's first pixel row, under the ruler)
         rows = [r for r in rows if (top <= r[0] < h if r[1] is None else r[1] > top and r[0] < h)]
         return rows, self.grid_cols(w)
@@ -1252,6 +1269,18 @@ class RollDrawing:
         sigs = sigs_of(self.app.tempo)  # (bars and beats by the time signatures: 6/8 = a line each eighth)
         cols += [(round(self.t2x(b)), look.GRID_BEAT) for b in beat_lines(sigs, max(0.0, b_lo), b_hi, 5 / self.sx)]
         cols += [(round(self.t2x(b)), look.GRID_BAR) for b, _ in bar_lines(sigs, max(0.0, b_lo), b_hi, 6 / self.sx)]
+        if b_lo < 0:  # (Space before the start: the first bar's beats and bars go on backwards)
+            first = sigs[0] if sigs else (0, 4, 4)
+            beat, bar = 4 / first[2], first[1] * 4 / first[2]
+            k = 1
+            while -k * beat >= b_lo and (beat * self.sx >= 5 or bar * self.sx >= 6):
+                b = -k * beat
+                on_bar = abs(b / bar - round(b / bar)) < 1e-9
+                if on_bar and bar * self.sx >= 6:
+                    cols.append((round(self.t2x(b)), look.GRID_BAR))
+                elif beat * self.sx >= 5 and b <= b_hi:
+                    cols.append((round(self.t2x(b)), look.GRID_BEAT))
+                k += 1
         ppq = self.app.ppq
         by = self.tick_by()
         if by is not None:  # zoomed far in: a line each tick, fading in (first: a snap / beat / bar line wins)
@@ -1269,13 +1298,18 @@ class RollDrawing:
 
     def draw_grid(self, w, h, rows, cols):
         x0, top = self.kb_w, self.ruler_h
-        for y0, y1, color in rows:
-            if y1 is None:
-                self.create_line(x0, y0, w, y0, fill=color, tags="grid")
-            else:
-                self.create_rectangle(x0, y0, w, y1, fill=color, outline="", tags="grid")
+        dark = getattr(self, "dark_x", None)  # (Space before the start: left of it every colour darker)
+        parts = ((x0, dark, look.space_shade), (dark, w, None)) if dark is not None else ((x0, w, None),)
+        for a, b, shade in parts:
+            for y0, y1, color in rows:
+                color = shade(color) if shade else color
+                if y1 is None:
+                    self.create_line(a, y0, b, y0, fill=color, tags="grid")
+                else:
+                    self.create_rectangle(a, y0, b, y1, fill=color, outline="", tags="grid")
         for x, color in cols:
-            self.create_line(x, top, x, h, fill=color, tags="grid")
+            self.create_line(x, top, x, h, fill=look.space_shade(color) if dark is not None and x < dark else color,
+                             tags="grid")
 
     def start_order(self):
         """The rendered notes' row numbers by start (stable: the same start keeps their order), kept until the
@@ -1695,12 +1729,21 @@ class RollDrawing:
             for y in range(max(a, 0), min(b, ih)):
                 row_color[y] = color
         patterns = {}
+        dark = getattr(self, "dark_x", None)  # (Space before the start: pixels left of it darker)
+        dark = None if dark is None else min(iw, max(0, int(dark) - kb))
         for color in set(row_color):
             line = bytearray(px(color) * iw)
             for x, c in cols:
                 x = int(x) - kb
                 if 0 <= x < iw:
                     line[x * 3:x * 3 + 3] = px(c)
+            if dark:
+                shaded = bytearray(px(look.space_shade(color)) * dark)
+                for x, c in cols:
+                    x = int(x) - kb
+                    if 0 <= x < dark:
+                        shaded[x * 3:x * 3 + 3] = px(look.space_shade(c))
+                line[:dark * 3] = shaded
             patterns[color] = bytes(line)
         img = np.frombuffer(b"".join(patterns[c] for c in row_color), np.uint8).reshape(ih, iw, 3).copy()
         loaded = getattr(self.app, "loaded", None) is not None and self.app.show_notes.get()
@@ -2055,6 +2098,12 @@ class RollDrawing:
         """Piano keys follow the pitch zoom: black keys on their rows, white-key edges between B/C and E/F."""
         kb, top = self.kb_w, self.ruler_h
         self.create_rectangle(0, top, kb, h, fill=look.KEY_WHITE, outline="", tags=("frame", "kbd"))
+        if getattr(self, "room_keys", lambda: 0)():  # (Space past the keys: no keys there, plain like past the roll)
+            y_lo, y_hi = round(self.p2y(-0.5)), round(self.p2y(self.app.keys - 0.5))
+            if y_lo < h:
+                self.create_rectangle(0, y_lo, kb, h, fill=look.OUTSIDE_KEYS, outline="", tags=("frame", "kbd"))
+            if y_hi > top:
+                self.create_rectangle(0, top, kb, y_hi, fill=look.OUTSIDE_KEYS, outline="", tags=("frame", "kbd"))
         p_lo, p_hi = self.visible_pitches(h)
         font_size = max(7, min(11, int(self.sy * 0.6 / self.scale)))
         # faintly greyed: outside a real 88-key piano; with 256 keys, above the standard 128 instead (31-EDO: the

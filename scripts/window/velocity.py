@@ -770,12 +770,20 @@ class VelocityPane(KeepsItems, tk.Canvas):
         row_color[h - 1] = look.ROLL_EDGE
         cols = [(int(x) - kb, px(c)) for x, c in self.app.roll.grid_cols(w) if 0 <= int(x) - kb < iw]
 
+        # (Space before the start, Settings → General: left of beat 0 every colour darker, like the piano roll)
+        dark = min(iw, max(0, round(self.app.roll.t2x(0.0)) - kb))
         rows = {}  # row colour -> the current row: that colour, grid lines, and every bar started so far
         for color in {look.ROLL_BG, *row_color.values()}:
             line = bytearray(px(color) * iw)
             if color != look.ROLL_EDGE:
                 for x, c in cols:
                     line[x * 3:x * 3 + 3] = c
+                if dark:
+                    shaded = bytearray(px(look.space_shade(color)) * dark)
+                    for x, c in cols:
+                        if x < dark:
+                            shaded[x * 3:x * 3 + 3] = px(look.space_shade("#" + c.hex()))
+                    line[:dark * 3] = shaded
             rows[color] = line
 
         tops, caps = self.bars(w, kb)

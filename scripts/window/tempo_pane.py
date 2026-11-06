@@ -3441,6 +3441,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         lw = max(1, round(self.scale))
         worked = plans(tempo, base, self.app.ppq)
         areas = []  # (x0, x1, colour) of each coloured area, later ones on top: the faint grid lines' shade
+        dark = round(roll.t2x(0.0))  # (Space before the start, Settings → General: darker there, like the piano roll)
+        if dark > kb:
+            self.create_rectangle(kb, 0, dark, h, fill=look.space_shade(look.ROLL_BG), outline="")
+            areas.append((kb, dark, look.space_shade(look.ROLL_BG)))
         # stretches: the held part (amber) and its catch-up (teal; red when it can't work)
         for st, plan in worked:
             x1 = roll.t2x(st["line"])
@@ -3511,6 +3515,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             if x >= kb:
                 if c not in (look.GRID_BEAT, look.GRID_BAR):  # (tick / snap lines: a shade of the area they're on)
                     c = next((area_shade(f, by) if f else c for x0, x1, f in reversed(areas) if x0 <= x < x1), c)
+                elif x < dark:
+                    c = look.space_shade(c)
                 self.create_line(x, 0, x, h, fill=c)
         for v, strong in self.labels():
             y = round(float(self.b2y(v)))

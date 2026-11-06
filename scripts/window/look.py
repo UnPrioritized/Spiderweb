@@ -162,6 +162,20 @@ ROW_LINE = pick("#dfe6f2", "#353538")  # between two white-key rows
 ROW_HALF, ROW_BLACK_EDO = pick("#eef2fa", "#373739"), pick("#dce4f4", "#303033")
 OCTAVE_LINE = pick("#606060", "#7a7a7c")  # under each C
 OUTSIDE_KEYS = pick("#ececec", "#2f2f31")  # past the lowest / highest key
+# Space past the edges (Settings → General; user 2026-11-06): the grid goes on there, every colour darker (key rows
+# kept: user picked darker over stripes)
+SPACE_DIM = pick(0.86, 0.74)
+_space = {}
+
+
+def space_shade(colour):
+    """colour as drawn in the Space past the keys / before the start ("#rrggbb"; a shade of one stays itself)."""
+    got = _space.get(colour)
+    if got is None:
+        v = [round(int(colour[i:i + 2], 16) * SPACE_DIM) for i in (1, 3, 5)]
+        got = _space[colour] = "#%02x%02x%02x" % tuple(v)
+        _space[got] = got
+    return got
 GRID_SNAP, GRID_BEAT, GRID_BAR = pick("#eef1f6", "#464649"), pick("#bcc4d2", "#57575a"), pick("#3a3a3a", "#8a8a8c")
 GRID_TICK = pick("#eef1f6", "#464649")  # a line each tick when zoomed far in (fades in toward this)
 KEY_WHITE = pick("#ffffff", "#b5b5b6")
