@@ -965,24 +965,47 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def above_marks(self):
         """[(shape number, x)]: shapes put away above the piano roll's highest key (128 keys: up to 255, user) get
         a small arrow at the top of the piano roll, in the middle of their time, to see and grab them by."""
-        top, w = self.app.keys - 0.5, self.winfo_width()
+        return [(i, x) for i, x, _, way in self.edge_marks() if way == "up"]
+
+    def edge_marks(self):
+        """[(shape number, x, y, way)]: a shape wholly past where the view can go (above the highest key / under the
+        lowest / before beat 0, or past the Space settings' room: they were put out there with more room) gets a
+        small arrow at that edge of the piano roll ("up" / "down" / "left"), in the middle of its time / keys, to see
+        and grab it by (user 2026-11-06: the old up arrows' way)."""
+        room, back = self.room_keys(), self.room_beats()
+        top, bottom, w, h = self.app.keys - 0.5 + room, -0.5 - room, self.winfo_width(), self.winfo_height()
+        s = self.scale
         out = []
         for i, sh in enumerate(self.app.shapes):
             if i in self.app.hidden_shapes:
                 continue
             r = self.reach([sh])
-            if r and r[1] >= top:
-                x = self.t2x((r[0] + r[3]) / 2)
-                if self.kb_w <= x <= w:
-                    out.append((i, x))
+            if not r:
+                continue
+            if r[3] <= -back and r[3] < 0:
+                y = min(max(self.p2y((r[1] + r[2]) / 2), self.ruler_h + 8 * s), h - 8 * s)
+                out.append((i, self.kb_w + 3 * s, y, "left"))
+                continue
+            x = self.t2x((r[0] + r[3]) / 2)
+            if not self.kb_w <= x <= w:
+                continue
+            if r[1] >= top:
+                out.append((i, x, self.ruler_h + 3 * s, "up"))
+            elif r[2] <= bottom:
+                out.append((i, x, h - 3 * s, "down"))
         return out
 
     def above_mark_at(self, x, y):
-        """The shape whose arrow (above_marks) is at x, y, the one on top first; None."""
-        if y > self.ruler_h + 16 * self.scale:
-            return None
-        for i, mx in reversed(self.above_marks()):
-            if abs(mx - x) <= 8 * self.scale:
+        """The shape whose arrow (edge_marks) is at x, y, the one on top first; None."""
+        s = self.scale
+        for i, mx, my, way in reversed(self.edge_marks()):
+            if way == "up":  # (as always: the top 16 px, 8 px either side)
+                hit = y <= self.ruler_h + 16 * s and abs(mx - x) <= 8 * s
+            elif way == "down":
+                hit = y >= my - 13 * s and abs(mx - x) <= 8 * s
+            else:
+                hit = x <= mx + 13 * s and abs(my - y) <= 8 * s
+            if hit:
                 return i
         return None
 

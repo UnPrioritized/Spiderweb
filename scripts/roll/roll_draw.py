@@ -1036,10 +1036,15 @@ class RollDrawing:
 
     def draw_above_marks(self):
         """A small arrow pointing up at the top of the piano roll for each shape put away above its highest key
-        (pianoroll.above_marks; user: one, in the middle of the shape). Selected: red like its line."""
-        s, y = self.scale, self.ruler_h + 3 * self.scale
-        for i, x in self.above_marks():
-            self.create_polygon(x, y, x + 6 * s, y + 9 * s, x - 6 * s, y + 9 * s, outline=look.ABOVE_EDGE,
+        (pianoroll.above_marks; user: one, in the middle of the shape). Selected: red like its line. The same at the
+        bottom / left edge for shapes left past the lowest key / before beat 0 (pianoroll.edge_marks: the Space
+        settings turned down since)."""
+        s = self.scale
+        for i, x, y, way in self.edge_marks():
+            pts = {"up": (x, y, x + 6 * s, y + 9 * s, x - 6 * s, y + 9 * s),
+                   "down": (x, y, x + 6 * s, y - 9 * s, x - 6 * s, y - 9 * s),
+                   "left": (x, y, x + 9 * s, y - 6 * s, x + 9 * s, y + 6 * s)}[way]
+            self.create_polygon(*pts, outline=look.ABOVE_EDGE,
                                 fill=look.SHAPE_LINE_PICKED if i in self.app.sels else look.SHAPE_LINE)
 
     def draw_cut_marks(self):
