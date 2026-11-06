@@ -1795,7 +1795,9 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
                     j = near(i)
                     d = slots[j[done[j] & ~pinned[j] & roomy[j]]] - own[i]
                     rows.update((d[(d >= 0) & (d % step == 0)] // step).tolist())
-            row = 0
+            # (a shape with a part pinned: from that part's row, so the rest stays with it when nothing clashes
+            # any more; sweep 2026-11-06)
+            row = min(int(slots[p]) // step for p in pins) if pins else 0
             while row in rows:
                 row += 1
             if pins:
@@ -2435,6 +2437,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         paste_unit, paste_units = {}, {}  # (paste, track) -> its unit; paste -> its units
         taken = {}  # (unit -> its slot before channel 10 is skipped: a "solid" pinned shape's tracks)
         solid_teams = []  # (unit, (group, turn)) of those tracks
+        solid_cuts = []  # (unit, cut group) of those tracks: its fellow pieces keep its row (keep colours)
         told = {}  # (shape's number -> its track numbers, its first unit: voice_slots)
         extra = {}  # (unit -> the extra time it sounds: busy)
         for lst, tr, sep, pin, team, pid in zip(note_lists, tracks, apart, pinned, teams, pastes):
@@ -2450,6 +2453,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                             taken[len(units)] = u
                             if team is not None:  # (a step turned into plain notes: the other turns step round it)
                                 solid_teams.append((len(units), team))
+                            elif groups and groups[len(unit_of)] is not None:  # (a sliced piece turned plain)
+                                solid_cuts.append((len(units), groups[len(unit_of)]))
                             units.append(every[cut[k]:cut[k + 1]])
                 unit_of.append(None)
                 continue
@@ -2557,6 +2562,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     shape_of[v] = key
             for p, team in solid_teams:  # (a step turned into plain notes still belongs to its group)
                 shape_of[p] = ("team", team[0])
+            for p, key in solid_cuts:  # (a sliced piece turned into plain notes still belongs to its whole: the
+                shape_of[p] = ("paste", ("cut", key))  # pieces' own key, App's pastes ("cut", group))
             # (a shape whose first round keeps its slots (stay: Channel per strip, colours given by hand) isn't loose:
             # the others step round those, hunt 2026-10-23: a line over a strips song shared its channel)
             loose = {shape_of[v] for i, u in enumerate(unit_of) if u is not None and rounds and rounds[i] is not None

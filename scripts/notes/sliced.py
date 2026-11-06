@@ -16,6 +16,7 @@ Moving it (or a copy) keeps that; changing its outline (points, size, turn, flip
 Last note) makes it a shape of its own (App.shapes_changed drops "cut"), and so does "Turn into a complete shape".
 """
 
+import hashlib
 import json
 import math
 
@@ -338,16 +339,19 @@ def source(sh):
 
 def cut_group(sh):
     """A sliced piece -> a key its fellow pieces share (cut from one whole), else None: with "Overlapping shapes
-    keep their colours" the pieces move to other channels as one shape, like a paste's pieces."""
+    keep their colours" the pieces move to other channels as one shape, like a paste's pieces. A piece turned into
+    plain notes keeps its key ("cut_of"), so the pieces left stay on its channels (sweep 2026-11-06: a Lasso turning
+    one piece plain sent the other back to its first channels)."""
     cut = sh.get("cut")
     if not cut or not cut.get("whole"):
-        return None
+        return sh.get("cut_of")
     whole = cut["whole"]
     got = _groups.get(id(whole))  # (pieces share one whole: worked out once, not per piece per redraw)
     if got is None or got[0] is not whole:
         if len(_groups) > 256:
             _groups.clear()
-        got = _groups[id(whole)] = (whole, json.dumps(whole, sort_keys=True, default=str))
+        key = hashlib.sha1(json.dumps(whole, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        got = _groups[id(whole)] = (whole, key)
     return got[1]
 
 

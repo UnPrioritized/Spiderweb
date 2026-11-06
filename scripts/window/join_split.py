@@ -36,8 +36,8 @@ from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
 from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
-from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, keep_was, knife_hits, knife_in_two, moved_by,
-                          notes_across, rejoined, slice_in_two, split_here_ok, tooled)
+from notes.sliced import (CANT, completed, cut_group, cut_in_two, keep_velocity, keep_was, knife_hits,
+                          knife_in_two, moved_by, notes_across, rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_dot, piece_velocity, sections,
                           split_at, split_custom, split_pieces)
@@ -1101,6 +1101,15 @@ class JoinSplit:
             rows[:, 4] = t // 15 * 16 + np.asarray(SKIP10)[t % 15]
         return rows
 
+    def mark_cut_of(self, new):
+        """plain_copies' shapes of sliced pieces stay one shape with the pieces left (sh["cut_of"]), for "Overlapping
+        shapes keep their colours" (sweep 2026-11-06: the piece left went back to its first channels)."""
+        kept = {cut_group(sh) for k, sh in enumerate(self.shapes) if k not in new} - {None}
+        for i in new:
+            key = cut_group(self.shapes[i])
+            if key in kept:
+                new[i]["cut_of"] = key
+
     def put_plain(self, new):
         """plain_copies' shapes in place of the ones they were made of (no undo step: the caller's)."""
         laps = []  # (an Add between group: unlinked, user; each shape keeps its colour turn and its repeat, so with
@@ -1112,6 +1121,7 @@ class JoinSplit:
         for i in new:
             if turns[i] is not None:
                 new[i]["team"] = list(turns[i])
+        self.mark_cut_of(new)
         self.unlink_groups(sorted(new))
         for i, sh in new.items():
             self.shapes[i] = sh
@@ -1376,6 +1386,7 @@ class JoinSplit:
                                                                      n=len(drawn)), icon="question", parent=self):
                 return None
             new = self.plain_copies(drawn)
+            self.mark_cut_of(new)  # (before they're cut: their pieces keep it)
         done = {}
         for i in targets:
             sh = new[i] if drawn and i in new else self.shapes[i]
@@ -1502,6 +1513,7 @@ class JoinSplit:
                                           icon="question", parent=self):
                 return False
             new = self.plain_copies(drawn)
+            self.mark_cut_of(new)  # (before they're cut: their pieces keep it)
         done = {}
         for i in targets:
             sh = new[i] if drawn and i in new else self.shapes[i]
