@@ -656,6 +656,7 @@ class Player:
         # (Kestrel ends one note per note-off, oldest first: every note gets its own, else the later one rang on, hunt
         # 2026-10-28; BASSMIDI ends every note of the key at one)
         shared = (tune or self.shared) and getattr(out, "name", None) != KESTREL
+        self.one_sound = shared  # (Stop: one note-off ends a key, hunt 2026-11-07)
         ons = _Ons(notes, t0, self.stop_beat * self.ppq, use10, tune, self.ports, self.edo_first)
         del notes
         ready = self.ready  # (a loaded MIDI playing along: the line waits until its first notes are read)
@@ -813,9 +814,12 @@ class Player:
                 per[ch] = per.get(ch, 0) + n
             # (channels past 16 take note on / off only: synth.Live.send)
             many = {ch for ch, n in per.items() if n > STACKED and ch < 1 << 24}
+            # (one sound a key (31-EDO rows, keep colours sharing): one note-off ends it; one per stacked note kept
+            # Stop busy ~1 s at a million held on channels past 16, which take no "all notes off": hunt 2026-11-07)
+            one = getattr(self, "one_sound", False)
             for key, n in self.held.items():
-                if key & ~0xFFFF00 not in many:
-                    for _ in range(n):
+                if key & ~0xFFFF00 not in many and n > 0:
+                    for _ in range(1 if one else n):
                         self.out.send(0x80 | key)
             for ch in many:
                 self.out.send(0xB0 | ch | 123 << 8)

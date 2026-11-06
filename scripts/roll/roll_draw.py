@@ -490,9 +490,11 @@ def track_ranks(slots, own, files=(), emptied=()):
     return out, len(rows) + len(ids)
 
 
-def stack_keys(notes, sels, back, rule):
+def stack_keys(notes, sels, back, rule, also=None):
     """Each note's painting key (bigger = painted later = on top) by stack_rule's rule, and the key where the
-    selected shapes' notes start (all below it are the rest)."""
+    selected shapes' notes start (all below it are the rest). also: slots of notes not given (the ones off screen):
+    the track places counted with them too, as the compiled painter counts every note (hunt 2026-11-07: places
+    from the notes on screen only put your tracks above others while scrolling)."""
     owner = notes[:, 5]
     group = np.ones(len(notes), np.int64)  # 0 = faint tracks behind the highlighted one, 1 = the rest, 2 = selected
     if sels:
@@ -503,7 +505,12 @@ def stack_keys(notes, sels, back, rule):
     if mode == "shape":
         span = int(owner.max()) + 1 if len(owner) else 1
         return group * span + owner, 2 * span
-    place, span = track_ranks(notes[:, 4], *rule[1:])
+    if also is not None and len(notes):
+        slots = np.union1d(np.unique(notes[:, 4]), also)
+        at, span = track_ranks(slots, *rule[1:])
+        place = at[np.searchsorted(slots, notes[:, 4])]
+    else:
+        place, span = track_ranks(notes[:, 4], *rule[1:])
     if mode == "loud":  # (-1 = a mask's ghost: quietest; -2 - velocity = a faint track's note)
         v = notes[:, 3]
         v = np.where(v <= -2, -2 - v, np.clip(v, 0, 127))
@@ -1333,6 +1340,15 @@ class RollDrawing:
                                 np.ascontiguousarray(order[:, 0]))
         return self._note_index[1]
 
+    def every_slot(self):
+        """The slots of every note shown (on screen or not; kept until the notes change): stack_keys' track places."""
+        rendered = self.app.drawn
+        kept = getattr(self, "_every_slot", None)
+        if kept is None or kept[0] is not rendered:
+            kept = self._every_slot = (rendered, np.unique(np.asarray(rendered)[:, 4]) if len(rendered)
+                                       else np.zeros(0, np.int64))
+        return kept[1]
+
     def visible_range(self, t_lo, t_hi):
         """(first, end): the sorted_notes() rows that can overlap ticks t_lo..t_hi."""
         self.sorted_notes()
@@ -1461,7 +1477,8 @@ class RollDrawing:
             if order and len(on):
                 # (stacked notes: stack_rule's order, the selected shapes' on top, faint tracks under all; the
                 # same order as the compiled painting_order: by key, then by start)
-                key_of = stack_keys(notes[on], sels, getattr(app, "behind_owner", None), stack_rule(app))[0]
+                key_of = stack_keys(notes[on], sels, getattr(app, "behind_owner", None), stack_rule(app),
+                                    self.every_slot())[0]
                 on = on[np.argsort(key_of, kind="stable")]
                 owner = notes[on, 5]
                 cols = slot_colours(getattr(app, "picture_use10", False))
