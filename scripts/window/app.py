@@ -262,7 +262,7 @@ class Channels(dict):
 
 
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
-              keep=False, busy=None, own=None, stash=None):
+              keep=False, busy=None, own=None, stash=None, overlaps=None):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count, {Hz bass's number: {voice: slot}} for those with
     their own channel per note (render voice_slots)). all16: the project's "Use channel 10" (every
@@ -275,7 +275,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     its tracks' order; more colours than tracks: the last one's) in every mode, its own overlaps fixed as if alone
     (Single channel; As drawn: kept), other shapes' never (Domino lets two notes share a key in a track); the other
     shapes never step round them (nor take tracks added by hand). Also returns {shape's number: how many colours
-    it has} for those (App.fit_into). stash: a dict given = what lay_again needs kept in it."""
+    it has} for those (App.fit_into). stash: a dict given = what lay_again needs kept in it. overlaps: how overlaps
+    are fixed (App.overlap_rule: Single's split around, Multi's Remove overlaps; render overlaps)."""
     team_laps = []
     teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
@@ -368,7 +369,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              voice_slots,
                              busy, together, note_slots, [pasted_notes(sh) for sh in shapes],
                              # (keep colours: a cut shape's pieces move as one shape, partial sweep 11-02)
-                             groups=[cut_group(sh) for sh in shapes] if keep else None)
+                             groups=[cut_group(sh) for sh in shapes] if keep else None, overlaps=overlaps)
     if stash is not None:  # (App.fit_into's laying again: lay_again)
         stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
                      all16=all16, mode=mode)
@@ -729,6 +730,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.ch10_order = tk.BooleanVar(value=False)  # with Use channel 10: channels 1-16 in order (in_order)
         self.new_rounds = tk.BooleanVar(value=False)  # each Colours round on channels of its own (rounds_apart)
         self.pad_rounds = tk.BooleanVar(value=True)  # with it: empty tracks for a round's unused channels (pad_tracks)
+        # (overlap fixing, user 2026-11-06: overlap_rule; saved with the project, no undo step like the ticks above)
+        self.single_split = tk.BooleanVar(value=False)  # Single channel: split around instead of cut + stretch
+        self.multi_cut = tk.BooleanVar(value=False)  # Multi channel: Remove overlaps between tracks too
+        self.multi_later = tk.BooleanVar(value=False)  # ... later tracks win (off: earlier tracks win, the default)
+        self.multi_stretch = tk.BooleanVar(value=False)  # ... cut + stretch like Single channel (off: split around)
         self.channels_folded = tk.BooleanVar(value=False)  # Project's Channels rows folded to one grey line (autosave)
         self._used_tracks = (None, 0)  # (rendered, how many slots have notes: update_status)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
@@ -1311,11 +1317,37 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for var in (self.channel_mode, self.use_ch10, self.ch10_order, self.new_rounds, self.pad_rounds,
                     self.keep_colours, self.channels_folded):
             var.trace_add("write", lambda *a: self.sync_channels_fold())
+        self.mode_buttons = {}
         for value, text, tip in CHANNEL_CHOICES:
-            b = ttk.Radiobutton(ch, text=text, value=value, variable=self.channel_mode,
-                                command=self.on_channel_mode)
+            b = self.mode_buttons[value] = ttk.Radiobutton(ch, text=text, value=value, variable=self.channel_mode,
+                                                           command=self.on_channel_mode)
             b.pack(anchor="w")
             Tooltip(b, tip)
+        # (user 2026-11-06: Single channel's other way, its own row shown only while Single channel is picked)
+        self.single_split_tick = ttk.Checkbutton(ch, text=tr("app.single_split"), variable=self.single_split,
+                                                 command=self.on_channel_mode)
+        Tooltip(self.single_split_tick, tr("app.single_split_tip"))
+        # (user 2026-11-06: Multi channel's Remove overlaps; who wins + the way shown only once it's ticked)
+        self.multi_rows = ttk.Frame(ch)
+        self.multi_cut_tick = ttk.Checkbutton(self.multi_rows, text=tr("app.multi_cut"), variable=self.multi_cut,
+                                              command=self.on_channel_mode)
+        self.multi_cut_tick.pack(anchor="w")
+        Tooltip(self.multi_cut_tick, tr("app.multi_cut_tip"))
+        self.multi_more = ttk.Frame(self.multi_rows)
+        names = [tr("app.multi_earlier_win"), tr("app.multi_later_win")]
+        self.multi_win_box = ttk.Combobox(self.multi_more, state="readonly", values=names, width=max(map(len, names)))
+        self.multi_win_box.pack(anchor="w", pady=(1, 0))
+        self.multi_win_box.current(0)
+        self.multi_win_box.bind("<<ComboboxSelected>>", lambda e: (
+            self.multi_later.set(self.multi_win_box.current() == 1), self.on_channel_mode()))
+        Tooltip(self.multi_win_box, tr("app.multi_win_tip"))
+        self.multi_later.trace_add("write", lambda *a: self.multi_win_box.current(int(self.multi_later.get())))
+        self.multi_stretch_tick = ttk.Checkbutton(self.multi_more, text=tr("app.multi_stretch"),
+                                                  variable=self.multi_stretch, command=self.on_channel_mode)
+        self.multi_stretch_tick.pack(anchor="w", pady=(2, 0))
+        Tooltip(self.multi_stretch_tick, tr("app.multi_stretch_tip"))
+        for var in (self.single_split, self.multi_cut, self.multi_later, self.multi_stretch):
+            var.trace_add("write", lambda *a: self.sync_channels_fold())
         names = [name for _, name in SPLIT_CHOICES]
         self.split_box = ttk.Combobox(ch, state="readonly", values=names, width=max(map(len, names)))
         # (not packed here: shapes_changed shows it under Multi channel; with no autosave it never runs at start)
@@ -1341,6 +1373,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                         command=self.on_pad_rounds)
         Tooltip(self.pad_tick, tr("app.pad_rounds_tip"))
         self.sync_channels_fold()
+        self.sync_overlap_rows()  # (Single channel is picked at the start: its row shows without a shapes_changed)
         r += 1
         # (MIDI out: only in Settings → Sound now, user 2026-10-18; "Overloaded" is beside Play)
         names = [name for _, name in DOMINO_STARTS]
@@ -1780,10 +1813,43 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 words.append(tr("app.ch_short_rounds"))
             if self.blocks_apart() and self.pad_rounds.get():
                 words.append(tr("app.ch_short_pad"))
+            if self.multi_cut.get():
+                words.append(tr("app.ch_short_later" if self.multi_later.get() else "app.ch_short_earlier"))
+                if self.multi_stretch.get():
+                    words.append(tr("app.ch_short_stretch"))
+        elif mode == "single" and self.single_split.get():
+            words.append(tr("app.ch_short_split"))
         if self.channels_short.cget("text") != ", ".join(words):
             self.channels_short.config(text=", ".join(words))
         grid_shown(self.channels_rows, not folded)
         grid_shown(self.channels_short, folded)
+
+    def overlap_rule(self):
+        """How overlaps are fixed now (render overlaps), or None = the usual way: Single channel's "split around"
+        tick, Multi channel's Remove overlaps (who wins, cut + stretch or split around; user 2026-11-06)."""
+        mode = self.channel_mode.get()
+        if mode == "single" and self.single_split.get():
+            return {"way": "split"}
+        if mode == "auto" and self.multi_cut.get():
+            return {"across": True, "way": "stretch" if self.multi_stretch.get() else "split",
+                    "later": bool(self.multi_later.get())}
+        return None
+
+    def sync_overlap_rows(self):
+        """Single's split around row only under Single channel; Multi's who wins + way only once Remove overlaps is
+        ticked (only on a change: grid_shown's rule)."""
+        single = self.channel_mode.get() == "single"
+        if single != bool(self.single_split_tick.winfo_manager()):
+            if single:
+                self.single_split_tick.pack(anchor="w", padx=(18, 0), pady=(1, 0), after=self.mode_buttons["single"])
+            else:
+                self.single_split_tick.pack_forget()
+        more = bool(self.multi_cut.get())
+        if more != bool(self.multi_more.winfo_manager()):
+            if more:
+                self.multi_more.pack(anchor="w", padx=(18, 0))
+            else:
+                self.multi_more.pack_forget()
 
     def in_order(self):
         """True while the shapes take channels 1-16 in order ("Channels 1-16 in order", only with all16)."""
@@ -1984,10 +2050,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.split_box.pack(anchor="w", padx=(18, 0), pady=(1, 0))
                 self.ch10_tick.pack(anchor="w", padx=(18, 0), pady=(2, 0))
                 self.rounds_tick.pack(anchor="w", padx=(18, 0), pady=(2, 0))
+                self.multi_rows.pack(anchor="w", padx=(18, 0), pady=(2, 0), after=self.rounds_tick)
             else:
                 self.split_box.pack_forget()
                 self.ch10_tick.pack_forget()
                 self.rounds_tick.pack_forget()
+                self.multi_rows.pack_forget()
+        self.sync_overlap_rows()
         if self.all16() != bool(self.order_tick.winfo_manager()):  # (only shown with Use channel 10, user)
             if self.all16():
                 self.order_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)
@@ -2013,7 +2082,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
                              self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
                              keep=self.keep_colours.get(),
-                             busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels(), stash=stash)
+                             busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels(), stash=stash,
+                             overlaps=self.overlap_rule())
         if made is None:
             made = make()
             if self._notes_worked != worked:
@@ -2031,7 +2101,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             # (Single channel: sounding masks' notes cut the pattern's where they start; what a mask shows / Apply
             # makes = the pattern as it sounds without them, user)
             self.pattern = all_notes(self.shapes, self.ppq, self.keys, "single", self.channel_split, self.all16(),
-                                     self.notes_tracks, quiet=True, own=self.own_channels())[2]
+                                     self.notes_tracks, quiet=True, own=self.own_channels(),
+                                     overlaps=self.overlap_rule())[2]
         if self.mask_preview.get():
             self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
                                                       self.pattern, GHOST_FADE[0] > 0)
@@ -2099,7 +2170,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys, mode, split, self.all16(),
                 self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode),
                 tuple(json.dumps(sh.get("strips")) for sh in self.shapes),  # (Channel per strip: not in shape_key)
-                tuple(sorted(self.own_channels().items())), tuple(sorted(self.own_channels().fixed)))
+                tuple(sorted(self.own_channels().items())), tuple(sorted(self.own_channels().fixed)),
+                tuple(sorted((self.overlap_rule() or {}).items())))
 
     def own_channels(self):
         """{id: channel} of the tracks added by hand (all_notes own), and of the loaded MIDI's tracks shapes are
@@ -2623,7 +2695,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 busy = None if key[9] is None else cc_busy(  # (worked out here: a long Arpeggio's took 0.2 s)
                     [json.loads(t) if t else {} for t in key[9][1]], key[1], key[4])
                 got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
-                                busy=busy, own=dict(key[11]))
+                                busy=busy, own=dict(key[11]), overlaps=dict(key[13]) or None)
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:

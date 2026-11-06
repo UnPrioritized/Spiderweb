@@ -319,6 +319,10 @@ class ProjectFiles:
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
             "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
+            # (overlap fixing, user 2026-11-06: only when on, so files without them stay as they were)
+            **{k: True for k, v in (("single_split", self.single_split), ("multi_cut", self.multi_cut),
+                                    ("multi_later", self.multi_later), ("multi_stretch", self.multi_stretch))
+               if v.get()},
             "domino_start": self.domino_start(),
             "snap": self.snap.get(), "defaults": self.defaults,
             "custom_defaults": dict(self.custom_defaults, shape=self.custom_shape),
@@ -471,6 +475,8 @@ class ProjectFiles:
         self.ch10_order.set(data.get("ch10_order") is True)
         self.new_rounds.set(data.get("new_rounds") is True)
         self.pad_rounds.set(data.get("pad_rounds") is not False)
+        for k in ("single_split", "multi_cut", "multi_later", "multi_stretch"):
+            getattr(self, k).set(data.get(k) is True)
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
         self.edo31.set(data.get("edo31") is True)
         self.edo31_audio.set(data.get("edo31_audio") is True)
@@ -1073,7 +1079,8 @@ class ProjectFiles:
         zoom, scrolling and the play line don't count, user)."""
         return (tuple(v.get() for k, v in sorted(self.pvar.items())), self.keys_var.get(), self.edo31.get(),
                 self.channel_mode.get(), str(self.channel_split), self.use_ch10.get(), self.ch10_order.get(),
-                self.new_rounds.get(), self.pad_rounds.get())
+                self.new_rounds.get(), self.pad_rounds.get(), self.single_split.get(), self.multi_cut.get(),
+                self.multi_later.get(), self.multi_stretch.get())
 
     def is_dirty(self):
         """Changed since the last save / open: another newest undo step (undo back to it = saved again) or other
