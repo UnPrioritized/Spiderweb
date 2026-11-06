@@ -268,7 +268,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         same (user 2026-10-22: only while the mouse is at or past the edge)."""
         self.box_timer = None
         kind = self.drag[0] if self.drag else None
-        moving = kind == "move" and self.box_moving or kind is not None and kind.startswith("lasso")
+        moving = (kind == "move" and self.box_moving or kind is not None and kind.startswith("lasso")
+                  or self.follows(kind))
         if kind != "box" and not moving or self.sx is None:
             return
         mx, my, state = self.box_mouse
@@ -294,6 +295,16 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.drag = ("box", b, p, cx - mx, cy + my, *rest)
         self.request_redraw()
         self.box_timer = self.after(BOX_SCROLL_MS, self.box_scroll)
+
+    # what the view scrolls along with when dragged past the piano roll's edge while a Space past the keys / before
+    # the start is on (Settings → General, user 2026-11-06: so shapes can be taken out there): shapes moved, points /
+    # handles / box sides, shapes being drawn, the Stir centre point, a Slice line
+    FOLLOW_KINDS = frozenset(("move", "handle", "resize", "skew", "stretch", "create", "segment", "arcdrag", "wall",
+                              "place", "free", "rccentre", "slice", "knife"))
+
+    def follows(self, kind):
+        """True: the view goes along when this drag passes the edge (box_scroll); only with a Space setting on."""
+        return kind in self.FOLLOW_KINDS and bool(self.room_keys() or self.room_beats())
 
     def ruler_box(self):
         """The ruler dragged sideways (any tool): a Select box over every key from where it was pressed, like many
@@ -1393,6 +1404,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if not self.drag:
             return
         kind = self.drag[0]
+        if self.follows(kind):  # (past the edge the view goes along: box_scroll)
+            self.box_mouse = (e.x, e.y, e.state)
+            if self.box_timer is None:
+                self.box_timer = self.after_idle(self.box_scroll)
         if e.state & 0x200 and kind != "pan":  # (the middle button held too: Tk gives the moves to the left button's
             self.pan_view(e)                     # drag, so the view moves here; what's held follows the mouse)
         if kind == "pan":
@@ -1680,7 +1695,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if kind == "wall":
                 self.app.sync_funnel()
             return
-        if kind in ("box", "move") and self.box_timer:
+        if (kind in ("box", "move") or kind in self.FOLLOW_KINDS) and self.box_timer:
             self.after_cancel(self.box_timer)
             self.box_timer = None
         if kind == "box" and (self.box_area() or self.box_more and e.state & CTRL):
