@@ -8,7 +8,7 @@ dev/scratch/dx_scan.py): one spot each, the same as the hand-made 1.43 table, an
 read right in all of them (FAMILY_32). 64-bit Domino (1.45 dev002 = the 256 keys mod's, 1.45 dev009-en nightly,
 PLAN L2 / L3, dev/scratch/dx64_*.py): the same classes, loaded somewhere else each start (domino_view.with_slots
 moves the addresses), 8-byte pointers, places in FAMILY_64 (both builds alike); the 256 keys mod says its 256 rows
-itself (rows_at).
+itself (rows_at). 32-bit 1.45 (dev009 x86) moves too, with its own places (FAMILY_32_145).
 Read-only, like the rest. Anything that doesn't add up = None: never guessed."""
 
 import struct
@@ -18,6 +18,11 @@ from dataclasses import replace
 FAMILY_32 = dict(top_row=0xB8, row_px=0x1CC, beat_px=0x1D0, left=0x234, cursor=0x190, song=0x184, ppq_at=0xC,
                  tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, undo_at=0x188, path_at=0xA8,
                  doc_path_at=0x18C)
+# 32-bit 1.45 (dev009 x86, loads elsewhere each start; dev/scratch/dk145_probe.py, 2026-11-07): the view, ruler and
+# main window keep their numbers elsewhere (rows_at as in 64-bit: 0x10 before the top row); tracks and notes as in
+# FAMILY_32, the song's .mid import path at [[S+0xA0]+4] (dev/scratch/dk145_path.py)
+FAMILY_32_145 = dict(FAMILY_32, top_row=0x144, row_px=0x2EC, beat_px=0x2F0, left=0x3DC, song=0x284, undo_at=0x288,
+                     doc_path_at=0x28C, cursor=0x290, rows_at=0x134, path_at=0xA0)
 # the same in both 64-bit builds measured (1.45 dev002, 1.45 dev009-en); the .mid import path [[S+0x140]+8]
 # (found 2026-11-06, dev/scratch/rm_midpath.py)
 FAMILY_64 = dict(top_row=0x228, row_px=0x4D0, beat_px=0x4D4, left=0x6A8, cursor=0x448, song=0x430, ppq_at=0x18,
@@ -48,6 +53,7 @@ class _PE:
         else:
             self.base = struct.unpack_from("<I", data, opt + 28)[0]
             self.moves = bool(struct.unpack_from("<H", data, opt + 70)[0] & 0x40)  # (DYNAMIC_BASE: loads elsewhere)
+        self.size = struct.unpack_from("<I", data, opt + 56)[0]  # (SizeOfImage: the whole program as loaded)
         first = opt + struct.unpack_from("<H", data, pe + 20)[0]
         self.secs = {}
         for i in range(nsec):
@@ -143,9 +149,9 @@ def _from_file(path, build_type):
     except (OSError, ValueError, struct.error):
         return None
     if pe.x64:
-        family, find, extra = FAMILY_64, vtable_64, {"file_base": pe.base}
-    elif pe.moves or pe.base != 0x400000:
-        return None  # (a 32-bit Domino that moves: none seen)
+        family, find, extra = FAMILY_64, vtable_64, {"file_base": pe.base, "image_size": pe.size}
+    elif pe.moves:  # (1.45 dev009 x86: loads elsewhere each start, moved like a 64-bit one)
+        family, find, extra = FAMILY_32_145, vtable_32, {"file_base": pe.base, "image_size": pe.size}
     else:
         family, find, extra = FAMILY_32, vtable_32, {}
     got = {k: find(pe, n) for k, n in CLASSES.items()}
@@ -169,6 +175,8 @@ def find_slots(build, read, check=True):
     hits = {k: [] for k in SLOTS}
     want = {getattr(build, v): k for k, v in SLOTS.items()}
     lo, hi = build.data_at - 0x800000, build.data_at + 0x800000  # (the program itself: not an object)
+    if build.file_base and build.image_size:  # (a moving one, exactly: 1.45 x86 may load so low that its objects
+        lo, hi = build.file_base, build.file_base + build.image_size  # sit within the rough range above)
     size, fmt = build.ptr, "<Q" if build.ptr == 8 else "<I"
     for o in range(0, len(raw) - size + 1, size):
         p = struct.unpack_from(fmt, raw, o)[0]

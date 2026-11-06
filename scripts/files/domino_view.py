@@ -51,7 +51,9 @@ class Build:
     data_at: int = 0    # builds found by name (files/domino_builds.py): Domino's global data, where the slots are
     data_size: int = 0  # looked for in the running Domino (slots 0 until then)
     ptr: int = 4        # pointer size: 4 (32-bit Domino) or 8 (64-bit: also loaded somewhere else each start)
-    file_base: int = 0  # 64-bit: the load address the vtables / data_at are counted from (moved by the real one)
+    file_base: int = 0  # builds loaded elsewhere each start (64-bit, 1.45 x86): the load address the vtables /
+    #                     data_at are counted from (moved by the real one); 0 = never moves
+    image_size: int = 0  # a moving build: the program's size as loaded (file_base .. + this = not an object)
     n_tick: int = 4     # a note + this: tick (u32); selected byte; key byte; velocity byte; gate (u32)
     n_sel: int = 8
     n_key: int = 0xC
@@ -156,7 +158,7 @@ _forced = set()  # exe keys (+ load address) the user said "Try anyway" for (unt
 
 def with_slots(d):
     """A Domino whose build was found by name: its slots looked for in the running Domino (a 32-bit Domino: once
-    per program file, it never moves; a 64-bit one: once per load address). Not found yet (still starting, no
+    per program file, it never moves; a 64-bit one or 1.45 x86: once per load address). Not found yet (still starting, no
     piano roll) = looked again later; till then reading answers "not readable"."""
     import time
     b = d.build
@@ -166,7 +168,7 @@ def with_slots(d):
     ph = d.handle()
     if key is None or not ph:
         return d
-    if b.ptr == 8:  # (64-bit: everything moved by where Windows loaded it this time)
+    if b.file_base:  # (64-bit / a 32-bit one that moves: everything moved by where Windows loaded it this time)
         base = _module_base(ph)
         if not base:  # (e.g. Spiderweb run by a 32-bit Python: a 64-bit Domino can't be read from there)
             return _failed(d, key, None) if time.monotonic() - _slot_tries.get(key, -1e9) >= SLOT_AGAIN_S else \
@@ -239,7 +241,7 @@ def settle(d):
 
 
 def moved(b, delta):
-    """A 64-bit build's addresses moved to where this Domino was loaded."""
+    """A moving build's (64-bit, 1.45 x86) addresses moved to where this Domino was loaded."""
     from dataclasses import replace
     return replace(b, p_vtable=b.p_vtable + delta, h_vtable=b.h_vtable + delta, c_vtable=b.c_vtable + delta,
                    note_vt=b.note_vt + delta, data_at=b.data_at + delta, file_base=b.file_base + delta)
