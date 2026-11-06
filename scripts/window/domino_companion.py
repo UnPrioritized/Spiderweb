@@ -739,13 +739,23 @@ class Companion:
             return self.paste_rows(shapes, out, int(out[:, 0].min()), None, steps)
         self.paste_jobs(shapes, jobs, 0, steps, len(out), first)
 
-    def paste_jobs(self, shapes, jobs, i, steps, n, back):
+    def paste_jobs(self, shapes, jobs, i, steps, n, back, base=None):
         """send_across's pastes one after another, each on its track: jobs = [(track, notes (tick, end, key,
         velocity), first tick, end of the stretch replaced or None = a plain paste, the new notes alone (cut only
         among themselves) for a replaced stretch)]; then the current track back. A stretch holding Domino's other
         events from where the cursor landed (it can land before the first changed note: hunt 2026-11-06) = that
-        track gets only its new notes alone, Domino's left as they are (said)."""
+        track gets only its new notes alone, Domino's left as they are (said). One failing after others went in:
+        those taken back with Domino's Undo (base = the steps before the first paste; hunt 2026-11-06: half a send
+        stayed in Domino, out of undo)."""
         d = self.job
+        base = steps if base is None else base
+
+        def failed(why):
+            if dl.alive(d):
+                for _ in range(steps - base):  # (this send's pastes; tracks added for it stay, empty)
+                    dl.command(d, dl.UNDO)
+                dl.switch_track(d, back)
+            return self.sent(shapes, False, why, n, base)
         if not dl.alive(d):
             return self.sent(shapes, False, "domino", n, steps)
         if i == len(jobs):
@@ -756,12 +766,11 @@ class Companion:
         if at is not None and end is not None and self.stretch_unsafe(d, track, at, end):
             self.say(tr("companion.track_events"), warn=True)
             if not len(alone):  # (none of its new notes left: nothing goes on this track)
-                return self.paste_jobs(shapes, jobs, i + 1, steps, n, back)
+                return self.paste_jobs(shapes, jobs, i + 1, steps, n, back, base)
             notes, first, end = alone, int(alone[:, 0].min()), None
             at = dl.put_cursor(d, first)
         if at is None:
-            dl.switch_track(d, back)
-            return self.sent(shapes, False, "cursor", n, steps)
+            return failed("cursor")
         rows = np.zeros((len(notes), 6), np.int64)
         rows[:, :4] = notes
         if end is not None:  # (the notes from the cursor on: the grid may have put it before first)
@@ -773,9 +782,8 @@ class Companion:
 
         def done(ok, why):
             if not ok:
-                dl.switch_track(d, back)
-                return self.sent(shapes, False, why, n, steps)
-            self.paste_jobs(shapes, jobs, i + 1, steps + 1, n, back)
+                return failed(why)
+            self.paste_jobs(shapes, jobs, i + 1, steps + 1, n, back, base)
         dl.Paste(self.bar, d, raw, done, cmd=dl.SWAP_PASTE if end is not None else dl.PASTE)
 
     def notes_for(self, shapes):
