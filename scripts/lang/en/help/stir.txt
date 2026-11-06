@@ -24,7 +24,7 @@ Below the line in the Area dropdown are the drawings in your shape library: pick
 
 ## Moving, turning and sizing the area
 
-With the Select tool the area also has its own box on the piano roll, as a solid green line with big round green handles, so it doesn't look like the area's own line or a shape's box. It works like a custom shape's box: drag a side's round handle to stretch the area that way (Stretch across or up changes, Size stays), a corner to stretch it both ways, Ctrl on a corner to change Size and keep its proportions, just outside a corner to turn it (15° steps; Shift for any angle), just outside a side's middle to slant it. Size, Stretch and Angle in the window follow. Turning or slanting by hand ticks "Round as seen", so the area turns the way it looks on the screen.
+With the Select tool the area also has its own box on the piano roll, as a solid green line with big round green handles, so it doesn't look like the area's own line or a shape's box. It works like a custom shape's box: drag a side's round handle to stretch the area that way (Stretch across or up changes, Size stays), a corner to stretch it both ways, Ctrl on a corner to change Size and keep its proportions, just outside a corner to turn it (15° steps; Shift for any angle), just outside a side's middle to slant it. Size, Stretch, Angle and Slant in the window follow (Slant: how far the top slides sideways, in % of the area's height; type 0 to take it away). Turning or slanting by hand ticks "Round as seen", so the area turns the way it looks on the screen.
 
 Area moves with the Centre point (ticked at the start): untick it and the area stays where it is, with its own spot shown as a square on the piano roll. Drag the square (or the area) to move it, or type the spot in "Area spot" (it may sit past the shape's box, from -100 to 200 %); right-click the square to put it in the middle. Turn and Twist still go around the Centre point, so with the Centre point outside the area, the area becomes a window onto colours turned around a far point.
 
@@ -66,7 +66,7 @@ Colour sets (shown when a shape has more than one set of channels, 15 colours ea
 
 Several stirs on one shape: the tabs at the top (Stir 1, Stir 2, ...) each hold a stir of their own, with its own Centre point and settings. They work in order: each stir bends the colours the stirs before it left, so you can turn the whole pattern with Stir 1 and put a small swirl in one spot with Stir 2 (Area: Circle). "+" adds a stir after the others (it is kept once you change one of its settings), the × beside a tab takes that stir away. Many tabs scroll sideways under a thin bar (the mouse wheel over them scrolls too). The piano roll shows the dot and area of the tab you're on. Up to 20 stirs.
 
-Reset puts the shown stir back to nothing; with only one stir that takes the stir away. The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
+Reset puts the shown stir back to nothing; with only one stir that takes the stir away. An area picked after Reset starts plain (Size 50 %, no stretch, angle or slant). The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
 
 ## With the rest of Spiderweb
 

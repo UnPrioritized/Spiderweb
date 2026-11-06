@@ -1575,6 +1575,8 @@
  "stir.angle": "Angle",
  "stir.angle_tip": "How far the area is turned, in degrees. On the piano roll the area has its own dotted box (round handles, apart from a shape's box): drag a side's middle to stretch the area that way, a corner to stretch it both ways (Ctrl on a corner changes Size and keeps its proportions), just outside a corner to turn it (15° steps, Shift for any angle), just outside a side's middle to slant it.",
  "stir.undo_area_box": "Stir area box",
+ "stir.slant": "Slant",
+ "stir.slant_tip": "How far the area's top slides sideways, in % of its height (minus = to the left); 0 = not slanted. On the piano roll, drag just outside a side's middle of the area's box to slant it by hand.",
  "stir.tied": "Area moves with the Centre point",
  "stir.tied_tip": "Ticked: the area sits on the Centre point and moves with it.\nUnticked: the area stays where it is and gets its own spot, a square on the piano roll: drag the square to move the area (right-click it: back to the middle). Turn and Twist still go round the Centre point, so a Centre point outside the area turns what you see through it around a far point.",
  "stir.undo_tied": "Stir area spot",

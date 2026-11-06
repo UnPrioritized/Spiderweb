@@ -13,7 +13,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MOST_REACH, MAKE_SHAPE_POINTS, MOST_STIRS,
+from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_SKEW, MOST_STIRS,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_stack)
@@ -200,9 +200,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # ---- Area (BMC tester 11-03 + the user's own idea 11-04: the stir only inside a circle / square / diamond /
         # a drawing round the Centre point; Size = its width in % of the box; Whole shape = no area)
         self._part("area")
-        self.reach_last = 50.0  # (the size picking an area brings back: the last one shown)
-        self.area_last = {"round": False, "stretch": 100.0, "stretch_up": 100.0, "seen": None, "spot": None,
-                          "tilt": 0.0, "skew": 0.0}  # (likewise, hunt 11-04)
+        self.forget_area()
         word = ttk.Label(form, text=tr("stir.area"))
         Tooltip(word, tr("stir.area_tip"))
         self.areas = ("whole",) + STIR_AREAS
@@ -258,7 +256,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             ttk.Label(cell, text="%").pack(side="left")
         self._put("area", (1, self.rounds["round"][1]), (2, cell, 2),
                   (4, self._cell(form, "tilt", -360, 360, "stir.angle", "stir.angle_tip", "°")))  # (PLAN C2b)
-        self._put("area", (1, self.rounds["spin"][1], 4))
+        # (Slant under Angle, user 11-06: a slant made on the piano roll showed nowhere, Reset seemed to keep it)
+        self._put("area", (1, self.rounds["spin"][1], 3),
+                  (4, self._cell(form, "skew", -100 * MOST_SKEW, 100 * MOST_SKEW, "stir.slant", "stir.slant_tip",
+                                 "%")))
         # (user 11-04: a button takes the piano roll's look again, for both ticks; zoom alone never does)
         self.match = ttk.Button(form, text=tr("stir.match"), command=self.on_match)
         Tooltip(self.match, tr("stir.match_tip"))
@@ -318,6 +319,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         app.centre_first = "stir"  # (its dots win over Clumps' on one spot: roll_centre.centre_boxes)
         self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
         self.deiconify()
+
+    def forget_area(self):
+        """What picking an area on a whole-shape stir brings back (hunt 11-04: the last one shown) set to a plain
+        area: Size 50, no stretch / angle / slant (at the start and on Reset)."""
+        self.reach_last = 50.0
+        self.area_last = {"round": False, "stretch": 100.0, "stretch_up": 100.0, "seen": None, "spot": None,
+                          "tilt": 0.0, "skew": 0.0}
 
     def _area_tick(self, parent, key, start, tip):
         """A tick for an area setting (only stirs with an area take it), its own undo step."""
@@ -774,9 +782,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 b["var"].set(text)
             b["shown"] = text
             b["entry"].config(state="normal" if on and live_ else "disabled")
-        for key, empty in (("stretch", 100), ("stretch_up", 100), ("tilt", 0)):
+        for key, empty in (("stretch", 100), ("stretch_up", 100), ("tilt", 0), ("skew", 0)):
             b = self.boxes[key]
-            vals = {s[key] for s in areas}
+            vals = {round(s[key] * 100, 2) if key == "skew" else s[key] for s in areas}  # (slant: in % of the height)
             text = fmt(next(iter(vals))) if len(vals) == 1 else "" if vals else fmt(empty)
             if self.focus_get() is not b["entry"] or b["var"].get() == b["shown"]:
                 b["var"].set(text)
@@ -859,6 +867,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                     st["spot"] = None
                 elif not st["spot"]:
                     st["spot"] = list(st["centre"])
+            elif key == "skew":  # (the box shows % of the area's height)
+                st["skew"] = round(value / 100, 4)
             elif key.startswith("spot"):
                 c = list(st["spot"])
                 c[int(key[-1])] = value
@@ -880,6 +890,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
                 "stretch_up": lambda st: st["reach"] is not None,
                 "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
+                "skew": lambda st: st["reach"] is not None,
                 **{k: lambda st: st["reach"] is not None for k in ("hard", "reverse", "area_turn", "area_twist",
                                                                    "area_squeeze", "flip_in", "mirror",
                                                                    "size_of")},
@@ -1015,6 +1026,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             return
         self.wheel = None
         i = self.tab
+        self.forget_area()  # (else picking an area after Reset brought the old slant / Size back, user 11-06)
         self.app.change_recolour(
             lambda old, sh: with_stir(old, i, lambda st: full_stir(None))
             if old and i < len(stir_stack(old.get("stir"))) else old, tr("stir.undo_reset"))
