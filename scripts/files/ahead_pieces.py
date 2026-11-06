@@ -128,7 +128,8 @@ class Song:
     31-EDO's sound (R6, like live play: playback.edo_code), each row on its own pitch-bent channel from that channel
     (port x 16 + channel), the bends at every piece's start."""
 
-    def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None, edo_first=None):
+    def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None, edo_first=None, one_sound=False):
+        """one_sound (31-EDO on BASSMIDI): a row sounds ONE note at a time, like live play (_one_sound)."""
         from notes.engine import channels_of, ports_of
         notes = np.asarray(notes)
         self.edo_first = edo_first
@@ -154,12 +155,45 @@ class Song:
             self.chan, self.key = (code & 15).astype(np.uint8), ((code >> 8) & 0x7F).astype(np.uint8)
             self.port = (code >> 24).astype(np.uint8)
             del code
+            if one_sound:
+                self._one_sound()
         del slot, order
         self.bends = []  # (31-EDO: its channels' bends, as CC-line messages at a piece's start)
         if edo_first is not None:
             from files.playback import edo_bends
             self.bends = edo_bends(first=edo_first)
         self._finish(ccs)
+
+    def _one_sound(self):
+        """31-EDO rows as live Built-in play sounds them (playback.Player: a new note on a sounding row lets the old
+        one go first, the row's note-off waits for its last end): on each row (port, channel, key) a note overlapping
+        the next ends where that one starts, the last of such a run at the run's furthest end; notes left with no
+        length go (their sound was let go at once). Plain on / off pairs let BASSMIDI's off end every voice of the
+        key at the first end: a short note on a long one cut the long one (hunt 2026-11-07, heard: 1.2 s shorter)."""
+        n = len(self.start)
+        if n < 2:
+            return
+        row = (self.port.astype(np.int64) << 11) | (self.chan.astype(np.int64) << 7) | self.key
+        o = np.lexsort((self.start, row))
+        r, s, e = row[o], self.start[o], self.end[o]
+        same = np.zeros(n, bool)
+        same[1:] = r[1:] == r[:-1]
+        # the furthest end so far within each row (rows one after another, each lifted above the ones before)
+        grp = np.cumsum(~same) - 1
+        t0 = int(min(s.min(), e.min()))
+        span = int(max(s.max(), e.max())) - t0 + 2
+        reach = np.maximum.accumulate(e - t0 + grp * span) - grp * span + t0
+        nxt = np.zeros(n, bool)
+        nxt[:-1] = same[1:] & (s[1:] < reach[:-1])  # (the next note on the row starts while this run sounds)
+        end = reach.copy()
+        end[:-1] = np.where(nxt[:-1], s[1:], reach[:-1])
+        keep = end > s
+        back = o[keep]
+        idx = np.sort(back)  # (start order kept)
+        new_end = np.empty(n, np.int64)
+        new_end[o] = end
+        self.start, self.end = self.start[idx], new_end[idx]
+        self.key, self.vel, self.chan, self.port = self.key[idx], self.vel[idx], self.chan[idx], self.port[idx]
 
     @classmethod
     def on_channels(cls, notes, chans, ccs, ppq, bpm, tempo=None):

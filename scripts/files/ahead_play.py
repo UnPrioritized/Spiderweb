@@ -253,7 +253,9 @@ class AheadPlay:
         """What the pieces are made of: your shapes (a Song), with the loaded MIDI along (a LoadedSong: its tracks
         as the track list mutes them) when one is loaded."""
         from files.ahead_loaded import song_for
-        own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, self._edo_first(engine))
+        edo = self._edo_first(engine)  # (BASSMIDI: one sound a row, as live Built-in play; hunt 2026-11-07)
+        own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo,
+                   one_sound=edo is not None and engine == "bassmidi")
         lm = self.app.loaded
         return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else ())
 
