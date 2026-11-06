@@ -1915,8 +1915,29 @@ def winners(notes, group, rank, stretch=False, like=None):
     if not work.any():
         return regrouped(notes, like)
     rest, w = notes[~work], np.flatnonzero(work)
-    wg, ws, we, wr = group[w], s[w], e[w], rank[w]
-    # every start and end in a group = the edges of the little stretches where one note wins
+    wg, ws, we, wr = (np.ascontiguousarray(a, np.int64) for a in (group[w], s[w], e[w], rank[w]))
+    fast = loops()
+    if fast:  # (the compiled loops: the same pieces, without the stretches in between: 4x the notes, 4x the time)
+        order = np.lexsort((ws, wg))
+        note, ps, pe, m = fast.winner_pieces(wg, ws, we, wr, order)
+        note, ps, pe = note[:m], ps[:m], pe[:m]
+    else:
+        note, ps, pe = winner_stretches(wg, ws, we, wr)
+    out = notes[w[note]].copy()
+    out[:, 0], out[:, 1] = ps, pe
+    if stretch and len(out) > 1:  # (a note coming back after the winner: the winner stretched over it instead;
+        back = out[:, 0] > ws[note]  # such a piece always follows its winner's, touching it)
+        keep = np.flatnonzero(~back)
+        ends = np.maximum.reduceat(out[:, 1], keep)
+        out = out[keep]
+        out[:, 1] = ends
+    return regrouped(np.concatenate([rest, out]), like)
+
+
+def winner_stretches(wg, ws, we, wr):
+    """winners' pieces the NumPy way (fastloops.winner_pieces' twin): every start and end in a group = the edges of
+    the little stretches where one note wins; each stretch's winner, the same note's stretches side by side joined.
+    -> (each piece's note (place in wg...), start, end), by group, then time."""
     g0 = int(wg.min())
     gk = (wg - g0).astype(np.int64)
     t0 = int(min(ws.min(), 0))
@@ -1927,13 +1948,14 @@ def winners(notes, group, rank, stretch=False, like=None):
     edges = np.unique(np.concatenate([gk * span + (ws - t0), gk * span + (we - t0)]))
     i0 = np.searchsorted(edges, gk * span + (ws - t0))
     i1 = np.searchsorted(edges, gk * span + (we - t0))
-    n = i1 - i0
+    # each stretch each note covers, the notes taken highest rank first (one sort of the notes, not of every
+    # stretch: 4x the notes took 8x the time): the lowest rank is written last, so it's the one that stays
+    perm = np.argsort(-wr, kind="stable")
+    n = (i1 - i0)[perm]
     total = int(n.sum())
-    where = np.repeat(i0 - np.cumsum(n) + n, n) + np.arange(total)  # (each stretch each note covers)
-    who = np.repeat(np.arange(len(w)), n)
-    by = np.lexsort((who, -wr[who]))  # (lowest rank last: the value written last stays)
+    where = np.repeat(i0[perm] - np.cumsum(n) + n, n) + np.arange(total)
     best = np.full(len(edges), -1, np.int64)
-    best[where[by]] = who[by]
+    best[where] = np.repeat(perm, n)
     piece = np.flatnonzero(best[:-1] >= 0)
     piece = piece[edges[piece] // span == edges[piece + 1] // span]  # (a stretch inside one group)
     note = best[piece]
@@ -1941,16 +1963,7 @@ def winners(notes, group, rank, stretch=False, like=None):
     first[1:] = (note[1:] != note[:-1]) | (piece[1:] != piece[:-1] + 1)
     head = np.flatnonzero(first)
     tail = np.append(head[1:], len(piece)) - 1
-    out = notes[w[note[head]]].copy()
-    out[:, 0] = edges[piece[head]] % span + t0
-    out[:, 1] = edges[piece[tail] + 1] % span + t0
-    if stretch and len(out) > 1:  # (a note coming back after the winner: the winner stretched over it instead;
-        back = out[:, 0] > ws[note[head]]  # such a piece always follows its winner's, touching it)
-        keep = np.flatnonzero(~back)
-        ends = np.maximum.reduceat(out[:, 1], keep)
-        out = out[keep]
-        out[:, 1] = ends
-    return regrouped(np.concatenate([rest, out]), like)
+    return note[head], edges[piece[head]] % span + t0, edges[piece[tail] + 1] % span + t0
 
 
 def regrouped(notes, like=None):

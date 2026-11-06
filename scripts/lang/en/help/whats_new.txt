@@ -14,6 +14,8 @@ What's new:
 
 • Draw on Domino (Experimental; Project, beside Export MIDI; Windows, Domino 1.41b to 1.44 and the 64-bit 1.45 test builds, the 256 keys mod too): Spiderweb's drawing tools right on Domino's piano roll. Spiderweb hides behind a small floating bar, what you draw follows Domino's scroll and zoom, and each finished shape goes into Domino's current track by itself (Ctrl+Z takes it out again). Take lifts the notes selected in Domino out to change them with Spiderweb's tools, Send puts them back. A shape you sent stays a shape: while its notes are unchanged in Domino (moved or copied together is fine), selecting them shows a dashed outline and Take brings back the shape itself, curve and points included; Bake makes them plain notes for good. Spiderweb keeps this in a small ".spiderweb" file next to the song. It's experimental: save your song first, and drawing in Spiderweb + Copy to Domino stays the safe way. See Help → Draw on Domino.
 
+• Remove overlaps (Project → Channels, under Multi channel): every shape keeps its own channel and colour, and no two notes sound on the same key at once. Earlier tracks win, or later ones; the losing note is split around the winner, or cut and stretched like Single channel. Single channel can now split around too ("Split around instead of stretching"). See Help → Channels.
+
 • Help pages with many headings have a small "Back to top" link next to each heading.
 
 • Stir's colour flips have "Flip what": pick "the stirred pattern" to mirror the finished swirl (it turns over, like the normal flips, while the notes stay put) instead of the colours before the stir.
@@ -31,6 +33,10 @@ What's new:
 • Stir's area Size can count "of the circle around" the shape's box: at 100 % a round area reaches the box's corners too, so the whole shape is inside.
 
 • Fixed: the track list's tips stayed hidden after a click until the mouse left the list.
+
+• Fixed: zoomed far in, pressing Shift while moving a shape made it jump away from the mouse.
+
+• Gate extend in % rounds each note's share to the nearest tick (before: always down), so a slanted line's ends are as even as its notes, also at low PPQ.
 
 • Help → About and saved files show which build made them (its code mark and day), so two builds of the same version can be told apart.
 

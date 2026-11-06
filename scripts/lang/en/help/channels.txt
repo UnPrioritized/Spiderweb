@@ -4,7 +4,14 @@ As drawn: every note exactly as the shapes make it, one channel; notes on the sa
 
 Single channel: where two notes on the same key overlap, the earlier one is cut where the later starts and the later one is stretched to where the earlier would have ended; notes starting on the same tick become one (the loudest, as long as the longest).
 
+Split around instead of stretching, under Single channel: the later note still wins, but it keeps its own length, and what's left of the earlier note after it comes back as a note of its own. More notes, and the gaps look even. Saved with the project.
+
 Multi channel: shapes whose notes clash go on different channels, each on its own track (channel 10, drums, is skipped). "Split: same key at the same time" = only notes on the same key at the same time clash; "Split: any notes at the same time" = any notes at the same time. Shapes that follow one after another share a channel.
+
+Remove overlaps, under Multi channel: shapes still get their own channels and colours, and on top of that no two notes sound on the same key at once, so no MIDI player cuts them at random. The track order decides who wins, as the track list shows it (your own tracks where they're listed; Reverse track order turns it round too):
+• Earlier tracks win (the usual): a note on a track higher up in the list cuts the overlapping notes of the tracks below it. A note lying wholly under a winner is gone; the shape list then says "0 notes (all overlapped)".
+• Later tracks win: the other way round.
+The losing note is split around the winner: cut where it starts, and what's left after the winner ends comes back as a note of its own. Tick "Cut + stretch like Single channel" to only cut it and stretch the winner over the rest instead. Pieces as short as 1 tick are kept. Overlaps inside one track are fixed first, like Single channel. Notes pasted from Domino take part too; Sustain shapes keep their overlaps, and a loaded MIDI is never changed. Draw on Domino does the same with the notes already in Domino's tracks. Saved with the project.
 
 Use channel 10 (16 colours), under Multi channel: channel 10 is used too, so there are 16 colours instead of 15 (a shape, Colours and the drawer's areas can then have 16). Many synths play channel 10 as drums. With a piano-only soundfont, many MIDI players stay silent there and only show the notes' colour. Built-in BASSMIDI plays it as a piano. Saved with the project.
 

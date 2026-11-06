@@ -9,6 +9,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   paint_notes    roll_draw.paint_region: the notes' colours straight into the picture (the last painted wins)
   overlap_order  engine.resolve_overlaps' groups and sort (first_seen + overlap_order)
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
+  winner_pieces  engine.winner_stretches (Remove overlaps, split around): the winning note at every moment, a heap
   recolour_apart recolour.kept_apart's walk through bursts of 3+ overlapping notes (Recolour)
   midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
   midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
@@ -543,6 +544,79 @@ def overlap_sweep(notes, order, group):
             out[m, 1] = end
             m += 1
     return out, m
+
+
+@njit(cache=CACHE, nogil=True)
+def _heap_push(hr, hi, size, r, i):
+    """A note (rank r, place i) into winner_pieces' heap (lowest rank, then place, on top) -> its new size."""
+    k = size
+    hr[k], hi[k] = r, i
+    while k > 0:
+        p = (k - 1) // 2
+        if hr[p] < hr[k] or (hr[p] == hr[k] and hi[p] <= hi[k]):
+            break
+        hr[p], hr[k] = hr[k], hr[p]
+        hi[p], hi[k] = hi[k], hi[p]
+        k = p
+    return size + 1
+
+
+@njit(cache=CACHE, nogil=True)
+def _heap_pop(hr, hi, size):
+    """The top of winner_pieces' heap taken off -> its new size."""
+    size -= 1
+    hr[0], hi[0] = hr[size], hi[size]
+    k = 0
+    while True:
+        a, b, m = 2 * k + 1, 2 * k + 2, k
+        if a < size and (hr[a] < hr[m] or (hr[a] == hr[m] and hi[a] < hi[m])):
+            m = a
+        if b < size and (hr[b] < hr[m] or (hr[b] == hr[m] and hi[b] < hi[m])):
+            m = b
+        if m == k:
+            return size
+        hr[m], hr[k] = hr[k], hr[m]
+        hi[m], hi[k] = hi[k], hi[m]
+        k = m
+
+
+@njit(cache=CACHE, nogil=True)
+def winner_pieces(group, s, e, rank, order):
+    """engine.winner_stretches' pieces (Remove overlaps, split around): in each group, at every moment the sounding
+    note with the lowest rank wins; walked once in time (order: by group, then start) with the sounding notes in a
+    heap, so piling notes never makes it slower. -> (each piece's note, start, end, how many), by group, then time."""
+    n = len(order)
+    hr, hi = np.empty(n, np.int64), np.empty(n, np.int64)
+    note, ps, pe = np.empty(2 * n, np.int64), np.empty(2 * n, np.int64), np.empty(2 * n, np.int64)
+    m, i = 0, 0
+    while i < n:
+        g = group[order[i]]
+        size, cur, since = 0, -1, 0
+        t = s[order[i]]
+        while True:
+            while i < n and group[order[i]] == g and s[order[i]] <= t:  # (every note starting by now)
+                size = _heap_push(hr, hi, size, rank[order[i]], order[i])
+                i += 1
+            while size and e[hi[0]] <= t:  # (ended ones off the top)
+                size = _heap_pop(hr, hi, size)
+            top = hi[0] if size else -1
+            if top != cur:
+                if cur >= 0 and t > since:
+                    if m == len(note):  # (never: a note's pieces end at a start or an end, 2 per note at most)
+                        break
+                    note[m], ps[m], pe[m] = cur, since, t
+                    m += 1
+                cur, since = top, t
+            nxt = s[order[i]] if i < n and group[order[i]] == g else -1
+            if cur < 0 and nxt < 0:
+                break
+            if cur < 0:
+                t = nxt
+            elif nxt >= 0 and nxt < e[cur]:
+                t = nxt
+            else:
+                t = e[cur]
+    return note, ps, pe, m
 
 
 @njit(cache=CACHE, nogil=True)
