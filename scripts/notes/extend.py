@@ -115,7 +115,9 @@ def extended(notes, ext, ppq):
     n = np.broadcast_to(np.asarray(amounts(notes, ext, unit_ppq(ext, ppq)), np.int64), (len(notes),))
     out = notes.copy()
     s, e = out[:, 0].astype(np.int64), out[:, 1].astype(np.int64)
-    add = (e - s) * n // 100 if is_pct(ext) else n
+    # (% of its own length to the NEAREST tick, halves up: rounded down, notes 3 and 4 ticks long got 1 and 2 at
+    # 50 %, twice as uneven as the line's own steps, user 2026-11-06)
+    add = ((e - s) * n * 2 + 100) // 200 if is_pct(ext) else n
     want = e + add
     out[:, 1] = np.minimum(want, np.maximum(e, next_starts(notes)))
     return out
