@@ -547,6 +547,31 @@ def undo_depth(d):
     return _i32(ph, u + d.build.undo_n) if u else None
 
 
+def song_mark(d):
+    """Something that changes whenever any track's events change (a paste always makes new event objects, even for
+    the same notes) or the undo list moves, or None (unreadable): compared before / after a paste to see it landed
+    (undo_depth alone stays put once Domino's undo list is full). A few ms at a million notes (pointer lists only)."""
+    import zlib
+    b = getattr(d, "build", None)
+    got = _track_list(d) if b is not None and b.events_at else None
+    if got is None:
+        return None
+    ph, tracks = got
+    out = [undo_depth(d)]
+    for t in tracks:
+        if not t:
+            out.append(None)
+            continue
+        ev, m = _p(ph, t + b.events_at, b), _i32(ph, t + b.events_at + b.ptr)
+        if m is None or not 0 <= m <= 50_000_000:
+            return None
+        raw = _read(ph, ev, b.ptr * m) if m else b""
+        if len(raw) != b.ptr * m:
+            return None
+        out.append((m, zlib.crc32(raw)))
+    return tuple(out)
+
+
 def _track_list(d):
     """(process handle, [each track's object]) in track-list order, or None."""
     got = _song_obj(d)

@@ -434,10 +434,11 @@ class Paste:
 
     SETTLE_MS = 120  # (clipboard watchers look at a new copy right away)
     CHECK_MS = 350   # (a "Failed to open clipboard" box shows within this)
+    SETTLED_MS = 1500  # (Domino answering, its song unchanged this long after the paste = nothing landed)
 
     def __init__(self, widget, d, raw, done, cmd=PASTE):
-        self.w, self.d, self.done, self.tries, self.cmd = widget, d, done, 0, cmd
-        self.started = time.monotonic()
+        self.w, self.d, self.done, self.tries, self.cmd, self.raw = widget, d, done, 0, cmd, raw
+        self.started, self.puts = time.monotonic(), 1
         if not dc.put_on_clipboard(raw):
             widget.after_idle(done, False, "clipboard")
             return
@@ -452,8 +453,15 @@ class Paste:
             if time.monotonic() - self.started > 20:
                 return self.done(False, "busy")
             return self.w.after(40, self.free)
+        if dc.get_from_clipboard() != self.raw:  # (another program copied meanwhile: ours put back, 2026-11-07)
+            if self.puts >= 3 or not dc.put_on_clipboard(self.raw):
+                return self.done(False, "clipboard")
+            self.puts += 1
+            return self.w.after(self.SETTLE_MS, self.free)
         self.before = boxes(self.d)
+        self.mark = dv.song_mark(self.d)
         command(self.d, self.cmd, wait=False)
+        self.pasted, self.waited = time.monotonic(), None
         self.w.after(self.CHECK_MS, self.check)
 
     def check(self):
@@ -461,7 +469,7 @@ class Paste:
             return self.done(False, "domino")
         new = boxes(self.d) - self.before
         if not new:
-            return self.done(True, "")
+            return self.landed()
         for b in new:
             answer(b)
         self.tries += 1
@@ -469,6 +477,30 @@ class Paste:
             return self.done(False, "domino")
         self.started = time.monotonic()
         self.w.after(250, self.free)
+
+    def landed(self):
+        """Done once Domino's song changed (2026-11-07: "done" was said when no error box opened, so a shape could
+        leave the overlay with nothing in Domino: the clipboard taken by another program in between). Unreadable
+        song (unknown build) = done as before. A big paste: Domino doesn't answer until it's over (waited)."""
+        if self.mark is None:
+            return self.done(True, "")
+        if not alive(self.d):
+            return self.done(False, "domino")
+        res = ctypes.c_size_t()
+        answers = _u().SendMessageTimeoutW(self.d.top, 0, 0, 0, 0x2, 100, ctypes.byref(res))  # WM_NULL
+        now = dv.song_mark(self.d) if answers else self.mark
+        if now is None or now != self.mark:
+            return self.done(True, "")
+        if not answers and time.monotonic() - self.pasted < 120:  # (still pasting)
+            self.waited = None
+            return self.w.after(100, self.landed)
+        if self.waited is None:
+            self.waited = time.monotonic()
+        if time.monotonic() - self.waited < self.SETTLED_MS / 1000:
+            return self.w.after(100, self.landed)
+        if boxes(self.d) - self.before:  # (a late error box: the usual retry)
+            return self.check()
+        self.done(False, "landed")
 
 
 class Copy:
