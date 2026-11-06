@@ -69,6 +69,15 @@ AUTOSAVE = os.path.join(USER, "autosave.json")
 OUTPUT_DIR = os.path.join(HERE, "output")
 
 
+def domino_sigs(sigs, first, ppq):
+    """The time signatures a Conductor copy for Domino takes from tick first on (user 2026-11-06: none were left out
+    unexpectedly): every change inside; the one in force at first only when first is on a bar line (put mid-bar,
+    Domino would start a new bar there and shift every bar line after it). Key signatures all go (no bars)."""
+    if bar_line(sigs, first, ppq) == first:
+        return sigs
+    return [s for s in sigs if s[0] > first]
+
+
 def backup_path(autosave):
     """autosave.json -> autosave-backup.json (an ordinary project file, so Open project can open it too)."""
     return os.path.splitext(autosave)[0] + "-backup.json"
@@ -1815,9 +1824,8 @@ class ProjectFiles:
         plan = self.tempo_timed(ppq, bpm, beats, {}, upto=top)[2]
         first, end = (int(t) for t in plan["map"](np.array([round(lo * ppq), top], np.int64)).tolist())
         end = max(end, first + 1)
-        on_bar = bar_line(plan["sigs"], first, ppq) == first
-        items, slow = tempo_items(plan["events"], plan["sigs"] if on_bar else (), first, end,
-                                  plan["keys"] if on_bar else (), plan.get("typed"))
+        items, slow = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first, end,
+                                  plan["keys"], plan.get("typed"))
         return conductor_clip(ppq, items, end - first), slow
 
     def tempo_to_domino(self, clip, quiet):
@@ -1987,8 +1995,8 @@ class ProjectFiles:
             # (the tempo goes along only with everything picked by Ctrl+A, user 2026-11-01: a Conductor track
             # first pushed the notes one track down in Domino)
             if self.copied_whole():
-                conductor = tempo_items(plan["events"], plan["sigs"] if bar else (), first, first + span[1],
-                                        plan["keys"] if bar else (), plan.get("typed"))[0]
+                conductor = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first,
+                                        first + span[1], plan["keys"], plan.get("typed"))[0]
         elif early < int(notes[:, 0].min()):
             first, length = clip_span(notes, beats * ppq, self.domino_start())
             start = early if self.domino_start() == "note" else early // (beats * ppq) * beats * ppq
