@@ -25,6 +25,10 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
   smooth_sor     nested.smooth_values' loop (Nested fill, Blend)
+  gap_ticks      tempo_file.keep_gaps' work on one Keep timing part (export, Conductor pane checks)
+  gap_plan       tempo_file.file_plan's gaps of one Keep timing part as file tempo runs (with tempo._fit_blocks,
+                 _flat_pair, _near_pair, _nearest1 as _fit_blocks_n ...); stops at a gap needing _fit_exact / the
+                 full pair search, which Python does
   limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
                  never waits for Python); the same maths within float rounding
   midi_walk      midi_scan.walk (Load MIDI: a track's events read + checked), the very same function compiled
@@ -1683,6 +1687,382 @@ def smooth_sor(flat, red, black, wide, om, times):
 
 
 @njit(cache=CACHE, nogil=True)
+def _domino_safe1(x):
+    """tempo.domino_safe of one value (the same float32 rounding)."""
+    bpm = np.float64(np.float32(6e7 / max(x, 1)))
+    return np.int64(np.trunc(6e7 / bpm)) == x
+
+
+@njit(cache=CACHE, nogil=True)
+def _safe1n(u):
+    """tempo._safe1: Domino-safe and in 1..0xFFFFFF."""
+    return 1 <= u <= 0xFFFFFF and _domino_safe1(u)
+
+
+@njit(cache=CACHE, nogil=True)
+def _nearest1n(x, reach):
+    """tempo._nearest1 (x already in 1..0xFFFFFF): u, then u + s k, u - s k for k = 1, 2... (s = x's side)."""
+    u = np.int64(np.rint(x))
+    if _safe1n(u):
+        return u
+    s = 1 if x >= u else -1
+    for k in range(1, reach):
+        if _safe1n(u + s * k):
+            return u + s * k
+        if _safe1n(u - s * k):
+            return u - s * k
+    return u
+
+
+@njit(cache=CACHE, nogil=True)
+def _pw_sum(v, lo, n):
+    """NumPy's float64 sum of v[lo:lo + n] (pairwise, blocks of 8: the very same additions as np.sum, which starts
+    from 0.0 + this; dev/scratch/pairwise_check.py). Halves added up with a list of its own, not by calling itself
+    (Numba's saved copy of a function calling itself crashed on loading)."""
+    if n <= 128:
+        return _pw_leaf(v, lo, n)
+    los = np.empty(64, np.int64)
+    ns = np.empty(64, np.int64)
+    stage = np.zeros(64, np.int64)
+    sums = np.empty(64, np.float64)
+    top, ns_top = 0, 0
+    los[0], ns[0] = lo, n
+    while top >= 0:
+        a, m = los[top], ns[top]
+        if m <= 128:
+            sums[ns_top] = _pw_leaf(v, a, m)
+            ns_top += 1
+            top -= 1
+            continue
+        half = m // 2
+        half -= half % 8
+        if stage[top] == 0:
+            stage[top] = 1
+            top += 1
+            los[top], ns[top], stage[top] = a, half, 0
+        elif stage[top] == 1:
+            stage[top] = 2
+            top += 1
+            los[top], ns[top], stage[top] = a + half, m - half, 0
+        else:
+            ns_top -= 1
+            sums[ns_top - 1] = sums[ns_top - 1] + sums[ns_top]
+            top -= 1
+    return sums[0]
+
+
+@njit(cache=CACHE, nogil=True)
+def _pw_leaf(v, lo, n):
+    """_pw_sum of 128 values or fewer."""
+    if n < 8:
+        res = 0.0
+        for i in range(n):
+            res += v[lo + i]
+        return res
+    r0, r1, r2, r3 = v[lo], v[lo + 1], v[lo + 2], v[lo + 3]
+    r4, r5, r6, r7 = v[lo + 4], v[lo + 5], v[lo + 6], v[lo + 7]
+    i = 8
+    while i < n - (n % 8):
+        r0 += v[lo + i]
+        r1 += v[lo + i + 1]
+        r2 += v[lo + i + 2]
+        r3 += v[lo + i + 3]
+        r4 += v[lo + i + 4]
+        r5 += v[lo + i + 5]
+        r6 += v[lo + i + 6]
+        r7 += v[lo + i + 7]
+        i += 8
+    res = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7))
+    while i < n:
+        res += v[lo + i]
+        i += 1
+    return res
+
+
+@njit(cache=CACHE, nogil=True)
+def _side_next(u, way):
+    """tempo._near_pair's side(): the first safe value from u going way within 64 steps, or -1 (LookupError)."""
+    for _ in range(64):
+        if _safe1n(u):
+            return u
+        u += way
+    return -1
+
+
+@njit(cache=CACHE, nogil=True)
+def _near_pair_n(n, target, reach):
+    """tempo._near_pair: (0, a, ticks of a, b) found / (1, ...) None / (2, ...) _FAR. Every pair tried once; the
+    nearest by (nearness, down place, up place), the same pick in any order."""
+    q = target / n
+    downs = np.empty(reach, np.int64)
+    ups = np.empty(reach, np.int64)
+    v = _side_next(np.int64(math.floor(q)), -1)
+    if v < 0:
+        return 2, 0, 0, 0
+    downs[0], nd, cur_d = v, 1, v - 1
+    v = _side_next(np.int64(math.ceil(q)), 1)
+    if v < 0:
+        return 2, 0, 0, 0
+    ups[0], nu, cur_u = v, 1, v + 1
+    found, b_far, b_ia, b_ib, b_a, b_b, b_k = False, 0.0, 0, 0, 0, 0, 0
+    ed, eu = 0, 0  # (pairs ia < ed, ib < eu tried already)
+    while True:
+        for ia in range(nd):
+            for ib in range(nu):
+                if ia < ed and ib < eu:
+                    continue
+                av, bv = downs[ia], ups[ib]
+                if bv == av:
+                    continue
+                gap = bv - av
+                num = n * bv - target
+                k = num // gap
+                if num % gap != 0 or not 0 <= k <= n:
+                    continue
+                far = (q - np.float64(av)) + (np.float64(bv) - q)
+                if (not found or far < b_far or (far == b_far and (ia < b_ia or (ia == b_ia and ib < b_ib)))):
+                    found, b_far, b_ia, b_ib, b_a, b_b, b_k = True, far, ia, ib, av, bv, k
+        ed, eu = nd, nu
+        limit = np.inf if not found else b_far + 1e-6
+        grow_d = nd < reach and ups[0] - (downs[nd - 1] - 1) <= limit
+        grow_u = nu < reach and (ups[nu - 1] + 1) - downs[0] <= limit
+        if not grow_d and not grow_u:
+            break
+        if grow_d:
+            v = _side_next(cur_d, -1)
+            if v < 0:
+                return 2, 0, 0, 0
+            downs[nd], cur_d = v, v - 1
+            nd += 1
+        if grow_u:
+            v = _side_next(cur_u, 1)
+            if v < 0:
+                return 2, 0, 0, 0
+            ups[nu], cur_u = v, v + 1
+            nu += 1
+    if not found:
+        return (1 if nd >= reach and nu >= reach else 2), 0, 0, 0
+    return 0, b_a, b_k, b_b
+
+
+@njit(cache=CACHE, nogil=True)
+def _flat_pair_n(n, target, reach):
+    """tempo._flat_pair_search up to its full search: (0, a, ticks of a, b) / (1, ...) None / (2, ...) the full
+    search is needed (left to Python)."""
+    a0 = target // n
+    r = target - a0 * n
+    if r == 0 and _safe1n(a0):
+        return 0, a0, n, a0
+    if r != 0 and _safe1n(a0) and _safe1n(a0 + 1):
+        return 0, a0, n * (a0 + 1) - target, a0 + 1
+    return _near_pair_n(n, target, reach)
+
+
+@njit(cache=CACHE, nogil=True)
+def _put_pair(out, n, a, ka, b):
+    for i in range(n):
+        out[i] = a if i < ka else b
+
+
+@njit(cache=CACHE, nogil=True)
+def _fit_blocks_n(drawn, a, n0, n1, kj, target, every, safe_reach, pair_reach, out):
+    """tempo._fit_blocks on file_plan's curved gap (ideal = the drawn tempo at kj even steps): 0 = out[:kj] made, 1 =
+    None, 2 = a step that needs _fit_exact / the full pair search (left to Python)."""
+    n = kj
+    top = 0xFFFFFF
+    if n <= every and every > 1:
+        if n <= target <= n * top:
+            code, pa, pk, pb = _flat_pair_n(n, target, pair_reach)
+            if code == 0:
+                _put_pair(out, n, pa, pk, pb)
+                return 0
+        return 2
+    if every <= 1:
+        return 2
+    ideal = np.empty(n, np.float64)
+    lo, hi = np.inf, -np.inf
+    for i in range(n):
+        x = np.float64(drawn[n0 - a + (i * (n1 - n0)) // kj])
+        ideal[i] = x
+        lo, hi = min(lo, x), max(hi, x)
+    if hi - lo < 1:
+        return 2
+    if not n <= target <= n * top:
+        return 1
+    nb = (n + every - 1) // every
+    want = np.empty(nb, np.float64)
+    for b in range(nb):
+        ln = min(every, n - b * every)
+        want[b] = ideal[b * every] * ln
+    scale = target / (0.0 + _pw_sum(want, 0, nb))
+    for b in range(nb):
+        want[b] = want[b] * scale
+    done, owed = 0, 0.0
+    for b in range(nb - 1):
+        x = (want[b] + owed) / every
+        u = _nearest1n(min(max(x, 1.0), np.float64(top)), safe_reach)
+        for i in range(b * every, b * every + every):
+            out[i] = u
+        owed += want[b] - u * every
+        done += u * every
+    last = n - (nb - 1) * every
+    rest = target - done
+    if not last <= rest <= last * top:
+        return 2
+    code, pa, pk, pb = _flat_pair_n(last, rest, pair_reach)
+    if code != 0:
+        return 2
+    _put_pair(out[(nb - 1) * every:], last, pa, pk, pb)
+    return 0
+
+
+@njit(cache=CACHE, nogil=True)
+def _least1(t, most):
+    """tempo_file._least of one gap."""
+    least = max(1, -(-t // most))
+    if least == 1 and t >= 2 and not _domino_safe1(min(max(t, 1), most)):
+        least = 2
+    return least
+
+
+@njit(cache=CACHE, nogil=True)
+def gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair_reach, lens, vals, pos, got):
+    """tempo_file.file_plan's loop over one Keep timing part's gaps from gap j: each gap's file tempo as runs into
+    lens / vals from pos (each gap its own runs), k[j] changed where its pair needs a tick more or less, as that
+    loop does. last = the value the gap before ended on (-1 = none). Stops at a gap only Python can do (its
+    _fit_exact / the full pair search): (that gap, last, pos); all done = (number of gaps, last, pos)."""
+    g = len(k)
+    while j < g:
+        n0, n1 = n[j], n[j + 1]
+        kj, tj = k[j], total[j]
+        curved = kj > every and pref[n1 - a - 1] - pref[n0 - a] > 0
+        least = _least1(tj, most)
+        kk = max(kj, 1)
+        qa = tj // kk
+        exact = tj % kk == 0
+        qb = qa if exact else qa + 1
+        qka = kj if exact else kj * qb - tj
+        if (not curved and kj >= 1 and qa >= 1 and qb <= most and least <= kj and kj <= tj
+                and _domino_safe1(min(max(qa, 1), most)) and _domino_safe1(min(max(qb, 1), most))):
+            if 0 < qka < kj and last != -1 and qa != last and qb == last:
+                lens[pos], vals[pos] = kj - qka, qb
+                lens[pos + 1], vals[pos + 1] = qka, qa
+                pos += 2
+                last = qa
+            else:
+                if qka > 0:
+                    lens[pos], vals[pos] = qka, qa
+                    pos += 1
+                if kj - qka > 0:
+                    lens[pos], vals[pos] = kj - qka, qb
+                    pos += 1
+                last = qb if qka < kj else qa
+            j += 1
+            continue
+        have = False
+        if curved:
+            code = _fit_blocks_n(drawn, a, n0, n1, kj, tj, every, safe_reach, pair_reach, got)
+            if code == 2:
+                return j, last, pos
+            have = code == 0
+        if not have:
+            for step in range(17):  # (kj, then kj + 1, kj - 1, kj + 2, kj - 2 ... kj - 8)
+                c = kj if step == 0 else kj + ((step + 1) // 2) * (1 if step % 2 else -1)
+                if least <= c <= tj:
+                    code, pa, pk, pb = _flat_pair_n(c, tj, pair_reach)
+                    if code != 0:
+                        return j, last, pos
+                    _put_pair(got, c, pa, pk, pb)
+                    kj = c
+                    k[j] = c
+                    have = True
+                    break
+            if not have:  # (nothing near: the nearest values, not Domino-safe)
+                q = tj // kj
+                extra = tj - q * kj
+                for i in range(kj):
+                    got[i] = q + 1 if i < extra else q
+            if last != -1 and got[0] != last and got[kj - 1] == last:  # (pairs only: a curve's steps never)
+                got[:kj] = got[:kj][::-1].copy()
+        start = 0
+        for i in range(1, kj + 1):
+            if i == kj or got[i] != got[i - 1]:
+                lens[pos], vals[pos] = i - start, got[start]
+                pos += 1
+                start = i
+        last = got[kj - 1]
+        j += 1
+    return j, last, pos
+
+
+@njit(cache=CACHE, nogil=True)
+def gap_ticks(a, e, ts, bs, drawn, was, u, most):
+    """tempo_file.keep_gaps' work on one Keep timing part without loose ticks: the anchors n (a, e, the note ticks
+    of ts inside, the bar lines of bs inside), each gap's time (d x u, or was's running total when it has one:
+    len(was) > 0), its file ticks k (rounded on a running total, clipped like _least) and the anchors where two
+    notes are under a tick apart. The same sums in the same order as the NumPy code."""
+    i0 = np.searchsorted(ts, a)
+    i1 = np.searchsorted(ts, e, side="right")
+    b0 = np.searchsorted(bs, a, side="right")
+    b1 = np.searchsorted(bs, e)
+    # (a, then the note ticks and bar lines strictly inside merged (both sorted already), then e; repeats once)
+    n = np.empty(2 + (i1 - i0) + max(0, b1 - b0), np.int64)
+    n[0] = a
+    c = 1
+    i, j = i0, b0
+    while i < i1 or j < b1:
+        if j >= b1 or (i < i1 and ts[i] <= bs[j]):
+            x = ts[i]
+            i += 1
+        else:
+            x = bs[j]
+            j += 1
+        if a < x < e and x != n[c - 1]:
+            n[c] = x
+            c += 1
+    n[c] = e
+    c += 1
+    n = n[:c]
+    note = np.zeros(c, np.bool_)  # (an anchor that is a note tick: ts[i0:i1] holds them all, sorted)
+    j = i0
+    for i in range(c):
+        while j < i1 and ts[j] < n[i]:
+            j += 1
+        note[i] = j < i1 and ts[j] == n[i]
+    sums = np.empty(e - a + 1, np.float64)
+    s = 0.0
+    sums[0] = 0.0
+    for i in range(e - a):
+        s += np.float64(drawn[i])
+        sums[i + 1] = s
+    g = c - 1
+    total = np.empty(g, np.int64)
+    k = np.empty(g, np.int64)
+    dense = np.empty(g, np.int64)
+    nd = 0
+    run, before = 0.0, 0.0
+    own = len(was) > 0
+    for i in range(g):
+        x0, x1 = n[i] - a, n[i + 1] - a
+        d = n[i + 1] - n[i]
+        tot = was[x1] - was[x0] if own else d * u
+        exact = tot / ((sums[x1] - sums[x0]) / d)
+        if note[i] and note[i + 1] and exact < 1:
+            dense[nd] = n[i]
+            nd += 1
+        run += exact
+        r = np.rint(run)
+        kk = np.int64(r - before)
+        before = r
+        least = max(1, -(-tot // most))
+        if least == 1 and tot >= 2 and not _domino_safe1(min(max(tot, 1), most)):
+            least = 2
+        total[i] = tot
+        k[i] = min(max(kk, least), tot)
+    return n, total, k, dense[:nd]
+
+
+@njit(cache=CACHE, nogil=True)
 def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0, x1, y1, eps):
     """faces.Faces.area_at for every spot (x, y): the same halving over its slab's lines, and the same recount of
     every line of the slab for a spot right by one (worked out as _x does, so the very same numbers)."""
@@ -1935,6 +2315,12 @@ def warm():
     hz_order(np.arange(300, dtype=np.int64))
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
     smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
+    t3 = np.array([0, 1, 3], np.int64)
+    gap_ticks(0, 3, t3, t3[:0], np.full(3, 500000, np.int64), t3[:0], 500000, 0xFFFFFF)
+    gap_ticks(0, 3, t3, t3, np.full(3, 500000, np.int64), np.arange(4, dtype=np.int64) * 500000, 0, 0xFFFFFF)
+    gap_plan(0, -1, 0, t3, np.array([500000, 1000000], np.int64), np.array([1, 2], np.int64),
+             np.full(3, 500000, np.int64), np.zeros(3, np.int64), 24, 0xFFFFFF, 8192, 48, np.zeros(16, np.int64),
+             np.zeros(16, np.int64), 0, np.zeros(16, np.int64))
     u8 = np.zeros(1, np.uint8)
     mu = np.zeros(1, np.uint16)  # (LoadedPlayer.muted: each track's channels muted, a bit each)
     midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))

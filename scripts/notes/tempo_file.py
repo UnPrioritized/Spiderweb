@@ -19,8 +19,9 @@ import bisect
 
 import numpy as np
 
+from files import speed
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
-from notes.tempo import (EVERY, _fit_blocks, _fit_exact, _flat_pair, _put_all, _put_many, _runs, base_us, beat_tick, domino_safe,
+from notes.tempo import (EVERY, PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _put_all, _put_many, _runs, base_us, beat_tick, domino_safe,
                          typed_bpms,
                          file_segments, has_tempo, keep_heard, layout, tempo_text)
 
@@ -192,6 +193,11 @@ class _RunBuf:
             self.lens.append(length)
             self.vals.append(value)
             self.count += 1
+
+    def add_runs(self, lens, vals):
+        """Runs made already (gap_plan's), in order, as one piece."""
+        self.chunks.append((np.full(len(lens), self.count, np.int64), lens, vals))
+        self.count += 1
 
     def add_array(self, got):
         """One gap's per-tick values as runs (each gap's runs its own, also where the gap before ends on the same
@@ -379,19 +385,31 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     # jumps x 300k notes froze for seconds, PLAN #12 hunt; the same answers)
     bs =np.sort(bars) if fit_bars else None
     ls = np.sort(loose)
+    fast = speed.loops()  # (compiled: gap_ticks does a part's work below in one go, the same numbers)
+    if fast is not None:
+        ts_c = np.ascontiguousarray(ts, np.int64)
+        bs_c = np.ascontiguousarray(bs, np.int64) if fit_bars else np.zeros(0, np.int64)
+        none = np.zeros(0, np.int64)
     for (a, e, u), mine, part in zip(keeps, own, files):
-        near = ts[np.searchsorted(ts, a, "left"):np.searchsorted(ts, e, "right")]  # (a <= tick <= e)
-        inside = near[(near > a) & (near < e)]
-        marks = [np.array([a, e], np.int64), inside]
-        if fit_bars:
-            marks.append(bs[np.searchsorted(bs, a, "right"):np.searchsorted(bs, e, "left")])
         drawn = _per_tick(segs, a, e, starts)
-        sums =np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
         was = None if part is None else np.concatenate([[0], np.cumsum(_per_tick(part, a, e))])
         if mine:  # (its own heard tempo line: that, also over a loaded MIDI's own tempo, even one steady value:
             # a flat line, e.g. Keep the visual's, was left to the file's tempo, hunt 2026-10-24)
             was = None if isinstance(u, int) else np.concatenate([[0], np.cumsum(u)])
         lo = ls[np.searchsorted(ls, a, "right"):np.searchsorted(ls, e, "left")]
+        if fast is not None and not len(lo):
+            n, total, k, close_at = fast.gap_ticks(a, e, ts_c, bs_c, drawn, none if was is None else was,
+                                                   int(u) if was is None else 0, MAX_US)
+            dense += (close_at / ppq).tolist()
+            gaps.append([n, total, k, drawn])
+            times.append(was if was is not None else int(u))
+            continue
+        near = ts[np.searchsorted(ts, a, "left"):np.searchsorted(ts, e, "right")]  # (a <= tick <= e)
+        inside = near[(near > a) & (near < e)]
+        marks = [np.array([a, e], np.int64), inside]
+        if fit_bars:
+            marks.append(bs[np.searchsorted(bs, a, "right"):np.searchsorted(bs, e, "left")])
+        sums =np.concatenate([[0], np.cumsum(drawn, dtype=np.float64)])
         while True:
             n = sorted_union(marks + [lo])
             d = np.diff(n)
@@ -531,32 +549,39 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     seg_starts = [s[0] for s in segs]
     for (a, e, u), (n, total, k, drawn), heard_t in zip(keeps, gaps, times):
         file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, a, seg_starts)]
-        last = None
-        changes = np.flatnonzero(drawn[1:] != drawn[:-1]) + 1 + a  # (ticks where the drawn tempo changes)
-        curved = (k > every) & (np.searchsorted(changes, n[:-1], "right") < np.searchsorted(changes, n[1:], "left"))
-        quick, qa, qb, qka = _quick_pairs(k, total)
-        quick &= ~curved
-        fewest = _least(total)
-        buf = _RunBuf(2 * len(k))
-        for j, (fast, kj, tj, aj, bj, kaj) in enumerate(zip(quick.tolist(), k.tolist(), total.tolist(),
-                                                              qa.tolist(), qb.tolist(), qka.tolist())):
-            if fast:  # (the two values round the average: as runs, never one number per tick)
+        buf = _RunBuf()
+        pre = []
+
+        def slow(j, last, a=a, n=n, total=total, k=k, drawn=drawn, buf=buf, pre=pre):
+            """Gap j's file tempo into buf the NumPy way (no compiled loops, or a gap gap_plan leaves to Python:
+            _fit_exact / the full pair search); last = the value the gap before ended on (None = none) -> its."""
+            if not pre:  # (the part's gaps at once, the first time one is asked; k is only ever changed at gaps
+                # already done)
+                changes = np.flatnonzero(drawn[1:] != drawn[:-1]) + 1 + a  # (ticks where the drawn tempo changes)
+                curved = (k > every) & (np.searchsorted(changes, n[:-1], "right") <
+                                        np.searchsorted(changes, n[1:], "left"))
+                quick, qa, qb, qka = _quick_pairs(k, total)
+                quick &= ~curved
+                pre += [quick.tolist(), qa.tolist(), qb.tolist(), qka.tolist(), curved.tolist(),
+                        _least(total).tolist()]
+            quick, qa, qb, qka, curved, fewest = pre
+            kj, tj = int(k[j]), int(total[j])
+            if quick[j]:  # (the two values round the average: as runs, never one number per tick)
+                aj, bj, kaj = qa[j], qb[j], qka[j]
                 if 0 < kaj < kj and last is not None and aj != last and bj == last:
                     buf.add(kj - kaj, bj)  # (the run goes on from the gap before: one change fewer)
                     buf.add(kaj, aj)
-                    last = aj
-                else:
-                    buf.add(kaj, aj)
-                    buf.add(kj - kaj, bj)
-                    last = bj if kaj < kj else aj
-                continue
+                    return aj
+                buf.add(kaj, aj)
+                buf.add(kj - kaj, bj)
+                return bj if kaj < kj else aj
             n0, n1 = int(n[j]), int(n[j + 1])
             got = None
             if curved[j]:  # (a long gap over a curve: steps every "every" ticks, as drawn)
                 ideal = drawn[n0 - a + (np.arange(kj) * (n1 - n0)) // kj].astype(np.float64)
                 got = _fit_blocks(ideal, tj, every)
             if got is None:  # (no Domino-safe values for that many ticks: a tick more or less, rare)
-                least = int(fewest[j])
+                least = fewest[j]
                 for kk in [kj] + [kj + s * w for s in range(1, 9) for w in (1, -1)]:
                     if least <= kk <= tj:
                         got = pairs.get(kk, tj)
@@ -569,7 +594,28 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
                 if last is not None and got[0] != last and got[-1] == last:
                     got = got[::-1]  # (the run goes on from the gap before: one change fewer)
             buf.add_array(got)
-            last = int(got[-1])
+            return int(got[-1])
+
+        loops = speed.loops()
+        if loops is None:
+            last = None
+            for j in range(len(k)):
+                last = slow(j, last)
+        else:  # (compiled: gap_plan does the gaps, the same numbers; one it can't = slow(), then on from there)
+            pref = np.concatenate([[0], np.cumsum(drawn[1:] != drawn[:-1], dtype=np.int64)])
+            room = 3 * len(k) + 4 + (int((k // every).sum()) if every > 1 else 0)  # (runs a gap can make, at most)
+            lens_out, vals_out = np.empty(room, np.int64), np.empty(room, np.int64)
+            got_out = np.empty(int(k.max()) + 9, np.int64)
+            j, last = 0, -1
+            while True:
+                j, last, pos = loops.gap_plan(j, last, a, n, total, k, drawn, pref, int(every), MAX_US, SAFE_REACH,
+                                              PAIR_REACH, lens_out, vals_out, 0, got_out)
+                if pos:
+                    buf.add_runs(lens_out[:pos].copy(), vals_out[:pos].copy())
+                if j >= len(k):
+                    break
+                last = slow(j, None if last == -1 else last)
+                j += 1
         fa = a + offset
         lens, vals = buf.runs()
         starts = fa + np.concatenate([[0], np.cumsum(lens)])
