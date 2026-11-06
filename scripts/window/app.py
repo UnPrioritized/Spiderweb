@@ -598,6 +598,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # Settings → Note colours "Show hidden note starts / ends" (off by default, user 2026-10-31): Spiderweb's own
         # notes shaded where a note under them starts / ends (roll_draw.hidden_shade; loaded MIDI always has it)
         self.hidden_shade = tk.BooleanVar(self, value=False)
+        # Settings → General "Space past the keys" (keyboard heights past each end, 0 = off) and "Space before the
+        # start" (bars before beat 0, 0 = off): the main piano roll may scroll there (user 2026-11-06; roll limits)
+        self.space_keys = tk.IntVar(self, value=0)
+        self.space_bars = tk.IntVar(self, value=0)
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
         # when it opens (a change = opened again at the next Play: fresh_builtin)
         self.kestrel_opts = dict(KESTREL_DEFAULTS)

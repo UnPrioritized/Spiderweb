@@ -302,6 +302,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
             say(tr("updates.checking")), updates.check(report=say))).pack(side="left")
         self.build_tips(f)
+        self.build_space(f)
         self.build_file_link(f)
         f = page("look", tr("settings.look_tab"))
         f.head(tr("settings.look_tab"))
@@ -375,6 +376,29 @@ class SettingsWindow(tk.Toplevel):
             note.config(text=tr("help.done_every_tip_shows_again_the"))
         ttk.Button(row, text=tr("help.show_all_tips_again"), takefocus=False, command=again).pack(side="left")
         note.pack(side="left", padx=(6, 0))
+
+    def build_space(self, f):
+        """"Space past the keys" / "Space before the start" (user 2026-11-06): how far the main piano roll may scroll
+        (and shapes go) past the lowest / highest key and before beat 0. No notes are made there. Read by place."""
+        from files.settings import SPACE_BARS, SPACE_KEYS
+        app = self.app
+        f.head(tr("settings.head_space"))
+        self.space_boxes = []
+        for var, steps, row, tip, word in ((app.space_keys, SPACE_KEYS, "settings.space_keys",
+                                            "settings.space_keys_tip", "settings.space_keys_n"),
+                                           (app.space_bars, SPACE_BARS, "settings.space_bars",
+                                            "settings.space_bars_tip", "settings.space_bars_n")):
+            names = [tr("settings.space_off") if n == 0 else lang.trn(word, n, n=n) for n in steps]
+            box = f.row(tr(row), ttk.Combobox(f.page, values=names, state="readonly", width=16), tip=tr(tip))
+            box.current(steps.index(var.get()) if var.get() in steps else 0)
+
+            def picked(e, box=box, var=var, steps=steps):
+                var.set(steps[box.current()])
+                box.selection_clear()
+                app.roll.space_changed()
+                app.schedule_autosave()
+            box.bind("<<ComboboxSelected>>", picked)
+            self.space_boxes.append(box)
 
     def build_file_link(self, f):
         """"Open .spwb files with Spiderweb" (14, user 2026-10-29): Windows told that double-clicking a .spwb opens

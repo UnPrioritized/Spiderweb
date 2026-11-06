@@ -57,7 +57,7 @@ from files.errors import write_log
 from files.midi_copy import Added, Retime
 from files.midi_read import M_CUT, M_RMID, Cancelled, FileChanged, MidiError
 from files.safefile import write_bytes, write_text
-from files.settings import save_app_settings, with_app_settings
+from files.settings import SPACE_BARS, SPACE_KEYS, save_app_settings, with_app_settings
 from files.snap import clean_snap
 from files.unzip import allowance
 from files.update_check import version_tuple
@@ -662,6 +662,7 @@ class ProjectFiles:
                               "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
                               "loud_on_top": self.stack_order.get() == "loud",
                               "hidden_shade": self.hidden_shade.get(),
+                              "space_keys": self.space_keys.get(), "space_bars": self.space_bars.get(),
                               "live": (getattr(getattr(self, "stir_window", None), "drawing", None)
                                        or {"live": self.live.get()})["live"],  # (a Stir area being drawn turned
                               # Live shape off for a while: the user's own tick is saved, hunt 11-04 4)
@@ -880,6 +881,9 @@ class ProjectFiles:
             self.stack_order.set(stack if stack in STACK_MODES else "loud" if win.get("loud_on_top") is True
                                  else STACK_MODES[0])
             self.hidden_shade.set(win.get("hidden_shade") is True)
+            for key, steps in (("space_keys", SPACE_KEYS), ("space_bars", SPACE_BARS)):
+                v = win.get(key)
+                getattr(self, key).set(v if v in steps and not isinstance(v, bool) else 0)
             self.sync_builtin()
         kept(sound)
 

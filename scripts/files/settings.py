@@ -163,7 +163,11 @@ APP_KEYS = {
     "loud_on_top": ("look", "louder_notes_on_top", bool),  # (old tick: read when stacked_notes isn't there yet)
     "stacked_notes": ("look", "stacked_notes", str),  # (roll_draw.STACK_MODES)
     "hidden_shade": ("look", "hidden_note_shade", bool),
+    "space_keys": ("view", "space_past_the_keys", int),  # (keyboard heights; SPACE_KEYS)
+    "space_bars": ("view", "space_before_the_start_bars", int),  # (SPACE_BARS)
 }
+SPACE_KEYS = (0, 1, 2, 3, 4)  # Settings → General "Space past the keys": keyboard heights past each end
+SPACE_BARS = (0, 1, 2, 4, 8, 16)  # ... "Space before the start": bars before beat 0 (user 2026-11-06)
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)
 # the ones the autosave keeps inside its "hz_preview" settings (1.5.1 sweep: all app-wide): window key -> key there
 IN_HZ = {"soundfont": "font", "more_soundfonts": "more_fonts", "hz_on": "on", "hz_voices": "voices", "hz_nofx": "nofx", "hz_volume": "volume",

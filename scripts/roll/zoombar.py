@@ -11,15 +11,20 @@ TROUGH, THUMB, THUMB_HOT, GRIP = look.TROUGH, look.THUMB, look.THUMB_HOT, look.G
 
 class ZoomBar(tk.Canvas):
     """A scrollbar whose two ends can be dragged: that makes the bar longer or shorter, which zooms.
-    view() -> (start, end, total) of what's seen, or None; move(start) scrolls; zoom(start, end, which) zooms,
-    which = the end being dragged ("start" / "end": the other one stays where it is)."""
+    view() -> (start, end, total) or (start, end, total, first) of what's seen (the bar's track = first .. total,
+    first 0 if not given), or None; move(start) scrolls; zoom(start, end, which) zooms, which = the end being dragged
+    ("start" / "end": the other one stays where it is). stops() -> None, or the places a dragged end catches on
+    (STOP_PX) and then the bar may also be PUSHED on past its ends (FL's way: the view goes on, the main piano roll's
+    Space past the edges, user 2026-11-06)."""
+    STOP_PX = 6
 
-    def __init__(self, parent, scale, across, view, move, zoom):
+    def __init__(self, parent, scale, across, view, move, zoom, stops=None):
         self.thick = int(16 * scale)
         super().__init__(parent, bg=TROUGH, highlightthickness=0, width=self.thick, height=self.thick)
         self.scale, self.across, self.view, self.move, self.zoom = scale, across, view, move, zoom
+        self.stops = stops or (lambda: None)
         self.grip, self.least = 8 * scale, 28 * scale  # an end's draggable part; the bar's shortest length
-        self._drag = None  # (what, mouse, start, end, total, bar length) when the mouse went down
+        self._drag = None  # (what, mouse, start, end, total, bar length, first) when the mouse went down
         self._hot = False
         self.bind("<Configure>", lambda e: self.refresh())
         self.bind("<ButtonPress-1>", self.on_press)
@@ -40,14 +45,20 @@ class ZoomBar(tk.Canvas):
         v = self.view()
         if v is None or self.track() < 2:
             return None
-        a, b, total = v
+        a, b, total = v[:3]
+        first = v[3] if len(v) > 3 else 0.0
         if self._drag:
-            total = max(self._drag[4], b)
+            total, first = max(self._drag[4], b), min(self._drag[6], a)
         track, span = self.track(), b - a
-        length = min(track, max(self.least, track * span / total))
-        rest = total - span
-        pos = (track - length) * min(1.0, max(0.0, a / rest)) if rest > 1e-9 else 0.0
+        length = min(track, max(self.least, track * span / (total - first)))
+        rest = total - first - span
+        pos = (track - length) * min(1.0, max(0.0, (a - first) / rest)) if rest > 1e-9 else 0.0
         return pos, length, a, b, total
+
+    def first(self):
+        """Where the bar's track starts (0, or before it while the view is in the Space before the start)."""
+        v = self.view()
+        return v[3] if v is not None and len(v) > 3 else 0.0
 
     def part(self, c):
         """What's at c along the track: "before" / "after" the bar, its "start" / "end" grip, or "move"."""
@@ -109,24 +120,36 @@ class ZoomBar(tk.Canvas):
         elif what == "after":
             self.move(a + (b - a))
         else:
-            self._drag = (what, c, a, b, total, length)
+            self._drag = (what, c, a, b, total, length, self.first())
             self.refresh()
 
     def on_drag(self, e):
         if not self._drag:
             return
-        what, c0, a, b, total, length = self._drag
+        what, c0, a, b, total, length, first = self._drag
         track, d = self.track(), self.along(e) - c0
+        stops = self.stops()
         if what == "move":
-            rest = total - (b - a)
-            if track > length and rest > 0:
-                self.move(min(rest, max(0.0, a + d * rest / (track - length))))
+            rest = total - first - (b - a)
+            if track > length + 1 and rest > 1e-9:
+                to = a + d * rest / (track - length)
+                # (pushed on past an end: the view goes on, the piano roll keeps it inside its room)
+                self.move(to if stops is not None else min(first + rest, max(first, to)))
+            elif stops is not None and track > 0:  # (the bar fills the track, e.g. every key shown: dragged = the
+                self.move(a + d * (total - first) / track)  # view still goes that way, into the room; user 11-06)
             return
-        least = (b - a) * 1e-6
+        least, whole = (b - a) * 1e-6, total - first
         if what == "start":
-            self.zoom(min(b - least, max(0.0, a + d * total / track)), b, what)
+            self.zoom(min(b - least, max(first, self.caught(a + d * whole / track, stops, whole))), b, what)
         else:
-            self.zoom(a, min(total, max(a + least, b + d * total / track)), what)
+            self.zoom(a, min(total, max(a + least, self.caught(b + d * whole / track, stops, whole))), what)
+
+    def caught(self, v, stops, whole):
+        """v on a stop when it's within STOP_PX of one (a dragged end catches on the keyboard's ends / beat 0)."""
+        for s in stops or ():
+            if abs(v - s) * self.track() / whole <= self.STOP_PX * self.scale:
+                return s
+        return v
 
     def on_release(self, _):
         self._drag = None
@@ -147,7 +170,8 @@ def add_zoom_bars(box, roll, widget=None, axes=(True, False), up="keys"):
         row.grid(row=1, column=0, sticky="ew") if across else row.grid(row=0, column=1, sticky="ns")
         bar = ZoomBar(row, s, across, lambda across=across: roll.bar_view(across),
                       lambda a, across=across: roll.bar_move(across, a),
-                      lambda a, b, which, across=across: roll.bar_zoom(across, a, b, which))
+                      lambda a, b, which, across=across: roll.bar_zoom(across, a, b, which),
+                      (lambda across=across: roll.bar_stops(across)) if hasattr(roll, "bar_stops") else None)
         bars.append(bar)
         side = "right" if across else "bottom"
         for text, f, tip in (("+", 1.25, "in"), ("−", 0.8, "out")):  # (packed from the far end: "-" comes first)

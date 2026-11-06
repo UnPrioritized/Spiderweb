@@ -616,12 +616,31 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                        (min(bs), math.ceil(max(ps) - 0.5 - 1e-9) + 0.5, max(bs), math.floor(min(ps) + 0.5 + 1e-9) - 0.5))
         self.box_kept = (new, set(self.app.sels))
 
+    def room_keys(self):
+        """Keys the view may go past the lowest / highest key (Settings → General "Space past the keys": keyboard
+        heights; 0 = off, the view stays on the keys)."""
+        return getattr(getattr(self.app, "space_keys", None), "get", lambda: 0)() * self.app.keys
+
+    def room_beats(self):
+        """Beats the view may go before beat 0 ("Space before the start", counted in the first bar's beats)."""
+        bars = getattr(getattr(self.app, "space_bars", None), "get", lambda: 0)()
+        return bars * self.app.beats if bars else 0.0
+
+    def space_changed(self):
+        """A "Space past ..." setting changed: the view back inside the new room."""
+        self.clamp_view()
+        self.request_redraw()
+
     def clamp_view(self):
+        """The view kept on the keys and after beat 0, or as far past them as the Space settings allow. Zoomed out
+        past every key (and the room): pinned to the top, empty space below (on purpose, like Domino)."""
         if self.sy is None:
             return
-        rows, top = (self.winfo_height() - self.ruler_h) / self.sy, self.app.keys - 0.5
-        self.view_top = top if rows >= self.app.keys else min(top, max(rows - 0.5, self.view_top))
-        self.view_t = max(0.0, self.view_t)
+        room = self.room_keys()
+        rows, top = (self.winfo_height() - self.ruler_h) / self.sy, self.app.keys - 0.5 + room
+        low = rows - 0.5 - room  # (the view's bottom on the lowest place it may show)
+        self.view_top = top if low >= top else min(top, max(low, self.view_top))
+        self.view_t = max(-self.room_beats(), self.view_t)
 
     def fit_view(self):
         w, h = self.winfo_width(), self.winfo_height()
@@ -688,21 +707,32 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         return end / self.app.ppq + 8 * self.app.beats
 
     def bar_view(self, across):
-        """(start, end, total) of what's seen, for a scrollbar: beats across, keys counted from the top down.
-        Scrolled past the end (mouse), the total grows to where the view ends."""
+        """(start, end, total, first) of what's seen, for a scrollbar: beats across, keys counted from the top
+        down. Scrolled past the end (mouse), the total grows to where the view ends; scrolled into the Space before
+        the start / above the top key, first (0 otherwise) goes back to where the view starts. So the bar's whole
+        length = the keys (the song) while the view is on them (user 2026-11-06: a thumb end dragged to fill the bar
+        = every key row shown)."""
         if self.sx is None:
             return None
         if across:
             a, span = self.view_t, max(1, self.winfo_width() - self.kb_w) / self.sx
-            return a, a + span, max(self.end_beat(), a + span)
+            return a, a + span, max(self.end_beat(), a + span), min(0.0, a)
         a, span = self.app.keys - 0.5 - self.view_top, max(1, self.winfo_height() - self.ruler_h) / self.sy
-        return a, a + span, max(self.app.keys, a + span)
+        return a, a + span, max(self.app.keys, a + span), min(0.0, a)
+
+    def bar_stops(self, across):
+        """Where a scrollbar's end catches while dragged (the keyboard's ends / beat 0), and the bar may be pushed on
+        past its end (FL's way); None = the Space setting is off (the bar as before)."""
+        if across:
+            return [0.0] if self.room_beats() else None
+        return [0.0, float(self.app.keys)] if self.room_keys() else None
 
     def bar_move(self, across, a):
         """A scrollbar was dragged to a. (By whole pixels: the picture of the notes can then be moved along.)"""
         if across:
-            self.view_t = self.view_t + round((a - self.view_t) * self.sx) / self.sx if a > 0 else 0.0
-        elif a > 0:
+            self.view_t = (self.view_t + round((a - self.view_t) * self.sx) / self.sx if a > 0 or self.room_beats()
+                           else 0.0)
+        elif a > 0 or self.room_keys():
             self.view_top += round((self.app.keys - 0.5 - a - self.view_top) * self.sy) / self.sy
         else:
             self.view_top = self.app.keys - 0.5
