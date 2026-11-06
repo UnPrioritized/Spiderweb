@@ -2,6 +2,6 @@
 
 31-EDO: the piano roll shows 31 keys an octave (key 0 = C0). On the keyboard, white keys are the 7 plain notes, black keys sharps and flats, and the short grey keys half sharps (^) and half flats (v); their rows are white, dark and light. Zoomed in, every row is named.
 
-Audio (only while 31-EDO is ticked): playback and listening with the right mouse button play the notes in 31-EDO, every key up to 255. It works with Built-in BASSMIDI or Kestrel (GPU) as the MIDI out; with another one the tick turns orange and playback plays the usual way (keys above 127 skipped).
+Audio (only while 31-EDO is ticked): playback and listening with the right mouse button play the notes in 31-EDO, every key up to 255. It works with Built-in BASSMIDI, Kestrel (GPU) or Rendered ahead as the MIDI out; with another one the tick turns orange and playback plays the usual way (keys above 127 skipped).
 
 Only the look and the sound here change: the saved MIDI and Copy to Domino keep the same key numbers, so play it in a player set up for 31-EDO. Both ticks are saved with the project.

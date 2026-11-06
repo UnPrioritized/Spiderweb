@@ -6,7 +6,7 @@ Free to use, share and change under the MIT License.
 
 New versions, the source code and problem reports: {WEBSITE}
 
-Spiderweb can look there for a new version by itself (set how often in Settings, in the Help menu, on the General tab; Never turns it off). When there is one, a small window says what's new in it and has a button to open the download page. Nothing is downloaded by itself: to update, download the new Spiderweb.exe and put it in place of the old one. Your autosave and shapes stay.
+Spiderweb can look there for a new version by itself (set how often in Settings, in the Help menu, on the General tab; Never turns it off). When there is one, a small window says what's new in it and has a button to open the download page. When the new version comes with a safety signature, the window also has "Update and restart" (Spiderweb.exe: downloads the new one, checks it, swaps it in and starts it) or "Download and check" (running from the scripts: the checked zip goes to your Downloads folder, to unzip over your Spiderweb folder). A download that doesn't match its signature is thrown away. Nothing is downloaded until you press one of them. Your autosave and shapes stay.
 
 All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed the project: decided what it should do, tested it and asked for changes.
 

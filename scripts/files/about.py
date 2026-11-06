@@ -8,6 +8,10 @@ try:  # (written by build_version.py for a build: its commit + day, so builds wi
     from files.build_stamp import BUILD
 except ImportError:
     BUILD = ""
+try:  # (the commit's date, time, timezone and short code: What's new shows it under this version)
+    from files.build_stamp import BUILT
+except ImportError:
+    BUILT = ""
 FULL_VERSION = f"{VERSION} ({BUILD})" if BUILD else VERSION  # (Help, errors.log; saved files keep it as "build")
 WEBSITE = "https://github.com/UnPrioritized/Spiderweb"  # new versions, the source code, problem reports
 

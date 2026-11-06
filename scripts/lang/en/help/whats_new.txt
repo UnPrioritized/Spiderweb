@@ -14,6 +14,16 @@ What's new:
 
 • Draw on Domino (Experimental; Project, beside Export MIDI; Windows, Domino 1.41b to 1.44 and the 64-bit 1.45 test builds, the 256 keys mod too): Spiderweb's drawing tools right on Domino's piano roll. Spiderweb hides behind a small floating bar, what you draw follows Domino's scroll and zoom, and each finished shape goes into Domino's current track by itself (Ctrl+Z takes it out again). Take lifts the notes selected in Domino out to change them with Spiderweb's tools, Send puts them back. A shape you sent stays a shape: while its notes are unchanged in Domino (moved or copied together is fine), selecting them shows a dashed outline and Take brings back the shape itself, curve and points included; Bake makes them plain notes for good. Spiderweb keeps this in a small ".spiderweb" file next to the song. It's experimental: save your song first, and drawing in Spiderweb + Copy to Domino stays the safe way. See Help → Draw on Domino.
 
+• Glissando (R, in the drawing tools list): drag a line and every picked key between its ends gets one short note, one after another, like a run played by hand. The step picks itself from the line's slope (Grids: Halves or your own list), and keys are picked by clicking the piano keys. A run can be edited afterwards: its step, copies above and below, note length, bends (Add anchor, Make the run straight) and Timing (On the grid, Where the line crosses, or Smooth with a Smoothing amount). See Help → Glissando.
+
+• Gate extend… (right-click selected shapes): every note ends a little later, so it runs over into the notes after it. The amount is in % of each note's length or in ticks, and can change across the shape. See Help → Gate extend.
+
+• Maestro (API) in Settings → Sound → MIDI out, when Maestro is installed: plays through Maestro, a loaded MIDI on its own ports. Maestro keeps its sound settings in a profile just for Spiderweb, opened with "Open Maestro's settings for Spiderweb…". See Help → Playing and listening.
+
+• Updates from the update window: when a new version comes with a safety signature, "Update and restart" (Spiderweb.exe) or "Download and check" (running from the scripts) downloads it and checks it before anything is replaced. Nothing is downloaded until you press it. See Help → About Spiderweb.
+
+• Gate Range (per key row) has a new Ends choice, "Exact (no leftover)", the default for new Ranges: the gates add up exactly to the shape's length, with a few notes a tick longer or shorter spread along. See Help → Inside fill (custom shapes).
+
 • Remove overlaps (Project → Channels, under Multi channel): every shape keeps its own channel and colour, and no two notes sound on the same key at once. Earlier tracks win, or later ones; the losing note is split around the winner, or cut and stretched like Single channel. Single channel can now split around too ("Split around instead of stretching"). See Help → Channels.
 
 • Space past the edges (Settings → General → Piano roll, off at first): room to scroll and put shapes below the lowest key, above the highest one and before the first beat, for big drawings and Stir areas that reach past the keys. The extra space is drawn darker; no notes are made there, and a shape partly out there keeps only its notes inside. See Help → View.
@@ -34,6 +44,20 @@ What's new:
 
 • Stir's area Size can count "of the circle around" the shape's box: at 100 % a round area reaches the box's corners too, so the whole shape is inside.
 
+• Stir's Colour sets (shapes with more than one set of 15 channels): "Stay in their set" keeps the whole pattern bending together, "Move between sets" lets notes take colours from other sets.
+
+• Double right-click in the velocity pane and in the drawer switches between Select and the tool you used last, like on the piano roll.
+
+• Note colours get deeper the louder a note is, like Domino's.
+
+• Right-drag listening hears what's shown: the faint tracks behind the highlighted one too (Faint 0 % = not heard).
+
+• Notes pasted from Domino keep their tracks and their CC events in every Channels setting, Single channel too (missing tracks are added at the bottom), and Recolour works on them in every setting.
+
+• A tempo typed in the Conductor pane (like 252) now shows exactly that in Domino after Copy to Domino, not 251.99.
+
+• What's new shows when each version came out and its code mark, under its name.
+
 • Fixed: the track list's tips stayed hidden after a click until the mouse left the list.
 
 • Fixed: zoomed far in, pressing Shift while moving a shape made it jump away from the mouse.
@@ -47,6 +71,7 @@ What's new:
 • Kestrel (GPU) with "Lower it by itself": a dense part that leaves notes out now keeps the same notes every time you play it. Before, it kept a few more each play from the third play on, so the sound kept changing.
 
 ## Version 1.7.1
+^^ 2026/10/31 21:54:44 UTC+07:00 · c9040f9
 
 What's new:
 
@@ -87,6 +112,7 @@ What's new:
 • Fixed: Ctrl+A in Show multiple tracks highlighted every track but showed none of them until the next click.
 
 ## Version 1.7.0
+^^ 2026/10/30 07:25:18 UTC+07:00 · 1d6287c
 
 What's new:
 
@@ -115,6 +141,7 @@ What's new:
 • Notes by snap (side panel, for lines, polylines, freehand, curves and arcs): every note is one step long, so the line becomes a staircase on the grid, with steep slopes stacking keys in each step. Type the step in ticks or as a note length like 1/32, and pick how the line's last step ends. The Slice tool cuts through its notes like a knife. See Help → Notes by snap.
 
 • A new icon, and projects now save as .spwb files: packed, so much smaller (older .json projects still open). Drop a project or a MIDI file onto the window or onto Spiderweb's icon to open it (a shape file from someone's shape library is offered into yours), and Settings → General can make .spwb projects open with a double-click. See Help → Saving and MIDI export.
+
 • If Spiderweb closes by itself, the next start now says so, with a button to open spiderweb-crash.log. When it happened while Kestrel (GPU) was playing, it also offers to switch to Built-in BASSMIDI.
 
 • Recolour (side panel, under Colours): changes which colour each note has, while the notes stay exactly where they are. Shuffle the colours a shape already has, or split it into new ones, Scattered at random or in Clumps: bands, swirls or wedges you can turn, twist, centre and push. Shares… sets how many colours and how much of each. It works on pasted notes too, and the colours stay put when you move, copy, flip or slice the shape. See Help → Recolour.
@@ -184,6 +211,7 @@ What's new:
 • Fixes: merging no longer leaves gaps where a row is shorter; plain shapes keep their colours apart and no longer move a channel onto channel 10; quick right-clicks no longer switch tools; no more typing lag in the output name, BPM and beats per bar boxes; texts no longer get cut off with wider system fonts; the toolbar's pinned tools wrap and Help stays at the top right; Delete and Ctrl+A work after clicking a toolbar button, also in the Hz bass window.
 
 ## Version 1.6.1
+^^ 2026/10/19 01:43:06 UTC+07:00 · 1c67291
 
 What's new:
 
@@ -216,6 +244,7 @@ What's new:
 • Fixes: flipped shapes mirror their notes exactly; outline tips and squares on a key edge no longer add stray notes; sliced pieces keep their notes and area colours when moved; turned or flipped texts no longer jump when retyped; Nested, Tiles and Ripples with Colours use every colour; the toolbar's Play button is no longer cut off in narrow windows; the mouse wheel on dropdowns works right after undo; MIDI export keeps the channel number of empty tracks.
 
 ## Version 1.6.0
+^^ 2026/10/17 00:02:12 UTC+07:00 · c027f18
 
 What's new:
 
@@ -244,6 +273,7 @@ What's new:
 • Fixes: every shape can be moved down to the bottom key; the box round pasted notes stays round them; Gate sensitive merge no longer changes note colours; Ctrl+Z in the image window no longer undoes the piano roll; one damaged saved colour list, pattern or rhythm no longer loses the rest; windows fit on small screens; Spiderweb starts on Linux with older Python; error logs no longer show your folder paths.
 
 ## Version 1.5.4
+^^ 2026/10/14 08:30:01 UTC+07:00 · c605d62
 
 What's new:
 
@@ -258,6 +288,7 @@ What's new:
 • Fixes: in Hz bass chords, a note cut by another tone's hit keeps its longer gate in the next note; Hz shape keeps its line on an Hz bass with no notes yet and after undoing the first note, and dragging stays smooth with many keys.
 
 ## Version 1.5.3
+^^ 2026/10/14 02:26:04 UTC+07:00 · 1f8cc33
 
 What's new:
 
@@ -270,6 +301,7 @@ What's new:
 • Fixes: Spiderweb could close by itself while an Hz bass preview played after picking another Hz bass.
 
 ## Version 1.5.2
+^^ 2026/10/13 16:39:35 UTC+07:00 · 36ef3a2
 
 What's new:
 
@@ -284,6 +316,7 @@ What's new:
 • Fixes: Hz bass notes stay on their beats when a shape's left side is dragged or its text is retyped; text erased and typed again keeps its settings; a shape fits its notes again after its box is changed.
 
 ## Version 1.5.1
+^^ 2026/10/13 03:08:33 UTC+07:00 · 760a997
 
 Before you update:
 
@@ -328,6 +361,7 @@ What's new:
 • Many fixes.
 
 ## Version 1.5.0
+^^ 2026/10/10 12:40:13 UTC+07:00 · 7f8b16f
 
 Before you update: a lot changed inside Spiderweb, so a project or shape made in 1.4.0 can come out a little different. Keep a copy of your projects, your autosave and your shapes folder, and keep the old Spiderweb.exe for a while so you can compare. A project saved in 1.5.0 may not open fully in 1.4.0.
 
@@ -382,6 +416,7 @@ What's new:
 • Linux: Spiderweb should run on Linux too. Nobody has tested it there yet, so please report how it goes.
 
 ## Version 1.4.0
+^^ 2026/10/02 09:49:33 UTC+07:00 · f7fd766
 
 • Hz bass tool (H): spam so fast it sounds like a tone. Drag where it starts on the piano roll, then place notes in the window that opens (chords, slides). The red line there is the tone you really hear. Preview plays the Hz bass alone through a built-in synth with your soundfont.
 
@@ -424,6 +459,7 @@ What's new:
 • Join, Split and Turn into live shape left the Shapes box: they're in the right-click menu and on Ctrl+G, Ctrl+Shift+G and Ctrl+L.
 
 ## Version 1.3.0
+^^ 2026/09/30 09:17:50 UTC+07:00 · 981f417
 
 • Polygon tool (Q), next to Circle, instead of Square and Triangle: pick how many points it has and its kind in the panel (polygon, star, or crossing star). Its sides can have a shape or a pattern (right-click → Formula).
 
@@ -454,6 +490,7 @@ What's new:
 • Curves fitted from drawn paths follow long, wiggly paths with fewer anchors, and sharp corners stay sharp.
 
 ## Version 1.2.0
+^^ 2026/09/29 04:58:50 UTC+07:00 · 4684944
 
 • Inside fill: Spam ends (round, keep, drop, no slivers, stretch), Normal / Outline, Overlaps cancel out, and outlines with gaps can be filled.
 
@@ -468,9 +505,11 @@ What's new:
 • History panel, Keys 128 / 256, picking shapes by their notes, Paste from Domino can start at the bar line, more tips, and typing anywhere in Help searches.
 
 ## Version 1.1.0
+^^ 2026/09/28 03:45:58 UTC+07:00 · 0cb3eb2
 
 • Copy to Domino (Ctrl+Shift+C) and Paste from Domino (Ctrl+Shift+V).
 
 ## Version 1.0.0
+^^ 2026/09/27 23:21:42 UTC+07:00 · 09549ee
 
 • The first version.

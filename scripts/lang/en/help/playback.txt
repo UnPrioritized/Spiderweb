@@ -8,10 +8,12 @@ When the computer can't keep up, a red "Overloaded" shows at the right end of th
 
 Or tick "Slow down to keep up" there (off at first): the song then plays slower instead while the computer can't keep up (down to 10 %, the pitch the same), and goes back to its own speed once it can. An orange "Slowed to 62 %" shows while it's slower. With "Lower it by itself when overloaded" ticked too, the voice limit is lowered only once it's at the slowest, or once playing slower stops helping (very many notes ringing at once). Busy loaded MIDIs can slow down a lot.
 
-Right-drag (any tool) = listen to the notes under the mouse, like scrubbing: a second line follows the mouse, the play line stays where it is.
+Right-drag (any tool) = listen to the notes under the mouse, like scrubbing: a second line follows the mouse, the play line stays where it is. You hear what's shown: the faint tracks behind the highlighted one too (Faint 0 % = not heard), hidden tracks never.
 
 OmniMIDI (KDMAPI) shows in the MIDI out list when OmniMIDI is installed. It plays straight through OmniMIDI with your own OmniMIDI settings, skipping Windows' MIDI layers, so many notes play more smoothly.
 
 Kestrel (GPU, Experimental) in the MIDI out list makes the sound on your graphics card with the same soundfonts, so very dense MIDIs keep far more notes ringing. See Kestrel (GPU) playback.
+
+Maestro (API) shows in the MIDI out list when Maestro is installed. It plays through Maestro, with a loaded MIDI's own ports kept. Maestro keeps its own sound settings (soundfont list, synth, limiter) in a profile just for Spiderweb: Settings → Sound → "Open Maestro's settings for Spiderweb…" opens them, and the line under it says which Maestro version was found and which one Spiderweb was tested with. Piano keys and right-drag listening sound a little late on Maestro: a smaller render buffer in Maestro's settings makes that shorter.
 
 Rendered ahead in the MIDI out list makes the sound a little ahead of the play line (on the graphics card or the processor) and plays it from there, so every note rings; what isn't made yet shows a faint grey while playing. See Rendered ahead playback.

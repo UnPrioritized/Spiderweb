@@ -50,6 +50,12 @@ commit = git("rev-parse", "--short", "HEAD") or "unknown"
 if git("status", "--porcelain", "--untracked-files=no"):
     commit += "+"
 stamp = f"{commit}, {datetime.date.today().isoformat()}"
+# The commit's own time (What's new shows it under this version's heading, as the older versions' lines do)
+when = git("log", "-1", "--format=%cd", "--date=format:%Y/%m/%d %H:%M:%S %z")
+if when:
+    day, clock, zone = when.split()
+    when = f"{day} {clock} UTC{zone[0]}{zone[1:3]}:{zone[3:]} · {commit}"
 with open(os.path.join(HERE, "scripts", "files", "build_stamp.py"), "w", encoding="utf-8", newline="\n") as f:
-    f.write(f'"""Written by build_version.py for one build (deleted again after it)."""\n\nBUILD = {stamp!r}\n')
-print("Build", stamp)
+    f.write(f'"""Written by build_version.py for one build (deleted again after it)."""\n\nBUILD = {stamp!r}\n'
+            f'BUILT = {when!r}\n')
+print("Build", stamp, "|", when)

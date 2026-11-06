@@ -26,7 +26,7 @@ A shape you draw stays on Spiderweb's layer until you're done with it, so you ca
 
 Keys: while drawing, Esc, Enter, Ctrl+Z / Ctrl+Y for what you did here, Delete for selected shapes and the drawing tools' letters are Spiderweb's. Every other key (Space, Ctrl+S, the arrows...) goes on to Domino.
 
-Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With Single channel, overlapping notes on a key are fixed the way Single channel always does it, together with the notes already in that Domino track: a note of Domino's that your new note starts inside is cut where yours starts. With Multi channel, each channel goes on its own track, from the current one down, with the channels those tracks already have; when the track list runs out, Spiderweb adds new tracks at the bottom with Domino's own Add Track (channel 10 is skipped unless "Use channel 10" is ticked). Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
+Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With Single channel, overlapping notes on a key are fixed the way Single channel always does it (cut and stretched, or split around with "Split around instead of stretching"), together with the notes already in that Domino track; Domino's notes elsewhere in the track stay as they are. With Multi channel, each channel goes on its own track, from the current one down, with the channels those tracks already have; with Remove overlaps ticked, the overlaps are fixed against the notes already in those tracks too, the track order deciding which note wins; when the track list runs out, Spiderweb adds new tracks at the bottom with Domino's own Add Track (channel 10 is skipped unless "Use channel 10" is ticked). Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
 
 ## Changing Domino's notes
 
@@ -36,7 +36,7 @@ There is one selection: Domino's own. Select notes in Domino with its select box
 
 A shape you sent stays a shape for Spiderweb after it goes into Domino. Select all its notes in Domino and press Take, and it comes back as the shape itself, with its curve, points and handles, ready to change, wherever it is now. Notes you select that aren't part of a sent shape come out as plain notes, as before.
 
-• Select notes of a remembered shape in Domino and a dashed blue outline shows around the whole shape.
+• Select notes of a remembered shape in Domino and an outline (a white line with orange dashes) shows around the whole shape.
 
 • Move the shape's notes together in Domino (drag them, cut and paste them somewhere else) and Spiderweb follows. Copy the whole shape in Domino and the copy is remembered too.
 
@@ -52,6 +52,6 @@ Spiderweb keeps this in a small file next to the song with the same name plus ".
 
 • It doesn't work while a MIDI file is loaded in Spiderweb.
 
-• Nothing is changed inside Domino's memory: the notes go in through Domino's own Copy and Paste, so the clipboard holds the last notes sent.
+• Spiderweb only reads Domino's memory, it never writes into it: the notes go in through Domino's own commands (Copy, Paste, Delete, Undo, Add Track), so the clipboard holds the last notes sent.
 
 • Domino can hold only one note on the same key at the same tick, so stacked notes become one there.

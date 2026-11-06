@@ -11,7 +11,7 @@ import webbrowser
 from tkinter import font as tkfont, ttk
 
 from files.lang import size as lang_size, tr
-from files.about import BANNER, FULL_VERSION, HERE, LICENSE, VERSION, WEBSITE
+from files.about import BANNER, BUILT, FULL_VERSION, HERE, LICENSE, VERSION, WEBSITE
 from files import system
 from files.system import open_path
 from window import look
@@ -23,6 +23,19 @@ TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
 TIP_PLACE = "tip_moved"
 CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
 TOPIC_LINKS = 3  # a page with this many "## " headings or more gets a line of links to them at its top (user 2026-10-29)
+
+
+def with_build_date(page):
+    """What's new with this build's date line under its own version's heading, when the page has none there yet
+    (released versions have theirs written in; the newest gets one at its next release). From source: none."""
+    if not BUILT:
+        return page
+    head = "## Version " + VERSION.split("-")[0] + "\n"
+    at = page.find(head)
+    if at < 0 or page.startswith("^^ ", at + len(head)):
+        return page
+    at += len(head)
+    return page[:at] + "^^ " + BUILT + "\n" + page[at:]
 
 
 def gif_frames(path):
@@ -371,6 +384,7 @@ class HelpWindow(tk.Toplevel):
         self.text.tag_configure("hit", background=look.SEARCH_HIT)
         self.text.tag_configure("link", foreground=look.LINK)
         self.text.tag_configure("back_top", font=look.font(8))  # (the small link after a heading)
+        self.text.tag_configure("small", font=look.font(8), foreground=look.HINT)  # ("^^ " lines: What's new dates)
         self.text.tag_configure("hover", underline=True)
         # (a long bullet line wraps under its text, not under the •)
         self.text.tag_configure("bullet", lmargin2=tkfont.Font(font=self.text.cget("font")).measure("•  "))
@@ -489,7 +503,10 @@ class HelpWindow(tk.Toplevel):
                 self.about_banner()
             if self.add_clip(topic_id):
                 t.insert("end", "\n\n")
-            for n, part in enumerate(re.split(r"\[clip:([^\]]*)\]\n?", topic["page"])):
+            page = topic["page"]
+            if topic_id == "whats_new":
+                page = with_build_date(page)
+            for n, part in enumerate(re.split(r"\[clip:([^\]]*)\]\n?", page)):
                 if n % 2:  # (the odd parts are the clip names)
                     if self.add_clip(part):
                         t.insert("end", "\n")
@@ -503,6 +520,9 @@ class HelpWindow(tk.Toplevel):
                     t.delete(f"{i}.0", f"{i}.3")
                     t.tag_add("heading", f"{i}.0", f"{i}.end")
                     heads.append(i)
+                elif t.get(f"{i}.0", f"{i}.3") == "^^ ":  # ("^^ text" line = small grey text)
+                    t.delete(f"{i}.0", f"{i}.3")
+                    t.tag_add("small", f"{i}.0", f"{i}.end")
             self.topic_links(top, heads)
             for w in set(self.query.get().lower().split()):
                 start = "1.0"

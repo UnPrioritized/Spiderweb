@@ -6,7 +6,7 @@ The Stir window shows Turn, Twist and the Centre point at the top. Area and Flip
 
 Turn turns all the colours around the Centre point, in degrees. It can go past a whole turn (360): the knob's ring changes colour for each further turn. On the whole shape a whole turn looks like none, but inside an Area each extra turn winds the colours tighter towards the area's edge.
 
-Twist winds the colours into a swirl around the Centre point: how many times they wind round from the centre to the edge, minus for the other way. It twists most near the centre.
+Twist winds the colours into a swirl around the Centre point: how many times they wind round from the centre to the edge, minus for the other way. It twists most near the centre. Middle-click the Turn or Twist knob to put it back to 0.
 
 Centre point: where Turn and Twist go around, in % of the shape's box. With "Moving the Centre point squeezes the colours" ticked (the start), moving it also moves the middle of the colours there, so they get squeezed on one side and stretched on the other. Untick it to keep the colours where they are: the Centre point then only says where they turn and twist around. Middle puts the Centre point back in the middle (50 / 50). While the window is open the piano roll shows the Centre point as a dot with a dot inside: drag it (whole %, hold Shift for in between), right-click it to put it back in the middle.
 
