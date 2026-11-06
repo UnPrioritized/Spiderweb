@@ -233,7 +233,7 @@ class SidePages(ttk.Frame):
         self.area.pack(side="left", fill="both", expand=True)
         self.area.rowconfigure(0, weight=1)
         self.area.columnconfigure(0, weight=1)
-        self.shown, self.names = [], []
+        self.shown, self.names, self.on_show = [], [], {}
         self.list.bind("<<ListboxSelect>>", lambda e: self.list.curselection() and self.select(
             self.list.curselection()[0]))
 
@@ -256,7 +256,13 @@ class SidePages(ttk.Frame):
         self.shown[k].tkraise()
         self.list.selection_clear(0, "end")
         self.list.selection_set(k)
+        self.list.activate(k)  # (arrow keys go on from the page shown, also one opened from elsewhere: hunt 11-07)
         self.list.see(k)
+        run = self.on_show.get(str(self.shown[k]))
+        if run:
+            run()
+
+    on_show = {}  # page name -> run each time it's shown (set per window in __init__)
 
     def tab(self, which, option="text"):
         return self.names[self.index(which)]
@@ -483,6 +489,8 @@ class SettingsWindow(tk.Toplevel):
                 ShortLabel(row, text=os.path.basename(path)).pack(side="left", fill="x", expand=True)
             ttk.Frame(box, width=width, height=0).pack(anchor="w")
         fill()
+        # (an index saved while Settings is open: listed when the page is shown again, hunt 2026-11-07)
+        self.tabs.on_show[str(self.pages["loaded"])] = fill
 
     def build_copying(self, f):
         """Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (App.put_clipboard)."""

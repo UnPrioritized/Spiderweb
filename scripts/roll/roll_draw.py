@@ -656,7 +656,8 @@ class RollDrawing:
         ring = box_notes(app)
         boxed = getattr(app, "_box_notes", None) if ring is not None else None
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
-                 self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])))
+                 self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])),
+                 stack_rule(app)[0])  # (Stacked notes changed in Settings: painted again at once, hunt 2026-11-07)
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols), self.hidden_shade()))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
