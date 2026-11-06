@@ -36,8 +36,8 @@ from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
 from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
-from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, knife_hits, knife_in_two, moved_by, notes_across,
-                          rejoined, slice_in_two, split_here_ok, tooled)
+from notes.sliced import (CANT, completed, cut_in_two, keep_velocity, keep_was, knife_hits, knife_in_two, moved_by,
+                          notes_across, rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_dot, piece_velocity, sections,
                           split_at, split_custom, split_pieces)
@@ -1140,6 +1140,7 @@ class JoinSplit:
             piece_velocity(p, old, span(p), whole, lead="cut" in p)
             part_glue(p, old)
             keep_velocity(p)
+            keep_was(p, old, span(p), whole)
         if velocity:  # (like Slice, hunt: Sustain's stops put by hand kept per piece, Gate subtract's graph cut)
             carry_stops(self, [old], parts)
             carry_subtract(self, old, parts)
@@ -1753,6 +1754,7 @@ class JoinSplit:
                 piece_velocity(p, sh, span(p), whole, lead="cut" in p)
                 part_glue(p, sh)
                 keep_velocity(p)
+                keep_was(p, sh, span(p), whole)
             if i in done:
                 carry_stops(self, [sh], parts)  # (Sustain's stops put by hand: each piece keeps the ones inside it)
                 carry_subtract(self, sh, parts)  # (Gate subtract's graph across the shape: cut per piece)

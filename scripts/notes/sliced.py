@@ -1045,6 +1045,19 @@ def keep_velocity(sh):
         cut["vel"] = velocity(sh)
 
 
+def keep_was(sh, old, new_span, old_span):
+    """A new piece of old, a piece with a velocity of its own: it keeps the line old had when cut (over its own
+    time), so own_velocities still finds only the stretches drawn over and the rest keeps the pages' velocities
+    (sweep 2026-11-06: slicing such a piece again gave every note of both halves the plain line)."""
+    from notes.joined import piece_velocity
+    cut, was = sh.get("cut"), (old.get("cut") or {}).get("vel")
+    if not (cut and cut.get("own_vel") and cut.get("vel") is None and was and "vel0" in was):
+        return
+    got = {}
+    piece_velocity(got, dict(was), new_span, old_span)
+    cut["vel"] = got if "vel0" in got else dict(was)
+
+
 def pack_wholes(shapes):
     """Shapes for a project file: the pieces of one shape point to ONE copy of it (user: the file shouldn't grow
     with every piece): cut["whole"] = {"ref": n} -> (shapes, the wholes)."""
