@@ -1,6 +1,7 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
 ## Version 1.7.2
+^^ 2026/11/06 20:34:48 UTC+07:00 · 5ec9217
 
 What's new:
 
