@@ -552,8 +552,20 @@ class Companion:
                 steps = dl.add_tracks(d, need - (len(got[1]) - got[0]), app.all16())
                 if steps is None:
                     return self.not_sent(tr("companion.send_failed_tracks"))
-            if (app.overlap_rule() or {}).get("across") and got is not None:
-                return self.send_across(shapes, rows, got[0], steps)
+            if (app.overlap_rule() or {}).get("across"):
+                if got is not None:
+                    return self.send_across(shapes, rows, got[0], steps)
+                # (Domino's track list unreadable: the new notes' overlaps still removed, said; hunt 2026-11-06)
+                self.say(tr("companion.tracks_unread"), warn=True)
+                slots = np.unique(rows[:, 4])
+                _, alone = dl.merge_across({k: np.zeros((0, 4), np.int64) for k in range(len(slots))},
+                                           np.column_stack([rows[:, :4], np.searchsorted(slots, rows[:, 4])]),
+                                           app.overlap_rule())
+                rows = np.zeros((len(alone), 6), np.int64)
+                rows[:, :4], rows[:, 4] = alone[:, :4], slots[alone[:, 4]]
+                self.sending = (shapes, rows.copy(), None)
+                if not len(rows):
+                    return self.not_sent(tr("companion.no_notes"))
             self.paste_rows(shapes, rows, int(rows[:, 0].min()), None, steps)
         except Exception:
             self.failed()
@@ -584,21 +596,31 @@ class Companion:
         self.say(text, warn=True)
         self.app.after_idle(self.flush)
 
-    def paste_rows(self, shapes, rows, first, end, steps, swap=False, cc=None, since=None):
+    def paste_rows(self, shapes, rows, first, end, steps, swap=False, cc=None, since=None, guard=None):
         """rows (start, end, key, velocity, slot...) pasted at Domino's cursor put on first (or the grid place
         before it); swap: Domino's Substitute Paste over [cursor, end) (the stretch's notes and other events
         replaced). steps = Domino steps made before this send's paste (tracks added). Domino mid-action (the
-        mouse held, a menu / window open): tried again a little later (since = when the first try was)."""
+        mouse held, a menu / window open): tried again a little later (since = when the first try was). guard: the
+        track a swap without its events (Single's quick way) checks from where the cursor landed: anything there =
+        only the new notes go in, Domino's left alone (hunt 2026-11-06)."""
         app, d = self.app, self.job
         if not dl.alive(d):
             return self.not_sent(tr("companion.send_failed_domino"))
         since = since or time.monotonic()
         at = dl.put_cursor(d, first)
         if at is None and (dl.busy(d) or dl.mouse_down()) and time.monotonic() - since < 20:
-            self.bar.after(60, lambda: self.safely(self.paste_rows, shapes, rows, first, end, steps, swap, cc, since))
+            self.bar.after(60, lambda: self.safely(self.paste_rows, shapes, rows, first, end, steps, swap, cc, since,
+                                                   guard))
             return None
         if at is None:
             return self.not_sent(tr("companion.send_failed_cursor"))
+        if swap and guard is not None and self.stretch_unsafe(d, guard, at, end):
+            self.say(tr("companion.track_events"), warn=True)
+            alone = dl.merge_single(np.zeros((0, 4), np.int64), self.sending[1][:, :4], self.single_way())[2]
+            rows = np.zeros((len(alone), 6), np.int64)
+            rows[:, :4] = alone
+            first = int(alone[:, 0].min())
+            return self.paste_rows(shapes, rows, first, None, steps, since=since)
         if swap:  # (the notes from the cursor on: the grid may have put it before first)
             rows = rows[(rows[:, 0] >= at) & (rows[:, 0] < end)]
             cc = {0: [e for e in cc if at <= e[0] < end]} if cc else None
@@ -622,7 +644,7 @@ class Companion:
         notes, others = dv.track_notes(d, track), dv.track_others(d, track)
         if notes is None or others is None:
             return None
-        done = dl.merge_single(notes[:, :4].astype(np.int64), rows[:, :4])
+        done = dl.merge_single(notes[:, :4].astype(np.int64), rows[:, :4], self.single_way())
         _, changed, new = done
         if len(changed):
             moved = np.concatenate([changed[:, 0], new[:, 0]])
@@ -648,7 +670,7 @@ class Companion:
         if there is not None:
             old = np.asarray(there, np.int64)[:, :4].copy()
             old[:, 0] += start
-        merged, changed, new = done if done is not None else dl.merge_single(old, rows[:, :4])
+        merged, changed, new = done if done is not None else dl.merge_single(old, rows[:, :4], self.single_way())
         out = np.zeros((len(merged), 6), np.int64)
         out[:, :4] = merged
         if not len(changed):  # (Domino's notes stay as they are: a plain paste of the new ones)
@@ -664,7 +686,9 @@ class Companion:
         moved = np.concatenate([changed[:, 0], new[:, 0]])
         a, b = int(moved.min()), int(moved.max()) + 1
         cc = sorted(((int(t) + start, 0, 0, 0, (tag, body)) for t, _tr, tag, body in rides), key=lambda e: e[0])
-        self.paste_rows(shapes, out, a, b, 0, swap=True, cc=cc)
+        # (the quick way read no events: checked again from where the cursor lands)
+        self.paste_rows(shapes, out, a, b, 0, swap=True, cc=cc,
+                        guard=self.sending[2] if done is not None and self.sending else None)
 
     def send_across(self, shapes, rows, first, steps):
         """Multi channel + Remove overlaps (user 2026-11-06, "for consistency" with Single channel): each target
@@ -681,6 +705,9 @@ class Companion:
         there = {k: dv.track_notes(d, first + k) for k in range(len(slots))}
         others = {k: dv.track_others(d, first + k) for k in range(len(slots))}
         jobs, unread = None, any(v is None for v in list(there.values()) + list(others.values()))
+        # (the new notes cut only among themselves: what a track gets when Domino's must be left alone)
+        _, alone = dl.merge_across({k: np.zeros((0, 4), np.int64) for k in range(len(slots))}, new, rule)
+        went = alone
         if not unread:
             per, went = dl.merge_across({k: a[:, :4] for k, a in there.items()}, new, rule)
             jobs = []
@@ -691,13 +718,13 @@ class Companion:
                     if ((others[k] >= a) & (others[k] < b)).any():  # (it must ride along: not this way)
                         jobs, unread = None, True
                         break
-                    jobs.append((first + k, whole, a, b))
+                    jobs.append((first + k, whole, a, b, alone[alone[:, 4] == k, :4]))
                 elif len(added):
-                    jobs.append((first + k, added, int(added[:, 0].min()), None))
+                    jobs.append((first + k, added, int(added[:, 0].min()), None, None))
         if jobs is None:  # (Domino's notes left alone: only the new ones' overlaps removed)
             self.say(tr("companion.tracks_unread"), warn=True)
-            _, went = dl.merge_across({k: np.zeros((0, 4), np.int64) for k in range(len(slots))}, new, rule)
-            jobs = [(first + k, went[went[:, 4] == k, :4], int(went[went[:, 4] == k, 0].min()), None)
+            went = alone
+            jobs = [(first + k, went[went[:, 4] == k, :4], int(went[went[:, 4] == k, 0].min()), None, None)
                     for k in np.unique(went[:, 4]).tolist()]
         out = np.zeros((len(went), 6), np.int64)
         out[:, :4], out[:, 4] = went[:, :4], slots[went[:, 4]]
@@ -707,22 +734,31 @@ class Companion:
             self.landed.append((shapes, 0, (steps, d)))
             self.take_off()
             return self.app.after_idle(self.flush)
-        if all(b is None for _, _, _, b in jobs) and len(jobs) == len(np.unique(went[:, 4])) == len(slots):
+        if all(j[3] is None for j in jobs) and len(jobs) == len(np.unique(went[:, 4])) == len(slots):
             # (one paste, the tracks as without the tick: no track left without notes, so none moves up)
             return self.paste_rows(shapes, out, int(out[:, 0].min()), None, steps)
         self.paste_jobs(shapes, jobs, 0, steps, len(out), first)
 
     def paste_jobs(self, shapes, jobs, i, steps, n, back):
         """send_across's pastes one after another, each on its track: jobs = [(track, notes (tick, end, key,
-        velocity), first tick, end of the stretch replaced or None = a plain paste)]; then the current track back."""
+        velocity), first tick, end of the stretch replaced or None = a plain paste, the new notes alone (cut only
+        among themselves) for a replaced stretch)]; then the current track back. A stretch holding Domino's other
+        events from where the cursor landed (it can land before the first changed note: hunt 2026-11-06) = that
+        track gets only its new notes alone, Domino's left as they are (said)."""
         d = self.job
         if not dl.alive(d):
             return self.sent(shapes, False, "domino", n, steps)
         if i == len(jobs):
             dl.switch_track(d, back)
             return self.sent(shapes, True, "", n, steps)
-        track, notes, first, end = jobs[i]
+        track, notes, first, end, alone = jobs[i]
         at = dl.put_cursor(d, first) if dl.switch_track(d, track) else None
+        if at is not None and end is not None and self.stretch_unsafe(d, track, at, end):
+            self.say(tr("companion.track_events"), warn=True)
+            if not len(alone):  # (none of its new notes left: nothing goes on this track)
+                return self.paste_jobs(shapes, jobs, i + 1, steps, n, back)
+            notes, first, end = alone, int(alone[:, 0].min()), None
+            at = dl.put_cursor(d, first)
         if at is None:
             dl.switch_track(d, back)
             return self.sent(shapes, False, "cursor", n, steps)
@@ -749,13 +785,31 @@ class Companion:
         from window.app import all_notes  # (app.py imports this file's caller)
         app = self.app
         mode = app.channel_mode.get()
+        rule = app.overlap_rule() or {}
+        # (Multi + Remove overlaps: each track's own overlaps fixed the way picked; between tracks and with Domino's
+        # notes: merge_across. Hunt 2026-11-06: always cut + stretched here, not what Spiderweb showed)
+        way = {"way": rule["way"]} if mode == "auto" and rule.get("across") else None
         rows = all_notes(shapes, app.ppq, app.keys, "raw" if mode == "single" else mode, app.channel_split,
                          app.all16(), app.notes_tracks, rounds=app.rounds_apart(), order=app.in_order(),
-                         keep=app.keep_colours.get(), busy=app.cc_busy(mode, shapes))[2]
+                         keep=app.keep_colours.get(), busy=app.cc_busy(mode, shapes), overlaps=way)[2]
         rows = np.array(rows, np.int64)
         if mode == "single" and len(rows):
             rows[:, 4] = 0
         return rows
+
+    def single_way(self):
+        """Single channel's way against Domino's track: "split" with "Split around instead of stretching" (hunt
+        2026-11-06: Domino always got cut + stretch, unlike what Spiderweb showed)."""
+        return "split" if self.app.single_split.get() else "stretch"
+
+    def stretch_unsafe(self, d, track, at, end):
+        """True when Domino's track holds events other than notes (controller, bend, program...) in [at, end) or
+        can't be read: a Substitute Paste there would delete them (hunt 2026-11-06: the cursor can land before the
+        first changed note, the check looked from that note on)."""
+        if track is None:
+            return True
+        others = dv.track_others(d, track)
+        return others is None or bool(((others >= at) & (others < end)).any())
 
     def sent(self, shapes, ok, why, n, steps=1):
         self.busy, self._own = False, time.monotonic()

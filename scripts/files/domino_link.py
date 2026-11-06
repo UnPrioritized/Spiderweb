@@ -214,13 +214,14 @@ def add_tracks(d, count, use10):
     return steps if made == count else None
 
 
-def merge_single(there, new):
+def merge_single(there, new, way="stretch"):
     """Single channel against the notes already in the Domino track (user 2026-11-06): there = its notes (tick, gate,
     key, velocity, ...), new = the notes going in (tick, end, key, velocity, ...) -> (rows, changed, added), all
-    (tick, end, key, velocity): rows = every note after Spiderweb's Single channel rule (resolve_overlaps over both),
-    changed = notes of there no longer as they were (cut, or merged into a note on the same tick), added = rows not
-    in Domino as they are (what goes in when nothing there changed). Rows sorted by tick, then key."""
-    from notes.engine import resolve_overlaps
+    (tick, end, key, velocity): rows = every note after Spiderweb's Single channel rule (resolve_overlaps over both;
+    way "split": split around, the "Split around instead of stretching" tick, hunt 2026-11-06), changed = notes of
+    there no longer as they were (cut, or merged into a note on the same tick), added = rows not in Domino as they
+    are (what goes in when nothing there changed). Rows sorted by tick, then key."""
+    from notes.engine import resolve_overlaps, split_overlaps
     import numpy as np
     there = np.asarray(there, np.int64)
     there = there.reshape(0, 4) if not there.size else there
@@ -248,7 +249,7 @@ def merge_single(there, new):
         hit = np.isin(run, run[src < 0])
         near[src[hit & (src >= 0)]] = True
     part = old[near]
-    fixed = resolve_overlaps(np.concatenate([part, mine]))[:, :4]
+    fixed = (split_overlaps if way == "split" else resolve_overlaps)(np.concatenate([part, mine]))[:, :4]
 
     def view(a):
         return np.ascontiguousarray(a[:, :4]).view([("", np.int64)] * 4).ravel()

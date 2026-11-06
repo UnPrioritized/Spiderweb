@@ -2934,6 +2934,7 @@
  "companion.undo_busy": "Domino is busy (a window or menu of it open): try again in a moment",
  "companion.take_busy": "Domino stayed busy (a window or menu of it open, or the mouse held): try Take again",
  "companion.track_unread":"Couldn't read the notes already in Domino's track: overlaps were only removed among the new notes",
+ "companion.track_events":"Domino's track has other events (controllers, bends...) where its notes would change: Domino's notes there were left as they are, overlaps were only removed among the new notes",
  "companion.tracks_unread":"Couldn't use the notes already in Domino's tracks (unreadable, or other events where they'd change): overlaps were only removed among the new notes",
  "companion.take": "Take",
  "companion.take_tip": "Take the notes selected in Domino into Spiderweb, at the same spot, to change them with Spiderweb's tools (they leave Domino until you press Send).\nA shape sent from here comes back as the shape itself (its curve, its points) when all its notes are selected, wherever Domino moved it",
