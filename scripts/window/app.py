@@ -28,6 +28,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
+                          split_overlaps,
                           track_ids,
                           auto_count, PORTS, pasted_notes)
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
@@ -90,7 +91,7 @@ from window.app_playback import GROUP_DEFAULT, Playback
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
-from roll.roll_draw import GHOST_FADE, STACK_MODES, painting_order, stack_rule, track_ranks
+from roll.roll_draw import GHOST_FADE, STACK_MODES, list_order, painting_order, stack_rule, track_ranks
 from files import clipboard, errors, notes_clip, speed, system
 from files.about import ICONS, VERSION
 from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, KESTREL, MidiOut, Player
@@ -374,24 +375,40 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              # (keep colours: a cut shape's pieces move as one shape, partial sweep 11-02)
                              groups=[cut_group(sh) for sh in shapes] if keep else None,
                              overlaps=overlaps and {"way": overlaps.get("way", "stretch")})
+    way = (overlaps or {}).get("way", "stretch")
     if stash is not None:  # (App.fit_into's laying again: lay_again)
         stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
-                     all16=all16, mode=mode)
-    rendered, slots, need, laid = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode)
+                     all16=all16, mode=mode, overlaps=overlaps if across else None, way=way)
+    rendered, slots, need, laid = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode, way)
+    emptied = frozenset()
     if across and len(rendered):  # (Remove overlaps: after the laid shapes are in, so your tracks take part too)
-        held = np.flatnonzero([is_sustained(sh) or sh.get("held") is True for sh in shapes])
-        rendered = remove_across(rendered, np.isin(rendered[:, 5], held), overlaps,
-                                 lambda n: track_ranks(n[:, 4], overlaps.get("own") or ())[0])
+        rendered, emptied = cut_across(rendered, shapes, overlaps)
     voice_slots.update(laid)
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
             voice_slots[("strips", i)] = strip_spans(got[i][0], got[i][1], s)
     if stash is not None:
         stash["voice_slots"] = voice_slots
-    return wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}, need
+    return (wanted, use10 or all16, rendered, slots, {i: s for i, s in voice_slots.items() if s is not None}, need,
+            emptied)
 
 
-def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
+def cut_across(rendered, shapes, overlaps):
+    """all_notes' Remove overlaps step (engine.remove_across) -> (notes, the automatic tracks it left without notes).
+    The order: the track list's as it is BEFORE the cut (user 2026-11-06, hunt: an emptied track no longer counted for
+    your tracks' places, so yours moved down and the list no longer showed who won); those emptied tracks keep
+    counting as tracks with notes everywhere (App.cut_emptied: list, exports), so nothing moves. The loaded MIDI's
+    tracks first, in their listed order (overlaps "files")."""
+    held = np.flatnonzero([is_sustained(sh) or sh.get("held") is True for sh in shapes])
+    before = np.unique(rendered[:, 4])
+    files = overlaps.get("files") or ()
+    out = remove_across(rendered, np.isin(rendered[:, 5], held), overlaps,
+                        lambda n: track_ranks(n[:, 4], overlaps.get("own") or (), files=files)[0])
+    gone = np.setdiff1d(before, np.unique(out[:, 4]) if len(out) else before[:0])
+    return out, frozenset(int(s) for s in gone.tolist() if s < OWN0)
+
+
+def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch"):
     """all_notes' last part: the shapes laid on tracks ({number: (notes, colours)}) put on them, after the other
     shapes' rendered notes: (rendered, slot count, {number: how many colours it has}, {number: {pasted track: slot}}
     for laid pasted notes with CC events: render's voice_slots, Multi channel only, App.cc_messages)."""
@@ -422,7 +439,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
             together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
         else:
-            parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, fix))
+            parts.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, fix, way))
     if together:  # (pinned on one of Spiderweb's tracks: with the notes already there)
         together = np.concatenate(together)
         there = np.isin(rendered[:, 4], np.unique(together[together[:, 4] < OWN0, 4]))
@@ -432,7 +449,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode):
         if there.any():
             parts[0] = rendered[~there]
             together = np.concatenate([rendered[there], together])
-        parts.append(fix_rows(together))
+        parts.append(fix_rows(together, way))
     rendered = np.concatenate(parts)
     return rendered, max(slots, auto_count(rendered[:, 4])), need, laid  # (automatic tracks shapes were pinned on, B11)
 
@@ -448,25 +465,29 @@ def lay_again(made, stash, shapes, own):
     if (use10 or stash["all16"]) != made[1]:
         return None
     rendered, slots, need, laid = lay_inside(stash["rendered"], stash["slots"], inside, shapes, own, made[1],
-                                             stash["mode"])
-    return made[0], made[1], rendered, slots, {**made[4], **laid}, need
+                                             stash["mode"], stash.get("way", "stretch"))
+    emptied = frozenset()
+    if stash.get("overlaps") and len(rendered):  # (Remove overlaps after laying again too: hunt 2026-11-06, the
+        rendered, emptied = cut_across(rendered, shapes, stash["overlaps"])  # overlaps stayed till the next edit)
+    return made[0], made[1], rendered, slots, {**made[4], **laid}, need, emptied
 
 
-def in_track(notes, slots, owner, fix):
+def in_track(notes, slots, owner, fix, way="stretch"):
     """A shape's notes on tracks added by hand (slots: each note's): rendered rows (fix: its own overlaps on each
-    track fixed, resolve_overlaps)."""
+    track fixed, fix_rows)."""
     rows = np.zeros((len(notes), 6), np.int64)
     rows[:, :4], rows[:, 5], rows[:, 4] = notes, owner, slots
-    return fix_rows(rows) if fix else rows
+    return fix_rows(rows, way) if fix else rows
 
 
-def fix_rows(rows):
-    """Rendered rows with their overlaps on each track fixed (resolve_overlaps)."""
+def fix_rows(rows, way="stretch"):
+    """Rendered rows with their overlaps on each track fixed: cut + stretch (resolve_overlaps), or split around
+    (way "split": Single's tick / Multi's Remove overlaps, hunt 2026-11-06: laid shapes were always stretched)."""
     if not len(rows):
         return rows
     rows = rows.copy()
     ids, rows[:, 4] = np.unique(rows[:, 4], return_inverse=True)  # (small numbers while fixing: OWN0's are huge)
-    rows = resolve_overlaps(rows)
+    rows = split_overlaps(rows) if way == "split" else resolve_overlaps(rows)
     rows[:, 4] = ids[rows[:, 4]]
     return rows
 
@@ -743,6 +764,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.multi_cut = tk.BooleanVar(value=False)  # Multi channel: Remove overlaps between tracks too
         self.multi_later = tk.BooleanVar(value=False)  # ... later tracks win (off: earlier tracks win, the default)
         self.multi_stretch = tk.BooleanVar(value=False)  # ... cut + stretch like Single channel (off: split around)
+        self.cut_emptied = frozenset()  # automatic tracks Remove overlaps took every note of (still counted: filled_slots)
         self.channels_folded = tk.BooleanVar(value=False)  # Project's Channels rows folded to one grey line (autosave)
         self._used_tracks = (None, 0)  # (rendered, how many slots have notes: update_status)
         self.keys = 128  # the project's key range: 0 .. keys - 1 (paths.KEYS)
@@ -1838,10 +1860,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         mode = self.channel_mode.get()
         if mode == "single" and self.single_split.get():
             return {"way": "split"}
-        if mode == "auto" and self.multi_cut.get():  # (own: your tracks' places in the track list, track_ranks)
+        if mode == "auto" and self.multi_cut.get():  # (own / files: the track list's order, track_ranks; not the
+            own, files, _ = list_order(self)             # emptied tracks: those are worked out from these notes)
             return {"across": True, "way": "stretch" if self.multi_stretch.get() else "split",
-                    "later": bool(self.multi_later.get()),
-                    "own": tuple((t["id"], t["after"]) for t in self.own_tracks or ())}
+                    "later": bool(self.multi_later.get()), "own": own, "files": files}
         return None
 
     def sync_overlap_rows(self):
@@ -1887,8 +1909,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def least_tracks(self):
         """Spiderweb's tracks listed and written at least (midi_out.track_slots' least): 1 for a new project's empty
-        Track 1 (start_track), none with a loaded MIDI (its own tracks instead)."""
-        return int(self.start_track and self.loaded is None and self.midi_link is None)
+        Track 1 (start_track), none with a loaded MIDI (its own tracks instead). A track Remove overlaps emptied
+        stays (hunt 2026-11-06: tracks never come and go with the tick)."""
+        least = int(self.start_track and self.loaded is None and self.midi_link is None)
+        return max([least] + [s + 1 for s in self.cut_emptied])
+
+    def filled_slots(self, notes):
+        """The automatic tracks counted as having notes (own_tracks.counted: where your tracks go) for these notes:
+        theirs + the ones Remove overlaps emptied, so ticking it never moves your tracks (hunt 2026-11-06)."""
+        got = np.unique(np.asarray(notes)[:, 4]) if len(notes) else np.zeros(0, np.int64)
+        return np.union1d(got, np.asarray(sorted(self.cut_emptied), np.int64)) if self.cut_emptied else got
 
     def rows_apart(self):
         """True while overlapping shapes move to the next row of channels (Settings → General, Multi channel only)."""
@@ -2101,7 +2131,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if any("into_ch" in sh for sh in self.shapes):  # (a paste's lanes tidied too, so undo / redo give
                 tidy_tracks(self)                           # back the same: found by the track sweep)
             made = lay_again(made, stash, self.shapes, self.own_channels()) or make()
-        wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _ = made
+        wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _, self.cut_emptied = made
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
         started = time.perf_counter()
@@ -2288,7 +2318,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 return False
         own, changed = list(self.own_tracks), False
         by_id = {t["id"]: t for t in own}
-        slots, filled = track_slots(rendered, self.pad_tracks(), self.least_tracks()), np.unique(rendered[:, 4])
+        self.cut_emptied = made[6] if len(made) > 6 else frozenset()  # (this answer's, before least / filled)
+        slots, filled = track_slots(rendered, self.pad_tracks(), self.least_tracks()), self.filled_slots(rendered)
         # (every row: an automatic slot s as -1 - s, yours by id, a loaded MIDI's track n as FILE0 + n; group D)
         files = self.file_tracks()
         rows = [(-1 - r if r >= 0 else FILE0 + key_track(-1 - r)) if type(r) is int else r["id"]  # (a part: its track)

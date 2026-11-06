@@ -1267,7 +1267,9 @@ class ProjectFiles:
             return
         from files.midi_copy import copy_through
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
-                                 "plan": None, "step": "load.exporting", "hits": 0, "tracks": 0}
+                                 "plan": None, "step": "load.exporting", "hits": 0, "tracks": 0,
+                                 # (the track list's order: Remove overlaps' emptied tracks still counted)
+                                 "filled": self.filled_slots(self.rendered), "least": self.least_tracks()}
         use10, pad = self.picture_use10, self.pad_tracks()
         # (the extracted notes as they are NOW: an undo / Extract while it runs changes nothing in it, hunt
         # 2026-10-25; the shapes left out = nothing hidden either, the file as it was)
@@ -1334,7 +1336,8 @@ class ProjectFiles:
                         notes = notes[~inside]
                     if len(notes) or own:
                         pieces, job["tracks"], between = note_tracks(notes, use10, pad, cc, ports, own,
-                                                                     len(order))  # (removed tracks: not written)
+                                                                     len(order),  # (removed tracks: not written)
+                                                                     filled=job["filled"], least=job["least"])
                         added = Added(pieces, job["tracks"], 16 * len(notes), between)
                 job["step"] = "load.exporting"
                 os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1527,7 +1530,8 @@ class ProjectFiles:
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
                                                  self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"],
-                                                 own=self.with_file_tracks(), least=self.least_tracks())):
+                                                 own=self.with_file_tracks(), least=self.least_tracks(),
+                                                 filled=self.filled_slots(notes))):
             return
         channels = tracks  # (the tracks written, in every mode: pastes / your tracks make several in Single too)
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
@@ -1780,7 +1784,7 @@ class ProjectFiles:
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
                                pad=self.pad_tracks(), cc=cc, tempo=tempo, sigs=sigs, keys=keys,
                                own=self.with_file_tracks(), least=self.least_tracks(),
-                               typed=plan.get("typed")))):
+                               typed=plan.get("typed"), filled=self.filled_slots(notes)))):
             return
         tracks = len(track_slots(notes, self.pad_tracks(), self.least_tracks())) + len(self.with_file_tracks())
         ports = slot_ports(auto_count(notes[:, 4]), cc, self.picture_use10)  # (as dms_data decides)
@@ -2030,7 +2034,7 @@ class ProjectFiles:
         notes, long = cut_gates(notes)
         try:
             raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from, cc, span, conductor,
-                            self.with_file_tracks())
+                            self.with_file_tracks(), self.filled_slots(notes))
         except MemoryError:
             return fail(tr("big_ask.out_of_memory"))
         finally:

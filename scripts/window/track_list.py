@@ -276,7 +276,7 @@ class TrackList(tk.Canvas):
             size = int(slots.max()) + 1 if len(slots) else 0
             # (a loaded MIDI's tracks first (their numbers -1, -2, ...), the tracks added by hand among them and among
             # Spiderweb's: own_tracks.full_plan, the exports' order)
-            self._filled = np.unique(n[:, 4]) if len(n) else n[:0, 4]  # (tracks with notes: own_tracks.counted)
+            self._filled = app.filled_slots(n)  # (tracks with notes: own_tracks.counted; Remove overlaps' emptied too)
             files = app.file_rows()
             rows = [-1 - k for k in waiting] + full_plan(files, slots, own, self._filled)
             self._hand = {HAND + t["id"]: t for t in own}

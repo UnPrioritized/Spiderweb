@@ -2474,7 +2474,14 @@ def remove_across(notes, held, overlaps, ranks):
     rest = resolve_overlaps(rest) if stretch else split_overlaps(rest)
     if len(rest):
         rank = np.asarray(ranks(rest), np.int64)
-        rest = across_tracks(rest, -rank if overlaps.get("later") else rank, stretch)
+        rank = -rank if overlaps.get("later") else rank
+        # (one track's channels share a place: between them the later start wins, Single channel's rule inside one
+        # track (user 2026-11-06, hunt: the winner was left to chance and differed without the compiled loops); then
+        # the lower slot: every note its own rank, so no tie is ever left)
+        order = np.lexsort((rest[:, 4], -rest[:, 0], rank))
+        rank = np.empty(len(rest), np.int64)
+        rank[order] = np.arange(len(rest))
+        rest = across_tracks(rest, rank, stretch)
     return np.concatenate([rest, notes[held]]) if held.any() else rest
 
 

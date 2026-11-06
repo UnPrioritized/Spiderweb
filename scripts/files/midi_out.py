@@ -269,29 +269,31 @@ def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
 
 
 def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None,
-               own=(), least=0):
+               own=(), least=0, filled=None):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
     (use10: channel 10 used too, slot_track_channel; pad, least: track_slots). Nothing marks channel 10 as not drums
     (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
     the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events); with them past one round of
     channels every track starts with its port (FF 21: engine.slot_ports). tempo, sigs: tempo_track's. own: the
-    tracks added by hand (files/own_tracks.py), put among the slots' (own_tracks.plan)."""
+    tracks added by hand (files/own_tracks.py), put among the slots' (own_tracks.plan; filled: the slots counted as
+    having notes, App.filled_slots; None = the notes' own)."""
     head = tempo_track(bpm, beats, tempo, sigs, keys)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]))
+    tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]) if filled is None else filled)
     write_bytes(path, _pieces(notes, tracks, use10,
                               b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
 
 
-def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=(), files=0):
+def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=(), files=0, filled=None, least=0):
     """write_midi's note tracks alone, no header or tempo track: (pieces, how many tracks, {k: [whole MTrk chunks]}).
     A loaded MIDI's export puts pieces after the file's own tracks, and the last answer's chunks before its k-th
     track (own tracks placed among its files tracks: own_tracks "file"). ports: a set of slots whose tracks start
-    with their port (extracted notes from another port: their slots' rounds are their ports)."""
+    with their port (extracted notes from another port: their slots' rounds are their ports). filled / least:
+    write_midi's."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     head, rest = among_file(list(own), files)
-    tracks = plan(track_slots(notes, pad), rest, np.unique(notes[:, 4]))
+    tracks = plan(track_slots(notes, pad, least), rest, np.unique(notes[:, 4]) if filled is None else filled)
     before = {}
     if head:
         for t, data in zip(head, track_chunks(notes, head, use10, cc, ports)):

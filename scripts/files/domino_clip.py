@@ -157,7 +157,7 @@ def clip_span(notes, bar, start="bar"):
     return first, max(-(-(int(notes[:, 1].max()) - first) // bar) * bar, bar)
 
 
-def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, conductor=None, own=()):
+def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, conductor=None, own=(), filled=None):
     """notes: (start, end, pitch, velocity, slot, ...) rows -> the clipboard bytes. One track per slot (channel)
     that has notes, in slot order, packed together (no empty tracks; pad_from: every slot from that one on gets a
     track, empty ones too: Overlapping shapes keep their colours, rows of channels); Domino fills tracks downwards
@@ -167,7 +167,8 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
     for CC messages past the last note). cc = {slot: messages} (hz_cc.slot_events): control items on its track.
     span = (first, length) instead of clip_span's; conductor = tempo_items bytes: a Conductor track first (Domino
     keeps it only when pasted on its Conductor track; tested by the user 2026-10-21). own: the tracks added by hand
-    (files/own_tracks.py): the ones with notes put among the slots' as in the MIDI export (own_tracks.plan)."""
+    (files/own_tracks.py): the ones with notes put among the slots' as in the MIDI export (own_tracks.plan; filled:
+    its slots counted as having notes, App.filled_slots, None = the notes')."""
     cc = cc or {}
     first, length = span or clip_span(notes, bar, start)
     length = max([length] + [ev[-1][0] - first + 1 for ev in cc.values() if ev])
@@ -177,7 +178,8 @@ def clip_data(notes, ppq, bar, start="bar", pad_from=None, cc=None, span=None, c
         notes, autos, count, at = own_compact(notes, own)
         parts = own_parts(at, count)  # (a folder of yours: one Domino track per channel)
         order, cuts = track_orders(notes, count, z.pool)
-        slots = [s for t in plan(range(autos), [t for t in own if t["id"] in at], np.unique(notes[:, 4]))
+        slots = [s for t in plan(range(autos), [t for t in own if t["id"] in at],
+                                 np.unique(notes[:, 4]) if filled is None else filled)
                  for s in (parts[t["id"]] if type(t) is dict else [t])] + sorted(
                      set(range(autos, count)) - {s for t in own if t["id"] in at for s in parts[t["id"]]})
 
@@ -392,7 +394,7 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
 
 
 def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None, keys=None,
-             own=(), least=0, typed=None):
+             own=(), least=0, typed=None, filled=None):
     """notes: [start, end, pitch, velocity, slot, ...] -> a .dms file (Domino's own song file, which can hold a
     PPQ up to 65535 where a MIDI file stops at 32767). It's the clipboard's format with a Conductor track first
     (tempo + time signature), then one track per slot like the MIDI export (empty ones too unless not pad; least:
@@ -406,11 +408,12 @@ def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None,
     power)] (the Tempo pane's, tempo_file.file_plan): the Conductor track's instead of one BPM. own: the tracks
     added by hand (files/own_tracks.py), among the slots' like the MIDI export's."""
     with Packer(DMS_LEVEL) as z:
-        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys, own, least, typed)
+        return dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad, cc or {}, tempo, sigs, keys, own, least, typed,
+                        filled)
 
 
 def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=None, sigs=None, keys=None, own=(),
-             least=0, typed=None):
+             least=0, typed=None, filled=None):
     """dms_data's work: the file's data fed to the Packer z as it's made."""
     feed = z.add
 
@@ -434,7 +437,7 @@ def dms_pack(z, notes, ppq, bpm, beats, use10, drums, pad=True, cc=None, tempo=N
     track_head(0, b"Conductor", len(events), True)
     feed(events + track_tail(min(LONGEST, max([0] + [r[0] for r in (tempo or [])] + [r[0] for r in (sigs or [])]
                                               + [r[0] for r in (keys or [])]))))
-    tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]))
+    tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]) if filled is None else filled)
     was = notes[:, 4]  # (a track of yours: each part's channel)
     notes, autos, count, hand = own_compact(notes, own, max((t + 1 for t in tracks if type(t) is not dict), default=0))
     order, cuts = track_orders(notes, count, z.pool)

@@ -444,25 +444,42 @@ def stack_rule(app):
     under everything."""
     var = getattr(app, "stack_order", None)
     mode = var.get() if var is not None else STACK_MODES[0]
-    own = tuple((t["id"], t["after"]) for t in getattr(app, "own_tracks", None) or ())
-    return (mode if mode in STACK_MODES else STACK_MODES[0], own)
+    return (mode if mode in STACK_MODES else STACK_MODES[0],) + list_order(app)
 
 
-def track_ranks(slots, own):
-    """Each note's track place in the track list / export (own_tracks.plan; own = stack_rule's (id, after)) and how
-    many places there are. A track's channels share its place."""
-    from files.own_tracks import plan
+def list_order(app):
+    """(own, files, emptied): what the track list's order goes by, as track_ranks takes it (your tracks' (id,
+    after, file), the loaded MIDI's tracks as listed, the automatic tracks Remove overlaps emptied)."""
+    own = tuple((t["id"], t["after"], t.get("file")) for t in getattr(app, "own_tracks", None) or ())
+    rows = getattr(app, "file_rows", None)
+    return own, tuple(rows()) if rows else (), tuple(sorted(getattr(app, "cut_emptied", ()) or ()))
+
+
+def track_ranks(slots, own, files=(), emptied=()):
+    """Each note's track place in the track list / export and how many places there are. A track's channels share
+    its place. own = (id, after) or (id, after, file) of your tracks (stack_rule's; file = its place among a loaded
+    MIDI's tracks, None = after them); files = the loaded MIDI's track numbers as listed (App.file_rows: own_tracks.
+    full_plan's order, so shapes drawn into its tracks rank where the list shows them, hunt 2026-11-06); emptied =
+    automatic tracks counted as having notes (App.cut_emptied: Remove overlaps took theirs, nothing moves)."""
+    from files.own_tracks import FILE0, full_plan, key_track
     from notes.engine import OWN0
     slots = np.asarray(slots, np.int64)
     auto = slots < OWN0
     autos = int(slots[auto].max()) + 1 if auto.any() else 0
-    filled = np.flatnonzero(np.bincount(slots[auto], minlength=autos)) if autos else ()
+    autos = max([autos] + [int(s) + 1 for s in emptied])
+    filled = np.flatnonzero(np.bincount(slots[auto], minlength=autos)) if autos else np.zeros(0, np.int64)
+    if len(emptied):
+        filled = np.union1d(filled, np.asarray(sorted(emptied), np.int64))
     ids = np.unique((slots[~auto] - OWN0) >> 4) if not auto.all() else np.zeros(0, np.int64)
-    rows = plan(range(autos), [{"id": i, "after": a} for i, a in own], filled)
+    mine = [dict({"id": t[0], "after": t[1]}, **({"file": t[2]} if len(t) > 2 and t[2] is not None else {}))
+            for t in own]
+    rows = full_plan(list(files), range(autos), mine, filled)
     at_auto, at_own = np.zeros(autos, np.int64), {}
     for k, r in enumerate(rows):
         if isinstance(r, dict):
-            at_own[r["id"]] = k
+            at_own.setdefault(r["id"], k)
+        elif r < 0:  # (a loaded MIDI's track (or its part): shapes drawn into it have id FILE0 + its number)
+            at_own.setdefault(FILE0 + key_track(-1 - r), k)
         else:
             at_auto[r] = k
     out = np.empty(len(slots), np.int64)
@@ -486,7 +503,7 @@ def stack_keys(notes, sels, back, rule):
     if mode == "shape":
         span = int(owner.max()) + 1 if len(owner) else 1
         return group * span + owner, 2 * span
-    place, span = track_ranks(notes[:, 4], rule[1])
+    place, span = track_ranks(notes[:, 4], *rule[1:])
     if mode == "loud":  # (-1 = a mask's ghost: quietest; -2 - velocity = a faint track's note)
         v = notes[:, 3]
         v = np.where(v <= -2, -2 - v, np.clip(v, 0, 127))

@@ -20,6 +20,7 @@ from notes import between
 from notes.areas import most_colours
 from notes.engine import cached_path
 from notes.gateflip import all_flipped
+from notes.mask import is_mask, silent
 from notes.strips import has_strips
 from notes.subtract import subtracts
 from notes.extend import is_extended
@@ -816,7 +817,8 @@ class BetweenGroups:
                     label = tr("app.with_cc_list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
                           shape_label=label, counts=counts[i], uses=uses)
-                if not counts[i] and (self.overlap_rule() or {}).get("across") and len(self.notes_of(sh)):
+                if (not counts[i] and (self.overlap_rule() or {}).get("across") and not (is_mask(sh) and silent(sh))
+                        and len(self.notes_of(sh))):  # (a silent mask has none to lose: hunt 2026-11-06)
                     # (Remove overlaps took every note: said, else "0 notes" looked like a bug, user 2026-11-06)
                     text = tr("app.notes_overlapped", i=i + 1, shape_label=label)
             want.append((text, warn > many))  # (past many the note colours and channel numbers repeat)
