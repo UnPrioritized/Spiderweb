@@ -7,14 +7,23 @@ The Stir window shows Turn, Twist and the Centre point at the top. Area and Flip
 Turn turns all the colours around the Centre point, in degrees. It can go past a whole turn (360): the knob's ring changes colour for each further turn. On the whole shape a whole turn looks like none, but inside an Area each extra turn winds the colours tighter towards the area's edge.
 
 Twist winds the colours into a swirl around the Centre point: how many times they wind round from the centre to the edge, minus for the other way. It twists most near the centre. Middle-click the Turn or Twist knob to put it back to 0.
+[clip:stir-turn-twist]
+
+Rainbow stripes as drawn, with Turn 60° and with Twist 1.
 
 Centre point: where Turn and Twist go around, in % of the shape's box. With "Moving the Centre point squeezes the colours" ticked (the start), moving it also moves the middle of the colours there, so they get squeezed on one side and stretched on the other. Untick it to keep the colours where they are: the Centre point then only says where they turn and twist around. Middle puts the Centre point back in the middle (50 / 50). While the window is open the piano roll shows the Centre point as a dot with a dot inside: drag it (whole %, hold Shift for in between), right-click it to put it back in the middle.
+[clip:stir-centre]
+
+Twist 1 with the Centre point at 25 % across: on the left the colours squeeze towards it, on the right (unticked) they only twist around it.
 
 Unless "Turn and twist round as seen" is ticked, Turn works in the shape's own box, so on a long flat shape (one or a few key rows) a big turn squeezes many notes onto the few colours near the middle. Twist and small turns keep more of them.
 
 ## Area
 
 Area: "Whole shape" (the default) stirs all the colours. "Circle", "Square" or "Diamond" stirs just the colours in that area around the Centre point; outside it nothing changes. Size is the area's base size, in % of the shape's box (a diamond: from tip to tip), up to 200 % of the box, so on a long or tall shape the area stretches with the box, like Turn does. Stretch (under Size) makes it wider or taller from there. The stir fades out smoothly towards the area's edge, so there is no seam, and Twist winds from the Centre point out to the edge. While the window is open the piano roll shows the area as a dashed line. With the Select tool, press inside the area or on its line and drag to move it (with "Area moves with the Centre point" ticked, the Centre point moves along); press outside it to move the shape as usual. A small area (no box, see below) changes size when you drag its line instead (whole %, hold Shift for in between). For a swirl in one spot of a pattern, untick "Moving the Centre point squeezes the colours" too.
+[clip:stir-areas]
+
+A Circle, a Square and a Diamond, each turned 90° and twisted half a turn inside; outside them nothing changes.
 
 Below the line in the Area dropdown are the drawings in your shape library: pick one and the area takes that drawing's outline, as drawn (Size is the width of its box). The stir keeps its own copy, so changing or deleting the library drawing later changes nothing here. The colours stir from the area's middle out along each arm to the outline, so a star's arms stir right out to their tips; a part of the drawing away from the middle (a frame around a hole) stirs most halfway across it, and a hole stays as it is. A drawing with only open lines has no inside, so it can't be an area.
 
@@ -38,12 +47,18 @@ On the left a 100 % circle "of the box" covers the whole shape; on the right "of
 ## What the area changes
 
 Hard edge (with an Area): the area is cut clean at its outline, like a turntable: inside it Turn and Twist work in full right up to the edge, outside nothing moves. Unticked, they fade out smoothly so there is no seam.
+[clip:stir-hard]
+
+Turn 90° in a circle: on the left it fades out towards the edge, on the right Hard edge cuts it clean.
 
 The area limits: Turn, Twist and Squeeze are ticked at the start, so all three happen only inside the area. Untick one to let it work on the whole shape again; for example Twist inside the area while Turn turns everything.
 
 ## Flips and track order
 
 Flip colours: Sideways mirrors each key row's colours from end to start, Upside down mirrors them from top to bottom. The notes stay where they are; only their colours change. The colours flip at the shape's own outline, so a round or slanted shape flips into itself. "Flip what" picks when the flip happens. "the colours, then stir" (the start) flips before this stir's Turn and Twist, so a swirl stays at the Centre point. "the stirred pattern" mirrors this stir's finished pattern instead, like the normal Flip sideways / Flip upside down but without moving any notes: the swirl turns over with it. With an Area, "Flip in: the area" and "Mirror across: only that part", the swirl turns over inside the area alone. With several stirs, each tab has its own flips, so you can flip the colours between two stirs. With an Area, "Flip in" picks where the flips work: the whole shape, only inside the area, or only outside it.
+[clip:stir-flip-what]
+
+Sideways with a swirl: on the left "the colours, then stir" (the swirl stays at the Centre point), on the right "the stirred pattern" (the finished swirl turns over).
 
 Mirror across (with the flips only inside or outside the area): "the whole shape" (the start) mirrors across each key row's whole width and the shape's whole height, so an area off to one side shows colours from the shape's other side. "only that part" mirrors only across the notes being flipped, so the part inside the area flips in place, mirrored across the area itself (within the notes it covers, also where the area hangs past them). Outside the area, the notes on each side of it flip across themselves: on a key row, the notes before the area across the space before it, the notes after it across the space after it (upside down: below and above it).
 [clip:stir-mirror]
@@ -59,12 +74,18 @@ Reverse the track order inside the area (under Flip and reverse, with an Area): 
 ## At the edges and colour sets
 
 At the edges (beside the knobs): what happens to colours stirred past the edge of the shape. "Escape" (the default): they're gone, and the colours at the edge stretch in to fill the gaps. "Wrap around": what goes out one side comes back in on the other side of the notes, as if the colours were a repeating tile; on a round or slanted shape this follows the shape's own edge, row by row. "Cut by the outline": the stir is worked out on the box around the shape, and the outline cuts it out, like a picture seen through a stencil; on a round or slanted shape, spots that come from the empty parts of the box take the nearest note's colour, so you may see flat patches there. "Bend with the outline": each key row is stretched to fill the box first, so the swirl follows the shape (on a circle it bends along the edge) and never comes from empty space. Its "Smooth corners" box (under the dropdown) rounds the outline's corners for this stretch, so they leave no straight seam; a new stir starts at 20 %, 0 is sharp. Near a sharp tip the rows get very short, so the colours there still stretch a lot.
+[clip:stir-edges]
+
+A round shape turned around a point near its left side: Escape (top left), Wrap around (top right), Cut by the outline (bottom left) and Bend with the outline (bottom right).
 
 Colour sets (shown when a shape has more than one set of channels, 15 colours each, 16 with channel 10): "Stay in their set" (the default) keeps each note in its own set of tracks and gives it the matching colour there, so the whole pattern bends together. "Move between sets" gives each note the colour and track of the note it's stirred from, so notes can move to another set.
 
 ## Several stirs
 
 Several stirs on one shape: the tabs at the top (Stir 1, Stir 2, ...) each hold a stir of their own, with its own Centre point and settings. They work in order: each stir bends the colours the stirs before it left, so you can turn the whole pattern with Stir 1 and put a small swirl in one spot with Stir 2 (Area: Circle). "+" adds a stir after the others (it is kept once you change one of its settings), the × beside a tab takes that stir away. Many tabs scroll sideways under a thin bar (the mouse wheel over them scrolls too). The piano roll shows the dot and area of the tab you're on. Up to 20 stirs.
+[clip:stir-several]
+
+Stir 1 turns the stripes 90°; Stir 2 adds a small swirl in one spot.
 
 Reset puts the shown stir back to nothing; with only one stir that takes the stir away. An area picked after Reset starts plain (Size 50 %, no stretch, angle or slant). The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
 
