@@ -1625,6 +1625,7 @@ def _kind_notes_tracks(sh, ppq, keys):
             if src.get("glue") or src.get("fx"):  # the whole's glue / note tool pages first, on all its notes
                 raw, spots, tracks = whole_tools(src, raw, spots, tracks, ppq)
                 came = None  # (the pages' notes aren't the steps any more)
+                raw = np.column_stack([raw, raw[:, 0]])  # (each page note's start rides along through the cuts)
             raw, spots, tracks = cut_through(src, raw, spots, tracks, part, ppq, came)
             mine = in_part(spots, part)
             raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
@@ -1635,7 +1636,7 @@ def _kind_notes_tracks(sh, ppq, keys):
             return raw, tracks
         # (a velocity of its own on a piece of a shape with pages: its notes also as made with the velocities it had
         # when cut, kept where its own line didn't change: sliced.own_velocities)
-        was = finish(with_whole_velocity(sh, vel_sh), raw, spots, tracks, came)[0] \
+        was = finish(with_whole_velocity(sh, vel_sh), raw, spots, tracks, came)[0][:, :4] \
             if not same_vel and (sh.get("glue") or sh.get("fx")) else None
         # (each note's own start rides along: a note the cut went through keeps its velocity in both halves, read
         # where the note started, user 2026-11-02; pages carry their velocity column themselves)
@@ -1645,7 +1646,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw, tracks = finish(sh, raw, spots, tracks, came)
         if carry:
             vel_at, raw = raw[:, 3].copy(), raw[:, :3]
-        if raw.shape[1] == 4:  # (velocities made by the whole's pages: kept, unless the piece has its own)
+        if raw.shape[1] == 5:  # (velocities made by the whole's pages: kept, unless the piece has its own)
+            vel_at, raw = raw[:, 4].copy(), raw[:, :4]
             if same_vel:
                 return raw, tracks
             ok = was is not None and was.shape == raw.shape and (was[:, :3] == raw[:, :3]).all()
@@ -1673,7 +1675,9 @@ def _kind_notes_tracks(sh, ppq, keys):
         if cycling(sh) and len(raw):  # "Colours" on a line / funnel
             tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
     if made is not None and len(made) == len(raw):  # (a piece of a shape with pages, with a velocity of its own)
-        frac = np.clip((raw[:, 0] - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
+        # (read where each note started: a note the cut went through keeps its velocity in both halves, sweep 11-06)
+        at = vel_at if vel_at is not None and len(vel_at) == len(raw) else raw[:, 0]
+        frac = np.clip((at - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
         vel = own_velocities(vel_sh, made, frac)
     else:
         carried = vel_at is not None and len(vel_at) == len(raw)
