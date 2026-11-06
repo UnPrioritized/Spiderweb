@@ -1852,6 +1852,124 @@ def resolve_overlaps(notes):
     return a if keep.all() else a[keep]
 
 
+OVERLAP_WAYS = ("stretch", "split")  # (render's way: Single's cut + stretch / split around)
+
+
+def split_overlaps(notes, stretch=False):
+    """Single channel's "split around" way: notes on the same pitch and slot that overlap: the one starting later
+    wins (as resolve_overlaps), the earlier one is cut where it starts and what's left of it after the winner ends
+    comes back as a note of its own (resolve_overlaps stretches the winner over it instead: stretch=True gives
+    the same notes). Notes starting on the same tick become one note first, as there. Every piece is kept, however
+    short (user 2026-11-06)."""
+    if not len(notes):
+        return notes
+    notes = np.asarray(notes, np.int64)
+    group = first_seen(notes[:, 4] * 256 + notes[:, 2])
+    order = overlap_order(notes, group)  # (by group, start; the same start: the loudest last, the longest first)
+    a, g = notes[order], group[order]
+    lead = np.ones(len(a), bool)  # (the first of each group + start: the one row the same start becomes)
+    lead[1:] = (g[1:] != g[:-1]) | (a[1:, 0] != a[:-1, 0])
+    at = np.flatnonzero(lead)
+    last = np.append(at[1:], len(a)) - 1
+    one = a[last].copy()  # (the loudest of the same start, with the longest length)
+    one[:, 1] = np.maximum.reduceat(a[:, 1], at)
+    g = g[last]
+    return winners(one, g, -one[:, 0], stretch, notes)
+
+
+def across_tracks(notes, rank, stretch=False):
+    """Multi channel's Remove overlaps (user 2026-11-06): notes on the same pitch on DIFFERENT slots that overlap:
+    the slot with the lower rank wins (rank: per note, its slot's place in the track order), the other note is cut
+    where the winner starts and comes back after it ends as a note of its own (stretch: the winner is stretched over
+    that instead, like Single channel). Each slot's own overlaps must be fixed already. Every piece is kept, however
+    short."""
+    if not len(notes):
+        return notes
+    notes = np.asarray(notes, np.int64)
+    return winners(notes, notes[:, 2], np.asarray(rank, np.int64), stretch)
+
+
+def winners(notes, group, rank, stretch=False, like=None):
+    """split_overlaps / across_tracks: in each group (a key, or a slot + key), at every moment only the sounding note
+    with the lowest rank sounds (no two with one rank overlap): each note becomes the pieces of its time where it
+    wins. stretch: a piece of a note coming back after a winner is given to that winner instead (stretched over it).
+    -> the notes, grouped as resolve_overlaps' (by slot + key in the order they first show up in like (default
+    notes), by start inside each)."""
+    s, e = notes[:, 0], notes[:, 1]
+    # (only notes overlapping another in their group need the work; the rest stay as they are)
+    o = np.lexsort((s, group))
+    gs, ss, es = group[o], s[o], e[o]
+    same = np.zeros(len(o), bool)
+    same[1:] = gs[1:] == gs[:-1]
+    run = running_max(es, gs)
+    before = np.concatenate([[0], run[:-1]])
+    over = same & (ss < before) & (es > ss)
+    touch = over.copy()
+    touch[:-1] |= over[1:]  # (the note it overlaps isn't always the one just before: whole runs below)
+    run_id = np.cumsum(~(same & (ss < before)))  # (runs of notes sounding one after another without a gap)
+    busy = np.zeros(run_id[-1] + 1, bool)
+    busy[run_id[touch]] = True
+    work = np.zeros(len(notes), bool)
+    work[o] = busy[run_id] & (es > ss)
+    like = notes if like is None else like
+    if not work.any():
+        return regrouped(notes, like)
+    rest, w = notes[~work], np.flatnonzero(work)
+    wg, ws, we, wr = group[w], s[w], e[w], rank[w]
+    # every start and end in a group = the edges of the little stretches where one note wins
+    g0 = int(wg.min())
+    gk = (wg - g0).astype(np.int64)
+    t0 = int(min(ws.min(), 0))
+    span = int(max(we.max(), 0)) - t0 + 1
+    if span * (int(gk.max()) + 1) >= 1 << 62:  # (too far apart for one code: group numbers made smaller)
+        _, gk = np.unique(gk, return_inverse=True)
+        gk = gk.reshape(-1).astype(np.int64)
+    edges = np.unique(np.concatenate([gk * span + (ws - t0), gk * span + (we - t0)]))
+    i0 = np.searchsorted(edges, gk * span + (ws - t0))
+    i1 = np.searchsorted(edges, gk * span + (we - t0))
+    n = i1 - i0
+    total = int(n.sum())
+    where = np.repeat(i0 - np.cumsum(n) + n, n) + np.arange(total)  # (each stretch each note covers)
+    who = np.repeat(np.arange(len(w)), n)
+    by = np.lexsort((who, -wr[who]))  # (lowest rank last: the value written last stays)
+    best = np.full(len(edges), -1, np.int64)
+    best[where[by]] = who[by]
+    piece = np.flatnonzero(best[:-1] >= 0)
+    piece = piece[edges[piece] // span == edges[piece + 1] // span]  # (a stretch inside one group)
+    note = best[piece]
+    first = np.ones(len(piece), bool)  # (stretches of one note next to each other = one piece)
+    first[1:] = (note[1:] != note[:-1]) | (piece[1:] != piece[:-1] + 1)
+    head = np.flatnonzero(first)
+    tail = np.append(head[1:], len(piece)) - 1
+    out = notes[w[note[head]]].copy()
+    out[:, 0] = edges[piece[head]] % span + t0
+    out[:, 1] = edges[piece[tail] + 1] % span + t0
+    if stretch and len(out) > 1:  # (a note coming back after the winner: the winner stretched over it instead;
+        back = out[:, 0] > ws[note[head]]  # such a piece always follows its winner's, touching it)
+        keep = np.flatnonzero(~back)
+        ends = np.maximum.reduceat(out[:, 1], keep)
+        out = out[keep]
+        out[:, 1] = ends
+    return regrouped(np.concatenate([rest, out]), like)
+
+
+def regrouped(notes, like=None):
+    """notes ordered as resolve_overlaps gives them: by slot + key in the order they first show up in like (the
+    notes before the fix; default notes), then by start."""
+    if not len(notes):
+        return notes
+    code = notes[:, 4] * 256 + notes[:, 2]
+    if like is None:
+        g = first_seen(code)
+    else:
+        had = like[:, 4] * 256 + like[:, 2]
+        ids, at = np.unique(had, return_index=True)
+        place = np.empty(len(ids), np.int64)
+        place[np.argsort(at, kind="stable")] = np.arange(len(ids))
+        g = place[np.searchsorted(ids, code)]
+    return notes[np.lexsort((notes[:, 0], g))]
+
+
 def first_seen(ids):
     """Each id (whole numbers, not negative) as a number: 0 for the id that shows up first, 1 for the next new
     one, and so on."""
@@ -2080,7 +2198,7 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None, together
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
            held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None, busy=None,
-           together=None, note_slots=None, kept=None, groups=None):
+           together=None, note_slots=None, kept=None, groups=None, overlaps=None):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -2122,6 +2240,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     kept: per shape True if its tracks keep a slot each outside "auto" too (a Domino paste: what you copied; "single"
     then fixes overlaps per slot).
     groups: per shape None or a key: with keep, shapes with one key move as one shape (the pieces of one cut shape).
+    overlaps: how overlaps are fixed (overlap_fix; None = cut + stretch per slot, as always).
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -2322,13 +2441,33 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         part[:, :4], part[:, 4], part[:, 5] = lst, slot_of[o], o
         at += len(lst)
     if mode != "raw":
+        fix = overlap_fix(mode, overlaps)
         if held and any(held):  # (sustained shapes keep their overlaps; the others are cut where theirs start)
             mine = np.asarray(held, bool)[notes[:, 5]]
             kept = notes[mine]
-            notes = np.concatenate([cut_by(resolve_overlaps(notes[~mine]), kept), kept])
+            notes = np.concatenate([cut_by(fix(notes[~mine]), kept), kept])
         else:
-            notes = resolve_overlaps(notes)
+            notes = fix(notes)
     return notes, count
+
+
+def overlap_fix(mode, overlaps):
+    """render's overlap fixing: overlaps = None (today's way) or {"way": OVERLAP_WAYS, "across": True for Multi
+    channel's Remove overlaps, "rank": None or an array slot -> its place in the track order (default: the slot
+    number), "later": True when later tracks win}. -> a function notes -> fixed notes."""
+    o = overlaps or {}
+    stretch = o.get("way", "stretch") == "stretch"
+    if not (mode == "auto" and o.get("across")):
+        return resolve_overlaps if stretch else split_overlaps
+
+    def fix(notes):
+        notes = resolve_overlaps(notes) if stretch else split_overlaps(notes)  # (each track's own first, user)
+        if not len(notes):
+            return notes
+        table = o.get("rank")
+        rank = notes[:, 4] if table is None else np.asarray(table, np.int64)[notes[:, 4]]
+        return across_tracks(notes, -rank if o.get("later") else rank, stretch)
+    return fix
 
 
 def slot_track_channel(slot, use10=False):
