@@ -260,6 +260,59 @@ def merge_single(there, new):
     return rows, changed, added
 
 
+def merge_across(there, new, overlaps):
+    """Multi channel's Remove overlaps against the notes already in Domino's tracks (user 2026-11-06, "for
+    consistency": like merge_single, a track at a time). there = {k: the k-th target track's notes (tick, gate, key,
+    velocity, ...)}, new = the notes going in (tick, end, key, velocity, k), overlaps = App.overlap_rule's. Track k
+    = the k-th from the current one down: the earlier one in Domino's list = lower k. -> ({k: (rows, changed,
+    added)} as merge_single's, the new notes as they go in (tick, end, key, velocity, k)). Only Domino's notes in a
+    run of touching notes on one key (every track counted) that holds a new note go through the rule: Domino's own
+    overlaps elsewhere stay."""
+    from notes.engine import remove_across
+    import numpy as np
+    new = np.asarray(new, np.int64).reshape(-1, 5)
+    parts, mine = [], np.zeros((len(new), 6), np.int64)
+    mine[:, :5], mine[:, 5] = new, -1
+    for k, a in there.items():
+        a = np.asarray(a, np.int64)
+        a = a.reshape(0, 4) if not a.size else a
+        o = np.zeros((len(a), 6), np.int64)
+        if len(a):
+            o[:, 0], o[:, 1], o[:, 2], o[:, 3] = a[:, 0], a[:, 0] + a[:, 1], a[:, 2], a[:, 3]
+        o[:, 4], o[:, 5] = k, np.arange(len(a))
+        parts.append(o)
+    old = np.concatenate(parts) if parts else np.zeros((0, 6), np.int64)
+    near = np.zeros(len(old), bool)
+    if len(old) and len(mine):
+        on = np.flatnonzero(np.isin(old[:, 2], np.unique(mine[:, 2])))
+        both = np.concatenate([old[on], mine])
+        src = np.concatenate([on, np.full(len(mine), -1)])
+        shift = both[:, 2] << 34  # (keys apart: ticks stay under 2^33)
+        s, e = both[:, 0] + shift, both[:, 1] + shift
+        order = np.lexsort((s,))
+        s, e, src = s[order], e[order], src[order]
+        reach = np.maximum.accumulate(e)
+        run = np.cumsum(np.concatenate([[1], s[1:] > reach[:-1]]))
+        hit = np.isin(run, run[src < 0])
+        near[src[hit & (src >= 0)]] = True
+    part = old[near]
+    fixed = remove_across(np.concatenate([part, mine]), np.zeros(len(part) + len(mine), bool), overlaps,
+                          lambda n: n[:, 4])
+
+    def view(a):
+        return np.ascontiguousarray(a[:, :5]).view([("", np.int64)] * 5).ravel()
+    out = {}
+    for k in there:
+        p, f = part[part[:, 4] == k], fixed[fixed[:, 4] == k]
+        changed = p[~np.isin(view(p), view(f)), :4] if len(p) else p[:, :4]
+        added = f[~np.isin(view(f), view(p)), :4] if len(p) else f[:, :4]
+        rows = np.concatenate([old[~near & (old[:, 4] == k), :4], f[:, :4]])
+        rows = rows[np.lexsort((rows[:, 2], rows[:, 0]))]
+        out[k] = rows, changed, added[np.lexsort((added[:, 2], added[:, 0]))]
+    went = fixed[fixed[:, 5] < 0, :5]
+    return out, went[np.lexsort((went[:, 2], went[:, 0]))]
+
+
 def boxes(d):
     """Domino's message boxes open now (window handles)."""
     if not system.WINDOWS:
