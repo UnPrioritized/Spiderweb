@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from roll.pianoroll import PianoRoll
 from roll.roll_shared import SHIFT
 
+DOMINO_BLACK = 51 / 101  # Domino's black keys: 51 of its keyboard's 101 px (measured on the user's screen 2026-11-06)
+
 
 class OverlayRoll(PianoRoll):
     # Domino cuts a note's x down to the pixel, Spiderweb rounds: half a pixel less = the same edges as Domino's
@@ -86,7 +88,23 @@ class OverlayRoll(PianoRoll):
         pass
 
     def draw_keyboard(self, h):
-        pass
+        """Domino's own keys show through; while picking Glissando keys (kb_w = Domino's keyboard, set by
+        window/domino_companion.sync_keys) only the picked keys and the one held are lit over them, like the main
+        piano roll's."""
+        kb = self.kb_w
+        if not kb:
+            return
+        from roll.roll_shared import BLACK
+        from window import look
+        lit = self.app.gliss_picks() or ()
+        p_lo, p_hi = self.visible_pitches(h)
+        for p in range(p_lo, p_hi + 1):
+            if p != self.held_key and p not in lit:
+                continue
+            y0, y1 = self.row_y(p)
+            black = p % 12 in BLACK
+            fill = look.KEY_HELD if p == self.held_key else look.KEY_PICKED_BLACK if black else look.KEY_PICKED
+            self.create_rectangle(0, y0, kb * DOMINO_BLACK if black else kb, y1, fill=fill, outline="", tags=("frame", "kbd"))
 
     def draw_ruler(self, w):
         pass

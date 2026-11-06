@@ -272,6 +272,20 @@ class Companion:
             if d is not None and not self.busy:
                 dl.to_domino(d)
         self.overlay.set_drawing(self.drawing())
+        self.sync_keys()
+
+    def sync_keys(self):
+        """Domino's piano keys pick Glissando keys while the tool is in use or a run is selected (user 2026-11-06:
+        like Spiderweb's own keys); otherwise they're Domino's again (a click there highlights its key row). Never
+        switched mid-action (the canvas moves sideways with it)."""
+        r = self.roll
+        if r.drag or r.draft or r.follow:
+            return
+        want = self.drawing() and self.app.gliss_picks() is not None
+        kb = self.overlay.set_keys(want)
+        if kb != r.kb_w:
+            r.kb_w = kb
+            r.request_redraw()
 
     # --- keys: Spiderweb's for what's drawn here, the rest Domino's ---
     def own_key(self, e):
@@ -356,6 +370,7 @@ class Companion:
         v = self.overlay.view
         if v is not None:
             self.roll.set_domino_view(v, v.keys)  # (only redraws when something moved our view)
+            self.sync_keys()  # (a run picked / let go, Domino's scale changed)
             if self.bar.winfo_viewable():  # (hidden: placed when shown again, show_bar)
                 self.place_bar()
         d = self.overlay.domino

@@ -86,6 +86,7 @@ class DominoOverlay:
         self.view = None
         self.state = "starting"
         self.drawing = False
+        self.keys_px = 0            # how far both windows reach left over Domino's keyboard (set_keys)
         self._last = None
         self._job = None
         self._found_at = -FIND_MS
@@ -210,10 +211,26 @@ class DominoOverlay:
             self.catch.withdraw()
         self._place()
 
+    def keyboard_px(self):
+        """Domino's keyboard width in real pixels (left of the grid), or 0 when not known."""
+        d, v = self.domino, self.view
+        if d is None or v is None or d.build is None:
+            return 0
+        return round(d.build.keys_w * v.scale)
+
+    def set_keys(self, on):
+        """On = both windows reach left over Domino's keyboard too (picking Glissando keys there, user 2026-11-06);
+        the canvas then starts at the keyboard's left edge. Returns the pixels reached over."""
+        px = self.keyboard_px() if on else 0
+        if px != self.keys_px:
+            self.keys_px = px
+            self._place()
+        return px
+
     def to_canvas(self, x, y):
         """Screen pixels -> canvas pixels."""
         g = self.view.grid
-        return x - g[0], y - g[1]
+        return x - g[0] + self.keys_px, y - g[1]
 
     def _set_state(self, reason):
         if reason != self.state:
@@ -229,14 +246,19 @@ class DominoOverlay:
         self._set_state(reason)
 
     def _place(self):
-        """Both windows exactly over the grid (the catcher only while drawing)."""
+        """Both windows exactly over the grid (the catcher only while drawing); + the keyboard while keys_px."""
         if self.view is None or self._last is None:
             return
         g = self.view.grid
-        spot = f"{max(1, g[2] - g[0])}x{max(1, g[3] - g[1])}+{g[0]}+{g[1]}"
+        x0 = g[0] - self.keys_px
+        spot = f"{max(1, g[2] - x0)}x{max(1, g[3] - g[1])}+{x0}+{g[1]}"
+        # (update_idletasks at once: else the z-order SetWindowPos made Tk forget a move, the catcher stayed over
+        # Domino's keyboard after picking Glissando keys there; same as the bar's GOTCHA)
         self.win.geometry(spot)
+        self.win.update_idletasks()
         if self.drawing:
             self.catch.geometry(spot)
+            self.catch.update_idletasks()
 
     def _tick(self):
         self._job = self.root.after(TICK_MS, self._tick)
