@@ -58,4 +58,5 @@ if when:
 with open(os.path.join(HERE, "scripts", "files", "build_stamp.py"), "w", encoding="utf-8", newline="\n") as f:
     f.write(f'"""Written by build_version.py for one build (deleted again after it)."""\n\nBUILD = {stamp!r}\n'
             f'BUILT = {when!r}\n')
-print("Build", stamp, "|", when)
+# (plain letters only: a Japanese / Chinese Windows console can't print the "·" and the build stopped there)
+print("Build", stamp, "|", when.encode("ascii", "replace").decode("ascii"))
