@@ -200,7 +200,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # ---- Area (BMC tester 11-03 + the user's own idea 11-04: the stir only inside a circle / square / diamond /
         # a drawing round the Centre point; Size = its width in % of the box; Whole shape = no area)
         self._part("area")
-        self.forget_area()
+        self.forget_area(every=True)
+        self.shown_plain, self.area_kept = None, False  # (sync: when the shown stir became reset, and how)
         word = ttk.Label(form, text=tr("stir.area"))
         Tooltip(word, tr("stir.area_tip"))
         self.areas = ("whole",) + STIR_AREAS
@@ -320,12 +321,34 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
         self.deiconify()
 
-    def forget_area(self):
-        """What picking an area on a whole-shape stir brings back (hunt 11-04: the last one shown) set to a plain
-        area: Size 50, no stretch / angle / slant (at the start and on Reset)."""
-        self.reach_last = 50.0
-        self.area_last = {"round": False, "stretch": 100.0, "stretch_up": 100.0, "seen": None, "spot": None,
-                          "tilt": 0.0, "skew": 0.0}
+    # (what picking an area on a whole-shape stir brings back, hunt 11-04: the last one shown, EACH TAB ITS OWN
+    # (hunt 11-06: tab 1's slant showed up on tab 2); forgotten = a plain area: Size 50, no stretch / angle / slant)
+    PLAIN_AREA = {"round": False, "stretch": 100.0, "stretch_up": 100.0, "seen": None, "spot": None, "tilt": 0.0,
+                  "skew": 0.0}
+
+    @property
+    def reach_last(self):
+        return self.area_mem.get(self.tab, {}).get("reach", 50.0)
+
+    @reach_last.setter
+    def reach_last(self, v):
+        self.area_mem.setdefault(self.tab, {})["reach"] = v
+
+    @property
+    def area_last(self):
+        return self.area_mem.get(self.tab, {}).get("look", self.PLAIN_AREA)
+
+    @area_last.setter
+    def area_last(self, v):
+        self.area_mem.setdefault(self.tab, {})["look"] = v
+
+    def forget_area(self, every=False):
+        """The shown tab's remembered area back to a plain one (every: all tabs; at the start). Also whenever its
+        stir is shown reset, however it got there (Reset, its undo / redo, the History: hunt 11-06)."""
+        if every:
+            self.area_mem = {}
+        else:
+            self.area_mem.pop(self.tab, None)
 
     def _area_tick(self, parent, key, start, tip):
         """A tick for an area setting (only stirs with an area take it), its own undo step."""
@@ -453,6 +476,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             for key in ("hard", "round"):
                 if every(key, areas):
                     words.append(tr("stir.short_" + key))
+            # (stretch / angle / slant made on the piano roll show folded too, hunt 11-06)
+            for word, set_ in (("stretched", lambda s: s["stretch"] != 100 or s["stretch_up"] != 100),
+                               ("turned", lambda s: s["tilt"] % 360), ("slanted", lambda s: s["skew"])):
+                if areas and all(set_(s) for s in areas):
+                    words.append(tr("stir.short_" + word))
             if every("spin", sts):
                 words.append(tr("stir.short_spin"))
             texts["area"] = ", ".join(words)
@@ -661,6 +689,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.app.change_recolour(
                 lambda old, sh: with_stir(old, i, None)
                 if i < len(stir_stack((old or {}).get("stir"))) else old, tr("stir.undo_drop"))
+        # (each tab's remembered area moves down with its tab)
+        self.area_mem = {t - (t > i): m for t, m in self.area_mem.items() if t != i}
         self.tab = max(0, i - 1)
         self.sync()
 
@@ -721,6 +751,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.area_box.current(0)
         show_mixed(self.area_box, len(kinds) > 1, self.area_tip, tr("stir.area_tip"))
         self.area_box.config(state="readonly" if on else "disabled")
+        # (the shown stir BECAME reset by Reset / undo / redo / History / another shape: nothing of the old area
+        # comes back, hunt 11-06; not when Whole shape did it: an area-only stir is no stir then, but Whole shape
+        # and back keeps the look, hunt 11-04)
+        plain = bool(sts) and all(s == full_stir(None) for s in sts)
+        if plain and self.shown_plain == (self.tab, False) and not self.area_kept:
+            self.forget_area()
+        self.shown_plain, self.area_kept = (self.tab, plain), False
         sizes = {r for r in reaches if r is not None}
         if len(sizes) == 1:
             self.reach_last = next(iter(sizes))
@@ -887,6 +924,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             return st
         if self.drawing:  # (an area being drawn: the selection is the drawing, not the stirred shapes)
             return False
+        self.area_kept = key == "area" and value is None  # (Whole shape: the look stays remembered, sync)
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
                 "stretch_up": lambda st: st["reach"] is not None,
                 "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
@@ -1026,6 +1064,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             return
         self.wheel = None
         i = self.tab
+        for b in self.boxes.values():  # (half-typed numbers thrown away: else they went in after Reset, hunt 11-06)
+            if b["var"].get() != b["shown"]:
+                b["var"].set(b["shown"])
+                good(b["entry"])
         self.forget_area()  # (else picking an area after Reset brought the old slant / Size back, user 11-06)
         self.app.change_recolour(
             lambda old, sh: with_stir(old, i, lambda st: full_stir(None))
@@ -1172,7 +1214,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                                                most_reach(st, roll.area_k(made, st))), 3),
                                stretch=round(min(max(got["stretch"], LEAST_STRETCH), MOST_STRETCH), 3),
                                stretch_up=100.0,
-                               tilt=round(got["tilt"], 3), skew=round(got["skew"], 4),
+                               tilt=round(got["tilt"], 3),  # (slant kept in its limit: past it, saving lost it)
+                               skew=round(min(max(got["skew"], -MOST_SKEW), MOST_SKEW), 4),
                                **({"spot": middle} if own else {"centre": middle}))
         if not puts:  # (no stirred shape has notes: nothing would change, the strokes stay, hunt C 9)
             app.status.config(text=tr("stir.draw_no_notes"))

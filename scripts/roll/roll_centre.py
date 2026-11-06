@@ -13,7 +13,7 @@ from files.lang import tr
 from notes.engine import free_box
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, SPOT_LEAST, SPOT_MOST, LEAST_STRETCH, MOST_REACH, MOST_SKEW, MOST_STRETCH, area_corners,
                             area_dist, area_from_box, area_global, area_local, area_outlines, area_scales, centre_at,
-                            most_reach,
+                            fit_reach, most_reach,
                             centre_spot, clean_recolour, drawn_gauge, without_recolour)
 from roll.roll_shared import CTRL
 from roll.roll_gliss import clip_polyline
@@ -292,10 +292,12 @@ class CentreDots:
         got = area_from_box(st2, *pcts, self.area_k(made, st2))
         if got is None:
             return
-        put = {"round": True, "seen": st2["seen"],
-               "reach": min(got["reach"], most_reach(st2, self.area_k(made, st2))), "tilt": got["tilt"],
-               "skew": got["skew"], **{key: round(min(max(got[key], LEAST_STRETCH), MOST_STRETCH), 3)
-                                       for key in ("stretch", "stretch_up")}}
+        # (Size moved just enough for both Stretches to fit, the slant kept in its limit: on a long shape the area
+        # grew / lost its slant at the press, hunt 11-06)
+        got = fit_reach(got, most_reach(st2, self.area_k(made, st2)))
+        put = {"round": True, "seen": st2["seen"], "reach": round(got["reach"], 3), "tilt": got["tilt"],
+               "skew": round(min(max(got["skew"], -MOST_SKEW), MOST_SKEW), 4),
+               **{key: round(got[key], 3) for key in ("stretch", "stretch_up")}}
         i = self.app.stir_window.tab
         self.app.change_recolour(lambda old, sh: with_stir(old, i, lambda s: dict(s, **put)) if sh is target else old,
                                  None, False)
@@ -306,9 +308,14 @@ class CentreDots:
         its middle, Size, Stretch, Angle and slant (recolour.area_from_box): a side or corner = the Stretches (Size
         stays), Ctrl on a corner = Size (the Stretches stay; user 11-06)."""
         from window.stir_window import with_stir
-        _, made, _, kind, k, orig, start, a0, target = self.drag
+        _, made, _, kind, k, orig, start, a0, target = self.drag[:9]
         rc, notes, own, _ = made
         w = self.app.stir_window
+        if kind in ("turn", "skew") and len(self.drag) < 10:  # (turning / slanting goes as seen on screen, like
+            # a custom shape's box: Round as seen ticked at the first move, the area kept where it is; a press
+            # alone changes nothing = no undo step, hunt 11-06)
+            self.round_for_box(target, made, orig)
+            self.drag += (True,)
         if kind in ("corner", "side"):
             new = self.resize_custom(orig, k, self.event_pt(e, snap=False), bool(e.state & CTRL), side=kind == "side")
         elif kind == "turn":
@@ -333,6 +340,17 @@ class CentreDots:
         else:
             put.update({key: round(min(max(got[key], LEAST_STRETCH), MOST_STRETCH), 3)
                         for key in ("stretch", "stretch_up")})
+        if kind in ("corner", "side") and any(abs(put[key] - got[key]) > 0.01 for key in put if key != "tilt"):
+            # (a Stretch / Size stopped at its limit: the corner (side) not held stays where it was, the held one
+            # stops; the middle followed the mouse and slid the area along, hunt 11-06 4 + 5)
+            cu, cv = (((0, 0), (1, 0), (0, 1), (0, 0))[k] if kind == "side" else ((0, 0), (1, 0), (1, 1), (0, 1))[k])
+            ou, ov = 1 - cu, 1 - cv
+            p0, pu, pv = (np.asarray(p, np.float64) for p in pcts)
+            anchor = p0 + ou * (pu - p0) + ov * (pv - p0)
+            now = dict(st, **put)
+            dx, dy = area_corners(now, self.area_k(made, now))
+            j = {(0, 0): 0, (1, 0): 1, (1, 1): 2, (0, 1): 3}[(ou, ov)]
+            middle = [round(min(max(float(v), lo), hi), 3) for v in (anchor[0] - 100 * dx[j], anchor[1] - 100 * dy[j])]
         i = w.tab
 
         def changed(old, sh):
@@ -349,10 +367,7 @@ class CentreDots:
         hit = self.area_box_hit(e)
         if hit:
             sh, made, kind, k, frame, _ = hit
-            self.app.push_undo(name=tr("stir.undo_area_box"))
-            if kind in ("turn", "skew"):  # (turning / slanting goes as seen on screen, like a custom shape's box:
-                # Round as seen ticked first, the area kept exactly where it is)
-                self.round_for_box(sh, made, frame)
+            self.app.push_undo(name=tr("stir.undo_area_box"))  # (turn / slant: Round as seen at the first move)
             self.drag = ("rccentre", made, "box", kind, k, frame, self.event_pt(e, snap=False),
                          self.screen_angle(frame, e.x, e.y), sh)
             return True

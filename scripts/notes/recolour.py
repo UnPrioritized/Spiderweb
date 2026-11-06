@@ -1118,6 +1118,18 @@ def area_from_box(st, p0, pu, pv, k, keep="size"):
             "tilt": math.degrees(tilt), "skew": wx / wy}
 
 
+def fit_reach(got, most):
+    """area_from_box's got (Size kept) with Size moved just enough that both Stretches fit LEAST..MOST_STRETCH,
+    within LEAST_REACH..most: the area stays the same on screen (hunt 11-06: Round as seen ticked by a turn press on
+    a long shape needed Stretch up 5.6 %, clamped to 10 = the area grew at the press). Stretches clamped only when
+    no Size can hold them (a box over 100x longer than tall)."""
+    r, sx, sy = got["reach"], got["stretch"], got["stretch_up"]
+    lo, hi = max(sx, sy) * r / MOST_STRETCH, min(sx, sy) * r / LEAST_STRETCH
+    r2 = min(max(min(max(r, lo), hi) if lo <= hi else r, LEAST_REACH), most)
+    clamp = lambda v: min(max(v * r / r2, LEAST_STRETCH), MOST_STRETCH)
+    return dict(got, reach=r2, stretch=clamp(sx), stretch_up=clamp(sy))
+
+
 def area_outline(area, n):
     """The Stir area's outline at distance 1 (area_dist), closed, as (dx, dy) arrays: n + 1 points round a circle,
     only the corners for a square / diamond (straight sides)."""
