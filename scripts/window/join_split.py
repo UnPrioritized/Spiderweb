@@ -27,7 +27,8 @@ from notes.gateflip import lifted, put_back, turn_velocities
 from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import SKIP10, is_mask, same_mask
 from notes.sustain import alike
-from notes.engine import free_box
+from notes.engine import free_box, past_edges
+from notes.paths import rows_up_to
 from notes.custom import ROUND
 from notes.recolour import KEEP, box_of, carried, colour_sets, is_recoloured, turn_again, without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
@@ -868,6 +869,10 @@ class JoinSplit:
             return
         self.plain_kept(new, held=bool(align) and not remove)  # (lined up + overlaps kept: none cut by the rule)
         gone = sorted(emptied)
+        lost = clean_extract([g for i in gone for g in extract_groups(held_extract(self.shapes[i]))])
+        if lost and new:  # (its loaded notes stay out of the file, like Fill gaps: hunt 2026-11-07)
+            heir = new[min(new)]
+            heir["extract"] = clean_extract(extract_groups(heir.get("extract")) + extract_groups(lost))
         self.roll.cancel_draft()
         self.push_undo(name=tr("lines.title_" + ("sideways" if sideways else "upside")))
         self.put_plain(new)
@@ -1038,6 +1043,8 @@ class JoinSplit:
                     rows[:, 4] = np.array([place.get(int(s), 0) for s in ids], np.int64)[back.ravel()]
                 elif own or not auto:
                     rows = multi_slots(rows, slots)
+                if whole and not own:  # (past the edges: the hidden part too, hunt 2026-11-07)
+                    rows = self.with_hidden(sh, rows)
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
                 laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
         if together:
@@ -1066,6 +1073,49 @@ class JoinSplit:
             if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
                 new[i]["extract"] = ex
         return new
+
+    def with_hidden(self, sh, rows):
+        """rows (start, end, key, velocity, slot, owner: sh's notes as they sound) + the part of sh past the edges
+        that isn't heard (Space past the edges: past the keys / before beat 0), each on the slot its colour has in
+        rows (Flip each line / Fill gaps, hunt 2026-11-07: that part was thrown away; the normal Flip keeps it). A
+        note across beat 0 gets its real start back. Inside the edges: rows as they are."""
+        out = past_edges(sh, self.keys, self.ppq)
+        if out is None or not len(rows):
+            return rows
+        lifted, up, room, later = out
+        with rows_up_to(room - 1):
+            notes, tracks = self.notes_tracks(lifted, room)
+        if tracks is None or not len(notes):
+            return rows
+        notes = np.array(notes[:, :4], np.int64, copy=True)
+        notes[:, 2] -= up
+        notes[:, :2] -= round(later * self.ppq)
+        tracks = np.asarray(tracks, np.int64)
+        heard = (notes[:, 2] >= 0) & (notes[:, 2] < self.keys) & (notes[:, 1] > 0)
+        # each colour's slot: from its heard notes (start clipped at 0, key) found among rows
+        spot = {(max(int(s), 0), int(k)): int(sl) for s, k, sl in zip(rows[:, 0], rows[:, 2], rows[:, 4])}
+        slot_of = {}
+        for (s, k), t in zip(notes[heard][:, [0, 2]].tolist(), tracks[heard].tolist()):
+            if t not in slot_of and (max(s, 0), k) in spot:
+                slot_of[t] = spot[(max(s, 0), k)]
+        first = int(rows[0, 4])
+        rows = np.array(rows, np.int64, copy=True)
+        across = heard & (notes[:, 0] < 0)  # (cut to start on beat 0 when heard: its real start back)
+        if across.any():
+            at = {(k, e): s for s, e, k in notes[across][:, :3].tolist()}
+            for j in np.flatnonzero(rows[:, 0] == 0):
+                s = at.get((int(rows[j, 2]), int(rows[j, 1])))
+                if s is not None:
+                    rows[j, 0] = s
+        hid = ~heard
+        if not hid.any():
+            return rows
+        extra = np.zeros((int(hid.sum()), rows.shape[1]), np.int64)
+        extra[:, :4] = notes[hid]
+        extra[:, 4] = [slot_of.get(t, first) for t in tracks[hid].tolist()]
+        extra[:, 5:] = rows[0, 5:]
+        both = np.concatenate([rows, extra])
+        return both[np.lexsort((both[:, 2], both[:, 0]))]
 
     def multi_rendered(self):
         """(slot numbering: channel 10 used, every note as in Multi channel): the shown notes in Multi channel, else
