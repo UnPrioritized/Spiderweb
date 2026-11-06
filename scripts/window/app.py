@@ -30,7 +30,7 @@ from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
                           split_overlaps,
                           track_ids,
-                          auto_count, PORTS, pasted_notes)
+                          auto_count, PORTS, pasted_notes, past_edges, cut_back)
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
@@ -2004,19 +2004,27 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def notes_of(self, sh):
         return self.notes_tracks(sh)[0]
 
-    def notes_tracks(self, sh):
+    def notes_tracks(self, sh, keys=None):
         """shape_notes_tracks, remembered. Each note tool page goes on top of the notes remembered without it
         (trying a page's settings doesn't make the notes before it again). Outside Multi channel a Hz bass's notes
-        are made as for one channel (Own channel per note needs Multi channel)."""
+        are made as for one channel (Own channel per note needs Multi channel). keys: made on another key range
+        (a shape past the edges, made lifted: engine.past_edges)."""
         if self.channel_mode.get() != "auto":  # (Recolour too: in one channel it would only change overlaps; a
             sh = recolour_alone(one_voice(sh))  # Domino paste keeps its tracks, so its Recolour stays)
         elif "recolour" in sh:  # (a colour set holds 16 with channel 10 used)
             sh = with_most(sh, self.all16())
-        key = (shape_key(sh), self.ppq, self.keys)
+        keys = self.keys if keys is None else keys
+        key = (shape_key(sh), self.ppq, keys)
         cache = self._notes_cache
         got = cache.pop(key, None)
         if got is None:
-            got = fx_notes(sh, self.ppq, self.keys, self.notes_tracks)
+            out = past_edges(sh, keys) if keys == self.keys else None
+            if out is not None:  # (reaching past the keys / before beat 0: made whole, then cut: engine.past_edges)
+                lifted, up, room, later = out
+                got = cut_back(*self.notes_tracks(lifted, room), up, keys, round(later * self.ppq))
+            else:
+                got = fx_notes(sh, self.ppq, keys, self.notes_tracks if keys == self.keys else
+                               (lambda s: self.notes_tracks(s, keys)))
             self._notes_worked += 1
         cache[key] = got  # (last = used most recently: trim_notes forgets the oldest first)
         self.trim_notes()

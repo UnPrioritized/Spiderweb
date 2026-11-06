@@ -637,8 +637,7 @@ class RollDrawing:
         # (keyboard and ruler kept apart: a sideways scroll draws only the ruler again)
         picks = self.app.gliss_picks()
         kb_key = (h, self.kb_w, self.ruler_h, self.sy, self.view_top, self.scale, self.app.keys, self.app.edo(),
-                  None if picks is None else frozenset(picks), self.held_key,
-                  getattr(self, "room_keys", lambda: 0)())
+                  getattr(self, "room_keys", lambda: 0)(), None if picks is None else frozenset(picks), self.held_key)
         frame_key = (w, self.kb_w, self.ruler_h, self.sx, self.view_t, self.scale, json.dumps(sigs_of(self.app.tempo)),
                      json.dumps(self.app.tempo.get("keysigs")), self.track_mark())
         if kb_key != self._kb_key:

@@ -175,16 +175,19 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """The mouse as (beat, pitch), kept inside the visible roll and the MIDI key range (dragging past the
         edge of the window stays on the edge, like the velocity pane). above: shapes being moved: past the top of
         the piano roll (the view as high as it goes) the keys go on up to the 256 keys' highest, also at 128 keys
-        (user: shapes can be put away up there, an arrow shows them: above_marks)."""
+        (user: shapes can be put away up there, an arrow shows them: above_marks). The Space past the keys / before
+        the start (Settings → General) widen this: points go there too (no notes are made there)."""
         x = min(max(e.x, self.kb_w), self.winfo_width())
         y = min(max(e.y, self.ruler_h), self.winfo_height())
-        if above and e.y < self.ruler_h and self.view_top >= self.app.keys - 0.5 - 1e-9:
+        room = self.room_keys()
+        if above and e.y < self.ruler_h and self.view_top >= self.app.keys - 0.5 + room - 1e-9:
             y = e.y
         b, p = self.x2t(x), self.y2p(y)
         sb = self.app.snap_beats()
         if snap and sb and not e.state & SHIFT:
             b, p = round(b / sb) * sb, round(p)
-        return [max(0.0, b), min(max(p, 0), (KEYS[1] if above else self.app.keys) - 1)]
+        top = max(KEYS[1] - 1 if above else 0, self.app.keys - 1 + room)
+        return [max(-self.room_beats(), b), min(max(p, -room), top)]
 
     def slice_pt(self, e):
         """The Slice tool's line end at the mouse: time on the snap grid, keys on the lines between key rows (so a
@@ -196,7 +199,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         sb = self.app.snap_beats()
         if not e.state & SHIFT:
             b, p = (round(b / sb) * sb if sb else b), math.floor(p) + 0.5
-        return [b, min(max(p, -0.5), self.app.keys - 0.5)]
+        _, lo, hi = self.room_edges()
+        return [b, min(max(p, lo - 0.5), hi + 0.5)]
 
     def box_area(self):
         """The Select box being dragged as (beat, pitch, beat, pitch) corners: out to whole snap steps and whole
@@ -391,13 +395,15 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         there still plays that key, and a filled shape / pasted notes' box fills only rows whose middle it covers
         (user: every shape must reach the bottom key)."""
         r = self.reach(shapes)
-        top = self.app.keys - 1.0 if top is None else top
+        # (Space past the keys / before the start, Settings → General: the limits move out to the room's ends)
+        room = self.room_keys()
+        top = max(self.app.keys - 1.0 if top is None else top, self.app.keys - 1.0 + room)
         # (a custom shape's lines may lie exactly half a key over the top key: a point on a row edge with the line
         # below it plays the key below, paths.edges_settled; other kinds (a line's end on the edge plays the key
         # above) stop just under it)
         if not all(sh.get("kind") == "custom" for sh in shapes):
             top -= 1e-6
-        return r and (min(0.0, r[0]), min(-EDGE, r[1]), max(top + EDGE, r[2]))
+        return r and (min(-self.room_beats(), r[0]), min(-room - EDGE, r[1]), max(top + EDGE, r[2]))
 
     def move_room(self, sh):
         """How far a shape can be moved (beats left, keys down, keys up) before it passes the limits: up to the
@@ -448,7 +454,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         free. (db, dp) of the move."""
         left = min(min(b0, b1) for b0, _, b1, _ in self.box_moving)
         rooms = [self.room[j] for j in idx if self.room.get(j)]
-        back = min([left] + [r[0] for r in rooms])  # (how far left it can all go)
+        back = min([left + self.room_beats()] + [r[0] for r in rooms])  # (how far left it can all go)
         down, up = min([r[1] for r in rooms], default=math.inf), min([r[2] for r in rooms], default=math.inf)
         sb = self.app.snap_beats()
         if sb and not e.state & SHIFT:
@@ -625,6 +631,12 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """Beats the view may go before beat 0 ("Space before the start", counted in the first bar's beats)."""
         bars = getattr(getattr(self.app, "space_bars", None), "get", lambda: 0)()
         return bars * self.app.beats if bars else 0.0
+
+    def room_edges(self):
+        """(earliest beat, lowest key, highest key) a point may be put on: beat 0 and the keys, or the ends of the
+        Space past the keys / before the start."""
+        room = self.room_keys()
+        return -self.room_beats(), -room, self.app.keys - 1 + room
 
     def space_changed(self):
         """A "Space past ..." setting changed: the view back inside the new room."""

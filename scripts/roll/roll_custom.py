@@ -144,7 +144,8 @@ class CustomBox:
             sh = self.app.selected()
             if sh and sh.get("kind") == "custom" and "notes" in sh and self.app.snap_beats() and not e.state & SHIFT:
                 y = min(max(e.y, self.ruler_h), self.winfo_height())
-                pt[1] = min(max(round(self.y2p(y) - 0.5) + 0.5, -0.5), self.app.keys - 0.5)
+                _, lo, hi = self.room_edges()
+                pt[1] = min(max(round(self.y2p(y) - 0.5) + 0.5, lo - 0.5), hi + 0.5)
             return pt
         c = self.custom_corners({"pts": orig})
         b, p = c[k] if not side else [(c[k][i] + c[(k + 1) % 4][i]) / 2 for i in (0, 1)]
@@ -237,7 +238,8 @@ class CustomBox:
             dy = math.copysign(abs(dx) / aspect, dy or 1)
         else:
             dx = math.copysign(abs(dy) * aspect, dx or 1)
-        return [max(0.0, start[0] + dx / self.sx), min(max(start[1] + dy / self.sy, 0), self.app.keys - 1)]
+        b0, lo, hi = self.room_edges()  # (beat 0 and the keys, or the Space past them)
+        return [max(b0, start[0] + dx / self.sx), min(max(start[1] + dy / self.sy, lo), hi)]
 
     def draw_custom_box(self, sh):
         """The box of the selected custom shape: dashed outline and corner squares to resize it."""

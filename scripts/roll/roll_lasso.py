@@ -34,7 +34,7 @@ class LassoDrawing:
         piano roll's edge = on the edge."""
         x = min(max(e.x, self.kb_w), self.winfo_width())
         y = min(max(e.y, self.ruler_h), self.winfo_height())
-        return [max(0.0, self.x2t(x)), min(max(self.y2p(y), -0.5), self.app.keys - 0.5)]
+        return self.lasso_kept_in([self.x2t(x), self.y2p(y)])
 
     # (what the drawer's lasso does its own way: window/drawer_lasso.py overrides these)
 
@@ -92,7 +92,7 @@ class LassoDrawing:
         sb = self.app.snap_beats()
         if e.state & CTRL or not sb:
             return pt
-        return [max(0.0, round(pt[0] / sb) * sb), pt[1]]
+        return [max(self.lasso_kept_in([-math.inf, 0.0])[0], round(pt[0] / sb) * sb), pt[1]]
 
     def lasso_angle(self, pt, e):
         """Shift held: pt moved onto the nearest 45° line from the last point, on screen."""
@@ -107,8 +107,9 @@ class LassoDrawing:
 
     def lasso_kept_in(self, pt):
         """A point kept on the piano roll: beat 0 at least, keys from under key 0 to over the top one (hunt 10-23: a
-        45° point went under the keyboard)."""
-        return [max(0.0, pt[0]), min(max(pt[1], -0.5), self.app.keys - 0.5)]
+        45° point went under the keyboard). The Space past the keys / before the start widen it (main piano roll)."""
+        b0, lo, hi = getattr(self, "room_edges", lambda: (0.0, 0, self.app.keys - 1))()
+        return [max(b0, pt[0]), min(max(pt[1], lo - 0.5), hi + 0.5)]
 
     def lasso_point_at(self, x, y):
         """The waiting loop's point (number) near the mouse, or None."""

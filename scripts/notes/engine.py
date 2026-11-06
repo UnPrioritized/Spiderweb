@@ -738,13 +738,62 @@ def shape_notes_tracks(sh, ppq, keys=128):
     which of them (one number per row; None for every other shape)."""
     sh = made_from(sh)
     done = {}
+    out = past_edges(sh, keys)
+    if out is not None:  # (reaching past the keys / before beat 0: made whole, cut at the very end)
+        sh, up, keys_in, later = out
+    else:
+        up, keys_in, later = 0, keys, 0.0
 
     def get(s):
         key = json.dumps(s, sort_keys=True)
         if key not in done:
-            done[key] = fx_notes(s, ppq, keys, get)
+            done[key] = fx_notes(s, ppq, keys_in, get)
         return done[key]
-    return get(sh)
+    if out is None:
+        return get(sh)
+    return cut_back(*get(sh), up, keys, round(later * ppq))
+
+
+LATER_STEP = 12  # beats: a shape before beat 0 is made this many at a time later (whole bars of 4/4, 3/4, 6/8 and
+#                  every usual grid step fit in, so its spam grid / Chop's song grid land the same; past_edges)
+
+
+def cut_back(notes, tracks, up, keys, later=0):
+    """past_edges' notes (made lifted by up keys and later ticks later) put back where the shape is, cut at the keys
+    and beat 0: what reaches past them is left out, a note across beat 0 starts on it (keeping its velocity)."""
+    notes = np.array(notes, copy=True)
+    if up:
+        notes[:, 2] -= up
+    if later:
+        notes[:, :2] -= later
+    keep = (notes[:, 2] >= 0) & (notes[:, 2] < keys) & (notes[:, 1] > 0)
+    notes = notes[keep]
+    notes[:, 0] = np.maximum(notes[:, 0], 0)
+    return notes, None if tracks is None else np.asarray(tracks)[keep]
+
+
+def past_edges(sh, keys):
+    """A shape whose lines reach before beat 0, under key 0 or over the top key (Space past the edges, Settings →
+    General, user 2026-11-06: no notes are made there): (it lifted onto the keys by up whole keys and not cut at the
+    edges (_free) and moved later by whole LATER_STEPs past beat 0 (+ one more: note tools reaching earlier), up,
+    the keys to make it on, beats later). Its notes are made WHOLE (velocities by their real starts, note tool pages,
+    Sustain, overlaps as if nothing was cut; tools never see a time before 0, where some stop) and only then put back
+    and cut where it really is (cut_back; a sliced piece's way, sliced.made_at_cut). None: inside the keys (made as
+    always), a Hz bass (its tones sit on song beats), a sliced piece (lifted its own way), Recolour's uncut look."""
+    if sh.get("_free") or sh.get("cut") or sh.get("hz") or "pts" not in sh:
+        return None
+    try:
+        r = cached_reach(sh)
+    except Exception:  # (a shape too broken to measure: made as always)
+        return None
+    if r is None or r[0] >= 0 and r[1] >= -0.5 and r[2] <= keys - 0.5:
+        return None
+    up = max(0, math.ceil(-0.5 - float(r[1]) - 1e-9))
+    room = max(keys, math.ceil(float(r[2]) + up + 0.5 + 1e-9) + 1)
+    later = (math.ceil(-float(r[0]) / LATER_STEP - 1e-9) + 1) * LATER_STEP if r[0] < 0 else 0
+    lifted = dict(sh, pts=[[b + later, p + up] for b, p in sh["pts"]]) if up or later else dict(sh)
+    lifted["_free"] = True
+    return lifted, up, room, later
 
 
 def made_from(sh):
