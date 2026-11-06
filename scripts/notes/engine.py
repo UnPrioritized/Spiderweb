@@ -2451,6 +2451,20 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     return notes, count
 
 
+def remove_across(notes, held, overlaps, ranks):
+    """Multi channel's Remove overlaps on the finished notes (App's all_notes, after the shapes laid on your tracks
+    are in): every track's own overlaps fixed first (user 2026-11-06), then the track order decides between tracks.
+    held: per note True if it keeps its overlaps (Sustain, Fill gaps' Keep both: left as they are, as in render).
+    ranks: notes -> each note's place in the track list (earlier = lower). overlaps: overlap_fix's."""
+    stretch = overlaps.get("way", "stretch") == "stretch"
+    rest = notes[~held]
+    rest = resolve_overlaps(rest) if stretch else split_overlaps(rest)
+    if len(rest):
+        rank = np.asarray(ranks(rest), np.int64)
+        rest = across_tracks(rest, -rank if overlaps.get("later") else rank, stretch)
+    return np.concatenate([rest, notes[held]]) if held.any() else rest
+
+
 def overlap_fix(mode, overlaps):
     """render's overlap fixing: overlaps = None (today's way) or {"way": OVERLAP_WAYS, "across": True for Multi
     channel's Remove overlaps, "rank": None or an array slot -> its place in the track order (default: the slot

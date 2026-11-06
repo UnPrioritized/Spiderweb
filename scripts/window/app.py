@@ -27,7 +27,8 @@ from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
-                          one_voice, own_slot, render, resolve_overlaps, shape_key, slot_track_channel, track_ids,
+                          one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
+                          track_ids,
                           auto_count, PORTS, pasted_notes)
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
@@ -89,7 +90,7 @@ from window.app_playback import GROUP_DEFAULT, Playback
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
-from roll.roll_draw import GHOST_FADE, STACK_MODES, painting_order, stack_rule
+from roll.roll_draw import GHOST_FADE, STACK_MODES, painting_order, stack_rule, track_ranks
 from files import clipboard, errors, notes_clip, speed, system
 from files.about import ICONS, VERSION
 from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, KESTREL, MidiOut, Player
@@ -278,6 +279,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     it has} for those (App.fit_into). stash: a dict given = what lay_again needs kept in it. overlaps: how overlaps
     are fixed (App.overlap_rule: Single's split around, Multi's Remove overlaps; render overlaps)."""
     team_laps = []
+    across = bool(overlaps and overlaps.get("across")) and mode == "auto"  # (Multi channel's Remove overlaps)
     teams = between_turns(shapes, team_laps)
     # (each Colours shape's notes made with their rounds, then taken off the tracks: render's rounds; a merged shape's
     # parts' rounds too, merge.part_rows; an Add between step = one channel, its round = its group's: in_rounds)
@@ -361,19 +363,25 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                              # without the first colours keeps the whole's channels, partial sweep 11-02)
                              [sh.get("paste") if "notes" in sh else ("cut", cut_group(sh)) if cut_group(sh) else None
                               for sh in shapes],
-                             # (a Domino paste keeps its own overlaps outside Single channel: user 2026-10-30)
+                             # (a Domino paste keeps its own overlaps outside Single channel: user 2026-10-30; not
+                             # with Remove overlaps ticked, user 2026-11-06)
                              [is_sustained(sh) or sh.get("held") is True or mode == "auto" and pasted_notes(sh)
-                              for sh in shapes],
+                              and not across for sh in shapes],
                              backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
                              voice_slots,
                              busy, together, note_slots, [pasted_notes(sh) for sh in shapes],
                              # (keep colours: a cut shape's pieces move as one shape, partial sweep 11-02)
-                             groups=[cut_group(sh) for sh in shapes] if keep else None, overlaps=overlaps)
+                             groups=[cut_group(sh) for sh in shapes] if keep else None,
+                             overlaps=overlaps and {"way": overlaps.get("way", "stretch")})
     if stash is not None:  # (App.fit_into's laying again: lay_again)
         stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
                      all16=all16, mode=mode)
     rendered, slots, need, laid = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode)
+    if across and len(rendered):  # (Remove overlaps: after the laid shapes are in, so your tracks take part too)
+        held = np.flatnonzero([is_sustained(sh) or sh.get("held") is True for sh in shapes])
+        rendered = remove_across(rendered, np.isin(rendered[:, 5], held), overlaps,
+                                 lambda n: track_ranks(n[:, 4], overlaps.get("own") or ())[0])
     voice_slots.update(laid)
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
@@ -1830,9 +1838,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         mode = self.channel_mode.get()
         if mode == "single" and self.single_split.get():
             return {"way": "split"}
-        if mode == "auto" and self.multi_cut.get():
+        if mode == "auto" and self.multi_cut.get():  # (own: your tracks' places in the track list, track_ranks)
             return {"across": True, "way": "stretch" if self.multi_stretch.get() else "split",
-                    "later": bool(self.multi_later.get())}
+                    "later": bool(self.multi_later.get()),
+                    "own": tuple((t["id"], t["after"]) for t in self.own_tracks or ())}
         return None
 
     def sync_overlap_rows(self):
