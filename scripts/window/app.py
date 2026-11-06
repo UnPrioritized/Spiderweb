@@ -35,7 +35,7 @@ from notes.paths import rows_up_to
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
-from notes.fx import (flip_shape, flipped as fx_flipped, glue_last, tidy_glue, turn_shape, with_turn as fx_turned,
+from notes.fx import (flip_shape, flipped as fx_flipped, glue_after, tidy_glue, turn_shape, with_turn as fx_turned,
                       with_velocity)
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, unflipped_starts, why_not as gate_why_not)
@@ -3175,6 +3175,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         before = sum(len(self.notes_of(sh)) for sh in shapes)
         self.push_undo(name=tr("app.glue"))
         for sh in shapes:
+            was = copy.deepcopy(sh.get("glue"))
             if not areas:
                 sh["glue"] = True
             else:
@@ -3183,10 +3184,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     shares = glue_shares(area, box)
                     if shares:
                         sh["glue"] = glue_added(sh.get("glue"), shares)
-            if sh.get("glue"):  # (done after the pages there are now, like the last thing done: fx.GLUE)
-                fx = glue_last(sh.get("fx"))
-                if fx:
-                    sh["fx"] = fx
+            # (what this glue added is done after the pages there are now, like the last thing done; earlier glue
+            # keeps its place, shapes the box missed stay as they were: hunt 2026-11-07)
+            fx = glue_after(sh.get("fx"), sh.get("glue"), was, not areas)
+            if was is True and fx == sh.get("fx"):  # (a box on a shape glued all over, done at the same place: none)
+                sh["glue"] = True
+            if fx:
+                sh["fx"] = fx
+            else:
+                sh.pop("fx", None)
         after = sum(len(self.notes_of(sh)) for sh in shapes)
         self.shapes_changed()
         self.status.config(text=tr("app.glued", notes=trn("n.notes", before, n=before), after=after))

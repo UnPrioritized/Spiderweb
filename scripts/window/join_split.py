@@ -140,13 +140,19 @@ def part_glue(part, whole):
     if part.get("cut") and not whole.get("cut"):
         return
     if isinstance(whole.get("glue"), list):
-        got = glue_for_part(whole["glue"], glue_box(np.concatenate(cached_arrays(whole))),
-                            glue_box(np.concatenate(cached_arrays(part))))
+        from notes.fx import glue_groups, regrouped, tidy_glue
+        a, b = glue_box(np.concatenate(cached_arrays(whole))), glue_box(np.concatenate(cached_arrays(part)))
+        # (each glue place keeps its own boxes: their numbers change when some aren't in this part, hunt 2026-11-07)
+        got, fx = regrouped([glue_for_part(g, a, b) or [] for g in glue_groups(whole["glue"], part.get("fx"))],
+                            part.get("fx"))
+        if fx:
+            part["fx"] = fx
+        else:
+            part.pop("fx", None)
         if got:
             part["glue"] = got
         else:
             part.pop("glue", None)
-            from notes.fx import tidy_glue
             tidy_glue(part)
 
 

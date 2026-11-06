@@ -63,11 +63,16 @@ def for_part(glue, whole, part):
     return out or None
 
 
+ALL = [-1e6, -1e6, 1e6, 1e6]  # (a box over everything: glue on all of it kept as a box, so a later box can
+# have a place of its own among the note tool pages, hunt 2026-11-07)
+
+
 def added(glue, shares):
-    """The shape's glue with one more box (True stays True: it already glues everything)."""
-    if glue is True or shares is True:
+    """The shape's glue with one more box (shares True: everything). Glued all over before: that as a box (ALL)
+    first, the new box after it (it may be done at a later place, fx.glue_after)."""
+    if shares is True:
         return True
-    return (glue or []) + [shares]
+    return ([ALL] if glue is True else glue or []) + [shares]
 
 
 def flipped(glue, sideways):

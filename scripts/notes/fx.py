@@ -84,10 +84,29 @@ def clean_fx(sh, steps=False):
             if pts:
                 out.append({"tool": "vel", "pts": pts})
         elif tool == "glue" and pages(out):
-            out = without_glue(out) or []
-            out.append(dict(GLUE))
-    if not clean_glue(sh.get("glue")):  # (no glue: no place for it)
+            k = st.get("from", 0)
+            if not isinstance(k, int) or isinstance(k, bool) or k < 0:
+                continue
+            if out[-1]["tool"] == "glue":  # (two in a row: one place, the earlier's)
+                continue
+            out.append(dict(GLUE, **({"from": k} if k else {})))
+    g = clean_glue(sh.get("glue"))
+    if not g:  # (no glue: no place for it)
         out = without_glue(out) or []
+    else:  # (each place glues the boxes from its "from" on, up to the next place's: hunt 2026-11-07)
+        n = len(g) if isinstance(g, list) else 1
+        if g is True:  # (glue everything: one place, the last)
+            at = [j for j, st in enumerate(out) if st["tool"] == "glue"][-1:]
+            out = [dict(GLUE) if [j] == at else st for j, st in enumerate(out) if st["tool"] != "glue" or [j] == at]
+        last, kept = -1, []
+        for st in out:
+            if st["tool"] == "glue":
+                k = st.get("from", 0)
+                if k <= last or k >= n:
+                    continue
+                last = k
+            kept.append(st)
+        out = kept
     return out or None
 
 
@@ -95,7 +114,7 @@ GLUE = {"tool": "glue"}
 
 
 def glue_index(fx):
-    """Where the glue is done among the steps fx (its step's index), or None: before them all."""
+    """Where the glue is first done among the steps fx (its step's index), or None: before them all."""
     for k, st in enumerate(fx or ()):
         if st["tool"] == "glue":
             return k
@@ -103,32 +122,93 @@ def glue_index(fx):
 
 
 def without_glue(fx):
-    """The steps without the glue's place (None when none are left)."""
+    """The steps without the glue's places (None when none are left)."""
     out = [st for st in fx or () if st["tool"] != "glue"]
     return out or None
 
 
-def glue_last(fx):
-    """The steps after the shape is glued (again): the glue done last, after every page there is (none: before
-    them all, so no step)."""
-    fx = without_glue(fx) or []
-    return fx + [dict(GLUE)] if pages(fx) else (fx or None)
+def glue_from(glue, fx, k=None):
+    """glue cut to what's glued before step k of fx (k None: before every step = before the pages): the boxes
+    before the first glue place at or after k. True / no place there: glue as it is (True: only before its one place
+    or not at all)."""
+    for j, st in enumerate(fx or ()):
+        if st["tool"] == "glue" and (k is None or j >= k):
+            n = st.get("from", 0)
+            return glue[:n] or None if isinstance(glue, list) else None
+    return glue
+
+
+def at_step(glue, step):
+    """The boxes a glue place glues (step: its {"tool": "glue", "from"?}; the boxes after the later places are already
+    gone: engine.before_step)."""
+    n = step.get("from", 0)
+    return glue[n:] or None if isinstance(glue, list) and n else glue
+
+
+def glue_after(fx, glue, before, whole=False):
+    """The steps after the shape is glued (again) (user: the last thing done happens; hunt 2026-11-07: each glue
+    keeps its own place, an earlier box stays where it was used): glue = its glue now, before = its glue before,
+    whole: glued all over (not a box).
+    Nothing new glued: the steps as they were. Glue on everything (True): its one place after every page. New boxes:
+    a place for them after every page (from the first new box on); none needed when no page comes after the last
+    place. No page at all: no place (glued before them all)."""
+    if glue is True and before is True and not whole:  # (a box on a shape glued all over: nothing new)
+        return fx
+    if glue is True:  # (glued all again: it glues again after the pages, user: "glue does nothing" confused)
+        fx = without_glue(fx) or []
+        return fx + [dict(GLUE)] if pages(fx) else (fx or None)
+    if glue == before or not glue:
+        return fx
+    fx = list(fx or [])
+    if not pages(fx) or fx[-1]["tool"] == "glue":
+        return fx or None
+    k = len(before) if isinstance(before, list) else 0
+    return fx + [dict(GLUE, **({"from": k} if k else {}))]
+
+
+def glue_groups(glue, fx):
+    """glue's boxes by where they're done: [before the pages, then each glue place in order] (lists; None: glue
+    isn't a list of boxes)."""
+    if not isinstance(glue, list):
+        return None
+    cuts = [st.get("from", 0) for st in fx or () if st["tool"] == "glue"]
+    ends = cuts + [len(glue)]
+    return [glue[:ends[0]]] + [glue[ends[i]:ends[i + 1]] for i in range(len(cuts))]
+
+
+def regrouped(groups, fx):
+    """(glue, steps) back from glue_groups' groups (each changed alike, e.g. cut to a piece): a place whose boxes are
+    all gone goes too; the froms counted again."""
+    out, glue, g = [], list(groups[0]), 1
+    for st in fx or ():
+        if st["tool"] != "glue":
+            out.append(st)
+            continue
+        boxes = groups[g] if g < len(groups) else []
+        g += 1
+        if boxes:
+            out.append(dict(GLUE, **({"from": len(glue)} if glue else {})))
+            glue += boxes
+    return glue or None, out or None
 
 
 def before_page(sh, k):
-    """sh as its step k gets the notes: only the steps before it, and its glue only when that comes before too."""
+    """sh as its step k gets the notes: only the steps before it, and only the glue done before it."""
     fx = sh.get("fx") or []
     out = {key: v for key, v in sh.items() if key != "fx"}
     if fx[:k]:
         out["fx"] = fx[:k]
-    g = glue_index(fx)
-    if g is not None and g >= k:
-        out.pop("glue", None)
+    if out.get("glue"):
+        g = glue_from(out["glue"], fx, k)
+        if g:
+            out["glue"] = g
+        else:
+            out.pop("glue")
     return out
 
 
 def tidy_glue(sh):
-    """sh without a glue place when it has no glue any more. Changes sh."""
+    """sh without glue places when it has no glue any more. Changes sh."""
     if not sh.get("glue") and glue_index(sh.get("fx")) is not None:
         fx = without_glue(sh["fx"])
         if fx:
@@ -138,15 +218,15 @@ def tidy_glue(sh):
     return sh
 
 
-def chained(first, then, own_glue):
-    """Steps first, then steps then (a sliced piece's whole's, then the piece's own), with one glue place: then's
-    when its shape has glue of its own (none stored: it came right after first's steps), else first's."""
+def chained(first, then, own_glue, first_n=0):
+    """Steps first, then steps then (a sliced piece's whole's, then the piece's own). own_glue: the piece has glue of
+    its own (its boxes come after the whole's first_n boxes in the joined glue): its glue before its own pages gets
+    a place right after first's pages, its places' froms move on by first_n. Else then's places go."""
     first, then = list(first or []), list(then or [])
     if own_glue:
-        k = glue_index(then)
-        first = without_glue(first) or []
-        if k is None and pages(first):
-            then = [dict(GLUE)] + then
+        then = [dict(st, **{"from": st.get("from", 0) + first_n}) if st["tool"] == "glue" else st for st in then]
+        if pages(first) and first[-1]["tool"] != "glue" and (not then or then[0]["tool"] != "glue"):
+            then = [dict(GLUE, **({"from": first_n} if first_n else {}))] + then
     else:
         then = without_glue(then) or []
     return (first + then) or None

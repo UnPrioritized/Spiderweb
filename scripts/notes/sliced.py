@@ -205,19 +205,35 @@ def completed(sh):
     if whole.get("cut"):  # (cut from a piece: its own whole's pages / glue first, then its own)
         whole = json.loads(json.dumps(whole))
         completed(whole)
-    if whole.get("fx"):  # (one glue place: the piece's own glue's, else the whole's, fx.chained)
-        from notes.fx import chained
-        fx = chained(json.loads(json.dumps(whole["fx"])), sh.get("fx"), bool(sh.get("glue")))
+    from notes.fx import chained, glue_groups, regrouped
+    wfx = json.loads(json.dumps(whole.get("fx") or []))
+    gl, own = whole.get("glue"), sh.get("glue")
+    if gl is True and isinstance(own, list):  # (glue on all of it, done at its own place: as a box, hunt 11-07)
+        from notes.glue import ALL
+        gl = [list(ALL)]
+    if gl and own is not True:  # (the boxes inside it as it was when cut, as shares of its own box)
+        from notes.engine import cached_arrays
+        from notes.glue import for_part, glue_box
+        a, b = glue_box(np.concatenate(cached_arrays(whole))), glue_box(np.concatenate(cached_arrays(cut["was"])))
+        groups = glue_groups(gl, wfx)
+        if groups is None:  # (True: glues all of it)
+            gl = for_part(gl, a, b)
+        else:  # (each glue place keeps its boxes: hunt 2026-11-07, the whole's glue moved after its pages)
+            gl, wfx = regrouped([for_part(g, a, b) or [] for g in groups], wfx)
+            wfx = wfx or []
+    elif own is True:
+        gl = None
+    if wfx:
+        n = len(gl) if isinstance(gl, list) else 0
+        fx = chained(wfx, sh.get("fx"), bool(own), n if isinstance(own, list) else 0)
         if fx:
             sh["fx"] = fx
-    gl = whole.get("glue")
-    if gl and sh.get("glue") is not True:  # (the boxes inside it as it was when cut, as shares of its own box)
-        from notes.engine import cached_arrays
-        from notes.glue import added, for_part, glue_box
-        part = for_part(gl, glue_box(np.concatenate(cached_arrays(whole))),
-                        glue_box(np.concatenate(cached_arrays(cut["was"]))))
-        for b in ([True] if part is True else part or ()):
-            sh["glue"] = added(sh.get("glue"), b)
+    if gl:
+        sh["glue"] = True if gl is True or own is True else gl + (own or [])
+        if sh["glue"] is True and sh.get("fx"):  # (glue on everything: one place, the last (the piece's), glues all)
+            first = [k for k, st in enumerate(sh["fx"]) if st["tool"] == "glue"][-1:]
+            sh["fx"] = [{"tool": "glue"} if [k] == first else st for k, st in enumerate(sh["fx"])
+                        if st["tool"] != "glue" or [k] == first]
 
 
 def whole_made(cut):
