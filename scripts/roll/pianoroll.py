@@ -89,6 +89,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.onto_grid = None    # where the notes of shapes being moved start and end (note_edges): (all of them,
         #                          {shape number: its own}); a move sticks one of them to the grid (sticky_move)
         self.press_beat = 0.0    # the press's beat, not snapped (sticky_move goes by how far the mouse really went)
+        self.press_key = 0.0     # ... and key (a Shift move goes by how far the mouse really went: user 2026-11-06,
+        #                          zoomed far in the shape jumped off the mouse by the press's snapping)
         self.grid_later = None   # a resize whose notes were too slow to snap while dragging: (make, beat) for let go
         self.inside_fit = None   # a fitted box being dragged: the frame in it (custom.frame_in_box; frame_for_box)
         self.limit = None        # how far the shapes being edited may reach (limits)
@@ -1131,7 +1133,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.key_press(e)
             return
         app = self.app
-        self.press_beat = self.event_pt(e, snap=False)[0]
+        self.press_beat, self.press_key = self.event_pt(e, snap=False, above=True)
         if app.tool.get() == "select":  # Select is the tool at the start, so its tip comes on first use
             app.tips.show("select", wait=True)
         if e.y < self.ruler_h and not self.draft and self.ruler_band(e, kept):
@@ -1409,6 +1411,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             pt = self.event_pt(e, above=True)
             _, start, orig, one, _, part = self.drag
             db, dp = pt[0] - start[0], 0 if self.time_only else pt[1] - start[1]
+            if e.state & SHIFT and self.app.snap_beats():  # (free: from where the press really was, not its snapped
+                free = self.event_pt(e, snap=False, above=True)  # place, else the shape sits off the mouse)
+                db, dp = free[0] - self.press_beat, 0 if self.time_only else free[1] - self.press_key
             if not (db or dp) and not self.drag[4]:
                 return
             if self.dup and self.dup != "done":
