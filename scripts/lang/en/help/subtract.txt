@@ -3,6 +3,9 @@ Select one or more shapes, then right-click one: Gate subtract… Every note get
 ## Note start and Note end
 
 The window has two tabs. Note end: each note ends earlier, its start stays where it is, so the notes still sound at the same time. Note start: each note starts later, its end stays where it is. Tick "Subtract from the note end" or "Subtract from the note start" on a tab to use that side. You can use one side or both. A shape that doesn't have Gate subtract yet starts with Note end, 1 tick.
+[clip:subtract-sides]
+
+Touching notes as drawn, then with 30 ticks off the Note end (each note ends earlier: the shape still starts at its left edge) and off the Note start (each note starts later: the shape still ends at its right edge).
 
 With both sides, a note can be shortened at both ends. If the two together would take more than the note has, both are made smaller by the same share, so the note always keeps at least 1 tick.
 
@@ -13,6 +16,9 @@ Only notes the one before touches (Note start) / Only notes that touch the next 
 ## Change across the shape
 
 Tick Change across the shape to make the amount change from the first number to the second along a graph, instead of being the same for every note. Each side has its own graph.
+[clip:subtract-vary]
+
+Note end, Left to right from 0 to 90 ticks: no gap at the start, wider and wider gaps towards the end.
 
 Across: Left to right (time) goes from the shape's first note to its last (on Note start, measured from where the notes end, so a flipped copy mirrors exactly). Low to high and Top to bottom give each key row its own amount, from the lowest key to the highest or the other way.
 

@@ -1,4 +1,7 @@
 Select one or more shapes, then right-click one: Gate extend… Every note ends a little later, so it runs over into the notes after it, like a run played by hand. Notes keep their starts, keys, colours and velocities.
+[clip:extend-amount]
+
+A run as drawn, and with Gate extend at 100 %: every note twice as long, running over the next ones.
 
 ## The amount
 
@@ -11,6 +14,9 @@ A note never runs into the next note on its own key: it stops where that one sta
 ## Change across the shape
 
 Tick Change across the shape to make the amount change from the first number to the second along a graph, for example short at the start of a run and long at its end. It works like Gate subtract's graph: Left to right, Low to high or Top to bottom, Each key row by itself, and ready-made graphs under it.
+[clip:extend-vary]
+
+Left to right from 0 % to 300 %: the run's first notes stay as they were, its last ones run far over.
 
 ## Using the window
 
