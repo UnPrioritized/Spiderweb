@@ -657,8 +657,9 @@ class Playback:
                 text = (tr("app.overloaded_1", m=m) if cap == 1 else
                         tr("app.overloaded_n", n=f"{readable(cap):,}", m=m)) if 0 < cap < top else tr("app.overloaded")
         elif self.out.name == MAESTRO and self.out.handle and self.player.running and not text:
-            # (its own load limiter lowered and notes at it, or its sound falling behind: notes left out, hunt
-            # 2026-11-01; Spiderweb's own sending follows its limit, play_loaded)
+            # (more notes a second than its limit lets through, or its sound falling behind: notes left out, hunt
+            # 2026-11-01; Spiderweb's own sending follows its limit, play_loaded. nps_limit: <= 0.2.3 = its load
+            # limiter's lowered limit, 0 while not lowered; 0.2.4 = the limit set in Maestro, 0 = none)
             h, now = self.out.handle, time.perf_counter()
             seen = getattr(self, "_m_ons", None)
             if seen is None or seen[0] is not h or h.ons < seen[1]:

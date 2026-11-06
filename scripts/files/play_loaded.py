@@ -48,7 +48,7 @@ BUDGET_SYNTH = 200_000  # note-ons a second to start from on each of Built-in BA
 BUDGET_KDMAPI = 200_000  # ... OmniMIDI (KDMAPI): one message per call from Python
 BUDGET_DEVICE = 30_000  # ... a Windows MIDI device
 BUDGET_MAESTRO = 400_000  # ... each of Maestro's ports (bytes in one call a port; its own limiter does the rest)
-MAESTRO_ROOM = 1.1  # (its limit lowered: a little more than it lets through, so it can climb back)
+MAESTRO_ROOM = 1.1  # (a little more than its limit lets through: 0.2.3's lowered limit could climb back)
 SLICE_S = 0.001  # (Maestro: messages stamped together at most this far apart in the song)
 BUDGET_LEAST, BUDGET_MOST = 20_000, 1_500_000  # (a synth: one makes ~1 M notes a second at 1,000 voices, measured)
 # A synth's load reading LAGS (measured 2026-10-24, Shinki beats 1100-1125, 8 synths x 500 voices: budgets grew to 1.5 M
@@ -1025,8 +1025,9 @@ class LoadedPlayer:
                 if self.sinks and checked:  # (13f: note-ons asked for a second / the budget, the busiest synth: how
                     # much faster the song fits, as the speed scales the note-ons exactly)
                     self.asked = float(np.max(asked / (now - checked) / np.maximum(self.budgets, 1)))
-                if maestro and checked:  # (its load limiter lowered: no more than it lets play, shared by what each
-                    # port asked for; the loudest kept, left out counted = "Overloaded")
+                if maestro and checked:  # (its limit: no more than it lets play, shared by what each port asked
+                    # for; the loudest kept, left out counted = "Overloaded". <= 0.2.3 reports only a lowered limit,
+                    # 0.2.4 the limit set in Maestro)
                     st = self.out.handle.stats() if self.out.handle else None
                     lim = st["nps_limit"] if st else 0
                     if lim:

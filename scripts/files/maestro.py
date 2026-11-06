@@ -18,7 +18,7 @@ import time
 from files import system
 from files.system import WINDOWS
 
-TESTED = "0.2.3"  # (the Maestro version Spiderweb was last checked with: skill maestro-update sets it)
+TESTED = "0.2.4"  # (the Maestro version Spiderweb was last checked with: skill maestro-update sets it)
 APP_ID = b"io.github.unprioritized.spiderweb"
 APP_NAME = b"Spiderweb"
 PORTS = 16
@@ -175,7 +175,7 @@ class MaestroOut:
         self.last = 0  # (latest stamp sent: a message sent "now" never comes before one queued earlier)
         self.failed = None  # (a send Maestro refused: turned off / its engine stopped; since failed_at)
         self.failed_at = 0.0
-        self.ons = 0  # (note-ons sent: "Overloaded" against its load limiter; a loaded MIDI's reader adds its own)
+        self.ons = 0  # (note-ons sent: "Overloaded" against its notes-a-second limit; a loaded MIDI's reader adds its own)
         self.opened = time.perf_counter()
         self._sync()
 
