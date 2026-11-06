@@ -3,6 +3,9 @@
 A run of short notes. Drag a line from where the run starts to where it ends: each picked key between them gets one note, one grid step long, one after another.
 
 The step picks itself: the grid nearest one key per step for the line you drew. A steeper line = a finer grid.
+[clip:gliss-run]
+
+A flat line plays 1/16 steps; a steep one picks a finer grid by itself.
 
 The side panel's Grids picks which grid sizes the step can be: Halves (1/1, 1/2, 1/4 … as fine as the PPQ allows) or My list, your own sizes like 1/16, 1/32, 1/48, 1/256. Grids shorter than one tick are skipped: a higher PPQ allows finer grids.
 
@@ -11,6 +14,9 @@ The side panel's Grids picks which grid sizes the step can be: Halves (1/1, 1/2,
 While the Glissando tool is in use, or a run is selected, click the piano keys on the left to pick which keys the run plays. Picked keys light up blue, and each click plays the key so you can hear it.
 
 A click picks that note in every octave: click C, E and G for a C major run. Click a lit key again to unpick that note in every octave. Ctrl+click picks or unpicks just that one key. Hold the button and move up or down to hear other keys: the key you let go on is the one picked.
+[clip:gliss-keys]
+
+C, E and G picked (lit blue on the piano keys) for the selected run on the left; the run on the right uses the white keys.
 
 With a run selected, the picked keys are the run's: pick other keys and the run follows them. With nothing selected, they are the keys your next runs use. With no keys picked, runs use the white keys.
 
@@ -21,8 +27,14 @@ The line stays where you draw it. Select a run and drag its squares to move its 
 Step: Auto picks the step from how steep the line is. Pick a fixed step to make the run faster or slower: 1/32 to 1/64 makes it 2x faster. The run keeps its start and keys and gets shorter or longer.
 
 Copies: copies of the run above and below it, each one picked key further out, playing at the same times. On the piano roll, a selected run has a dotted line above it and one below: drag them up or down.
+[clip:gliss-copies]
+
+The same run alone, and with one copy above and one below (selected: the dotted lines).
 
 Note length: how long each note is, as % of the step (100 % = up to the next note, more = they overlap) or in ticks. On the piano roll, drag any note's right end: every note in the run follows. New runs always start at 100 %.
+[clip:gliss-length]
+
+Note length 50 %, 100 % and 200 %.
 
 For notes that run over into the next ones like a run played by hand, right-click the run → Gate extend…: each note ends later by a % of its own length or by ticks (see Help → Gate extend). It works on any shape.
 
@@ -33,3 +45,6 @@ Select a run and middle-click on its line (or right-click → Add anchor here) t
 Timing: On the grid = one note per step, one after another, evenly: the bend only decides which key comes next. Where the line crosses = each note starts where the line crosses its key, so the run speeds up where the line is steep and slows down where it's flat. The first note starts on the line's start; Last note decides whether the last note ends on the line's end or starts there. With % Note length, 100 % = each note up to the next one.
 
 Smooth = the same keys, start and end as Where the line crosses, but the speed changes gradually, so the run sounds even. Smoothing sets how much: 0 % = exactly where the line crosses, 100 % = every gap the same, in between = the speed still follows the bend a little. The notes can sit a bit off the line: it looks less tidy but sounds more natural.
+[clip:gliss-timing]
+
+One bent line three ways: On the grid, Where the line crosses, and Smooth at 50 %.
