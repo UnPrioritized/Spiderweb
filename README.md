@@ -45,6 +45,10 @@ Windows, nothing to install. Linux and Windows users can also [run it from sourc
 |---|---|---|
 | ![A straight line and a curve turning into stairs of notes](pictures/lines.png) | ![A circle filled with rings of notes in four colours](pictures/nested.png) | ![The Hz bass synth window with knobs, tabs and a keyboard](pictures/synth.png) |
 
+| Stir: the colours you drew, swirled | Draw on Domino: Spiderweb's tools on Domino's piano roll |
+|---|---|
+| ![A round shape whose five colour bands are swirled round its middle](pictures/stir.png) | ![Domino with Spiderweb's floating bar: a line already sent into Domino and a glissando run still waiting](pictures/domino.png) |
+
 ## Running the .exe
 
 Just run **Spiderweb.exe**. Nothing to install.
