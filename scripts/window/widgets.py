@@ -1012,10 +1012,11 @@ class Scrub:
                 except (ValueError, ZeroDivisionError):
                     continue
                 value = round(value + (n * step_for(value, n, state) if step_for else d), 6)
-                if self.lo is not None:
-                    value = max(self.lo, value)
-                if self.hi is not None:
-                    value = min(self.hi, value)
+                lo, hi = (v() if callable(v) else v for v in (self.lo, self.hi))  # (a limit may be asked now)
+                if lo is not None:
+                    value = max(lo, value)
+                if hi is not None:
+                    value = min(hi, value)
                 var.set(self.text(value))
                 if apply:
                     apply()

@@ -16,7 +16,7 @@ from files.lang import tr, trn
 from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
 from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
-from notes.engine import cached_reach, make_shape, shape_key
+from notes.engine import SPACE_KEYS as engine_space_keys, cached_reach, make_shape, shape_key
 from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
@@ -650,7 +650,13 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         return -self.room_beats(), -room, self.app.keys - 1 + room
 
     def space_changed(self):
-        """A "Space past ..." setting changed: the view back inside the new room."""
+        """A "Space past ..." setting changed: the view back inside the new room; shapes crossing the top key made
+        anew when "Space past the keys" went on / off (engine.SPACE_KEYS: off = cut at the top key first, as before)."""
+        on = bool(self.room_keys())
+        if engine_space_keys[0] != on:
+            engine_space_keys[0] = on
+            self.app._notes_cache.clear()
+            self.app.shapes_changed()
         self.clamp_view()
         self.request_redraw()
 

@@ -286,15 +286,21 @@ def made_at_cut(sh, ppq, keys, make):
     d = moved_by(sh)
     if d is None or abs(d[0]) < 1e-9 and abs(d[1]) < 1e-9:
         return None
-    from notes.engine import cached_arrays
-    ks = np.concatenate(cached_arrays(sh["cut"]["whole"]))[:, 1]  # (the whole where it was cut: lifted onto the
-    up = max(0, math.ceil(-float(ks.min()) - 1e-9))  # keys, so none of its notes go missing there)
+    from notes.engine import cached_arrays, later_unit
+    from notes.paths import rows_up_to
+    pts = np.concatenate(cached_arrays(sh["cut"]["whole"]))  # (the whole where it was cut: lifted onto the keys
+    ks = pts[:, 1]                                             # and after beat 0, so none of its notes go missing
+    up = max(0, math.ceil(-float(ks.min()) - 1e-9))            # there, and note tools never see a time before 0)
+    t0 = float(pts[:, 0].min())
+    unit = later_unit(sh["cut"]["whole"], ppq) if t0 < 0 else 0
+    later = float((math.ceil(-t0 / unit - 1e-9) + 1) * unit) if t0 < 0 else 0.0
     room = max(keys, math.ceil(float(ks.max()) + 1e-9) + up + 1)
-    if abs(d[0]) < 1e-9 and abs(d[1] - up) < 1e-9:  # (lifted already: made as it is)
+    if abs(d[0] - later) < 1e-9 and abs(d[1] - up) < 1e-9:  # (lifted already: made as it is)
         return None
-    notes, tracks = make(moved(sh, (-d[0], -d[1] + up)), ppq, room)
+    with rows_up_to(room - 1):
+        notes, tracks = make(moved(sh, (-d[0] + later, -d[1] + up)), ppq, room)
     notes = notes.copy()
-    notes[:, :2] += round(d[0] * ppq)
+    notes[:, :2] += round((d[0] - later) * ppq)
     notes[:, 2] += round(d[1]) - up
     if sh.get("_free"):  # (not cut at the edges: Recolour's box, engine.free_box)
         return notes, tracks

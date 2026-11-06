@@ -884,6 +884,10 @@ class ProjectFiles:
             for key, steps in (("space_keys", SPACE_KEYS), ("space_bars", SPACE_BARS)):
                 v = win.get(key)
                 getattr(self, key).set(v if v in steps and not isinstance(v, bool) else 0)
+            from notes import engine  # (shapes over the top key: made whole only with the room on, engine.SPACE_KEYS)
+            if engine.SPACE_KEYS[0] != (self.space_keys.get() > 0):
+                engine.SPACE_KEYS[0] = self.space_keys.get() > 0
+                self._notes_cache.clear()
             self.sync_builtin()
         kept(sound)
 

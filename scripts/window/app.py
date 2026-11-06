@@ -30,7 +30,7 @@ from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
                           split_overlaps,
                           track_ids,
-                          auto_count, PORTS, pasted_notes, past_edges, cut_back)
+                          auto_count, PORTS, pasted_notes, edge_made, SPACE_KEYS)
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
@@ -1540,8 +1540,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             watch_bad(te)
             watch_bad(pe)
             # ticks: a snap step (Ctrl = one tick), pitch: a key (Shift = an octave)
-            Scrub(self, [(te, tv, None)], lambda: (self.snap_ticks(), 4 * self.snap_ticks(), 1), 0)
-            Scrub(self, [(pe, pv, None)], (1, 12, 0.1), 0, KEYS[1] - 1)
+            # (Space past the keys / before the start on: as far as the mouse can put a point, hunt 2026-11-06)
+            Scrub(self, [(te, tv, None)], lambda: (self.snap_ticks(), 4 * self.snap_ticks(), 1),
+                  lambda: self.point_limits()[0])
+            Scrub(self, [(pe, pv, None)], (1, 12, 0.1), lambda: self.point_limits()[1],
+                  lambda: self.point_limits()[2])
         self.sync_points()
         for i, (tv, pv, _, _) in enumerate(self.point_rows):
             tv.trace_add("write", lambda *_, i=i: self.on_point(i))
@@ -1690,16 +1693,24 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes_changed()
         self.sync_points()
 
+    def point_limits(self):
+        """(lowest tick, lowest key, highest key) a point box takes: tick 0 and keys 0-255, or out to the Space past
+        the keys / before the start (pianoroll.room_edges; hunt 2026-11-06)."""
+        b0, lo, hi = self.roll.room_edges()
+        return min(0, round(b0 * self.ppq)), min(0, lo), max(KEYS[1] - 1, hi)
+
     def on_point(self, i):
         if self._loading or not self.selected():
             return
         tv, pv, te, pe = self.point_rows[i]
         values = []
-        # (tick 0 on, pitch 0-255 at 128 keys too: user; ticks only as far as a saved file keeps a shape)
-        for var, entry, hi in ((tv, te, BEATS_FAR * self.ppq), (pv, pe, KEYS[1] - 1)):
+        # (tick 0 on, pitch 0-255 at 128 keys too: user; ticks only as far as a saved file keeps a shape; the Space
+        # settings widen it as far as the mouse goes)
+        t_lo, p_lo, p_hi = self.point_limits()
+        for var, entry, lo, hi in ((tv, te, t_lo, BEATS_FAR * self.ppq), (pv, pe, p_lo, p_hi)):
             try:
                 value = float(calc(var.get()))
-                if not 0 <= value <= hi:
+                if not lo <= value <= hi:
                     raise ValueError
                 values.append(value)
                 good(entry)
@@ -2018,11 +2029,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         cache = self._notes_cache
         got = cache.pop(key, None)
         if got is None:
-            out = past_edges(sh, keys) if keys == self.keys else None
-            if out is not None:  # (reaching past the keys / before beat 0: made whole, then cut: engine.past_edges)
-                lifted, up, room, later = out
-                got = cut_back(*self.notes_tracks(lifted, room), up, keys, round(later * self.ppq))
-            else:
+            # (reaching past the keys / before beat 0: made whole, then cut: engine.edge_made, the thread's too)
+            got = edge_made(sh, self.ppq, keys, self.notes_tracks) if keys == self.keys else None
+            if got is None:
                 got = fx_notes(sh, self.ppq, keys, self.notes_tracks if keys == self.keys else
                                (lambda s: self.notes_tracks(s, keys)))
             self._notes_worked += 1
@@ -2728,17 +2737,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
 
-        def notes_tracks(sh):
+        def notes_tracks(sh, keys=None):
             if job["stop"]:
                 raise Stopped
             if not voiced:  # (as App.notes_tracks: Recolour left out too, not a Domino paste's)
                 sh = recolour_alone(one_voice(sh))
             elif "recolour" in sh:
                 sh = with_most(sh, wide)
-            k = (shape_key(sh), key[1], key[2])
+            keys = key[2] if keys is None else keys
+            k = (shape_key(sh), key[1], keys)
             got = known.get(k) or job["own"].get(k)
             if got is None:
-                got = job["own"][k] = fx_notes(sh, key[1], key[2], notes_tracks)
+                # (past the edges: made whole, then cut, as App.notes_tracks does: engine.edge_made)
+                got = edge_made(sh, key[1], keys, notes_tracks) if keys == key[2] else None
+                if got is None:
+                    got = fx_notes(sh, key[1], keys, notes_tracks if keys == key[2] else
+                                   (lambda s: notes_tracks(s, keys)))
+                job["own"][k] = got
             return got
 
         def work():

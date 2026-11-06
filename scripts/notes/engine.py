@@ -51,7 +51,7 @@ from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.extend import clean_extend, extended, is_extended
 from notes.sustain import clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
-from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, snap_steps
+from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, rows_up_to, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
 from notes.custom import ROUND, frame_upright, notes_resampled, pack_notes, path_colours
 from notes.picture import clean_picture, turned_notes
@@ -737,25 +737,70 @@ def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
     sh = made_from(sh)
-    done = {}
-    out = past_edges(sh, keys)
-    if out is not None:  # (reaching past the keys / before beat 0: made whole, cut at the very end)
-        sh, up, keys_in, later = out
-    else:
-        up, keys_in, later = 0, keys, 0.0
 
-    def get(s):
-        key = json.dumps(s, sort_keys=True)
-        if key not in done:
-            done[key] = fx_notes(s, ppq, keys_in, get)
-        return done[key]
+    def make(s, keys_in):
+        done = {}
+
+        def get(s):
+            key = json.dumps(s, sort_keys=True)
+            if key not in done:
+                done[key] = fx_notes(s, ppq, keys_in, get)
+            return done[key]
+        return get(s)
+    got = edge_made(sh, ppq, keys, make)  # (reaching past the keys / before beat 0: made whole, cut at the end)
+    return got if got is not None else make(sh, keys)
+
+
+SPACE_KEYS = [False]  # Settings → General "Space past the keys" on (App.space_changed): a shape crossing the top key
+# is made whole then cut too; off = cut at the top key first, as before this setting (user: off = as before)
+
+
+def edge_made(sh, ppq, keys, make):
+    """sh's (notes, tracks) when it reaches past the edges (past_edges): made lifted (make(shape, keys)), with fills
+    making their rows that high (paths.rows_up_to), then put back and cut (cut_back). None: made as always. The one
+    way for App.notes_tracks, its background thread and shape_notes_tracks (hunt 2026-11-06: they drifted)."""
+    out = past_edges(sh, keys, ppq)
     if out is None:
-        return get(sh)
-    return cut_back(*get(sh), up, keys, round(later * ppq))
+        return None
+    lifted, up, room, later = out
+    with rows_up_to(room - 1):
+        got = make(lifted, room)
+    return cut_back(*got, up, keys, round(later * ppq))
 
 
 LATER_STEP = 12  # beats: a shape before beat 0 is made this many at a time later (whole bars of 4/4, 3/4, 6/8 and
 #                  every usual grid step fit in, so its spam grid / Chop's song grid land the same; past_edges)
+LATER_MOST = 10 ** 8  # ticks: a shape's own grids needing a longer shift than this: LATER_STEP alone
+
+
+def later_unit(sh, ppq):
+    """Beats (a Fraction) the time shift of a shape before beat 0 comes in: LATER_STEP and every grid the shape
+    counts from the song's start (Spam "Aligned" gate, Colours By time, Chop's song grid), so they land the same
+    (hunt 2026-11-06: a 7-tick aligned gate went off the grid)."""
+    from fractions import Fraction
+    steps = [Fraction(LATER_STEP)]
+    try:
+        if sh.get("kind") == "custom" and sh.get("align") == "aligned" and isinstance(sh.get("gate"), (int, float)):
+            steps.append(Fraction(max(1, round(sh["gate"] * ppq)), ppq))
+        c = sh.get("cycle")
+        if isinstance(c, dict) and c.get("by") == "time" and isinstance(c.get("every"), (list, tuple)):
+            a, b = c["every"][:2]
+            steps.append(Fraction(4 * Fraction(a).limit_denominator(1000), Fraction(b).limit_denominator(1000)))
+        for page in sh.get("fx") or ():
+            cfg = page.get("cfg") or {} if isinstance(page, dict) else {}
+            if page.get("tool") == "chop" and cfg.get("abs") and isinstance(cfg.get("len"), (int, float)):
+                steps.append(Fraction(cfg["len"]).limit_denominator(ppq))
+    except (TypeError, ValueError, ZeroDivisionError, AttributeError):
+        return Fraction(LATER_STEP)
+    unit = steps[0]
+    for s in steps[1:]:
+        if s <= 0:
+            continue
+        num = unit.numerator * s.numerator // math.gcd(unit.numerator, s.numerator)
+        unit = Fraction(num, math.gcd(unit.denominator, s.denominator))
+        if unit * ppq > LATER_MOST:
+            return Fraction(LATER_STEP)
+    return unit
 
 
 def cut_back(notes, tracks, up, keys, later=0):
@@ -772,26 +817,43 @@ def cut_back(notes, tracks, up, keys, later=0):
     return notes, None if tracks is None else np.asarray(tracks)[keep]
 
 
-def past_edges(sh, keys):
+def past_edges(sh, keys, ppq=960):
     """A shape whose lines reach before beat 0, under key 0 or over the top key (Space past the edges, Settings →
     General, user 2026-11-06: no notes are made there): (it lifted onto the keys by up whole keys and not cut at the
-    edges (_free) and moved later by whole LATER_STEPs past beat 0 (+ one more: note tools reaching earlier), up,
+    edges (_free) and moved later by whole later_units past beat 0 (+ one more: note tools reaching earlier), up,
     the keys to make it on, beats later). Its notes are made WHOLE (velocities by their real starts, note tool pages,
     Sustain, overlaps as if nothing was cut; tools never see a time before 0, where some stop) and only then put back
-    and cut where it really is (cut_back; a sliced piece's way, sliced.made_at_cut). None: inside the keys (made as
-    always), a Hz bass (its tones sit on song beats), a sliced piece (lifted its own way), Recolour's uncut look."""
-    if sh.get("_free") or sh.get("cut") or sh.get("hz") or "pts" not in sh:
+    and cut where it really is (edge_made / cut_back). A sliced piece by its WHOLE's reach (moved along with it):
+    lifted by its points, sliced.made_at_cut then makes it where it was cut (also lifted) and moves it. A Glissando
+    goes up by whole octaves, its picked keys along (real piano keys). Over the top key alone only with Space past
+    the keys on (SPACE_KEYS; off: as before). None: made as always (inside the keys, a Hz bass: its tones sit on
+    song beats, Recolour's uncut look)."""
+    if sh.get("_free") or sh.get("hz") or "pts" not in sh:
         return None
     try:
         r = cached_reach(sh)
+        if sh.get("cut"):  # (a piece: its notes come from the whole's)
+            d = moved_by(sh)
+            w = cached_reach(moved(sh["cut"]["whole"], d)) if d is not None and sh["cut"].get("whole") else None
+            if r is not None and w is not None:
+                r = (min(r[0], w[0]), min(r[1], w[1]), max(r[2], w[2]), max(r[3], w[3]))
     except Exception:  # (a shape too broken to measure: made as always)
         return None
-    if r is None or r[0] >= 0 and r[1] >= -0.5 and r[2] <= keys - 0.5:
+    if r is None or r[0] >= 0 and r[1] >= -0.5 and (r[2] <= keys - 0.5 or not SPACE_KEYS[0]):
         return None
     up = max(0, math.ceil(-0.5 - float(r[1]) - 1e-9))
+    gliss = sh.get("kind") == "gliss"
+    if gliss and up:
+        up = -(-up // 12) * 12
     room = max(keys, math.ceil(float(r[2]) + up + 0.5 + 1e-9) + 1)
-    later = (math.ceil(-float(r[0]) / LATER_STEP - 1e-9) + 1) * LATER_STEP if r[0] < 0 else 0
+    if r[0] < 0:
+        unit = later_unit(sh, ppq)
+        later = float((math.ceil(-float(r[0]) / unit - 1e-9) + 1) * unit)
+    else:
+        later = 0.0
     lifted = dict(sh, pts=[[b + later, p + up] for b, p in sh["pts"]]) if up or later else dict(sh)
+    if gliss and up and isinstance(sh.get("gliss"), dict) and sh["gliss"].get("keys"):
+        lifted["gliss"] = dict(sh["gliss"], keys=[k + up for k in sh["gliss"]["keys"]])
     lifted["_free"] = True
     return lifted, up, room, later
 

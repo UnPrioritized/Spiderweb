@@ -28,7 +28,7 @@ import numpy as np
 
 from notes.custom import cut_out, frame_to_bp, frame_to_uv, in_turns, merged_rows, poly_edges, rows_spans
 from notes.nested import mirrored, view_loops, view_of
-from notes.paths import TOP_KEY, pitch_of
+from notes.paths import pitch_of, top_key
 
 INSIDES = ("rings", "empty", "plain")
 RIPPLES_DEFAULTS = {"steps": 60, "grow": 5.0, "auto": True, "edge": True, "turn": 0.0, "spacing": 0, "colours": 4,
@@ -400,7 +400,7 @@ def spans_of(loops_bp, ppq, wind=False):
     if not loops_bp:
         return np.zeros((0, 3), np.int64)
     ps = np.concatenate(loops_bp)[:, 1]
-    q0, q1 = max(0, pitch_of(float(ps.min()))), min(TOP_KEY, pitch_of(float(ps.max())))
+    q0, q1 = max(0, pitch_of(float(ps.min()))), min(top_key(), pitch_of(float(ps.max())))
     found = rows_spans(poly_edges(loops_bp), q0, q1, ppq, wind)
     return np.asarray(found, np.int64).reshape(-1, 3)[:, [1, 2, 0]]
 

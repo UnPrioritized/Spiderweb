@@ -22,7 +22,7 @@ from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, forme
                            moved_formulas)
 from notes.polygon import side_paths
 from notes.smooth import clean_level, smooth_path
-from notes.paths import (TOP_KEY, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
+from notes.paths import (top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
                           shifted_hz, squares, threshold)  # (Hz bass: hzbass.py)
@@ -1367,7 +1367,7 @@ def find_spans(sh, ppq):
     edges = None if tx else poly_edges(polys)
     if walled:  # (every piece of a row between two lines: filled as fill_test says)
         edges += (np.zeros(len(edges[0]), np.int64),)
-    q0, q1 = max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps)))
+    q0, q1 = max(0, pitch_of(min(ps))), min(top_key(), pitch_of(max(ps)))
     if not tx and not walled:
         return rows_spans(edges, q0, q1, ppq)
     out = []
@@ -1402,7 +1402,7 @@ def frame_spans(carried, frame, ppq):
     if not polys or not len(edges[0]):
         return []
     ys = np.concatenate([p[:, 1] for p in polys])
-    q0, q1 = max(0, pitch_of(float(ys.min()))), min(TOP_KEY, pitch_of(float(ys.max())))
+    q0, q1 = max(0, pitch_of(float(ys.min()))), min(top_key(), pitch_of(float(ys.max())))
     if not walled:
         return rows_spans(edges, q0, q1, ppq)
     union, fc = walled
@@ -2015,7 +2015,7 @@ def find_area_spans(sh, ppq):
         return spot_colour(sh, uv[:, 0].reshape(x.shape), uv[:, 1].reshape(x.shape), sizes)
 
     walled = fill_test(sh)
-    rows = [(q, row_cut(edges, q)) for q in range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)]
+    rows = [(q, row_cut(edges, q)) for q in range(max(0, pitch_of(min(ps))), min(top_key(), pitch_of(max(ps))) + 1)]
     rows = [(q, cut) for q, cut in rows if cut]
     # (every row's spots asked at once: one row at a time, asking took most of the time)
     asked = []

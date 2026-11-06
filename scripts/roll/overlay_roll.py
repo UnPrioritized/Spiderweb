@@ -44,6 +44,12 @@ class OverlayRoll(PianoRoll):
     def clamp_view(self):
         pass  # (Domino decides where the view is)
 
+    def room_keys(self):
+        return 0  # (Space past the keys / before the start: main piano roll only; Domino's view can't go there)
+
+    def room_beats(self):
+        return 0.0
+
     def fit_view(self):
         if self.sx is None:  # (before Domino's view is known: anything, so redraw has numbers)
             self.sx, self.sy = 100.0, 10.0

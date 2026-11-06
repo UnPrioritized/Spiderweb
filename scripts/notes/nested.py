@@ -30,7 +30,7 @@ import numpy as np
 from files import speed
 from notes.custom import (carried_fill, clean_of_at, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
                           frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, in_turns, inside_rows, merged_rows, poly_edges, rows_spans)
-from notes.paths import TOP_KEY, pitch_of
+from notes.paths import pitch_of, top_key
 from notes.shrink import field, inner_rows, proportion
 
 WAYS = ("scale", "band", "blend")
@@ -479,7 +479,7 @@ def loop_spans(polys, ppq):
     if not polys:
         return []
     ps = np.concatenate(polys)[:, 1]
-    q0, q1 = max(0, pitch_of(float(ps.min()))), min(TOP_KEY, pitch_of(float(ps.max())))
+    q0, q1 = max(0, pitch_of(float(ps.min()))), min(top_key(), pitch_of(float(ps.max())))
     return rows_spans(poly_edges(polys), q0, q1, ppq)
 
 

@@ -32,6 +32,7 @@ import re
 import numpy as np
 
 from notes.bezier import sample
+from notes.paths import top_key
 
 WHITE = (0, 2, 4, 5, 7, 9, 11)
 TOP_KEY = 255  # (a click picks the note up to here: the most keys a project has)
@@ -191,7 +192,7 @@ def crossings(sh):
     out = []
 
     def add(key, t):
-        if 0 <= key <= TOP_KEY and (key in keys if keys else key % 12 in WHITE) and (not out or out[-1][0] != key):
+        if 0 <= key <= top_key() and (key in keys if keys else key % 12 in WHITE) and (not out or out[-1][0] != key):
             out.append((key, float(t)))
 
     add(math.floor(p[0] + 0.5), b[0])
@@ -341,7 +342,7 @@ def gliss_notes(sh, ppq):
     rows = [np.column_stack([starts, ends, np.asarray(keys, np.int64)])]
     up, down = g.get("above", 0), g.get("below", 0)
     if up or down:  # copies, one picked key over each (counted among every picked key, not only the run's)
-        every = run_keys(g, 0, TOP_KEY)
+        every = run_keys(g, 0, top_key())
         place = {k: j for j, k in enumerate(every)}
         at = np.asarray([place[k] for k in keys], np.int64)
         every = np.asarray(every, np.int64)
@@ -354,7 +355,7 @@ def gliss_notes(sh, ppq):
 
 def shifted(g, key, c):
     """key moved c picked keys up (down when c < 0), as far as the picked keys go (None: key not picked)."""
-    every = run_keys(g, 0, TOP_KEY)
+    every = run_keys(g, 0, top_key())
     j = bisect.bisect_left(every, key)
     if j >= len(every) or every[j] != key:
         return None
@@ -377,7 +378,7 @@ def copies_at(sh, keys_away, side, ppq):
     mid = middle_note(sh, ppq)
     if mid is None:
         return 0
-    every = run_keys(g, 0, TOP_KEY)
+    every = run_keys(g, 0, top_key())
     to = mid[1] + keys_away
     near = min(range(len(every)), key=lambda j: abs(every[j] - to))
     n = near - every.index(mid[1])

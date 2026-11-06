@@ -11,7 +11,7 @@ from notes.bezier import anchor_count, fit, handle_anchor, sample
 from notes.custom import chop, row_spans, spam_gate
 from notes.gaterange import clean_range, y_gate
 from notes.hzbass import heard_layers
-from notes.paths import EDGE, TOP_KEY, pitch_of
+from notes.paths import EDGE, pitch_of, top_key
 from notes.pattern import clean_pattern, clean_shape_formula, formed_path, has_formula, moved_formulas
 
 # ---------------------------------------------------------------- funnels
@@ -509,7 +509,7 @@ def to_wall(sh, a, b):
 
 
 def _keys(ps):
-    return range(max(0, pitch_of(min(ps))), min(TOP_KEY, pitch_of(max(ps))) + 1)
+    return range(max(0, pitch_of(min(ps))), min(top_key(), pitch_of(max(ps))) + 1)
 
 
 def funnel_sides(sh):

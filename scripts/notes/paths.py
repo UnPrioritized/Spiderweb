@@ -11,6 +11,8 @@ Paths are NumPy arrays of (time, pitch) rows here (a line with tiny tumours has 
 """
 
 import math
+import threading
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -18,6 +20,25 @@ EDGE = 0.5 - 1e-6  # half a pitch row, just inside the row
 ROW_EDGE = 1e-7  # a line point this close to the edge between two rows counts as on it (parts_notes)
 KEYS = (128, 256)  # the project's key range: the MIDI standard 0-127, or 0-255 (256-key MIDI)
 TOP_KEY = KEYS[-1] - 1  # the highest key a shape can ever make (the project's range filters the rest)
+_rows = threading.local()
+
+
+def top_key():
+    """The highest key row a fill makes: TOP_KEY, or higher while a shape past the edges is made lifted onto the
+    keys (engine.past_edges: rows_up_to, this thread only)."""
+    return getattr(_rows, "top", TOP_KEY)
+
+
+@contextmanager
+def rows_up_to(top):
+    """Fills make rows up to top (at least TOP_KEY) inside this, on this thread (a shape lifted far up: its rows
+    inside the keys must all be made, hunt 2026-11-06)."""
+    old = getattr(_rows, "top", TOP_KEY)
+    _rows.top = max(TOP_KEY, int(top), old)
+    try:
+        yield
+    finally:
+        _rows.top = old
 
 
 # ---------------------------------------------------------------- path -> notes
