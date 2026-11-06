@@ -16,26 +16,29 @@ Windows, nothing to install. Linux and Windows users can also [run it from sourc
 
 ## What it can do
 
-- **Draw** lines, polylines, freehand strokes, curves, arcs, circles, polygons, stars, funnels, text, and shapes you
-  draw yourself.
+- **Draw** lines, polylines, freehand strokes, curves, arcs, circles, polygons, stars, funnels, glissando runs, text,
+  and shapes you draw yourself.
 - **Fill** shapes with notes: one long note per key, or chopped into notes of any length (spam). Inside fills can be
   smaller copies of the shape (Nested), another shape repeated like wallpaper (Tiles), or rings growing out from
   shapes drawn inside (Ripples).
 - **Shape the notes:** add bumps along lines (tumours), shape the velocities, and put overlapping shapes on
-  different channels.
+  different channels (or remove the overlaps, track by track).
 - **Hz bass:** spam so fast it sounds like a tone, with a synth window (knobs, effects, layers) and a preview you
   can hear right away.
 - **Image to notes:** turn an image into notes in up to 15 colours (16 with channel 10).
 - **Note tools:** Claw machine, Strum and Chop pages that change the notes of a shape, Add between (shapes that step
-  from one shape to another), Recolour, Gate trim, Fill gaps, slicing (with a line, a Lasso loop or another shape)
-  and merging.
+  from one shape to another), Recolour and Stir (swirls and bends made from the colours you drew), Gate trim, Gate
+  extend, Fill gaps, slicing (with a line, a Lasso loop or another shape) and merging.
+- **Draw on Domino** (Experimental, Windows): Spiderweb's drawing tools right on Domino's piano roll; each finished
+  shape goes into Domino's current track by itself.
 - **Load MIDI:** open a MIDI file, even a huge dense one, draw on top of it, change its tempo, reorder or draw into
   its tracks; the export changes only what you changed.
 - **Track list and Conductor pane:** see and arrange the tracks your MIDI will have (Tab), and draw the tempo as a
   line with jumps, glides and catch-ups, plus time and key signatures.
 - **Share shapes** with others as one line of text.
-- **Play it as you go** (Built-in BASSMIDI, or Kestrel on the graphics card for walls of notes), then write a .mid
-  file, or copy the notes straight into Domino (and paste notes from Domino, or save a Domino song file).
+- **Play it as you go** (Built-in BASSMIDI, Kestrel on the graphics card, or Rendered ahead: the sound made a little
+  ahead of the play line, so even the densest walls play without dropping notes), then write a .mid file, or copy
+  the notes straight into Domino (and paste notes from Domino, or save a Domino song file).
 - **Settings:** light or dark look, your own note colours, size, font and language.
 
 | Every key a line crosses gets a note | Nested fill: copies inside copies | Hz bass synth window |
@@ -123,7 +126,8 @@ mouse shortcuts.
 <summary>Windows or Linux, Python 3.10 or newer</summary>
 
 You need:
-- **Windows or Linux.** A Linux user reports it works; copying notes to and from Domino works on Windows only.
+- **Windows or Linux.** A Linux user reports it works; copying notes to and from Domino and Draw on Domino work on
+  Windows only.
   macOS is untested: start it with `python3 spiderweb.py` (Python from python.org, not Apple's: its Tk is old). If
   macOS blocks the sound files, run `xattr -d com.apple.quarantine scripts/bass/mac/*.dylib` once.
 - **Python 3.10 or newer** ([python.org](https://www.python.org); tested with 3.14; Tkinter comes with it).
@@ -154,8 +158,10 @@ pip install numpy==2.5.3 numba==0.68.0 pillow==12.3.0
 
 **Playback** goes to the MIDI out picked in Settings → Sound: Windows' MIDI output, Built-in BASSMIDI (Spiderweb's own
 synth, with a soundfont you pick; the default on Linux), Kestrel (GPU, Experimental: the same soundfonts played on
-the graphics card, 64-bit Windows and Linux), or OmniMIDI (KDMAPI) when OmniMIDI is installed. The
-Hz bass window's Preview always uses the built-in synth (no MIDI device needed).
+the graphics card, 64-bit Windows and Linux), Rendered ahead (the sound made ahead of the play line with Merlin or
+Kestrel on the graphics card, or BASSMIDI), OmniMIDI (KDMAPI) when OmniMIDI is installed, or Maestro (API) when
+Maestro is installed. The Hz bass window's Preview needs no MIDI device: it plays with BASSMIDI, or Merlin / Kestrel
+on the graphics card.
 
 **Building the .exe yourself:** install PyInstaller once (`pip install pyinstaller`), then double-click
 **build.bat**. The result is in the `dist` folder.
@@ -181,9 +187,14 @@ Kestrel (GPU) playback uses **Kestrel**, the GPU MIDI synth by thtstickyboi
 (mbms0, [mbms0/kestrel-midi](https://github.com/mbms0/kestrel-midi)). It's under the Mozilla Public License 2.0.
 Spiderweb talks to it through its own small connector (source in `native/kestrel_bridge`; the built files in
 `scripts/kestrel`, the Windows one also inside the .exe; they aren't in this git repository: take them from a
-release's source zip, or build the connector with `cargo build --release`). Spiderweb's copy of Kestrel has small changes of its own;
-their source is at [UnPrioritized/kestrel-midi](https://github.com/UnPrioritized/kestrel-midi). Its licence and
-those of the libraries it carries are at the end of [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+release's source zip, or build the connector with `python native/kestrel_bridge/build_release.py`). Rendered ahead
+also uses **Merlin**, Kestrel's second renderer that drops no note. Spiderweb's copy of Kestrel has small changes of
+its own; their source and what they do are at [UnPrioritized/kestrel-midi](https://github.com/UnPrioritized/kestrel-midi)
+(branch `spiderweb`). Its licence and those of the libraries it carries are at the end of
+[THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+
+Maestro (API) playback talks to **Maestro** by dimms0 ([dimms0/maestro](https://github.com/dimms0/maestro)) when you
+have it installed; no part of Maestro comes with Spiderweb.
 
 The .exe also carries Python, Tcl/Tk, NumPy, Numba, llvmlite (with LLVM), Pillow, PyNaCl (with libsodium, cffi and
 pycparser) and PyInstaller's starter program. Their licences are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
