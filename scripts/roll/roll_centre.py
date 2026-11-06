@@ -293,8 +293,9 @@ class CentreDots:
         if got is None:
             return
         put = {"round": True, "seen": st2["seen"],
-               "reach": min(got["reach"], most_reach(st2, self.area_k(made, st2))), "stretch": got["stretch"],
-               "tilt": got["tilt"], "skew": got["skew"]}
+               "reach": min(got["reach"], most_reach(st2, self.area_k(made, st2))), "tilt": got["tilt"],
+               "skew": got["skew"], **{key: round(min(max(got[key], LEAST_STRETCH), MOST_STRETCH), 3)
+                                       for key in ("stretch", "stretch_up")}}
         i = self.app.stir_window.tab
         self.app.change_recolour(lambda old, sh: with_stir(old, i, lambda s: dict(s, **put)) if sh is target else old,
                                  None, False)
@@ -302,7 +303,8 @@ class CentreDots:
     def area_box_drag(self, e):
         """The area box handle held: the grabbed shape's area resized / turned / slanted like a custom shape's box
         (Ctrl on a corner keeps its proportions, Shift turns freely, else in 15° steps), the box turned back into
-        its middle, Size, Stretch, Angle and slant (recolour.area_from_box)."""
+        its middle, Size, Stretch, Angle and slant (recolour.area_from_box): a side or corner = the Stretches (Size
+        stays), Ctrl on a corner = Size (the Stretches stay; user 11-06)."""
         from window.stir_window import with_stir
         _, made, _, kind, k, orig, start, a0, target = self.drag
         rc, notes, own, _ = made
@@ -319,14 +321,18 @@ class CentreDots:
             new = self.skew_custom(orig, k, pt[0] - start[0], pt[1] - start[1])
         st = self.target_stir(target)  # (as it is now: the press may have made it round as seen)
         pcts = [centre_at(rc, notes, own, b * self.app.ppq, p) for b, p in new]
-        got = area_from_box(st, *pcts, self.area_k(made, st))
+        sized = kind == "corner" and bool(e.state & CTRL)
+        got = area_from_box(st, *pcts, self.area_k(made, st), keep="stretch" if sized else "size")
         if got is None:  # (turned inside out / flat: stays as it was last)
             return
         lo, hi = (SPOT_LEAST, SPOT_MOST) if self.target_stir(target)["spot"] else (0.0, 100.0)
         middle = [round(min(max(v, lo), hi), 3) for v in got["middle"]]
-        put = {"reach": round(min(max(got["reach"], LEAST_REACH), most_reach(st, self.area_k(made, st))), 3),
-               "stretch": round(min(max(got["stretch"], LEAST_STRETCH), MOST_STRETCH), 3),
-               "tilt": round(got["tilt"], 3), "skew": round(min(max(got["skew"], -MOST_SKEW), MOST_SKEW), 4)}
+        put = {"tilt": round(got["tilt"], 3), "skew": round(min(max(got["skew"], -MOST_SKEW), MOST_SKEW), 4)}
+        if sized:
+            put["reach"] = round(min(max(got["reach"], LEAST_REACH), most_reach(st, self.area_k(made, st))), 3)
+        else:
+            put.update({key: round(min(max(got[key], LEAST_STRETCH), MOST_STRETCH), 3)
+                        for key in ("stretch", "stretch_up")})
         i = w.tab
 
         def changed(old, sh):

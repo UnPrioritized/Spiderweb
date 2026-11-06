@@ -64,9 +64,11 @@ MOST_SEED = 2 ** 31 - 1
 # tick was ticked (a key looked as tall as that many beats are wide; zoom never changes it afterwards); "round" =
 # the area measured that way (a circle stays round on a long shape, Size = % of the box's longer side as seen);
 # "spin" = Turn / Twist turn the colours that way too; "stretch" = the area's width across in %, with or without
-# round (user picked "works either way"))
+# round (user picked "works either way"); "stretch_up" = its height the same way (user 11-06: Size = the base, both
+# stretched from it; old files have none = 100))
 STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "stay", "edge": "escape",
                  "squeeze": True, "reach": None, "area": "circle", "round": False, "stretch": 100.0,
+                 "stretch_up": 100.0,
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
                  "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
                  "area_squeeze": True, "reverse": False, "flip_in": "whole", "flip_by": "time", "mirror": "shape",
@@ -80,7 +82,7 @@ MOST_SMOOTH, NEW_SMOOTH = 100.0, 20.0  # (20: the least that took the tester's s
 # ("size_mix": only Add between's steps, 0..1 = how far Size counts from the box to the circle inside (0..-1: to
 # the circle around, SIZE_SHARE), so the area
 # grows smoothly between an end of each kind, hunt 11-05 6; never set from the window)
-MOST_REACH_INSIDE = 1000.0  # (Size of the circle inside may go as far as the box's own 100 %, hunt 11-05 8)
+MOST_REACH_INSIDE = 2000.0  # (Size of the circle inside may go as far as the box's own 200 %, hunt 11-05 8)
 # (Chinese tester's feedback 11-04, PLAN.md, each a second choice with the old way as the default (user):
 # "flip_by" = the sideways colour flip by "time" (mirrored across the row's notes' span) / "order" (each key row's
 # 1st note <-> its last, 2nd <-> 2nd-last, lengths left out); "mirror" = with flips inside / outside the area, they
@@ -110,7 +112,7 @@ SPOT_LEAST, SPOT_MOST = -100.0, 200.0  # (the area's own spot may sit past the b
 # its filled outline in its 0..1 box (v up), "aspect": its width / height as drawn}; Size = its box's width)
 # (spot: the area's own middle [% across, % up] when it doesn't move with the Centre point (PLAN C1, user 11-04:
 # Turn / Twist still go round the Centre point, the area sits here); None = on the Centre point; only with a reach)
-MOST_REACH, LEAST_REACH = 100.0, 0.01
+MOST_REACH, LEAST_REACH = 200.0, 0.01  # (200 % of the box at most, however Size is counted: user 11-06)
 MOST_TURN = 360000.0  # (Stir's Turn: 1000 whole turns, only so a file can't hold nonsense; user 11-04 dropped +-360)
 MOST_STRETCH, LEAST_STRETCH = 1000.0, 10.0
 STIR_AREAS = ("circle", "square", "diamond")  # (Size = the circle's width / the square's side / the diamond's tip to tip)
@@ -265,7 +267,7 @@ def stir_stack(s):
 def one_stir(s):
     """One saved stir -> {"turn": degrees -MOST_TURN..MOST_TURN, "twist": turns -MOST_TIGHT..MOST_TIGHT, "centre": [% across,
     % up], "sets": "move" (STIR_SETS), "edge": "wrap" (STIR_EDGES), "squeeze": False, "reach": % LEAST_REACH..
-    MOST_REACH (+ "area": STIR_AREAS, "stretch": %, "round": True, only with a reach), "spin": True, "seen":
+    MOST_REACH (+ "area": STIR_AREAS, "stretch" / "stretch_up": %, "round": True, only with a reach), "spin": True, "seen":
     beats per key (only with round / spin), "flip_side" / "flip_up": True}, each only when not its default (STIR_DEFAULTS), or None (no
     stir)."""
     if not isinstance(s, dict):
@@ -309,9 +311,10 @@ def one_stir(s):
             shape = clean_area_shape(s.get("shape"))
             if shape:
                 out["area"], out["shape"] = DRAWN, shape
-        w = s.get("stretch")
-        if number(w) and LEAST_STRETCH <= round(w, 3) <= MOST_STRETCH and round(w, 3) != 100:
-            out["stretch"] = round(float(w), 3)
+        for key in ("stretch", "stretch_up"):
+            w = s.get(key)
+            if number(w) and LEAST_STRETCH <= round(w, 3) <= MOST_STRETCH and round(w, 3) != 100:
+                out[key] = round(float(w), 3)
         p = s.get("spot")
         if isinstance(p, list) and len(p) == 2 and all(number(x) and SPOT_LEAST <= x <= SPOT_MOST for x in p):
             out["spot"] = [round(float(x), 3) for x in p]
@@ -995,7 +998,7 @@ def area_scales(st, spot, ppq):
 def area_local(dx, dy, st, k):
     """(dx, dy) from the area's middle (the colour box 0..1 across / up) -> the area's own (X, Y) (its outline at
     about 1: area_q): k = area_scales' (kx, ky), then the area's Angle (tilt) and slant (skew) undone, Stretch
-    along its own width (PLAN C2b; tilt 0 / skew 0 = exactly the old way)."""
+    along its own width and Stretch up along its height (PLAN C2b; tilt 0 / skew 0 = exactly the old way)."""
     r = st["reach"] / 200 * size_scale(st, k)
     X, Y = np.asarray(dx, np.float64) * k[0] / r, np.asarray(dy, np.float64) * k[1] / r
     if st["tilt"]:
@@ -1003,12 +1006,12 @@ def area_local(dx, dy, st, k):
         X, Y = X * math.cos(a) + Y * math.sin(a), Y * math.cos(a) - X * math.sin(a)
     if st["skew"]:
         X = X - st["skew"] * Y
-    return X / (st["stretch"] / 100), Y
+    return X / (st["stretch"] / 100), Y / (st["stretch_up"] / 100)
 
 
 def area_global(X, Y, st, k):
     """area_local's way back: the area's own (X, Y) -> (dx, dy) from its middle, the colour box 0..1."""
-    X, Y = np.asarray(X, np.float64) * (st["stretch"] / 100), np.asarray(Y, np.float64)
+    X, Y = np.asarray(X, np.float64) * (st["stretch"] / 100), np.asarray(Y, np.float64) * (st["stretch_up"] / 100)
     if st["skew"]:
         X = X + st["skew"] * Y
     if st["tilt"]:
@@ -1074,11 +1077,11 @@ def size_scale(st, k):
 
 def most_reach(st, k):
     """The largest Size for stir st (filled in, k = area_scales' (kx, ky)), the ONE rule for the window and the
-    piano roll's drags: 100 % of the box when counting by the circle inside (then more than 100, up to
-    MOST_REACH_INSIDE); else 100 (the circle around at 100 % = through the box's corners, user 11-05: the roll's
-    drags stopped at 70.7 %, hunt 11-06)."""
+    piano roll's drags: 200 % of the box however Size is counted (user 11-06; counting by the circle inside = more
+    than 200, up to MOST_REACH_INSIDE); the circle around never under 100 (= through the box's corners, user 11-05:
+    the roll's drags stopped at 70.7 %, hunt 11-06)."""
     scale = size_scale(st, k)
-    return min(MOST_REACH / scale, MOST_REACH_INSIDE) if scale < 1.0 else MOST_REACH
+    return min(max(MOST_REACH / scale, 100.0), MOST_REACH_INSIDE)
 
 
 def area_aspect(st):
@@ -1093,21 +1096,25 @@ def area_corners(st, k):
     return area_global(np.array([-1.0, 1.0, 1.0, -1.0]), np.array([-h, -h, h, h]), st, k)
 
 
-def area_from_box(st, p0, pu, pv, k):
+def area_from_box(st, p0, pu, pv, k, keep="size"):
     """An area's settings for a box dragged on the piano roll (PLAN C2b: its corners (-, -), (+, -), (-, +) in % of
-    the colour box): {"middle" [% across, % up], "reach", "stretch", "tilt", "skew"}, or None (a box turned
-    inside out / flat)."""
+    the colour box): {"middle" [% across, % up], "reach", "stretch", "stretch_up", "tilt", "skew"}, or None (a box
+    turned inside out / flat). keep "size" = st's Size stays, both Stretches take the box (user 11-06: a side
+    dragged = its own stretch); "stretch" = st's Stretch up stays, Size takes the box's height (Ctrl on a corner,
+    an area made from a box)."""
     p0, pu, pv = (np.asarray(p, np.float64) / 100 for p in (p0, pu, pv))
     c1, c2 = (pu - p0) / 2 * k, (pv - p0) / 2 * k  # (half its width / height, measured the area's way)
     tilt = math.atan2(c1[1], c1[0])
     cw, sw = math.cos(tilt), math.sin(tilt)
     wx, wy = c2[0] * cw + c2[1] * sw, c2[1] * cw - c2[0] * sw
-    r = wy * area_aspect(st)
-    if r <= 1e-9:
+    h = wy * area_aspect(st)  # (its height, in Size's measure before Stretch up)
+    if h <= 1e-9:
         return None
+    scale = size_scale(st, k)
+    r = st["reach"] / 200 * scale if keep == "size" else h / (st["stretch_up"] / 100)
     middle = (pu + pv) / 2 * 100
-    return {"middle": [float(v) for v in middle], "reach": 200 * r / size_scale(st, k),
-            "stretch": 100 * math.hypot(*c1) / r,
+    return {"middle": [float(v) for v in middle], "reach": 200 * r / scale,
+            "stretch": 100 * math.hypot(*c1) / r, "stretch_up": 100 * h / r,
             "tilt": math.degrees(tilt), "skew": wx / wy}
 
 
@@ -1354,7 +1361,7 @@ def area_mirrored(at, mid, key, rc, box, own, side, up, smooth=0.0, outside=Fals
         x, y = unit_xy(np.asarray(t, np.float64), np.asarray(k, np.float64), rc, box, own)
         return area_spot_q(np.asarray(x, np.float64), np.asarray(y, np.float64), st, kxy) < 1
 
-    sig = (st["reach"], st["area"], id(st["shape"]), st["stretch"], st["tilt"], st["skew"],
+    sig = (st["reach"], st["area"], id(st["shape"]), st["stretch"], st["stretch_up"], st["tilt"], st["skew"],
            tuple(st["spot"] or st["centre"]), st["round"], st["seen"], st["size_of"], json.dumps(st.get("size_mix")),
            tuple(float(v) for v in box), tuple(float(v) for v in own), json.dumps(rc.get("frame")),
            json.dumps(rc.get("whole")), rc.get("ppq"))

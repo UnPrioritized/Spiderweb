@@ -201,8 +201,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # a drawing round the Centre point; Size = its width in % of the box; Whole shape = no area)
         self._part("area")
         self.reach_last = 50.0  # (the size picking an area brings back: the last one shown)
-        self.area_last = {"round": False, "stretch": 100.0, "seen": None, "spot": None, "tilt": 0.0,
-                          "skew": 0.0}  # (likewise, hunt 11-04)
+        self.area_last = {"round": False, "stretch": 100.0, "stretch_up": 100.0, "seen": None, "spot": None,
+                          "tilt": 0.0, "skew": 0.0}  # (likewise, hunt 11-04)
         word = ttk.Label(form, text=tr("stir.area"))
         Tooltip(word, tr("stir.area_tip"))
         self.areas = ("whole",) + STIR_AREAS
@@ -245,9 +245,19 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                                    command=lambda key=key: self.on_round(key))
             Tooltip(tick, tr(f"stir.{key}_tip"))
             self.rounds[key] = (var, tick)
-        self._put("area", (1, self.rounds["round"][1]),
-                  (2, self._cell(form, "stretch", LEAST_STRETCH, MOST_STRETCH, "stir.stretch", "stir.stretch_tip", "%")),
-                  (3, self._cell(form, "tilt", -360, 360, "stir.angle", "stir.angle_tip", "°")))  # (PLAN C2b)
+        # (Stretch across + up on one row, user 11-06: Size = the base, each side stretched from it)
+        cell = ttk.Frame(form)
+        word = ttk.Label(cell, text=tr("stir.stretch"))
+        word.pack(side="left")
+        Tooltip(word, tr("stir.stretch_tip"))
+        for key, text in (("stretch", "stir.stretch_across"), ("stretch_up", "stir.stretch_up")):
+            w = ttk.Label(cell, text=tr(text))
+            w.pack(side="left", padx=(4 if key == "stretch" else 6, 0))
+            Tooltip(w, tr("stir.stretch_tip"))
+            self._number_box(cell, key, LEAST_STRETCH, MOST_STRETCH, w)
+            ttk.Label(cell, text="%").pack(side="left")
+        self._put("area", (1, self.rounds["round"][1]), (2, cell, 2),
+                  (4, self._cell(form, "tilt", -360, 360, "stir.angle", "stir.angle_tip", "°")))  # (PLAN C2b)
         self._put("area", (1, self.rounds["spin"][1], 4))
         # (user 11-04: a button takes the piano roll's look again, for both ticks; zoom alone never does)
         self.match = ttk.Button(form, text=tr("stir.match"), command=self.on_match)
@@ -713,12 +723,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         b["shown"] = text
         b["entry"].config(state="normal" if on and sizes else "disabled")
         areas = [s for s in sts if s["reach"] is not None]  # (Round as seen + Stretch: only with an area)
-        looks = {(s["round"], s["stretch"], s["seen"] if s["round"] else None, tuple(s["spot"] or ()), s["tilt"],
-                  s["skew"]) + tuple(s[k] for k in AREA_KEPT) for s in areas}
+        looks = {(s["round"], s["stretch"], s["stretch_up"], s["seen"] if s["round"] else None,
+                  tuple(s["spot"] or ()), s["tilt"], s["skew"]) + tuple(s[k] for k in AREA_KEPT) for s in areas}
         if len(looks) == 1:  # (what picking an area again brings back; the round-3 settings too, hunt 11-04 5)
-            r, w, v, p, t, k, *more = next(iter(looks))
-            self.area_last = {"round": r, "stretch": w, "seen": v, "spot": list(p) or None, "tilt": t, "skew": k,
-                              **dict(zip(AREA_KEPT, more))}
+            r, w, wu, v, p, t, k, *more = next(iter(looks))
+            self.area_last = {"round": r, "stretch": w, "stretch_up": wu, "seen": v, "spot": list(p) or None,
+                              "tilt": t, "skew": k, **dict(zip(AREA_KEPT, more))}
         tied = {s["spot"] is None for s in areas}
         self.tied.set(tied != {False})
         self.tied_tick.state(["alternate" if len(tied) > 1 else "!alternate",
@@ -764,7 +774,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 b["var"].set(text)
             b["shown"] = text
             b["entry"].config(state="normal" if on and live_ else "disabled")
-        for key, empty in (("stretch", 100), ("tilt", 0)):
+        for key, empty in (("stretch", 100), ("stretch_up", 100), ("tilt", 0)):
             b = self.boxes[key]
             vals = {s[key] for s in areas}
             text = fmt(next(iter(vals))) if len(vals) == 1 else "" if vals else fmt(empty)
@@ -836,7 +846,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                     if st["reach"] is None:
                         st["reach"] = self.reach_last
                         last = self.area_last
-                        st["stretch"] = last["stretch"]
+                        st["stretch"], st["stretch_up"] = last["stretch"], last.get("stretch_up", 100.0)
                         st["spot"] = last["spot"]
                         st["tilt"], st["skew"] = last.get("tilt", 0.0), last.get("skew", 0.0)
                         st.update({k: last[k] for k in AREA_KEPT if k in last})
@@ -859,7 +869,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 st["centre"] = c
             else:
                 st[key] = value
-            # (never past 100 % of the box, however Size is counted, hunt 11-05 8; the shape's proportions only
+            # (never past 200 % of the box, however Size is counted, hunt 11-05 8 + user 11-06; the shape's proportions only
             # looked up for the settings that change that limit)
             if st["reach"] is not None and key in ("reach", "area", "round", "spin", "seen", "size_of"):
                 most = most_reach(st, self.shape_k(sh, st))  # (the roll's drags use the same rule)
@@ -868,6 +878,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         if self.drawing:  # (an area being drawn: the selection is the drawing, not the stirred shapes)
             return False
         only = {"reach": lambda st: st["reach"] is not None, "stretch": lambda st: st["reach"] is not None,
+                "stretch_up": lambda st: st["reach"] is not None,
                 "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
                 **{k: lambda st: st["reach"] is not None for k in ("hard", "reverse", "area_turn", "area_twist",
                                                                    "area_squeeze", "flip_in", "mirror",
@@ -1134,10 +1145,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             made = roll.stir_made(t)
             if made is None:
                 continue
-            st = dict(stir_at(made[0], i), area=DRAWN, shape=shape, round=True, seen=seen)
+            st = dict(stir_at(made[0], i), area=DRAWN, shape=shape, round=True, seen=seen, stretch_up=100.0)
             st["reach"] = st["reach"] or self.reach_last
             pcts = [centre_at(made[0], made[1], made[2], b * app.ppq, p) for b, p in box]
-            got = area_from_box(st, *pcts, roll.area_k(made, st))
+            got = area_from_box(st, *pcts, roll.area_k(made, st), keep="stretch")  # (Size = its height)
             if got is None:
                 continue
             mid = got["middle"]
@@ -1145,8 +1156,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             lo, hi = (SPOT_LEAST, SPOT_MOST) if own else (0.0, 100.0)
             middle = [round(min(max(v, lo), hi), 3) for v in mid]
             puts[id(t)] = dict(area=DRAWN, round=True, seen=seen,
-                               reach=round(min(max(got["reach"], LEAST_REACH), MOST_REACH), 3),
+                               reach=round(min(max(got["reach"], LEAST_REACH),
+                                               most_reach(st, roll.area_k(made, st))), 3),
                                stretch=round(min(max(got["stretch"], LEAST_STRETCH), MOST_STRETCH), 3),
+                               stretch_up=100.0,
                                tilt=round(got["tilt"], 3), skew=round(got["skew"], 4),
                                **({"spot": middle} if own else {"centre": middle}))
         if not puts:  # (no stirred shape has notes: nothing would change, the strokes stay, hunt C 9)
@@ -1192,7 +1205,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             if st["area"] == DRAWN and st["shape"]:
                 loops, aspect, label = st["shape"]["loops"], st["shape"]["aspect"], st["shape"]["name"]
             else:  # (a built-in area: its outline, in its own box)
-                lines = area_outlines(dict(st, tilt=0.0, skew=0.0, stretch=100.0), 72)
+                lines = area_outlines(dict(st, tilt=0.0, skew=0.0, stretch=100.0, stretch_up=100.0), 72)
                 loops = [[[(x + 1) / 2, (y + 1) / 2] for x, y in zip(*ln)] for ln in lines]
                 aspect, label = 1.0, tr("stir.area_" + st["area"])
             strokes = [{"kind": "poly", "pts": [list(map(float, p)) for p in lp] + [list(map(float, lp[0]))]}
