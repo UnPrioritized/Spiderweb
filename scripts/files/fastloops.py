@@ -27,8 +27,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   smooth_sor     nested.smooth_values' loop (Nested fill, Blend)
   gap_ticks      tempo_file.keep_gaps' work on one Keep timing part (export, Conductor pane checks)
   gap_plan       tempo_file.file_plan's gaps of one Keep timing part as file tempo runs (with tempo._fit_blocks,
-                 _flat_pair, _near_pair, _nearest1 as _fit_blocks_n ...); stops at a gap needing _fit_exact / the
-                 full pair search, which Python does
+                 _fit_exact, _flat_pair (+ its full search), _near_pair, _nearest1, next_safe as *_n)
   limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
                  never waits for Python); the same maths within float rounding
   midi_walk      midi_scan.walk (Load MIDI: a track's events read + checked), the very same function compiled
@@ -1846,16 +1845,118 @@ def _near_pair_n(n, target, reach):
 
 
 @njit(cache=CACHE, nogil=True)
-def _flat_pair_n(n, target, reach):
-    """tempo._flat_pair_search up to its full search: (0, a, ticks of a, b) / (1, ...) None / (2, ...) the full
-    search is needed (left to Python)."""
+def _next1n(u, way, reach):
+    """tempo._next1: the first safe value u + way k, k = 1 .. reach - 1 (u when none)."""
+    for k in range(1, reach):
+        if _safe1n(u + way * k):
+            return u + way * k
+    return u
+
+
+@njit(cache=CACHE, nogil=True)
+def _next_small_n(u, way, reach):
+    """tempo._next_small / _next_by_bpm: walked by the BPMs a file can store."""
+    c = u + way
+    while 1 <= c <= 0xFFFFFF and (c - u) * way < reach:
+        v = np.int64(np.trunc(6e7 / np.float64(np.float32(6e7 / c))))
+        if v == c:
+            return c
+        c = v if (v - c) * way > 0 else c + way
+    return u
+
+
+@njit(cache=CACHE, nogil=True)
+def _next_safe_n(body, nb, way, reach, out):
+    """tempo.next_safe of body[:nb] into out (its three ways by length, as there)."""
+    if nb == 1:
+        out[0] = _next1n(body[0], way, reach)
+        return
+    for i in range(nb):
+        u = body[i]
+        if nb <= 32:
+            out[i] = _next_small_n(u, way, reach)
+            continue
+        got = -1
+        for k in range(1, 9):
+            c = u + way * k
+            if _safe1n(c):
+                got = c
+                break
+        out[i] = got if got != -1 else _next_small_n(u, way, reach)
+
+
+@njit(cache=CACHE, nogil=True)
+def _safe_side_n(start, way, reach, safe_reach, out):
+    """tempo._safe_side: up to reach safe values from start (included) going way into out; how many."""
+    c, u = 0, start - way
+    while c < reach:
+        found = 0
+        last = u
+        for k in range(1, 513):  # (a window of 512 candidates)
+            x = u + way * k
+            if 1 <= x <= 0xFFFFFF and _domino_safe1(x):
+                found += 1
+                if c < reach:
+                    out[c] = x
+                    c += 1
+                    last = x
+        if found == 0:
+            nxt = _next1n(u, way, safe_reach)
+            if nxt == u:
+                break
+            out[c] = nxt
+            c += 1
+            u = nxt
+            continue
+        u = last
+    return c
+
+
+@njit(cache=CACHE, nogil=True)
+def _full_pair_n(n, target, reach, safe_reach):
+    """tempo._flat_pair_search's full search (safe values far apart): (0, a, ticks of a, b) / (1, ...) None."""
+    q = target / n
+    downs = np.empty(reach, np.int64)
+    ups = np.empty(reach, np.int64)
+    nd = _safe_side_n(np.int64(math.floor(q)), -1, reach, safe_reach, downs)
+    nu = _safe_side_n(np.int64(math.ceil(q)), 1, reach, safe_reach, ups)
+    if nd == 0 or nu == 0:
+        return 1, 0, 0, 0
+    for ia in range(nd):  # (a pair of one value adding up exactly: the first, a then b)
+        for ib in range(nu):
+            if ups[ib] == downs[ia] and downs[ia] * n == target:
+                return 0, downs[ia], n, downs[ia]
+    found, b_far, b_a, b_b, b_k = False, 0.0, 0, 0, 0
+    for ia in range(nd):
+        for ib in range(nu):
+            av, bv = downs[ia], ups[ib]
+            if bv == av:
+                continue
+            num = n * bv - target
+            k = num // (bv - av)
+            if num % (bv - av) != 0 or not 0 <= k <= n:
+                continue
+            far = (q - np.float64(av)) + (np.float64(bv) - q)
+            if not found or far < b_far:  # (the first of the nearest)
+                found, b_far, b_a, b_b, b_k = True, far, av, bv, k
+    if not found:
+        return 1, 0, 0, 0
+    return 0, b_a, b_k, b_b
+
+
+@njit(cache=CACHE, nogil=True)
+def _flat_pair_n(n, target, reach, safe_reach):
+    """tempo._flat_pair_search: (0, a, ticks of a, b) / (1, ...) None."""
     a0 = target // n
     r = target - a0 * n
     if r == 0 and _safe1n(a0):
         return 0, a0, n, a0
     if r != 0 and _safe1n(a0) and _safe1n(a0 + 1):
         return 0, a0, n * (a0 + 1) - target, a0 + 1
-    return _near_pair_n(n, target, reach)
+    code, pa, pk, pb = _near_pair_n(n, target, reach)
+    if code != 2:
+        return code, pa, pk, pb
+    return _full_pair_n(n, target, reach, safe_reach)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1865,28 +1966,81 @@ def _put_pair(out, n, a, ka, b):
 
 
 @njit(cache=CACHE, nogil=True)
+def _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out):
+    """tempo._fit_exact of ideal[:n] (left as it is) into out[:n]: 0 = made, 1 = None."""
+    top = 0xFFFFFF
+    if n == 0 or not n <= target <= n * top:
+        return 1
+    lo, hi = np.inf, -np.inf
+    for i in range(n):
+        lo, hi = min(lo, ideal[i]), max(hi, ideal[i])
+    if hi - lo < 1:
+        code, pa, pk, pb = _flat_pair_n(n, target, pair_reach, safe_reach)
+        if code == 0:
+            _put_pair(out, n, pa, pk, pb)
+            return 0
+    scale = target / (0.0 + _pw_sum(ideal, 0, n))
+    want = np.empty(n, np.float64)
+    for i in range(n):
+        want[i] = ideal[i] * scale
+        out[i] = _nearest1n(min(max(want[i], 1.0), np.float64(top)), safe_reach)
+    nb = max(0, n - 2)  # (the last two are picked as a pair at the end)
+    nxt = np.empty(max(nb, 1), np.int64)
+    for _ in range(8):
+        s = 0
+        for i in range(nb):
+            s += out[i]
+        rest = target - s - np.int64(0.0 + _pw_sum(want, nb, n - nb))
+        way = 1 if rest > 0 else -1
+        _next_safe_n(out, nb, way, safe_reach, nxt)
+        used, took = 0, 0
+        for i in range(nb):
+            used += abs(nxt[i] - out[i])
+            if used > abs(rest):
+                break
+            took += 1
+        if took == 0:
+            break
+        for i in range(took):
+            out[i] = nxt[i]
+    s = 0
+    for i in range(nb):
+        s += out[i]
+    rest = target - s
+    if n == 1:
+        out[0] = rest
+        return 0 if 1 <= rest <= top and _domino_safe1(rest) else 1
+    a0 = np.int64(np.rint(rest / 2))
+    for k in range(safe_reach):
+        for a in (a0 - k, a0 + k):
+            b = rest - a
+            if _safe1n(a) and _safe1n(b):
+                out[n - 2], out[n - 1] = a, b
+                return 0
+    return 1
+
+
+@njit(cache=CACHE, nogil=True)
 def _fit_blocks_n(drawn, a, n0, n1, kj, target, every, safe_reach, pair_reach, out):
     """tempo._fit_blocks on file_plan's curved gap (ideal = the drawn tempo at kj even steps): 0 = out[:kj] made, 1 =
-    None, 2 = a step that needs _fit_exact / the full pair search (left to Python)."""
+    None."""
     n = kj
     top = 0xFFFFFF
-    if n <= every and every > 1:
-        if n <= target <= n * top:
-            code, pa, pk, pb = _flat_pair_n(n, target, pair_reach)
-            if code == 0:
-                _put_pair(out, n, pa, pk, pb)
-                return 0
-        return 2
-    if every <= 1:
-        return 2
     ideal = np.empty(n, np.float64)
     lo, hi = np.inf, -np.inf
     for i in range(n):
         x = np.float64(drawn[n0 - a + (i * (n1 - n0)) // kj])
         ideal[i] = x
         lo, hi = min(lo, x), max(hi, x)
-    if hi - lo < 1:
-        return 2
+    if n <= every and every > 1:
+        if n <= target <= n * top:
+            code, pa, pk, pb = _flat_pair_n(n, target, pair_reach, safe_reach)
+            if code == 0:
+                _put_pair(out, n, pa, pk, pb)
+                return 0
+        return _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out)
+    if every <= 1 or hi - lo < 1:
+        return _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out)
     if not n <= target <= n * top:
         return 1
     nb = (n + every - 1) // every
@@ -1908,12 +2062,15 @@ def _fit_blocks_n(drawn, a, n0, n1, kj, target, every, safe_reach, pair_reach, o
     last = n - (nb - 1) * every
     rest = target - done
     if not last <= rest <= last * top:
-        return 2
-    code, pa, pk, pb = _flat_pair_n(last, rest, pair_reach)
-    if code != 0:
-        return 2
-    _put_pair(out[(nb - 1) * every:], last, pa, pk, pb)
-    return 0
+        return _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out)
+    tail = out[(nb - 1) * every:]
+    code, pa, pk, pb = _flat_pair_n(last, rest, pair_reach, safe_reach)
+    if code == 0:
+        _put_pair(tail, last, pa, pk, pb)
+        return 0
+    if _fit_exact_n(np.full(last, rest / last), last, rest, safe_reach, pair_reach, tail) == 0:
+        return 0
+    return _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out)
 
 
 @njit(cache=CACHE, nogil=True)
@@ -1929,12 +2086,15 @@ def _least1(t, most):
 def gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair_reach, lens, vals, pos, got):
     """tempo_file.file_plan's loop over one Keep timing part's gaps from gap j: each gap's file tempo as runs into
     lens / vals from pos (each gap its own runs), k[j] changed where its pair needs a tick more or less, as that
-    loop does. last = the value the gap before ended on (-1 = none). Stops at a gap only Python can do (its
-    _fit_exact / the full pair search): (that gap, last, pos); all done = (number of gaps, last, pos)."""
+    loop does. last = the value the gap before ended on (-1 = none). -> (number of gaps, last, pos); a smaller
+    gap number = stopped there: lens / vals have no room for its most runs (kj + 10; the caller keeps the runs,
+    makes room and goes on from there)."""
     g = len(k)
     while j < g:
         n0, n1 = n[j], n[j + 1]
         kj, tj = k[j], total[j]
+        if pos + kj + 10 > len(lens):  # (no room for this gap's most runs: one per tick: the caller makes room)
+            return j, last, pos
         curved = kj > every and pref[n1 - a - 1] - pref[n0 - a] > 0
         least = _least1(tj, most)
         kk = max(kj, 1)
@@ -1968,11 +2128,12 @@ def gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair
         if not have:
             for step in range(17):  # (kj, then kj + 1, kj - 1, kj + 2, kj - 2 ... kj - 8)
                 c = kj if step == 0 else kj + ((step + 1) // 2) * (1 if step % 2 else -1)
-                if least <= c <= tj:
-                    code, pa, pk, pb = _flat_pair_n(c, tj, pair_reach)
-                    if code != 0:
-                        return j, last, pos
-                    _put_pair(got, c, pa, pk, pb)
+                if least <= c <= tj:  # (file_plan's _Pairs.get: the pair, else _fit_exact of the flat tempo)
+                    code, pa, pk, pb = _flat_pair_n(c, tj, pair_reach, safe_reach)
+                    if code == 0:
+                        _put_pair(got, c, pa, pk, pb)
+                    elif _fit_exact_n(np.full(c, tj / c), c, tj, safe_reach, pair_reach, got) != 0:
+                        continue
                     kj = c
                     k[j] = c
                     have = True

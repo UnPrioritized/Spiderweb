@@ -601,9 +601,11 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
             last = None
             for j in range(len(k)):
                 last = slow(j, last)
-        else:  # (compiled: gap_plan does the gaps, the same numbers; one it can't = slow(), then on from there)
+        else:  # (compiled: gap_plan does the gaps, the same numbers)
             pref = np.concatenate([[0], np.cumsum(drawn[1:] != drawn[:-1], dtype=np.int64)])
-            room = 3 * len(k) + 4 + (int((k // every).sum()) if every > 1 else 0)  # (runs a gap can make, at most)
+            # (room for the usual runs: two a pair, one a curve's step; a gap whose values change on every tick
+            # (_fit_exact) needs more: gap_plan stops before it and the room grows)
+            room = 3 * len(k) + 16 + (int((k // every).sum()) if every > 1 else 0)
             lens_out, vals_out = np.empty(room, np.int64), np.empty(room, np.int64)
             got_out = np.empty(int(k.max()) + 9, np.int64)
             j, last = 0, -1
@@ -614,8 +616,12 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
                     buf.add_runs(lens_out[:pos].copy(), vals_out[:pos].copy())
                 if j >= len(k):
                     break
-                last = slow(j, None if last == -1 else last)
-                j += 1
+                need = int(k[j]) + 10
+                if need > len(lens_out):
+                    lens_out, vals_out = np.empty(need, np.int64), np.empty(need, np.int64)
+                elif not pos:  # (an empty room and still stopped: never happens; the NumPy way, to be safe)
+                    last = slow(j, None if last == -1 else last)
+                    j += 1
         fa = a + offset
         lens, vals = buf.runs()
         starts = fa + np.concatenate([[0], np.cumsum(lens)])
