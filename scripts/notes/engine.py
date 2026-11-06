@@ -1945,17 +1945,12 @@ def winner_stretches(wg, ws, we, wr):
     if span * (int(gk.max()) + 1) >= 1 << 62:  # (too far apart for one code: group numbers made smaller)
         _, gk = np.unique(gk, return_inverse=True)
         gk = gk.reshape(-1).astype(np.int64)
-    edges = np.unique(np.concatenate([gk * span + (ws - t0), gk * span + (we - t0)]))
+    # (sorted, repeats dropped: np.unique's hashing took 6x the time for 4x the notes, a sort ~10x less, 4x)
+    edges = np.sort(np.concatenate([gk * span + (ws - t0), gk * span + (we - t0)]))
+    edges = edges[np.concatenate([[True], edges[1:] != edges[:-1]])]
     i0 = np.searchsorted(edges, gk * span + (ws - t0))
     i1 = np.searchsorted(edges, gk * span + (we - t0))
-    # each stretch each note covers, the notes taken highest rank first (one sort of the notes, not of every
-    # stretch: 4x the notes took 8x the time): the lowest rank is written last, so it's the one that stays
-    perm = np.argsort(-wr, kind="stable")
-    n = (i1 - i0)[perm]
-    total = int(n.sum())
-    where = np.repeat(i0[perm] - np.cumsum(n) + n, n) + np.arange(total)
-    best = np.full(len(edges), -1, np.int64)
-    best[where] = np.repeat(perm, n)
+    best = lowest_over(i0, i1, wr, len(edges))
     piece = np.flatnonzero(best[:-1] >= 0)
     piece = piece[edges[piece] // span == edges[piece + 1] // span]  # (a stretch inside one group)
     note = best[piece]
@@ -1964,6 +1959,43 @@ def winner_stretches(wg, ws, we, wr):
     head = np.flatnonzero(first)
     tail = np.append(head[1:], len(piece)) - 1
     return note[head], edges[piece[head]] % span + t0, edges[piece[tail] + 1] % span + t0
+
+
+def lowest_over(i0, i1, rank, size):
+    """For each of size places: the note (its place in i0...) with the lowest rank among those covering it (note k
+    covers places i0[k] .. i1[k] - 1), -1 for none. A tree of ranges (segment tree): each note written into at most
+    2 blocks a level, ~20 levels, then the blocks pushed down to the places once; the work goes with the notes, not
+    with how many places each covers (spreading every note over its places grew 5-8x for 4x the notes where they
+    pile up: hunt 2026-11-06, the user wants the NumPy way within the speed rule without the compiled loops)."""
+    out = np.full(size, -1, np.int64)
+    if not len(i0) or size <= 0:
+        return out
+    perm = np.argsort(rank, kind="stable")  # (lowest rank first: each note's place in that order = its value)
+    dense = np.empty(len(perm), np.int64)
+    dense[perm] = np.arange(len(perm))
+    width = 1 << max(0, int(size - 1).bit_length())
+    none = np.iinfo(np.int64).max
+    tree = np.full(2 * width, none, np.int64)
+    back = perm[::-1]  # (highest value first: a block written twice in one level keeps the last = the lowest)
+    lo, hi, val = i0[back] + width, i1[back] + width, dense[back]
+    while len(lo):
+        keep = lo < hi
+        if not keep.all():
+            lo, hi, val = lo[keep], hi[keep], val[keep]
+        left, right = (lo & 1) == 1, (hi & 1) == 1
+        tree[lo[left]] = val[left]  # (a block of one level never gets a block of another: plain writes)
+        tree[hi[right] - 1] = val[right]
+        lo, hi = (lo + left) >> 1, (hi - right) >> 1
+    level = 1
+    while level < width:  # (each block's lowest pushed down into its two halves, top to bottom)
+        parent = tree[level:2 * level]
+        tree[2 * level:4 * level:2] = np.minimum(tree[2 * level:4 * level:2], parent)
+        tree[2 * level + 1:4 * level:2] = np.minimum(tree[2 * level + 1:4 * level:2], parent)
+        level *= 2
+    leaf = tree[width:width + size]
+    got = leaf != none
+    out[got] = perm[leaf[got]]
+    return out
 
 
 def regrouped(notes, like=None):
@@ -1976,11 +2008,18 @@ def regrouped(notes, like=None):
         g = first_seen(code)
     else:
         had = like[:, 4] * 256 + like[:, 2]
-        ids, at = np.unique(had, return_index=True)
+        o = np.argsort(had, kind="stable")  # (np.unique's way, by one stable sort: its hashing grew too fast)
+        sh = had[o]
+        new = np.concatenate([[True], sh[1:] != sh[:-1]])
+        ids, at = sh[new], o[new]  # (each id's first place: stable, so the earliest)
         place = np.empty(len(ids), np.int64)
         place[np.argsort(at, kind="stable")] = np.arange(len(ids))
         g = place[np.searchsorted(ids, code)]
-    return notes[np.lexsort((notes[:, 0], g))]
+    s = notes[:, 0]
+    lo, wide = int(s.min()), int(s.max()) - int(s.min()) + 1
+    if wide < 1 << 40 and int(g.max()) < 1 << 22:  # (one key, one sort: the same order as the lexsort, quicker)
+        return notes[np.argsort((g << 40) | (s - lo), kind="stable")]
+    return notes[np.lexsort((s, g))]
 
 
 def first_seen(ids):
