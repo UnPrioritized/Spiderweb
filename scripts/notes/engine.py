@@ -37,7 +37,7 @@ from notes.ripples import clean_ripples, free_span, grows_free
 from notes.chop import apply_chop
 from notes.claw import apply_claw
 from notes.copypath import apply_path
-from notes.fx import (at_step, clean_fx, flip_shape, glue_from, groups, idle, mirrored, notes_box, reverse_velocity, swapped, toggled,
+from notes.fx import (at_step, clean_fx, flip_shape, glue_from, groups, idle, mirrored, notes_box, pages, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.gateflip import is_flipped as is_gate_flipped, is_pasted_flipped, mirrored_runs, unflipped_starts
@@ -995,18 +995,29 @@ def fx_notes(sh, ppq, keys, get):
         # (velocity lines drawn after the last page come AFTER the flip: they were drawn on the notes as shown, so
         # they change only the notes under them there; before it, the flip carried them onto other notes, partial
         # sweep 11-05)
+        # (glue places after the last page too: a box is drawn on the notes as shown, so it glues them after the flip,
+        # like a shape with no page; before it, it glued other notes and moved other rows' runs, hunt 2026-11-07)
         k = len(fx)
-        while k and fx[k - 1]["tool"] == "vel":
+        while k and fx[k - 1]["tool"] in ("vel", "glue"):
             k -= 1
-        base = {key: v for key, v in sh.items() if key not in ("gate_flip", "fx")}
+        base = {key: v for key, v in sh.items() if key not in ("gate_flip", "fx", "glue")}
         if k:
             base["fx"] = fx[:k]
-        if k == len(fx):
-            base = {key: v for key, v in sh.items() if key != "gate_flip"}
+        first = glue_from(sh.get("glue"), fx, k) if sh.get("glue") else None  # (boxes glued before the held places)
+        if first and pages(fx[:k]):
+            base["glue"] = first
+            first = None
         notes, tracks = get(base)
         notes, tracks = mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
-        for step in fx[k:]:
-            notes, tracks = fx_step(notes, tracks, step, sh, ppq, keys)
+        if first:  # (no page before: glued after the flip, as with no step at all)
+            notes, tracks = with_glue(notes, tracks, dict(sh, glue=first), ppq)
+        for j in range(k, len(fx)):
+            step = fx[j]
+            if step["tool"] == "glue":
+                g = glue_level(sh, j + 1)
+                notes, tracks = with_glue(notes, tracks, dict(g, glue=at_step(g.get("glue"), step)), ppq)
+            else:
+                notes, tracks = fx_step(notes, tracks, step, sh, ppq, keys)
         return notes, tracks
     if fx:
         if len(fx) > DEEP and not getattr(_warming, "on", False):
@@ -1142,8 +1153,17 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
     got = source(without_recolour(sh))
     if got is None or tracks is None:
         return None
-    # (the whole as it was cut: its own box, never flipped)
-    rc = {k: v for k, v in sh["recolour"].items() if k not in ("whole", "frame")}
+    # (the whole as it was cut: its own box, flipped as it was then (rc "cut_frame", recolour.carried; old pieces
+    # without it: never flipped); the piece's notes mirrored back only by the flips made since)
+    own = sh["recolour"]
+    rc = {k: v for k, v in own.items() if k not in ("whole", "frame", "cut_frame")}
+    then = own.get("cut_frame")
+    if then and tuple(then) != (1, 0, 0, 1):
+        rc["frame"] = then
+    if then and not then[1]:
+        now = own.get("frame") or (1, 0, 0, 1)
+        if not now[1]:
+            rule = dict(rule, frame=[now[0] * then[0], 0, 0, now[3] * then[3]])
     whole = {k: v for k, v in without_recolour(got[0]).items() if k != "gate_flip"}
     wn, wt = get(dict(whole, recolour=rc))
     return from_whole(notes, tracks, wn, wt, held_, lambda n: places_of(n, rule, gate, box_of(n)))
@@ -2642,7 +2662,11 @@ def remove_across(notes, held, overlaps, ranks):
     rest = notes[~held]
     rest = resolve_overlaps(rest) if stretch else split_overlaps(rest)
     if len(rest):
-        rank = np.asarray(ranks(rest), np.int64)
+        # (places worked out from ALL the notes, held ones too: a track holding only Sustain notes still counts, so
+        # your tracks after it keep their place, hunt 2026-11-07; then looked up by each note's slot)
+        every = np.asarray(ranks(notes), np.int64)
+        slots, at = np.unique(notes[:, 4], return_index=True)
+        rank = every[at][np.searchsorted(slots, rest[:, 4])]
         rank = -rank if overlaps.get("later") else rank
         # (one track's channels share a place: between them the later start wins, Single channel's rule inside one
         # track (user 2026-11-06, hunt: the winner was left to chance and differed without the compiled loops); then

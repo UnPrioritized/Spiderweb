@@ -373,8 +373,8 @@ class Pair:
             stacks = {id(x): sx, id(y): sy}
             x, y = ({k: stacks[id(r)] if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
                      for k in set(x) | set(y)} for r in (x, y))
-            got = {k: mix(x[k], y[k], f) for k in x if k not in ("seed", "frame", "whole")}
-            got.update({k: near[k] for k in ("seed", "frame", "whole") if k in near})
+            got = {k: mix(x[k], y[k], f) for k in x if k not in ("seed", "frame", "whole", "cut_frame")}
+            got.update({k: near[k] for k in ("seed", "frame", "whole", "cut_frame") if k in near})
             if sized:
                 steps = got["stir"] if isinstance(got["stir"], list) else [got["stir"]]
                 for j in sized:

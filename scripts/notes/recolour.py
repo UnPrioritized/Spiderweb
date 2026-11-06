@@ -189,6 +189,9 @@ def clean_recolour(r):
     f = r.get("frame")
     if isinstance(f, list) and all(number(x) for x in f) and tuple(f) in FRAMES and tuple(f) != SAME:
         out["frame"] = [int(x) for x in f]
+    f = r.get("cut_frame")  # (a Stir piece: its whole's frame when cut, SAME too: engine.stirred_piece)
+    if isinstance(f, list) and all(number(x) for x in f) and tuple(f) in FRAMES:
+        out["cut_frame"] = [int(x) for x in f]
     w = r.get("whole")
     if isinstance(w, list) and len(w) == 6 and all(number(x) and x == int(x) and abs(x) < 1 << 40 for x in w) \
             and w[4] >= 0 and w[5] >= 0 and any(w[:4]):
@@ -410,7 +413,11 @@ def carried(whole_rc, whole, piece):
     a, b, _, d = rc.get("frame") or SAME
     if b:
         rc.pop("whole", None)
+        rc.pop("cut_frame", None)
         return clean_recolour(rc)
+    # (the whole's flips when cut: a Stir piece works the whole's colours out flipped like that and mirrors back only
+    # the flips made since, engine.stirred_piece; hunt 2026-11-07: a shape flipped before the cut swapped colours)
+    rc["cut_frame"] = list(rc.get("frame") or SAME)
     S, P = [int(v) for v in whole], [int(v) for v in piece]
     o = rc.get("whole") or [0, 0, 0, 0]  # (cut from a piece: counted in its own whole's box)
     B = [S[i] + o[i] for i in range(4)]  # (where the whole's colours count, mirrored back like its notes)
