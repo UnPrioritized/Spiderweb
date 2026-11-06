@@ -66,6 +66,9 @@ pub struct KbOptions {
     pub filter: u32,
     pub lfo: u32,
     pub mod_env: u32,
+    /// (0.9.0) A piece's tempo clock starts with this many ticks carried over (Kestrel's Config::tempo_seed): where
+    /// a clock that ran from the song's start has it, so the piece's notes fall on a whole render's frames. 0 = none.
+    pub clock_seed: f64,
 }
 
 impl Default for KbOptions {
@@ -92,6 +95,7 @@ impl Default for KbOptions {
             filter: 1,
             lfo: 1,
             mod_env: 1,
+            clock_seed: 0.0,
         }
     }
 }
@@ -1111,7 +1115,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.8.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 18cbbc6)";
+    static V: &CStr = c"0.9.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 547e634)";
     V.as_ptr()
 }
 

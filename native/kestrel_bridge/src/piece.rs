@@ -80,6 +80,7 @@ fn piece_config(opts: &KbOptions, f: &Fonts, engine: Engine, midi: &Path) -> Res
         gpu_backend: f.backend.clone(),
         gpu_adapter: f.card.clone(),
         coalesce: true,
+        tempo_seed: opts.clock_seed,
         ..config(opts)?
     };
     // (limiter off = the raw mix, unclamped: Spiderweb's own limiter runs over the joined pieces; Kestrel's render

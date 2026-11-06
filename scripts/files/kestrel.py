@@ -127,16 +127,18 @@ class _Options(ctypes.Structure):
                 ("steal_rule", ctypes.c_uint32), ("release_floor_db", ctypes.c_float),
                 ("min_velocity", ctypes.c_uint32), ("admit_rule", ctypes.c_uint32),
                 ("max_steal_percent", ctypes.c_uint32), ("max_layers", ctypes.c_uint32), ("filter", ctypes.c_uint32),
-                ("lfo", ctypes.c_uint32), ("mod_env", ctypes.c_uint32)]
+                ("lfo", ctypes.c_uint32), ("mod_env", ctypes.c_uint32),
+                ("clock_seed", ctypes.c_double)]  # (0.9.0 on; older connectors read only the fields before it)
 
 
 def _options(block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True, limiter=2, ceiling_db=0.0, dc_blocker=True,
              dc_blocker_hz=0.0, interpolation=1, steal=2, release_floor=-100, min_velocity=0, admit=0, max_steal=25,
-             max_layers=16, filter=True, lfo=True, mod_env=True, card=""):
-    """The connector's options from Kestrel's keywords (App.kestrel_opts; card = Loaded's, not a synth's)."""
+             max_layers=16, filter=True, lfo=True, mod_env=True, card="", clock_seed=0.0):
+    """The connector's options from Kestrel's keywords (App.kestrel_opts; card = Loaded's, not a synth's).
+    clock_seed = a piece's tempo clock starts with this carried (ahead_pieces.Song.clock_at)."""
     return _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), float(ceiling_db),
                     int(dc_blocker), dc_blocker_hz, interpolation, steal, release_floor, min_velocity, admit, max_steal,
-                    max_layers, int(filter), int(lfo), int(mod_env))
+                    max_layers, int(filter), int(lfo), int(mod_env), float(clock_seed))
 
 
 class _Stats(ctypes.Structure):

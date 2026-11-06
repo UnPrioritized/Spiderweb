@@ -18,6 +18,8 @@ Each piece is made with the limiter OFF: Spiderweb's own runs over the joined pi
 Thread rules: Maker.step() runs on the window's thread (quick: it only looks at jobs and starts threads); the
 making runs in threads of its own; Maker.take() is called from the sound's thread."""
 
+import bisect
+import math
 import os
 import tempfile
 import threading
@@ -28,6 +30,14 @@ import numpy as np
 from files import errors
 from files.playback import TimeMap
 from files.synth import RATE
+
+class PieceMidi(bytearray):
+    """A piece's MIDI file bytes + clock_seed: what Kestrel's clock starts with carried (Song.clock_at)."""
+
+    def __init__(self, data=b"", clock_seed=0.0):
+        super().__init__(data)
+        self.clock_seed = clock_seed
+
 
 BLOCK_S = 2.0  # seconds a block (the grey / remake / play unit)
 BLOCK = int(BLOCK_S * RATE)
@@ -228,16 +238,16 @@ class Song:
         in it)."""
         t_end = self.tick_at(f1 + int(POST_S * RATE))  # (a little past it: see POST_S)
         t0, t_pre = self.piece_start(f0)
-        tracks = self.tracks(t0, t_pre, t_end)
-        if not tracks:
-            return None, 0
-        skip = f0 - self.frame(t0)
         # (a PPQ over 32767 reads as SMPTE timing in a MIDI file: written as half the PPQ with half the tempo
         # value, so every tick keeps its time; hunt 2026-11-03, PPQ goes up to 65535)
         half = 2 if self.ppq > 32767 else 1
+        tracks = self.tracks(t0, t_pre, t_end)
+        if not tracks:
+            return None, 0
+        zero, seed = self.clock_at(t0) if half == 1 else (self.frame(t0), 0.0)
         tracks.insert(0, self.tempo_track(t0, t_end, (self.ppq // half) / self.ppq))
         head = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + len(tracks).to_bytes(2, "big")
-        return head + (self.ppq // half).to_bytes(2, "big") + b"".join(tracks), skip
+        return PieceMidi(head + (self.ppq // half).to_bytes(2, "big") + b"".join(tracks), seed), f0 - zero
 
     def tempo_track(self, t0, t_end, scale=1.0):
         """The heard tempo from tick t0 (the piece's tick 0) to t_end as a track; scale = the tempo values' factor
@@ -245,6 +255,47 @@ class Song:
         us, changes = self._at(t0)
         tempo_of = lambda u: b"\xff\x51\x03" + max(1, int(round(u * scale))).to_bytes(3, "big")  # noqa: E731
         return _track([(0, tempo_of(us))] + [(t - t0, tempo_of(u)) for t, u in changes if t < t_end])
+
+    def clock_at(self, t0):
+        """(the song frame a piece starting at tick t0 has its time 0 on, the clock seed it needs). Kestrel times
+        notes as BASSMIDI's file player does (TempoTiming::Bassmidi): every note on a whole frame, and at every tempo
+        change the clock snaps to a whole frame and carries the part over ("overshoot", in ticks) from the song's
+        start on. A piece starting mid-song began with nothing carried: notes one frame off a whole render (single
+        attacks -22..-33 dB, Shining Needle, 2026-11-06). Here Kestrel's clock is replayed (same sums in the same
+        order, f64) up to t0; the seed (connector 0.9.0 clock_seed: the piece's clock starts with it carried) puts
+        every note of the piece on the frame the whole render has it on. Tempo values as the piece writes them."""
+        if t0 <= 0:
+            return 0, 0.0
+        states = self._clock_states()
+        i = max(0, bisect.bisect_right([s[0] for s in states], t0) - 1)
+        bt, bf, over, num, den = states[i]
+        whole, rem = divmod((t0 - bt) * num, den)
+        fr = rem / den - over * num / den
+        zero = int(max(0.0, float(whole) + math.ceil(fr)))
+        part = math.ceil(fr) - fr  # (frames from the piece's time 0 back to where the clock's ticks run from)
+        return bf + zero, part * den / num
+
+    def _clock_states(self):
+        """[(tick of a tempo change, its whole frame, overshoot in ticks, num, den)] after each change: Kestrel's
+        TempoClock (midi.rs set_tempo / frames_to, Bassmidi timing) run over the tempo list once."""
+        got = getattr(self, "_clock", None)
+        if got is not None:
+            return got
+        bt, bf, over = 0, 0, 0.0
+        num, den = 500_000 * RATE, 1_000_000 * self.ppq  # (120 BPM until told otherwise)
+        out = [(0, 0, 0.0, num, den)]
+        for t, u in self.tempo:
+            t = max(0, int(t))
+            whole, rem = divmod((t - bt) * num, den)
+            n = int(max(0.0, float(whole) + math.ceil(rem / den - over * num / den)))
+            past = n * den - (t - bt) * num
+            over = max(0.0, over + float(past) / float(num))
+            bf += n
+            bt = t
+            num = max(1, int(round(u))) * RATE
+            out.append((t, bf, over, num, den))
+        self._clock = out
+        return out
 
     def tracks(self, t0, t_pre, t_end, file_ports=()):
         """The notes + CC lines of a piece from tick t0 (its tick 0; notes ending after t_pre sound in it) to t_end
@@ -423,7 +474,7 @@ def _card_one(song, engine, opts, fonts, card, f0, f1, cancel, progress, plain=F
             return None
         loaded = kestrel.loaded_for(fonts, card)
         _clean_old_pieces()  # (files older Spiderwebs left: pieces go to the connector as bytes now, user 11-03)
-        o = {"block": opts["block"]}
+        o = {"block": opts["block"], "clock_seed": getattr(data, "clock_seed", 0.0)}
         if engine == "kestrel":
             o.update(voices=opts["voices"], interpolation=opts["interpolation"], min_velocity=opts["min_velocity"])
         piece = kestrel.Piece(loaded, data, engine, skip, f1 - f0, **o)

@@ -16,7 +16,7 @@ from collections import OrderedDict
 import numpy as np
 
 from files import midi_piece
-from files.ahead_pieces import HELD_PRE, PIECE_MOST, POST_S, PRE, Song
+from files.ahead_pieces import HELD_PRE, PIECE_MOST, POST_S, PRE, PieceMidi, Song
 from files.synth import RATE, SynthError
 
 
@@ -866,7 +866,7 @@ class LoadedSong:
             body = _vlq(t_copy - origin) + b"\xff\x2f\x00"
             hold = b"MTrk" + len(body).to_bytes(4, "big") + body
         count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks) + bool(hold)
-        buf = bytearray(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
+        buf = PieceMidi(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
                         + self.ppq.to_bytes(2, "big"))
         buf += self.own.tempo_track(origin, t_copy)
         for port in ports:  # (each port's set-up first: SysEx in order, then every channel's state; hunt 11-03)
@@ -914,7 +914,10 @@ class LoadedSong:
         for chunk in own:
             buf += chunk
         buf += hold
-        return buf, f0 - self.frame(origin)
+        # (the frame its time 0 is on as Kestrel's clock has it, + what that clock carries there: Song.clock_at)
+        zero, seed = self.own.clock_at(origin)
+        buf.clock_seed = seed
+        return buf, f0 - zero
 
     def bass_events(self):
         raise NotImplementedError("BASSMIDI pieces of a loaded MIDI: PLAN.md L4")
