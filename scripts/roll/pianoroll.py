@@ -218,8 +218,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return (b0, VEL_TOP if self.box_vel else RULER_TOP, b1, -0.5) if b1 - b0 > 1e-9 else None
         b0, b1 = grid_span(self.x2t(x), self.x2t(cx), tick if self.box_shift0 else step or tick,
                            tick if self.box_shift else step or tick)
-        top = self.app.keys - 1
-        p0, p1 = sorted(min(max(round(self.y2p(v)), 0), top) for v in (y, cy))
+        _, low, top = self.room_edges()  # (the keys, or out into the Space past them: Settings → General)
+        p0, p1 = sorted(min(max(round(self.y2p(v)), low), top) for v in (y, cy))
         return b0, p1 + 0.5, b1, p0 - 0.5
 
     def box_from(self):
