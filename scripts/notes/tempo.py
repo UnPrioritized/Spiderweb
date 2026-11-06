@@ -1046,8 +1046,16 @@ def layout(tempo, base, ppq):
         u = _segments(tempo, base, start_u, ppq, t, t + 1, ordered)[0][2]
         return u if isinstance(u, int) else int(u[0])
 
+    # (2026-11-06: heard() walked every span found so far = all-against-all with 2,000 catch-ups. A span ending at
+    # or before every tick still to be asked can't hold any of them: dropped as the loop goes, same answers)
+    asks = [min(t0 - 1, beat_tick(sts[n]["read"], ppq)) if kind == 0 and sts[n]["read"] is not None
+            and n not in inner else t0 - 1 for t0, kind, n in todo]
+    for k in range(len(asks) - 2, -1, -1):
+        asks[k] = min(asks[k], asks[k + 1])
     bases, keep_u = [start_u] * len(sts), [start_u] * len(keeps_at)
-    for t0, kind, n in todo:
+    for k, (t0, kind, n) in enumerate(todo):
+        if len(spans) > 8:
+            spans[:] = [s for s in spans if s[1] is None or s[1] > asks[k]]
         u = heard(t0 - 1)
         if kind == 0 and sts[n]["read"] is not None and n not in inner:  # (the tempo the line comes back to)
             u = heard(beat_tick(sts[n]["read"], ppq))
@@ -1617,11 +1625,15 @@ def _fit_blocks(ideal, target, every):
     want = want * (target / want.sum())  # (each block's share of the target)
     out = np.empty(n, np.int64)
     done, owed = 0, 0.0
-    for k in range(len(starts) - 1):
-        u = int(nearest_safe([(want[k] + owed) / lens[k]])[0])
-        out[starts[k]:starts[k] + lens[k]] = u
-        owed += want[k] - u * lens[k]
-        done += u * lens[k]
+    # (plain Python per block, _nearest1 straight = nearest_safe of one value: its NumPy wrapping cost more than the
+    # search, thousands of gaps an export; the same values)
+    wl, ll, sl = want.tolist(), lens.tolist(), starts.tolist()
+    top = float(0xFFFFFF)
+    for k in range(len(sl) - 1):
+        u = _nearest1(min(max((wl[k] + owed) / ll[k], 1.0), top))
+        out[sl[k]:sl[k] + ll[k]] = u
+        owed += wl[k] - u * ll[k]
+        done += u * ll[k]
     last, rest = lens[-1], target - done
     if not last <= rest <= last * 0xFFFFFF:
         return _fit_exact(ideal, target)

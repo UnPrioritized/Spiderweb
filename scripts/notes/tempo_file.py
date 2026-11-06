@@ -177,32 +177,53 @@ class _RunBuf:
     """A Keep timing part's file tempo as runs (ticks, us), not one number per file tick (hunt 2026-10-24: a few
     bars at 1,000,000 BPM took gigabytes)."""
 
-    def __init__(self, size):
-        self.lens, self.vals, self.n = np.empty(max(16, size), np.int64), np.empty(max(16, size), np.int64), 0
+    # (2026-11-06: every piece numbered in order and turned into runs all at once at the end: one piece at a time
+    # = a few small NumPy calls each, 40,000 gaps in a Keep the audio export; the same runs)
 
-    def room(self, more):
-        if self.n + more > len(self.lens):
-            size = max(2 * len(self.lens), self.n + more)
-            self.lens = np.concatenate([self.lens[:self.n], np.empty(size - self.n, np.int64)])
-            self.vals = np.concatenate([self.vals[:self.n], np.empty(size - self.n, np.int64)])
+    def __init__(self, size=0):
+        self.ids, self.lens, self.vals = [], [], []  # (add's runs, plain Python)
+        self.pend, self.pend_ids, self.waiting = [], [], 0  # (add_array's gaps waiting)
+        self.chunks = []  # (ids, lens, vals) arrays of gaps already turned into runs
+        self.count = 0
 
     def add(self, length, value):
         if length > 0:
-            self.room(1)
-            self.lens[self.n], self.vals[self.n] = length, value
-            self.n += 1
+            self.ids.append(self.count)
+            self.lens.append(length)
+            self.vals.append(value)
+            self.count += 1
 
     def add_array(self, got):
-        """One gap's per-tick values as runs."""
-        cut = np.flatnonzero(got[1:] != got[:-1]) + 1
-        starts = np.concatenate([[0], cut])
-        self.room(len(starts))
-        self.lens[self.n:self.n + len(starts)] = np.diff(np.append(starts, len(got)))
-        self.vals[self.n:self.n + len(starts)] = got[starts]
-        self.n += len(starts)
+        """One gap's per-tick values as runs (each gap's runs its own, also where the gap before ends on the same
+        value)."""
+        self.pend.append(got)
+        self.pend_ids.append(self.count)
+        self.count += 1
+        self.waiting += len(got)
+        if self.waiting > 1 << 20:  # (never millions of per-tick values held: the runs are the point)
+            self.flush()
+
+    def flush(self):
+        """The waiting gaps' runs: cut where the value changes and at every gap's start, as one by one."""
+        sizes = np.array([len(g) for g in self.pend], np.int64)
+        got = np.concatenate(self.pend) if len(self.pend) > 1 else np.asarray(self.pend[0], np.int64)
+        cut = np.empty(len(got), bool)
+        cut[0] = True
+        cut[1:] = got[1:] != got[:-1]
+        cut[np.cumsum(sizes[:-1])] = True
+        starts = np.flatnonzero(cut)
+        ids = np.repeat(np.array(self.pend_ids, np.int64), sizes)[starts]
+        self.chunks.append((ids, np.diff(np.append(starts, len(got))), got[starts].astype(np.int64)))
+        self.pend, self.pend_ids, self.waiting = [], [], 0
 
     def runs(self):
-        return self.lens[:self.n], self.vals[:self.n]
+        if self.pend:
+            self.flush()
+        ids = np.concatenate([np.array(self.ids, np.int64)] + [c[0] for c in self.chunks])
+        lens = np.concatenate([np.array(self.lens, np.int64)] + [c[1] for c in self.chunks])
+        vals = np.concatenate([np.array(self.vals, np.int64)] + [c[2] for c in self.chunks])
+        order = np.argsort(ids, kind="stable")  # (back in the order added; a gap's own runs keep theirs)
+        return lens[order], vals[order]
 
 
 def _spans_off(segs, keeps, start_u):
