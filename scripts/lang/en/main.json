@@ -1175,6 +1175,7 @@
  "app.channels_2": ", {chans} channels",
  "app.notes": "{i}.  {shape_label}  —  {counts:,} notes{uses}",
  "app.notes_one": "{i}.  {shape_label}  —  1 note{uses}",
+ "app.notes_overlapped": "{i}.  {shape_label}  —  0 notes (all overlapped)",
  "app.draw": "Draw: {shape_label}",
  "app.spiderweb_2": "Spiderweb",
  "app.are_you_sure_you_want_to": "Are you sure you want to delete all {n} shapes?\n(Ctrl+Z can bring them back.)",

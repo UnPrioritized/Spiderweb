@@ -816,6 +816,9 @@ class BetweenGroups:
                     label = tr("app.with_cc_list", name=label)
                 text = tr("app.notes_one" if counts[i] == 1 else "app.notes", i=i + 1,
                           shape_label=label, counts=counts[i], uses=uses)
+                if not counts[i] and (self.overlap_rule() or {}).get("across") and len(self.notes_of(sh)):
+                    # (Remove overlaps took every note: said, else "0 notes" looked like a bug, user 2026-11-06)
+                    text = tr("app.notes_overlapped", i=i + 1, shape_label=label)
             want.append((text, warn > many))  # (past many the note colours and channel numbers repeat)
         lb, shown = self.listbox, getattr(self, "_list_shown", None)
         if shown is None or lb.size() != len(shown):
