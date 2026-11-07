@@ -3255,12 +3255,19 @@ class TrackList(tk.Canvas):
         first_line, last_line = cy // self.row_h, (cy + ah) // self.row_h
         lo_t, hi_t = cx / self.sx * ppq, (cx + aw) / self.sx * ppq
         row = self.note_rows()
+        _, _, first, keys, sub = self.lines()
+        # (only the notes of the rows these lines show: scrolling a 4,000-track list read every note for each new
+        # strip, user 2026-11-07; the same notes reach the painting below, so the picture is the same)
+        order, by_row = self.notes_by_row(row)
+        r_lo = max(0, int(np.searchsorted(first, first_line, "right")) - 1)
+        r_hi = int(np.searchsorted(first, last_line, "right")) - 1
+        part = order[np.searchsorted(by_row, r_lo, "left"):np.searchsorted(by_row, r_hi, "right")]
+        n, row = n[part], row[part]
         keep = (row >= 0) & (n[:, 1] > lo_t) & (n[:, 0] < hi_t)
         if not keep.any():
             return
         n, row = n[keep], row[keep]
         ch = channels_of(n[:, 4], self.app.picture_use10)
-        _, _, first, keys, sub = self.lines()
         line = first[row]
         if len(keys):  # (an open folder: each note on its channel's sub-row too)
             k = row * 16 + ch
@@ -3316,6 +3323,17 @@ class TrackList(tk.Canvas):
                 continue
             # (only the pixel rows its lines reach: a colour is mostly one track's, user 2026-10-31: every colour
             # over the whole picture made each repaint slow)
+            if not pad:  # (thin lines: only the pixel rows it uses, not every row between its top and bottom; a
+                # colour is spread over many tracks in a 4,000-track list, user 2026-11-07)
+                uy, yi = np.unique(ym, return_inverse=True)
+                size = len(uy) * (aw + 1)
+                cover = np.bincount(yi * (aw + 1) + xa[mine], minlength=size).astype(np.int32)
+                cover -= np.bincount(yi * (aw + 1) + xb[mine] + 1, minlength=size).astype(np.int32)
+                hit = np.cumsum(cover.reshape(len(uy), aw + 1), axis=1, dtype=np.int32)[:, :aw] > 0
+                part = img[uy]
+                part[hit] = hex_rgb(colours[c])
+                img[uy] = part
+                continue
             ya, yb = int(ym.min()), min(hh, int(ym.max()) + 1 + pad)
             size = (yb - ya) * (aw + 1)
             # (+1 where a line starts, -1 just past its end, added up along each pixel row: covered where > 0)
@@ -3329,6 +3347,16 @@ class TrackList(tk.Canvas):
                 hit = (ups - below) > 0
             lo = max(ya, pad)
             img[lo - pad:yb - pad][hit[lo - ya:]] = hex_rgb(colours[c])
+
+    def notes_by_row(self, row):
+        """(the notes' order by row, kept in their own order within a row; the rows in that order) for note_rows'
+        array row: worked out once per array (a new one comes with new notes / tracks)."""
+        got = getattr(self, "_by_row", None)
+        if got is None or got[0] is not row:
+            small = row.astype(np.int16) if len(row) and int(row.max()) < 32767 else row  # (16-bit: radix sort)
+            order = np.argsort(small, kind="stable")
+            got = self._by_row = (row, order, row[order])
+        return got[1], got[2]
 
     def chan_colour(self, ch):
         """Channel ch's notes' colour (colour_of's look)."""
