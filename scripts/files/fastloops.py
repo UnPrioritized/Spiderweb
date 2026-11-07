@@ -15,6 +15,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   stir_spots     recolour.stir_from's middle (Bulge, the more bends, Turn / Twist, edges, Squeeze), note by note
   stir_nearest   recolour.nearest after its sort: each spot's nearest note
   stir_wrap      recolour.Rows.wrapped (Stir's Wrap around)   (all three on half the cores: on_cores)
+  liquify_sample liquify.sample: Liquify's map at spots of the colour box (on half the cores)
   midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
   midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
@@ -684,6 +685,38 @@ def _stir_wrap_cores(keys, a, b, mid, key, out):
 def stir_wrap(keys, a, b, mid, key, out):
     """stir_wrap_one on half the cores (on_cores)."""
     on_cores(_stir_wrap_cores, stir_wrap_one, len(mid), keys, a, b, mid, key, out)
+
+
+@njit(cache=CACHE, nogil=True)
+def _sample_at(i, a, x, y, out):
+    """liquify.sample for spot i: the map a blended between its 4 grid points (the same sums, the same order)."""
+    gy, gx = a.shape[0], a.shape[1]
+    fx = min(max(x[i], 0.0), 1.0) * (gx - 1)
+    fy = min(max(y[i], 0.0), 1.0) * (gy - 1)
+    i0 = min(np.int64(fx), gx - 2)
+    j0 = min(np.int64(fy), gy - 2)
+    tx, ty = fx - i0, fy - j0
+    for c in range(2):
+        out[i, c] = ((a[j0, i0, c] * (1 - tx) + a[j0, i0 + 1, c] * tx) * (1 - ty)
+                     + (a[j0 + 1, i0, c] * (1 - tx) + a[j0 + 1, i0 + 1, c] * tx) * ty)
+
+
+@njit(cache=CACHE, nogil=True)
+def liquify_sample_one(a, x, y, out):
+    """liquify.sample (Liquify's map at spots of the colour box), one core."""
+    for i in range(len(x)):
+        _sample_at(i, a, x, y, out)
+
+
+@njit(cache=CACHE, nogil=True, parallel=True)
+def _liquify_sample_cores(a, x, y, out):
+    for i in prange(len(x)):
+        _sample_at(i, a, x, y, out)
+
+
+def liquify_sample(a, x, y, out):
+    """liquify_sample_one on half the cores (on_cores)."""
+    on_cores(_liquify_sample_cores, liquify_sample_one, len(x), a, x, y, out)
 
 
 @njit(cache=CACHE, nogil=True)

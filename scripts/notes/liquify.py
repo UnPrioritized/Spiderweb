@@ -23,6 +23,8 @@ units per screen pixel there, so a round brush stays round however the shape is 
 """
 
 import base64
+import json
+import weakref
 import zlib
 
 import numpy as np
@@ -32,6 +34,7 @@ MOST_PUSH = 8.0  # (a spot looks at most this many boxes away: int16 / SCALE)
 GRID_LONG = 256  # (grid points along the shape's longer side on screen when its first stroke is made)
 GRID_SHORT = 16  # (at least this many along the other side)
 MOST_GRID = 1024
+SAMPLE_FAST = 2000  # (spots: from this many the map is looked up by the compiled loop)
 MOST_STRENGTH = 400.0  # (user 2026-11-07: up to 400 %)
 DEFAULTS = {"strength": 100.0, "on": True, "edge": "escape"}
 TOOLS = ("push", "restore", "smooth", "twirl", "pinch", "bulge", "freeze", "thaw")
@@ -184,6 +187,14 @@ def empty(grid):
 
 def sample(a, x, y):
     """The map a at spots (x, y) of the colour box (0..1; past it: the edge's), blended between grid points."""
+    if np.ndim(x) == 1 and len(x) >= SAMPLE_FAST and a.shape[2] == 2:
+        from files.speed import loops
+        fast = loops()
+        if fast:  # (the compiled twin: the same sums in the same order, files/fastloops.liquify_sample)
+            out = np.empty((len(x), 2), np.float64)
+            fast.liquify_sample(np.ascontiguousarray(a, np.float64), np.ascontiguousarray(x, np.float64),
+                                np.ascontiguousarray(y, np.float64), out)
+            return out
     gy, gx = a.shape[:2]
     fx = np.clip(np.asarray(x, np.float64), 0.0, 1.0) * (gx - 1)
     fy = np.clip(np.asarray(y, np.float64), 0.0, 1.0) * (gy - 1)
@@ -304,6 +315,12 @@ def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     lq = clean_liquify(rc.get("liquify"))
     if not lq or not lq.get("map") or lq.get("on") is False or not len(at) or not lq.get("strength", 100.0):
         return now
+    lv = _LIVE_KEPT.get("live")
+    lv = lv() if lv is not None else None
+    if lv is not None:  # (the brush stroke just let go already worked these colours out: Live == liquified)
+        got = lv.done_colours(notes, at, now, rc, box, own, map_of(full(lq)))
+        if got is not None:
+            return got
     shown = shown_places(notes, at, rc)
     idx, mid, key = liquify_from(shown, rc, box, own)
     if not len(idx):
@@ -317,6 +334,20 @@ def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     return _apart(notes, low, new, pals, pick)
 
 
+_LIVE_KEPT = {}  # "got": ((weak notes, at, now), _live_key, Live._parts) of the last shape brushed
+
+
+def _forget_live(_ref=None):
+    _LIVE_KEPT.clear()
+
+
+def _live_key(rc, box, own, grid):
+    """What Live's kept parts depend on besides the notes: the rule (the map itself left out) and the boxes."""
+    lq = {k: v for k, v in (rc.get("liquify") or {}).items() if k not in ("map", "frozen", "grid")}
+    rest = {k: v for k, v in rc.items() if k != "liquify"}
+    return json.dumps([rest, lq], sort_keys=True, default=repr), repr(box), repr(own), tuple(grid)
+
+
 class Live:
     """A brush stroke's colours while dragging, exactly as liquified makes them, worked out only where the map
     changed (the brush shows the real result, like image editors; user 2026-11-07: a bent picture of the piano roll
@@ -325,40 +356,63 @@ class Live:
     key (kept_apart looks at nothing else), so the colours given are the very ones the whole shape gets."""
 
     def __init__(self, notes, at, low, now, rc, which, pals, pick, box, own, a):
-        from notes.recolour import _sorted_notes, leaders
         self.notes, self.at, self.low, self.now, self.rc = notes, at, low, now, rc
         self.pals, self.pick, self.box, self.own = pals, pick, box, own
-        groups_at, at = at, shown_places(notes, at, rc)  # (groups by the places, the map by where notes show)
-        self.at = at
-        self.w = _where(at, rc, box, own)
-        lq = self.w["lq"]
-        self.off = lq.get("on") is False or not lq.get("strength") or not len(at)
-        # (made once, every piece side by side in memory: nearest's compiled search took a copy of a key column
-        # at every update, ~4 ms at 3 M notes)
-        self.kept = tuple(np.ascontiguousarray(v) if isinstance(v, np.ndarray) else v
-                          for v in _sorted_notes(at)) if len(at) else None
+        # (what doesn't change while brushing: kept for the shape's next stroke too (its notes before the Liquify are
+        # kept by recolour.before_liquify: the very same arrays), stage F: a press on 7.7 M notes took ~1 s)
+        key = _live_key(rc, box, own, a.shape[:2])
+        got = _LIVE_KEPT.get("got")
+        if got is None or any(r() is not x for r, x in zip(got[0], (notes, at, now))) or got[1] != key:
+            got = None
+            parts = self._parts(notes, at, now, rc, box, own, a.shape[:2])
+            try:
+                _LIVE_KEPT["got"] = (tuple(weakref.ref(x, _forget_live) for x in (notes, at, now)), key, parts)
+            except TypeError:  # (a view of another array can't be linked weakly: not kept)
+                _LIVE_KEPT.clear()
+        else:
+            parts = got[2]
+        self.__dict__.update(parts)
+        self.at_in, self.key = at, key
+        self.out = np.array(now)  # (every note's colour as brushed so far: liquified's very result; let go uses it)
+        _LIVE_KEPT["live"] = weakref.ref(self)
         self.a = np.zeros_like(a)
         self.F = np.array(now)  # (each note's colour taken, before groups / kept_apart)
-        self.lead = leaders(groups_at, rc["by"]) if rc.get("by") and len(at) else None
         self.P = self.F if self.lead is None else self.F[self.lead]
-        if self.lead is not None:
-            self.by_lead = np.argsort(self.lead, kind="stable")
-            self.lead_sorted = self.lead[self.by_lead]
-        gy, gx = a.shape[:2]
-        cx = np.minimum((np.clip(self.w["x"], 0.0, 1.0) * (gx - 1)).astype(np.int64), gx - 2)
-        cy = np.minimum((np.clip(self.w["y"], 0.0, 1.0) * (gy - 1)).astype(np.int64), gy - 2)
-        from files.speed import key_sort
-        self.cells = key_sort(cy, cx) if len(cy) else np.zeros(0, np.int64)
-        self.cx = cx[self.cells]
-        self.row_at = np.searchsorted(cy[self.cells], np.arange(gy))  # (each cell row's first place in cells)
-        self.bursts = self._bursts(notes)
-        self.grid = (gy, gx)
-        # (nothing pushed = liquified leaves the colours as they are, kept_apart and groups too: once something is,
-        # the notes whose group's colour differs change everywhere; ever = every note given out since)
-        self.base = np.flatnonzero(self.P != now) if self.lead is not None else np.zeros(0, np.int64)
-        self.ever = np.zeros(len(at), bool)
+        self.ever = np.zeros(len(self.at), bool)
         self.zero = True
         self.update(a)
+
+    @classmethod
+    def _parts(cls, notes, at, now, rc, box, own, grid):
+        """Live's parts that stay the same while brushing (and from stroke to stroke on the same notes)."""
+        from notes.recolour import _sorted_notes, leaders
+        p = {}
+        groups_at, at = at, shown_places(notes, at, rc)  # (groups by the places, the map by where notes show)
+        p["at"] = at
+        p["w"] = _where(at, rc, box, own)
+        lq = p["w"]["lq"]
+        p["off"] = lq.get("on") is False or not lq.get("strength") or not len(at)
+        # (made once, every piece side by side in memory: nearest's compiled search took a copy of a key column
+        # at every update, ~4 ms at 3 M notes)
+        p["kept"] = tuple(np.ascontiguousarray(v) if isinstance(v, np.ndarray) else v
+                          for v in _sorted_notes(at)) if len(at) else None
+        lead = p["lead"] = leaders(groups_at, rc["by"]) if rc.get("by") and len(at) else None
+        if lead is not None:
+            p["by_lead"] = np.argsort(lead, kind="stable")
+            p["lead_sorted"] = lead[p["by_lead"]]
+        gy, gx = grid
+        cx = np.minimum((np.clip(p["w"]["x"], 0.0, 1.0) * (gx - 1)).astype(np.int64), gx - 2)
+        cy = np.minimum((np.clip(p["w"]["y"], 0.0, 1.0) * (gy - 1)).astype(np.int64), gy - 2)
+        from files.speed import key_sort
+        p["cells"] = cells = key_sort(cy, cx) if len(cy) else np.zeros(0, np.int64)
+        p["cx"] = cx[cells]
+        p["row_at"] = np.searchsorted(cy[cells], np.arange(gy))  # (each cell row's first place in cells)
+        p["bursts"] = cls._bursts(notes)
+        p["grid"] = (gy, gx)
+        # (nothing pushed = liquified leaves the colours as they are, kept_apart and groups too: once something is,
+        # the notes whose group's colour differs change everywhere)
+        p["base"] = np.flatnonzero(now[lead] != now) if lead is not None else np.zeros(0, np.int64)
+        return p
 
     @staticmethod
     def _spread(first, size):
@@ -388,6 +442,21 @@ class Live:
     def update(self, a):
         """The map is a now: (notes whose colour may have changed, their colours) (before their round / turn), or
         None when nothing changed."""
+        got = self._update(a)
+        if got is not None:
+            self.out[got[0]] = got[1]
+        return got
+
+    def done_colours(self, notes, at, now, rc, box, own, a):
+        """liquified's result for these very notes and map when this stroke already has it (out), else None: a let go
+        on 7.7 M notes worked the whole Liquify out again (~0.4 s), stage F."""
+        if (self.off or self.notes is not notes or self.at_in is not at or self.now is not now
+                or a.shape != self.a.shape or self.key != _live_key(rc, box, own, a.shape[:2])
+                or not np.array_equal(a, self.a)):
+            return None
+        return self.out.copy()
+
+    def _update(self, a):
         if self.off:
             self.a = a
             return None
