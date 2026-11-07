@@ -257,7 +257,9 @@ class FoldWindow(tk.Toplevel):
         app = self.app
         app.add_undo_step(self.state0, tr("fold.title"), self.sel0)  # (the shapes shown now ARE the fold)
         app.select_many([self.got[0]], self.got[0])
-        app.shapes_changed()
+        # (their notes were made by the preview just above: not made all again, user 2026-11-07: 1.5 s on 4,000
+        # tracks; the autosave waited while the window was open)
+        app.schedule_autosave()
         new = self.made[0]
         app.status.config(text=tr("fold.done", a=trn("n.tracks", self.tracks, n=self.tracks),
                                   b=trn("n.tracks", new, n=new)))
