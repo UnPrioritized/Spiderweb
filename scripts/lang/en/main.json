@@ -1546,7 +1546,7 @@
  "liquify.nothing": "Select a shape to liquify its colours.",
  "liquify.shape": "Liquifying: {name}",
  "liquify.n_shapes": "Liquifying {n} shapes",
- "liquify.hint": "Drag over the selected shape on the piano roll to push its colours. Hold Alt for the opposite: Twirl turns the other way, Pinch swells out (Bulge), Freeze takes the mask away (Thaw). Shift+click: a straight stroke from where the last one ended.",
+ "liquify.hint": "Drag over the selected shape on the piano roll to push its colours. Hold Alt for the opposite: Twirl turns the other way, Pinch swells out (Bulge), Freeze takes the mask away (Thaw). Straight strokes: hold Shift to see one from where the last stroke ended, then Shift+click (the first Shift+click only places the start). Add Ctrl to snap it to every 15°. Esc forgets the start.",
  "liquify.tool": "Tool:",
  "liquify.push": "Push",
  "liquify.push_tip": "Pushes the colours along the way you drag, like a finger through wet paint.",

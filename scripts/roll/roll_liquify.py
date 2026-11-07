@@ -20,7 +20,7 @@ from notes import liquify as lq
 from files.speed import key_sort
 from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, clean_recolour, new_seed, rule_of,
                             turned_map, with_most, without_recolour)
-from roll.roll_shared import SHIFT
+from roll.roll_shared import CTRL, SHIFT
 from window import look
 
 LIVE_MS = 30  # (every note made again at most this often while brushing (not shown live); longer when it takes longer)
@@ -28,6 +28,8 @@ SPACING = 0.2  # (a dab every this much of the brush's radius along its path)
 HOLD_MS = 40  # (holding still: a dab this often, at Rate % of the pressure; 25 a second)
 CATCH_REST = 0.08  # (s the mouse rests before a trailing (Smoothing) brush starts catching up with it)
 CATCH_SHARE = 0.3  # (of the way left, every HOLD_MS: eases in, ~0.4 s for a long string)
+SNAP_ANGLE = math.radians(15)  # (Shift+Ctrl+click: a straight stroke's way snapped to every 15 degrees, user 11-07)
+ARROW_EVERY = 70  # (px between the direction arrows on a straight stroke's line)
 MASK_STEP = 3  # (the freeze mask's red tint worked out every this many screen pixels, then stretched: it's soft)
 MASK_ALPHA = 0.45  # (fully frozen: this see-through)
 
@@ -93,6 +95,10 @@ class LiquifyBrush:
             hit = self.liquify_shapes_at(e.x, e.y, r)
             if not hit:
                 return False
+        if e.state & SHIFT and self.liquify_start() is None:  # (Shift+click with no start yet (nothing brushed on
+            self.liquify_set_start(e.x, e.y)  # these shapes, Esc): it only places the start, user 11-07: a straight
+            self.draw_liquify_brush()  # stroke's start "seems like it's randomly decided")
+            return True
         tool = app.liquify_window.tool.get()
         app.push_undo(name=tr("liquify.undo_mask" if tool in lq.MASK_TOOLS else "liquify.undo"))
         if tool not in lq.MASK_TOOLS:
@@ -111,10 +117,11 @@ class LiquifyBrush:
                    "masked": False, "mask_job": None, "alt": bool(e.state & ALT), "dabbed": time.perf_counter(),
                    "way": self.liquify_way(jobs) if tool not in lq.MASK_TOOLS else "mask"}
         self.drag = ("liquify",)
-        end = getattr(self, "lq_end", None)
-        if e.state & SHIFT and end:  # (Shift+click: a straight stroke from where the last one ended)
-            self.liquify_stroke(end, (e.x, e.y))
-            self.lq["p"] = (e.x, e.y)
+        end = self.liquify_start()
+        if e.state & SHIFT and end:  # (Shift+click: a straight stroke from where the last one ended; + Ctrl: its
+            q = self.liquify_aim(end, (e.x, e.y), e.state)  # way snapped to every 15 degrees)
+            self.liquify_stroke(end, q)
+            self.lq["p"] = self.lq["mouse"] = q
         else:  # (a click alone works too: Twirl / Pinch / Bulge / Freeze... at the spot, like the editors)
             self.liquify_dabs([(e.x, e.y)], (e.x, e.y))
         self.lq["hold"] = self.after(HOLD_MS, self.liquify_hold)
@@ -220,9 +227,51 @@ class LiquifyBrush:
             self.liquify_apply(now=st["way"] == "live", notes=st["changed"])
             self.app.sync_recolour()
             self.app.schedule_autosave()
-        self.lq_end = st["p"]
+        self.liquify_set_start(*st["p"])
         self.lq = None
         self.draw_liquify_brush()
+
+    # ---- straight strokes (Shift+click): their start, shown while Shift is held
+
+    def liquify_set_start(self, x, y):
+        """The next straight stroke starts here (where a stroke ended / a Shift+click placed it): kept in beats and
+        keys (it stays on the notes when the view moves), for the shapes selected now."""
+        b, p = self.from_xy(x, y)
+        self.lq_end = (b, p, frozenset(self.app.sels))
+
+    def liquify_start(self):
+        """The straight stroke's start on screen, or None: none placed, or other shapes selected since."""
+        end = getattr(self, "lq_end", None)
+        if not end or end[2] != frozenset(self.app.sels):
+            return None
+        return self.to_xy((end[0], end[1]))
+
+    def liquify_forget(self, e=None):
+        """Esc / the window closed or opened: no start for a straight stroke any more."""
+        if getattr(self, "lq_end", None) and not getattr(self, "lq", None):
+            self.lq_end = None
+            self.draw_liquify_brush()
+
+    @staticmethod
+    def liquify_aim(a, m, state):
+        """Where a straight stroke from a towards the mouse m ends: m, or with Ctrl held its way snapped to the
+        nearest 15 degrees (the mouse's distance along that way; user 11-07)."""
+        if not state & CTRL:
+            return m
+        dx, dy = m[0] - a[0], m[1] - a[1]
+        if not (dx or dy):
+            return m
+        ang = round(math.atan2(dy, dx) / SNAP_ANGLE) * SNAP_ANGLE
+        ux, uy = math.cos(ang), math.sin(ang)
+        d = dx * ux + dy * uy
+        return a[0] + ux * d, a[1] + uy * d
+
+    def liquify_keys(self, e, down):
+        """Shift / Ctrl pressed or let go over the piano roll: the straight stroke's line shown / snapped again."""
+        if self.liquify_on() and getattr(self, "lq_mouse", None):
+            bit = SHIFT if e.keysym.startswith("Shift") else CTRL
+            self.lq_state = (getattr(self, "lq_state", 0) | bit) if down else (getattr(self, "lq_state", 0) & ~bit)
+            self.draw_liquify_brush()
 
     def liquify_stroke(self, a, b):
         """Dabs from a to b (screen px; a left out) on every shape of the stroke, then their notes (soon)."""
@@ -678,6 +727,7 @@ class LiquifyBrush:
     def liquify_motion(self, e):
         if self.liquify_on() or getattr(self, "lq_mouse", None):
             self.lq_mouse = (e.x, e.y)
+            self.lq_state = e.state & (SHIFT | CTRL)
             self.draw_liquify_brush()
 
     def liquify_leave(self, e=None):
@@ -698,6 +748,10 @@ class LiquifyBrush:
         r = w.size_px() / 2
         line = max(1, round(self.scale))
         band = line + 2 * max(1, round(self.scale))
+        a = self.liquify_start() if not st and getattr(self, "lq_state", 0) & SHIFT else None
+        if a:  # (Shift held: where a Shift+click strokes from (its circle) and to, arrows along the way)
+            x, y = self.liquify_aim(a, m, self.lq_state)
+            self.draw_liquify_way(a, (x, y), r, line, band)
         for width, col in ((band, look.ROLL_BG), (line, look.LIQUIFY_BRUSH)):
             self.create_oval(x - r, y - r, x + r, y + r, outline=col, width=width, tags="lqbrush")
         h = r * w.brush["density"] / 100.0
@@ -708,3 +762,26 @@ class LiquifyBrush:
             for width, col in ((band, look.ROLL_BG), (line, look.LIQUIFY_BRUSH)):
                 self.create_line(x, y, m[0], m[1], fill=col, width=width, tags="lqbrush")
         self.tag_raise("lqbrush")
+
+    def draw_liquify_way(self, a, b, r, line, band):
+        """A straight stroke's preview: its start's circle (dashed) and a line from it to b with arrows showing the
+        way it pushes (user 11-07)."""
+        ax, ay = a
+        self.create_oval(ax - r, ay - r, ax + r, ay + r, outline=look.ROLL_BG, width=band, tags="lqbrush")
+        self.create_oval(ax - r, ay - r, ax + r, ay + r, outline=look.LIQUIFY_BRUSH, width=line, dash=(4, 3),
+                         tags="lqbrush")
+        d = math.hypot(b[0] - ax, b[1] - ay)
+        if d < 2:
+            return
+        ux, uy = (b[0] - ax) / d, (b[1] - ay) / d
+        size = 7 * max(1, round(self.scale))
+        for width, col in ((band, look.ROLL_BG), (line, look.LIQUIFY_BRUSH)):
+            self.create_line(ax, ay, b[0], b[1], fill=col, width=width, tags="lqbrush")
+        n = max(1, int(d // ARROW_EVERY))
+        for i in range(n):  # (evenly along it)
+            t = d * (i + 1) / (n + 1)
+            cx, cy = ax + ux * t, ay + uy * t
+            pts = (cx - ux * size - uy * size, cy - uy * size + ux * size, cx, cy,
+                   cx - ux * size + uy * size, cy - uy * size - ux * size)
+            for width, col in ((band, look.ROLL_BG), (line, look.LIQUIFY_BRUSH)):
+                self.create_line(*pts, fill=col, width=width, capstyle="round", joinstyle="round", tags="lqbrush")

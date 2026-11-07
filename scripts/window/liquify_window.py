@@ -248,6 +248,7 @@ class LiquifyWindow(tk.Toplevel):
         if (roll.drag or ("",))[0] == "liquify":
             roll.liquify_release(None)
         self.app.liquify_window = None
+        roll.lq_end = None  # (a straight stroke's start: forgotten with the window)
         self.destroy()
         roll.focus_set()
         roll.draw_liquify_mask()
@@ -261,4 +262,5 @@ def open_liquify(app):
         w.lift()
         w.focus_set()
     else:
+        app.roll.lq_end = None  # (a straight stroke starts from a stroke made since the window opened)
         LiquifyWindow(app)
