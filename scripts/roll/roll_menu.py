@@ -30,6 +30,7 @@ from notes.sustain import is_sustained
 from window.sustain_window import any_sustained, carry_stops, open_sustain, sustain_targets, target_indices
 from window.merge_window import open_merge
 from window.fill_window import open_fill
+from window.fold_window import fold_targets, open_fold
 from window.subtract_window import any_subtracted, carry_subtract, open_subtract, subtract_targets
 from window.extend_window import any_extended, carry_extend, open_extend
 from window.strips_window import any_strips, open_strips, strips_targets
@@ -191,6 +192,8 @@ class ShapeMenu:
         self.new_colours_menu(m)
         if app.fill_targets():
             item(tr("fill_gaps.menu"), "", lambda: open_fill(app))
+        if fold_targets(app):  # (Fold tracks…, fold_window.py)
+            item(tr("fold.menu"), "", lambda: open_fold(app))
         if len(app.sels) == 1 and app.can_split_pieces(sh):
             label = (tr("roll_menu.split_back_into_the_shapes_it") if originals(sh) or merge_parts(sh) else
                      tr("roll_menu.split_into_separate_shapes"))
@@ -324,6 +327,8 @@ class ShapeMenu:
         self.new_colours_menu(m)
         if app.fill_targets():
             item(tr("fill_gaps.menu"), "", lambda: open_fill(app))
+        if fold_targets(app):
+            item(tr("fold.menu"), "", lambda: open_fold(app))
         if app.pieces():
             item(tr("roll_menu.make_complete"), "", app.make_complete)
         self.group_items(m, item, True, True, True)

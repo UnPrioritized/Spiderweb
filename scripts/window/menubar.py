@@ -10,6 +10,7 @@ from window import look
 from window.chop_window import open_chop, quick_chop
 from window.claw_window import open_claw
 from window.fill_window import open_fill
+from window.fold_window import fold_targets, open_fold
 from window.load_midi import find_loaded, load_midi
 from window.path_window import open_path
 from window.strum_window import open_strum
@@ -105,6 +106,7 @@ def build_menu(app):
         m.entryconfig(6, state="normal" if tools else "disabled")
         m.entryconfig(7, state="normal" if app.tumour_targets() else "disabled")
         m.entryconfig(9, state="normal" if app.fill_targets() else "disabled")
+        m.entryconfig(10, state="normal" if fold_targets(app) else "disabled")
     t = menu("menu.tools", sync_tools)
     add(t, "roll_menu.claw_machine", "roll_menu.alt_w", lambda: open_claw(app))
     add(t, "roll_menu.strum", "roll_menu.alt_s", lambda: open_strum(app))
@@ -116,6 +118,7 @@ def build_menu(app):
     add(t, "roll_menu.tumours", "", app.open_tumours)
     t.add_separator()
     add(t, "fill_gaps.menu", "", lambda: open_fill(app))
+    add(t, "fold.menu", "", lambda: open_fold(app))
 
     v = menu("menu.view")
     redraw = lambda: (app.roll.request_redraw(), app.schedule_autosave())

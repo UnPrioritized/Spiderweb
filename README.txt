@@ -33,8 +33,8 @@ What it can do
 - Note tools: Claw machine, Strum and Chop pages that change the notes of a
   shape, Add between (shapes that step from one shape to another), Recolour
   and Stir (swirls and bends made from the colours you drew), Gate trim,
-  Gate extend, Fill gaps, slicing (with a line, a Lasso loop or another
-  shape) and merging.
+  Gate extend, Fill gaps, Fold tracks (many tracks onto fewer), slicing
+  (with a line, a Lasso loop or another shape) and merging.
 - Draw on Domino (Experimental, Windows): Spiderweb's drawing tools right
   on Domino's piano roll; each finished shape goes into Domino's current
   track by itself.

@@ -1,0 +1,28 @@
+Select the shapes whose tracks you want folded, then right-click one: Fold tracks… (also in the Tools menu). Their notes are put on fewer tracks. Use it when thin stripes of many colours are too busy to look at, or to hand a smaller track count to another program.
+
+[clip:fold]
+Thin stripes on 160 tracks, folded In a row into 16 tracks (wide bands), and into 40 tracks (narrower bands).
+
+## Fold into
+
+How many tracks the notes end up on. It starts at the number of colours the notes use, and the grey text beside it says about how many of the old tracks go into each new one. The piano roll shows the result while the window is open.
+
+## How
+
+In a row: tracks next to each other go together. With 300 tracks into 16, tracks 1–19 become track 1, tracks 20–38 track 2, and so on. Each new track takes one colour, so thin stripes of many colours become wide bands of one colour.
+
+Looping: the tracks are dealt out in turn. With 16 tracks, tracks 1, 17, 33 … become track 1, tracks 2, 18, 34 … track 2. When the colours already go round in 16s, the picture stays as it is, on fewer tracks.
+
+## The ticks
+
+Remove overlaps (on at first): notes on the same key that now overlap in one track are fixed the way Single channel fixes them. The earlier note is cut where the later one starts, and notes starting together become one. The line at the bottom says how many notes changed. Untick it to keep both notes.
+
+Even groups (In a row only): every new track gets about the same number of old tracks. Unticked, the groups are full and the last one is left short, so 300 tracks in groups of 19 make 16 tracks with 15 in the last. When full groups can't make the number you typed, the line at the bottom says so.
+
+Keep colours: each new track takes notes of one colour only, so the picture doesn't change. All the channel 1 tracks fold together, all the channel 2 tracks, and so on. Fold into can't go below the number of colours then; a bigger number gives each colour several tracks.
+
+## After folding
+
+Fold turns the selected shapes into one shape of plain notes, drawn shapes too, like Turn into plain notes. Ctrl+Z brings the shapes back. Cancel, Esc or the window's X leaves everything as it was.
+
+Every new track holds notes of one channel only, so the MIDI opens in any program that needs one channel per track.
