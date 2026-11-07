@@ -3544,6 +3544,13 @@ def block_notes(sh, ppq):
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
     if "picture" in sh:  # (a picture's box is its whole grid, even where its edges are see-through)
         t_all, k_all = (float(n) for n in sh["picture"]["grid"])
+    else:  # (only moved: upright, its notes' own size, on a tick and a key = every note shifted by as much; the
+        # same notes as the way below, checked on random boxes, dev/scratch/lag_block.py; 3 M notes 0.5 s -> quick)
+        t0, k0 = b0 * ppq, p0 + 0.5
+        if (up == 0 and vb == 0 and abs(ub * ppq - t_all) <= 1e-9 * t_all and abs(vp - k_all) <= 1e-9 * k_all
+                and abs(t0 - round(t0)) <= 1e-9 and abs(k0 - round(k0)) <= 1e-9):
+            T0, K0 = int(round(t0)), int(round(k0))
+            return np.column_stack([rows[:, 0] + T0, rows[:, 1] + T0, rows[:, 2] + K0, rows[:, 3], rows[:, 4]])
     v = (rows[:, 2] + 0.5) / k_all
     ends = []
     for u in (rows[:, 0] / t_all, rows[:, 1] / t_all):
