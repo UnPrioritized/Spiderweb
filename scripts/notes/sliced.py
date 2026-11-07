@@ -207,7 +207,7 @@ def completed(sh):
     if key:
         sh["cut_of"] = key
     rc = sh.get("recolour") or {}
-    if cut and (rc.get("stir") or rc.get("by")):
+    if cut and (rc.get("stir") or rc.get("liquify") or rc.get("by")):
         sh["colour_cut"] = cut
     whole = (cut or {}).get("whole") or {}
     if whole.get("cut"):  # (cut from a piece: its own whole's pages / glue first, then its own)

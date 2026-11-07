@@ -382,8 +382,12 @@ class Pair:
             stacks = {id(x): sx, id(y): sy}
             x, y = ({k: stacks[id(r)] if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
                      for k in set(x) | set(y)} for r in (x, y))
-            got = {k: mix(x[k], y[k], f) for k in x if k not in ("seed", "frame", "whole", "cut_frame")}
+            got = {k: mix(x[k], y[k], f) for k in x if k not in ("seed", "frame", "whole", "cut_frame", "liquify")}
             got.update({k: near[k] for k in ("seed", "frame", "whole", "cut_frame") if k in near})
+            from notes.liquify import blend  # (Liquify: the bend maps blended spot by spot, one end's fades)
+            lb = blend(x.get("liquify"), y.get("liquify"), f)
+            if lb:
+                got["liquify"] = lb
             if sized:
                 steps = got["stir"] if isinstance(got["stir"], list) else [got["stir"]]
                 for j in sized:

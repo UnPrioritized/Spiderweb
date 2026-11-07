@@ -42,7 +42,9 @@ from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
-KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned")  # (what mode KEEP looks at)
+KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "liquify")  # (what mode KEEP looks at)
+# ("liquify" = the Liquify brush's bend map, notes/liquify.py: applied after every stir; Off with only a Liquify =
+# KEEP too)
 # ("turned" = Reverse track order on a stirred shape, sweep 11-06: [[colour before, colour now], ...] of the colours
 # it swapped (only those moved). The Stir works out the colours from the ones before and the result is swapped the
 # same way, so the reverse is EXACTLY the stirred pattern with its tracks turned round: the stir's dice and "two
@@ -171,7 +173,9 @@ def clean_recolour(r):
     if not isinstance(r, dict) or r.get("mode") not in MODES + (KEEP,):
         return None
     stir = clean_stir(r.get("stir"))
-    if r["mode"] == KEEP and not stir:
+    from notes.liquify import clean_liquify
+    liquify = clean_liquify(r.get("liquify"))
+    if r["mode"] == KEEP and not stir and not liquify:
         return None
     a = r.get("amount", 100)
     if not number(a):
@@ -223,6 +227,8 @@ def clean_recolour(r):
         out["whole"] = [int(x) for x in w]
     if stir:
         out["stir"] = stir
+    if liquify:
+        out["liquify"] = liquify
     tw = clean_turned(r.get("turned"))
     if tw:
         out["turned"] = tw
@@ -737,10 +743,10 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
         # sounding together gives way: never random here)
         rc = {k: v for k, v in rc.items() if k in KEEP_KEYS}
         rc["seed"] = 1
-    if rc.get("stir") and tracks is not None and len(notes) >= BEFORE_STIR_LEAST:
+    if (rc.get("stir") or rc.get("liquify")) and tracks is not None and len(notes) >= BEFORE_STIR_LEAST:
         # (only the Stir changed since last time (a knob turned): the colours before it are kept, user 11-07: 3 M
-        # notes took a second a change)
-        key = (json.dumps({k: v for k, v in rc.items() if k != "stir"}, sort_keys=True), held, gate,
+        # notes took a second a change; the same for Liquify, and a brush stroke keeps the stirred colours too)
+        key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify")}, sort_keys=True), held, gate,
                None if own is None else tuple(own))
         got = _BEFORE_STIR.get("got")
         if got is None or got[0]() is not notes or got[1]() is not tracks or got[2] != key:
@@ -753,7 +759,17 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
         if b is None:
             return notes, tracks
         notes, lap, tw, (n, at, low, now, which, pals, pick, box, own) = b
-        now = all_stirred(n, at, low, now, rc, which, pals, pick, box, own)
+        skey = json.dumps(rc.get("stir"), sort_keys=True)
+        kept = _BEFORE_STIR.get("stirred")
+        if kept is not None and kept[0] is b and kept[1] == skey:
+            now = kept[2]
+        else:
+            now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own)
+            if rc.get("liquify"):  # (kept for the next brush stroke: only the Liquify changes then)
+                now = np.array(now)
+                now.setflags(write=False)
+                _BEFORE_STIR["stirred"] = (b, skey, now)
+        now = liquified_now(n, at, low, now, rc, which, pals, pick, box, own)
         return notes.copy(), lap + (turned_map(tw)(now) if tw else now)  # (a copy: whoever gets it may change it)
     return _recoloured(notes, tracks, rc, held, gate, own)
 
@@ -845,6 +861,20 @@ def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
 
 
 def all_stirred(notes, at, low, now, rc, which, pals, pick, box, own):
+    """now after every stir of rc in order, then its Liquify (applied last, user 11-07)."""
+    now = stirs_only(notes, at, low, now, rc, which, pals, pick, box, own)
+    return liquified_now(notes, at, low, now, rc, which, pals, pick, box, own)
+
+
+def liquified_now(notes, at, low, now, rc, which, pals, pick, box, own):
+    """now after rc's Liquify (notes/liquify.py), or as it is without one."""
+    if not rc.get("liquify"):
+        return now
+    from notes.liquify import liquified
+    return liquified(notes, at, low, now, rc, which, pals, pick, box, own)
+
+
+def stirs_only(notes, at, low, now, rc, which, pals, pick, box, own):
     """now after every stir of rc in order (stacked stirs: each on the colours the one before left; a stir at its
     defaults skipped)."""
     st = rc.get("stir")
