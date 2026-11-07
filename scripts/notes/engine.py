@@ -2086,6 +2086,8 @@ def split_overlaps(notes, stretch=False):
     lead = np.ones(len(a), bool)  # (the first of each group + start: the one row the same start becomes)
     lead[1:] = (g[1:] != g[:-1]) | (a[1:, 0] != a[:-1, 0])
     at = np.flatnonzero(lead)
+    if len(at) == len(a):  # (no two share a start: every row is its own)
+        return winners(a, g, -a[:, 0], stretch, notes)
     last = np.append(at[1:], len(a)) - 1
     one = a[last].copy()  # (the loudest of the same start, with the longest length)
     one[:, 1] = np.maximum.reduceat(a[:, 1], at)
@@ -2098,11 +2100,12 @@ def across_tracks(notes, rank, stretch=False):
     the slot with the lower rank wins (rank: per note, its slot's place in the track order), the other note is cut
     where the winner starts and comes back after it ends as a note of its own (stretch: the winner is stretched over
     that instead, like Single channel). Each slot's own overlaps must be fixed already. Every piece is kept, however
-    short."""
+    short. rank may also be a function: note places -> their ranks (only their order counts), asked only for the
+    notes that overlap."""
     if not len(notes):
         return notes
     notes = np.asarray(notes, np.int64)
-    return winners(notes, notes[:, 2], np.asarray(rank, np.int64), stretch)
+    return winners(notes, notes[:, 2], rank if callable(rank) else np.asarray(rank, np.int64), stretch)
 
 
 def winners(notes, group, rank, stretch=False, like=None):
@@ -2113,9 +2116,13 @@ def winners(notes, group, rank, stretch=False, like=None):
     notes), by start inside each)."""
     s, e = notes[:, 0], notes[:, 1]
     # (only notes overlapping another in their group need the work; the rest stay as they are)
-    o = np.lexsort((s, group))
-    gs, ss, es = group[o], s[o], e[o]
-    same = np.zeros(len(o), bool)
+    if ((group[1:] > group[:-1]) | (group[1:] == group[:-1]) & (s[1:] >= s[:-1])).all():
+        o = None  # (by group and start already: split_overlaps' notes)
+        gs, ss, es = group, s, e
+    else:
+        o = np.lexsort((s, group))
+        gs, ss, es = group[o], s[o], e[o]
+    same = np.zeros(len(gs), bool)
     same[1:] = gs[1:] == gs[:-1]
     run = running_max(es, gs)
     before = np.concatenate([[0], run[:-1]])
@@ -2125,13 +2132,17 @@ def winners(notes, group, rank, stretch=False, like=None):
     run_id = np.cumsum(~(same & (ss < before)))  # (runs of notes sounding one after another without a gap)
     busy = np.zeros(run_id[-1] + 1, bool)
     busy[run_id[touch]] = True
-    work = np.zeros(len(notes), bool)
-    work[o] = busy[run_id] & (es > ss)
+    if o is None:
+        work = busy[run_id] & (es > ss)
+    else:
+        work = np.zeros(len(notes), bool)
+        work[o] = busy[run_id] & (es > ss)
     like = notes if like is None else like
     if not work.any():
         return regrouped(notes, like)
     rest, w = notes[~work], np.flatnonzero(work)
-    wg, ws, we, wr = (np.ascontiguousarray(a, np.int64) for a in (group[w], s[w], e[w], rank[w]))
+    wg, ws, we, wr = (np.ascontiguousarray(a, np.int64) for a in (group[w], s[w], e[w],
+                                                                  rank(w) if callable(rank) else rank[w]))
     fast = loops()
     if fast:  # (the compiled loops: the same pieces, without the stretches in between: 4x the notes, 4x the time)
         order = np.lexsort((ws, wg))
@@ -2241,7 +2252,9 @@ def regrouped(notes, like=None):
             g = place[np.searchsorted(ids, code)]
     s = notes[:, 0]
     # (notes mostly come in time inside each group already: then a stable sort by group alone gives the same order
-    # as by group + start, quicker; 337.spwb's 2 M notes 140 -> 60 ms)
+    # as by group + start, quicker; 337.spwb's 2 M notes 140 -> 60 ms; in that order already: a copy)
+    if ((g[1:] > g[:-1]) | (g[1:] == g[:-1]) & (s[1:] >= s[:-1])).all():
+        return notes.copy()
     o = np.argsort(g, kind="stable")
     gs, ss = g[o], s[o]
     if not ((gs[1:] == gs[:-1]) & (ss[1:] < ss[:-1])).any():
@@ -2751,22 +2764,28 @@ def remove_across(notes, held, overlaps, ranks):
     held: per note True if it keeps its overlaps (Sustain, Fill gaps' Keep both: left as they are, as in render).
     ranks: notes -> each note's place in the track list (earlier = lower). overlaps: overlap_fix's."""
     stretch = overlaps.get("way", "stretch") == "stretch"
-    rest = notes[~held]
+    rest = notes[~held] if held.any() else notes
     rest = resolve_overlaps(rest) if stretch else split_overlaps(rest)
     if len(rest):
-        # (places worked out from ALL the notes, held ones too: a track holding only Sustain notes still counts, so
-        # your tracks after it keep their place, hunt 2026-11-07; then looked up by each note's slot)
-        every = np.asarray(ranks(notes), np.int64)
-        slots, at = np.unique(notes[:, 4], return_index=True)
-        rank = every[at][np.searchsorted(slots, rest[:, 4])]
-        rank = -rank if overlaps.get("later") else rank
-        # (one track's channels share a place: between them the later start wins, Single channel's rule inside one
-        # track (user 2026-11-06, hunt: the winner was left to chance and differed without the compiled loops); then
-        # the lower slot: every note its own rank, so no tie is ever left)
-        order = np.lexsort((rest[:, 4], -rest[:, 0], rank))
-        rank = np.empty(len(rest), np.int64)
-        rank[order] = np.arange(len(rest))
-        rest = across_tracks(rest, rank, stretch)
+        rest = np.asarray(rest, np.int64)
+
+        def ranked(w):
+            """The ranks of rest's notes w (only those that overlap: their order is all that counts)."""
+            # (places worked out from ALL the notes, held ones too: a track holding only Sustain notes still counts,
+            # so your tracks after it keep their place, hunt 2026-11-07; then looked up by each note's slot)
+            every = np.asarray(ranks(notes), np.int64)
+            slots, at = np.unique(notes[:, 4], return_index=True)
+            mine = rest[w]
+            rank = every[at][np.searchsorted(slots, mine[:, 4])]
+            rank = -rank if overlaps.get("later") else rank
+            # (one track's channels share a place: between them the later start wins, Single channel's rule inside
+            # one track (user 2026-11-06, hunt: the winner was left to chance and differed without the compiled
+            # loops); then the lower slot: every note its own rank, so no tie is ever left)
+            order = np.lexsort((mine[:, 4], -mine[:, 0], rank))
+            rank = np.empty(len(mine), np.int64)
+            rank[order] = np.arange(len(mine))
+            return rank
+        rest = across_tracks(rest, ranked, stretch)
     return np.concatenate([rest, notes[held]]) if held.any() else rest
 
 
