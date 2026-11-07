@@ -2500,7 +2500,7 @@ def in_rounds(note_lists, slot_of, rounds, step, teams=None, stay=None, together
 
 def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, use10=False, teams=None, pastes=None,
            held=None, back=None, ordered=None, rounds=None, keep=False, stay=None, voice_slots=None, busy=None,
-           together=None, note_slots=None, kept=None, groups=None, overlaps=None):
+           together=None, note_slots=None, kept=None, groups=None, overlaps=None, slots_only=False):
     """
     note_lists: shape_notes() of every shape -> (final notes, number of slots used). The notes are an array of
     (start, end, pitch, velocity, slot, owner) rows, owner = the shape's number.
@@ -2543,6 +2543,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
     then fixes overlaps per slot).
     groups: per shape None or a key: with keep, shapes with one key move as one shape (the pieces of one cut shape).
     overlaps: how overlaps are fixed (overlap_fix; None = cut + stretch per slot, as always).
+    slots_only: only the slots are wanted (note_slots / voice_slots): (None, number of slots), no notes made.
     """
     pastes = pastes or [None] * len(note_lists)
     tracks = tracks or [None] * len(note_lists)
@@ -2733,7 +2734,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             render([note_lists[i] for i in pick], "auto", split, [tracks[i] for i in pick],
                    [apart[i] for i in pick], [fixed[i] for i in pick], use10, None, [pastes[i] for i in pick],
                    None, [back[i] for i in pick], [ordered[i] for i in pick], keep=keep, voice_slots=told,
-                   busy=[busy[i] for i in pick] if busy else None, note_slots=got)
+                   busy=[busy[i] for i in pick] if busy else None, note_slots=got, slots_only=True)
             for k, v in told.items():  # (its CC events' tracks: passengers.py)
                 voice_slots[pick[k]] = v
             for k, s in got.items():
@@ -2741,6 +2742,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                     slot_of[pick[k]] = np.asarray(s, np.int64)
                     count = max(count, int(np.max(s)) + 1)
     count = max(count, top)
+    if slots_only:  # (the notes themselves aren't wanted: their overlap fixing took 0.3 s on 3 M pasted notes)
+        return None, count
     notes = np.empty((sum(len(lst) for lst in note_lists), 6), np.int64)
     at = 0
     for o, lst in enumerate(note_lists):
