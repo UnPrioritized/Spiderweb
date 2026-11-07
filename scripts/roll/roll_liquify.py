@@ -2,7 +2,7 @@
 while the Liquify window is open, a left drag over a selected shape (any tool) brushes its colours; elsewhere the
 piano roll works as usual. The brush is a circle on screen (its size in pixels, zoom never changes it), drawn at the
 mouse; with Smoothing it trails behind on a string (a "lazy mouse": it moves only when the string is pulled tight).
-Shift+click = a straight stroke from where the last one ended. One undo step a stroke. Each shape's map is changed
+Two Shift+clicks = a straight stroke between them (held 2nd click = it again and again). One undo step a stroke. Each shape's map is changed
 dab by dab along the brush's path. While dragging, the REAL new colours show (B check-in 2026-11-07: a bent picture
 of the piano roll looked nothing like the result, and making every note again was slow): only the notes whose
 colour changed are worked out (notes/liquify.Live) and painted again on the piano roll's picture, pixel for pixel
@@ -26,6 +26,7 @@ from window import look
 LIVE_MS = 30  # (every note made again at most this often while brushing (not shown live); longer when it takes longer)
 SPACING = 0.2  # (a dab every this much of the brush's radius along its path)
 HOLD_MS = 40  # (holding still: a dab this often, at Rate % of the pressure; 25 a second)
+LINE_MS = 200  # (a straight stroke's 2nd click held: the whole stroke again this often, at Rate % of the pressure)
 CATCH_REST = 0.08  # (s the mouse rests before a trailing (Smoothing) brush starts catching up with it)
 CATCH_SHARE = 0.3  # (of the way left, every HOLD_MS: eases in, ~0.4 s for a long string)
 SNAP_ANGLE = math.radians(15)  # (Shift+Ctrl+click: a straight stroke's way snapped to every 15 degrees, user 11-07)
@@ -118,10 +119,13 @@ class LiquifyBrush:
                    "way": self.liquify_way(jobs) if tool not in lq.MASK_TOOLS else "mask"}
         self.drag = ("liquify",)
         end = self.liquify_start()
-        if e.state & SHIFT and end:  # (Shift+click: a straight stroke from where the last one ended; + Ctrl: its
-            q = self.liquify_aim(end, (e.x, e.y), e.state)  # way snapped to every 15 degrees)
+        if e.state & SHIFT and end:  # (2nd Shift+click: the straight stroke from the start placed by the 1st; + Ctrl:
+            q = self.liquify_aim(end, (e.x, e.y), e.state)  # its way snapped to every 15 degrees). Held = the same
+            self.lq_end = None  # stroke again and again (liquify_hold; user 11-07). Next one = a new pair of clicks.
             self.liquify_stroke(end, q)
             self.lq["p"] = self.lq["mouse"] = q
+            self.lq["line"] = (end, q)
+            self.lq["passed"] = time.perf_counter()
         else:  # (a click alone works too: Twirl / Pinch / Bulge / Freeze... at the spot, like the editors)
             self.liquify_dabs([(e.x, e.y)], (e.x, e.y))
         self.lq["hold"] = self.after(HOLD_MS, self.liquify_hold)
@@ -172,6 +176,15 @@ class LiquifyBrush:
         if not st or not w:
             return
         st["hold"] = self.after(HOLD_MS, self.liquify_hold)
+        rate = w.brush["rate"]
+        if st.get("line"):  # (a straight stroke's 2nd click held: the whole stroke again every LINE_MS at Rate %,
+            # every tool, Push too; the mouse moving changes nothing. User's own idea 11-07: "clicking second spot
+            # and holding it should work like holding it so its effect is more applied"; editors do one pass)
+            if rate > 0 and time.perf_counter() - st["passed"] >= LINE_MS / 1000:
+                a, b = st["line"]
+                self.liquify_dabs(lq.straight(a, b, max(1.0, w.size_px() / 2 * SPACING)), a, rate / 100.0)
+                st["passed"] = time.perf_counter()
+            return
         p, m = st["p"], st["mouse"]
         if time.perf_counter() - st.get("moved", 0.0) > CATCH_REST and math.hypot(m[0] - p[0], m[1] - p[1]) > 0.5:
             # (the mouse rests: a smoothing brush catches up with it, image editors' "stroke catch-up"; user 11-07:
@@ -182,7 +195,6 @@ class LiquifyBrush:
             st["p"] = q
             self.draw_liquify_brush()
             return
-        rate = w.brush["rate"]
         tool = self.liquify_tool()[0]
         if rate <= 0 or tool == "push" or time.perf_counter() - st["dabbed"] < HOLD_MS / 1000 * 0.9:
             return
@@ -195,6 +207,8 @@ class LiquifyBrush:
         st["mouse"] = (e.x, e.y)
         st["moved"] = time.perf_counter()
         st["alt"] = bool(e.state & ALT)
+        if st.get("line"):  # (a straight stroke stays on its line while held)
+            return
         p = st["p"]
         w = self.app.liquify_window
         string = w.brush["smoothing"] / 100.0 * w.size_px() if w else 0.0
@@ -227,8 +241,7 @@ class LiquifyBrush:
             self.liquify_apply(now=st["way"] == "live", notes=st["changed"])
             self.app.sync_recolour()
             self.app.schedule_autosave()
-        self.liquify_set_start(*st["p"])
-        self.lq = None
+        self.lq = None  # (no straight-stroke start left behind: each one = its own pair of Shift+clicks, user 11-07)
         self.draw_liquify_brush()
 
     # ---- straight strokes (Shift+click): their start, shown while Shift is held
@@ -779,10 +792,14 @@ class LiquifyBrush:
         r = w.size_px() / 2
         line = max(1, round(self.scale))
         band = line + 2 * max(1, round(self.scale))
-        a = self.liquify_start() if not st and getattr(self, "lq_state", 0) & SHIFT else None
-        if a:  # (Shift held: where a Shift+click strokes from (its circle) and to, arrows along the way)
-            x, y = self.liquify_aim(a, m, self.lq_state)
+        a = self.liquify_start() if not st else None
+        if st and st.get("line"):  # (a straight stroke held: its line stays shown while it repeats)
+            self.draw_liquify_way(st["line"][0], st["line"][1], r, line, band)
+        elif a and getattr(self, "lq_state", 0) & SHIFT:  # (Shift held: where the next Shift+click strokes from
+            x, y = self.liquify_aim(a, m, self.lq_state)  # (its circle) and to, arrows along the way)
             self.draw_liquify_way(a, (x, y), r, line, band)
+        elif a:  # (the start placed: its circle stays, user 11-07)
+            self.draw_liquify_way(a, a, r, line, band)
         for width, col in ((band, look.ROLL_BG), (line, look.LIQUIFY_BRUSH)):
             self.create_oval(x - r, y - r, x + r, y + r, outline=col, width=width, tags="lqbrush")
         h = r * w.brush["density"] / 100.0

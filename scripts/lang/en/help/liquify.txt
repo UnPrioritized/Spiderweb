@@ -32,7 +32,7 @@ Density: how hard the brush's edge is. Higher = the full push reaches further ou
 
 Pressure: how strongly each step of the brush pushes.
 
-Rate: how fast Twirl, Pinch, Restore, Smooth and Freeze keep working while you hold the mouse still. 0 = only while moving. Push only works while moving.
+Rate: how fast a held brush keeps working. Twirl, Pinch, Restore, Smooth and Freeze keep working while you hold the mouse still; every tool, Push too, keeps going while you hold a straight stroke's second click. 0 = only while moving.
 
 Smoothing: the brush trails behind the mouse on a string, so shaky hand movements come out as smooth strokes. The higher, the longer the string (a line from the brush to the mouse shows it). When the mouse rests, the brush catches up with it.
 
@@ -40,7 +40,7 @@ At the edges: what is pulled in where the brush pushes colours past the shape's 
 
 ## Straight strokes
 
-Hold Shift to see a straight stroke before making it: a dashed circle where it starts (where your last stroke ended) and a line with arrows to the mouse. Shift+click makes it; Shift+click again goes on from there. The first Shift+click on a shape with no start yet only places the start. Add Ctrl (Shift+Ctrl+click) to snap the line to every 15° (flat, upright, 45° and in between). Esc forgets the start.
+A straight stroke takes two clicks: Shift+click where it starts (a dashed circle stays there), then Shift+click where it ends. While you hold Shift, a line with arrows shows the way it will push. Keep holding the second click and the same stroke goes on and on, pushing further the longer you hold (as fast as Rate says). The next straight stroke starts with a new first click. Add Ctrl (Shift+Ctrl+click) to snap the line to every 15° (flat, upright, 45° and in between). Esc forgets the start.
 
 ## In the Recolour row
 

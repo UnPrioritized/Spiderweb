@@ -29,7 +29,6 @@ BRUSH = {"size": (100.0, 4.0, 1000.0, "px", (5, 50, 1)),
          "pressure": (50.0, 1.0, 100.0, "%", (1, 10, 0.1)),
          "rate": (80.0, 0.0, 100.0, "%", (1, 10, 0.1)),
          "smoothing": (0.0, 0.0, 100.0, "%", (1, 10, 0.1))}
-HOLD_TOOLS = ("restore", "smooth", "twirl", "pinch", "freeze")  # (Rate: working while held still)
 
 
 def saved(name):
@@ -163,15 +162,12 @@ class LiquifyWindow(tk.Toplevel):
         self.sync_tool()
 
     def sync_tool(self):
-        """Settings a tool doesn't use greyed (Twirl's way round, Rate for Push)."""
+        """Settings a tool doesn't use greyed (Twirl's way round). Rate never: Push uses it too, on a held straight
+        stroke (user 11-07)."""
         tool = self.tool.get()
         on = ["!disabled"] if tool == "twirl" else ["disabled"]
         for b in (*self.twirl_buttons, self.twirl_word):
             b.state(on)
-        e, _, word = self.boxes["rate"]
-        on = ["!disabled"] if tool in HOLD_TOOLS else ["disabled"]
-        e.state(on)
-        word.state(on)
 
     def on_box(self, name):
         e, var, _ = self.boxes[name]
