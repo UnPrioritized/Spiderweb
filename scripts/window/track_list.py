@@ -355,10 +355,11 @@ class TrackList(tk.Canvas):
             return got[1]
         sets = [set() for _ in range(len(self._all))]
         n = self._made[0]
-        if len(n):
-            rows = self.note_rows()
+        if len(n):  # (a note's row and channel go by its slot alone: worked out once per slot, not per note)
+            slots = np.unique(n[:, 4])
+            rows = self.rows_of(slots)
             ok = rows >= 0
-            for p in np.unique(rows[ok] * 16 + channels_of(n[ok, 4], use10)).tolist():
+            for p in np.unique(rows[ok] * 16 + channels_of(slots[ok], use10)).tolist():
                 sets[p >> 4].add(p & 15)
         if lm is not None:
             moved = lm.rechannel
