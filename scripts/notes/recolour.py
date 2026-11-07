@@ -37,7 +37,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from files.speed import loops
+from files.speed import key_sort, loops
 from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
@@ -543,9 +543,17 @@ def dice(notes, low, seed, salt, corner):
             np.asarray(notes[:, 2], np.int64) - k0, np.asarray(low, np.int64)]
     with np.errstate(over="ignore"):
         x = np.full(len(notes), np.uint64(seed * 2 + salt), np.uint64)
-        for c in cols:
-            x = _mixed(x ^ c.view(np.uint64))
-    return (x >> np.uint64(11)).astype(np.float64) / float(1 << 53)
+        t = np.empty(len(notes), np.uint64)
+        for c in cols:  # (_mixed done in place: half the time on millions of notes)
+            x ^= c.view(np.uint64)
+            x += np.uint64(0x9E3779B97F4A7C15)
+            x ^= np.right_shift(x, np.uint64(30), out=t)
+            x *= np.uint64(0xBF58476D1CE4E5B9)
+            x ^= np.right_shift(x, np.uint64(27), out=t)
+            x *= np.uint64(0x94D049BB133111EB)
+            x ^= np.right_shift(x, np.uint64(31), out=t)
+        x >>= np.uint64(11)
+    return x.astype(np.float64) / float(1 << 53)
 
 
 def colour_sets(low):
@@ -1898,9 +1906,17 @@ def _sorted_notes(at):
     n = len(at)
     nk = np.asarray(at[:, 2], np.int64)
     nm = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
-    o = np.lexsort((nm, nk))
+    a = np.asarray(at)
+    if a.dtype == np.int64 and n and np.abs(a[:, :2]).max() < 1 << 52:
+        # (whole ticks: by start + end is by middle, the same order; the compiled sort when it's there)
+        o = key_sort(nk, a[:, 0] + a[:, 1])
+    else:
+        o = np.lexsort((nm, nk))
     ks, ms = nk[o], nm[o]
-    keys, first = np.unique(ks, return_index=True)
+    new = np.ones(n, bool)  # (sorted: each key's first place, as np.unique gives it)
+    new[1:] = ks[1:] != ks[:-1]
+    first = np.flatnonzero(new)
+    keys = ks[first]
     last = np.append(first[1:], n)
     base, top = float(ms.min()), float(ms.max())
     gap = 2 * (top - base) + 2
@@ -2069,9 +2085,9 @@ def kept_apart(notes, old, new, colours, pick):
     free one from its dice), or its own one when all are taken. Notes of one colour before may share (sustained).
     Only bursts of notes overlapping on a key are looked at: pairs all at once, bigger ones note by note."""
     s, e, k = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
-    o = np.lexsort((s, k))
+    o = key_sort(k, s)  # (np.lexsort((s, k)), compiled when it's there)
     ks, ss, es = k[o], s[o], e[o]
-    reach = np.maximum.accumulate(es + ks * (1 << 40))  # (the latest end so far, counted per key: keys far apart)
+    reach =np.maximum.accumulate(es + ks * (1 << 40))  # (the latest end so far, counted per key: keys far apart)
     over = np.zeros(len(o), bool)
     over[1:] = ss[1:] + ks[1:] * (1 << 40) < reach[:-1]
     over[1:] &= ks[1:] == ks[:-1]
