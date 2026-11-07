@@ -818,6 +818,7 @@ class RollDrawing:
         self.draw_lasso()
         self.draw_copy_path()
         self.draw_centre_dots()
+        self.draw_liquify_brush()
         self.draw_melody_lit()
         self.draw_sustain_stops()
         if self._kb_key is None or self._frame_key is None:

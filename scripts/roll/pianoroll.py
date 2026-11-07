@@ -38,6 +38,7 @@ from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_centre import CentreDots
+from roll.roll_liquify import LiquifyBrush
 from roll.roll_melody import MelodyMarks
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
@@ -53,7 +54,8 @@ EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                PathEditing, SustainStops, LassoDrawing, CentreDots, MelodyMarks, GlissEditing, tk.Canvas):
+                PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, MelodyMarks, GlissEditing,
+                tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -147,6 +149,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.bind("<ButtonRelease-1>", self.on_left_up)
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
+        self.bind("<Leave>", self.liquify_leave, add="+")  # (Liquify's brush circle goes with the mouse)
         bind_double_right(self, self.on_right, self.on_double_right)
         self.bind("<B3-Motion>", self.on_right_drag)
         self.bind("<ButtonRelease-3>", self.on_right_release)
@@ -388,7 +391,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
         return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
-                                                     "rccentre", "gliss_copies", "gliss_len", "keyhold",
+                                                     "rccentre", "liquify", "gliss_copies", "gliss_len", "keyhold",
                                                      "sustop", "lasso_free", "lasso_poly", "lasso_point",
                                                      "lasso_magnet")
 
@@ -1247,6 +1250,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if not self.draft and self.centre_press(e):  # Shares window open: a Clumps Centre point dot grabbed
             return
+        if not self.draft and self.liquify_press(e):  # Liquify window open: a brush stroke on a selected shape
+            return
         if self.stop_press(e):  # a sustained shape's stop line held (the Select tool)
             return
         tool = app.tool.get()
@@ -1461,6 +1466,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.path_drag(e)
         elif kind == "rccentre":
             self.centre_drag(e)
+        elif kind == "liquify":
+            self.liquify_drag(e)
         elif kind == "box":
             self.box_mouse = (e.x, e.y, e.state)
             self.box_to()
@@ -1717,6 +1724,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if kind == "rccentre":
             self.drag = None
             return
+        if kind == "liquify":
+            self.liquify_release(e)
+            return
         if kind.startswith("lasso"):
             if self.box_timer:
                 self.after_cancel(self.box_timer)
@@ -1925,6 +1935,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def on_motion(self, e):
         self.app.show_position(self.position_text(e))
         self.tempo_hover(e)
+        self.liquify_motion(e)
         if not self.drag and self.lasso_motion(e):  # (a Polygonal loop's next line follows the mouse)
             return
         if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):

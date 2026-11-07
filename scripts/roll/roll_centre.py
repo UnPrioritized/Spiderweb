@@ -65,7 +65,7 @@ class CentreDots:
         out.sort(key=lambda d: (d[1][3] == "clumps") == first)
         return out
 
-    def stir_made(self, sh, kind="stir"):
+    def stir_made(self, sh, kind="stir"):  # (Liquify's brush too: roll_liquify.py)
         """(its Recolour, its notes without it, their box past the piano roll's edges, kind) for a shape, or None
         (no notes)."""
         app = self.app

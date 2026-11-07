@@ -43,10 +43,16 @@ class RecolourPanel:
         Tooltip(self.recolour_again, tr("recolour.again_tip"))
         # (Stir… goes on a line of its own under the dropdown when the row has no room: "Stir… (on)" beside New
         # shuffle was cut, user 2026-11-03; fit_stir)
+        # (Liquify… beside it, user 2026-11-07: the two move together, recolour_tools)
         self.recolour_line, self.recolour_stir_line = c, ttk.Frame(box)
-        self.recolour_stir = ttk.Button(box, text=tr("stir.button"), command=self.open_stir)
-        self.recolour_stir.pack(in_=c, side="left", padx=(4, 0))
+        self.recolour_tools = ttk.Frame(box)
+        self.recolour_tools.pack(in_=c, side="left", padx=(4, 0))
+        self.recolour_stir = ttk.Button(self.recolour_tools, text=tr("stir.button"), command=self.open_stir)
+        self.recolour_stir.pack(side="left")
         Tooltip(self.recolour_stir, tr("stir.button_tip"))
+        self.recolour_liquify = ttk.Button(self.recolour_tools, text=tr("liquify.button"), command=self.open_liquify)
+        self.recolour_liquify.pack(side="left", padx=(4, 0))
+        Tooltip(self.recolour_liquify, tr("liquify.button_tip"))
         box.bind("<Configure>", lambda e: self.fit_stir(), add="+")
         rows = self.recolour_row = ttk.Frame(box)  # (only shown while Recolour is on)
         row = ttk.Frame(rows)
@@ -79,9 +85,9 @@ class RecolourPanel:
         self.recolour_mix_tip = Tooltip(self.recolour_mix_tick, tr("recolour.mix_tip", most=SET))
 
     def fit_stir(self):
-        """Stir… beside the dropdown (and New shuffle) when the row has room for it, else on its own line under
-        the dropdown."""
-        box, c, line, b = self.recolour_box, self.recolour_line, self.recolour_stir_line, self.recolour_stir
+        """Stir… + Liquify… beside the dropdown (and New shuffle) when the row has room for them, else on their own
+        line under the dropdown."""
+        box, c, line, b = self.recolour_box, self.recolour_line, self.recolour_stir_line, self.recolour_tools
         room = box.winfo_width()
         if room <= 1:
             return
@@ -106,6 +112,10 @@ class RecolourPanel:
     def open_stir(self):
         from window.stir_window import open_stir
         open_stir(self)
+
+    def open_liquify(self):
+        from window.liquify_window import open_liquify
+        open_liquify(self)
 
     def recolour_targets(self):
         """The selected shapes Recolour works on (not a Hz bass); nothing selected: none (no setting for new
@@ -180,6 +190,9 @@ class RecolourPanel:
         self.recolour_amount_tip.text = tr(AMOUNT_WORDS[kind][1])
         self.recolour_stir.config(text=tr("stir.button_on" if stir_on else "stir.button"))
         self.recolour_stir.state(["!disabled" if tgts else "disabled"])
+        liquify_on = any(r and r.get("liquify") for r in act)
+        self.recolour_liquify.config(text=tr("liquify.button_on" if liquify_on else "liquify.button"))
+        self.recolour_liquify.state(["!disabled" if tgts else "disabled"])
         shown = bool(live)
         if shown != bool(self.recolour_row.winfo_manager()):
             if shown:
@@ -201,7 +214,8 @@ class RecolourPanel:
             else:
                 self.recolour_mix_tick.pack_forget()
         self.recolour_mix_tip.text = tr("recolour.mix_tip", most=SET)
-        for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None)):
+        for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None),
+                  getattr(self, "liquify_window", None)):
             if w:
                 w.sync()
 
@@ -252,8 +266,8 @@ class RecolourPanel:
 
         def changed(old, _sh=None):
             if what == "mode":
-                if mode is None:  # (Off: a Stir stays, on the colours as they are)
-                    return dict(old, mode=KEEP) if old and old.get("stir") else None
+                if mode is None:  # (Off: a Stir / Liquify stays, on the colours as they are)
+                    return dict(old, mode=KEEP) if old and (old.get("stir") or old.get("liquify")) else None
                 if old and old["mode"] == mode:
                     return old
                 # (another mode: its own Amount to start from, the word means another thing there)
