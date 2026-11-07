@@ -199,8 +199,16 @@ def inner(sh):
 def completed(sh):
     """A piece that's becoming a shape of its own (its outline changed, Turn into a complete shape): it takes the
     whole's glue (the boxes inside it) and note tool pages, before its own, so they now work on its own notes.
-    Changes sh; its "cut" is dropped."""
+    Changes sh; its "cut" is dropped (hunt 2026-11-07: its cut group kept as "cut_of", so the other pieces keep their
+    channels; a stirred / Per chord / run piece keeps the cut as "colour_cut": flipped only, it still takes the
+    whole's colours, flipped_back)."""
+    key = cut_group(sh)
     cut = sh.pop("cut", None)
+    if key:
+        sh["cut_of"] = key
+    rc = sh.get("recolour") or {}
+    if cut and (rc.get("stir") or rc.get("by")):
+        sh["colour_cut"] = cut
     whole = (cut or {}).get("whole") or {}
     if whole.get("cut"):  # (cut from a piece: its own whole's pages / glue first, then its own)
         whole = json.loads(json.dumps(whole))
@@ -351,6 +359,29 @@ def source(sh):
                 to_bp = frame_to_bp(sh["pts"])
                 src[key] = moved_at(src[key], lambda u, v: to_uv(*to_bp(u, v)))
     return src, cut["part"], same_vel
+
+
+def flipped_back(sh, side, up):
+    """A recoloured piece made a shape of its own by a flip (sh["colour_cut"] = its cut, completed): sh as the piece
+    it was, unflipped where it sits now (side / up: flipped sideways / upside down since the cut), so
+    engine.stirred_piece can still look its colours up in the whole (hunt 2026-11-07). None: its outline changed in
+    another way."""
+    cut = sh.get("colour_cut")
+    if not cut or not side and not up:
+        return None
+    was = np.asarray(cut["was"]["pts"], float)
+    pts = np.asarray(sh["pts"], float)
+    if was.shape != pts.shape or not len(pts):
+        return None
+    back = was.copy()
+    for ax, flip in ((0, side), (1, up)):
+        rel = pts[:, ax] + was[:, ax] if flip else pts[:, ax] - was[:, ax]
+        if np.abs(rel - rel[0]).max() > 1e-6:
+            return None
+        back[:, ax] = was[:, ax] + (pts[:, ax].min() - was[:, ax].min())  # (unflipped on the same spot)
+    out = dict(sh, cut=cut, pts=back.tolist())
+    out.pop("colour_cut", None)
+    return out if moved_by(out) is not None else None
 
 
 def cut_group(sh):

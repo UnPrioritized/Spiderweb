@@ -111,6 +111,8 @@ def hold_gap(sus, notes, ppq):
     """The hold gap in ticks: the typed one, else auto_gap."""
     if "gap" in sus:
         return int(round(sus["gap"] * ppq))
+    if "_auto" in sus:  # (worked out before any glue: engine.auto_sustain)
+        return sus["_auto"]
     return auto_gap(notes)
 
 

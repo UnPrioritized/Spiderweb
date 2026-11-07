@@ -591,8 +591,9 @@ class SustainWindow(tk.Toplevel):
         return self.remembered(notes, key, count)
 
     def auto_of(self, t):
-        """Shape t's Auto gap in ticks (from its notes without Sustain)."""
-        notes = bare_notes(self.app, t)
+        """Shape t's Auto gap in ticks (from its notes without Sustain and glue: engine.auto_sustain)."""
+        from notes.engine import unglued
+        notes = bare_notes(self.app, unglued(t) or t)
         return self.remembered(notes, "auto", lambda: auto_gap(notes))
 
     def show(self):

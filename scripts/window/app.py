@@ -349,7 +349,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     # (a sliced piece with Colours: by colour number too, so it keeps the whole's colours, user 2026-11-02: a
     # piece starting on the 3rd colour began again from the 1st)
     ordered = [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh
-               or bool(sh.get("cut")) and has_colours(sh, turns=True) for sh in shapes]
+               or bool(sh.get("cut") or sh.get("cut_of")) and has_colours(sh, turns=True) for sh in shapes]
     # (a recoloured shape's colours: each counted as starting where it did before, so they keep their channels)
     backs = [recolour_back(s, notes_tracks, dict(s_as, _rounds=True) if r else s_as, n, t)
              if mode == "auto" and not o and t is not None and is_recoloured(s) else colours_back(s)

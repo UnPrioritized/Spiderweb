@@ -46,10 +46,10 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
-from notes.recolour import box_of, clean_recolour, is_recoloured, recoloured, rule_of, without_recolour
+from notes.recolour import KEEP, box_of, clean_recolour, is_recoloured, recoloured, rule_of, without_recolour
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.extend import clean_extend, extended, is_extended
-from notes.sustain import clean_sustain, cut_by, held, is_sustained
+from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, rows_up_to, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
@@ -970,7 +970,10 @@ def fx_notes(sh, ppq, keys, get):
         rule = rule_of(sh["recolour"])
         if rule.get("stir"):  # (a stir round as seen counts beats: recolour.area_scales)
             rule["ppq"] = ppq
-        if rule.get("stir") and sh.get("cut") and not (rule.get("frame") or (1, 0))[1]:  # (turned: notes made anew)
+        # (Stir, and Per chord / run (a run cut in two got a new first note, hunt 11-07): a piece looks its colours up
+        # in the whole)
+        if ((rule.get("stir") or rule.get("by") and rule["mode"] != KEEP) and (sh.get("cut") or sh.get("colour_cut"))
+                and not (rule.get("frame") or (1, 0))[1]):  # (turned: notes made anew)
             got = stirred_piece(sh, notes, tracks, held_, get, gate, rule)
             if got is not None:
                 return got
@@ -986,7 +989,7 @@ def fx_notes(sh, ppq, keys, get):
         if not is_sustained(sh):
             return notes, tracks
         got = held_piece(sh, notes, tracks, ppq, get)
-        return got if got is not None else held(notes, tracks, sh["sustain"], ppq)
+        return got if got is not None else held(notes, tracks, auto_sustain(sh, get), ppq)
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
         return kind_notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")
@@ -1059,6 +1062,31 @@ def fx_notes(sh, ppq, keys, get):
 
 
 _held_wholes = {}  # id(whole's notes) -> (them, (sustain, ppq), held(...)): held_piece's
+
+
+def unglued(sh):
+    """sh without its glue and glue places (None: it has no glue)."""
+    if not sh.get("glue"):
+        return None
+    out = {k: v for k, v in sh.items() if k != "glue"}
+    fx = [st for st in sh.get("fx") or () if st["tool"] != "glue"]
+    if fx:
+        out["fx"] = fx
+    else:
+        out.pop("fx", None)
+    return out
+
+
+def auto_sustain(sh, get):
+    """sh's Sustain as held: an Auto hold gap worked out from the notes WITHOUT glue (sus "_auto" ticks; hunt
+    2026-11-07: gluing touching notes in a box changed the shape's most common gap, so rows outside the box were held
+    differently). Typed gap / no glue: as it is."""
+    sus = sh["sustain"]
+    bare = unglued({k: v for k, v in sh.items() if k != "sustain"}) if "gap" not in sus else None
+    if bare is None:
+        return sus
+    notes = get(bare)[0]
+    return dict(sus, _auto=auto_gap(notes))
 
 
 def held_piece(sh, notes, tracks, ppq, get):
@@ -1149,15 +1177,25 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
     a gate flipped / flipped piece: the spot its note had before, recolour.places_of, so the colours flip with it).
     None: not a piece any more (made as a shape of its own)."""
     from notes.recolour import from_whole, places_of
-    from notes.sliced import source
-    got = source(without_recolour(sh))
+    from notes.sliced import flipped_back, source
+    own = sh["recolour"]
+    then = own.get("cut_frame")
+    piece = sh
+    if not sh.get("cut"):  # (flipped since the cut, a shape of its own: looked up as the piece unflipped, hunt 11-07)
+        now = own.get("frame") or (1, 0, 0, 1)
+        was = then or (1, 0, 0, 1)
+        if now[1] or was[1]:
+            return None
+        piece = flipped_back(sh, now[0] * was[0] < 0, now[3] * was[3] < 0)
+        if piece is None:
+            return None
+        then = was
+    got = source(without_recolour(piece))
     if got is None or tracks is None:
         return None
     # (the whole as it was cut: its own box, flipped as it was then (rc "cut_frame", recolour.carried; old pieces
     # without it: never flipped); the piece's notes mirrored back only by the flips made since)
-    own = sh["recolour"]
     rc = {k: v for k, v in own.items() if k not in ("whole", "frame", "cut_frame")}
-    then = own.get("cut_frame")
     if then and tuple(then) != (1, 0, 0, 1):
         rc["frame"] = then
     if then and not then[1]:
