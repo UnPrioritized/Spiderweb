@@ -723,6 +723,51 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
         # sounding together gives way: never random here)
         rc = {k: v for k, v in rc.items() if k in KEEP_KEYS}
         rc["seed"] = 1
+    if rc.get("stir") and tracks is not None and len(notes) >= BEFORE_STIR_LEAST:
+        # (only the Stir changed since last time (a knob turned): the colours before it are kept, user 11-07: 3 M
+        # notes took a second a change)
+        key = (json.dumps({k: v for k, v in rc.items() if k != "stir"}, sort_keys=True), held, gate,
+               None if own is None else tuple(own))
+        got = _BEFORE_STIR.get("got")
+        if got is None or got[0] is not notes or got[1] is not tracks or got[2] != key:
+            got = (notes, tracks, key, _before_stir(notes, tracks, rc, held, gate, own))
+            _BEFORE_STIR["got"] = got
+        b = got[3]
+        if b is None:
+            return notes, tracks
+        notes, lap, tw, (n, at, low, now, which, pals, pick, box, own) = b
+        now = all_stirred(n, at, low, now, rc, which, pals, pick, box, own)
+        return notes.copy(), lap + (turned_map(tw)(now) if tw else now)  # (a copy: whoever gets it may change it)
+    return _recoloured(notes, tracks, rc, held, gate, own)
+
+
+BEFORE_STIR_LEAST = 100_000  # (notes: smaller shapes are quick anyway, no memory kept for them)
+_BEFORE_STIR = {}  # "got": (notes, tracks, key, _before_stir's result) of the last big stirred shape
+
+
+def _before_stir(notes, tracks, rc, held, gate, own):
+    """recoloured's work up to the Stir: (settled notes, each note's round, the "turned" list, all_stirred's
+    arguments but rc), or None = nothing to recolour. Arrays made read-only: they are kept."""
+    out = []
+    _recoloured(notes, tracks, rc, held, gate, own, lambda *a: out.append(a))
+    if not out:
+        return None
+    notes2, lap, tw, args = out[0]
+    mine = {}  # (an array the caller handed in (held: the notes as they came) is copied: theirs stay theirs)
+
+    def own(a):
+        if not isinstance(a, np.ndarray):
+            return a
+        if id(a) not in mine:
+            b = a.copy() if any(np.shares_memory(a, x) for x in (notes, tracks) if isinstance(x, np.ndarray)) else a
+            b.setflags(write=False)
+            mine[id(a)] = b
+        return mine[id(a)]
+    return own(notes2), own(lap), tw, tuple(own(x) for x in args)
+
+
+def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
+    """recoloured's own work (keep(notes, lap, tw, all_stirred's args): hands them over instead of stirring)."""
     if tracks is None and len(notes) and rc["mode"] in SPLIT:  # (one colour: Split works from it)
         tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
@@ -741,6 +786,8 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     corner = (box[0], box[2])
     pick = dice(at, low, rc["seed"], 1, corner)
     if rc["mode"] == KEEP:
+        if keep:
+            return keep(notes, lap, tw, (notes, at, low, low, which, pals, pick, box, own))
         if tw:
             return notes, lap + turned_map(tw)(all_stirred(notes, at, low, low, rc, which, pals, pick, box, own))
         return notes, lap + all_stirred(notes, at, low, low, rc, which, pals, pick, box, own)
@@ -768,6 +815,8 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
                 continue
             got = np.where(change[m], take(p, weights(len(p), shares), low[m], pick[m]), low[m])
             new[m] = kept_apart(notes[m], low[m], got, p, pick[m])
+    if keep:
+        return keep(notes, lap, None, (notes, at, low, new, which, pals, pick, box, own))
     return notes, lap + all_stirred(notes, at, low, new, rc, which, pals, pick, box, own)
 
 
@@ -951,7 +1000,7 @@ def stir_from(at, rc, box, own, spots=None):
         mid, k = (np.asarray(v, np.float64) for v in spots)
     edge = st["edge"]
     if edge in ("wrap", "bend"):  # (Bend's rows with Smooth corners: an outline's corner rounds, no straight seam)
-        rows = Rows(at, st["bend_smooth"] if edge == "bend" else 0.0)
+        rows = rows_of(at, st["bend_smooth"] if edge == "bend" else 0.0)
         t0, t1 = float(at[:, 0].min()), float(at[:, 1].max())
     if edge == "bend":  # (each key row stretched to the notes' whole width: no empty spot left to come from)
         mid = rows.stretched(mid, k, t0, t1)
@@ -1748,10 +1797,31 @@ class Rows:
         return a + (mid - t0) / max(t1 - t0, 1.0) * (b - a)
 
 
-def nearest(at, mid, key, own=True):
-    """For each spot (mid, key): the note of at nearest it: on the nearest key holding notes (the key rounded), the
-    note there whose middle is nearest in time. own: spot i is note i's own spot moved: the note itself as near as
-    the one found wins (no stir = each note its own)."""
+_ROWS = {}  # (smooth) -> (at, its Rows) of the last big kept at
+
+
+def rows_of(at, smooth=0.0):
+    """Rows(at, smooth), kept for the last big at nobody changes (Stir knob turns: the same notes each time)."""
+    got = _ROWS.get(smooth)
+    if got is not None and got[0] is at:
+        return got[1]
+    rows = Rows(at, smooth)
+    if len(at) >= BEFORE_STIR_LEAST and not at.flags.writeable:
+        if any(g[0] is not at for g in _ROWS.values()):
+            _ROWS.clear()
+        _ROWS[smooth] = (at, rows)
+    return rows
+
+
+_SORTED = {}  # "got": (at, nearest's sorted notes) of the last big at (kept read-only between Stir changes)
+
+
+def _sorted_notes(at):
+    """nearest's notes sorted by key, then middle, as one long line (each key row its own stretch); kept for the
+    last big at (Stir knob turns look up the same notes each time, user 11-07)."""
+    got = _SORTED.get("got")
+    if got is not None and got[0] is at:
+        return got[1]
     n = len(at)
     nk = np.asarray(at[:, 2], np.int64)
     nm = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
@@ -1759,16 +1829,30 @@ def nearest(at, mid, key, own=True):
     ks, ms = nk[o], nm[o]
     keys, first = np.unique(ks, return_index=True)
     last = np.append(first[1:], n)
+    base, top = float(ms.min()), float(ms.max())
+    gap = 2 * (top - base) + 2
+    line = ms - base + np.repeat(np.arange(len(keys)) * gap, last - first)
+    out = (nk, nm, o, ks, ms, keys, first, last, line, base, top, gap)
+    if n >= BEFORE_STIR_LEAST and not at.flags.writeable:  # (only arrays nobody changes: the kept ones)
+        _SORTED["got"] = (at, out)
+    return out
+
+
+def nearest(at, mid, key, own=True):
+    """For each spot (mid, key): the note of at nearest it: on the nearest key holding notes (the key rounded), the
+    note there whose middle is nearest in time. own: spot i is note i's own spot moved: the note itself as near as
+    the one found wins (no stir = each note its own)."""
+    n = len(at)
+    nk, nm, o, ks, ms, keys, first, last, line, base, top, gap = _sorted_notes(at)
     q = np.rint(np.asarray(key, np.float64))
     i = np.clip(np.searchsorted(keys, q), 0, len(keys) - 1)
     j = np.maximum(i - 1, 0)
     row = np.where(np.abs(keys[j] - q) <= np.abs(keys[i] - q), j, i)  # (the nearer key with notes; lower on a tie)
     lo, hi = first[row], last[row]
     mid = np.asarray(mid, np.float64)
-    base = min(ms.min(), mid.min())
-    gap = 2 * (max(ms.max(), mid.max()) - base) + 2  # (each key row its own stretch of one long sorted line)
-    line = ms - base + np.repeat(np.arange(len(keys)) * gap, last - first)
-    p = np.clip(np.searchsorted(line, mid - base + row * gap), lo, hi - 1)
+    # (a spot past every note in time looks from the nearest end: the same note is found; the distances below use
+    # the real spot)
+    p = np.clip(np.searchsorted(line, np.clip(mid, base, top) - base + row * gap), lo, hi - 1)
     p0 = np.maximum(p - 1, lo)
     p = np.where(np.abs(ms[p0] - mid) <= np.abs(ms[p] - mid), p0, p)
     got = o[p]
