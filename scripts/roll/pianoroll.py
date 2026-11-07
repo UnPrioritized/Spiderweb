@@ -1881,6 +1881,14 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if c and abs(e.x - c[1]) < 5 and abs(e.y - c[2]) < 5 and c[0] < len(self.app.shapes):
             self.app.select(c[0])  # (its first click went on to the shape under it: back to the one clicked, so a
             # double-click acts on the shape under the mouse when it was pressed, and only once)
+        if (not self.draft and self.liquify_on() and e.x >= self.kb_w and e.y >= self.ruler_h
+                and self.liquify_target(e.x, e.y, e.state) is not None):
+            self.doubled = True  # (Liquify window open: a quick 2nd click on a shape is a dab too, never a text /
+            try:                 # picture / Add between double-click)
+                self.on_press(e)
+            finally:
+                self.doubled = False
+            return
         if self.draft and self.draft["kind"] == "poly":
             self.finish_poly()
         elif self.app.tool.get() == "lasso":
@@ -2204,6 +2212,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         funnel = bool(self.draft and self.draft["kind"] == "funnel")
         self.stop_tidy()  # (a sustain stop held: its stops in order again)
         self.drop_lasso(unfinished=True)  # (a loop half drawn goes with its drag, never left stuck; hunt 2026-10-23)
+        self.liquify_cancel()  # (a Liquify stroke: ended whole, its timers too (Ctrl+Z mid-stroke))
         self.draft = None
         self.drag = None
         self.follow = None

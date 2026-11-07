@@ -140,7 +140,8 @@ class LiquifyWindow(tk.Toplevel):
         self.hint.pack(anchor="w", fill="x", pady=(10, 0))
         self.warn = ttk.Label(box, text="", foreground=look.WARN, wraplength=int(300 * app.scale), justify="left")
         self.protocol("WM_DELETE_WINDOW", self.close)
-        self.bind("<Escape>", lambda e: self.close())
+        # (Esc: a straight stroke's start placed goes first, like on the piano roll; then the window closes)
+        self.bind("<Escape>", lambda e: self.on_escape())
         self.sync()
         remember_place(self, "liquify")
         self.deiconify()
@@ -168,6 +169,16 @@ class LiquifyWindow(tk.Toplevel):
         on = ["!disabled"] if tool == "twirl" else ["disabled"]
         for b in (*self.twirl_buttons, self.twirl_word):
             b.state(on)
+
+    def on_escape(self):
+        if not self.app.roll.liquify_forget():
+            self.close()
+
+    def take_typed(self):
+        """Numbers typed in the boxes without Enter count from now on (a press on the piano roll: before its first
+        dab, like the panel's boxes; their leaving the keyboard comes only after the press)."""
+        for name in self.boxes:
+            self.on_box(name)
 
     def on_box(self, name):
         e, var, _ = self.boxes[name]

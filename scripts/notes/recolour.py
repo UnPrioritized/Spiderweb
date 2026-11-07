@@ -671,15 +671,19 @@ def centre_spot(rc, notes, own, c):
     return F[0] + x * (F[1] - F[0]), F[2] + y * (F[3] - F[2])
 
 
-def centre_at(rc, notes, own, t, k):
-    """The Centre point (% of the colours' box) for a spot (tick, key) on the piano roll (centre_spot's way back)."""
+def centre_at(rc, notes, own, t, k, one_key=False):
+    """The Centre point (% of the colours' box) for a spot (tick, key) on the piano roll (centre_spot's way back).
+    one_key: notes all on one key = a box one key tall round them (Liquify's brush: else up / down is lost and a
+    one-row shape can't be brushed, hunt 11-08); else every key there is the middle (50)."""
     S = box_of(notes)
     B, F = colour_box(notes, rc, own)
     a, b, f2, d = rc.get("frame") or SAME
     if not b:
         t, k = (S[0] + S[1] - t if a < 0 else t), (S[2] + S[3] - k if d < 0 else k)
-        return [100 * (t - B[0]) / max(B[1] - B[0], 1), 100 * (k - B[2]) / (B[3] - B[2]) if B[3] > B[2] else 50.0]
-    x, y = (t - F[0]) / max(F[1] - F[0], 1) - 0.5, ((k - F[2]) / (F[3] - F[2]) if F[3] > F[2] else 0.5) - 0.5
+        flat = 100 * (k - B[2]) + 50.0 if one_key else 50.0
+        return [100 * (t - B[0]) / max(B[1] - B[0], 1), 100 * (k - B[2]) / (B[3] - B[2]) if B[3] > B[2] else flat]
+    x, y = (t - F[0]) / max(F[1] - F[0], 1) - 0.5, ((k - F[2]) / (F[3] - F[2]) if F[3] > F[2]
+                                                   else (k - F[2] + 0.5 if one_key else 0.5)) - 0.5
     u, v = 0.5 + b * y, 0.5 + f2 * x
     (a0, a1), (b0, b1) = whole_shares(rc)
     return [100 * (u - a0) / max(a1 - a0, 1e-12), 100 * (v - b0) / (b1 - b0) if b1 > b0 else 50.0]

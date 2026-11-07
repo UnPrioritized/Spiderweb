@@ -422,6 +422,7 @@ class HistoryPanel:
         if self.hz_window and self.hz_window.pending:  # a slide started in the Hz bass window: just drop its mark
             self.hz_window.pending = None
             return self.hz_window.redraw()
+        self.roll.liquify_cancel()  # (a Liquify stroke: ended (its colours in the shapes) BEFORE the empty-step check)
         self.drop_empty_step(undo_state(self.shapes))  # (a click that changed nothing isn't a step)
         self._restore(self.undo_stack, self.redo_stack)
 

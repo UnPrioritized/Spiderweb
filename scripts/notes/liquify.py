@@ -185,6 +185,41 @@ def empty(grid):
     return np.zeros((grid[1], grid[0], 2), np.float64)
 
 
+def least_radius(shape, J, r):
+    """r px, or more: enough to reach one step of a grid of shape (up, across, ...) both ways (a brush between grid
+    points changes nothing)."""
+    gy, gx = shape[:2]
+    J = np.asarray(J, np.float64)
+    ex, ey = float(np.hypot(J[0, 0], J[0, 1])), float(np.hypot(J[1, 0], J[1, 1]))
+    need = [1.0 / (e * (g - 1)) for e, g in ((ex, gx), (ey, gy)) if e > 0 and np.isfinite(e)]
+    return max([r] + need)
+
+
+def finer(a, m, r, J, cells=2.0):
+    """The map a and mask m (None: none) on a finer grid when a brush of radius r px (J: the colour box's units per
+    screen px at its spot) reaches fewer than `cells` grid steps either way (a long shape zoomed in: the brush did
+    nothing, or a blocky bend). Each step is cut into k equal ones (at most MOST_GRID points), so the bends stay as
+    they were (a blend between grid points, cut finer, is the same blend). Not needed: a and m themselves."""
+    gy, gx = a.shape[:2]
+    J = np.asarray(J, np.float64)
+
+    def k_for(g, e):
+        if not (e > 0 and np.isfinite(e)):
+            return 1
+        k = int(np.ceil(cells / e / (g - 1)))
+        return max(1, min(k, (MOST_GRID - 1) // (g - 1)))
+    kx = k_for(gx, r * float(np.hypot(J[0, 0], J[0, 1])))
+    ky = k_for(gy, r * float(np.hypot(J[1, 0], J[1, 1])))
+    if kx == 1 and ky == 1:
+        return a, m
+    nx, ny = (gx - 1) * kx + 1, (gy - 1) * ky + 1
+    jj, ii = np.mgrid[0:ny, 0:nx]
+    u, v = ii / (nx - 1), jj / (ny - 1)
+    a2 = np.array(sample(a, u, v), np.float64)
+    m2 = None if m is None else np.array(sample(np.asarray(m, np.float64)[..., None], u, v)[..., 0])
+    return a2, m2
+
+
 def sample(a, x, y):
     """The map a at spots (x, y) of the colour box (0..1; past it: the edge's), blended between grid points."""
     if np.ndim(x) == 1 and len(x) >= SAMPLE_FAST and a.shape[2] == 2:
