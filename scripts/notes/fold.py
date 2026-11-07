@@ -16,6 +16,31 @@ def block(use10):
     return 16 if use10 else 15
 
 
+def free_rounds(rows, others, b, most=4096):
+    """How far (a whole number of rounds of b channels, so every colour stays) the folded rows' slots must move so no
+    other shape's note (others: rendered rows) sounds on one of them while it plays (each slot's own first start ..
+    last end): 0 = they're free where they are."""
+    if not len(rows) or not len(others):
+        return 0
+    slots, at = np.unique(rows[:, 4], return_inverse=True)
+    at = at.ravel()
+    t0 = np.full(len(slots), np.iinfo(np.int64).max)
+    t1 = np.full(len(slots), np.iinfo(np.int64).min)
+    np.minimum.at(t0, at, rows[:, 0])
+    np.maximum.at(t1, at, rows[:, 1])
+    near = others[(others[:, 0] < t1.max()) & (others[:, 1] > t0.min())]
+    if not len(near):
+        return 0
+    for k in range(most):
+        moved = slots + k * b
+        j = np.searchsorted(moved, near[:, 4])
+        j = np.minimum(j, len(moved) - 1)
+        hit = (moved[j] == near[:, 4]) & (near[:, 0] < t1[j]) & (near[:, 1] > t0[j])
+        if not hit.any():
+            return k * b
+    return 0
+
+
 def chunks(count, n, how, even):
     """count tracks in order -> each one's new place 0..n-1 (fewer when the groups come out short): how "row" / "loop";
     even: In a row's groups as even as can be (else each ceil(count / n), the last one short)."""

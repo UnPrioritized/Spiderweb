@@ -923,6 +923,9 @@ class ProjectFiles:
         self._autosave_job = None
         if getattr(self, "companion", None) is not None:  # (drawing on Domino: the project's PPQ is Domino's for now;
             return                                         # saved once back, window/domino_companion.py, hunt 11-06)
+        if getattr(self, "fold_window", None):  # (Fold tracks' preview isn't the project yet: saved once it closes)
+            self._autosave_job = self.after(1500, self.autosave)
+            return
         try:
             self.write_json(self.autosave_path, window=True)
             self._autosave_failed = False

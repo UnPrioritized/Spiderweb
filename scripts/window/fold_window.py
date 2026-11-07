@@ -11,10 +11,11 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.fold import colour_count, fold_map, folded
+from notes.fold import block, chunks, colour_count, fold_map, folded, free_rounds
 from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import is_mask
 from window import look
+from window.history import load_state, undo_state
 from window.join_split import by_owner, without10
 from window.widgets import Scrub, Tooltip, remember_place, unit_word
 
@@ -42,7 +43,13 @@ class FoldWindow(tk.Toplevel):
             app.shapes_changed(now=True)
         app.roll.cancel_draft()
         self.originals = list(app.shapes)
-        self.state0, self.sel0 = None, app.sel_state()
+        # (the project as it was: Cancel and Fold's undo step start from it, never from the shapes the preview's
+        # redraws may have changed, e.g. an Add between group unlinked, hunt 11-07)
+        self.state0, self.sel0 = undo_state(app.shapes), app.sel_state()
+        tl = app.track_list
+        self.highlight = (tl.current, set(tl.behind))  # (put back by Cancel: the preview's tracks moved)
+        r = app.rendered
+        self.others = r[~np.isin(r[:, 5], got)] if len(r) else r  # (other shapes' notes as heard now)
         self.use10, multi = app.multi_rendered()
         # (the order the shapes take slots in: channel 10 the 16th with "Use channel 10", never with only a
         # picture's, slot order with "Channels 1-16 in order")
@@ -164,9 +171,18 @@ class FoldWindow(tk.Toplevel):
         n, how, even, keep, _ = self.settings()
         t = self.tracks
         self.each.config(text=tr("fold.each", n=f"{t / max(n, 1):,.0f}") if t else "")
-        g = -(-t // max(n, 1)) if t else 1
-        self.how_text["row"].config(text=tr("fold.row_example", a=g, b=g + 1, c=2 * g) if g > 1 else "")
-        self.how_text["loop"].config(text=tr("fold.loop_example", a=n + 1, b=2 * n + 1) if n < t else "")
+        row = loop = ""
+        if keep:  # (each colour folds among its own tracks: no one example fits, hunt 11-07)
+            row = tr("fold.keep_example")
+        elif t and n < t:
+            sizes = np.bincount(chunks(t, n, "row", even))  # (the real groups, Even groups too)
+            a = int(sizes[0])
+            if a > 1:
+                row = tr("fold.row_example", a=a, b=a + 1, c=a + int(sizes[1])) if len(sizes) > 1 else ""
+            loop = (tr("fold.loop_example", a=n + 1, b=2 * n + 1) if 2 * n < t else  # (never a track past the last)
+                    tr("fold.loop_example_two", a=n + 1))
+        self.how_text["row"].config(text=row)
+        self.how_text["loop"].config(text=loop)
         self.ticks["fold.even"].state(["!disabled"] if how == "row" else ["disabled"])
 
     def preview(self):
@@ -180,11 +196,18 @@ class FoldWindow(tk.Toplevel):
             return
         n, how, even, keep, cut = key
         fold = fold_map(self.slots, n, how, even, keep, self.use10, self.seq)
-        app = self.app
-        app.shapes[:] = self.originals  # (built from the shapes as they were: CC passengers, sustain)
         rows, changed = folded(self.rows, fold, cut)
+        # (pinned in every Channels mode, like a paste's tracks, hunt 11-07: Single / As drawn put it all on one;
+        # moved down by whole rounds of channels past other shapes' tracks sounding with it, so they keep theirs)
+        step = free_rounds(rows, self.others, block(self.use10))
+        if step:
+            rows[:, 4] += step
+            fold = {s: v + step for s, v in fold.items()}
+        app = self.app
+        app.shapes[:] = load_state(self.state0)  # (built from the shapes as they were: CC passengers, sustain)
         slots_of = lambda o: {t: fold.get(s, s) for t, s in self.slots_of(o).items()}
         sh = without10(app.copied(rows, False, True, slots_of), self.use10)
+        sh["own_slots"] = True
         sh["made"] = "plain"
         sh["name"] = tr("fold.name", name=app.shape_label(self.originals[self.got[0]]))
         if cut:
@@ -196,15 +219,14 @@ class FoldWindow(tk.Toplevel):
             sh["extract"] = ex
         self.result = sh
         self.made = (len(set(fold.values())), changed)
-        app.shapes[:] = self.with_result(sh)
+        # (shown exactly as Fold keeps it: an Add between group / sliced pieces handled as Turn into plain notes)
+        app.put_plain({self.got[0]: sh})
+        for i in reversed(self.got[1:]):
+            del app.shapes[i]
         app.select_many([self.got[0]], self.got[0])
         app.shapes_changed()
         self.shown = key
         self.say()
-
-    def with_result(self, sh):
-        gone = set(self.got[1:])
-        return [sh if i == self.got[0] else s for i, s in enumerate(self.originals) if i not in gone]
 
     def say(self):
         if not self.tracks:
@@ -216,7 +238,7 @@ class FoldWindow(tk.Toplevel):
         new, changed = self.made
         text = tr("fold.outcome", a=trn("n.tracks", self.tracks, n=self.tracks), b=trn("n.tracks", new, n=new))
         n, how, even, keep, _ = self.settings()
-        if how == "row" and not even and not keep and new < n:  # (full groups can't make n: said why)
+        if how == "row" and not even and new < n:  # (full groups can't make n: said why)
             text += tr("fold.short", n=n)
         if changed:
             text += tr("fold.fixed", notes=trn("n.notes", changed, n=changed))
@@ -233,13 +255,7 @@ class FoldWindow(tk.Toplevel):
         if self.result is None or "disabled" in self.fold_button.state():
             return
         app = self.app
-        from window.history import undo_state
-        app.shapes[:] = self.originals
-        before = undo_state(app.shapes)
-        app.put_plain({self.got[0]: self.result})  # (an Add between group / sliced pieces: as Turn into plain notes)
-        for i in reversed(self.got[1:]):
-            del app.shapes[i]
-        app.add_undo_step(before, tr("fold.title"), self.sel0)
+        app.add_undo_step(self.state0, tr("fold.title"), self.sel0)  # (the shapes shown now ARE the fold)
         app.select_many([self.got[0]], self.got[0])
         app.shapes_changed()
         new = self.made[0]
@@ -253,9 +269,13 @@ class FoldWindow(tk.Toplevel):
             self.after_cancel(self.job)
             self.job = None
         if self.shown is not None:
-            app.shapes[:] = self.originals
+            app.shapes[:] = load_state(self.state0)
             app.select_many(self.sel0[0], self.sel0[1])
             app.shapes_changed()
+            tl = app.track_list  # (the track highlighted before, hunt 11-07)
+            if (tl.current, tl.behind) != self.highlight:
+                tl.current, tl.behind = self.highlight[0], set(self.highlight[1])
+                tl.shown_changed()
         self.close()
 
     def close(self):

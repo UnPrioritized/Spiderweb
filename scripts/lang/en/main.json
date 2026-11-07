@@ -69,6 +69,8 @@
  "fold.looping_tip": "The tracks are dealt out in turn: with 16 tracks, tracks 1, 17, 33 … become track 1, tracks 2, 18, 34 … track 2, and so on. The colours mostly stay as they look now, on fewer tracks.",
  "fold.row_example": "1–{a} → 1, {b}–{c} → 2 …",
  "fold.loop_example": "1, {a}, {b} … → 1",
+ "fold.loop_example_two": "1, {a} → 1",
+ "fold.keep_example": "each colour folds on its own",
  "fold.cut": "Remove overlaps",
  "fold.cut_tip": "Notes on the same key that now overlap in one track are fixed like Single channel does: the earlier note is cut where the later one starts, and notes starting together become one. Untick to keep both.",
  "fold.even": "Even groups",

@@ -4027,6 +4027,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def on_close(self):
         if self.drawer and self.drawer.winfo_exists() and not self.drawer.may_quit():
             return
+        if getattr(self, "fold_window", None):  # (Fold tracks' preview never kept: as its Cancel, hunt 11-07)
+            self.fold_window.cancel()
         if self.companion is not None:  # (drawing on Domino: back first, so the project's own PPQ is what's saved)
             self.companion.stop(now=True)
         if self.hz_window and self.hz_window.draft is not None:  # (a path drawn there: made, as when the Hz bass
