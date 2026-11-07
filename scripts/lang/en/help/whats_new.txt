@@ -6,6 +6,8 @@ What's new:
 
 • Bulge in the Stir window (beside Turn and Twist): swells the colours out from the middle like a lens, or pinches them in with a minus number, for the bulging "ball" look of op art. No colour is added or lost: they get packed tighter towards the edge. The knob goes from -200 % to +200 %; type up to ±1000 % in the box. Without an Area it bulges the whole shape around the Centre point; with one it stays inside the area, in any area shape (untick "Bulge" under "The area limits" to bulge the whole shape again). See Help → Stir.
 
+• More bends in the Stir window (a new part that folds open under the knobs): Straight to round turns straight stripes into rays, or into rings with Turn at 90° (a Square area gives a square tunnel); Ripple makes them wavy, or rings like a water drop; Kaleidoscope mirrors one slice round the Centre point; Twist along a line wrings them like a ribbon. Each works on the whole shape or only inside the Area. See Help → Stir.
+
 • Fold tracks… (right-click selected shapes, or the Tools menu): puts their notes on fewer tracks. In a row puts neighbour tracks together, so thin stripes of many colours become wide bands; Looping deals the tracks out in turn (1, 17, 33 … together). Overlapping notes are fixed (a tick), Keep colours keeps the picture as it is, and the piano roll shows the result before you press Fold. Pasted notes and drawn shapes both work; the result is plain notes, and every track stays on one channel. See Help → Fold tracks.
 
 ## Version 1.7.2

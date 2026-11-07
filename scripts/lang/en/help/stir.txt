@@ -1,6 +1,6 @@
 Stir… (beside the Recolour dropdown) bends the colours the notes have now, without adding or taking away any colour and without anything random. It works with Recolour Off (the shape's own colours) and on top of Shuffle and Split (their result gets stirred). Each note takes the colour of the note found where the stir brings it from, so the colours keep about the same amounts.
 
-The Stir window shows Turn, Twist, Bulge and the Centre point at the top. Area and Flip and reverse fold away: click their name to open or fold them. Folded, the grey words beside the name say what they're set to (for example "Circle, 50 %"). The window remembers which ones you leave open.
+The Stir window shows Turn, Twist, Bulge and the Centre point at the top. More bends, Area and Flip and reverse fold away: click their name to open or fold them. Folded, the grey words beside the name say what they're set to (for example "Circle, 50 %"). The window remembers which ones you leave open.
 
 ## Turn, Twist and the Centre point
 
@@ -18,7 +18,7 @@ Twist 1 with the Centre point at 25 % across: on the left the colours squeeze to
 
 Unless "Turn and twist round as seen" is ticked, Turn works in the shape's own box, so on a long flat shape (one or a few key rows) a big turn squeezes many notes onto the few colours near the middle. Twist and small turns keep more of them.
 
-## Bulge
+## Bulge and other bends
 
 Bulge swells the colours out from the middle like a lens, or pinches them in with a minus number. At +100 % the middle looks twice as big, at +200 % three times; the colours get packed tighter towards the edge, so none are added or lost. Bulge happens last, like a lens laid over the finished Turn and Twist.
 [clip:stir-bulge]
@@ -28,6 +28,30 @@ Rainbow stripes with Bulge +150 %, with -150 % (pinched), and with +300 % inside
 Without an Area it bulges the whole shape around the Centre point, inside the oval that touches the shape's box (its corners stay as they are). With an Area it stays inside the area, around the area's middle, in any area shape: an oval through Stretch, a square, a diamond or your own drawing. Untick "Bulge" under "The area limits" to bulge the whole shape again.
 
 The knob goes from -200 % to +200 %; type a number up to ±1000 % in the box, and the knob then turns on from there. Very big numbers suit big shapes or wide stripes: on thin stripes the packed edge (or the middle, when pinching) turns into confetti. Middle-click the knob to put it back to 0.
+
+More bends (fold it open under the knobs) has four more. Each works around the Centre point, or with its tick under "The area limits" only inside the Area, around the area's middle. You see them after Turn and Twist and under Bulge, in this order: Straight to round, Twist along a line, Ripple, Kaleidoscope. Like the rest of the stir, they never add or take away a colour. Put a bend back to 0 to switch it off.
+
+Straight to round wraps the colours round the Centre point: going round becomes going across, and going out from the middle becomes going up. Straight upright stripes become rays, and with Turn at 90° they become rings. Inside an Area the rings take the area's shape, so a Square area with Hard edge gives a square tunnel. Below 100 % the colours are only part way there.
+[clip:stir-polar]
+
+Rainbow stripes with Straight to round 100 %, then with Turn 90° too (rings), then inside a Square area with Hard edge (a square tunnel).
+
+Ripple moves the colours along a wave, so straight stripes go wavy. Height is how far they move and length is how long one wave is, both in % of the shape's box. "Sideways" moves the colours sideways, "Up and down" moves them up and down, and "Rings" moves them out from the Centre point and back, like rings from a water drop.
+[clip:stir-ripple]
+
+Ripple Sideways (height 3 %, length 12 %) and Rings (height 2 %, length 8 %).
+
+Kaleidoscope mirrors one slice of the colours round the Centre point, like a kaleidoscope. Slices is how many times it repeats (0 is off), and turn picks which slice of the colours is used. Spots far out in the corners may land past the shape's edge: "At the edges" decides what they show (Wrap around repeats the colours there).
+[clip:stir-kaleido]
+
+Kaleidoscope with 6 slices, and with 3 slices turned 30°.
+
+Twist along a line twists the colours like a wrung ribbon along a line through the Centre point: the farther along the line, the more they turn. Turns is how much at the far end (minus for the other way), and angle turns the line (0 = across, 90 = straight up).
+[clip:stir-wring]
+
+Twist along a line 0.5 turns across, and with the line at 45°.
+
+Round bends at the Area's edge (under More bends, with an Area): "Cut clean" (the start) stops Straight to round and Kaleidoscope sharply at the area's edge, because a soft fade smears them into thin stripes. "Fade like the rest" makes them follow the Hard edge tick, like Turn and Twist.
 
 ## Area
 
@@ -62,7 +86,7 @@ Hard edge (with an Area): the area is cut clean at its outline, like a turntable
 
 Turn 90° in a circle: on the left it fades out towards the edge, on the right Hard edge cuts it clean.
 
-The area limits: Turn, Twist, Squeeze and Bulge are ticked at the start, so they happen only inside the area. Untick one to let it work on the whole shape again; for example Twist inside the area while Turn turns everything, or a bulge over the whole shape around the Centre point.
+The area limits: Turn, Twist, Squeeze, Bulge and the four More bends are ticked at the start, so they happen only inside the area. Untick one to let it work on the whole shape again; for example Twist inside the area while Turn turns everything, or a bulge over the whole shape around the Centre point.
 
 ## Flips and track order
 
