@@ -126,6 +126,8 @@ class LiquifyBrush:
         if st["job"]:
             self.after_cancel(st["job"])
             st["job"] = None
+            if st["way"] == "live":  # (the last mouse moves shown first: they came with the let go, user 11-07:
+                self.liquify_live()  # "every stroke shifts its pixels once I let go")
         if st["changed"]:
             # (shown live: the picture stays until the real notes are made, the very same colours)
             self.liquify_apply(now=st["way"] == "live")
@@ -156,11 +158,17 @@ class LiquifyBrush:
                 J = self.liquify_jac(job["made"], *q, at=c)
                 job["a"] = lq.dab(job["a"], tool, c, r, J, pressure, density, vec=vec)
                 st["changed"] = True
-        if st["changed"] and not st["job"]:
-            if st["way"] == "live":  # (when the mouse moves stop coming in: every waiting one is in the map by then)
+        if not st["changed"]:
+            return
+        if st["way"] == "live":
+            if time.perf_counter() - st.get("shown", 0.0) > LIVE_MS / 1000:  # (mouse moves never stopping coming
+                if st["job"]:                                                 # in: no idle time, shown now)
+                    self.after_cancel(st["job"])
+                self.liquify_live()
+            elif not st["job"]:  # (when the mouse moves stop coming in: every waiting one is in the map by then)
                 st["job"] = self.after_idle(self.liquify_live)
-            else:
-                st["job"] = self.after(max(LIVE_MS, int(st["took"] * 1000)), self.liquify_live)
+        elif not st["job"]:
+            st["job"] = self.after(max(LIVE_MS, int(st["took"] * 1000)), self.liquify_live)
 
     def liquify_way(self, jobs):
         """How a stroke shows its colours: "live" = only the changed notes worked out and painted (Live), "later" =
@@ -193,7 +201,8 @@ class LiquifyBrush:
                 st["way"] = "full"
         elif st["way"] == "live":
             if all(self.liquify_show(job) for job in st["jobs"]):
-                st["took"] = time.perf_counter() - t0
+                st["shown"] = time.perf_counter()
+                st["took"] = st["shown"] - t0
                 return
             st["way"] = "full"  # (something it can't follow: every note made from here on)
             self.liquify_apply()
