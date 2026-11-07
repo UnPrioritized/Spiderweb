@@ -338,7 +338,7 @@ class Pair:
             plain = full_stir(None)
             sx, sy = ((stir_stack(r.get("stir")) + [plain] * n)[:n] for r in (x, y))
             calm = lambda s: dict(s, turn=0.0, twist=0.0, squeeze=False, flip_side=False, flip_up=False,
-                                  reverse=False)
+                                  reverse=False, bulge=0.0)
             sized = []  # (stirs whose Size counts another way at each end: blend_sizes)
             for j in range(n):
                 if sx[j] == plain and sy[j] != plain:

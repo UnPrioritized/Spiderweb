@@ -72,7 +72,14 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "spin": False, "seen": None, "flip_side": False, "flip_up": False, "spot": None, "shape": None,
                  "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
                  "area_squeeze": True, "reverse": False, "flip_in": "whole", "flip_by": "time", "mirror": "shape",
-                 "size_of": "box", "size_mix": None, "flip_of": "before", "smooth": 0.0, "bend_smooth": 0.0}
+                 "size_of": "box", "size_mix": None, "flip_of": "before", "smooth": 0.0, "bend_smooth": 0.0,
+                 "bulge": 0.0, "area_bulge": True}
+# ("bulge" = Bulge %, BMC tester 11-07 (their "local expansion / collapse", op art's bulging grid): + = the colours
+# swell out from the middle like a lens, packed tight at the edge; - = pinched in. Never adds or loses a colour inside
+# its reach: each spot looks along its own ray from the middle, the reach's outline stays put. Its reach = the Area
+# ("area_bulge", ticked = only inside it, round its own middle) or the whole shape (round the Centre point, out to the
+# colour box's farthest corner). A lens over this stir's finished bend: Turn / Twist / Squeeze happen first)
+MOST_BULGE = 200.0
 # ("smooth" / "bend_smooth" = Smooth corners, % (Chinese tester 11-05, user picked a setting): the row ends (time
 # slices' lowest / highest keys) the colour flips mirror across / Bend with the outline stretches by, averaged over
 # this much of the shape's height (width for the upside-down flip), so an outline's corner (a triangle's tip, an area
@@ -282,6 +289,9 @@ def one_stir(s):
     t = s.get("twist")
     if number(t) and abs(t) <= MOST_TIGHT and round(t, 3):
         out["twist"] = round(float(t), 3)
+    b = s.get("bulge")
+    if number(b) and abs(b) <= MOST_BULGE and round(b, 3):
+        out["bulge"] = round(float(b), 3)
     c = s.get("centre")
     if isinstance(c, list) and len(c) == 2 and all(number(x) and 0 <= x <= 100 for x in c) and \
             [round(x, 3) for x in c] != [50, 50]:
@@ -330,7 +340,7 @@ def one_stir(s):
         for k in ("hard", "reverse"):
             if s.get(k) is True:
                 out[k] = True
-        for k in ("area_turn", "area_twist", "area_squeeze"):
+        for k in ("area_turn", "area_twist", "area_squeeze", "area_bulge"):
             if s.get(k) is False:
                 out[k] = False
         if s.get("flip_in") in FLIP_IN[1:]:
@@ -918,6 +928,9 @@ def stir_from(at, rc, box, own, spots=None):
     turn = st["turn"] / 360
     reach = st["reach"]
     (kx, ky), (rx, ry) = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))
+    if st["bulge"]:  # (a lens over everything below: each spot looks nearer the middle (bulge) / farther (pinch))
+        x, y = bulged(x, y, st, (cx, cy), (kx, ky))
+        dx, dy = x - cx, y - cy
     whole_twist = st["twist"] and not (reach and st["area_twist"])
     if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there (Hard edge: cut
         # clean, tester 11-04); measured from the area's own spot when it has one. What the area limits is ticked:
@@ -954,6 +967,36 @@ def stir_from(at, rc, box, own, spots=None):
     elif edge == "bend":
         mid = rows.unstretched(mid, key, t0, t1)
     return mid, key
+
+
+def bulge_size(b):
+    """Bulge % -> how many times bigger the very middle looks: +100 % = 2, +200 % = 3; -100 % = 1 / 2 (pinched);
+    0 = 1 (nothing moves)."""
+    m = 1 + abs(b) / 100
+    return m if b > 0 else 1 / m
+
+
+def bulged(x, y, st, c, k):
+    """Spots (x, y) in the colour box -> where stir st's Bulge (filled in, not 0) has them look: along their own ray
+    from the middle, distance q (0..1 of the reach) -> q / (m - (m - 1) q) (a lens: the middle m times as big, the
+    edge 1 / m, smooth between), so the reach's outline stays and every colour inside it stays (only squeezed /
+    stretched). The Area (ticked "area_bulge"): round its own middle, any area shape, nothing outside moves; else
+    the whole shape round the Centre point c, inside the oval touching the colour box's four sides (round like a
+    ball; the box's edge squared the look with creases; never a colour from past the box; the corners stay)."""
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    m = bulge_size(st["bulge"])
+    if st["reach"] and st["area_bulge"]:
+        mx, my = (v / 100 for v in (st["spot"] or st["centre"]))
+        q = area_spot_q(x, y, st, k)
+    else:
+        mx, my = c
+        dx, dy = x - mx, y - my
+        q = np.hypot(np.where(dx > 0, dx / max(1 - mx, 1e-12), -dx / max(mx, 1e-12)),
+                     np.where(dy > 0, dy / max(1 - my, 1e-12), -dy / max(my, 1e-12)))
+    ok = (q < 1) & (q > 1e-12)
+    g = np.ones_like(q)
+    g[ok] = 1 / (m - (m - 1) * q[ok])  # (the new distance / the old)
+    return mx + (x - mx) * g, my + (y - my) * g
 
 
 def area_spot_q(x, y, st, k):
