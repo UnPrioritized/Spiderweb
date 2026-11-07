@@ -10,6 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.engine import pasted_notes
+from notes.liquify import DEFAULTS as LIQUIFY_DEFAULTS, MOST_STRENGTH
 from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
     wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
@@ -20,6 +21,12 @@ AMOUNT_WORDS = {"shuffle": ("recolour.amount", "recolour.amount_tip"),
                 "scatter": ("recolour.amount", "recolour.amount_tip_scatter"),
                 "clumps": ("recolour.rough", "recolour.amount_tip_clumps")}
 START_AMOUNT = {"shuffle": 100.0, "scatter": 50.0, "clumps": 20.0}
+
+
+def full_liquify(rc):
+    """A clean Recolour's Liquify with every setting filled in, or None."""
+    got = (rc or {}).get("liquify")
+    return dict(LIQUIFY_DEFAULTS, **got) if got else None
 
 
 class RecolourPanel:
@@ -83,6 +90,25 @@ class RecolourPanel:
         self.recolour_mix_tick = ttk.Checkbutton(rows, text=tr("recolour.mix"), variable=self.recolour_mix,
                                                  command=lambda: self.on_recolour("mix"))
         self.recolour_mix_tip = Tooltip(self.recolour_mix_tick, tr("recolour.mix_tip", most=SET))
+        # (Liquify's row, shown while a selected shape has one (stage E, PLAN.md: "an eye + strength %"; it says
+        # what "(on)" on the button used to): the tick = the eye (hides the bends, keeps them), Strength 0-400 %)
+        lrow = self.liquify_row = ttk.Frame(box)
+        self.liquify_shown = tk.BooleanVar(value=True)
+        t = self.liquify_tick = ttk.Checkbutton(lrow, text=tr("liquify.row"), variable=self.liquify_shown,
+                                                command=lambda: self.on_liquify("on"))
+        t.pack(side="left")
+        Tooltip(t, tr("liquify.row_tip"))
+        lb = ttk.Label(lrow, text=tr("liquify.strength"))
+        lb.pack(side="left", padx=(8, 0))
+        self.liquify_var = tk.StringVar()
+        e = self.liquify_entry = ttk.Entry(lrow, textvariable=self.liquify_var, width=7)
+        e.pack(side="left", padx=4)
+        Scrub(self, [(e, self.liquify_var, lambda: self.on_liquify("strength"))], (1, 10, 0.1), 0, MOST_STRENGTH,
+              label=lb, drag_box=True)
+        ttk.Label(lrow, text="%").pack(side="left")
+        Tooltip(lb, tr("liquify.strength_tip"))
+        e.bind("<Return>", lambda ev: self.on_liquify("strength"))
+        leave_box(self, e, self.liquify_var, lambda left: self.on_liquify("strength", left and e))
 
     def fit_stir(self):
         """Stir… + Liquify… beside the dropdown (and New shuffle) when the row has room for them, else on their own
@@ -190,15 +216,30 @@ class RecolourPanel:
         self.recolour_amount_tip.text = tr(AMOUNT_WORDS[kind][1])
         self.recolour_stir.config(text=tr("stir.button_on" if stir_on else "stir.button"))
         self.recolour_stir.state(["!disabled" if tgts else "disabled"])
-        liquify_on = any(r and r.get("liquify") for r in act)
-        self.recolour_liquify.config(text=tr("liquify.button_on" if liquify_on else "liquify.button"))
         self.recolour_liquify.state(["!disabled" if tgts else "disabled"])
+        lqs = [lq for lq in (full_liquify(r) for r in act) if lq]
+        if lqs:
+            self._loading = True
+            ons = {lq["on"] for lq in lqs}
+            self.liquify_shown.set(ons == {True})
+            self.liquify_tick.state(["alternate" if len(ons) > 1 else "!alternate"])
+            same_or_blank(self.liquify_entry, self.liquify_var, [fmt(lq["strength"]) for lq in lqs])
+            self._loading = False
         shown = bool(live)
         if shown != bool(self.recolour_row.winfo_manager()):
             if shown:
-                self.recolour_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
+                if self.liquify_row.winfo_manager():
+                    self.recolour_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0),
+                                           before=self.liquify_row)
+                else:
+                    self.recolour_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
             else:
                 self.recolour_row.pack_forget()
+        if bool(lqs) != bool(self.liquify_row.winfo_manager()):
+            if lqs:
+                self.liquify_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(2, 0))
+            else:
+                self.liquify_row.pack_forget()
         if shown != bool(self.recolour_again.winfo_manager()):
             if shown:
                 self.recolour_again.pack(side="left", after=self.recolour_mode)
@@ -285,6 +326,36 @@ class RecolourPanel:
         if self.change_recolour(changed, tr("recolour.undo_again" if what == "seed" else "recolour.undo")) and \
                 what == "mode" and mode is not None:
             self.tips.show("recolour", wait=True)  # (the first time: what it does)
+
+    def on_liquify(self, what, left=None):
+        """The Liquify row: its tick (what = "on": the bends shown / hidden, kept either way) or Strength
+        ("strength"). Only shapes with a Liquify change; several picked keep their own strengths."""
+        if self._loading or (left is not None and unchanged(left)):
+            return
+        if what == "on":
+            self.liquify_tick.state(["!alternate"])
+            on = self.liquify_shown.get()
+            set_to = {"on": on}
+        else:
+            e, var = self.liquify_entry, self.liquify_var
+            if not var.get().strip() and getattr(e, "blank_from", None):
+                return
+            try:
+                s = calc(var.get().strip().rstrip("%"))
+                ok = 0 <= s <= MOST_STRENGTH
+            except ValueError:
+                ok = False
+            if not ok:
+                return bad(e)
+            good(e)
+            set_to = {"strength": round(s, 3)}
+
+        def changed(old, _sh=None):
+            got = (old or {}).get("liquify")
+            if not got:
+                return old
+            return dict(old, liquify=dict(got, **set_to))
+        self.change_recolour(changed, tr("liquify.undo_show" if what == "on" else "liquify.undo_strength"))
 
     def change_recolour(self, changed, name, push=True):
         """Each selected shape's Recolour = changed(its old one, clean; the shape); one undo step named name (push

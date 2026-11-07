@@ -86,6 +86,8 @@ class LiquifyBrush:
         app = self.app
         tool = app.liquify_window.tool.get()
         app.push_undo(name=tr("liquify.undo_mask" if tool in lq.MASK_TOOLS else "liquify.undo"))
+        if tool not in lq.MASK_TOOLS:
+            hit = self.liquify_shown_again(hit)
         jobs = []
         for sh, made in hit:
             got = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
@@ -109,6 +111,23 @@ class LiquifyBrush:
         self.lq["hold"] = self.after(HOLD_MS, self.liquify_hold)
         self.draw_liquify_brush()
         return True
+
+    def liquify_shown_again(self, hit):
+        """Brushing a shape whose Liquify is hidden (the Recolour row's tick off) shows it again first, in the
+        stroke's undo step (my pick: else the brush works blind); its notes made now. hit again, made anew."""
+        hidden = []
+        for sh, _ in hit:
+            rc = clean_recolour(sh.get("recolour"))
+            got = (rc or {}).get("liquify")
+            if got and got.get("on") is False:
+                sh["recolour"] = clean_recolour(dict(rc, liquify={k: v for k, v in got.items() if k != "on"}))
+                hidden.append(sh)
+        if not hidden:
+            return hit
+        self.app.shapes_changed(now=True)
+        self.app.sync_recolour()
+        self.redraw()
+        return [(sh, self.stir_made(sh, "liquify") or made) for sh, made in hit]
 
     def liquify_tool(self):
         """The tool a dab uses now and Twirl's way round (+1 / -1): Alt held = the opposite (Twirl turns back, Pinch

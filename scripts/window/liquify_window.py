@@ -227,7 +227,9 @@ class LiquifyWindow(tk.Toplevel):
                          tr("liquify.n_shapes", n=len(tgts)))
         rcs = [clean_recolour(t.get("recolour")) for t in tgts]
         lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
-        text = tr("liquify.needs") if lonely else tr("liquify.one") if single else ""
+        lqs = [(r or {}).get("liquify") for r in rcs]
+        zero = lqs and all(g and g.get("strength", 100.0) == 0 for g in lqs)  # (Recolour row's Strength 0 %)
+        text = tr("liquify.needs") if lonely else tr("liquify.one") if single else tr("liquify.zero") if zero else ""
         if text != self.warn.cget("text"):
             self.warn.config(text=text)
             if text:
