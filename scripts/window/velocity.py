@@ -21,6 +21,7 @@ from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURS
                               bind_double_right, box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
                               set_cursor, slot_colours)
 from window import look
+from window.notes_wait import stale_ok
 from window.canvas_keep import KeepsItems
 
 LEVELS = (127, 96, 64, 32, 0)
@@ -574,6 +575,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
             self._redraw_pending = True
             self.after_idle(self.redraw)
 
+    @stale_ok  # (notes being made in the background: the ones on screen, notes_wait.py)
     def redraw(self):
         self._redraw_pending = False
         if not self.winfo_ismapped():

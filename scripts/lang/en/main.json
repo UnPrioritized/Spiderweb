@@ -1264,6 +1264,7 @@
  "big_ask.out_of_memory": "There wasn't enough memory to do this, so nothing was changed. Closing other programs frees memory.",
  "big_ask.out_of_memory_somewhere": "Spiderweb ran out of memory, so what you just did may not have finished. Undo (Ctrl+Z) takes it back. Closing other programs frees memory.",
  "app.shapes_notes": "{shapes} · {notes}",
+ "app.making_notes": "Making notes…",
  "app.tracks_one_channel_each": "{slot_count} tracks (one channel each)",
  "app.tracks_mixed": "{slot_count} tracks ({mixed} hold several channels)",
  "app.tracks_mixed_one": "{slot_count} tracks (1 holds several channels)",

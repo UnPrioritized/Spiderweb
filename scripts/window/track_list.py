@@ -38,6 +38,7 @@ from roll.roll_shared import (BOX_STILL, COLOURS_16, MAX_SX, MIN_SX, SELECT_CURS
                               draw_boxes as outline_boxes, grab_while_panning, slot_colours)
 from roll.tiles import see_through
 from window import look
+from window.notes_wait import stale_ok
 from window.track_windows import AddTracksBox, PropertiesBox
 from window.widgets import Scrub, Tooltip, bad, good, remember_place
 
@@ -2987,6 +2988,7 @@ class TrackList(tk.Canvas):
         if self._job is None:
             self._job = self.after_idle(self.redraw)
 
+    @stale_ok  # (notes being made in the background: the ones on screen, notes_wait.py)
     def redraw(self):
         self._job = None
         w, h = self.winfo_width(), self.winfo_height()

@@ -21,7 +21,7 @@ from files.lang import size as lang_size, tr, trn
 from notes.areas import ALL_COLOURS, most_colours
 from notes.custom import (ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, has_pattern, set_key_top,
                           tracks_apart)
-from window import big_ask, look
+from window import big_ask, look, notes_wait
 from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
@@ -135,6 +135,7 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("custom", tr("app.custom_shape"), "s"),
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
+LATE_S = 0.15  # making the notes took longer than this (s): after an edit they're made in the background (late_ok)
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -537,10 +538,17 @@ def cc_texts(shapes, mode):
 
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, GlissPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
+    _bg_notes = False  # the notes are being made in the background after an edit (shapes_changed, notes_wait.py)
+    _bg_serial = None  # (the event that started it: its other bindings don't wait for it)
+    _bg_carry = None  # (the selected shapes whose old notes go along meanwhile: roll_draw.carry_from)
+    _job_stash = None  # (all_notes' stash from the notes made in the background: notes_made, for lay_again)
+    stale_ok = 0  # > 0: the view is being drawn: the notes as they are on screen, not waited for
+
     def __init__(self, autosave=AUTOSAVE):
         mac_buttons()  # (Mac's Tk 8.6: right / middle button swapped back, before any binding)
         super().__init__()
         errors.install(self)
+        notes_wait.install(self)  # (a big project's notes made in the background after an edit: shapes_changed)
         look.apply(self)  # (the dark look, before any widget is made)
         palettes.start()  # (the note colours picked in Settings)
         self.title(tr("app.spiderweb", VERSION=VERSION))
@@ -722,10 +730,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
         self._merge_keys = {}  # merged shapes' parts' settings when last seen (remake_merges)
         self._notes_time = 0.0  # how long that took the last time
+        self._make_time = 0.0  # how long the last making of every note took, remembered or not (late_ok)
         self._mask_time = 0.0  # ... and the masks' preview (mask.mask_view)
         self._late_notes = None  # while dragging: notes left until the mouse rests
         self.shapes_gen = 0  # +1 at every shapes_changed (windows working out something slow from the shapes: same?)
         self._coming = None  # notes being made in the background while a drag rests (notes_rested)
+        self._made_shapes = []  # app.shapes when the notes were last made (late_ok: the same shapes, maybe more)
         self._position = None
         self._normal_geometry = None
 
@@ -2056,7 +2066,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         While dragging, if that's slow (lots of notes), only the lines follow the mouse: the notes catch up when the
         mouse rests or is let go (now: catch up). moving: shapes are dragged to another place: the piano roll shows
         their notes going along (roll_draw.paint_carried), and they catch up when the mouse rests (if that's quick)
-        or is let go."""
+        or is let go.
+        After an edit on a big project (making the notes took > LATE_S, or now="late": a drag let go), the notes are
+        made in a background thread: the view keeps working meanwhile, the first other click / key waits for them
+        (notes_wait.py, late_ok, finish_notes)."""
+        if now and now != "late":
+            self._bg_notes = False  # (being made now: what's read on the way is read as it is, not waited for)
         self.shapes_gen += 1
         if self._late_notes:
             self.after_cancel(self._late_notes)
@@ -2100,7 +2115,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._late_notes = self.after(120 if moving else 250, self.notes_rested, not (moving and slow))
             self.roll.request_redraw()
             return
-        self.notes_late = False
+        if now in (False, "late") and self.late_ok():
+            self.notes_late = self._bg_notes = True
+            self._bg_serial, self._bg_carry = notes_wait.last_event, None
+            self._make_coming(True)  # (made already at a mid-drag rest: shown at once, shapes_changed(now=True))
+            if self._bg_notes:
+                self.roll.request_redraw()
+                self.update_status()
+            return
+        self.notes_late = self._bg_notes = False
+        self._made_shapes = list(self.shapes)
         if not self.roll.drag:
             self.remake_pictures()
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
@@ -2138,7 +2162,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for sh in self.shapes:  # a piece whose outline was changed is a shape of its own now (sliced.py)
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)  # (with the whole's glue / note tool pages)
-        stash = {}
+        stash = (self._job_stash or {}) if made is not None else {}  # (made in the background: its all_notes' stash)
+        self._job_stash = None
 
         def make():
             stash.clear()
@@ -2149,8 +2174,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                              overlaps=self.overlap_rule())
         if made is None:
             made = make()
+            self._make_time = time.perf_counter() - started  # (every time: late_ok goes by it)
             if self._notes_worked != worked:
-                self._notes_time = time.perf_counter() - started
+                self._notes_time = self._make_time
         if self.fit_into(made):  # (shapes laid on tracks got more colours: laid down the rows, laid again)
             if any("into_ch" in sh for sh in self.shapes):  # (a paste's lanes tidied too, so undo / redo give
                 tidy_tracks(self)                           # back the same: found by the track sweep)
@@ -2716,6 +2742,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def _make_coming(self, show, follow=False):
         """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
+        self.stale_ok += 1  # (what it reads of the notes on screen: as they are, never waited for)
+        try:
+            self._start_coming(show, follow)
+        finally:
+            self.stale_ok -= 1
+
+    def _start_coming(self, show, follow):
         self._late_notes = None
         show = show or not (self.roll.drag or self.scrubbing)  # (the drag called off: no let go to wait for)
         job, key = self._coming, self.notes_key()
@@ -2735,7 +2768,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)
         job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False,
-                              "follow": follow}
+                              "follow": follow, "stash": {}}  # (stash: all_notes' own, for lay_again)
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
@@ -2765,8 +2798,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             try:
                 busy = None if key[9] is None else cc_busy(  # (worked out here: a long Arpeggio's took 0.2 s)
                     [json.loads(t) if t else {} for t in key[9][1]], key[1], key[4])
+                own = Channels(key[11])  # (as own_channels: the loaded tracks given a channel too)
+                own.fixed = frozenset(key[12])
                 got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
-                                busy=busy, own=dict(key[11]), overlaps=dict(key[13]) or None)
+                                busy=busy, own=own, overlaps=dict(key[13]) or None, stash=job["stash"])
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:
@@ -2792,6 +2827,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         if not job["done"]:
             self.after(15, self._coming_check, job)
+            return
+        if self._bg_notes:  # (after an edit: taken in; something changed since without shapes_changed: made again)
+            self.stale_ok += 1  # (notes_key reads the notes on screen as they are, as _make_coming did)
+            try:
+                changed = job["got"] is not None and self.notes_key() != job["key"]
+            finally:
+                self.stale_ok -= 1
+            if changed:
+                self._make_coming(True)
+            else:
+                self.finish_notes()
             return
         held = self.roll.drag or self.scrubbing
         if not self.notes_late or not (job["show"] or not held):
@@ -2822,12 +2868,35 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.trim_notes()
         if job["own"]:
             self._notes_time = job["time"]
+        self._make_time = job["time"]
         self.roll.ready_order(job["got"][2], *job["drawn"])
+        self._job_stash = job["stash"]
         return job["got"]
 
-    def catch_up_notes(self):
-        """The notes left for later while dragging (shapes_changed): now."""
+    def catch_up_notes(self, late=True):
+        """The notes left for later while dragging (shapes_changed): now (late: a drag let go, in the background
+        when that's slow, late_ok; else made here, for what reads them next)."""
+        if self._bg_notes:
+            if not late:
+                self.finish_notes()
+            return
         if self._late_notes or self.notes_late:
+            self.shapes_changed(now="late" if late else True)
+
+    def late_ok(self):
+        """The notes can be made in the background (shapes_changed): the last making took longer than LATE_S, and the
+        notes on screen still belong to these shapes (the same ones in the same places, maybe more after them)."""
+        if self._make_time + self._mask_time <= LATE_S or self._merges_owed:
+            return False
+        if self.companion is not None or getattr(self, "fold_window", None):  # (Draw on Domino / Fold tracks: their
+            return False                                                       # own notes, made at once)
+        made = self._made_shapes
+        return len(self.shapes) >= len(made) and all(a is b for a, b in zip(self.shapes, made))
+
+    def finish_notes(self):
+        """Notes still being made in the background (shapes_changed): waited for and taken in now."""
+        if self._bg_notes:
+            self._bg_notes = False
             self.shapes_changed(now=True)
 
     def shape_edited(self, moving=False):
@@ -3788,6 +3857,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def update_status(self):
         parts = [self._position] if self._position else []
+        if self._bg_notes:  # (the notes are being made in the background: shapes_changed)
+            self.status.show("     ".join(parts + [tr("app.making_notes")]))
+            return
         parts.append(tr("app.shapes_notes", shapes=trn("n.shapes", len(self.shapes), n=len(self.shapes)),
                         notes=trn("n.notes", len(self.rendered), n=len(self.rendered))))
         if self.slot_count:  # (every mode: pastes and your tracks make several in Single too, hunt 2026-11-01)
@@ -4050,3 +4122,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.stop_play()
         self.out.close()
         self.destroy()
+
+
+# the notes shapes_changed makes: read while they're still made in the background = finished first (notes_wait.py)
+LATE_NOTES = ("rendered", "drawn", "drawn_all", "pattern", "note_counts", "slot_count", "voice_slots", "cut_emptied",
+              "mask_covered", "colours_wanted", "picture_use10", "drawn_slots")
+for _name in LATE_NOTES:
+    setattr(App, _name, notes_wait.late_attr(_name))

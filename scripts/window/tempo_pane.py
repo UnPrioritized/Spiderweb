@@ -43,6 +43,7 @@ from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR
                               grab_while_panning,
                               set_cursor)
 from window import look
+from window.notes_wait import stale_ok
 from window.canvas_keep import KeepsItems
 from window.conductor_marks import ROW, ConductorMarks
 from window.melody_window import open_melody
@@ -3401,6 +3402,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             out.append((xs[on], beats[on], ys[on], i))
         return out
 
+    @stale_ok  # (notes being made in the background: the ones on screen, notes_wait.py)
     def redraw(self):
         got = self.copies_preview() if self.box.mode != "heard" else None
         if got is None:

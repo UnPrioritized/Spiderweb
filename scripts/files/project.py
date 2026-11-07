@@ -1758,7 +1758,7 @@ class ProjectFiles:
         except ValueError as e:
             messagebox.showerror(tr("project.spiderweb"), str(e))
             return
-        self.catch_up_notes()
+        self.catch_up_notes(late=False)
         notes = self.rendered
         high = int((notes[:, 2] > 127).sum()) if self.keys > 128 else 0  # (256 keys: Domino only has 128)
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
@@ -1919,7 +1919,7 @@ class ProjectFiles:
         file ticks), "cc" {slot: messages}, "plan" (file_plan, None without a tempo line / signatures), "sels" (the
         shapes copied, [] = all), "heard" (first start, last end in beats), "time" (the time selection's (start,
         end) in file ticks, or None)}; None when the track list's boxes hold none of Spiderweb's notes."""
-        self.catch_up_notes()  # (a shape dragged in a big project: its notes wait for the mouse to rest)
+        self.catch_up_notes(late=False)  # (a shape dragged in a big project: its notes wait for the mouse to rest)
         notes = self.rendered
         boxed = self.list_boxed()
         if boxed is not None and not boxed.any():

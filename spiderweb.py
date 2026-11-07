@@ -39,6 +39,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
     drawer_mouse.py  the mouse on the drawer's board (drawing, Select, sticking), copy / paste / flip / turn
     canvas_keep.py   kept canvas items: a redraw's items made the same way as last time stay (the drawer's board)
+    notes_wait.py    a big project's notes made in the background after an edit: the view keeps working, other
+                     clicks / keys wait for them first
     sticky.py        the drawer's sticky lines: points stick to other strokes' points, crossings and lines
     velocity.py      the velocity pane under the piano roll
     tempo_pane.py    the Tempo pane (under the velocity pane): tempo points, curves, catch-up lines

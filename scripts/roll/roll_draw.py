@@ -30,7 +30,9 @@ from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO
                               note_name, slot_colours, velocity_shades)
 from roll.tiles import Tiles, see_through_strips
 from window import look
+from window.notes_wait import stale_ok
 
+CARRY_REST_S = 0.15  # notes made in the background: their carried picture waits this long after a zoom (carried_pic)
 TIP_MARKS = 10  # a ruler tempo mark's tip lists at most this many changes, then "+N more"
 CC_CROWD = 2000  # the ruler's CC row: past this many events only those on screen are laid out, and past this many
 #                  on screen plain marks (one per pixel) + a count per stretch (hunt 2026-10-29: 300,000 froze each
@@ -623,6 +625,7 @@ class RollDrawing:
             app._notes_cache[self._draft_made[0]] = self._draft_made[1]
         self._draft_made = None
 
+    @stale_ok  # (notes being made in the background: the ones on screen, notes_wait.py)
     def redraw(self):
         with same_shapes():  # (each shape's lines looked up once a redraw)
             self.redraw_all()
@@ -662,9 +665,14 @@ class RollDrawing:
         from window.load_extract import box_notes  # (it imports this file)
         ring = box_notes(app)
         boxed = getattr(app, "_box_notes", None) if ring is not None else None
+        carried = self.carried()
+        # (notes made in the background after an edit: the usual painting, the selected shapes' notes left out
+        # and carried along on top as a see-through picture; scrolling moves the picture as usual)
+        self._hide_sels = carried is not None and not (self.drag and self.drag[0] == "move")
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
                  self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])),
-                 stack_rule(app)[0])  # (Stacked notes changed in Settings: painted again at once, hunt 2026-11-07)
+                 stack_rule(app)[0],  # (Stacked notes changed in Settings: painted again at once, hunt 2026-11-07)
+                 self._hide_sels)
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols), self.hidden_shade()))
         # (a shape being drawn / placed: its notes are in the picture, unless only its lines show)
         drafted = self.draft_notes() is not None
@@ -677,15 +685,14 @@ class RollDrawing:
         moved = self.pan_pixels(old, pic, w, h)
         last, self._last_pic = self._last_pic, pic  # (only the view moved since the last redraw: scrolling)
         scrolled = last is not None and last[0] is pic[0] and last[1][0] == pic[1][0] and last[1][1:3] != pic[1][1:3]
-        carried = self.carried()
         if carried is None:
-            self._carry = None
+            self._carry = self._carry_view = None
             if not (self.drag and self.drag[0] == "move"):  # (a rest: the same picture goes on after it)
                 self._carry_pic = None
         # (a drag called off: the notes catch up; a held knob / number box isn't one)
-        if app.notes_late and not (self.drag or app.scrubbing) and not app._late_notes:
+        if app.notes_late and not (self.drag or app.scrubbing) and not app._late_notes and not app._bg_notes:
             app.notes_rested()
-        if carried is not None and w > self.kb_w and h > self.ruler_h:
+        if carried is not None and not self._hide_sels and w > self.kb_w and h > self.ruler_h:
             self.paint_carried(w, h, rows, cols, fixed, *carried)
             self._note_pic = None
         elif old is not None and old[0] is pic[0] and old[1] == pic[1]:
@@ -721,6 +728,8 @@ class RollDrawing:
                         fill, edge = colors[color & (NO_END - 1)]
                         self.create_rectangle(x0, y0, x1, y1, fill=fill, outline=edge)
             self.paint_time = time.perf_counter() - started
+        if self._hide_sels and not carried[2] and w > self.kb_w and h > self.ruler_h:
+            self.carried_pic(w, h, fixed, carried[0], carried[1])
         if self._tiles is not None and self._grid_key:  # (the grid is in the notes' picture)
             self.delete("grid")
             self._grid_key = None
@@ -881,6 +890,8 @@ class RollDrawing:
         from window.load_extract import box_notes  # (it imports this file)
         boxed = box_notes(app)  # (a kept box over a loaded MIDI: the loaded notes Delete would take, group D)
         if not (app.sels and len(app.drawn) or boxed is not None) or not app.show_notes.get():
+            return None
+        if app._bg_notes and getattr(self, "_hide_sels", False):  # (their notes are carried along while made in the background)
             return None
         ppq, ax = app.ppq, self.sx / app.ppq
         key = (frozenset(app.sels), self.sx, ppq, id(boxed))
@@ -1105,6 +1116,7 @@ class RollDrawing:
             self.create_oval(cx - r, cy - r, cx + r, cy + r, outline=look.CUT, width=w)
             self.create_line(cx - side * 1 * s, cy - r, x - side * 3 * s, y - 6 * s, fill=look.CUT, width=w)
 
+    @stale_ok
     def draw_select_box(self):
         """The box being dragged with Select (with the ones kept when Ctrl+drag adds it), or the last ones
         (kept_box): one outline, boxes that touch or overlap joined."""
@@ -1425,6 +1437,8 @@ class RollDrawing:
         only: True = just the selected shapes' notes, False = all but theirs (no draft either way).
         draft: "with" = the draft's notes too, "without" = all but them, "alone" = only them (paint_drafted)."""
         app, ppq = self.app, self.app.ppq
+        if only is None and app._bg_notes and getattr(self, "_hide_sels", False):
+            only = False  # (notes made in the background: the selected shapes' old ones are carried along, redraw)
         ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift  # x = tick * ax + bx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy  # y = pitch * ay + by
         kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
@@ -1617,10 +1631,12 @@ class RollDrawing:
         (dx, dy, apart), how far they are from where the notes on screen have them, in pixels; apart: they didn't all
         go as far (one held back at an edge). Else None."""
         app = self.app
-        if not (self.drag and self.drag[0] == "move" and app.notes_late and app.show_notes.get()) or self.draft:
+        if self.draft or not (app.notes_late and app.show_notes.get()):
             return None
+        if not (self.drag and self.drag[0] == "move") and not (app._bg_notes and app.sels):
+            return None  # (after an edit, notes made in the background: the selected shapes' old notes go along)
         got = set()
-        for j in self.drag[2]:
+        for j in self.carry_from():
             if j >= len(app.shapes) or j >= len(app.rendered_pts):
                 return None
             (b, p), (b0, p0) = app.shapes[j]["pts"][0], app.rendered_pts[j]
@@ -1628,6 +1644,18 @@ class RollDrawing:
         if not got:
             return None
         return (*min(got), len(got) > 1)
+
+    def carry_from(self):
+        """The shapes whose old notes are carried along (paint_carried): the dragged ones, or after an edit whose
+        notes are made in the background, the selected ones (the same object while it lasts)."""
+        if self.drag and self.drag[0] == "move":
+            return self.drag[2]
+        app = self.app
+        if app._bg_carry is None or app._bg_carry[0] != app.sels:
+            d = self._carry_pic  # (just let go of a drag: its picture goes on)
+            same = d is not None and set(d["orig"]) == set(app.sels)
+            app._bg_carry = (frozenset(app.sels), d["orig"] if same else sorted(app.sels))
+        return app._bg_carry[1]
 
     def paint_carried(self, w, h, rows, cols, fixed, dx, dy, apart=False):
         """While shapes are dragged and their notes are left for later (slow to make): the other shapes' notes shown
@@ -1661,26 +1689,51 @@ class RollDrawing:
             for x0, y0, x1, y1, color in zip(*(v.tolist() for v in self.note_rects(w, h, only=False))):
                 fill, edge = colors[color & (NO_END - 1)]
                 self.create_rectangle(x0, y0, x1, y1, fill=fill, outline=edge)
-        if apart:
-            return
+        if not apart:
+            self.carried_pic(w, h, fixed, dx, dy)
+
+    def _carry_rested(self):
+        self._carry_job = None
+        if self.app._bg_notes:
+            self.request_redraw()
+
+    def carried_pic(self, w, h, fixed, dx, dy):
+        """paint_carried's see-through picture of the carried shapes' old notes, slid (dx, dy) pixels."""
+        app = self.app
+        kb, top = int(self.kb_w), int(self.ruler_h)
+        iw, ih = w - kb, h - top
         # The dragged notes' picture holds the part of the screen they came from, and around it. KEPT FOR THE WHOLE
         # DRAG at this view: after a rest their real notes are the same, moved along (making it again took ~0.2 s
         # at every next move with a zoomed-in spam shape), so it's slid from where it was made (ref)
-        orig = self.drag[2]
-        view = (fixed[:7], self.view_t, self.view_top)
+        # (scrolled since by whole pixels: slid along with the view too, as the notes' picture is: shift_image)
+        orig = self.carry_from()
+        view = fixed[:7]
         d = self._carry_pic
         if d is not None and (d["orig"] is not orig or d["view"] != view):
             d = None
         if d is not None:
             got = {(round((app.shapes[j]["pts"][0][0] - b0) * self.sx), round((p0 - app.shapes[j]["pts"][0][1]) * self.sy))
                    for j, (b0, p0) in d["ref"].items()}
+            vx, vy = (d["at"][0] - self.view_t) * self.sx, (self.view_top - d["at"][1]) * self.sy
             dx, dy = min(got)
+            dx, dy = dx + round(vx), dy + round(vy)
             a = d["area"]
-            if len(got) > 1 or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy:
+            if (len(got) > 1 or abs(vx - round(vx)) > 1e-6 or abs(vy - round(vy)) > 1e-6
+                    or a[0] > kb - dx or a[1] > top - dy or a[2] < w - dx or a[3] < h - dy):
                 d = None
+        now = time.perf_counter()
+        was = getattr(self, "_carry_view", None)
+        if was != view:
+            self._carry_view, self._zoomed_at = view, now if was is not None else 0.0
+        if d is None and self._hide_sels and now - self._zoomed_at < CARRY_REST_S:
+            # (notes made in the background, zoomed: made once the zoom rests, so each zoom step stays quick)
+            if not getattr(self, "_carry_job", None):
+                self._carry_job = self.after(int(CARRY_REST_S * 1000) + 10, self._carry_rested)
+            self._carry_pic = None
+            return
         if d is None:
             a = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
-            d = self._carry_pic = {"orig": orig, "view": view, "area": a, "photo": [],
+            d = self._carry_pic = {"orig": orig, "view": view, "area": a, "photo": [], "at": (self.view_t, self.view_top),
                                    "ref": {j: app.rendered_pts[j] for j in orig}}
             rects = self.note_rects(w, h, area=a, only=True)
             if len(rects[0]):
@@ -1722,6 +1775,7 @@ class RollDrawing:
         self.show_image()
         return True
 
+    @stale_ok
     def paint_exact(self):
         """The picture painted whole again (after it was moved along with the view)."""
         if self._exact:
