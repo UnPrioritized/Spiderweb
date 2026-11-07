@@ -13,8 +13,9 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE, MOST_SKEW,
-                            MOST_STIRS,
+from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE,
+                            MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
+                            ROUND_EDGES, bends,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_stack)
@@ -28,8 +29,9 @@ from window.widgets import (Scrub, ShortLabel, Tooltip, bad, good, grid_shown, n
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
 BULGE_KNOB = 200.0  # % at the Bulge knob's ends (the box goes up to MOST_BULGE, user 11-07)
-AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "area_bulge", "flip_in", "mirror",
-             "size_of")  # (brought back with an area)
+AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "area_bulge", "area_polar", "area_ripple",
+             "area_kaleido", "area_wring", "round_edge", "flip_in", "mirror", "size_of")  # (brought back with an area)
+BEND_BOXES = ("polar", "ripple", "ripple_len", "kaleido", "kaleido_turn", "wring", "wring_angle")
 
 
 def stirred_rc(old, stir):
@@ -207,6 +209,37 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         word = ttk.Label(form, text=tr("stir.sets"))
         self.sets_row = [word, self._pick(form, "sets", STIR_SETS, word)]
         self._put(None, (1, word), (2, self.sets_row[1], 3), pady=6)
+        # ---- More bends (user 11-07, picked a fold of its own: every bend usable in one tab; recolour.bent)
+        self._part("bends")
+        word = ttk.Label(form, text=tr("stir.polar"))
+        Tooltip(word, tr("stir.polar_tip"))
+        cell = ttk.Frame(form)
+        self._number_box(cell, "polar", 0, 100, word)
+        ttk.Label(cell, text="%").pack(side="left")
+        self._put("bends", (1, word), (2, cell))
+        word = ttk.Label(form, text=tr("stir.ripple"))
+        Tooltip(word, tr("stir.ripple_tip"))
+        self._put("bends", (1, word),
+                  (2, self._cell(form, "ripple", 0, MOST_RIPPLE, "stir.ripple_height", "stir.ripple_tip", "%")),
+                  (3, self._cell(form, "ripple_len", LEAST_RIPPLE_LEN, MOST_RIPPLE_LEN, "stir.ripple_len",
+                                 "stir.ripple_len_tip", "%")),
+                  (4, self._pick(form, "ripple_kind", RIPPLE_KINDS, None)))
+        word = ttk.Label(form, text=tr("stir.kaleido"))
+        Tooltip(word, tr("stir.kaleido_tip"))
+        self._put("bends", (1, word),
+                  (2, self._cell(form, "kaleido", 0, MOST_SLICES, "stir.kaleido_slices", "stir.kaleido_tip", "")),
+                  (3, self._cell(form, "kaleido_turn", -360, 360, "stir.kaleido_turn", "stir.kaleido_turn_tip",
+                                 "°")))
+        word = ttk.Label(form, text=tr("stir.wring"))
+        Tooltip(word, tr("stir.wring_tip"))
+        self._put("bends", (1, word),
+                  (2, self._cell(form, "wring", -MOST_WRING, MOST_WRING, "stir.wring_turns", "stir.wring_tip", "")),
+                  (3, self._cell(form, "wring_angle", -360, 360, "stir.wring_angle", "stir.wring_angle_tip", "°")))
+        cell = ttk.Frame(form)  # (its long name on one line with the dropdown: column 1 stays narrow)
+        word = ttk.Label(cell, text=tr("stir.round_edge"))
+        word.pack(side="left")
+        self._pick(cell, "round_edge", ROUND_EDGES, word).pack(side="left", padx=(6, 0))
+        self._put("bends", (1, cell, 4))
         # ---- Area (BMC tester 11-03 + the user's own idea 11-04: the stir only inside a circle / square / diamond /
         # a drawing round the Centre point; Size = its width in % of the box; Whole shape = no area)
         self._part("area")
@@ -247,6 +280,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         for k, key in enumerate(("area_turn", "area_twist", "area_squeeze", "area_bulge")):
             self._area_tick(row, key, True, tr("stir.affects_tip")).pack(side="left", padx=(0 if k == 0 else 12, 0))
         self._put("area", (1, word), (2, row, 3))
+        row = ttk.Frame(form)  # (the more bends' ticks on a second line, user 11-07)
+        for k, key in enumerate(("area_polar", "area_ripple", "area_kaleido", "area_wring")):
+            self._area_tick(row, key, True, tr("stir.affects_tip")).pack(side="left", padx=(0 if k == 0 else 12, 0))
+        self._put("area", (2, row, 3), pady=2)
         # (proportion, user's own idea 11-04: the area round as the piano roll shows it when ticked, + Stretch;
         # the spin round as seen too)
         self.rounds = {}
@@ -474,8 +511,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         def every(key, among):
             return bool(among) and all(s[key] for s in among)
 
-        texts = {"area": "", "flips": ""}
+        texts = {"area": "", "flips": "", "bends": ""}
         if sts:
+            words = [tr("stir.short_" + key) for key in ("polar", "wring", "ripple", "kaleido")
+                     if all(s[key] and (key != "kaleido" or s[key] >= 2) for s in sts)]
+            if not words and any(bends(s) for s in sts):
+                words = [mixed]
+            text = ", ".join(words) or tr("stir.short_off")
+            texts["bends"] = text[:1].upper() + text[1:]
             name = self.area_box.get()
             sizes = {s["reach"] for s in areas}
             inner = every("round", areas) and all(s["size_of"] == "inside" for s in areas)
@@ -747,7 +790,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         for key, p in self.picks.items():
             # (the area's own settings: only stirs with an area, like the ticks beside them; a shape without one
             # made them "Mixed" for good, hunt 11-05 5)
-            among = with_area if key in ("flip_in", "mirror", "size_of") and with_area else sts
+            among = with_area if key in ("flip_in", "mirror", "size_of", "round_edge") and with_area else sts
             vals = {s[key] for s in among}
             if len(vals) == 1:
                 p["box"].current(p["choices"].index(next(iter(vals))))
@@ -822,7 +865,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # sideways flip)
         live = {"mirror": any(s["flip_in"] != "whole" for s in areas),
                 "size_of": bool(areas), "flip_by": any(s["flip_side"] for s in sts),
-                "flip_of": any(s["flip_side"] or s["flip_up"] for s in sts)}
+                "flip_of": any(s["flip_side"] or s["flip_up"] for s in sts),
+                "round_edge": any(s["polar"] or s["kaleido"] >= 2 for s in areas),
+                "ripple_kind": any(s["ripple"] for s in sts)}
         for key, ok in live.items():
             self.picks[key]["box"].config(state="readonly" if on and ok else "disabled")
         # (Smooth corners: the flips' one live with a flip by time / upside down, Bend's only with Bend; a shape
@@ -844,6 +889,17 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 b["var"].set(text)
             b["shown"] = text
             b["entry"].config(state="normal" if on and areas else "disabled")
+        # (the more bends' numbers; a bend's second number live only while that bend is on)
+        second = {"ripple_len": "ripple", "kaleido_turn": "kaleido", "wring_angle": "wring"}
+        for key in BEND_BOXES:
+            b = self.boxes[key]
+            vals = {s[key] for s in sts}
+            text = fmt(next(iter(vals))) if len(vals) == 1 else ""
+            if self.focus_get() is not b["entry"] or b["var"].get() == b["shown"]:
+                b["var"].set(text)
+            b["shown"] = text
+            live = key not in second or any(s[second[key]] for s in sts)
+            b["entry"].config(state="normal" if on and live else "disabled")
         squeezes = {s["squeeze"] for s in sts}
         self.squeeze.set(squeezes != {False})
         self.squeeze_tick.state(["alternate" if len(squeezes) > 1 else "!alternate",
@@ -921,6 +977,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                     st["spot"] = None
                 elif not st["spot"]:
                     st["spot"] = list(st["centre"])
+            elif key == "kaleido":  # (whole slices; 1 = off like 0)
+                st["kaleido"] = int(round(value)) if round(value) >= 2 else 0
             elif key == "skew":  # (the box shows % of the area's height)
                 st["skew"] = round(value / 100, 4)
             elif key.startswith("spot"):
@@ -946,9 +1004,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 "stretch_up": lambda st: st["reach"] is not None,
                 "tied": lambda st: st["reach"] is not None, "tilt": lambda st: st["reach"] is not None,
                 "skew": lambda st: st["reach"] is not None,
-                **{k: lambda st: st["reach"] is not None for k in ("hard", "reverse", "area_turn", "area_twist",
-                                                                   "area_squeeze", "area_bulge", "flip_in", "mirror",
-                                                                   "size_of")},
+                **{k: lambda st: st["reach"] is not None for k in AREA_KEPT},
                 "spot0": lambda st: st["reach"] is not None and st["spot"],
                 "spot1": lambda st: st["reach"] is not None and st["spot"],
                 "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)

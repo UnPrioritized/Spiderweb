@@ -821,7 +821,7 @@ class ProjectFiles:
             self.show_notes.set(win.get("show_notes") is not False)
             self.channels_folded.set(win.get("channels_folded") is True)
             got = win.get("stir_open")
-            self.stir_open = {p for p in got if p in ("area", "flips")} if isinstance(got, list) else set()
+            self.stir_open = {p for p in got if p in ("bends", "area", "flips")} if isinstance(got, list) else set()
         kept(ticks)
 
         def places():

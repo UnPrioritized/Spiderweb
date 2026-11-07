@@ -73,7 +73,24 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "tilt": 0.0, "skew": 0.0, "hard": False, "area_turn": True, "area_twist": True,
                  "area_squeeze": True, "reverse": False, "flip_in": "whole", "flip_by": "time", "mirror": "shape",
                  "size_of": "box", "size_mix": None, "flip_of": "before", "smooth": 0.0, "bend_smooth": 0.0,
-                 "bulge": 0.0, "area_bulge": True}
+                 "bulge": 0.0, "area_bulge": True,
+                 "polar": 0.0, "ripple": 0.0, "ripple_len": 10.0, "ripple_kind": "side", "kaleido": 0,
+                 "kaleido_turn": 0.0, "wring": 0.0, "wring_angle": 0.0, "round_edge": "cut", "area_polar": True,
+                 "area_ripple": True, "area_kaleido": True, "area_wring": True}
+# (MORE BENDS, user 11-07 after example pictures; each round the Centre point (its Area tick: round the area's own
+# middle, only inside it), the order as SEEN: Turn / Twist -> Straight to round -> Twist along a line -> Ripple ->
+# Kaleidoscope -> Bulge. "polar" = Straight to round % (angle -> across, distance -> up: stripes -> rays, Turn 90 ->
+# rings; inside an Area the distance is the area's own, so a Square area gives square rings); "ripple" = wave height
+# % of the box, "ripple_len" = wave length %, "ripple_kind" RIPPLE_KINDS; "kaleido" = slices (0 = off, 2..MOST_SLICES),
+# "kaleido_turn" = the slice's turn in degrees; "wring" = Twist along a line, turns at the far end, "wring_angle" = the
+# line's angle; "round_edge" = how Straight to round + Kaleidoscope end at an Area's edge: "cut" clean (default: a
+# soft fade smeared them, pictures 11-07) / "fade" like the rest (user: "it can be a choice"))
+RIPPLE_KINDS = ("side", "up", "rings")
+ROUND_EDGES = ("cut", "fade")
+MOST_SLICES = 32
+MOST_RIPPLE, MOST_RIPPLE_LEN, LEAST_RIPPLE_LEN = 100.0, 200.0, 0.5
+MOST_WRING = 50.0
+SETTINGS_ONLY = {"smooth", "bend_smooth", "ripple_len", "ripple_kind", "kaleido_turn", "wring_angle"}  # (alone: no stir)
 # ("bulge" = Bulge %, BMC tester 11-07 (their "local expansion / collapse", op art's bulging grid): + = the colours
 # swell out from the middle like a lens, packed tight at the edge; - = pinched in. Never adds or loses a colour inside
 # its reach: each spot looks along its own ray from the middle, the reach's outline stays put. Its reach = the Area
@@ -293,6 +310,18 @@ def one_stir(s):
     b = s.get("bulge")
     if number(b) and abs(b) <= MOST_BULGE and round(b, 3):
         out["bulge"] = round(float(b), 3)
+    for k, lo, hi, plain in (("polar", 0.0, 100.0, 0.0), ("ripple", 0.0, MOST_RIPPLE, 0.0),
+                             ("ripple_len", LEAST_RIPPLE_LEN, MOST_RIPPLE_LEN, 10.0),
+                             ("kaleido_turn", -360.0, 360.0, 0.0), ("wring", -MOST_WRING, MOST_WRING, 0.0),
+                             ("wring_angle", -360.0, 360.0, 0.0)):
+        v = s.get(k)
+        if number(v) and lo <= round(v, 3) <= hi and round(v, 3) != plain:
+            out[k] = round(float(v), 3)
+    v = s.get("kaleido")
+    if number(v) and 2 <= round(v) <= MOST_SLICES:
+        out["kaleido"] = int(round(v))
+    if s.get("ripple_kind") in RIPPLE_KINDS[1:]:
+        out["ripple_kind"] = s["ripple_kind"]
     c = s.get("centre")
     if isinstance(c, list) and len(c) == 2 and all(number(x) and 0 <= x <= 100 for x in c) and \
             [round(x, 3) for x in c] != [50, 50]:
@@ -341,9 +370,12 @@ def one_stir(s):
         for k in ("hard", "reverse"):
             if s.get(k) is True:
                 out[k] = True
-        for k in ("area_turn", "area_twist", "area_squeeze", "area_bulge"):
+        for k in ("area_turn", "area_twist", "area_squeeze", "area_bulge", "area_polar", "area_ripple",
+                  "area_kaleido", "area_wring"):
             if s.get(k) is False:
                 out[k] = False
+        if s.get("round_edge") in ROUND_EDGES[1:]:
+            out["round_edge"] = s["round_edge"]
         if s.get("flip_in") in FLIP_IN[1:]:
             out["flip_in"] = s["flip_in"]
         if s.get("mirror") in MIRROR[1:]:
@@ -360,7 +392,7 @@ def one_stir(s):
             out["spin"] = True
         if out.get("round") or out.get("spin"):
             out["seen"] = float(v)
-    if set(out) <= {"smooth", "bend_smooth"}:  # (Smooth corners alone stirs nothing: no stir, like the plain one)
+    if set(out) <= SETTINGS_ONLY:  # (Smooth corners / a bend's second number alone stirs nothing: no stir)
         return None
     return out
 
@@ -932,11 +964,16 @@ def stir_from(at, rc, box, own, spots=None):
     if st["bulge"]:  # (a lens over everything below: each spot looks nearer the middle (bulge) / farther (pinch))
         x, y = bulged(x, y, st, (cx, cy), (kx, ky))
         dx, dy = x - cx, y - cy
+    seen_x, seen_y = x, y  # (where the note is seen: the Area's fade for Turn / Twist / Squeeze is measured there)
+    if bends(st):  # (Kaleidoscope, Ripple, Twist along a line, Straight to round: seen after Turn / Twist; they
+        # send spots far (Straight to round: across the whole box), so the Area must not be measured after them)
+        x, y = bent(x, y, st, (cx, cy), (kx, ky), (rx, ry))
+        dx, dy = x - cx, y - cy
     whole_twist = st["twist"] and not (reach and st["area_twist"])
     if reach:  # (an Area: Twist winds out to its edge, everything fades smoothly to none there (Hard edge: cut
         # clean, tester 11-04); measured from the area's own spot when it has one. What the area limits is ticked:
         # an unticked part works on the whole shape)
-        q = area_spot_q(x, y, st, (kx, ky))
+        q = area_spot_q(seen_x, seen_y, st, (kx, ky))
         w = (q < 1).astype(np.float64) if st["hard"] else 1 - q * q * (3 - 2 * q)
         if st["area_turn"]:
             turn = turn * w
@@ -998,6 +1035,85 @@ def bulged(x, y, st, c, k):
     g = np.ones_like(q)
     g[ok] = 1 / (m - (m - 1) * q[ok])  # (the new distance / the old)
     return mx + (x - mx) * g, my + (y - my) * g
+
+
+def bends(st):
+    """Whether stir st (filled in) has one of the more bends on."""
+    return bool(st["polar"] or st["ripple"] or st["kaleido"] >= 2 or st["wring"])
+
+
+def bent(x, y, st, c, k, r):
+    """Spots (x, y) in the colour box -> where stir st's more bends have them look, worked backwards from how they
+    are seen (Kaleidoscope on top, then Ripple, Twist along a line, Straight to round). Each goes round the Centre
+    point c (its Area tick: round the area's own middle, only inside it: the soft fade, Hard edge cut; Straight to
+    round + Kaleidoscope cut clean unless round_edge "fade"). Measured as seen with r = (rx, ry) (Turn and twist
+    round as seen), k = the area's (kx, ky)."""
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    rx, ry = r
+    area = st["reach"] is not None
+    if area:
+        q = area_spot_q(x, y, st, k)
+        hard = (q < 1).astype(np.float64)
+        soft = hard if st["hard"] else 1 - q * q * (3 - 2 * q)
+        am = tuple(v / 100 for v in (st["spot"] or st["centre"]))
+
+    def where(key, rnd=False):
+        """(middle, weight: None = everywhere) of one bend."""
+        if area and st["area_" + key]:
+            return am, (hard if rnd and st["round_edge"] == "cut" else soft)
+        return c, None
+
+    def seen(m):
+        return (x - m[0]) * rx, (y - m[1]) * ry
+
+    def put(m, X, Y, w, share=1.0):
+        nx, ny = m[0] + X / rx, m[1] + Y / ry
+        f = share if w is None else w * share
+        return x + (nx - x) * f, y + (ny - y) * f
+
+    def far(m):
+        return max(math.hypot((X - m[0]) * rx, (Y - m[1]) * ry) for X in (0, 1) for Y in (0, 1)) or 1.0
+
+    if st["kaleido"] >= 2:  # (one slice mirrored round the middle: every other half-slice turned over)
+        m, w = where("kaleido", True)
+        X, Y = seen(m)
+        t = math.radians(st["kaleido_turn"])
+        wedge = 2 * np.pi / st["kaleido"]
+        a = np.mod(np.arctan2(Y, X) - t, wedge)
+        a = np.where(a > wedge / 2, wedge - a, a) + t
+        R = np.hypot(X, Y)
+        x, y = put(m, R * np.cos(a), R * np.sin(a), w)
+    if st["ripple"]:  # (shifted along a wave: sideways stripes wave, up / down, or rings out from the middle)
+        m, w = where("ripple")
+        X, Y = seen(m)
+        h, L = st["ripple"] / 100, st["ripple_len"] / 100
+        kind = st["ripple_kind"]
+        if kind == "side":
+            X = X + h * np.sin(2 * np.pi * Y / L)
+        elif kind == "up":
+            Y = Y + h * np.sin(2 * np.pi * X / L)
+        else:
+            R = np.hypot(X, Y)
+            g = np.where(R > 1e-12, (R + h * np.sin(2 * np.pi * R / L)) / np.maximum(R, 1e-12), 1.0)
+            X, Y = X * g, Y * g
+        x, y = put(m, X, Y, w)
+    if st["wring"]:  # (a ribbon wrung along a line through the middle: the farther along, the more it turns)
+        m, w = where("wring")
+        X, Y = seen(m)
+        a = math.radians(st["wring_angle"])
+        ca, sa = math.cos(a), math.sin(a)
+        u, v = X * ca + Y * sa, Y * ca - X * sa
+        phi = 2 * np.pi * st["wring"] * u / far(m)
+        u, v = u + v * np.sin(phi), v * np.cos(phi)
+        x, y = put(m, u * ca - v * sa, u * sa + v * ca, w)
+    if st["polar"]:  # (angle -> across the box, distance -> up: straight stripes become rays / rings)
+        m, w = where("polar", True)
+        X, Y = seen(m)
+        across = (np.arctan2(Y, X) + np.pi) / (2 * np.pi)
+        up = area_spot_q(x, y, st, k) if w is not None else np.hypot(X, Y) / far(m)
+        f = st["polar"] / 100 * (1.0 if w is None else w)
+        x, y = x + (across - x) * f, y + (up - y) * f
+    return x, y
 
 
 def area_spot_q(x, y, st, k):
