@@ -20,6 +20,14 @@ def comes_from_left(stay, slide):
     return np.asarray(slide)[:, :2].mean() < np.asarray(stay)[:, :2].mean()
 
 
+def _rows(p):
+    """p as an int64 2-D rows array (an empty part too: reshape(0, -1) can't guess its width)."""
+    a = np.asarray(p, np.int64)
+    if a.ndim == 2:
+        return a
+    return a.reshape(len(a), -1) if a.size else a.reshape(0, 4)
+
+
 def gate_merge(stay, slide, from_left=None, rest_slides=True):
     """stay, slide: (start, end, pitch, velocity[, track]) rows in ticks. Returns (stay + slide's rows that met,
     slide's leftover rows), or None when no row meets. Each row comes in from far away on that side (from_left;
@@ -39,7 +47,7 @@ def _merge(stay, slide, from_left, rest_slides=True):
     if isinstance(stay, list):
         shapes = []
         for s in stay:
-            s = np.asarray(s, np.int64).reshape(len(s), -1)
+            s = _rows(s)
             s = s[np.argsort(s[:, 2], kind="stable")]
             shapes.append((s, s[:, 2]))
         stay = np.concatenate([s for s, _ in shapes]) if shapes else np.zeros((0, 4), np.int64)
@@ -108,8 +116,8 @@ def mover(parts, way, skip=None):
     up / down), not one in skip: right = the earliest by middle time, left = the latest, up = the one with the lowest
     note, down = the highest (ties: by middle key); None when all are skipped. (A Merged notes made this way before
     moves again first: JoinSplit.merge_mover.)"""
-    rows = [np.asarray(p, np.int64).reshape(len(p), -1) for p in parts]
-    ks = [k for k in range(len(rows)) if k not in (skip or ())]
+    rows = [_rows(p) for p in parts]
+    ks = [k for k in range(len(rows)) if k not in (skip or ()) and len(rows[k])]  # (a shape with no notes never moves)
     if not ks:
         return None
     if way in ("right", "left"):
@@ -159,9 +167,9 @@ def up_down_plan(stays, rows, up, top):
     nothing in its way = up to key top (down to key 0), a leftover. None when no piece meets them; else a plan for
     up_down_rows: "moved" False when no piece moves, "room" False when a piece can't go under (key 0 / top in the
     way), "slid" = the smallest slide of the pieces that met (keys, + = up)."""
-    stays = [np.asarray(s, np.int64).reshape(len(s), -1) for s in stays]
+    stays = [_rows(s) for s in stays]
     stays = [s for s in stays if len(s)]
-    rows = np.asarray(rows, np.int64).reshape(len(rows), -1)
+    rows = _rows(rows)
     if not stays or not len(rows):
         return None
     rk = rows[:, 2] if up else top - rows[:, 2]  # (down = up, upside down)
@@ -200,7 +208,7 @@ def up_down_plan(stays, rows, up, top):
 def up_down_rows(plan, rows):
     """up_down_plan's rows (the same notes, any more columns after pitch) cut where the slide changes and slid ->
     (rows, True where a row is a leftover)."""
-    rows = np.asarray(rows, np.int64).reshape(len(rows), -1)
+    rows = _rows(rows)
     cuts = plan["change"]  # (notes are only cut where the slide changes)
     lo = np.searchsorted(cuts, rows[:, 0], "right")  # (cuts strictly inside each note: lo .. hi - 1)
     hi = np.searchsorted(cuts, rows[:, 1], "left")
@@ -390,7 +398,7 @@ def colour_laps(rows, laps):
 def merged(parts, right, ppq, keys):
     """gate_merge of two shapes' notes (each (start, end, pitch, velocity[, track]) rows): parts = [left, right] by
     their middles; right = the left one slides right."""
-    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
+    a, b = (_rows(p) for p in parts)
     if len(a) and len(b) and comes_from_left(a, b):  # (a = the one on the left)
         a, b = b, a
     return gate_merge(b, a, True) if right else gate_merge(a, b, False)
@@ -403,7 +411,7 @@ def merged_up_down(parts, up, keys, slide=None, spans=None, was_time=None, need_
     made "Merge leftovers"): those left out; pieces newly with nothing in their way stay in it, slid by the smallest
     slide (like left / right's rows; was_time(ticks): where a piece's time was when made, a flipped / stretched box).
     need_room: False (not None) when a piece can't go out under the other shape (key 0 / the top key in the way)."""
-    a, b = (np.asarray(p, np.int64).reshape(len(p), -1) for p in parts)
+    a, b = (_rows(p) for p in parts)
     if not len(a) or not len(b):
         return None
     if slide is None:

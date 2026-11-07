@@ -444,6 +444,8 @@ class JoinSplit:
         parts = [copy.deepcopy(self.shapes[i]) for i in pair]
         flips = lifted(parts)  # (both gate flipped: the merged shape is, each row across both, user 2026-10-11)
         rows = part_rows(parts, self.ppq, self.keys, self.rounds_apart())
+        if not all(len(r) for r in rows):  # (e.g. a shape wholly past the top key: its notes aren't made)
+            return tr("join_split.merge_no_notes")
         if way in ("up", "down"):
             slide = mover(rows, way)  # (kept in the recipe)
             got = merged_up_down(rows, way == "up", self.keys, slide, need_room=True)
