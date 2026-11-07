@@ -79,6 +79,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.box_drop = False    # a Ctrl+drag box with the ruler's bands kept: they go once it's a box
         self.dup = None          # Ctrl+press in the kept boxes: {"click": shape under the mouse}; the copies are
         #                          made at the first move ("done" then)
+        self.copy_src = None     # those copies before their notes are made: {copy's number: its original's}; the
+        #                          originals' notes are carried along for them (roll_draw.on_top), made on let go
         self.grabbed = None      # the shape a move drag was started on (None: all selected, the kept boxes moved)
         self.cycle = None  # the one selected shape clicked again: let go without dragging = the next one under it
         self.cycled = None  # (shape it went on from, x, y): a double-click goes back to it
@@ -432,10 +434,22 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 up = max(up, KEYS[1] - 1 - keys[1])
         return left, down, up
 
+    def as_made(self, j):
+        """Shape j, for where its notes reach: a Ctrl+drag copy still waiting for its notes that differs from its
+        original only by its paste id (which only keeps their channels apart: the same notes) = the original, whose
+        notes are made already (making the copy's took ~0.4 s at the first move on 3 M pasted notes)."""
+        sh = self.app.shapes[j]
+        k = self.copy_src.get(j) if self.copy_src else None
+        if k is not None and "paste" in sh:
+            o = self.app.shapes[k]
+            if "paste" in o and dict(sh, paste=o["paste"]) == o:
+                return o
+        return sh
+
     def note_edges(self, idx):
         """(earliest note's start, last note's end) in beats of shapes idx, or None (nothing to play)."""
         app = self.app
-        got = [(notes[:, 0].min(), notes[:, 1].max()) for notes in (app.notes_of(app.shapes[j]) for j in idx)
+        got = [(notes[:, 0].min(), notes[:, 1].max()) for notes in (app.notes_of(self.as_made(j)) for j in idx)
                if len(notes)]
         if not got:
             return None
@@ -1505,7 +1519,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if self.dup and self.dup != "done":
                 orig = self.copy_moved(orig)
             if self.room is None:  # (each shape stops at beat 0 and the lowest / highest key on its own, the rest go
-                self.room = {j: self.move_room(self.app.shapes[j]) for j in orig}  # on; with the box all stop: user)
+                self.room = {j: self.move_room(self.as_made(j)) for j in orig}  # on; with the box all stop: user)
                 self.onto_grid = ((None, {}) if self.box_moving else
                                   (self.note_edges(orig), {j: self.note_edges([j]) for j in orig}))
             fix, side = 0.0, None
@@ -1642,7 +1656,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if len(app.shapes) > first + len(orig):  # (a group copied without its steps: they were added)
             new.update({j: copy.deepcopy(app.shapes[j]["pts"]) for j in range(first + len(orig), len(app.shapes))})
         app.select_many(new, max(new))
-        app.shapes_changed(now=True)  # (the copies' notes are there before they're carried along)
+        # (the copies' notes aren't made yet: the originals' notes are carried along for them, like a move's (user
+        # 2026-11-07: making every note with each copy on its original took 1.7-2.9 s on big projects, and overlaps
+        # split the notes between them); made at a rest / let go, or right away when that's quick)
+        self.copy_src = {first + k: j for k, j in enumerate(sorted(orig))}
+        app.shapes_changed(moving=True)
         self.dup = "done"
         return new
 

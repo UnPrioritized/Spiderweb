@@ -2128,6 +2128,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not self.roll.drag:
             self.remake_pictures()
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
+        self.roll.copy_src = None  # (Ctrl+drag copies: their own notes now, roll_draw.on_top)
         started, worked = time.perf_counter(), self._notes_worked
         self.channel_split = SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
         multi = self.channel_mode.get() == "auto"

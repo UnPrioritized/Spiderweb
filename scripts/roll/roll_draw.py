@@ -893,6 +893,9 @@ class RollDrawing:
             return None
         if app._bg_notes and getattr(self, "_hide_sels", False):  # (their notes are carried along while made in the background)
             return None
+        copies = bool(getattr(self, "copy_src", None))  # (Ctrl+drag copies: no notes of their own yet)
+        if copies and boxed is None:
+            return None
         ppq, ax = app.ppq, self.sx / app.ppq
         key = (frozenset(app.sels), self.sx, ppq, id(boxed))
         span = max(1.0, self.winfo_width() - self.kb_w) / ax  # (the view's width in ticks)
@@ -902,12 +905,13 @@ class RollDrawing:
         if (got is None or got[0] is not app.drawn or got[1] != key or va - pad < got[3][0]
                 or va + span + pad > got[3][1]):
             fast = loops()
-            kept = self.paint_order(fast) if fast and app.sels else None
+            kept = self.paint_order(fast) if fast and app.sels and not copies else None
             if kept is not None:  # (the selected shapes' notes are already together there, last)
                 (s, e, k, _, first, _), others = kept
                 s, e, k = s[first[others]:], e[first[others]:], k[first[others]:]
             else:
-                notes = app.drawn[np.isin(app.drawn[:, 5], list(app.sels))] if app.sels else app.drawn[:0]
+                notes = (app.drawn[np.isin(app.drawn[:, 5], list(app.sels))] if app.sels and not copies
+                         else app.drawn[:0])
                 s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
             if boxed is not None:
                 s, e, k = (np.concatenate([a, b]) for a, b in zip((s, e, k), boxed))
@@ -1385,14 +1389,27 @@ class RollDrawing:
         pics = np.asarray(getattr(app, "picture_owners", ()), bool)
         back = getattr(app, "behind_owner", None)
         rule = stack_rule(app)
-        key = (frozenset(app.sels), pics.tobytes(), len(pics), bool(app.picture_use10), back, rule)
+        top = self.on_top()
+        key = (frozenset(top), pics.tobytes(), len(pics), bool(app.picture_use10), back, rule)
         got = self._paint_order
         if got is not None and got[0] is rendered and got[1] == key:
             return got[2]
-        made = painting_order(fast, rendered, self.start_order(), app.sels, pics, app.keys, app.picture_use10, back,
+        made = painting_order(fast, rendered, self.start_order(), top, pics, app.keys, app.picture_use10, back,
                               rule)
         self._paint_order = (rendered, key, made)
         return made
+
+    def on_top(self):
+        """The shapes whose notes are painted on top (note_rects' only: carried along): the selected ones, or while
+        Ctrl+drag copies wait for their notes (pianoroll.copy_src), their originals."""
+        src = getattr(self, "copy_src", None)
+        return set(src.values()) if src else self.app.sels
+
+    def carry_ref(self, j):
+        """The shape whose notes in rendered_pts stand for shape j's while carried: a copy waiting for its notes =
+        its original."""
+        src = getattr(self, "copy_src", None)
+        return src.get(j, j) if src else j
 
     def ready_order(self, rendered, start, order):
         """Notes made in the background (App.notes_made) came with their start order and painting order (made for
@@ -1439,6 +1456,9 @@ class RollDrawing:
         app, ppq = self.app, self.app.ppq
         if only is None and app._bg_notes and getattr(self, "_hide_sels", False):
             only = False  # (notes made in the background: the selected shapes' old ones are carried along, redraw)
+        if only is False and getattr(self, "copy_src", None):  # (Ctrl+drag copies carry their originals' notes
+            only, draft = None, "without"                     # along: the originals stay where they are too)
+        lifted = self.on_top()
         ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift  # x = tick * ax + bx
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy  # y = pitch * ay + by
         kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
@@ -1465,7 +1485,7 @@ class RollDrawing:
                 e, longest, cut = held
                 c = self.cut_colours(c, cut)
             b0, b1 = 0, len(first) - 1
-            if only is not None and app.sels:
+            if only is not None and lifted:
                 b0, b1 = (others, b1) if only else (0, others)
             # (the same notes as visible_notes(t_lo, t_hi) gives, then screen())
             args = (s, e, k, c, first, b0, b1, t_lo - longest, float(t_hi), float(ax), float(bx), float(kb), float(w),
@@ -1475,7 +1495,7 @@ class RollDrawing:
                 left, right = int(kb) - 2, int(w) + 2
                 return fast.order_rects(*args, left, right, app.keys, row0, row1)
             main = fast.order_screen(*args)
-        sels = list(app.sels)
+        sels = list(lifted)
 
         def screen(notes, color, order, cut=None):
             """These notes' x0, x1, key and colour number, the ones on screen only. order: put in painting order
@@ -1527,8 +1547,8 @@ class RollDrawing:
             if clip:
                 keep = shown[np.clip(notes[:, 2], 0, app.keys - 1)]
                 notes, cut = notes[keep], None if cut is None else cut[keep]
-            if only is not None and app.sels:
-                keep = np.isin(notes[:, 5], list(app.sels)) == only
+            if only is not None and lifted:
+                keep = np.isin(notes[:, 5], sels) == only
                 notes, cut = notes[keep], None if cut is None else cut[keep]
             main = screen(notes, None, True, cut)
         parts = [main]
@@ -1637,9 +1657,10 @@ class RollDrawing:
             return None  # (after an edit, notes made in the background: the selected shapes' old notes go along)
         got = set()
         for j in self.carry_from():
-            if j >= len(app.shapes) or j >= len(app.rendered_pts):
+            r = self.carry_ref(j)
+            if j >= len(app.shapes) or r >= len(app.rendered_pts):
                 return None
-            (b, p), (b0, p0) = app.shapes[j]["pts"][0], app.rendered_pts[j]
+            (b, p), (b0, p0) = app.shapes[j]["pts"][0], app.rendered_pts[r]
             got.add((round((b - b0) * self.sx), round((p0 - p) * self.sy)))
         if not got:
             return None
@@ -1734,7 +1755,7 @@ class RollDrawing:
         if d is None:
             a = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
             d = self._carry_pic = {"orig": orig, "view": view, "area": a, "photo": [], "at": (self.view_t, self.view_top),
-                                   "ref": {j: app.rendered_pts[j] for j in orig}}
+                                   "ref": {j: app.rendered_pts[self.carry_ref(j)] for j in orig}}
             rects = self.note_rects(w, h, area=a, only=True)
             if len(rects[0]):
                 x0, y0 = max(int(rects[0].min()), a[0]), max(int(rects[1].min()), a[1])
