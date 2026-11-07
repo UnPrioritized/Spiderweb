@@ -1837,20 +1837,24 @@ def row_twins(at, colours, among=None):
 
 
 def smooth_ends(pos, vals, r):
-    """vals (at sorted places pos) each averaged with the ones within r of it, the reach shrunk near either end so
-    it stays even on both sides: a straight line stays exactly as it is (evenly spaced places), a corner rounds over
-    about 2 r. NaN values: left out, and stay NaN."""
+    """vals (at sorted places pos) averaged TWICE with the ones within r / sqrt 2 of it (as much smoothing as one
+    pass over r), the reach shrunk near either end so it stays even on both sides: a straight line stays exactly
+    as it is (evenly spaced places), a corner rounds over about 3 r. Twice (11-08): one pass rounded a corner into
+    an arc that met the straight parts with a sudden change of bend, a faint straight line where the rounding ends
+    (stir sweep: a triangle's tip flipped upside down, Bend on a diamond / disc). NaN values: left out, stay NaN."""
     vals = np.asarray(vals, np.float64)
     ok = np.isfinite(vals)
     if r <= 0 or ok.sum() < 3:
         return vals
     p, v = np.asarray(pos, np.float64)[ok], vals[ok]
-    reach = np.minimum(r, np.minimum(p - p[0], p[-1] - p))
+    reach = np.minimum(r / np.sqrt(2.0), np.minimum(p - p[0], p[-1] - p))
     lo = np.searchsorted(p, p - reach - 1e-9, side="left")
     hi = np.searchsorted(p, p + reach + 1e-9, side="right")
-    c = np.concatenate([[0.0], np.cumsum(v)])
+    for _ in range(2):
+        c = np.concatenate([[0.0], np.cumsum(v)])
+        v = (c[hi] - c[lo]) / (hi - lo)
     out = vals.copy()
-    out[ok] = (c[hi] - c[lo]) / (hi - lo)
+    out[ok] = v
     return out
 
 
