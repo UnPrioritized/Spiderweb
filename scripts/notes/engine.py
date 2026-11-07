@@ -2207,18 +2207,32 @@ def regrouped(notes, like=None):
     if not len(notes):
         return notes
     code = notes[:, 4] * 256 + notes[:, 2]
+    g = None
     if like is None:
         g = first_seen(code)
     else:
         had = like[:, 4] * 256 + like[:, 2]
-        o = np.argsort(had, kind="stable")  # (np.unique's way, by one stable sort: its hashing grew too fast)
-        sh = had[o]
-        new = np.concatenate([[True], sh[1:] != sh[:-1]])
-        ids, at = sh[new], o[new]  # (each id's first place: stable, so the earliest)
-        place = np.empty(len(ids), np.int64)
-        place[np.argsort(at, kind="stable")] = np.arange(len(ids))
-        g = place[np.searchsorted(ids, code)]
+        top = max(int(had.max()), int(code.max())) + 1
+        if top <= 4 * len(had) + 65536:  # (a table, no sort: first_seen's way over like's ids)
+            rank = seen_ranks(had, top)
+            g = rank[code]
+            if int(g.min()) < 0:  # (an id like doesn't have: the sorted way below, as before)
+                g = None
+        if g is None:
+            o = np.argsort(had, kind="stable")  # (np.unique's way, by one stable sort: its hashing grew too fast)
+            sh = had[o]
+            new = np.concatenate([[True], sh[1:] != sh[:-1]])
+            ids, at = sh[new], o[new]  # (each id's first place: stable, so the earliest)
+            place = np.empty(len(ids), np.int64)
+            place[np.argsort(at, kind="stable")] = np.arange(len(ids))
+            g = place[np.searchsorted(ids, code)]
     s = notes[:, 0]
+    # (notes mostly come in time inside each group already: then a stable sort by group alone gives the same order
+    # as by group + start, quicker; 337.spwb's 2 M notes 140 -> 60 ms)
+    o = np.argsort(g, kind="stable")
+    gs, ss = g[o], s[o]
+    if not ((gs[1:] == gs[:-1]) & (ss[1:] < ss[:-1])).any():
+        return np.take(notes, o, axis=0)
     lo, wide = int(s.min()), int(s.max()) - int(s.min()) + 1
     if wide < 1 << 40 and int(g.max()) < 1 << 22:  # (one key, one sort: the same order as the lexsort, quicker)
         return notes[np.argsort((g << 40) | (s - lo), kind="stable")]
@@ -2232,12 +2246,19 @@ def first_seen(ids):
     if top > 4 * len(ids) + 65536:  # (too spread out for a table)
         _, first, where = np.unique(ids, return_index=True, return_inverse=True)
         return np.argsort(np.argsort(first))[where]
-    first = np.full(top, -1, np.int64)
+    return seen_ranks(ids, top)[ids]
+
+
+def seen_ranks(ids, top):
+    """A table 0..top-1: each id's number in the order ids first show up (first_seen), -1 for ids not there. No
+    sort: an id's first place is where the table of first places points back at itself."""
+    first = np.empty(top, np.int64)
     first[ids[::-1]] = np.arange(len(ids) - 1, -1, -1)  # (a repeated index keeps the last one written: the first)
-    found = np.flatnonzero(first >= 0)
-    rank = np.empty(top, np.int64)
-    rank[found[np.argsort(first[found])]] = np.arange(len(found))
-    return rank[ids]
+    lead = first[ids] == np.arange(len(ids))  # (ids at their first place, in the order they show up)
+    rank = np.full(top, -1, np.int64)
+    new = ids[lead]
+    rank[new] = np.arange(len(new))
+    return rank
 
 
 def overlap_order(notes, group):
