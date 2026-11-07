@@ -1516,7 +1516,7 @@
  "stir.turn_head": "Turn (°)",
  "stir.twist_head": "Twist (turns)",
  "stir.bulge_head": "Bulge (%)",
- "stir.bulge_tip": "Swells the colours out from the middle like a lens (plus), or pinches them in (minus). +100 % makes the middle twice as big, +200 % three times; the colours get packed tighter towards the edge. No colour is added or lost.\nWithout an Area it bulges the whole shape round the Centre point; with one it stays inside the area, round the area's middle.\nMiddle-click: back to 0.",
+ "stir.bulge_tip": "Swells the colours out from the middle like a lens (plus), or pinches them in (minus). +100 % makes the middle twice as big, +200 % three times; the colours get packed tighter towards the edge. No colour is added or lost. The knob goes to ±200 %; type up to ±1000 % in the box (on thin stripes very big numbers pack the edge into confetti).\nWithout an Area it bulges the whole shape round the Centre point; with one it stays inside the area, round the area's middle.\nMiddle-click: back to 0.",
  "stir.centre": "Centre point",
  "stir.centre_tip": "Where the colours turn and twist around, in % of the shape's box (50 / 50 = the middle).\nWith \"Moving the Centre point squeezes the colours\" ticked, moving it also moves the middle of the colours there: they get squeezed on one side and stretched on the other.\nYou can also drag the dot on the shape in the piano roll while this window is open. Right-click the dot: back to the middle.",
  "stir.squeeze": "Moving the Centre point squeezes the colours",

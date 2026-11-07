@@ -79,7 +79,8 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
 # its reach: each spot looks along its own ray from the middle, the reach's outline stays put. Its reach = the Area
 # ("area_bulge", ticked = only inside it, round its own middle) or the whole shape (round the Centre point, out to the
 # colour box's farthest corner). A lens over this stir's finished bend: Turn / Twist / Squeeze happen first)
-MOST_BULGE = 200.0
+MOST_BULGE = 1000.0  # (typed; the knob covers +-200, like Twist's: past ~300 the packed edge turns to confetti on
+# thin stripes, user 11-07 still wanted room for big shapes)
 # ("smooth" / "bend_smooth" = Smooth corners, % (Chinese tester 11-05, user picked a setting): the row ends (time
 # slices' lowest / highest keys) the colour flips mirror across / Bend with the outline stretches by, averaged over
 # this much of the shape's height (width for the upside-down flip), so an outline's corner (a triangle's tip, an area

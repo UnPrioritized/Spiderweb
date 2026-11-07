@@ -27,6 +27,7 @@ from window.widgets import (Scrub, ShortLabel, Tooltip, bad, good, grid_shown, n
                             set_names, show_mixed, unhighlight)
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
+BULGE_KNOB = 200.0  # % at the Bulge knob's ends (the box goes up to MOST_BULGE, user 11-07)
 AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "area_bulge", "flip_in", "mirror",
              "size_of")  # (brought back with an area)
 
@@ -98,6 +99,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.hold = None
         self.wheel = None
         self.twist_real, self.twist_at, self.zeroing = 0.0, 0.0, False  # (sync: the Twist shown, its knob's place)
+        self.bulge_real, self.bulge_at = 0.0, 0.0  # (the same for Bulge)
         self.boxes = {}  # name -> {var, entry, shown, lo, hi}
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
@@ -153,8 +155,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         form.pack(anchor="w", fill="x", pady=(8, 0))
         self.grid_row, self.parts, self.gap = 0, {}, int(8 * app.scale)
         knobs = ttk.Frame(form)
-        # (Bulge, BMC tester 11-07: a third knob, -MOST_BULGE..MOST_BULGE across its turn; user picked the Area as
-        # its reach instead of size boxes of its own)
+        # (Bulge, BMC tester 11-07: a third knob, -BULGE_KNOB..BULGE_KNOB across its turn, the box up to
+        # MOST_BULGE like Twist's; user picked the Area as its reach instead of size boxes of its own)
         for name, unit, lo, hi in (("turn", "°", -MOST_TURN, MOST_TURN), ("twist", "", -MOST_TIGHT, MOST_TIGHT),
                                    ("bulge", "", -MOST_BULGE, MOST_BULGE)):
             cell = ttk.Frame(knobs, padding=(0, 0, 14, 0))
@@ -172,7 +174,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             if name == "twist":  # (middle-click: back to 0 itself, also from past the knob's end)
                 knob.bind("<ButtonPress-2>", lambda e: self.twist_to_zero())
             elif name == "bulge":
-                knob.bind("<ButtonPress-2>", lambda e: self.bulge_knob.turn_to(0, True))
+                knob.bind("<ButtonPress-2>", lambda e: self.bulge_to_zero())
             r = ttk.Frame(cell)
             r.pack()
             # (Turn goes past +-360 now: room for "-1234.567" whole, hunt 11-04; Twist as wide, centred, user 11-05)
@@ -725,7 +727,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             elif knob is self.turn_knob:
                 knob.set(round(vals[0], 1) if vals else 0.0)
             elif knob is self.bulge_knob:
-                knob.set(round((vals[0] if vals else 0.0) / MOST_BULGE * 100, 1))
+                self.bulge_real = vals[0] if vals else 0.0
+                self.bulge_at = round(max(-100.0, min(100.0, self.bulge_real / BULGE_KNOB * 100)), 1)
+                knob.set(self.bulge_at)
             elif knob:
                 self.twist_real = vals[0] if vals else 0.0
                 self.twist_at = round(max(-100.0, min(100.0, self.twist_real / TWIST_KNOB * 100)), 1)
@@ -960,8 +964,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
 
     def on_turned(self, name, v, done):
         knob = {"turn": self.turn_knob, "twist": self.twist_knob, "bulge": self.bulge_knob}[name]
-        if name == "bulge":
-            v = round(v / 100 * MOST_BULGE, 3)
+        if name == "bulge":  # (typed past the knob's end: the knob moves it from there, like Twist)
+            if abs(self.bulge_real) > BULGE_KNOB and not self.zeroing:
+                v = self.bulge_real + (v - self.bulge_at) / 100 * BULGE_KNOB
+                v = round(max(-MOST_BULGE, min(MOST_BULGE, v)), 3)
+            else:
+                v = round(v / 100 * BULGE_KNOB, 3)
         elif name == "twist":
             if abs(self.twist_real) > TWIST_KNOB and not self.zeroing:
                 # (typed past the knob's end: the knob moves it from there, no jump to its end, hunt 2026-11-02)
@@ -970,6 +978,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             else:
                 v = round(v / 100 * TWIST_KNOB, 3)
         self.on_turn(knob, done, lambda: self.set_stir(name, v))
+
+    def bulge_to_zero(self):
+        self.zeroing = True
+        try:
+            self.bulge_knob.turn_to(0, True)
+        finally:
+            self.zeroing = False
 
     def twist_to_zero(self):
         self.zeroing = True
