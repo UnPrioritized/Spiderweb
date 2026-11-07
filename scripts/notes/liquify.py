@@ -285,6 +285,16 @@ def _apart(notes, low, new, pals, pick):
     return new
 
 
+def shown_places(notes, at, rc):
+    """The places the map is brushed on and fetches from: where each note is SHOWN (flipped back only with the
+    shape's flip, as the brush's spot is: roll_liquify.liquify_unit), not where a gate flip had it before (at): a gate
+    flipped shape bent on the other side of each key row, user 2026-11-07. rc["_gate"]: recolour sets it."""
+    if not rc.get("_gate"):
+        return at
+    from notes.recolour import box_of, places_of
+    return places_of(notes, rc, False, box_of(notes))
+
+
 def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     """The colours now after rc's Liquify: each note takes the colour of the note found where the map fetches from
     (recolour.stirred's way: colour sets "stay", Per chord / run by the group's first note, two notes on a key kept
@@ -294,11 +304,12 @@ def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     lq = clean_liquify(rc.get("liquify"))
     if not lq or not lq.get("map") or lq.get("on") is False or not len(at) or not lq.get("strength", 100.0):
         return now
-    idx, mid, key = liquify_from(at, rc, box, own)
+    shown = shown_places(notes, at, rc)
+    idx, mid, key = liquify_from(shown, rc, box, own)
     if not len(idx):
         return now
     # (own=False: the spots are only some notes'; a spot that didn't move finds its own note anyway, the nearest)
-    src = nearest(at, mid, key, own=False)
+    src = nearest(shown, mid, key, own=False)
     new = np.array(now)
     new[idx] = _taken(now, idx, src, pals, rc)
     if rc.get("by"):
@@ -317,6 +328,8 @@ class Live:
         from notes.recolour import _sorted_notes, leaders
         self.notes, self.at, self.low, self.now, self.rc = notes, at, low, now, rc
         self.pals, self.pick, self.box, self.own = pals, pick, box, own
+        groups_at, at = at, shown_places(notes, at, rc)  # (groups by the places, the map by where notes show)
+        self.at = at
         self.w = _where(at, rc, box, own)
         lq = self.w["lq"]
         self.off = lq.get("on") is False or not lq.get("strength") or not len(at)
@@ -326,7 +339,7 @@ class Live:
                           for v in _sorted_notes(at)) if len(at) else None
         self.a = np.zeros_like(a)
         self.F = np.array(now)  # (each note's colour taken, before groups / kept_apart)
-        self.lead = leaders(at, rc["by"]) if rc.get("by") and len(at) else None
+        self.lead = leaders(groups_at, rc["by"]) if rc.get("by") and len(at) else None
         self.P = self.F if self.lead is None else self.F[self.lead]
         if self.lead is not None:
             self.by_lead = np.argsort(self.lead, kind="stable")

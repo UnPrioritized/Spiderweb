@@ -18,14 +18,16 @@ from files.lang import tr
 from files.system import ALT
 from notes import liquify as lq
 from files.speed import key_sort
-from notes.recolour import (KEEP, before_liquify, box_of, centre_at, clean_recolour, new_seed, rule_of, turned_map,
-                            with_most, without_recolour)
+from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, clean_recolour, new_seed, rule_of,
+                            turned_map, with_most, without_recolour)
 from roll.roll_shared import SHIFT
 from window import look
 
 LIVE_MS = 30  # (every note made again at most this often while brushing (not shown live); longer when it takes longer)
 SPACING = 0.2  # (a dab every this much of the brush's radius along its path)
 HOLD_MS = 40  # (holding still: a dab this often, at Rate % of the pressure; 25 a second)
+CATCH_REST = 0.08  # (s the mouse rests before a trailing (Smoothing) brush starts catching up with it)
+CATCH_SHARE = 0.3  # (of the way left, every HOLD_MS: eases in, ~0.4 s for a long string)
 MASK_STEP = 3  # (the freeze mask's red tint worked out every this many screen pixels, then stretched: it's soft)
 MASK_ALPHA = 0.45  # (fully frozen: this see-through)
 
@@ -81,9 +83,16 @@ class LiquifyBrush:
             return False
         r = self.liquify_radius()
         hit = self.liquify_shapes_at(e.x, e.y, r)
-        if not hit:
-            return False
         app = self.app
+        if not hit:  # (on another shape (or none was selected): that one picked and brushed, never moved: user
+            # 11-07, "liquify should always do the brush, not moving the shape itself"; empty space: as usual)
+            i = self.shape_at(e.x, e.y, prefer_selected=False)
+            if i is None or not can_recolour(app.shapes[i]):
+                return False
+            app.select(i)
+            hit = self.liquify_shapes_at(e.x, e.y, r)
+            if not hit:
+                return False
         tool = app.liquify_window.tool.get()
         app.push_undo(name=tr("liquify.undo_mask" if tool in lq.MASK_TOOLS else "liquify.undo"))
         if tool not in lq.MASK_TOOLS:
@@ -156,6 +165,16 @@ class LiquifyBrush:
         if not st or not w:
             return
         st["hold"] = self.after(HOLD_MS, self.liquify_hold)
+        p, m = st["p"], st["mouse"]
+        if time.perf_counter() - st.get("moved", 0.0) > CATCH_REST and math.hypot(m[0] - p[0], m[1] - p[1]) > 0.5:
+            # (the mouse rests: a smoothing brush catches up with it, image editors' "stroke catch-up"; user 11-07:
+            # the circle stayed behind once the mouse stopped)
+            k = 1.0 if math.hypot(m[0] - p[0], m[1] - p[1]) < 2 else CATCH_SHARE
+            q = (p[0] + (m[0] - p[0]) * k, p[1] + (m[1] - p[1]) * k)
+            self.liquify_stroke(p, q)
+            st["p"] = q
+            self.draw_liquify_brush()
+            return
         rate = w.brush["rate"]
         tool = self.liquify_tool()[0]
         if rate <= 0 or tool == "push" or time.perf_counter() - st["dabbed"] < HOLD_MS / 1000 * 0.9:
@@ -167,6 +186,7 @@ class LiquifyBrush:
         if not st:
             return
         st["mouse"] = (e.x, e.y)
+        st["moved"] = time.perf_counter()
         st["alt"] = bool(e.state & ALT)
         p = st["p"]
         w = self.app.liquify_window
@@ -255,6 +275,11 @@ class LiquifyBrush:
                 self.liquify_live()
             elif not st["job"]:  # (when the mouse moves stop coming in: every waiting one is in the map by then)
                 st["job"] = self.after_idle(self.liquify_live)
+        elif st["way"] == "later":  # (the notes made once, at the first real push, then live: on a timer a quick
+            if st["job"]:  # first stroke showed nothing until let go, E's find)
+                self.after_cancel(st["job"])
+                st["job"] = None
+            self.liquify_live()
         elif not st["job"]:
             st["job"] = self.after(max(LIVE_MS, int(st["took"] * 1000)), self.liquify_live)
 
@@ -280,6 +305,8 @@ class LiquifyBrush:
         st["job"] = None
         t0 = time.perf_counter()
         if st["way"] == "later":  # (its first Recolour: the notes made once, then shown live)
+            if not any(job["a"].any() for job in st["jobs"]):  # (nothing pushed yet (a Push's press): no Recolour
+                return  # to give it yet, else it stayed "later" and every note was made from then on)
             self.liquify_apply(now=True)
             self.redraw()  # (the new picture now: the live painting goes on it)
             for job in st["jobs"]:

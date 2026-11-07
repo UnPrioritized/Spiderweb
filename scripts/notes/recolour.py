@@ -764,6 +764,8 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
     arguments with the colours after every stir), or None = nothing to recolour. Big shapes keep it (the brush's
     strokes and Stir knob turns change nothing before it). Liquify's brush starts a stroke with it too (Live)."""
     rc = kept_rule(rc)
+    if gate and rc.get("liquify"):  # (the Liquify works on where notes show: liquify.shown_places)
+        rc = dict(rc, _gate=True)
     if tracks is None or len(notes) < BEFORE_STIR_LEAST:
         b = _before_stir(notes, tracks, rc, held, gate, own) if tracks is not None or rc["mode"] in SPLIT else None
         if b is None:
@@ -837,6 +839,8 @@ def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
         tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
         return notes, tracks
+    if gate and rc.get("liquify"):  # (the Liquify works on where notes show: liquify.shown_places)
+        rc = dict(rc, _gate=True)
     t = np.asarray(tracks, np.int64)
     if not held:
         notes, t = settled(notes, t)
