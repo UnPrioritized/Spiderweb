@@ -91,4 +91,4 @@ Reset puts the shown stir back to nothing; with only one stir that takes the sti
 
 ## With the rest of Spiderweb
 
-A sliced piece of a stirred shape shows the colours it had in the whole, also after a Gate aware flip. After Flip or Turn 90° it becomes a shape of its own, so a few notes right at the cut may change.
+A sliced piece of a stirred shape shows the colours it had in the whole, also after a Gate aware flip or a Flip (mirrored with it). After Turn 90° or a change to its outline it becomes a shape of its own, stirred by itself.
