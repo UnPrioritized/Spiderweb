@@ -1680,6 +1680,13 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
         kind = self.drag[0]
+        if kind == "resize" and self.grid_later and not e.state & SHIFT:  # (too slow to snap the notes while
+            # dragging: done now, BEFORE the notes catch up, so they're made once, at the snapped spot)
+            step = self.held_step([self.app.sel])
+            self.notes_onto_grid(self.app.selected(), *self.grid_later, late=False)
+            self.grid_later = None
+            if self.stayed_inside(step):  # (the snap would pass an edge: it stays where it stopped)
+                self.app.shape_edited()
         self.app.catch_up_notes()
         if kind == "sustop":
             self.stop_release(e)
@@ -1821,12 +1828,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             else:
                 self.cancel_draft()
         elif kind in ("resize", "turn", "skew") or kind == "handle" and self.app.selected()["kind"] == "custom":
-            if kind == "resize" and self.grid_later and not e.state & SHIFT:  # (too slow to snap the notes while
-                #                                                              dragging: done now)
-                step = self.held_step([self.app.sel])
-                self.notes_onto_grid(self.app.selected(), *self.grid_later, late=False)
-                if self.stayed_inside(step):  # (the snap would pass an edge: it stays where it stopped)
-                    self.app.shape_edited()
             self.app.sync_custom()  # (a stroke's point dragged: its gaps may have closed)
         elif kind == "stretch":  # the box goes back to its size, the shapes stay stretched (user)
             self.box_kept = (self.drag[4], set(self.app.sels))
