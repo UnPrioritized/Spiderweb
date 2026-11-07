@@ -14,7 +14,8 @@ logs.
   stir_spots, stir_spots_one   recolour.stir_from's middle (stir_spots on half the cores past CORES_LEAST spots)
   winner_pieces                engine.winner_stretches' pieces (Remove overlaps, split around)
   key_order, key_order_cores   np.lexsort by key, then 3 more columns (key_order_cores: the key groups on half
-                               the cores past CORES_LEAST rows)"""
+                               the cores past CORES_LEAST rows)
+  the rest: files/native_wraps.py (NEEDS lists them; extension calls only: pyext.rs py_loops!)"""
 
 import ctypes
 import os
@@ -25,9 +26,25 @@ import sys
 import numpy as np
 
 from files.about import HERE
+from files.native_wraps import NEEDS, Wraps
 from files.system import MAC, WINDOWS
 
-ABI = 3  # (the library's sw_abi(): another one = not used)
+ABI = 4  # (the library's sw_abi(): another one = not used)
+# The library's element kinds (lib.rs K_*, the same order): (NumPy kind letter, bytes, the dtype copies are made in)
+KIND_TYPES = [("i", 8, np.int64), ("f", 8, np.float64), ("u", 1, np.uint8), ("i", 1, np.int8), ("i", 2, np.int16),
+              ("u", 2, np.uint16), ("i", 4, np.int32), ("u", 4, np.uint32), ("u", 8, np.uint64), ("f", 4, np.float32),
+              ("b", 1, np.bool_)]
+RUST_TYPES = {"i64": 0, "f64": 1, "u8": 2, "i8": 3, "i16": 4, "u16": 5, "i32": 6, "u32": 7, "u64": 8, "f32": 9,
+              "Flag": 10}  # (the type names in the extension's docs -> KIND_TYPES)
+
+
+def kind_masks():
+    """Each element kind's NumPy type numbers, a bit each (int64 can be "long" and "long long", ...)."""
+    nums = {}
+    for code in "?bBhHiIlLqQefdg":
+        t = np.dtype(code)
+        nums.setdefault((t.kind, t.itemsize), set()).add(t.num)
+    return [sum(1 << n for n in nums.get((k, size), ()) if n < 63) for k, size, _ in KIND_TYPES]
 LEVELS = {1: "plain", 2: "SSE4.2", 3: "AVX2", 4: "AVX-512"}  # (sw_level: the builds in use)
 CORES_LEAST = 20000  # (rows: fewer = one core, sharing out costs more than it saves; as fastloops.CORES_LEAST)
 NEED_COPY = -3
@@ -84,6 +101,7 @@ def load():
         i64, o = ctypes.c_int64, ctypes.py_object
         for name, args in (("sw_abi", []), ("sw_level", []), ("sw_set_level", [i64]), ("sw_panic_check", []),
                            ("sw_setup", [i64] * 5), ("sw_probe", [o, ctypes.c_void_p]),
+                           ("sw_kinds", [ctypes.c_void_p, i64]),
                            ("sw_stir_spots", [o] * 6 + [i64]), ("sw_winner_pieces", [o] * 8),
                            ("sw_key_order", [o] * 5 + [i64])):
             f = getattr(d, name)
@@ -94,6 +112,8 @@ def load():
         ints = [np.dtype(t).num for t in (np.int64, np.longlong, np.int_) if np.dtype(t).itemsize == 8
                 and np.dtype(t).kind == "i"]
         d.sw_setup(ints[0], ints[-1], np.dtype(np.float64).num, cores(), CORES_LEAST)
+        masks = np.array(kind_masks(), np.int64)
+        d.sw_kinds(masks.ctypes.data, len(masks))
         force = os.environ.get("SPIDERWEB_NATIVE_LEVEL", "")  # (checks: 1-4 = that level, if this processor has it)
         if force.isdigit():
             d.sw_set_level(int(force))
@@ -124,6 +144,8 @@ def load_ext(path):
         loader.exec_module(m)
         z = np.zeros(1, np.int64)
         if m.key_order(z, z, z, z, np.empty(1, np.int64), 0) != 0:  # (another copy of the file: NEED_COPY)
+            return None
+        if m.setup_arrays(np.empty, *(np.dtype(t) for _, _, t in KIND_TYPES)) != 0:  # (loops handing back arrays)
             return None
         return m
     except Exception:  # noqa: BLE001 (any failure: the ctypes calls)
@@ -159,16 +181,78 @@ def _failed_once(name, code):
         errors.note("own loops", "%s failed (%d): the slower loop is used for that call" % (name, code))
 
 
-class Loops:
+def arg_kinds(f):
+    """The extension function's arguments as its doc names them (py_loops!): per argument (None = a plain number /
+    yes-no) or (dtype, writable) for an array."""
+    out = []
+    for t in (f.__doc__ or "").split(";"):
+        t = t.strip()
+        if not t:
+            continue
+        if t.startswith(("&", "Nd")):
+            name = t.replace("&", "").replace("mut", "").replace("[", " ").replace("]", " ").replace("<", " ")
+            name = name.replace(",", " ").split()
+            word = name[1] if name[0] in ("Nd", "NdMut") else name[0]
+            out.append((KIND_TYPES[RUST_TYPES[word]][2], "mut" in t or "NdMut" in t))
+        else:
+            out.append(t)  # ("i64", "f64", "bool")
+    return out
+
+
+_kinds = {}
+
+
+def plain_call(f, args):
+    """f once more with every array as the library reads it (its own kind, side by side, writable when written):
+    copies made only of the ones that aren't; what the loop wrote copied back. Another kind that can't hold every
+    value safely (e.g. int64 for int16) = NEED_COPY (the slower loop)."""
+    kinds = _kinds.get(f)
+    if kinds is None:
+        kinds = _kinds[f] = arg_kinds(f)
+    if len(kinds) != len(args):
+        return NEED_COPY
+    plain = []
+    for a, k in zip(args, kinds):
+        if isinstance(k, str):
+            if isinstance(a, np.ndarray) and a.ndim == 0:
+                a = a.item()
+            if k in ("i64", "u64"):
+                if not isinstance(a, (int, np.integer, bool, np.bool_)):
+                    return NEED_COPY  # (a fraction where a whole number goes: the slower loop)
+                a = int(a) & ((1 << 64) - 1) if k == "u64" else int(a)
+            plain.append(float(a) if k == "f64" else bool(a) if k == "bool" else a)
+            continue
+        dtype, writes = k
+        a2 = np.asarray(a)
+        if a2.dtype != dtype and not np.can_cast(a2.dtype, dtype, "safe"):
+            return NEED_COPY
+        p = np.ascontiguousarray(a2, dtype)
+        if writes and (p is a2 and not p.flags.writeable):
+            p = p.copy()
+        plain.append(p)
+    got = f(*plain)
+    if got.__class__ is not int or got >= 0:  # (a tuple: a loop handing back arrays ran)
+        for a, p, k in zip(args, plain, kinds):
+            if not isinstance(k, str) and k[1] and p is not a and isinstance(a, np.ndarray):
+                a[...] = p
+    return got
+
+
+class Loops(Wraps):
     """fastloops with the library's loops in their place (any other name: fastloops' own). The first try hands
     the arrays over as they are (cheap); NEED_COPY = plain copies, once more."""
 
     def __init__(self, base, dll, ext=None):
-        mine = {n for n in type(self).__dict__ if not n.startswith("_")}
+        mine = {n for c in type(self).__mro__ for n in c.__dict__ if not n.startswith("_")}
         if base is not None:  # (fastloops' names copied in: a plain lookup, as quick as the module's own)
             self.__dict__.update((n, v) for n, v in vars(base).items() if not n.startswith("__") and n not in mine)
+        for name, needs in NEEDS.items():  # (a loop the library hasn't got: fastloops' own)
+            if ext is None or not all(hasattr(ext, x) for x in needs):
+                if base is not None and hasattr(base, name):
+                    self.__dict__[name] = getattr(base, name)
         self.base = base
         self.dll = dll
+        self.x = ext
         if ext is not None:  # (the extension's functions take the same arguments as the ctypes ones)
             self._stir_f, self._winner_f, self._key_f = ext.stir_spots, ext.winner_pieces, ext.key_order
         else:
@@ -176,6 +260,15 @@ class Loops:
 
     def __getattr__(self, name):  # (a name fastloops got after the copy)
         return getattr(self.base, name)
+
+    def _again(self, name, got, args):
+        """The extension's loop name didn't run (got < 0): NEED_COPY = plain copies once more. -> what it gave
+        (still < 0 = said once in the logs; the caller uses the fastloops loop)."""
+        if got == NEED_COPY:
+            got = plain_call(getattr(self.x, name), args)
+        if got.__class__ is int and got < 0:
+            _failed_once(name, got)
+        return got
 
     def _stir_again(self, got, x, y, fp, ip, ox, oy, many, fallback):
         """The first try didn't run (got < 0): plain copies once more, else the fastloops loop."""
