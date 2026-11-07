@@ -131,7 +131,7 @@ def key_sort(key, *cols):
             and int(key.max()) - int(key.min()) <= max(65536, n)):
         a = [np.ascontiguousarray(c) for c in cols]
         a += [a[-1]] * (3 - len(a))  # (the last column again: changes no order)
-        return fast.key_order(np.ascontiguousarray(key), *a)
+        return fast.key_order_cores(np.ascontiguousarray(key), *a)
     return np.lexsort((*cols[::-1], key))
 
 

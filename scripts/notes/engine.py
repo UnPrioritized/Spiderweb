@@ -1948,7 +1948,7 @@ def stretches(notes, owner, split="key"):
         if m < 0:
             key = np.ascontiguousarray(notes[:, 2]) if split == "key" else np.zeros(len(notes), np.int64)
             s = np.ascontiguousarray(notes[:, 0])
-            out, m = fast.note_stretches(notes, split == "key", owner, fast.key_order(key, s, s, s))
+            out, m = fast.note_stretches(notes, split == "key", owner, fast.key_order_cores(key, s, s, s))
         return out if m == len(out) else out[:m].copy()
     flat = notes[:, 1] <= notes[:, 0]
     key = notes[:, 2] if split == "key" else np.zeros(len(notes), np.int64)

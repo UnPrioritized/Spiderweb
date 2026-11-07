@@ -22,7 +22,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   note_ends      hzbass.note_lengths: a Hz bass's notes' ends by its Note length
   wave_fill      hzbass.wave_ticks: each note's wave length, one key at a time
   hz_expand ... hz_finish  hz_grid.KeyGrid.made for the plain settings (made_fast): a key's repeats
-  key_order      np.lexsort by key, then up to 3 more columns (runs already in order merged: quick)
+  key_order      np.lexsort by key, then up to 3 more columns (runs already in order merged: quick; key_order_cores =
+                 the key groups on half the cores: on_cores)
   radix_order    np.argsort(kind="stable") of whole numbers (Copy / Export to Domino: domino_clip.start_key_order)
   ring_runs      roll_draw.ring_parts' runs: the selection's red outline, each key row's notes joined
   clash_pairs    engine.clash_arrays (Multi channel): which owners' stretches clash
@@ -998,23 +999,29 @@ def _before(i, j, a, b, c):
 
 
 @njit(cache=CACHE, nogil=True)
-def _runs_sort(idx, a, b, c, tmp):
+def _runs_sort(idx, a, b, c, tmp, bounds, nb):
     """idx (row numbers) sorted by (a, b, c) in place, rows alike kept in their order (as np.lexsort): the runs
-    already in order are merged two by two (notes mostly come in order: a few runs, quick)."""
+    already in order are merged two by two (notes mostly come in order: a few runs, quick). bounds, nb: work space,
+    len(idx) + 2 each (plain arrays: a growing list was ~1.3x slower)."""
     n = len(idx)
     if n < 2:
         return
-    bounds = [0]
+    nbo = 1
+    bounds[0] = 0
     for i in range(1, n):
         if _before(idx[i], idx[i - 1], a, b, c):
-            bounds.append(i)
-    bounds.append(n)
-    while len(bounds) > 2:
-        nb = [0]
-        for r in range(0, len(bounds) - 1, 2):
+            bounds[nbo] = i
+            nbo += 1
+    bounds[nbo] = n
+    nbo += 1
+    while nbo > 2:
+        nn = 1
+        nb[0] = 0
+        for r in range(0, nbo - 1, 2):
             lo = bounds[r]
-            if r + 2 >= len(bounds):
-                nb.append(bounds[r + 1])
+            if r + 2 >= nbo:
+                nb[nn] = bounds[r + 1]
+                nn += 1
                 continue
             mid, hi = bounds[r + 1], bounds[r + 2]
             p, q, m = lo, mid, lo
@@ -1034,18 +1041,23 @@ def _runs_sort(idx, a, b, c, tmp):
                 tmp[m] = idx[q]
                 q += 1
                 m += 1
-            idx[lo:hi] = tmp[lo:hi]
-            nb.append(hi)
-        bounds = nb
+            for j in range(lo, hi):
+                idx[j] = tmp[j]
+            nb[nn] = hi
+            nn += 1
+        for j in range(nn):
+            bounds[j] = nb[j]
+        nbo = nn
 
 
 @njit(cache=CACHE, nogil=True)
-def key_order(key, a, b, c):
-    """np.lexsort((c, b, a, key)): rows by key, then a, b, c, rows alike in their order."""
+def _key_groups(key):
+    """key_order's first part: rows grouped by key, lowest first, in their order -> (order, at: group g = order[at[g]
+    .. at[g + 1]])."""
     n = len(key)
     order = np.empty(n, np.int64)
     if n == 0:
-        return order
+        return order, np.zeros(1, np.int64)
     kmin = key.min()
     nk = key.max() - kmin + 1
     at = np.zeros(nk + 1, np.int64)
@@ -1058,11 +1070,45 @@ def key_order(key, a, b, c):
         g = key[i] - kmin
         order[pos[g]] = i
         pos[g] += 1
+    return order, at
+
+
+@njit(cache=CACHE, nogil=True)
+def _key_runs(order, at, a, b, c):
+    """key_order's second part: each key's group sorted by (a, b, c). One core."""
+    n = len(order)
     tmp = np.empty(n, np.int64)
-    for g in range(nk):
+    bounds, nb = np.empty(n + 2, np.int64), np.empty(n + 2, np.int64)
+    for g in range(len(at) - 1):
         if at[g + 1] - at[g] > 1:
-            part = order[at[g]:at[g + 1]]
-            _runs_sort(part, a, b, c, tmp[at[g]:at[g + 1]])
+            _runs_sort(order[at[g]:at[g + 1]], a, b, c, tmp[at[g]:at[g + 1]], bounds, nb)
+
+
+@njit(cache=CACHE, nogil=True, parallel=True)
+def _key_runs_cores(order, at, a, b, c):
+    """_key_runs with the key groups shared out (each group on its own: the very same order)."""
+    n, nk = len(order), len(at) - 1
+    tmp = np.empty(n, np.int64)
+    bounds, nb = np.empty(n + 2 * nk, np.int64), np.empty(n + 2 * nk, np.int64)
+    for g in prange(nk):
+        lo, hi = at[g], at[g + 1]
+        if hi - lo > 1:
+            _runs_sort(order[lo:hi], a, b, c, tmp[lo:hi], bounds[lo + 2 * g:hi + 2 * g + 2],
+                       nb[lo + 2 * g:hi + 2 * g + 2])
+
+
+@njit(cache=CACHE, nogil=True)
+def key_order(key, a, b, c):
+    """np.lexsort((c, b, a, key)): rows by key, then a, b, c, rows alike in their order. One core."""
+    order, at = _key_groups(key)
+    _key_runs(order, at, a, b, c)
+    return order
+
+
+def key_order_cores(key, a, b, c):
+    """key_order with the key groups sorted on half the cores (on_cores; 3 M pasted notes measured ~3x quicker)."""
+    order, at = _key_groups(key)
+    on_cores(_key_runs_cores, _key_runs, len(order), order, at, a, b, c)
     return order
 
 
@@ -2823,6 +2869,8 @@ def warm():
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
     key_order(i1, i1, i1, i1)
+    k_order, k_at = _key_groups(i1)
+    on_cores(_key_runs_cores, _key_runs, CORES_LEAST, k_order, k_at, i1, i1, i1)  # (the shared loop made now, not mid-paste)
     radix_order(i1, 1)
     ring_runs(i1, i1, i1, i1, 0.5, 1)
     clash_pairs(np.zeros((1, 4), np.int64), 1, 1 << 28)
