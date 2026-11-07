@@ -539,6 +539,7 @@ def cc_texts(shapes, mode):
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, GlissPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
           Playback, Pictures, HistoryPanel, ScrollingSide, tk.Tk):
     _bg_notes = False  # the notes are being made in the background after an edit (shapes_changed, notes_wait.py)
+    _recolour_owed = False  # the panel's Recolour row waits for those notes (panel_recolour.sync_recolour)
     _bg_serial = None  # (the event that started it: its other bindings don't wait for it)
     _bg_carry = None  # (the selected shapes whose old notes go along meanwhile: roll_draw.carry_from)
     _job_stash = None  # (all_notes' stash from the notes made in the background: notes_made, for lay_again)
@@ -2032,14 +2033,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         are made as for one channel (Own channel per note needs Multi channel). keys: made on another key range
         (a shape past the edges, made lifted: engine.past_edges). edges=False: the notes before a page, never cut
         at the edges (only the finished shape is: shape_notes_tracks' way; pages_hunt 5, 2026-11-06)."""
-        if self.channel_mode.get() != "auto":  # (Recolour too: in one channel it would only change overlaps; a
-            sh = recolour_alone(one_voice(sh))  # Domino paste keeps its tracks, so its Recolour stays)
-        elif "recolour" in sh:  # (a colour set holds 16 with channel 10 used)
-            sh = with_most(sh, self.all16())
-        keys = self.keys if keys is None else keys
-        key = (shape_key(sh), self.ppq, keys)
-        if not edges and keys == self.keys and past_edges(sh, keys, self.ppq) is not None:
-            key += ("whole",)  # (uncut: not the finished shape's cut notes)
+        sh, keys, key = self.notes_cache_key(sh, keys, edges)
         cache = self._notes_cache
         got = cache.pop(key, None)
         if got is None:
@@ -2051,6 +2045,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         cache[key] = got  # (last = used most recently: trim_notes forgets the oldest first)
         self.trim_notes()
         return got
+
+    def notes_cache_key(self, sh, keys=None, edges=True):
+        """(sh as its notes are made, keys, the notes cache key) for notes_tracks."""
+        if self.channel_mode.get() != "auto":  # (Recolour too: in one channel it would only change overlaps; a
+            sh = recolour_alone(one_voice(sh))  # Domino paste keeps its tracks, so its Recolour stays)
+        elif "recolour" in sh:  # (a colour set holds 16 with channel 10 used)
+            sh = with_most(sh, self.all16())
+        keys = self.keys if keys is None else keys
+        key = (shape_key(sh), self.ppq, keys)
+        if not edges and keys == self.keys and past_edges(sh, keys, self.ppq) is not None:
+            key += ("whole",)  # (uncut: not the finished shape's cut notes)
+        return sh, keys, key
+
+    def notes_known(self, sh):
+        """notes_tracks(sh) when they're remembered already, else None (nothing made)."""
+        return self._notes_cache.get(self.notes_cache_key(sh)[2])
 
     def trim_notes(self):
         """The notes remembered for at most 500 shapes, or 3 for each shape in the project: past that, the ones
@@ -2229,6 +2239,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.lines_window:  # (its line count from these notes, hunt 2026-10-30)
             self.lines_window.sync()
         self.sync_list_selection()
+        if self._recolour_owed:  # (the panel's Recolour colours waited for these notes: panel_recolour)
+            self.sync_recolour()
         self.roll.request_redraw()
         self.track_list.changed()
         self.sync_toolbar_parts()
@@ -3674,8 +3686,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             turned_piece(sh, frm, turned)
         self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r + db, cp - sign * (b - cb) / r + dp),
                                 turned=True)  # (too)
+        self.shapes_changed()  # (first: notes made in the background, the panel's Recolour row waits for them)
         self.sync_panel()
-        self.shapes_changed()
 
     @staticmethod
     def stretched(sh, ab, kx, ap, ky):

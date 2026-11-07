@@ -159,13 +159,21 @@ class RecolourPanel:
         self.recolour_mix.set(mixes == {True})
         self.recolour_mix_tick.state(["alternate" if len(mixes) > 1 else "!alternate"])
         self._loading = False
-        # (Off + a Stir counts too: it says why the stir shows nothing, hunt 2026-11-02)
-        lonely, single = self.recolour_trouble(tgts, act)
-        owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
-        self.recolour_mode.config(state="readonly" if tgts else "disabled",
-                                  style="Gap.TCombobox" if lonely or single else "TCombobox")
-        show_mixed(self.recolour_mode, len(modes) > 1, self.recolour_tip,
-                   tr("recolour.tip") + (tr("recolour.needs") if lonely else tr("recolour.one") if single else ""))
+        # (notes being made in the background after an edit (a big turned paste: ~0.7 s) and these shapes' colours
+        # not known yet: what needs them waits for the notes (shapes_changed calls this again then), so the edit
+        # doesn't make them here first, freezing the window)
+        late = self._bg_notes and any(r and self.notes_known(without_recolour(t)) is None for t, r in zip(tgts, act))
+        self._recolour_owed = late
+        if late:
+            self.recolour_mode.config(state="readonly" if tgts else "disabled")
+        else:
+            # (Off + a Stir counts too: it says why the stir shows nothing, hunt 2026-11-02)
+            lonely, single = self.recolour_trouble(tgts, act)
+            owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
+            self.recolour_mode.config(state="readonly" if tgts else "disabled",
+                                      style="Gap.TCombobox" if lonely or single else "TCombobox")
+            show_mixed(self.recolour_mode, len(modes) > 1, self.recolour_tip,
+                       tr("recolour.tip") + (tr("recolour.needs") if lonely else tr("recolour.one") if single else ""))
         self.recolour_entry.config(state="normal" if live else "disabled", style="TEntry")
         kind = mode if mode in AMOUNT_WORDS else "shuffle"  # (Mixed: the plain Amount)
         self.recolour_amount_word.config(text=tr(AMOUNT_WORDS[kind][0]))
@@ -184,6 +192,8 @@ class RecolourPanel:
             else:
                 self.recolour_again.pack_forget()
         self.recolour_box.after_idle(self.fit_stir)  # (New shuffle / "(on)" changed the room the row needs)
+        if late:
+            return
         sets = shown and any(len(o) > 1 for o in owns)  # (more than one colour set: Mix across sets)
         if sets != bool(self.recolour_mix_tick.winfo_manager()):
             if sets:
