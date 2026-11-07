@@ -69,6 +69,8 @@ mod midi_index;
 mod midi_scan;
 mod misc;
 mod order;
+mod piece;
+mod play;
 mod recolour;
 mod stir;
 mod tempo;

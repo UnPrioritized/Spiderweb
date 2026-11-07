@@ -53,6 +53,7 @@ extern "C" {
     fn PyLong_AsLongLong(o: *mut PyObj) -> i64;
     fn PyFloat_AsDouble(o: *mut PyObj) -> f64;
     fn PyLong_AsUnsignedLongLong(o: *mut PyObj) -> u64;
+    fn PyNumber_Index(o: *mut PyObj) -> *mut PyObj;
     fn PyObject_IsTrue(o: *mut PyObj) -> c_int;
     fn PyErr_Occurred() -> *mut PyObj;
     fn PyErr_Clear();
@@ -261,7 +262,20 @@ impl<'a> FromPy<'a> for u64 {
         let v = PyLong_AsUnsignedLongLong(o);
         if v == u64::MAX && !PyErr_Occurred().is_null() {
             PyErr_Clear();
-            return Err(NEED_COPY);
+            // (a NumPy whole number, e.g. np.uint64: PyLong_AsUnsignedLongLong takes Python ints only; its
+            // __index__ gives one. Without this every such call took the slow plain-copy route: dice_mix 3.3 us)
+            let i = PyNumber_Index(o);
+            if i.is_null() {
+                PyErr_Clear();
+                return Err(NEED_COPY);
+            }
+            let v = PyLong_AsUnsignedLongLong(i);
+            Py_DecRef(i);
+            if v == u64::MAX && !PyErr_Occurred().is_null() {
+                PyErr_Clear();
+                return Err(NEED_COPY);
+            }
+            return Ok(v);
         }
         Ok(v)
     }

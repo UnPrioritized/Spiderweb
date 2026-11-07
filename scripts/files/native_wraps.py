@@ -26,6 +26,14 @@ NEEDS = {
     "midi_index": ("midi_index",), "midi_close": ("midi_close",), "midi_grid": ("midi_grid",),
     "midi_halve": ("midi_halve",), "midi_cover": ("midi_cover",), "midi_merge_loud": ("midi_merge_loud",),
     "midi_cover_many": ("midi_cover_many",), "loaded_pixels": ("loaded_pixels",), "all_tops": ("all_tops",),
+    "play_read": ("play_read",), "play_programs": ("play_programs",), "play_order": ("play_order",),
+    "play_order_count": ("play_order_count",), "play_order_place": ("play_order_place",), "play_hist": ("play_hist",),
+    "play_stamp": ("play_stamp",), "play_condense": ("play_condense",), "play_stamp_pre": ("play_stamp_pre",),
+    "play_emit": ("play_emit",),
+    "piece_track": ("piece_track",), "piece_held_ons": ("piece_held_ons",), "piece_held_head": ("piece_held_head",),
+    "piece_note_ons": ("piece_note_ons",), "piece_runs_sort": ("piece_runs_sort",),
+    "piece_runs_merge": ("piece_runs_merge",), "piece_counted_track": ("piece_counted_track",),
+    "piece_order_ok": ("piece_order_ok",), "piece_open_at": ("piece_open_at",),
 }
 NOT_IN_ORDER = -10  # (note_stretches: the notes aren't in key / start order; Numba's -1)
 
@@ -310,12 +318,13 @@ class Wraps:
 
     def gap_plan(self, j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair_reach, lens, vals, pos,
                  got):
-        res = np.empty(3, np.int64)
-        args = (j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair_reach, lens, vals, pos, got, res)
-        r = self.x.gap_plan(*args)
-        if r < 0 and self._again("gap_plan", r, args) < 0:
-            return self.base.gap_plan(*args[:-1])
-        return int(res[0]), int(res[1]), int(res[2])
+        args = (j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair_reach, lens, vals, pos, got)
+        r = self.x.gap_plan(*args)  # (-> (gaps, last, pos), made in Rust: no array a call)
+        if r.__class__ is int:
+            r = self._again("gap_plan", r, args)
+            if r.__class__ is int:
+                return self.base.gap_plan(*args)
+        return r
 
     # ---- Load MIDI's byte loops (midi_scan): -> where each stopped
 
@@ -326,10 +335,11 @@ class Wraps:
             return None
         return got
 
-    def midi_walk(self, b, p, end, final, rest, st, cnt):
-        args = (b, p, end, final, rest, st, cnt)
-        got = self._at("midi_walk", args)
-        return got if got is not None else self.base.midi_walk(*args)
+    def midi_walk(self, b, p, end, final, rest, st, cnt):  # (straight: small calls, the helper cost ~0.1 us)
+        got = self.x.midi_walk(b, p, end, final, rest, st, cnt)
+        if got < 0 and (got := self._again("midi_walk", got, (b, p, end, final, rest, st, cnt))) < 0:
+            return self.base.midi_walk(b, p, end, final, rest, st, cnt)
+        return got
 
     def midi_rewrite(self, b, p, end, final, bp_n, bp_f, use_map, drop, ins_t, ins_at, ins_b, out, o, st, base, skip,
                      chan=-1, keep=0xFFFF, meta=1):
@@ -341,9 +351,10 @@ class Wraps:
         return int(res[0]), int(res[1])
 
     def midi_note_ticks(self, b, p, end, final, mark, base, st):
-        args = (b, p, end, final, mark, base, st)
-        got = self._at("midi_note_ticks", args)
-        return got if got is not None else self.base.midi_note_ticks(*args)
+        got = self.x.midi_note_ticks(b, p, end, final, mark, base, st)
+        if got < 0 and (got := self._again("midi_note_ticks", got, (b, p, end, final, mark, base, st))) < 0:
+            return self.base.midi_note_ticks(b, p, end, final, mark, base, st)
+        return got
 
     def midi_busy_hits(self, b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit):
         args = (b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit)
@@ -384,9 +395,9 @@ class Wraps:
             self.base.midi_grid(*args)
 
     def midi_halve(self, cnt, top, cnt2, top2):
-        args = (cnt, top, cnt2, top2)
-        if not self._do("midi_halve", args):
-            self.base.midi_halve(*args)
+        got = self.x.midi_halve(cnt, top, cnt2, top2)
+        if got < 0 and self._again("midi_halve", got, (cnt, top, cnt2, top2)) < 0:
+            self.base.midi_halve(cnt, top, cnt2, top2)
 
     def midi_cover(self, b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, colour, tab,
                    nx, filled, marks, sq, sa, sb, sv):
@@ -418,3 +429,151 @@ class Wraps:
         args = (top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G)
         if not self._do("all_tops", args):
             self.base.all_tops(*args)
+
+    # ---- playing a loaded MIDI (play_loaded, play_dense): called often, so each one straight (no helper call)
+
+    def play_read(self, b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base, sk, sk_i, sk_end,
+                  count, opened, slot):
+        args = (b, at, size, t1, tick, run, nxt, used, kn, out_t, out_m, out_k, n, base, sk, sk_i, sk_end, count,
+                opened, slot)
+        got = self.x.play_read(*args)
+        if got < 0 and (got := self._again("play_read", got, args)) < 0:
+            return self.base.play_read(*args)
+        return got
+
+    def play_programs(self, b, p, end, st):
+        got = self.x.play_programs(b, p, end, st)
+        if got < 0 and (got := self._again("play_programs", got, (b, p, end, st))) < 0:
+            return self.base.play_programs(b, p, end, st)
+        return got
+
+    def play_order(self, ticks, ms, ks, base, span, out_t, out_m, out_k):
+        args = (ticks, ms, ks, base, span, out_t, out_m, out_k)
+        got = self.x.play_order(*args)
+        if got < 0 and self._again("play_order", got, args) < 0:
+            self.base.play_order(*args)
+
+    def play_order_count(self, ticks, base, count):
+        got = self.x.play_order_count(ticks, base, count)
+        if got < 0 and self._again("play_order_count", got, (ticks, base, count)) < 0:
+            self.base.play_order_count(ticks, base, count)
+
+    def play_order_place(self, ticks, ms, ks, base, at, out_t, out_m, out_k):
+        args = (ticks, ms, ks, base, at, out_t, out_m, out_k)
+        got = self.x.play_order_place(*args)
+        if got < 0 and self._again("play_order_place", got, args) < 0:
+            self.base.play_order_place(*args)
+
+    def play_hist(self, ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, h):
+        args = (ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, h)
+        got = self.x.play_hist(*args)
+        if got < 0 and self._again("play_hist", got, args) < 0:
+            self.base.play_hist(*args)
+
+    def play_stamp(self, ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least, fr, out, tr, counts,
+                   cp, tab_key, tab_gen, tab_at, head, tail, val, nxt, st):
+        args = (ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least, fr, out, tr, counts, cp,
+                tab_key, tab_gen, tab_at, head, tail, val, nxt, st)
+        got = self.x.play_stamp(*args)
+        if got < 0 and (got := self._again("play_stamp", got, args)) < 0:
+            return self.base.play_stamp(*args)
+        return got
+
+    def play_condense(self, ts, ms, ks, tport, n, out_t, out_m, out_tr, out_cp, tab_key, tab_gen, tab_at, counts,
+                      last_on):
+        args = (ts, ms, ks, tport, n, out_t, out_m, out_tr, out_cp, tab_key, tab_gen, tab_at, counts, last_on)
+        got = self.x.play_condense(*args)
+        if got < 0 and (got := self._again("play_condense", got, args)) < 0:
+            return self.base.play_condense(*args)
+        return got
+
+    def play_stamp_pre(self, ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr, out, tr, cp, counts,
+                       dry, head, tail, val, nxt, st):
+        args = (ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr, out, tr, cp, counts, dry, head,
+                tail, val, nxt, st)
+        got = self.x.play_stamp_pre(*args)
+        if got < 0 and (got := self._again("play_stamp_pre", got, args)) < 0:
+            return self.base.play_stamp_pre(*args)
+        return got
+
+    def play_emit(self, ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room, out, lens, three,
+                  head, tail, val, nxt, st):
+        args = (ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room, out, lens, three, head, tail,
+                val, nxt, st)
+        got = self.x.play_emit(*args)
+        if got < 0 and (got := self._again("play_emit", got, args)) < 0:
+            return self.base.play_emit(*args)
+        return got
+
+    # ---- Rendered ahead's pieces of a loaded MIDI (ahead_loaded): one call a track a piece
+
+    def piece_track(self, b, base, tick, run, t_pre, t_end, sk, cnt, vel, ontk, muted, newch, last, out, t_on, opn,
+                    port, base_t, bars, bar_ch, ev_key, ev_sig, nev):
+        args = (b, base, tick, run, t_pre, t_end, sk, cnt, vel, ontk, muted, newch, last, out, t_on, opn, port, base_t,
+                bars, bar_ch, ev_key, ev_sig, nev)
+        got = self.x.piece_track(*args)
+        if got.__class__ is int:
+            got = self._again("piece_track", got, args)
+            if got.__class__ is int:
+                return self.base.piece_track(*args)
+        return got
+
+    def piece_held_ons(self, b, base, tick, run, t_stop, sk, muted, need, off, tk, vl, pos):
+        args = (b, base, tick, run, t_stop, sk, muted, need, off, tk, vl, pos)
+        got = self.x.piece_held_ons(*args)
+        if got < 0 and (got := self._again("piece_held_ons", got, args)) < 0:
+            return self.base.piece_held_ons(*args)
+        return got
+
+    def piece_held_head(self, tk, qs, vl, newch, last, out):
+        args = (tk, qs, vl, newch, last, out)
+        got = self.x.piece_held_head(*args)
+        if got.__class__ is int:
+            got = self._again("piece_held_head", got, args)
+            if got.__class__ is int:
+                return self.base.piece_held_head(*args)
+        return got
+
+    def piece_note_ons(self, b, base, tick, run, t_stop, sk, muted, want, out_t, out_q, out_v):
+        args = (b, base, tick, run, t_stop, sk, muted, want, out_t, out_q, out_v)
+        got = self.x.piece_note_ons(*args)
+        if got < 0 and (got := self._again("piece_note_ons", got, args)) < 0:
+            return self.base.piece_note_ons(*args)
+        return got
+
+    def piece_runs_sort(self, key, sig, cnt, n, tk, ts, tc, bits):
+        args = (key, sig, cnt, n, tk, ts, tc, bits)
+        got = self.x.piece_runs_sort(*args)
+        if got < 0 and (got := self._again("piece_runs_sort", got, args)) < 0:
+            return self.base.piece_runs_sort(*args)
+        return got
+
+    def piece_runs_merge(self, ak, asg, ac, na, bk, bsg, bc, nb, ok, osg, oc):
+        args = (ak, asg, ac, na, bk, bsg, bc, nb, ok, osg, oc)
+        got = self.x.piece_runs_merge(*args)
+        if got < 0 and (got := self._again("piece_runs_merge", got, args)) < 0:
+            return self.base.piece_runs_merge(*args)
+        return got
+
+    def piece_counted_track(self, key, sig, cnt, n, port, rel, out):
+        args = (key, sig, cnt, n, port, rel, out)
+        got = self.x.piece_counted_track(*args)
+        if got.__class__ is int:
+            got = self._again("piece_counted_track", got, args)
+            if got.__class__ is int:
+                return self.base.piece_counted_track(*args)
+        return got
+
+    def piece_order_ok(self, key, sig, cnt, n, bar_ch):
+        args = (key, sig, cnt, n, bar_ch)
+        got = self.x.piece_order_ok(*args)
+        if got < 0 and (got := self._again("piece_order_ok", got, args)) < 0:
+            return self.base.piece_order_ok(*args)
+        return got == 1
+
+    def piece_open_at(self, key, sig, cnt, n, lim, wlim, take):
+        args = (key, sig, cnt, n, lim, wlim, take)
+        got = self.x.piece_open_at(*args)
+        if got < 0 and (got := self._again("piece_open_at", got, args)) < 0:
+            return self.base.piece_open_at(*args)
+        return got

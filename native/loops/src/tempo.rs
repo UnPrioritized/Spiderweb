@@ -83,6 +83,7 @@ fn side_next(mut u: i64, way: i64) -> i64 {
 }
 
 /// tempo._near_pair: (0, a, ticks of a, b) found / (1, ...) None / (2, ...) far.
+#[inline(always)]
 fn near_pair_n(n: i64, target: i64, reach: i64) -> (i64, i64, i64, i64) {
     let q = target as f64 / n as f64;
     let ru = reach.max(0) as usize;
@@ -180,6 +181,7 @@ fn next_small_n(u: i64, way: i64, reach: i64) -> i64 {
     u
 }
 
+#[inline(always)]
 fn next_safe_n(body: &[i64], nb: usize, way: i64, reach: i64, out: &mut [i64]) {
     if nb == 1 {
         out[0] = next1n(body[0], way, reach);
@@ -203,6 +205,7 @@ fn next_safe_n(body: &[i64], nb: usize, way: i64, reach: i64, out: &mut [i64]) {
     }
 }
 
+#[inline(always)]
 fn safe_side_n(start: i64, way: i64, reach: i64, safe_reach: i64, out: &mut [i64]) -> usize {
     let (mut c, mut u) = (0i64, start - way);
     while c < reach {
@@ -234,6 +237,7 @@ fn safe_side_n(start: i64, way: i64, reach: i64, safe_reach: i64, out: &mut [i64
     c as usize
 }
 
+#[inline(always)]
 fn full_pair_n(n: i64, target: i64, reach: i64, safe_reach: i64) -> (i64, i64, i64, i64) {
     let q = target as f64 / n as f64;
     let ru = reach.max(0) as usize;
@@ -275,6 +279,7 @@ fn full_pair_n(n: i64, target: i64, reach: i64, safe_reach: i64) -> (i64, i64, i
     (0, b_a, b_k, b_b)
 }
 
+#[inline(always)]
 fn flat_pair_n(n: i64, target: i64, reach: i64, safe_reach: i64) -> (i64, i64, i64, i64) {
     let a0 = fdiv(target, n);
     let r = target - a0 * n;
@@ -299,6 +304,7 @@ fn put_pair(out: &mut [i64], n: i64, a: i64, ka: i64, b: i64) {
 }
 
 /// tempo._fit_exact of ideal[:n] into out[:n]: 0 = made, 1 = None.
+#[inline(always)]
 fn fit_exact_n(ideal: &[f64], n: i64, target: i64, safe_reach: i64, pair_reach: i64, out: &mut [i64]) -> i64 {
     if n == 0 || !(n <= target && target <= n * TOP) {
         return 1;
@@ -364,6 +370,7 @@ fn fit_exact_n(ideal: &[f64], n: i64, target: i64, safe_reach: i64, pair_reach: 
 
 /// tempo._fit_blocks on file_plan's curved gap: 0 = out[:kj] made, 1 = None.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn fit_blocks_n(drawn: &[i64], a: i64, n0: i64, n1: i64, kj: i64, target: i64, every: i64, safe_reach: i64,
                 pair_reach: i64, out: &mut [i64]) -> i64 {
     let n = kj;
@@ -438,6 +445,21 @@ fn least1(t: i64, most: i64) -> i64 {
         least = 2;
     }
     least
+}
+
+/// fastloops.gap_plan -> (j, last, pos) as numbers (no array made in Python a call: small calls stay cheap).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn gap_plan_t(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i64], drawn: &[i64], pref: &[i64],
+                  every: i64, most: i64, safe_reach: i64, pair_reach: i64, lens: &mut [i64], vals: &mut [i64],
+                  pos: i64, got: &mut [i64]) -> Outs {
+    let mut res = [0i64; 3];
+    let r = gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair_reach, lens, vals, pos, got,
+                     &mut res);
+    if r < 0 {
+        return Err(r);
+    }
+    Ok(vec![Out::Int(res[0]), Out::Int(res[1]), Out::Int(res[2])])
 }
 
 /// fastloops.gap_plan; res = (j, last, pos) -> 0.

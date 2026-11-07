@@ -433,6 +433,31 @@ pub fn grid(cov: NdMut<i32, 2>, edg: NdMut<u8, 2>, glo: i64, ghi: i64, klo: i64,
 pub fn halve(cnt: Nd<i32, 2>, top: Nd<i32, 2>, cnt2: NdMut<i32, 2>, top2: NdMut<i32, 2>) -> i64 {
     let n = cnt.sh[1];
     let (w2, t2w) = (cnt2.sh[1], top2.sh[1]);
+    let (rows, tw) = (cnt.sh[0], top.sh[1]);
+    // (the usual shapes: rows checked once, then plain slices the compiler can run several at a time; any other
+    // shape takes the step-by-step loop below, which reads exactly what Numba's does)
+    if w2 > 0 && 2 * (w2 - 1) < n && tw >= n && t2w >= w2 && top.sh[0] >= rows && cnt2.sh[0] >= rows
+        && top2.sh[0] >= rows {
+        for k in 0..rows {
+            let c_in = &cnt.d[k * n..k * n + n];
+            let t_in = &top.d[k * tw..k * tw + n];
+            let c_out = &mut cnt2.d[k * w2..k * w2 + w2];
+            let t_out = &mut top2.d[k * t2w..k * t2w + w2];
+            let full = n / 2; // (pairs both inside the row)
+            let m = full.min(w2);
+            for g in 0..m {
+                let (c0, c1) = (c_in[2 * g], c_in[2 * g + 1]);
+                let (t0, t1) = (t_in[2 * g], t_in[2 * g + 1]);
+                c_out[g] = if c1 > c0 { c1 } else { c0 };
+                t_out[g] = if t1 > t0 { t1 } else { t0 };
+            }
+            for g in m..w2 {
+                c_out[g] = c_in[2 * g];
+                t_out[g] = t_in[2 * g];
+            }
+        }
+        return 0;
+    }
     for k in 0..cnt.sh[0] {
         for g in 0..w2 {
             let a = 2 * g;

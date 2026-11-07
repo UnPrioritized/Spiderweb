@@ -156,18 +156,31 @@ pub fn stir_wrap(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], o
 /// fastloops._sample_at for spots x / y into out (2 numbers a spot).
 #[inline(always)]
 fn sample_inner(a: &[f64], gy: usize, gx: usize, x: &[f64], y: &[f64], out: &mut [f64]) {
-    let (row, col) = (gx * 2, 2usize);
-    for i in 0..x.len() {
-        let fx = pmin(pmax(x[i], 0.0), 1.0) * (gx as i64 - 1) as f64;
-        let fy = pmin(pmax(y[i], 0.0), 1.0) * (gy as i64 - 1) as f64;
-        let i0 = (fx as i64).min(gx as i64 - 2);
-        let j0 = (fy as i64).min(gy as i64 - 2);
-        let (tx, ty) = (fx - i0 as f64, fy - j0 as f64);
-        let (i0, j0) = (i0 as usize, j0 as usize);
-        for c in 0..2 {
-            let at = |j: usize, i: usize| a[j * row + i * col + c];
-            out[i * 2 + c] = (at(j0, i0) * (1.0 - tx) + at(j0, i0 + 1) * tx) * (1.0 - ty)
-                + (at(j0 + 1, i0) * (1.0 - tx) + at(j0 + 1, i0 + 1) * tx) * ty;
+    let n = x.len();
+    // (sizes checked once: fx / fy are clamped to 0 .. g - 1 first, so i0 / j0 stay in 0 .. g - 2 and every read
+    // below is inside the map; a NaN spot gives 0 too. No checks inside the loop: 8 reads a spot)
+    assert!(gx >= 2 && gy >= 2 && y.len() >= n && out.len() >= n * 2 && a.len() >= gy * gx * 2);
+    let row = gx * 2;
+    let (wx, wy) = ((gx as i64 - 1) as f64, (gy as i64 - 1) as f64);
+    let (mx, my) = (gx as i64 - 2, gy as i64 - 2);
+    for i in 0..n {
+        unsafe {
+            let fx = pmin(pmax(*x.get_unchecked(i), 0.0), 1.0) * wx;
+            let fy = pmin(pmax(*y.get_unchecked(i), 0.0), 1.0) * wy;
+            // (fx / fy are 0 .. g - 1 here (or NaN: 0), so the plain conversion is exact; Rust's own `as` adds
+            // range checks each time: the sampler was 1.2x Numba's)
+            let i0 = if fx == fx { fx.to_int_unchecked::<i64>() } else { 0 }.min(mx);
+            let j0 = if fy == fy { fy.to_int_unchecked::<i64>() } else { 0 }.min(my);
+            let (tx, ty) = (fx - i0 as f64, fy - j0 as f64);
+            let p = j0 as usize * row + i0 as usize * 2;
+            for c in 0..2 {
+                let a00 = *a.get_unchecked(p + c);
+                let a01 = *a.get_unchecked(p + 2 + c);
+                let a10 = *a.get_unchecked(p + row + c);
+                let a11 = *a.get_unchecked(p + row + 2 + c);
+                *out.get_unchecked_mut(i * 2 + c) =
+                    (a00 * (1.0 - tx) + a01 * tx) * (1.0 - ty) + (a10 * (1.0 - tx) + a11 * tx) * ty;
+            }
         }
     }
 }
@@ -225,6 +238,56 @@ pub fn dice_mix(seed: u64, c0: &[u64], c1: &[u64], c2: &[u64], c3: &[u64], out: 
 #[inline(always)]
 pub fn recolour_apart(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64], pick: &[f64],
                       bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
+    if apart_plain(order, ss, e, old, new, pick, bstart, bsize, nc) {
+        apart_walk::<false>(order, ss, e, old, new, pick, bstart, bsize, nc)
+    } else {
+        apart_walk::<true>(order, ss, e, old, new, pick, bstart, bsize, nc)
+    }
+}
+
+/// Every place recolour_apart will read checked once: bursts inside order / ss, notes inside e / old / new / pick,
+/// colours (old, new) in 0 .. nc. Then its walk reads without a check a step (Numba checks none either).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn apart_plain(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &[i64], pick: &[f64], bstart: &[i64],
+               bsize: &[i64], nc: i64) -> bool {
+    let notes = e.len().min(old.len()).min(new.len()).min(pick.len()) as i64;
+    let places = order.len().min(ss.len()) as i64;
+    if bsize.len() < bstart.len() || nc < 1 {
+        return false;
+    }
+    for w in 0..bstart.len() {
+        let (a, z) = (bstart[w], bsize[w]);
+        if a < 0 || z < 0 || a + z > places {
+            return false;
+        }
+        for j in a..a + z {
+            let i = order[j as usize];
+            if i < 0 || i >= notes {
+                return false;
+            }
+            let (o, n) = (old[i as usize], new[i as usize]);
+            if o < 0 || o >= nc || n < 0 || n >= nc {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[inline(always)]
+fn at<T: Copy, const CHECK: bool>(s: &[T], i: usize) -> T {
+    if CHECK {
+        s[i]
+    } else {
+        unsafe { *s.get_unchecked(i) }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn apart_walk<const CHECK: bool>(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64], pick: &[f64],
+                                 bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
     let most = if bsize.is_empty() { 1 } else { bsize.iter().copied().max().unwrap_or(1).max(1) };
     let mut act = vec![0i64; most as usize];
     let ncu = nc.max(0) as usize;
@@ -233,11 +296,12 @@ pub fn recolour_apart(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &m
         let mut na = 0usize;
         for j in bstart[w]..bstart[w] + bsize[w] {
             let ju = j as usize;
-            let i = order[ju] as usize;
+            let i = at::<_, CHECK>(order, ju) as usize;
+            let sj = at::<_, CHECK>(ss, ju);
             let mut m = 0usize;
             for q in 0..na {
-                let x = act[q];
-                if e[x as usize] > ss[ju] {
+                let x = at::<_, CHECK>(&act, q);
+                if at::<_, CHECK>(e, x as usize) > sj {
                     act[m] = x;
                     m += 1;
                 }
@@ -245,19 +309,21 @@ pub fn recolour_apart(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &m
             na = m;
             taken.iter_mut().for_each(|t| *t = false);
             let mut count = 0i64;
+            let oi = at::<_, CHECK>(old, i);
             for q in 0..na {
-                let x = act[q] as usize;
-                if old[x] != old[i] && !taken[new[x] as usize] {
-                    taken[new[x] as usize] = true;
+                let x = at::<_, CHECK>(&act, q) as usize;
+                let nx = at::<_, CHECK>(new, x) as usize;
+                if at::<_, CHECK>(old, x) != oi && !at::<_, CHECK>(&taken, nx) {
+                    taken[nx] = true;
                     count += 1;
                 }
             }
-            if taken[new[i] as usize] {
+            if at::<_, CHECK>(&taken, at::<_, CHECK>(new, i) as usize) {
                 let free = nc - count;
-                if free == 0 || !taken[old[i] as usize] {
+                if free == 0 || !at::<_, CHECK>(&taken, oi as usize) {
                     new[i] = old[i];
                 } else {
-                    let mut r = ((pick[i] * free as f64) as i64).min(free - 1);
+                    let mut r = crate::maths::f2i(pick[i] * free as f64).min(free - 1);
                     for c in 0..ncu {
                         if !taken[c] {
                             if r == 0 {

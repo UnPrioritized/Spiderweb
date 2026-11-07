@@ -83,7 +83,7 @@ py_loops! {
               -> arrays => crate::tempo::gap_ticks;
     gap_plan(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i64], drawn: &[i64], pref: &[i64],
              every: i64, most: i64, safe_reach: i64, pair_reach: i64, lens: &mut [i64], vals: &mut [i64], pos: i64,
-             got: &mut [i64], res: &mut [i64]) => crate::tempo::gap_plan;
+             got: &mut [i64]) -> arrays => crate::tempo::gap_plan_t;
     // ---- Load MIDI's byte loops (midi_scan.rs)
     midi_walk(b: &[u8], p: i64, end: i64, final_: bool, rest: i64, st: &mut [i64], cnt: &mut [i64])
               => crate::midi_scan::walk;
@@ -132,4 +132,53 @@ py_loops! {
     all_tops(top: NdMut<i32, 2>, data: &[u8], offs: &[i64], nrows: &[i64], nbytes: &[i64], pklo: &[i64],
              glo: &[i64], pf: &[i64], cols: &[i64], used: &[Flag], uoff: &[i64], ids: &[i64], x0: i64, tpp: f64,
              g_: i64) => crate::midi_index::all_tops;
+    // ---- playing a loaded MIDI (play.rs)
+    play_read(b: &[u8], at: &[i64], size: &[i64], t1: i64, tick: &mut [i64], run: &mut [i64], nxt: &mut [i64],
+              used: &mut [i64], kn: &[i32], out_t: &mut [i64], out_m: &mut [i32], out_k: &mut [i32], n: i64,
+              base: &[i64], sk: &[i64], sk_i: &mut [i64], sk_end: &[i64], count: bool, opened: &mut [i64],
+              slot: &[i64]) => crate::play::read;
+    play_programs(b: &[u8], p: i64, end: i64, st: &mut [i64]) => crate::play::programs;
+    play_order(ticks: &[i64], ms: &[i32], ks: &[i32], base: i64, span: i64, out_t: &mut [i64], out_m: &mut [i32],
+               out_k: &mut [i32]) => crate::play::order;
+    play_order_count(ticks: &[i64], base: i64, count: &mut [i64]) => crate::play::order_count;
+    play_order_place(ticks: &[i64], ms: &[i32], ks: &[i32], base: i64, at: &mut [i64], out_t: &mut [i64],
+                     out_m: &mut [i32], out_k: &mut [i32]) => crate::play::order_place;
+    play_hist(ms: &[i32], trk: &[i32], i0: i64, i1: i64, ticks: &[i64], t_late: i64, muted: &[u16], tport: &[i64],
+              ports: i64, synths: i64, h: NdMut<i64, 2>) => crate::play::hist;
+    play_stamp(ms: &[i32], trk: &[i32], i0: i64, i1: i64, ticks: &[i64], muted: &[u16], tport: &[i64], mt: &[i64],
+               ms_: &[f64], mspt: &[f64], base: f64, rate: f64, least: f64, fr: &mut [u64], out: &mut [u32],
+               tr: &mut [u16], counts: &mut [i64], cp: &mut [u32], tab_key: &mut [u32], tab_gen: &mut [i64],
+               tab_at: &mut [i64], head: &mut [i64], tail: &mut [i64], val: &mut [i64], nxt: &mut [i64],
+               st: &mut [i64]) => crate::play::stamp;
+    play_condense(ts: &[i64], ms: &[i32], ks: &[i32], tport: &[i64], n: i64, out_t: &mut [i64], out_m: &mut [u32],
+                  out_tr: &mut [u16], out_cp: &mut [u32], tab_key: &mut [u32], tab_gen: &mut [i64],
+                  tab_at: &mut [i64], counts: &mut [i64], last_on: &mut [i64]) => crate::play::condense;
+    play_stamp_pre(ts: &[i32], ms: &[u32], trs: &[u16], cps: &[u32], t0: i64, i0: i64, i1: i64, mt: &[i64],
+                   ms_: &[f64], mspt: &[f64], base: f64, rate: f64, least: f64, fr: &mut [u64], out: &mut [u32],
+                   tr: &mut [u16], cp: &mut [u32], counts: &mut [i64], dry: bool, head: &mut [i64],
+                   tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64]) => crate::play::stamp_pre;
+    play_emit(ms: &[i32], trk: &[i32], i0: i64, i1: i64, ticks: &[i64], t_late: i64, muted: &[u16], tport: &[i64],
+              ports: i64, synths: i64, thr: &[i64], room: &mut [i64], out: NdMut<u8, 2>, lens: &mut [i64],
+              three: bool, head: &mut [i64], tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64])
+              => crate::play::emit;
+    // ---- Rendered ahead's pieces of a loaded MIDI (piece.rs)
+    piece_track(b: &[u8], base: i64, tick: i64, run: i64, t_pre: i64, t_end: i64, sk: &[i64], cnt: &mut [i64],
+                vel: &mut [i64], ontk: &mut [i64], muted: i64, newch: i64, last: i64, out: &mut [u8], t_on: i64,
+                opn: &mut [i64], port: i64, base_t: i64, bars: &[i64], bar_ch: &[u8], ev_key: &mut [i64],
+                ev_sig: &mut [u8], nev: &mut [i64]) -> arrays => crate::piece::piece_track;
+    piece_held_ons(b: &[u8], base: i64, tick: i64, run: i64, t_stop: i64, sk: &[i64], muted: i64, need: &[i64],
+                   off: &[i64], tk: &mut [i64], vl: &mut [i64], pos: &mut [i64]) => crate::piece::held_ons;
+    piece_held_head(tk: &[i64], qs: &[i64], vl: &[i64], newch: i64, last: i64, out: &mut [u8]) -> arrays
+                    => crate::piece::held_head;
+    piece_note_ons(b: &[u8], base: i64, tick: i64, run: i64, t_stop: i64, sk: &[i64], muted: i64, want: &[i8],
+                   out_t: &mut [i64], out_q: &mut [i64], out_v: &mut [i64]) => crate::piece::note_ons;
+    piece_runs_sort(key: &mut [i64], sig: &mut [u8], cnt: &mut [i64], n: i64, tk: &mut [i64], ts: &mut [u8],
+                    tc: &mut [i64], bits: i64) => crate::piece::runs_sort;
+    piece_runs_merge(ak: &[i64], asg: &[u8], ac: &[i64], na: i64, bk: &[i64], bsg: &[u8], bc: &[i64], nb: i64,
+                     ok: &mut [i64], osg: &mut [u8], oc: &mut [i64]) => crate::piece::runs_merge;
+    piece_counted_track(key: &[i64], sig: &[u8], cnt: &[i64], n: i64, port: i64, rel: i64, out: &mut [u8])
+                        -> arrays => crate::piece::counted_track;
+    piece_order_ok(key: &[i64], sig: &[u8], cnt: &[i64], n: i64, bar_ch: &[u8]) => crate::piece::order_ok;
+    piece_open_at(key: &[i64], sig: &[u8], cnt: &[i64], n: i64, lim: i64, wlim: i64, take: &mut [i64])
+                  => crate::piece::open_at;
 }
