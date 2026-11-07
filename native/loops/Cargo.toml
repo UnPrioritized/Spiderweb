@@ -1,0 +1,20 @@
+[package]
+name = "spiderweb_loops"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Spiderweb's compiled loops (the slowest note work with lots of notes), called through ctypes."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rayon = "1.12"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# (unwind, not abort: a panic is caught at the C edge and the program uses its slower code for that call)
+panic = "unwind"

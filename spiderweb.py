@@ -190,6 +190,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     quicksound.py    the quick sound: single soundfont notes recorded once, copies laid at each note (live keys)
     speed.py         optional speed-ups: Numba's compiled loops loaded in the background, Pillow for pictures
     fastloops.py     the compiled loops (Numba) for lots of notes: notes on screen, painting, the overlap step
+    native.py        our own compiled loops (Rust, built from native/loops) used in place of fastloops' ones
     mathexpr.py      math in number boxes (960*4 etc.)
     snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
 """

@@ -3,8 +3,9 @@ screen in half the time, more picture file types). Spiderweb works the same with
 Tk code they replace is kept and used then.
 
 start() loads the compiled loops in the background (the first start compiles them: a few seconds); loops() is
-None until they're ready, then the fastloops module. SPIDERWEB_SPEED in the environment: "off" = never use them,
-"now" = load them at once instead of in the background (tests: the same code every run)."""
+None until they're ready, then the fastloops module (with files/native.py's loops in place of the ones our own
+library has). SPIDERWEB_SPEED in the environment: "off" = never use them, "now" = load them at once instead of in
+the background (tests: the same code every run)."""
 
 import os
 import threading
@@ -41,7 +42,8 @@ def _load():
     import time
     began = time.perf_counter()
     try:
-        _loops = _warm_loops()
+        from files import native
+        _loops = native.over(_warm_loops())  # (our own library's loops in place of their Numba twins, when built)
         how = "compiled loops ready in %.1f s" % (time.perf_counter() - began)
     except Exception:  # no Numba (or it can't compile here): the NumPy code is used
         global _failed
@@ -50,12 +52,13 @@ def _load():
         if importlib.util.find_spec("numba") is not None:  # (there but not working: worth a line in errors.log)
             from files import errors
             errors.write_log(*sys.exc_info(), "(loading the compiled loops; the slower code is used)")
-    from files import errors
-    errors.note("speed-ups", f"Numba {'on' if _loops else 'off'}, Pillow {'on' if pillow() else 'off'}")
+    from files import errors, native
+    own = ("on (%s)" % native.level_name()) if native.load() else "off: " + native.why()
+    errors.note("speed-ups", f"Numba {'on' if _loops else 'off'}, own loops {own}, Pillow {'on' if pillow() else 'off'}")
     report = os.environ.get("SPIDERWEB_SPEED_REPORT")  # (the exe test asks how it went)
     if report:
         with open(report, "w", encoding="utf-8") as f:
-            f.write(how + "\nPillow: " + ("yes" if pillow() else "no") + "\n")
+            f.write(how + "\nOwn loops: " + own + "\nPillow: " + ("yes" if pillow() else "no") + "\n")
 
 
 def _warm_loops():
@@ -117,7 +120,7 @@ def _forget_saved():
 
 
 def loops():
-    """The fastloops module once it's ready, else None (use the NumPy code)."""
+    """The loops once they're ready (fastloops, or native.Loops over it), else None (use the NumPy code)."""
     return _loops
 
 
