@@ -3,7 +3,7 @@ PLAN.md: a small window of its own like Stir's). While it is open, dragging over
 brushes its colours (roll/roll_liquify.py); the window holds the tool and the brush settings. Follows the selection
 like Stir…. The brush settings are the user's own (settings.ini [liquify]), not part of a shape: no undo step.
 The tools are the image editors' Liquify ones: Push, Restore (their Reconstruct), Smooth, Twirl (Left / Right here +
-Alt turns back, user's pick), Pinch / Bulge (their Pucker / Bloat), Freeze / Thaw (their mask; Alt = the other), and
+Alt turns back, user's pick), Pinch (their Pucker; Alt held = Bulge, their Bloat), Freeze (their mask; Alt held = Thaw), and
 the buttons Restore All / Freeze all / Thaw all / Invert (their Restore All, Mask All, None, Invert All). At the edges
 (Stir's choices) is the shapes' own (an undo step); for a shape's first stroke the window's last pick."""
 
@@ -18,15 +18,18 @@ from notes.recolour import KEEP, STIR_EDGES, clean_recolour
 from window import look
 from window.widgets import Scrub, ShortLabel, Tooltip, good, remember_place
 
-TOOLS = lq.TOOLS
-TOOL_ROWS = (("push", "restore", "smooth", "twirl"), ("pinch", "bulge", "freeze", "thaw"))
+# (Pinch + Bulge and Freeze + Thaw = ONE tool each here, Alt held = the other: user 11-07 "too much options"; the
+# dab maths keep all of them)
+TOOL_ROWS = (("push", "restore", "smooth"), ("twirl", "pinch", "freeze"))
+ONE_OF = {"bulge": "pinch", "thaw": "freeze"}  # (saved before they became one tool)
+TOOLS = tuple(t for row in TOOL_ROWS for t in row)
 # name -> (default, least, most, unit, steps)
 BRUSH = {"size": (100.0, 4.0, 1000.0, "px", (5, 50, 1)),
          "density": (50.0, 0.0, 100.0, "%", (1, 10, 0.1)),
          "pressure": (50.0, 1.0, 100.0, "%", (1, 10, 0.1)),
          "rate": (80.0, 0.0, 100.0, "%", (1, 10, 0.1)),
          "smoothing": (0.0, 0.0, 100.0, "%", (1, 10, 0.1))}
-HOLD_TOOLS = ("restore", "smooth", "twirl", "pinch", "bulge", "freeze", "thaw")  # (Rate: working while held still)
+HOLD_TOOLS = ("restore", "smooth", "twirl", "pinch", "freeze")  # (Rate: working while held still)
 
 
 def saved(name):
@@ -57,6 +60,7 @@ class LiquifyWindow(tk.Toplevel):
         self.resizable(False, False)
         self.brush = {k: saved(k) for k in BRUSH}
         tool = settings.get("liquify", "tool", "push")
+        tool = ONE_OF.get(tool, tool)
         self.tool = tk.StringVar(value=tool if tool in TOOLS else "push")
         way = settings.get("liquify", "twirl", "right")
         self.twirl = tk.StringVar(value=way if way in ("left", "right") else "right")
