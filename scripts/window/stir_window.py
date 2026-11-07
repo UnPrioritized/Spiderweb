@@ -243,9 +243,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self._put("area", (1, self._area_tick(form, "hard", False, tr("stir.hard_tip")), 4))
         word = ttk.Label(form, text=tr("stir.affects"))
         Tooltip(word, tr("stir.affects_tip"))
-        self._put("area", (1, word), *((c, self._area_tick(form, key, True, tr("stir.affects_tip")))
-                                       for c, key in ((2, "area_turn"), (3, "area_twist"), (4, "area_squeeze"))))
-        self._put("area", (2, self._area_tick(form, "area_bulge", True, tr("stir.affects_tip"))), pady=2)
+        row = ttk.Frame(form)  # (one line, side by side: the columns spread them too far, user 11-07)
+        for k, key in enumerate(("area_turn", "area_twist", "area_squeeze", "area_bulge")):
+            self._area_tick(row, key, True, tr("stir.affects_tip")).pack(side="left", padx=(0 if k == 0 else 12, 0))
+        self._put("area", (1, word), (2, row, 3))
         # (proportion, user's own idea 11-04: the area round as the piano roll shows it when ticked, + Stretch;
         # the spin round as seen too)
         self.rounds = {}
