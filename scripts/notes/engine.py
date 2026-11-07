@@ -716,6 +716,26 @@ def unique_index(a):
     """The rows unique_rows keeps."""
     if len(a) < 2:
         return np.arange(len(a))
+    if a.dtype == np.int64 and a.ndim == 2 and a.shape[1] == 5:  # (pasted notes + velocity + track: by key, start,
+        # end, track; rows alike in those four (few) sorted again with the velocity. 3 M notes 0.65 s -> ~0.15 s)
+        c = a.T
+        order = key_sort(c[2], c[0], c[1], c[4])
+        b = a[order][:, [0, 1, 2, 4]]
+        same = np.zeros(len(a), bool)
+        same[1:] = (b[1:] == b[:-1]).all(axis=1)
+        if not same.any():
+            return np.arange(len(a))
+        group = same.copy()
+        group[:-1] |= same[1:]
+        idx = np.sort(order[group])  # (earliest first: the stable sort below keeps it first among repeats)
+        sub = a[idx]
+        so = np.lexsort(sub.T[::-1])
+        sb = sub[so]
+        again = np.zeros(len(sb), bool)
+        again[1:] = (sb[1:] == sb[:-1]).all(axis=1)
+        keep = np.ones(len(a), bool)
+        keep[idx[so[again]]] = False
+        return np.flatnonzero(keep)
     if a.dtype == np.int64 and a.ndim == 2 and a.shape[1] in (3, 4):  # (notes: by key, then start, end, track;
         c = a.T  # any order bringing repeats together does, and keys sort quickest)
         order = key_sort(c[2], c[0], c[1], c[3] if a.shape[1] == 4 else c[1])
