@@ -48,6 +48,7 @@ ROW_LEAST, ROW_MOST = 8, 160
 ALL_H = 40      # the All tracks row's height at least (taller than a track, user 2026-10-26: not read as one more)
 ALL_ROW, CONDUCTOR_ROW = -2, -1  # row_at's answers for the two rows on top
 PAD = 3         # free pixels above / below a row's notes
+WHEEL_ROWS = 4  # tracks a wheel notch scrolls (Domino's)
 COLUMN = 28     # bar numbers closer than this many pixels: several bars per column (2, 4, 8...)
 TIP_SHAPES = 8  # shapes named in a row's tip at most
 FAINT = 25      # % the tracks shown behind the current one are drawn at, at first (0 = hidden)
@@ -1102,8 +1103,8 @@ class TrackList(tk.Canvas):
             self.zoom_step(not e.state & 0x1, 1.25 if notch > 0 else 0.8, e.x)
         elif e.state & 0x1:  # Shift: sideways
             self.bar_move(True, self.view_t - notch * 60 * self.scale / self.sx)
-        else:
-            self.bar_move(False, self.top - notch * self.row_h)
+        else:  # (4 tracks a notch, like Domino's track 1 -> 5; arrow keys still one, user 2026-11-07)
+            self.bar_move(False, self.top - notch * WHEEL_ROWS * self.row_h)
 
     def start_pan(self, e):
         self._pan = (e.x, e.y, self.view_t, self.top)
