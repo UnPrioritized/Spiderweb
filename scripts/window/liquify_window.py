@@ -264,3 +264,4 @@ def open_liquify(app):
     else:
         app.roll.lq_end = None  # (a straight stroke starts from a stroke made since the window opened)
         LiquifyWindow(app)
+        app.tips.show("liquify", wait=True)  # (the first time: what it does, Help → Liquify)

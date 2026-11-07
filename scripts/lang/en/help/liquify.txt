@@ -1,0 +1,51 @@
+Liquify… (in the Recolour row, beside Stir…) is a brush you paint with on the piano roll. It pushes the colours inside a shape around, like a finger through wet paint, the way the Liquify tool of photo editing programs bends a picture. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the brush pulled into its place.
+
+The bends are kept with the shape and worked out again after every change. Change the colours underneath (Recolour, Stir, Colours) and they flow along the same bends; move or stretch the shape and the bends go with it. Liquify is applied last, after Recolour and every Stir.
+
+## Brushing
+
+Open Liquify…, then drag over a selected shape on the piano roll. The circle shows the brush; the colours change live while you drag, exactly as they stay when you let go. Each stroke is one undo step (Ctrl+Z). Pressing on another shape picks it and brushes it (a shape is never moved while the window is open); pressing on empty space works as usual.
+
+The window follows whichever shape is selected. With several shapes selected, a stroke bends each one on its own.
+
+## The tools
+
+Push: pushes the colours along the way you drag.
+
+Restore: brushes the bends back towards none, slowly, where you paint. Restore All (the button) takes every bend off at once.
+
+Smooth: rounds off sharp kinks in the bends without undoing them.
+
+Twirl: swirls the colours round the brush while you hold the mouse still or drag. Left / Right picks the way round.
+
+Pinch: squeezes the colours in towards the brush's middle. Hold Alt for Bulge: swells them out.
+
+Freeze: paints a see-through red mask over spots the other tools must leave alone (partly red = partly left alone). Hold Alt to Thaw (take the mask away). Freeze all, Thaw all and Invert work on the whole shape; "Show freeze mask" hides the red without changing anything. Freezing never changes a colour by itself.
+
+Holding Alt while brushing always gives the opposite: Twirl turns the other way, Pinch bulges, Freeze thaws.
+
+## Brush settings
+
+Size: the brush's size in pixels on the screen (zooming doesn't change it).
+
+Density: how hard the brush's edge is. Higher = the full push reaches further out (the dashed inner circle), lower = it fades out softly from the middle.
+
+Pressure: how strongly each step of the brush pushes.
+
+Rate: how fast Twirl, Pinch, Restore, Smooth and Freeze keep working while you hold the mouse still. 0 = only while moving. Push only works while moving.
+
+Smoothing: the brush trails behind the mouse on a string, so shaky hand movements come out as smooth strokes. The higher, the longer the string (a line from the brush to the mouse shows it). When the mouse rests, the brush catches up with it.
+
+At the edges: what is pulled in where the brush pushes colours past the shape's edge, as in Stir: Escape, Wrap around, Bend or Cut.
+
+## Straight strokes
+
+Hold Shift to see a straight stroke before making it: a dashed circle where it starts (where your last stroke ended) and a line with arrows to the mouse. Shift+click makes it; Shift+click again goes on from there. The first Shift+click on a shape with no start yet only places the start. Add Ctrl (Shift+Ctrl+click) to snap the line to every 15° (flat, upright, 45° and in between). Esc forgets the start.
+
+## In the Recolour row
+
+A shape with a Liquify shows a Liquify row under the Recolour settings. Untick it to hide the bends without losing them; tick it again and they come back the same. Strength (0 to 400 %) pushes the same bends less or further: 0 shows none, 200 % pushes twice as far. Brushing a hidden Liquify shows it again.
+
+## Big shapes
+
+On shapes with millions of notes, a shape's first stroke takes a moment (its colours are made ready once), and letting go takes a moment while the notes are made. While dragging only the notes whose colour changes are worked out, so the brush stays live.
