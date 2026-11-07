@@ -1897,6 +1897,19 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
                 done[i] = True
                 own[i] = -1
         return slots.tolist()
+    if member:
+        # (a group whose lists clash with nothing and are in no other group: each takes the next slot in turn, in
+        # order, as the loop below would give them one by one; 337.spwb: 8,192 lists in two groups)
+        place = np.empty(n, np.int64)
+        place[order] = np.arange(n)
+        lone = np.asarray([at[i] == at[i + 1] and not done[i] and len(member[i]) == 1 if i in member else False
+                           for i in range(n)], bool)
+        for g in apart:
+            a = next(iter(g), None)
+            g = member[a][0] if a in member and len(member[a]) == 1 else None
+            if g is not None and lone[g].all() and not done[g].any():
+                slots[g[np.argsort(place[g])]] = np.arange(len(g))
+                done[g] = True
     for i in order:
         if not done[i]:
             if not alone(i):  # (else slot 0)
