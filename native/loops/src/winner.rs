@@ -118,7 +118,7 @@ fn pieces_inner(group: &[i64], s: &[i64], e: &[i64], rank: &[i64], order: &[i64]
     m as i64
 }
 
-two_builds!(fn pieces_built(group: &[i64], s: &[i64], e: &[i64], rank: &[i64], order: &[i64], note: &mut [i64],
+level_builds!(fn pieces_built(group: &[i64], s: &[i64], e: &[i64], rank: &[i64], order: &[i64], note: &mut [i64],
                             ps: &mut [i64], pe: &mut [i64], hr: &mut [i64], hi: &mut [i64]) -> i64 => pieces_inner);
 
 pub fn pieces(group: &[i64], s: &[i64], e: &[i64], rank: &[i64], order: &[i64], note: &mut [i64], ps: &mut [i64],

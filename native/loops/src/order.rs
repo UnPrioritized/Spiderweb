@@ -126,7 +126,7 @@ fn groups_inner(order: &mut [i64], at: &[usize], base: usize, g0: usize, g1: usi
     true
 }
 
-two_builds!(fn groups(order: &mut [i64], at: &[usize], base: usize, g0: usize, g1: usize, a: &[i64], b: &[i64],
+level_builds!(fn groups(order: &mut [i64], at: &[usize], base: usize, g0: usize, g1: usize, a: &[i64], b: &[i64],
                       c: &[i64]) -> bool => groups_inner);
 
 /// The counting pass: rows by key, lowest first, in their order -> at (group g = order[at[g] .. at[g + 1]]).
@@ -149,7 +149,7 @@ fn bucket_inner(key: &[i64], order: &mut [i64], at: &mut [usize], pos: &mut [usi
     }
 }
 
-two_builds!(fn bucket(key: &[i64], order: &mut [i64], at: &mut [usize], pos: &mut [usize], kmin: i64) => bucket_inner);
+level_builds!(fn bucket(key: &[i64], order: &mut [i64], at: &mut [usize], pos: &mut [usize], kmin: i64) => bucket_inner);
 
 /// The counting pass shared out, step 1: how many rows of each key in one chunk of the rows.
 #[inline(always)]
@@ -160,7 +160,7 @@ fn count_inner(key: &[i64], counts: &mut [usize], kmin: i64) {
     }
 }
 
-two_builds!(fn count(key: &[i64], counts: &mut [usize], kmin: i64) => count_inner);
+level_builds!(fn count(key: &[i64], counts: &mut [usize], kmin: i64) => count_inner);
 
 /// Where a chunk writes its rows (raw: chunks write to places no other chunk writes to).
 #[derive(Clone, Copy)]
@@ -179,7 +179,7 @@ fn scatter_inner(key: &[i64], first: usize, pos: &mut [usize], out: Out, kmin: i
     }
 }
 
-two_builds!(fn scatter(key: &[i64], first: usize, pos: &mut [usize], out: Out, kmin: i64) => scatter_inner);
+level_builds!(fn scatter(key: &[i64], first: usize, pos: &mut [usize], out: Out, kmin: i64) => scatter_inner);
 
 /// The counting pass on the pool's threads (run inside its install): chunk j's rows of a key go after chunks
 /// 0 .. j-1's (the same order as one core). -> at, or None = no memory.

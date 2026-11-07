@@ -2,9 +2,9 @@
 //! (scripts/files/native.py). Each loop gives exactly what the NumPy code it replaces gives (dev/tests/native_loops.py
 //! compares them); without this library the program uses that code.
 //!
-//! ONE FILE PER SYSTEM: every loop is built twice inside it, for any x86-64 processor and for one with AVX2
-//! (`two_builds!`), picked once when the library is first used (`level`). Rust never fuses a * b + c into one
-//! step, so both give the very same numbers.
+//! ONE FILE PER SYSTEM: every loop is built four times inside it, one per x86-64 level (any, SSE4.2, AVX2,
+//! AVX-512: `level_builds!`), the highest the processor has picked once when the library is first used (`level`).
+//! Rust never fuses a * b + c into one step, so all give the very same numbers.
 //!
 //! CHEAP CALLS (PLAN.md B rule: never slower than Numba, small inputs too): arrays come in as the NumPy array
 //! objects themselves (ctypes py_object, no pointer asked for in Python: that cost ~0.8 us an array) and their
@@ -22,24 +22,38 @@ use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Once, OnceLock};
 
 /// The library's version of this C edge: scripts/files/native.py refuses a library with another one.
-pub const ABI: i64 = 2;
+pub const ABI: i64 = 3;
 pub const FAILED: i64 = -1;
 pub const NO_MEMORY: i64 = -2;
 pub const NEED_COPY: i64 = -3;
 
-/// Defines `fn name(args) -> r` running `inner(args)`, built once for any x86-64 and once with AVX2 (the inner
-/// function and what it calls must be #[inline(always)], so they're built inside each).
-macro_rules! two_builds {
+/// Defines `fn name(args) -> r` running `inner(args)`, built once for each x86-64 level (1 any, 2 SSE4.2, 3 AVX2,
+/// 4 AVX-512; the inner function and what it calls must be #[inline(always)], so they're built inside each).
+/// The feature lists are the standard x86-64-v2 / v3 / v4 ones (LEVEL_2 / 3 / 4 below say the same for checking).
+macro_rules! level_builds {
     ($(#[$m:meta])* $vis:vis fn $name:ident($($a:ident: $t:ty),* $(,)?) $(-> $r:ty)? => $inner:path) => {
         $(#[$m])* $vis fn $name($($a: $t),*) $(-> $r)? {
             #[cfg(target_arch = "x86_64")]
             {
-                #[target_feature(enable = "avx,avx2,bmi1,bmi2,fma,lzcnt,popcnt,f16c,movbe")]
-                unsafe fn fast($($a: $t),*) $(-> $r)? {
+                #[target_feature(enable = "sse3,ssse3,sse4.1,sse4.2,popcnt,cmpxchg16b,avx,avx2,bmi1,bmi2,fma,lzcnt,\
+                                           f16c,movbe,avx512f,avx512bw,avx512cd,avx512dq,avx512vl")]
+                unsafe fn l4($($a: $t),*) $(-> $r)? {
                     $inner($($a),*)
                 }
-                if crate::level() == 1 {
-                    return unsafe { fast($($a),*) };
+                #[target_feature(enable = "sse3,ssse3,sse4.1,sse4.2,popcnt,cmpxchg16b,avx,avx2,bmi1,bmi2,fma,lzcnt,\
+                                           f16c,movbe")]
+                unsafe fn l3($($a: $t),*) $(-> $r)? {
+                    $inner($($a),*)
+                }
+                #[target_feature(enable = "sse3,ssse3,sse4.1,sse4.2,popcnt,cmpxchg16b")]
+                unsafe fn l2($($a: $t),*) $(-> $r)? {
+                    $inner($($a),*)
+                }
+                match crate::level() {
+                    4 => return unsafe { l4($($a),*) },
+                    3 => return unsafe { l3($($a),*) },
+                    2 => return unsafe { l2($($a),*) },
+                    _ => {}
                 }
             }
             $inner($($a),*)
@@ -51,31 +65,44 @@ mod maths;
 mod order;
 mod stir;
 mod winner;
+mod pyext;
 
 // ---------------------------------------------------------------- builds, threads
 
 static LEVEL: AtomicI32 = AtomicI32::new(-1);
 
+/// The highest level this processor has every feature of (1 = any x86-64).
 fn best_level() -> i32 {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx")
+        let l2 = is_x86_feature_detected!("sse3")
+            && is_x86_feature_detected!("ssse3")
+            && is_x86_feature_detected!("sse4.1")
+            && is_x86_feature_detected!("sse4.2")
+            && is_x86_feature_detected!("popcnt")
+            && is_x86_feature_detected!("cmpxchg16b");
+        let l3 = l2
+            && is_x86_feature_detected!("avx")
             && is_x86_feature_detected!("avx2")
             && is_x86_feature_detected!("bmi1")
             && is_x86_feature_detected!("bmi2")
             && is_x86_feature_detected!("fma")
             && is_x86_feature_detected!("lzcnt")
-            && is_x86_feature_detected!("popcnt")
             && is_x86_feature_detected!("f16c")
-            && is_x86_feature_detected!("movbe")
-        {
-            return 1;
-        }
+            && is_x86_feature_detected!("movbe");
+        let l4 = l3
+            && is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512bw")
+            && is_x86_feature_detected!("avx512cd")
+            && is_x86_feature_detected!("avx512dq")
+            && is_x86_feature_detected!("avx512vl");
+        return if l4 { 4 } else if l3 { 3 } else if l2 { 2 } else { 1 };
     }
-    0
+    #[allow(unreachable_code)]
+    1
 }
 
-/// 1 = the AVX2 builds are used, 0 = the plain ones.
+/// The builds in use: 1 any x86-64, 2 SSE4.2, 3 AVX2, 4 AVX-512.
 pub(crate) fn level() -> i32 {
     let l = LEVEL.load(Ordering::Relaxed);
     if l >= 0 {
@@ -266,16 +293,16 @@ pub unsafe extern "C" fn sw_probe(o: *const Arr, out: *mut i64) -> i64 {
     0
 }
 
-/// The builds in use: 1 = AVX2, 0 = plain.
+/// The builds in use: 1 any x86-64, 2 SSE4.2, 3 AVX2, 4 AVX-512.
 #[no_mangle]
 pub extern "C" fn sw_level() -> i64 {
     level() as i64
 }
 
-/// Tests: use the plain builds (0) or the AVX2 ones (1, when this processor has it) -> the level now in use.
+/// Tests / forcing: use level want (1-4), or the highest this processor has when it has less -> the level now in use.
 #[no_mangle]
 pub extern "C" fn sw_set_level(want: i64) -> i64 {
-    let l = if want >= 1 { best_level() } else { 0 };
+    let l = (want.clamp(1, 4) as i32).min(best_level());
     LEVEL.store(l, Ordering::Relaxed);
     l as i64
 }

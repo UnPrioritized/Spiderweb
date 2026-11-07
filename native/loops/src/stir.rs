@@ -198,7 +198,7 @@ fn range_inner(x: &[f64], y: &[f64], fp: &FP, ip: &IP, ox: &mut [f64], oy: &mut 
     }
 }
 
-two_builds!(fn range(x: &[f64], y: &[f64], fp: &FP, ip: &IP, ox: &mut [f64], oy: &mut [f64]) => range_inner);
+level_builds!(fn range(x: &[f64], y: &[f64], fp: &FP, ip: &IP, ox: &mut [f64], oy: &mut [f64]) => range_inner);
 
 /// Every spot; many = shared out over the pool's threads (each spot on its own: the very same numbers). -> 0.
 pub fn spots(x: &[f64], y: &[f64], fp: &[f64], ip: &[i64], ox: &mut [f64], oy: &mut [f64], many: bool) -> i64 {

@@ -3,9 +3,11 @@ Numba loops of files/fastloops.py one by one (PLAN.md B): the loops it has are u
 still comes from fastloops. Each gives exactly what the NumPy code (and the Numba loop) gives: dev/tests/native_loops
 compares them. No library (not built, another system, a 32-bit Python, SPIDERWEB_NATIVE=off) = fastloops as before.
 
-The library holds every loop twice (any x86-64 processor, and AVX2) and picks one itself. CHEAP CALLS (PLAN.md B:
-never slower than Numba, small inputs too): arrays are handed over as they are (py_object: the library reads NumPy's
-array struct, checked at load by probe()); one it can't read as it is (another type, spread out in memory, read
+The library holds every loop four times (x86-64 levels: any, SSE4.2, AVX2, AVX-512) and picks the highest the
+processor has (SPIDERWEB_NATIVE_LEVEL=1-4 forces one, for checks). CHEAP CALLS (PLAN.md B:
+never slower than Numba, small inputs too): the same file is ALSO loaded as a Python extension module (pyext.rs:
+a call ~0.4 us, ctypes' own floor is ~1 us, Numba's ~0.8 us; load_ext; it fails = the ctypes functions, the same
+loops). Arrays are handed over as they are (the library reads NumPy's array struct, checked at load by probe()); one it can't read as it is (another type, spread out in memory, read
 only) = NEED_COPY, made plain here and handed over again. A loop that fails inside (a bad index: caught there, it
 never ends the program; no memory) returns below 0 and that call uses the fastloops loop instead, noted once in the
 logs.
@@ -25,11 +27,13 @@ import numpy as np
 from files.about import HERE
 from files.system import MAC, WINDOWS
 
-ABI = 2  # (the library's sw_abi(): another one = not used)
+ABI = 3  # (the library's sw_abi(): another one = not used)
+LEVELS = {1: "plain", 2: "SSE4.2", 3: "AVX2", 4: "AVX-512"}  # (sw_level: the builds in use)
 CORES_LEAST = 20000  # (rows: fewer = one core, sharing out costs more than it saves; as fastloops.CORES_LEAST)
 NEED_COPY = -3
 
 _dll = None
+_ext = None  # (the same file as an extension module: the cheap calls; None = ctypes')
 _why = None  # (why there's no library: shown in the logs' state line)
 _failed = set()  # (loops that failed once: said once in the logs)
 
@@ -90,6 +94,9 @@ def load():
         ints = [np.dtype(t).num for t in (np.int64, np.longlong, np.int_) if np.dtype(t).itemsize == 8
                 and np.dtype(t).kind == "i"]
         d.sw_setup(ints[0], ints[-1], np.dtype(np.float64).num, cores(), CORES_LEAST)
+        force = os.environ.get("SPIDERWEB_NATIVE_LEVEL", "")  # (checks: 1-4 = that level, if this processor has it)
+        if force.isdigit():
+            d.sw_set_level(int(force))
         if not probe(d):
             _why = "can't read this Python's arrays"
             return None
@@ -97,7 +104,30 @@ def load():
         _why = "failed: %s" % e
         return None
     _dll = d
+    global _ext
+    _ext = load_ext(path)
     return d
+
+
+def load_ext(path):
+    """The library file as a Python extension module (its PyInit, pyext.rs): the same loops as the ctypes functions
+    without ctypes' call cost. Loaded from the same file, so it shares sw_setup's numbers (checked by one tiny call).
+    None when it can't be (SPIDERWEB_NATIVE_EXT=off too): the ctypes functions are used."""
+    if os.environ.get("SPIDERWEB_NATIVE_EXT", "") == "off":
+        return None
+    try:
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.ExtensionFileLoader("spiderweb_loops", path)
+        spec = importlib.util.spec_from_file_location("spiderweb_loops", path, loader=loader)
+        m = importlib.util.module_from_spec(spec)
+        loader.exec_module(m)
+        z = np.zeros(1, np.int64)
+        if m.key_order(z, z, z, z, np.empty(1, np.int64), 0) != 0:  # (another copy of the file: NEED_COPY)
+            return None
+        return m
+    except Exception:  # noqa: BLE001 (any failure: the ctypes calls)
+        return None
 
 
 def why():
@@ -106,15 +136,15 @@ def why():
 
 
 def level_name():
-    """"AVX2" / "plain": the builds the library uses (the logs' state line)."""
-    return "AVX2" if _dll and _dll.sw_level() == 1 else "plain"
+    """"AVX-512" / "AVX2" / "SSE4.2" / "plain": the builds the library uses (the logs' state line)."""
+    return (LEVELS.get(_dll.sw_level(), "plain") + ("" if _ext else ", ctypes calls")) if _dll else "plain"
 
 
 def over(base):
     """The loops the program uses: base (the fastloops module) with the library's loops in their place; base as it
     is without the library."""
     d = load()
-    return Loops(base, d) if d else base
+    return Loops(base, d, _ext) if d else base
 
 
 def _in(a, dtype):
@@ -133,13 +163,16 @@ class Loops:
     """fastloops with the library's loops in their place (any other name: fastloops' own). The first try hands
     the arrays over as they are (cheap); NEED_COPY = plain copies, once more."""
 
-    def __init__(self, base, dll):
+    def __init__(self, base, dll, ext=None):
         mine = {n for n in type(self).__dict__ if not n.startswith("_")}
         if base is not None:  # (fastloops' names copied in: a plain lookup, as quick as the module's own)
             self.__dict__.update((n, v) for n, v in vars(base).items() if not n.startswith("__") and n not in mine)
         self.base = base
         self.dll = dll
-        self._stir_f, self._winner_f, self._key_f = dll.sw_stir_spots, dll.sw_winner_pieces, dll.sw_key_order
+        if ext is not None:  # (the extension's functions take the same arguments as the ctypes ones)
+            self._stir_f, self._winner_f, self._key_f = ext.stir_spots, ext.winner_pieces, ext.key_order
+        else:
+            self._stir_f, self._winner_f, self._key_f = dll.sw_stir_spots, dll.sw_winner_pieces, dll.sw_key_order
 
     def __getattr__(self, name):  # (a name fastloops got after the copy)
         return getattr(self.base, name)
