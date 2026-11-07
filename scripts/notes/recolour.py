@@ -1020,6 +1020,19 @@ def stir_from(at, rc, box, own, spots=None):
     turn = st["turn"] / 360
     reach = st["reach"]
     (kx, ky), (rx, ry) = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))
+    fast = loops()
+    if fast and len(x) and not (reach and st["area"] == DRAWN):  # (the compiled walk: the very same numbers,
+        # files/fastloops.stir_spots; user 11-07: 3 M notes)
+        fp, ip = stir_numbers(st, (cx, cy), (kx, ky), (rx, ry))
+        x, y = np.ascontiguousarray(x, np.float64), np.ascontiguousarray(y, np.float64)
+        ox, oy = np.empty_like(x), np.empty_like(y)
+        fast.stir_spots(x, y, fp, ip, ox, oy)
+        mid, key = from_unit(ox, oy, rc, box, own)
+        if edge == "wrap":
+            mid = rows.wrapped(mid, key)
+        elif edge == "bend":
+            mid = rows.unstretched(mid, key, t0, t1)
+        return mid, key
     if st["bulge"]:  # (a lens over everything below: each spot looks nearer the middle (bulge) / farther (pinch))
         x, y = bulged(x, y, st, (cx, cy), (kx, ky))
         dx, dy = x - cx, y - cy
@@ -1064,6 +1077,49 @@ def stir_from(at, rc, box, own, spots=None):
     elif edge == "bend":
         mid = rows.unstretched(mid, key, t0, t1)
     return mid, key
+
+
+def stir_numbers(st, c, k, r):
+    """Stir st's numbers for the compiled walk (files/fastloops.stir_spots): (floats, whole numbers) in its order,
+    every one worked out here exactly as stir_from / bulged / bent / area_spot_q work it out (the same Python / NumPy
+    scalars, so the notes come out the same to the last bit)."""
+    (cx, cy), (kx, ky), (rx, ry) = c, k, r
+    reach = st["reach"]
+    area = reach is not None
+    turn = st["turn"] / 360
+    whole_twist = bool(st["twist"] and not (reach and st["area_twist"]))
+    per_note = bool((reach and st["area_turn"]) or (reach and st["twist"] and st["area_twist"]) or whole_twist)
+    a0 = -2 * np.pi * np.asarray(turn, np.float64)
+    ca0, sa0 = float(np.cos(a0)), float(np.sin(a0))
+    far_twist = float(max(np.hypot((X - cx) * rx, (Y - cy) * ry) for X in (0, 1) for Y in (0, 1)))
+    am = tuple(v / 100 for v in (st["spot"] or st["centre"]))
+
+    def far(m):
+        return max(math.hypot((X - m[0]) * rx, (Y - m[1]) * ry) for X in (0, 1) for Y in (0, 1)) or 1.0
+    f = [0.0] * 32
+    f[0:9] = [cx, cy, rx, ry, turn, st["twist"], ca0, sa0, far_twist]
+    if area:
+        tilt = math.radians(st["tilt"]) if st["tilt"] else 0.0
+        f[9:19] = [am[0], am[1], kx, ky, reach / 200 * size_scale(st, k), math.cos(tilt), math.sin(tilt),
+                   st["skew"], st["stretch"] / 100, st["stretch_up"] / 100]
+    m = bulge_size(st["bulge"]) if st["bulge"] else 1.0
+    f[19:21] = [m, m - 1]
+    if st["kaleido"] >= 2:
+        wedge = 2 * np.pi / st["kaleido"]
+        f[21:24] = [math.radians(st["kaleido_turn"]), wedge, wedge / 2]
+    f[24:26] = [st["ripple"] / 100, st["ripple_len"] / 100]
+    wa = math.radians(st["wring_angle"])
+    f[26:29] = [math.cos(wa), math.sin(wa), 2 * np.pi * st["wring"]]
+    f[29:32] = [st["polar"] / 100, far((cx, cy)), far(am)]
+    kinds = {"square": 1, "diamond": 2}
+    i = [int(area), int(st["hard"]), kinds.get(st["area"], 0), int(bool(st["tilt"])), int(bool(st["skew"])),
+         int(st["area_turn"]), int(st["area_twist"]), int(st["area_squeeze"]), int(st["area_bulge"]),
+         int(bool(st["bulge"])), int(st["kaleido"] >= 2),
+         ("side", "up", "rings").index(st["ripple_kind"]) if st["ripple"] else -1, int(bool(st["wring"])),
+         int(bool(st["polar"])), int(st["area_kaleido"]), int(st["area_ripple"]), int(st["area_wring"]),
+         int(st["area_polar"]), int(st["round_edge"] == "cut"), int(whole_twist), int(per_note),
+         int(st["edge"] == "escape"), int(st["squeeze"])]
+    return np.array(f, np.float64), np.array(i, np.int64)
 
 
 def bulge_size(b):
@@ -1786,6 +1842,13 @@ class Rows:
         return np.where(np.abs(self.keys[j] - q) <= np.abs(self.keys[i] - q), j, i)
 
     def wrapped(self, mid, key):
+        fast = loops()
+        if fast and len(mid):  # (the compiled walk: the very same numbers, files/fastloops.stir_wrap)
+            to = np.ascontiguousarray
+            out = np.empty(len(mid), np.float64)
+            fast.stir_wrap(to(self.keys, np.int64), to(self.a, np.float64), to(self.b, np.float64),
+                           to(mid, np.float64), to(key, np.float64), out)
+            return out
         r = self.row(key)
         a, b = self.a[r], self.b[r]
         w = np.maximum(b - a, 1.0)
@@ -1854,6 +1917,14 @@ def nearest(at, mid, key, own=True):
     the one found wins (no stir = each note its own)."""
     n = len(at)
     nk, nm, o, ks, ms, keys, first, last, line, base, top, gap = _sorted_notes(at)
+    fast = loops()
+    if fast and len(mid):  # (the compiled search: the very same notes, files/fastloops.stir_nearest)
+        to = np.ascontiguousarray
+        out = np.empty(len(mid), np.int64)
+        fast.stir_nearest(to(keys, np.int64), to(first, np.int64), to(last, np.int64), to(line, np.float64),
+                          to(ms, np.float64), to(nk, np.int64), to(nm, np.float64), to(o, np.int64), float(base),
+                          float(top), float(gap), to(mid, np.float64), to(key, np.float64), bool(own), out)
+        return out
     q = np.rint(np.asarray(key, np.float64))
     i = np.clip(np.searchsorted(keys, q), 0, len(keys) - 1)
     j = np.maximum(i - 1, 0)

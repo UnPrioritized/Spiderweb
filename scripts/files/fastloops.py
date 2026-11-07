@@ -11,6 +11,9 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
   winner_pieces  engine.winner_stretches (Remove overlaps, split around): the winning note at every moment, a heap
   recolour_apart recolour.kept_apart's walk through bursts of 3+ overlapping notes (Recolour)
+  stir_spots     recolour.stir_from's middle (Bulge, the more bends, Turn / Twist, edges, Squeeze), note by note
+  stir_nearest   recolour.nearest after its sort: each spot's nearest note
+  stir_wrap      recolour.Rows.wrapped (Stir's Wrap around)   (all three on half the cores: on_cores)
   midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
   midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
@@ -53,9 +56,11 @@ the exe's user/compiled-loops (keep_exe_loops)."""
 import math
 import os
 import sys
+import threading
 
 import numpy as np
-from numba import carray, cfunc, njit, types
+import numba
+from numba import carray, cfunc, njit, prange, types
 from numba.core import caching
 from numba.typed import List
 
@@ -617,6 +622,271 @@ def winner_pieces(group, s, e, rank, order):
             else:
                 t = e[cur]
     return note, ps, pe, m
+
+
+@njit(cache=CACHE, nogil=True)
+def stir_nearest_one(keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own, out):
+    """recolour.nearest after its sort (_sorted_notes): for each spot (mid, key) the note nearest it, on the nearest
+    key holding notes (lower on a tie), the note there whose middle is nearest (the earlier one on a tie); own: spot
+    i is note i's own spot moved, the note itself as near wins. One core."""
+    for s in range(len(mid)):
+        out[s] = _near_one(s, keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own)
+
+
+@njit(cache=CACHE, nogil=True, parallel=True)
+def _stir_nearest_cores(keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own, out):
+    for s in prange(len(mid)):
+        out[s] = _near_one(s, keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own)
+
+
+def stir_nearest(keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own, out):
+    """stir_nearest_one on half the cores (on_cores)."""
+    on_cores(_stir_nearest_cores, stir_nearest_one, len(mid), keys, first, last, line, ms, nk, nm, o, base, top,
+             gap, mid, key, own, out)
+
+
+@njit(cache=CACHE, nogil=True)
+def _wrap_one(i, keys, a, b, mid, key):
+    """recolour.Rows.wrapped for spot i: past its key row's notes = back in on that row's other side."""
+    nkeys = len(keys)
+    q = np.rint(key[i])
+    lo_, hi_ = 0, nkeys
+    while lo_ < hi_:
+        h = (lo_ + hi_) >> 1
+        if keys[h] < q:
+            lo_ = h + 1
+        else:
+            hi_ = h
+    r = min(max(lo_, 0), nkeys - 1)
+    j = max(r - 1, 0)
+    row = j if abs(keys[j] - q) <= abs(keys[r] - q) else r
+    m, s, e = mid[i], a[row], b[row]
+    if m < s or m > e:
+        return s + np.mod(m - s, max(e - s, 1.0))
+    return m
+
+
+@njit(cache=CACHE, nogil=True)
+def stir_wrap_one(keys, a, b, mid, key, out):
+    """recolour.Rows.wrapped (Stir's Wrap around) for every spot. One core."""
+    for i in range(len(mid)):
+        out[i] = _wrap_one(i, keys, a, b, mid, key)
+
+
+@njit(cache=CACHE, nogil=True, parallel=True)
+def _stir_wrap_cores(keys, a, b, mid, key, out):
+    for i in prange(len(mid)):
+        out[i] = _wrap_one(i, keys, a, b, mid, key)
+
+
+def stir_wrap(keys, a, b, mid, key, out):
+    """stir_wrap_one on half the cores (on_cores)."""
+    on_cores(_stir_wrap_cores, stir_wrap_one, len(mid), keys, a, b, mid, key, out)
+
+
+@njit(cache=CACHE, nogil=True)
+def _near_one(s, keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own):
+    """stir_nearest's work for spot s."""
+    nkeys = len(keys)
+    q = np.rint(key[s])
+    lo_, hi_ = 0, nkeys  # (np.searchsorted(keys, q): first key >= q)
+    while lo_ < hi_:
+        h = (lo_ + hi_) >> 1
+        if keys[h] < q:
+            lo_ = h + 1
+        else:
+            hi_ = h
+    i = min(max(lo_, 0), nkeys - 1)
+    j = max(i - 1, 0)
+    row = j if abs(keys[j] - q) <= abs(keys[i] - q) else i
+    lo, hi = first[row], last[row]
+    m = mid[s]
+    c = min(max(m, base), top)
+    v = c - base + row * gap
+    a, b = lo, hi  # (np.searchsorted(line, v) inside the row's own stretch: the rows never mix)
+    while a < b:
+        h = (a + b) >> 1
+        if line[h] < v:
+            a = h + 1
+        else:
+            b = h
+    p = min(max(a, lo), hi - 1)
+    p0 = max(p - 1, lo)
+    if abs(ms[p0] - m) <= abs(ms[p] - m):
+        p = p0
+    got = o[p]
+    if own and nk[s] == keys[row] and abs(nm[s] - m) <= abs(ms[p] - m) + 1e-9:
+        got = s
+    return got
+
+
+@njit(cache=CACHE, nogil=True)
+def _stir_q(x, y, fp, ip):
+    """recolour.area_spot_q of one spot (a circle / square / diamond area): 0 in its middle, 1 on its outline and
+    past it, rounded to 9 places."""
+    X = (x - fp[9]) * fp[11] / fp[13]
+    Y = (y - fp[10]) * fp[12] / fp[13]
+    if ip[3]:
+        X, Y = X * fp[14] + Y * fp[15], Y * fp[14] - X * fp[15]
+    if ip[4]:
+        X = X - fp[16] * Y
+    X, Y = X / fp[17], Y / fp[18]
+    if ip[2] == 1:
+        d = max(abs(X), abs(Y))
+    elif ip[2] == 2:
+        d = abs(X) + abs(Y)
+    else:
+        d = np.hypot(X, Y)
+    d = np.rint(d * 1e9) / 1e9
+    return min(max(d, 0.0), 1.0)
+
+
+@njit(cache=CACHE, nogil=True)
+def _stir_one(px, py, fp, ip):
+    """recolour.stir_from's middle part, note by note: (x, y) in the colour box (unit_xy) -> where the stir looks
+    (before from_unit): Bulge, the more bends, Turn / Twist (+ the Area's fade), the edges' clip / tile, Squeeze.
+    fp / ip = the stir's numbers in recolour.stir_numbers' order (circle / square / diamond areas only)."""
+    cx, cy, rx, ry = fp[0], fp[1], fp[2], fp[3]
+    tau = 2 * np.pi
+    if ip[9]:  # Bulge
+        if ip[0] and ip[8]:
+            mx, my = fp[9], fp[10]
+            q = _stir_q(px, py, fp, ip)
+        else:
+            mx, my = cx, cy
+            dx, dy = px - mx, py - my
+            q = np.hypot(dx / max(1 - mx, 1e-12) if dx > 0 else -dx / max(mx, 1e-12),
+                         dy / max(1 - my, 1e-12) if dy > 0 else -dy / max(my, 1e-12))
+        g = 1.0
+        if q < 1 and q > 1e-12:
+            g = 1 / (fp[19] - fp[20] * q)
+        px, py = mx + (px - mx) * g, my + (py - my) * g
+    w = 1.0
+    q = 0.0
+    hard = 0.0
+    if ip[0]:  # (the Area's fade, measured where the note is seen)
+        q = _stir_q(px, py, fp, ip)
+        hard = 1.0 if q < 1 else 0.0
+        w = hard if ip[1] else 1 - q * q * (3 - 2 * q)
+    if ip[10]:  # Kaleidoscope
+        inside = ip[0] and ip[14]
+        mx, my = (fp[9], fp[10]) if inside else (cx, cy)
+        X, Y = (px - mx) * rx, (py - my) * ry
+        a = np.mod(np.arctan2(Y, X) - fp[21], fp[22])
+        if a > fp[23]:
+            a = fp[22] - a
+        a = a + fp[21]
+        R = np.hypot(X, Y)
+        nx, ny = mx + R * np.cos(a) / rx, my + R * np.sin(a) / ry
+        f = ((hard if ip[18] else w) * 1.0) if inside else 1.0
+        px, py = px + (nx - px) * f, py + (ny - py) * f
+    if ip[11] >= 0:  # Ripple
+        inside = ip[0] and ip[15]
+        mx, my = (fp[9], fp[10]) if inside else (cx, cy)
+        X, Y = (px - mx) * rx, (py - my) * ry
+        if ip[11] == 0:
+            X = X + fp[24] * np.sin(tau * Y / fp[25])
+        elif ip[11] == 1:
+            Y = Y + fp[24] * np.sin(tau * X / fp[25])
+        else:
+            R = np.hypot(X, Y)
+            g = (R + fp[24] * np.sin(tau * R / fp[25])) / max(R, 1e-12) if R > 1e-12 else 1.0
+            X, Y = X * g, Y * g
+        nx, ny = mx + X / rx, my + Y / ry
+        f = (w * 1.0) if inside else 1.0
+        px, py = px + (nx - px) * f, py + (ny - py) * f
+    if ip[12]:  # Twist along a line
+        inside = ip[0] and ip[16]
+        mx, my = (fp[9], fp[10]) if inside else (cx, cy)
+        X, Y = (px - mx) * rx, (py - my) * ry
+        u, v = X * fp[26] + Y * fp[27], Y * fp[26] - X * fp[27]
+        phi = fp[28] * u / (fp[31] if inside else fp[30])
+        u, v = u + v * np.sin(phi), v * np.cos(phi)
+        nx, ny = mx + (u * fp[26] - v * fp[27]) / rx, my + (u * fp[27] + v * fp[26]) / ry
+        f = (w * 1.0) if inside else 1.0
+        px, py = px + (nx - px) * f, py + (ny - py) * f
+    if ip[13]:  # Straight to round
+        inside = ip[0] and ip[17]
+        mx, my = (fp[9], fp[10]) if inside else (cx, cy)
+        X, Y = (px - mx) * rx, (py - my) * ry
+        across = (np.arctan2(Y, X) + np.pi) / tau
+        up = _stir_q(px, py, fp, ip) if inside else np.hypot(X, Y) / fp[30]
+        f = fp[29] * ((hard if ip[18] else w) if inside else 1.0)
+        px, py = px + (across - px) * f, py + (up - py) * f
+    dx, dy = px - cx, py - cy
+    if ip[20]:  # (a turn of its own for every note)
+        turn = fp[4]
+        if ip[0]:
+            if ip[5]:
+                turn = turn * w
+            if fp[5] != 0 and ip[6]:
+                turn = turn + fp[5] * np.sqrt(q) * w
+        if ip[19]:
+            turn = turn + fp[5] * np.sqrt(np.hypot(dx * rx, dy * ry) / max(fp[8], 1e-12))
+        a = -2 * np.pi * turn
+        ca, sa = np.cos(a), np.sin(a)
+    else:
+        ca, sa = fp[6], fp[7]
+    X, Y = dx * rx, dy * ry
+    px, py = cx + (X * ca - Y * sa) / rx, cy + (X * sa + Y * ca) / ry
+    if ip[21]:  # Escape
+        px, py = min(max(px, 0.0), 1.0), min(max(py, 0.0), 1.0)
+    else:
+        if px < -1e-9 or px > 1 + 1e-9:
+            px = np.mod(px, 1.0)
+        if py < -1e-9 or py > 1 + 1e-9:
+            py = np.mod(py, 1.0)
+        px, py = min(max(px, 0.0), 1.0), min(max(py, 0.0), 1.0)
+    if ip[22]:  # Squeeze
+        sx = 0.5 * px / max(cx, 1e-12) if px < cx else 0.5 + 0.5 * (px - cx) / max(1 - cx, 1e-12)
+        sy = 0.5 * py / max(cy, 1e-12) if py < cy else 0.5 + 0.5 * (py - cy) / max(1 - cy, 1e-12)
+        if ip[0] and ip[7]:
+            sx, sy = px + (sx - px) * w, py + (sy - py) * w
+        px, py = sx, sy
+    return px, py
+
+
+@njit(cache=CACHE, nogil=True)
+def stir_spots_one(x, y, fp, ip, ox, oy):
+    """recolour.stir_from's middle part for every spot (x, y) in the colour box (unit_xy): ox, oy = where the stir
+    looks (before from_unit). One core."""
+    for i in range(len(x)):
+        ox[i], oy[i] = _stir_one(x[i], y[i], fp, ip)
+
+
+@njit(cache=CACHE, nogil=True, parallel=True)
+def _stir_spots_cores(x, y, fp, ip, ox, oy):
+    for i in prange(len(x)):
+        ox[i], oy[i] = _stir_one(x[i], y[i], fp, ip)
+
+
+# (SEVERAL CORES, user 11-07 "any speed up is beneficial": the Stir's per-note loops shared over half the cores (all
+# cores halted the PC, the synths' rule), 13x quicker measured. ONE THREAD AT A TIME: Numba's plain sharing (no
+# OpenMP / TBB on a PC) breaks when two threads use it at once, so a thread finding it busy (notes made on a
+# thread mid-drag) takes the one-core loop instead of waiting; any failure = one core from then on. Each note on
+# its own: the very same numbers either way.)
+_CORES_LOCK = threading.Lock()
+_CORES = {"ok": True}
+CORES_LEAST = 20000  # (spots: fewer = one core, sharing out costs more than it saves)
+
+
+def on_cores(many, one, n, *args):
+    """many(*args) on half the cores when n is big enough and no other thread is sharing them out, else one(*args)."""
+    if n >= CORES_LEAST and _CORES["ok"] and _CORES_LOCK.acquire(blocking=False):
+        try:
+            numba.set_num_threads(max(1, min(numba.config.NUMBA_NUM_THREADS, (os.cpu_count() or 2) // 2)))
+            many(*args)
+            return
+        except Exception:  # noqa: BLE001 (no threading layer here: one core for good)
+            _CORES["ok"] = False
+        finally:
+            _CORES_LOCK.release()
+    one(*args)
+
+
+def stir_spots(x, y, fp, ip, ox, oy):
+    """stir_spots_one on half the cores (on_cores)."""
+    on_cores(_stir_spots_cores, stir_spots_one, len(x), x, y, fp, ip, ox, oy)
 
 
 @njit(cache=CACHE, nogil=True)
