@@ -11,6 +11,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   overlap_sweep  engine.resolve_overlaps after its sort: cut / stretch / merge the notes on one key and slot
   winner_pieces  engine.winner_stretches (Remove overlaps, split around): the winning note at every moment, a heap
   recolour_apart recolour.kept_apart's walk through bursts of 3+ overlapping notes (Recolour)
+  dice_mix       recolour.dice: each note's number from its place, colour and the seed (splitmix64)
   stir_spots     recolour.stir_from's middle (Bulge, the more bends, Turn / Twist, edges, Squeeze), note by note
   stir_nearest   recolour.nearest after its sort: each spot's nearest note
   stir_wrap      recolour.Rows.wrapped (Stir's Wrap around)   (all three on half the cores: on_cores)
@@ -887,6 +888,29 @@ def on_cores(many, one, n, *args):
 def stir_spots(x, y, fp, ip, ox, oy):
     """stir_spots_one on half the cores (on_cores)."""
     on_cores(_stir_spots_cores, stir_spots_one, len(x), x, y, fp, ip, ox, oy)
+
+
+_MIX_ADD, _MIX_A, _MIX_B = np.uint64(0x9E3779B97F4A7C15), np.uint64(0xBF58476D1CE4E5B9), np.uint64(0x94D049BB133111EB)
+
+
+@njit(cache=CACHE, nogil=True)
+def _mix(x):
+    """recolour._mixed (splitmix64) on one uint64."""
+    x = x + _MIX_ADD
+    x = (x ^ (x >> np.uint64(30))) * _MIX_A
+    x = (x ^ (x >> np.uint64(27))) * _MIX_B
+    return x ^ (x >> np.uint64(31))
+
+
+@njit(cache=CACHE, nogil=True)
+def dice_mix(seed, c0, c1, c2, c3, out):
+    """recolour.dice's numbers: each note's 4 columns (as uint64) mixed in turn from seed -> out (0 <= u < 1)."""
+    for i in range(len(out)):
+        x = _mix(seed ^ c0[i])
+        x = _mix(x ^ c1[i])
+        x = _mix(x ^ c2[i])
+        x = _mix(x ^ c3[i])
+        out[i] = np.float64(x >> np.uint64(11)) / 9007199254740992.0
 
 
 @njit(cache=CACHE, nogil=True)

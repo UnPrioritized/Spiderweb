@@ -541,6 +541,11 @@ def dice(notes, low, seed, salt, corner):
     t0, k0 = corner
     cols = [np.asarray(notes[:, 0], np.int64) - t0, np.asarray(notes[:, 1], np.int64) - t0,
             np.asarray(notes[:, 2], np.int64) - k0, np.asarray(low, np.int64)]
+    fast = loops()
+    if fast and len(notes):  # (the compiled mix: the very same numbers)
+        out = np.empty(len(notes), np.float64)
+        fast.dice_mix(np.uint64(seed * 2 + salt), *(np.ascontiguousarray(c).view(np.uint64) for c in cols), out)
+        return out
     with np.errstate(over="ignore"):
         x = np.full(len(notes), np.uint64(seed * 2 + salt), np.uint64)
         t = np.empty(len(notes), np.uint64)
@@ -559,7 +564,8 @@ def dice(notes, low, seed, salt, corner):
 def colour_sets(low):
     """(each note's set number, each set's own colours, sorted) of colours low (tracks without their rounds): cut
     every SET colours in order."""
-    ids, inv = np.unique(low, return_inverse=True)
+    from notes.engine import unique_inverse
+    ids, inv = unique_inverse(np.asarray(low, np.int64))  # (np.unique's, counted: millions of notes)
     set_of = np.arange(len(ids)) // SET
     if len(ids) > SET and len(ids) % SET == 1:  # (a lone last colour joins the set before: 16 colours = one set)
         set_of[-1] -= 1
@@ -1830,8 +1836,9 @@ class Rows:
     wraps at the real notes)."""
 
     def __init__(self, at, smooth=0.0):
+        from notes.engine import unique_inverse
         k = np.asarray(at[:, 2], np.int64)
-        self.keys, inv = np.unique(k, return_inverse=True)
+        self.keys, inv = unique_inverse(k)  # (np.unique's, counted: millions of notes)
         self.a = np.full(len(self.keys), np.inf)
         self.b = np.full(len(self.keys), -np.inf)
         np.minimum.at(self.a, inv, np.asarray(at[:, 0], np.float64))
@@ -2150,7 +2157,8 @@ def first_starts(notes, tracks, starts=None):
         return {}
     low = np.asarray(tracks, np.int64) % ROUND
     s = np.asarray(notes[:, 0] if starts is None else starts, np.int64)
-    ids, which = np.unique(low, return_inverse=True)
+    from notes.engine import unique_inverse
+    ids, which = unique_inverse(low)  # (np.unique's, counted: millions of notes)
     first = np.full(len(ids), np.iinfo(np.int64).max)
     np.minimum.at(first, which.reshape(-1), s)
     return dict(zip(ids.tolist(), first.tolist()))
