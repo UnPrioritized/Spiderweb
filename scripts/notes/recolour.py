@@ -738,40 +738,65 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     the notes' box without the piano roll's edges (engine.free_box; None = as they are): the dice and areas count
     from it (and a piece's whole's box, rc "whole": colour_box), so pushing a shape against an edge keeps its
     colours."""
-    if rc["mode"] == KEEP:  # (Off + a Stir: the shape's own colours only, the same however it got there: settings
-        # left from another mode (Per chord, Colours, Mix, Shares) wait for it, the seed too (which of two notes
-        # sounding together gives way: never random here)
-        rc = {k: v for k, v in rc.items() if k in KEEP_KEYS}
-        rc["seed"] = 1
+    rc = kept_rule(rc)
     if (rc.get("stir") or rc.get("liquify")) and tracks is not None and len(notes) >= BEFORE_STIR_LEAST:
-        # (only the Stir changed since last time (a knob turned): the colours before it are kept, user 11-07: 3 M
-        # notes took a second a change; the same for Liquify, and a brush stroke keeps the stirred colours too)
-        key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify")}, sort_keys=True), held, gate,
-               None if own is None else tuple(own))
-        got = _BEFORE_STIR.get("got")
-        if got is None or got[0]() is not notes or got[1]() is not tracks or got[2] != key:
-            # (weak links: the shape's notes gone = the kept work goes too, hunt 11-07: ~150 MB a million notes stayed)
-            gone = lambda ref: any(r is ref for r in _BEFORE_STIR.get("got", ())[:2]) and forget_kept()
-            got = (weakref.ref(notes, gone), weakref.ref(tracks, gone), key,
-                   _before_stir(notes, tracks, rc, held, gate, own))
-            _BEFORE_STIR["got"] = got
-        b = got[3]
-        if b is None:
+        got = before_liquify(notes, tracks, rc, held, gate, own)
+        if got is None:
             return notes, tracks
-        notes, lap, tw, (n, at, low, now, which, pals, pick, box, own) = b
-        skey = json.dumps(rc.get("stir"), sort_keys=True)
-        kept = _BEFORE_STIR.get("stirred")
-        if kept is not None and kept[0] is b and kept[1] == skey:
-            now = kept[2]
-        else:
-            now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own)
-            if rc.get("liquify"):  # (kept for the next brush stroke: only the Liquify changes then)
-                now = np.array(now)
-                now.setflags(write=False)
-                _BEFORE_STIR["stirred"] = (b, skey, now)
+        rc, notes, lap, tw, (n, at, low, now, which, pals, pick, box, own) = got
         now = liquified_now(n, at, low, now, rc, which, pals, pick, box, own)
         return notes.copy(), lap + (turned_map(tw)(now) if tw else now)  # (a copy: whoever gets it may change it)
     return _recoloured(notes, tracks, rc, held, gate, own)
+
+
+def kept_rule(rc):
+    """rc as recoloured works with it: Off + a Stir / Liquify (KEEP) = the shape's own colours only, the same however
+    it got there: settings left from another mode (Per chord, Colours, Mix, Shares) wait for it, the seed too (which
+    of two notes sounding together gives way: never random here)."""
+    if rc["mode"] == KEEP:
+        rc = {k: v for k, v in rc.items() if k in KEEP_KEYS}
+        rc["seed"] = 1
+    return rc
+
+
+def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
+    """recoloured's work up to the Liquify: (rc, settled notes, each note's round, the "turned" list, all_stirred's
+    arguments with the colours after every stir), or None = nothing to recolour. Big shapes keep it (the brush's
+    strokes and Stir knob turns change nothing before it). Liquify's brush starts a stroke with it too (Live)."""
+    rc = kept_rule(rc)
+    if tracks is None or len(notes) < BEFORE_STIR_LEAST:
+        b = _before_stir(notes, tracks, rc, held, gate, own) if tracks is not None or rc["mode"] in SPLIT else None
+        if b is None:
+            return None
+        notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2) = b
+        now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2)
+        return rc, notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2)
+    # (only the Stir changed since last time (a knob turned): the colours before it are kept, user 11-07: 3 M
+    # notes took a second a change; the same for Liquify, and a brush stroke keeps the stirred colours too)
+    key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify")}, sort_keys=True), held, gate,
+           None if own is None else tuple(own))
+    got = _BEFORE_STIR.get("got")
+    if got is None or got[0]() is not notes or got[1]() is not tracks or got[2] != key:
+        # (weak links: the shape's notes gone = the kept work goes too, hunt 11-07: ~150 MB a million notes stayed)
+        gone = lambda ref: any(r is ref for r in _BEFORE_STIR.get("got", ())[:2]) and forget_kept()
+        got = (weakref.ref(notes, gone), weakref.ref(tracks, gone), key,
+               _before_stir(notes, tracks, rc, held, gate, own))
+        _BEFORE_STIR["got"] = got
+    b = got[3]
+    if b is None:
+        return None
+    notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2) = b
+    skey = json.dumps(rc.get("stir"), sort_keys=True)
+    kept = _BEFORE_STIR.get("stirred")
+    if kept is not None and kept[0] is b and kept[1] == skey:
+        now = kept[2]
+    else:
+        now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2)
+        if rc.get("liquify"):  # (kept for the next brush stroke: only the Liquify changes then)
+            now = np.array(now)
+            now.setflags(write=False)
+            _BEFORE_STIR["stirred"] = (b, skey, now)
+    return rc, notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2)
 
 
 BEFORE_STIR_LEAST = 100_000  # (notes: smaller shapes are quick anyway, no memory kept for them)
@@ -1964,12 +1989,12 @@ def _sorted_notes(at):
     return out
 
 
-def nearest(at, mid, key, own=True):
+def nearest(at, mid, key, own=True, kept=None):
     """For each spot (mid, key): the note of at nearest it: on the nearest key holding notes (the key rounded), the
     note there whose middle is nearest in time. own: spot i is note i's own spot moved: the note itself as near as
-    the one found wins (no stir = each note its own)."""
+    the one found wins (no stir = each note its own). kept: _sorted_notes(at) made already (Liquify's brush)."""
     n = len(at)
-    nk, nm, o, ks, ms, keys, first, last, line, base, top, gap = _sorted_notes(at)
+    nk, nm, o, ks, ms, keys, first, last, line, base, top, gap = kept or _sorted_notes(at)
     fast = loops()
     if fast and len(mid):  # (the compiled search: the very same notes, files/fastloops.stir_nearest)
         to = np.ascontiguousarray

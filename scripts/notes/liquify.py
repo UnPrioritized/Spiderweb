@@ -58,11 +58,20 @@ def decode(grid, text):
     return a
 
 
+def _steps(a):
+    """A map in whole 1 / SCALE steps, as saved (MOST_PUSH boxes at most: int16)."""
+    return np.clip(np.rint(np.asarray(a, np.float64) * SCALE), -32767, 32767)
+
+
 def encode(a):
     """A map array (up, across, 2) -> its text (rounded to 1 / SCALE, at most MOST_PUSH boxes)."""
-    q = np.rint(np.clip(np.asarray(a, np.float64), -MOST_PUSH, MOST_PUSH) * SCALE).astype("<i2")
-    text = base64.b64encode(zlib.compress(q.tobytes(), 6)).decode("ascii")
+    text = base64.b64encode(zlib.compress(_steps(a).astype("<i2").tobytes(), 6)).decode("ascii")
     return text
+
+
+def rounded(a):
+    """The map a as it comes back from its text (decode(encode(a))): the brush's live colours look it up so."""
+    return _steps(a) / SCALE
 
 
 def clean_liquify(d):
@@ -129,25 +138,30 @@ def touched(a, x, y):
     return cell[j, i]
 
 
-def liquify_from(at, rc, box, own):
-    """(the notes moved (their places in at), middle in ticks, key) each one's colour comes from under rc's Liquify
-    (stir_from's way: the edge choices alike). Notes where nothing was pushed are left out."""
-    from notes.recolour import from_unit, rows_of, unit_xy
-    lq = full(clean_liquify(rc.get("liquify")))
-    a = decode(lq["grid"], lq["map"])
+def _where(at, rc, box, own):
+    """liquify_from's first half: rc's Liquify settings (filled in) and each note's place (x, y) in the colour box,
+    with what the edge rule needs later."""
+    from notes.recolour import rows_of, unit_xy
+    lq = full(clean_liquify(rc.get("liquify")) or {})
     s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
     mid = (s + e) / 2
-    edge = lq["edge"]
-    if edge in ("wrap", "bend"):
-        rows = rows_of(at, 0.0)
-        t0, t1 = float(at[:, 0].min()), float(at[:, 1].max())
-    if edge == "bend":
-        mid = rows.stretched(mid, k, t0, t1)
-    x, y = unit_xy(mid, k, rc, box, own)
-    idx = np.flatnonzero(touched(a, x, y))
-    x, y = x[idx], y[idx]
-    d = sample(a, x, y) * (lq["strength"] / 100)
+    w = {"lq": lq, "edge": lq["edge"], "rows": None, "t0": 0.0, "t1": 0.0}
+    if w["edge"] in ("wrap", "bend"):
+        w["rows"] = rows_of(at, 0.0)
+        w["t0"], w["t1"] = float(at[:, 0].min()), float(at[:, 1].max())
+    if w["edge"] == "bend":
+        mid = w["rows"].stretched(mid, k, w["t0"], w["t1"])
+    w["x"], w["y"] = unit_xy(mid, k, rc, box, own)
+    return w
+
+
+def _fetched(w, a, x, y, rc, box, own):
+    """(middle in ticks, key) the spots (x, y) of the colour box fetch their colour from under the map a
+    (liquify_from's second half: the edge choices like stir_from's)."""
+    from notes.recolour import from_unit
+    d = sample(a, x, y) * (w["lq"]["strength"] / 100)
     x, y = x + d[:, 0], y + d[:, 1]
+    edge = w["edge"]
     if edge != "escape":
         out = lambda v: (v < -1e-9) | (v > 1 + 1e-9)  # noqa: E731 (a hair past the edge stays on it)
         x = np.clip(np.where(out(x), np.mod(x, 1.0), x), 0, 1)
@@ -156,17 +170,60 @@ def liquify_from(at, rc, box, own):
         x, y = np.clip(x, 0, 1), np.clip(y, 0, 1)
     mid, key = from_unit(x, y, rc, box, own)
     if edge == "wrap":
-        mid = rows.wrapped(mid, key)
+        mid = w["rows"].wrapped(mid, key)
     elif edge == "bend":
-        mid = rows.unstretched(mid, key, t0, t1)
+        mid = w["rows"].unstretched(mid, key, w["t0"], w["t1"])
+    return mid, key
+
+
+def liquify_from(at, rc, box, own):
+    """(the notes moved (their places in at), middle in ticks, key) each one's colour comes from under rc's Liquify
+    (stir_from's way: the edge choices alike). Notes where nothing was pushed are left out."""
+    lq = full(clean_liquify(rc.get("liquify")))
+    a = decode(lq["grid"], lq["map"])
+    w = _where(at, rc, box, own)
+    idx = np.flatnonzero(touched(a, w["x"], w["y"]))
+    mid, key = _fetched(w, a, w["x"][idx], w["y"][idx], rc, box, own)
     return idx, mid, key
+
+
+def _taken(now, idx, src, pals, rc):
+    """The colours notes idx take from the notes src found: theirs, or with 2+ colour sets the same place in the
+    note's own block of channels (Stir's "stay"; a colour its block lacks: the found one itself)."""
+    if len(pals) < 2:
+        return now[src]
+    from notes.recolour import MOST
+    per = rc.get("most", MOST)
+    pool = np.concatenate(pals)
+    o = np.argsort(pool, kind="stable")
+    want = now[idx] // per * per + now[src] % per
+    i = o[np.clip(np.searchsorted(pool[o], want), 0, len(pool) - 1)]
+    return np.where(pool[i] == want, want, now[src])
+
+
+def _apart(notes, low, new, pals, pick):
+    """new with two notes on a key sounding together kept apart (recolour.kept_apart), each colour set on its own
+    with 2+ sets (a note's set: the one its new colour is in). new itself may be changed."""
+    from notes.recolour import kept_apart
+    if len(pals) < 2:
+        return kept_apart(notes, low, new, pals[0], pick) if len(pals[0]) >= 2 else new
+    pool = np.concatenate(pals)
+    set_of = np.repeat(np.arange(len(pals)), [len(p) for p in pals])
+    o = np.argsort(pool, kind="stable")
+    mine = set_of[o[np.clip(np.searchsorted(pool[o], new), 0, len(pool) - 1)]]
+    for s, p in enumerate(pals):
+        m = np.flatnonzero(mine == s)
+        if len(p) >= 2 and len(m):
+            new[m] = kept_apart(notes[m], low[m], new[m], p, pick[m])
+    return new
 
 
 def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     """The colours now after rc's Liquify: each note takes the colour of the note found where the map fetches from
     (recolour.stirred's way: colour sets "stay", Per chord / run by the group's first note, two notes on a key kept
-    apart). Hidden (eye off) or none: now as it is."""
-    from notes.recolour import MOST, kept_apart, leaders, nearest
+    apart). Hidden (eye off) or none: now as it is. Live does the same for a brush stroke, only where it changed:
+    keep both in step."""
+    from notes.recolour import leaders, nearest
     lq = clean_liquify(rc.get("liquify"))
     if not lq or lq.get("on") is False or not len(at) or not lq.get("strength", 100.0):
         return now
@@ -176,27 +233,151 @@ def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     # (own=False: the spots are only some notes'; a spot that didn't move finds its own note anyway, the nearest)
     src = nearest(at, mid, key, own=False)
     new = np.array(now)
-    move = len(pals) < 2
-    if move:
-        new[idx] = now[src]
-    else:  # (each note keeps its block of channels and takes the found note's colour in it, as Stir's "stay")
-        per = rc.get("most", MOST)
-        pool = np.concatenate(pals)
-        set_of = np.repeat(np.arange(len(pals)), [len(p) for p in pals])
-        o = np.argsort(pool, kind="stable")
-        want = now[idx] // per * per + now[src] % per
-        i = o[np.clip(np.searchsorted(pool[o], want), 0, len(pool) - 1)]
-        new[idx] = np.where(pool[i] == want, want, now[src])
+    new[idx] = _taken(now, idx, src, pals, rc)
     if rc.get("by"):
         new = new[leaders(at, rc["by"])]
-    if move:
-        return kept_apart(notes, low, new, pals[0], pick) if len(pals[0]) >= 2 else new
-    mine = set_of[o[np.clip(np.searchsorted(pool[o], new), 0, len(pool) - 1)]]
-    for s, p in enumerate(pals):
-        m = np.flatnonzero(mine == s)
-        if len(p) >= 2 and len(m):
-            new[m] = kept_apart(notes[m], low[m], new[m], p, pick[m])
-    return new
+    return _apart(notes, low, new, pals, pick)
+
+
+class Live:
+    """A brush stroke's colours while dragging, exactly as liquified makes them, worked out only where the map
+    changed (the brush shows the real result, like image editors; user 2026-11-07: a bent picture of the piano roll
+    looked nothing like it). Every note's colour before kept_apart is kept: a change of the map changes the notes in
+    the grid cells around it, then their Per chord / run groups, then whole bursts of notes sounding together on a
+    key (kept_apart looks at nothing else), so the colours given are the very ones the whole shape gets."""
+
+    def __init__(self, notes, at, low, now, rc, which, pals, pick, box, own, a):
+        from notes.recolour import _sorted_notes, leaders
+        self.notes, self.at, self.low, self.now, self.rc = notes, at, low, now, rc
+        self.pals, self.pick, self.box, self.own = pals, pick, box, own
+        self.w = _where(at, rc, box, own)
+        lq = self.w["lq"]
+        self.off = lq.get("on") is False or not lq.get("strength") or not len(at)
+        # (made once, every piece side by side in memory: nearest's compiled search took a copy of a key column
+        # at every update, ~4 ms at 3 M notes)
+        self.kept = tuple(np.ascontiguousarray(v) if isinstance(v, np.ndarray) else v
+                          for v in _sorted_notes(at)) if len(at) else None
+        self.a = np.zeros_like(a)
+        self.F = np.array(now)  # (each note's colour taken, before groups / kept_apart)
+        self.lead = leaders(at, rc["by"]) if rc.get("by") and len(at) else None
+        self.P = self.F if self.lead is None else self.F[self.lead]
+        if self.lead is not None:
+            self.by_lead = np.argsort(self.lead, kind="stable")
+            self.lead_sorted = self.lead[self.by_lead]
+        gy, gx = a.shape[:2]
+        cx = np.minimum((np.clip(self.w["x"], 0.0, 1.0) * (gx - 1)).astype(np.int64), gx - 2)
+        cy = np.minimum((np.clip(self.w["y"], 0.0, 1.0) * (gy - 1)).astype(np.int64), gy - 2)
+        from files.speed import key_sort
+        self.cells = key_sort(cy, cx) if len(cy) else np.zeros(0, np.int64)
+        self.cx = cx[self.cells]
+        self.row_at = np.searchsorted(cy[self.cells], np.arange(gy))  # (each cell row's first place in cells)
+        self.bursts = self._bursts(notes)
+        self.grid = (gy, gx)
+        # (nothing pushed = liquified leaves the colours as they are, kept_apart and groups too: once something is,
+        # the notes whose group's colour differs change everywhere; ever = every note given out since)
+        self.base = np.flatnonzero(self.P != now) if self.lead is not None else np.zeros(0, np.int64)
+        self.ever = np.zeros(len(at), bool)
+        self.zero = True
+        self.update(a)
+
+    @staticmethod
+    def _spread(first, size):
+        """The places first[i] .. first[i] + size[i] - 1 of every i, one after another."""
+        return np.repeat(first - np.cumsum(size) + size, size) + np.arange(int(size.sum()))
+
+    @staticmethod
+    def _bursts(notes):
+        """(each note's burst, each burst's first place, its size, notes in key / start order) as kept_apart finds
+        them (notes on a key each overlapping one before), or None when no two notes overlap."""
+        from files.speed import key_sort
+        if len(notes) < 2:
+            return None
+        s, e, k = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
+        o = key_sort(k, s)
+        ks, ss, es = k[o], s[o], e[o]
+        reach = np.maximum.accumulate(es + ks * (1 << 40))
+        over = np.zeros(len(o), bool)
+        over[1:] = (ss[1:] + ks[1:] * (1 << 40) < reach[:-1]) & (ks[1:] == ks[:-1])
+        if not over.any():
+            return None
+        burst = np.cumsum(~over) - 1
+        of = np.empty(len(o), np.int64)
+        of[o] = burst
+        return of, np.flatnonzero(~over), np.bincount(burst), o
+
+    def update(self, a):
+        """The map is a now: (notes whose colour may have changed, their colours) (before their round / turn), or
+        None when nothing changed."""
+        if self.off:
+            self.a = a
+            return None
+        diff = (a != self.a).any(2)
+        self.a = a
+        if not diff.any():
+            return None
+        A = self._changed(a, diff)
+        zero = not a.any()
+        if zero:  # (nothing pushed any more: every note as it was before the Liquify)
+            if self.zero:
+                return None
+            self.zero = True
+            B = np.flatnonzero(self.ever)
+            self.ever[:] = False
+            return B, self.now[B]
+        if self.zero:
+            self.zero = False
+            A = np.union1d(A, self.base)
+        if not len(A):
+            return None
+        B = A
+        if self.bursts is not None:  # (every note of the bursts they're in: kept_apart's colours there change)
+            of, first, size, o = self.bursts
+            b = np.unique(of[A])
+            B = o[self._spread(first[b], size[b])]
+        new = _apart(self.notes[B], self.low[B], self.P[B].copy(), self.pals, self.pick[B])
+        self.ever[B] = True
+        return B, new
+
+    def _changed(self, a, diff):
+        """The notes whose colour before kept_apart changed now that the map is a (changed at diff's grid points);
+        F and P brought up to date."""
+        gy, gx = self.grid
+        none = np.zeros(0, np.int64)
+        rows, cols = np.flatnonzero(diff.any(1)), np.flatnonzero(diff.any(0))
+        # (a cell looks at its 4 corners: the cells around every changed grid point)
+        j0, j1 = max(int(rows[0]) - 1, 0), min(int(rows[-1]), gy - 2)
+        i0, i1 = max(int(cols[0]) - 1, 0), min(int(cols[-1]), gx - 2)
+        parts = []
+        for j in range(j0, j1 + 1):
+            lo, hi = int(self.row_at[j]), int(self.row_at[j + 1]) if j + 1 < gy else len(self.cells)
+            c = self.cx[lo:hi]
+            parts.append(self.cells[lo + int(np.searchsorted(c, i0)):lo + int(np.searchsorted(c, i1, "right"))])
+        D = np.concatenate(parts) if parts else none
+        if not len(D):
+            return none
+        from notes.recolour import nearest
+        x, y = self.w["x"][D], self.w["y"][D]
+        hot = touched(a, x, y)
+        got = self.now[D].copy()
+        if hot.any():
+            mid, key = _fetched(self.w, a, x[hot], y[hot], self.rc, self.box, self.own)
+            src = nearest(self.at, mid, key, own=False, kept=self.kept)
+            got[hot] = _taken(self.now, D[hot], src, self.pals, self.rc)
+        moved = got != self.F[D]
+        D = D[moved]
+        if not len(D):
+            return none
+        self.F[D] = got[moved]
+        if self.lead is None:
+            return D
+        heads = D[self.lead[D] == D]  # (a group's colour is its first note's: only first notes changing count)
+        if not len(heads):
+            return none
+        lo = np.searchsorted(self.lead_sorted, heads)
+        hi = np.searchsorted(self.lead_sorted, heads, "right")
+        A = self.by_lead[self._spread(lo, hi - lo)]
+        self.P[A] = self.F[self.lead[A]]
+        return A
 
 
 def blend(x, y, f):
