@@ -301,17 +301,38 @@ def cut_by(normal, held):
     if not len(normal) or not len(held):
         return normal
     lo = int(min(normal[:, 0].min(), held[:, 0].min()))
-    # (each key + slot pair numbered: slot * 256 + key ran out of room past slot 32767, many Colours rounds)
-    _, pair = np.unique(np.concatenate([held[:, [4, 2]], normal[:, [4, 2]]]), axis=0, return_inverse=True)
-    pair = pair.reshape(-1).astype(np.int64)
-    hk = pair[:len(held)] << 40 | (held[:, 0] - lo)
-    hk = np.unique(hk)
-    nk = pair[len(held):] << 40 | (normal[:, 0] - lo)
+    # (each key + slot pair as one number: slot * 256 + key ran out of room past slot 32767 in a << 40 key, many
+    # Colours rounds; a 2-column unique of every note took 3 s on 3 M pasted notes. Sorted with duplicates: the
+    # first held start past a note's is the same as in a unique list)
+    k0 = int(min(normal[:, 2].min(), held[:, 2].min()))
+    span = int(max(normal[:, 2].max(), held[:, 2].max())) - k0 + 1
+    s0 = int(min(normal[:, 4].min(), held[:, 4].min()))
+    codes = (int(max(normal[:, 4].max(), held[:, 4].max())) - s0 + 1) * span
+    sb = int(max(normal[:, 0].max(), held[:, 0].max()) - lo).bit_length()
+    has = True
+    if (codes - 1).bit_length() + sb <= 62:  # (pair and start side by side in one number: no numbering needed)
+        hp = (held[:, 4] - s0) * span + (held[:, 2] - k0)
+        npair = (normal[:, 4] - s0) * span + (normal[:, 2] - k0)
+    elif codes < 1 << 62:  # (pairs numbered by the HELD notes' pairs only)
+        sb = 40
+        hc = (held[:, 4] - s0) * span + (held[:, 2] - k0)
+        nc = (normal[:, 4] - s0) * span + (normal[:, 2] - k0)
+        own, hp = np.unique(hc, return_inverse=True)
+        hp = hp.reshape(-1).astype(np.int64)
+        npair = np.minimum(np.searchsorted(own, nc), len(own) - 1)
+        has = own[npair] == nc  # (a pair no held note has: never cut)
+    else:
+        sb = 40
+        _, pair = np.unique(np.concatenate([held[:, [4, 2]], normal[:, [4, 2]]]), axis=0, return_inverse=True)
+        pair = pair.reshape(-1).astype(np.int64)
+        hp, npair = pair[:len(held)], pair[len(held):]
+    hk = np.sort(hp << sb | (held[:, 0] - lo))
+    nk = npair << sb | (normal[:, 0] - lo)
     at = np.searchsorted(hk, nk, side="right")
     ok = at < len(hk)
     nxt = hk[np.minimum(at, len(hk) - 1)]
-    start = (nxt & ((1 << 40) - 1)) + lo
-    cut = ok & (nxt >> 40 == nk >> 40) & (start < normal[:, 1])
+    start = (nxt & ((1 << sb) - 1)) + lo
+    cut = has & ok & (nxt >> sb == nk >> sb) & (start < normal[:, 1])
     if not cut.any():
         return normal
     out = normal.copy()
