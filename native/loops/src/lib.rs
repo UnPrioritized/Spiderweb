@@ -64,6 +64,7 @@ macro_rules! level_builds {
 mod draw;
 mod engine;
 mod hz;
+mod lim;
 mod maths;
 mod midi_index;
 mod midi_scan;
@@ -160,6 +161,30 @@ static QUIET: Once = Once::new();
 pub(crate) fn guard_with<R>(f: impl FnOnce() -> Result<R, i64>) -> Result<R, i64> {
     QUIET.call_once(|| std::panic::set_hook(Box::new(|_| {})));
     catch_unwind(AssertUnwindSafe(f)).unwrap_or(Err(FAILED))
+}
+
+/// Reads / writes without a check a step: ONLY where the loop checked its sizes / indices once before (the fast
+/// path); odd inputs go the checked path instead (Numba checks nothing: per-step checks cost 10-40 %).
+#[inline(always)]
+pub(crate) fn rd<T: Copy>(s: &[T], i: usize) -> T {
+    debug_assert!(i < s.len());
+    unsafe { *s.get_unchecked(i) }
+}
+#[inline(always)]
+pub(crate) fn wr<T>(s: &mut [T], i: usize, v: T) {
+    debug_assert!(i < s.len());
+    unsafe { *s.get_unchecked_mut(i) = v }
+}
+/// Every index in idx is 0 .. lim (one pass the processor runs many at a time).
+#[inline(always)]
+pub(crate) fn all_below(idx: &[i64], lim: usize) -> bool {
+    if lim == 0 {
+        return idx.is_empty();
+    }
+    // (0 <= i <= top exactly when neither i nor top - i has its sign bit: only OR / minus, which even the plain
+    // build runs many at a time (it has no 64-bit compares: a compare here made overlap_sweep 1.1x at that level))
+    let top = lim.min(i64::MAX as usize) as i64 - 1;
+    idx.iter().fold(0i64, |acc, &i| acc | i | top.wrapping_sub(i)) >= 0
 }
 
 /// n zeros, or None when there isn't the memory (Rust would end the program). Zeroed by the system (calloc): big

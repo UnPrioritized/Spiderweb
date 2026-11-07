@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 
 use crate::maths::imax;
-use crate::{try_zeros, Nd, NdMut, NO_MEMORY};
+use crate::{all_below, rd, try_zeros, wr, Nd, NdMut, NO_MEMORY};
 
 thread_local! {
     /// Results whose size isn't known before the loop runs (clash_pairs): kept here until take2 copies them out
@@ -170,6 +170,56 @@ pub fn overlap_order(notes: Nd<i64, 2>, group: &mut [i64], order: &mut [i64]) ->
 #[inline(always)]
 pub fn overlap_sweep(notes: Nd<i64, 2>, order: &[i64], group: &[i64], out: NdMut<i64, 2>) -> i64 {
     let n = order.len();
+    let (rows, nc, oc) = (notes.sh[0], notes.sh[1], out.sh[1]);
+    // (checked once: every place in order is a note with a group, out has a row per place, wide enough; then no
+    // checks a step. Else the checked loop below)
+    if nc < 2 || oc < nc || out.sh[0] < n || group.len() < rows || notes.d.len() < rows * nc
+        || out.d.len() < n * oc || !all_below(order, rows) {
+        return overlap_sweep_checked(notes, order, group, out);
+    }
+    let nt = notes.d;
+    let od = out.d;
+    let mut m = 0usize;
+    let mut run = 0i64;
+    let mut prev_g = 0i64;
+    for idx in 0..n {
+        let i = rd(order, idx) as usize;
+        let (g, s, e) = (rd(group, i), rd(nt, i * nc), rd(nt, i * nc + 1));
+        let mut end = e;
+        if idx > 0 && prev_g == g {
+            if s < run {
+                end = imax(e, run);
+            }
+            run = imax(run, e);
+        } else {
+            run = e;
+        }
+        prev_g = g;
+        let mut last = true;
+        if idx + 1 < n {
+            let j = rd(order, idx + 1) as usize;
+            if rd(group, j) == g {
+                last = false;
+                let sj = rd(nt, j * nc);
+                if sj < run {
+                    end = sj;
+                }
+            }
+        }
+        if last || end > s {
+            for c in 0..nc {
+                wr(od, m * oc + c, rd(nt, i * nc + c));
+            }
+            wr(od, m * oc + 1, end);
+            m += 1;
+        }
+    }
+    m as i64
+}
+
+#[inline(never)] // (rare odd inputs: kept out of the fast loop's code)
+fn overlap_sweep_checked(notes: Nd<i64, 2>, order: &[i64], group: &[i64], out: NdMut<i64, 2>) -> i64 {
+    let n = order.len();
     let nc = notes.sh[1];
     let nt = notes.d;
     let od = out.d;
@@ -210,6 +260,76 @@ pub fn overlap_sweep(notes: Nd<i64, 2>, order: &[i64], group: &[i64], out: NdMut
 /// fastloops.note_stretches into out ((len(notes), 4)) -> how many rows, or -10 = not in order (Numba: -1).
 #[inline(always)]
 pub fn note_stretches(notes: Nd<i64, 2>, by_key: bool, owner: i64, order: &[i64], out: NdMut<i64, 2>) -> i64 {
+    let n = notes.sh[0];
+    let nc = notes.sh[1];
+    let no = order.len();
+    // (checked once: 3+ columns, out (4 wide) has room for every row this can write (the zero-length ones + one per
+    // place / note), places inside notes; then no checks a step)
+    if nc < 3 || out.sh[1] != 4 || out.sh[0] < n || out.d.len() < out.sh[0] * 4 || notes.d.len() < n * nc
+        || !all_below(order, n) {
+        return note_stretches_checked(notes, by_key, owner, order, out);
+    }
+    let nt = notes.d;
+    let sh = out.sh;
+    let od = out.d;
+    let mut m = 0usize;
+    for i in 0..n {
+        let (s, e) = (rd(nt, i * nc), rd(nt, i * nc + 1));
+        if e <= s {
+            wr(od, m * 4, if by_key { rd(nt, i * nc + 2) } else { 0 });
+            wr(od, m * 4 + 1, s);
+            wr(od, m * 4 + 2, e);
+            wr(od, m * 4 + 3, owner);
+            m += 1;
+        }
+    }
+    let first = m;
+    if first + (if no > 0 { no } else { n - first }) > sh[0] {
+        return note_stretches_checked(notes, by_key, owner, order, NdMut { d: od, sh });
+    }
+    // (the open row's key / end kept in hand instead of read back; its end written when it closes)
+    let (mut lk, mut le) = (0i64, 0i64);
+    let ordered = no > 0;
+    let (mut pk, mut ps) = (0i64, 0i64);
+    for j in 0..(if ordered { no } else { n }) {
+        let i = if ordered { rd(order, j) as usize } else { j };
+        let p = i * nc;
+        let (s, e) = (rd(nt, p), rd(nt, p + 1));
+        if e <= s {
+            continue;
+        }
+        let k = if by_key { rd(nt, p + 2) } else { 0 };
+        if m > first {
+            if !ordered && (k < pk || k == pk && s < ps) {
+                return -10;
+            }
+            if k == lk && s <= le {
+                if e > le {
+                    le = e;
+                }
+                pk = k;
+                ps = s;
+                continue;
+            }
+            wr(od, (m - 1) * 4 + 2, le);
+        }
+        pk = k;
+        ps = s;
+        wr(od, m * 4, k);
+        wr(od, m * 4 + 1, s);
+        wr(od, m * 4 + 3, owner);
+        m += 1;
+        lk = k;
+        le = e;
+    }
+    if m > first {
+        wr(od, (m - 1) * 4 + 2, le);
+    }
+    m as i64
+}
+
+#[inline(never)] // (rare odd inputs: kept out of the fast loop's code)
+fn note_stretches_checked(notes: Nd<i64, 2>, by_key: bool, owner: i64, order: &[i64], out: NdMut<i64, 2>) -> i64 {
     let n = notes.sh[0];
     let nc = notes.sh[1];
     let nt = notes.d;
@@ -300,9 +420,50 @@ pub fn radix_order(k: &mut [i64], bits: i64, order: &mut [i64], o2: &mut [i64]) 
     o_in_2 as i64
 }
 
+/// ring_runs' sizes checked once (3 rows of room len(order), every place inside s / e / k).
+#[inline(always)]
+fn ring_ok(s: &[i64], e: &[i64], k: &[i64], order: &[i64], out: &NdMut<i64, 2>) -> bool {
+    !order.is_empty() && out.sh[0] >= 3 && out.sh[1] >= order.len() && out.d.len() >= 3 * out.sh[1]
+        && all_below(order, s.len().min(e.len()).min(k.len()))
+}
+
+/// ring_runs / ring_runs_int with no checks a step (ring_ok first); far = "starts past the reach".
+#[inline(always)]
+fn ring_fast(s: &[i64], e: &[i64], k: &[i64], order: &[i64], big: i64, out: NdMut<i64, 2>,
+             far: impl Fn(i64, i64) -> bool) -> i64 {
+    let n = order.len();
+    let room = out.sh[1];
+    let (rk, rest) = out.d.split_at_mut(room);
+    let (ra, rb) = rest.split_at_mut(room);
+    let mut m = 0usize;
+    let i = rd(order, 0) as usize;
+    let mut kk = rd(k, i);
+    let mut reach = rd(e, i) + kk * big;
+    wr(rk, 0, kk);
+    wr(ra, 0, rd(s, i));
+    for j in 1..n {
+        let i = rd(order, j) as usize;
+        let ki = rd(k, i);
+        let at = rd(s, i) + ki * big;
+        if far(at, reach) {
+            wr(rb, m, reach - kk * big);
+            m += 1;
+            kk = ki;
+            wr(rk, m, ki);
+            wr(ra, m, rd(s, i));
+        }
+        reach = imax(reach, rd(e, i) + ki * big);
+    }
+    wr(rb, m, reach - kk * big);
+    m as i64 + 1
+}
+
 /// fastloops.ring_runs into out (3 rows: key, start, end; room len(order)) -> how many runs (len(order) >= 1).
 #[inline(always)]
 pub fn ring_runs(s: &[i64], e: &[i64], k: &[i64], order: &[i64], gap: f64, big: i64, out: NdMut<i64, 2>) -> i64 {
+    if ring_ok(s, e, k, order, &out) {
+        return ring_fast(s, e, k, order, big, out, |at, reach| at as f64 > reach as f64 + gap);
+    }
     let n = order.len();
     let room = out.sh[1];
     let (rk, rest) = out.d.split_at_mut(room);
@@ -330,6 +491,9 @@ pub fn ring_runs(s: &[i64], e: &[i64], k: &[i64], order: &[i64], gap: f64, big: 
 /// ring_runs with a whole-number gap (Numba compares whole numbers then).
 #[inline(always)]
 pub fn ring_runs_int(s: &[i64], e: &[i64], k: &[i64], order: &[i64], gap: i64, big: i64, out: NdMut<i64, 2>) -> i64 {
+    if ring_ok(s, e, k, order, &out) {
+        return ring_fast(s, e, k, order, big, out, |at, reach| at > reach + gap);
+    }
     let n = order.len();
     let room = out.sh[1];
     let (rk, rest) = out.d.split_at_mut(room);

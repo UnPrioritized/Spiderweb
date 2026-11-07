@@ -238,6 +238,16 @@ pub fn order(ticks: &[i64], ms: &[i32], ks: &[i32], base: i64, span: i64, out_t:
 /// midi_play.order_count -> 0.
 #[inline(always)]
 pub fn order_count(ticks: &[i64], base: i64, count: &mut [i64]) -> i64 {
+    // (checked once: every tick - base inside count (one pass the processor runs many at a time); then no check a
+    // step (it was 1.04-1.09x Numba's). Else the checked loop)
+    let top = count.len() as i64 - 1;
+    if top >= 0 && ticks.iter().fold(0i64, |acc, &t| acc | (t - base) | (top - (t - base))) >= 0 {
+        for &t in ticks {
+            let k = (t - base) as usize;
+            put(count, k, g(count, k) + 1);
+        }
+        return 0;
+    }
     for &t in ticks {
         count[u(t - base)] += 1;
     }

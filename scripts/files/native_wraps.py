@@ -20,7 +20,7 @@ NEEDS = {
     "dc_block": ("dc_block",),
     "wave_fill": ("wave_fill",), "note_ends": ("note_ends",), "hz_expand": ("hz_expand",), "hz_late": ("hz_late",),
     "hz_order": ("hz_order",), "hz_finish": ("hz_finish", "hz_finish_i"),
-    "gap_ticks": ("gap_ticks",), "gap_plan": ("gap_plan",),
+    "gap_ticks": ("gap_ticks", "gap_room", "gap_ticks_into"), "gap_plan": ("gap_plan",),
     "midi_walk": ("midi_walk",), "midi_rewrite": ("midi_rewrite",), "midi_note_ticks": ("midi_note_ticks",),
     "midi_busy_hits": ("midi_busy_hits",), "midi_gather": ("midi_gather",),
     "midi_index": ("midi_index",), "midi_close": ("midi_close",), "midi_grid": ("midi_grid",),
@@ -36,6 +36,16 @@ NEEDS = {
     "piece_order_ok": ("piece_order_ok",), "piece_open_at": ("piece_open_at",),
 }
 NOT_IN_ORDER = -10  # (note_stretches: the notes aren't in key / start order; Numba's -1)
+BIG_GAPS = 4096  # (gap_ticks: anchors past this = written into arrays made in Python)
+
+
+def rows_of(out, m):
+    """The first m of each row of out as separate arrays: views of out when little room is left unused (copying
+    them costs as much as the loop on big pictures), else copies so a big mostly-empty out isn't kept alive."""
+    if out.shape[1] - m <= max(out.shape[1] >> 3, 65536):
+        return tuple(out[r, :m] for r in range(out.shape[0]))
+    o = out[:, :m].copy()
+    return tuple(o[r] for r in range(o.shape[0]))
 
 
 class Wraps:
@@ -76,8 +86,7 @@ class Wraps:
                     row0, row1, out)
             m = self.x.order_rects(*args)
             if m >= 0 or (m := self._again("order_rects", m, args)) >= 0:
-                o = out[:, :m].copy()
-                return o[0], o[1], o[2], o[3], o[4]
+                return rows_of(out, m)
         return self.base.order_rects(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, shown, clip, c0, c2,
                                      left, right, keys, row0, row1)
 
@@ -86,8 +95,7 @@ class Wraps:
         args = (x0, x1, key, color, left, right, keys, row0, row1, out)
         m = self.x.last_on_pixels(*args)
         if m >= 0 or (m := self._again("last_on_pixels", m, args)) >= 0:
-            o = out[:, :m].copy()
-            return o[0], o[1], o[2], o[3], o[4]
+            return rows_of(out, m)
         return self.base.last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1)
 
     def note_top(self, top_px, half, kb, top, w, h, x0, y0, x1, y1, color, shade):
@@ -313,6 +321,15 @@ class Wraps:
 
     def gap_ticks(self, a, e, ts, bs, drawn, was, u, most):
         args = (a, e, ts, bs, drawn, was, u, most)
+        if len(ts) + len(bs) > BIG_GAPS and (room := self.x.gap_room(a, e, ts, bs)) > BIG_GAPS:
+            # (a big part: written straight into arrays made here, as Numba does; copying them out afterwards cost
+            # 1.3x Numba's time)
+            n, total, k, dense = (np.empty(room, np.int64), np.empty(room - 1, np.int64),
+                                  np.empty(room - 1, np.int64), np.empty(room - 1, np.int64))
+            got = self.x.gap_ticks_into(*args, n, total, k, dense)
+            if got >= 0:
+                c, nd = got & 0xFFFFFFFF, got >> 32
+                return n[:c], total[:c - 1], k[:c - 1], dense[:nd]
         got = self._tuple("gap_ticks", args)
         return got if got is not None else self.base.gap_ticks(*args)
 

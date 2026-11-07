@@ -4,7 +4,7 @@
 use rayon::prelude::*;
 
 use crate::maths::{npmod, pmax, pmin, rint};
-use crate::{Nd, NdMut};
+use crate::{rd, wr, Nd, NdMut};
 
 /// A place counted from the end when below 0 (Numba's a[-1]).
 #[inline(always)]
@@ -128,8 +128,32 @@ fn wrap_one(m: f64, k: f64, keys: &[i64], a: &[f64], b: &[f64]) -> f64 {
 
 #[inline(always)]
 fn wrap_range_inner(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64]) {
-    for (j, o) in out.iter_mut().enumerate() {
-        *o = wrap_one(mid[j], key[j], keys, a, b);
+    // (checked once: keys not empty, a / b a number per key row, mid / key / out as long as each other: then the
+    // search and reads need no checks (the row found is always 0 .. len(keys) - 1). Else the checked one)
+    let (nk, n) = (keys.len(), out.len());
+    if nk == 0 || a.len() < nk || b.len() < nk || mid.len() < n || key.len() < n {
+        for (j, o) in out.iter_mut().enumerate() {
+            *o = wrap_one(mid[j], key[j], keys, a, b);
+        }
+        return;
+    }
+    for j in 0..n {
+        let q = rint(rd(key, j));
+        let (mut lo, mut hi) = (0usize, nk);
+        while lo < hi {
+            let h = (lo + hi) >> 1;
+            if (rd(keys, h) as f64) < q {
+                lo = h + 1;
+            } else {
+                hi = h;
+            }
+        }
+        let r = lo.min(nk - 1);
+        let jj = r.saturating_sub(1);
+        let (kj, kr) = (rd(keys, jj) as f64, rd(keys, r) as f64);
+        let row = if (kj - q).abs() <= (kr - q).abs() { jj } else { r };
+        let (m, s, e) = (rd(mid, j), rd(a, row), rd(b, row));
+        wr(out, j, if m < s || m > e { s + npmod(m - s, pmax(e - s, 1.0)) } else { m });
     }
 }
 level_builds!(fn wrap_range(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64])

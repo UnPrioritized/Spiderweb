@@ -41,6 +41,13 @@ pub fn npmod(a: f64, b: f64) -> f64 {
 /// lowest whole number, what x86-64's conversion gives; Rust's own `as` would give the nearest end instead).
 #[inline(always)]
 pub fn f2i(x: f64) -> i64 {
+    // (x86-64: the conversion instruction itself, which gives exactly that: one instruction, no range checks)
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        use std::arch::x86_64::{_mm_cvttsd_si64, _mm_set_sd};
+        _mm_cvttsd_si64(_mm_set_sd(x))
+    }
+    #[cfg(not(target_arch = "x86_64"))]
     if (-9223372036854775808.0..9223372036854775808.0).contains(&x) {
         x as i64
     } else {

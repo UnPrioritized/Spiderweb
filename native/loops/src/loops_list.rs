@@ -81,6 +81,10 @@ py_loops! {
     // ---- Keep timing's file tempos (tempo.rs)
     gap_ticks(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i64], u: i64, most: i64)
               -> arrays => crate::tempo::gap_ticks;
+    gap_room(a: i64, e: i64, ts: &[i64], bs: &[i64]) => crate::tempo::gap_room;
+    gap_ticks_into(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i64], u: i64, most: i64,
+                   n: &mut [i64], total: &mut [i64], k: &mut [i64], dense: &mut [i64])
+                   => crate::tempo::gap_ticks_into;
     gap_plan(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i64], drawn: &[i64], pref: &[i64],
              every: i64, most: i64, safe_reach: i64, pair_reach: i64, lens: &mut [i64], vals: &mut [i64], pos: i64,
              got: &mut [i64]) -> arrays => crate::tempo::gap_plan_t;

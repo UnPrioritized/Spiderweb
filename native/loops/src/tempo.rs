@@ -586,13 +586,56 @@ fn ss(a: &[i64], x: i64, right: bool) -> usize {
     lo
 }
 
+/// gap_ticks' places in ts / bs (i0, i1, b0, b1) and the room its anchors need.
+#[inline(always)]
+fn gap_places(a: i64, e: i64, ts: &[i64], bs: &[i64]) -> ([usize; 4], usize) {
+    let (i0, i1) = (ss(ts, a, false), ss(ts, e, true));
+    let (b0, b1) = (ss(bs, a, true), ss(bs, e, false));
+    ([i0, i1, b0, b1], 2 + i1.saturating_sub(i0) + b1.saturating_sub(b0))
+}
+
+/// The room gap_ticks_into needs: anchors (the other three: one less).
+#[inline(always)]
+pub fn gap_room(a: i64, e: i64, ts: &[i64], bs: &[i64]) -> i64 {
+    gap_places(a, e, ts, bs).1 as i64
+}
+
+/// fastloops.gap_ticks written into arrays made in Python (big parts: no copying the results out afterwards; n room
+/// gap_room, the others one less) -> anchors + found dense ones << 32, or FAILED (too little room).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn gap_ticks_into(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i64], u: i64, most: i64,
+                      n: &mut [i64], total: &mut [i64], k: &mut [i64], dense: &mut [i64]) -> i64 {
+    let (p, room) = gap_places(a, e, ts, bs);
+    if n.len() < room || total.len() + 1 < room || k.len() + 1 < room || dense.len() + 1 < room {
+        return crate::FAILED;
+    }
+    let c = gap_anchors(a, e, ts, bs, p, n);
+    let nd = gap_rest(a, e, ts, drawn, was, u, most, p, &n[..c], total, k, dense);
+    c as i64 | (nd as i64) << 32
+}
+
 /// fastloops.gap_ticks -> (n, total, k, dense).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub fn gap_ticks(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i64], u: i64, most: i64) -> Outs {
-    let (i0, i1) = (ss(ts, a, false), ss(ts, e, true));
-    let (b0, b1) = (ss(bs, a, true), ss(bs, e, false));
-    let mut n = vec![0i64; 2 + i1.saturating_sub(i0) + b1.saturating_sub(b0)];
+    let (p, room) = gap_places(a, e, ts, bs);
+    let mut n = vec![0i64; room];
+    let c = gap_anchors(a, e, ts, bs, p, &mut n);
+    n.truncate(c);
+    let g = c - 1;
+    let mut total = vec![0i64; g];
+    let mut k = vec![0i64; g];
+    let mut dense = vec![0i64; g];
+    let nd = gap_rest(a, e, ts, drawn, was, u, most, p, &n, &mut total, &mut k, &mut dense);
+    dense.truncate(nd);
+    Ok(vec![Out::I64(n, 0), Out::I64(total, 0), Out::I64(k, 0), Out::I64(dense, 0)])
+}
+
+/// gap_ticks' anchors into n (room gap_places' size) -> how many.
+#[inline(always)]
+fn gap_anchors(a: i64, e: i64, ts: &[i64], bs: &[i64], p: [usize; 4], n: &mut [i64]) -> usize {
+    let [i0, i1, b0, b1] = p;
     n[0] = a;
     let mut c = 1usize;
     let (mut i, mut j) = (i0, b0);
@@ -611,8 +654,16 @@ pub fn gap_ticks(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i
         }
     }
     n[c] = e;
-    c += 1;
-    n.truncate(c);
+    c + 1
+}
+
+/// gap_ticks' gaps from its anchors n: total / k (room len(n) - 1) and the dense anchors -> how many dense.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn gap_rest(a: i64, e: i64, ts: &[i64], drawn: &[i64], was: &[i64], u: i64, most: i64, p: [usize; 4], n: &[i64],
+            total: &mut [i64], k: &mut [i64], dense: &mut [i64]) -> usize {
+    let [i0, i1, _, _] = p;
+    let c = n.len();
     let mut note = vec![false; c];
     let mut jj = i0;
     for i in 0..c {
@@ -622,16 +673,17 @@ pub fn gap_ticks(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i
         note[i] = jj < i1 && ts[jj] == n[i];
     }
     let span = (e - a).max(0) as usize;
-    let mut sums = vec![0f64; span + 1];
+    // (the running sums made as they're worked out: no zeroing first, no check a step; drawn[..span] panics when
+    // too short = Numba's own loop, which reads past it)
+    let mut sums: Vec<f64> = Vec::with_capacity(span + 1);
+    sums.push(0.0);
     let mut s = 0.0;
-    for i in 0..span {
-        s += drawn[i] as f64;
-        sums[i + 1] = s;
-    }
+    sums.extend(drawn[..span].iter().map(|&v| {
+        s += v as f64;
+        s
+    }));
     let g = c - 1;
-    let mut total = vec![0i64; g];
-    let mut k = vec![0i64; g];
-    let mut dense = Vec::new();
+    let mut nd = 0usize;
     let (mut run, mut before) = (0.0f64, 0.0f64);
     let own = !was.is_empty();
     for i in 0..g {
@@ -640,7 +692,8 @@ pub fn gap_ticks(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i
         let tot = if own { was[x1] - was[x0] } else { d * u };
         let exact = tot as f64 / ((sums[x1] - sums[x0]) / d as f64);
         if note[i] && note[i + 1] && exact < 1.0 {
-            dense.push(n[i]);
+            dense[nd] = n[i];
+            nd += 1;
         }
         run += exact;
         let r = rint(run);
@@ -653,5 +706,5 @@ pub fn gap_ticks(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i
         total[i] = tot;
         k[i] = imin(imax(kk, least), tot);
     }
-    Ok(vec![Out::I64(n, 0), Out::I64(total, 0), Out::I64(k, 0), Out::I64(dense, 0)])
+    nd
 }

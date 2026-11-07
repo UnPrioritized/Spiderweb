@@ -238,6 +238,41 @@ def plain_call(f, args):
     return got
 
 
+class CFunc:
+    """A plain C function of the library, as BASS calls it (synth.py: _DSPPROC(fast.limit_dsp.address))."""
+
+    def __init__(self, address):
+        self.address = address
+
+
+_lim = {}
+
+
+def limiter(dll):
+    """The library's limiter for BASS (sw_limit_dsp) once synth.py's numbers are handed over and match the layout
+    built into it; None = not there / another layout (Numba's or Python's limiter then). Also readies
+    dll.sw_limit_live (checks)."""
+    if dll is None:
+        return None
+    if dll not in _lim:
+        got = None
+        try:
+            from files import synth as s
+            nums = np.array([s.LIM_BLOCK, s.LIM_DELAY, s.LIM_RING, s.LIM_N, s.LIM_ON, s.LIM_MIX, s.LIM_ENV, s.LIM_G0,
+                             s.LIM_G1, s.LIM_PEAK, s.LIM_PREV, s.LIM_HEAD, s.LIM_SIZE, s.LIM_SLOTS, s.LIM_TOP,
+                             s.LIM_ALL, s.LIM_CEILING, s.LIM_FALL, s.LIM_STEP], np.float64)
+            dll.sw_lim_setup.argtypes, dll.sw_lim_setup.restype = [ctypes.c_void_p, ctypes.c_int64], ctypes.c_int64
+            v = ctypes.c_void_p
+            dll.sw_limit_live.argtypes = [v, v, ctypes.c_int64, v, ctypes.c_int64]
+            dll.sw_limit_live.restype = ctypes.c_int64
+            if dll.sw_lim_setup(nums.ctypes.data, len(nums)) == 0:
+                got = CFunc(ctypes.cast(dll.sw_limit_dsp, ctypes.c_void_p).value)
+        except (AttributeError, ImportError, OSError):
+            got = None
+        _lim[dll] = got
+    return _lim[dll]
+
+
 class Loops(Wraps):
     """fastloops with the library's loops in their place (any other name: fastloops' own). The first try hands
     the arrays over as they are (cheap); NEED_COPY = plain copies, once more."""
@@ -257,6 +292,9 @@ class Loops(Wraps):
             self._stir_f, self._winner_f, self._key_f = ext.stir_spots, ext.winner_pieces, ext.key_order
         else:
             self._stir_f, self._winner_f, self._key_f = dll.sw_stir_spots, dll.sw_winner_pieces, dll.sw_key_order
+        dsp = limiter(dll)
+        if dsp is not None:  # (Built-in BASSMIDI's limiter: BASS's sound thread calls the library's C function)
+            self.__dict__["limit_dsp"] = dsp
 
     def __getattr__(self, name):  # (a name fastloops got after the copy)
         return getattr(self.base, name)
