@@ -15,6 +15,7 @@ import time
 import numpy as np
 
 from files.lang import tr
+from files.system import ALT
 from notes import liquify as lq
 from files.speed import key_sort
 from notes.recolour import (KEEP, before_liquify, box_of, centre_at, clean_recolour, new_seed, rule_of, turned_map,
@@ -24,6 +25,9 @@ from window import look
 
 LIVE_MS = 30  # (every note made again at most this often while brushing (not shown live); longer when it takes longer)
 SPACING = 0.2  # (a dab every this much of the brush's radius along its path)
+HOLD_MS = 40  # (holding still: a dab this often, at Rate % of the pressure; 25 a second)
+MASK_STEP = 3  # (the freeze mask's red tint worked out every this many screen pixels, then stretched: it's soft)
+MASK_ALPHA = 0.45  # (fully frozen: this see-through)
 
 
 class LiquifyBrush:
@@ -80,32 +84,71 @@ class LiquifyBrush:
         if not hit:
             return False
         app = self.app
-        app.push_undo(name=tr("liquify.undo"))
+        tool = app.liquify_window.tool.get()
+        app.push_undo(name=tr("liquify.undo_mask" if tool in lq.MASK_TOOLS else "liquify.undo"))
         jobs = []
         for sh, made in hit:
-            old = clean_recolour(sh.get("recolour"))
-            got = (old or {}).get("liquify")
+            got = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
             if got:
-                a = np.array(lq.decode(got["grid"], got["map"]))
+                a, m = np.array(lq.map_of(got)), lq.mask_of(got)
+                m = None if m is None else np.array(m)
             else:
                 x0, y0, x1, y1 = self.liquify_box(made)
-                a = lq.empty(lq.new_grid(x1 - x0, y1 - y0))
-            jobs.append({"sh": sh, "made": made, "a": a, "box": self.liquify_box(made)})
+                a, m = lq.empty(lq.new_grid(x1 - x0, y1 - y0)), None
+            jobs.append({"sh": sh, "made": made, "a": a, "m": m, "box": self.liquify_box(made)})
         self.lq = {"jobs": jobs, "p": (e.x, e.y), "mouse": (e.x, e.y), "job": None, "changed": False, "took": 0.0,
-                   "way": self.liquify_way(jobs)}
+                   "masked": False, "mask_job": None, "alt": bool(e.state & ALT), "dabbed": time.perf_counter(),
+                   "way": self.liquify_way(jobs) if tool not in lq.MASK_TOOLS else "mask"}
         self.drag = ("liquify",)
         end = getattr(self, "lq_end", None)
         if e.state & SHIFT and end:  # (Shift+click: a straight stroke from where the last one ended)
             self.liquify_stroke(end, (e.x, e.y))
             self.lq["p"] = (e.x, e.y)
+        else:  # (a click alone works too: Twirl / Pinch / Bulge / Freeze... at the spot, like the editors)
+            self.liquify_dabs([(e.x, e.y)], (e.x, e.y))
+        self.lq["hold"] = self.after(HOLD_MS, self.liquify_hold)
         self.draw_liquify_brush()
         return True
+
+    def liquify_tool(self):
+        """The tool a dab uses now and Twirl's way round (+1 / -1): Alt held = the opposite (Twirl turns back, Pinch
+        <-> Bulge, Freeze <-> Thaw; like the editors' Alt)."""
+        w = self.app.liquify_window
+        tool = w.tool.get()
+        turn = w.turn()
+        if (self.lq or {}).get("alt"):
+            tool = lq.OPPOSITE.get(tool, tool)
+            turn = -turn
+        return tool, turn
+
+    def liquify_alt(self, e, down):
+        """Alt pressed / let go while brushing (holding still too: the hold-still dabs follow it at once)."""
+        st = getattr(self, "lq", None)
+        if st:
+            st["alt"] = down
+            return "break"  # (Alt was for the brush: not the menu bar's)
+        return None
+
+    def liquify_hold(self):
+        """While the button is held: the brush still = dabs at its spot (Rate %, like the editors: Twirl, Pinch,
+        Bulge, Restore, Smooth, Freeze / Thaw keep working; Push needs moving)."""
+        st = getattr(self, "lq", None)
+        w = self.app.liquify_window
+        if not st or not w:
+            return
+        st["hold"] = self.after(HOLD_MS, self.liquify_hold)
+        rate = w.brush["rate"]
+        tool = self.liquify_tool()[0]
+        if rate <= 0 or tool == "push" or time.perf_counter() - st["dabbed"] < HOLD_MS / 1000 * 0.9:
+            return
+        self.liquify_dabs([st["p"]], st["p"], rate / 100.0)
 
     def liquify_drag(self, e):
         st = getattr(self, "lq", None)
         if not st:
             return
         st["mouse"] = (e.x, e.y)
+        st["alt"] = bool(e.state & ALT)
         p = st["p"]
         w = self.app.liquify_window
         string = w.brush["smoothing"] / 100.0 * w.size_px() if w else 0.0
@@ -123,14 +166,19 @@ class LiquifyBrush:
         self.drag = None
         if not st:
             return
+        for k in ("hold", "mask_job"):
+            if st.get(k):
+                self.after_cancel(st[k])
+                st[k] = None
         if st["job"]:
             self.after_cancel(st["job"])
             st["job"] = None
             if st["way"] == "live":  # (the last mouse moves shown first: they came with the let go, user 11-07:
                 self.liquify_live()  # "every stroke shifts its pixels once I let go")
-        if st["changed"]:
-            # (shown live: the picture stays until the real notes are made, the very same colours)
-            self.liquify_apply(now=st["way"] == "live")
+        if st["changed"] or st["masked"]:
+            # (shown live: the picture stays until the real notes are made, the very same colours; a mask stroke
+            # alone makes no notes (engine.made_from leaves the mask out): nothing made again, not even the others)
+            self.liquify_apply(now=st["way"] == "live", notes=st["changed"])
             self.app.sync_recolour()
             self.app.schedule_autosave()
         self.lq_end = st["p"]
@@ -139,14 +187,23 @@ class LiquifyBrush:
 
     def liquify_stroke(self, a, b):
         """Dabs from a to b (screen px; a left out) on every shape of the stroke, then their notes (soon)."""
-        st = self.lq
         w = self.app.liquify_window
         if not w:
             return
+        self.liquify_dabs(lq.straight(a, b, max(1.0, w.size_px() / 2 * SPACING)), a)
+
+    def liquify_dabs(self, spots, prev, scale=1.0):
+        """A dab at each spot (screen px; Push: pushed by the move from the one before, prev first) on every shape
+        of the stroke under it, pressure x scale; then their colours (soon) / the mask shown again."""
+        st = self.lq
+        w = self.app.liquify_window
+        if not w or not spots:
+            return
         r = w.size_px() / 2
-        tool, pressure, density = w.tool.get(), w.brush["pressure"], w.brush["density"]
-        spots = lq.straight(a, b, max(1.0, r * SPACING))
-        prev = a
+        tool, turn = self.liquify_tool()
+        pressure, density = w.brush["pressure"] * scale, w.brush["density"]
+        mask = tool in lq.MASK_TOOLS
+        st["dabbed"] = time.perf_counter()
         for q in spots:
             vec = (q[0] - prev[0], q[1] - prev[1])
             prev = q
@@ -156,10 +213,22 @@ class LiquifyBrush:
                     continue
                 c = self.liquify_unit(job["made"], *q)
                 J = self.liquify_jac(job["made"], *q, at=c)
-                job["a"] = lq.dab(job["a"], tool, c, r, J, pressure, density, vec=vec)
-                st["changed"] = True
+                if mask:
+                    m = job["m"] if job["m"] is not None else np.zeros(job["a"].shape[:2])
+                    job["m"] = lq.mask_dab(m, c, r, J, pressure, density, freeze=tool == "freeze")
+                    st["masked"] = True
+                else:
+                    job["a"] = lq.dab(job["a"], tool, c, r, J, pressure, density, vec=vec, turn=turn,
+                                      frozen=job["m"])
+                    st["changed"] = True
+        if mask:
+            if st["masked"] and not st["mask_job"]:
+                st["mask_job"] = self.after_idle(self.liquify_mask_shown)
+            return
         if not st["changed"]:
             return
+        if st["way"] == "mask":  # (a mask tool's stroke went on with another tool: Alt can't, the window can)
+            st["way"] = "full"
         if st["way"] == "live":
             if time.perf_counter() - st.get("shown", 0.0) > LIVE_MS / 1000:  # (mouse moves never stopping coming
                 if st["job"]:                                                 # in: no idle time, shown now)
@@ -210,22 +279,30 @@ class LiquifyBrush:
             self.liquify_apply()
         st["took"] = time.perf_counter() - t0
 
-    def liquify_apply(self, now=False):
-        """Every shape of the stroke gets its map as it is now; their notes made again (now: here, not in the
-        background)."""
+    def liquify_apply(self, now=False, notes=True):
+        """Every shape of the stroke gets its map (and freeze mask) as it is now; their notes made again (now: here,
+        not in the background; notes False: only the mask changed, nothing to make)."""
         for job in self.lq["jobs"]:
             sh = job["sh"]
             old = clean_recolour(sh.get("recolour"))
             base = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
-            keep = {k: v for k, v in (base.get("liquify") or {}).items() if k not in ("grid", "map")}
-            a = job["a"]
-            base["liquify"] = dict(keep, grid=[a.shape[1], a.shape[0]], map=lq.encode(a))
+            w = self.app.liquify_window
+            # (a shape's first Liquify: At the edges as the window shows it)
+            settings = base.get("liquify") or ({"edge": w.edge} if w else {})
+            got = lq.with_arrays(settings, job["a"], job["m"])
+            if got:
+                base["liquify"] = got
+            else:
+                base.pop("liquify", None)
             new = clean_recolour(base)
             if new:
                 sh["recolour"] = new
             else:
                 sh.pop("recolour", None)
-        self.app.shapes_changed(now=now)
+        if notes:
+            self.app.shapes_changed(now=now)
+        else:
+            self.draw_liquify_mask()
 
     # ---- the real colours while brushing, painted only where they changed
 
@@ -237,7 +314,7 @@ class LiquifyBrush:
         channels may move with it): its notes are made once first, then this."""
         app = self.app
         sh = job["sh"]
-        from notes.engine import is_gate_flipped, is_pasted_flipped, past_edges, pasted_notes
+        from notes.engine import is_gate_flipped, is_pasted_flipped, made_from, past_edges, pasted_notes
         from notes.mask import is_mask
         from notes.sustain import is_sustained
         if (self._img is None or self._tiles is None or app.channel_mode.get() != "auto" or len(app.sels) != 1
@@ -254,13 +331,14 @@ class LiquifyBrush:
         idx = next((i for i, s in enumerate(app.shapes) if s is sh), None)
         if idx is None or idx not in app.sels:
             return None
-        old = clean_recolour(sh.get("recolour"))
+        # (as its notes are made: without the freeze mask (engine.made_from); only a mask = no Recolour yet)
+        old = clean_recolour(made_from(sh).get("recolour"))
         if old is None:
             return "later"
         _, notes, own, _ = job["made"]
         _, tracks = app.notes_tracks(without_recolour(sh))
         base = dict(old)
-        settings = {k: v for k, v in (base.get("liquify") or {}).items() if k not in ("grid", "map")}
+        settings = {k: v for k, v in (base.get("liquify") or {}).items() if k not in ("grid", "map", "frozen")}
         # (the rule as the notes are made with this stroke's map: any map stands in, Live is handed the real one)
         base["liquify"] = dict(settings, grid=[2, 2], map=lq.encode(np.full((2, 2, 2), 1.0 / lq.SCALE)))
         rule = rule_of(with_most(dict(sh, recolour=base), app.all16())["recolour"])
@@ -414,6 +492,140 @@ class LiquifyBrush:
         self.paint_rects(sub, rects, region, True)
         self._img[Y0 - top:Y1 - top, X0 - kb:X1 - kb] = sub
         self._tiles.put(self._img, X0 - kb, Y0 - top, X1 - kb, Y1 - top)
+
+    # ---- the freeze mask
+
+    def liquify_mask_shown(self):
+        st = getattr(self, "lq", None)
+        if st:
+            st["mask_job"] = None
+            st["mask_n"] = st.get("mask_n", 0) + 1  # (a new look of the mask: its picture made again)
+        self.draw_liquify_mask()
+
+    def draw_liquify_mask(self):
+        """Each selected shape's freeze mask as a see-through red tint over its colour box (while the Liquify window
+        is open and Show mask is ticked; image editors' red mask). Worked out every MASK_STEP pixels and stretched
+        (it's soft anyway); its pictures kept while nothing they show changed."""
+        self.delete("lqmask")
+        w = getattr(self.app, "liquify_window", None)
+        if not w or not w.show_mask.get() or self.sx is None:
+            self._lq_masks = {}
+            return
+        st = getattr(self, "lq", None)
+        stroke = {id(j["sh"]): j for j in (st or {}).get("jobs", ())}
+        kept, self._lq_masks = getattr(self, "_lq_masks", {}), {}
+        W, H = self.winfo_width(), self.winfo_height()
+        view = (self.sx, self.sy, self.view_t, self.view_top, self.kb_w, self.ruler_h, W, H)
+        for sh in self.app.recolour_targets():
+            job = stroke.get(id(sh))
+            if job is not None:
+                m, made = job["m"], job["made"]
+                mark = ("stroke", st.get("mask_n", 0))
+            else:
+                m = lq.mask_of((clean_recolour(sh.get("recolour")) or {}).get("liquify"))
+                if m is None:
+                    continue
+                old = kept.get(id(sh))
+                # (its notes' box: looked up again only after a change of the shapes (a whole note pass on a big one))
+                made = old[2] if old and old[3] == self.app.shapes_gen else self.stir_made(sh, "liquify")
+                mark = (sh["recolour"]["liquify"]["frozen"],)
+            if m is None or made is None:
+                continue
+            key = (id(made[1]), mark, view)
+            got = kept.get(id(sh))
+            if got is None or got[0] != key:
+                got = (key, self.liquify_mask_pic(made, m, W, H))
+            got = got[:2] + (made, self.app.shapes_gen)
+            self._lq_masks[id(sh)] = got
+            if got[1]:
+                pic, x, y = got[1]
+                self.create_image(x, y, image=pic, anchor="nw", tags="lqmask")
+        self.tag_raise("lqmask")
+        self.tag_raise("lqbrush")
+
+    def liquify_mask_pic(self, made, m, W, H):
+        """(picture, x, y) of the red tint of mask m over a shape on screen, or None (nothing frozen in view)."""
+        from roll.tiles import see_through
+        x0, y0, x1, y1 = self.liquify_box(made)
+        X0, Y0 = max(int(math.floor(x0)), int(math.ceil(self.kb_w))), max(int(math.floor(y0)), int(math.ceil(self.ruler_h)))
+        X1, Y1 = min(int(math.ceil(x1)), W), min(int(math.ceil(y1)), H)
+        if X1 <= X0 or Y1 <= Y0:
+            return None
+        s = MASK_STEP
+        nx, ny = -(-(X1 - X0) // s), -(-(Y1 - Y0) // s)
+        # (the colour box is the screen's, turned / flipped / stretched: straight lines stay straight, so 3 spots tell
+        # every pixel's place)
+        u0 = self.liquify_unit(made, X0 + s / 2, Y0 + s / 2)
+        J = self.liquify_jac(made, X0 + s / 2, Y0 + s / 2, at=u0)
+        i, j = np.meshgrid(np.arange(nx) * s, np.arange(ny) * s)
+        u = u0[0] + J[0][0] * i + J[0][1] * j
+        v = u0[1] + J[1][0] * i + J[1][1] * j
+        inside = (u >= 0) & (u <= 1) & (v >= 0) & (v <= 1)
+        val = lq.sample(m[..., None], u, v)[..., 0] * inside
+        if not (val > 1 / 255).any():
+            return None
+        rgba = np.empty((ny, nx, 4), np.uint8)
+        rgba[..., :3] = look.rgb(look.LIQUIFY_FREEZE)
+        rgba[..., 3] = np.clip(val * MASK_ALPHA * 255, 0, 255).astype(np.uint8)
+        small = see_through(self, rgba)
+        import tkinter as tk
+        pic = tk.PhotoImage(master=self, width=X1 - X0, height=Y1 - Y0)
+        pic.tk.call(pic, "copy", small, "-zoom", s, s)
+        return pic, X0, Y0
+
+    def liquify_all(self, kind):
+        """The window's buttons, on every selected shape at once (one undo step): "restore" = Restore All (every
+        bend gone, the mask kept; the editors' Restore All), "freeze" / "thaw" = the whole shape frozen / thawed,
+        "invert" = the mask turned inside out."""
+        app = self.app
+        names = {"restore": "liquify.undo_restore_all", "freeze": "liquify.undo_mask", "thaw": "liquify.undo_mask",
+                 "invert": "liquify.undo_mask"}
+
+        def change(old, sh):
+            got = (old or {}).get("liquify")
+            if got:
+                a, m = lq.map_of(got), lq.mask_of(got)
+            else:
+                if kind in ("restore", "thaw"):
+                    return old
+                made = self.stir_made(sh, "liquify")
+                if made is None:
+                    return old
+                x0, y0, x1, y1 = self.liquify_box(made)
+                a, m = lq.empty(lq.new_grid(x1 - x0, y1 - y0)), None
+            zeros = np.zeros(a.shape[:2])
+            if kind == "restore":
+                a = zeros[..., None].repeat(2, 2)
+            elif kind == "freeze":
+                m = zeros + 1.0
+            elif kind == "thaw":
+                m = None
+            else:
+                m = 1.0 - (zeros if m is None else m)
+            w = app.liquify_window
+            new = lq.with_arrays(got or ({"edge": w.edge} if w else {}), a, m)
+            base = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
+            if new:
+                base["liquify"] = new
+            else:
+                base.pop("liquify", None)
+            return base
+        if kind == "restore":
+            app.change_recolour(change, tr(names[kind]))
+        else:  # (only the mask: no notes made again (engine.made_from), the others not painted again either)
+            tgts = app.recolour_targets()
+            olds = [clean_recolour(t.get("recolour")) for t in tgts]
+            news = [clean_recolour(change(o, t)) for o, t in zip(olds, tgts)]
+            if any(o != n for o, n in zip(olds, news)):
+                app.push_undo(name=tr(names[kind]))
+                for t, r in zip(tgts, news):
+                    if r:
+                        t["recolour"] = r
+                    else:
+                        t.pop("recolour", None)
+                app.sync_recolour()
+                app.schedule_autosave()
+        self.draw_liquify_mask()
 
     # ---- the brush on screen
 

@@ -883,7 +883,15 @@ def made_from(sh):
     they're MIDI messages, hz_cc.py). Own channel per note stays only while it has some (own_channels), as
     {"fall": how long its lines go on after a note, "ring": their run-on} (hz_cc.voices: a voice is busy until its
     lines end, so the notes and the CC messages take the same channels). The run-on (hz["ring"]) makes no notes
-    either, nor finer gates (hz["fine"]: the export's, hz_fine.py). The same again for what it gives back."""
+    either, nor finer gates (hz["fine"]: the export's, hz_fine.py). The same again for what it gives back.
+    Liquify's freeze mask makes no notes either (it only guides the brush: liquify.py), so freezing makes nothing
+    again."""
+    rc = sh.get("recolour")
+    if isinstance(rc, dict) and isinstance(rc.get("liquify"), dict) and "frozen" in rc["liquify"]:
+        from notes.recolour import clean_recolour
+        rc = dict(rc, liquify={k: v for k, v in rc["liquify"].items() if k != "frozen"})
+        # (only a mask: no Recolour at all, the very key of the shape without it)
+        sh = dict(sh, recolour=rc) if clean_recolour(rc) else {k: v for k, v in sh.items() if k != "recolour"}
     hz = sh.get("hz")
     if not isinstance(hz, dict):
         return sh

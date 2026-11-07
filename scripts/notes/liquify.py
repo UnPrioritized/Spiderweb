@@ -8,9 +8,14 @@ shape, so it is applied again after every edit (never baked): the colours under 
 and they flow along the same bends. Applied LAST, after every stir (recolour.all_stirred). One map per shape, no list
 of strokes (user: like the editors; mistakes are fixed with Restore / undo).
 
-Saved as {"grid": [across, up], "map": text (zlib + base64 of int16 pairs, 1 / SCALE of the box each), "strength":
-% (only != 100), "on": False (only when hidden), "edge": STIR_EDGES (only != "escape")}. A map with nothing pushed is
-no Liquify (clean_liquify: None).
+Saved as {"grid": [across, up], "map": text (zlib + base64 of int16 pairs, 1 / SCALE of the box each), "frozen":
+text (zlib + base64 of uint8 per grid point, 255 = fully frozen), "strength": % (only != 100), "on": False (only when
+hidden), "edge": STIR_EDGES (only != "escape")}. "map" / "frozen" only when something is pushed / frozen; neither = no
+Liquify (clean_liquify: None).
+
+THE FREEZE MASK (stage D, image editors' Freeze / Thaw Mask): spots the brushes leave alone (partly frozen = partly
+left alone), drawn as a see-through red tint while the Liquify window is open. It never changes a colour by itself:
+engine.made_from leaves it out, so freezing / thawing never makes the notes again.
 
 THE BRUSHES (dab): each mouse step changes the map near the brush, the brush measured on screen (J: the colour box's
 units per screen pixel there, so a round brush stays round however the shape is stretched / turned). The map is a
@@ -29,9 +34,12 @@ GRID_SHORT = 16  # (at least this many along the other side)
 MOST_GRID = 1024
 MOST_STRENGTH = 400.0  # (user 2026-11-07: up to 400 %)
 DEFAULTS = {"strength": 100.0, "on": True, "edge": "escape"}
-TOOLS = ("push", "restore", "smooth", "twirl", "pinch", "bulge")
+TOOLS = ("push", "restore", "smooth", "twirl", "pinch", "bulge", "freeze", "thaw")
+MASK_TOOLS = ("freeze", "thaw")
+OPPOSITE = {"pinch": "bulge", "bulge": "pinch", "freeze": "thaw", "thaw": "freeze"}  # (Alt held; Twirl: turns back)
 
 _DECODED = {}  # map text -> its array (read-only); the last few kept: every making of the notes reads it
+_MASKS = {}  # frozen text -> its array 0..1 (read-only)
 
 
 def number(x):
@@ -74,19 +82,78 @@ def rounded(a):
     return _steps(a) / SCALE
 
 
+def decode_mask(grid, text):
+    """The frozen text -> float64 array (up, across) 0..1, read-only; None when it doesn't fit."""
+    got = _MASKS.get(text)
+    if got is not None and got.shape == (grid[1], grid[0]):
+        return got
+    try:
+        raw = zlib.decompress(base64.b64decode(text.encode("ascii"), validate=True))
+    except (ValueError, zlib.error, UnicodeEncodeError):
+        return None
+    gx, gy = grid
+    if len(raw) != gx * gy:
+        return None
+    m = np.frombuffer(raw, np.uint8).astype(np.float64).reshape(gy, gx) / 255
+    m.setflags(write=False)
+    if len(_MASKS) > 16:
+        _MASKS.pop(next(iter(_MASKS)))
+    _MASKS[text] = m
+    return m
+
+
+def mask_steps(m):
+    """A mask as saved: whole 1 / 255 steps."""
+    return np.clip(np.rint(np.asarray(m, np.float64) * 255), 0, 255)
+
+
+def encode_mask(m):
+    return base64.b64encode(zlib.compress(mask_steps(m).astype(np.uint8).tobytes(), 6)).decode("ascii")
+
+
+def map_of(lq):
+    """A clean Liquify's map as an array (zeros when nothing is pushed)."""
+    if lq.get("map"):
+        return decode(lq["grid"], lq["map"])
+    return empty(lq["grid"])
+
+
+def mask_of(lq):
+    """A clean Liquify's freeze mask (up, across) 0..1, or None (nothing frozen)."""
+    return decode_mask(lq["grid"], lq["frozen"]) if lq and lq.get("frozen") else None
+
+
+def with_arrays(lq, a, m):
+    """lq (a clean Liquify or {}: its settings kept) with the map a and the mask m (None = nothing frozen) -> clean
+    form, or None."""
+    keep = {k: v for k, v in (lq or {}).items() if k not in ("grid", "map", "frozen")}
+    out = dict(keep, grid=[a.shape[1], a.shape[0]])
+    if np.rint(a * SCALE).any():
+        out["map"] = encode(a)
+    if m is not None and mask_steps(m).any():
+        out["frozen"] = encode_mask(m)
+    return clean_liquify(out)
+
+
 def clean_liquify(d):
-    """A saved rc["liquify"] -> its clean form (see the top), or None (no Liquify: nothing pushed)."""
+    """A saved rc["liquify"] -> its clean form (see the top), or None (no Liquify: nothing pushed or frozen)."""
     if not isinstance(d, dict):
         return None
-    g, text = d.get("grid"), d.get("map")
-    if not (isinstance(g, list) and len(g) == 2 and all(number(v) and v == int(v) and 2 <= v <= MOST_GRID for v in g)
-            and isinstance(text, str) and text):
+    g, text, fz = d.get("grid"), d.get("map"), d.get("frozen")
+    if not (isinstance(g, list) and len(g) == 2 and all(number(v) and v == int(v) and 2 <= v <= MOST_GRID for v in g)):
         return None
     g = [int(v) for v in g]
-    a = decode(g, text)
-    if a is None or not a.any():
+    out = {"grid": g}
+    if isinstance(text, str) and text:
+        a = decode(g, text)
+        if a is not None and a.any():
+            out["map"] = text
+    if isinstance(fz, str) and fz:
+        m = decode_mask(g, fz)
+        if m is not None and m.any():
+            out["frozen"] = fz
+    if len(out) == 1:
         return None
-    out = {"grid": g, "map": text}
     s = d.get("strength")
     if number(s) and round(float(s), 3) != DEFAULTS["strength"]:
         out["strength"] = round(min(max(float(s), 0.0), MOST_STRENGTH), 3)
@@ -180,7 +247,7 @@ def liquify_from(at, rc, box, own):
     """(the notes moved (their places in at), middle in ticks, key) each one's colour comes from under rc's Liquify
     (stir_from's way: the edge choices alike). Notes where nothing was pushed are left out."""
     lq = full(clean_liquify(rc.get("liquify")))
-    a = decode(lq["grid"], lq["map"])
+    a = map_of(lq)
     w = _where(at, rc, box, own)
     idx = np.flatnonzero(touched(a, w["x"], w["y"]))
     mid, key = _fetched(w, a, w["x"][idx], w["y"][idx], rc, box, own)
@@ -225,7 +292,7 @@ def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     keep both in step."""
     from notes.recolour import leaders, nearest
     lq = clean_liquify(rc.get("liquify"))
-    if not lq or lq.get("on") is False or not len(at) or not lq.get("strength", 100.0):
+    if not lq or not lq.get("map") or lq.get("on") is False or not len(at) or not lq.get("strength", 100.0):
         return now
     idx, mid, key = liquify_from(at, rc, box, own)
     if not len(idx):
@@ -396,13 +463,13 @@ def blend(x, y, f):
     def on_grid(d):
         if not d:
             return np.zeros((gy, gx, 2))
-        a = decode(d["grid"], d["map"])
+        a = map_of(d)
         return a if d["grid"] == g else sample(a, u, v)
     a = on_grid(x) * (1 - f) + on_grid(y) * f
     sx = (x or y).get("strength", DEFAULTS["strength"])
     sy = (y or x).get("strength", DEFAULTS["strength"])
-    out = dict(near, grid=list(g), map=encode(a), strength=sx + (sy - sx) * f)
-    return clean_liquify(out)
+    # (the freeze mask: the nearer end's, on its own grid = the one used here)
+    return with_arrays(dict(near, strength=sx + (sy - sx) * f), a, mask_of(near))
 
 
 # ---- brushes ----
@@ -418,9 +485,9 @@ def weight(q, density):
     return np.where(q <= 1.0, 1.0 - f * f * (3 - 2 * f), 0.0)
 
 
-def _reach(a, c, r, J):
+def _reach(shape, c, r, J):
     """The grid points a brush of radius r px at c (colour box units) can touch: (rows slice, cols slice), or None."""
-    gy, gx = a.shape[:2]
+    gy, gx = shape[:2]
     ex = r * float(np.hypot(J[0][0], J[0][1]))
     ey = r * float(np.hypot(J[1][0], J[1][1]))
     i0, i1 = int(np.floor((c[0] - ex) * (gx - 1))), int(np.ceil((c[0] + ex) * (gx - 1)))
@@ -432,27 +499,53 @@ def _reach(a, c, r, J):
     return slice(j0, j1 + 1), slice(i0, i1 + 1)
 
 
+def _under(shape, c, r, J, density):
+    """The grid points under a brush of radius r px at c (colour box units) on a grid of shape (up, across, ...):
+    (rows slice, cols slice, brush strength there, their spots x / y, box units from the middle x / y, screen px from
+    the middle x / y), or None (none under it)."""
+    gy, gx = shape[:2]
+    got = _reach(shape, c, r, J)
+    if got is None:
+        return None
+    rs, cs = got
+    jj, ii = np.mgrid[rs, cs]
+    px, py = ii / (gx - 1), jj / (gy - 1)
+    ux, uy = px - c[0], py - c[1]
+    try:
+        Ji = np.linalg.inv(J)
+    except np.linalg.LinAlgError:
+        return None
+    sx, sy = Ji[0, 0] * ux + Ji[0, 1] * uy, Ji[1, 0] * ux + Ji[1, 1] * uy
+    w = weight(np.hypot(sx, sy) / max(r, 1e-9), density)
+    return rs, cs, w, px, py, ux, uy, sx, sy
+
+
+def mask_dab(m, c, r, J, pressure=50.0, density=50.0, freeze=True):
+    """The freeze mask m (up, across) 0..1 after one Freeze (freeze) / Thaw dab: a new array. Pressure = how much a
+    dab adds / takes away (100 % = all at once), like painting the editors' mask."""
+    m = np.array(m, np.float64)
+    got = _under(m.shape, c, r, np.asarray(J, np.float64), density)
+    if got is None:
+        return m
+    rs, cs, w = got[:3]
+    k = w * min(max(pressure / 100.0, 0.0), 1.0)
+    old = m[rs, cs]
+    m[rs, cs] = old + (1.0 - old) * k if freeze else old * (1.0 - k)
+    return m
+
+
 def dab(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=1, frozen=None):
     """The map a after one brush dab (a new array; a itself never changed). tool: TOOLS. c = the brush middle in
     colour box units, r = its radius in screen px, J = [[dx/dpx, dx/dpy], [dy/dpx, dy/dpy]] (colour box units per
     screen pixel there), pressure / density in %, vec = the mouse's move in px since the last dab (Push), turn = +1 /
-    -1 (Twirl's way round), frozen = the freeze mask (up, across) 0..1 or None."""
+    -1 (Twirl's way round: +1 turns the colours anticlockwise on screen), frozen = the freeze mask (up, across) 0..1
+    or None (frozen spots move less, fully frozen not at all)."""
     a = np.array(a, np.float64)
     J = np.asarray(J, np.float64)
-    got = _reach(a, c, r, J)
+    got = _under(a.shape, c, r, J, density)
     if got is None:
         return a
-    rs, cs = got
-    gy, gx = a.shape[:2]
-    jj, ii = np.mgrid[rs, cs]
-    px, py = ii / (gx - 1), jj / (gy - 1)
-    ux, uy = px - c[0], py - c[1]  # (box units from the middle)
-    try:
-        Ji = np.linalg.inv(J)
-    except np.linalg.LinAlgError:
-        return a
-    sx, sy = Ji[0, 0] * ux + Ji[0, 1] * uy, Ji[1, 0] * ux + Ji[1, 1] * uy  # (screen px from the middle)
-    w = weight(np.hypot(sx, sy) / max(r, 1e-9), density)
+    rs, cs, w, px, py, ux, uy, sx, sy = got
     if frozen is not None:
         w = w * (1.0 - np.clip(frozen[rs, cs], 0.0, 1.0))
     if not w.any():
