@@ -156,7 +156,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         for key in ("Shift_L", "Shift_R", "Control_L", "Control_R"):  # (a straight stroke's line shown / snapped)
             self.bind(f"<KeyPress-{key}>", lambda e: self.liquify_keys(e, True), add="+")
             self.bind(f"<KeyRelease-{key}>", lambda e: self.liquify_keys(e, False), add="+")
-        self.bind("<KeyPress-Escape>", self.liquify_forget, add="+")  # (Esc: the straight stroke's start forgotten)
         bind_double_right(self, self.on_right, self.on_double_right)
         self.bind("<B3-Motion>", self.on_right_drag)
         self.bind("<ButtonRelease-3>", self.on_right_release)
@@ -2352,6 +2351,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 return pane.cancel_placing()
             if self.app.vel.confirm() | self.app.tempo_pane.confirm():  # (done with a velocity / tempo line, like
                 return                                                    # Enter)
+            if self.liquify_forget():  # (a Liquify straight stroke's start placed: that goes first, like any
+                return "break"         # other thing going on)
             busy = (self.draft is not None or self.drag is not None or self.typing is not None or self.app.parts
                     or self.app.stroke is not None)
             busy = self.drop_hz_keys() or busy

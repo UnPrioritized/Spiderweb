@@ -260,10 +260,13 @@ class LiquifyBrush:
         return self.to_xy((end[0], end[1]))
 
     def liquify_forget(self, e=None):
-        """Esc / the window closed or opened: no start for a straight stroke any more."""
-        if getattr(self, "lq_end", None) and not getattr(self, "lq", None):
+        """Esc / the window closed or opened: no start for a straight stroke any more. True: one was placed (shown)."""
+        if self.liquify_start() is not None and not getattr(self, "lq", None):
             self.lq_end = None
             self.draw_liquify_brush()
+            return True
+        self.lq_end = None
+        return False
 
     @staticmethod
     def liquify_aim(a, m, state):
