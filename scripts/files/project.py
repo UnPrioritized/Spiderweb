@@ -354,6 +354,8 @@ class ProjectFiles:
         is left out and self.load_notes says so (tell_load_notes). Running out of memory (or any other error) while
         its notes are made puts the project as it was back (user 2026-10-20: a shape stuck failing at every redraw).
         text: the project as text instead of the file at path (put_back)."""
+        from notes.recolour import forget_kept
+        forget_kept()  # (quick Stir changes' kept work, hunt 11-07)
         self.load_notes = []
         try:
             data, size = read_project(path) if text is None else (json.loads(text), len(text))

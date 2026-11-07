@@ -15,7 +15,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE,
                             MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
-                            ROUND_EDGES, bends,
+                            ROUND_EDGES, bends, forget_kept,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_stack)
@@ -515,8 +515,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         if sts:
             words = [tr("stir.short_" + key) for key in ("polar", "wring", "ripple", "kaleido")
                      if all(s[key] and (key != "kaleido" or s[key] >= 2) for s in sts)]
-            if not words and any(bends(s) for s in sts):
-                words = [mixed]
+            # (a bend only some selected shapes have: "Mixed" after the shared ones, like the Flip line, hunt 11-07)
+            on = lambda s, key: bool(s[key] >= 2 if key == "kaleido" else s[key])
+            if any(any(on(s, key) for s in sts) and not all(on(s, key) for s in sts)
+                   for key in ("polar", "wring", "ripple", "kaleido")):
+                words.append(mixed)
             text = ", ".join(words) or tr("stir.short_off")
             texts["bends"] = text[:1].upper() + text[1:]
             name = self.area_box.get()
@@ -1383,6 +1386,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.call_off(self.hold)
         self.take_typing()
         self.app.stir_window = None
+        forget_kept()  # (what quick Stir changes kept: only needed while the knobs turn, hunt 11-07)
         roll = self.app.roll
         if (roll.drag or ("",))[0] == "rccentre":  # (a Centre point dot held: let go, what it moved kept)
             roll.drag = None

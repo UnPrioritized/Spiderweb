@@ -3043,7 +3043,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         keys, the output file, channel settings and the Domino start stay; BPM and the time signature go back to
         MIDI's 120 and 4/4 (user). Asked first (unsaved work: save it first?). NOTHING SURVIVES (user 2026-10-25:
         Ctrl+Z after New brought the tempo back without the loaded MIDI): like Open, the undo / redo steps go."""
-        boxes = (self.pvar["bpm"].get(), self.project_file)
+        from notes.recolour import forget_kept
+        forget_kept()  # (quick Stir changes' kept work: hunt 11-07, ~0.45 GB on a 3 M-note shape)
+        boxes =(self.pvar["bpm"].get(), self.project_file)
         try:
             usual = calc(boxes[0]) == 120
         except ValueError:

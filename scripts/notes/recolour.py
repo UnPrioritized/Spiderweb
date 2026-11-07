@@ -729,8 +729,11 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
         key = (json.dumps({k: v for k, v in rc.items() if k != "stir"}, sort_keys=True), held, gate,
                None if own is None else tuple(own))
         got = _BEFORE_STIR.get("got")
-        if got is None or got[0] is not notes or got[1] is not tracks or got[2] != key:
-            got = (notes, tracks, key, _before_stir(notes, tracks, rc, held, gate, own))
+        if got is None or got[0]() is not notes or got[1]() is not tracks or got[2] != key:
+            # (weak links: the shape's notes gone = the kept work goes too, hunt 11-07: ~150 MB a million notes stayed)
+            gone = lambda ref: any(r is ref for r in _BEFORE_STIR.get("got", ())[:2]) and forget_kept()
+            got = (weakref.ref(notes, gone), weakref.ref(tracks, gone), key,
+                   _before_stir(notes, tracks, rc, held, gate, own))
             _BEFORE_STIR["got"] = got
         b = got[3]
         if b is None:
@@ -742,7 +745,14 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
 
 
 BEFORE_STIR_LEAST = 100_000  # (notes: smaller shapes are quick anyway, no memory kept for them)
-_BEFORE_STIR = {}  # "got": (notes, tracks, key, _before_stir's result) of the last big stirred shape
+_BEFORE_STIR = {}  # "got": (weak notes, weak tracks, key, _before_stir's result) of the last big stirred shape
+
+
+def forget_kept():
+    """Let go of everything kept for quick Stir changes (New / Open / the Stir window closed / the notes gone)."""
+    _BEFORE_STIR.clear()
+    _SORTED.clear()
+    _ROWS.clear()
 
 
 def _before_stir(notes, tracks, rc, held, gate, own):
@@ -1997,6 +2007,14 @@ def kept_apart(notes, old, new, colours, pick):
     if not over.any():
         return new
     new = new.copy()
+    # (a note whose colour before isn't one of these (Mix across sets + a Stir's "Stay": it came from another set)
+    # falls back on its dice's colour here, never its own: the compiled walk read past the colour list = every
+    # note gone, and the plain one put it back in the other set, hunt 11-07)
+    colours = np.asarray(colours)
+    nc = len(colours)
+    there = colours[np.clip(np.searchsorted(colours, old), 0, nc - 1)] == old
+    if not there.all():
+        old = np.where(there, old, colours[np.minimum((np.asarray(pick) * nc).astype(np.int64), nc - 1)])
     burst = np.cumsum(~over) - 1  # (each note's burst: notes on a key each overlapping one before it)
     size = np.bincount(burst)
     pair = over & (size[burst] == 2)  # the second note of a burst of two

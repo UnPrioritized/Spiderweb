@@ -366,6 +366,15 @@ class Pair:
                 tb = ta + (sy[j]["tilt"] - ta + 180.0) % 360.0 - 180.0
                 shift = -360.0 if max(ta, tb) > 360 else 360.0 if min(ta, tb) < -360 else 0.0  # (kept in +-360)
                 sx[j], sy[j] = dict(sx[j], tilt=ta + shift), dict(sy[j], tilt=tb + shift)
+                # (Twist along a line's angle the short way too; Kaleidoscope's turn the short way within one slice
+                # (the pattern repeats every 360 / slices), hunt 11-07: 170 -> -170 swung through 0)
+                same = sx[j]["kaleido"] == sy[j]["kaleido"] and sx[j]["kaleido"] >= 2
+                for key, turn in (("wring_angle", 360.0), ("kaleido_turn", 360.0 / sx[j]["kaleido"] if same
+                                                            else 360.0)):
+                    ta = sx[j][key]
+                    tb = ta + (sy[j][key] - ta + turn / 2) % turn - turn / 2
+                    shift = -360.0 if max(ta, tb) > 360 else 360.0 if min(ta, tb) < -360 else 0.0
+                    sx[j], sy[j] = dict(sx[j], **{key: ta + shift}), dict(sy[j], **{key: tb + shift})
                 uses = lambda s: (bool(s["round"] and s["reach"] is not None), bool(s["spin"]))
                 if uses(sx[j]) != uses(sy[j]):
                     seen = (sx[j] if f < 0.5 else sy[j])["seen"]
