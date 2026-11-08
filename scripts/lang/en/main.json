@@ -2666,7 +2666,7 @@
  "help.path.words": "copy copies repeat array duplicate along path line curve arc trail steps stairs grow shrink spacing formula wave flip mirror keep inside range plain",
  "help.strum.title": "Strum",
  "help.strum.tip": "Makes the notes of each chord start one after another, like strumming a guitar: a straight edge of notes becomes a slope or a curve. The shape stays as drawn. Accept keeps it, X puts the notes back.",
- "help.strum.words": "strum guitar arpeggio slope stairs staircase lean slant chord spread humanize delay velocity fade alternate up down chop",
+ "help.strum.words": "strum guitar arpeggio slope stairs staircase lean slant chord spread humanize delay velocity fade alternate up down chop colour color cycle wrap stripes keys per step edges cut",
  "help.chop.title": "Chop",
  "help.chop.tip": "Cuts every note into a rhythm: even pieces, swing, off-beat, or one you draw. The shape stays as drawn. Accept keeps it, X puts the notes back.",
  "help.by_snap.title": "Notes by snap",

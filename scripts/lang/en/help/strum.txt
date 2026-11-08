@@ -25,3 +25,9 @@ Start and End each have a box at the top to switch that whole part on or off.
 Chop chords: wherever a note starts while other notes are still held, those notes are cut there, and the pieces strum again with it.
 
 Alternate direction: every other chord strums the other way (notes on their own don't count).
+
+Keys per step: how many notes of a chord move together on each step of the strum (their ends and velocity too). 1 = each note its own step. Put a different number in the second box and the steps grow (or shrink) evenly along the chord, for example 1 to 10.
+
+At the shape's edges: what happens to notes the strum moves past the shape's own start or end. Off: they stick out, as before. Cut at the edges: what sticks out is dropped. Wrap back in: it comes back in at the other end (a note crossing the edge is cut in two), so the shape stays a full block.
+
+Colour cycle: strum a block of coloured columns (each column a chord, a colour each) with Wrap back in, and the colours run through the block in slanted stripes while the block stays full. Keys per step sets how steep they are. With "Repeated colours get new channels" on (under Multi channel), a shape with Colours takes new channels each time its notes come round again, as if the block went on forever, so no colour repeats in a player that colours by track.
