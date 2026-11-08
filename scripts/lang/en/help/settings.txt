@@ -2,7 +2,7 @@ Help → Settings… (the menu bar at the top) opens Settings: how Spiderweb its
 
 General: how often to look for a new version (and Check now), tips on or off, Show all tips again, and Open .spwb files with Spiderweb (double-clicking a project opens it; press it again if you move the Spiderweb folder).
 
-Piano roll: Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; see Help → View). Keep notes made there: shapes keep the notes they make in that space, drawn see-through (Opacity: how strongly, 1 to 100 %). They're kept only in the project file, never exported or played.
+Piano roll: Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; see Help → View). Keep notes made there: shapes keep the notes they make in that space, drawn see-through (Opacity: how strongly, 1 to 100 %). They're kept only in the project file, unless Wrap them around puts them back onto the keys in exports, Domino copies and playback; Show wrapped notes shows where they land. See Help → Notes past the keys.
 
 Look:
 
