@@ -18,11 +18,11 @@
 use std::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::slice;
-use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Once, OnceLock};
 
 /// The library's version of this C edge: scripts/files/native.py refuses a library with another one.
-pub const ABI: i64 = 4;
+pub const ABI: i64 = 5;
 pub const FAILED: i64 = -1;
 pub const NO_MEMORY: i64 = -2;
 pub const NEED_COPY: i64 = -3;
@@ -313,8 +313,43 @@ unsafe impl Zero for u8 {}
 unsafe impl Zero for i32 {}
 unsafe impl Zero for u64 {}
 
+/// NumPy's array type (recorded by sw_probe from the real arrays Python checks at load) and, once the extension
+/// module loaded, Python's PyType_IsSubtype (an array subclass). Anything else handed over where an array goes
+/// (a number, None, a list: a caller's mistake) has no array struct behind its head: reading one would follow
+/// garbage and close the program, so it's NEED_COPY (native.py then refuses it / its slower loop runs).
+static ARRAY_TYPE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+pub(crate) static IS_SUB: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Is o a NumPy array (or a subclass)? Every Python object starts with its refcount + type, so reading the type is
+/// safe whatever o is.
+#[inline(always)]
+pub(crate) unsafe fn is_array(o: *const Arr) -> bool {
+    if o.is_null() {
+        return false;
+    }
+    let t = (*o)._type as *mut c_void;
+    let at = ARRAY_TYPE.load(Ordering::Relaxed);
+    if t == at {
+        return !at.is_null();
+    }
+    is_sub(t, at)
+}
+
+#[inline(never)]
+unsafe fn is_sub(t: *mut c_void, at: *mut c_void) -> bool {
+    let f = IS_SUB.load(Ordering::Relaxed);
+    if at.is_null() || f.is_null() || t.is_null() {
+        return false;
+    }
+    let f: unsafe extern "C" fn(*mut c_void, *mut c_void) -> std::ffi::c_int = std::mem::transmute(f);
+    f(t, at) != 0
+}
+
 /// A 1-D array's (place, length) when it holds T side by side in this processor's byte order; else NEED_COPY.
 unsafe fn parts<T: Kind>(o: *const Arr) -> Result<(*mut T, usize), i64> {
+    if !is_array(o) {
+        return Err(NEED_COPY);
+    }
     let a = &*o;
     if a.nd != 1 || a.descr.is_null() {
         return Err(NEED_COPY);
@@ -332,6 +367,9 @@ unsafe fn parts<T: Kind>(o: *const Arr) -> Result<(*mut T, usize), i64> {
 
 /// An N-D array's (place, shape, items) when it holds T in C order, side by side; else NEED_COPY.
 unsafe fn parts_nd<T: Kind, const N: usize>(o: *const Arr) -> Result<(*mut T, [usize; N], usize), i64> {
+    if !is_array(o) {
+        return Err(NEED_COPY);
+    }
     let a = &*o;
     if a.nd != N as i32 || a.descr.is_null() {
         return Err(NEED_COPY);
@@ -373,7 +411,7 @@ pub(crate) unsafe fn nd<'a, T: Kind, const N: usize>(o: *const Arr) -> Result<Nd
 }
 
 pub(crate) unsafe fn nd_mut<'a, T: Kind, const N: usize>(o: *const Arr) -> Result<NdMut<'a, T, N>, i64> {
-    if (*o).flags & WRITEABLE == 0 {
+    if !is_array(o) || (*o).flags & WRITEABLE == 0 {
         return Err(NEED_COPY);
     }
     let (p, sh, n) = parts_nd::<T, N>(o)?;
@@ -388,7 +426,7 @@ pub(crate) unsafe fn arr<'a, T: Kind>(o: *const Arr) -> Result<&'a [T], i64> {
 
 /// A 1-D array to write into (NEED_COPY when it can't be written).
 pub(crate) unsafe fn arr_mut<'a, T: Kind>(o: *const Arr) -> Result<&'a mut [T], i64> {
-    if (*o).flags & WRITEABLE == 0 {
+    if !is_array(o) || (*o).flags & WRITEABLE == 0 {
         return Err(NEED_COPY);
     }
     let (p, n) = parts::<T>(o)?;
@@ -440,6 +478,9 @@ pub unsafe extern "C" fn sw_kinds(masks: *const i64, n: i64) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn sw_probe(o: *const Arr, out: *mut i64) -> i64 {
     let a = &*o;
+    // (only real arrays come here, native.probe's: their type = NumPy's array type, kept for is_array)
+    let _ = ARRAY_TYPE.compare_exchange(std::ptr::null_mut(), a._type as *mut c_void, Ordering::Relaxed,
+                                        Ordering::Relaxed);
     let out = slice::from_raw_parts_mut(out, 5);
     out[0] = a.data as i64;
     out[1] = if a.nd >= 1 { *a.dims as i64 } else { -1 };

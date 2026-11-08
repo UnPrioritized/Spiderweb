@@ -66,6 +66,7 @@ extern "C" {
     fn PyFloat_FromDouble(v: f64) -> *mut PyObj;
     fn Py_IncRef(o: *mut PyObj);
     fn Py_DecRef(o: *mut PyObj);
+    fn PyType_IsSubtype(a: *mut c_void, b: *mut c_void) -> c_int;
 }
 
 // ---------------------------------------------------------------- loops that hand back new arrays
@@ -166,8 +167,27 @@ unsafe fn run_outs(f: impl FnOnce() -> Outs) -> *mut PyObj {
 }
 
 unsafe fn len_of(o: *mut PyObj) -> isize {
+    if !crate::is_array(o as *const Arr) {
+        return 0;
+    }
     let a = &*(o as *const Arr);
     if a.nd >= 1 { *a.dims } else { 0 }
+}
+
+/// How many items the biggest array among the arguments holds (a number / anything else: 0).
+unsafe fn most_items(args: &[*mut PyObj]) -> isize {
+    let mut most = 0isize;
+    for &o in args {
+        if crate::is_array(o as *const Arr) {
+            let a = &*(o as *const Arr);
+            let mut t: isize = if a.nd >= 1 { 1 } else { 0 };
+            for k in 0..a.nd.max(0) as usize {
+                t = t.saturating_mul((*a.dims.add(k)).max(0));
+            }
+            most = most.max(t);
+        }
+    }
+    most
 }
 
 unsafe fn flag(o: *mut PyObj) -> i64 {
@@ -305,16 +325,18 @@ impl<'a> FromPy<'a> for bool {
 /// by native.py) running inner at this processor's level, the GIL let go (the window keeps going; Numba's nogil
 /// loops let it go too), a panic caught (FAILED). inner must return the i64 the Python side expects (>= 0).
 /// `name(args) -> arrays => inner;`: inner returns Outs (new arrays / numbers), handed back as a tuple.
+/// The GIL is let go only when the biggest array holds GIL_FREE items or more (small calls keep it: taking it back
+/// can wait a few ms while another thread runs Python).
 macro_rules! py_ret {
     (; $inner:path; $($a:ident: $t:ty),*) => {
         level_builds!(fn leveled($($a: $t),*) -> i64 => $inner);
-        unsafe fn go($($a: $t),*) -> *mut PyObj {
-            run(true, move || crate::guard(|| leveled($($a),*)))
+        unsafe fn go(big: bool, $($a: $t),*) -> *mut PyObj {
+            run(big, move || crate::guard(|| leveled($($a),*)))
         }
     };
     (arrays; $inner:path; $($a:ident: $t:ty),*) => {
         level_builds!(fn leveled($($a: $t),*) -> Outs => $inner);
-        unsafe fn go($($a: $t),*) -> *mut PyObj {
+        unsafe fn go(_big: bool, $($a: $t),*) -> *mut PyObj {
             run_outs(move || leveled($($a),*))
         }
     };
@@ -345,7 +367,7 @@ macro_rules! py_loops {
                         k += 1;
                     )*
                     let _ = k;
-                    go($($a),*)
+                    go(most_items(a) >= GIL_FREE, $($a),*)
                 }
             }
             )*
@@ -390,5 +412,6 @@ static mut DEF: ModuleDef = ModuleDef {
 pub unsafe extern "C" fn PyInit_spiderweb_loops() -> *mut PyObj {
     let d = addr_of_mut!(DEF);
     (*d).methods = addr_of_mut!(METHODS) as *mut MethodDef;
+    crate::IS_SUB.store(PyType_IsSubtype as *mut c_void, Ordering::Relaxed); // (array subclasses: lib.rs is_array)
     PyModule_Create2(d, 3)
 }

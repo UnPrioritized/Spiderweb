@@ -31,7 +31,7 @@ from files.about import HERE
 from files.native_wraps import NEEDS, Wraps
 from files.system import MAC, WINDOWS
 
-ABI = 4  # (the library's sw_abi(): another one = not used)
+ABI = 5  # (the library's sw_abi(): another one = not used)
 # The library's element kinds (lib.rs K_*, the same order): (NumPy kind letter, bytes, the dtype copies are made in)
 KIND_TYPES = [("i", 8, np.int64), ("f", 8, np.float64), ("u", 1, np.uint8), ("i", 1, np.int8), ("i", 2, np.int16),
               ("u", 2, np.uint16), ("i", 4, np.int32), ("u", 4, np.uint32), ("u", 8, np.uint64), ("f", 4, np.float32),
@@ -156,7 +156,7 @@ def load_ext(path):
 
 def why():
     """Why there's no library ("" when there is one)."""
-    return "" if _dll else (_why or "not loaded yet")
+    return "" if _dll and _ext else (_why or "not loaded yet")
 
 
 def level_name():
@@ -165,9 +165,15 @@ def level_name():
 
 
 def over():
-    """The loops the program uses (Loops, fastloops' plain twins behind them); None without the library."""
+    """The loops the program uses (Loops, fastloops' plain twins behind them); None without the library, and None
+    when only its ctypes part loaded (the extension calls failing): most loops exist only as extension calls, so
+    Loops would put the slow plain twins in their place; Numba's loops / the NumPy code are far quicker."""
+    global _why
     d = load()
     if not d:
+        return None
+    if _ext is None:
+        _why = "its extension calls didn't load"
         return None
     from files import fastloops
     return Loops(fastloops, d, _ext)
@@ -227,6 +233,8 @@ def plain_call(f, args):
             plain.append(float(a) if k == "f64" else bool(a) if k == "bool" else a)
             continue
         dtype, writes = k
+        if not isinstance(a, (np.ndarray, list, tuple)):  # (a number / None where an array goes: refused, never
+            return NEED_COPY                               # turned into a one-item array)
         a2 = np.asarray(a)
         if a2.dtype != dtype and not np.can_cast(a2.dtype, dtype, "safe"):
             return NEED_COPY
@@ -277,6 +285,48 @@ def limiter(dll):
     return _lim[dll]
 
 
+_BYTES = np.dtype(np.uint8)
+
+
+def _as_bytes(a):
+    """A byte array as plain Python reads bytes (memoryview: each item a Python int, as the no-loops path hands
+    them over); anything else as it is."""
+    if isinstance(a, np.ndarray) and a.dtype == _BYTES and a.ndim == 1 and a.flags.c_contiguous:
+        return memoryview(a)
+    return a
+
+
+class PlainTwins:
+    """fastloops' plain-Python twins as a refused call uses them when Numba isn't there. They were written for
+    Numba, which reads every array item as a 64-bit number; plain Python under NumPy 2 keeps a byte as a uint8
+    (shifts overflow, Load MIDI could get stuck) and a small whole number as its own kind (sums past it fail). So
+    the loops in BYTE_LOOPS get their byte arrays as memoryviews (as the no-loops path calls midi_scan / midi_index)
+    and those in WIDE_LOOPS their small whole-number arrays read as int64 copies (only ones the loop never writes).
+    Same answers as Numba's (test plain_twins_same); every other name is the twin as it is."""
+
+    BYTE_LOOPS = frozenset(("midi_walk", "midi_rewrite", "midi_note_ticks", "midi_busy_hits", "midi_gather",
+                            "midi_index", "midi_cover", "midi_cover_many"))
+    WIDE_LOOPS = {"order_rects": {2}, "order_screen": {2}, "last_on_pixels": {2}}  # (name: places of read-only
+    # small whole-number arrays: the notes' keys, int16)
+
+    def __init__(self, base):
+        self._base = base
+
+    def __getattr__(self, name):
+        f = getattr(self._base, name)
+        if name in self.BYTE_LOOPS:
+            def bytes_twin(*args):
+                return f(*(_as_bytes(a) for a in args))
+            return bytes_twin
+        wide = self.WIDE_LOOPS.get(name)
+        if wide:
+            def wide_twin(*args):
+                return f(*(np.asarray(a, np.int64) if k in wide and isinstance(a, np.ndarray) else a
+                           for k, a in enumerate(args)))
+            return wide_twin
+        return f
+
+
 class Loops(Wraps):
     """fastloops with the library's loops in their place (any other name: fastloops' own). The first try hands
     the arrays over as they are (cheap); NEED_COPY = plain copies, once more."""
@@ -285,11 +335,11 @@ class Loops(Wraps):
         mine = {n for c in type(self).__mro__ for n in c.__dict__ if not n.startswith("_")}
         if base is not None:  # (fastloops' names copied in: a plain lookup, as quick as the module's own)
             self.__dict__.update((n, v) for n, v in vars(base).items() if not n.startswith("__") and n not in mine)
+        self._plain = PlainTwins(base) if base is not None else None
         for name, needs in NEEDS.items():  # (a loop the library hasn't got: fastloops' own)
             if ext is None or not all(hasattr(ext, x) for x in needs):
                 if base is not None and hasattr(base, name):
-                    self.__dict__[name] = getattr(base, name)
-        self._plain = base
+                    self.__dict__[name] = getattr(self._plain, name)
         self.dll = dll
         self.x = ext
         if ext is not None:  # (the extension's functions take the same arguments as the ctypes ones)
