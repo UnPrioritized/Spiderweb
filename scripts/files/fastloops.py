@@ -419,19 +419,62 @@ def overlap_order(notes):
             k = j + 1
             while k < b and notes[order[k], 0] == notes[order[j], 0]:
                 k += 1
-            for p in range(j + 1, k):
-                v = order[p]
-                q = p - 1
-                while q >= j:
-                    u = order[q]
-                    if notes[u, 3] > notes[v, 3] or (notes[u, 3] == notes[v, 3] and notes[u, 1] < notes[v, 1]):
-                        order[q + 1] = u
-                        q -= 1
-                    else:
-                        break
-                order[q + 1] = v
+            if k - j > 1:
+                _tie_order(notes, order, j, k)
             j = k
     return group, order
+
+
+TIE_SORT_MOST = 32  # (a same-start run longer than this: merge sorted; insertion went n * n on stacked copies)
+
+
+@njit(nogil=True)
+def _tie_order(notes, order, j, k):
+    """order[j:k] (one start) by velocity, quietest first, then the longest first; alike ones kept in their order.
+    Short runs: insertion; long ones: a merge sort (the same order: 80,000 copies on one tick took 2.9 s)."""
+    if k - j <= TIE_SORT_MOST:
+        for p in range(j + 1, k):
+            v = order[p]
+            q = p - 1
+            while q >= j:
+                u = order[q]
+                if notes[u, 3] > notes[v, 3] or (notes[u, 3] == notes[v, 3] and notes[u, 1] < notes[v, 1]):
+                    order[q + 1] = u
+                    q -= 1
+                else:
+                    break
+            order[q + 1] = v
+        return
+    n = k - j
+    src = order[j:k].copy()
+    dst = np.empty(n, np.int64)
+    width = 1
+    while width < n:
+        for lo in range(0, n, 2 * width):
+            mid = min(lo + width, n)
+            hi = min(lo + 2 * width, n)
+            p, q, o = lo, mid, lo
+            while p < mid and q < hi:
+                u, v = src[p], src[q]
+                # (v first only when strictly before u: quieter, or as loud and longer)
+                if notes[v, 3] < notes[u, 3] or (notes[v, 3] == notes[u, 3] and notes[v, 1] > notes[u, 1]):
+                    dst[o] = v
+                    q += 1
+                else:
+                    dst[o] = u
+                    p += 1
+                o += 1
+            while p < mid:
+                dst[o] = src[p]
+                p += 1
+                o += 1
+            while q < hi:
+                dst[o] = src[q]
+                q += 1
+                o += 1
+        src, dst = dst, src
+        width *= 2
+    order[j:k] = src
 
 
 @njit(nogil=True)

@@ -3,6 +3,7 @@
 //! _fit_blocks_n, ...). The same sums in the same order, the same float32 rounding, as those.
 use crate::maths::{f2i, fdiv, fmodi, imax, imin, pmax, pmin, rint};
 use crate::pyext::{Out, Outs};
+use crate::{filled, need, room, zeros};
 
 const TOP: i64 = 0xFFFFFF;
 
@@ -87,7 +88,7 @@ fn side_next(mut u: i64, way: i64) -> i64 {
 fn near_pair_n(n: i64, target: i64, reach: i64) -> (i64, i64, i64, i64) {
     let q = target as f64 / n as f64;
     let ru = reach.max(0) as usize;
-    let mut downs = vec![0i64; ru];
+    let mut downs = vec![0i64; ru]; // (a small search range, not the notes)
     let mut ups = vec![0i64; ru];
     let v = side_next(f2i(q.floor()), -1);
     if v < 0 {
@@ -241,7 +242,7 @@ fn safe_side_n(start: i64, way: i64, reach: i64, safe_reach: i64, out: &mut [i64
 fn full_pair_n(n: i64, target: i64, reach: i64, safe_reach: i64) -> (i64, i64, i64, i64) {
     let q = target as f64 / n as f64;
     let ru = reach.max(0) as usize;
-    let mut downs = vec![0i64; ru];
+    let mut downs = vec![0i64; ru]; // (a small search range, not the notes)
     let mut ups = vec![0i64; ru];
     let nd = safe_side_n(f2i(q.floor()), -1, reach, safe_reach, &mut downs);
     let nu = safe_side_n(f2i(q.ceil()), 1, reach, safe_reach, &mut ups);
@@ -323,13 +324,13 @@ fn fit_exact_n(ideal: &[f64], n: i64, target: i64, safe_reach: i64, pair_reach: 
         }
     }
     let scale = target as f64 / (0.0 + pw_sum(ideal, 0, nu));
-    let mut want = vec![0f64; nu];
+    let mut want = need!(zeros::<f64>(nu));
     for i in 0..nu {
         want[i] = ideal[i] * scale;
         out[i] = nearest1n(pmin(pmax(want[i], 1.0), TOP as f64), safe_reach);
     }
     let nb = imax(0, n - 2) as usize;
-    let mut nxt = vec![0i64; nb.max(1)];
+    let mut nxt = need!(zeros::<i64>(nb.max(1)));
     for _ in 0..8 {
         let s: i64 = out[..nb].iter().sum();
         let rest = target - s - f2i(0.0 + pw_sum(&want, nb, nu - nb));
@@ -375,7 +376,7 @@ fn fit_blocks_n(drawn: &[i64], a: i64, n0: i64, n1: i64, kj: i64, target: i64, e
                 pair_reach: i64, out: &mut [i64]) -> i64 {
     let n = kj;
     let nu = n.max(0) as usize;
-    let mut ideal = vec![0f64; nu];
+    let mut ideal = need!(zeros::<f64>(nu));
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for i in 0..nu {
         let x = drawn[(n0 - a + fdiv(i as i64 * (n1 - n0), kj)) as usize] as f64;
@@ -401,7 +402,7 @@ fn fit_blocks_n(drawn: &[i64], a: i64, n0: i64, n1: i64, kj: i64, target: i64, e
     }
     let nb = fdiv(n + every - 1, every) as usize;
     let eu = every as usize;
-    let mut want = vec![0f64; nb];
+    let mut want = need!(zeros::<f64>(nb));
     for b in 0..nb {
         let ln = imin(every, n - (b * eu) as i64);
         want[b] = ideal[b * eu] * ln as f64;
@@ -431,7 +432,7 @@ fn fit_blocks_n(drawn: &[i64], a: i64, n0: i64, n1: i64, kj: i64, target: i64, e
         put_pair(&mut out[tail_at..], last, pa, pk, pb);
         return 0;
     }
-    let flat = vec![rest as f64 / last as f64; last.max(0) as usize];
+    let flat = need!(filled(last.max(0) as usize, rest as f64 / last as f64));
     if fit_exact_n(&flat, last, rest, safe_reach, pair_reach, &mut out[tail_at..]) == 0 {
         return 0;
     }
@@ -532,7 +533,7 @@ pub fn gap_plan(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i6
                     if code == 0 {
                         put_pair(got, c, pa, pk, pb);
                     } else {
-                        let flat = vec![tj as f64 / c as f64; c.max(0) as usize];
+                        let flat = need!(filled(c.max(0) as usize, tj as f64 / c as f64));
                         if fit_exact_n(&flat, c, tj, safe_reach, pair_reach, got) != 0 {
                             continue;
                         }
@@ -611,7 +612,7 @@ pub fn gap_ticks_into(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was
         return crate::FAILED;
     }
     let c = gap_anchors(a, e, ts, bs, p, n);
-    let nd = gap_rest(a, e, ts, drawn, was, u, most, p, &n[..c], total, k, dense);
+    let nd = need!(gap_rest(a, e, ts, drawn, was, u, most, p, &n[..c], total, k, dense));
     c as i64 | (nd as i64) << 32
 }
 
@@ -620,14 +621,14 @@ pub fn gap_ticks_into(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was
 #[inline(always)]
 pub fn gap_ticks(a: i64, e: i64, ts: &[i64], bs: &[i64], drawn: &[i64], was: &[i64], u: i64, most: i64) -> Outs {
     let (p, room) = gap_places(a, e, ts, bs);
-    let mut n = vec![0i64; room];
+    let mut n = need!(zeros::<i64>(room));
     let c = gap_anchors(a, e, ts, bs, p, &mut n);
     n.truncate(c);
     let g = c - 1;
-    let mut total = vec![0i64; g];
-    let mut k = vec![0i64; g];
-    let mut dense = vec![0i64; g];
-    let nd = gap_rest(a, e, ts, drawn, was, u, most, p, &n, &mut total, &mut k, &mut dense);
+    let mut total = need!(zeros::<i64>(g));
+    let mut k = need!(zeros::<i64>(g));
+    let mut dense = need!(zeros::<i64>(g));
+    let nd = need!(gap_rest(a, e, ts, drawn, was, u, most, p, &n, &mut total, &mut k, &mut dense));
     dense.truncate(nd);
     Ok(vec![Out::I64(n, 0), Out::I64(total, 0), Out::I64(k, 0), Out::I64(dense, 0)])
 }
@@ -661,10 +662,10 @@ fn gap_anchors(a: i64, e: i64, ts: &[i64], bs: &[i64], p: [usize; 4], n: &mut [i
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn gap_rest(a: i64, e: i64, ts: &[i64], drawn: &[i64], was: &[i64], u: i64, most: i64, p: [usize; 4], n: &[i64],
-            total: &mut [i64], k: &mut [i64], dense: &mut [i64]) -> usize {
+            total: &mut [i64], k: &mut [i64], dense: &mut [i64]) -> Result<usize, i64> {
     let [i0, i1, _, _] = p;
     let c = n.len();
-    let mut note = vec![false; c];
+    let mut note = need!(zeros::<bool>(c));
     let mut jj = i0;
     for i in 0..c {
         while jj < i1 && ts[jj] < n[i] {
@@ -675,7 +676,7 @@ fn gap_rest(a: i64, e: i64, ts: &[i64], drawn: &[i64], was: &[i64], u: i64, most
     let span = (e - a).max(0) as usize;
     // (the running sums made as they're worked out: no zeroing first, no check a step; drawn[..span] panics when
     // too short = Numba's own loop, which reads past it)
-    let mut sums: Vec<f64> = Vec::with_capacity(span + 1);
+    let mut sums: Vec<f64> = need!(room(span + 1));
     sums.push(0.0);
     let mut s = 0.0;
     sums.extend(drawn[..span].iter().map(|&v| {
@@ -706,5 +707,5 @@ fn gap_rest(a: i64, e: i64, ts: &[i64], drawn: &[i64], was: &[i64], u: i64, most
         total[i] = tot;
         k[i] = imin(imax(kk, least), tot);
     }
-    nd
+    Ok(nd)
 }

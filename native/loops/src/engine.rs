@@ -4,7 +4,8 @@
 use std::cell::RefCell;
 
 use crate::maths::imax;
-use crate::{all_below, rd, try_zeros, wr, Nd, NdMut, NO_MEMORY};
+use crate::{all_below, copied, filled, gathered, grow, need, rd, room, try_zeros, wr, zeros, Nd, NdMut,
+            NO_MEMORY};
 
 thread_local! {
     /// Results whose size isn't known before the loop runs (clash_pairs): kept here until take2 copies them out
@@ -26,21 +27,22 @@ pub fn take2(a: &mut [i64], b: &mut [i64]) -> i64 {
 
 /// fastloops._merge_runs: order[a:b] sorted by start (notes' column 0), stable.
 #[inline(always)]
-fn merge_runs(nt: &[i64], nc: usize, order: &mut [i64], a: usize, b: usize) {
+fn merge_runs(nt: &[i64], nc: usize, order: &mut [i64], a: usize, b: usize) -> Result<(), i64> {
     let n = b - a;
-    let mut idx: Vec<i64> = order[a..b].to_vec();
-    let mut s: Vec<i64> = idx.iter().map(|&i| nt[i as usize * nc]).collect();
+    let mut idx: Vec<i64> = copied(&order[a..b])?;
+    let mut s: Vec<i64> = gathered(idx.iter().map(|&i| nt[i as usize * nc]))?;
     let mut bounds = vec![0usize];
     for q in 1..n {
         if s[q] < s[q - 1] {
-            bounds.push(q);
+            grow(&mut bounds, q)?;
         }
     }
-    bounds.push(n);
-    let mut idx2 = vec![0i64; n];
-    let mut s2 = vec![0i64; n];
+    grow(&mut bounds, n)?;
+    let mut idx2: Vec<i64> = zeros(n)?;
+    let mut s2: Vec<i64> = zeros(n)?;
     while bounds.len() > 2 {
-        let mut new = vec![0usize];
+        let mut new: Vec<usize> = room(bounds.len() / 2 + 2)?;
+        new.push(0);
         let mut r = 0;
         while r < bounds.len() - 1 {
             let lo = bounds[r];
@@ -86,7 +88,40 @@ fn merge_runs(nt: &[i64], nc: usize, order: &mut [i64], a: usize, b: usize) {
         std::mem::swap(&mut s, &mut s2);
     }
     order[a..b].copy_from_slice(&idx);
+    Ok(())
 }
+
+/// A same-start run order[j..k] put in fastloops' order (the quietest first, then the longest first; else as it
+/// was = by note number, as the runs come in ascending note order): an insertion sort for short runs, an in-place
+/// sort with the note number as the last key for long ones (insertion went n * n with many stacked copies: 80,000
+/// copies on one tick took 2.9 s; the same order comes out).
+#[inline(always)]
+fn tie_order(nt: &[i64], nc: usize, order: &mut [i64], j: usize, k: usize) {
+    let col = |i: i64, c: usize| nt[i as usize * nc + c];
+    if k - j > TIE_SORT_MOST {
+        order[j..k].sort_unstable_by(|&u, &v| {
+            col(u, 3).cmp(&col(v, 3)).then(col(v, 1).cmp(&col(u, 1))).then(u.cmp(&v))
+        });
+        return;
+    }
+    for p in j + 1..k {
+        let v = order[p];
+        let mut q = p as i64 - 1;
+        while q >= j as i64 {
+            let u = order[q as usize];
+            if col(u, 3) > col(v, 3) || (col(u, 3) == col(v, 3) && col(u, 1) < col(v, 1)) {
+                order[q as usize + 1] = u;
+                q -= 1;
+            } else {
+                break;
+            }
+        }
+        order[(q + 1) as usize] = v;
+    }
+}
+
+/// Runs longer than this get the in-place sort (fastloops.TIE_SORT_MOST, the same).
+const TIE_SORT_MOST: usize = 32;
 
 /// fastloops.overlap_order into group / order (len(notes) each) -> 1, or 0 = the ids too spread out (Numba gives
 /// two empty arrays then).
@@ -109,8 +144,8 @@ pub fn overlap_order(notes: Nd<i64, 2>, group: &mut [i64], order: &mut [i64]) ->
     if n == 0 || lo < 0 || hi + 1 > 4 * n as i64 + 65536 {
         return 0;
     }
-    let mut seen = vec![-1i64; (hi + 1) as usize];
-    let mut first = vec![0i64; n + 1];
+    let mut seen: Vec<i64> = need!(filled((hi + 1) as usize, -1i64));
+    let mut first: Vec<i64> = need!(zeros(n + 1));
     let mut groups = 0i64;
     for i in 0..n {
         let g = gid(i) as usize;
@@ -125,7 +160,7 @@ pub fn overlap_order(notes: Nd<i64, 2>, group: &mut [i64], order: &mut [i64]) ->
     for g in 0..ng {
         first[g + 1] += first[g];
     }
-    let mut at: Vec<i64> = first[..ng].to_vec();
+    let mut at: Vec<i64> = need!(copied(&first[..ng]));
     for i in 0..n {
         let g = group[i] as usize;
         order[at[g] as usize] = i as i64;
@@ -136,7 +171,7 @@ pub fn overlap_order(notes: Nd<i64, 2>, group: &mut [i64], order: &mut [i64]) ->
         let (a, b) = (first[g] as usize, first[g + 1] as usize);
         for j in a + 1..b {
             if col(order[j], 0) < col(order[j - 1], 0) {
-                merge_runs(nt, nc, order, a, b);
+                need!(merge_runs(nt, nc, order, a, b));
                 break;
             }
         }
@@ -146,19 +181,8 @@ pub fn overlap_order(notes: Nd<i64, 2>, group: &mut [i64], order: &mut [i64]) ->
             while k < b && col(order[k], 0) == col(order[j], 0) {
                 k += 1;
             }
-            for p in j + 1..k {
-                let v = order[p];
-                let mut q = p as i64 - 1;
-                while q >= j as i64 {
-                    let u = order[q as usize];
-                    if col(u, 3) > col(v, 3) || (col(u, 3) == col(v, 3) && col(u, 1) < col(v, 1)) {
-                        order[q as usize + 1] = u;
-                        q -= 1;
-                    } else {
-                        break;
-                    }
-                }
-                order[(q + 1) as usize] = v;
+            if k - j > 1 {
+                tie_order(nt, nc, order, j, k);
             }
             j = k;
         }
@@ -524,22 +548,23 @@ pub fn clash_pairs(items: Nd<i64, 2>, n: i64, most: i64) -> i64 {
     let rows = items.sh[0];
     let ic = items.sh[1];
     let it = items.d;
-    let colv = |c: usize| -> Vec<i64> { (0..rows).map(|r| it[r * ic + c]).collect() };
-    let (k, s, e, o) = (colv(0), colv(1), colv(2), colv(3));
-    let mut order = vec![0i64; rows];
+    let colv = |c: usize| -> Result<Vec<i64>, i64> { gathered((0..rows).map(|r| it[r * ic + c])) };
+    let (k, s, e, o) = (need!(colv(0)), need!(colv(1)), need!(colv(2)),
+                        need!(colv(3)));
+    let mut order: Vec<i64> = need!(zeros(rows));
     if crate::order::key_order(&k, &s, &e, &o, &mut order, false) < 0 {
         return NO_MEMORY;
     }
     let nu = n as usize;
     let words = ((n + 63) >> 6) as usize;
     let lcap = (1usize << 20).min(16usize.max(4 * order.len()));
-    let mut listed = vec![0i64; lcap];
+    let mut listed: Vec<i64> = need!(zeros(lcap));
     let mut nl = 0usize;
     let mut hit: Vec<u64> = Vec::new();
     let mut count: i64 = -1;
-    let mut latest = vec![i64::MIN; nu];
-    let mut on = vec![false; nu];
-    let mut act = vec![0i64; nu];
+    let mut latest: Vec<i64> = need!(filled(nu, i64::MIN));
+    let mut on: Vec<bool> = need!(zeros(nu));
+    let mut act: Vec<i64> = need!(zeros(nu));
     let mut na = 0usize;
     let m = order.len();
     let mut i = 0usize;
@@ -618,14 +643,14 @@ pub fn clash_pairs(items: Nd<i64, 2>, n: i64, most: i64) -> i64 {
         na = 0;
     }
     let (pa, pb) = if count < 0 {
-        let mut code = listed[..nl].to_vec();
+        let mut code = need!(copied(&listed[..nl]));
         code.sort_unstable();
         code.dedup();
-        (code.iter().map(|&c| crate::maths::fdiv(c, n)).collect::<Vec<i64>>(),
-         code.iter().map(|&c| crate::maths::fmodi(c, n)).collect::<Vec<i64>>())
+        (need!(gathered(code.iter().map(|&c| crate::maths::fdiv(c, n)))),
+         need!(gathered(code.iter().map(|&c| crate::maths::fmodi(c, n)))))
     } else {
-        let mut pa = Vec::with_capacity(count as usize);
-        let mut pb = Vec::with_capacity(count as usize);
+        let mut pa: Vec<i64> = need!(room(count as usize));
+        let mut pb: Vec<i64> = need!(room(count as usize));
         for a in 0..nu {
             for w in 0..words {
                 let mut x = hit[a * words + w];
@@ -717,15 +742,15 @@ pub fn clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) -> i64 {
         }
     }
     let nk = (kmax - kmin + 1) as usize;
-    let mut at = vec![0i64; nk + 1];
+    let mut at: Vec<i64> = need!(zeros(nk + 1));
     for i in 0..n {
         at[(row(i, 2) - kmin) as usize + 1] += 1;
     }
     for g in 0..nk {
         at[g + 1] += at[g];
     }
-    let mut pos: Vec<i64> = at[..nk].to_vec();
-    let mut order = vec![0i64; n];
+    let mut pos: Vec<i64> = need!(copied(&at[..nk]));
+    let mut order: Vec<i64> = need!(zeros(n));
     for i in 0..n {
         let g = (row(i, 2) - kmin) as usize;
         order[pos[g] as usize] = i as i64;
@@ -754,7 +779,7 @@ pub fn clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) -> i64 {
             while c < b && order[c] < end_list {
                 c += 1;
             }
-            let mut bidx: Vec<i64> = order[i..c].to_vec();
+            let mut bidx: Vec<i64> = need!(copied(&order[i..c]));
             let m = c - i;
             let mut srt = true;
             for t in 1..m {
@@ -764,10 +789,12 @@ pub fn clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) -> i64 {
                 }
             }
             if !srt {
-                bidx.sort_by_key(|&x| row(x as usize, 0)); // (stable, as np.argsort's mergesort)
+                // (as np.argsort's stable mergesort: bidx comes in rising note order, so the note number as the
+                // last key gives the same order; sort_unstable needs no extra memory, a stable sort would)
+                bidx.sort_unstable_by_key(|&x| (row(x as usize, 0), x));
             }
             let mut top = 0usize;
-            let mut hint = vec![0i64; cnt.len()];
+            let mut hint: Vec<i64> = need!(zeros(cnt.len()));
             for t in 0..m {
                 let x = bidx[t] as usize;
                 let (sx, ex) = (row(x, 0), row(x, 1));
@@ -788,12 +815,15 @@ pub fn clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) -> i64 {
             }
             for lv in 0..=top {
                 while cs.len() <= lv {
-                    cs.push(Vec::new());
-                    ce.push(Vec::new());
-                    ss.push(Vec::new());
-                    se.push(Vec::new());
+                    need!(grow(&mut cs, Vec::new()));
+                    need!(grow(&mut ce, Vec::new()));
+                    need!(grow(&mut ss, Vec::new()));
+                    need!(grow(&mut se, Vec::new()));
                 }
                 if cnt.len() <= lv {
+                    if cnt.try_reserve(2 * lv + 16 - cnt.len()).is_err() {
+                        return NO_MEMORY;
+                    }
                     cnt.resize(2 * lv + 16, 0);
                 }
                 let mut add = 0usize;
@@ -811,8 +841,8 @@ pub fn clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) -> i64 {
                 let mut ne = std::mem::take(&mut se[lv]);
                 if ns.len() < need {
                     let size = need + (need >> 1) + 8;
-                    ns = vec![0; size];
-                    ne = vec![0; size];
+                    ns = need!(zeros(size));
+                    ne = need!(zeros(size));
                 }
                 let (old_s, old_e) = (&cs[lv], &ce[lv]);
                 let (mut p, mut mm) = (0usize, 0usize);

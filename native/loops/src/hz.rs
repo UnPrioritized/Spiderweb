@@ -2,7 +2,7 @@
 //! hz_finish. The same sums in the same order as those (floats to whole numbers as Numba does them: f2i).
 use crate::maths::{f2i, fdiv, fmodi, imax, imin, pmax, pmin, rint};
 use crate::pyext::{Out, Outs};
-use crate::{Flag, K_BOOL};
+use crate::{copied, filled, gathered, need, room, zeros, Flag, K_BOOL};
 
 /// A place counted from the end when below 0 (Numba's a[-1]).
 #[inline(always)]
@@ -55,8 +55,8 @@ pub fn wave_fill(starts: &[i64], a: i64, b: i64, sq0: &[i64], wo: &[f64], out: &
 pub fn note_ends(s: &[i64], e: &[i64], k: &[i64], stick: bool, mode: i64, beats: f64, pct: f64, pct_int: bool,
                  wv: &[f64], wf: f64, big: i64, res: &mut [i64]) -> i64 {
     let n = s.len();
-    let keyed: Vec<i64> = (0..n).map(|i| k[i].wrapping_mul(big).wrapping_add(s[i])).collect();
-    let mut j = vec![0usize; n];
+    let keyed: Vec<i64> = need!(gathered((0..n).map(|i| k[i].wrapping_mul(big).wrapping_add(s[i]))));
+    let mut j = need!(zeros::<usize>(n));
     let mut i = 0;
     while i < n {
         let mut r = i + 1;
@@ -68,9 +68,9 @@ pub fn note_ends(s: &[i64], e: &[i64], k: &[i64], stick: bool, mode: i64, beats:
         }
         i = r;
     }
-    let mut room = vec![0i64; n];
-    let mut now = vec![0i64; n];
-    let mut last = vec![false; n];
+    let mut room = need!(zeros::<i64>(n));
+    let mut now = need!(zeros::<i64>(n));
+    let mut last = need!(zeros::<bool>(n));
     for i in 0..n {
         now[i] = e[i] - s[i];
         let jj = j[i];
@@ -82,14 +82,14 @@ pub fn note_ends(s: &[i64], e: &[i64], k: &[i64], stick: bool, mode: i64, beats:
             last[i] = true;
         }
     }
-    let mut full = now.clone();
+    let mut full = need!(copied(&now));
     for i in 1..n {
         if stick && last[i] && !last[i - 1] && k[i - 1] == k[i] {
             full[i] = imin(imax(now[i], now[i - 1]), room[i]);
         }
     }
-    let mut chain = vec![false; n];
-    let mut group = vec![0usize; n];
+    let mut chain = need!(zeros::<bool>(n));
+    let mut group = need!(zeros::<usize>(n));
     if n > 0 {
         chain[0] = true;
     }
@@ -98,14 +98,14 @@ pub fn note_ends(s: &[i64], e: &[i64], k: &[i64], stick: bool, mode: i64, beats:
         group[i] = group[i - 1] + chain[i] as usize;
     }
     let ng = if n > 0 { group[n - 1] + 1 } else { 0 };
-    let mut gmax = vec![0i64; ng];
+    let mut gmax = need!(zeros::<i64>(ng));
     for i in 0..n {
         let v = s[i] + full[i];
         if chain[i] || v > gmax[group[i]] {
             gmax[group[i]] = v;
         }
     }
-    let mut want = vec![0i64; n];
+    let mut want = need!(zeros::<i64>(n));
     for i in 0..n {
         let ni = match mode {
             0 => imax(f2i(beats.floor()), 1),
@@ -131,8 +131,8 @@ pub fn note_ends(s: &[i64], e: &[i64], k: &[i64], stick: bool, mode: i64, beats:
         };
         want[i] = imin(s[i].wrapping_add(ni), gmax[group[i]]);
     }
-    let mut end = vec![0i64; n];
-    let mut reach = vec![0i64; n];
+    let mut end = need!(zeros::<i64>(n));
+    let mut reach = need!(zeros::<i64>(n));
     for i in 0..n {
         if chain[i] {
             reach[i] = want[i];
@@ -162,23 +162,23 @@ pub fn hz_expand(runs_sel: &[i64], copy_sel: &[i64], scale_c: &[f64], n_run: &[i
     let r_ = runs_sel.len();
     let c_ = copy_sel.len();
     let p_ = r_ * c_;
-    let mut n_p = vec![0i64; p_];
-    let mut run_p = vec![0i64; p_];
-    let mut scale_p = vec![0f64; p_];
+    let mut n_p = need!(zeros::<i64>(p_));
+    let mut run_p = need!(zeros::<i64>(p_));
+    let mut scale_p = need!(zeros::<f64>(p_));
     for p in 0..p_ {
         run_p[p] = runs_sel[p / c_];
         n_p[p] = n_run[wi(run_p[p], n_run.len())];
         scale_p[p] = scale_c[p % c_];
     }
-    let mut first = vec![0i64; p_];
+    let mut first = need!(zeros::<i64>(p_));
     let mut acc = 0i64;
     for p in 0..p_ {
         first[p] = acc;
         acc += n_p[p];
     }
     let m0 = acc.max(0) as usize;
-    let mut part = vec![0i64; m0];
-    let mut src = vec![0i64; m0];
+    let mut part = need!(zeros::<i64>(m0));
+    let mut src = need!(zeros::<i64>(m0));
     for p in 0..p_ {
         for k in 0..n_p[p].max(0) {
             let r = (first[p] + k) as usize;
@@ -186,14 +186,14 @@ pub fn hz_expand(runs_sel: &[i64], copy_sel: &[i64], scale_c: &[f64], n_run: &[i
             src[r] = off_run[wi(run_p[p], off_run.len())] + k;
         }
     }
-    let mut stretch = vec![0f64; m0];
-    let mut inc = vec![0f64; m0];
+    let mut stretch = need!(zeros::<f64>(m0));
+    let mut inc = need!(zeros::<f64>(m0));
     let mut ok = true;
     for r in 0..m0 {
         let s = wi(src[r], opf.len());
         stretch[r] = scale_p[part[r] as usize] * (1.0 + off_pitch * opf[s] * (x - 0.5)) * vf[wi(src[r], vf.len())];
     }
-    let mut moves = vec![false; p_];
+    let mut moves = need!(zeros::<bool>(p_));
     for p in 0..p_ {
         let scaled = scale_p[p] != 1.0 && n_p[p] > 0;
         moves[p] = (moves_run[wi(run_p[p], moves_run.len())].on() || scaled) && n_p[p] > 0;
@@ -204,22 +204,22 @@ pub fn hz_expand(runs_sel: &[i64], copy_sel: &[i64], scale_c: &[f64], n_run: &[i
             ok = false;
         }
     }
-    let mut total = vec![0f64; p_];
+    let mut total = need!(zeros::<f64>(p_));
     for r in 0..m0 {
         total[part[r] as usize] += inc[r];
     }
-    let mut pos = vec![-1i64; pos_len.max(0) as usize];
+    let mut pos = need!(filled(pos_len.max(0) as usize, -1i64));
     for i in 0..r_ {
         let pl = pos.len();
         pos[wi(runs_sel[i], pl)] = i as i64;
     }
-    let mut up = vec![0i64; p_];
+    let mut up = need!(zeros::<i64>(p_));
     for p in 0..p_ {
         let pr = prev_run[wi(run_p[p], prev_run.len())];
         let u = if pr >= 0 { pos[pr as usize] } else { -1 };
         up[p] = if u >= 0 { u * c_ as i64 + (p % c_) as i64 } else { -1 };
     }
-    let mut head = vec![0f64; p_];
+    let mut head = need!(zeros::<f64>(p_));
     for p in 0..p_ {
         head[p] = if up[p] >= 0 { total[up[p] as usize] } else { 0.0 };
     }
@@ -227,8 +227,8 @@ pub fn hz_expand(runs_sel: &[i64], copy_sel: &[i64], scale_c: &[f64], n_run: &[i
         if !up.iter().any(|&u| u >= 0) {
             break;
         }
-        let mut nh = vec![0f64; p_];
-        let mut nu = vec![0i64; p_];
+        let mut nh = need!(zeros::<f64>(p_));
+        let mut nu = need!(zeros::<i64>(p_));
         for p in 0..p_ {
             if up[p] >= 0 {
                 let s = up[p] as usize;
@@ -242,22 +242,22 @@ pub fn hz_expand(runs_sel: &[i64], copy_sel: &[i64], scale_c: &[f64], n_run: &[i
         head = nh;
         up = nu;
     }
-    let mut counted = vec![false; p_];
-    let mut j0 = vec![0f64; p_];
-    let mut size = vec![0i64; p_];
+    let mut counted = need!(zeros::<bool>(p_));
+    let mut j0 = need!(zeros::<f64>(p_));
+    let mut size = need!(zeros::<i64>(p_));
     for p in 0..p_ {
         let h = head[p];
         counted[p] = moves[p] || (h - rint(h)).abs() > 1e-9;
         j0[p] = (h - 1e-9).ceil();
         size[p] = if counted[p] { f2i(pmax((h + total[p] - 1e-9).ceil() - j0[p], 0.0)) } else { n_p[p] };
     }
-    let mut ends = vec![0f64; m0];
+    let mut ends = need!(zeros::<f64>(m0));
     let mut acc_f = 0.0f64;
     for r in 0..m0 {
         acc_f += inc[r];
         ends[r] = acc_f;
     }
-    let mut excl = vec![0f64; p_];
+    let mut excl = need!(zeros::<f64>(p_));
     acc_f = 0.0;
     for p in 0..p_ {
         excl[p] = acc_f;
@@ -265,11 +265,11 @@ pub fn hz_expand(runs_sel: &[i64], copy_sel: &[i64], scale_c: &[f64], n_run: &[i
     }
     let mo: i64 = size.iter().sum();
     let mo = mo.max(0) as usize;
-    let mut o_part = vec![0i64; mo];
-    let mut o_num = vec![0i64; mo];
-    let mut o_src = vec![0i64; mo];
-    let mut o_w = vec![0f64; mo];
-    let mut o_s = vec![0f64; mo];
+    let mut o_part = need!(zeros::<i64>(mo));
+    let mut o_num = need!(zeros::<i64>(mo));
+    let mut o_src = need!(zeros::<i64>(mo));
+    let mut o_w = need!(zeros::<f64>(mo));
+    let mut o_s = need!(zeros::<f64>(mo));
     let mut q = 0usize;
     for p in 0..p_ {
         if !counted[p] {
@@ -330,11 +330,11 @@ pub fn hz_late(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s: &[f64], 
     let (p2, s2): (std::borrow::Cow<[i64]>, std::borrow::Cow<[i64]>);
     if copied {
         let m2 = m1 * h;
-        let mut pv = vec![0i64; m2];
-        let mut nv = vec![0i64; m2];
-        let mut sv = vec![0i64; m2];
-        let mut wv = vec![0f64; m2];
-        let mut stv = vec![0f64; m2];
+        let mut pv = need!(zeros::<i64>(m2));
+        let mut nv = need!(zeros::<i64>(m2));
+        let mut sv = need!(zeros::<i64>(m2));
+        let mut wv = need!(zeros::<f64>(m2));
+        let mut stv = need!(zeros::<f64>(m2));
         for i in 0..m1 {
             for t in 0..h {
                 let q = i * h + t;
@@ -345,8 +345,8 @@ pub fn hz_late(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s: &[f64], 
                 stv[q] = s[i];
             }
         }
-        p2 = std::borrow::Cow::Owned(pv.clone());
-        s2 = std::borrow::Cow::Owned(sv.clone());
+        p2 = std::borrow::Cow::Owned(need!(crate::copied(&pv)));
+        s2 = std::borrow::Cow::Owned(need!(crate::copied(&sv)));
         out.extend([Out::I64(pv, 0), Out::I64(nv, 0), Out::I64(sv, 0), Out::F64(wv, 0), Out::F64(stv, 0)]);
     } else {
         p2 = std::borrow::Cow::Borrowed(part);
@@ -354,10 +354,10 @@ pub fn hz_late(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s: &[f64], 
     }
     let m2 = p2.len();
     let pn = np_.max(0) as usize;
-    let mut late = vec![0f64; m2];
-    let mut nsrc = vec![0f64; m2];
-    let mut count = vec![0i64; pn];
-    let mut noisy_p = vec![0u8; pn];
+    let mut late = need!(zeros::<f64>(m2));
+    let mut nsrc = need!(zeros::<f64>(m2));
+    let mut count = need!(zeros::<i64>(pn));
+    let mut noisy_p = need!(zeros::<u8>(pn));
     for q in 0..m2 {
         let sq = wi(s2[q], slant.len());
         late[q] = if has_trace { hits[q % h] } else { 0.0 };
@@ -370,20 +370,20 @@ pub fn hz_late(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s: &[f64], 
             noisy_p[pq] = 1;
         }
     }
-    let mut base = vec![0i64; pn];
+    let mut base = need!(zeros::<i64>(pn));
     let mut acc = 0i64;
     for p in 0..pn {
         base[p] = acc;
         acc += if noisy_p[p] != 0 { count[p] } else { 0 };
     }
     let total_took = acc;
-    let mut excl_c = vec![0i64; pn];
+    let mut excl_c = need!(zeros::<i64>(pn));
     acc = 0;
     for p in 0..pn {
         excl_c[p] = acc;
         acc += count[p];
     }
-    let mut place = vec![0i64; m2];
+    let mut place = need!(zeros::<i64>(m2));
     for q in 0..m2 {
         let pq = wi(p2[q], pn);
         place[q] = base[pq] + q as i64 - excl_c[pq];
@@ -395,10 +395,10 @@ pub fn hz_late(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s: &[f64], 
 
 /// fastloops.hz_order (np.argsort(wg, kind="stable")).
 #[inline(always)]
-fn order_of(wg: &[i64]) -> Vec<i64> {
+fn order_of(wg: &[i64]) -> Result<Vec<i64>, i64> {
     let k = wg.len();
     if k == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let (mut mn, mut mx) = (wg[0], wg[0]);
     for &v in wg {
@@ -411,13 +411,14 @@ fn order_of(wg: &[i64]) -> Vec<i64> {
     }
     let span = mx.wrapping_sub(mn);
     if span >= 8589934592 || k < 256 {
-        let mut order: Vec<i64> = (0..k as i64).collect();
-        order.sort_by_key(|&i| wg[i as usize]); // (stable: the same order as a merge sort)
-        return order;
+        let mut order: Vec<i64> = gathered((0..k).map(|i| i as i64))?;
+        // (stable as a merge sort: alike ones by their place, the last key; sort_unstable needs no extra memory)
+        order.sort_unstable_by_key(|&i| (wg[i as usize], i));
+        return Ok(order);
     }
-    let key: Vec<i64> = wg.iter().map(|&v| v - mn).collect();
-    let mut order: Vec<i64> = (0..k as i64).collect();
-    let mut tmp = vec![0i64; k];
+    let key: Vec<i64> = gathered(wg.iter().map(|&v| v - mn))?;
+    let mut order: Vec<i64> = gathered((0..k).map(|i| i as i64))?;
+    let mut tmp = zeros::<i64>(k)?;
     let mut cnt = [0i64; 2049];
     let mut shift = 0;
     while (span >> shift) > 0 {
@@ -436,13 +437,13 @@ fn order_of(wg: &[i64]) -> Vec<i64> {
         std::mem::swap(&mut order, &mut tmp);
         shift += 11;
     }
-    order
+    Ok(order)
 }
 
 /// fastloops.hz_order into out -> 0.
 #[inline(always)]
 pub fn hz_order(wg: &[i64], out: &mut [i64]) -> i64 {
-    out[..wg.len()].copy_from_slice(&order_of(wg));
+    out[..wg.len()].copy_from_slice(&need!(order_of(wg)));
     0
 }
 
@@ -473,12 +474,12 @@ pub fn hz_finish<L: ToF>(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s
                          tf: &[f64], soft_thr: f64) -> Outs {
     let m = part.len();
     let c = gains_sel.len() as i64;
-    let mut st = Vec::with_capacity(m);
-    let mut li = Vec::with_capacity(m);
-    let mut wv = Vec::with_capacity(m);
-    let mut fa = Vec::with_capacity(m);
-    let mut pe0 = Vec::with_capacity(m);
-    let mut qu = Vec::with_capacity(m);
+    let mut st = need!(room(m));
+    let mut li = need!(room(m));
+    let mut wv = need!(room(m));
+    let mut fa = need!(room(m));
+    let mut pe0 = need!(room(m));
+    let mut qu = need!(room(m));
     for q in 0..m {
         let p = part[q];
         let pu = wi(p, noisy_p.len());
@@ -525,11 +526,11 @@ pub fn hz_finish<L: ToF>(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s
         return Ok(vec![Out::F64(Vec::new(), 2), Out::F64(Vec::new(), 0), Out::U8(Vec::new(), K_BOOL, 0),
                        Out::F64(Vec::new(), 0), Out::Int(0)]);
     }
-    let wg: Vec<i64> = st.iter().map(|&v| f2i((v + 0.5).floor())).collect();
-    let order = order_of(&wg);
-    let mut gfirst = Vec::with_capacity(k);
-    let mut gstart = Vec::with_capacity(k);
-    let mut gmax = Vec::with_capacity(k);
+    let wg: Vec<i64> = gathered(st.iter().map(|&v| f2i((v + 0.5).floor())))?;
+    let order = order_of(&wg)?;
+    let mut gfirst = need!(room(k));
+    let mut gstart = need!(room(k));
+    let mut gmax = need!(room(k));
     let mut kk = 0usize;
     while kk < k {
         let a = kk;
@@ -549,8 +550,8 @@ pub fn hz_finish<L: ToF>(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s
         gmax.push(mm);
     }
     let ng = gstart.len();
-    let mut out_sq = Vec::with_capacity(ng * 2);
-    let mut which = Vec::with_capacity(ng);
+    let mut out_sq = need!(room(ng * 2));
+    let mut which = need!(room(ng));
     for g in 0..ng {
         let nxt = if g + 1 < ng { gstart[g + 1] as f64 } else { gmax[ng - 1] };
         let end = pmin(nxt, gmax[g]);
@@ -561,9 +562,9 @@ pub fn hz_finish<L: ToF>(part: &[i64], number: &[i64], src: &[i64], w: &[f64], s
             which.push(i);
         }
     }
-    let factor: Vec<f64> = which.iter().map(|&i| fa[i]).collect();
-    let mine: Vec<u8> = which.iter().map(|&i| (pe0[i] > 0.0) as u8).collect();
-    let wout: Vec<f64> = which.iter().map(|&i| wv[i]).collect();
+    let factor: Vec<f64> = gathered(which.iter().map(|&i| fa[i]))?;
+    let mine: Vec<u8> = gathered(which.iter().map(|&i| (pe0[i] > 0.0) as u8))?;
+    let wout: Vec<f64> = gathered(which.iter().map(|&i| wv[i]))?;
     Ok(vec![Out::F64(out_sq, 2), Out::F64(factor, 0), Out::U8(mine, K_BOOL, 0), Out::F64(wout, 0),
             Out::Int(k as i64)])
 }

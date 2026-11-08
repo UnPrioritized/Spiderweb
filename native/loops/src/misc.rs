@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 
 use crate::maths::{fdiv, pmax, pmin};
-use crate::{try_zeros, Nd, NdMut, NO_MEMORY};
+use crate::{gathered, need, try_zeros, zeros, Nd, NdMut, NO_MEMORY};
 
 thread_local! {
     /// Bytes whose length isn't known before the loop runs (midi_events / midi_track): kept here until take_bytes
@@ -88,11 +88,11 @@ pub fn midi_events(notes: Nd<i64, 2>, rows: &[i64], order: &[i64], ch: i64, most
 
 /// fastloops.radix_order on a copy (k changed as work space there; here nobody sees it) -> the order.
 #[inline(always)]
-fn radix(mut k1: Vec<i64>, bits: i64) -> Vec<i64> {
+fn radix(mut k1: Vec<i64>, bits: i64) -> Result<Vec<i64>, i64> {
     let n = k1.len();
-    let mut order: Vec<i64> = (0..n as i64).collect();
-    let mut o2 = vec![0i64; n];
-    let mut k2 = vec![0i64; n];
+    let mut order: Vec<i64> = gathered((0..n).map(|i| i as i64))?;
+    let mut o2: Vec<i64> = zeros(n)?;
+    let mut k2: Vec<i64> = zeros(n)?;
     let mut count = [0i64; 2049];
     let mut shift = 0i64;
     while shift < bits && n > 1 {
@@ -118,7 +118,7 @@ fn radix(mut k1: Vec<i64>, bits: i64) -> Vec<i64> {
         std::mem::swap(&mut k1, &mut k2);
         shift += 11;
     }
-    order
+    Ok(order)
 }
 
 /// fastloops.midi_track: the bytes stashed (take_bytes) -> how many.
@@ -126,16 +126,16 @@ fn radix(mut k1: Vec<i64>, bits: i64) -> Vec<i64> {
 pub fn midi_track(notes: Nd<i64, 2>, rows: &[i64], ch: i64, most: i64, bits: i64) -> i64 {
     let m = rows.len();
     let nc = notes.sh[1];
-    let mut own = vec![0i64; m * 4];
-    let mut k = vec![0i64; 2 * m];
+    let mut own: Vec<i64> = need!(zeros(m * 4));
+    let mut k: Vec<i64> = need!(zeros(2 * m));
     for i in 0..m {
         let r = rows[i] as usize;
         own[i * 4..i * 4 + 4].copy_from_slice(&notes.d[r * nc..r * nc + 4]);
         k[2 * i] = own[i * 4] * 2 + 1;
         k[2 * i + 1] = own[i * 4 + 1] * 2;
     }
-    let order = radix(k, bits);
-    let rows2: Vec<i64> = (0..m as i64).collect();
+    let order = need!(radix(k, bits));
+    let rows2: Vec<i64> = need!(gathered((0..m).map(|i| i as i64)));
     match events(&own, 4, &rows2, &order, ch, most) {
         Some(v) => stash(v),
         None => NO_MEMORY,
