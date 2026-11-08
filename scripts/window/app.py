@@ -3701,6 +3701,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return empty
         return off_part(notes, tracks, up, self.keys, round(later * self.ppq))
 
+    def kept_notes(self, sh):
+        """sh's (start, end, key, velocity) notes for the tools: with "Keep notes made there" on, its notes past the
+        keys / before beat 0 too (the whole shape, a note across beat 0 whole: engine.whole_notes_tracks' way, from
+        the remembered notes); else its notes as made (notes_of)."""
+        if not self.keeps_offrange() or sh.get("hz"):
+            return self.notes_of(sh)
+        out = past_edges(sh, self.keys, self.ppq)
+        if out is None:
+            return self.notes_of(sh)
+        lifted, up, room, later = out
+        with rows_up_to(room - 1):
+            n = np.array(self.notes_tracks(lifted, room)[0][:, :4], np.int64, copy=True)
+        n[:, 2] -= up
+        n[:, :2] -= round(later * self.ppq)
+        return n
+
     def offrange_changed(self):
         """Settings → Piano roll "Keep notes made there" / its Opacity / the Space settings changed: the kept notes
         worked out again and painted at the new opacity (no undo step: an app setting)."""
@@ -3720,6 +3736,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         rendered, parts = self.rendered, []
         owners = rendered[:, 5]
         order = np.argsort(owners, kind="stable") if len(rendered) else None
+
+        def heard(i):  # (shape i's real notes as rendered, or None)
+            if order is None:
+                return None
+            lo, hi = np.searchsorted(owners, i, sorter=order), np.searchsorted(owners, i, "right", sorter=order)
+            return rendered[order[lo:hi]] if hi > lo else None
+        kin = {}  # (pieces of one paste / one cut shape: a piece wholly out there takes its colours from one heard)
+        for j, s in enumerate(self.shapes):
+            for k in (("paste", s.get("paste")), ("cut", cut_group(s))):
+                if k[1] is not None and k not in kin and heard(j) is not None:
+                    kin[k] = j
         for i, sh in enumerate(self.shapes):
             notes, tracks = self.offrange_tracks(sh)
             if not len(notes):
@@ -3727,21 +3754,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             notes = np.asarray(notes, np.int64).reshape(-1, 4)
             t = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
             slot = t if self.channel_mode.get() == "auto" else np.zeros(len(notes), np.int64)
-            if order is not None:
-                lo, hi = np.searchsorted(owners, i, sorter=order), np.searchsorted(owners, i, "right", sorter=order)
-                if hi > lo:
-                    mine = rendered[order[lo:hi]]
-                    got = self.colour_slots(sh, mine)
-                    if len(got) == 1:
-                        slot = np.full(len(notes), got[0], np.int64)
-                    else:
-                        real = self.notes_tracks(dict(sh, _rounds=True) if self.rounds_apart() and has_colours(sh)
-                                                 else sh)[1]
-                        u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
-                        at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
-                        found = (u[at] == t) & (at < len(got))
-                        slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)],
-                                        int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min()))
+            src = i if heard(i) is not None else next(
+                (kin[k] for k in (("paste", sh.get("paste")), ("cut", cut_group(sh))) if k[1] is not None and k in kin),
+                None)
+            if src is not None:
+                mine, other = heard(src), self.shapes[src]
+                got = self.colour_slots(other, mine)
+                if len(got) == 1:
+                    slot = np.full(len(notes), got[0], np.int64)
+                else:
+                    real = self.notes_tracks(dict(other, _rounds=True) if self.rounds_apart() and has_colours(other)
+                                             else other)[1]
+                    u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
+                    at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
+                    found = (u[at] == t) & (at < len(got))
+                    slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)],
+                                    int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min()))
             parts.append(np.column_stack([notes, slot, np.full(len(notes), i, np.int64)]))
         return np.concatenate(parts) if parts else NO_NOTES
 

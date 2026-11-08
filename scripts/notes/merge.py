@@ -95,7 +95,9 @@ def _merge(stay, slide, from_left, rest_slides=True):
         moved[~met, :2] += least
     out, rest = np.concatenate([stay, moved[met]]), moved[~met]
     first = min(out[:, 0].min(), rest[:, 0].min() if len(rest) else 0)
-    late = max(0, -int(first))
+    # (notes kept before beat 0, "Keep notes made there": only sliding further before them makes everything wait)
+    was = min(0, int(stay[:, 0].min()), int(np.asarray(slide, np.int64)[:, 0].min()))
+    late = max(0, was - int(first))
     if late:  # (slid before the song's start: everything waits)
         out[:, :2] += late
         rest[:, :2] += late
@@ -173,6 +175,12 @@ def up_down_plan(stays, rows, up, top):
     if not stays or not len(rows):
         return None
     rk = rows[:, 2] if up else top - rows[:, 2]  # (down = up, upside down)
+    sks = [s[:, 2] if up else top - s[:, 2] for s in stays]
+    # (notes kept past the keys, "Keep notes made there": counted from the farthest one, so a piece never goes past
+    # it either; inside the keys lift = 0, as always)
+    lift = max(0, -min(int(rk.min()), *(int(k.min()) for k in sks)))
+    if lift:
+        rk, sks, top = rk + lift, [k + lift for k in sks], top + lift
     # (its own note ends cut too, user 2026-10-20: a shorter bottom row left the rest hanging a key above)
     cuts = np.unique(np.concatenate([s[:, :2].ravel() for s in stays] + [rows[:, :2].ravel()]))
     count = len(cuts) + 1  # (time pieces: piece t between cuts t - 1 and t)
@@ -184,8 +192,8 @@ def up_down_plan(stays, rows, up, top):
     far = 1 << 40
     low = np.full(count, far, np.int64)
     under = np.full(count, -1, np.int64)  # (the highest note of the shapes left out)
-    for s in stays:  # (per shape: left out where all its notes are below the piece's lowest)
-        sk, at = (s[:, 2] if up else top - s[:, 2]), sounding(s)
+    for s, sk in zip(stays, sks):  # (per shape: left out where all its notes are below the piece's lowest)
+        at = sounding(s)
         s_low, s_high = spread(*at, sk, count, True), spread(*at, sk, count, False)
         low = np.where(s_high >= least, np.minimum(low, s_low), low)
         under = np.where(s_high >= least, under, np.maximum(under, s_high))
@@ -340,16 +348,19 @@ def preview_parts(sh, ppq, keys):
 # "apart": keys whose rows became the "Merge leftovers" shape}. Project files leave its "notes" out; loading makes
 # them again from the recipe.
 
-def part_rows(parts, ppq, keys, rounds=False):
+def part_rows(parts, ppq, keys, rounds=False, whole=False):
     """Each shape's notes as (start, end, pitch, velocity, track) rows: its own colours (areas, outline colours,
     Colours turns) kept (user 2026-10-16: always the colours they had). Track = the channel slot each colour gets
     with Multi channel when the two shapes stand as they are (engine.assign_slots, like render): shapes apart share
     slots, overlapping ones stay apart; render counts a merged shape's tracks in order (ordered), so track k keeps
     slot k. Without their Sustain / Gate subtract: the merged shape holds those itself. rounds: + a 6th column, each
     note's Colours round ("New channels each Colours round"): the first part's rounds, then the second's (a part
-    without Colours = one round)."""
+    without Colours = one round). whole: notes past the keys / before beat 0 kept ("Keep notes made there", the
+    recipe's "whole": engine.whole_notes_tracks)."""
     from notes.custom import ROUND, tracks_apart
-    from notes.engine import assign_slots, shape_notes_tracks, unique_inverse
+    from notes.engine import assign_slots, shape_notes_tracks, unique_inverse, whole_notes_tracks
+    if whole:
+        shape_notes_tracks = whole_notes_tracks  # noqa: F811 (the same call, uncut)
     from notes.gateflip import colours_back, unflipped_starts
     from notes.recolour import is_recoloured
     units, forced, firsts, made, laps, after = [], [], [], [], [], 0
@@ -498,7 +509,7 @@ def recipe_shape(m):
 def recipe_rows(m, rounds=False):
     """The recipe's merged (start, end, pitch, velocity, track[, round]) rows (part_rows), in the order its packed
     notes keep them, or None (no notes)."""
-    parts = part_rows(m["parts"], m["ppq"], m["keys"], rounds)
+    parts = part_rows(m["parts"], m["ppq"], m["keys"], rounds, m.get("whole") is True)
     if m.get("way") in ("up", "down"):  # (its leftovers' times left out, pieces newly with nothing in their way kept)
         got = merged_by(parts, m, spans=m.get("spans", []))
         out = np.concatenate(parts) if got is None else got[0]
@@ -574,10 +585,17 @@ def refit(sh):
 # the notes kept (block_notes). A part that can't be turned this way (pasted notes, text, Hz bass, funnel...): the
 # merged notes sampled like a turned image (turned_notes).
 
+def part_notes(m):
+    """f(part, ppq, keys) -> a part's (start, end, pitch, velocity) notes as the recipe m makes them: cut at the
+    edges, or whole (m["whole"]: "Keep notes made there")."""
+    from notes.engine import shape_notes, whole_notes_tracks
+    return (lambda p, ppq, keys: whole_notes_tracks(p, ppq, keys)[0]) if m.get("whole") is True else shape_notes
+
+
 def made_sides(m):
     """(sliding part's index, from the left?, its smallest slide, how much later all went) as the recipe was made,
     ticks at m["ppq"]; None = nothing met."""
-    from notes.engine import shape_notes
+    shape_notes = part_notes(m)
     a, b = (shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract", "extend")}, m["ppq"], m["keys"])
             for p in m["parts"])
     left = 1 if len(a) and len(b) and comes_from_left(a, b) else 0
@@ -588,7 +606,7 @@ def made_sides(m):
 
 def made_keys(m):
     """Merge up / down recipe: (moving part's index, its smallest slide in keys, + = up) as made; None = none met."""
-    from notes.engine import shape_notes
+    shape_notes = part_notes(m)
     a, b = (np.asarray(shape_notes({k: v for k, v in p.items() if k not in ("sustain", "subtract", "extend")}, m["ppq"],
                                    m["keys"]),
                        np.int64).reshape(-1, 4) for p in m["parts"])
@@ -750,8 +768,8 @@ def reshaped_notes(sh, ppq, keys, rounds=False):
     if not got:
         return None
     parts, slide, from_left, (L, o, least) = got
-    rows = part_rows(parts, ppq, keys, rounds)
     m = sh["merge"]
+    rows = part_rows(parts, ppq, keys, rounds, m.get("whole") is True)
     if m.get("way") in ("up", "down"):  # (flipped upside down: the other way; its leftovers' times found back)
         up = (m["way"] == "up") == (L[1, 1] > 0)
         spans = (np.asarray(m.get("spans", []), float).reshape(-1, 2) * ppq).tolist()
@@ -872,6 +890,8 @@ def clean_merge(m, clean_shape):
         box = None
     if box and len(box) == 3 and all(math.isfinite(x) for pt in box for x in pt):
         out["box"] = box  # (its box when made: turned / slanted / stretched since = the parts too, merged again)
+    if m.get("whole") is True:
+        out["whole"] = True  # (made with "Keep notes made there": its parts' notes past the edges merged too)
     if "vrev" in m:
         out["vrev"] = m["vrev"] is True  # (flipped sideways an odd number of times: velocities the other way)
     from notes.gateflip import lifted

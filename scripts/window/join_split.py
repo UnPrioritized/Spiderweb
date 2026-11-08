@@ -22,6 +22,7 @@ from notes.lines import flipped_lines, lined_up, note_lines, overlap_losers
 from notes.passengers import has_cc, pack_cc, split_cc, unpack_cc
 from files.own_tracks import COUNT_MOST, FILE0, clean_name, from_rows, full_plan, into_ids, new_id, with_port
 from notes.engine import (PORTS, SHAPE_DEFAULTS, as_made, cached_arrays, channels_of, clean_shape, shape_notes_tracks,
+                          whole_notes_tracks,
                           shape_path)
 from notes.gateflip import lifted, put_back, turn_velocities
 from notes.loaded import clean_extract, extract_groups, held_extract
@@ -443,7 +444,7 @@ class JoinSplit:
         each Colours round")), or the message why it can't."""
         parts = [copy.deepcopy(self.shapes[i]) for i in pair]
         flips = lifted(parts)  # (both gate flipped: the merged shape is, each row across both, user 2026-10-11)
-        rows = part_rows(parts, self.ppq, self.keys, self.rounds_apart())
+        rows = part_rows(parts, self.ppq, self.keys, self.rounds_apart(), self.keeps_offrange())
         if not all(len(r) for r in rows):  # (e.g. a shape wholly past the top key: its notes aren't made)
             return tr("join_split.merge_no_notes")
         if way in ("up", "down"):
@@ -461,7 +462,8 @@ class JoinSplit:
         """(Which of sels moves (place in sels; None when a shape has no notes), the one moving instead when that's a
         Merged notes which wouldn't move (or None), each one's notes): a Merged notes made this way before moves
         again (user 2026-10-19) if it would move, else merge.mover among the others (hunt: a new shape meets it)."""
-        notes = [np.asarray(self.notes_of(self.shapes[i]), np.int64).reshape(-1, 4) for i in sels]
+        # ("Keep notes made there": their notes past the edges too, kept_notes)
+        notes = [np.asarray(self.kept_notes(self.shapes[i]), np.int64).reshape(-1, 4) for i in sels]
         if not all(len(n) for n in notes):
             return None, None, notes
         lone = set().union(*self.merge_own(sels).values())  # (leftovers never move by themselves)
@@ -536,6 +538,8 @@ class JoinSplit:
                            "apart": [] if updown else sorted(set(rest[:, 2].tolist())),
                            "at": list(new[0]["pts"][0]),  # (where its box was: Split moves the parts as far as it)
                            "box": [list(p) for p in new[0]["pts"]]}  # (turned / slanted since: the parts too)
+        if self.keeps_offrange():  # ("Keep notes made there": the parts' notes past the edges merged too, for good)
+            new[0]["merge"]["whole"] = True
         if updown:  # (up / down, user 2026-10-19: the leftovers' times, so a remake leaves them out)
             new[0]["merge"].update(way=way, slide=int(slide),
                                    spans=[[a / self.ppq, b / self.ppq] for a, b in spans_of(rest)])
@@ -1033,10 +1037,15 @@ class JoinSplit:
             rows = shown(i)
             sh = self.shapes[i]
             slots = rows if auto else multi_of(i)
+            all_kept = False
             if own:
                 n = np.asarray(self.notes_of(sh), np.int64).reshape(-1, 4)
                 rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])
                 slots = self.own_slots(i, use10)
+                if not len(rows) and self.keeps_offrange():  # (all of it past the edges: the kept notes, painted
+                    off = self.off_all                          # on their colours' slots: App.offrange_rows)
+                    rows = slots = np.array(off[off[:, 5] == i], np.int64)
+                    all_kept = True
             if len(rows):  # (a shape with no notes stays as it is)
                 if self.in_own_track(sh):  # (laid on tracks: the copy is laid on them too, each note's colour =
                     rows = shown(i).copy()  # its track's place in the shape's list)
@@ -1045,7 +1054,9 @@ class JoinSplit:
                     rows[:, 4] = np.array([place.get(int(s), 0) for s in ids], np.int64)[back.ravel()]
                 elif own or not auto:
                     rows = multi_slots(rows, slots)
-                if whole and not own:  # (past the edges: the hidden part too, hunt 2026-11-07)
+                # (past the edges: the hidden part too, hunt 2026-11-07; a merge's own notes with "Keep notes made
+                # there": the notes it slid with, merge_mover's kept_notes)
+                if whole and not own or own and self.keeps_offrange() and not all_kept:
                     rows = self.with_hidden(sh, rows)
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
                 laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
@@ -1358,7 +1369,8 @@ class JoinSplit:
                 for sa, sb, box in cuts:
                     nxt = []
                     for p in pieces:
-                        got, hit = slice_notes(p, *self.all_rows(p), sa, sb, self.ppq, box, self.keys)
+                        got, hit = slice_notes(p, *self.all_rows(p), sa, sb, self.ppq, box,
+                                               None if self.keeps_offrange() else self.keys)  # (kept: all seen)
                         crossed |= hit
                         nxt += got or [p]
                     pieces = nxt
@@ -1851,6 +1863,9 @@ class JoinSplit:
         hidden but kept: a slice mustn't lose them). As they sound, Sustain / Gate subtract done: the pieces sound
         exactly as before and don't keep those settings (user 2026-10-23: a cut turns them into plain notes;
         slice._halves)."""
+        # ("Keep notes made there": under key 0 / before beat 0 too, cut like the rest)
+        if self.keeps_offrange() and past_edges(sh, self.keys, self.ppq) is not None:
+            return whole_notes_tracks(sh, self.ppq, self.keys)
         (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
         if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
             return self.notes_tracks(sh)

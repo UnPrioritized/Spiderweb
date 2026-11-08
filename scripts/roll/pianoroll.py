@@ -1071,14 +1071,14 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 if line_touches_box(self.t2x(pts[:, 0]), self.p2y(pts[:, 1]), x0 + e, y0 + e, x1 - e, y1 - e):
                     found.add(i)
                     break
-        if self.app.show_notes.get() and (len(self.app.rendered) or own):
+        if self.app.show_notes.get() and (len(self.app.rendered) or own or len(getattr(self.app, "off_drawn", ()))):
             ppq = self.app.ppq
             t0, t1 = self.x2t(x0) * ppq, self.x2t(x1) * ppq
             if own:
                 mine = np.asarray(own[1], float).reshape(len(own[1]), -1)[:, :3]  # (start, end, key; then its number)
                 ns = np.column_stack([mine, np.zeros((len(mine), 2)), np.full(len(mine), own[0])])
             else:
-                ns = self.visible_notes(t0, t1)
+                ns = self.with_kept(self.visible_notes(t0, t1), t0, t1)
             # (the keys whose row's middle is in the box; e: screen pixels turned back into ticks aren't exact)
             k0, k1 = math.ceil(self.y2p(y1) - e), math.floor(self.y2p(y0) + e)
             ns = ns[(ns[:, 2] >= k0) & (ns[:, 2] <= k1) & (ns[:, 0] < t1 - e) & (ns[:, 1] > t0 + e)]
@@ -1133,14 +1133,23 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def notes_near(self, x, y):
         """The notes under the mouse, a few pixels either side (short notes), and the tick there; None while the
         notes aren't shown."""
-        if not self.app.show_notes.get() or not len(self.app.rendered):
+        if not self.app.show_notes.get() or not len(self.app.rendered) and not len(getattr(self.app, "off_drawn", ())):
             return None
         ppq, near = self.app.ppq, 5 * self.scale
         t, t_lo, t_hi = (self.x2t(v) * ppq for v in (x, x - near, x + near))
-        ns = self.visible_notes(t_lo, t_hi)
+        ns = self.with_kept(self.visible_notes(t_lo, t_hi), t_lo, t_hi)
         # (the track list's faint tracks behind the highlighted one: no shape of their own, never clicked)
         return ns[(ns[:, 2] == math.floor(self.y2p(y) + 0.5)) & (ns[:, 0] <= t_hi) & (ns[:, 1] >= t_lo)
                   & (ns[:, 5] < len(self.app.shapes))], t
+
+    def with_kept(self, ns, t_lo, t_hi):
+        """ns (rendered rows) + the notes kept past the keys / before beat 0 (App.off_drawn, "Keep notes made there")
+        that overlap ticks t_lo..t_hi: a shape is clicked / boxed by those too (same columns)."""
+        off = getattr(self.app, "off_drawn", None)
+        if off is None or not len(off):
+            return ns
+        off = off[(off[:, 0] <= t_hi) & (off[:, 1] >= t_lo)]
+        return np.concatenate([ns, off.astype(ns.dtype)]) if len(off) else ns
 
     def note_owners(self, x, y):
         got = self.notes_near(x, y)

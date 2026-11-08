@@ -771,6 +771,34 @@ def shape_notes_tracks(sh, ppq, keys=128):
     return got if got is not None else make(sh, keys)
 
 
+def whole_notes_tracks(sh, ppq, keys=128):
+    """shape_notes_tracks WHOLE: a shape past the edges (past_edges) with its notes past the keys / before beat 0
+    kept where they are, not cut off ("Keep notes made there": Gate sensitive merge's parts, Slice on pasted notes).
+    Inside the edges: shape_notes_tracks."""
+    out = past_edges(made_from(sh), keys, ppq)
+    if out is None:
+        return shape_notes_tracks(sh, ppq, keys)
+    lifted, up, room, later = out
+
+    def make(s, keys_in):
+        done = {}
+
+        def get(s):
+            key = json.dumps(s, sort_keys=True)
+            if key not in done:
+                done[key] = fx_notes(s, ppq, keys_in, get)
+            return done[key]
+        return get(s)
+    with rows_up_to(room - 1):
+        notes, tracks = make(lifted, room)
+    notes = np.array(notes, copy=True)
+    if up:
+        notes[:, 2] -= up
+    if later:
+        notes[:, :2] -= round(later * ppq)
+    return notes, tracks
+
+
 SPACE_KEYS = [False]  # Settings → General "Space past the keys" on (App.space_changed): a shape crossing the top key
 # is made whole then cut too; off = cut at the top key first, as before this setting (user: off = as before)
 

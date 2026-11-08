@@ -189,6 +189,22 @@ def ring_parts(notes, gap, cols=None):
     return np.concatenate(sides), np.concatenate(tops)
 
 
+def ring_from(cols, gap):
+    """ring_parts of (starts, ends, keys) that may reach under key 0 / before tick 0 (notes kept there, "Keep notes
+    made there"): worked out from the lowest key / earliest tick, then put back (ring_parts counts from 0)."""
+    s, e, k = (np.asarray(c, np.int64) for c in cols)
+    ds, dk = min(0, int(s.min())), min(0, int(k.min()))
+    if not ds and not dk:
+        return ring_parts(None, gap, (s, e, k))
+    sides, tops = ring_parts(None, gap, (s - ds, e - ds, k - dk))
+    sides, tops = sides.copy(), tops.copy()
+    sides[:, 0] += ds
+    sides[:, 1:3] += dk
+    tops[:, 0:2] += ds
+    tops[:, 2] += dk
+    return sides, tops
+
+
 def ring_chains(xa, ya, xb, yb, up, extra):
     """Upright (up) / flat pieces from (xa, ya) to (xb, yb), both ends drawn, joined where an end is another
     piece's end or one pixel diagonally beside it (an inner corner of a staircase; a one-pixel diagonal step draws
@@ -911,7 +927,10 @@ class RollDrawing:
         app = self.app
         from window.load_extract import box_notes  # (it imports this file)
         boxed = box_notes(app)  # (a kept box over a loaded MIDI: the loaded notes Delete would take, group D)
-        if not (app.sels and len(app.drawn) or boxed is not None) or not app.show_notes.get():
+        off = getattr(app, "off_drawn", None)
+        offsel = off[np.isin(off[:, 5], list(app.sels))] if app.sels and off is not None and len(off) else None
+        offsel = offsel if offsel is not None and len(offsel) else None  # (their notes kept past the keys: ringed too)
+        if not (app.sels and len(app.drawn) or boxed is not None or offsel is not None) or not app.show_notes.get():
             return None
         if app._bg_notes and getattr(self, "_hide_sels", False):  # (their notes are carried along while made in the background)
             return None
@@ -919,7 +938,7 @@ class RollDrawing:
         if copies and boxed is None:
             return None
         ppq, ax = app.ppq, self.sx / app.ppq
-        key = (frozenset(app.sels), self.sx, ppq, id(boxed))
+        key = (frozenset(app.sels), self.sx, ppq, id(boxed), getattr(app, "off_version", 0))
         span = max(1.0, self.winfo_width() - self.kb_w) / ax  # (the view's width in ticks)
         va = self.view_t * ppq
         pad = 16 / ax  # (the ring's pixels reach a little past its notes' ends)
@@ -937,13 +956,16 @@ class RollDrawing:
                 s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
             if boxed is not None:
                 s, e, k = (np.concatenate([a, b]) for a, b in zip((s, e, k), boxed))
+            if offsel is not None:
+                s, e, k = (np.concatenate([np.asarray(a, np.int64), offsel[:, c].astype(np.int64)])
+                           for a, c in zip((s, e, k), (0, 1, 2)))
             wa, wb = math.floor(va - span), math.ceil(va + 2 * span)
             near = (e > wa) & (s < wb)
             if near.all():  # (all of it: good wherever the view goes)
                 cols, wa, wb = (s, e, k), -math.inf, math.inf
             else:  # (cut at the stretch's ends: the side lines there are a screen away from the view)
                 cols = (np.maximum(s[near], wa), np.minimum(e[near], wb), k[near])
-            parts = ring_parts(None, RING_GAP / ax, cols) if len(cols[0]) else None
+            parts = ring_from(cols, RING_GAP / ax) if len(cols[0]) else None
             got = self._ring = (app.drawn, key, parts, (wa, wb))
         return got[2]
 

@@ -386,23 +386,24 @@ def slice_notes(sh, notes, tracks, a, b, ppq, box=None, seen=None):
     if (max(a[0], b[0]) * ppq <= t0 or min(a[0], b[0]) * ppq >= t1 or max(a[1], b[1]) < k0
             or min(a[1], b[1]) > k1):  # (nowhere near them: quick, a paste can be millions of notes)
         return None, False
-    rows = np.arange(k1 + 1)
+    base = min(0, k0)  # (rows under key 0 kept, "Keep notes made there": counted from the lowest)
+    rows = np.arange(base, k1 + 1)
     s = (rows - a[1]) / dk  # (where along a-b it crosses each row's middle)
     row_on = (s >= -EPS) & (s <= 1 + EPS)
     row_x = np.round((a[0] + (b[0] - a[0]) * s) * ppq).astype(np.int64)
-    inside = row_on[k0:] & (row_x[k0:] > t0) & (row_x[k0:] < t1)
+    inside = row_on[k0 - base:] & (row_x[k0 - base:] > t0) & (row_x[k0 - base:] < t1)
     crossed = bool(inside.any())
-    on, x = row_on[keys], row_x[keys]
+    on, x = row_on[keys - base], row_x[keys - base]
     # (it has to go through a note or between a row's notes somewhere: a note starting before it on the row, and one
     # ending after it)
-    early = np.bincount(keys[on & (lo < x)], minlength=k1 + 1) > 0
-    late = np.bincount(keys[on & (hi > x)], minlength=k1 + 1) > 0
+    early = np.bincount(keys[on & (lo < x)] - base, minlength=k1 + 1 - base) > 0
+    late = np.bincount(keys[on & (hi > x)] - base, minlength=k1 + 1 - base) > 0
     if not (early & late).any():
         return None, crossed
     tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
     # rows past an end in empty space (user, 2026-10-12): each note goes to the side of the line carried on, by its
     # middle, never cut. Past an end inside the notes (cutting a corner off): they stay whole after it.
-    sk = s[keys]
+    sk = s[keys - base]
     past = ~on & (((sk < 0) & open_end(notes, a, ppq)) | ((sk > 1) & open_end(notes, b, ppq)))
     side = past & (lo + hi < 2 * x)
     rest, before = (~on & ~side) | (on & (hi > x)), (on & (lo < x)) | side
