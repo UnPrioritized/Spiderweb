@@ -29,7 +29,7 @@ import numpy as np
 
 from files.about import HERE
 from files.native_wraps import NEEDS, Wraps
-from files.system import MAC, WINDOWS
+from files.system import MAC, WINDOWS, WINE
 
 ABI = 5  # (the library's sw_abi(): another one = not used)
 # The library's element kinds (lib.rs K_*, the same order): (NumPy kind letter, bytes, the dtype copies are made in)
@@ -119,6 +119,12 @@ def load():
         force = os.environ.get("SPIDERWEB_NATIVE_LEVEL", "")  # (checks: 1-4 = that level, if this processor has it)
         if force.isdigit():
             d.sw_set_level(int(force))
+        if WINE and not os.environ.get("SPIDERWEB_LOOPS_CHECK"):
+            level = checked_level(d.sw_level(), path)
+            if not level:
+                _why = "failed its check on this system"
+                return None
+            d.sw_set_level(level)
         if not probe(d):
             _why = "can't read this Python's arrays"
             return None
@@ -129,6 +135,67 @@ def load():
     global _ext
     _ext = load_ext(path)
     return d
+
+
+def checked_level(top, path):
+    """(Wine-like systems only; untested on a real emulator) The processor there may be emulated, and one claiming
+    AVX2 / AVX-512 it can't really run would end the program at the first loop. So the level is first tried in a
+    separate run of Spiderweb (spiderweb.py --loops-check: a few loops on big inputs, answers compared with NumPy's),
+    from the highest the processor names down to plain; 0 = none worked (the NumPy code). Remembered in
+    user/loops-level.json per system version + processor + library, so it's tried once."""
+    import json
+    import subprocess
+    from files import about, safefile
+    from files.system import cpu_name
+    saved = os.path.join(about.USER, "loops-level.json")
+    key = f"{WINE}|{cpu_name()}|{os.path.getsize(path)}|{ABI}|{top}"
+    try:
+        with open(saved, encoding="utf-8") as f:
+            known = json.load(f)
+        if not isinstance(known, dict):
+            known = {}
+    except (OSError, ValueError):
+        known = {}
+    if isinstance(known.get(key), int):
+        return known[key]
+    start = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable,
+                                                                     os.path.join(HERE, "spiderweb.py")]
+    level = 0
+    for tried in range(top, 0, -1):
+        env = dict(os.environ, SPIDERWEB_LOOPS_CHECK="1", SPIDERWEB_NATIVE_LEVEL=str(tried))
+        try:
+            done = subprocess.run(start + ["--loops-check"], env=env, timeout=180,
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if done.returncode == 0:
+                level = tried
+                break
+        except (OSError, subprocess.SubprocessError):
+            pass
+    known[key] = level
+    try:
+        safefile.write_text(saved, json.dumps(known))
+    except OSError:
+        pass
+    return level
+
+
+def self_check():
+    """(spiderweb.py --loops-check, a run of its own) A few loops at SPIDERWEB_NATIVE_LEVEL on inputs big enough for
+    their fastest code, answers compared with NumPy's. Exit code: 0 = fine, else not (a crash ends it anyway)."""
+    d = load()
+    if d is None:
+        return 3
+    loops = over()
+    if loops is None:
+        return 3
+    g = np.random.default_rng(7)
+    n = CORES_LEAST * 4
+    key, a, b, c = (g.integers(0, k, n).astype(np.int64) for k in (128, 50, 1000, 1 << 40))
+    want = np.lexsort((c, b, a, key))
+    for f in (loops.key_order, loops.key_order_cores):
+        if not np.array_equal(f(key, a, b, c), want):
+            return 4
+    return 0
 
 
 def load_ext(path):

@@ -1,5 +1,10 @@
 """What Spiderweb asks the operating system, each in one small function: the Windows way, the Linux way (a Linux
-user reports it works), the macOS way (untested) or a harmless answer when none works."""
+user reports it works), the macOS way (untested) or a harmless answer when none works.
+
+WINE: the Windows exe run on another system through a Windows-compatible layer (phones too). Only this file asks;
+others read WINE. Seen working there (one version, a desktop check): the lock, memory / processor, work_area,
+clipboard, file pickers, title icon, DPI call. The rest of the Windows-only spots (GDI fonts, key-held check, file
+drop, Domino reading, Update and restart) are untested there; each fails quietly or with its usual message."""
 
 import ctypes
 import sys

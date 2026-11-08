@@ -163,6 +163,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     (window/) palettes.py  note colour palettes (user/palettes/), switched live
     (window/) button_look.py  Settings → Look's Button style (system's own, Plain, Raised, Outlined, Flat)
     system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
+    c_fill.py        makes a C runtime's do-nothing complex-number stand-ins work (before NumPy loads)
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer
     midi_read.py     reading any MIDI file safely (Load MIDI): layout, every track checked, fingerprint
@@ -415,6 +416,11 @@ def close_lock():
 
 
 if __name__ == "__main__":
+    from files import c_fill
+    c_filled = c_fill.fill()  # (before NumPy loads: some systems' C runtime has stand-ins that end the program)
+    if "--loops-check" in sys.argv[1:]:  # (a run of its own: does the compiled loops' level work here? native.py)
+        from files import native
+        sys.exit(native.self_check())
     # Tell Windows we handle display scaling ourselves, so the window isn't stretched (blurry)
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -469,6 +475,8 @@ if __name__ == "__main__":
     not_moved = move_old_files()
     errors.move_old_logs()
     errors.watch_crashes()
+    if c_filled:
+        errors.note("C runtime", f"{len(c_filled)} complex functions filled in")
     if not check_numpy():
         sys.exit(1)
     try:

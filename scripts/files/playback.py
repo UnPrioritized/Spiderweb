@@ -12,7 +12,7 @@ import time
 import numpy as np
 
 from files.lang import tr
-from files.system import WINDOWS, wintypes
+from files.system import WINDOWS, WINE, wintypes
 from notes.engine import channels_of, ports_of
 from notes.hz_settings import CC_NUMBER, CC_START
 
@@ -24,7 +24,7 @@ KESTREL = "Kestrel (GPU, Experimental)"  # (the GPU synth through files/kestrel.
 MAESTRO = "Maestro (API)"  # (the user's own install, through its API: files/maestro.py; user 2026-11-01; saved)
 AHEAD = "Rendered ahead"  # (sound made into audio ahead of the play line: files/render_ahead.py; user 2026-11-02; saved)
 OLD_NAMES = {"Kestrel (GPU)": KESTREL}  # (saved MIDI outs under an earlier name)
-DEFAULT_DEVICE = MAPPER_NAME if WINDOWS else BUILTIN
+DEFAULT_DEVICE = MAPPER_NAME if WINDOWS and not WINE else BUILTIN  # (Wine-like systems often have no MIDI device)
 MAPPER = 0xFFFFFFFF
 
 # 31-EDO sound (Built-in BASSMIDI only): row r = 31-EDO step r above C0. Each step of the octave has its own
@@ -266,8 +266,9 @@ class MidiOut:
             pass
         h = wintypes.HANDLE()
         err = _winmm.midiOutOpen(ctypes.byref(h), dev, 0, 0, 0)
-        if err:
-            return tr("playback.couldn_t_open_windows_error_another", name=name, err=err)
+        if err:  # (Wine-like systems: usually no device at all, so "another program" would mislead)
+            return tr("playback.couldn_t_open_no_device" if WINE else "playback.couldn_t_open_windows_error_another",
+                      name=name, err=err)
         self.handle, self.name = h, name
         return None
 
