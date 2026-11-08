@@ -771,11 +771,12 @@ def shape_notes_tracks(sh, ppq, keys=128):
     return got if got is not None else make(sh, keys)
 
 
-def whole_notes_tracks(sh, ppq, keys=128):
+def whole_notes_tracks(sh, ppq, keys=128, over_top=None):
     """shape_notes_tracks WHOLE: a shape past the edges (past_edges) with its notes past the keys / before beat 0
     kept where they are, not cut off ("Keep notes made there": Gate sensitive merge's parts, Slice on pasted notes).
-    Inside the edges: shape_notes_tracks."""
-    out = past_edges(made_from(sh), keys, ppq)
+    Inside the edges: shape_notes_tracks. over_top=True: over the top key whole too whatever "Space past the keys"
+    says now (a merge made so must come back the same on any PC / setting, hunt 2026-11-08)."""
+    out = past_edges(made_from(sh), keys, ppq, over_top)
     if out is None:
         return shape_notes_tracks(sh, ppq, keys)
     lifted, up, room, later = out
@@ -881,7 +882,7 @@ def off_part(notes, tracks, up, keys, later=0):
     return notes, None if tracks is None else np.asarray(tracks)[out]
 
 
-def past_edges(sh, keys, ppq=960):
+def past_edges(sh, keys, ppq=960, over_top=None):
     """A shape whose lines reach before beat 0, under key 0 or over the top key (Space past the edges, Settings →
     General, user 2026-11-06: no notes are made there): (it lifted onto the keys by up whole keys and not cut at the
     edges (_free) and moved later by whole later_units past beat 0 (+ one more: note tools reaching earlier), up,
@@ -890,8 +891,10 @@ def past_edges(sh, keys, ppq=960):
     and cut where it really is (edge_made / cut_back). A sliced piece by its WHOLE's reach (moved along with it):
     lifted by its points, sliced.made_at_cut then makes it where it was cut (also lifted) and moves it. A Glissando
     goes up by whole octaves, its picked keys along (real piano keys). Over the top key alone only with Space past
-    the keys on (SPACE_KEYS; off: as before). None: made as always (inside the keys, a Hz bass: its tones sit on
-    song beats, Recolour's uncut look)."""
+    the keys on (SPACE_KEYS; off: as before; over_top True / False overrides it). None: made as always (inside the
+    keys, a Hz bass: its tones sit on song beats, Recolour's uncut look)."""
+    if over_top is None:
+        over_top = SPACE_KEYS[0]
     if sh.get("_free") or sh.get("hz") or "pts" not in sh:
         return None
     try:
@@ -903,7 +906,7 @@ def past_edges(sh, keys, ppq=960):
                 r = (min(r[0], w[0]), min(r[1], w[1]), max(r[2], w[2]), max(r[3], w[3]))
     except Exception:  # (a shape too broken to measure: made as always)
         return None
-    if r is None or r[0] >= 0 and r[1] >= -0.5 and (r[2] <= keys - 0.5 or not SPACE_KEYS[0]):
+    if r is None or r[0] >= 0 and r[1] >= -0.5 and (r[2] <= keys - 0.5 or not over_top):
         return None
     up = max(0, math.ceil(-0.5 - float(r[1]) - 1e-9))
     gliss = sh.get("kind") == "gliss"

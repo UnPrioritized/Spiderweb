@@ -1608,7 +1608,9 @@ class RollDrawing:
         """The App.off_drawn notes on screen as main_rects' rectangles, in their see-through colours (off_code);
         None when there are none."""
         app = self.app
-        off = getattr(app, "off_drawn", None)
+        off = getattr(app, "off_paint", None)  # (under a mask's preview: faded outside it, App.masked_offrange)
+        if off is None:
+            off = getattr(app, "off_drawn", None)
         if off is None or not len(off) or draft == "alone":
             return None
         if only is None and app._bg_notes and getattr(self, "_hide_sels", False):
@@ -1636,8 +1638,10 @@ class RollDrawing:
             group = np.where(pics[np.clip(off[on, 5], 0, len(pics) - 1)], PICTURE_GROUP + np.minimum(slot, 15), group)
         left, right = int(kb) - 2, int(w) + 2
         x0, x1 = np.maximum(x0[on], left).astype(np.int64), np.minimum(x1[on], right).astype(np.int64)
-        return x0, y0[on].astype(np.int64), np.maximum(x1 - 1, x0), y1[on].astype(np.int64) - 1, \
-            off_code(group, off[on, 3])
+        vel = off[on, 3]  # (-1 = a mask's ghost: faint like the real notes it covers)
+        code = off_code(group, vel) if not (vel < 0).any() else np.where(vel < 0, ghost_code(group, vel),
+                                                                         off_code(group, vel))
+        return x0, y0[on].astype(np.int64), np.maximum(x1 - 1, x0), y1[on].astype(np.int64) - 1, code
 
     def main_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
         """On-screen notes as whole-pixel rectangles, skipping exact repeats: NumPy arrays (x0, y0, x1, y1, colour),

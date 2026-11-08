@@ -704,8 +704,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.wrap_version = 0  # (+1 each time wrapped_rows' answer changes: the roll's picture key)
         self._outgoing = None  # (App.outgoing's last (key, notes))
         self.off_all = self.off_drawn = NO_NOTES  # (offrange_rows; off_drawn = the ones the piano roll shows)
+        # (off_all as the masks' preview shows it: ghosts (velocity -1) + the parts that show; None = no mask over
+        # them; off_paint = that, filtered like off_drawn: what roll_draw.off_rects paints; App.masked_offrange)
+        self.off_masked = self.off_paint = None
         self.export_held = False  # (W held: the piano roll shows what the export gets, export_view)
         self.off_version = 0  # (+1 each time off_drawn is set: the roll's picture key)
+        # (+1 each time rendered / off_all are made again: outgoing / wrapped_rows / scrub_wrapped keys; an array's
+        # id alone can be handed to a new one once the old is gone)
+        self.made_version = 0
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
         # when it opens (a change = opened again at the next Play: fresh_builtin)
         self.kestrel_opts = dict(KESTREL_DEFAULTS)
@@ -1238,15 +1244,21 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if away and len(self.drawn):
                 self.drawn = self.drawn[~np.isin(self.drawn[:, 5], away)]
             hidden |= set(away)
-        off = self.off_all
-        if len(off) and (hidden or self.track_list.current is not None):  # (only the shapes / tracks shown)
-            keep = ~np.isin(off[:, 5], list(hidden))
-            if self.track_list.current is not None:
-                keep &= np.isin(off[:, 4], list(self.track_list.shown_slots()))
-            off = off[keep]
-        if off is not self.off_drawn and (len(off) or len(self.off_drawn)):
+        def shown_off(off):  # (only the shapes / tracks shown)
+            if len(off) and (hidden or self.track_list.current is not None):
+                keep = ~np.isin(off[:, 5], list(hidden))
+                if self.track_list.current is not None:
+                    keep &= np.isin(off[:, 4], list(self.track_list.shown_slots()))
+                off = off[keep]
+            return off
+        off = shown_off(self.off_all)
+        masked = self.off_masked
+        paint = None if masked is None else shown_off(masked)
+        if (off is not self.off_drawn or paint is not self.off_paint) and (
+                len(off) or len(self.off_drawn) or paint is not None or self.off_paint is not None):
             self.off_version += 1
         self.off_drawn = off
+        self.off_paint = paint  # (as painted under the masks' preview: faded outside them; None = off_drawn)
         if self.export_held:  # (W held: what the export gets; let go = track_view again)
             if self.wraps_offrange():
                 self.export_drawn()
@@ -2310,6 +2322,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             made = lay_again(made, stash, self.shapes, self.own_channels()) or make()
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _, self.cut_emptied = made
         self.off_all = self.offrange_rows()  # (before play_changed: App.outgoing reads them)
+        self.made_version += 1
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
         started = time.perf_counter()
@@ -2323,8 +2336,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.mask_preview.get():
             self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
                                                       self.pattern, GHOST_FADE[0] > 0)
+            self.off_masked = self.masked_offrange()  # (the kept notes past the keys under the masks too)
         else:  # (toolbar "Preview" off: the pattern drawn whole, only the masks' dashed lines; user)
             self.drawn, self.mask_covered = self.rendered, set()
+            self.off_masked = None
         self.drawn_slots = track_ids(self.drawn[:, 4])  # (the real tracks: the track list's one-track view goes
         #                                                  by these; a track added by hand: its HAND id)
         if self.strips_window:  # (its strips each in a colour of its own while it shows them)
@@ -3788,8 +3803,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         Domino, note count...) never hold them. Made from the same remembered lifted notes as edge_made's, so this
         costs no note making of its own. Nothing to save: they come from the shape's drawing again."""
         empty = np.zeros((0, 4), np.int64), None
-        if not self.keeps_offrange() or sh.get("hz"):
-            return empty
+        if not self.keeps_offrange() or sh.get("hz") or silent(sh):  # (a mask whose own notes don't sound: none
+            return empty                                                  # there either, like all_notes)
         out = past_edges(sh, self.keys, self.ppq)
         if out is None:
             return empty
@@ -3822,6 +3837,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         from roll.roll_draw import OFF_FADE
         OFF_FADE[0] = min(100, max(1, int(self.offrange_opacity.get())))
         self.off_all = self.offrange_rows()
+        self.made_version += 1
+        self.off_masked = self.masked_offrange() if self.mask_preview.get() else None
         self._outgoing = None
         self.track_view()
         self.roll.request_redraw()
@@ -3838,17 +3855,24 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         key mod the project's keys, before beat 0 never; overlaps / channels worked out with them like any other
         note in that mode). Rows like rendered's. Made only when asked (and kept until the notes change), so the
         piano roll and the tools never pay for it; never part of app.rendered (the tools would see them twice)."""
+        return self.outgoing_layout()[0]
+
+    def outgoing_layout(self):
+        """(App.outgoing's notes, their voice_slots {shape: {track: slot}}): the export's own channel layout, so the
+        Hz basses' CC lines and pasted notes' CCs go on the channels their notes are WRITTEN on (hunt 2026-11-08:
+        wrapped notes moved a Hz bass to another channel, its Cutoff stayed on the old one). Wrap off / nothing
+        wrapped = (rendered, voice_slots) as always."""
         if not self.wraps_offrange() or not len(self.off_all):
-            return self.rendered
-        key = (id(self.rendered), id(self.off_all), self.ppq, self.keys)
+            return self.rendered, self.voice_slots
+        key = (self.made_version, id(self.rendered), id(self.off_all), self.ppq, self.keys, self.channel_mode.get())
         if self._outgoing is not None and self._outgoing[0] == key:
             return self._outgoing[1]
         mode = self.channel_mode.get()
         got = all_notes(self.shapes, self.ppq, self.keys, mode, self.channel_split, self.all16(), self.notes_tracks,
                         rounds=self.rounds_apart(), order=self.in_order(), keep=self.keep_colours.get(),
-                        busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=True)[2]
-        self._outgoing = (key, got)
-        return got
+                        busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=True)
+        self._outgoing = (key, (got[2], got[4]))
+        return self._outgoing[1]
 
     def wrapped_rows(self):
         """Where the kept notes past the keys LAND with "Wrap them around" on, for the piano roll ("Show wrapped
@@ -3867,7 +3891,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.wrap_version += 1
             return none
         sels = frozenset(self.sels) if mode == "selected" else None
-        key = (id(off), id(self.rendered), sels, mode, self.keys)
+        key = (self.made_version, self.off_version, id(off), id(self.rendered), sels, mode, self.keys)
         if self._wrapped is not None and self._wrapped[0] == key:
             return self._wrapped[1]
         if sels is not None:
@@ -3915,7 +3939,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         off = self.off_drawn
         if not len(off) or not self.wraps_offrange():
             return NO_NOTES
-        key = (id(off), self.keys)
+        key = (self.made_version, self.off_version, id(off), self.keys)
         got = getattr(self, "_scrub_wrap", None)
         if got is None or got[0] != key:
             got = self._scrub_wrap = (key, wrap_landing(off, self.keys)[0])
@@ -3967,6 +3991,76 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                                     int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min()))
             parts.append(np.column_stack([notes, slot, np.full(len(notes), i, np.int64)]))
         return np.concatenate(parts) if parts else NO_NOTES
+
+    def kept_mask_world(self, pattern=None):
+        """The masks worked out over the kept notes past the keys (hunt 2026-11-08, user: masks work on them like on
+        any note): the masks' areas only reach key 0 .. the top key, so everything is lifted by `up` whole keys onto
+        a taller keyboard (nkeys): (shapes with every drawn mask lifted, notes = the real rows of the shapes with kept
+        notes + the kept rows, lifted, a 7th column 1 on the kept ones, nkeys, up, notes_of for those shapes: a lifted
+        mask's notes made WHOLE there (engine.whole_notes_tracks), others' as made, lifted). None: no mask or no kept
+        note. pattern: the rows the masks cover (App.pattern's; None = rendered)."""
+        off = self.off_all
+        if not len(off) or not any(map(is_mask, self.shapes)):
+            return None
+        from notes.engine import whole_notes_tracks
+        up = self.keys * max(1, int(self.space_keys.get()))
+        nkeys = self.keys + 2 * up
+        shapes = [dict(sh, pts=[[b, p + up] for b, p in sh["pts"]], _up=up) if is_mask(sh) and "pts" in sh else sh
+                  for sh in self.shapes]
+        real = self.rendered if pattern is None else pattern
+        real = real[np.isin(real[:, 5], np.unique(off[:, 5]))]
+        notes = np.concatenate([np.column_stack([real, np.zeros(len(real), np.int64)]),
+                                np.column_stack([off, np.ones(len(off), np.int64)])])
+        notes[:, 2] += up
+        ppq = self.ppq
+
+        def notes_of(s):
+            if "_up" in s:  # (fills make their rows that high too: paths.rows_up_to, as past_edges' shapes)
+                with rows_up_to(nkeys - 1):
+                    return whole_notes_tracks({k: v for k, v in s.items() if k != "_up"}, ppq, nkeys,
+                                              over_top=True)[0]
+            n = np.array(self.notes_of(s), np.int64, copy=True).reshape(-1, 4)
+            n[:, 2] += up
+            return n
+        return shapes, notes, nkeys, up, notes_of
+
+    def masked_offrange(self):
+        """off_all as the masks' preview shows it (mask.mask_view over kept_mask_world): the kept rows of shapes a
+        mask covers as ghosts (velocity -1, painted faint) + the parts that show; None = no mask over kept notes."""
+        world = self.kept_mask_world()
+        if world is None:
+            return None
+        import notes.mask as mask_mod
+        shapes, notes, nkeys, up, notes_of = world
+        saved = dict(mask_mod._shown)  # (mask_view's own memory is the real notes' one: Apply mask reuses it)
+        try:
+            rows, covered = mask_view(notes, shapes, self.ppq, nkeys, notes_of, None, GHOST_FADE[0] > 0)
+        finally:
+            mask_mod._shown.clear()
+            mask_mod._shown.update(saved)
+        if not covered:
+            return None
+        rows = rows[rows[:, 6] == 1][:, :6].copy()
+        rows[:, 2] -= up
+        return rows
+
+    def masked_kept_shown(self):
+        """For Apply mask: {first mask of a unit: the kept rows (rendered's columns) that unit shows}, worked out in
+        kept_mask_world like the preview (mask.worked_now)."""
+        from notes.mask import unmasked, worked_now
+        world = self.kept_mask_world(self.pattern)
+        if world is None:
+            return {}
+        shapes, notes, nkeys, up, notes_of = world
+        units, shown = worked_now(shapes, unmasked(notes, shapes), self.ppq, nkeys, notes_of)
+        out = {}
+        for unit in units:
+            got = shown(unit)[1]
+            got = got[got[:, 6] == 1][:, :6].copy() if len(got) else got[:, :6]
+            if len(got):
+                got[:, 2] -= up
+                out[tuple(unit)] = got
+        return out
 
     def gate_flip_state(self):
         """The right-click "Gate aware flip" for the selected shapes: (shapes it switches, on: ticked, why: None or

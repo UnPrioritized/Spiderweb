@@ -1639,18 +1639,21 @@ class ProjectFiles:
             notes = moved
         return notes, cc, plan
 
-    def cc_messages(self, ppq, bpm, only=None):
+    def cc_messages(self, ppq, bpm, only=None, plain=False):
         """The Hz basses' CC lines as MIDI messages on the slots (tracks) their notes are on: {slot: [(tick, status,
         data 1, data 2)]} (hz_cc.slot_events; only = the shapes' numbers to take, None: all). Pasted notes' passengers
         too (Multi channel only: each track's on the slot its notes got), each as its MIDI messages with a 5th part:
         (tag, body) = Domino's event to write back as it was (on the last of its messages; status None when it has
         no MIDI message), False = a MIDI-only message (passengers.midi_messages)."""
-        out = slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
+        # (the export's own layout: wrapped kept notes can move channels, App.outgoing_layout; plain = the piano
+        # roll's, for copies of the notes as shown: the track list's boxes)
+        laid, voice_slots = (self.rendered, self.voice_slots) if plain else self.outgoing_layout()
+        out = slot_events(self.shapes, laid, ppq, bpm, only, voice_slots)
         added = set()
         auto = self.channel_mode.get() == "auto"
         groups = {}  # (a paste (or a shape alone) -> ([its shapes], latest values: cc_put_back))
         for i, sh in enumerate(self.shapes):
-            slots = self.voice_slots.get(i) if "cc" in sh and (only is None or i in only) else None
+            slots = voice_slots.get(i) if "cc" in sh and (only is None or i in only) else None
             if slots is None and auto and "cc" in sh and sh.get("own_slots") and (only is None or i in only):
                 # (a copy whose tracks ARE its slots, made with the channel rule of then: moved like its notes, hunt)
                 ks = sorted({e[1] for e in unpack_cc(sh["cc"])})
@@ -1679,7 +1682,7 @@ class ProjectFiles:
                 slot = slots.get(track)
                 if slot is not None:  # (a track without notes here: no channel to go on)
                     add(slot, t, tag, body)
-            strips = self.voice_slots.get(("strips", i))
+            strips = voice_slots.get(("strips", i))
             if strips:  # (Channel per strip: each later strip's channel gets its track's values in effect at its
                 # start, then its events while it sounds, hunt 2026-10-23)
                 for track, slot in slots.items():
@@ -1953,9 +1956,10 @@ class ProjectFiles:
             time = min(min(a[0], a[2]) for a in areas), max(max(a[0], a[2]) for a in areas)
         if sels and not by_time:  # (shapes picked by clicking / a Select box: the pasted CC
             # events stay behind, Domino's way, user 2026-10-29; your Hz bass CC lines go along, user 2026-10-21)
-            cc = slot_events(self.shapes, self.rendered, ppq, bpm, only, self.voice_slots)
+            laid, voice_slots = self.outgoing_layout() if boxed is None else (self.rendered, self.voice_slots)
+            cc = slot_events(self.shapes, laid, ppq, bpm, only, voice_slots)
         else:
-            cc = self.cc_messages(ppq, bpm, only)
+            cc = self.cc_messages(ppq, bpm, only, plain=boxed is not None)
         if time is not None:
             time = round(time[0] * ppq), round(time[1] * ppq)
         if boxed is not None:  # (their CC lines: only on a box's rows inside its time, hunt 2026-10-29: a box

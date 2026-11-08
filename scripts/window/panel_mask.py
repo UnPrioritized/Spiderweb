@@ -279,15 +279,22 @@ class MaskPanel:
             self.shapes_changed(now=True)
         notes = unmasked(self.pattern, self.shapes)  # (as they sound without the masks' own notes)
         units, shown = worked_now(self.shapes, notes, self.ppq, self.keys, self.notes_of)
+        # (+ the kept notes past the keys the masks show, as kept notes of the copy: hunt 2026-11-08, user)
+        kept = self.masked_kept_shown() if self.keeps_offrange() else {}
         made, count = {}, 0
         for unit in [u for u in units if set(u) & set(masks)]:
             i = unit[0]
             got = shown(unit)[1]
+            extra = kept.get(tuple(unit))
+            if extra is not None and len(extra):
+                got = np.concatenate([got, extra]) if len(got) else extra
             if not len(got):  # (nothing shows through: no copy of the border alone)
                 continue
             # its own sounding notes (the border, as its fill settings make them) come along: the copy = what you see
             # (user, 2026-10-12, after trying; silent masks have none)
-            got = np.concatenate([got, self.rendered[np.isin(self.rendered[:, 5], unit)]])
+            got = np.concatenate([got, self.rendered[np.isin(self.rendered[:, 5], unit)]]
+                                 + ([self.off_all[np.isin(self.off_all[:, 5], unit)]] if self.keeps_offrange()
+                                    else []))
             count += len(got)
             pics = np.array(["picture" in self.shapes[o] for o in got[:, 5].tolist()], bool)
             hand = got[:, 4] >= OWN0  # (notes on a track added by hand: a copy in that track each)

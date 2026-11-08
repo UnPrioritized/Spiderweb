@@ -357,10 +357,13 @@ class SettingsWindow(tk.Toplevel):
             t.fit()
 
     def close(self):
-        """Esc / X: a voice limit typed without Enter is taken first."""
+        """Esc / X: a voice limit / an Opacity typed without Enter is taken first (a wrong one: the last good stays)."""
         panel = self.app.builtin_window
         if panel is not None and panel.winfo_exists():
             panel.take_voices()
+        take = getattr(self, "take_opacity", None)
+        if take is not None and self.opacity_box.winfo_exists() and not self.opacity_box.instate(["disabled"]):
+            take(True)
         self.destroy()
 
     def tick(self, page, key, var, command, tip=None, **kw):

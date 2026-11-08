@@ -359,8 +359,9 @@ def part_rows(parts, ppq, keys, rounds=False, whole=False):
     recipe's "whole": engine.whole_notes_tracks)."""
     from notes.custom import ROUND, tracks_apart
     from notes.engine import assign_slots, shape_notes_tracks, unique_inverse, whole_notes_tracks
-    if whole:
-        shape_notes_tracks = whole_notes_tracks  # noqa: F811 (the same call, uncut)
+    if whole:  # (the same call, uncut; over the top key always: made so, it must come back the same, hunt 11-08)
+        def shape_notes_tracks(p, ppq, keys):  # noqa: F811
+            return whole_notes_tracks(p, ppq, keys, over_top=True)
     from notes.gateflip import colours_back, unflipped_starts
     from notes.recolour import is_recoloured
     units, forced, firsts, made, laps, after = [], [], [], [], [], 0
@@ -589,7 +590,8 @@ def part_notes(m):
     """f(part, ppq, keys) -> a part's (start, end, pitch, velocity) notes as the recipe m makes them: cut at the
     edges, or whole (m["whole"]: "Keep notes made there")."""
     from notes.engine import shape_notes, whole_notes_tracks
-    return (lambda p, ppq, keys: whole_notes_tracks(p, ppq, keys)[0]) if m.get("whole") is True else shape_notes
+    return (lambda p, ppq, keys: whole_notes_tracks(p, ppq, keys, over_top=True)[0]) if m.get("whole") is True \
+        else shape_notes
 
 
 def made_sides(m):
