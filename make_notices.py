@@ -1,7 +1,8 @@
 """Writes THIRD-PARTY-NOTICES.txt: the licences of everything Spiderweb.exe carries inside it besides Spiderweb itself
-(Python, Tcl/Tk, NumPy, Numba, llvmlite with LLVM, Pillow, PyNaCl + cffi + pycparser, PyInstaller's starter), read from the copies installed here
-so the notices match the versions built in, then the Kestrel connector's (native/kestrel_bridge/NOTICES.txt, written
-by its own make_notices.py). build.bat runs it before building."""
+(Python, Tcl/Tk, NumPy, Pillow, PyNaCl + cffi + pycparser, PyInstaller's starter), read from the copies installed here
+so the notices match the versions built in, then the own compiled loops' Rust crates (native/loops/NOTICES.txt) and
+the Kestrel connector's (native/kestrel_bridge/NOTICES.txt), each written by its own make_notices.py. build.bat runs
+it before building."""
 
 import glob
 import importlib.metadata as meta
@@ -20,8 +21,10 @@ The Hz bass preview and the built-in synth use BASS, BASSMIDI and BASSmix by Un4
 (un4seen.com). They aren't covered by these licences or by Spiderweb's: they are free for
 non-commercial use only (see README.txt).
 
-Kestrel (GPU) playback uses the Kestrel connector (scripts/kestrel, also inside the .exe): its
-licences, Kestrel's own among them, are at the end of this file.
+The own compiled loops (scripts/loops, also inside the .exe) are built with Rust crates (rayon and
+its helpers): their licences come after the packages below. Kestrel (GPU) playback uses the Kestrel
+connector (scripts/kestrel, also inside the .exe): its licences, Kestrel's own among them, are at the
+end of this file.
 """
 
 
@@ -58,16 +61,15 @@ def main():
              section(f"Python {sys.version.split()[0]}", python),
              tcl_tk(),
              package("numpy", "NumPy"),
-             package("numba", "Numba"),
-             package("llvmlite", "llvmlite (with LLVM)"),
              package("pillow", "Pillow"),
              package("pynacl", "PyNaCl (with libsodium; checks update signatures)"),
              package("cffi", "cffi (used by PyNaCl)"),
              package("pycparser", "pycparser (used by cffi)"),
              package("pyinstaller", "PyInstaller (its starter program runs Spiderweb.exe)")]
-    kestrel = os.path.join(HERE, "native", "kestrel_bridge", "NOTICES.txt")
-    if os.path.isfile(kestrel):
-        parts.append(f"\n\n{LINE}\n{LINE}\n\n" + open(kestrel, encoding="utf-8").read())
+    for own in (("loops", "NOTICES.txt"), ("kestrel_bridge", "NOTICES.txt")):
+        path = os.path.join(HERE, "native", *own)
+        if os.path.isfile(path):
+            parts.append(f"\n\n{LINE}\n{LINE}\n\n" + open(path, encoding="utf-8").read())
     text = "".join(parts).replace("\r\n", "\n")
     with open(OUT + ".tmp", "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

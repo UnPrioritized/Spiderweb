@@ -79,7 +79,7 @@ class DcCompiled:
 
 
 class DcNumpy:
-    """The same filter without Numba, a CHUNK at a time: its two poles are a conjugate pair p, p*, so the recursive
+    """The same filter without the own loops, a CHUNK at a time: its two poles are a conjugate pair p, p*, so the recursive
     part is 2 Re(A v) with v[n] = p v[n-1] + x[n] (A = p / (p - p*)), and v over a chunk = p^k (p v_before +
     cumsum(x p^-j)) (|p|^-CHUNK stays near 2); then b0 w + b1 w[-1] + b2 w[-2]. Matches the compiled one to ~1e-9."""
     CHUNK = 512

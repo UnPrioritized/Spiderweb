@@ -775,7 +775,7 @@ class Player:
 
 # Built-in BASSMIDI's limiter (Live.set_limiter): Limiter's way (gain worked out per block, looking one block ahead,
 # ceiling at full volume) but with all it keeps in one row of numbers, so BASS's sound thread can run it as compiled
-# code that never waits for Python (fastloops.limit_dsp, when Numba is there) or else live_limit below (the same
+# code that never waits for Python (the own loops' limit_dsp, native.limiter) or else live_limit below (the same
 # maths; dev/tests/live_limiter.py compares them). Switched on / off, it fades between the plain and the limited
 # sound over LIM_FADE (a cut clicks: the limited sound is LIM_DELAY frames late); the first LIM_DELAY frames after
 # it's put on the stream stay plain (nothing late to fade to yet).
@@ -812,7 +812,7 @@ def dc_coefficients(hz=DC_HZ):
 
 def dc_block(x, c, z):
     """x (frames, 2) float32 high-passed in place: c = dc_coefficients(), z = (2, 2) float64 state (z1, z2 a
-    channel), kept between calls. Compiled: fastloops.dc_block."""
+    channel), kept between calls. Compiled: the own loops library's dc_block."""
     b0, b1, b2, a1, a2 = c[0], c[1], c[2], c[3], c[4]
     for i in range(x.shape[0]):
         for ch in range(2):
@@ -852,7 +852,7 @@ def lim_row(slot):
 
 
 def live_limit(st, x, loud, slot):
-    """The limiter without Numba: x = float32 rows (left, right), changed in place; st = limit_state()'s row,
+    """The limiter without the own loops: x = float32 rows (left, right), changed in place; st = limit_state()'s row,
     loud = every limited stream's loudness lately (slot = this one's)."""
     ring = st[LIM_HEAD:].reshape(LIM_RING, 2)
     m, i = len(x), 0
@@ -911,8 +911,9 @@ class _Limited:
                     return
                 from files import speed
                 fast = speed.loops()
-                if fast is not None and struct.calcsize("P") == 8:  # (compiled code calls the plain C way: 64-bit)
-                    self._proc = _DSPPROC(fast.limit_dsp.address)
+                dsp = getattr(fast, "limit_dsp", None) if fast is not None else None
+                if dsp is not None and struct.calcsize("P") == 8:  # (compiled code calls the plain C way: 64-bit)
+                    self._proc = _DSPPROC(dsp.address)
                 else:
                     self._proc = _DSPPROC(self._limit)
                 self.slot, self.st = slot, lim_row(slot)
@@ -943,7 +944,7 @@ class _Limited:
             self.slot = None
 
     def _limit(self, dsp, channel, buf, length, user):
-        """(BASS's sound thread, without Numba) A piece just made, turned down in place where too loud."""
+        """(BASS's sound thread, without the own loops) A piece just made, turned down in place where too loud."""
         try:
             slot = self.slot
             if slot is not None:
@@ -986,8 +987,8 @@ class Live(_Limited):
     rather than stuttering when it can't keep up. Holds the soundfont open until close(). set_limiter = the
     driver's optional limiter (a limiter plugin at its defaults: catches only what goes past full volume), handed
     each piece by BASS as it makes it (see LIM_BLOCK; BASS's own compressor measured useless here: at full volume it
-    does nothing, past +6 dB it lets sound through). Without Numba that step is Python: it waits while the window is
-    busy and the sound breaks up then (hunt 2026-10-08: editing while playing, 150 ms of 6 s missing)."""
+    does nothing, past +6 dB it lets sound through). Without the own loops that step is Python: it waits while the
+    window is busy and the sound breaks up then (hunt 2026-10-08: editing while playing, 150 ms of 6 s missing)."""
     CPU = 95  # % of the time it may spend making sound before voices are dropped (the driver's default)
     QUEUE = 65536 * 4  # bytes of messages waiting for the sound thread (the driver's default)
     plain, mixer = False, 0  # (mixer: a group's synth, its group's mix once added)

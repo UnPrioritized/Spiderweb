@@ -1,6 +1,6 @@
 """Rendered ahead's pieces of a LOADED MIDI (PLAN.md L0 / L1): a track's piece is its own bytes, COPIED from a
 checkpoint, never read into notes and written again (measured 2026-11-03: ~5x quicker; Shinki 4.5 s of music made
-in 2 s instead of 9.3). Plain Python that files/fastloops.py compiles (piece_track; the same function both ways).
+in 2 s instead of 9.3). Plain Python that our own loops (native/loops) do in Rust too (piece_track; the same both ways).
 
 piece_track walks a track's bytes from a checkpoint. Before t_pre it only counts: which notes sound there (cnt,
 channel x 256 + key, and the newest one's velocity / tick). From the first event at / after t_pre up to t_on (the

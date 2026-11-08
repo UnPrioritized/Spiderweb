@@ -851,7 +851,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
         self.updates.start()  # (What's new after an update; asks about / looks for updates)
-        speed.start()  # (the compiled loops for lots of notes, if Numba is there: loaded in the background)
+        speed.start()  # (the own compiled loops for lots of notes: loaded in the background)
         from window import app_playback
         if app_playback.READY_AFTER_MS is not None:  # (Built-in BASSMIDI ready before the first Space)
             self.after(app_playback.READY_AFTER_MS, self.ready_builtin)

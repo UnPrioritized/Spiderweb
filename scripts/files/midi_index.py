@@ -1,5 +1,5 @@
 """Load MIDI's pass over each track, in the same read that checks it (midi_read.MidiFile.scan's each=). Plain
-Python here; files/fastloops.py compiles the very same functions (midi_index, midi_close, midi_grid), so both
+Python here; our own loops (native/loops) do the very same in Rust (midi_index, midi_close, midi_grid), so both
 give identical results. No note is kept: a track is read again from its bytes whenever its notes are needed, so
 the pass leaves an index to start such a read anywhere, and the overview picture.
 

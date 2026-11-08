@@ -29,10 +29,8 @@ user/
 # Kestrel connector DLL (built from native/kestrel_bridge; how it ships is decided at release)
 scripts/kestrel/**/*.dll
 scripts/kestrel/**/*.so
-# Own compiled loops (built from native/loops by its build_release.py; ships in the exe + source zip)
-scripts/loops/**/*.dll
-scripts/loops/**/*.so
-scripts/loops/**/*.dylib
+# Own compiled loops: the built files ARE in git (built from native/loops by its build_release.py, paths taken out),
+# so running from source gets them too
 scripts/loops/**/*.tmp
 # Build stamp (build_version.py writes it for one build)
 scripts/files/build_stamp.py

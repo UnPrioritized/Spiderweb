@@ -190,7 +190,7 @@ def report(exc_type, exc, tb, where="", fatal=False):
 
 
 def watch_crashes():
-    """A crash inside a DLL or compiled code (BASS, Numba, Tk) ends the program before Python can log anything.
+    """A crash inside a DLL or compiled code (BASS, our own loops, Tk) ends the program before Python can log anything.
     faulthandler then writes what every thread was doing into user/crash-now.log; the next start moves that into
     spiderweb-crash.log. A run that ended normally leaves only its start line and note lines (what was in use), which
     the next start drops."""

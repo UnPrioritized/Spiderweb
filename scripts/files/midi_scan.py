@@ -1,5 +1,5 @@
-"""The byte loops for reading and copying MIDI files (Load MIDI). Plain Python here; files/fastloops.py compiles the
-very same functions with Numba (midi_walk / midi_rewrite), so both give identical results. Every loop works on a
+"""The byte loops for reading and copying MIDI files (Load MIDI). Plain Python here; our own loops (native/loops) do
+the very same in Rust (midi_walk / midi_rewrite), so both give identical results. Every loop works on a
 piece of one track at a time and stops at the last whole event, so a huge track goes through a small buffer: call
 again with the rest (st carries what it needs across pieces).
 

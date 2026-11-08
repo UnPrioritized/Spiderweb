@@ -1,5 +1,5 @@
-"""The byte loops for playing a loaded MIDI (Load MIDI group D). Plain Python here; files/fastloops.py compiles the
-very same functions with Numba (play_read / play_order / play_hist / play_emit), so both give identical results.
+"""The byte loops for playing a loaded MIDI (Load MIDI group D). Plain Python here; our own loops (native/loops) do
+the very same in Rust (play_read / play_order / play_hist / play_emit), so both give identical results.
 
 read   many tracks' channel events from their bytes, up to a tick (what playing needs)
 programs  a track's program / bank state at a byte place (where playing starts: the instruments in effect there)

@@ -1,11 +1,11 @@
-"""Optional speed-ups (user, 2026-10-06): Numba (compiled loops, files/fastloops.py) and Pillow (pictures to the
-screen in half the time, more picture file types). Spiderweb works the same without them, just slower: the NumPy /
-Tk code they replace is kept and used then.
+"""Speed-ups: our own compiled loops (files/native.py, a library built from native/loops in Rust; shipped with
+Spiderweb) and Pillow (optional: pictures to the screen in half the time, more picture file types). Spiderweb works
+the same without them, just slower: the NumPy / Tk code they replace is kept and used then.
 
-start() loads the compiled loops in the background (the first start compiles them: a few seconds); loops() is
-None until they're ready, then the fastloops module (with files/native.py's loops in place of the ones our own
-library has). SPIDERWEB_SPEED in the environment: "off" = never use them, "now" = load them at once instead of in
-the background (tests: the same code every run)."""
+start() loads the compiled loops in the background; loops() is None until they're ready, then native.Loops (each
+loop's plain-Python twin in files/fastloops.py is the last resort of a call the library refuses). SPIDERWEB_SPEED
+in the environment: "off" = never use them, "now" = load them at once instead of in the background (tests: the same
+code every run). (Until 2026-11 the loops were Numba's; PLAN.md B.)"""
 
 import os
 import threading
@@ -14,8 +14,6 @@ import tkinter as tk
 _loops = None
 _started = False
 _failed = False
-save_loops = True  # False = the saved loops failed this start: made again without saving (fastloops reads it)
-_build = None
 
 
 def start():
@@ -36,91 +34,44 @@ def start():
 
 
 def _load():
-    global _loops
-    import importlib.util
+    global _loops, _failed
     import sys
     import time
+    from files import errors, native
     began = time.perf_counter()
     try:
-        from files import native
-        _loops = native.over(_warm_loops())  # (our own library's loops in place of their Numba twins, when built)
-        how = "compiled loops ready in %.1f s" % (time.perf_counter() - began)
-    except Exception:  # no Numba (or it can't compile here): the NumPy code is used
-        global _failed
-        _failed = True
+        _loops = native.over()
+        how = ("compiled loops ready in %.1f s" % (time.perf_counter() - began)) if _loops else "compiled loops off"
+    except Exception:  # noqa: BLE001 (the library there but failing: the NumPy code is used, worth a line in the logs)
+        _loops = None
         how = "compiled loops off: " + repr(sys.exc_info()[1])
-        if importlib.util.find_spec("numba") is not None:  # (there but not working: worth a line in errors.log)
-            from files import errors
-            errors.write_log(*sys.exc_info(), "(loading the compiled loops; the slower code is used)")
-    from files import errors, native
-    own = ("on (%s)" % native.level_name()) if native.load() else "off: " + native.why()
-    errors.note("speed-ups", f"Numba {'on' if _loops else 'off'}, own loops {own}, Pillow {'on' if pillow() else 'off'}")
+        errors.write_log(*sys.exc_info(), "(loading the compiled loops; the slower code is used)")
+    if _loops is None:
+        _failed = True
+    own = ("on (%s)" % native.level_name()) if _loops is not None else "off: " + (native.why() or how)
+    errors.note("speed-ups", f"own loops {own}, Pillow {'on' if pillow() else 'off'}")
     report = os.environ.get("SPIDERWEB_SPEED_REPORT")  # (the exe test asks how it went)
     if report:
         with open(report, "w", encoding="utf-8") as f:
             f.write(how + "\nOwn loops: " + own + "\nPillow: " + ("yes" if pillow() else "no") + "\n")
+    _drop_numba_saved()
 
 
-def _warm_loops():
-    """fastloops, compiled (or loaded). Saved loops that fail (a damaged file; one that can't be saved: disk full,
-    path too long) are thrown away and the loops made again without saving; the next start saves them anew."""
-    global save_loops
-    import importlib
-    import importlib.util
-    import sys
-    try:
-        from files import fastloops
-        fastloops.warm()
-        return fastloops
-    except Exception:
-        if not save_loops or importlib.util.find_spec("numba") is None:
-            raise
-        first = sys.exc_info()[1]
-    from files import errors
-    errors.note("compiled loops", "saved ones failed, made again: " + repr(first)[:200])
-    save_loops = False
-    _forget_saved()
-    sys.modules.pop("files.fastloops", None)
-    fastloops = importlib.import_module("files.fastloops")
-    fastloops.warm()
-    return fastloops
-
-
-def loops_folder():
-    """Where the saved compiled loops are: the exe's user/compiled-loops/<version>-<the exe's fingerprint>, from
-    the source scripts/files/__pycache__ (Numba's own place)."""
-    global _build
+def _drop_numba_saved():
+    """The exe's user/compiled-loops folder: Numba's saved loops from versions before 2026-11 (tens of MB), never
+    used again. Deleted once; only our own folder, nothing else."""
     import sys
     if not getattr(sys, "frozen", False):
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "__pycache__")
-    from files import about
-    if _build is None:
-        import hashlib
-        h = hashlib.sha256()
-        with open(sys.executable, "rb") as f:
-            for block in iter(lambda: f.read(1 << 20), b""):
-                h.update(block)
-        _build = "%s-%s" % (about.VERSION, h.hexdigest()[:10])
-    return os.path.join(about.USER, "compiled-loops", _build)
-
-
-def _forget_saved():
-    """Deletes the saved compiled loops (this build's only)."""
-    folder = loops_folder()
-    try:
-        names = os.listdir(folder)
-    except OSError:
         return
-    for name in names:
-        if name.startswith(("fastloops.", "midi_scan.", "midi_index.")) and name.endswith((".nbi", ".nbc")):
-            try:
-                os.remove(os.path.join(folder, name))
-            except OSError:
-                pass
+    from files import about
+    folder = os.path.join(about.USER, "compiled-loops")
+    if os.path.isdir(folder):
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def loops():
-    """The loops once they're ready (fastloops, or native.Loops over it), else None (use the NumPy code)."""
+    """The loops once they're ready (native.Loops), else None (use the NumPy code)."""
     return _loops
 
 
@@ -151,7 +102,7 @@ def key_rows(keys):
 
 
 def without_loops():
-    """True = the compiled loops won't come (no Numba, it failed, or turned off); False while they still load."""
+    """True = the compiled loops won't come (no library, it failed, or turned off); False while they still load."""
     return _failed or not _started
 
 

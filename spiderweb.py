@@ -165,7 +165,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     update_check.py  asking GitHub for newer versions (and their notes)
     midi_out.py      MIDI file writer
     midi_read.py     reading any MIDI file safely (Load MIDI): layout, every track checked, fingerprint
-    midi_scan.py     the byte loops reading / writing MIDI tracks (compiled by fastloops.py)
+    midi_scan.py     the byte loops reading / writing MIDI tracks (also in the own loops, native/loops)
     midi_copy.py     writing a loaded MIDI file out again, unchanged bytes copied, checked while writing
     midi_index.py    Load MIDI's loops: notes paired, the index to read a track anywhere, the overview, painting
     midi_play.py     the loops playing a loaded MIDI: tracks read up to a tick, put in order, thinned per synth
@@ -188,9 +188,11 @@ Files (the scripts live in scripts/, one subfolder per group):
     synth.py         the built-in synth (Hz bass preview): BASS + BASSMIDI DLLs in scripts/bass/
     sfz.py           the sample files an SFZ soundfont names (checked when one is picked)
     quicksound.py    the quick sound: single soundfont notes recorded once, copies laid at each note (live keys)
-    speed.py         optional speed-ups: Numba's compiled loops loaded in the background, Pillow for pictures
-    fastloops.py     the compiled loops (Numba) for lots of notes: notes on screen, painting, the overlap step
-    native.py        our own compiled loops (Rust, built from native/loops) used in place of fastloops' ones
+    speed.py         speed-ups: the own compiled loops loaded in the background, Pillow (optional) for pictures
+    fastloops.py     the own loops' plain-Python twins (the source they copy; a refused call's last resort)
+    native.py        our own compiled loops (Rust, built from native/loops): notes on screen, painting, overlaps...
+    native_wraps.py  each own loop's call (room for its results made, a refused call handed to its twin)
+    loop_marks.py    the marks fastloops' loops carry (plain Python: they compile nothing)
     mathexpr.py      math in number boxes (960*4 etc.)
     snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
 """
@@ -206,8 +208,8 @@ from files import errors  # noqa: E402 (needs the path above)
 
 def check_numpy():
     """NumPy does the heavy note maths. Run from source without it: offer to install it (pip), True when it's there.
-    Only looks for it, never loads it: installing Numba next (offer_extras) can swap NumPy for another version, and
-    a loaded one leaves pip's half-removed copy behind and keeps Numba from loading until the next start."""
+    Only looks for it, never loads it: a package installed next (offer_extras) can swap NumPy for another version,
+    and a loaded one leaves pip's half-removed copy behind."""
     import importlib.util
     if importlib.util.find_spec("numpy") is not None:
         return True
@@ -291,14 +293,14 @@ def run_pip(root, packages):
     return failed, output.strip()
 
 
-EXTRAS = (("numba", "numba", "extras.numba"), ("PIL", "pillow", "extras.pillow"))  # (module, pip name, text)
-SHOWN = {"numba": "Numba", "pillow": "Pillow"}  # (their names while they're installed)
+EXTRAS = (("PIL", "pillow", "extras.pillow"),)  # (module, pip name, text; Numba was one until 2026-11: own loops now)
+SHOWN = {"pillow": "Pillow"}  # (their names while they're installed)
 
 
 def offer_extras():
-    """Numba (compiled loops: much faster with lots of notes) and Pillow (pictures to the screen faster, more
-    picture kinds) are optional: Spiderweb works without them, slower. Run from source with one missing: offer to
-    install it, once (a "No" or a failed install is remembered in packages.json; the exe has them inside)."""
+    """Pillow (pictures to the screen faster, more picture kinds) is optional: Spiderweb works without it, slower.
+    Run from source with it missing: offer to install it, once (a "No" or a failed install is remembered in
+    packages.json; the exe has it inside)."""
     if getattr(sys, "frozen", False):
         return
     import importlib

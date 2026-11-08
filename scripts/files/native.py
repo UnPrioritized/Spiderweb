@@ -1,7 +1,8 @@
-"""Our own compiled loops: a library built from native/loops (Rust), loaded by ctypes like BASS. It replaces the
-Numba loops of files/fastloops.py one by one (PLAN.md B): the loops it has are used in their place, every other one
-still comes from fastloops. Each gives exactly what the NumPy code (and the Numba loop) gives: dev/tests/native_loops
-compares them. No library (not built, another system, a 32-bit Python, SPIDERWEB_NATIVE=off) = fastloops as before.
+"""Our own compiled loops: a library built from native/loops (Rust), loaded by ctypes like BASS (PLAN.md B: it
+replaced the Numba loops, 2026-11). Each gives exactly what the NumPy code it stands in for gives (dev/tests
+native_loops / native_replay / fast_loops compare them). No library (not built, another system, a 32-bit Python,
+SPIDERWEB_NATIVE=off) = speed.loops() None: the NumPy code is used. The plain-Python twins in files/fastloops.py
+(the source the library copies) are only the last resort of a call the library refuses.
 
 The library holds every loop four times (x86-64 levels: any, SSE4.2, AVX2, AVX-512) and picks the highest the
 processor has (SPIDERWEB_NATIVE_LEVEL=1-4 forces one, for checks). CHEAP CALLS (PLAN.md B:
@@ -9,8 +10,8 @@ never slower than Numba, small inputs too): the same file is ALSO loaded as a Py
 a call ~0.4 us, ctypes' own floor is ~1 us, Numba's ~0.8 us; load_ext; it fails = the ctypes functions, the same
 loops). Arrays are handed over as they are (the library reads NumPy's array struct, checked at load by probe()); one it can't read as it is (another type, spread out in memory, read
 only) = NEED_COPY, made plain here and handed over again. A loop that fails inside (a bad index: caught there, it
-never ends the program; no memory) returns below 0 and that call uses the fastloops loop instead, noted once in the
-logs.
+never ends the program; no memory) returns below 0 and that call uses the fastloops twin instead (plain Python:
+slow but the same), noted once in the logs.
   stir_spots, stir_spots_one   recolour.stir_from's middle (stir_spots on half the cores past CORES_LEAST spots)
   winner_pieces                engine.winner_stretches' pieces (Remove overlaps, split around)
   key_order, key_order_cores   np.lexsort by key, then 3 more columns (key_order_cores: the key groups on half
@@ -162,11 +163,13 @@ def level_name():
     return (LEVELS.get(_dll.sw_level(), "plain") + ("" if _ext else ", ctypes calls")) if _dll else "plain"
 
 
-def over(base):
-    """The loops the program uses: base (the fastloops module) with the library's loops in their place; base as it
-    is without the library."""
+def over():
+    """The loops the program uses (Loops, fastloops' plain twins behind them); None without the library."""
     d = load()
-    return Loops(base, d, _ext) if d else base
+    if not d:
+        return None
+    from files import fastloops
+    return Loops(fastloops, d, _ext)
 
 
 def _in(a, dtype):
@@ -178,7 +181,7 @@ def _failed_once(name, code):
     if name not in _failed:
         _failed.add(name)
         from files import errors
-        errors.note("own loops", "%s failed (%d): the slower loop is used for that call" % (name, code))
+        errors.note("own loops", "%s refused a call (%d): its plain-Python twin did it (slower)" % (name, code))
 
 
 def arg_kinds(f):
@@ -250,7 +253,7 @@ _lim = {}
 
 def limiter(dll):
     """The library's limiter for BASS (sw_limit_dsp) once synth.py's numbers are handed over and match the layout
-    built into it; None = not there / another layout (Numba's or Python's limiter then). Also readies
+    built into it; None = not there / another layout (synth.py's Python limiter then). Also readies
     dll.sw_limit_live (checks)."""
     if dll is None:
         return None
@@ -292,9 +295,8 @@ class Loops(Wraps):
             self._stir_f, self._winner_f, self._key_f = ext.stir_spots, ext.winner_pieces, ext.key_order
         else:
             self._stir_f, self._winner_f, self._key_f = dll.sw_stir_spots, dll.sw_winner_pieces, dll.sw_key_order
-        dsp = limiter(dll)
-        if dsp is not None:  # (Built-in BASSMIDI's limiter: BASS's sound thread calls the library's C function)
-            self.__dict__["limit_dsp"] = dsp
+        # (Built-in BASSMIDI's limiter: BASS's sound thread calls the library's C function; None = synth.py's own)
+        self.__dict__["limit_dsp"] = limiter(dll)
 
     def __getattr__(self, name):  # (a name fastloops got after the copy)
         return getattr(self.base, name)

@@ -168,19 +168,18 @@ Then:
    type this in a command prompt:
      pip install numpy
 
-Two more packages are optional: Numba (much faster with lots of notes) and
-Pillow (images shown faster; the Image tool opens JPG, WebP, BMP and TIFF
-too, not just PNG and GIF). Spiderweb works without them, just slower. It
-offers to install them once; to do it yourself later, type
-  pip install numba pillow
-The first start with Numba takes a second longer in the background while it
-prepares its fast code (kept for the next starts).
+The fast code for lots of notes comes with Spiderweb (scripts/loops, built
+from native/loops; 64-bit Windows and Linux), nothing to install. One more
+package is optional: Pillow (images shown faster; the Image tool opens JPG,
+WebP, BMP and TIFF too, not just PNG and GIF). Spiderweb works without it,
+just slower. It offers to install it once; to do it yourself later, type
+  pip install pillow
 With PyNaCl installed (pip install pynacl), the update popup can also
 download the new source zip and check its signature for you.
 
-Tested with Python 3.14.7, NumPy 2.5.3, Numba 0.68.0 and Pillow 12.3.0. If
-something misbehaves with other versions, these are known to work:
-  pip install numpy==2.5.3 numba==0.68.0 pillow==12.3.0
+Tested with Python 3.14.7, NumPy 2.5.3 and Pillow 12.3.0. If something
+misbehaves with other versions, these are known to work:
+  pip install numpy==2.5.3 pillow==12.3.0
 
 Playback goes to the MIDI out picked in Settings → Sound: Windows' MIDI
 output, Built-in BASSMIDI (Spiderweb's own synth, with a soundfont you pick;
@@ -230,7 +229,12 @@ those of the libraries it carries are at the end of THIRD-PARTY-NOTICES.txt.
 Maestro (API) playback talks to Maestro by dimms0 (github.com/dimms0/maestro)
 when you have it installed; no part of Maestro comes with Spiderweb.
 
-The .exe also carries Python, Tcl/Tk, NumPy, Numba, llvmlite (with LLVM),
-Pillow, PyNaCl (with libsodium, cffi and pycparser) and PyInstaller's
-starter program. Their licences are in
+The fast loops for lots of notes are Spiderweb's own, written in Rust
+(source in native/loops, the built files in scripts/loops, the Windows one
+also inside the .exe; rebuild them with
+python native/loops/build_release.py). They carry the Rust libraries rayon
+and its helpers; their licences are in THIRD-PARTY-NOTICES.txt.
+
+The .exe also carries Python, Tcl/Tk, NumPy, Pillow, PyNaCl (with libsodium,
+cffi and pycparser) and PyInstaller's starter program. Their licences are in
 THIRD-PARTY-NOTICES.txt.

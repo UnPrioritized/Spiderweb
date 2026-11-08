@@ -1,5 +1,7 @@
-"""Compiled loops (Numba) for the slowest note work with lots of notes. Only reached through files/speed.py, which
-loads this in the background and hands it out once it's ready; without Numba the NumPy code they replace is used.
+"""The plain-Python twins of our own compiled loops (files/native.py, built from native/loops in Rust): the
+slowest note work with lots of notes. They were compiled by Numba until 2026-11 (PLAN.md B); now they're the
+last resort when the library refuses a call (files/loop_marks.py: their marks do nothing), and the very source
+the library copies. Without the library the NumPy code they replace is used, not these.
 Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares them):
   paint_order    the notes kept in painting order for the next two (redone when they or the selection change)
   order_screen   roll_draw.note_rects' screen(): the notes on screen, their pixels, colours, in painting order
@@ -35,8 +37,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   gap_ticks      tempo_file.keep_gaps' work on one Keep timing part (export, Conductor pane checks)
   gap_plan       tempo_file.file_plan's gaps of one Keep timing part as file tempo runs (with tempo._fit_blocks,
                  _fit_exact, _flat_pair (+ its full search), _near_pair, _nearest1, next_safe as *_n)
-  limit_dsp      synth.live_limit as a callback BASS's sound thread calls itself (Built-in BASSMIDI's limiter: it
-                 never waits for Python); the same maths within float rounding
+  limit_live     synth.live_limit, a frame at a time (the library's limit_dsp is its C callback for BASS)
   midi_walk      midi_scan.walk (Load MIDI: a track's events read + checked), the very same function compiled
   midi_rewrite   midi_scan.rewrite (a track written again with its ticks moved), the very same function compiled
   midi_note_ticks  midi_scan.note_ticks (Keep timing's anchors on a loaded MIDI), the very same function compiled
@@ -52,113 +53,24 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   piece_runs_sort, piece_runs_merge, piece_counted_track, piece_order_ok, piece_open_at   midi_piece's (Merlin pieces' counted
                  notes, PLAN D2)
   all_tops       track_list.loaded_tops: a loaded MIDI's tracks in the track list's All tracks row
-  dc_block       synth.dc_block (Rendered ahead's DC blocker, ahead of its limiter)
-The first start compiles them (in the background); the result is kept for the next starts: in __pycache__, or in
-the exe's user/compiled-loops (keep_exe_loops)."""
+  dc_block       synth.dc_block (Rendered ahead's DC blocker, ahead of its limiter)"""
 
 import math
-import os
-import sys
 import threading
 
 import numpy as np
-import numba
-from numba import carray, cfunc, njit, prange, types
-from numba.core import caching
-from numba.typed import List
 
 from files import midi_index as _index, midi_piece, midi_play, midi_scan
+from files.loop_marks import List, njit, prange, set_threads
 from files.synth import dc_block as _dc_block
-from files.synth import (LIM_ALL, LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD,
-                         LIM_MIX, LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_SLOTS, LIM_STEP, LIM_TOP)
+from files.synth import (LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX,
+                         LIM_N, LIM_ON, LIM_PEAK, LIM_PREV, LIM_RING, LIM_STEP)
 
 
-def keep_exe_loops():
-    """The exe unpacks to a new temp folder each start, so Numba can't find its saved loops by the source file's
-    place: they go to user/compiled-loops/<this build> instead (speed.loops_folder; made again when missing, the
-    newest 3 builds kept: an older build's file can never pass for this one's). Numba also checks the processor
-    (another PC = compiled again). False = the folder can't be written (the loops are compiled each start)."""
-    from files import about, lang, safefile, speed
-    folder = speed.loops_folder()
-    top = os.path.dirname(folder)
-    try:
-        os.makedirs(folder, exist_ok=True)
-        os.utime(folder)  # (last used: the newest builds are kept)
-        readme = os.path.join(top, "!README.txt")  # ("!": on top when sorted by name)
-        if not os.path.exists(readme):
-            safefile.write_text(readme, lang.tr("speed.loops_readme"))
-        test = os.path.join(folder, "x" * 80 + ".tmp")  # (longer than Numba's names: path too long / read-only = off)
-        with open(test, "wb") as f:
-            f.write(b"0")
-        os.remove(test)
-    except OSError:
-        return False
-    import shutil
-    builds = sorted((os.path.join(top, n) for n in os.listdir(top) if os.path.isdir(os.path.join(top, n))),
-                    key=os.path.getmtime, reverse=True)
-    for old in builds[3:]:
-        if old != folder:
-            shutil.rmtree(old, ignore_errors=True)
-
-    class ExeLocator(caching._SourceFileBackedLocatorMixin, caching._CacheLocator):
-        def __init__(self, py_func, py_file):
-            self._py_file = py_file
-            self._lineno = py_func.__code__.co_firstlineno
-
-        def get_cache_path(self):
-            return folder
-
-        @classmethod
-        def from_function(cls, py_func, py_file):
-            self = cls(py_func, py_file)
-            try:
-                self.ensure_cache_path()
-            except OSError:
-                return None
-            return self
-
-    caching.CacheImpl._locator_classes[:] = [ExeLocator]  # (no other place: Numba's own ones would pile up in AppData)
-    return True
+OWN0 = 1 << 32  # (engine.OWN0)
 
 
-def drop_stale(folder):
-    """From source Numba checks only this file, but synth.py's LIM_* numbers are built into the saved loops too:
-    when they differ from the ones the saved loops were made with, those are deleted (made again)."""
-    from files import safefile
-    now = repr((LIM_BLOCK, LIM_CEILING, LIM_DELAY, LIM_ENV, LIM_FALL, LIM_G0, LIM_G1, LIM_HEAD, LIM_MIX, LIM_N, LIM_ON,
-                LIM_PEAK, LIM_PREV, LIM_RING, LIM_SIZE, LIM_STEP, LIM_ALL, LIM_SLOTS, LIM_TOP))
-    mark = os.path.join(folder, "fastloops-synth.txt")
-    try:
-        with open(mark, encoding="utf-8") as f:
-            if f.read() == now:
-                return
-    except OSError:
-        pass
-    try:
-        os.makedirs(folder, exist_ok=True)
-        for name in os.listdir(folder):
-            if name.startswith("fastloops.") and name.endswith((".nbi", ".nbc")):
-                os.remove(os.path.join(folder, name))
-        safefile.write_text(mark, now)
-    except OSError:
-        pass
-
-
-def _cache():
-    from files import speed
-    if not speed.save_loops:  # (the saved ones failed this start: made without saving)
-        return False
-    if getattr(sys, "frozen", False):  # (the exe: each build's own folder, so nothing goes stale)
-        return keep_exe_loops()
-    drop_stale(speed.loops_folder())
-    return True
-
-
-CACHE = _cache()
-OWN0 = 1 << 32  # (engine.OWN0, kept here: an import would have to join drop_stale's list)
-
-
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1):
     """The notes' rectangles (x0, y0, x1, y1, colour) with x clamped to left..right; of notes up to 3 pixels long
     on the very same pixels only the last is kept (the others are painted over)."""
@@ -186,7 +98,7 @@ def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1):
     return ra[:m].copy(), rb[:m].copy(), rc[:m].copy(), rd[:m].copy(), re[:m].copy()
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
     """The notes kept in painting order between pictures (redone when the notes or the selection change): by each
     NOTE's rank (roll_draw.stack_keys: track / loudness / shape, the selected ones last), each rank's in by_start's
@@ -230,7 +142,7 @@ def paint_order(notes, by_start, rank, nranks, pics, cols, picgroup, ghost):
     return s, e, key, color, first, longest
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _block_range(s, lo, hi, t_lo, t_hi):
     """In s[lo:hi] (sorted): the first with s >= t_lo, the first with s > t_hi (np.searchsorted left / right)."""
     a, b = lo, hi
@@ -250,7 +162,7 @@ def _block_range(s, lo, hi, t_lo, t_hi):
     return a, c
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def order_screen(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, shown, clip, c0, c2):
     """note_rects' screen() from paint_order's notes (ranks b0 .. b1, starts t_lo .. t_hi): x0, x1, key, colour of the ones
     on screen, already in painting order."""
@@ -277,7 +189,7 @@ def order_screen(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, sho
     return x0[:m], x1[:m], k[:m], c[:m]
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def order_rects(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, shown, clip, c0, c2, left, right, keys,
                 row0, row1):
     """order_screen and last_on_pixels in one: the rectangles, without the notes in between."""
@@ -326,7 +238,7 @@ def order_rects(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, show
 NO_END = 1 << 30  # (a colour number's flag: the note's end was cut short for painting, roll_draw.covered_ends)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def note_top(top_px, half, kb, top, w, h, x0, y0, x1, y1, color, shade):
     """top_px (the region's pixels, row by row, -1 filled) = note number * 2 + (1 = outline) of the note painted
     last on each pixel. Same pixels as a canvas rectangle with a 1-pixel outline: x0..x1 and y0..y1 inclusive.
@@ -360,7 +272,7 @@ def note_top(top_px, half, kb, top, w, h, x0, y0, x1, y1, color, shade):
         half[p] = 1 if half[p] >= 2 else 0
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb, shade):
     """Each note's colours painted straight into img (pixels x 3), the last painted winning: the same pixels as
     note_top's notes on top coloured in, without that list. With shade, where a note under it starts / ends, a
@@ -413,7 +325,7 @@ def paint_notes(img, kb, top, w, h, x0, y0, x1, y1, color, rgb, shade):
                     img[row + d - 1, 0], img[row + d - 1, 1], img[row + d - 1, 2] = e0, e1, e2
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _merge_runs(notes, order, a, b):
     """order[a:b] sorted by start (notes[:, 0]), stable: its runs already in order merged two by two."""
     n = b - a
@@ -461,7 +373,7 @@ def _merge_runs(notes, order, a, b):
     order[a:b] = idx
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def overlap_order(notes):
     """engine.first_seen of slot * 256 + key and engine.overlap_order in one: (group, order), or two empty arrays
     when the ids are too spread out for a table (the NumPy way then)."""
@@ -520,7 +432,7 @@ def overlap_order(notes):
     return group, order
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def overlap_sweep(notes, order, group):
     """resolve_overlaps' work once sorted (order: by group, start, velocity, longest first): a note starting while
     earlier ones of its group still sound is stretched to where they would have ended and the one before it is
@@ -554,7 +466,7 @@ def overlap_sweep(notes, order, group):
     return out, m
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _heap_push(hr, hi, size, r, i):
     """A note (rank r, place i) into winner_pieces' heap (lowest rank, then place, on top) -> its new size."""
     k = size
@@ -569,7 +481,7 @@ def _heap_push(hr, hi, size, r, i):
     return size + 1
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _heap_pop(hr, hi, size):
     """The top of winner_pieces' heap taken off -> its new size."""
     size -= 1
@@ -588,7 +500,7 @@ def _heap_pop(hr, hi, size):
         k = m
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def winner_pieces(group, s, e, rank, order):
     """engine.winner_stretches' pieces (Remove overlaps, split around): in each group, at every moment the sounding
     note with the lowest rank wins; walked once in time (order: by group, then start) with the sounding notes in a
@@ -627,7 +539,7 @@ def winner_pieces(group, s, e, rank, order):
     return note, ps, pe, m
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def stir_nearest_one(keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own, out):
     """recolour.nearest after its sort (_sorted_notes): for each spot (mid, key) the note nearest it, on the nearest
     key holding notes (lower on a tie), the note there whose middle is nearest (the earlier one on a tie); own: spot
@@ -636,7 +548,7 @@ def stir_nearest_one(keys, first, last, line, ms, nk, nm, o, base, top, gap, mid
         out[s] = _near_one(s, keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own)
 
 
-@njit(cache=CACHE, nogil=True, parallel=True)
+@njit(nogil=True, parallel=True)
 def _stir_nearest_cores(keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own, out):
     for s in prange(len(mid)):
         out[s] = _near_one(s, keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own)
@@ -648,7 +560,7 @@ def stir_nearest(keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, ke
              gap, mid, key, own, out)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _wrap_one(i, keys, a, b, mid, key):
     """recolour.Rows.wrapped for spot i: past its key row's notes = back in on that row's other side."""
     nkeys = len(keys)
@@ -669,14 +581,14 @@ def _wrap_one(i, keys, a, b, mid, key):
     return m
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def stir_wrap_one(keys, a, b, mid, key, out):
     """recolour.Rows.wrapped (Stir's Wrap around) for every spot. One core."""
     for i in range(len(mid)):
         out[i] = _wrap_one(i, keys, a, b, mid, key)
 
 
-@njit(cache=CACHE, nogil=True, parallel=True)
+@njit(nogil=True, parallel=True)
 def _stir_wrap_cores(keys, a, b, mid, key, out):
     for i in prange(len(mid)):
         out[i] = _wrap_one(i, keys, a, b, mid, key)
@@ -687,7 +599,7 @@ def stir_wrap(keys, a, b, mid, key, out):
     on_cores(_stir_wrap_cores, stir_wrap_one, len(mid), keys, a, b, mid, key, out)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _sample_at(i, a, x, y, out):
     """liquify.sample for spot i: the map a blended between its 4 grid points (the same sums, the same order)."""
     gy, gx = a.shape[0], a.shape[1]
@@ -701,14 +613,14 @@ def _sample_at(i, a, x, y, out):
                      + (a[j0 + 1, i0, c] * (1 - tx) + a[j0 + 1, i0 + 1, c] * tx) * ty)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def liquify_sample_one(a, x, y, out):
     """liquify.sample (Liquify's map at spots of the colour box), one core."""
     for i in range(len(x)):
         _sample_at(i, a, x, y, out)
 
 
-@njit(cache=CACHE, nogil=True, parallel=True)
+@njit(nogil=True, parallel=True)
 def _liquify_sample_cores(a, x, y, out):
     for i in prange(len(x)):
         _sample_at(i, a, x, y, out)
@@ -719,7 +631,7 @@ def liquify_sample(a, x, y, out):
     on_cores(_liquify_sample_cores, liquify_sample_one, len(x), a, x, y, out)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _near_one(s, keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, key, own):
     """stir_nearest's work for spot s."""
     nkeys = len(keys)
@@ -755,7 +667,7 @@ def _near_one(s, keys, first, last, line, ms, nk, nm, o, base, top, gap, mid, ke
     return got
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _stir_q(x, y, fp, ip):
     """recolour.area_spot_q of one spot (a circle / square / diamond area): 0 in its middle, 1 on its outline and
     past it, rounded to 9 places."""
@@ -776,7 +688,7 @@ def _stir_q(x, y, fp, ip):
     return min(max(d, 0.0), 1.0)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _stir_one(px, py, fp, ip):
     """recolour.stir_from's middle part, note by note: (x, y) in the colour box (unit_xy) -> where the stir looks
     (before from_unit): Bulge, the more bends, Turn / Twist (+ the Area's fade), the edges' clip / tile, Squeeze.
@@ -881,7 +793,7 @@ def _stir_one(px, py, fp, ip):
     return px, py
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def stir_spots_one(x, y, fp, ip, ox, oy):
     """recolour.stir_from's middle part for every spot (x, y) in the colour box (unit_xy): ox, oy = where the stir
     looks (before from_unit). One core."""
@@ -889,17 +801,16 @@ def stir_spots_one(x, y, fp, ip, ox, oy):
         ox[i], oy[i] = _stir_one(x[i], y[i], fp, ip)
 
 
-@njit(cache=CACHE, nogil=True, parallel=True)
+@njit(nogil=True, parallel=True)
 def _stir_spots_cores(x, y, fp, ip, ox, oy):
     for i in prange(len(x)):
         ox[i], oy[i] = _stir_one(x[i], y[i], fp, ip)
 
 
 # (SEVERAL CORES, user 11-07 "any speed up is beneficial": the Stir's per-note loops shared over half the cores (all
-# cores halted the PC, the synths' rule), 13x quicker measured. ONE THREAD AT A TIME: Numba's plain sharing (no
-# OpenMP / TBB on a PC) breaks when two threads use it at once, so a thread finding it busy (notes made on a
-# thread mid-drag) takes the one-core loop instead of waiting; any failure = one core from then on. Each note on
-# its own: the very same numbers either way.)
+# cores halted the PC, the synths' rule; the library does it with its own threads). ONE THREAD AT A TIME: a thread
+# finding it busy takes the one-core loop instead of waiting; any failure = one core from then on. Each note on its
+# own: the very same numbers either way.)
 _CORES_LOCK = threading.Lock()
 _CORES = {"ok": True}
 CORES_LEAST = 20000  # (spots: fewer = one core, sharing out costs more than it saves)
@@ -909,7 +820,7 @@ def on_cores(many, one, n, *args):
     """many(*args) on half the cores when n is big enough and no other thread is sharing them out, else one(*args)."""
     if n >= CORES_LEAST and _CORES["ok"] and _CORES_LOCK.acquire(blocking=False):
         try:
-            numba.set_num_threads(max(1, min(numba.config.NUMBA_NUM_THREADS, (os.cpu_count() or 2) // 2)))
+            set_threads()
             many(*args)
             return
         except Exception:  # noqa: BLE001 (no threading layer here: one core for good)
@@ -927,7 +838,7 @@ def stir_spots(x, y, fp, ip, ox, oy):
 _MIX_ADD, _MIX_A, _MIX_B = np.uint64(0x9E3779B97F4A7C15), np.uint64(0xBF58476D1CE4E5B9), np.uint64(0x94D049BB133111EB)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _mix(x):
     """recolour._mixed (splitmix64) on one uint64."""
     x = x + _MIX_ADD
@@ -936,7 +847,7 @@ def _mix(x):
     return x ^ (x >> np.uint64(31))
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def dice_mix(seed, c0, c1, c2, c3, out):
     """recolour.dice's numbers: each note's 4 columns (as uint64) mixed in turn from seed -> out (0 <= u < 1)."""
     for i in range(len(out)):
@@ -947,7 +858,7 @@ def dice_mix(seed, c0, c1, c2, c3, out):
         out[i] = np.float64(x >> np.uint64(11)) / 9007199254740992.0
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def recolour_apart(order, ss, e, old, new, pick, bstart, bsize, nc):
     """recolour.kept_apart's walk through its bursts of 3+ notes (old / new: colour numbers 0 .. nc - 1, new changed
     in place): a note keeps no colour that a note sounding with it, of ANOTHER colour before, has now (its own one
@@ -989,7 +900,7 @@ def recolour_apart(order, ss, e, old, new, pick, bstart, bsize, nc):
             na += 1
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def note_stretches(notes, by_key, owner, order):
     """engine.stretches: (key, start, end, owner) rows, the notes without a length first as they come, then the rest's
     stretches (back-to-back notes on a key joined) by key and start. order: the notes by key, then start, or empty =
@@ -1021,7 +932,7 @@ def note_stretches(notes, by_key, owner, order):
     return out, m
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _before(i, j, a, b, c):
     """Row i comes before row j: by a, then b, then c."""
     if a[i] != a[j]:
@@ -1031,7 +942,7 @@ def _before(i, j, a, b, c):
     return c[i] < c[j]
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _runs_sort(idx, a, b, c, tmp, bounds, nb):
     """idx (row numbers) sorted by (a, b, c) in place, rows alike kept in their order (as np.lexsort): the runs
     already in order are merged two by two (notes mostly come in order: a few runs, quick). bounds, nb: work space,
@@ -1083,7 +994,7 @@ def _runs_sort(idx, a, b, c, tmp, bounds, nb):
         nbo = nn
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _key_groups(key):
     """key_order's first part: rows grouped by key, lowest first, in their order -> (order, at: group g = order[at[g]
     .. at[g + 1]])."""
@@ -1106,7 +1017,7 @@ def _key_groups(key):
     return order, at
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _key_runs(order, at, a, b, c):
     """key_order's second part: each key's group sorted by (a, b, c). One core."""
     n = len(order)
@@ -1117,7 +1028,7 @@ def _key_runs(order, at, a, b, c):
             _runs_sort(order[at[g]:at[g + 1]], a, b, c, tmp[at[g]:at[g + 1]], bounds, nb)
 
 
-@njit(cache=CACHE, nogil=True, parallel=True)
+@njit(nogil=True, parallel=True)
 def _key_runs_cores(order, at, a, b, c):
     """_key_runs with the key groups shared out (each group on its own: the very same order)."""
     n, nk = len(order), len(at) - 1
@@ -1130,7 +1041,7 @@ def _key_runs_cores(order, at, a, b, c):
                        nb[lo + 2 * g:hi + 2 * g + 2])
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def key_order(key, a, b, c):
     """np.lexsort((c, b, a, key)): rows by key, then a, b, c, rows alike in their order. One core."""
     order, at = _key_groups(key)
@@ -1145,7 +1056,7 @@ def key_order_cores(key, a, b, c):
     return order
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def radix_order(k, bits):
     """np.argsort(k, kind="stable") for whole numbers 0 .. 2 ** bits - 1: 11 bits a pass, the keys carried along
     (a pass where every key has the same digit is skipped). k is used as work space: changed afterwards."""
@@ -1175,7 +1086,7 @@ def radix_order(k, bits):
     return order
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def ring_runs(s, e, k, order, gap, big):
     """roll_draw.ring_parts' runs: the notes in (key, start) order joined while the next starts within gap ticks of
     the reach so far (key * big added, as there) -> each run's key, start, end."""
@@ -1197,7 +1108,7 @@ def ring_runs(s, e, k, order, gap, big):
     return rk[:m + 1], ra[:m + 1], rb[:m + 1]
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def clash_pairs(items, n, most):
     """engine.clash_arrays: (key, start, end, owner) rows, owners below n -> arrays a, b of the owner pairs a < b
     that clash, sorted by a then b, and True (False + nothing: the table would take more than `most` bytes): in (key, start, end, owner) order, a later one on the same key starting before
@@ -1296,7 +1207,7 @@ def clash_pairs(items, n, most):
     return pa, pb, True
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _first_at(arr, n, x, hint):
     """How many of arr[:n] (sorted) are below x, searched outwards from hint (the answer nearby: a step or two when
     the questions come in order), then halved down as a plain binary search."""
@@ -1331,7 +1242,7 @@ def _first_at(arr, n, x, hint):
     return lo
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def clash_levels(rows, offs, out):
     """engine.clash_levels: rows = (n, 3) int64 (start, end, key) of all lists one after another; offs: where each
     list starts (+ end). out: the level of each note (filled). A note goes on the lowest level where no note of an EARLIER list on its key
@@ -1483,7 +1394,7 @@ def clash_levels(rows, offs, out):
             i = c
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def wave_fill(starts, a, b, sq0, wo, out):
     """hzbass.wave_ticks / KeyGrid.wave_at for one key: out[i] = wo[the last repeat (sq0 = its start ticks) starting at or before starts[i], 0 if none] for i in a..b-1
     (np.searchsorted(sq0, starts, "right") - 1, clamped at 0: as KeyGrid.wave_at)."""
@@ -1513,7 +1424,7 @@ def wave_fill(starts, a, b, sq0, wo, out):
         out[i] = wo[at]
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def note_ends(s, e, k, stick, mode, beats, pct, pct_int, wv, wf, big):
     """hzbass.note_lengths: the notes' (sorted by key, then start) new ends, the same steps as its NumPy
     code. mode 0 = beats (ticks), 1 = share wf of a wave (wv), 2 = pct (pct_int: a whole number), 3 = as made."""
@@ -1606,7 +1517,7 @@ def note_ends(s, e, k, stick, mode, beats, pct, pct_int, wv, wf, big):
     return res
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def hz_expand(runs_sel, copy_sel, scale_c, n_run, off_run, prev_run, moves_run, pos_len, x, off_pitch, opf, vf,
               W, S):
     """hz_grid.KeyGrid.made (the plain settings, made_fast): the parts' repeats as made (pre-expansion), the chain counts, and the expansion to the sorted repeats
@@ -1754,7 +1665,7 @@ def hz_expand(runs_sel, copy_sel, scale_c, n_run, off_run, prev_run, moves_run, 
     return o_part, o_num, o_src, o_w, o_s, run_p, ok
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def hz_late(part, number, src, w, s, hits, has_trace, x, slant, groups, noisy_f, P):
     """Trace hits (each repeat once per hit when there are several), the Slant / Groups lateness, the noisy
     draws' counts (which random numbers each part takes) and their places."""
@@ -1810,7 +1721,7 @@ def hz_late(part, number, src, w, s, hits, has_trace, x, slant, groups, noisy_f,
     return p2, n2, s2, w2, st2, late, nsrc, noisy_p, place, total_took
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def hz_order(wg):
     """np.argsort(wg, kind="stable"): LSD radix sort on 11-bit digits when the ticks' range is small (same order:
     each pass is stable), else the merge sort."""
@@ -1844,7 +1755,7 @@ def hz_order(wg):
     return order
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def hz_finish(part, number, src, w, st0, late, nsrc, noisy_p, place, drawn, until_p, gains_sel, has_loud, has_wah,
               hv, vol_f, lev, oct_f, own_f, layer_f, lim_f, loud_sw, c1, tf, soft_thr):
     """The noise, the starts, the loudness (wah, tremolo, volume, Octave below), the repeats kept, the velocity parts,
@@ -1942,7 +1853,7 @@ def hz_finish(part, number, src, w, st0, late, nsrc, noisy_p, place, drawn, unti
     return out_sq[:cnt], factor, mine, wout, K
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def nearest(lab, cen):
     """picture._dist2(lab, cen).argmin(1): each colour's nearest centre (squared distance summed channel by channel
     in the same order; the first of equal ones, or the first not-a-number, as argmin)."""
@@ -1963,7 +1874,7 @@ def nearest(lab, cen):
     return out
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def spread_line(a0, free, pal, pal_lab, strength, idx, err, line, lab, vals, clipped):
     """One step of picture._spread: finishes slanted line `line - 1` (lab = NumPy's OKLab of its colours, vals = the
     colours themselves: nearest palette colour like nearest(), error kept in err), then works out line `line`'s
@@ -2011,7 +1922,7 @@ def spread_line(a0, free, pal, pal_lab, strength, idx, err, line, lab, vals, cli
     return max(0, y1 - y0 + 1)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _put_vlq(out, p, d):
     """A MIDI wait (7 bits per byte, every byte but the last with the top bit set) at out[p]; returns the next p."""
     k = 1 + (d >= 1 << 7) + (d >= 1 << 14) + (d >= 1 << 21)
@@ -2021,7 +1932,7 @@ def _put_vlq(out, p, d):
     return p + k
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def midi_track(notes, rows, ch, most, bits):
     """midi_events for the notes at rows (in their order), sorted here too: ticks * 2 (+ 1 on a note-on, so offs
     come first) below 2 ** bits. Lets go of the GIL all the way (midi_out: tracks made side by side)."""
@@ -2037,7 +1948,7 @@ def midi_track(notes, rows, ch, most, bits):
     return midi_events(own, np.arange(m), radix_order(k, bits), ch, most)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def midi_events(notes, rows, order, ch, most):
     """midi_out.track_events' bytes (end-of-track not included): order = event numbers in time order
     (note i's on = 2i, its off = 2i + 1; note i = notes[rows[i]]); a wait over most is split by empty text events
@@ -2072,7 +1983,7 @@ def midi_events(notes, rows, order, ch, most):
     return out
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def limit_live(st, x, frames, loud, slot):
     """synth.live_limit one frame at a time: x = the piece's floats (left, right, left...), changed in place."""
     for f in range(frames):
@@ -2107,20 +2018,7 @@ def limit_live(st, x, frames, loud, slot):
             st[LIM_PREV], st[LIM_PEAK] = st[LIM_PEAK], 0.0
 
 
-# (BASS's DSPPROC: handle, channel = the stream, the piece, its bytes, user = synth._LIM_ALL: the stream's slot found
-# by its handle; none = left as made)
-@cfunc(types.void(types.uint32, types.uint32, types.CPointer(types.float32), types.uint32,
-                  types.CPointer(types.float64)), cache=CACHE)
-def limit_dsp(dsp, channel, buf, length, user):
-    a = carray(user, (LIM_ALL,))
-    for i in range(LIM_SLOTS):
-        if a[i] == channel:
-            limit_live(a[LIM_TOP + i * LIM_SIZE:LIM_TOP + (i + 1) * LIM_SIZE], carray(buf, (length // 4,)),
-                       length // 8, a[LIM_SLOTS:LIM_TOP], i)
-            return
-
-
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def smooth_sor(flat, red, black, wide, om, times):
     """nested.smooth_values' loop: red-black over-relaxation on a grid with a zero border (flat), red / black = the
     cells each half changes, the same sums in the same order."""
@@ -2132,20 +2030,20 @@ def smooth_sor(flat, red, black, wide, om, times):
                 flat[i] = here + om * (g - here)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _domino_safe1(x):
     """tempo.domino_safe of one value (the same float32 rounding)."""
     bpm = np.float64(np.float32(6e7 / max(x, 1)))
     return np.int64(np.trunc(6e7 / bpm)) == x
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _safe1n(u):
     """tempo._safe1: Domino-safe and in 1..0xFFFFFF."""
     return 1 <= u <= 0xFFFFFF and _domino_safe1(u)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _nearest1n(x, reach):
     """tempo._nearest1 (x already in 1..0xFFFFFF): u, then u + s k, u - s k for k = 1, 2... (s = x's side)."""
     u = np.int64(np.rint(x))
@@ -2160,11 +2058,11 @@ def _nearest1n(x, reach):
     return u
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _pw_sum(v, lo, n):
     """NumPy's float64 sum of v[lo:lo + n] (pairwise, blocks of 8: the very same additions as np.sum, which starts
     from 0.0 + this; dev/scratch/pairwise_check.py). Halves added up with a list of its own, not by calling itself
-    (Numba's saved copy of a function calling itself crashed on loading)."""
+    (kept from its compiled days: a saved compiled copy of a function calling itself crashed on loading)."""
     if n <= 128:
         return _pw_leaf(v, lo, n)
     los = np.empty(64, np.int64)
@@ -2197,7 +2095,7 @@ def _pw_sum(v, lo, n):
     return sums[0]
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _pw_leaf(v, lo, n):
     """_pw_sum of 128 values or fewer."""
     if n < 8:
@@ -2225,7 +2123,7 @@ def _pw_leaf(v, lo, n):
     return res
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _side_next(u, way):
     """tempo._near_pair's side(): the first safe value from u going way within 64 steps, or -1 (LookupError)."""
     for _ in range(64):
@@ -2235,7 +2133,7 @@ def _side_next(u, way):
     return -1
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _near_pair_n(n, target, reach):
     """tempo._near_pair: (0, a, ticks of a, b) found / (1, ...) None / (2, ...) _FAR. Every pair tried once; the
     nearest by (nearness, down place, up place), the same pick in any order."""
@@ -2291,7 +2189,7 @@ def _near_pair_n(n, target, reach):
     return 0, b_a, b_k, b_b
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _next1n(u, way, reach):
     """tempo._next1: the first safe value u + way k, k = 1 .. reach - 1 (u when none)."""
     for k in range(1, reach):
@@ -2300,7 +2198,7 @@ def _next1n(u, way, reach):
     return u
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _next_small_n(u, way, reach):
     """tempo._next_small / _next_by_bpm: walked by the BPMs a file can store."""
     c = u + way
@@ -2312,7 +2210,7 @@ def _next_small_n(u, way, reach):
     return u
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _next_safe_n(body, nb, way, reach, out):
     """tempo.next_safe of body[:nb] into out (its three ways by length, as there)."""
     if nb == 1:
@@ -2332,7 +2230,7 @@ def _next_safe_n(body, nb, way, reach, out):
         out[i] = got if got != -1 else _next_small_n(u, way, reach)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _safe_side_n(start, way, reach, safe_reach, out):
     """tempo._safe_side: up to reach safe values from start (included) going way into out; how many."""
     c, u = 0, start - way
@@ -2359,7 +2257,7 @@ def _safe_side_n(start, way, reach, safe_reach, out):
     return c
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _full_pair_n(n, target, reach, safe_reach):
     """tempo._flat_pair_search's full search (safe values far apart): (0, a, ticks of a, b) / (1, ...) None."""
     q = target / n
@@ -2391,7 +2289,7 @@ def _full_pair_n(n, target, reach, safe_reach):
     return 0, b_a, b_k, b_b
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _flat_pair_n(n, target, reach, safe_reach):
     """tempo._flat_pair_search: (0, a, ticks of a, b) / (1, ...) None."""
     a0 = target // n
@@ -2406,13 +2304,13 @@ def _flat_pair_n(n, target, reach, safe_reach):
     return _full_pair_n(n, target, reach, safe_reach)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _put_pair(out, n, a, ka, b):
     for i in range(n):
         out[i] = a if i < ka else b
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out):
     """tempo._fit_exact of ideal[:n] (left as it is) into out[:n]: 0 = made, 1 = None."""
     top = 0xFFFFFF
@@ -2467,7 +2365,7 @@ def _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out):
     return 1
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _fit_blocks_n(drawn, a, n0, n1, kj, target, every, safe_reach, pair_reach, out):
     """tempo._fit_blocks on file_plan's curved gap (ideal = the drawn tempo at kj even steps): 0 = out[:kj] made, 1 =
     None."""
@@ -2520,7 +2418,7 @@ def _fit_blocks_n(drawn, a, n0, n1, kj, target, every, safe_reach, pair_reach, o
     return _fit_exact_n(ideal, n, target, safe_reach, pair_reach, out)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def _least1(t, most):
     """tempo_file._least of one gap."""
     least = max(1, -(-t // most))
@@ -2529,7 +2427,7 @@ def _least1(t, most):
     return least
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair_reach, lens, vals, pos, got):
     """tempo_file.file_plan's loop over one Keep timing part's gaps from gap j: each gap's file tempo as runs into
     lens / vals from pos (each gap its own runs), k[j] changed where its pair needs a tick more or less, as that
@@ -2603,7 +2501,7 @@ def gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair
     return j, last, pos
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def gap_ticks(a, e, ts, bs, drawn, was, u, most):
     """tempo_file.keep_gaps' work on one Keep timing part without loose ticks: the anchors n (a, e, the note ticks
     of ts inside, the bar lines of bs inside), each gap's time (d x u, or was's running total when it has one:
@@ -2670,7 +2568,7 @@ def gap_ticks(a, e, ts, bs, drawn, was, u, most):
     return n, total, k, dense[:nd]
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0, x1, y1, eps):
     """faces.Faces.area_at for every spot (x, y): the same halving over its slab's lines, and the same recount of
     every line of the slab for a spot right by one (worked out as _x does, so the very same numbers)."""
@@ -2714,22 +2612,21 @@ def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0,
     return out
 
 
-# (Load MIDI: midi_scan's own functions compiled, so the plain ones and these can never differ; Numba keeps them by
-# midi_scan.py and checks that file)
-midi_walk = njit(cache=CACHE, nogil=True)(midi_scan.walk)
-midi_rewrite = njit(cache=CACHE, nogil=True)(midi_scan.rewrite)
-midi_note_ticks = njit(cache=CACHE, nogil=True)(midi_scan.note_ticks)
-midi_busy_hits = njit(cache=CACHE, nogil=True)(midi_scan.busy_hits)
-midi_gather = njit(cache=CACHE, nogil=True)(midi_scan.gather)
-midi_index = njit(cache=CACHE, nogil=True)(_index.index)
-midi_close = njit(cache=CACHE, nogil=True)(_index.close)
-midi_grid = njit(cache=CACHE, nogil=True)(_index.grid)
-midi_halve = njit(cache=CACHE, nogil=True)(_index.halve)
-midi_cover = njit(cache=CACHE, nogil=True)(_index.cover)
-midi_merge_loud = njit(cache=CACHE, nogil=True)(_index.merge_loud)
+# (Load MIDI: midi_scan's own functions, under the names the library's loops have)
+midi_walk = njit(nogil=True)(midi_scan.walk)
+midi_rewrite = njit(nogil=True)(midi_scan.rewrite)
+midi_note_ticks = njit(nogil=True)(midi_scan.note_ticks)
+midi_busy_hits = njit(nogil=True)(midi_scan.busy_hits)
+midi_gather = njit(nogil=True)(midi_scan.gather)
+midi_index = njit(nogil=True)(_index.index)
+midi_close = njit(nogil=True)(_index.close)
+midi_grid = njit(nogil=True)(_index.grid)
+midi_halve = njit(nogil=True)(_index.halve)
+midi_cover = njit(nogil=True)(_index.cover)
+midi_merge_loud = njit(nogil=True)(_index.merge_loud)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def midi_cover_many(faint, klo, khi, starts, ends, e0s, e1s, cp_tick, cp_run, limits, lasts, buf, pos, eq, ec, ev,
                     skip, t1, ax, bx, W, k_lo, normal, behind, tab, nx, filled, marks, sq, sa, sb, sv, cnt_q, first_q,
                     vel_q, st, covered):
@@ -2768,31 +2665,29 @@ def midi_cover_many(faint, klo, khi, starts, ends, e0s, e1s, cp_tick, cp_run, li
         midi_cover(b8, p, p, starts[i], skip, st, cnt_q, first_q, vel_q, t1, close, ax, bx, W, k_lo, colour, tab, nx,
                    filled, marks, sq, sa, sb, sv)
     return nc
-play_read = njit(cache=CACHE, nogil=True)(midi_play.read)
-play_order = njit(cache=CACHE, nogil=True)(midi_play.order)
-play_order_count = njit(cache=CACHE, nogil=True)(midi_play.order_count)
-play_order_place = njit(cache=CACHE, nogil=True)(midi_play.order_place)
-play_hist = njit(cache=CACHE, nogil=True)(midi_play.hist)
-play_emit = njit(cache=CACHE, nogil=True)(midi_play.emit)
-play_programs = njit(cache=CACHE, nogil=True)(midi_play.programs)
-# (saved loops of midi_play's are made again only when THIS file changes: 2026-11-05, stamp / stamp_pre end a sent
-# note at its longest exact copy)
-play_stamp = njit(cache=CACHE, nogil=True)(midi_play.stamp)
-play_condense = njit(cache=CACHE, nogil=True)(midi_play.condense)
-play_stamp_pre = njit(cache=CACHE, nogil=True)(midi_play.stamp_pre)
-piece_track = njit(cache=CACHE, nogil=True)(midi_piece.piece_track)
-piece_held_ons = njit(cache=CACHE, nogil=True)(midi_piece.held_ons)
-piece_held_head = njit(cache=CACHE, nogil=True)(midi_piece.held_head)
-piece_note_ons = njit(cache=CACHE, nogil=True)(midi_piece.note_ons)
-piece_runs_sort = njit(cache=CACHE, nogil=True)(midi_piece.runs_sort_fold)
-piece_runs_merge = njit(cache=CACHE, nogil=True)(midi_piece.runs_merge)
-piece_counted_track = njit(cache=CACHE, nogil=True)(midi_piece.counted_track)
-piece_order_ok = njit(cache=CACHE, nogil=True)(midi_piece.order_ok)
-piece_open_at = njit(cache=CACHE, nogil=True)(midi_piece.open_at)
-dc_block = njit(cache=CACHE, nogil=True)(_dc_block)
+play_read = njit(nogil=True)(midi_play.read)
+play_order = njit(nogil=True)(midi_play.order)
+play_order_count = njit(nogil=True)(midi_play.order_count)
+play_order_place = njit(nogil=True)(midi_play.order_place)
+play_hist = njit(nogil=True)(midi_play.hist)
+play_emit = njit(nogil=True)(midi_play.emit)
+play_programs = njit(nogil=True)(midi_play.programs)
+play_stamp = njit(nogil=True)(midi_play.stamp)
+play_condense = njit(nogil=True)(midi_play.condense)
+play_stamp_pre = njit(nogil=True)(midi_play.stamp_pre)
+piece_track = njit(nogil=True)(midi_piece.piece_track)
+piece_held_ons = njit(nogil=True)(midi_piece.held_ons)
+piece_held_head = njit(nogil=True)(midi_piece.held_head)
+piece_note_ons = njit(nogil=True)(midi_piece.note_ons)
+piece_runs_sort = njit(nogil=True)(midi_piece.runs_sort_fold)
+piece_runs_merge = njit(nogil=True)(midi_piece.runs_merge)
+piece_counted_track = njit(nogil=True)(midi_piece.counted_track)
+piece_order_ok = njit(nogil=True)(midi_piece.order_ok)
+piece_open_at = njit(nogil=True)(midi_piece.open_at)
+dc_block = njit(nogil=True)(_dc_block)
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
     """roll_loaded.loaded_pixels (a loaded MIDI's key x pixel table painted like notes), the same pixels."""
     ih, iw = img.shape[0], img.shape[1]
@@ -2825,7 +2720,7 @@ def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
                 img[y - y0, x, 2] = rgb[code, e, 2]
 
 
-@njit(cache=CACHE, nogil=True)
+@njit(nogil=True)
 def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G):
     """track_list.loaded_tops' block for the loaded tracks ids in order (a later one over an earlier one): each key x
     pixel of top the track whose loading-pass small picture has a note there, read like track_list.small_mask with
@@ -2882,129 +2777,3 @@ def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, id
                     if (data[rb + (c >> 3)] >> (7 - (c & 7))) & 1:
                         top[key, x] = r
                         break
-
-
-def warm():
-    """Compiles (or loads) every loop with the same kinds of values the program hands them."""
-    i1, f, b = np.zeros(1, np.int64), 0.0, np.zeros(1, bool)
-    s, e, key, color, first, _ = paint_order(np.zeros((1, 6), np.int64), np.zeros(1, np.int64), i1, 1,
-                                             np.zeros(0, bool), np.arange(15, dtype=np.int64), 16, 0)
-    order_screen(s, e, key, color, first, 0, 1, f, f, f, f, f, f, b, False, f, f)
-    order_rects(s, e, key, color, first, 0, 1, f, f, f, f, f, f, b, False, f, f, 0, 0, 1, i1, i1)
-    last_on_pixels(i1.copy(), i1.copy(), i1.copy(), i1.copy(), 0, 0, 1, i1, i1)
-    note_top(np.full(1, -1, np.int64), np.zeros(1, np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, False)
-    paint_notes(np.zeros((1, 3), np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, np.zeros((1, 2, 3), np.uint8), False)
-    overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
-    overlap_order(np.zeros((1, 6), np.int64))
-    recolour_apart(i1, i1, i1, i1, i1.copy(), np.zeros(1), i1, i1 + 1, 1)
-    midi_events(np.zeros((1, 6), np.int64), i1 * 0, np.zeros(2, np.int64), 0, 1)
-    midi_track(np.zeros((1, 6), np.int64), i1 * 0, 0, 1, 1)
-    note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
-    clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
-    key_order(i1, i1, i1, i1)
-    k_order, k_at = _key_groups(i1)
-    on_cores(_key_runs_cores, _key_runs, CORES_LEAST, k_order, k_at, i1, i1, i1)  # (the shared loop made now, not mid-paste)
-    radix_order(i1, 1)
-    ring_runs(i1, i1, i1, i1, 0.5, 1)
-    clash_pairs(np.zeros((1, 4), np.int64), 1, 1 << 28)
-    wave_fill(i1, 0, 1, i1, np.zeros(1), np.zeros(1))
-    note_ends(i1, i1 + 1, i1, True, 2, 0.0, 50.0, True, np.zeros(1), 0.0, np.int64(1) << 40)
-    nearest(np.zeros((1, 3)), np.zeros((1, 3)))
-    m = np.zeros((1, 3))
-    spread_line(np.zeros((1, 1, 3)), np.zeros((1, 1)), m, m, 1.0, np.zeros((1, 1), np.int64), np.zeros((1, 1, 3)), 0,
-                m[:0], m, m.copy())
-    f1, i2 = np.zeros(1), np.zeros(2, np.int64)
-    i0, f0 = np.zeros(0, np.int64), np.zeros(0)
-    p, nm, sr, w, s, rp, _ = hz_expand(i1, i1, np.ones(1), i1 + 1, i1, i1 - 1, b, 1, 0.5, 0.1, f1, np.ones(1),
-                                       np.ones(1), f1)
-    p, nm, sr, w, s, late, ns, npp, place, took = hz_late(p, nm, sr, w, s, f1, True, 0.5, f1, np.ones(1, np.int64), f1, 1)
-    hz_finish(p, nm, sr, w, s, late, ns, npp, place, np.zeros(1), np.full(1, 9.0), np.ones(1), True, True, b, f1,
-              np.ones(1), f1, f1, np.ones(1), np.full(1, 9.0), np.ones(1), np.ones(1), np.ones(1), 0.01)
-    hz_finish(p, nm, sr, w, s, late, ns, npp, place, np.zeros(1), np.full(1, 9.0), np.ones(1), True, True, b, f1,
-              np.ones(1), f1, f1, np.ones(1), np.full(1, 9, np.int64), np.ones(1), np.ones(1), np.ones(1), 0.01)
-    hz_order(np.arange(300, dtype=np.int64))
-    area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
-    smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
-    t3 = np.array([0, 1, 3], np.int64)
-    gap_ticks(0, 3, t3, t3[:0], np.full(3, 500000, np.int64), t3[:0], 500000, 0xFFFFFF)
-    gap_ticks(0, 3, t3, t3, np.full(3, 500000, np.int64), np.arange(4, dtype=np.int64) * 500000, 0, 0xFFFFFF)
-    gap_plan(0, -1, 0, t3, np.array([500000, 1000000], np.int64), np.array([1, 2], np.int64),
-             np.full(3, 500000, np.int64), np.zeros(3, np.int64), 24, 0xFFFFFF, 8192, 48, np.zeros(16, np.int64),
-             np.zeros(16, np.int64), 0, np.zeros(16, np.int64))
-    u8 = np.zeros(1, np.uint8)
-    mu = np.zeros(1, np.uint16)  # (LoadedPlayer.muted: each track's channels muted, a bit each)
-    midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
-    midi_rewrite(u8, 0, 0, True, i1, i1.copy(), False, np.zeros(128, np.uint8), i1[:0], np.zeros(1, np.int64),
-                 u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64), 0, i1[:0], -1, 0xFFFF, 1)
-    midi_note_ticks(u8, 0, 0, True, u8.copy(), 0, np.zeros(midi_scan.NT_SIZE, np.int64))
-    midi_busy_hits(u8, 0, 0, 0, i1[:0], 1, np.zeros(midi_scan.BH_SIZE, np.int64), i1.copy(), i1.copy(),
-                   np.zeros(2, np.int64), i1.copy(), i1.copy(), i1.copy(), u8.copy())
-    midi_gather(u8, 0, 0, 0, i1[:0], 0, 1, 0, 127, u8.copy(), np.zeros(midi_scan.GA_SIZE, np.int64), i1.copy(),
-                i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(),
-                i1.copy(), u8.copy())
-    q, z = np.zeros(_index.QS, np.int64), np.zeros(4, np.int64)
-    ix, cov, i32 = _index.new_state(), np.zeros((128, 8), np.int32), np.zeros((128, 8), np.int32)
-    midi_index(u8, 0, 0, 0, 60, ix, q, q.copy(), q.copy(), q.copy(), q.copy(), q.copy(), z, z.copy(), z.copy(),
-               z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), cov,
-               np.zeros((128, 8), np.uint8), np.zeros(16, np.int64), z.copy(), z.copy(), z.copy(),
-               np.zeros((4, _index.META_KEEP), np.uint8), z.copy(), np.zeros(4, np.int32),
-               np.zeros(16 * _index.CC_KINDS, np.int64))
-    midi_close(ix, 60, q, q.copy(), q.copy(), z, z.copy(), z.copy(), z.copy(), z.copy(), cov,
-               np.zeros((128, 8), np.uint8))
-    midi_grid(cov, np.zeros((128, 8), np.uint8), 0, 1, 0, 0, i32, i32.copy(), i32.copy(), 0,
-              np.zeros((1, 2), np.uint8), 1)
-    midi_halve(i32, i32.copy(), np.zeros((128, 4), np.int32), np.zeros((128, 4), np.int32))
-    t2, m2 = np.full((1, 2), -1, np.int64), np.zeros((1, 2), np.uint8)
-    midi_cover(u8, 0, 0, 0, i1[:0], np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,
-               np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
-               z.copy(), z.copy())
-    midi_cover_many(np.zeros(1, bool), i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, u8, i1, np.zeros(1, np.int16), i1,
-                    u8.copy(), i1[:0], 1, 1.0, 0.0, 2, 0, np.zeros((16, 32), np.int64), np.zeros((16, 32), np.int64),
-                    t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(), z.copy(), z.copy(), q,
-                    q.copy(), q.copy(), np.zeros(_index.C_SIZE, np.int64), i1.copy())
-    loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
-    all_tops(np.full((1, 1), -1, np.int32), np.zeros(1, np.uint8), i1, i1 + 1, i1 + 1, i1.copy(), i1.copy(), i1 + 1,
-             i1 + 1, np.zeros(1, bool), i1.copy(), i1.copy(), 0, 1.0, 1)
-    midi_merge_loud(t2, m2, t2.copy(), m2.copy(), np.zeros((1, 3), np.int64), np.zeros(1, np.int64), 1 << 20)
-    i32 = np.zeros(1, np.int32)
-    play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),
-              i32.copy(), 0, i1.copy(), i1[:0], i1.copy(), i1.copy(), False, i1.copy(), i1.copy())
-    play_order(i1, i32, i32, 0, 1, i1.copy(), i32.copy(), i32.copy())
-    play_order_count(i1, 0, i1.copy())
-    play_order_place(i1, i32, i32, 0, i1.copy(), i1.copy(), i32.copy(), i32.copy())
-    h2 = np.zeros((1, 128), np.int64)
-    play_hist(i32, i32, 0, 0, i1, 0, mu, i1, 1, 1, h2)
-    line = midi_play.Line(4, midi_play.OPEN * 4)
-    play_emit(i32, i32, 0, 0, i1, 0, mu, i1, 1, 1, i1, i1.copy(), np.zeros((1, 3), np.uint8), i1.copy(), False,
-              *line.arrays())
-    play_programs(u8, 0, 0, np.zeros(midi_play.PS_SIZE, np.int64))
-    f1 = np.zeros(1, np.float64)
-    line = midi_play.Line(4)
-    play_stamp(i32, i32, 0, 0, i1, mu, i1, i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0,
-               np.zeros(1, np.uint64), np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(3, np.int64),
-               np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64), np.zeros(1, np.int64),
-               *line.arrays())
-    play_condense(i1, i32, i32, i1.copy(), 0, i1.copy(), np.zeros(1, np.uint32),
-                  np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64),
-                  np.zeros(1, np.int64), np.zeros(4, np.int64), np.full(1 << 17, -1, np.int64))
-    play_stamp_pre(i32, np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), 0, 0, 0,
-                   i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0, np.zeros(1, np.uint64),
-                   np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(3, np.int64), False,
-                   *line.arrays())
-    q = np.zeros(midi_piece.QS, np.int64)
-    piece_track(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 0, 10, i1[:0], q, q.copy(),
-                q.copy(), 0, -1, 0, np.zeros(32, np.uint8), 5, q.copy(), 0, 0, np.zeros(1, np.int64),
-                np.zeros(256, np.uint8), np.zeros(4, np.int64), np.zeros(4, np.uint8), np.zeros(2, np.int64))
-    rk, rs, rc = np.array([3, 1, 3], np.int64), np.array([5, 0, 5], np.uint8), np.ones(3, np.int64)
-    m = piece_runs_sort(rk, rs, rc, 3, rk.copy(), rs.copy(), rc.copy(), 2)
-    m = piece_runs_merge(rk, rs, rc, m, rk.copy(), rs.copy(), rc.copy(), m, np.zeros(6, np.int64),
-                         np.zeros(6, np.uint8), np.zeros(6, np.int64))
-    piece_counted_track(rk, rs, rc, 2, 0, 0, np.zeros(96, np.uint8))
-    piece_order_ok(rk, rs, rc, 2, np.zeros(256, np.uint8))
-    piece_open_at(rk, rs, rc, 2, 1 << 40, 1 << 30, np.zeros(2, np.int64))
-    dc_block(np.zeros((4, 2), np.float32), np.ones(5), np.zeros((2, 2)))
-    piece_held_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0, q, q.copy(),
-                   np.zeros(1, np.int64), np.zeros(1, np.int64), q.copy())
-    piece_held_head(np.zeros(1, np.int64), np.zeros(1, np.int64), np.ones(1, np.int64), -1, 0, np.zeros(16, np.uint8))
-    piece_note_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0,
-                   np.ones(midi_piece.QS, np.int8), np.zeros(4, np.int64), np.zeros(4, np.int64), np.zeros(4, np.int64))
