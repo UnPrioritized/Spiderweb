@@ -305,6 +305,9 @@ def clean_shape(sh):
     cut = clean_cut(sh["cut"]) if isinstance(sh.get("cut"), dict) else None
     if cut:  # a piece cut from another shape, keeping its notes (sliced.py)
         out["cut"] = cut
+        if out.get("vel_env"):  # (older files: every earlier cut's point on the line before its start)
+            from notes.joined import thin_lead
+            out["vel_env"] = thin_lead(out["vel_env"])
     fx = clean_fx(sh, steps=bool(cut) and (whole_made(cut) or bool(sh.get("ripples"))))  # (sliced.steps_kept)
     if fx:  # Chop / Claw machine / Strum pages, flips and velocities after them (fx.py)
         out["fx"] = fx

@@ -599,6 +599,46 @@ def knife_free(k, lo, hi, halves, d, ppq):
     return np.where(flat, flat_free, cut_free)
 
 
+REACH_KEYS = 8192  # (needed_halves compares cuts over keys -REACH_KEYS .. REACH_KEYS: far past any note row)
+LEAST_GAP = 1e-6  # beats (x (1 + how far out)): a cut counts as inside another only this far inside on every key
+
+
+def needed_halves(halves):
+    """A custom piece's cuts [b0, k0, db, dk, side] without the ones another cut of the piece makes useless: on every
+    key row (any key a note can have) a slanted cut keeps the notes after / before the tick where it crosses the row;
+    one keeping strictly less on every row (the cut to its right keeping the later side, say) leaves nothing for it
+    to do: knife_cut gives exactly the same notes without it (it only ever takes the largest start / smallest end).
+    Slicing a drawing piece by piece kept every earlier cut on every piece (720 pieces = 720 cuts each: slow to
+    slice / open / undo, files growing with pieces x pieces, 2026-11-09); now ~2. Flat cuts are always kept. Order
+    kept."""
+    if len(halves) < 2:
+        return halves
+    h = np.asarray(halves, float).reshape(-1, 5)
+    b0, k0, db, dk, sd = h.T
+    slanted = np.abs(dk) > 1e-6
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tilt = np.where(slanted, db / np.where(slanted, dk, 1.0), 0.0)
+    ends = [b0 + tilt * (k - k0) for k in (-REACH_KEYS, REACH_KEYS)]  # (each cut's beat on the far rows)
+    later = (dk < 0) == (sd > 0)  # (keeps the later side: knife_cut raises starts)
+    drop = np.zeros(len(h), bool)
+    for want in (True, False):
+        idx = np.flatnonzero(slanted & (later == want))
+        if len(idx) < 2:
+            continue
+        x, y = (ends[0][idx], ends[1][idx]) if want else (-ends[0][idx], -ends[1][idx])  # (earlier side: mirrored)
+        # (useless: another one at least LEAST_GAP further in on both far rows, so on every row between)
+        gap = LEAST_GAP * (1 + np.abs(x) + np.abs(y))  # (far past float noise however far out the rows reach)
+        o = np.argsort(x, kind="stable")
+        xs, ys = x[o], y[o]
+        best = np.maximum.accumulate(ys[::-1])[::-1]  # (the furthest in on the top row among those from here on)
+        at = np.searchsorted(xs, x + gap, side="left")
+        has = at < len(xs)
+        drop[idx[has]] = best[np.minimum(at[has], len(xs) - 1)] >= y[has] + gap[has]
+    if not drop.any():
+        return halves
+    return [c for c, gone in zip(halves, drop) if not gone]
+
+
 def knife_cut(notes, tracks, halves, d, ppq):
     """Notes (start, end, key, any other columns) and tracks cut like a knife went through them: each half
     [b0, k0, db, dk, side] keeps what's on its side of the line through (b0, k0) going (db, dk) (beats, keys; moved
@@ -797,7 +837,7 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
     for h, sd in zip(halves, (1, -1)):
         mine = [m for m in marks if knife_side(m["at"], a, b) in (0, sd)]
         knife = knives + [[float(a[0]), float(a[1]), float(b[0] - a[0]), float(b[1] - a[1]), sd]]
-        h["cut"] = {"whole": whole, "was": outline(h), "part": knife if custom else part, "vel": None,
+        h["cut"] = {"whole": whole, "was": outline(h), "part": needed_halves(knife) if custom else part, "vel": None,
                     "marks": mine + [new]}
         if custom:
             h["cut"]["gate"] = velocity(h, GATE)
@@ -1194,8 +1234,9 @@ def slice_in_two(sh, halves, a, b):
     for h in halves:
         sd = side([p for p in cached_path(h)], a, b) or 1
         mine = [m for m in marks if side([m["at"]], a, b) in (0, sd)]
-        h["cut"] = {"whole": whole, "was": outline(h), "part": part + [[float(a[0]), float(a[1]), float(b[0] - a[0]),
-                                                                       float(b[1] - a[1]), sd]],
+        h["cut"] = {"whole": whole, "was": outline(h),
+                    "part": needed_halves(part + [[float(a[0]), float(a[1]), float(b[0] - a[0]), float(b[1] - a[1]),
+                                                   sd]]),
                     "vel": None, "gate": velocity(h, GATE), "marks": mine + [new]}
         if own:
             h["cut"]["own_vel"] = True
@@ -1275,6 +1316,7 @@ def clean_cut(c):
             part = [[float(x) for x in h[:4]] + [1 if h[4] > 0 else -1] for h in c["part"]]
             if not part or any(len(h) != 5 for h in c["part"]):
                 return None
+            part = needed_halves(part)  # (older files kept every earlier cut on every piece: same notes without)
         else:
             part = [float(c["part"][0]), None if c["part"][1] is None else float(c["part"][1])]
             knife = [[float(x) for x in h[:4]] + [1 if h[4] > 0 else -1] for h in c.get("knife") or []]
@@ -1295,6 +1337,9 @@ def clean_cut(c):
         for key, keys in (("vel", VELOCITY), ("gate", GATE)):  # (as the piece's own would come out of a file)
             v = c.get(key)
             snaps[key] = velocity(clean_shape(dict(c["was"], **v)) or {}, keys) if isinstance(v, dict) else None
+        if (snaps["vel"] or {}).get("vel_env"):  # (older files: every earlier cut's point before its start, as the
+            from notes.joined import thin_lead  # piece's own line: engine.clean_shape)
+            snaps["vel"]["vel_env"] = thin_lead(snaps["vel"]["vel_env"])
     except (KeyError, TypeError, ValueError, IndexError, AttributeError):
         return None
     out = {"whole": dict(outline(whole), **velocity(whole), **(velocity(whole, GATE) if whole["kind"] == "custom"

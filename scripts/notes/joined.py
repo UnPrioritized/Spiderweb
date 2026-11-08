@@ -402,6 +402,32 @@ def split_at(sh, a):
 
 
 LEAD_MOST = 2000  # points of the line before a piece kept at most (a Formula line can have 40,000)
+STRAIGHT = 1e-12  # (x (1 + velocity)): a point this close to the line through its neighbours adds nothing
+
+
+def straight_out(pts):
+    """[[u, velocity]] without the points lying on the straight line between the ones beside them (the line reads
+    the same). A drawing sliced piece by piece passed every earlier cut's point on to the next piece's line before
+    its start (720 pieces: 720 points each, 2026-11-09). First / last points and jumps (two points on one u) stay."""
+    if len(pts) < 3:
+        return pts
+    out = [pts[0]]
+    for (u0, v0), (u1, v1), (u2, v2) in zip(pts, pts[1:], pts[2:]):
+        if u0 < u1 < u2 and abs(v0 + (v2 - v0) * (u1 - u0) / (u2 - u0) - v1) <= STRAIGHT * (1 + abs(v1)):
+            continue
+        out.append([u1, v1])
+    out.append(pts[-1])
+    return out
+
+
+def thin_lead(env):
+    """A piece's velocity line with straight_out on its part before its start (u < 0, plus the point it leads to):
+    older files kept every earlier cut's point there. The line reads the same everywhere."""
+    k = next((i for i, (u, _) in enumerate(env) if u >= 0), len(env))
+    if k < 2:
+        return env
+    return straight_out([list(p) for p in env[:k + 1]])[:-1] + [list(p) for p in env[k:]] if k < len(env) else \
+        straight_out([list(p) for p in env])
 
 
 def piece_velocity(new, old, new_span, old_span, lead=False):
@@ -424,6 +450,7 @@ def piece_velocity(new, old, new_span, old_span, lead=False):
     before = [[(u - ua) / (ub - ua), float(v)] for u, v in env if u <= ua][-LEAD_MOST:] if lead else []
     if not any(u < -1e-12 for u, _ in before):
         before = []
+    before = straight_out(before + [[0.0, va]])[:-1]
     if inner or before:
         new["vel_env"] = before + [[0.0, va]] + inner + [[1.0, vb]]
     elif abs(va - round(va)) > 1e-9 or abs(vb - round(vb)) > 1e-9:
