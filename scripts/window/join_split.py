@@ -827,13 +827,8 @@ class JoinSplit:
     def line_count(self, gap):
         """How many lines the line tools' shapes have (each shape's own colours = its tracks), or None: no notes."""
         got = self.line_targets()
-        key = (id(self.rendered), self.shapes_gen, self.channel_mode.get())
-        kept = getattr(self, "_fill_multi", None)
-        if kept and kept[0] == key:
-            multi = kept[1]
-        else:
-            multi = self.multi_rendered()[1]
-            self._fill_multi = (key, multi)
+        multi = self.multi_kept()[1]  # (the same memo as Fill gaps / plain_copies: (use10, notes); storing the notes
+        # alone there made Flip each line fail on its Flip button, 2026-11-08)
         rows = multi[np.isin(multi[:, 5], got)] if got else multi[:0]
         if not len(rows):
             return None
