@@ -30,7 +30,8 @@ from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
                           split_overlaps,
                           track_ids,
-                          auto_count, PORTS, pasted_notes, edge_made, past_edges, SPACE_KEYS)
+                          auto_count, PORTS, pasted_notes, edge_made, past_edges, SPACE_KEYS,
+                          off_part)
 from notes.paths import rows_up_to
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
@@ -612,6 +613,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # start" (bars before beat 0, 0 = off): the main piano roll may scroll there (user 2026-11-06; roll limits)
         self.space_keys = tk.IntVar(self, value=0)
         self.space_bars = tk.IntVar(self, value=0)
+        # ... "Keep notes made there" (off; user 2026-11-08): shapes keep the notes they make in that space, kept
+        # apart from the real notes (App.offrange_tracks), so nothing that leaves Spiderweb ever gets them
+        self.keep_offrange = tk.BooleanVar(self, value=False)
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
         # when it opens (a change = opened again at the next Play: fresh_builtin)
         self.kestrel_opts = dict(KESTREL_DEFAULTS)
@@ -3660,6 +3664,29 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         n[:, 2] -= up
         n[:, :2] -= round(later * self.ppq)
         return n
+
+    def keeps_offrange(self):
+        """Settings "Keep notes made there" on AND some space to keep them in (user 2026-11-08: the tick is greyed
+        without Space past the keys / before the start, so then it counts as off)."""
+        return bool(self.keep_offrange.get() and (self.space_keys.get() > 0 or self.space_bars.get() > 0))
+
+    def offrange_tracks(self, sh):
+        """(notes, tracks) sh makes in the space past the keys / before beat 0 (engine.off_part) while "Keep notes
+        made there" is on; empty otherwise. KEPT APART from notes_tracks: the real notes (export, playback, Copy to
+        Domino, note count...) never hold them. Made from the same remembered lifted notes as edge_made's, so this
+        costs no note making of its own. Nothing to save: they come from the shape's drawing again."""
+        empty = np.zeros((0, 4), np.int64), None
+        if not self.keeps_offrange() or sh.get("hz"):
+            return empty
+        out = past_edges(sh, self.keys, self.ppq)
+        if out is None:
+            return empty
+        lifted, up, room, later = out
+        with rows_up_to(room - 1):
+            notes, tracks = self.notes_tracks(lifted, room)
+        if not len(notes):
+            return empty
+        return off_part(notes, tracks, up, self.keys, round(later * self.ppq))
 
     def gate_flip_state(self):
         """The right-click "Gate aware flip" for the selected shapes: (shapes it switches, on: ticked, why: None or

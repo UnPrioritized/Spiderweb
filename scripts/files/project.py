@@ -665,6 +665,7 @@ class ProjectFiles:
                               "loud_on_top": self.stack_order.get() == "loud",
                               "hidden_shade": self.hidden_shade.get(),
                               "space_keys": self.space_keys.get(), "space_bars": self.space_bars.get(),
+                              "keep_offrange": self.keep_offrange.get(),
                               "live": (getattr(getattr(self, "stir_window", None), "drawing", None)
                                        or {"live": self.live.get()})["live"],  # (a Stir area being drawn turned
                               # Live shape off for a while: the user's own tick is saved, hunt 11-04 4)
@@ -886,6 +887,7 @@ class ProjectFiles:
             for key, steps in (("space_keys", SPACE_KEYS), ("space_bars", SPACE_BARS)):
                 v = win.get(key)
                 getattr(self, key).set(v if v in steps and not isinstance(v, bool) else 0)
+            self.keep_offrange.set(win.get("keep_offrange") is True)
             from notes import engine  # (shapes over the top key: made whole only with the room on, engine.SPACE_KEYS)
             if engine.SPACE_KEYS[0] != (self.space_keys.get() > 0):
                 engine.SPACE_KEYS[0] = self.space_keys.get() > 0

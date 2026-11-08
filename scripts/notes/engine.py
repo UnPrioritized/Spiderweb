@@ -837,6 +837,22 @@ def cut_back(notes, tracks, up, keys, later=0):
     return notes, None if tracks is None else np.asarray(tracks)[keep]
 
 
+def off_part(notes, tracks, up, keys, later=0):
+    """What cut_back leaves out of the same lifted notes, put back where the shape is: notes under key 0, over the
+    top key or wholly before beat 0, and the part before beat 0 of a note across it (ending on beat 0). The
+    "Keep notes made there" notes (App.offrange_tracks); never part of the shape's real notes."""
+    notes = np.array(notes, copy=True)
+    if up:
+        notes[:, 2] -= up
+    if later:
+        notes[:, :2] -= later
+    out = (notes[:, 2] < 0) | (notes[:, 2] >= keys) | (notes[:, 0] < 0)
+    notes = notes[out]
+    inside = (notes[:, 2] >= 0) & (notes[:, 2] < keys)  # (in the keys: only its part before beat 0 is off)
+    notes[inside, 1] = np.minimum(notes[inside, 1], 0)
+    return notes, None if tracks is None else np.asarray(tracks)[out]
+
+
 def past_edges(sh, keys, ppq=960):
     """A shape whose lines reach before beat 0, under key 0 or over the top key (Space past the edges, Settings →
     General, user 2026-11-06: no notes are made there): (it lifted onto the keys by up whole keys and not cut at the

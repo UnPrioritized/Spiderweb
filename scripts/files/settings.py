@@ -165,6 +165,7 @@ APP_KEYS = {
     "hidden_shade": ("look", "hidden_note_shade", bool),
     "space_keys": ("view", "space_past_the_keys", int),  # (keyboard heights; SPACE_KEYS)
     "space_bars": ("view", "space_before_the_start_bars", int),  # (SPACE_BARS)
+    "keep_offrange": ("view", "keep_notes_made_there", bool),  # (App.offrange_tracks)
 }
 SPACE_KEYS = (0, 1, 2, 3, 4)  # Settings → General "Space past the keys": keyboard heights past each end
 SPACE_BARS = (0, 1, 2, 4, 8, 16)  # ... "Space before the start": bars before beat 0 (user 2026-11-06)
