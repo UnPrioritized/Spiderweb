@@ -8,6 +8,23 @@ WINDOWS = sys.platform == "win32"
 MAC = sys.platform == "darwin"
 ALT = 0x20000 if WINDOWS else 0x10 if MAC else 0x8  # Alt held, in a Tk event's state (Linux: Mod1; Mac: Option)
 
+
+def _wine_version():
+    """The Wine version ("9.0") when this Windows is really Wine (it adds wine_get_version to ntdll), else None.
+    Only this file asks: everything else reads WINE."""
+    if not WINDOWS:
+        return None
+    try:
+        ask = ctypes.windll.ntdll.wine_get_version
+        ask.restype = ctypes.c_char_p
+        found = ask()
+    except (AttributeError, OSError):  # (real Windows: no such function)
+        return None
+    return found.decode("ascii", "replace") if found else "?"
+
+
+WINE = _wine_version()  # (untested under Wine: the program never names it, only the logs do)
+
 try:
     from ctypes import wintypes  # Windows' C types (import it from here, never from ctypes)
 except (ImportError, ValueError):  # (Linux on an older Python can't load it: files describing Windows calls still

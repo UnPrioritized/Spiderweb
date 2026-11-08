@@ -13,7 +13,7 @@ import traceback
 
 from files.lang import tr
 from files.about import FULL_VERSION as VERSION, HERE, USER
-from files.system import error_box
+from files.system import WINE, error_box
 
 LOG = os.path.join(HERE, "spiderweb-error.log")
 OLD_LOG = os.path.join(HERE, "spiderweb-error-old.log")  # the log moves here when it gets big
@@ -89,6 +89,11 @@ def _folder_rules():
 _FOLDERS = _folder_rules()
 
 
+def system_text():
+    """The system in a log's first line; under Wine its version too (a log from a phone reads differently)."""
+    return platform.platform() + (f" (Wine {WINE})" if WINE else "")
+
+
 def hide_folders(text):
     """Logs get shared and folder names can hold the user's name: Spiderweb's folder becomes <Spiderweb>, the home
     folder ~ (file names stay)."""
@@ -101,7 +106,7 @@ def write_log(exc_type, exc, tb, where):
     """Adds the error to errors.log. True if it could be written."""
     text = hide_folders("".join(traceback.format_exception(exc_type, exc, tb)))
     head = (f"==== {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python {platform.python_version()}"
-            f"   {platform.platform()}   {where}")
+            f"   {system_text()}   {where}")
     times = _seen[text] = _seen.get(text, 0) + 1
     if times == 2:  # the full details are already in the log once
         text = (f"The same {exc_type.__name__} as logged earlier this session happened again; "
@@ -210,7 +215,7 @@ def watch_crashes():
     try:
         _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
         _crash_file.write(f"==== started {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python "
-                          f"{platform.python_version()} {platform.architecture()[0]}   {platform.platform()}\n")
+                          f"{platform.python_version()} {platform.architecture()[0]}   {system_text()}\n")
         _crash_file.flush()
         faulthandler.enable(_crash_file, all_threads=True)
         atexit.register(_closed)
