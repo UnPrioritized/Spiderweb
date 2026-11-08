@@ -14,7 +14,9 @@ a tick apart). "vel": velocity taken off per note,
 End ("end" on): "end_time" beats: the ends come earlier; + = the last note struck keeps its end, - = the first.
 "chop": every note is first cut wherever another note starts while it's held, so those pieces strum too.
 "alternate": every other chord strums the other way (single notes don't count, and never change).
-A note left with no length keeps 1 tick at its start."""
+A note left with no length keeps 1 tick at its start.
+"keys": how many notes of a chord share each step (start, end and velocity alike), counted from the note struck
+first: groups of that many (1 = every note its own step)."""
 
 import math
 
@@ -24,12 +26,20 @@ TIME_KNOB, END_KNOB, VEL_KNOB = 1 / 3, 1 / 8, 127  # how far the knobs go (beats
 LIMITS = {"time": (-4.0, 4.0), "tension": (-100.0, 100.0), "vel": (-127.0, 127.0), "vel_tension": (-100.0, 100.0),
           "end_time": (-4.0, 4.0), "end_tension": (-100.0, 100.0)}  # (typed numbers can go past the knobs)
 FLAGS = ("start", "preserve", "ahead", "end", "chop", "alternate")
+KEYS_MAX = 100_000  # (notes per step: more than any chord holds)
 STRUM_DEFAULTS = dict({k: 0.0 for k in LIMITS}, start=True, preserve=False, ahead=False, end=True, chop=False,
-                      alternate=False)
+                      alternate=False, keys=1)
 # beats: no note moves further from its chord (a steep tension over a big chord would go on forever, user; 1000 bars
 # of 4/4, user 2026-10-17: FL's own goes on until it breaks past ~1300 bars, leaving the rest of the chord behind)
 CAP = 4000
 CHOP_MAX = 5_000_000  # pieces: more than this and the notes aren't chopped
+
+
+def whole(v, default):
+    """A notes-per-step count from a file: 1 .. KEYS_MAX, else default."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+        return max(1, min(KEYS_MAX, int(v)))
+    return default
 
 
 def clean_strum(c):
@@ -47,6 +57,7 @@ def clean_strum(c):
     for key in FLAGS:
         if isinstance(c.get(key), bool):
             out[key] = c[key]
+    out["keys"] = whole(c.get("keys"), 1)
     if not (out["start"] and (out["time"] or out["vel"]) or out["end"] and out["end_time"]):
         return None
     return out
@@ -83,6 +94,11 @@ def chop(a):
     return out
 
 
+def groups(q, m, st):
+    """The step of the note q places from the one struck first, in a chord of m notes ("keys" notes a step)."""
+    return np.asarray(q) // st.get("keys", 1)
+
+
 def apply_strum(a, st, ppq):
     """a: notes as an int64 array of (start, end, key, velocity, ...) rows (other columns ride along) -> the notes
     strummed."""
@@ -105,12 +121,13 @@ def apply_strum(a, st, ppq):
         multi = size > 1
         down ^= multi & (np.cumsum(multi) % 2 == 0)  # (the 2nd, 4th... real chord)
     q = np.where(down[chord], m - 1 - rank, rank)  # place in the strum (0 = struck first)
+    q, last = groups(q, m, st), groups(m - 1, m, st)  # (its step, the chord's last step)
     ns, ne = s.astype(float), e.astype(float)
     cap = CAP * ppq
     if start and st["time"]:
         g = abs(st["time"]) * ppq
         if st["ahead"]:
-            off = steps(q, g, -st["tension"], cap, True) - steps(m - 1, g, -st["tension"], cap, True)
+            off = steps(q, g, -st["tension"], cap, True) - steps(last, g, -st["tension"], cap, True)
         else:
             off = steps(q, g, st["tension"], cap, True)
         off = np.rint(off)
@@ -119,10 +136,10 @@ def apply_strum(a, st, ppq):
         if not st["preserve"]:
             ne = ne + off + late
     if st["end"] and st["end_time"]:
-        k = m - 1 - q if st["end_time"] > 0 else q
+        k = last - q if st["end_time"] > 0 else q
         ne = ne - np.rint(steps(k, abs(st["end_time"]) * ppq, st["end_tension"], cap, True))
     if start and st["vel"]:
-        k = q if st["vel"] > 0 else m - 1 - q
+        k = q if st["vel"] > 0 else last - q
         a[:, 3] = np.maximum(1, a[:, 3] - np.rint(steps(k, abs(st["vel"]), st["vel_tension"], VEL_KNOB))).astype(np.int64)
     ns = np.maximum(ns, 0)
     a[:, 0] = ns.astype(np.int64)
