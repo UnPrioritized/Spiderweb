@@ -138,6 +138,8 @@ def load():
 
 
 CHECK_WAIT_S = 180  # (checked_level: one level's run taking longer = the system is slow, not the level wrong)
+CHECK_ALL_S = 360  # (all the levels' runs together: past this = the NumPy code this run, tried again next start)
+LEVEL_NOTE = "loops level"  # (errors.note topic: the level in use, so a crash in the loops is seen next start)
 
 
 def checked_level(top, path):
@@ -145,10 +147,12 @@ def checked_level(top, path):
     AVX2 / AVX-512 it can't really run would end the program at the first loop. So the level is first tried in a
     separate run of Spiderweb (spiderweb.py --loops-check: a few loops on big inputs, answers compared with NumPy's),
     from the highest the processor names down to plain; 0 = none worked (the NumPy code). Remembered in
-    user/loops-level.json per system version + processor + library, so it's tried once (a run past CHECK_WAIT_S:
-    NumPy for now, tried again next start)."""
+    user/loops-level.json per system version + processor + library, so it's tried once. Only a level's own fault is
+    remembered (wrong answers, a crash): a run that couldn't start, was ended from outside or took too long = the
+    NumPy code this run, tried again next start; a level timing out lets the lower ones try. The last run crashed
+    inside the loops at the remembered level (the emulator changed under the same names, a loop the check doesn't
+    cover) = one level lower, checked again."""
     import json
-    import subprocess
     from files import about, safefile
     from files.system import cpu_name
     saved = os.path.join(about.USER, "loops-level.json")
@@ -160,29 +164,83 @@ def checked_level(top, path):
             known = {}
     except (OSError, ValueError):
         known = {}
-    if isinstance(known.get(key), int):
-        return known[key]
-    start = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable,
-                                                                     os.path.join(HERE, "spiderweb.py")]
-    level = 0
-    for tried in range(top, 0, -1):
-        env = dict(os.environ, SPIDERWEB_LOOPS_CHECK="1", SPIDERWEB_NATIVE_LEVEL=str(tried))
-        try:
-            done = subprocess.run(start + ["--loops-check"], env=env, timeout=CHECK_WAIT_S,
-                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if done.returncode == 0:
-                level = tried
-                break
-        except subprocess.TimeoutExpired:  # (a slow system, not the level's fault: the NumPy code this run, not
-            return 0                       # remembered, so the next start tries again)
-        except (OSError, subprocess.SubprocessError):
-            pass
+    level = known.get(key)
+    if isinstance(level, int) and not (level > 0 and crashed_at(key) == level):
+        _note_level(level, key)
+        return level
+    level, sure = try_levels(top if not isinstance(level, int) else level - 1)
+    if not sure:
+        _note_level(0, key)
+        return 0
     known[key] = level
     try:
         safefile.write_text(saved, json.dumps(known))
     except OSError:
         pass
+    _note_level(level, key)
     return level
+
+
+def _note_level(level, key):
+    try:
+        from files import errors
+        errors.note(LEVEL_NOTE, f"{level} | {key}")
+    except Exception:  # noqa: BLE001 (only a log line)
+        pass
+
+
+def crashed_at(key):
+    """The loops level the last run used, when it CRASHED inside the loops (its dump names our loops' files) with
+    this same key; else None."""
+    try:
+        from files import errors
+        text = errors.last_crash_text
+        if not text or "native" not in text:
+            return None
+        level, _, was = errors._in_use(text).get(LEVEL_NOTE, "").partition(" | ")
+        return int(level) if was == key and level.isdigit() else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def level_fault(code):
+    """A check run's exit code that blames the level: wrong answers (4) or a crash (a Windows exception code)."""
+    code &= 0xFFFFFFFF
+    return code == 4 or code >= 0xC0000000
+
+
+def try_levels(first, run=None):
+    """(level, sure): the highest level from first down to 1 whose check run passes. sure False = nothing to
+    remember (a run couldn't start / was ended from outside / they took too long); (0, True) = every level failed by
+    its own fault. run(level, timeout) -> exit code (tests); default = spiderweb.py --loops-check."""
+    import subprocess
+    import time
+    if run is None:
+        start = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable,
+                                                                         os.path.join(HERE, "spiderweb.py")]
+
+        def run(tried, wait):
+            env = dict(os.environ, SPIDERWEB_LOOPS_CHECK="1", SPIDERWEB_NATIVE_LEVEL=str(tried))
+            return subprocess.run(start + ["--loops-check"], env=env, timeout=wait, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+    began = time.monotonic()
+    timed_out = False
+    for tried in range(first, 0, -1):
+        left = CHECK_ALL_S - (time.monotonic() - began)
+        if left <= 1:
+            return 0, False
+        try:
+            code = run(tried, min(CHECK_WAIT_S, left))
+        except subprocess.TimeoutExpired:  # (slow, or this level hangs: the lower ones try)
+            timed_out = True
+            continue
+        except (OSError, subprocess.SubprocessError):  # (couldn't start: not the level's fault)
+            return 0, False
+        if code == 0:
+            return tried, True
+        if not level_fault(code):  # (ended from outside: not the level's fault)
+            return 0, False
+    return 0, not timed_out
 
 
 def self_check():

@@ -472,6 +472,11 @@ if __name__ == "__main__":
         clean_leftovers()  # (an update's Spiderweb.exe.old / .new: exe only)
     except Exception:
         pass
+    from files.system import WINE
+    if WINE and getattr(sys, "frozen", False):  # (old unpacked copies of the exe a hard-ended session left: Temp)
+        import threading
+        from files.system import clean_old_unpacked
+        threading.Thread(target=clean_old_unpacked, name="old unpacked", daemon=True).start()
     from window import open_files
     open_files.STARTED = started
     open_files.HOLD[0] = bool(given)  # (the last session's MIDI isn't read again before the given file opens)

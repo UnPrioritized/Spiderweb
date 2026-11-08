@@ -367,6 +367,67 @@ def link_files(ext, here, name):
         return False
 
 
+UNPACKED_OURS = (("lang", "en", "main.json"), ("icons", "grab.cur"))  # (inside our exe's unpacked folder only)
+UNPACKED_REST_S = 600  # (a folder newer than this may be another copy still unpacking: left)
+
+
+def clean_old_unpacked():
+    """(Wine-like systems, the exe only; untested on a phone) The exe unpacks itself into a "_MEI…" folder in Temp
+    at each start and removes it at a normal end; a session ended hard (the whole Wine app closed with Spiderweb
+    open) leaves ~125 MB behind each time. Removed here: OURS (UNPACKED_OURS inside), not this run's, older than
+    UNPACKED_REST_S and not in use by a running copy (its program files can't be opened for writing). How many."""
+    import os
+    import shutil
+    import time
+    own = getattr(sys, "_MEIPASS", None)
+    if not WINE or not own or not getattr(sys, "frozen", False):
+        return 0
+    temp = os.path.dirname(os.path.normpath(own))
+    gone = 0
+    try:
+        names = os.listdir(temp)
+    except OSError:
+        return 0
+    for name in names:
+        d = os.path.join(temp, name)
+        try:
+            if (not name.startswith("_MEI") or os.path.normcase(d) == os.path.normcase(os.path.normpath(own))
+                    or not os.path.isdir(d) or not all(os.path.isfile(os.path.join(d, *p)) for p in UNPACKED_OURS)
+                    or time.time() - os.path.getmtime(d) < UNPACKED_REST_S or unpacked_in_use(d)):
+                continue
+            moved = d + "-gone"
+            os.rename(d, moved)
+        except OSError:
+            continue
+        shutil.rmtree(moved, ignore_errors=True)
+        gone += 1
+    return gone
+
+
+def unpacked_in_use(folder):
+    """True when a running program holds a program file (.dll / .pyd) in folder: opening one for writing with no
+    sharing fails. Unsure (can't ask) = True."""
+    import os
+    try:
+        k = ctypes.windll.kernel32
+        k.CreateFileW.restype = ctypes.c_void_p
+        k.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                                  ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+        k.CloseHandle.argtypes = [ctypes.c_void_p]
+        bad = ctypes.c_void_p(-1).value
+        files = [n for n in os.listdir(folder) if n.lower().endswith((".dll", ".pyd"))]
+        if not files:
+            return False
+        for n in files:
+            h = k.CreateFileW(os.path.join(folder, n), 0x40000000 | 0x00010000, 0, None, 3, 0, None)  # (write+delete, open)
+            if not h or h == bad:
+                return True
+            k.CloseHandle(h)
+        return False
+    except (AttributeError, OSError):
+        return True
+
+
 def error_box(title, msg):
     """An error message that works without a Spiderweb window (e.g. it couldn't start). Nothing if it can't show."""
     if WINDOWS:

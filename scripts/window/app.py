@@ -143,10 +143,12 @@ _old_notes_most = []
 
 
 def old_notes_most():
-    """Bytes the notes of shapes as they were may take (App.forget_old_notes; the PC's memory asked once)."""
+    """Bytes the notes of shapes as they were may take (App.forget_old_notes; the PC's memory asked once). None = no
+    limit: only Wine-like systems get one (phones; Windows kept as it was, its undo stays quick)."""
     if not _old_notes_most:
         total = system.total_memory()
-        _old_notes_most.append(max(OLD_NOTES_LEAST, (total or 16 * 2 ** 30) // OLD_NOTES_SHARE))
+        _old_notes_most.append(max(OLD_NOTES_LEAST, (total or 16 * 2 ** 30) // OLD_NOTES_SHARE)
+                               if system.WINE else None)
     return _old_notes_most[0]
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
 CHANNEL_CHOICES = [
@@ -2238,14 +2240,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def forget_old_notes(self):
         """The notes remembered for shapes as they WERE (before a move, an edit...: kept so undo is quick) past
         OLD_NOTES_SHARE of the PC's memory: the oldest forgotten (made again if undo needs them). A few edits of a
-        shape with millions of notes kept a copy each: a phone ran out of memory. The notes this making used stay."""
+        shape with millions of notes kept a copy each: a phone ran out of memory. The notes this making used stay.
+        Wine-like systems only (old_notes_most None elsewhere: nothing forgotten)."""
         cache, used, gen = self._notes_cache, self._notes_used, self.shapes_gen
         for k in [k for k in used if k not in cache]:  # (the cache emptied elsewhere: their keys hold big texts)
             del used[k]
+        most = old_notes_most()
+        if most is None:
+            return
         sizes = {k: sum(a.nbytes for a in (v if isinstance(v, (tuple, list)) else (v,)) if isinstance(a, np.ndarray))
                  for k, v in cache.items()}
         total = sum(sizes.values())
-        most = old_notes_most()
         if total <= most:
             return
         for k in [k for k in cache if used.get(k) != gen]:  # (oldest first)
@@ -4638,6 +4643,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if str(self.vel_box) in map(str, self.panes.panes()):
                 self.panes.forget(self.vel_box)
             self.vel.delete("all")  # hidden, it isn't kept up to date: never show an old picture
+            self.vel.forget_pictures()  # (and lets go of the notes it last showed: a whole old copy on big projects)
         self.schedule_autosave()
 
     def remember_geometry(self, e):

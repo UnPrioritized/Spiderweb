@@ -2311,7 +2311,7 @@
  "playback.midi_playback_only_works_on_windows": "This MIDI out only works on Windows: pick Built-in BASSMIDI in Settings (Help menu) → Sound.",
  "playback.the_midi_device_isn_t_there": "The MIDI device \"{name}\" isn't there any more — pick another one in Settings (Help menu) → Sound.",
  "playback.couldn_t_open_windows_error_another": "Couldn't open \"{name}\" (Windows error {err}). Another program may be using it.",
- "playback.couldn_t_open_no_device": "Couldn't open \"{name}\" (error {err}). This system may have no MIDI device: pick Built-in BASSMIDI in Settings → Sound.",
+ "playback.couldn_t_open_no_device": "Couldn't open \"{name}\" (error {err}). This system may have no MIDI device: pick Built-in BASSMIDI in Settings (Help menu) → Sound.",
  "panel_freehand.makes_the_freehand_stroke_perfect_0": "Makes the freehand stroke perfect: 0 = as you drew it. Higher = straighter lines and smoother curves,\nand a stroke that ends where it started becomes a perfect circle, ellipse, square, rectangle or triangle.\nThe higher, the simpler (a slightly oval loop: an ellipse, then a circle). The stroke as drawn is kept,\nso you can change this any time. New freehand strokes use the last number picked.",
  "panel_freehand.straighten": "Straighten",
  "panel_freehand.0_as_drawn_100_simplest": "0 = as drawn, 100 = simplest",

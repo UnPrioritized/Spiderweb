@@ -34,6 +34,7 @@ _seen = {}  # error text -> times it happened this session (an error on every mo
 NOTE = "-- "
 CLOSED = "==== closed "  # (written at a normal end: a dump without it = Spiderweb really crashed)
 last_crash = None  # (the run before this one crashed: what it had in use, {topic: text}; said by say_crash)
+last_crash_text = ""  # (that crash's whole dump: which code it was in, e.g. native.checked_level)
 _state = {}
 _state_logged = {}  # what the error log was last told
 _state_lock = threading.Lock()
@@ -199,7 +200,7 @@ def watch_crashes():
     faulthandler then writes what every thread was doing into user/crash-now.log; the next start moves that into
     spiderweb-crash.log. A run that ended normally leaves only its start line and note lines (what was in use), which
     the next start drops."""
-    global _crash_file, last_crash
+    global _crash_file, last_crash, last_crash_text
     import atexit
     import faulthandler
     try:
@@ -212,6 +213,7 @@ def watch_crashes():
         return  # (crash-now.log kept for the next start rather than lost)
     if crashed and CLOSED not in last:  # (a dump in a run that closed normally = a DLL caught it: logged, not said)
         last_crash = _in_use(last)
+        last_crash_text = last
     try:
         _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
         _crash_file.write(f"==== started {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python "

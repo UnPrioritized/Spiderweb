@@ -658,6 +658,13 @@ class VelocityPane(KeepsItems, tk.Canvas):
             self._redraw_pending = True
             self.after_idle(self.redraw)
 
+    def forget_pictures(self):
+        """(the pane hidden) What the last picture showed and the leftover check's notes go: they held the notes of
+        that moment (a whole old copy after the next edit). Shown again = everything painted afresh."""
+        self._pic = None
+        self.img = None
+        self._leftovers = None
+
     @stale_ok  # (notes being made in the background: the ones on screen, notes_wait.py)
     def redraw(self):
         self._redraw_pending = False
