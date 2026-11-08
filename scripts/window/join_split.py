@@ -1040,6 +1040,8 @@ class JoinSplit:
         for i in got:
             rows = shown(i)
             sh = self.shapes[i]
+            if not (own or whole or moved or together):  # (Turn into plain notes, Lasso / Slice of drawn shapes)
+                rows = self.own_heard(i, rows)
             slots = rows if auto else multi_of(i)
             all_kept = False
             if own:
@@ -1095,6 +1097,49 @@ class JoinSplit:
             if ex:                                              # it, hunt 2026-10-25; a merge keeps its parts)
                 new[i]["extract"] = ex
         return new
+
+    def own_heard(self, i, rows):
+        """Shape i's shown rows (rendered) -> its OWN notes as they sound: its own overlaps fixed the way the Channels
+        mode fixes them (heard_overlaps), but never cut by OTHER shapes' notes on the same channel (Single channel,
+        Multi's shared slots), each colour on the slot it shows on. A plain copy made from the shown notes kept those
+        cuts for good, so the other shape's note lost the stretch over them (sweep 2026-11-08, user took A: nothing
+        outside the cut changes). Rows unchanged when nothing else cuts it, or when its notes can't all be placed."""
+        if self.channel_mode.get() == "raw" or not len(rows):
+            return rows
+        sh = self.shapes[i]
+        notes, tracks = self.notes_tracks(sh)
+        if not len(notes):
+            return rows
+        notes = np.asarray(notes, np.int64)[:, :4]
+        colour = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
+
+        def code(a):  # (start and key as one number: keys inside the project, < 1024)
+            return a[:, 0] * 1024 + (a[:, 2] & 1023)
+        have = code(rows)
+        o = np.argsort(have, kind="stable")
+        have, row_slot = have[o], rows[o, 4]
+        want = code(notes)
+        at = np.minimum(np.searchsorted(have, want), max(len(have) - 1, 0))
+        found = have[at] == want
+        names, inv = np.unique(colour, return_inverse=True)
+        inv = inv.ravel()
+        first = np.full(len(names), -1, np.int64)  # (each colour's slot: from its first note shown where it starts)
+        hit = np.flatnonzero(found)
+        first[inv[hit[::-1]]] = row_slot[at[hit[::-1]]]
+        if (first < 0).any():
+            return rows  # (a colour with no note shown where it starts: can't tell its slot)
+        slots = first[inv]
+        got, got_slots = self.heard_overlaps(sh, notes, slots)
+        got = np.asarray(got, np.int64)
+        got_slots = np.asarray(got_slots, np.int64)
+        heard = (got[:, 2] >= 0) & (got[:, 2] < self.keys) & (got[:, 1] > got[:, 0])
+        got, got_slots = got[heard], got_slots[heard]
+        out = np.zeros((len(got), rows.shape[1]), np.int64)
+        out[:, :4], out[:, 4], out[:, 5:] = got, got_slots, rows[0, 5:]
+        if not np.isin(code(rows), code(out)).all():
+            return rows  # (something else shapes what's shown (a mask, a Hz bass...): as shown, as before)
+        o = np.lexsort((out[:, 2], out[:, 0]))
+        return out[o]
 
     def with_hidden(self, sh, rows):
         """rows (start, end, key, velocity, slot, owner: sh's notes as they sound) + the part of sh past the edges
