@@ -786,17 +786,20 @@ class VelocityPane(KeepsItems, tk.Canvas):
         x0, x1 = np.round(s * ax + bx).astype(np.int64), np.round(e * ax + bx).astype(np.int64)
         on = ~((x1 < 0) | (x0 >= iw))
         x0, x1, y, layer = x0[on], x1[on], ys[vel[on]], layer[on]
-        kx0, kx1, ky, kl = self.kept_bars(ax, bx, iw, ys, cols)  # (kept notes before beat 0: greyed, view only)
-        if len(kx0):
-            x0, x1 = np.concatenate([x0, kx0]), np.concatenate([x1, kx1])
-            y, layer = np.concatenate([y, ky]), np.concatenate([layer, kl])
         lx, lv, lg = self.loaded_starts(iw)  # (a loaded MIDI's notes: faded, behind, can't be changed)
         if len(lx):
             x0, x1 = np.concatenate([x0, lx]), np.concatenate([x1, lx])
             y, layer = np.concatenate([y, ys[lv]]), np.concatenate([layer, lg])
+        # (layers: [0, L) = kept notes, greyed and BEHIND everything; [L, 2L) the usual ones; [2L, 3L) greyed on top
+        # (split around's leftovers): a column shows its highest layer's colour)
+        layer = layer + len(LAYERS)
+        kx0, kx1, ky, kl = self.kept_bars(ax, bx, iw, ys, cols)  # (kept notes: greyed, behind, view only)
+        if len(kx0):
+            x0, x1 = np.concatenate([x0, kx0]), np.concatenate([x1, kx1])
+            y, layer = np.concatenate([y, ky]), np.concatenate([layer, kl])
         # each bar (column and layer): its highest note
         bar = x0 >= 0
-        n = 2 * len(LAYERS)  # (the second half: the same layers greyed, kept_bars)
+        n = 3 * len(LAYERS)
         top = np.full(iw * n, 1 << 30, np.int64)
         np.minimum.at(top, x0[bar] * n + layer[bar], y[bar])
         found = np.nonzero(top < 1 << 30)[0]
@@ -812,14 +815,15 @@ class VelocityPane(KeepsItems, tk.Canvas):
         return OFF_FADE[0]
 
     def kept_bars(self, ax, bx, iw, ys, cols):
-        """The kept notes before beat 0 the piano roll shows (App.off_drawn; Settings → Piano roll "Keep notes made
-        there"), as bars in the grey part (user 2026-11-08): image columns x0 / x1, top y, layers in the greyed second
-        half (len(LAYERS) + the layer a real note would get). Only to see: drawing here never reaches them."""
+        """The kept notes the piano roll shows (App.off_drawn; Settings → Piano roll "Keep notes made there"): before
+        beat 0 in the grey part, past the top / bottom key among the real bars (user 2026-11-08), as greyed bars
+        BEHIND the real ones: image columns x0 / x1, top y, layers in the first third (the layer a real note would
+        get, bars draws real notes one third up). Only to see: the velocity line takes them by their own rule."""
         none = (np.zeros(0, np.int64),) * 4
         off = getattr(self.app, "off_drawn", None)
         if off is None or not len(off):
             return none
-        off = off[(off[:, 0] < 0) & (off[:, 2] >= 0) & (off[:, 2] < self.app.keys) & (off[:, 3] >= 0)]
+        off = off[off[:, 3] >= 0]
         if not len(off):
             return none
         x0, x1 = np.round(off[:, 0] * ax + bx).astype(np.int64), np.round(off[:, 1] * ax + bx).astype(np.int64)
@@ -828,7 +832,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
         slot = note_colours(off[:, 4], cols)
         sels = self.app.sels
         layer = np.where(np.isin(off[:, 5], list(sels)), NORMAL + slot, slot) if sels else NORMAL + slot
-        return x0, x1, ys[np.minimum(off[:, 3], 127)], layer + len(LAYERS)
+        return x0, x1, ys[np.minimum(off[:, 3], 127)], layer
 
     def leftover_bars(self, notes):
         """Which of these shown notes (sorted_notes rows) are "split around" leftovers (Single's "Split around instead
@@ -940,13 +944,14 @@ class VelocityPane(KeepsItems, tk.Canvas):
                 rgb[color] = bytes.fromhex(color[1:])
             return rgb[color]
 
-        fills = [px(f) for f, _ in LAYERS]
-        borders = [px(b) for _, b in LAYERS]
-        # (kept notes before beat 0, kept_bars: each layer see-through on the grey like the piano roll's, OFF_FADE)
+        # (kept notes, kept_bars, and split around's leftovers: each layer see-through on the grey like the piano
+        # roll's, OFF_FADE; layers as bars makes them: kept behind, usual, leftovers on top)
         from roll.roll_draw import OFF_FADE, mixed
         grey, share = look.space_shade(look.ROLL_BG), 1 - OFF_FADE[0] / 100
-        fills += [px(mixed(f, share, grey)) for f, _ in LAYERS]
-        borders += [px(mixed(b, share, grey)) for _, b in LAYERS]
+        faded_f = [px(mixed(f, share, grey)) for f, _ in LAYERS]
+        faded_b = [px(mixed(b, share, grey)) for _, b in LAYERS]
+        fills = faded_f + [px(f) for f, _ in LAYERS] + faded_f
+        borders = faded_b + [px(b) for _, b in LAYERS] + faded_b
         row_color = {self.v2y(v): look.CHART_GRID for v in (96, 64, 32)}
         row_color[self.v2y(127)] = row_color[self.v2y(0)] = look.CHART_GRID_STRONG
         row_color[h - 1] = look.ROLL_EDGE
