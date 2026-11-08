@@ -1904,14 +1904,22 @@ class JoinSplit:
             return notes, tracks
         notes = np.asarray(notes, np.int64)
         who = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
+        across = rule.get("across") and tracks is not None and len(np.unique(who)) > 1
         o = np.lexsort((notes[:, 0], notes[:, 2], who))
         same = (notes[o[1:], 2] == notes[o[:-1], 2]) & (who[o[1:]] == who[o[:-1]])
-        if not (same & (notes[o[1:], 0] < notes[o[:-1], 1])).any():
+        if not across and not (same & (notes[o[1:], 0] < notes[o[:-1], 1])).any():
             return notes, tracks  # (no overlaps: as they are)
         # (rows kept past the keys ("Keep notes made there") are never fixed when shown: left as they are)
         inside = (notes[:, 2] >= 0) & (notes[:, 2] < self.keys)
         rows = np.column_stack([notes[inside, :4], who[inside], np.zeros(int(inside.sum()), np.int64)])
         fixed = fix_rows(rows, rule.get("way", "stretch"))
+        if across and len(fixed):
+            # (Multi's Remove overlaps: then between its tracks too, in the track list's order = its tracks' order;
+            # Later tracks win turns it round: hunt 2026-11-08, a cut through a quiet note under another track's
+            # stretched loud one went quiet)
+            from notes.engine import across_tracks
+            rank = -fixed[:, 4] if rule.get("later") else fixed[:, 4]
+            fixed = across_tracks(fixed, rank, rule.get("way", "stretch") == "stretch")
         out = np.concatenate([fixed[:, :4], notes[~inside, :4]])
         return out, None if tracks is None else np.concatenate([fixed[:, 4], who[~inside]])
 
