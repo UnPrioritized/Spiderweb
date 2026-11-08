@@ -369,12 +369,13 @@ def toggled(axes, axis):
     return sorted(set(axes or ()) ^ {axis})
 
 
-def velocities(notes, pts, t_lo, t_hi):
+def velocities(notes, pts, t_lo, t_hi, at=None):
     """notes' velocities with the drawn pts (u = 0..1 from tick t_lo to t_hi) put on the notes starting between the
-    first and last u."""
+    first and last u (at: where each reads it instead of its start, engine.from0_starts)."""
     if not len(notes):
         return notes
-    frac = (notes[:, 0] - t_lo) / (t_hi - t_lo) if t_hi > t_lo else np.zeros(len(notes))
+    at = notes[:, 0] if at is None else at
+    frac = (at - t_lo) / (t_hi - t_lo) if t_hi > t_lo else np.zeros(len(notes))
     on = (frac >= pts[0][0] - 1e-9) & (frac <= pts[-1][0] + 1e-9)
     if not on.any():
         return notes

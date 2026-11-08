@@ -75,7 +75,10 @@ def own_repainted(sh, text, drawn, ppq):
     start, end = np.rint(np.minimum(a, b)), np.rint(np.maximum(a, b))
     if is_pasted_flipped(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
         base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], np.arange(len(rows))]).astype(np.int64)
-        start = mirrored_runs(base, None, True)[0][:, 0].astype(float)
+        got = mirrored_runs(base, None, True)[0]
+        start, end = got[:, 0].astype(float), got[:, 1].astype(float)
+    # (a note across beat 0 reads the line at beat 0, where it shows; wholly before it: its own, user 2026-11-08)
+    start = np.where((start < 0) & (end > 0), 0.0, start)
     beat = start / ppq
     lo, hi = drawn[0][0], drawn[-1][0]
     hit = (beat >= lo - 1e-9) & (beat <= hi + 1e-9)
@@ -606,7 +609,8 @@ class VelocityPane(KeepsItems, tk.Canvas):
         # (the notes the piano roll shows: with a track highlighted in the track list, only its, hunt 2026-10-23)
         pic = None if self.edit or roll.draft_notes() is not None else (
             self.app.drawn, (frozenset(self.app.sels), roll.sx, roll.view_t, roll.kb_w, w, h, self.top,
-                                tuple(roll.grid_cols(w)), roll.loaded_mark()))  # (+ a loaded MIDI's exact pictures)
+                                tuple(roll.grid_cols(w)), roll.loaded_mark(),  # (+ a loaded MIDI's exact pictures)
+                                getattr(self.app, "off_version", 0), self.off_fade()))  # (+ kept notes: kept_bars)
         if pic and self.img is not None and self._pic and self._pic[0] is pic[0] and self._pic[1] == pic[1]:
             self.create_image(kb, 0, image=self.img, anchor="nw")
         else:
@@ -708,20 +712,49 @@ class VelocityPane(KeepsItems, tk.Canvas):
         x0, x1 = np.round(s * ax + bx).astype(np.int64), np.round(e * ax + bx).astype(np.int64)
         on = ~((x1 < 0) | (x0 >= iw))
         x0, x1, y, layer = x0[on], x1[on], ys[vel[on]], layer[on]
+        kx0, kx1, ky, kl = self.kept_bars(ax, bx, iw, ys, cols)  # (kept notes before beat 0: greyed, view only)
+        if len(kx0):
+            x0, x1 = np.concatenate([x0, kx0]), np.concatenate([x1, kx1])
+            y, layer = np.concatenate([y, ky]), np.concatenate([layer, kl])
         lx, lv, lg = self.loaded_starts(iw)  # (a loaded MIDI's notes: faded, behind, can't be changed)
         if len(lx):
             x0, x1 = np.concatenate([x0, lx]), np.concatenate([x1, lx])
             y, layer = np.concatenate([y, ys[lv]]), np.concatenate([layer, lg])
         # each bar (column and layer): its highest note
         bar = x0 >= 0
-        top = np.full(iw * len(LAYERS), 1 << 30, np.int64)
-        np.minimum.at(top, x0[bar] * len(LAYERS) + layer[bar], y[bar])
+        n = 2 * len(LAYERS)  # (the second half: the same layers greyed, kept_bars)
+        top = np.full(iw * n, 1 << 30, np.int64)
+        np.minimum.at(top, x0[bar] * n + layer[bar], y[bar])
         found = np.nonzero(top < 1 << 30)[0]
-        tops = dict(zip(zip((found // len(LAYERS)).tolist(), (found % len(LAYERS)).tolist()), top[found].tolist()))
+        tops = dict(zip(zip((found // n).tolist(), (found % n).tolist()), top[found].tolist()))
         long = x1 - x0 >= 2
         caps = np.unique(np.column_stack([y[long], np.maximum(x0[long], 0), np.minimum(x1[long], iw - 1),
                                           layer[long]]), axis=0)
         return tops, set(map(tuple, caps.tolist()))
+
+    @staticmethod
+    def off_fade():
+        from roll.roll_draw import OFF_FADE
+        return OFF_FADE[0]
+
+    def kept_bars(self, ax, bx, iw, ys, cols):
+        """The kept notes before beat 0 the piano roll shows (App.off_drawn; Settings → Piano roll "Keep notes made
+        there"), as bars in the grey part (user 2026-11-08): image columns x0 / x1, top y, layers in the greyed second
+        half (len(LAYERS) + the layer a real note would get). Only to see: drawing here never reaches them."""
+        none = (np.zeros(0, np.int64),) * 4
+        off = getattr(self.app, "off_drawn", None)
+        if off is None or not len(off):
+            return none
+        off = off[(off[:, 0] < 0) & (off[:, 2] >= 0) & (off[:, 2] < self.app.keys) & (off[:, 3] >= 0)]
+        if not len(off):
+            return none
+        x0, x1 = np.round(off[:, 0] * ax + bx).astype(np.int64), np.round(off[:, 1] * ax + bx).astype(np.int64)
+        on = ~((x1 < 0) | (x0 >= iw))
+        off, x0, x1 = off[on], x0[on], x1[on]
+        slot = note_colours(off[:, 4], cols)
+        sels = self.app.sels
+        layer = np.where(np.isin(off[:, 5], list(sels)), NORMAL + slot, slot) if sels else NORMAL + slot
+        return x0, x1, ys[np.minimum(off[:, 3], 127)], layer + len(LAYERS)
 
     def ghost_vels(self, notes):
         """The real velocity of notes a mask hides (shown as velocity -1 rows), found by start, key and shape in the
@@ -776,6 +809,11 @@ class VelocityPane(KeepsItems, tk.Canvas):
 
         fills = [px(f) for f, _ in LAYERS]
         borders = [px(b) for _, b in LAYERS]
+        # (kept notes before beat 0, kept_bars: each layer see-through on the grey like the piano roll's, OFF_FADE)
+        from roll.roll_draw import OFF_FADE, mixed
+        grey, share = look.space_shade(look.ROLL_BG), 1 - OFF_FADE[0] / 100
+        fills += [px(mixed(f, share, grey)) for f, _ in LAYERS]
+        borders += [px(mixed(b, share, grey)) for _, b in LAYERS]
         row_color = {self.v2y(v): look.CHART_GRID for v in (96, 64, 32)}
         row_color[self.v2y(127)] = row_color[self.v2y(0)] = look.CHART_GRID_STRONG
         row_color[h - 1] = look.ROLL_EDGE

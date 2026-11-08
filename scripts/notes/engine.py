@@ -922,7 +922,19 @@ def past_edges(sh, keys, ppq=960, over_top=None):
     if gliss and up and isinstance(sh.get("gliss"), dict) and sh["gliss"].get("keys"):
         lifted["gliss"] = dict(sh["gliss"], keys=[k + up for k in sh["gliss"]["keys"]])
     lifted["_free"] = True
+    if later:  # (where beat 0 is in it: a note across it reads its velocity there, where it shows: from0_starts)
+        lifted["_from0"] = later
     return lifted, up, room, later
+
+
+def from0_starts(sh, notes, starts, ppq):
+    """Where notes (start, end, ... rows) read their velocity: at starts, except a note across beat 0 of a shape made
+    later (past_edges "_from0", user 2026-11-08): there, where it shows. Notes wholly before beat 0 keep their own."""
+    f = sh.get("_from0")
+    if not f or not len(notes):
+        return starts
+    t0 = round(f * ppq)
+    return np.where((starts < t0) & (notes[:, 1] > t0), t0, starts)
 
 
 def made_from(sh):
@@ -1418,7 +1430,8 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
         return _after(apply_trim, notes, tracks, step["cfg"], ppq)
     if tool == "vel":  # (over the shape's time, like its velocity line)
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
-        return velocities(notes, step["pts"], float(t.min()), float(t.max())), tracks
+        return velocities(notes, step["pts"], float(t.min()), float(t.max()),
+                          from0_starts(sh, notes, notes[:, 0], ppq)), tracks
     return notes, tracks
 
 
@@ -1822,13 +1835,13 @@ def _kind_notes_tracks(sh, ppq, keys):
             tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
     if made is not None and len(made) == len(raw):  # (a piece of a shape with pages, with a velocity of its own)
         # (read where each note started: a note the cut went through keeps its velocity in both halves, sweep 11-06)
-        at = vel_at if vel_at is not None and len(vel_at) == len(raw) else raw[:, 0]
+        at = from0_starts(sh, raw, vel_at if vel_at is not None and len(vel_at) == len(raw) else raw[:, 0], ppq)
         frac = np.clip((at - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
         vel = own_velocities(vel_sh, made, frac)
     else:
         carried = vel_at is not None and len(vel_at) == len(raw)
         # (a cut note's start before a piece's own time: read on the line kept from before it, joined.piece_velocity)
-        vel = env_velocities(env, vel_at if carried else raw[:, 0], t_lo, t_hi,
+        vel = env_velocities(env, from0_starts(sh, raw, vel_at if carried else raw[:, 0], ppq), t_lo, t_hi,
                              min(0.0, float(env[0][0])) if carried and not same_vel else 0.0)
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
