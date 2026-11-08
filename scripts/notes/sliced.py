@@ -460,13 +460,19 @@ def piece_notes(sh, ppq, keys, make):
     src, halves, same_vel = got
     if sh["kind"] != "custom":
         halves = sh["cut"].get("knife") or []
+    # (a plain drawn piece with a velocity of its own: the whole made with the velocities it had when cut, shared by
+    # every piece. Its own line only sets the last column, which own_velocities replaces below anyway; made with each
+    # piece's own line, 180 pieces under one velocity line made the whole 180 times: 4.7 s to open, 2026-11-08)
+    plain_vel = not same_vel and sh["kind"] == "custom" and not any(src.get(k) for k in VELOCITY_LATE)
+    if plain_vel:
+        src = with_whole_velocity(src, sh)
     key = (json.dumps(src, sort_keys=True), ppq, keys)
     whole = _wholes.get(key)  # (got once: the notes may be made in a background thread too, see App.notes_made)
     if whole is None:
         if len(_wholes) > 8:
             _wholes.clear()
         whole = _wholes[key] = make(src, ppq, keys)
-    notes, tracks = knife_cut(*whole, halves, moved_by(sh), ppq)  # (the cuts went along with it)
+    notes, tracks = whole_cut(whole, halves, moved_by(sh), ppq)  # (the cuts went along with it)
     if sh["cut"].get("mould"):  # (cut with a shape, mould.py)
         from notes.mould import mould_cut
         notes, tracks = mould_cut(notes, tracks, sh["cut"]["mould"], moved_by(sh), ppq)
@@ -475,6 +481,9 @@ def piece_notes(sh, ppq, keys, make):
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
         frac = np.clip((notes[:, 0] - t.min()) / max(t.max() - t.min(), 1e-9), 0, 1)
         made = notes[:, 3]
+        if plain_vel:  # (made from the whole as it was when cut already)
+            notes[:, 3] = own_velocities(sh, made, frac)
+            return notes, tracks
         # (its notes as made with the velocities it had when cut, the whole's (with pages: as they left them); src
         # holds the piece's own line, stretched over the whole's time: partial sweep 11-02)
         was_src = with_whole_velocity(src, sh)
@@ -483,7 +492,7 @@ def piece_notes(sh, ppq, keys, make):
             if len(_wholes) > 8:
                 _wholes.clear()
             _wholes[key] = make(was_src, ppq, keys)
-        was = knife_cut(*_wholes[key], halves, moved_by(sh), ppq)[0]
+        was = whole_cut(_wholes[key], halves, moved_by(sh), ppq)[0]
         if sh["cut"].get("mould"):
             from notes.mould import mould_cut
             was = mould_cut(was, None, sh["cut"]["mould"], moved_by(sh), ppq)[0]
@@ -494,17 +503,121 @@ def piece_notes(sh, ppq, keys, make):
 
 
 _wholes = {}  # the whole shape's notes, shared by its pieces
+# (settings that use a note's velocity after it's made: a piece with these makes its whole with its own line)
+VELOCITY_LATE = ("fx", "glue", "hz", "sustain", "subtract", "extend", "strips", "recolour")
+_by_start = {}  # id(a whole's notes) -> (them, order by start, starts in that order, longest note, lowest, top key)
+WINDOW_LEAST = 4096  # (fewer notes: knife_cut on them all)
+
+
+def whole_cut(whole, halves, d, ppq):
+    """knife_cut of a whole's (notes, tracks) for one piece, looking only at the notes that can be on its side of its
+    cuts: the whole's notes sorted by start once, each cut's tick range over the whole's keys bounds the starts (a
+    piece's notes made in time ~ its own notes, not the whole's: 720 pieces of a 640k-note drawing). Exactly
+    knife_cut's notes (a superset of rows goes in, in their order)."""
+    notes, tracks = whole
+    if len(notes) < WINDOW_LEAST or not halves:
+        return knife_cut(notes, tracks, halves, d, ppq)
+    got = _by_start.get(id(notes))
+    if got is None or got[0] is not notes:
+        if len(_by_start) > 16:
+            _by_start.clear()
+        order = np.argsort(notes[:, 0], kind="stable")
+        starts = notes[order, 0]
+        got = _by_start[id(notes)] = (notes, order, starts, int((notes[:, 1] - notes[:, 0]).max()),
+                                     int(notes[:, 2].min()), int(notes[:, 2].max()))
+    _, order, starts, longest, k_lo, k_hi = got
+    left, right = -np.inf, np.inf  # (kept notes end after left, start before right; ticks)
+    mb, mk = d
+    for b0, k0, db, dk, sd in halves:
+        slope = -dk / ppq
+        if abs(slope) < 1e-15:
+            continue
+        b0, k0 = b0 + mb, k0 + mk
+        xs = [-(db * (kk - k0) + dk * b0) / slope for kk in (k_lo, k_hi)]  # (the cut's tick on the lowest / top row)
+        if (slope > 0) == (sd > 0):
+            left = max(left, min(xs))
+        else:
+            right = min(right, max(xs))
+    if left == -np.inf and right == np.inf:
+        return knife_cut(notes, tracks, halves, d, ppq)
+    # (whole ticks searched: a float made NumPy copy every start to floats each time)
+    if not (math.isfinite(left) or left == -np.inf) or not (math.isfinite(right) or right == np.inf):
+        return knife_cut(notes, tracks, halves, d, ppq)  # (a NaN: no window)
+    far = 2 ** 62
+    a = 0 if left == -np.inf else int(np.searchsorted(
+        starts, min(far, max(-far, math.floor(left) - longest - 2)), side="left"))
+    b = len(starts) if right == np.inf else int(np.searchsorted(
+        starts, min(far, max(-far, math.ceil(right) + 2)), side="right"))
+    if b - a > len(notes) // 2:
+        return knife_cut(notes, tracks, halves, d, ppq)
+    rows = np.sort(order[a:b])
+    return knife_cut(notes[rows], None if tracks is None else np.asarray(tracks)[rows], halves, d, ppq)
+
+
+KNIFE_SAMPLE = 256  # (notes looked at to put a piece's cuts tightest first)
+
+
+def knife_order(k, lo, hi, halves, d, ppq):
+    """The halves' order for knife_cut: those keeping fewest of a spread-out sample of the notes first (the result
+    doesn't depend on the order; a piece of a shape sliced 180 times carries ~180 cuts, and only its own last two
+    keep it small: cutting all notes 180 times made opening such a project take 17 s, 2026-11-08)."""
+    step = max(1, len(k) // KNIFE_SAMPLE)
+    ks, ls, hs = k[::step], lo[::step], hi[::step]
+    h = np.asarray(halves, float).reshape(-1, 5)
+    b0, k0, db, dk, sd = h[:, 0] + d[0], h[:, 1] + d[1], h[:, 2], h[:, 3], h[:, 4]
+    c0 = db[:, None] * (ks[None, :] - k0[:, None]) + (dk * b0)[:, None]
+    slope = -dk / ppq
+    flat = np.abs(slope) < 1e-15
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x = -c0 / np.where(flat, 1.0, slope)[:, None]
+    up = ((slope > 0) == (sd > 0))[:, None]
+    kept = np.where(flat[:, None], np.where((sd > 0)[:, None], c0 >= 0, c0 < 0),
+                    np.where(up, hs[None, :] > np.maximum(ls[None, :], x), np.minimum(hs[None, :], x) > ls[None, :]))
+    return np.argsort(kept.sum(axis=1), kind="stable")
+
+
+def knife_free(k, lo, hi, halves, d, ppq):
+    """Which halves change none of these notes (knife_cut can leave them out: same result): a cut whose tick on the
+    notes' lowest and top rows is clearly before every start (keeping the later side) / after every end (keeping the
+    earlier side); a flat one with every row on its kept side. A piece of a shape sliced 720 times carries ~720 cuts
+    of which ~2 touch its own notes."""
+    h = np.asarray(halves, float).reshape(-1, 5)
+    b0, k0, db, dk, sd = h[:, 0] + d[0], h[:, 1] + d[1], h[:, 2], h[:, 3], h[:, 4]
+    k_lo, k_hi, lo_min, hi_max = k.min(), k.max(), lo.min(), hi.max()
+    c_lo = db * (k_lo - k0) + dk * b0  # (c0 on the lowest / top row)
+    c_hi = db * (k_hi - k0) + dk * b0
+    slope = -dk / ppq
+    flat = np.abs(slope) < 1e-15
+    room = 1e-6 * (1 + np.abs(c_lo) + np.abs(c_hi))
+    flat_free = np.where(sd > 0, np.minimum(c_lo, c_hi) >= room, np.maximum(c_lo, c_hi) < -room)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s = np.where(flat, 1.0, slope)
+        x_lo, x_hi = -c_lo / s, -c_hi / s
+    up = (slope > 0) == (sd > 0)
+    edge = 1e-6 * (1 + abs(lo_min) + abs(hi_max))
+    cut_free = np.where(up, np.maximum(x_lo, x_hi) < lo_min - edge, np.minimum(x_lo, x_hi) > hi_max + edge)
+    return np.where(flat, flat_free, cut_free)
 
 
 def knife_cut(notes, tracks, halves, d, ppq):
     """Notes (start, end, key, any other columns) and tracks cut like a knife went through them: each half
     [b0, k0, db, dk, side] keeps what's on its side of the line through (b0, k0) going (db, dk) (beats, keys; moved
-    by d since), a note across it cut in two there."""
+    by d since), a note across it cut in two there. Many halves: tightest first, notes already gone dropped as it
+    goes (a note with end <= start never comes back: later halves only raise starts / lower ends; same result)."""
     k = notes[:, 2].astype(float)
     lo, hi = notes[:, 0].astype(float), notes[:, 1].astype(float)
     keep = np.ones(len(notes), bool)
     mb, mk = d
-    for b0, k0, db, dk, sd in halves:
+    order = range(len(halves))
+    where = None  # (rows still in play, when dropped as it goes)
+    if len(halves) > 4 and len(notes):
+        if len(notes) > 4 * KNIFE_SAMPLE:
+            order = knife_order(k, lo, hi, halves, d, ppq)
+            where = np.arange(len(notes))
+        free = knife_free(k, lo, hi, halves, d, ppq)
+        order = [j for j in order if not free[j]]
+    for j in order:
+        b0, k0, db, dk, sd = halves[j]
         b0, k0 = b0 + mb, k0 + mk
         # which side of the cut (beat, key) is on: db * (key - k0) - dk * (beat - b0) >= 0 is side 1, < 0 side -1
         # (a spot right on it goes to side 1 only); on a key row that's c0 + slope * tick
@@ -512,14 +625,24 @@ def knife_cut(notes, tracks, halves, d, ppq):
         slope = -dk / ppq
         if abs(slope) < 1e-15:  # (a flat cut: whole rows on one side)
             keep &= (c0 >= 0) if sd > 0 else (c0 < 0)
-            continue
-        x = -c0 / slope  # the tick where the cut crosses the row's middle
-        if (slope > 0) == (sd > 0):
-            lo = np.maximum(lo, x)
         else:
-            hi = np.minimum(hi, x)
+            x = -c0 / slope  # the tick where the cut crosses the row's middle
+            if (slope > 0) == (sd > 0):
+                lo = np.maximum(lo, x)
+            else:
+                hi = np.minimum(hi, x)
+        if where is not None:
+            live = keep & (hi > lo)
+            if live.sum() * 4 < len(live) * 3:  # (a quarter gone: drop them before the next cuts)
+                k, lo, hi, where = k[live], lo[live], hi[live], where[live]
+                keep = np.ones(len(where), bool)
     lo, hi = np.round(lo), np.round(hi)
     keep &= hi > lo
+    if where is not None:
+        rows = where[keep]
+        notes = notes[rows].copy()
+        notes[:, 0], notes[:, 1] = lo[keep], hi[keep]
+        return notes, None if tracks is None else np.asarray(tracks)[rows]
     notes = notes[keep].copy()
     notes[:, 0], notes[:, 1] = lo[keep], hi[keep]
     return notes, None if tracks is None else np.asarray(tracks)[keep]

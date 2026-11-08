@@ -176,10 +176,32 @@ def sane(x):
         if isinstance(x, dict):
             todo.extend(x.values())
         elif isinstance(x, list):
+            if len(x) >= SANE_AT_ONCE:  # (a long list of only numbers: looked at in one go)
+                ok = numbers_in_reach(x)
+                if ok is not None:
+                    if not ok:
+                        return False
+                    continue
             todo.extend(x)
         elif isinstance(x, (int, float)) and not -FAR <= x <= FAR:  # (NaN is never between)
             return False
     return True
+
+
+SANE_AT_ONCE = 16  # (shorter lists: one by one is quicker)
+
+
+def numbers_in_reach(x):
+    """A list (of lists ...) holding ONLY numbers, all the same length at each level: are they all within FAR of 0?
+    None: anything else (text, dicts, ragged rows, a huge whole number): sane looks at it one by one. (A piece of
+    a drawing sliced 720 times stores ~720 cuts: one by one, opening took seconds, 2026-11-08.)"""
+    try:
+        a = np.asarray(x)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if a.dtype.kind not in "fiub" or a.dtype == object:
+        return None
+    return bool(((a >= -FAR) & (a <= FAR)).all())
 
 
 def clean_kept_patterns(kept):
