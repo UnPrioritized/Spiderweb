@@ -85,6 +85,9 @@ class FoldWindow(tk.Toplevel):
         self.highlight = (tl.current, set(tl.behind))  # (put back by Cancel: the preview's tracks moved)
         r = app.rendered
         self.others = r[~np.isin(r[:, 5], got)] if len(r) else r  # (other shapes' notes as heard now)
+        if app.channel_mode.get() != "auto":  # (Single / As drawn: the result stays on the channels it was laid on,
+            self.others = r[:0]  # no move by whole rounds: moved off a shared channel, Single stopped cutting other
+            # shapes' notes against it and they grew back; user 2026-11-08. Multi keeps the move for the colours)
         self.use10, multi = app.multi_rendered()
         # (the order the shapes take slots in: channel 10 the 16th with "Use channel 10", never with only a
         # picture's, slot order with "Channels 1-16 in order")
