@@ -65,3 +65,5 @@ Flip and Turn 90° take the colours along: a flipped shape shows its colours mir
 Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, wherever you move them. (A spam piece that you flip lays its spam again from its new start, so its notes move a little and get new colours.) Slicing pasted notes (Slice or Lasso) turns the pieces into plain notes with the colours you saw, without Recolour. Add between blends Recolour step by step when both shapes use the same mode.
 
 Turn into plain notes, Gate sensitive merge, Copy to Domino and Export MIDI all keep the colours you see.
+
+Some colours depend on the other notes in the shape: Stir and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes (Glue, Chop, Claw machine, Strum, Gate trim, Gate subtract, Gate extend, Sustain, Fill gaps...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.

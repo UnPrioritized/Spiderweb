@@ -49,3 +49,7 @@ A shape with a Liquify shows a Liquify row under the Recolour settings. Untick i
 ## Big shapes
 
 On shapes with millions of notes, a shape's first stroke takes a moment (its colours are made ready once), and letting go takes a moment while the notes are made. While dragging only the notes whose colour changes are worked out, so the brush stays live.
+
+## Edits that change notes
+
+Some colours depend on the other notes in the shape: Stir and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes (Glue, Chop, Claw machine, Strum, Gate trim, Gate subtract, Gate extend, Sustain, Fill gaps...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.

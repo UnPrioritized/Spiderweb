@@ -31,3 +31,5 @@ Keys per step: how many notes of a chord move together on each step of the strum
 At the shape's edges: what happens to notes the strum moves past the shape's own start or end. Off: they stick out, as before. Cut at the edges: what sticks out is dropped. Wrap back in: it comes back in at the other end (a note crossing the edge is cut in two), so the shape stays a full block.
 
 Colour cycle: strum a block of coloured columns (each column a chord, a colour each) with Wrap back in, and the colours run through the block in slanted stripes while the block stays full. Keys per step sets how steep they are. With "Repeated colours get new channels" on (under Multi channel), a shape with Colours takes new channels each time its notes come round again, as if the block went on forever, so no colour repeats in a player that colours by track.
+
+On a shape with Recolour (Stir, Shuffle, Per chord, Clumps...) or Liquify, this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.

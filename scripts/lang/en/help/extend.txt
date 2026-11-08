@@ -31,3 +31,5 @@ Gate extend comes after everything else that makes the notes, Sustain too, and b
 Flipping or turning the shape moves the graph with it. Slicing and splitting keep it on every piece, with the graph cut so every note keeps its amount. Join, Turn into live shape and Gate sensitive merge keep it when all the shapes have the same settings. An Add between group gets it step by step when both ends have it in the same unit.
 
 Turn into plain notes, Apply mask copies and mask areas are made without it. A Hz bass and an image can't have it.
+
+On a shape with Recolour (Stir, Shuffle, Per chord, Clumps...) or Liquify, this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
