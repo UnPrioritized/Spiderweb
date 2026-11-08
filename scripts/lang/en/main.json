@@ -992,6 +992,8 @@
  "app.channels": "Channels",
  "app.voices_tip": "How many sounds Built-in BASSMIDI can ring at once (1000 to start). More = fuller in busy parts, but more work for the processor: if playback breaks up (\"Overloaded\" in red next to the Settings button), lower it.\nPast the limit, the oldest sounds are cut.",
  "app.overloaded": "Overloaded",
+ "app.offrange_count": "+{n:,} off-range",
+ "app.offrange_tip": "Notes outside the valid key range or before bar 1. They are kept only in the project file: not exported, played or copied to other programs.",
  "app.overloaded_n": "Overloaded: {n} of {m} voices",
  "app.overloaded_notes": "Overloaded: {n} notes left out a second ({p} %)",
  "app.scrub_rough": "Too many notes here to hear exactly: listening roughly (every key drawn, one loudness)",

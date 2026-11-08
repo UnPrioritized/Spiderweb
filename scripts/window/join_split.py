@@ -1018,13 +1018,17 @@ class JoinSplit:
         self.status.config(text=trn("lines.split_done", made, n=f"{made:,}") +
                            (tr("lines.split_shared", most=PORTS) if shared else ""))
 
-    def plain_copies(self, got, moved=None, own=False, together=None, whole=False):
+    def plain_copies(self, got, moved=None, own=False, together=None, whole=False, kept_after=False):
         """Turn into plain notes' new shapes: {i: a shape of shape i's notes exactly as they sound now, each note on
         the channel it has now} for the shapes in got that have notes. moved(rows): their rendered rows changed
         first (Gate sensitive merge: slid). own: the shape's own notes, not as other shapes overlapping them cut
         them (Single channel; merge slides it away from them, hunt), each on its channel all the same.
         together({i: rows}) -> {i: rows}: every shape's rows changed at once (Fill gaps: key rows across shapes).
-        whole: the notes as laid in Multi channel in every mode (Fill gaps: Single channel's merging left out)."""
+        whole: the notes as laid in Multi channel in every mode (Fill gaps: Single channel's merging left out).
+        With "Keep notes made there" on, the copies keep the shape's notes past the keys / before beat 0 (user
+        2026-11-08: plain notes can hold them): added before moved, or after it with kept_after (moved picks rows
+        by place: the track list's box cut, its rest keeps them)."""
+        keep = self.keeps_offrange()
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         use10, multi = self.multi_kept() if whole else self.multi_rendered()  # (Fill gaps: the hint's already)
@@ -1042,7 +1046,7 @@ class JoinSplit:
                 n = np.asarray(self.notes_of(sh), np.int64).reshape(-1, 4)
                 rows = np.column_stack([n, np.zeros((len(n), 1), np.int64), np.full((len(n), 1), i, np.int64)])
                 slots = self.own_slots(i, use10)
-                if not len(rows) and self.keeps_offrange():  # (all of it past the edges: the kept notes, painted
+                if not len(rows) and keep:  # (all of it past the edges: the kept notes, painted
                     off = self.off_all                          # on their colours' slots: App.offrange_rows)
                     rows = slots = np.array(off[off[:, 5] == i], np.int64)
                     all_kept = True
@@ -1056,7 +1060,7 @@ class JoinSplit:
                     rows = multi_slots(rows, slots)
                 # (past the edges: the hidden part too, hunt 2026-11-07; a merge's own notes with "Keep notes made
                 # there": the notes it slid with, merge_mover's kept_notes)
-                if whole and not own or own and self.keeps_offrange() and not all_kept:
+                if whole and not own or own and keep and not all_kept or keep and not own and moved is None:
                     rows = self.with_hidden(sh, rows)
                 laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
                 laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
@@ -1067,6 +1071,8 @@ class JoinSplit:
             sh = self.shapes[i]
             if moved:
                 rows = moved(rows)
+                if kept_after and keep and len(rows):
+                    rows = self.with_hidden(sh, rows)
             if not len(rows):  # (none of them wanted: merge leftovers; Fill gaps: all lost to same-start notes)
                 continue
             new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)
@@ -1098,12 +1104,13 @@ class JoinSplit:
         lifted, up, room, later = out
         with rows_up_to(room - 1):
             notes, tracks = self.notes_tracks(lifted, room)
-        if tracks is None or not len(notes):
+        if not len(notes) or tracks is None and not self.keeps_offrange():
             return rows
         notes = np.array(notes[:, :4], np.int64, copy=True)
         notes[:, 2] -= up
         notes[:, :2] -= round(later * self.ppq)
-        tracks = np.asarray(tracks, np.int64)
+        # (one colour: no tracks, all on track 0; "Keep notes made there" turns lines into plain notes too)
+        tracks = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
         heard = (notes[:, 2] >= 0) & (notes[:, 2] < self.keys) & (notes[:, 1] > 0)
         # each colour's slot: from its heard notes (start clipped at 0, key) found among rows
         spot = {(max(int(s), 0), int(k)): int(sl) for s, k, sl in zip(rows[:, 0], rows[:, 2], rows[:, 4])}

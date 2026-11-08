@@ -229,6 +229,15 @@ class VelocityPane(KeepsItems, tk.Canvas):
         if owners is not None:
             ok &= np.isin(notes[:, 5], list(owners))
         rows = np.nonzero(ok)[0]
+        # (notes kept past the keys / before beat 0, "Keep notes made there": their shapes take the line too, user
+        # 2026-11-08; they show on the piano roll only, so no bars here)
+        off = self.app.off_drawn
+        if len(off):
+            hit = (off[:, 0] >= lo) & (off[:, 0] <= hi)
+            if owners is not None:
+                hit &= np.isin(off[:, 5], list(owners))
+            for i in np.unique(off[hit, 5]).tolist():
+                ed["owners"].setdefault(int(i), True)
         if not len(rows):
             return
         if ed["preview"] is None:  # velocity per row of roll.sorted_notes(), -1 = not drawn over

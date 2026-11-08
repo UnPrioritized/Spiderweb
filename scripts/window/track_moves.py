@@ -348,7 +348,9 @@ def parts_of(app, i, m):
     """Shape i cut by m (its notes in the box, by_owner's order): (the part inside, the rest) as plain notes
     (either None when empty); a shape holding loaded notes (an Extract) = both keep holding them."""
     ex = held_extract(app.shapes[i])
-    piece, rest = (app.plain_copies({i}, moved=lambda rr, keep=keep: rr[keep]).get(i) for keep in (m, ~m))
+    # (the rest keeps the notes kept past the keys / before beat 0: the box holds only heard notes)
+    piece, rest = (app.plain_copies({i}, moved=lambda rr, keep=keep: rr[keep], kept_after=after).get(i)
+                   for keep, after in ((m, False), (~m, True)))
     for p in (piece, rest):
         if ex and p is not None:
             p["extract"] = copy.deepcopy(ex)

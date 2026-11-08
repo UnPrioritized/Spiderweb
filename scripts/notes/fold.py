@@ -135,7 +135,20 @@ def folded(rows, fold, cut=True):
         return rows, 0
     keep = rows[:, 5].copy()
     rows[:, 5] = np.arange(len(rows))  # (each note's own number: which ones came out changed)
-    out = resolve_overlaps(rows)
+    # (notes kept past the keys, "Keep notes made there": keys under 0 / past 255 — resolve_overlaps counts keys
+    # 0-255 only, so each block of 256 keys is fixed on its own; overlaps only ever meet on one key)
+    block = rows[:, 2] // 256
+    if block.min() == block.max() == 0:
+        out = resolve_overlaps(rows)
+    else:
+        parts = []
+        for b in np.unique(block).tolist():
+            part = rows[block == b]
+            part[:, 2] -= b * 256
+            got = resolve_overlaps(part)
+            got[:, 2] += b * 256
+            parts.append(got)
+        out = np.concatenate(parts)
     same = (out[:, 0] == rows[out[:, 5], 0]) & (out[:, 1] == rows[out[:, 5], 1])
     changed = len(rows) - int(same.sum())
     out = out[np.lexsort((out[:, 2], out[:, 0]))]

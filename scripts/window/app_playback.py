@@ -691,26 +691,25 @@ class Playback:
             self.overload_label.config(text=text)
             self.slowed_label.config(text=slowed)
             self.buffer_label.config(text=buf)
-            free = 0
-            if buf:  # (M3: rightmost, the red / orange ones left of it)
-                self.buffer_label.place(relx=1.0, rely=0.5, anchor="e", x=-6)
-                free = self.buffer_label.winfo_reqwidth() + 12
-            else:
-                self.buffer_label.place_forget()
-            if text:
-                self.overload_label.place(relx=1.0, rely=0.5, anchor="e", x=-6 - free)
-                free += self.overload_label.winfo_reqwidth() + (12 if buf else 18)
-            else:
-                self.overload_label.place_forget()
-            if slowed:  # (13f: orange, left of the red "Overloaded" when both show)
-                self.slowed_label.place(relx=1.0, rely=0.5, anchor="e", x=-6 - free)
-                free += self.slowed_label.winfo_reqwidth() + (12 if text or buf else 18)
-            else:
-                self.slowed_label.place_forget()
-            # (a long status message stops short of them with "…" instead of running under them)
-            self.status.keep_free(free)
+            self.place_status_marks()
             if self.builtin_window is not None:
                 self.builtin_window.refresh()
+
+    def place_status_marks(self):
+        """The texts at the status line's right end, right to left: Rendered ahead's buffer, red "Overloaded",
+        orange "Slowed to", red "+n off-range" (App.show_offrange); a long status message stops short of them with
+        "…" instead of running under them."""
+        free, first = 0, True
+        for label, text in ((self.buffer_label, self.buffer_text), (self.overload_label, self.overload_text),
+                            (self.slowed_label, self.slowed_text),
+                            (self.offrange_label, getattr(self, "offrange_text", ""))):
+            if text:
+                label.place(relx=1.0, rely=0.5, anchor="e", x=-6 - free)
+                free += label.winfo_reqwidth() + (18 if first and label is not self.buffer_label else 12)
+                first = False
+            else:
+                label.place_forget()
+        self.status.keep_free(free)
 
     def midi_device_picked(self):
         """MIDI out picked: the old one stops and closes (the same one picked again changes nothing)."""

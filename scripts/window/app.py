@@ -1047,6 +1047,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (M3: Rendered ahead's grey "Audio buffer: 12.4 / 60" at the very right end while playing / making stopped)
         self.buffer_label = ttk.Label(self.status, text="", foreground=look.HINT, font=look.font(9))
         self.buffer_text = ""
+        # (red "+1,447 off-range" while notes are kept past the keys / before beat 0, Settings → Piano roll "Keep
+        # notes made there"; user 2026-11-08: the note count leaves them out. Placed at the right end like
+        # "Overloaded": the count's place moves with the mouse position, this never does)
+        self.offrange_label = ttk.Label(self.status, text="", foreground=look.ERROR, font=look.font(9))
+        Tooltip(self.offrange_label, tr("app.offrange_tip"))
+        self.offrange_text = ""
 
         side = self._build_side()
         self._build_project(side)
@@ -3725,6 +3731,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.off_all = self.offrange_rows()
         self.track_view()
         self.roll.request_redraw()
+        self.update_status()  # (the red "+n off-range" count)
 
     def offrange_rows(self):
         """Every shape's "Keep notes made there" notes as rendered rows (start, end, key, velocity, slot, owner): the
@@ -4034,7 +4041,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._position = text
         self.update_status()
 
+    def show_offrange(self):
+        """The red "+1,447 off-range" at the status line's right end: notes kept past the keys / before beat 0
+        (App.off_all; the note count leaves them out, user 2026-11-08). Hidden while there are none or the setting is
+        off (off_all is empty then)."""
+        n = len(self.off_all)
+        text = tr("app.offrange_count", n=n) if n else ""
+        if text != self.offrange_text:
+            self.offrange_text = text
+            self.offrange_label.config(text=text)
+            self.place_status_marks()
+
     def update_status(self):
+        self.show_offrange()
         parts = [self._position] if self._position else []
         if self._bg_notes:  # (the notes are being made in the background: shapes_changed)
             self.status.show("     ".join(parts + [tr("app.making_notes")]))
