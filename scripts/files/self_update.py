@@ -224,7 +224,7 @@ def _retry(job, tries=25):
 def swap_in(new_path, exe=None):
     """Puts the checked exe in the running one's place (it becomes .old). Returns undo(): True when the old exe is
     back; False when it couldn't be (the folder still has an exe then: the new one). Raises OSError (nothing
-    changed then)."""
+    changed then). Untested under WINE (system.WINE)."""
     exe = exe or exe_path()
     old = exe + ".old"
     if os.path.exists(old):

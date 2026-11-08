@@ -71,7 +71,7 @@ LETTER_CHECK_MS = 100  # while a letter is held: how often we ask if it's still 
 def key_down(code):
     """Whether the key with this key code (a key event's keycode) is still held down, asked of the keyboard itself:
     True / False, or None when we can't tell (not Windows). Its let-go never reaches us while the window is being
-    moved (Windows keeps it)."""
+    moved (Windows keeps it). Untested under WINE (system.WINE)."""
     if sys.platform != "win32":
         return None
     try:

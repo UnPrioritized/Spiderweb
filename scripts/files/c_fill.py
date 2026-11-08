@@ -116,41 +116,59 @@ def _is_stand_in(address, name):
     return ctypes.string_at(text, len(name) + 1) == name.encode() + b"\0"
 
 
+# Where the stand-ins can sit: the C runtime itself, and the small "API set" file programs link to, whose functions
+# usually lead into it but may be stand-ins of their own in some versions (one already filled = real code there).
+MODULES = ("ucrtbase", "api-ms-win-crt-math-l1-1-0")
+
+
+def _kernel():
+    k32 = ctypes.WinDLL("kernel32")
+    k32.GetProcAddress.restype = ctypes.c_void_p
+    k32.GetProcAddress.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    k32.VirtualProtect.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+    k32.FlushInstructionCache.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    return k32
+
+
+def patch(k32, at, name):
+    """Fills in the stand-in for name at address at. True when done."""
+    if not at or not _is_stand_in(at, name):
+        return False
+    code = _CODE.get(name)
+    if code is None:
+        f = _stand_in(name)
+        if f is None:
+            return False
+        _kept.append(f)
+        code = b"\x48\xb8" + struct.pack("<Q", ctypes.cast(f, ctypes.c_void_p).value) + b"\xff\xe0"  # mov rax; jmp rax
+    old = ctypes.c_uint32()
+    if not k32.VirtualProtect(at, len(code), 0x40, ctypes.byref(old)):  # (PAGE_EXECUTE_READWRITE)
+        return False
+    ctypes.memmove(at, code, len(code))
+    k32.VirtualProtect(at, len(code), old.value, ctypes.byref(ctypes.c_uint32()))
+    k32.FlushInstructionCache(k32.GetCurrentProcess(), at, len(code))
+    return True
+
+
 def fill():
     """Makes the stand-ins work. Returns the names filled (empty: nothing to do). Never raises."""
     if not WINE or ctypes.sizeof(ctypes.c_void_p) != 8:
         return []
     done = []
     try:
-        k32 = ctypes.WinDLL("kernel32")
-        k32.GetProcAddress.restype = ctypes.c_void_p
-        k32.GetProcAddress.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-        k32.VirtualProtect.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint32,
-                                       ctypes.POINTER(ctypes.c_uint32)]
-        k32.FlushInstructionCache.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
-        k32.GetCurrentProcess.restype = ctypes.c_void_p
-        module = ctypes.c_void_p(ctypes.WinDLL("ucrtbase")._handle)
+        k32 = _kernel()
     except (OSError, AttributeError):
         return done
-    for name in dict.fromkeys(NAMES):
+    for module_name in MODULES:
         try:
-            at = k32.GetProcAddress(module, name.encode())
-            if not at or not _is_stand_in(at, name):
-                continue
-            code = _CODE.get(name)
-            if code is None:
-                f = _stand_in(name)
-                if f is None:
-                    continue
-                _kept.append(f)
-                code = b"\x48\xb8" + struct.pack("<Q", ctypes.cast(f, ctypes.c_void_p).value) + b"\xff\xe0"
-            old = ctypes.c_uint32()
-            if not k32.VirtualProtect(at, len(code), 0x40, ctypes.byref(old)):  # (PAGE_EXECUTE_READWRITE)
-                continue
-            ctypes.memmove(at, code, len(code))
-            k32.VirtualProtect(at, len(code), old.value, ctypes.byref(ctypes.c_uint32()))
-            k32.FlushInstructionCache(k32.GetCurrentProcess(), at, len(code))
-            done.append(name)
-        except Exception:  # (a start must never fail here: that function stays as it was)
+            module = ctypes.c_void_p(ctypes.WinDLL(module_name)._handle)
+        except (OSError, AttributeError):
             continue
+        for name in dict.fromkeys(NAMES):
+            try:
+                if patch(k32, k32.GetProcAddress(module, name.encode()), name):
+                    done.append(name)
+            except Exception:  # (a start must never fail here: that function stays as it was)
+                continue
     return done

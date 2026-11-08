@@ -420,6 +420,10 @@ if __name__ == "__main__":
     c_filled = c_fill.fill()  # (before NumPy loads: some systems' C runtime has stand-ins that end the program)
     if "--loops-check" in sys.argv[1:]:  # (a run of its own: does the compiled loops' level work here? native.py)
         from files import native
+        try:  # (a level the processor can't run crashes this run: ended at once, no crash box waiting for a click)
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+        except (AttributeError, OSError):
+            pass
         sys.exit(native.self_check())
     # Tell Windows we handle display scaling ourselves, so the window isn't stretched (blurry)
     try:

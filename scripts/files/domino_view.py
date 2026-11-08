@@ -1,6 +1,6 @@
 """Domino companion: where Domino's piano roll is on the screen and what it shows, read from outside.
 
-Read-only: Spiderweb never writes into Domino. A running Domino is found by its program's path (never by window
+Read-only: Spiderweb never writes into Domino. Untested under WINE (system.WINE): an unknown build = no reading. A running Domino is found by its program's path (never by window
 title), its program file is checked against BUILDS (an unknown build = no reading, with the reason), then a few
 numbers are read out of its memory: how far the piano roll is scrolled, its zoom and row height.
 

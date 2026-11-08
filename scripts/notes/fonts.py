@@ -8,7 +8,8 @@ which is what the nonzero fill rule needs.
 Letters the font doesn't have come from another installed font that has them (like Windows' own programs do): the
 fonts Windows lists as stand-ins for this one, then BACKUPS. Not for symbol fonts (their letters ARE other pictures).
 
-Elsewhere (Linux) Font is fonts_ft.FtFont: the same, read with fontconfig + FreeType.
+Elsewhere (Linux) Font is fonts_ft.FtFont: the same, read with fontconfig + FreeType. Untested under WINE
+(system.WINE: its own GDI and fonts; a missing font takes the usual missing-font way).
 """
 
 import bisect

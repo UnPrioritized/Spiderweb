@@ -137,12 +137,16 @@ def load():
     return d
 
 
+CHECK_WAIT_S = 180  # (checked_level: one level's run taking longer = the system is slow, not the level wrong)
+
+
 def checked_level(top, path):
     """(Wine-like systems only; untested on a real emulator) The processor there may be emulated, and one claiming
     AVX2 / AVX-512 it can't really run would end the program at the first loop. So the level is first tried in a
     separate run of Spiderweb (spiderweb.py --loops-check: a few loops on big inputs, answers compared with NumPy's),
     from the highest the processor names down to plain; 0 = none worked (the NumPy code). Remembered in
-    user/loops-level.json per system version + processor + library, so it's tried once."""
+    user/loops-level.json per system version + processor + library, so it's tried once (a run past CHECK_WAIT_S:
+    NumPy for now, tried again next start)."""
     import json
     import subprocess
     from files import about, safefile
@@ -164,11 +168,13 @@ def checked_level(top, path):
     for tried in range(top, 0, -1):
         env = dict(os.environ, SPIDERWEB_LOOPS_CHECK="1", SPIDERWEB_NATIVE_LEVEL=str(tried))
         try:
-            done = subprocess.run(start + ["--loops-check"], env=env, timeout=180,
+            done = subprocess.run(start + ["--loops-check"], env=env, timeout=CHECK_WAIT_S,
                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if done.returncode == 0:
                 level = tried
                 break
+        except subprocess.TimeoutExpired:  # (a slow system, not the level's fault: the NumPy code this run, not
+            return 0                       # remembered, so the next start tries again)
         except (OSError, subprocess.SubprocessError):
             pass
     known[key] = level

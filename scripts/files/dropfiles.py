@@ -1,4 +1,5 @@
 """Files dragged in from Explorer, onto a whole window (the user's own kestrelGUI dropfiles.py, made for Spiderweb).
+Untested under WINE (system.WINE): registering failing = no drops, nothing else changes.
 
 Tk has no drag and drop of its own, so this registers an OLE IDropTarget through ctypes. OLE rather than
 WM_DROPFILES because it asks while the files are still being dragged: a drag holding nothing usable gets the no-drop
