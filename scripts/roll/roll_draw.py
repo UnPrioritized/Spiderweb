@@ -276,6 +276,13 @@ TRACK_FADE = [25]
 # only ever sit there) so it shows OFF_FADE[0] % of itself: see-through (user 2026-11-08, 1-100 %, default 50)
 OFF_BASE = 2 * GHOST_BASE
 OFF_FADE = [50]
+# then where they LAND with "Wrap them around" on ("Show wrapped notes", user 2026-11-08; App.wrapped_rows): one more
+# group per group, faint copies mixed toward the piano roll's background (inside the keys), fainter than the kept
+# notes themselves (WRAP_SHARE of OFF_FADE) so they never pass for real notes; painted UNDER the real notes
+WRAP_BASE = 3 * GHOST_BASE
+WRAP_SHARE = 0.6
+# then one group: a landing note sitting on a real note (the export will see them overlap): red, ON TOP
+CLASH_GROUP = 4 * GHOST_BASE
 _tables = {}
 
 
@@ -289,6 +296,16 @@ def mixed(color, amount, to):
 def off_code(group, vel):
     """The colour number a kept note past the edges is painted with: its colour group's see-through shade."""
     return (OFF_BASE + group) * 32 + np.clip(vel, 0, 127) // 4
+
+
+def wrap_code(group, vel):
+    """The colour number a wrapped note's landing spot is painted with: its colour group's faint copy shade."""
+    return (WRAP_BASE + group) * 32 + np.clip(vel, 0, 127) // 4
+
+
+def wrap_fade():
+    """How much of itself a landing note shows (0..1): WRAP_SHARE of the kept notes' Opacity."""
+    return max(0.01, OFF_FADE[0] / 100 * WRAP_SHARE)
 
 
 def ghost_code(group, vel=-1):
@@ -316,6 +333,9 @@ def note_tables(pal):
                   for (f, b), a in zip(groups[g:g + 31] + [groups[g + 31]], [behind] * 31 + [away])]
         space, off = look.space_shade(look.ROLL_BG), 1 - OFF_FADE[0] / 100  # (OFF_BASE: after the ghosts)
         extra += [(mixed(f, off, space), mixed(b, off, space)) for f, b in groups]
+        away = 1 - wrap_fade()  # (WRAP_BASE: where wrapped notes land, inside the keys)
+        extra += [(mixed(f, away, look.ROLL_BG), mixed(b, away, look.ROLL_BG)) for f, b in groups]
+        extra += [(look.WRAP_CLASH_FILL, look.WRAP_CLASH)] * 32  # (CLASH_GROUP)
         colors = NOTE_COLORS + extra
         rgb = np.concatenate([NOTE_RGB, np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
                                                   for pair in extra], np.uint8)])
@@ -704,9 +724,12 @@ class RollDrawing:
         # (notes made in the background after an edit: the usual painting, the selected shapes' notes left out
         # and carried along on top as a see-through picture; scrolling moves the picture as usual)
         self._hide_sels = carried is not None and not (self.drag and self.drag[0] == "move")
+        if hasattr(app, "wrapped_rows"):
+            app.wrapped_rows()  # (worked out now: its wrap_version goes in the key below)
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
                  self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])),
                  getattr(app, "off_version", 0), OFF_FADE[0],  # (the notes kept past the edges)
+                 getattr(app, "wrap_version", 0),  # (where wrapped notes land: "Show wrapped notes")
                  stack_rule(app)[0],  # (Stacked notes changed in Settings: painted again at once, hunt 2026-11-07)
                  self._hide_sels)
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols), self.hidden_shade()))
@@ -848,6 +871,7 @@ class RollDrawing:
             self.draw_path(self.draft, look.DRAFT_LINE, look.LINES + 1)
             self.draw_draft_points()
         self.draw_hz_start()
+        self.draw_wrap_boxes(w, h)
         self.draw_above_marks()
         self.draw_select_box()
         self.draw_slice()
@@ -1100,6 +1124,27 @@ class RollDrawing:
         yb = np.where(up, np.concatenate([sy1[on_s], ty[on_t]]) - extra, ya)
         for line in ring_chains(xa.tolist(), ya.tolist(), xb.tolist(), yb.tolist(), up.tolist(), extra):
             self.create_line(*line, **kw)
+
+    def draw_wrap_boxes(self, w, h):
+        """"Show wrapped notes: Selected shapes" (user 2026-11-08): a dashed box round each selected shape's landing
+        area (App.wrapped_rows' boxes: notes from over the top land at the bottom, from under key 0 at the top)."""
+        get = getattr(self.app, "wrapped_rows", None)
+        boxes = get()[1] if get is not None and self.app.show_notes.get() else ()
+        if not boxes:
+            return
+        ppq, s = self.app.ppq, self.scale
+        ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+        pad = 2 * s
+        # (a side far off screen is pulled in just past the edge: a dashed line thousands of px long freezes Tk)
+        lo_x, lo_y, hi_x, hi_y = self.kb_w - 20, self.ruler_h - 20, w + 20, h + 20
+        for _, t0, t1, k0, k1 in boxes:
+            x0, x1 = round(t0 * ax + bx) - pad, round(t1 * ax + bx) + pad
+            y0, y1 = round((k1 + 0.5) * ay + by) - pad, round((k0 - 0.5) * ay + by) + pad
+            if x1 < self.kb_w or x0 > w or y1 < self.ruler_h or y0 > h:
+                continue
+            self.create_rectangle(max(x0, lo_x), max(y0, lo_y), min(x1, hi_x), min(y1, hi_y), outline=look.WRAP_BOX,
+                                  width=max(1, round(s)), dash=(4, 3))
 
     def draw_above_marks(self):
         """A small arrow pointing up at the top of the piano roll for each shape put away above its highest key
@@ -1495,9 +1540,64 @@ class RollDrawing:
         pixel with the real notes (those stay inside the keys, from beat 0), so nothing else changes."""
         rects = self.main_rects(w, h, clip, area, only, draft)
         off = self.off_rects(w, h, clip, area, only, draft)
-        if off is None:
+        under, over = self.wrap_rects(w, h, clip, area, only, draft)
+        if off is None and under is None and over is None:
             return rects
-        return tuple(np.concatenate([np.asarray(a, np.int64), b]) for a, b in zip(rects, off))
+        # (where wrapped notes land: faint copies UNDER the real notes, their clashes red ON TOP; "Show wrapped notes")
+        parts = [p for p in (under, rects, off, over) if p is not None]
+        return tuple(np.concatenate([np.asarray(p[n], np.int64) for p in parts]) for n in range(5))
+
+    def wrap_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
+        """(under, over): the landing spots of the wrapped notes (App.wrapped_rows) as main_rects' rectangles in
+        their faint colours (wrap_code), and the red clash stretches; None where there are none."""
+        app = self.app
+        get = getattr(app, "wrapped_rows", None)
+        if get is None or draft == "alone":
+            return None, None
+        rows, _, clash = get()
+        if not len(rows) and not len(clash):
+            return None, None
+        lifted = self.on_top()
+        if only is not None and lifted and len(rows):
+            rows = rows[np.isin(rows[:, 5], list(lifted)) == only]
+        under = over = None
+        if len(rows):
+            got = self.row_rects(rows, w, h, clip, area)
+            if got is not None:
+                on, x0, y0, x1, y1 = got
+                slot = rows[on, 4]
+                group = note_colours(slot, slot_colours(getattr(app, "picture_use10", False)))
+                pics = getattr(app, "picture_owners", ())
+                if len(pics) and pics.any():
+                    group = np.where(pics[np.clip(rows[on, 5], 0, len(pics) - 1)], PICTURE_GROUP + np.minimum(slot, 15),
+                                     group)
+                under = x0, y0, x1, y1, wrap_code(group, rows[on, 3])
+        if len(clash) and only is not True:  # (with the rest: a picture of only the selected shapes leaves them out)
+            got = self.row_rects(clash, w, h, clip, area)
+            if got is not None:
+                on, x0, y0, x1, y1 = got
+                over = x0, y0, x1, y1, np.full(len(on), CLASH_GROUP * 32, np.int64)
+        return under, over
+
+    def row_rects(self, rows, w, h, clip=None, area=None):
+        """Rows (start, end, key, ...) on screen as whole-pixel rectangles like main_rects' (outline inside):
+        (which rows, x0, y0, x1, y1), or None when none show."""
+        ppq = self.app.ppq
+        ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+        kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
+        x0, x1 = np.round(rows[:, 0] * ax + bx), np.round(rows[:, 1] * ax + bx)
+        y0 = np.round((rows[:, 2] + 0.5) * ay + by)
+        y1 = np.maximum(np.round((rows[:, 2] - 0.5) * ay + by), y0 + 1)
+        on = ~((x1 < kb) | (x0 > w) | (y1 < top) | (y0 > h))
+        if clip:
+            on &= ~((x1 < clip[0]) | (x0 >= clip[2]) | (y1 < clip[1]) | (y0 >= clip[3]))
+        on = np.flatnonzero(on)
+        if not len(on):
+            return None
+        left, right = int(kb) - 2, int(w) + 2
+        x0, x1 = np.maximum(x0[on], left).astype(np.int64), np.minimum(x1[on], right).astype(np.int64)
+        return on, x0, y0[on].astype(np.int64), np.maximum(x1 - 1, x0), y1[on].astype(np.int64) - 1
 
     def off_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
         """The App.off_drawn notes on screen as main_rects' rectangles, in their see-through colours (off_code);

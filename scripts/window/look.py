@@ -233,6 +233,10 @@ SHAPE_LINE = pick("#c0392b", "#a4a4a8")  # a shape's line (shown lines), an arro
 SHAPE_LINE_PICKED = pick("#ff1f1f", "#dcdce0")  # ... selected (dark: greyish white like the ring, user)
 STROKE = pick("#c0392b", "#dcdce0")  # the drawer's strokes, its Empty cross (dark: greyish white, user)
 ABOVE_EDGE = pick("#ffffff")  # round that arrow
+# "Show wrapped notes" (user 2026-11-08): a landing note sitting on a real note (red: it MEANS a clash), and the
+# dashed box round a selected shape's landing area
+WRAP_CLASH, WRAP_CLASH_FILL = pick("#e01010", "#ff4a4a"), pick("#ff9c9c", "#a83a3a")
+WRAP_BOX = pick("#2f6fd0", "#8ab4ff")
 ORIGIN, ORIGIN_PICKED = pick("#efc0c0", "#7a5656"), pick("#e89a9a", "#a86a6a")  # a line as drawn under its tumours
 DRAFT_LINE = pick("#0a8f0a", "#3fcf3f")  # the shape being drawn
 MASK_LINE, MASK_LINE_PICKED = pick("#008c8c", "#3fc9c9"), pick("#00b3b3", "#7ae6e6")  # a mask's dashed line

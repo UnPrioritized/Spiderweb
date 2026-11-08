@@ -455,8 +455,24 @@ class SettingsWindow(tk.Toplevel):
         def wrapped():  # ("Wrap them around", user 2026-11-08: exports, playback and Domino copies; App.outgoing)
             app.offrange_changed()
             app.schedule_autosave()
+            self.sync_keep()
         self.wrap_tick = f.row(None, self.tick(f.page, "settings.wrap_offrange", app.wrap_offrange, wrapped))
         Tooltip(self.wrap_tick, tr("settings.wrap_offrange_tip"))
+        # "Show wrapped notes" (user 2026-11-08): where they land, for the selected shapes / always / never. Read by place
+        from files.settings import WRAP_SHOWN
+        names = [tr("settings.show_wrapped_" + k) for k in WRAP_SHOWN]
+        box = self.wrapped_box = f.row(tr("settings.show_wrapped"),
+                                       ttk.Combobox(f.page, values=names, state="readonly", width=16),
+                                       tip=tr("settings.show_wrapped_tip"))
+        box.current(WRAP_SHOWN.index(app.show_wrapped.get()) if app.show_wrapped.get() in WRAP_SHOWN else 0)
+        self.wrapped_label = f.page.grid_slaves(row=f.r - 1, column=0)[0]  # (Form.row's name label)
+
+        def shown(e=None):
+            box.selection_clear()
+            app.show_wrapped.set(WRAP_SHOWN[box.current()])
+            app.roll.request_redraw()
+            app.schedule_autosave()
+        box.bind("<<ComboboxSelected>>", shown)
         self.sync_keep()
 
     def sync_keep(self):
@@ -471,6 +487,9 @@ class SettingsWindow(tk.Toplevel):
         self.opacity_box.state(["!disabled"] if on else ["disabled"])
         self.opacity_label.state(["!disabled"] if on else ["disabled"])
         self.wrap_tick.state(["!disabled"] if on else ["disabled"])
+        wraps = on and app.wrap_offrange.get()  # ("Show wrapped notes": greyed while nothing wraps)
+        self.wrapped_box.state(["!disabled"] if wraps else ["disabled"])  # (readonly stays)
+        self.wrapped_label.state(["!disabled"] if wraps else ["disabled"])
 
     def build_file_link(self, f):
         """"Open .spwb files with Spiderweb" (14, user 2026-10-29): Windows told that double-clicking a .spwb opens

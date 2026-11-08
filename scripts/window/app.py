@@ -266,6 +266,54 @@ class Channels(dict):
     fixed = frozenset()
 
 
+def wrap_landing(n, keys):
+    """THE wrap rule ("Wrap them around", user 2026-11-08), for kept notes past the keys / before beat 0 (rows
+    start, end, key, ...): (the ones that land, put where they land, ok = which rows of n those are). Start cut at
+    beat 0 (nothing before it, a note across it starts on it), key mod the project's keys (one over the top = key 0,
+    one under key 0 = the top key). Export (wrapped_in) and the piano roll's landing spots (App.wrapped_rows) both
+    use this, so what's shown is what's written."""
+    n = np.array(n, copy=True)
+    n[:, 0] = np.maximum(n[:, 0], 0)
+    ok = n[:, 1] > n[:, 0]
+    n = n[ok]
+    n[:, 2] %= keys
+    return n, ok
+
+
+def landing_clashes(rows, real):
+    """(start, end, key) for each landing note (rows) that sits on a real note (real) on its key: from the first
+    real note's start it meets (or its own start, when one already sounds there) to the last real end it meets
+    (or its own end). One row per clashing landing note; none when nothing meets. Same key, time overlapping (the
+    overlap the export sees: Single channel cuts it, Multi moves a colour to another channel)."""
+    empty = np.zeros((0, 3), np.int64)
+    if not len(rows) or not len(real):
+        return empty
+    real = np.asarray(real)
+    k, s, e = real[:, 2].astype(np.int64), real[:, 0].astype(np.int64), real[:, 1].astype(np.int64)
+    order = np.lexsort((s, k))
+    k, s, e = k[order], s[order], e[order]
+    far = int(max(np.abs(s).max(), np.abs(e).max(), np.abs(rows[:, :2]).max())) + 2
+    lift = np.int64(2 * far + 1)  # (each key its own stretch of numbers: searches / running ends never cross keys)
+    base = k * lift + far
+    place = base + s
+    ends = np.maximum.accumulate(base + e)  # (latest end so far, per key: base keeps keys apart)
+    rk, rs, re = rows[:, 2].astype(np.int64), rows[:, 0].astype(np.int64), rows[:, 1].astype(np.int64)
+    rb = rk * lift + far
+    # (latest end of the real notes on this key starting before this one ends; another key's = far below rs)
+    upto = np.searchsorted(place, rb + re, "left")
+    late = np.where(upto > 0, ends[np.maximum(upto - 1, 0)] - rb, rs - 1)
+    hit = late > rs
+    if not hit.any():
+        return empty
+    # (one on this key already sounding at its start = from its start; else from the first one starting after it)
+    at = np.searchsorted(place, rb + rs, "left")
+    before = np.where(at > 0, ends[np.maximum(at - 1, 0)] - rb, rs - 1)
+    first = s[np.minimum(at, len(s) - 1)]
+    lo = np.where(before > rs, rs, np.maximum(rs, first))
+    hi = np.minimum(re, late)
+    return np.column_stack([lo, hi, rk])[hit & (hi > lo)]
+
+
 def wrapped_in(sh, notes, tracks, ppq, keys, notes_tracks):
     """sh's (notes, tracks) with its notes past the keys added back inside ("Keep notes made there" + "Wrap them
     around", user 2026-11-08): key mod the project's keys (one over the top = key 0, one under key 0 = the top key),
@@ -281,13 +329,9 @@ def wrapped_in(sh, notes, tracks, ppq, keys, notes_tracks):
     if not len(n):
         return notes, tracks
     n, t = off_part(n, t, up, keys, round(later * ppq))
-    n = np.array(n, copy=True)
-    n[:, 0] = np.maximum(n[:, 0], 0)
-    ok = n[:, 1] > n[:, 0]
+    n, ok = wrap_landing(n, keys)
     if not ok.any():
         return notes, tracks
-    n = n[ok]
-    n[:, 2] %= keys
     if tracks is None and t is None:
         both, tt = np.concatenate([np.asarray(notes).reshape(-1, n.shape[1]), n]), None
     else:
@@ -654,6 +698,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.keep_offrange = tk.BooleanVar(self, value=False)
         self.offrange_opacity = tk.IntVar(self, value=50)  # (how see-through they're drawn, %: roll_draw.OFF_FADE)
         self.wrap_offrange = tk.BooleanVar(self, value=False)  # ("Wrap them around": App.outgoing)
+        # ("Show wrapped notes": settings.WRAP_SHOWN "selected" / "always" / "off"; App.wrapped_rows)
+        self.show_wrapped = tk.StringVar(self, value="selected")
+        self._wrapped = None  # (App.wrapped_rows' last answer, keyed)
+        self.wrap_version = 0  # (+1 each time wrapped_rows' answer changes: the roll's picture key)
         self._outgoing = None  # (App.outgoing's last (key, notes))
         self.off_all = self.off_drawn = NO_NOTES  # (offrange_rows; off_drawn = the ones the piano roll shows)
         self.off_version = 0  # (+1 each time off_drawn is set: the roll's picture key)
@@ -3794,6 +3842,44 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                         rounds=self.rounds_apart(), order=self.in_order(), keep=self.keep_colours.get(),
                         busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=True)[2]
         self._outgoing = (key, got)
+        return got
+
+    def wrapped_rows(self):
+        """Where the kept notes past the keys LAND with "Wrap them around" on, for the piano roll ("Show wrapped
+        notes", user 2026-11-08): (rows, boxes, clash). rows = off_drawn's rows put where they land by wrap_landing
+        (the export's own rule: shown = written), only the selected shapes' in "Selected shapes", every shown one in
+        "Always", none when "Off". boxes = [(owner, t0, t1, k0, k1)] each landing area (a shape's notes from over the
+        top land at the bottom, from under key 0 at the top: one box each), only in "Selected shapes" (the dashed
+        outline). clash = (start, end, key) stretches where a landing note sits on a real note on the same key (the
+        export will see them overlap): drawn red. Kept until something it reads changes."""
+        none = (NO_NOTES, [], np.zeros((0, 3), np.int64))
+        mode = self.show_wrapped.get()
+        off = self.off_drawn
+        if mode == "off" or not len(off) or not self.wraps_offrange():
+            if self._wrapped is not None:
+                self._wrapped = None
+                self.wrap_version += 1
+            return none
+        sels = frozenset(self.sels) if mode == "selected" else None
+        key = (id(off), id(self.rendered), sels, mode, self.keys)
+        if self._wrapped is not None and self._wrapped[0] == key:
+            return self._wrapped[1]
+        if sels is not None:
+            off = off[np.isin(off[:, 5], list(sels))] if sels else off[:0]
+        rows, ok = wrap_landing(off, self.keys)
+        boxes = []
+        if mode == "selected" and len(rows):
+            below = off[ok, 2] < 0  # (from under key 0: lands at the top)
+            for owner in np.unique(rows[:, 5]).tolist():
+                mine = rows[:, 5] == owner
+                for side in (below, ~below):
+                    r = rows[mine & side]
+                    if len(r):
+                        boxes.append((owner, int(r[:, 0].min()), int(r[:, 1].max()), int(r[:, 2].min()),
+                                      int(r[:, 2].max())))
+        got = rows, boxes, landing_clashes(rows, self.rendered)
+        self._wrapped = (key, got)
+        self.wrap_version += 1
         return got
 
     def offrange_rows(self):
