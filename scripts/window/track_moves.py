@@ -33,11 +33,11 @@ def row_entry(app, s):
     return -1 - s
 
 
-def boxed(app, boxes):
-    """Which of app.rendered's notes START inside the boxes (track_list.boxes: rows x beats; a ruler band = every
-    row)."""
-    r, ppq = app.rendered, app.ppq
-    rows = app.track_list.note_rows()
+def boxed(app, boxes, notes=None):
+    """Which of app.rendered's notes (or these notes: rows like rendered's, e.g. App.outgoing's) START inside the
+    boxes (track_list.boxes: rows x beats; a ruler band = every row)."""
+    r, ppq = (app.rendered, app.ppq) if notes is None else (notes, app.ppq)
+    rows = app.track_list.note_rows() if notes is None else app.track_list.rows_of(notes[:, 4])
     out = np.zeros(len(r), bool)
     for b in boxes:
         a, z = round(b["t0"] * ppq), round(b["t1"] * ppq)

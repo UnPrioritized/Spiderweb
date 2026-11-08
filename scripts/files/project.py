@@ -1942,8 +1942,15 @@ class ProjectFiles:
         boxed = self.list_boxed()
         if boxed is not None and not boxed.any():
             return None
-        # (+ wrapped kept notes, App.outgoing; the track list's boxes are worked out on the notes as shown)
-        notes = base = self.rendered if boxed is not None else self.outgoing()
+        # (+ wrapped kept notes, App.outgoing: the track list's boxes too, worked out on the notes as they go out,
+        # user 2026-11-08: every way out wraps)
+        notes = base = self.outgoing()
+        if boxed is not None and notes is not self.rendered:
+            from window.track_moves import boxed as boxed_in
+            from window.track_tempo import note_boxes as boxes_of
+            boxed = boxed_in(self, boxes_of(self.track_list.boxes), notes)
+            if not boxed.any():
+                return None
         sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
         only = set(sels) if sels else None
         time, by_time = None, boxed is not None or (bool(sels) and self.time_picked())
@@ -1959,7 +1966,7 @@ class ProjectFiles:
             laid, voice_slots = self.outgoing_layout() if boxed is None else (self.rendered, self.voice_slots)
             cc = slot_events(self.shapes, laid, ppq, bpm, only, voice_slots)
         else:
-            cc = self.cc_messages(ppq, bpm, only, plain=boxed is not None)
+            cc = self.cc_messages(ppq, bpm, only)  # (the export's layout: the notes copied are App.outgoing's)
         if time is not None:
             time = round(time[0] * ppq), round(time[1] * ppq)
         if boxed is not None:  # (their CC lines: only on a box's rows inside its time, hunt 2026-10-29: a box

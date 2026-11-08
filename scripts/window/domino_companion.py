@@ -812,9 +812,12 @@ class Companion:
         # (Multi + Remove overlaps: each track's own overlaps fixed the way picked; between tracks and with Domino's
         # notes: merge_across. Hunt 2026-11-06: always cut + stretched here, not what Spiderweb showed)
         way = {"way": rule["way"]} if mode == "auto" and rule.get("across") else None
+        # (kept notes past the keys / before beat 0 wrapped in like every other way out, "Wrap them around" on:
+        # app.wrap_landing's rule through all_notes wrap=, user 2026-11-08)
         rows = all_notes(shapes, app.ppq, app.keys, "raw" if mode == "single" else mode, app.channel_split,
                          app.all16(), app.notes_tracks, rounds=app.rounds_apart(), order=app.in_order(),
-                         keep=app.keep_colours.get(), busy=app.cc_busy(mode, shapes), overlaps=way)[2]
+                         keep=app.keep_colours.get(), busy=app.cc_busy(mode, shapes), overlaps=way,
+                         wrap=app.wraps_offrange())[2]
         rows = np.array(rows, np.int64)
         if mode == "single" and len(rows):
             rows[:, 4] = 0
