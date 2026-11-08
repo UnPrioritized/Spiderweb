@@ -266,8 +266,41 @@ class Channels(dict):
     fixed = frozenset()
 
 
+def wrapped_in(sh, notes, tracks, ppq, keys, notes_tracks):
+    """sh's (notes, tracks) with its notes past the keys added back inside ("Keep notes made there" + "Wrap them
+    around", user 2026-11-08): key mod the project's keys (one over the top = key 0, one under key 0 = the top key),
+    cut at beat 0 like cut_back (nothing before it, a note across it starts on it). Made from the same remembered
+    lifted notes as edge_made / App.offrange_tracks (engine.off_part); added before the channels / overlaps are
+    worked out, so they're fixed like any other note in that mode."""
+    out = past_edges(sh, keys, ppq)
+    if out is None:
+        return notes, tracks
+    lifted, up, room, later = out
+    with rows_up_to(room - 1):
+        n, t = notes_tracks(lifted, room)
+    if not len(n):
+        return notes, tracks
+    n, t = off_part(n, t, up, keys, round(later * ppq))
+    n = np.array(n, copy=True)
+    n[:, 0] = np.maximum(n[:, 0], 0)
+    ok = n[:, 1] > n[:, 0]
+    if not ok.any():
+        return notes, tracks
+    n = n[ok]
+    n[:, 2] %= keys
+    if tracks is None and t is None:
+        both, tt = np.concatenate([np.asarray(notes).reshape(-1, n.shape[1]), n]), None
+    else:
+        a = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
+        b = np.zeros(len(n), np.int64) if t is None else np.asarray(t, np.int64)[ok]
+        both, tt = np.concatenate([np.asarray(notes).reshape(-1, n.shape[1]), n]), np.concatenate([a, b])
+    order = np.argsort(both[:, 0], kind="stable")
+    return both[order].astype(np.asarray(notes).dtype if len(notes) else both.dtype, copy=False), \
+        None if tt is None else tt[order]
+
+
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
-              keep=False, busy=None, own=None, stash=None, overlaps=None):
+              keep=False, busy=None, own=None, stash=None, overlaps=None, wrap=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count, {Hz bass's number: {voice: slot}} for those with
     their own channel per note (render voice_slots)). all16: the project's "Use channel 10" (every
@@ -291,7 +324,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     took = [rounds and has_colours(sh) and team is None for sh, team in zip(shapes, teams)]
     wide = all16 and mode == "auto"  # (a Nested / Tiles / Ripples fill with Colours: its pairs go round 16 colours)
     shapes_as = [dict(sh, _most=ALL_COLOURS) if wide and has_pattern(sh) and sh.get("cycle") else sh for sh in shapes]
-    got = [notes_tracks(dict(sh, _rounds=True) if r else sh) for sh, r in zip(shapes_as, took)]
+    asked = [dict(sh, _rounds=True) if r else sh for sh, r in zip(shapes_as, took)]
+    got = [notes_tracks(s) for s in asked]
+    if wrap:  # ("Wrap them around": the notes past the keys put back inside, App.outgoing)
+        got = [wrapped_in(s, n, t, ppq, keys, notes_tracks) for s, (n, t) in zip(asked, got)]
     laps = [np.asarray(t, np.int64) // ROUND if r and t is not None else None for (_, t), r in zip(got, took)]
     got = [(n, t % ROUND) if lap is not None else (n, t) for (n, t), lap in zip(got, laps)]
     if rounds:
@@ -617,6 +653,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # apart from the real notes (App.offrange_tracks), so nothing that leaves Spiderweb ever gets them
         self.keep_offrange = tk.BooleanVar(self, value=False)
         self.offrange_opacity = tk.IntVar(self, value=50)  # (how see-through they're drawn, %: roll_draw.OFF_FADE)
+        self.wrap_offrange = tk.BooleanVar(self, value=False)  # ("Wrap them around": App.outgoing)
+        self._outgoing = None  # (App.outgoing's last (key, notes))
         self.off_all = self.off_drawn = NO_NOTES  # (offrange_rows; off_drawn = the ones the piano roll shows)
         self.off_version = 0  # (+1 each time off_drawn is set: the roll's picture key)
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
@@ -1047,11 +1085,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (M3: Rendered ahead's grey "Audio buffer: 12.4 / 60" at the very right end while playing / making stopped)
         self.buffer_label = ttk.Label(self.status, text="", foreground=look.HINT, font=look.font(9))
         self.buffer_text = ""
-        # (red "+1,447 off-range" while notes are kept past the keys / before beat 0, Settings → Piano roll "Keep
-        # notes made there"; user 2026-11-08: the note count leaves them out. Placed at the right end like
-        # "Overloaded": the count's place moves with the mouse position, this never does)
-        self.offrange_label = ttk.Label(self.status, text="", foreground=look.ERROR, font=look.font(9))
-        Tooltip(self.offrange_label, tr("app.offrange_tip"))
+        # (red "(+1,447 off-range)" right after the note count while notes are kept past the keys / before beat 0,
+        # Settings → Piano roll "Keep notes made there"; user 2026-11-08: the count leaves them out, the red part
+        # sits right after it (moves with the mouse position: the user's choice), laid over that piece of the
+        # line's text: StatusLine.set_red)
+        self.offrange_label = ttk.Label(self.status, text="", foreground=look.ERROR, font=look.font(9), padding=0)
+        self.offrange_tip = Tooltip(self.offrange_label, tr("app.offrange_tip"))
         self.offrange_text = ""
 
         side = self._build_side()
@@ -2216,6 +2255,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 tidy_tracks(self)                           # back the same: found by the track sweep)
             made = lay_again(made, stash, self.shapes, self.own_channels()) or make()
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _, self.cut_emptied = made
+        self.off_all = self.offrange_rows()  # (before play_changed: App.outgoing reads them)
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
         started = time.perf_counter()
@@ -2246,7 +2286,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.picture_owners = np.array([picture_like(sh) for sh in self.shapes], bool)
         self.picture_pal = self.slots_pal()
         self.drawn_all, self.picture_owners_all = self.drawn, self.picture_owners
-        self.off_all = self.offrange_rows()
         self.track_view(follow=True)
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # how many channels each shape spreads over (every mode: a paste keeps its
@@ -3729,9 +3768,33 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         from roll.roll_draw import OFF_FADE
         OFF_FADE[0] = min(100, max(1, int(self.offrange_opacity.get())))
         self.off_all = self.offrange_rows()
+        self._outgoing = None
         self.track_view()
         self.roll.request_redraw()
         self.update_status()  # (the red "+n off-range" count)
+        self.play_changed()  # (Wrap them around: heard from now on, or no longer)
+
+    def wraps_offrange(self):
+        """Settings → Piano roll "Wrap them around in exports and Domino copies" on (and Keep notes working)."""
+        return self.keeps_offrange() and bool(self.wrap_offrange.get())
+
+    def outgoing(self):
+        """The notes that leave Spiderweb (Export MIDI / to Domino, Copy to Domino, Spiderweb Notes, playback): the
+        rendered notes, + with "Wrap them around" on the kept notes past the keys put back inside (all_notes wrap=:
+        key mod the project's keys, before beat 0 never; overlaps / channels worked out with them like any other
+        note in that mode). Rows like rendered's. Made only when asked (and kept until the notes change), so the
+        piano roll and the tools never pay for it; never part of app.rendered (the tools would see them twice)."""
+        if not self.wraps_offrange() or not len(self.off_all):
+            return self.rendered
+        key = (id(self.rendered), id(self.off_all), self.ppq, self.keys)
+        if self._outgoing is not None and self._outgoing[0] == key:
+            return self._outgoing[1]
+        mode = self.channel_mode.get()
+        got = all_notes(self.shapes, self.ppq, self.keys, mode, self.channel_split, self.all16(), self.notes_tracks,
+                        rounds=self.rounds_apart(), order=self.in_order(), keep=self.keep_colours.get(),
+                        busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=True)[2]
+        self._outgoing = (key, got)
+        return got
 
     def offrange_rows(self):
         """Every shape's "Keep notes made there" notes as rendered rows (start, end, key, velocity, slot, owner): the
@@ -4042,24 +4105,25 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.update_status()
 
     def show_offrange(self):
-        """The red "+1,447 off-range" at the status line's right end: notes kept past the keys / before beat 0
-        (App.off_all; the note count leaves them out, user 2026-11-08). Hidden while there are none or the setting is
-        off (off_all is empty then)."""
+        """The red "(+1,447 off-range)" after the status line's note count: notes kept past the keys / before beat 0
+        (App.off_all; the note count leaves them out, user 2026-11-08). "" while there are none or the setting is off
+        (off_all is empty then). Its tip says whether Wrap them around takes them out."""
         n = len(self.off_all)
-        text = tr("app.offrange_count", n=n) if n else ""
-        if text != self.offrange_text:
-            self.offrange_text = text
-            self.offrange_label.config(text=text)
-            self.place_status_marks()
+        self.offrange_text = tr("app.offrange_count", n=n) if n else ""
+        self.offrange_tip.set_text(tr("app.offrange_tip_wrap" if self.wraps_offrange() else "app.offrange_tip"))
+        return self.offrange_text
 
     def update_status(self):
-        self.show_offrange()
+        off = self.show_offrange()
         parts = [self._position] if self._position else []
         if self._bg_notes:  # (the notes are being made in the background: shapes_changed)
+            self.status.set_red(self.offrange_label, "")
             self.status.show("     ".join(parts + [tr("app.making_notes")]))
             return
         parts.append(tr("app.shapes_notes", shapes=trn("n.shapes", len(self.shapes), n=len(self.shapes)),
-                        notes=trn("n.notes", len(self.rendered), n=len(self.rendered))))
+                        notes=trn("n.notes", len(self.rendered), n=len(self.rendered))) + (" " + off if off else ""))
+        self.status.red_piece = off  # (drawn red over the line: StatusLine.set_red, placed by show below)
+        self.status.red = self.offrange_label
         if self.slot_count:  # (every mode: pastes and your tracks make several in Single too, hunt 2026-11-01)
             if self.pad_tracks():
                 tracks = self.slot_count

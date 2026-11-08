@@ -895,9 +895,37 @@ class StatusLine(ttk.Label):
         self._job = None
         self._full = kw.get("text", "")  # (the text before cutting it short to fit)
         self.reserve = 0  # pixels kept free at the right end (the red "Overloaded")
+        # (one piece of the usual text drawn in red: a label laid exactly over it, set_red; the text itself stays in
+        # the line, so cutting short with "…" and _full work as before)
+        self.red, self.red_piece = None, ""
         # (text longer than the line ends in "…", the whole of it in a tip; user 2026-10-19: no texts cut off)
         self.tip = Tooltip(self, "")
         self.bind("<Configure>", lambda e: self._put(self._full), add="+")
+
+    def set_red(self, label, piece):
+        """Draw piece (a part of the text, e.g. "(+1,447 off-range)") in red: label (a child of this line, red
+        foreground, same font) is laid over it wherever it is now; "" = none."""
+        self.red, self.red_piece = label, piece
+        self._place_red()
+
+    def _place_red(self):
+        lab, piece = self.red, self.red_piece
+        if lab is None or not lab.winfo_exists():
+            return
+        full, shown = self._full, str(super().cget("text"))
+        at = full.find(piece) if piece else -1
+        if at < 0 or not shown.startswith(full[:at + len(piece)]):  # (not there, or cut off by the "…")
+            lab.place_forget()
+            return
+        try:
+            p = self.cget("padding")
+            pad = int(str(p[0] if isinstance(p, (tuple, list)) else p).split()[0])
+        except (ValueError, IndexError, TypeError, tk.TclError):
+            pad = 0
+        f = tkfont.Font(font=self.cget("font") or "TkDefaultFont")
+        if str(lab.cget("text")) != piece:
+            lab.configure(text=piece)
+        lab.place(x=pad + f.measure(full[:at]), rely=0.5, anchor="w")
 
     def configure(self, cnf=None, **kw):
         if isinstance(cnf, dict) and "text" in cnf:
@@ -923,6 +951,7 @@ class StatusLine(ttk.Label):
         shown = shortened(self, self._full, self.reserve)
         self.tip.set_text(self._full if shown != self._full else "")  # (the tip: the whole text when it's cut)
         super().configure(text=shown)
+        self._place_red()
 
     def show(self, text):
         """The line's usual text: shown now, or when the message on it is done."""

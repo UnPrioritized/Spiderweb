@@ -451,6 +451,12 @@ class SettingsWindow(tk.Toplevel):
         f.row(tr("settings.keep_opacity"), row, tip=tr("settings.keep_opacity_tip"))
         self.opacity_label = f.page.grid_slaves(row=f.r - 1, column=0)[0]  # (Form.row's name label)
         Scrub(app, [(e, self.opacity_var, took)], (1, 10, 1), lo, hi, label=self.opacity_label, no_undo=True)
+
+        def wrapped():  # ("Wrap them around", user 2026-11-08: exports, playback and Domino copies; App.outgoing)
+            app.offrange_changed()
+            app.schedule_autosave()
+        self.wrap_tick = f.row(None, self.tick(f.page, "settings.wrap_offrange", app.wrap_offrange, wrapped))
+        Tooltip(self.wrap_tick, tr("settings.wrap_offrange_tip"))
         self.sync_keep()
 
     def sync_keep(self):
@@ -464,6 +470,7 @@ class SettingsWindow(tk.Toplevel):
         on = room and app.keep_offrange.get()
         self.opacity_box.state(["!disabled"] if on else ["disabled"])
         self.opacity_label.state(["!disabled"] if on else ["disabled"])
+        self.wrap_tick.state(["!disabled"] if on else ["disabled"])
 
     def build_file_link(self, f):
         """"Open .spwb files with Spiderweb" (14, user 2026-10-29): Windows told that double-clicking a .spwb opens

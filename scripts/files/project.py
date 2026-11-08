@@ -667,6 +667,7 @@ class ProjectFiles:
                               "space_keys": self.space_keys.get(), "space_bars": self.space_bars.get(),
                               "keep_offrange": self.keep_offrange.get(),
                               "offrange_opacity": self.offrange_opacity.get(),
+                              "wrap_offrange": self.wrap_offrange.get(),
                               "live": (getattr(getattr(self, "stir_window", None), "drawing", None)
                                        or {"live": self.live.get()})["live"],  # (a Stir area being drawn turned
                               # Live shape off for a while: the user's own tick is saved, hunt 11-04 4)
@@ -889,6 +890,7 @@ class ProjectFiles:
                 v = win.get(key)
                 getattr(self, key).set(v if v in steps and not isinstance(v, bool) else 0)
             self.keep_offrange.set(win.get("keep_offrange") is True)
+            self.wrap_offrange.set(win.get("wrap_offrange") is True)
             from files.settings import OFFRANGE_OPACITY
             from roll.roll_draw import OFF_FADE
             v = win.get("offrange_opacity")
@@ -1243,16 +1245,17 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), tr("load.tempo_damaged", tracks=", ".join(
                 str(t.number + 1) for t in lm.mf.damaged()[:10])), parent=self)
             return
-        notes, cc, why, own = self.rendered[:0], {}, None, []
+        out = self.outgoing()  # (+ wrapped kept notes)
+        notes, cc, why, own = out[:0], {}, None, []
         written = len(self.file_rows())  # (the file's tracks written: a part = one more, removed ones fewer)
         if written > MAX_TRACKS + 1:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=written,
                                                               most=MAX_TRACKS + 1), parent=self)
             return
-        if len(self.rendered) or self.own_written():  # (own tracks without notes are written too)
+        if len(out) or self.own_written():  # (own tracks without notes are written too)
             why = ("load.shapes_damaged" if lm.mf.damaged() or M_CUT in lm.mf.marks else
                    "load.shapes_format" if lm.mf.format > 1 or M_RMID in lm.mf.marks else None)
-            tracks = len(track_slots(self.rendered, self.pad_tracks())) + len(self.own_written())
+            tracks = len(track_slots(out, self.pad_tracks())) + len(self.own_written())
             if why is None and written + tracks > MAX_TRACKS + 1:
                 messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=written + tracks,
                                                                   most=MAX_TRACKS + 1), parent=self)
@@ -1262,13 +1265,13 @@ class ProjectFiles:
                                            icon="warning", parent=self):
                     return
             else:
-                if not ask_big(self, "midi", len(self.rendered)):
+                if not ask_big(self, "midi", len(out)):
                     return
-                if long_silences(self.rendered) and not messagebox.askokcancel(
+                if long_silences(out) and not messagebox.askokcancel(
                         tr("project.spiderweb"), tr("project.long_silences", ppq=lm.ppq, beats=MAX_DELTA // lm.ppq),
                         icon="warning"):
                     return
-                notes, cc = self.rendered.copy(), self.cc_messages(lm.ppq, self.read_project()[1])
+                notes, cc = out.copy(), self.cc_messages(lm.ppq, self.read_project()[1])
                 own = [dict(t) for t in self.own_written()]
         targets = []
         if retimed and tempo_new(lm, self.tempo):  # (signatures changed alone: the tempo stays as it is, no question)
@@ -1291,7 +1294,7 @@ class ProjectFiles:
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
                                  "plan": None, "step": "load.exporting", "hits": 0, "tracks": 0,
                                  # (the track list's order: Remove overlaps' emptied tracks still counted)
-                                 "filled": self.filled_slots(self.rendered), "least": self.least_tracks()}
+                                 "filled": self.filled_slots(out), "least": self.least_tracks()}
         use10, pad = self.picture_use10, self.pad_tracks()
         # (the extracted notes as they are NOW: an undo / Extract while it runs changes nothing in it, hunt
         # 2026-10-25; the shapes left out = nothing hidden either, the file as it was)
@@ -1528,15 +1531,16 @@ class ProjectFiles:
         except ValueError as e:
             messagebox.showerror(tr("project.spiderweb"), str(e))
             return
-        if not len(self.rendered):
+        out = self.outgoing()  # (+ wrapped kept notes)
+        if not len(out):
             messagebox.showerror(tr("project.spiderweb"),
                                  tr("project.no_notes_yet_draw_something_inside", keys=self.keys - 1))
             return
-        tracks = len(track_slots(self.rendered, self.pad_tracks(), self.least_tracks())) + len(self.with_file_tracks())
+        tracks = len(track_slots(out, self.pad_tracks(), self.least_tracks())) + len(self.with_file_tracks())
         if tracks > MAX_TRACKS:
             messagebox.showerror(tr("project.spiderweb"), tr("project.too_many_tracks", tracks=tracks, most=MAX_TRACKS))
             return
-        if not ask_big(self, "midi", len(self.rendered)):
+        if not ask_big(self, "midi", len(out)):
             return
         path = output_path(self.pvar["output"].get())
         if os.path.exists(path) and not messagebox.askyesno(  # (asked like the Output file dialog does)
@@ -1544,7 +1548,7 @@ class ProjectFiles:
                                                   basename=os.path.basename(path)),
                 icon="warning", default="no"):
             return
-        if long_silences(self.rendered) and not messagebox.askokcancel(
+        if long_silences(out) and not messagebox.askokcancel(
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
         cc = self.cc_messages(ppq, bpm)
@@ -1558,9 +1562,9 @@ class ProjectFiles:
         channels = tracks  # (the tracks written, in every mode: pastes / your tracks make several in Single too)
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
-        if (self.rendered[:, 2] > 127).any():
+        if (out[:, 2] > 127).any():
             note += tr("project.it_has_keys_above_127_256")
-        if slot_ports(auto_count(self.rendered[:, 4]), cc, self.picture_use10):  # (as write_midi decides)
+        if slot_ports(auto_count(out[:, 4]), cc, self.picture_use10):  # (as write_midi decides)
             note += tr("project.ports_midi")
         mixed = self.track_list.mixed_note()  # (tracks holding several channels: no longer one each, PLAN #11 E1)
         note += mixed + self.tempo_notes(plan) + self.cc_note(cc, True)
@@ -1593,7 +1597,7 @@ class ProjectFiles:
         """(notes, cc, file_plan) for the MIDI file: the Tempo pane's changes, notes and CC messages in Keep timing
         parts moved to the ticks that keep their time (notes/tempo_file.py). notes: the ones going out (default:
         every note); upto: only the ticks up to there count (Copy to Domino: the song up to the copy's end)."""
-        notes = self.rendered if notes is None else notes
+        notes = self.outgoing() if notes is None else notes  # (+ wrapped kept notes: App.outgoing)
         # (Hz basses with finer gates: inside Keep timing parts drawn faster, made again on the file's ticks after
         # the other notes lay them out, hz_fine.py)
         fine = fine_owners(self.shapes) if len(notes) else []
@@ -1768,7 +1772,7 @@ class ProjectFiles:
             messagebox.showerror(tr("project.spiderweb"), str(e))
             return
         self.catch_up_notes(late=False)
-        notes = self.rendered
+        notes = self.outgoing()  # (+ wrapped kept notes)
         high = int((notes[:, 2] > 127).sum()) if self.keys > 128 else 0  # (256 keys: Domino only has 128)
         mod = high and self.domino256.get()  # (kept: only Domino's 256 keys mod opens them)
         if not len(notes) or high == len(notes) and not mod:
@@ -1929,10 +1933,11 @@ class ProjectFiles:
         shapes copied, [] = all), "heard" (first start, last end in beats), "time" (the time selection's (start,
         end) in file ticks, or None)}; None when the track list's boxes hold none of Spiderweb's notes."""
         self.catch_up_notes(late=False)  # (a shape dragged in a big project: its notes wait for the mouse to rest)
-        notes = self.rendered
         boxed = self.list_boxed()
         if boxed is not None and not boxed.any():
             return None
+        # (+ wrapped kept notes, App.outgoing; the track list's boxes are worked out on the notes as shown)
+        notes = base = self.rendered if boxed is not None else self.outgoing()
         sels = sorted({int(i) for i in np.unique(notes[boxed, 5])}) if boxed is not None else sorted(self.sels)
         only = set(sels) if sels else None
         time, by_time = None, boxed is not None or (bool(sels) and self.time_picked())
@@ -1973,7 +1978,7 @@ class ProjectFiles:
             # a few ticks off from Export MIDI, hunt 2026-10-24)
             lines = bar_ticks(self.tempo, ppq, upto)
             upto = int(lines[np.searchsorted(lines, upto)]) if upto < lines[-1] else upto
-            timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), upto=upto)
+            timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), notes=base, upto=upto)
             cc = timed_ticks(plan, notes[:0], cc)[1]  # (the notes as the file has them: finer Hz basses too)
             if boxed is not None and len(timed) == len(boxed):
                 notes = timed[boxed]

@@ -226,7 +226,8 @@ class Playback:
         """Where playing stops: one beat after the last note ends (a loaded MIDI's too; or after the play line if
         already past it), rounded up to the next beat line, whatever the time signature (user 2026-11-03: a
         quarter bar was half a beat in 2/4)."""
-        last = (int(self.rendered[:, 1].max()) if len(self.rendered) else 0) / ppq
+        out = self.outgoing()  # (+ wrapped kept notes)
+        last = (int(out[:, 1].max()) if len(out) else 0) / ppq
         if self.loaded is not None:
             last = max(last, self.loaded.end / ppq)
         return float(math.ceil(max(last, start) + 1.0 - 1e-9))
@@ -411,7 +412,8 @@ class Playback:
         # (pasted notes' CCs too, hunt 2026-10-22: as the files have them; their channels are kept for them already)
         pasted = self.cc_messages(ppq, bpm, {i for i, sh in enumerate(self.shapes) if "cc" in sh}) \
             if any("cc" in sh for sh in self.shapes) else {}
-        heard = self.track_list.unmuted(self.rendered)  # (tracks muted in the track list: not played)
+        # (tracks muted in the track list: not played; + wrapped kept notes, App.outgoing)
+        heard = self.track_list.unmuted(self.outgoing())
         if not per_shape and not any(pasted.values()):
             return heard, {}, 0
         ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO, AHEAD) else 0
@@ -697,12 +699,11 @@ class Playback:
 
     def place_status_marks(self):
         """The texts at the status line's right end, right to left: Rendered ahead's buffer, red "Overloaded",
-        orange "Slowed to", red "+n off-range" (App.show_offrange); a long status message stops short of them with
-        "…" instead of running under them."""
+        orange "Slowed to"; a long status message stops short of them with "…" instead of running under them. (The
+        red off-range count sits after the note count instead: App.update_status.)"""
         free, first = 0, True
         for label, text in ((self.buffer_label, self.buffer_text), (self.overload_label, self.overload_text),
-                            (self.slowed_label, self.slowed_text),
-                            (self.offrange_label, getattr(self, "offrange_text", ""))):
+                            (self.slowed_label, self.slowed_text)):
             if text:
                 label.place(relx=1.0, rely=0.5, anchor="e", x=-6 - free)
                 free += label.winfo_reqwidth() + (18 if first and label is not self.buffer_label else 12)
