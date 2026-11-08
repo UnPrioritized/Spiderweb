@@ -28,7 +28,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
-                          split_overlaps,
+                          split_overlaps, heard_way,
                           track_ids,
                           auto_count, PORTS, pasted_notes, edge_made, past_edges, SPACE_KEYS,
                           off_part)
@@ -561,6 +561,13 @@ def in_track(notes, slots, owner, fix, way="stretch"):
     rows = np.zeros((len(notes), 6), np.int64)
     rows[:, :4], rows[:, 5], rows[:, 4] = notes, owner, slots
     return fix_rows(rows, way) if fix else rows
+
+
+def as_heard(sh, mode, rule):
+    """sh as its notes are made in this Channels mode: a notes shape whose own overlaps the mode fixes carries the
+    way ("_heard", engine.heard_way / heard_notes), so it's made, kept and looked up apart from the other modes."""
+    way = heard_way(sh, mode, rule)
+    return dict(sh, _heard=way) if way else sh
 
 
 def fix_rows(rows, way="stretch"):
@@ -2021,6 +2028,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     "later": bool(self.multi_later.get()), "own": own, "files": files}
         return None
 
+    def heard_rule(self):
+        """overlap_rule's way + across only (quick: asked for every notes shape whose notes are made)."""
+        mode = self.channel_mode.get()
+        if mode == "single":
+            return {"way": "split" if self.single_split.get() else "stretch"}
+        if mode == "auto" and self.multi_cut.get():
+            return {"across": True, "way": "stretch" if self.multi_stretch.get() else "split"}
+        return None
+
     def sync_overlap_rows(self):
         """Single's split around row only under Single channel; Multi's who wins + way only once Remove overlaps is
         ticked (only on a change: grid_shown's rule)."""
@@ -2180,6 +2196,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             sh = recolour_alone(one_voice(sh))  # Domino paste keeps its tracks, so its Recolour stays)
         elif "recolour" in sh:  # (a colour set holds 16 with channel 10 used)
             sh = with_most(sh, self.all16())
+        if "notes" in sh:  # (its own overlaps fixed as shown before any tool works on them: engine.heard_way)
+            sh = as_heard(sh, self.channel_mode.get(), self.heard_rule())
         keys = self.keys if keys is None else keys
         key = (shape_key(sh), self.ppq, keys)
         if not edges and keys == self.keys and past_edges(sh, keys, self.ppq) is not None:
@@ -2917,6 +2935,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
+        heard = (self.channel_mode.get(), self.heard_rule())
 
         def notes_tracks(sh, keys=None, edges=True):
             if job["stop"]:
@@ -2925,6 +2944,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 sh = recolour_alone(one_voice(sh))
             elif "recolour" in sh:
                 sh = with_most(sh, wide)
+            if "notes" in sh:  # (as App.notes_cache_key)
+                sh = as_heard(sh, *heard)
             keys = key[2] if keys is None else keys
             k = (shape_key(sh), key[1], keys)
             if not edges and keys == key[2] and past_edges(sh, keys, key[1]) is not None:

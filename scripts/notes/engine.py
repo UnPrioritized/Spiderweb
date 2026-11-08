@@ -56,7 +56,7 @@ from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, for
 from notes.custom import ROUND, frame_upright, notes_resampled, pack_notes, path_colours
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
-from notes.mask import clean_mask
+from notes.mask import clean_mask, is_mask
 from notes.passengers import check_cc
 from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
@@ -1037,6 +1037,57 @@ def pasted_notes(sh):
         "picture_notes" not in sh
 
 
+def heard_way(sh, mode, rule=None):
+    """How the Channels mode fixes a notes shape's OWN overlaps on each of its tracks ("stretch" / "split"), or None
+    when it keeps them: Single channel; Multi for notes Spiderweb made, or any with Remove overlaps; never As drawn,
+    Sustain, held notes, pictures, masks. The notes are made so (sh["_heard"], heard_notes) before every tool works
+    on them (user 2026-11-08: Glue, note tool pages, Recolour, flips work on the notes AS SHOWN; a long quiet note
+    under a loud one shows loud to the long note's end in Single channel)."""
+    if (mode == "raw" or "notes" not in sh or "picture" in sh or "picture_notes" in sh or is_mask(sh)
+            or sh.get("held") is True or is_sustained(sh)):
+        return None
+    rule = rule or {}
+    if mode == "auto" and pasted_notes(sh) and not rule.get("across"):
+        return None
+    return rule.get("way") or "stretch"
+
+
+_FREE = {}  # id(a big stored notes text) -> (it, True): its notes have no overlaps of their own (heard_notes)
+
+
+def heard_notes(sh, notes, tracks):
+    """A notes shape's notes with its own overlaps on each track fixed as sh["_heard"] says (heard_way; Single's
+    rule: the later start wins, cut + stretch or split around). None / no overlaps: as they are. A big pasted text
+    found without overlaps is remembered (moved / stretched / cut copies of it never get any)."""
+    way = sh.get("_heard")
+    if not way or len(notes) < 2 or np.ndim(notes) != 2 or np.shape(notes)[1] != 4:
+        return notes, tracks
+    text = sh.get("notes")
+    big = isinstance(text, str) and len(text) > 10_000
+    if big:
+        got = _FREE.get(id(text))
+        if got is not None and got[0] is text:
+            return notes, tracks
+    n = np.asarray(notes, np.int64)
+    who = np.zeros(len(n), np.int64) if tracks is None else unique_inverse(np.asarray(tracks, np.int64).ravel())[1]
+    o = key_sort(who * 256 + n[:, 2], n[:, 0])
+    same = (who[o[1:]] == who[o[:-1]]) & (n[o[1:], 2] == n[o[:-1], 2])
+    if not (same & (n[o[1:], 0] < n[o[:-1], 1])).any():
+        if big:
+            if len(_FREE) > 64:
+                _FREE.clear()
+            _FREE[id(text)] = (text, True)
+        return notes, tracks
+    rows = np.zeros((len(n), 6), np.int64)
+    rows[:, :4], rows[:, 4] = n[:, :4], who
+    rows = split_overlaps(rows) if way == "split" else resolve_overlaps(rows)
+    out = np.ascontiguousarray(rows[:, :4])
+    if tracks is None:
+        return out, None
+    ids = unique_inverse(np.asarray(tracks, np.int64).ravel())[0]
+    return out, ids[rows[:, 4]]
+
+
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)
 _warming = threading.local()
 
@@ -1146,7 +1197,8 @@ def fx_notes(sh, ppq, keys, get):
     if is_pasted_flipped(sh) or is_gate_flipped(sh):  # (each run on a key mirrored inside itself, gateflip.py)
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
-    return with_glue(*kind_notes_tracks(sh, ppq, keys), sh, ppq)
+    # (a notes shape's own overlaps fixed as the Channels mode shows them, before glue and every tool: heard_way)
+    return with_glue(*heard_notes(sh, *kind_notes_tracks(sh, ppq, keys)), sh, ppq)
 
 
 _held_wholes = {}  # id(whole's notes) -> (them, (sustain, ppq), held(...)): held_piece's
