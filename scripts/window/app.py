@@ -3415,8 +3415,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 box = glue_box(np.concatenate(cached_arrays(sh)))
                 for area in areas:
                     shares = glue_shares(area, box)
-                    if shares:
-                        sh["glue"] = glue_added(sh.get("glue"), shares)
+                    if shares:  # (this Glue's first box: a pass of its own on what earlier glue left)
+                        sh["glue"] = glue_added(sh.get("glue"), shares, sh.get("glue") == was)
             # (what this glue added is done after the pages there are now, like the last thing done; earlier glue
             # keeps its place, shapes the box missed stay as they were: hunt 2026-11-07)
             fx = glue_after(sh.get("fx"), sh.get("glue"), was, not areas)

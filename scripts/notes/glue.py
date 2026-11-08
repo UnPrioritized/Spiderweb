@@ -4,7 +4,12 @@ of boxes [u0, v0, u1, v1] as shares of the shape's own box (glue_box: 0..1 acros
 they move, stretch and flip with it.
 
 A note is glued when its middle is in a box and its key row too. Notes with a gap between them (even 1 tick) stay
-apart; the glued note keeps the first note's velocity. Notes of different colours (tracks) never glue together."""
+apart; the glued note keeps the first note's velocity. Notes of different colours (tracks) never glue together.
+
+EACH GLUE WORKS ON THE NOTES AS THEY ARE WHEN USED: a box with a 5th number 1 ([u0, v0, u1, v1, 1], NEW) starts a
+pass of its own on the notes the boxes before it left (a long note glued by an earlier box joins only when its own
+middle is in the later box). Boxes without it (old files, the other boxes of one Glue) glue in one pass with the
+boxes before them, so old projects keep their notes."""
 
 import math
 
@@ -20,12 +25,23 @@ def clean_glue(g):
     out = []
     for b in g:
         try:
-            u0, v0, u1, v1 = (float(x) for x in b)
+            u0, v0, u1, v1 = (float(x) for x in b[:4])
+            apart = len(b) == 5 and b[4] == 1 and not isinstance(b[4], bool)
         except (TypeError, ValueError):
             continue
-        if all(map(math.isfinite, (u0, v0, u1, v1))) and u0 != u1 and v0 != v1:
-            out.append([min(u0, u1), min(v0, v1), max(u0, u1), max(v0, v1)])
+        if len(b) in (4, 5) and all(map(math.isfinite, (u0, v0, u1, v1))) and u0 != u1 and v0 != v1:
+            out.append([min(u0, u1), min(v0, v1), max(u0, u1), max(v0, v1)] + ([1] if apart else []))
     return out or None
+
+
+def passes(glue):
+    """A list of glue boxes cut into the passes done one after another (a box marked apart starts one)."""
+    out = []
+    for b in glue:
+        if not out or (len(b) > 4 and b[4]):
+            out.append([])
+        out[-1].append(b)
+    return out
 
 
 def glue_box(path):
@@ -55,11 +71,12 @@ def for_part(glue, whole, part):
         return glue
     b0, p0, b1, p1 = whole
     out = []
-    for u0, v0, u1, v1 in glue:
+    for g in glue:
+        u0, v0, u1, v1 = g[:4]
         area = (b0 + u0 * (b1 - b0), p0 + v0 * (p1 - p0), b0 + u1 * (b1 - b0), p0 + v1 * (p1 - p0))
         shares = to_shares(area, part)
         if shares:
-            out.append(shares)
+            out.append(shares + g[4:])
     return out or None
 
 
@@ -67,20 +84,22 @@ ALL = [-1e6, -1e6, 1e6, 1e6]  # (a box over everything: glue on all of it kept a
 # have a place of its own among the note tool pages, hunt 2026-11-07)
 
 
-def added(glue, shares):
+def added(glue, shares, apart=True):
     """The shape's glue with one more box (shares True: everything). Glued all over before: that as a box (ALL)
-    first, the new box after it (it may be done at a later place, fx.glue_after)."""
+    first, the new box after it (it may be done at a later place, fx.glue_after). apart: the box starts a pass of
+    its own on what the earlier boxes left (a new Glue; False = one more box of the same Glue)."""
     if shares is True:
         return True
-    return ([ALL] if glue is True else glue or []) + [shares]
+    old = [ALL] if glue is True else glue or []
+    return old + [list(shares) + ([1] if apart and old else [])]
 
 
 def flipped(glue, sideways):
     if not isinstance(glue, list):
         return glue
     if sideways:
-        return [[1 - u1, v0, 1 - u0, v1] for u0, v0, u1, v1 in glue]
-    return [[u0, 1 - v1, u1, 1 - v0] for u0, v0, u1, v1 in glue]
+        return [[1 - b[2], b[1], 1 - b[0], b[3]] + b[4:] for b in glue]
+    return [[b[0], 1 - b[3], b[2], 1 - b[1]] + b[4:] for b in glue]
 
 
 def turned(glue, clockwise):
@@ -88,8 +107,8 @@ def turned(glue, clockwise):
     if not isinstance(glue, list):
         return glue
     if clockwise:
-        return [[v0, 1 - u1, v1, 1 - u0] for u0, v0, u1, v1 in glue]
-    return [[1 - v1, u0, 1 - v0, u1] for u0, v0, u1, v1 in glue]
+        return [[b[1], 1 - b[2], b[3], 1 - b[0]] + b[4:] for b in glue]
+    return [[1 - b[3], b[0], 1 - b[1], b[2]] + b[4:] for b in glue]
 
 
 def apply_glue(a, glue, box, ppq, tracks):
@@ -97,13 +116,20 @@ def apply_glue(a, glue, box, ppq, tracks):
     notes after the glue, in the same order (a glued note where its first note was)."""
     if not len(a) or not glue:
         return a
+    if glue is not True:
+        steps = passes(glue)
+        if len(steps) > 1:  # (each Glue on what the ones before it left)
+            for boxes in steps:
+                a = apply_glue(a, boxes, box, ppq, tracks)
+            return a
     if glue is True:
         inside = np.ones(len(a), bool)
     else:
         b0, p0, b1, p1 = box
         mid = (a[:, 0] + a[:, 1]) / 2 / ppq
         inside = np.zeros(len(a), bool)
-        for u0, v0, u1, v1 in glue:
+        for g in glue:
+            u0, v0, u1, v1 = g[:4]
             t0, t1 = b0 + u0 * (b1 - b0), b0 + u1 * (b1 - b0)
             k0, k1 = p0 + v0 * (p1 - p0), p0 + v1 * (p1 - p0)
             inside |= (mid >= t0 - 1e-9) & (mid <= t1 + 1e-9) & (a[:, 2] >= k0 - 1e-6) & (a[:, 2] <= k1 + 1e-6)
