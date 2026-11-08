@@ -1410,7 +1410,10 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
     if tool == "claw":
         return with_claw(notes, tracks, step["cfg"], ppq)
     if tool == "strum":
-        return with_strum(notes, tracks, step["cfg"], ppq)
+        cfg = step["cfg"]
+        if cfg and sh.get("_rounds") and tracks is not None and cfg.get("edges") == "wrap":  # ("Repeated colours
+            cfg = dict(cfg, rounds=True)  # get new channels": each trip round the block = later rounds, strum.wrapped)
+        return with_strum(notes, tracks, cfg, ppq)
     if tool == "trim":
         return _after(apply_trim, notes, tracks, step["cfg"], ppq)
     if tool == "vel":  # (over the shape's time, like its velocity line)

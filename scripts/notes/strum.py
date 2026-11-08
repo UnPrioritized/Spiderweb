@@ -188,7 +188,7 @@ def apply_strum(a, st, ppq):
     a[:, 1] = np.maximum(ne, ns + 1).astype(np.int64)
     if block is None:
         return a
-    return wrapped(a, *block) if edges == "wrap" else cut(a, *block)
+    return wrapped(a, *block, st.get("rounds", False)) if edges == "wrap" else cut(a, *block)
 
 
 def cut(a, lo, hi):
@@ -199,17 +199,26 @@ def cut(a, lo, hi):
     return a
 
 
-def wrapped(a, lo, hi):
+def wrapped(a, lo, hi, rounds=False):
     """The notes brought back inside lo .. hi: what is past one edge comes in at the other (a note across an edge is
-    cut in two; one as long as the block or longer fills it)."""
+    cut in two; one as long as the block or longer fills it). rounds ("Repeated colours get new channels", the last
+    column = colour + ROUND x its round, custom.ROUND): as if the block went on forever, a note brought in from j
+    blocks later is j x (the block's rounds) rounds later; its colour stays."""
     span = hi - lo
     length = a[:, 1] - a[:, 0]
-    s = lo + (a[:, 0] - lo) % span
+    trips = (a[:, 0] - lo) // span  # (blocks away: -1 = came from before the start)
+    s = a[:, 0] - trips * span
     full = length >= span
     s[full] = lo
     e = np.where(full, hi, s + length)
-    over = e > hi  # (across the end: the rest comes in at the start)
+    over = e > hi  # (across the end: the rest comes in at the start, from the block before)
     out = np.concatenate([a, a[over]])
     out[:len(a), 0], out[:len(a), 1] = s, np.minimum(e, hi)
     out[len(a):, 0], out[len(a):, 1] = lo, lo + (e[over] - hi)
+    if rounds and len(a):
+        from notes.custom import ROUND
+        lap = a[:, -1] // ROUND
+        laps = int(lap.max() - lap.min()) + 1  # (the rounds one block holds)
+        later = np.concatenate([-trips, -trips[over] - 1])
+        out[:, -1] += later * laps * ROUND
     return out
