@@ -1927,14 +1927,18 @@ class JoinSplit:
         2026-11-08: a long quiet note under a loud one shows loud to the long note's end in Single channel; cut there,
         the right piece went quiet): heard_overlaps."""
         # ("Keep notes made there": under key 0 / before beat 0 too, cut like the rest)
+        # (made as shown: its own overlaps fixed at the base, before Gate aware flip / pages, as App.notes_tracks
+        # does; fixed only afterwards, a gate flipped paste's runs came out mirrored from other notes, sweep 11-08)
+        from window.app import as_heard
+        made = as_heard(sh, self.channel_mode.get(), self.overlap_rule())
         if self.keeps_offrange() and past_edges(sh, self.keys, self.ppq) is not None:
-            got = whole_notes_tracks(sh, self.ppq, self.keys)
+            got = whole_notes_tracks(made, self.ppq, self.keys)
         else:
             (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
             if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
                 got = self.notes_tracks(sh)
             else:
-                got = shape_notes_tracks(sh, self.ppq, 256)
+                got = shape_notes_tracks(made, self.ppq, 256)
         return self.heard_overlaps(sh, *got)
 
     def heard_overlaps(self, sh, notes, tracks):
