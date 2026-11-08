@@ -71,7 +71,7 @@ def own_places(sh, rows, ppq, way=None):
     a, b = ((b0 + (rows[:, c] / t_all) * (b1 - b0) + v * (b2 - b0)) * ppq for c in (0, 1))
     start, end = np.rint(np.minimum(a, b)), np.rint(np.maximum(a, b))
     if way and len(rows) > 1:
-        return heard_places(sh, rows, start, end, way)
+        return heard_places(sh, rows, start, end, way, ppq)
     if is_pasted_flipped(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
         base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], np.arange(len(rows))]).astype(np.int64)
         got = mirrored_runs(base, None, True)[0]
@@ -79,14 +79,21 @@ def own_places(sh, rows, ppq, way=None):
     return start, end
 
 
-def heard_places(sh, rows, start, end, way):
+def heard_places(sh, rows, start, end, way, ppq):
     """own_places for a shape whose own overlaps are fixed as shown (engine.heard_notes, the same steps: fixed as
     unflipped when flipped sideways, then gate flipped runs mirrored): each stored note's (start, end) = the piece
     holding its own start (overlap hunt 2026-11-08: a flipped stretched note showed before its own start, and a line
     over it missed it). A note merged into another starting with it: that one's place."""
+    from notes.custom import block_notes
     from notes.engine import resolve_overlaps, split_overlaps
     n = len(rows)
     s, e = start.astype(np.int64), np.maximum(end.astype(np.int64), start.astype(np.int64) + 1)
+    try:  # (the very ticks the notes are made on: a tick off here changed a gate flip's runs, sweep 47903102)
+        made = block_notes(sh, ppq)
+    except Exception:  # noqa: BLE001 (anything odd: the worked-out places)
+        made = None
+    if made is not None and len(made) == n:
+        s, e = made[:, 0].astype(np.int64), np.maximum(made[:, 1].astype(np.int64), made[:, 0].astype(np.int64) + 1)
     pts = sh["pts"]
     back = pts[1][0] < pts[0][0]
     hi = int(e.max())
@@ -104,14 +111,14 @@ def heard_places(sh, rows, start, end, way):
     ps, pe = fs.copy(), fe.copy()
     ps[mine[:, 5]], pe[mine[:, 5]] = mine[:, 0], mine[:, 1]
     lost = np.setdiff1d(np.arange(n), mine[:, 5])
-    if len(lost):  # (merged into a note starting with it on its key + track: that one's piece)
+    partner = None
+    if len(lost):  # (merged into a note starting with it on its key + track: that one's place, set at the end)
         code = (mine[:, 0] * 256 + mine[:, 2]) * (int(who.max()) + 1) + mine[:, 4]
         order = np.argsort(code)
         q = (fs[lost] * 256 + rows[lost, 2]) * (int(who.max()) + 1) + who[lost]
         i = np.minimum(np.searchsorted(code[order], q), len(order) - 1)
         hit = code[order][i] == q
-        at = mine[order[i[hit]], 5]
-        ps[lost[hit]], pe[lost[hit]] = ps[at], pe[at]
+        partner = (lost[hit], mine[order[i[hit]], 5])
     if back:
         ps, pe = hi - pe, hi - ps
     else:
@@ -125,6 +132,8 @@ def heard_places(sh, rows, start, end, way):
         flip = mirrored_runs(base, None, True)[0]
         mark = idx >= 0
         ps[idx[mark]], pe[idx[mark]] = flip[mark, 0], flip[mark, 1]
+    if partner is not None:
+        ps[partner[0]], pe[partner[0]] = ps[partner[1]], pe[partner[1]]
     return ps.astype(float), pe.astype(float)
 
 
