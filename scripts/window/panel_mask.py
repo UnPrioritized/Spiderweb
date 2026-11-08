@@ -8,7 +8,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
-from notes.engine import OWN0, SHAPE_DEFAULTS, clean_shape, own_id
+from notes.engine import OWN0, SHAPE_DEFAULTS, clean_shape, keeps_laps, own_id
 from notes.sustain import is_sustained
 from notes.passengers import carried, track_map
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
@@ -357,6 +357,8 @@ class MaskPanel:
                                                     self.picture_use10)}
         if any(is_sustained(self.shapes[o]) for o in np.unique(owners).tolist()):
             new["held"] = True
+        if any(keeps_laps(self.shapes[o]) for o in np.unique(owners).tolist()):
+            new["paste_laps"] = True  # (a Domino paste's overlaps stay as in the preview, Multi too: overlap hunt 11-08)
         sh = clean_shape(new)
         if multi and not picture:
             sh["own_slots"] = [float(v) for v in sh["pts"][0]]

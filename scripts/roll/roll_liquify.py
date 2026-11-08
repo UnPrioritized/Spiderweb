@@ -488,7 +488,7 @@ class LiquifyBrush:
         channels may move with it): its notes are made once first, then this."""
         app = self.app
         sh = job["sh"]
-        from notes.engine import is_gate_flipped, is_pasted_flipped, made_from, past_edges, pasted_notes
+        from notes.engine import is_gate_flipped, is_pasted_flipped, keeps_laps, made_from, past_edges
         from notes.mask import is_mask
         from notes.sustain import is_sustained
         if (self._img is None or self._tiles is None or app.channel_mode.get() != "auto" or len(app.sels) != 1
@@ -518,7 +518,7 @@ class LiquifyBrush:
         rule = rule_of(with_most(dict(sh, recolour=base), app.all16())["recolour"])
         if rule.get("stir"):
             rule["ppq"] = app.ppq
-        held_ = is_sustained(sh) or sh.get("held") is True or pasted_notes(sh)
+        held_ = is_sustained(sh) or sh.get("held") is True or keeps_laps(sh)  # (as engine.fx_notes')
         gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
         got = before_liquify(notes, tracks, rule, held_, gate, own)
         if got is None:

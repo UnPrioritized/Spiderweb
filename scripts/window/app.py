@@ -28,7 +28,7 @@ from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
-                          split_overlaps, heard_way,
+                          split_overlaps, heard_way, keeps_laps,
                           track_ids,
                           auto_count, PORTS, pasted_notes, edge_made, past_edges, SPACE_KEYS,
                           off_part)
@@ -449,7 +449,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                               for sh in shapes],
                              # (a Domino paste keeps its own overlaps outside Single channel: user 2026-10-30; not
                              # with Remove overlaps ticked, user 2026-11-06)
-                             [is_sustained(sh) or sh.get("held") is True or mode == "auto" and pasted_notes(sh)
+                             [is_sustained(sh) or sh.get("held") is True or mode == "auto" and keeps_laps(sh)
                               and not across for sh in shapes],
                              backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
@@ -518,7 +518,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch")
             laid[i] = {int(u): int(on[min(k, len(ids) - 1)]) for k, u in enumerate(tracks.tolist())}
         # (a Domino paste keeps its own overlaps in Multi channel too, as copied: user 2026-10-30, round trip)
         fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True and not (
-            mode == "auto" and pasted_notes(sh))
+            mode == "auto" and keeps_laps(sh))
         if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
             together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
         else:

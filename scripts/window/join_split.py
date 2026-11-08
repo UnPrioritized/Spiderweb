@@ -541,6 +541,10 @@ class JoinSplit:
                            "box": [list(p) for p in new[0]["pts"]]}  # (turned / slanted since: the parts too)
         if self.keeps_offrange():  # ("Keep notes made there": the parts' notes past the edges merged too, for good)
             new[0]["merge"]["whole"] = True
+        from notes.engine import keeps_laps
+        if any(keeps_laps(self.shapes[i]) for i in pair):  # (a Domino paste's overlaps kept, Multi too: overlap hunt
+            for sh in new:                                  # 2026-11-08)
+                sh["paste_laps"] = True
         if updown:  # (up / down, user 2026-10-19: the leftovers' times, so a remake leaves them out)
             new[0]["merge"].update(way=way, slide=int(slide),
                                    spans=[[a / self.ppq, b / self.ppq] for a, b in spans_of(rest)])
@@ -1078,6 +1082,9 @@ class JoinSplit:
                 continue
             new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)
             new[i]["made"] = "plain"
+            from notes.engine import keeps_laps
+            if keeps_laps(sh):  # (a Domino paste's overlaps kept as they were, Multi too: overlap hunt 2026-11-08)
+                new[i]["paste_laps"] = True
             new[i]["name"] = tr("join_split.plain_name", name=self.shape_label(sh))
             if self.in_own_track(sh):
                 new[i].pop("own_slots", None)
@@ -1894,13 +1901,13 @@ class JoinSplit:
         """A pasted-notes shape's notes and tracks with its own overlaps on each track fixed as the Channels mode fixes
         them (Single channel; Multi channel only for notes Spiderweb made, or with Remove overlaps; never As drawn,
         Sustain or held notes), so cut pieces sound as before; else as they are."""
-        from notes.engine import pasted_notes
+        from notes.engine import keeps_laps
         from notes.sustain import is_sustained
         from window.app import fix_rows
         mode = self.channel_mode.get()
         rule = self.overlap_rule() or {}
         if (mode == "raw" or not len(notes) or is_sustained(sh) or sh.get("held") is True
-                or mode == "auto" and pasted_notes(sh) and not rule.get("across")):
+                or mode == "auto" and keeps_laps(sh) and not rule.get("across")):
             return notes, tracks
         notes = np.asarray(notes, np.int64)
         who = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)

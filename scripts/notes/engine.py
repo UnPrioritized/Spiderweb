@@ -467,6 +467,8 @@ def clean_shape(sh):
                 out["picture_notes"] = {"pal": list(pal) if ok else None}
             if sh.get("held") is True:
                 out["held"] = True
+            if sh.get("paste_laps") is True:  # (made from a Domino paste's notes: keeps their overlaps like it, keeps_laps)
+                out["paste_laps"] = True
             ex = clean_extract(sh.get("extract"))
             if ex:  # (Load MIDI's Extract: the loaded notes it took stay hidden while it's there, loaded.py)
                 out["extract"] = ex
@@ -1047,9 +1049,16 @@ def heard_way(sh, mode, rule=None):
             or sh.get("held") is True or is_sustained(sh)):
         return None
     rule = rule or {}
-    if mode == "auto" and pasted_notes(sh) and not rule.get("across"):
+    if mode == "auto" and keeps_laps(sh) and not rule.get("across"):
         return None
     return rule.get("way") or "stretch"
+
+
+def keeps_laps(sh):
+    """Notes keeping their own overlaps in Multi channel (without Remove overlaps): a Domino paste (pasted_notes), or
+    notes made from one by Apply mask / Gate sensitive merge / Fill gaps (sh["paste_laps"]; overlap hunt 2026-11-08,
+    user took A: Multi cut the paste's overlaps once copied, so Apply mask didn't sound like its preview)."""
+    return pasted_notes(sh) or sh.get("paste_laps") is True
 
 
 _FREE = {}  # id(a big stored notes text) -> (it, True): its notes have no overlaps of their own (heard_notes)
@@ -1113,7 +1122,7 @@ def fx_notes(sh, ppq, keys, get):
             return notes, tracks
         # (held: overlaps kept, not settled; a Domino paste keeps its own overlaps too, as with Recolour off
         # (Multi channel, user 2026-10-30; Single channel cuts them on its track afterwards anyway)
-        held_ = is_sustained(sh) or sh.get("held") is True or pasted_notes(sh)
+        held_ = is_sustained(sh) or sh.get("held") is True or keeps_laps(sh)
         gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
         rule = rule_of(sh["recolour"])
         if rule.get("stir"):  # (a stir round as seen counts beats: recolour.area_scales)
