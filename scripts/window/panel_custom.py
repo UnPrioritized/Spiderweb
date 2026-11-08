@@ -448,8 +448,12 @@ class CustomPanel:
         self.edge_mode_box.config(state="readonly" if outline and tgts[0].get("edge") else "disabled")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
         ids = {id(t) for t in tgts}
-        wanted = max([self.colours_wanted[i] for i, s in enumerate(self.shapes) if id(s) in ids
-                      and i < len(self.colours_wanted)] or [0])
+        self.stale_ok += 1  # (notes made in the background: the last count, never waited for; their take-in syncs again)
+        try:
+            had = self.colours_wanted
+        finally:
+            self.stale_ok -= 1
+        wanted = max([had[i] for i, s in enumerate(self.shapes) if id(s) in ids and i < len(had)] or [0])
         most = most_colours(self.all16())
         if wanted > most:
             self.colours_warn.config(text=tr("panel_custom.too_many_colours", n=wanted, most=most))

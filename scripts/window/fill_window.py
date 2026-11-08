@@ -16,6 +16,7 @@ class FillWindow(tk.Toplevel):
         self.withdraw()
         self.app = app
         self.seen = None  # what sync worked out the hint for
+        self.hold = False  # (Fill being done: the panel syncs on the way wait for its notes)
         app.fill_window = self
         self.title(tr("fill_gaps.title"))
         self.transient(app)
@@ -57,7 +58,10 @@ class FillWindow(tk.Toplevel):
         app = self.app
         way, same = self.way.get(), self.same.get()
         app.fill_way, app.fill_same = way, same
-        seen = (way, same, tuple(sorted(app.sels)), app.shapes_gen, len(app.shapes), id(app.rendered),
+        if self.hold or app._bg_notes:  # (Fill pressed / notes made in the background: worked out once they're in,
+            self.seen = None            # App.shapes_changed calls this again then; never made twice here)
+            return
+        seen =(way, same, tuple(sorted(app.sels)), app.shapes_gen, len(app.shapes), id(app.rendered),
                 app.channel_mode.get())  # (the notes made again: undo / redo, Channels, hunt 10-25)
         if seen == self.seen:  # (worked out already: big shapes, every panel sync)
             return
@@ -84,9 +88,14 @@ class FillWindow(tk.Toplevel):
         pass
 
     def fill(self):
+        self.sync()  # (a hint left for later while notes were made: Fill greyed or not by the notes now)
         if self.go.instate(["disabled"]):
             return
-        self.app.fill_gaps(self.way.get(), self.same.get())
+        self.hold = True
+        try:
+            self.app.fill_gaps(self.way.get(), self.same.get())
+        finally:
+            self.hold = False
         self.sync()
 
     def close(self):

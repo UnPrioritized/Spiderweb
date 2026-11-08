@@ -486,6 +486,10 @@ class ChopWindow(ToolWindow):
         if not hasattr(self, "info") or getattr(self, "late", None):
             return
         app = self.app
+        if app._bg_notes:  # (the notes being made in the background: counted once they're in, not made twice here)
+            if not getattr(self, "_count_job", None):
+                self._count_job = self.after(60, self._count_later)
+            return
         if not self.targets or self.at is None and self.cfg["pieces"]:  # (no pieces: its warning still shows)
             if self.info.cget("text"):
                 self.info.config(text="")
@@ -505,6 +509,12 @@ class ChopWindow(ToolWindow):
         empty = not self.cfg["pieces"]
         self.info.config(text=tr("chop.no_pieces") if empty else tr("chop.too_many") if stuck else
                          tr("chop.count", before=before, after=after), foreground=look.ERROR if stuck or empty else look.HINT)
+
+
+    def _count_later(self):
+        self._count_job = None
+        if self.winfo_exists():
+            self.show_count()
 
 
 open_chop = ChopWindow.open

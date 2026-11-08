@@ -730,13 +730,7 @@ class JoinSplit:
         """Why Fill gaps would do nothing for the selection (the window's hint, Fill greyed), or None: the notes as
         Fill gaps takes them (each shape's own, laid as in Multi channel, hunt 10-25)."""
         got = self.fill_targets()
-        key = (id(self.rendered), self.shapes_gen, self.channel_mode.get())
-        kept = getattr(self, "_fill_multi", None)
-        if kept and kept[0] == key:  # (outside Multi channel it's the whole project's notes again: once per change)
-            multi = kept[1]
-        else:
-            multi = self.multi_rendered()[1]
-            self._fill_multi = (key, multi)
+        multi = self.multi_kept()[1]
         rows = multi[np.isin(multi[:, 5], got)] if got else multi[:0]
         if not len(rows):
             return tr("fill_gaps.nothing")
@@ -787,7 +781,7 @@ class JoinSplit:
             heir["extract"] = clean_extract(extract_groups(heir.get("extract")) + extract_groups(lost))
         self.roll.cancel_draft()
         self.push_undo(name=tr("fill_gaps.undo"))
-        self.put_plain(new)
+        self.put_plain(new, in_place=True)
         if gone:
             self.unlink_groups(gone)
             for i in reversed(gone):
@@ -1029,7 +1023,7 @@ class JoinSplit:
         whole: the notes as laid in Multi channel in every mode (Fill gaps: Single channel's merging left out)."""
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
-        use10, multi = self.multi_rendered()
+        use10, multi = self.multi_kept() if whole else self.multi_rendered()  # (Fill gaps: the hint's already)
         shown = by_owner(multi if whole else self.rendered)  # (each shape's rows sliced out, not searched for:
         multi_of = shown if whole else by_owner(multi)       # thousands of shapes, hunt 10-25)
         new = {}
@@ -1125,6 +1119,15 @@ class JoinSplit:
         both = np.concatenate([rows, extra])
         return both[np.lexsort((both[:, 2], both[:, 0]))]
 
+    def multi_kept(self):
+        """multi_rendered, remembered until the notes / shapes / Channels change (outside Multi channel it's the
+        whole project's notes again: the Fill gaps hint and Fill itself share one)."""
+        key = (id(self.rendered), self.shapes_gen, self.channel_mode.get())
+        kept = getattr(self, "_fill_multi", None)
+        if not (kept and kept[0] == key):
+            kept = self._fill_multi = (key, self.multi_rendered())
+        return kept[1]
+
     def multi_rendered(self):
         """(slot numbering: channel 10 used, every note as in Multi channel): the shown notes in Multi channel, else
         worked out as if it were (each note's Multi channel slot kept too, for Multi channel later)."""
@@ -1168,8 +1171,10 @@ class JoinSplit:
             if key in kept:
                 new[i]["cut_of"] = key
 
-    def put_plain(self, new):
-        """plain_copies' shapes in place of the ones they were made of (no undo step: the caller's)."""
+    def put_plain(self, new, in_place=False):
+        """plain_copies' shapes in place of the ones they were made of (no undo step: the caller's). in_place: each
+        old shape's dict takes the new one's contents (the same shapes, so a big project's notes can be made in the
+        background: App.late_ok)."""
         laps = []  # (an Add between group: unlinked, user; each shape keeps its colour turn and its repeat, so with
         turns = between_turns(self.shapes, laps)  # "Repeated colours get new channels" it stays on its channels, hunt)
         gids = {group_of(self.shapes[i]) for i in new} - {None}
@@ -1182,7 +1187,12 @@ class JoinSplit:
         self.mark_cut_of(new)
         self.unlink_groups(sorted(new))
         for i, sh in new.items():
-            self.shapes[i] = sh
+            if in_place:
+                old = self.shapes[i]
+                old.clear()
+                old.update(sh)
+            else:
+                self.shapes[i] = sh
 
     def can_split_pieces(self, sh):
         """A joined curve with more than one piece / shape in it, a live shape that can go back to the shapes it was

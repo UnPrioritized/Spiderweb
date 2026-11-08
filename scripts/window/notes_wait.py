@@ -94,6 +94,19 @@ def view_widget(app, w):
     return False
 
 
+def pass_window(w):
+    """w is inside a window marked notes_pass (the note tool windows): its clicks / keys only change settings and
+    start new notes (which stops the ones being made), so they run at once; whatever reads the notes still waits
+    for them (late_attr)."""
+    for _ in range(12):
+        if w is None or isinstance(w, str):
+            return False
+        if getattr(w, "notes_pass", False):
+            return True
+        w = getattr(w, "master", None)
+    return False
+
+
 def event_key(e):
     """What tells one event from another (every binding of the same event sees the same)."""
     return tuple(getattr(e, k, None) for k in ("serial", "type", "time", "x_root", "y_root", "num", "keysym", "state"))
@@ -115,6 +128,8 @@ def _sort_event(app, e):
         return VIEW
     if kind in QUIET:
         return PASS
+    if pass_window(getattr(e, "widget", None)):
+        return VIEW if kind == "Motion" and not state & BUTTONS else PASS
     if kind == "Motion":
         return VIEW if not state & BUTTONS or view_widget(app, e.widget) and not app.roll.drag else WAIT
     if kind == "MouseWheel" or kind in ("ButtonPress", "ButtonRelease") and getattr(e, "num", 0) in (4, 5):
@@ -144,6 +159,8 @@ def sort_command(app, wrapper):
         return VIEW  # (a list's / canvas's scroll command telling its scrollbar where it is)
     if isinstance(w, tk.Tk):
         return PASS  # (variable traces, the window's close button: reading notes waits)
+    if pass_window(w):
+        return PASS
     return WAIT
 
 

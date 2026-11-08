@@ -198,6 +198,7 @@ class ToolWindow(tk.Toplevel):
     is taken) and show() (the widgets show self.cfg). put(key, value, done) = a setting changed."""
 
     KEY, ATTR, POS, DEFAULTS = "", "", "", {}
+    notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
 
     @classmethod
     def open(cls, app):
@@ -516,7 +517,7 @@ class ToolWindow(tk.Toplevel):
             fx = fn(copied(sh.get("fx") or []), self.at[i])
             self.put_fx(sh, fx)
         self.now = self.settings()
-        self.app.shapes_changed(now=True)
+        self.app.shapes_changed()  # (big project: in the background, preview)
         self.sync_tabs()
 
     @staticmethod
@@ -551,7 +552,7 @@ class ToolWindow(tk.Toplevel):
         self.now = self.settings()
         self.show()
         self.sync_tabs()
-        self.app.shapes_changed(now=True)
+        self.app.shapes_changed()  # (big project: in the background, preview)
 
     def retarget(self):
         """Work on the selected shapes, on a new page ("+")."""
@@ -654,9 +655,12 @@ class ToolWindow(tk.Toplevel):
                 sh["fx"] = fx
         self.now = self.settings()
         self.sync_tabs()
-        self.app.shapes_changed(now=True)
-        self.app.update_idletasks()  # (the piano roll redrawn now, so the time counts it)
+        app = self.app
+        app.shapes_changed()  # (a big project: the notes are made in the background, the window keeps answering)
+        app.update_idletasks()  # (the piano roll redrawn now, so the time counts it)
         self.took = time.perf_counter() - started
+        if app._bg_notes:  # (what a making takes: drags wait for the mouse to rest by it)
+            self.took = max(self.took, app._make_time + app._mask_time)
 
     def catch_up(self):
         """A preview left for later (preview): now."""
