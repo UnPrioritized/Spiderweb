@@ -153,6 +153,12 @@ pip install pillow
 ```
 On a Mac, or a Linux too old for the included fast code, `pip install numba` gets you that speed back (the first
 start then takes a minute while it gets ready).
+
+Which fast code runs, best first (Spiderweb picks by itself; results are the same either way, only the speed differs):
+1. **The included fast code** (`scripts/loops`): 64-bit Windows and Linux. The download (exe) always uses this.
+2. **Numba**, if you installed it: used when the included code can't load (Mac, older Linux). Spiderweb offers to
+   install it once in that case.
+3. **NumPy alone**: works everywhere, slowest on huge projects.
 With **PyNaCl** installed (`pip install pynacl`), the update popup can also download the new source zip and check its
 signature for you.
 
