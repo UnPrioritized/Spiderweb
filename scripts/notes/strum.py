@@ -15,9 +15,14 @@ End ("end" on): "end_time" beats: the ends come earlier; + = the last note struc
 "chop": every note is first cut wherever another note starts while it's held, so those pieces strum too.
 "alternate": every other chord strums the other way (single notes don't count, and never change).
 A note left with no length keeps 1 tick at its start.
-"keys": how many notes of a chord share each step (start, end and velocity alike), counted from the note struck
-first: groups of that many (1 = every note its own step)."""
+"keys" .. "keys_to": how many notes of a chord share each step (start, end and velocity alike), counted from the
+note struck first. One number (keys_to = keys): groups of that many (1 = every note its own step). A range: the group
+sizes change evenly along the chord, from keys at the note struck first towards keys_to at the last (smaller
+keys_to = shrinking): a step beginning at place x (0 = struck first) holds
+round(keys + (keys_to - keys) * min(1, x / (m - keys_to))) notes, m = the chord's notes (so a step beginning keys_to
+from the end holds keys_to); the last step holds what is left (as with one number)."""
 
+import functools
 import math
 
 import numpy as np
@@ -28,7 +33,7 @@ LIMITS = {"time": (-4.0, 4.0), "tension": (-100.0, 100.0), "vel": (-127.0, 127.0
 FLAGS = ("start", "preserve", "ahead", "end", "chop", "alternate")
 KEYS_MAX = 100_000  # (notes per step: more than any chord holds)
 STRUM_DEFAULTS = dict({k: 0.0 for k in LIMITS}, start=True, preserve=False, ahead=False, end=True, chop=False,
-                      alternate=False, keys=1)
+                      alternate=False, keys=1, keys_to=1)
 # beats: no note moves further from its chord (a steep tension over a big chord would go on forever, user; 1000 bars
 # of 4/4, user 2026-10-17: FL's own goes on until it breaks past ~1300 bars, leaving the rest of the chord behind)
 CAP = 4000
@@ -58,6 +63,7 @@ def clean_strum(c):
         if isinstance(c.get(key), bool):
             out[key] = c[key]
     out["keys"] = whole(c.get("keys"), 1)
+    out["keys_to"] = whole(c.get("keys_to"), out["keys"])  # (none: one number)
     if not (out["start"] and (out["time"] or out["vel"]) or out["end"] and out["end_time"]):
         return None
     return out
@@ -95,8 +101,28 @@ def chop(a):
 
 
 def groups(q, m, st):
-    """The step of the note q places from the one struck first, in a chord of m notes ("keys" notes a step)."""
-    return np.asarray(q) // st.get("keys", 1)
+    """The step of the note q places from the one struck first, in a chord of m notes ("keys" .. "keys_to" notes a
+    step: the docstring at the top)."""
+    a, b = st.get("keys", 1), st.get("keys_to", st.get("keys", 1))
+    q = np.asarray(q)
+    if a == b:
+        return q // a
+    m = np.broadcast_to(m, q.shape)
+    out = np.empty(q.shape, np.int64)
+    for size in np.unique(m):  # (a few chord sizes: each one's steps worked out once)
+        at = m == size
+        out[at] = np.searchsorted(range_starts(a, b, int(size)), q[at], "right") - 1
+    return out
+
+
+@functools.lru_cache(maxsize=256)
+def range_starts(a, b, m):
+    """Where each step of a keys range begins in a chord of m notes (places from the note struck first)."""
+    starts, x = [], 0
+    while x < m:
+        starts.append(x)
+        x += max(1, round(a + (b - a) * min(1.0, x / max(m - b, 1))))  # (the last whole step: keys_to)
+    return np.array(starts, np.int64)
 
 
 def apply_strum(a, st, ppq):
