@@ -824,10 +824,39 @@ def turned_notes(sh, ppq):
     if abs(det) < 1e-12 or not len(rows):
         return np.zeros((0, 5), np.int64)
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
+    # (notes alike in start, end and key: sampled once, each copy given the same pieces with its own velocity and
+    # track; millions of copies were a layer each, a project with a small zip bomb never opened)
+    o = np.lexsort((rows[:, 1], rows[:, 0], rows[:, 2]))
+    srt = rows[o]
+    new = np.ones(len(srt), bool)
+    new[1:] = (srt[1:, :3] != srt[:-1, :3]).any(axis=1)
+    if new.all():
+        return _layered(sh, rows, t_all, k_all, ppq)[0]
+    firsts = np.flatnonzero(new)
+    out, src = _layered(sh, srt[firsts], t_all, k_all, ppq)
+    count = np.diff(np.append(firsts, len(srt)))
+    rep = count[src]
+    out = np.repeat(out, rep, axis=0)
+    at = np.repeat(firsts[src], rep) + np.arange(len(out)) - np.repeat(np.cumsum(rep) - rep, rep)
+    out[:, 3:5] = srt[at, 3:5]
+    # (in the order sampling every layer of all the notes gave: by layer, then key, then start)
+    layer = np.zeros(len(rows), np.int64) if (lay := overlap_layers(rows)) is None else lay
+    return out[np.lexsort((out[:, 0], out[:, 2], layer[o][at]))]
+
+
+def _layered(sh, rows, t_all, k_all, ppq):
+    """turned_notes' pieces of these notes (no two alike) and which note each came from: in layers when some
+    overlap on one key."""
     layer = overlap_layers(rows)
     if layer is None:
-        return _sampled(sh, rows, t_all, k_all, ppq)
-    return np.concatenate([_sampled(sh, rows[layer == k], t_all, k_all, ppq) for k in range(int(layer.max()) + 1)])
+        return _sampled(sh, rows, t_all, k_all, ppq, src=True)
+    outs, srcs = [np.zeros((0, 5), np.int64)], [np.zeros(0, np.int64)]
+    for k in range(int(layer.max()) + 1):
+        idx = np.flatnonzero(layer == k)
+        out, src = _sampled(sh, rows[idx], t_all, k_all, ppq, src=True)
+        outs.append(out)
+        srcs.append(idx[src])
+    return np.concatenate(outs), np.concatenate(srcs)
 
 
 def overlap_layers(rows):
@@ -852,28 +881,47 @@ def overlap_layers(rows):
     first[:-1] |= over[1:]
     lay = np.zeros(len(s), np.int64)
     import heapq
+    # (overlapping notes starting together on a key = one block, given the lowest free layers in one go: the same
+    # layers as one by one, as long as none of them ends where it starts; a million copies of a note took minutes)
+    joined = np.zeros(len(s), bool)
+    joined[1:] = over[1:] & over[:-1] & (s[1:] == s[:-1])
+    heads = np.flatnonzero(first & ~joined)
+    size = np.diff(np.append(np.flatnonzero(~joined), len(s)))[np.searchsorted(np.flatnonzero(~joined), heads)]
     free, ends, key = [], [], None
-    for i in np.flatnonzero(first).tolist():
+    for i, m in zip(heads.tolist(), size.tolist()):
         if not over[i] or k[i] != key:  # (a new stretch: every layer free again)
             free, ends, key = [], [], k[i]
             heapq.heappush(ends, (int(e[i]), 0))
             used = 1
             continue
-        while ends and ends[0][0] <= s[i]:
+        si = s[i]
+        while ends and ends[0][0] <= si:
             heapq.heappush(free, heapq.heappop(ends)[1])
-        if free:
-            j = heapq.heappop(free)
-        else:
-            j, used = used, used + 1
-        lay[i] = j
-        heapq.heappush(ends, (int(e[i]), j))
+        if m > 1 and (e[i:i + m] > si).all():
+            got = [heapq.heappop(free) for _ in range(min(m, len(free)))]
+            got += range(used, used + m - len(got))
+            used = max(used, got[-1] + 1)
+            lay[i:i + m] = got
+            ends.extend(zip(e[i:i + m].tolist(), got))
+            heapq.heapify(ends)
+            continue
+        for i in range(i, i + m):
+            while ends and ends[0][0] <= s[i]:
+                heapq.heappush(free, heapq.heappop(ends)[1])
+            if free:
+                j = heapq.heappop(free)
+            else:
+                j, used = used, used + 1
+            lay[i] = j
+            heapq.heappush(ends, (int(e[i]), j))
     out = np.empty(len(s), np.int64)
     out[order] = lay
     return out
 
 
-def _sampled(sh, rows, t_all, k_all, ppq):
-    """turned_notes for these notes (none overlapping on one key), t_all / k_all = the whole shape's size."""
+def _sampled(sh, rows, t_all, k_all, ppq, src=False):
+    """turned_notes for these notes (none overlapping on one key), t_all / k_all = the whole shape's size. src: also
+    which of rows each piece came from."""
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
     det = ub * vp - up * vb
@@ -882,7 +930,7 @@ def _sampled(sh, rows, t_all, k_all, ppq):
     t0, span = min(cb), max(cb) - min(cb)
     n = max(1, int(np.ceil(span * ppq)))
     if hi_k < lo_k:
-        return np.zeros((0, 5), np.int64)
+        return (np.zeros((0, 5), np.int64), np.zeros(0, np.int64)) if src else np.zeros((0, 5), np.int64)
     n = min(n, max(1, MOST_SAMPLES // (hi_k - lo_k + 1)))
     step = span / n
     kk = np.arange(lo_k, hi_k + 1, dtype=float)[:, None]
@@ -914,7 +962,10 @@ def _sampled(sh, rows, t_all, k_all, ppq):
     end = np.round((t0 + ends * step) * ppq).astype(np.int64)
     got = srt[np.maximum(val, 0)]
     out = np.column_stack([start, end, ks + lo_k, got[:, 3], got[:, 4]])[on]
-    return out[out[:, 1] > out[:, 0]]
+    keep = out[:, 1] > out[:, 0]
+    if src:
+        return out[keep], order[np.maximum(val, 0)][on][keep]
+    return out[keep]
 
 
 def clean_merge(m, clean_shape):
