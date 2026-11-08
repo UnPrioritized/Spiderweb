@@ -421,12 +421,15 @@ class VelocityPane(KeepsItems, tk.Canvas):
             had = bases.get(i) if bases else None  # (a shape the end was moved over: from what it has now)
             fx = had[4] if had else sh.get("fx")
             lo, hi = time_span(sh, app.ppq)
-            if pages(fx):
+            merged = bool(sh.get("merge")) and "notes" in sh
+            if pages(fx) or merged:
                 # note tool pages: only a velocity step after them, on the notes as they show (user 2026-11-02: a
-                # Chop piece past the line kept its velocity; the notes under the pages are left as they are)
+                # Chop piece past the line kept its velocity; the notes under the pages are left as they are); a
+                # merged shape too (its notes are made again from its parts when flipped / reshaped: a line written
+                # into them was lost, overlap hunt 2026-11-08)
                 pts = [[(b - lo) / (hi - lo), v] for b, v in drawn] if hi > lo else \
                     [[0.0, env_at(drawn, dus, lo)], [1.0, env_at(drawn, dus, lo)]]
-                sh["fx"] = with_velocity(fx, pts)
+                sh["fx"] = with_velocity(fx, pts, always=merged)
                 done[i] = (sh, sh["fx"], None, (lo, hi), fx)
                 continue
             if sh.get("own_vel") and "notes" in sh:

@@ -58,7 +58,9 @@ def idle(fx):
 
 def clean_fx(sh, steps=False):
     """sh["fx"] from a file -> a valid step list, or None. Without one: the old chop / claw / strum as pages.
-    steps: flips / turns / velocities before any page count too (a sliced piece's, see flipped)."""
+    steps: flips / turns / velocities before any page count too (a sliced piece's, see flipped). A merged shape's
+    velocity steps always count (with_velocity always)."""
+    vels = bool(sh.get("merge"))
     fx = sh.get("fx")
     if not isinstance(fx, list):
         fx = [{"tool": k, "cfg": sh[k]} for k in TOOLS[:3] if sh.get(k)]
@@ -71,7 +73,7 @@ def clean_fx(sh, steps=False):
             cfg = CLEAN[tool](st.get("cfg"))
             if cfg:
                 out.append({"tool": tool, "cfg": cfg, **({"off": True} if st.get("off") is True else {})})
-        elif not pages(out) and not steps:
+        elif not pages(out) and not steps and not (vels and tool == "vel"):
             continue  # (a flip / velocities before any page change nothing)
         elif tool == "flip" and st.get("axis") in AXES:
             out.append({"tool": "flip", "axis": st["axis"]})
@@ -277,6 +279,9 @@ def flip_shape(sh, sideways, mid2):
             sh[key]["mirror"] = not sh[key]["mirror"]
     if sideways:  # the velocities flip with it
         reverse_velocity(sh)
+        if sh.get("fx") and not pages(sh["fx"]):  # (a merged shape's velocity steps: across its time, mirrored too)
+            sh["fx"] = [dict(st, pts=[[1 - u, v] for u, v in reversed(st["pts"])]) if st["tool"] == "vel" else st
+                        for st in sh["fx"]]
     elif (sh.get("cycle") or {}).get("shift"):  # (Colours' Diagonal slants the other way, user)
         sh["cycle"] = dict(sh["cycle"], shift=[-sh["cycle"]["shift"][0], sh["cycle"]["shift"][1]])
     if not sideways and sh.get("kind") == "gliss":  # (a Glissando run's copies above are below it now)
@@ -334,13 +339,16 @@ def norm_deg(deg):
     return deg - 360 if deg > 180 else deg + 0.0
 
 
-def with_velocity(fx, pts):
+def with_velocity(fx, pts, always=False):
     """The steps after velocities pts ([[u, v]], u across the shape's time) were drawn: a velocity step on top (one
-    that covers the last one replaces it), or nothing when there's no page (the drawing's own velocities do)."""
-    if not pages(fx) or not pts:
+    that covers the last one replaces it), or nothing when there's no page (the drawing's own velocities do).
+    always: a step even so (a merged shape: its notes are made again from its parts when flipped / reshaped, so a line
+    written into its notes was lost; overlap hunt 2026-11-08)."""
+    if not (pages(fx) or always) or not pts:
         return fx
     pts = clean_pts(pts)
-    last = fx[-1]
+    fx = fx or []
+    last = fx[-1] if fx else {"tool": None}
     if last["tool"] == "vel" and pts[0][0] <= last["pts"][0][0] and pts[-1][0] >= last["pts"][-1][0]:
         fx = fx[:-1]
     return fx + [{"tool": "vel", "pts": pts}]

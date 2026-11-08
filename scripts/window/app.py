@@ -3771,7 +3771,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 sh["unmerge"]["vrev"] = not sh["unmerge"].get("vrev")
             flip_shape(sh, sideways, m2)
             turned_piece(sh, frm, lambda w: flip_shape(w, sideways, m2))  # (a funnel piece stays one)
-            if fx:  # (its note tool pages' result is flipped too, fx.py)
+            if fx is was and fx:  # (no flip step: flip_shape's own steps kept, a merged shape's velocity mirrored)
+                pass
+            elif fx:  # (its note tool pages' result is flipped too, fx.py)
                 sh["fx"] = fx
             else:
                 sh.pop("fx", None)
