@@ -489,6 +489,10 @@ class ChopWindow(ToolWindow):
         if app._bg_notes:  # (the notes being made in the background: counted once they're in, not made twice here)
             if not getattr(self, "_count_job", None):
                 self._count_job = self.after(60, self._count_later)
+            if (self.targets and self.cfg["pieces"] and self.at is not None
+                    and self.info.cget("text") != tr("chop.counting")):
+                # (meanwhile "Notes: calculating…" on the same line: nothing missing, nothing moves, user 11-09)
+                self.info.config(text=tr("chop.counting"), foreground=look.HINT)
             return
         if not self.targets or self.at is None and self.cfg["pieces"]:  # (no pieces: its warning still shows)
             if self.info.cget("text"):

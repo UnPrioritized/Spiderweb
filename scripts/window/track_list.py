@@ -1397,6 +1397,7 @@ class TrackList(tk.Canvas):
         holding notes and the Conductor's changes: both, the tempo the same distance from the notes as copied (user
         2026-11-05)."""
         app = self.app
+        app.finish_copy()  # (a Ctrl+C's text still being made: waited for first)
         clip = getattr(app, "tempo_clip", None)
         # (a copy made in Domino / a shared line copied since Spiderweb's last copy comes in first, also with the
         # Conductor row lit: the ONE PASTE rule, hunt 2026-11-05)

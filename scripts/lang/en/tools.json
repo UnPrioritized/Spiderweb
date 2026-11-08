@@ -579,6 +579,7 @@
  "chop.absolute": "Follow the song's grid (Absolute)",
  "chop.tip_absolute": "On: the rhythm lines up with the song's beats, so a note starting between them gets a short first piece. Off: the rhythm starts again at each note's start.",
  "chop.count": "Notes: {before} → {after}",
+ "chop.counting": "Notes: calculating…",
  "chop.too_many": "Too many pieces to make: the notes are left unchopped. Pick a longer step length.",
  "chop.reset": "Reset",
  "chop.tip_reset": "Back to the start: the Even rhythm, 1/16 steps.",

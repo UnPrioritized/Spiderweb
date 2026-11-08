@@ -2866,6 +2866,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.notes_late = True
             self._make_coming(True, True)
 
+    def notes_for(self, shapes, sels):
+        """The notes for a shape list NOT on screen yet (the Fold tracks preview, fold_window) made in a background
+        thread, as _make_coming does; returns the job (job["done"] once made). Taken in by putting these very shapes
+        in app.shapes and calling shapes_changed(now=True): notes_made finds the job (same notes_key). Never shown
+        by itself (nothing is late on screen meanwhile)."""
+        old = self._coming
+        if old:  # (another spot's: stopped, and never taken for these)
+            old["stop"] = True
+        self._coming = None
+        keep = self.shapes, self.sels
+        self.shapes, self.sels = shapes, set(sels)  # (read by notes_key / the painting order, only during this call)
+        try:
+            self._make_coming(False)
+        finally:
+            self.shapes, self.sels = keep
+        return self._coming
+
     def notes_made(self, any_spot=False):
         """The notes made in the background for the shapes exactly as they are now (waited for if still being made),
         else None. Called by shapes_changed, which then makes them itself. any_spot: a finished job's notes even if
@@ -3324,15 +3341,16 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         boxes held a loaded MIDI's notes, which never go into a copy for other programs: said, hunt 2026-10-29).
         tempo: the Conductor's changes copied with them (the track list's boxes, track_tempo): the tempo copy too,
         pasted along with these shapes (track_list.key_paste)."""
+        self.cancel_copy()  # (an older copy's text still being made: this one wins)
         for sh in shapes:
             sh["into_from"] = self.project_token  # (its tracks are this project's: put_into_current)
         self.clipboard = shapes
         self.clip_kind = "shapes"
         self.shapes_stamp = self.copy_stamp()
+        self.remember_clip()  # (what the clipboard holds now is older than this copy, also while its text is made)
         if tempo is not None:
             tempo["with"], tempo["n"] = shapes, self.shapes_stamp
             self.tempo_clip = tempo
-        line = shapes_line(self.clipboard)  # (also on the Windows clipboard as text, to share: share.py)
         msg = trn("app.copied_shape_s_ctrl_v_pastes", len(self.clipboard), n=len(self.clipboard))
         if tempo is not None:
             from window.track_tempo import count
@@ -3354,8 +3372,27 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 also.append((registered(notes_clip.NAME), notes))
             elif loaded and not why:
                 why = "loaded"
+        # the shared text (also on the Windows clipboard, to share: share.py) made on a thread: ~1 s at millions of
+        # pasted notes (copy_wait); done quickly = finished here, as before
+        from window.copy_wait import CopyJob
+        job = CopyJob(self, lambda: shapes_line(shapes),
+                      lambda j: self._copy_made(j, also, msg, domino, notes, why, loaded))
+        if not job.quick():
+            self._copy_job = job
+            self.status.config(text=tr("app.copying_clip"))
+
+    def _copy_made(self, job, also, msg, domino, notes, why, loaded):
+        """put_clipboard's shared text is made: onto the Windows clipboard with the extras, unless something else
+        went on it since the copy (copied in another program, Copy to Domino...: that's newer, kept)."""
+        if getattr(self, "_copy_job", None) is job:
+            self._copy_job = None
+        if job.error is not None and not isinstance(job.error, MemoryError):
+            raise job.error
+        line = job.line
+        if copy_count() != self.seen_clip:
+            return self.status.config(text=msg)
         try:
-            shared, extra = put_text_and(line, also)
+            shared, extra = put_text_and(line, also) if line is not None else (False, False)
         except MemoryError:
             shared, extra = False, False
         self.remember_clip()
@@ -3392,6 +3429,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.copy_selected(whole=True, cut=True)
             self.delete_selected(name=tr("app.cut"))
 
+    def finish_copy(self):
+        """A Ctrl+C's shared text still being made (copy_wait): waited for here, so it's on the clipboard (Spiderweb's
+        own paste never runs beside half a copy; closing keeps it)."""
+        job = getattr(self, "_copy_job", None)
+        if job is not None:
+            job.finish()
+
+    def cancel_copy(self):
+        """... dropped instead: something newer goes on the clipboard."""
+        job = getattr(self, "_copy_job", None)
+        self._copy_job = None
+        if job is not None:
+            job.drop()
+
     def copy_stamp(self):
         """A number for each copy (shapes / tempo), counting up: the track list's Ctrl+V pastes the newer."""
         self._copy_n = getattr(self, "_copy_n", 0) + 1
@@ -3411,6 +3462,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def drop_own_copy(self):
         """remember_own_copy's emptying alone (Hz window notes, Conductor pane copies: hunt 2026-10-29); what Ctrl+V
         pastes on the piano roll stays as it was."""
+        self.cancel_copy()
         if RAW and (self.copy_domino.get() or self.copy_notes.get()) and copy_count() == self.seen_clip:
             clipboard.put_many([])  # (through the module: the tests' pretend clipboard replaces it there)
 
@@ -3509,6 +3561,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         double-click: the mouse, snapped already). With curves highlighted and a curve copied: its shape onto them.
         Shapes shared as text or notes copied in Domino, copied after Spiderweb's last copy, come first
         (paste_shared, paste_from_domino). The Tempo pane clicked last: its copied tempo at the play line."""
+        self.finish_copy()
         if not whole and at is None and getattr(self, "key_pane", None) is self.tempo_pane:
             return self.tempo_pane.paste()
         if getattr(getattr(self, "stir_window", None), "drawing", None):  # (a Stir area being drawn: only new
@@ -4133,6 +4186,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 time.sleep(0.02)
         if not self.close_autosave():
             return
+        self.finish_copy()  # (a Ctrl+C's text still being made: on the clipboard before Spiderweb closes)
         self.stop_play()
         self.out.close()
         self.destroy()
