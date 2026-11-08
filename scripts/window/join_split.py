@@ -1138,8 +1138,37 @@ class JoinSplit:
         out[:, :4], out[:, 4], out[:, 5:] = got, got_slots, rows[0, 5:]
         if not np.isin(code(rows), code(out)).all():
             return rows  # (something else shapes what's shown (a mask, a Hz bass...): as shown, as before)
+        out = self.held_cut(i, rows, out, code)
         o = np.lexsort((out[:, 2], out[:, 0]))
         return out[o]
+
+    def held_cut(self, i, rows, out, code):
+        """own_heard's notes that a HELD note of another shape (Sustain / Keep both) cuts as shown end where it cuts
+        them: a held note is never stretched over them, so nothing hangs on their hidden tail, and a cut inside it
+        made a piece starting with the held note that Single keeps (same start = no cut; sweep 2026-11-08)."""
+        from notes.sustain import is_sustained
+        held = [j for j, s in enumerate(self.shapes) if j != i and (s.get("held") is True or is_sustained(s))]
+        if not held or not len(out):
+            return out
+        r = np.asarray(self.rendered[:, :6], np.int64)
+        walls = r[np.isin(r[:, 5], held)]
+        if not len(walls):
+            return out
+        have = code(rows)
+        o = np.argsort(have, kind="stable")
+        at = np.minimum(np.searchsorted(have[o], code(out)), len(rows) - 1)
+        shown = rows[o[at]]
+        short = (have[o[at]] == code(out)) & (shown[:, 1] < out[:, 1]) & (shown[:, 4] == out[:, 4])
+        if not short.any():
+            return out
+        # (a held note of another shape starting on the key, slot and tick where the shown note ends)
+        wall = {(int(s), int(k), int(sl)) for s, k, sl in walls[:, [0, 2, 4]].tolist()}
+        k = np.flatnonzero(short)
+        cut = [j for j in k.tolist() if (int(shown[j, 1]), int(out[j, 2]), int(out[j, 4])) in wall]
+        if cut:
+            out = out.copy()
+            out[cut, 1] = shown[cut, 1]
+        return out
 
     def with_hidden(self, sh, rows):
         """rows (start, end, key, velocity, slot, owner: sh's notes as they sound) + the part of sh past the edges
