@@ -14,7 +14,8 @@ import numpy as np
 from files.lang import tr, trn
 from notes.arc import arc_circle, arc_points
 from notes.between import group_of, turns as between_turns
-from notes.convert import CAN_TURN, losses, originals, shared_settings, to_live, velocity_changed
+from notes.convert import (CAN_TURN, has_edge_strum, losses, originals, shared_settings, to_live, velocity_changed,
+                           without_edge_strums)
 from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.fillgaps import fill_gaps as filled, needs_fill
@@ -1301,6 +1302,12 @@ class JoinSplit:
             self.tips.show("turn_live", wait=True)
             return
         parts = split_pieces(sh) if sh["kind"] == "curve" else split_custom(sh)
+        if len(parts) > 1 and has_edge_strum(sh):  # (each piece would cut / wrap at its own edges: dropped, user)
+            if not messagebox.askokcancel(
+                    tr("join_split.spiderweb"), tr("join_split.splitting_changes") + tr("convert.strum_edges_dropped") +
+                    tr("join_split.ctrl_z_gives_it_back"), icon="warning", parent=self):
+                return
+            parts = [without_edge_strums(p) for p in parts]
         self.replace_shape(i, parts)
         self.status.config(text=tr("join_split.split_into_shapes", n=len(parts)))
         self.tips.show("join", wait=True)

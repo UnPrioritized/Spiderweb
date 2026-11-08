@@ -239,9 +239,12 @@ class StrumWindow(ToolWindow):
         for key in ("keys", "keys_to"):
             if str(self.entries[key].cget("state")) != state:
                 self.entries[key].config(state=state)
-        for w in (self.keys_label, self.keys_mid, self.edges_label):
+        for w in (self.keys_label, self.keys_mid):
             w.state(["!disabled"] if moves else ["disabled"])
-        self.edges_box.state(["!disabled", "readonly"] if moves else ["disabled"])
+        # (Edges: only a Start time moves notes past them; End only shortens notes, Velocity moves none, hunt)
+        starts = bool(c["start"] and c["time"])
+        self.edges_label.state(["!disabled"] if starts else ["disabled"])
+        self.edges_box.state(["!disabled", "readonly"] if starts else ["disabled"])
 
 
 open_strum = StrumWindow.open

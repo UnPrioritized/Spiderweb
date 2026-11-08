@@ -93,10 +93,35 @@ NOTE_SETTINGS = (("glue", "convert.glue"), ("fx", "convert.fx"), ("cycle", "colo
                  ("strips", "strips.title"), ("by_snap", "app.by_snap"), ("by_snap_end", "app.by_snap_end"))
 
 
+def edge_strum(st):
+    """A Strum page that cuts / wraps at the shape's own edges (its time span: another shape = other edges)."""
+    return st.get("tool") == "strum" and isinstance(st.get("cfg"), dict) and st["cfg"].get("edges") in ("cut", "wrap")
+
+
+def has_edge_strum(sh):
+    return isinstance(sh.get("fx"), list) and any(isinstance(st, dict) and edge_strum(st) for st in sh["fx"])
+
+
+def without_edge_strums(sh):
+    """sh with its cut / wrap Strum pages dropped (Join / Turn into live shape / Split: the new shapes' edges differ,
+    the notes would move; user 2026-11-08, like glue's boxes). No page left = no step list."""
+    if not has_edge_strum(sh):
+        return sh
+    from notes.fx import pages
+    fx = [st for st in sh["fx"] if not (isinstance(st, dict) and edge_strum(st))]
+    out = {k: v for k, v in sh.items() if k != "fx"}
+    if pages(fx):
+        out["fx"] = fx
+    return out
+
+
 def shared_settings(shapes):
     """The note settings (glue, note tool pages, Colours) a shape made of these keeps: the ones they all have alike (glue
-    only on whole shapes: boxes are shares of each shape's own box), and the sentence saying which are dropped
-    (a list with one sentence, or empty)."""
+    only on whole shapes: boxes are shares of each shape's own box; Strum pages cutting / wrapping at the edges only
+    for one shape: its edges stay), and the sentences saying what's dropped (a list, or empty)."""
+    edges = len(shapes) > 1 and any(has_edge_strum(sh) for sh in shapes)
+    if edges:
+        shapes = [without_edge_strums(sh) for sh in shapes]
     keep, lost = {}, []
     for key, name in NOTE_SETTINGS:
         # (Sustain's Auto is an empty dict)
@@ -123,7 +148,8 @@ def shared_settings(shapes):
     names = {sh.get("by_snap_name") for sh in shapes}
     if "by_snap" in keep and len(names) == 1 and None not in names:  # (Notes by snap's "1/32": kept too, hunt)
         keep["by_snap_name"] = names.pop()
-    return keep,[tr("convert.settings_dropped", names=", ".join(lost))] if lost else []
+    return keep, ([tr("convert.settings_dropped", names=", ".join(lost))] if lost else []) + (
+        [tr("convert.strum_edges_dropped")] if edges else [])
 
 
 def to_live(shapes, paths, defaults, custom_defaults, k=None):

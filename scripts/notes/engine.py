@@ -1529,7 +1529,8 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
             boxes = at_step(g.get("glue"), last)
             if boxes and len(a):
                 a = apply_glue(a, boxes, glue_box(np.concatenate(cached_arrays(g))), ppq, True)
-        elif last["tool"] == "path":  # (the last column = the tracks: the copies' colours go on them, hunt)
+        elif last["tool"] in ("path", "strum"):  # (the last column = the tracks: the copies' colours go on them,
+            # hunt; a Strum wrap's later rounds too, so sliced line pieces keep them)
             notes, tr = fx_step(a[:, :-1], a[:, -1], last, sh, ppq)
             a = np.column_stack([notes, tr])
         else:
