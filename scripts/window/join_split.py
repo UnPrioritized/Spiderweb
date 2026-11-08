@@ -1876,14 +1876,44 @@ class JoinSplit:
         """A pasted-notes shape's notes and tracks for the Slice / Lasso tools, rows moved past the top key too (they're
         hidden but kept: a slice mustn't lose them). As they sound, Sustain / Gate subtract done: the pieces sound
         exactly as before and don't keep those settings (user 2026-10-23: a cut turns them into plain notes;
-        slice._halves)."""
+        slice._halves). Its own overlaps on a track fixed first when the Channels mode fixes them for it (user
+        2026-11-08: a long quiet note under a loud one shows loud to the long note's end in Single channel; cut there,
+        the right piece went quiet): heard_overlaps."""
         # ("Keep notes made there": under key 0 / before beat 0 too, cut like the rest)
         if self.keeps_offrange() and past_edges(sh, self.keys, self.ppq) is not None:
-            return whole_notes_tracks(sh, self.ppq, self.keys)
-        (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
-        if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
-            return self.notes_tracks(sh)
-        return shape_notes_tracks(sh, self.ppq, 256)
+            got = whole_notes_tracks(sh, self.ppq, self.keys)
+        else:
+            (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+            if max(p0, p1, p2, p1 + p2 - p0) <= self.keys - 0.5:
+                got = self.notes_tracks(sh)
+            else:
+                got = shape_notes_tracks(sh, self.ppq, 256)
+        return self.heard_overlaps(sh, *got)
+
+    def heard_overlaps(self, sh, notes, tracks):
+        """A pasted-notes shape's notes and tracks with its own overlaps on each track fixed as the Channels mode fixes
+        them (Single channel; Multi channel only for notes Spiderweb made, or with Remove overlaps; never As drawn,
+        Sustain or held notes), so cut pieces sound as before; else as they are."""
+        from notes.engine import pasted_notes
+        from notes.sustain import is_sustained
+        from window.app import fix_rows
+        mode = self.channel_mode.get()
+        rule = self.overlap_rule() or {}
+        if (mode == "raw" or not len(notes) or is_sustained(sh) or sh.get("held") is True
+                or mode == "auto" and pasted_notes(sh) and not rule.get("across")):
+            return notes, tracks
+        notes = np.asarray(notes, np.int64)
+        who = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
+        o = np.lexsort((notes[:, 0], notes[:, 2], who))
+        same = (notes[o[1:], 2] == notes[o[:-1], 2]) & (who[o[1:]] == who[o[:-1]])
+        if not (same & (notes[o[1:], 0] < notes[o[:-1], 1])).any():
+            return notes, tracks  # (no overlaps: as they are)
+        # (rows kept past the keys ("Keep notes made there") are never fixed when shown: left as they are)
+        inside = (notes[:, 2] >= 0) & (notes[:, 2] < self.keys)
+        rows = np.column_stack([notes[inside, :4], who[inside], np.zeros(int(inside.sum()), np.int64)])
+        fixed = fix_rows(rows, rule.get("way", "stretch"))
+        out = np.concatenate([fixed[:, :4], notes[~inside, :4]])
+        return out, None if tracks is None else np.concatenate([fixed[:, 4], who[~inside]])
 
     def path_dist(self, sh, at):
         """How far (on screen) the shape's line passes from at."""
