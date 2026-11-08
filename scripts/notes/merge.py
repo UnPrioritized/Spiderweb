@@ -814,15 +814,69 @@ def turned_notes(sh, ppq):
     """A turned / slanted merged shape's notes, (start, end, pitch, velocity, track) rows (user: it turns as the one
     shape seen on screen, like a turned image, not chopped into staircases). Every key row crossing the box is
     sampled one tick at a time (fewer past MOST_SAMPLES): the note of the merged notes under each spot, so each
-    stretch of one note = a flat note; touching notes stay apart."""
+    stretch of one note = a flat note; touching notes stay apart. Notes OVERLAPPING on one key (a paste can hold a long
+    note with another on top, user 2026-11-08) are sampled in layers that don't overlap (overlap_layers), so each
+    keeps its own length; without overlaps: one layer, as before."""
     from notes.custom import unpack_notes
     rows = unpack_notes(sh["notes"])  # (start, end, key, velocity, track), from the box's corner
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
-    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
-    det = ub * vp - up * vb
+    det = (b1 - b0) * (p2 - p0) - (p1 - p0) * (b2 - b0)
     if abs(det) < 1e-12 or not len(rows):
         return np.zeros((0, 5), np.int64)
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
+    layer = overlap_layers(rows)
+    if layer is None:
+        return _sampled(sh, rows, t_all, k_all, ppq)
+    return np.concatenate([_sampled(sh, rows[layer == k], t_all, k_all, ppq) for k in range(int(layer.max()) + 1)])
+
+
+def overlap_layers(rows):
+    """Each note's layer so no two notes on one key in a layer overlap (start, end, key columns; fewest layers: the
+    first free one), or None when no notes overlap (one layer). Only the notes in overlapping stretches are dealt
+    with one by one."""
+    order = np.lexsort((rows[:, 0], rows[:, 2]))
+    s, e, k = rows[order, 0], rows[order, 1], rows[order, 2]
+    if len(s) < 2:
+        return None
+    new_key = np.ones(len(s), bool)
+    new_key[1:] = k[1:] != k[:-1]
+    seg = np.cumsum(new_key) - 1
+    span = int(e.max()) - int(s.min()) + 2
+    reach = np.maximum.accumulate(e - s.min() + seg * span) - seg * span + s.min()  # (latest end so far on its key)
+    over = np.zeros(len(s), bool)
+    over[1:] = ~new_key[1:] & (s[1:] < reach[:-1])  # (starts while an earlier note on its key still sounds)
+    if not over.any():
+        return None
+    # (a stretch of overlapping notes: from the note before the first overlapping one to the last)
+    first = over.copy()
+    first[:-1] |= over[1:]
+    lay = np.zeros(len(s), np.int64)
+    import heapq
+    free, ends, key = [], [], None
+    for i in np.flatnonzero(first).tolist():
+        if not over[i] or k[i] != key:  # (a new stretch: every layer free again)
+            free, ends, key = [], [], k[i]
+            heapq.heappush(ends, (int(e[i]), 0))
+            used = 1
+            continue
+        while ends and ends[0][0] <= s[i]:
+            heapq.heappush(free, heapq.heappop(ends)[1])
+        if free:
+            j = heapq.heappop(free)
+        else:
+            j, used = used, used + 1
+        lay[i] = j
+        heapq.heappush(ends, (int(e[i]), j))
+    out = np.empty(len(s), np.int64)
+    out[order] = lay
+    return out
+
+
+def _sampled(sh, rows, t_all, k_all, ppq):
+    """turned_notes for these notes (none overlapping on one key), t_all / k_all = the whole shape's size."""
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    det = ub * vp - up * vb
     cb, cp = [b0, b1, b2, b1 + b2 - b0], [p0, p1, p2, p1 + p2 - p0]
     lo_k, hi_k = int(np.ceil(min(cp) - 1e-9)), int(np.floor(max(cp) + 1e-9))  # (the edges: see inside below)
     t0, span = min(cb), max(cb) - min(cb)
