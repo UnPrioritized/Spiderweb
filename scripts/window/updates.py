@@ -14,7 +14,7 @@ import webbrowser
 from tkinter import ttk
 
 from files import errors, self_update, system
-from files.about import VERSION, WEBSITE
+from files.about import BUILD, VERSION, WEBSITE
 from files.lang import tr
 from files.update_check import newer_releases
 from window import look
@@ -36,6 +36,7 @@ class Updates:
         self.often = None  # one of OFTEN; None = the user wasn't asked yet
         self.last = 0.0
         self.seen_version = None
+        self.backup = None  # (folder, "1.7.2-5ec9217"): an update's first start backed the old settings up there
         self.old_user = False  # there were window settings: not the very first start
         self.running = False
         self.reports = []  # the About page's lines waiting for the running check's answer
@@ -44,7 +45,7 @@ class Updates:
 
     def state(self):
         """For the autosave's window settings."""
-        got = {"update_last": self.last, "seen_version": VERSION}
+        got = {"update_last": self.last, "seen_version": VERSION, "seen_build": BUILD}
         if self.often:
             got["update_check"] = self.often
         return got
@@ -65,7 +66,14 @@ class Updates:
         check if it's time."""
         if self.old_user and self.seen_version != VERSION:
             from window.help import open_help
-            self.app.after(1200, lambda: open_help(self.app, "whats_new"))
+            news = lambda: open_help(self.app, "whats_new")  # noqa: E731
+            if self.backup:  # (the settings backup's note first, What's new once it's closed: never over it)
+                from window.settings_backup import BackupNote
+                path, old = self.backup
+                self.app.after(1000, lambda: setattr(self, "backup_note", BackupNote(
+                    self.app, path, old, then=lambda: self.app.after(200, news))))
+            else:
+                self.app.after(1200, news)
         self.app.schedule_autosave()  # (remembers this version as seen)
         if self.often is None:
             self._started = time.time()

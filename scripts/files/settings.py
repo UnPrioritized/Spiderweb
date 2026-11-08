@@ -154,6 +154,7 @@ APP_KEYS = {
     "update_check": ("updates", "how_often", str),
     "update_last": ("updates", "last_check", float),
     "seen_version": ("updates", "seen_version", str),
+    "seen_build": ("updates", "seen_build", str),  # (its build's commit + day: the settings backup's folder name)
     "tips_on": ("tips", "show_tips", bool),
     "tips_seen": ("tips", "seen", list),
     "domino_256": ("domino", "keys_256", bool),

@@ -8,6 +8,8 @@ New versions, the source code and problem reports: {WEBSITE}
 
 Spiderweb can look there for a new version by itself (set how often in Settings, in the Help menu, on the General tab; Never turns it off). When there is one, a small window says what's new in it and has a button to open the download page. When the new version comes with a safety signature, the window also has "Update and restart" (Spiderweb.exe: downloads the new one, checks it, swaps it in and starts it) or "Download and check" (running from the scripts: the checked zip goes to your Downloads folder, to unzip over your Spiderweb folder). A download that doesn't match its signature is thrown away. Nothing is downloaded until you press one of them. Your autosave and shapes stay.
 
+The first time a new version starts, it copies the older version's settings, palettes, saved shapes and presets into the backups folder inside the user folder (named after the older version, e.g. "1.7.2-5ec9217") and says so in a small window. Every backup is kept, so you can always go back to how things were. Your projects and autosave aren't copied: they stay where they are.
+
 All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed the project: decided what it should do, tested it and asked for changes.
 
 Spiderweb's folder holds the MIDI files you export (output) and the user folder: your autosave (and autosave-backup), settings, presets, and your shape library (shapes). If something goes wrong, spiderweb-error.log and spiderweb-crash.log sit right next to Spiderweb.

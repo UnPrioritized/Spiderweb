@@ -35,6 +35,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     domino_overlay.py Domino companion: the see-through window lying over Domino's note grid, following it
     domino_companion.py Draw on Domino: the floating bar, switching app.roll to the overlay piano roll and back
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
+    settings_backup.py  an update's first start: the older version's settings + presets copied to user/backups
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
     drawer_mouse.py  the mouse on the drawer's board (drawing, Select, sticking), copy / paste / flip / turn

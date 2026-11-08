@@ -767,6 +767,17 @@ class ProjectFiles:
         win = with_app_settings(win)  # (user/settings.ini's sound / updates / tips)
         if win and not win.get("seen_version") and isinstance(data.get("app_version"), str):
             win["seen_version"] = data["app_version"]  # (settings.ini deleted: no What's new for the same version)
+        seen = win.get("seen_version")
+        if win and seen and str(seen) != VERSION:  # (an update's first start: the old settings copied first)
+            build = win.get("seen_build") or (data.get("build") if data.get("app_version") == seen else "")
+            try:
+                from window import settings_backup
+                made = settings_backup.make(seen, build or "")
+                if made:
+                    self.updates.backup = (made, settings_backup.label(seen, build or ""))
+            except Exception:  # (only a safety copy: never stops Spiderweb from starting)
+                write_log(*sys.exc_info(), "(backing up the older version's settings)")
+
         def kept(group):
             """One group put back; a broken one is skipped and logged, the rest still come back."""
             try:
