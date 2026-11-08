@@ -769,7 +769,10 @@ class ProjectFiles:
             win["seen_version"] = data["app_version"]  # (settings.ini deleted: no What's new for the same version)
         seen = win.get("seen_version")
         if win and seen and str(seen) != VERSION:  # (an update's first start: the old settings copied first)
-            build = win.get("seen_build") or (data.get("build") if data.get("app_version") == seen else "")
+            of, mark, build = str(win.get("seen_build") or "").partition("|")  # ("1.7.3|2b8a0dc, 2026-11-09")
+            if not mark or of != str(seen):  # (another version's build: an older Spiderweb started in between)
+                build = ""
+            build = build or (data.get("build") if data.get("app_version") == seen else "")
             try:
                 from window import settings_backup
                 made = settings_backup.make(seen, build or "")

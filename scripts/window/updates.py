@@ -45,7 +45,8 @@ class Updates:
 
     def state(self):
         """For the autosave's window settings."""
-        got = {"update_last": self.last, "seen_version": VERSION, "seen_build": BUILD}
+        got = {"update_last": self.last, "seen_version": VERSION,  # (the build with ITS version: an older Spiderweb
+               "seen_build": f"{VERSION}|{BUILD}"}  # started in between leaves this line as it is, never matching)
         if self.often:
             got["update_check"] = self.often
         return got
