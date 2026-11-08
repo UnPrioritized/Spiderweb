@@ -61,13 +61,9 @@ def with_lead(sh, base, pts):
     return tidy_env(env)
 
 
-def own_repainted(sh, text, drawn, ppq):
-    """Packed notes text (custom.pack_notes) of a shape keeping its notes' own velocities (pasted / Extract: sh
-    ["own_vel"]) after velocities drawn ([[beat, v]]): only the notes starting under the drawn stretch change, the
-    others keep theirs. text = the notes to start from. Returns text itself when no note changed."""
-    rows = unpack_notes(text)
-    if not len(rows) or not drawn:
-        return text
+def own_places(sh, rows, ppq):
+    """Where each stored note of a shape keeping its own velocities (rows: unpack_notes) shows: (start, end) ticks as
+    floats, flipped runs too; own_repainted's (a line changes the notes starting under it) and leftover_bars'."""
     (b0, p0), (b1, _), (b2, _) = sh["pts"]
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
     v = (rows[:, 2] + 0.5) / k_all
@@ -77,6 +73,17 @@ def own_repainted(sh, text, drawn, ppq):
         base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], np.arange(len(rows))]).astype(np.int64)
         got = mirrored_runs(base, None, True)[0]
         start, end = got[:, 0].astype(float), got[:, 1].astype(float)
+    return start, end
+
+
+def own_repainted(sh, text, drawn, ppq):
+    """Packed notes text (custom.pack_notes) of a shape keeping its notes' own velocities (pasted / Extract: sh
+    ["own_vel"]) after velocities drawn ([[beat, v]]): only the notes starting under the drawn stretch change, the
+    others keep theirs. text = the notes to start from. Returns text itself when no note changed."""
+    rows = unpack_notes(text)
+    if not len(rows) or not drawn:
+        return text
+    start, end = own_places(sh, rows, ppq)
     # (a note across beat 0 reads the line at beat 0, where it shows; wholly before it: its own, user 2026-11-08)
     start = np.where((start < 0) & (end > 0), 0.0, start)
     beat = start / ppq
@@ -705,6 +712,9 @@ class VelocityPane(KeepsItems, tk.Canvas):
             layer = np.where(np.isin(notes[:, 5], list(sels)), NORMAL + slot, slot)  # (own colours, others faded)
         else:
             layer = NORMAL + slot
+        left = self.leftover_bars(notes)  # (split around's leftovers: greyed, they follow their note's start)
+        if left is not None:
+            layer = np.where(left, layer + len(LAYERS), layer)
         s, e = notes[:, 0], notes[:, 1]
         d = roll.draft_notes()
         if d is not None:
@@ -758,6 +768,65 @@ class VelocityPane(KeepsItems, tk.Canvas):
         sels = self.app.sels
         layer = np.where(np.isin(off[:, 5], list(sels)), NORMAL + slot, slot) if sels else NORMAL + slot
         return x0, x1, ys[np.minimum(off[:, 3], 127)], layer + len(LAYERS)
+
+    def leftover_bars(self, notes):
+        """Which of these shown notes (sorted_notes rows) are "split around" leftovers (Single's "Split around instead
+        of stretching" / Multi's Remove overlaps without Cut + stretch): the part of an earlier note coming back after
+        a later one. A velocity line never reaches them (their note's velocity is set where it starts), so they're
+        drawn greyed (overlap hunt 2026-11-08, user took A). None: no such way picked / nothing found."""
+        app = self.app
+        if (app.heard_rule() or {}).get("way") != "split" or not len(notes):
+            return None
+        ren = app.rendered
+        cache = getattr(self, "_leftovers", None)
+        if cache is None or cache[0] is not ren or cache[1] != app.shapes_gen:
+            cache = self._leftovers = (ren, app.shapes_gen, self.note_starts())
+        if cache[2] is None:
+            return None
+        codes, mine = cache[2]
+        if not len(codes):
+            return None
+        n = len(app.shapes) + 1
+        own = np.isin(notes[:, 5], mine) & (notes[:, 0] >= 0) & (notes[:, 0] < (1 << 52) // (256 * n))
+        q = (notes[:, 0] * 256 + np.clip(notes[:, 2], 0, 255)) * n + np.clip(notes[:, 5], 0, n - 1)
+        i = np.minimum(np.searchsorted(codes, q), len(codes) - 1)
+        out = own & (codes[i] != q)
+        return out if out.any() else None
+
+    def note_starts(self):
+        """leftover_bars' sorted codes of every note start a velocity line can reach: each shape's notes as made
+        (before the overlaps between them are fixed); a shape keeping its own velocities: its stored notes where they
+        show (own_places). Shapes sampled (turned / taller) or held are left out (none of theirs greyed)."""
+        from notes.custom import notes_resampled
+        from notes.sustain import is_sustained
+        app = self.app
+        n = len(app.shapes) + 1
+        parts, mine = [], []
+        for o, sh in enumerate(app.shapes):
+            try:
+                if is_sustained(sh) or sh.get("held") is True or sh.get("hz") or "picture" in sh:
+                    continue
+                if sh.get("own_vel") and "notes" in sh:
+                    if notes_resampled(sh):
+                        continue
+                    rows = unpack_notes(sh["notes"])
+                    if not len(rows):
+                        continue
+                    start = own_places(sh, rows, app.ppq)[0]
+                    (_, p0), _, (_, p2) = sh["pts"]
+                    k_all = float(rows[:, 2].max() + 1)
+                    key = np.floor(p0 + (rows[:, 2] + 0.5) / k_all * (p2 - p0) + 1e-9)
+                    got = np.column_stack([start, key]).astype(np.int64)
+                else:
+                    got = np.asarray(app.notes_of(sh))[:, [0, 2]].astype(np.int64)
+            except Exception:  # (anything unusual: not greyed, never a broken pane)
+                continue
+            got = got[(got[:, 0] >= 0) & (got[:, 0] < (1 << 52) // (256 * n))]
+            parts.append((got[:, 0] * 256 + np.clip(got[:, 1], 0, 255)) * n + o)
+            mine.append(o)
+        if not parts:
+            return None
+        return np.sort(np.concatenate(parts)), np.array(mine, np.int64)
 
     def ghost_vels(self, notes):
         """The real velocity of notes a mask hides (shown as velocity -1 rows), found by start, key and shape in the
