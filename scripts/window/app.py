@@ -2037,6 +2037,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return {"across": True, "way": "stretch" if self.multi_stretch.get() else "split"}
         return None
 
+    def heard_way_of(self, sh):
+        """How the Channels mode fixes sh's own overlaps (engine.heard_way), or None."""
+        return heard_way(sh, self.channel_mode.get(), self.heard_rule())
+
     def sync_overlap_rows(self):
         """Single's split around row only under Single channel; Multi's who wins + way only once Remove overlaps is
         ticked (only on a change: grid_shown's rule)."""

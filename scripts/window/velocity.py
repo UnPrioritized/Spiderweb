@@ -61,14 +61,17 @@ def with_lead(sh, base, pts):
     return tidy_env(env)
 
 
-def own_places(sh, rows, ppq):
+def own_places(sh, rows, ppq, way=None):
     """Where each stored note of a shape keeping its own velocities (rows: unpack_notes) shows: (start, end) ticks as
-    floats, flipped runs too; own_repainted's (a line changes the notes starting under it) and leftover_bars'."""
+    floats, flipped runs too; own_repainted's (a line changes the notes starting under it) and leftover_bars'. way:
+    the shape's own overlaps fixed so (engine.heard_way): each note where the piece holding its own start shows."""
     (b0, p0), (b1, _), (b2, _) = sh["pts"]
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
     v = (rows[:, 2] + 0.5) / k_all
     a, b = ((b0 + (rows[:, c] / t_all) * (b1 - b0) + v * (b2 - b0)) * ppq for c in (0, 1))
     start, end = np.rint(np.minimum(a, b)), np.rint(np.maximum(a, b))
+    if way and len(rows) > 1:
+        return heard_places(sh, rows, start, end, way)
     if is_pasted_flipped(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
         base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], np.arange(len(rows))]).astype(np.int64)
         got = mirrored_runs(base, None, True)[0]
@@ -76,14 +79,63 @@ def own_places(sh, rows, ppq):
     return start, end
 
 
-def own_repainted(sh, text, drawn, ppq):
+def heard_places(sh, rows, start, end, way):
+    """own_places for a shape whose own overlaps are fixed as shown (engine.heard_notes, the same steps: fixed as
+    unflipped when flipped sideways, then gate flipped runs mirrored): each stored note's (start, end) = the piece
+    holding its own start (overlap hunt 2026-11-08: a flipped stretched note showed before its own start, and a line
+    over it missed it). A note merged into another starting with it: that one's place."""
+    from notes.engine import resolve_overlaps, split_overlaps
+    n = len(rows)
+    s, e = start.astype(np.int64), np.maximum(end.astype(np.int64), start.astype(np.int64) + 1)
+    pts = sh["pts"]
+    back = pts[1][0] < pts[0][0]
+    hi = int(e.max())
+    low = int(s.min())
+    fs, fe = (hi - e, hi - s) if back else (s - low, e - low)
+    track = rows[:, 4] if rows.shape[1] > 4 else np.zeros(n, np.int64)
+    who = np.unique(track, return_inverse=True)[1].ravel()
+    fix = np.column_stack([fs, fe, rows[:, 2], np.zeros(n, np.int64), who, np.arange(n)]).astype(np.int64)
+    got = split_overlaps(fix) if way == "split" else resolve_overlaps(fix)
+    # (each note's own piece: the first one (its start), unflipped)
+    o = np.lexsort((got[:, 0], got[:, 5]))
+    got = got[o]
+    first = np.r_[True, got[1:, 5] != got[:-1, 5]]
+    mine = got[first]
+    ps, pe = fs.copy(), fe.copy()
+    ps[mine[:, 5]], pe[mine[:, 5]] = mine[:, 0], mine[:, 1]
+    lost = np.setdiff1d(np.arange(n), mine[:, 5])
+    if len(lost):  # (merged into a note starting with it on its key + track: that one's piece)
+        code = (mine[:, 0] * 256 + mine[:, 2]) * (int(who.max()) + 1) + mine[:, 4]
+        order = np.argsort(code)
+        q = (fs[lost] * 256 + rows[lost, 2]) * (int(who.max()) + 1) + who[lost]
+        i = np.minimum(np.searchsorted(code[order], q), len(order) - 1)
+        hit = code[order][i] == q
+        at = mine[order[i[hit]], 5]
+        ps[lost[hit]], pe[lost[hit]] = ps[at], pe[at]
+    if back:
+        ps, pe = hi - pe, hi - ps
+    else:
+        ps, pe = ps + low, pe + low
+    if is_pasted_flipped(sh):  # (Gate aware flip: the fixed notes' runs mirrored, each piece where its partner was)
+        every = got.copy()
+        every[:, :2] = (hi - every[:, [1, 0]]) if back else every[:, :2] + low
+        idx = np.full(len(every), -1, np.int64)
+        idx[np.flatnonzero(first)] = got[first, 5]
+        base = np.column_stack([every[:, :3], np.arange(len(every))]).astype(np.int64)
+        flip = mirrored_runs(base, None, True)[0]
+        mark = idx >= 0
+        ps[idx[mark]], pe[idx[mark]] = flip[mark, 0], flip[mark, 1]
+    return ps.astype(float), pe.astype(float)
+
+
+def own_repainted(sh, text, drawn, ppq, way=None):
     """Packed notes text (custom.pack_notes) of a shape keeping its notes' own velocities (pasted / Extract: sh
     ["own_vel"]) after velocities drawn ([[beat, v]]): only the notes starting under the drawn stretch change, the
     others keep theirs. text = the notes to start from. Returns text itself when no note changed."""
     rows = unpack_notes(text)
     if not len(rows) or not drawn:
         return text
-    start, end = own_places(sh, rows, ppq)
+    start, end = own_places(sh, rows, ppq, way)
     # (a note across beat 0 reads the line at beat 0, where it shows; wholly before it: its own, user 2026-11-08)
     start = np.where((start < 0) & (end > 0), 0.0, start)
     beat = start / ppq
@@ -442,7 +494,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
             if sh.get("own_vel") and "notes" in sh:
                 # pasted / Extract notes: only the notes under the drawn stretch change, the rest keep their own
                 base = had[2] if had else sh["notes"]
-                sh["notes"] = own_repainted(sh, base, drawn, app.ppq)
+                sh["notes"] = own_repainted(sh, base, drawn, app.ppq, app.heard_way_of(sh))
                 done[i] = (sh, sh["notes"], base, (lo, hi), fx)
                 continue
             base = had[2] if had else velocity_env(sh)
@@ -812,7 +864,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
                     rows = unpack_notes(sh["notes"])
                     if not len(rows):
                         continue
-                    start = own_places(sh, rows, app.ppq)[0]
+                    start = own_places(sh, rows, app.ppq, app.heard_way_of(sh))[0]
                     (_, p0), _, (_, p2) = sh["pts"]
                     k_all = float(rows[:, 2].max() + 1)
                     key = np.floor(p0 + (rows[:, 2] + 0.5) / k_all * (p2 - p0) + 1e-9)
