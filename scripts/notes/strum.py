@@ -20,7 +20,11 @@ note struck first. One number (keys_to = keys): groups of that many (1 = every n
 sizes change evenly along the chord, from keys at the note struck first towards keys_to at the last (smaller
 keys_to = shrinking): a step beginning at place x (0 = struck first) holds
 round(keys + (keys_to - keys) * min(1, x / (m - keys_to))) notes, m = the chord's notes (so a step beginning keys_to
-from the end holds keys_to); the last step holds what is left (as with one number)."""
+from the end holds keys_to); the last step holds what is left (as with one number).
+"edges": "off" = as above; "cut" / "wrap": the shape's own time (its first start .. its last end, before the strum)
+is a block. "cut" drops what the strum moves past its edges (a note across an edge keeps its part inside); "wrap"
+brings it back in at the other end (a note across an edge is cut in two; one as long as the block fills it). Inside
+a block, tick 0 doesn't stop a note: the block's edges do."""
 
 import functools
 import math
@@ -33,7 +37,8 @@ LIMITS = {"time": (-4.0, 4.0), "tension": (-100.0, 100.0), "vel": (-127.0, 127.0
 FLAGS = ("start", "preserve", "ahead", "end", "chop", "alternate")
 KEYS_MAX = 100_000  # (notes per step: more than any chord holds)
 STRUM_DEFAULTS = dict({k: 0.0 for k in LIMITS}, start=True, preserve=False, ahead=False, end=True, chop=False,
-                      alternate=False, keys=1, keys_to=1)
+                      alternate=False, keys=1, keys_to=1, edges="off")
+EDGES = ("off", "cut", "wrap")
 # beats: no note moves further from its chord (a steep tension over a big chord would go on forever, user; 1000 bars
 # of 4/4, user 2026-10-17: FL's own goes on until it breaks past ~1300 bars, leaving the rest of the chord behind)
 CAP = 4000
@@ -64,6 +69,8 @@ def clean_strum(c):
             out[key] = c[key]
     out["keys"] = whole(c.get("keys"), 1)
     out["keys_to"] = whole(c.get("keys_to"), out["keys"])  # (none: one number)
+    if c.get("edges") in EDGES:
+        out["edges"] = c["edges"]
     if not (out["start"] and (out["time"] or out["vel"]) or out["end"] and out["end_time"]):
         return None
     return out
@@ -107,12 +114,17 @@ def groups(q, m, st):
     q = np.asarray(q)
     if a == b:
         return q // a
-    m = np.broadcast_to(m, q.shape)
-    out = np.empty(q.shape, np.int64)
-    for size in np.unique(m):  # (a few chord sizes: each one's steps worked out once)
-        at = m == size
-        out[at] = np.searchsorted(range_starts(a, b, int(size)), q[at], "right") - 1
-    return out
+    sizes, which = np.unique(np.broadcast_to(m, q.shape), return_inverse=True)
+    tables = [step_of(a, b, int(size)) for size in sizes]  # (each chord size's steps worked out once)
+    at = np.cumsum([0] + [len(t) for t in tables[:-1]])
+    return np.concatenate(tables)[at[which.reshape(q.shape)] + q]
+
+
+@functools.lru_cache(maxsize=1024)
+def step_of(a, b, m):
+    """Each place's step in a chord of m notes (a keys range)."""
+    starts = range_starts(a, b, m)
+    return np.repeat(np.arange(len(starts)), np.diff(np.append(starts, m)))
 
 
 @functools.lru_cache(maxsize=256)
@@ -130,6 +142,8 @@ def apply_strum(a, st, ppq):
     strummed."""
     if not len(a) or not st:
         return a
+    edges = st.get("edges", "off")
+    block = (int(a[:, 0].min()), int(a[:, 1].max())) if edges != "off" else None  # (the shape's own time)
     if st["chop"]:
         a = chop(a)
     a = a[np.lexsort((a[:, 2], a[:, 0]))]  # (a copy) chords in time order, each low to high
@@ -157,7 +171,8 @@ def apply_strum(a, st, ppq):
         else:
             off = steps(q, g, st["tension"], cap, True)
         off = np.rint(off)
-        late = np.maximum(0, -(ns + off))  # (pushed before tick 0: the note stops at 0, keeping its length)
+        late = np.maximum(0, -(ns + off)) if block is None else 0  # (pushed before tick 0: the note stops at 0,
+        # keeping its length; inside a block: cut / wrap at its edges instead)
         ns = ns + off + late
         if not st["preserve"]:
             ne = ne + off + late
@@ -167,7 +182,34 @@ def apply_strum(a, st, ppq):
     if start and st["vel"]:
         k = q if st["vel"] > 0 else last - q
         a[:, 3] = np.maximum(1, a[:, 3] - np.rint(steps(k, abs(st["vel"]), st["vel_tension"], VEL_KNOB))).astype(np.int64)
-    ns = np.maximum(ns, 0)
+    if block is None:
+        ns = np.maximum(ns, 0)
     a[:, 0] = ns.astype(np.int64)
     a[:, 1] = np.maximum(ne, ns + 1).astype(np.int64)
+    if block is None:
+        return a
+    return wrapped(a, *block) if edges == "wrap" else cut(a, *block)
+
+
+def cut(a, lo, hi):
+    """The notes kept inside lo .. hi (a note across an edge keeps its part inside)."""
+    a = a[(a[:, 1] > lo) & (a[:, 0] < hi)]
+    a[:, 0] = np.maximum(a[:, 0], lo)
+    a[:, 1] = np.minimum(a[:, 1], hi)
     return a
+
+
+def wrapped(a, lo, hi):
+    """The notes brought back inside lo .. hi: what is past one edge comes in at the other (a note across an edge is
+    cut in two; one as long as the block or longer fills it)."""
+    span = hi - lo
+    length = a[:, 1] - a[:, 0]
+    s = lo + (a[:, 0] - lo) % span
+    full = length >= span
+    s[full] = lo
+    e = np.where(full, hi, s + length)
+    over = e > hi  # (across the end: the rest comes in at the start)
+    out = np.concatenate([a, a[over]])
+    out[:len(a), 0], out[:len(a), 1] = s, np.minimum(e, hi)
+    out[len(a):, 0], out[len(a):, 1] = lo, lo + (e[over] - hi)
+    return out
