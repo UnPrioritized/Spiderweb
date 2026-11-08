@@ -10,8 +10,9 @@ never slower than Numba, small inputs too): the same file is ALSO loaded as a Py
 a call ~0.4 us, ctypes' own floor is ~1 us, Numba's ~0.8 us; load_ext; it fails = the ctypes functions, the same
 loops). Arrays are handed over as they are (the library reads NumPy's array struct, checked at load by probe()); one it can't read as it is (another type, spread out in memory, read
 only) = NEED_COPY, made plain here and handed over again. A loop that fails inside (a bad index: caught there, it
-never ends the program; no memory) returns below 0 and that call uses the fastloops twin instead (plain Python:
-slow but the same), noted once in the logs.
+never ends the program; no memory) returns below 0 and that call is done by Numba's compiled twin when Numba is
+installed (files/numba_loops.backup, that loop made on its first call), else by the fastloops twin (plain Python:
+slow); noted once in the logs. Never asked about (user 2026-11-09).
   stir_spots, stir_spots_one   recolour.stir_from's middle (stir_spots on half the cores past CORES_LEAST spots)
   winner_pieces                engine.winner_stretches' pieces (Remove overlaps, split around)
   key_order, key_order_cores   np.lexsort by key, then 3 more columns (key_order_cores: the key groups on half
@@ -288,7 +289,7 @@ class Loops(Wraps):
             if ext is None or not all(hasattr(ext, x) for x in needs):
                 if base is not None and hasattr(base, name):
                     self.__dict__[name] = getattr(base, name)
-        self.base = base
+        self._plain = base
         self.dll = dll
         self.x = ext
         if ext is not None:  # (the extension's functions take the same arguments as the ctypes ones)
@@ -298,8 +299,22 @@ class Loops(Wraps):
         # (Built-in BASSMIDI's limiter: BASS's sound thread calls the library's C function; None = synth.py's own)
         self.__dict__["limit_dsp"] = limiter(dll)
 
+    @property
+    def base(self):
+        """Where a refused call goes (read only then; user 2026-11-09, never asked): Numba's compiled fastloops when
+        Numba is installed (files/numba_loops.backup: only that loop made, on its first call), else the plain
+        twins."""
+        from files import numba_loops
+        return numba_loops.backup() or self._plain
+
+    @base.setter
+    def base(self, module):  # (checks put a traced stand-in for the plain twins here)
+        self._plain = module
+
     def __getattr__(self, name):  # (a name fastloops got after the copy)
-        return getattr(self.base, name)
+        if name == "_plain":
+            raise AttributeError(name)
+        return getattr(self._plain, name)
 
     def _again(self, name, got, args):
         """The extension's loop name didn't run (got < 0): NEED_COPY = plain copies once more. -> what it gave

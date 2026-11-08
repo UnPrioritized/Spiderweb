@@ -193,6 +193,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     native.py        our own compiled loops (Rust, built from native/loops): notes on screen, painting, overlaps...
     native_wraps.py  each own loop's call (room for its results made, a refused call handed to its twin)
     loop_marks.py    the marks fastloops' loops carry (plain Python: they compile nothing)
+    numba_loops.py   no own library here (Mac, older Linux) but Numba installed: fastloops compiled by Numba instead
     mathexpr.py      math in number boxes (960*4 etc.)
     snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
 """
@@ -293,14 +294,25 @@ def run_pip(root, packages):
     return failed, output.strip()
 
 
-EXTRAS = (("PIL", "pillow", "extras.pillow"),)  # (module, pip name, text; Numba was one until 2026-11: own loops now)
-SHOWN = {"pillow": "Pillow"}  # (their names while they're installed)
+EXTRAS = (("numba", "numba", "extras.numba"), ("PIL", "pillow", "extras.pillow"))  # (module, pip name, text)
+SHOWN = {"numba": "Numba", "pillow": "Pillow"}  # (their names while they're installed)
+
+
+def own_loops_work():
+    """Our own compiled loops load here (files/native.py). Numba is offered ONLY when they can't (user 2026-11-09:
+    a Mac, an older Linux); where they load it's never asked for, never imported."""
+    try:
+        from files import native
+        return native.load() is not None
+    except Exception:  # noqa: BLE001 (failing = they don't work here)
+        return False
 
 
 def offer_extras():
     """Pillow (pictures to the screen faster, more picture kinds) is optional: Spiderweb works without it, slower.
-    Run from source with it missing: offer to install it, once (a "No" or a failed install is remembered in
-    packages.json; the exe has it inside)."""
+    Numba too, but only where our own compiled loops can't load (own_loops_work). Run from source with one
+    missing: offer to install it, once (a "No" or a failed install is remembered in packages.json; the exe has
+    what it needs inside)."""
     if getattr(sys, "frozen", False):
         return
     import importlib
@@ -315,22 +327,25 @@ def offer_extras():
         declined = []
     missing = [(pip, text) for module, pip, text in EXTRAS
                if pip not in declined and importlib.util.find_spec(module) is None]
+    if any(pip == "numba" for pip, _ in missing) and own_loops_work():
+        missing = [m for m in missing if m[0] != "numba"]
     if not missing:
         return
     import tkinter as tk
     from tkinter import messagebox
-    from files.lang import tr
+    from files.lang import tr, trn
     from files.safefile import write_text
     root = tk.Tk()
     root.withdraw()
     names = " ".join(pip for pip, _ in missing)
     command = f'"{sys.executable.replace("pythonw", "python")}" -m pip install {names}'
     failed = []
-    if messagebox.askyesno("Spiderweb", tr("extras.ask", list="\n".join("• " + tr(text) for _, text in missing))):
+    if messagebox.askyesno("Spiderweb", trn("extras.ask", len(missing),
+                                            list="\n".join("• " + tr(text) for _, text in missing))):
         failed, output = run_pip(root, [(pip, SHOWN[pip]) for pip, _ in missing])
         importlib.invalidate_caches()
         if failed:
-            messagebox.showerror("Spiderweb", tr("extras.failed", output=output, command=command))
+            messagebox.showerror("Spiderweb", trn("extras.failed", len(failed), output=output, command=command))
     else:
         failed = [pip for pip, _ in missing]
     if failed:

@@ -174,6 +174,10 @@ package is optional: Pillow (images shown faster; the Image tool opens JPG,
 WebP, BMP and TIFF too, not just PNG and GIF). Spiderweb works without it,
 just slower. It offers to install it once; to do it yourself later, type
   pip install pillow
+On a Mac, or a Linux too old for the included fast code,
+  pip install numba
+gets you that speed back (the first start then takes a minute while it
+gets ready).
 With PyNaCl installed (pip install pynacl), the update popup can also
 download the new source zip and check its signature for you.
 

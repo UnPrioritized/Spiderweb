@@ -1,7 +1,9 @@
 """The plain-Python twins of our own compiled loops (files/native.py, built from native/loops in Rust): the
 slowest note work with lots of notes. They were compiled by Numba until 2026-11 (PLAN.md B); now they're the
 last resort when the library refuses a call (files/loop_marks.py: their marks do nothing), and the very source
-the library copies. Without the library the NumPy code they replace is used, not these.
+the library copies. Without the library: when Numba is installed (from source: Mac, an older Linux) this very
+file is compiled by it once more as its own module (files/numba_loops.py) and used like the library; else the
+NumPy code they replace is used, not these.
 Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares them):
   paint_order    the notes kept in painting order for the next two (redone when they or the selection change)
   order_screen   roll_draw.note_rects' screen(): the notes on screen, their pixels, colours, in painting order
@@ -2777,3 +2779,142 @@ def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, id
                     if (data[rb + (c >> 3)] >> (7 - (c & 7))) & 1:
                         top[key, x] = r
                         break
+
+
+def warm():
+    """Compiles (or loads) every loop with the same kinds of values the program hands them. Only called on the
+    Numba copy of this file (files/numba_loops.py: no own library, Numba installed); here it would just run them."""
+    i1, f, b = np.zeros(1, np.int64), 0.0, np.zeros(1, bool)
+    e0, i0e, u0 = np.zeros(0), np.zeros(0, np.int64), np.zeros(0, np.uint64)  # (no spots: made, nothing read)
+    fp, ip = np.zeros(64), np.zeros(64, np.int64)
+    for fn in (stir_spots_one, _stir_spots_cores):
+        fn(e0, e0, fp, ip, e0.copy(), e0.copy())
+    for fn in (stir_wrap_one, _stir_wrap_cores):
+        fn(i0e, e0, e0, e0, e0, e0.copy())
+    for fn in (stir_nearest_one, _stir_nearest_cores):
+        fn(i0e, i0e, i0e, e0, e0, i0e, e0, i0e, 0.0, 1.0, 1.0, e0, e0, False, i0e.copy())
+    for fn in (liquify_sample_one, _liquify_sample_cores):
+        fn(np.zeros((2, 2, 2)), e0, e0, np.zeros((0, 2)))
+    dice_mix(np.uint64(1), u0, u0, u0, u0, e0.copy())
+    winner_pieces(i1, i1, i1 + 1, i1, i1.copy())
+    s, e, key, color, first, _ = paint_order(np.zeros((1, 6), np.int64), np.zeros(1, np.int64), i1, 1,
+                                             np.zeros(0, bool), np.arange(15, dtype=np.int64), 16, 0)
+    order_screen(s, e, key, color, first, 0, 1, f, f, f, f, f, f, b, False, f, f)
+    order_rects(s, e, key, color, first, 0, 1, f, f, f, f, f, f, b, False, f, f, 0, 0, 1, i1, i1)
+    last_on_pixels(i1.copy(), i1.copy(), i1.copy(), i1.copy(), 0, 0, 1, i1, i1)
+    note_top(np.full(1, -1, np.int64), np.zeros(1, np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, False)
+    paint_notes(np.zeros((1, 3), np.uint8), 0, 0, 1, 1, i1, i1, i1, i1, i1, np.zeros((1, 2, 3), np.uint8), False)
+    overlap_sweep(np.zeros((1, 6), np.int64), i1, i1)
+    overlap_order(np.zeros((1, 6), np.int64))
+    recolour_apart(i1, i1, i1, i1, i1.copy(), np.zeros(1), i1, i1 + 1, 1)
+    midi_events(np.zeros((1, 6), np.int64), i1 * 0, np.zeros(2, np.int64), 0, 1)
+    midi_track(np.zeros((1, 6), np.int64), i1 * 0, 0, 1, 1)
+    note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
+    clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
+    key_order(i1, i1, i1, i1)
+    k_order, k_at = _key_groups(i1)
+    on_cores(_key_runs_cores, _key_runs, CORES_LEAST, k_order, k_at, i1, i1, i1)  # (the shared loop made now, not mid-paste)
+    radix_order(i1, 1)
+    ring_runs(i1, i1, i1, i1, 0.5, 1)
+    clash_pairs(np.zeros((1, 4), np.int64), 1, 1 << 28)
+    wave_fill(i1, 0, 1, i1, np.zeros(1), np.zeros(1))
+    note_ends(i1, i1 + 1, i1, True, 2, 0.0, 50.0, True, np.zeros(1), 0.0, np.int64(1) << 40)
+    nearest(np.zeros((1, 3)), np.zeros((1, 3)))
+    m = np.zeros((1, 3))
+    spread_line(np.zeros((1, 1, 3)), np.zeros((1, 1)), m, m, 1.0, np.zeros((1, 1), np.int64), np.zeros((1, 1, 3)), 0,
+                m[:0], m, m.copy())
+    f1, i2 = np.zeros(1), np.zeros(2, np.int64)
+    i0, f0 = np.zeros(0, np.int64), np.zeros(0)
+    p, nm, sr, w, s, rp, _ = hz_expand(i1, i1, np.ones(1), i1 + 1, i1, i1 - 1, b, 1, 0.5, 0.1, f1, np.ones(1),
+                                       np.ones(1), f1)
+    p, nm, sr, w, s, late, ns, npp, place, took = hz_late(p, nm, sr, w, s, f1, True, 0.5, f1, np.ones(1, np.int64), f1, 1)
+    hz_finish(p, nm, sr, w, s, late, ns, npp, place, np.zeros(1), np.full(1, 9.0), np.ones(1), True, True, b, f1,
+              np.ones(1), f1, f1, np.ones(1), np.full(1, 9.0), np.ones(1), np.ones(1), np.ones(1), 0.01)
+    hz_finish(p, nm, sr, w, s, late, ns, npp, place, np.zeros(1), np.full(1, 9.0), np.ones(1), True, True, b, f1,
+              np.ones(1), f1, f1, np.ones(1), np.full(1, 9, np.int64), np.ones(1), np.ones(1), np.ones(1), 0.01)
+    hz_order(np.arange(300, dtype=np.int64))
+    area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
+    smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
+    t3 = np.array([0, 1, 3], np.int64)
+    gap_ticks(0, 3, t3, t3[:0], np.full(3, 500000, np.int64), t3[:0], 500000, 0xFFFFFF)
+    gap_ticks(0, 3, t3, t3, np.full(3, 500000, np.int64), np.arange(4, dtype=np.int64) * 500000, 0, 0xFFFFFF)
+    gap_plan(0, -1, 0, t3, np.array([500000, 1000000], np.int64), np.array([1, 2], np.int64),
+             np.full(3, 500000, np.int64), np.zeros(3, np.int64), 24, 0xFFFFFF, 8192, 48, np.zeros(16, np.int64),
+             np.zeros(16, np.int64), 0, np.zeros(16, np.int64))
+    u8 = np.zeros(1, np.uint8)
+    mu = np.zeros(1, np.uint16)  # (LoadedPlayer.muted: each track's channels muted, a bit each)
+    midi_walk(u8, 0, 0, True, 0, np.zeros(midi_scan.ST_SIZE, np.int64), np.zeros(midi_scan.C_SIZE, np.int64))
+    midi_rewrite(u8, 0, 0, True, i1, i1.copy(), False, np.zeros(128, np.uint8), i1[:0], np.zeros(1, np.int64),
+                 u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64), 0, i1[:0], -1, 0xFFFF, 1)
+    midi_note_ticks(u8, 0, 0, True, u8.copy(), 0, np.zeros(midi_scan.NT_SIZE, np.int64))
+    midi_busy_hits(u8, 0, 0, 0, i1[:0], 1, np.zeros(midi_scan.BH_SIZE, np.int64), i1.copy(), i1.copy(),
+                   np.zeros(2, np.int64), i1.copy(), i1.copy(), i1.copy(), u8.copy())
+    midi_gather(u8, 0, 0, 0, i1[:0], 0, 1, 0, 127, u8.copy(), np.zeros(midi_scan.GA_SIZE, np.int64), i1.copy(),
+                i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(),
+                i1.copy(), u8.copy())
+    q, z = np.zeros(_index.QS, np.int64), np.zeros(4, np.int64)
+    ix, cov, i32 = _index.new_state(), np.zeros((128, 8), np.int32), np.zeros((128, 8), np.int32)
+    midi_index(u8, 0, 0, 0, 60, ix, q, q.copy(), q.copy(), q.copy(), q.copy(), q.copy(), z, z.copy(), z.copy(),
+               z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), z.copy(), cov,
+               np.zeros((128, 8), np.uint8), np.zeros(16, np.int64), z.copy(), z.copy(), z.copy(),
+               np.zeros((4, _index.META_KEEP), np.uint8), z.copy(), np.zeros(4, np.int32),
+               np.zeros(16 * _index.CC_KINDS, np.int64))
+    midi_close(ix, 60, q, q.copy(), q.copy(), z, z.copy(), z.copy(), z.copy(), z.copy(), cov,
+               np.zeros((128, 8), np.uint8))
+    midi_grid(cov, np.zeros((128, 8), np.uint8), 0, 1, 0, 0, i32, i32.copy(), i32.copy(), 0,
+              np.zeros((1, 2), np.uint8), 1)
+    midi_halve(i32, i32.copy(), np.zeros((128, 4), np.int32), np.zeros((128, 4), np.int32))
+    t2, m2 = np.full((1, 2), -1, np.int64), np.zeros((1, 2), np.uint8)
+    midi_cover(u8, 0, 0, 0, i1[:0], np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,
+               np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
+               z.copy(), z.copy())
+    midi_cover_many(np.zeros(1, bool), i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, u8, i1, np.zeros(1, np.int16), i1,
+                    u8.copy(), i1[:0], 1, 1.0, 0.0, 2, 0, np.zeros((16, 32), np.int64), np.zeros((16, 32), np.int64),
+                    t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(), z.copy(), z.copy(), q,
+                    q.copy(), q.copy(), np.zeros(_index.C_SIZE, np.int64), i1.copy())
+    loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
+    all_tops(np.full((1, 1), -1, np.int32), np.zeros(1, np.uint8), i1, i1 + 1, i1 + 1, i1.copy(), i1.copy(), i1 + 1,
+             i1 + 1, np.zeros(1, bool), i1.copy(), i1.copy(), 0, 1.0, 1)
+    midi_merge_loud(t2, m2, t2.copy(), m2.copy(), np.zeros((1, 3), np.int64), np.zeros(1, np.int64), 1 << 20)
+    i32 = np.zeros(1, np.int32)
+    play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),
+              i32.copy(), 0, i1.copy(), i1[:0], i1.copy(), i1.copy(), False, i1.copy(), i1.copy())
+    play_order(i1, i32, i32, 0, 1, i1.copy(), i32.copy(), i32.copy())
+    play_order_count(i1, 0, i1.copy())
+    play_order_place(i1, i32, i32, 0, i1.copy(), i1.copy(), i32.copy(), i32.copy())
+    h2 = np.zeros((1, 128), np.int64)
+    play_hist(i32, i32, 0, 0, i1, 0, mu, i1, 1, 1, h2)
+    line = midi_play.Line(4, midi_play.OPEN * 4)
+    play_emit(i32, i32, 0, 0, i1, 0, mu, i1, 1, 1, i1, i1.copy(), np.zeros((1, 3), np.uint8), i1.copy(), False,
+              *line.arrays())
+    play_programs(u8, 0, 0, np.zeros(midi_play.PS_SIZE, np.int64))
+    f1 = np.zeros(1, np.float64)
+    line = midi_play.Line(4)
+    play_stamp(i32, i32, 0, 0, i1, mu, i1, i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0,
+               np.zeros(1, np.uint64), np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(3, np.int64),
+               np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64), np.zeros(1, np.int64),
+               *line.arrays())
+    play_condense(i1, i32, i32, i1.copy(), 0, i1.copy(), np.zeros(1, np.uint32),
+                  np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64),
+                  np.zeros(1, np.int64), np.zeros(4, np.int64), np.full(1 << 17, -1, np.int64))
+    play_stamp_pre(i32, np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), 0, 0, 0,
+                   i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0, np.zeros(1, np.uint64),
+                   np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(3, np.int64), False,
+                   *line.arrays())
+    q = np.zeros(midi_piece.QS, np.int64)
+    piece_track(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 0, 10, i1[:0], q, q.copy(),
+                q.copy(), 0, -1, 0, np.zeros(32, np.uint8), 5, q.copy(), 0, 0, np.zeros(1, np.int64),
+                np.zeros(256, np.uint8), np.zeros(4, np.int64), np.zeros(4, np.uint8), np.zeros(2, np.int64))
+    rk, rs, rc = np.array([3, 1, 3], np.int64), np.array([5, 0, 5], np.uint8), np.ones(3, np.int64)
+    m = piece_runs_sort(rk, rs, rc, 3, rk.copy(), rs.copy(), rc.copy(), 2)
+    m = piece_runs_merge(rk, rs, rc, m, rk.copy(), rs.copy(), rc.copy(), m, np.zeros(6, np.int64),
+                         np.zeros(6, np.uint8), np.zeros(6, np.int64))
+    piece_counted_track(rk, rs, rc, 2, 0, 0, np.zeros(96, np.uint8))
+    piece_order_ok(rk, rs, rc, 2, np.zeros(256, np.uint8))
+    piece_open_at(rk, rs, rc, 2, 1 << 40, 1 << 30, np.zeros(2, np.int64))
+    dc_block(np.zeros((4, 2), np.float32), np.ones(5), np.zeros((2, 2)))
+    piece_held_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0, q, q.copy(),
+                   np.zeros(1, np.int64), np.zeros(1, np.int64), q.copy())
+    piece_held_head(np.zeros(1, np.int64), np.zeros(1, np.int64), np.ones(1, np.int64), -1, 0, np.zeros(16, np.uint8))
+    piece_note_ons(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 10, i1[:0], 0,
+                   np.ones(midi_piece.QS, np.int8), np.zeros(4, np.int64), np.zeros(4, np.int64), np.zeros(4, np.int64))

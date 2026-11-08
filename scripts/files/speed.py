@@ -3,7 +3,9 @@ Spiderweb) and Pillow (optional: pictures to the screen in half the time, more p
 the same without them, just slower: the NumPy / Tk code they replace is kept and used then.
 
 start() loads the compiled loops in the background; loops() is None until they're ready, then native.Loops (each
-loop's plain-Python twin in files/fastloops.py is the last resort of a call the library refuses). SPIDERWEB_SPEED
+loop's plain-Python twin in files/fastloops.py is the last resort of a call the library refuses). No library here
+(a Mac, an older Linux) but Numba installed (from source): Numba's compiled fastloops instead (files/numba_loops.py,
+user 2026-11-09); neither = None, the NumPy code. SPIDERWEB_SPEED
 in the environment: "off" = never use them, "now" = load them at once instead of in the background (tests: the same
 code every run). (Until 2026-11 the loops were Numba's; PLAN.md B.)"""
 
@@ -46,15 +48,35 @@ def _load():
         _loops = None
         how = "compiled loops off: " + repr(sys.exc_info()[1])
         errors.write_log(*sys.exc_info(), "(loading the compiled loops; the slower code is used)")
+    own = ("on (%s)" % native.level_name()) if _loops is not None else "off: " + (native.why() or how)
+    second = ""
+    if _loops is None:  # (no own library here: Numba's loops when it's installed, else the NumPy code)
+        _loops, second = _numba_loops()
+        if _loops is not None:
+            how = "Numba's compiled loops ready in %.1f s" % (time.perf_counter() - began)
     if _loops is None:
         _failed = True
-    own = ("on (%s)" % native.level_name()) if _loops is not None else "off: " + (native.why() or how)
-    errors.note("speed-ups", f"own loops {own}, Pillow {'on' if pillow() else 'off'}")
+    errors.note("speed-ups", f"own loops {own}{second}, Pillow {'on' if pillow() else 'off'}")
     report = os.environ.get("SPIDERWEB_SPEED_REPORT")  # (the exe test asks how it went)
     if report:
         with open(report, "w", encoding="utf-8") as f:
             f.write(how + "\nOwn loops: " + own + "\nPillow: " + ("yes" if pillow() else "no") + "\n")
     _drop_numba_saved()
+
+
+def _numba_loops():
+    """(Numba's compiled loops or None, the log's words for it): the second choice when our own library can't load
+    (files/numba_loops.py: from source with Numba installed, e.g. a Mac or an older Linux)."""
+    import sys
+    from files import errors, numba_loops
+    if not numba_loops.available():
+        return None, ", NumPy"
+    try:
+        m = numba_loops.load()
+    except Exception:  # noqa: BLE001 (Numba there but failing here: the NumPy code, worth a line in the logs)
+        errors.write_log(*sys.exc_info(), "(compiling Numba's loops; the slower code is used)")
+        return None, ", Numba failed, NumPy"
+    return (m, ", Numba on") if m is not None else (None, ", NumPy")
 
 
 def _drop_numba_saved():
@@ -71,7 +93,7 @@ def _drop_numba_saved():
 
 
 def loops():
-    """The loops once they're ready (native.Loops), else None (use the NumPy code)."""
+    """The loops once they're ready (native.Loops, or Numba's compiled fastloops), else None (the NumPy code)."""
     return _loops
 
 
