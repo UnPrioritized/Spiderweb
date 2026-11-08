@@ -1068,7 +1068,7 @@ def heard_way(sh, mode, rule=None):
     on them (user 2026-11-08: Glue, note tool pages, Recolour, flips work on the notes AS SHOWN; a long quiet note
     under a loud one shows loud to the long note's end in Single channel)."""
     if (mode == "raw" or "notes" not in sh or "picture" in sh or "picture_notes" in sh or is_mask(sh)
-            or sh.get("held") is True or is_sustained(sh)):
+            or sh.get("held") is True or is_sustained(sh) or sh.get("_sus") is True):
         return None
     rule = rule or {}
     if mode == "auto" and keeps_laps(sh) and not rule.get("across"):
@@ -1165,9 +1165,12 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k != "extend"})
         return (extended(notes, sh["extend"], ppq), tracks) if is_extended(sh) else (notes, tracks)
     if "sustain" in sh:  # (held on last, after everything else: sustain.py)
-        notes, tracks = get({k: v for k, v in sh.items() if k != "sustain"})
+        bare = {k: v for k, v in sh.items() if k != "sustain"}
         if not is_sustained(sh):
-            return notes, tracks
+            return get(bare)
+        # (its own overlaps kept under the hold, as heard_way says: "_sus" keeps the notes below from being fixed as
+        # heard; sweep 55660070, a sustained paste in Single had them fixed first, and a velocity line missed)
+        notes, tracks = get(dict(bare, _sus=True))
         got = held_piece(sh, notes, tracks, ppq, get)
         return got if got is not None else held(notes, tracks, auto_sustain(sh, get), ppq)
     if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
@@ -1266,7 +1269,7 @@ def auto_sustain(sh, get):
     bare = unglued({k: v for k, v in sh.items() if k != "sustain"}) if "gap" not in sus else None
     if bare is None:
         return sus
-    notes = get(bare)[0]
+    notes = get(dict(bare, _sus=True))[0]  # (its own overlaps kept, as fx_notes holds them)
     return dict(sus, _auto=auto_gap(notes))
 
 
