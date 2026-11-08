@@ -8,6 +8,8 @@ import threading
 import time
 from tkinter import filedialog, messagebox
 
+import numpy as np
+
 from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
@@ -1627,6 +1629,12 @@ class Playback:
         near = self.roll.visible_notes(lo, hi)  # Faint 0 % = not shown, not heard; user 2026-11-01)
         if not seen:
             near = near[near[:, 3] >= -1]
+        wrapped = self.scrub_wrapped()  # (Wrap on: the kept notes where they land, heard like Play hears them)
+        if len(wrapped):
+            ws, we = wrapped[:, 0], wrapped[:, 1]
+            wrapped = wrapped[((lo <= ws) & (ws <= hi)) | ((ws <= t_to) & (t_to < we))]
+            if len(wrapped):
+                near = np.concatenate([np.asarray(near, np.int64), np.asarray(wrapped, np.int64)])
         s_, e_ = near[:, 0], near[:, 1]
         tuned = out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():

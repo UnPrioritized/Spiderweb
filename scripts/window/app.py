@@ -3882,6 +3882,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.wrap_version += 1
         return got
 
+    def scrub_wrapped(self):
+        """Right-drag listening's wrapped notes (user 2026-11-08: heard whenever "Wrap them around" is on, like Play,
+        whatever "Show wrapped notes" says): every shown kept note (off_drawn: hidden shapes / tracks never) put where
+        it lands by wrap_landing, the export's own rule. Rows like rendered's; kept until off_drawn / keys change, so
+        a mouse move only picks rows."""
+        off = self.off_drawn
+        if not len(off) or not self.wraps_offrange():
+            return NO_NOTES
+        key = (id(off), self.keys)
+        got = getattr(self, "_scrub_wrap", None)
+        if got is None or got[0] != key:
+            got = self._scrub_wrap = (key, wrap_landing(off, self.keys)[0])
+        return got[1]
+
     def offrange_rows(self):
         """Every shape's "Keep notes made there" notes as rendered rows (start, end, key, velocity, slot, owner): the
         piano roll paints them see-through (roll_draw OFF_BASE). Each colour on the slot its real notes are on
