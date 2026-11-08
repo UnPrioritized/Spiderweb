@@ -137,6 +137,17 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
 LATE_S = 0.15  # making the notes took longer than this (s): after an edit they're made in the background (late_ok)
+OLD_NOTES_SHARE = 16  # notes remembered for shapes as they WERE (undo targets) may take 1/16 of the PC's memory
+OLD_NOTES_LEAST = 256 * 2 ** 20  # (bytes; at least this much: forget_old_notes)
+_old_notes_most = []
+
+
+def old_notes_most():
+    """Bytes the notes of shapes as they were may take (App.forget_old_notes; the PC's memory asked once)."""
+    if not _old_notes_most:
+        total = system.total_memory()
+        _old_notes_most.append(max(OLD_NOTES_LEAST, (total or 16 * 2 ** 30) // OLD_NOTES_SHARE))
+    return _old_notes_most[0]
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -834,6 +845,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._title = None
         self.big_skip = set()  # big_ask actions ticked "Don't ask again until Spiderweb is closed"
         self._notes_cache = {}
+        self._notes_used = {}  # notes cache key -> shapes_gen when last used (forget_old_notes)
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
         self.leave_boxes = {}  # side panel box -> what takes its number when it's left (widgets.leave_box)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
@@ -2191,6 +2203,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 got = fx_notes(sh, self.ppq, keys, lambda s: self.notes_tracks(s, keys, False))
             self._notes_worked += 1
         cache[key] = got  # (last = used most recently: trim_notes forgets the oldest first)
+        self._notes_used[key] = self.shapes_gen
         self.trim_notes()
         return got
 
@@ -2220,6 +2233,27 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if len(cache) > most:
             for k in list(itertools.islice(cache, len(cache) - most // 2)):
                 del cache[k]
+                self._notes_used.pop(k, None)
+
+    def forget_old_notes(self):
+        """The notes remembered for shapes as they WERE (before a move, an edit...: kept so undo is quick) past
+        OLD_NOTES_SHARE of the PC's memory: the oldest forgotten (made again if undo needs them). A few edits of a
+        shape with millions of notes kept a copy each: a phone ran out of memory. The notes this making used stay."""
+        cache, used, gen = self._notes_cache, self._notes_used, self.shapes_gen
+        for k in [k for k in used if k not in cache]:  # (the cache emptied elsewhere: their keys hold big texts)
+            del used[k]
+        sizes = {k: sum(a.nbytes for a in (v if isinstance(v, (tuple, list)) else (v,)) if isinstance(a, np.ndarray))
+                 for k, v in cache.items()}
+        total = sum(sizes.values())
+        most = old_notes_most()
+        if total <= most:
+            return
+        for k in [k for k in cache if used.get(k) != gen]:  # (oldest first)
+            if total <= most:
+                break
+            total -= sizes[k]
+            del cache[k]
+            used.pop(k, None)
 
     def shapes_changed(self, now=False, moving=False):
         """Recalculate every note (overlaps depend on all shapes together) and refresh the screen.
@@ -2343,6 +2377,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 tidy_tracks(self)                           # back the same: found by the track sweep)
             made = lay_again(made, stash, self.shapes, self.own_channels()) or make()
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _, self.cut_emptied = made
+        self.forget_old_notes()
         self.off_all = self.offrange_rows()  # (before play_changed: App.outgoing reads them)
         self.made_version += 1
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
@@ -2935,7 +2970,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)
         job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False,
-                              "follow": follow, "stash": {}}  # (stash: all_notes' own, for lay_again)
+                              "follow": follow, "stash": {}, "used": []}  # (stash: all_notes' own, for lay_again)
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
@@ -2961,6 +2996,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 if got is None:
                     got = fx_notes(sh, key[1], keys, lambda s: notes_tracks(s, keys, False))
                 job["own"][k] = got
+            job["used"].append(k)
             return got
 
         def work():
@@ -3052,6 +3088,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if job["got"] is None:
             return None
         self._notes_cache.update(job["own"])
+        for k in job["used"]:  # (the notes it used are the shapes' as they are now: kept by forget_old_notes)
+            self._notes_used[k] = self.shapes_gen
         self.trim_notes()
         if job["own"]:
             self._notes_time = job["time"]

@@ -5,6 +5,7 @@ import itertools
 import json
 import math
 import time
+import weakref
 import tkinter as tk
 import tkinter.font as tkfont
 
@@ -969,7 +970,7 @@ class RollDrawing:
         va = self.view_t * ppq
         pad = 16 / ax  # (the ring's pixels reach a little past its notes' ends)
         got = self._ring
-        if (got is None or got[0] is not app.drawn or got[1] != key or va - pad < got[3][0]
+        if (got is None or got[0]() is not app.drawn or got[1] != key or va - pad < got[3][0]
                 or va + span + pad > got[3][1]):
             fast = loops()
             kept = self.paint_order(fast) if fast and app.sels and not copies else None
@@ -992,7 +993,9 @@ class RollDrawing:
             else:  # (cut at the stretch's ends: the side lines there are a screen away from the view)
                 cols = (np.maximum(s[near], wa), np.minimum(e[near], wb), k[near])
             parts = ring_from(cols, RING_GAP / ax) if len(cols[0]) else None
-            got = self._ring = (app.drawn, key, parts, (wa, wb))
+            # (the notes it was made from by a weak link: a ring kept after a deselect held a whole old copy of
+            # every note; 230 MB at 5 M notes)
+            got = self._ring = (weakref.ref(app.drawn), key, parts, (wa, wb))
         return got[2]
 
     def draw_ring(self, w, h):
