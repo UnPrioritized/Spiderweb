@@ -9,18 +9,24 @@ import math
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
+
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.strum import EDGES, END_KNOB, KEYS_MAX, LIMITS, STRUM_DEFAULTS, TIME_KNOB, VEL_KNOB, clean_strum
+from notes import meter
+from notes.engine import cached_arrays
+from notes.strum import (BLOCK_MOST, EDGES, END_KNOB, KEYS_MAX, LIMITS, STRUM_DEFAULTS, TIME_KNOB, VEL_KNOB,
+                         clean_strum)
 from window import look
 from window.tool_window import GREEN, ORANGE, Knob, ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, unit_word
 
 TIMES = ("time", "end_time")  # kept in beats, shown in ticks
 TENSIONS = ("tension", "vel_tension", "end_tension")
 STRENGTH_OF = {"tension": "time", "vel_tension": "vel", "end_tension": "end_time"}
 STEPS = {"time": (1, 10, 0.1), "end_time": (1, 10, 0.1), "vel": (1, 10, 0.1)}  # (others: TENSION_STEPS)
 TENSION_STEPS = (1, 10, 0.1)
+BLOCK_LEAST, BLOCK_BARS_MOST = 0.001, BLOCK_MOST / 16  # (Every n bars: the box's range; 16 = a 16/4 bar)
 
 
 class StrumWindow(ToolWindow):
@@ -50,11 +56,11 @@ class StrumWindow(ToolWindow):
                                                                       pady=(6 if r == 3 else 0, 0))
         self.build_keys(panels["start"])
         more = ttk.Frame(box)
-        more.grid(row=2, column=1, sticky="nw", pady=(8, 0))
+        more.grid(row=2, column=1, sticky="nw", pady=(4, 0))  # (moved up a little: room for the Every row)
         for key in ("chop", "alternate"):
             self.check(more, key, tr(f"strum.{key}")).pack(anchor="w")
         edges = ttk.Frame(more)
-        edges.pack(anchor="w", pady=(8, 0))
+        edges.pack(anchor="w", pady=(4, 0))
         self.edges_label = ttk.Label(edges, text=tr("strum.edges"))
         self.edges_label.pack(anchor="w")
         names = [tr(f"strum.edges_{v}") for v in EDGES]
@@ -64,6 +70,7 @@ class StrumWindow(ToolWindow):
                             lambda e: self.put("edges", EDGES[max(self.edges_box.current(), 0)]))
         for w in (self.edges_label, self.edges_box):
             Tooltip(w, tr("strum.tip_edges"))
+        self.build_block(edges)
 
         row = ttk.Frame(box)
         row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
@@ -92,6 +99,59 @@ class StrumWindow(ToolWindow):
             Tooltip(e, tr(f"strum.tip_{key}"))
         Tooltip(self.keys_label, tr("strum.tip_keys"))
         Tooltip(self.keys_mid, tr("strum.tip_keys_to"))
+
+    def build_block(self, parent):
+        """Under the edges dropdown: "Every [n] bars" (the edges inside each piece of that length; cfg["block"] in
+        beats, None = the whole shape; a bar = the time signature at the shape's start, user 2026-11-08)."""
+        row = ttk.Frame(parent)
+        row.pack(anchor="w", pady=(3, 0))
+        self.block_on = tk.BooleanVar()
+        self.block_tick = ttk.Checkbutton(row, text=tr("strum.block_every"), variable=self.block_on,
+                                          command=self.on_block_tick)
+        self.block_tick.pack(side="left", padx=(0, 4))
+        self.block_bars = 1.0  # (the box's number while the tick is off: the window's own)
+        var = self.vars["block"] = tk.StringVar(value="1")
+        e = self.entries["block"] = ttk.Entry(row, textvariable=var, width=6, justify="center")
+        e.pack(side="left")
+        e.bind("<Return>", lambda ev: (self.on_block(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_block())
+        self.scrubs["block"] = Scrub(self.app, [(e, var, lambda: self.on_block(False))], (1, 4, 0.25), BLOCK_LEAST,
+                                     BLOCK_BARS_MOST, drag_box=True)
+        self.block_unit = unit_word(ttk.Label(row), var, "strum.block_bars", "strum.block_bars_one")
+        self.block_unit.pack(side="left", padx=(4, 0))
+        for w in (self.block_tick, e, self.block_unit):
+            Tooltip(w, tr("strum.tip_block"))
+
+    def bar_beats(self):
+        """A bar's length in beats at the (first) shape's start: the time signature there."""
+        try:
+            sh = self.app.shapes[self.targets[0]]
+            beat = float(np.concatenate(cached_arrays(sh))[:, 0].min())
+        except (AttributeError, IndexError, ValueError, KeyError, TypeError):
+            beat = 0.0
+        sigs = meter.sigs_of(getattr(self.app, "tempo", None))
+        return meter.bar_len(*meter.where(sigs, beat)[3])
+
+    def on_block_tick(self):
+        on = self.block_on.get()
+        self.put("block", self.block_bars * self.bar_beats() if on else None)
+
+    def on_block(self, done=True):
+        e, var = self.entries["block"], self.vars["block"]
+        try:
+            v = float(calc(var.get()))
+            if not BLOCK_LEAST <= v <= BLOCK_BARS_MOST:
+                raise ValueError
+        except (ValueError, ZeroDivisionError, OverflowError):
+            e.good_text = fmt(self.block_bars)
+            bad(e)
+            return
+        good(e)
+        if abs(v - self.block_bars) <= 1e-12:
+            return
+        self.block_bars = v
+        if self.cfg.get("block"):
+            self.put("block", v * self.bar_beats(), done)
 
     def on_keys(self, key, done=True):
         """A Keys box typed / scrubbed. The first box moves the second along while they're the same number (one
@@ -218,6 +278,13 @@ class StrumWindow(ToolWindow):
         at = EDGES.index(c["edges"]) if c["edges"] in EDGES else 0
         if self.edges_box.current() != at:
             self.edges_box.current(at)
+        if c.get("block"):
+            self.block_bars = c["block"] / self.bar_beats()
+        if self.block_on.get() != bool(c.get("block")):
+            self.block_on.set(bool(c.get("block")))
+        text = fmt(round(self.block_bars, 6))
+        if self.vars["block"].get() != text and self.focus_get() is not self.entries["block"]:
+            self.vars["block"].set(text)
         self.states()
 
     def states(self):
@@ -245,6 +312,13 @@ class StrumWindow(ToolWindow):
         starts = bool(c["start"] and c["time"])
         self.edges_label.state(["!disabled"] if starts else ["disabled"])
         self.edges_box.state(["!disabled", "readonly"] if starts else ["disabled"])
+        # (Every n bars: only while the edges do something; its box only while ticked)
+        edged = starts and c["edges"] != "off"
+        self.block_tick.state(["!disabled"] if edged else ["disabled"])
+        self.block_unit.state(["!disabled"] if edged and c.get("block") else ["disabled"])
+        state = "normal" if edged and c.get("block") else "disabled"
+        if str(self.entries["block"].cget("state")) != state:
+            self.entries["block"].config(state=state)
 
 
 open_strum = StrumWindow.open

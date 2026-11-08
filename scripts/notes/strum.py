@@ -24,7 +24,10 @@ from the end holds keys_to); the last step holds what is left (as with one numbe
 "edges": "off" = as above; "cut" / "wrap": the shape's own time (its first start .. its last end, before the strum)
 is a block. "cut" drops what the strum moves past its edges (a note across an edge keeps its part inside); "wrap"
 brings it back in at the other end (a note across an edge is cut in two; one as long as the block fills it). Inside
-a block, tick 0 doesn't stop a note: the block's edges do."""
+a block, tick 0 doesn't stop a note: the block's edges do.
+"block" (beats, only with cut / wrap; none = the whole shape, user 2026-11-08): the shape's time is cut into blocks
+that long, counted from its first start (the last one shorter when it doesn't fit), and the edges work inside each
+block on its own: a note across a block's edge is cut in two first, each note stays in the block it started in."""
 
 import functools
 import math
@@ -43,6 +46,7 @@ EDGES = ("off", "cut", "wrap")
 # of 4/4, user 2026-10-17: FL's own goes on until it breaks past ~1300 bars, leaving the rest of the chord behind)
 CAP = 4000
 CHOP_MAX = 5_000_000  # pieces: more than this and the notes aren't chopped
+BLOCK_MOST = 100_000.0  # beats: the longest block (longer = the whole shape anyway)
 
 
 def whole(v, default):
@@ -71,6 +75,9 @@ def clean_strum(c):
     out["keys_to"] = whole(c.get("keys_to"), out["keys"])  # (none: one number)
     if c.get("edges") in EDGES:
         out["edges"] = c["edges"]
+    b = c.get("block")  # (saved only when set: old files and the whole shape unchanged)
+    if isinstance(b, (int, float)) and not isinstance(b, bool) and math.isfinite(b) and 0 < b <= BLOCK_MOST:
+        out["block"] = float(b)
     if not (out["start"] and (out["time"] or out["vel"]) or out["end"] and out["end_time"]):
         return None
     return out
@@ -144,6 +151,11 @@ def apply_strum(a, st, ppq):
         return a
     edges = st.get("edges", "off")
     block = (int(a[:, 0].min()), int(a[:, 1].max())) if edges != "off" else None  # (the shape's own time)
+    blen = max(1, round(st["block"] * ppq)) if block and st.get("block") else 0  # (blocks inside it: ticks)
+    if blen and blen >= block[1] - block[0]:
+        blen = 0  # (one block holds it all: the whole shape)
+    if blen:
+        a = split_blocks(a, block[0], blen)
     if st["chop"]:
         a = chop(a)
     a = a[np.lexsort((a[:, 2], a[:, 0]))]  # (a copy) chords in time order, each low to high
@@ -162,6 +174,11 @@ def apply_strum(a, st, ppq):
         down ^= multi & (np.cumsum(multi) % 2 == 0)  # (the 2nd, 4th... real chord)
     q = np.where(down[chord], m - 1 - rank, rank)  # place in the strum (0 = struck first)
     q, last = groups(q, m, st), groups(m - 1, m, st)  # (its step, the chord's last step)
+    if blen:  # (each note's own block, by where it starts: after the split none crosses an edge)
+        lo = block[0] + (s - block[0]) // blen * blen
+        bounds = lo, np.minimum(lo + blen, block[1])
+    elif block:
+        bounds = block
     ns, ne = s.astype(float), e.astype(float)
     cap = CAP * ppq
     if start and st["time"]:
@@ -188,37 +205,61 @@ def apply_strum(a, st, ppq):
     a[:, 1] = np.maximum(ne, ns + 1).astype(np.int64)
     if block is None:
         return a
-    return wrapped(a, *block, st.get("rounds", False)) if edges == "wrap" else cut(a, *block)
+    return wrapped(a, *bounds, st.get("rounds", False)) if edges == "wrap" else cut(a, *bounds)
+
+
+def split_blocks(a, lo, size):
+    """Every note cut in two (or more) where it crosses a block's edge (lo + k x size, k >= 1)."""
+    s, e = a[:, 0], a[:, 1]
+    k0 = (s - lo) // size + 1  # (the first edge after the start)
+    n = np.maximum(-((lo - e) // size) - k0, 0)  # (edges strictly inside: k0 .. ceil((e - lo) / size) - 1)
+    if not n.any():
+        return a
+    rep = np.repeat(np.arange(len(a)), n + 1)
+    j = np.arange(len(rep)) - np.repeat(np.cumsum(n + 1) - (n + 1), n + 1)  # (which piece of its note)
+    out = a[rep]
+    edge = lo + (k0[rep] + j) * size
+    out[:, 0] = np.where(j == 0, s[rep], edge - size)
+    out[:, 1] = np.where(j == n[rep], e[rep], edge)
+    return out
 
 
 def cut(a, lo, hi):
-    """The notes kept inside lo .. hi (a note across an edge keeps its part inside)."""
-    a = a[(a[:, 1] > lo) & (a[:, 0] < hi)]
+    """The notes kept inside lo .. hi (a note across an edge keeps its part inside; lo / hi: one block, or each note's
+    own)."""
+    keep = (a[:, 1] > lo) & (a[:, 0] < hi)
+    lo, hi = (x[keep] if np.ndim(x) else x for x in (lo, hi))
+    a = a[keep]
     a[:, 0] = np.maximum(a[:, 0], lo)
     a[:, 1] = np.minimum(a[:, 1], hi)
     return a
 
 
 def wrapped(a, lo, hi, rounds=False):
-    """The notes brought back inside lo .. hi: what is past one edge comes in at the other (a note across an edge is
-    cut in two; one as long as the block or longer fills it). rounds ("Repeated colours get new channels", the last
-    column = colour + ROUND x its round, custom.ROUND): as if the block went on forever, a note brought in from j
-    blocks later is j x (the block's rounds) rounds later; its colour stays."""
+    """The notes brought back inside lo .. hi (one block, or each note's own): what is past one edge comes in at the
+    other (a note across an edge is cut in two; one as long as the block or longer fills it). rounds ("Repeated
+    colours get new channels", the last column = colour + ROUND x its round, custom.ROUND): as if the block went on
+    forever, a note brought in from j blocks later is j x (the block's rounds) rounds later; its colour stays."""
+    lo, hi = (np.broadcast_to(np.asarray(x, np.int64), (len(a),)) for x in (lo, hi))
     span = hi - lo
     length = a[:, 1] - a[:, 0]
     trips = (a[:, 0] - lo) // span  # (blocks away: -1 = came from before the start)
     s = a[:, 0] - trips * span
     full = length >= span
-    s[full] = lo
+    s = np.where(full, lo, s)
     e = np.where(full, hi, s + length)
     over = e > hi  # (across the end: the rest comes in at the start, from the block before)
     out = np.concatenate([a, a[over]])
     out[:len(a), 0], out[:len(a), 1] = s, np.minimum(e, hi)
-    out[len(a):, 0], out[len(a):, 1] = lo, lo + (e[over] - hi)
+    out[len(a):, 0], out[len(a):, 1] = lo[over], lo[over] + (e[over] - hi[over])
     if rounds and len(a):
         from notes.custom import ROUND
         lap = a[:, -1] // ROUND
-        laps = int(lap.max() - lap.min()) + 1  # (the rounds one block holds)
+        _, which = np.unique(lo, return_inverse=True)  # (each block's own rounds)
+        most, least = np.full(which.max() + 1, -(1 << 62)), np.full(which.max() + 1, 1 << 62)
+        np.maximum.at(most, which, lap)
+        np.minimum.at(least, which, lap)
+        laps = (most - least + 1)[which]  # (the rounds one block holds)
         later = np.concatenate([-trips, -trips[over] - 1])
-        out[:, -1] += later * laps * ROUND
+        out[:, -1] += later * np.concatenate([laps, laps[over]]) * ROUND
     return out
