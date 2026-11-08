@@ -1080,7 +1080,17 @@ def heard_notes(sh, notes, tracks):
         return notes, tracks
     rows = np.zeros((len(n), 6), np.int64)
     rows[:, :4], rows[:, 4] = n[:, :4], who
+    pts = sh.get("pts")
+    back = bool(pts) and pts[1][0] < pts[0][0]
+    if back:  # (flipped sideways: fixed as the unflipped notes are, then mirrored back = the exact mirror of what showed
+        hi = int(n[:, 1].max())  # unflipped; user took B 2026-11-08, the overlaps stay stored; mirrored within 0..hi:
+        rows[:, 0], rows[:, 1] = hi - n[:, 1], hi - n[:, 0]  # the compiled loops want no ticks below 0)
+    low = min(0, int(rows[:, 0].min()))  # (notes before beat 0: moved up meanwhile, for the same reason)
+    rows[:, :2] -= low
     rows = split_overlaps(rows) if way == "split" else resolve_overlaps(rows)
+    rows[:, :2] += low
+    if back:
+        rows[:, 0], rows[:, 1] = hi - rows[:, 1], hi - rows[:, 0]
     out = np.ascontiguousarray(rows[:, :4])
     if tracks is None:
         return out, None
