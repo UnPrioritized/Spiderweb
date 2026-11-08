@@ -616,6 +616,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # ... "Keep notes made there" (off; user 2026-11-08): shapes keep the notes they make in that space, kept
         # apart from the real notes (App.offrange_tracks), so nothing that leaves Spiderweb ever gets them
         self.keep_offrange = tk.BooleanVar(self, value=False)
+        self.offrange_opacity = tk.IntVar(self, value=50)  # (how see-through they're drawn, %: roll_draw.OFF_FADE)
+        self.off_all = self.off_drawn = NO_NOTES  # (offrange_rows; off_drawn = the ones the piano roll shows)
+        self.off_version = 0  # (+1 each time off_drawn is set: the roll's picture key)
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
         # when it opens (a change = opened again at the next Play: fresh_builtin)
         self.kestrel_opts = dict(KESTREL_DEFAULTS)
@@ -1141,6 +1144,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if away and len(self.drawn):
                 self.drawn = self.drawn[~np.isin(self.drawn[:, 5], away)]
             hidden |= set(away)
+        off = self.off_all
+        if len(off) and (hidden or self.track_list.current is not None):  # (only the shapes / tracks shown)
+            keep = ~np.isin(off[:, 5], list(hidden))
+            if self.track_list.current is not None:
+                keep &= np.isin(off[:, 4], list(self.track_list.shown_slots()))
+            off = off[keep]
+        if off is not self.off_drawn and (len(off) or len(self.off_drawn)):
+            self.off_version += 1
+        self.off_drawn = off
         if hidden != self.hidden_shapes:
             self.hidden_shapes = hidden
             if self.sels & hidden:  # (a hidden shape can't stay picked: nothing changes out of sight)
@@ -2228,6 +2240,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.picture_owners = np.array([picture_like(sh) for sh in self.shapes], bool)
         self.picture_pal = self.slots_pal()
         self.drawn_all, self.picture_owners_all = self.drawn, self.picture_owners
+        self.off_all = self.offrange_rows()
         self.track_view(follow=True)
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # how many channels each shape spreads over (every mode: a paste keeps its
@@ -3687,6 +3700,50 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not len(notes):
             return empty
         return off_part(notes, tracks, up, self.keys, round(later * self.ppq))
+
+    def offrange_changed(self):
+        """Settings → Piano roll "Keep notes made there" / its Opacity / the Space settings changed: the kept notes
+        worked out again and painted at the new opacity (no undo step: an app setting)."""
+        from roll.roll_draw import OFF_FADE
+        OFF_FADE[0] = min(100, max(1, int(self.offrange_opacity.get())))
+        self.off_all = self.offrange_rows()
+        self.track_view()
+        self.roll.request_redraw()
+
+    def offrange_rows(self):
+        """Every shape's "Keep notes made there" notes as rendered rows (start, end, key, velocity, slot, owner): the
+        piano roll paints them see-through (roll_draw OFF_BASE). Each colour on the slot its real notes are on
+        (colour_slots), so they look like the rest of the shape; a shape with no real notes: its colour number
+        (Multi) or slot 0. Never part of rendered / drawn: nothing that leaves Spiderweb sees them."""
+        if not self.keeps_offrange() or self.companion is not None or not self.shapes:
+            return NO_NOTES
+        rendered, parts = self.rendered, []
+        owners = rendered[:, 5]
+        order = np.argsort(owners, kind="stable") if len(rendered) else None
+        for i, sh in enumerate(self.shapes):
+            notes, tracks = self.offrange_tracks(sh)
+            if not len(notes):
+                continue
+            notes = np.asarray(notes, np.int64).reshape(-1, 4)
+            t = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
+            slot = t if self.channel_mode.get() == "auto" else np.zeros(len(notes), np.int64)
+            if order is not None:
+                lo, hi = np.searchsorted(owners, i, sorter=order), np.searchsorted(owners, i, "right", sorter=order)
+                if hi > lo:
+                    mine = rendered[order[lo:hi]]
+                    got = self.colour_slots(sh, mine)
+                    if len(got) == 1:
+                        slot = np.full(len(notes), got[0], np.int64)
+                    else:
+                        real = self.notes_tracks(dict(sh, _rounds=True) if self.rounds_apart() and has_colours(sh)
+                                                 else sh)[1]
+                        u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
+                        at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
+                        found = (u[at] == t) & (at < len(got))
+                        slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)],
+                                        int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min()))
+            parts.append(np.column_stack([notes, slot, np.full(len(notes), i, np.int64)]))
+        return np.concatenate(parts) if parts else NO_NOTES
 
     def gate_flip_state(self):
         """The right-click "Gate aware flip" for the selected shapes: (shapes it switches, on: ticked, why: None or

@@ -166,7 +166,9 @@ APP_KEYS = {
     "space_keys": ("view", "space_past_the_keys", int),  # (keyboard heights; SPACE_KEYS)
     "space_bars": ("view", "space_before_the_start_bars", int),  # (SPACE_BARS)
     "keep_offrange": ("view", "keep_notes_made_there", bool),  # (App.offrange_tracks)
+    "offrange_opacity": ("view", "kept_notes_opacity", int),  # (% 1-100; roll_draw.OFF_FADE)
 }
+OFFRANGE_OPACITY = (1, 100, 50)  # Settings → Piano roll "Opacity" of the notes kept there: least, most, default (user)
 SPACE_KEYS = (0, 1, 2, 3, 4)  # Settings → General "Space past the keys": keyboard heights past each end
 SPACE_BARS = (0, 1, 2, 4, 8, 16)  # ... "Space before the start": bars before beat 0 (user 2026-11-06)
 NOT_HERE = "not_in_settings_ini"  # (window key: the app settings this file couldn't take, kept in the autosave)

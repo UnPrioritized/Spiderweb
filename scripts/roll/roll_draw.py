@@ -255,7 +255,24 @@ GHOST_FADE = [20]
 # (shades 0..30 of each ghost group: tracks shown behind the highlighted one, velocity -2 - v, each velocity's
 # shade faded to TRACK_FADE[0] %: the track list's Faint box; user 2026-10-23: they kept their velocity look)
 TRACK_FADE = [25]
+# then the notes kept past the keys / before beat 0 (Settings → Piano roll "Keep notes made there", App.off_drawn):
+# one more group per group before the ghosts, each velocity shade mixed with the space's background colour (they
+# only ever sit there) so it shows OFF_FADE[0] % of itself: see-through (user 2026-11-08, 1-100 %, default 50)
+OFF_BASE = 2 * GHOST_BASE
+OFF_FADE = [50]
 _tables = {}
+
+
+def mixed(color, amount, to):
+    """color ("#rrggbb") mixed toward to by amount (0 = itself, 1 = to)."""
+    a = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(to[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(c + (t - c) * amount) for c, t in zip(a, b))
+
+
+def off_code(group, vel):
+    """The colour number a kept note past the edges is painted with: its colour group's see-through shade."""
+    return (OFF_BASE + group) * 32 + np.clip(vel, 0, 127) // 4
 
 
 def ghost_code(group, vel=-1):
@@ -268,7 +285,7 @@ def ghost_code(group, vel=-1):
 def note_tables(pal):
     """(NOTE_COLORS, NOTE_RGB) with the picture colours pal ("RRGGBB" list or None) added as groups
     PICTURE_GROUP.. (grey where there's none), then every group's ghost colours (GHOST_BASE..)."""
-    key = tuple(pal or ()), GHOST_FADE[0], TRACK_FADE[0]
+    key = tuple(pal or ()), GHOST_FADE[0], TRACK_FADE[0], OFF_FADE[0], look.ROLL_BG
     got = _tables.get(key)
     if got is None:
         extra = []
@@ -281,6 +298,8 @@ def note_tables(pal):
         groups = NOTE_COLORS + extra
         extra += [(fade(f, a), fade(b, a)) for g in range(0, len(groups), 32)
                   for (f, b), a in zip(groups[g:g + 31] + [groups[g + 31]], [behind] * 31 + [away])]
+        space, off = look.space_shade(look.ROLL_BG), 1 - OFF_FADE[0] / 100  # (OFF_BASE: after the ghosts)
+        extra += [(mixed(f, off, space), mixed(b, off, space)) for f, b in groups]
         colors = NOTE_COLORS + extra
         rgb = np.concatenate([NOTE_RGB, np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
                                                   for pair in extra], np.uint8)])
@@ -671,6 +690,7 @@ class RollDrawing:
         self._hide_sels = carried is not None and not (self.drag and self.drag[0] == "move")
         fixed = (frozenset(app.sels), self.sx, self.sy, self.kb_w, self.ruler_h, w, h,
                  self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])),
+                 getattr(app, "off_version", 0), OFF_FADE[0],  # (the notes kept past the edges)
                  stack_rule(app)[0],  # (Stacked notes changed in Settings: painted again at once, hunt 2026-11-07)
                  self._hide_sels)
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols), self.hidden_shade()))
@@ -1449,6 +1469,50 @@ class RollDrawing:
         return self.sorted_notes()[lo:hi]
 
     def note_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
+        """main_rects + the notes kept past the keys / before beat 0 (off_rects) after them: they never share a
+        pixel with the real notes (those stay inside the keys, from beat 0), so nothing else changes."""
+        rects = self.main_rects(w, h, clip, area, only, draft)
+        off = self.off_rects(w, h, clip, area, only, draft)
+        if off is None:
+            return rects
+        return tuple(np.concatenate([np.asarray(a, np.int64), b]) for a, b in zip(rects, off))
+
+    def off_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
+        """The App.off_drawn notes on screen as main_rects' rectangles, in their see-through colours (off_code);
+        None when there are none."""
+        app = self.app
+        off = getattr(app, "off_drawn", None)
+        if off is None or not len(off) or draft == "alone":
+            return None
+        if only is None and app._bg_notes and getattr(self, "_hide_sels", False):
+            only = False
+        lifted = self.on_top()
+        if only is not None and lifted:
+            off = off[np.isin(off[:, 5], list(lifted)) == only]
+        ppq = app.ppq
+        ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift
+        ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
+        kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
+        x0, x1 = np.round(off[:, 0] * ax + bx), np.round(off[:, 1] * ax + bx)
+        y0 = np.round((off[:, 2] + 0.5) * ay + by)
+        y1 = np.maximum(np.round((off[:, 2] - 0.5) * ay + by), y0 + 1)
+        on = ~((x1 < kb) | (x0 > w) | (y1 < top) | (y0 > h))
+        if clip:
+            on &= ~((x1 < clip[0]) | (x0 >= clip[2]) | (y1 < clip[1]) | (y0 >= clip[3]))
+        on = np.flatnonzero(on)
+        if not len(on):
+            return None
+        slot = off[on, 4]
+        group = note_colours(slot, slot_colours(getattr(app, "picture_use10", False)))
+        pics = getattr(app, "picture_owners", ())
+        if len(pics) and pics.any():  # (a placed picture's notes: its own colours, as main_rects)
+            group = np.where(pics[np.clip(off[on, 5], 0, len(pics) - 1)], PICTURE_GROUP + np.minimum(slot, 15), group)
+        left, right = int(kb) - 2, int(w) + 2
+        x0, x1 = np.maximum(x0[on], left).astype(np.int64), np.minimum(x1[on], right).astype(np.int64)
+        return x0, y0[on].astype(np.int64), np.maximum(x1 - 1, x0), y1[on].astype(np.int64) - 1, \
+            off_code(group, off[on, 3])
+
+    def main_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
         """On-screen notes as whole-pixel rectangles, skipping exact repeats: NumPy arrays (x0, y0, x1, y1, colour),
         colour = a number in NOTE_COLORS. Painted in this order (selected shapes' notes, then the draft, on top).
         clip = (x0, y0, x1, y1): only the notes that touch this part of the screen (the same rectangles).

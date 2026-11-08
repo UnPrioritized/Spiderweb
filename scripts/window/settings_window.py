@@ -114,7 +114,7 @@ def ask_name(parent, title, prompt, initial="", check=None):
 
 
 def open_settings(app, tab=None):
-    """tab = "look" / "sound" / "general" / "language": shown at once (none = the one showing / the first)."""
+    """tab = "look" / "roll" / "sound" / "general" / "language": shown at once (none = the one showing / the first)."""
     w = getattr(app, "settings_window", None)
     if w is not None and w.winfo_exists():
         w.deiconify()
@@ -308,12 +308,13 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(row, text=tr("updates.check_now"), takefocus=False, command=lambda: (
             say(tr("updates.checking")), updates.check(report=say))).pack(side="left")
         self.build_tips(f)
-        self.build_space(f)
         self.build_file_link(f)
         f = page("look", tr("settings.look_tab"))
         f.head(tr("settings.look_tab"))
         self.look = f.row(tr("look.look"), look_box(f.page), tip=tr("settings.look_hint"))
         self.build_size(f)
+        # Piano roll after Look (user 2026-11-08): the space past the edges + the notes kept there
+        self.build_space(page("roll", tr("settings.roll_tab")))
         f = page("colours", tr("settings.cat_colours"))
         self.build_palettes(f)
         self.build_stacked(f)
@@ -403,8 +404,66 @@ class SettingsWindow(tk.Toplevel):
                 box.selection_clear()
                 app.roll.space_changed()
                 app.schedule_autosave()
+                self.sync_keep()
             box.bind("<<ComboboxSelected>>", picked)
             self.space_boxes.append(box)
+        self.build_keep(f)
+
+    def build_keep(self, f):
+        """"Keep notes made there" + its Opacity (user 2026-11-08): shapes keep the notes they make in that space,
+        drawn see-through, kept only in the project (App.offrange_rows). The tick greyed while both Space settings
+        are Off (user), the Opacity box while the tick is off or greyed."""
+        from files.settings import OFFRANGE_OPACITY
+        from window.widgets import Scrub, bad, good
+        app = self.app
+        lo, hi, _ = OFFRANGE_OPACITY
+
+        def ticked():
+            app.offrange_changed()
+            app.schedule_autosave()
+            self.sync_keep()
+        self.keep_tick = f.row(None, self.tick(f.page, "settings.keep_offrange", app.keep_offrange, ticked))
+        self.keep_tip = Tooltip(self.keep_tick, tr("settings.keep_offrange_tip"))
+        row = ttk.Frame(f.page)
+        self.opacity_var = tk.StringVar(value=str(app.offrange_opacity.get()))
+        e = self.opacity_box = ttk.Entry(row, textvariable=self.opacity_var, width=6)
+        e.pack(side="left")
+        ttk.Label(row, text="%").pack(side="left", padx=(3, 0))
+        good(e)
+
+        def took(left=False):
+            try:
+                v = int(round(float(self.opacity_var.get())))
+                if not lo <= v <= hi:
+                    raise ValueError
+            except ValueError:
+                bad(e)
+                return
+            self.opacity_var.set(str(v))
+            good(e)
+            if v != app.offrange_opacity.get():
+                app.offrange_opacity.set(v)
+                app.offrange_changed()
+                app.schedule_autosave()
+        self.take_opacity = took  # (tests)
+        e.bind("<Return>", lambda ev: (took(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: took(True))
+        f.row(tr("settings.keep_opacity"), row, tip=tr("settings.keep_opacity_tip"))
+        self.opacity_label = f.page.grid_slaves(row=f.r - 1, column=0)[0]  # (Form.row's name label)
+        Scrub(app, [(e, self.opacity_var, took)], (1, 10, 1), lo, hi, label=self.opacity_label, no_undo=True)
+        self.sync_keep()
+
+    def sync_keep(self):
+        """The Keep notes tick greyed (tip says why) while there's no space for them; Opacity greyed with it off."""
+        if getattr(self, "keep_tick", None) is None or not self.keep_tick.winfo_exists():
+            return
+        app = self.app
+        room = app.space_keys.get() > 0 or app.space_bars.get() > 0
+        self.keep_tick.state(["!disabled"] if room else ["disabled"])
+        self.keep_tip.set_text(tr("settings.keep_offrange_tip") if room else tr("settings.keep_offrange_off"))
+        on = room and app.keep_offrange.get()
+        self.opacity_box.state(["!disabled"] if on else ["disabled"])
+        self.opacity_label.state(["!disabled"] if on else ["disabled"])
 
     def build_file_link(self, f):
         """"Open .spwb files with Spiderweb" (14, user 2026-10-29): Windows told that double-clicking a .spwb opens

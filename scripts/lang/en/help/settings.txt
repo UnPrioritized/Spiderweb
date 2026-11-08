@@ -1,6 +1,8 @@
 Help → Settings… (the menu bar at the top) opens Settings: how Spiderweb itself looks and sounds. These settings are kept for every project (in settings.ini in the user folder), not saved with a project, and Ctrl+Z doesn't take them back. Pick a page in the list on the left; every change is kept at once, Close just closes the window. Rest the mouse on a setting to see what it does.
 
-General: how often to look for a new version (and Check now), tips on or off, Show all tips again, Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; no notes are made there; see Help → View), and Open .spwb files with Spiderweb (double-clicking a project opens it; press it again if you move the Spiderweb folder).
+General: how often to look for a new version (and Check now), tips on or off, Show all tips again, and Open .spwb files with Spiderweb (double-clicking a project opens it; press it again if you move the Spiderweb folder).
+
+Piano roll: Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; see Help → View). Keep notes made there: shapes keep the notes they make in that space, drawn see-through (Opacity: how strongly, 1 to 100 %). They're kept only in the project file, never exported or played.
 
 Look:
 

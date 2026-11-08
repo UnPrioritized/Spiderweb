@@ -680,6 +680,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             engine_space_keys[0] = on
             self.app._notes_cache.clear()
             self.app.shapes_changed()
+        elif hasattr(self.app, "offrange_changed"):  # ("Keep notes made there" needs some space: on / off with it)
+            self.app.offrange_changed()
         self.clamp_view()
         self.request_redraw()
 
