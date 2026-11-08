@@ -730,6 +730,7 @@ class RollDrawing:
                  self.loaded_mark(), boxed and (boxed["key"], id(boxed["cols"])),
                  getattr(app, "off_version", 0), OFF_FADE[0],  # (the notes kept past the edges)
                  getattr(app, "wrap_version", 0),  # (where wrapped notes land: "Show wrapped notes")
+                 getattr(app, "export_held", False),  # (W held: what the export gets)
                  stack_rule(app)[0],  # (Stacked notes changed in Settings: painted again at once, hunt 2026-11-07)
                  self._hide_sels)
         pic = (app.drawn, (fixed, self.view_t, self.view_top, tuple(rows), tuple(cols), self.hidden_shade()))
@@ -951,7 +952,7 @@ class RollDrawing:
         app = self.app
         from window.load_extract import box_notes  # (it imports this file)
         boxed = box_notes(app)  # (a kept box over a loaded MIDI: the loaded notes Delete would take, group D)
-        off = getattr(app, "off_drawn", None)
+        off = None if getattr(app, "export_held", False) else getattr(app, "off_drawn", None)  # (W: hidden)
         offsel = off[np.isin(off[:, 5], list(app.sels))] if app.sels and off is not None and len(off) else None
         offsel = offsel if offsel is not None and len(offsel) else None  # (their notes kept past the keys: ringed too)
         if not (app.sels and len(app.drawn) or boxed is not None or offsel is not None) or not app.show_notes.get():
@@ -962,7 +963,8 @@ class RollDrawing:
         if copies and boxed is None:
             return None
         ppq, ax = app.ppq, self.sx / app.ppq
-        key = (frozenset(app.sels), self.sx, ppq, id(boxed), getattr(app, "off_version", 0))
+        key = (frozenset(app.sels), self.sx, ppq, id(boxed), getattr(app, "off_version", 0),
+               getattr(app, "export_held", False))
         span = max(1.0, self.winfo_width() - self.kb_w) / ax  # (the view's width in ticks)
         va = self.view_t * ppq
         pad = 16 / ax  # (the ring's pixels reach a little past its notes' ends)
@@ -1129,7 +1131,8 @@ class RollDrawing:
         """"Show wrapped notes: Selected shapes" (user 2026-11-08): a dashed box round each selected shape's landing
         area (App.wrapped_rows' boxes: notes from over the top land at the bottom, from under key 0 at the top)."""
         get = getattr(self.app, "wrapped_rows", None)
-        boxes = get()[1] if get is not None and self.app.show_notes.get() else ()
+        boxes = get()[1] if get is not None and self.app.show_notes.get() and not getattr(
+            self.app, "export_held", False) else ()  # (W held: the export's own notes stand there instead)
         if not boxes:
             return
         ppq, s = self.app.ppq, self.scale
@@ -1539,6 +1542,8 @@ class RollDrawing:
         """main_rects + the notes kept past the keys / before beat 0 (off_rects) after them: they never share a
         pixel with the real notes (those stay inside the keys, from beat 0), so nothing else changes."""
         rects = self.main_rects(w, h, clip, area, only, draft)
+        if getattr(self.app, "export_held", False):  # (W held: drawn = what the export gets, nothing else)
+            return rects
         off = self.off_rects(w, h, clip, area, only, draft)
         under, over = self.wrap_rects(w, h, clip, area, only, draft)
         if off is None and under is None and over is None:

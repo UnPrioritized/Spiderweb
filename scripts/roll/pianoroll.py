@@ -52,6 +52,7 @@ from roll.roll_text import TextTyping
 
 EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle: its notes stay on that key
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
+W_REPEAT_MS = 60  # W let go: back from "what the export gets" only if no press followed this soon (Linux repeats)
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, MelodyMarks, GlissEditing,
@@ -167,6 +168,14 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         grab_while_panning(self)
         self.bind("<MouseWheel>", self.on_wheel)
         self.bind("<Key>", self.on_key)
+        # W held (on_key: what the export gets): let go, the keyboard elsewhere or any mouse press = back to normal,
+        # BEFORE the press is handled (a tag of its own in front: the roll's own key / button bindings stay whole)
+        self._w_down = self._w_up = 0.0
+        tag = f"wheld{id(self)}"
+        self.bind_class(tag, "<KeyRelease>", self.w_released)
+        self.bind_class(tag, "<FocusOut>", lambda e: self.w_off())
+        self.bind_class(tag, "<ButtonPress>", lambda e: self.w_off())
+        self.bindtags((tag,) + self.bindtags())
 
     # ------------------------------------------------------------ coordinates
 
@@ -2363,6 +2372,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if self.lasso_key(e):  # (Enter cuts, Esc throws the loop away, Backspace = a Polygonal loop's last point)
             return "break"
         k = e.keysym.lower()
+        if k == "w" and not e.state & (CTRL | ALT):  # (held: what the export gets; Alt+W = Claw, Ctrl: shortcuts)
+            self._w_down = time.perf_counter()  # (a repeat while held: Linux sends a release before each one)
+            if not self.holding() and self.drag is None and self.draft is None:
+                self.app.export_view(True)
+            return "break"
         if k == "escape":
             if stop_extract(self.app):  # (an Extract still reading: stopped)
                 return "break"
@@ -2417,6 +2431,23 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.app.duplicate()
         elif not e.state & CTRL:
             self.app.tool_hotkey(k)
+
+    def w_off(self):
+        """Back from W's "what the export gets" view (let go / keyboard elsewhere / a mouse press)."""
+        if getattr(self.app, "export_held", False):
+            self.app.export_view(False)
+
+    def w_released(self, e):
+        """W let go. Linux repeats a held key as release + press pairs: the view goes back only when no press
+        followed within W_REPEAT_MS."""
+        if e.keysym.lower() != "w" or not getattr(self.app, "export_held", False):
+            return
+        self._w_up = time.perf_counter()
+        self.after(W_REPEAT_MS, self._w_settle)
+
+    def _w_settle(self):
+        if self._w_down <= self._w_up:  # (no press since the release: really let go)
+            self.w_off()
 
     def delete_dragged(self):
         """Delete while the mouse is dragging: only the shape being dragged goes (user: the one grabbed, even when

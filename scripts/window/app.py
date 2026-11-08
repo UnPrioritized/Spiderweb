@@ -704,6 +704,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.wrap_version = 0  # (+1 each time wrapped_rows' answer changes: the roll's picture key)
         self._outgoing = None  # (App.outgoing's last (key, notes))
         self.off_all = self.off_drawn = NO_NOTES  # (offrange_rows; off_drawn = the ones the piano roll shows)
+        self.export_held = False  # (W held: the piano roll shows what the export gets, export_view)
         self.off_version = 0  # (+1 each time off_drawn is set: the roll's picture key)
         # Kestrel (GPU)'s own settings (Settings → Sound; files.kestrel.Kestrel's keywords): all but "lower" are used
         # when it opens (a change = opened again at the next Play: fresh_builtin)
@@ -1246,6 +1247,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if off is not self.off_drawn and (len(off) or len(self.off_drawn)):
             self.off_version += 1
         self.off_drawn = off
+        if self.export_held:  # (W held: what the export gets; let go = track_view again)
+            if self.wraps_offrange():
+                self.export_drawn()
+            else:
+                self.export_held = False
         if hidden != self.hidden_shapes:
             self.hidden_shapes = hidden
             if self.sels & hidden:  # (a hidden shape can't stay picked: nothing changes out of sight)
@@ -3881,6 +3887,25 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._wrapped = (key, got)
         self.wrap_version += 1
         return got
+
+    def export_view(self, on):
+        """W held on the piano roll (user 2026-11-08): the piano roll shows exactly what the export gets: drawn =
+        App.outgoing (wrapped notes solid where they land, the track list's one-track view applied like track_view),
+        the kept notes past the keys, their landing copies, red marks and dashed boxes hidden (roll_draw.note_rects).
+        Only with Keep notes + Wrap on; off = back to the normal view."""
+        on = bool(on) and self.wraps_offrange()
+        if on == self.export_held:
+            return
+        self.export_held = on
+        self.track_view()
+        self.roll.request_redraw()
+
+    def export_drawn(self):
+        """track_view's last step while W is held: drawn from the export's notes instead of the piano roll's."""
+        out = self.outgoing()
+        self.drawn, self.behind_owner = self.track_list.filtered(out, track_ids(out[:, 4]), len(self.shapes))
+        self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
+            self.picture_owners_all, False)
 
     def scrub_wrapped(self):
         """Right-drag listening's wrapped notes (user 2026-11-08: heard whenever "Wrap them around" is on, like Play,
