@@ -29,7 +29,7 @@ def needs_fill(rows, way, same):
     if (later & (run[:-1] < s[1:])).any():  # (a gap)
         return True
     if same != "both":
-        return bool((later & (e[:-1] > s[1:])).any())  # (an overlap cut)
+        return bool((later & (run[:-1] > s[1:])).any())  # (an overlap cut, or a note held inside stretched)
     if way != "right":
         return False
     first = np.r_[True, ~on_key | (s[1:] != s[:-1])]  # (Keep both, right: a short note among longer ones reaching on)
@@ -61,6 +61,16 @@ def fill_gaps(rows, way, same):
     same_next = np.r_[gk[1:] == gk[:-1], False]  # (group g + 1 is on the same key)
     nxt = np.where(same_next, np.r_[gs[1:], 0], -1)  # (the next start on the key, -1 = none)
     if same != "both":  # (a partial overlap: cut where the later note starts)
+        # (a note starting while an earlier one still sounds is stretched to where that one would have ended, like
+        # Single channel: else a long note holding a short one was cut and the rest left silent, overlap hunt
+        # 2026-11-08, user took A)
+        gm0 = np.full(n, -1, np.int64)
+        np.maximum.at(gm0, g, e)
+        run0 = np.maximum.accumulate(gk * _BIG + gm0) - gk * _BIG
+        on = np.r_[False, gk[1:] == gk[:-1]]
+        before = np.where(on, np.r_[0, run0[:-1]], -1)  # (the latest end before each group on its key)
+        held = (before[g] > s) & (e < before[g])
+        e[held] = before[g][held]
         cut = (nxt[g] >= 0) & (e > nxt[g])
         e[cut] = nxt[g][cut]
     gm = np.full(n, -1, np.int64)  # (each group's latest end)
