@@ -938,7 +938,8 @@ def warp_exact(P, smooth, lx, ly, a, near, x, y, steps, ox, oy):
 def _unit_back(x, y, fp):
     """liquify._placed + recolour.from_unit for one spot of the colour box (Edges: escape = clipped, else wrapped
     round then clipped): (middle in ticks, key). fp = [cut, turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f1, f2, t0,
-    width, k0, height, k1 > k0]."""
+    width, k0, height, k1 > k0] (+ Wrap around: 1, rows R, the R rows' keys, first starts, last ends =
+    recolour.Rows.wrapped after it, _wrap_one's sums)."""
     if fp[0] != 0.0:
         if x < -1e-9 or x > 1 + 1e-9:
             x = np.mod(x, 1.0)
@@ -949,7 +950,24 @@ def _unit_back(x, y, fp):
         x2 = fp[2] + x * fp[3]
         y2 = fp[4] + y * fp[5] if fp[6] != 0.0 else y
         x, y = 0.5 + fp[8] * (y2 - 0.5), 0.5 + fp[7] * (x2 - 0.5)
-    return fp[9] + x * fp[10], (fp[11] + y * fp[12] if fp[13] != 0.0 else fp[11])
+    m, k = fp[9] + x * fp[10], (fp[11] + y * fp[12] if fp[13] != 0.0 else fp[11])
+    if len(fp) > 15 and fp[14] == 1.0:  # (Wrap around: past its key row's notes = back in on that row's other side)
+        nr = np.int64(fp[15])
+        q = np.rint(k)
+        lo_, hi_ = 0, nr
+        while lo_ < hi_:
+            h = (lo_ + hi_) >> 1
+            if fp[16 + h] < q:
+                lo_ = h + 1
+            else:
+                hi_ = h
+        r = min(max(lo_, 0), nr - 1)
+        j = max(r - 1, 0)
+        row = j if abs(fp[16 + j] - q) <= abs(fp[16 + r] - q) else r
+        s, e = fp[16 + nr + row], fp[16 + 2 * nr + row]
+        if m < s or m > e:
+            m = s + np.mod(m - s, max(e - s, 1.0))
+    return m, k
 
 
 @njit(nogil=True)

@@ -617,7 +617,40 @@ fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
         let y2 = if fp[6] != 0.0 { fp[4] + y * fp[5] } else { y };
         (x, y) = (0.5 + fp[8] * (y2 - 0.5), 0.5 + fp[7] * (x2 - 0.5));
     }
-    (fp[9] + x * fp[10], if fp[13] != 0.0 { fp[11] + y * fp[12] } else { fp[11] })
+    let m = fp[9] + x * fp[10];
+    let k = if fp[13] != 0.0 { fp[11] + y * fp[12] } else { fp[11] };
+    if fp.len() > 15 && fp[14] == 1.0 {
+        // (Wrap around: fp[15] rows, then their keys, first starts, last ends (checked by warp_soft): wrap_one's sums)
+        let nr = fp[15] as usize;
+        let keys = &fp[16..16 + nr];
+        let q = rint(k);
+        let (mut lo, mut hi) = (0usize, nr);
+        while lo < hi {
+            let h = (lo + hi) >> 1;
+            if keys[h] < q {
+                lo = h + 1;
+            } else {
+                hi = h;
+            }
+        }
+        let r = lo.min(nr - 1);
+        let j = r.saturating_sub(1);
+        let row = if (keys[j] - q).abs() <= (keys[r] - q).abs() { j } else { r };
+        let (s, e) = (fp[16 + nr + row], fp[16 + 2 * nr + row]);
+        if m < s || m > e {
+            return (s + npmod(m - s, pmax(e - s, 1.0)), k);
+        }
+    }
+    (m, k)
+}
+
+/// unit_back's Wrap around rows in fp sound: a whole row count >= 1 and that many keys / starts / ends after it.
+fn wrap_rows_ok(fp: &[f64]) -> bool {
+    if fp.len() <= 15 || fp[14] != 1.0 {
+        return true;
+    }
+    let r = fp[15];
+    r >= 1.0 && r == r.trunc() && r < 1e9 && fp.len() >= 16 + 3 * (r as usize)
 }
 
 const ROUND_INNER: usize = 7; // (fastloops.ROUND_INNER: look 0 the middle, 1 .. 6 the inner ring)
@@ -841,7 +874,7 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], 
     let (gy, gx) = (a.sh[0], a.sh[1]);
     let nl = ring.sh[0];
     if cols < 2 || a.sh[2] != 2 || gy < 2 || gx < 2 || ring.sh[1] != 3 || nl > MOST_LOOKS || nl < ROUND_INNER
-        || c.len() < 9 || fp.len() < 14 || keys.is_empty() || tstart.len() < 17 || x.len() < n || y.len() < n
+        || c.len() < 9 || fp.len() < 14 || !wrap_rows_ok(fp) || keys.is_empty() || tstart.len() < 17 || x.len() < n || y.len() < n
         || out.len() < n || ox.len() != oy.len() {
         return crate::FAILED;
     }

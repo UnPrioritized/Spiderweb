@@ -16,6 +16,8 @@ import tkinter as tk
 _loops = None
 _started = False
 _failed = False
+_own_tried = threading.Event()  # set once our own library loaded or couldn't (Numba's slow compile not waited for)
+OWN_WAIT_S = 3.0  # wait_own's longest wait: a library that hangs never holds the start up longer
 
 
 def start():
@@ -28,6 +30,7 @@ def start():
     if how == "off":
         global _failed
         _failed = True
+        _own_tried.set()
         return
     if how == "now":
         _load()
@@ -48,7 +51,9 @@ def _load():
         _loops = None
         how = "compiled loops off: " + repr(sys.exc_info()[1])
         errors.write_log(*sys.exc_info(), "(loading the compiled loops; the slower code is used)")
-    own = ("on (%s)" % native.level_name()) if _loops is not None else "off: " + (native.why() or how)
+    finally:
+        _own_tried.set()
+    own =("on (%s)" % native.level_name()) if _loops is not None else "off: " + (native.why() or how)
     second = ""
     if _loops is None:  # (no own library here: Numba's loops when it's installed, else the NumPy code)
         _loops, second = _numba_loops()
@@ -90,6 +95,14 @@ def _drop_numba_saved():
     if os.path.isdir(folder):
         import shutil
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def wait_own(timeout=OWN_WAIT_S):
+    """Waits (at most timeout s) until our own library has loaded or failed: the start's autosave opens with the
+    compiled loops instead of the NumPy code (a project with a Warp took ~7 s to open at start instead of ~1 s;
+    the library loads in ~0.06 s). Numba's compiling (a Mac) is never waited for."""
+    if _started:
+        _own_tried.wait(timeout)
 
 
 def loops():

@@ -969,12 +969,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         remember_good(self)  # (a wrong value typed in a number box goes back to its last good one)
         self._build()
         self.restore_window()
+        speed.start()  # (the own compiled loops for lots of notes: loaded in the background)
+        speed.wait_own()  # (~0.06 s: the autosave's notes made with them; a Warp's took ~7 s without)
         self.load_autosave()
         self.reattach_file()  # (the project file the work belonged to; the title)
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
         self.updates.start()  # (What's new after an update; asks about / looks for updates)
-        speed.start()  # (the own compiled loops for lots of notes: loaded in the background)
         from window import app_playback
         if app_playback.READY_AFTER_MS is not None:  # (Built-in BASSMIDI ready before the first Space)
             self.after(app_playback.READY_AFTER_MS, self.ready_builtin)

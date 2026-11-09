@@ -373,18 +373,27 @@ def _cover_table():
 
 
 def _place_numbers(w, rc, box, own):
-    """_placed's numbers as the compiled votes take them (fastloops._unit_back), or None: Wrap around / Bend with
-    the outline need their key rows (NumPy's way)."""
+    """_placed's numbers as the compiled votes take them (fastloops._unit_back), or None: Bend with the outline (its
+    arrows differ note by note: NumPy's way). Wrap around: its key rows follow the 14 numbers (1, row count, the
+    rows' keys, first starts, last ends: Rows.wrapped's; a Warp on Wrap around took the slow NumPy pick, ~2 s a
+    move at 2 M notes with Smooth edges)."""
     edge = w["edge"]
-    if edge in ("wrap", "bend"):
+    if edge == "bend":
         return None
     from notes.recolour import whole_shares
     f = rc.get("frame")
     turned = bool(f and f[1])
     t0, t1, k0, k1 = own if turned else box
     (a0, a1), (b0, b1) = whole_shares(rc) if turned else ((0.0, 1.0), (0.0, 1.0))
-    return np.array([edge != "escape", turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f[1] if turned else 1,
-                     f[2] if turned else 1, t0, max(t1 - t0, 1.0), k0, k1 - k0, k1 > k0], np.float64)
+    fp = np.array([edge != "escape", turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f[1] if turned else 1,
+                   f[2] if turned else 1, t0, max(t1 - t0, 1.0), k0, k1 - k0, k1 > k0], np.float64)
+    if edge == "wrap":
+        rows = w["rows"]
+        if not len(rows.keys):
+            return None
+        fp = np.concatenate([fp, [1.0, float(len(rows.keys))], np.asarray(rows.keys, np.float64),
+                             np.asarray(rows.a, np.float64), np.asarray(rows.b, np.float64)])
+    return fp
 
 
 _COVER_LOOKS = _cover_table()
