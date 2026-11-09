@@ -16,6 +16,8 @@ What's new:
 
 • Fold tracks… (right-click selected shapes, or the Tools menu): puts their notes on fewer tracks. In a row puts neighbour tracks together, so thin stripes of many colours become wide bands; Looping deals the tracks out in turn (1, 17, 33 … together). Overlapping notes are fixed (a tick), Keep colours keeps the picture as it is, and the piano roll shows the result before you press Fold. Pasted notes and drawn shapes both work; the result is plain notes, and every track stays on one channel. See Help → Fold tracks.
 
+• The side panel can be made wider or narrower: drag the line between it and the piano roll, or double-click the line for the smallest width where nothing is cut. Drag it far to the right and it shuts into a strip at the window's edge; click the strip (or View → Side panel) to bring it back. Until you drag it, it now gets wider by itself where a text would be cut (some Windows 11 setups cut the end of a row). The drawer's panel can be resized too. See Help → Side panel width.
+
 • Smaller and quicker: Spiderweb.exe is about 40 % smaller (about 70 MB instead of 116 MB), and its first start no longer waits while the speed-ups get ready. Opening, undo and redo, changing the gate and Stir on huge projects are up to 15 % faster. Running from the scripts gets the full speed with nothing extra to install.
 
 ## Version 1.7.2

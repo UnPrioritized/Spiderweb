@@ -1,0 +1,19 @@
+## Wider or narrower
+
+Drag the line between the piano roll and the side panel to make the panel wider or narrower. While you drag, a thin line shows where it will go; the panel takes the new width when you let go.
+
+Double-click the line for the smallest width where nothing shown in the panel is cut. Hint lines don't count: they wrap onto more lines instead.
+
+On a wider panel the lists, the Output file box and the Shape box get wider, and hint lines use the room. Buttons, number boxes and short dropdowns keep their size.
+
+Until you drag it, the panel gets wider by itself when something in it would be cut (other Windows versions, display scaling and fonts can make texts wider).
+
+## Shutting it
+
+Drag the line far to the right and the panel shuts into a thin strip at the window's right edge, with a ◀ on it. Click the strip to open the panel again at the width it had, or drag the strip out to the width you want.
+
+View → Side panel shuts and opens it too. The width, and whether the panel is open, are remembered for the next start.
+
+## The drawer
+
+The drawer's side panel can be made wider or narrower the same way, and double-clicked to fit. It doesn't shut.

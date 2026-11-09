@@ -173,6 +173,9 @@ class ScrollingSide:
         self.side_open_var().set(False)
         if save:
             self.save_side_open(False)
+            tips = getattr(self, "tips", None)
+            if tips is not None:  # (the first time: how to bring it back)
+                tips.show("side_panel")
 
     def open_side(self, width=None, save=True):
         if width is not None:
