@@ -676,13 +676,20 @@ fn gap_rest(a: i64, e: i64, ts: &[i64], drawn: &[i64], was: &[i64], u: i64, most
     let span = (e - a).max(0) as usize;
     // (the running sums made as they're worked out: no zeroing first, no check a step; drawn[..span] panics when
     // too short = Numba's own loop, which reads past it)
+    // (written into the room straight: push + extend on a list made by room() ran 2.3x slower at the plain level,
+    // 2026-11-09 — the compiler no longer saw the room was there)
     let mut sums: Vec<f64> = need!(room(span + 1));
-    sums.push(0.0);
-    let mut s = 0.0;
-    sums.extend(drawn[..span].iter().map(|&v| {
-        s += v as f64;
-        s
-    }));
+    {
+        let spare = &mut sums.spare_capacity_mut()[..span + 1];
+        spare[0].write(0.0);
+        let mut s = 0.0;
+        for (o, &v) in spare[1..].iter_mut().zip(&drawn[..span]) {
+            s += v as f64;
+            o.write(s);
+        }
+    }
+    // SAFETY: all span + 1 places were just written
+    unsafe { sums.set_len(span + 1) };
     let g = c - 1;
     let mut nd = 0usize;
     let (mut run, mut before) = (0.0f64, 0.0f64);
