@@ -285,11 +285,30 @@ def _where(at, rc, box, own, lq=None):
     return w
 
 
-def _fetched(w, a, x, y, rc, box, own):
+def _fetched(w, a, x, y, rc, box, own, exact=None):
     """(middle in ticks, key) the spots (x, y) of the colour box fetch their colour from under the map a
-    (liquify_from's second half: the edge choices like stir_from's)."""
+    (liquify_from's second half: the edge choices like stir_from's). exact: (ox, oy) a Warp's exact fetches
+    (warp.exact_offsets; NaN = the map's)."""
     d = sample(a, x, y) * (w["lq"]["strength"] / 100)
+    if exact is not None:
+        ox, oy = exact
+        got = ~np.isnan(ox)
+        d[got, 0], d[got, 1] = ox[got], oy[got]
     return _placed(w, x + d[:, 0], y + d[:, 1], rc, box, own)
+
+
+def _arrows(w, at, idx, x, y, rc, box, own):
+    """(tx, ty, kx, ky, h): what each note idx (at spots (x, y)) covers, as two arrows across the box (its half
+    length h ticks along, half a key up) -> fetched at their ends; the box's units per tick / key are the same
+    everywhere (unit_xy is straight) except with Bend with the outline."""
+    s, e, k = (np.asarray(at[idx, c], np.float64) for c in (0, 1, 2))
+    m, h = (s + e) / 2, np.maximum((e - s) / 2, 0.5)
+    if w["edge"] == "bend":
+        xb, yb = _unit(w, m + h, k, rc, box, own)
+        xd, yd = _unit(w, m, k + 0.5, rc, box, own)
+        return xb - x, yb - y, xd - x, yd - y, h
+    bx, by = _unit(w, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), rc, box, own)
+    return (bx[1] - bx[0]) * h, (by[1] - by[0]) * h, (bx[2] - bx[0]) * 0.5, (by[2] - by[0]) * 0.5, h
 
 
 def _placed(w, x, y, rc, box, own):
@@ -387,6 +406,16 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
     if w.get("exact") is not None:  # (a Warp: each spot's exact fetch where it settles, warp.exact_offsets)
         from notes.warp import exact_offsets
         ox, oy = exact_offsets(w["exact"], a, x, y)
+    ends = None
+    if ox is not None and w.get("soft") and len(idx):
+        # (Edges: Smooth judges what each note covers from where its two arrows' ends fetch: those EXACT too, like
+        # the middle (Warp Split hunt 2026-11-10: the middle exact but the ends from the map made ~7x the one-note
+        # slivers))
+        ends = _arrows(w, at, idx, x, y, rc, box, own)
+        tx, ty, kx, ky = ends[:4]
+        e1 = exact_offsets(w["exact"], a, x + tx, y + ty)
+        e3 = exact_offsets(w["exact"], a, x + kx, y + ky)
+        ends = ends + (e1, e3)
     fp = _place_numbers(w, rc, box, own) if len(idx) else None
     fast = compiled("warp_soft") if fp is not None else None
     if fast:  # (the compiled pick, note by note: the very same sums as below, files/fastloops.warp_soft (Sharp too,
@@ -397,9 +426,12 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
         bx, by = _unit(w, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), rc, box, own)
         kx, ky = (bx[2] - bx[0]) * 0.5, (by[2] - by[0]) * 0.5
         c = np.array([bx[1] - bx[0], by[1] - by[0], kx, ky, np.hypot(kx, ky) * 2, s100, SOFT_SQUASHED, SOFT_REACH,
-                      0.0 if w.get("soft") else 1.0], np.float64)
+                      0.0 if w.get("soft") else 1.0, 0.0 if ends is None else 1.0], np.float64)
         out = np.empty(len(idx), np.int64)
         none = np.zeros(0)
+        if ends is not None:  # (three exact fetches a spot, interleaved: the middle's, the two arrow ends')
+            (e1x, e1y), (e3x, e3y) = ends[5], ends[6]
+            ox, oy = np.stack([ox, e1x, e3x], 1).ravel(), np.stack([oy, e1y, e3y], 1).ravel()
         fast.warp_soft(to(at, np.int64), to(idx, np.int64), to(x, np.float64), to(y, np.float64),
                        to(ox, np.float64) if ox is not None else none, to(oy, np.float64) if oy is not None else none,
                        to(a, np.float64), c, fp, np.asarray(_RING, np.float64), *_COVER_LOOKS, to(keys, np.int64), to(first, np.int64),
@@ -416,20 +448,13 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
         return nearest(at, mid, key, own=False, kept=kept)
     kept = kept or _sorted_notes(at)
     now = np.asarray(now)
-    s, e, k = (np.asarray(at[idx, c], np.float64) for c in (0, 1, 2))
-    m, h = (s + e) / 2, np.maximum((e - s) / 2, 0.5)
-    # (what the note covers, as two arrows across the box (its length, one key) -> fetched at their ends; the box's
-    # units per tick / key are the same everywhere (unit_xy is straight) except with Bend with the outline)
-    if w["edge"] == "bend":
-        xb, yb = _unit(w, m + h, k, rc, box, own)
-        xd, yd = _unit(w, m, k + 0.5, rc, box, own)
-        tx, ty, kx, ky = xb - x, yb - y, xd - x, yd - y
+    tx, ty, kx, ky, h = (ends or _arrows(w, at, idx, x, y, rc, box, own))[:5]
+    if ends is not None:
+        m1, k1 = _fetched(w, a, x + tx, y + ty, rc, box, own, ends[5])
+        m3, k3 = _fetched(w, a, x + kx, y + ky, rc, box, own, ends[6])
     else:
-        bx, by = _unit(w, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), rc, box, own)
-        tx, ty = (bx[1] - bx[0]) * h, (by[1] - by[0]) * h
-        kx, ky = (bx[2] - bx[0]) * 0.5, (by[2] - by[0]) * 0.5
-    m1, k1 = _fetched(w, a, x + tx, y + ty, rc, box, own)
-    m3, k3 = _fetched(w, a, x + kx, y + ky, rc, box, own)
+        m1, k1 = _fetched(w, a, x + tx, y + ty, rc, box, own)
+        m3, k3 = _fetched(w, a, x + kx, y + ky, rc, box, own)
     vt = np.stack([m1 - mid, k1 - key], 1) * 2  # (along the note's length, in ticks / keys of the colours)
     vk = np.stack([m3 - mid, k3 - key], 1) * 2  # (across its key)
     # (in notes' worth: time / the note's length, keys as they are. SQUASHED = the note covers more than

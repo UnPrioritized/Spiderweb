@@ -548,6 +548,8 @@ class ProjectFiles:
         self.undo_stack.clear()
         self.redo_stack.clear()
         self._redo_kept = None
+        if hasattr(self, "roll"):  # (another project: no Warp point picked)
+            self.roll.warp_drop_pick()
         if not quiet and hasattr(self, "track_list"):  # (another song: every track heard and shown, hunt 2026-10-23)
             self.track_list.forget()
         try:

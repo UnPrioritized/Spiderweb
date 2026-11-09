@@ -204,7 +204,10 @@ class WarpWindow(tk.Toplevel):
 
     def _resize(self, cols=None, rows=None):
         """Every selected warped shape's grid made cols x rows cells (None = that way as it is), re-fitted from its
-        bend before the first of these size changes (a point dragged since = from the bend now)."""
+        bend before the first of these size changes (a point dragged since = from the bend now). The picked point
+        goes (its handles show again only after a click)."""
+        self.app.roll.warp_drop_pick()
+
         def set_to(w, sh):
             # (looked up by the Warp itself, not the shape: undo / redo makes new shape objects; hunt 2026-11-09)
             base = self._fit.get(fit_key(w))
@@ -361,6 +364,7 @@ class WarpWindow(tk.Toplevel):
 
     def sync(self):
         app = self.app
+        app.roll.warp_check_pick()  # (the selection changed since a point was picked: it goes)
         tgts = self.targets()
         self.what.config(text=tr("warp.nothing") if not tgts else
                          tr("warp.shape", name=app.shape_label(tgts[0])) if len(tgts) == 1 else
@@ -446,6 +450,7 @@ class WarpWindow(tk.Toplevel):
             self.on_shown("strength", self.strength_entry)
         if self.split_mode:
             self.set_split("")
+        roll.warp_drop_pick()  # (opened again: no point picked; Warp Split hunt 2026-11-10)
         self.app.warp_window = None
         self.destroy()
         roll.focus_set()

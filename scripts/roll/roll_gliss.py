@@ -63,6 +63,37 @@ def clip_polyline(line, box):
     return pieces
 
 
+def clip_polyline_many(line, box):
+    """clip_polyline for a LONG line, the very same pieces: segments wholly past one side of box (clip_segment gives
+    None for those) are skipped at once with NumPy, only the rest go through clip_segment (a zoomed-in Warp grid:
+    thousands of pieces a line, a few on screen; Warp Split hunt 2026-11-10)."""
+    import numpy as np
+    a = np.asarray(line, np.float64)
+    if len(a) < 4:
+        return []
+    x, y = a[0::2], a[1::2]
+    left, top, right, bottom = box
+    x0, x1, y0, y1 = x[:-1], x[1:], y[:-1], y[1:]
+    near = ~((np.maximum(x0, x1) < left) | (np.minimum(x0, x1) > right)
+             | (np.maximum(y0, y1) < top) | (np.minimum(y0, y1) > bottom))
+    pieces, cur, last = [], None, -2
+    for j in np.flatnonzero(near).tolist():
+        if j != last + 1:
+            cur = None
+        last = j
+        got = clip_segment(line[2 * j], line[2 * j + 1], line[2 * j + 2], line[2 * j + 3], box)
+        if got is None:
+            cur = None
+            continue
+        p, q = list(got[:2]), list(got[2:])
+        if cur is not None and cur[-2:] == p:
+            cur += q
+        else:
+            cur = p + q
+            pieces.append(cur)
+    return pieces
+
+
 class GlissEditing:
     """Mixed into PianoRoll. Drags: ("gliss_copies", side, dy) = a dotted line (dy: mouse minus the line where it was
     grabbed, px), ("gliss_len", start tick of the note held), ("keyhold", key, ctrl) = a piano key held."""

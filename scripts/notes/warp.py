@@ -1159,15 +1159,20 @@ def split(wp, way, at):
 
 def split_mirrored(wp, way, at):
     """split() at `at` and at its mirror 1 - at (Mirror modes, user 2026-11-09: a split adds the mirrored line too;
-    one line when they'd sit within MIN_GAP of each other). None when the first can't be made; the mirrored one
-    left out when only it can't."""
+    a spot within MIN_GAP / 2 of the middle = ONE line exactly on the middle). None when either can't be made (Warp
+    Split hunt 2026-11-10, user: never a lopsided grid under Mirror; a twin already there exactly counts as made)."""
+    if not number(at):
+        return None
+    if abs(float(at) - 0.5) < MIN_GAP / 2:
+        return split(wp, way, 0.5)
     got = split(wp, way, at)
     if got is None:
         return None
     other = round(1.0 - round(float(at), DIGITS), DIGITS) + 0.0
-    if abs(other - at) < MIN_GAP:
+    X, Y = lines(got)
+    if np.any(np.abs((X if way == "x" else Y) - other) < 1e-7):
         return got
-    return split(got, way, other) or got
+    return split(got, way, other)
 
 
 def remove_line(wp, way, k):

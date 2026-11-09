@@ -760,29 +760,34 @@ struct Soft<'a> {
     cl: Colours<'a>,
 }
 
-/// fastloops._soft_one: note j at spot (x0, y0) of the box -> the note it takes its colour from.
+/// Where the spot (x, y) fetches from: its exact fetch (ox, oy), or the map's, blended (NaN).
 #[inline(always)]
-fn soft_one(j: usize, x0: f64, y0: f64, o0: f64, o1: f64, s: &Soft, d: &Near) -> i64 {
-    let s100 = s.c[5];
-    // (o0 / o1: the spot's exact fetch, a Warp's (warp.exact_offsets); NaN = the map's, blended)
-    let (sx, sy) = if o0.is_nan() {
-        let (d0, d1) = sample2(s.a, s.gy, s.gx, x0, y0);
-        (x0 + d0 * s100, y0 + d1 * s100)
+fn fetch(x: f64, y: f64, ox: f64, oy: f64, s100: f64, s: &Soft) -> (f64, f64) {
+    if ox.is_nan() {
+        let (d0, d1) = sample2(s.a, s.gy, s.gx, x, y);
+        (x + d0 * s100, y + d1 * s100)
     } else {
-        (x0 + o0, y0 + o1)
-    };
+        (x + ox, y + oy)
+    }
+}
+
+/// fastloops._soft_one: note j at spot (x0, y0) of the box -> the note it takes its colour from. o: the exact
+/// fetches (a Warp's, warp.exact_offsets; NaN = the map's) of the spot, of the end of the note's length arrow and of
+/// its key arrow, as (x, y) pairs.
+#[inline(always)]
+fn soft_one(j: usize, x0: f64, y0: f64, o: &[f64; 6], s: &Soft, d: &Near) -> i64 {
+    let s100 = s.c[5];
+    let (sx, sy) = fetch(x0, y0, o[0], o[1], s100, s);
     let (mid, key) = unit_back(sx, sy, s.fp);
     if s.c[8] != 0.0 {
         return near_one(0, mid, key, d); // (Edges: Sharp, the Liquify: the nearest note alone, C7)
     }
     let (st, en) = (s.at[j * s.cols] as f64, s.at[j * s.cols + 1] as f64);
     let h = pmax((en - st) / 2.0, 0.5);
-    let (xx, yy) = (x0 + s.c[0] * h, y0 + s.c[1] * h);
-    let (d0, d1) = sample2(s.a, s.gy, s.gx, xx, yy);
-    let (m1, k1) = unit_back(xx + d0 * s100, yy + d1 * s100, s.fp);
-    let (xx, yy) = (x0 + s.c[2], y0 + s.c[3]);
-    let (d0, d1) = sample2(s.a, s.gy, s.gx, xx, yy);
-    let (m3, k3) = unit_back(xx + d0 * s100, yy + d1 * s100, s.fp);
+    let (xx, yy) = fetch(x0 + s.c[0] * h, y0 + s.c[1] * h, o[2], o[3], s100, s);
+    let (m1, k1) = unit_back(xx, yy, s.fp);
+    let (xx, yy) = fetch(x0 + s.c[2], y0 + s.c[3], o[4], o[5], s100, s);
+    let (m3, k3) = unit_back(xx, yy, s.fp);
     let (vt0, vt1) = ((m1 - mid) * 2.0, (k1 - key) * 2.0);
     let (vk0, vk1) = ((m3 - mid) * 2.0, (k3 - key) * 2.0);
     let (ut, uk) = (vt0 / (2.0 * h), vt1);
@@ -803,19 +808,27 @@ fn soft_one(j: usize, x0: f64, y0: f64, o0: f64, o1: f64, s: &Soft, d: &Near) ->
 #[inline(always)]
 fn soft_range_inner(idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], oy: &[f64], s: &Soft, d: &Near,
                     out: &mut [i64]) {
-    // (ox / oy empty: every spot the map's)
-    let has = !ox.is_empty();
-    for j in 0..out.len() {
-        let (o0, o1) = if has { (ox[j], oy[j]) } else { (f64::NAN, f64::NAN) };
-        out[j] = soft_one(idx[j] as usize, x[j], y[j], o0, o1, s, d);
+    // (ox / oy: empty = every spot the map's; one a spot = the middle's; three a spot (interleaved) = the middle's,
+    // the length arrow's end's, the key arrow's end's)
+    let n = out.len();
+    let per = if ox.is_empty() || n == 0 { 0 } else { ox.len() / n };
+    let nan = f64::NAN;
+    for j in 0..n {
+        let o = match per {
+            0 => [nan; 6],
+            1 => [ox[j], oy[j], nan, nan, nan, nan],
+            _ => [ox[3 * j], oy[3 * j], ox[3 * j + 1], oy[3 * j + 1], ox[3 * j + 2], oy[3 * j + 2]],
+        };
+        out[j] = soft_one(idx[j] as usize, x[j], y[j], &o, s, d);
     }
 }
 level_builds!(fn soft_range(idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], oy: &[f64], s: &Soft, d: &Near,
                             out: &mut [i64]) => soft_range_inner);
 
 /// fastloops.warp_soft (at: the notes' places; idx: the notes picked for; a: the map (gy, gx, 2); c / fp: the
-/// numbers _soft_one / _unit_back read; ring (looks, 3); ox / oy: each spot's exact fetch (NaN: the map's), or
-/// both empty; many = shared out) -> 0.
+/// numbers _soft_one / _unit_back read; ring (looks, 3); ox / oy: each spot's exact fetch (NaN: the map's), one a
+/// spot, or three a spot when c[9] = 1 (also the note's two arrow ends, interleaved), or both empty; many = shared
+/// out) -> 0.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], oy: &[f64], a: Nd<f64, 3>,
@@ -829,7 +842,11 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], 
     let nl = ring.sh[0];
     if cols < 2 || a.sh[2] != 2 || gy < 2 || gx < 2 || ring.sh[1] != 3 || nl > MOST_LOOKS || nl < ROUND_INNER
         || c.len() < 9 || fp.len() < 14 || keys.is_empty() || tstart.len() < 17 || x.len() < n || y.len() < n
-        || out.len() < n || ox.len() != oy.len() || !(ox.is_empty() || ox.len() >= n) {
+        || out.len() < n || ox.len() != oy.len() {
+        return crate::FAILED;
+    }
+    let per = if ox.is_empty() { 0 } else if c.len() > 9 && c[9] != 0.0 { 3 } else { 1 };
+    if ox.len() < per * n {
         return crate::FAILED;
     }
     for j in 0..16 {
@@ -846,16 +863,16 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], 
     let d = Near { keys, first, last, line, ms, nk: &[], nm: &[], o, base, top, gap, own: false };
     let cl = Colours { now, o };
     let s = Soft { at: at.d, cols, a: a.d, gy, gx, c, fp, ring: ring.d, nl, tstart, ta, tb, cl };
-    let has = !ox.is_empty();
-    let (ox, oy) = if has { (&ox[..n], &oy[..n]) } else { (ox, oy) };
+    let has = per > 0;
+    let (ox, oy) = if has { (&ox[..per * n], &oy[..per * n]) } else { (ox, oy) };
     match crate::pool_for(many, n, 1) {
         None => soft_range(idx, x, y, ox, oy, &s, &d, out),
         Some(pool) => {
             let chunk = (n / (pool.current_num_threads() * 8)).max(256);
             pool.install(|| {
                 if has {
-                    (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), ox.par_chunks(chunk),
-                     oy.par_chunks(chunk), out.par_chunks_mut(chunk))
+                    (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), ox.par_chunks(chunk * per),
+                     oy.par_chunks(chunk * per), out.par_chunks_mut(chunk))
                         .into_par_iter()
                         .for_each(|(i, xs, ys, a, b, oc)| soft_range(i, xs, ys, a, b, &s, &d, oc));
                 } else {

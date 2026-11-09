@@ -1069,19 +1069,35 @@ def _cover_at(mid, key, vt0, vt1, vk0, vk1, nt, nk, tstart, ta, tb, keys, first,
 
 
 @njit(nogil=True)
+def _soft_fetch(a, x, y, ox, oy, s100):
+    """Where the spot (x, y) fetches from: its exact fetch (ox, oy), or the map a's, blended (ox NaN)."""
+    if np.isnan(ox):
+        d0, d1 = _sample2(a, x, y)
+        return x + d0 * s100, y + d1 * s100
+    return x + ox, y + oy
+
+
+@njit(nogil=True)
 def _soft_one(i, at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top,
               gap, now, out):
     """liquify.found's Edges: Smooth for note idx[i] at spot (x[i], y[i]) of the box (the same sums, the same
     order as its arrays). c = [tick's step across, up (box units), half a key's across, up, one key's height,
-    strength / 100, SOFT_SQUASHED, SOFT_REACH, 1 = Edges: Sharp (the nearest note alone, C7)]. ox / oy: each
-    spot's exact fetch (a Warp's, warp.exact_offsets; NaN = the map's), or both empty."""
+    strength / 100, SOFT_SQUASHED, SOFT_REACH, 1 = Edges: Sharp (the nearest note alone, C7)(, 1 = ox / oy hold
+    three a spot)]. ox / oy: each spot's exact fetch (a Warp's, warp.exact_offsets; NaN = the map's), one a spot,
+    or three a spot interleaved (c[9] = 1: also the ends of the note's length arrow and key arrow), or both empty."""
     s100 = c[5]
     x0, y0 = x[i], y[i]
-    if len(ox) and not np.isnan(ox[i]):
-        sx, sy = x0 + ox[i], y0 + oy[i]
+    per = 0
+    if len(ox):
+        per = 3 if len(c) > 9 and c[9] != 0 else 1
+    nan = np.nan
+    if per == 3:
+        o0, o1, o2, o3, o4, o5 = ox[3 * i], oy[3 * i], ox[3 * i + 1], oy[3 * i + 1], ox[3 * i + 2], oy[3 * i + 2]
+    elif per == 1:
+        o0, o1, o2, o3, o4, o5 = ox[i], oy[i], nan, nan, nan, nan
     else:
-        d0, d1 = _sample2(a, x0, y0)
-        sx, sy = x0 + d0 * s100, y0 + d1 * s100
+        o0 = o1 = o2 = o3 = o4 = o5 = nan
+    sx, sy = _soft_fetch(a, x0, y0, o0, o1, s100)
     mid, key = _unit_back(sx, sy, fp)
     if c[8] != 0:  # (Edges: Sharp, the Liquify: the nearest note alone)
         out[i] = _near_at(mid, key, keys, first, last, line, ms, o, base, top, gap)
@@ -1089,12 +1105,10 @@ def _soft_one(i, at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, fi
     j = idx[i]
     s, e = float(at[j, 0]), float(at[j, 1])
     h = max((e - s) / 2, 0.5)
-    X, Y = x0 + c[0] * h, y0 + c[1] * h
-    d0, d1 = _sample2(a, X, Y)
-    m1, k1 = _unit_back(X + d0 * s100, Y + d1 * s100, fp)
-    X, Y = x0 + c[2], y0 + c[3]
-    d0, d1 = _sample2(a, X, Y)
-    m3, k3 = _unit_back(X + d0 * s100, Y + d1 * s100, fp)
+    X, Y = _soft_fetch(a, x0 + c[0] * h, y0 + c[1] * h, o2, o3, s100)
+    m1, k1 = _unit_back(X, Y, fp)
+    X, Y = _soft_fetch(a, x0 + c[2], y0 + c[3], o4, o5, s100)
+    m3, k3 = _unit_back(X, Y, fp)
     vt0, vt1 = (m1 - mid) * 2, (k1 - key) * 2
     vk0, vk1 = (m3 - mid) * 2, (k3 - key) * 2
     ut, uk = vt0 / (2 * h), vt1

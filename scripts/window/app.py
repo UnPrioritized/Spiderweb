@@ -3375,6 +3375,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.roll.drop_lasso()  # (a waiting loop would cut the new one)
         self.stop_play()
         self.undo_stack.clear()  # (nothing of the old project comes back, like Open)
+        self.roll.warp_drop_pick()
         self.redo_stack.clear()
         self._redo_kept = self._trimmed = None
         self._saved_shapes = self._saved_mark = None

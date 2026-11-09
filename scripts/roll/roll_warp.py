@@ -27,7 +27,8 @@ SPLIT (PLAN.md "Warp Split" B, user 2026-11-09): the window's Split button picke
 the line(s) through the grid spot shown there (warp_param: the bend turned round), mirrored with the Mirror pick, one
 undo step, the button lets go (also after a refused click: status line). Right-click on a grid = its own short menu
 (split across / down / both here, Remove this line on an inner line). Delete with a point picked = the inner lines
-through it go (never the shape; a corner: nothing). The picked point follows the split (warp_repick)."""
+through it go (never the shape; a corner: nothing; only with ONE shape selected). The picked point is kept by where
+its lines are, so it follows a split and comes back with an undo (warp_set_pick)."""
 
 import time
 
@@ -230,21 +231,44 @@ class WarpGrid:
         """sh's place in the shape list (None: not in it)."""
         return next((n for n, s in enumerate(self.app.shapes) if s is sh), None)
 
+    def warp_sel_sig(self):
+        """What the picked point belongs to: (the selected shapes' places in the list, how many shapes)."""
+        return tuple(sorted(self.app.sels)), len(self.app.shapes)
+
     def warp_set_pick(self, g, i):
-        """Point i of grid g clicked: its handles show. Kept as (shape's place in the list, point, grid size), so it
-        lasts through undo / redo (they make the shapes anew; hunt 2026-11-09) and a grid size change drops it."""
-        self.wp_pick = (self.warp_shape_place(g["sh"]), i, wp_.size(g["wp"]))
+        """Point i of grid g clicked: its handles show. Kept as the shape's place in the list + WHERE the point's two
+        grid lines sit (box units) + the selection then, so it lasts through undo / redo (they make the shapes anew;
+        hunts 2026-11-09 / 11-10: a split / Delete undone gives the point back) and follows splits; any other
+        selection, shapes added / gone, a grid size change, the window closed, Open / New = gone (warp_drop_pick)."""
+        c, _ = wp_.size(g["wp"])
+        X, Y = wp_.lines(g["wp"])
+        self.wp_pick = {"place": self.warp_shape_place(g["sh"]), "at": (float(X[i % (c + 1)]), float(Y[i // (c + 1)])),
+                        "sig": self.warp_sel_sig()}
+
+    def warp_drop_pick(self):
+        """No point picked any more (its handles go)."""
+        self.wp_pick = None
+
+    def warp_check_pick(self):
+        """The pick dropped when the selection / shape list changed since it was made (Ctrl+A, another shape, Esc,
+        a shape deleted or added: Delete must then delete shapes again; Warp Split hunt 2026-11-10)."""
+        p = getattr(self, "wp_pick", None)
+        if p and p["sig"] != self.warp_sel_sig():
+            self.wp_pick = None
 
     def warp_pick_of(self, g):
-        """The point of grid g clicked last (its handles show), or None. Another grid size than when clicked: the
-        pick is dropped (the same number would be another point)."""
+        """The point of grid g clicked last (its handles show), or None (another shape's, the selection changed, or
+        its lines aren't on this grid now: a line removed / an undo meanwhile shows it again when they're back)."""
+        self.warp_check_pick()
         p = getattr(self, "wp_pick", None)
-        if not p or p[0] is None or p[0] != self.warp_shape_place(g["sh"]):
+        if not p or p["place"] is None or p["place"] != self.warp_shape_place(g["sh"]):
             return None
-        if p[2] != wp_.size(g["wp"]):
-            self.wp_pick = None
+        X, Y = wp_.lines(g["wp"])
+        i = np.flatnonzero(np.abs(X - p["at"][0]) < 1e-7)
+        j = np.flatnonzero(np.abs(Y - p["at"][1]) < 1e-7)
+        if not (len(i) and len(j)):
             return None
-        return p[1]
+        return int(j[0]) * len(X) + int(i[0])
 
     def warp_handle_list(self, g):
         """[(point, side)] of the handles grid g shows: the picked point's own + each neighbour's facing it."""
@@ -530,8 +554,8 @@ class WarpGrid:
         """Delete with a grid point picked (its handles shown): the inner lines through it go, mirrored too (a point
         on the box's edge: its inner line; a corner: nothing); one undo step. True when a point was picked (Delete
         never deletes the shape then)."""
-        if not self.warp_on() or getattr(self, "wp", None):
-            return False
+        if not self.warp_on() or getattr(self, "wp", None) or len(self.app.sels) != 1:
+            return False  # (2+ selected: Delete deletes shapes, whatever was picked)
         for g in self.warp_grids():
             k = self.warp_pick_of(g)
             if k is None:
@@ -551,9 +575,8 @@ class WarpGrid:
         return False
 
     def warp_commit(self, g, wp, name):
-        """Grid g's shape gets the Warp wp (a split / removed line): one undo step, the picked point kept when it's
-        still a point of the new grid (else its handles go), the notes made again."""
-        self.warp_repick(g, wp)
+        """Grid g's shape gets the Warp wp (a split / removed line): one undo step, the picked point kept where its
+        lines are (a line of it removed: no handles until they're back, e.g. by undo), the notes made again."""
         self.app.push_undo(name=name)
         f = wp_.full(wp)
         st = {"sh": g["sh"], "g": dict(g, wp=f, P=wp_.offsets(f, strength=False))}
@@ -564,22 +587,6 @@ class WarpGrid:
         self.app.sync_recolour()
         self.app.schedule_autosave()
         self.redraw()
-
-    def warp_repick(self, g, wp):
-        """The picked point of grid g moved onto the new grid wp (found by where its lines are); gone with a line =
-        no pick."""
-        k = self.warp_pick_of(g)
-        if k is None:
-            return
-        c, _ = wp_.size(g["wp"])
-        X, Y = wp_.lines(g["wp"])
-        X2, Y2 = wp_.lines(wp)
-        i = np.flatnonzero(np.abs(X2 - X[k % (c + 1)]) < 1e-7)
-        j = np.flatnonzero(np.abs(Y2 - Y[k // (c + 1)]) < 1e-7)
-        if len(i) and len(j):
-            self.wp_pick = (self.wp_pick[0], int(j[0]) * len(X2) + int(i[0]), wp_.size(wp))
-        else:
-            self.wp_pick = None
 
     def warp_menu(self, e, x, y):
         """Right-click (no drag) on a shown grid while the Warp window is open: its own short menu (Split across /
@@ -632,7 +639,7 @@ class WarpGrid:
         self.delete("wpgrid")
         if not self.warp_on() or self.sx is None:
             return
-        from roll.roll_gliss import clip_polyline
+        from roll.roll_gliss import clip_polyline, clip_polyline_many
         s = self.scale
         line = max(1, round(s))
         band = line + 2 * max(1, round(s))
@@ -640,7 +647,7 @@ class WarpGrid:
         st = getattr(self, "wp", None)
         hover = getattr(self, "wp_hover", None)
         for g in self.warp_grids():
-            pieces = [p for ln in self.warp_lines(g) for p in clip_polyline(ln, room)]
+            pieces = [p for ln in self.warp_lines(g) for p in clip_polyline_many(ln, room)]
             for width, col in ((band, look.ROLL_BG), (line, look.WARP_GRID)):
                 for p in pieces:
                     self.create_line(*p, fill=col, width=width, tags="wpgrid")
@@ -754,7 +761,7 @@ class WarpGrid:
         got = self.warp_grab(e.x, e.y)
         if got is None:
             if getattr(self, "wp_pick", None) is not None:  # (off the grid: the picked point's handles go)
-                self.wp_pick = None
+                self.warp_drop_pick()
                 self.draw_warp_grid()
             if getattr(app, "liquify_window", None) is not None:
                 return False
