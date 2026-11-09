@@ -432,6 +432,7 @@ class HistoryPanel:
             self.hz_window.pending = None
             return self.hz_window.redraw()
         self.roll.liquify_cancel()  # (a Liquify stroke: ended (its colours in the shapes) BEFORE the empty-step check)
+        self.roll.warp_cancel()  # (a Warp point dragged: the same)
         self.drop_empty_step(undo_state(self.shapes))  # (a click that changed nothing isn't a step)
         self._restore(self.undo_stack, self.redo_stack)
 

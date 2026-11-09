@@ -39,6 +39,7 @@ from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_centre import CentreDots
 from roll.roll_liquify import LiquifyBrush
+from roll.roll_warp import WarpGrid
 from roll.roll_melody import MelodyMarks
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
@@ -55,7 +56,7 @@ DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a do
 W_REPEAT_MS = 60  # W let go: back from "what the export gets" only if no press followed this soon (Linux repeats)
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
-                PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, MelodyMarks, GlissEditing,
+                PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, WarpGrid, MelodyMarks, GlissEditing,
                 tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
@@ -1276,6 +1277,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if not self.draft and self.centre_press(e):  # Shares window open: a Clumps Centre point dot grabbed
             return
+        if not self.draft and self.warp_press(e):  # Warp window open: a grid point dragged / a shape picked, never moved
+            return
         if not self.draft and self.liquify_press(e):  # Liquify window open: a brush stroke on a selected shape
             return
         if self.stop_press(e):  # a sustained shape's stop line held (the Select tool)
@@ -1494,6 +1497,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.centre_drag(e)
         elif kind == "liquify":
             self.liquify_drag(e)
+        elif kind == "warp":
+            self.warp_drag(e)
+        elif kind == "warp_none":
+            pass
         elif kind == "box":
             self.box_mouse = (e.x, e.y, e.state)
             self.box_to()
@@ -1753,6 +1760,12 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if kind == "liquify":
             self.liquify_release(e)
             return
+        if kind == "warp":
+            self.warp_release(e)
+            return
+        if kind == "warp_none":
+            self.drag = None
+            return
         if kind.startswith("lasso"):
             if self.box_timer:
                 self.after_cancel(self.box_timer)
@@ -1901,6 +1914,14 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if c and abs(e.x - c[1]) < 5 and abs(e.y - c[2]) < 5 and c[0] < len(self.app.shapes):
             self.app.select(c[0])  # (its first click went on to the shape under it: back to the one clicked, so a
             # double-click acts on the shape under the mouse when it was pressed, and only once)
+        if (not self.draft and self.warp_on() and e.x >= self.kb_w and e.y >= self.ruler_h
+                and self.warp_target(e.x, e.y)):
+            self.doubled = True  # (Warp window open: a quick 2nd click on a point / shape is a press too, never a
+            try:                 # text / picture / Add between double-click)
+                self.on_press(e)
+            finally:
+                self.doubled = False
+            return
         if (not self.draft and self.liquify_on() and e.x >= self.kb_w and e.y >= self.ruler_h
                 and self.liquify_target(e.x, e.y, e.state) is not None):
             self.doubled = True  # (Liquify window open: a quick 2nd click on a shape is a dab too, never a text /
@@ -2013,6 +2034,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         arrow, a hand over a shape it can cut with."""
         name = self.custom_cursor(hit)
         app, tool = self.app, self.app.tool.get()
+        if not self.draft and self.warp_on() and self.warp_hit(e.x, e.y) is not None:
+            return "fleur"  # (a Warp grid point: a press drags it)
         if self.draft or hit and hit[0] != "inside":
             return name
         area = self.area_box_hit(e) if tool == "select" and getattr(app, "stir_window", None) else None
@@ -2233,6 +2256,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.stop_tidy()  # (a sustain stop held: its stops in order again)
         self.drop_lasso(unfinished=True)  # (a loop half drawn goes with its drag, never left stuck; hunt 2026-10-23)
         self.liquify_cancel()  # (a Liquify stroke: ended whole, its timers too (Ctrl+Z mid-stroke))
+        self.warp_cancel()  # (a Warp point dragged: ended as if let go)
         self.draft = None
         self.drag = None
         self.follow = None
@@ -2385,6 +2409,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 return pane.cancel_placing()
             if self.app.vel.confirm() | self.app.tempo_pane.confirm():  # (done with a velocity / tempo line, like
                 return                                                    # Enter)
+            if self.warp_escape():  # (a Warp point dragged: back where it was, no step)
+                return "break"
             if self.liquify_forget():  # (a Liquify straight stroke's start placed: that goes first, like any
                 return "break"         # other thing going on)
             busy = (self.draft is not None or self.drag is not None or self.typing is not None or self.app.parts

@@ -173,11 +173,17 @@ class WarpWindow(tk.Toplevel):
                 b.current(values.index(v))
             else:
                 b.set("")  # (mixed, or a file's grid the window doesn't offer)
+        if not getattr(app.roll, "wp", None):  # (the grid on the piano roll: as the shapes are now)
+            app.roll.draw_warp_grid()
 
     def close(self):
+        roll = self.app.roll
+        if (roll.drag or ("",))[0] in ("warp", "warp_none"):
+            roll.warp_release(None)
         self.app.warp_window = None
         self.destroy()
-        self.app.roll.focus_set()
+        roll.focus_set()
+        roll.draw_warp_grid()
 
 
 def open_warp(app):

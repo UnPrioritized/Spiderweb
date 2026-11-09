@@ -85,29 +85,47 @@ def offsets(wp, strength=True):
     return P
 
 
-def _catmull(P, x, y):
+def _catmull(P, x, y, slopes=False):
     """The offsets P (rows up, columns across, 2) at spots (x, y) of the box (0..1; past it: the edge's), on
-    Catmull-Rom curves through the points (the grid padded by straight lines past its ends)."""
+    Catmull-Rom curves through the points (the grid padded by straight lines past its ends). slopes: also how they
+    change along x and along y there ((value, d/dx, d/dy); 0 past the box, where the edge's value holds), worked out
+    exactly (Newton's steps in inverse_map: three lookups a step before, stage C's drags)."""
     Q = np.concatenate([2 * P[:1] - P[1:2], P, 2 * P[-1:] - P[-2:-1]], 0)
     Q = np.concatenate([2 * Q[:, :1] - Q[:, 1:2], Q, 2 * Q[:, -1:] - Q[:, -2:-1]], 1)
     gy, gx = P.shape[:2]
 
     def parts(v, g):
-        f = np.clip(np.asarray(v, np.float64), 0.0, 1.0) * (g - 1)
+        v = np.asarray(v, np.float64)
+        f = np.clip(v, 0.0, 1.0) * (g - 1)
         i = np.minimum(f.astype(np.int64), g - 2)
         t = f - i
         t2, t3 = t * t, t * t * t
         w = ((-t3 + 2 * t2 - t) / 2, (3 * t3 - 5 * t2 + 2) / 2, (-3 * t3 + 4 * t2 + t) / 2, (t3 - t2) / 2)
-        return i, w
-    i, wx = parts(x, gx)
-    j, wy = parts(y, gy)
+        if not slopes:
+            return i, w, None
+        inside = ((v >= 0.0) & (v <= 1.0)) * float(g - 1)
+        d = ((-3 * t2 + 4 * t - 1) / 2 * inside, (9 * t2 - 10 * t) / 2 * inside,
+             (-9 * t2 + 8 * t + 1) / 2 * inside, (3 * t2 - 2 * t) / 2 * inside)
+        return i, w, d
+    i, wx, dx = parts(x, gx)
+    j, wy, dy = parts(y, gy)
     out = np.zeros(np.shape(i) + (2,), np.float64)
+    if slopes:
+        ddx, ddy = np.zeros_like(out), np.zeros_like(out)
     for a in range(4):
         row = np.zeros_like(out)
+        if slopes:
+            row_d = np.zeros_like(out)
         for b in range(4):
-            row += Q[j + a, i + b] * wx[b][..., None]
+            q = Q[j + a, i + b]
+            row += q * wx[b][..., None]
+            if slopes:
+                row_d += q * dx[b][..., None]
         out += row * wy[a][..., None]
-    return out
+        if slopes:
+            ddx += row_d * wy[a][..., None]
+            ddy += row * dy[a][..., None]
+    return (out, ddx, ddy) if slopes else out
 
 
 def bend_at(P, x, y, smooth=True):
@@ -139,7 +157,10 @@ def inverse_map(wp):
     h = 1e-5
     for _ in range(STEPS):
         x, y = sx[live], sy[live]
-        d0 = bend_at(P, x, y, smooth)
+        if smooth:  # (the slopes exact, with the values: one lookup a step)
+            d0, dx, dy = _catmull(P, x, y, slopes=True)
+        else:
+            d0 = bend_at(P, x, y, smooth)
         rx, ry = x + d0[:, 0] - px[live], y + d0[:, 1] - py[live]
         err = np.hypot(rx, ry)
         better = err < best[live]
@@ -149,8 +170,11 @@ def inverse_map(wp):
         if not go.any():
             break
         live, x, y, rx, ry, d0 = live[go], x[go], y[go], rx[go], ry[go], d0[go]
-        dx = (bend_at(P, x + h, y, smooth) - d0) / h
-        dy = (bend_at(P, x, y + h, smooth) - d0) / h
+        if smooth:
+            dx, dy = dx[go], dy[go]
+        else:
+            dx = (bend_at(P, x + h, y, smooth) - d0) / h
+            dy = (bend_at(P, x, y + h, smooth) - d0) / h
         a, b, c, e = 1 + dx[:, 0], dy[:, 0], dx[:, 1], 1 + dy[:, 1]
         det = a * e - b * c
         ok = np.abs(det) > 1e-6

@@ -512,6 +512,12 @@ class LiquifyBrush:
         _, notes, own, _ = job["made"]
         _, tracks = app.notes_tracks(without_recolour(sh))
         base = dict(old)
+        if job.get("warp") is not None:  # (a Warp drag (roll_warp.py): the colours before the Warp, its turned-round
+            # map standing in for a Liquify's, with the Warp's edge; a Liquify after it = can't follow: made whole)
+            if base.get("liquify"):
+                return None
+            base.pop("warp", None)
+            base["liquify"] = {"edge": job["warp"]["edge"]}
         settings = {k: v for k, v in (base.get("liquify") or {}).items() if k not in ("grid", "map", "frozen")}
         # (the rule as the notes are made with this stroke's map: any map stands in, Live is handed the real one)
         base["liquify"] = dict(settings, grid=[2, 2], map=lq.encode(np.full((2, 2, 2), 1.0 / lq.SCALE)))
@@ -555,7 +561,13 @@ class LiquifyBrush:
                 "code": code if order is None else code[order], "order": order, "n": n, "lap": lap,
                 "turn": turned_map(tw) if tw else None, "img": self._img, "made": (mn, np.asarray(mt, np.int64)),
                 "slots": {}, "longest": int((drawn[mine, 1] - R0).max()),
-                "every": self.every_slot(), "calc": lq.Live(*args[:4], rule, *args[4:], lq.rounded(job["a"]))}
+                "every": self.every_slot(), "calc": lq.Live(*args[:4], rule, *args[4:], self.liquify_map(job))}
+
+    @staticmethod
+    def liquify_map(job):
+        """The map Live works with: a Liquify's as saved (rounded), a Warp's turned-round map as it is (warp.warped
+        uses it unrounded)."""
+        return job["a"] if job.get("warp") is not None else lq.rounded(job["a"])
 
     def liquify_slot(self, live, track):
         """The channel slot a colour (track) of the shape is on now (render gives each of a shape's tracks one: its
@@ -586,7 +598,7 @@ class LiquifyBrush:
         live = job["live"]
         if live["img"] is not self._img:
             return False
-        got = live["calc"].update(lq.rounded(job["a"]))
+        got = live["calc"].update(self.liquify_map(job))
         if got is None:
             return True
         B, L = got

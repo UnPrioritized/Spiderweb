@@ -982,12 +982,13 @@
  "warp.edge_tip": "Where colours come from when a bend reaches past the shape's edge, like the Stir's choice of the same name.",
  "warp.reset": "Reset",
  "warp.reset_tip": "Puts every point of the selected shapes back where it started.",
- "warp.hint": "Drag the grid's points on the piano roll to bend the selected shape's colours.",
+ "warp.hint": "Drag the grid's points on the piano roll to bend the selected shape's colours. A point can go past the shape's edge too. Esc while dragging puts the point back.",
  "warp.needs": "Channels isn't Multi channel now: all the notes are in one channel, so warping changes nothing.",
  "warp.one": "This shape has only one colour, so there's nothing to bend. Give it more with Colours in the side panel.",
  "warp.zero": "Strength is 0 % in the Recolour row, so the bend doesn't show yet.",
  "warp.undo_grid": "Warp grid size",
  "warp.undo_bend": "Warp bend",
  "warp.undo_edge": "Warp at the edges",
- "warp.undo_reset": "Reset Warp"
+ "warp.undo_reset": "Reset Warp",
+ "warp.undo_drag": "Warp point"
 }
