@@ -152,6 +152,24 @@ def _eased(P, x, y, slopes=False):
     return out, ddx, ddy
 
 
+def _straight(P, x, y):
+    """Straight cells' bend at spots (x, y) with its slopes, exact: (value, d/dx, d/dy) (value = liquify.sample's very
+    sums; slopes 0 past the box). Newton's slopes were steps of 1e-5 to one side: a mirrored grid's twin spots took
+    different steps and a fold picked other layers on each side (user 2026-11-09, crossing.spwb)."""
+    gy, gx = P.shape[:2]
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    fx = np.clip(x, 0.0, 1.0) * (gx - 1)
+    fy = np.clip(y, 0.0, 1.0) * (gy - 1)
+    i0 = np.minimum(fx.astype(np.int64), gx - 2)
+    j0 = np.minimum(fy.astype(np.int64), gy - 2)
+    tx, ty = (fx - i0)[..., None], (fy - j0)[..., None]
+    a, b, c, d = P[j0, i0], P[j0, i0 + 1], P[j0 + 1, i0], P[j0 + 1, i0 + 1]
+    lo, hi = a * (1 - tx) + b * tx, c * (1 - tx) + d * tx
+    mx = (((x >= 0.0) & (x <= 1.0)) * float(gx - 1))[..., None]
+    my = (((y >= 0.0) & (y <= 1.0)) * float(gy - 1))[..., None]
+    return lo * (1 - ty) + hi * ty, ((b - a) * (1 - ty) + (d - c) * ty) * mx, (hi - lo) * my
+
+
 def bend_at(P, x, y, smooth=True):
     """How far the spots (x, y) of the box move under the point offsets P (forward: where their colour goes)."""
     if smooth:
@@ -273,6 +291,7 @@ def _solve(P, px, py, smooth, fold=None):
 FOLD_LOOK = 9  # (spots a cell side where _folds looks whether a piece turned over / how far a cell's colours land)
 FOLD_PIECES = 4  # (a folded cell solved in this many pieces a side: inside it, two layers may come from one cell)
 FAR = 8.0  # (a box edge's cell reaches this far past the box: the edge's bend holds out there)
+BOUND_IN = 1e-12  # (a fold's piece: how far inside its edges Newton is kept)
 GIVE_UP_STEP, GIVE_UP_FAR = 6, 0.02  # (a fold's piece: still this far off after this many steps = not in it)
 
 
@@ -299,9 +318,12 @@ def _folds(P, smooth, top, always=False):
     if not flipped.any() and not always:
         return None
     moved = np.hypot(P[..., 0], P[..., 1])
-    rank = moved[:-1, :-1] + moved[:-1, 1:] + moved[1:, :-1] + moved[1:, 1:]
-    order = np.empty(rows * cols, np.int64)  # (by how far the cell's corners moved; a tie: grid order)
-    order[np.lexsort((np.arange(rows * cols), rank.ravel()))] = np.arange(rows * cols)
+    # (by how far the cell's corners moved, added smallest first: mirrored twin cells get the very same number;
+    # cells that tie share a place (user 2026-11-09, a mirrored fold came out lopsided when grid order broke the
+    # tie): _fold_pick then takes the answer whose colour travels less)
+    c4 = np.sort(np.stack([moved[:-1, :-1], moved[:-1, 1:], moved[1:, :-1], moved[1:, 1:]]), 0)
+    rank = (c4[0] + c4[1]) + (c4[2] + c4[3])
+    order = np.unique(rank.ravel(), return_inverse=True)[1].reshape(-1).astype(np.int64)
     k = FOLD_PIECES
     units, land, ranks, fixed = [], [], [], []
     per = (n - 1) // k  # (looks a piece side: n - 1 must split evenly)
@@ -318,8 +340,9 @@ def _folds(P, smooth, top, always=False):
                     for a in range(k):
                         pieces.append((a * per, (a + 1) * per, b * per, (b + 1) * per,
                                        float(mv[b * per:(b + 1) * per + 1, a * per:(a + 1) * per + 1].mean())))
-                inner = np.argsort([p[4] for p in pieces], kind="stable")
-                pieces = [pieces[m][:4] + (int(r) + 1,) for r, m in zip(np.argsort(inner), range(len(pieces)))]
+                # (pieces moving the same (to 9 places: a mirrored twin's are off in the last bits) share a place)
+                inner = np.unique(np.round([p[4] for p in pieces], 9), return_inverse=True)[1].reshape(-1)
+                pieces = [p[:4] + (int(r) + 1,) for p, r in zip(pieces, inner)]
             for a0, a1, b0, b1, sub in pieces:
                 px_ = fx[j, b0:b1 + 1, i, a0:a1 + 1]
                 py_ = fy[j, b0:b1 + 1, i, a0:a1 + 1]
@@ -383,12 +406,17 @@ def _fold_pick(P, px, py, smooth, fold, bx, by, lost=None):
     # (start in the piece's middle, its own part of the box; past the box: the box's edge)
     cx = (np.clip(lo_x, 0, 1) + np.clip(hi_x, 0, 1)) / 2
     cy = (np.clip(lo_y, 0, 1) + np.clip(hi_y, 0, 1)) / 2
-    sx, sy, err = _newton(P, px[sp], py[sp], smooth, cx, cy, (lo_x, hi_x, lo_y, hi_y))
+    # (kept a hair inside the piece: a spot ON a cell's top / right line counts as the next cell's, so Newton stuck
+    # at that edge took the neighbour's slopes on one side of a mirrored grid and not on the other)
+    sx, sy, err = _newton(P, px[sp], py[sp], smooth, cx, cy,
+                          (lo_x + BOUND_IN, hi_x - BOUND_IN, lo_y + BOUND_IN, hi_y - BOUND_IN))
     ok = (err < 1e-7) & (sx >= lo_x - 1e-9) & (sx <= hi_x + 1e-9) & (sy >= lo_y - 1e-9) & (sy <= hi_y + 1e-9)
     if not ok.any():
         return
     sp, sx, sy, r = sp[ok], sx[ok], sy[ok], R[up[ok]]
-    o = np.lexsort((-r, sp))  # (each spot's answers, highest rank first)
+    # (each spot's answers, highest rank first; a tie (mirrored twins): the colour travelling less, so a mirrored
+    # Warp stays mirrored except on the crease itself)
+    o = np.lexsort((np.hypot(sx - px[sp], sy - py[sp]), -r, sp))
     sp, sx, sy = sp[o], sx[o], sy[o]
     first = np.ones(len(sp), bool)
     first[1:] = sp[1:] != sp[:-1]
@@ -412,13 +440,10 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None):
     best = np.full(len(px), np.inf)
     bx, by = sx.copy(), sy.copy()
     live = np.arange(len(px))
-    h = 1e-5
     for step in range(STEPS):
         x, y = sx[live], sy[live]
-        if smooth:  # (the slopes exact, with the values: one lookup a step)
-            d0, dx, dy = _eased(P, x, y, slopes=True)
-        else:
-            d0 = bend_at(P, x, y, smooth)
+        # (the slopes exact, with the values: one lookup a step)
+        d0, dx, dy = _eased(P, x, y, slopes=True) if smooth else _straight(P, x, y)
         rx, ry = x + d0[:, 0] - px[live], y + d0[:, 1] - py[live]
         err = np.sqrt(rx * rx + ry * ry)  # (not hypot: the compiled twin's sqrt gives the very same bits)
         better = err < best[live]
@@ -430,11 +455,7 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None):
         if not go.any():
             break
         live, x, y, rx, ry, d0 = live[go], x[go], y[go], rx[go], ry[go], d0[go]
-        if smooth:
-            dx, dy = dx[go], dy[go]
-        else:
-            dx = (bend_at(P, x + h, y, smooth) - d0) / h
-            dy = (bend_at(P, x, y + h, smooth) - d0) / h
+        dx, dy = dx[go], dy[go]
         a, b, c, e = 1 + dx[:, 0], dy[:, 0], dx[:, 1], 1 + dy[:, 1]
         det = a * e - b * c
         ok = np.abs(det) > 1e-6

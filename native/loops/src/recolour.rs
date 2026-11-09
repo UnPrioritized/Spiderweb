@@ -323,6 +323,30 @@ fn sample2(a: &[f64], gy: usize, gx: usize, x: f64, y: f64) -> (f64, f64) {
     (v[0], v[1])
 }
 
+/// fastloops._straight_at: (value across, up, d/dx across, up, d/dy across, up) of Straight cells' offsets P
+/// (gy, gx, 2), the slopes exact (value = sample2's sums).
+#[inline(always)]
+fn straight_at(p: &[f64], gy: usize, gx: usize, x: f64, y: f64) -> [f64; 6] {
+    let fx = pmin(pmax(x, 0.0), 1.0) * (gx as i64 - 1) as f64;
+    let fy = pmin(pmax(y, 0.0), 1.0) * (gy as i64 - 1) as f64;
+    let i0 = f2i(fx).min(gx as i64 - 2);
+    let j0 = f2i(fy).min(gy as i64 - 2);
+    let (tx, ty) = (fx - i0 as f64, fy - j0 as f64);
+    let mx = (if x >= 0.0 && x <= 1.0 { 1.0 } else { 0.0 }) * (gx as i64 - 1) as f64;
+    let my = (if y >= 0.0 && y <= 1.0 { 1.0 } else { 0.0 }) * (gy as i64 - 1) as f64;
+    let row = gx * 2;
+    let q = j0 as usize * row + i0 as usize * 2;
+    let mut out = [0.0f64; 6];
+    for c in 0..2 {
+        let (a, b, cc, d) = (p[q + c], p[q + 2 + c], p[q + row + c], p[q + row + 2 + c]);
+        let (lo, hi) = (a * (1.0 - tx) + b * tx, cc * (1.0 - tx) + d * tx);
+        out[c] = lo * (1.0 - ty) + hi * ty;
+        out[2 + c] = ((b - a) * (1.0 - ty) + (d - cc) * ty) * mx;
+        out[4 + c] = (hi - lo) * my;
+    }
+    out
+}
+
 /// fastloops._eased_part: (cell, eased share, its slope) of one number along g points.
 #[inline(always)]
 fn eased_part(v: f64, g: usize) -> (i64, f64, f64) {
@@ -371,15 +395,9 @@ fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64,
     let (mut x, mut y) = (sx, sy);
     let mut b = f64::INFINITY;
     let (mut ox, mut oy) = (x, y);
-    let h = 1e-5;
     for step in 0..d.steps {
-        let (vx, vy, mut dxx, mut dxy, mut dyx, mut dyy) = if d.smooth {
-            let e = eased_at(d.p, d.gy, d.gx, x, y);
-            (e[0], e[1], e[2], e[3], e[4], e[5])
-        } else {
-            let (vx, vy) = sample2(d.p, d.gy, d.gx, x, y);
-            (vx, vy, 0.0, 0.0, 0.0, 0.0)
-        };
+        let e = if d.smooth { eased_at(d.p, d.gy, d.gx, x, y) } else { straight_at(d.p, d.gy, d.gx, x, y) };
+        let (vx, vy, dxx, dxy, dyx, dyy) = (e[0], e[1], e[2], e[3], e[4], e[5]);
         let (rx, ry) = (x + vx - px, y + vy - py);
         let err = (rx * rx + ry * ry).sqrt();
         if err < b {
@@ -391,12 +409,6 @@ fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64,
         }
         if !go {
             break;
-        }
-        if !d.smooth {
-            let (ax, ay) = sample2(d.p, d.gy, d.gx, x + h, y);
-            (dxx, dxy) = ((ax - vx) / h, (ay - vy) / h);
-            let (ax, ay) = sample2(d.p, d.gy, d.gx, x, y + h);
-            (dyx, dyy) = ((ax - vx) / h, (ay - vy) / h);
         }
         let (a, bb, c, e) = (1.0 + dxx, dyx, dxy, 1.0 + dyy);
         let det = a * e - bb * c;

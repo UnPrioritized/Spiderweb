@@ -729,6 +729,28 @@ def _sample2(a, x, y):
 
 
 @njit(nogil=True)
+def _straight_at(P, x, y):
+    """warp._straight at one spot: (value across, up, d/dx across, up, d/dy across, up), the same sums in the same
+    order (value = _sample2's)."""
+    gy, gx = P.shape[0], P.shape[1]
+    fx = min(max(x, 0.0), 1.0) * (gx - 1)
+    fy = min(max(y, 0.0), 1.0) * (gy - 1)
+    i0 = min(np.int64(fx), gx - 2)
+    j0 = min(np.int64(fy), gy - 2)
+    tx, ty = fx - i0, fy - j0
+    mx = (1.0 if (x >= 0.0 and x <= 1.0) else 0.0) * float(gx - 1)
+    my = (1.0 if (y >= 0.0 and y <= 1.0) else 0.0) * float(gy - 1)
+    out = np.empty(6)
+    for c in range(2):
+        a, b, cc, d = P[j0, i0, c], P[j0, i0 + 1, c], P[j0 + 1, i0, c], P[j0 + 1, i0 + 1, c]
+        lo, hi = a * (1 - tx) + b * tx, cc * (1 - tx) + d * tx
+        out[c] = lo * (1 - ty) + hi * ty
+        out[2 + c] = ((b - a) * (1 - ty) + (d - cc) * ty) * mx
+        out[4 + c] = (hi - lo) * my
+    return out[0], out[1], out[2], out[3], out[4], out[5]
+
+
+@njit(nogil=True)
 def _eased_part(v, g):
     """warp._eased's parts(v, g) with slopes for one number: (cell, eased share, its slope)."""
     f = min(max(v, 0.0), 1.0) * (g - 1)
@@ -760,13 +782,11 @@ def _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, g
     x, y = sx[i], sy[i]
     b = np.inf
     ox, oy = x, y
-    h = 1e-5
     for step in range(steps):
         if smooth:
             vx, vy, dxx, dxy, dyx, dyy = _eased_at(P, x, y)
         else:
-            vx, vy = _sample2(P, x, y)
-            dxx = dxy = dyx = dyy = 0.0
+            vx, vy, dxx, dxy, dyx, dyy = _straight_at(P, x, y)
         rx, ry = x + vx - px[i], y + vy - py[i]
         err = math.sqrt(rx * rx + ry * ry)
         if err < b:
@@ -776,11 +796,6 @@ def _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, g
             go = go and err < give_far
         if not go:
             break
-        if not smooth:
-            ax, ay = _sample2(P, x + h, y)
-            dxx, dxy = (ax - vx) / h, (ay - vy) / h
-            ax, ay = _sample2(P, x, y + h)
-            dyx, dyy = (ax - vx) / h, (ay - vy) / h
         a, bb, c, e = 1 + dxx, dyx, dxy, 1 + dyy
         det = a * e - bb * c
         if abs(det) > 1e-6:
