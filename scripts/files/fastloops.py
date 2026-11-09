@@ -24,6 +24,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   clash_levels   engine.clash_levels: Hz bass layers' notes clashing on a key -> their levels
+  any_overlap    engine.heard_notes: does a notes shape overlap itself on a track + key (one pass, no sort)
   note_ends      hzbass.note_lengths: a Hz bass's notes' ends by its Note length
   wave_fill      hzbass.wave_ticks: each note's wave length, one key at a time
   hz_expand ... hz_finish  hz_grid.KeyGrid.made for the plain settings (made_fast): a key's repeats
@@ -1285,6 +1286,34 @@ def _first_at(arr, n, x, hint):
         else:
             hi = mid
     return lo
+
+
+@njit(nogil=True)
+def any_overlap(notes, g, ng):
+    """engine.heard_notes' check without a sort: notes (start, end, ...) rows, g = each note's group (0 .. ng - 1) ->
+    1 = two notes of one group overlap, 0 = none, 2 = a group's starts go back somewhere (the caller sorts), -1 = a
+    group out of range. In start order a note overlaps an earlier one exactly when it starts before the latest end
+    so far (two notes overlapping = the sorted check's neighbours overlap somewhere between them)."""
+    n = notes.shape[0]
+    if n < 2 or ng <= 0:
+        return 0
+    if notes.shape[1] < 2 or g.shape[0] < n:
+        return -1
+    last = np.full(ng, np.iinfo(np.int64).min, np.int64)
+    most = np.full(ng, np.iinfo(np.int64).min, np.int64)
+    for i in range(n):
+        k = g[i]
+        if k < 0 or k >= ng:
+            return -1
+        s = notes[i, 0]
+        if s < last[k]:
+            return 2
+        last[k] = s
+        if s < most[k]:
+            return 1
+        if notes[i, 1] > most[k]:
+            most[k] = notes[i, 1]
+    return 0
 
 
 @njit(nogil=True)
@@ -2854,6 +2883,7 @@ def warm():
     midi_track(np.zeros((1, 6), np.int64), i1 * 0, 0, 1, 1)
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
+    any_overlap(np.zeros((2, 4), np.int64), np.zeros(2, np.int64), 1)
     key_order(i1, i1, i1, i1)
     k_order, k_at = _key_groups(i1)
     on_cores(_key_runs_cores, _key_runs, CORES_LEAST, k_order, k_at, i1, i1, i1)  # (the shared loop made now, not mid-paste)

@@ -33,6 +33,7 @@ py_loops! {
                   => crate::engine::ring_runs_int;
     clash_pairs(items: Nd<i64, 2>, n: i64, most: i64) => crate::engine::clash_pairs;
     clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) => crate::engine::clash_levels;
+    any_overlap(notes: Nd<i64, 2>, g: &[i64], ng: i64) => crate::engine::any_overlap;
     // ---- Recolour / Stir / Liquify (recolour.rs)
     stir_nearest(keys: &[i64], first: &[i64], last: &[i64], line: &[f64], ms: &[f64], nk: &[i64], nm: &[f64],
                  o: &[i64], base: f64, top: f64, gap: f64, mid: &[f64], key: &[f64], own: bool, out: &mut [i64],

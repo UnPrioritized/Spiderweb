@@ -11,7 +11,7 @@ NEEDS = {
     "paint_notes": ("paint_notes",),
     "overlap_order": ("overlap_order",), "overlap_sweep": ("overlap_sweep",), "note_stretches": ("note_stretches",),
     "radix_order": ("radix_order",), "ring_runs": ("ring_runs", "ring_runs_int"),
-    "clash_pairs": ("clash_pairs", "take2"), "clash_levels": ("clash_levels",),
+    "clash_pairs": ("clash_pairs", "take2"), "clash_levels": ("clash_levels",), "any_overlap": ("any_overlap",),
     "stir_nearest": ("stir_nearest",), "stir_nearest_one": ("stir_nearest",), "stir_wrap": ("stir_wrap",),
     "stir_wrap_one": ("stir_wrap",), "liquify_sample": ("liquify_sample",), "liquify_sample_one": ("liquify_sample",),
     "dice_mix": ("dice_mix",), "recolour_apart": ("recolour_apart",),
@@ -165,6 +165,12 @@ class Wraps:
         pa, pb = np.empty(got >> 1, np.int64), np.empty(got >> 1, np.int64)
         self.x.take2(pa, pb)
         return pa, pb, True
+
+    def any_overlap(self, notes, g, ng):
+        got = self.x.any_overlap(notes, g, ng)
+        if got < 0:
+            got = self._again("any_overlap", got, (notes, g, ng))
+        return got
 
     def clash_levels(self, rows, offs, out):
         args = (rows, offs, out)

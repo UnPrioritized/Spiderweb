@@ -721,6 +721,77 @@ fn first_at(arr: &[i64], n: i64, x: i64, hint: i64) -> i64 {
     lo
 }
 
+/// fastloops.any_overlap: notes (start, end, ...) rows, g = each note's group (0..ng) -> 1 = two notes of a group
+/// overlap, 0 = none, 2 = a group's starts go back somewhere (not in start order: the caller sorts).
+#[inline(always)]
+pub fn any_overlap(notes: Nd<i64, 2>, g: &[i64], ng: i64) -> i64 {
+    let n = notes.sh[0];
+    let nc = notes.sh[1];
+    if n < 2 || ng <= 0 {
+        return 0;
+    }
+    if nc < 2 || g.len() < n || !all_below(&g[..n], ng as usize) {
+        return any_overlap_checked(notes, g, ng);
+    }
+    let ng = ng as usize;
+    let mut last: Vec<i64> = need!(filled(ng, i64::MIN));
+    let mut most: Vec<i64> = need!(filled(ng, i64::MIN));
+    let d = notes.d;
+    if d.len() < n * nc {
+        return any_overlap_checked(notes, g, ng as i64);
+    }
+    for i in 0..n {
+        // SAFETY: d holds n rows of nc >= 2 (checked), every g[i] is below ng (all_below)
+        unsafe {
+            let k = *g.get_unchecked(i) as usize;
+            let s = *d.get_unchecked(i * nc);
+            let e = *d.get_unchecked(i * nc + 1);
+            let l = last.get_unchecked_mut(k);
+            if s < *l {
+                return 2;
+            }
+            *l = s;
+            let m = most.get_unchecked_mut(k);
+            if s < *m {
+                return 1;
+            }
+            if e > *m {
+                *m = e;
+            }
+        }
+    }
+    0
+}
+
+/// any_overlap for odd inputs (a group number out of range, short rows): every index checked; -1 = can't tell.
+#[inline(never)]
+fn any_overlap_checked(notes: Nd<i64, 2>, g: &[i64], ng: i64) -> i64 {
+    let n = notes.sh[0];
+    let nc = notes.sh[1];
+    if nc < 2 || g.len() < n || ng <= 0 {
+        return crate::FAILED;
+    }
+    let mut last: Vec<i64> = need!(filled(ng as usize, i64::MIN));
+    let mut most: Vec<i64> = need!(filled(ng as usize, i64::MIN));
+    for i in 0..n {
+        let k = g[i];
+        if k < 0 || k >= ng {
+            return crate::FAILED;
+        }
+        let k = k as usize;
+        let (s, e) = (notes.d[i * nc], notes.d[i * nc + 1]);
+        if s < last[k] {
+            return 2;
+        }
+        last[k] = s;
+        if s < most[k] {
+            return 1;
+        }
+        most[k] = most[k].max(e);
+    }
+    0
+}
+
 /// fastloops.clash_levels (out filled) -> 0.
 #[inline(always)]
 pub fn clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) -> i64 {
