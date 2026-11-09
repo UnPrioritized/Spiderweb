@@ -22,7 +22,6 @@ from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, rem
 # (Pinch + Bulge and Freeze + Thaw = ONE tool each here, Alt held = the other: user 11-07 "too much options"; the
 # dab maths keep all of them)
 TOOL_ROWS = (("push", "restore", "smooth"), ("twirl", "pinch", "freeze"))
-ONE_OF = {"bulge": "pinch", "thaw": "freeze"}  # (saved before they became one tool)
 TOOLS = tuple(t for row in TOOL_ROWS for t in row)
 # name -> (default, least, most, unit, steps)
 BRUSH = {"size": (100.0, 4.0, 1000.0, "px", (5, 50, 1)),
@@ -60,7 +59,6 @@ class LiquifyWindow(tk.Toplevel):
         self.resizable(False, False)
         self.brush = {k: saved(k) for k in BRUSH}
         tool = settings.get("liquify", "tool", "push")
-        tool = ONE_OF.get(tool, tool)
         self.tool = tk.StringVar(value=tool if tool in TOOLS else "push")
         way = settings.get("liquify", "twirl", "right")
         self.twirl = tk.StringVar(value=way if way in ("left", "right") else "right")
