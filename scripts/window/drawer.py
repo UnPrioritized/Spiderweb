@@ -611,7 +611,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
     def build_side(self):
         """The side panel: the layers list takes the room that's left; when that would make it shorter than its
         least rows (long warning texts, a small window), the panel scrolls instead (scrollbar, mouse wheel)."""
-        return self.make_side(int(300 * self.scale))
+        return self.make_side(int(300 * self.scale), "drawer")
 
     SIDE_SKIP = (tk.Listbox, ttk.Treeview)  # (the lists scroll themselves)
 

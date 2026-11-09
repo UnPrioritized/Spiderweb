@@ -1398,7 +1398,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def _build_side(self):
         """The side panel: scrolls (scrollbar, mouse wheel) when everything in it doesn't fit; otherwise the help
         text at the bottom takes the room that's left."""
-        side = self.make_side(int(lang_size("size.panel_width", 330) * self.scale))  # (a translation
+        side = self.make_side(int(lang_size("size.panel_width", 330) * self.scale), "side")  # (a translation
         self._side_wheel_at = 0.0  # may widen it)
         set_glide(self.wheel_gliding)
         click_first(self)  # (dropdowns, spin boxes, sliders: the wheel only after a click)
