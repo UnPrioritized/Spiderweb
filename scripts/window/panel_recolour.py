@@ -61,6 +61,12 @@ class RecolourPanel:
         self.recolour_liquify.pack(side="left", padx=(4, 0))
         Tooltip(self.recolour_liquify, tr("liquify.button_tip"))
         box.bind("<Configure>", lambda e: self.fit_stir(), add="+")
+        self.stir_narrow = False  # (held on their own line while the side panel measures: side_narrows)
+
+        def narrow(on):
+            self.stir_narrow = on
+            self.fit_stir()
+        self.side_narrows.append((lambda: narrow(True), lambda: narrow(False)))
         rows = self.recolour_row = ttk.Frame(box)  # (only shown while Recolour is on)
         row = ttk.Frame(rows)
         row.pack(anchor="w")
@@ -112,16 +118,18 @@ class RecolourPanel:
 
     def fit_stir(self):
         """Stir… + Liquify… beside the dropdown (and New shuffle) when the row has room for them, else on their own
-        line under the dropdown."""
+        line under the dropdown. stir_narrow = on their own line anyway (the side panel's double-click measures the
+        smallest width with nothing cut)."""
+        narrow = self.stir_narrow
         box, c, line, b = self.recolour_box, self.recolour_line, self.recolour_stir_line, self.recolour_tools
         room = box.winfo_width()
-        if room <= 1:
+        if room <= 1 and not narrow:
             return
         def wide(w):
             pad = w.pack_info().get("padx", 0)
             return w.winfo_reqwidth() + sum(pad) if isinstance(pad, tuple) else w.winfo_reqwidth() + 2 * int(pad)
         others = sum(wide(w) for w in c.pack_slaves() if w is not b)
-        fits = others + b.winfo_reqwidth() + 4 <= room
+        fits = not narrow and others + b.winfo_reqwidth() + 4 <= room
         if fits == (b.winfo_manager() == "pack" and b.pack_info().get("in") == c):
             return
         if fits:

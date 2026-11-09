@@ -40,6 +40,9 @@ class ScrollingSide:
         self.side_need = self.saved_side_need()  # (the widest the rows have needed: none of their text cut)
         self.side_width = width = self.side_fixed or max(self.side_usual, self.side_need)
         self._need_wait = None
+        # (rows that move parts onto a line of their own when there's no room beside: (narrow, fit again) pairs;
+        # the double-click measures them narrow, panel_recolour.fit_stir)
+        self.side_narrows = []
         box = self.side_box = ttk.Frame(self, width=width)
         box.pack(side="right", fill="y")
         box.pack_propagate(False)
@@ -324,6 +327,8 @@ class ScrollingSide:
         self._need_wait = None
         if not self.side.winfo_exists():
             return
+        if self.side_fixed is not None:  # (a width of the user's own: nothing grows; and a wide panel's rows
+            return  # spread beside each other, which isn't what they NEED)
         need = self.side_rows_need()
         if need <= self.side_need:
             return
@@ -398,11 +403,17 @@ class ScrollingSide:
         self.save_side_width()
 
     def grip_double(self, e):
-        """Double-click = the smallest width with no cut text (user): what the widest rows shown so far need."""
+        """Double-click = the smallest width where nothing SHOWN NOW is cut (user 2026-11-10: "go back to smallest
+        visible things that won't get cut off"); rows that wrap measured wrapped."""
         self._grip_from = None
         if self._grip_ghost is not None and self._grip_ghost.winfo_exists():
             self._grip_ghost.destroy()
-        self.side_need = max(self.side_need, self.side_rows_need())
-        self.set_side_width(self.side_need)
+        for narrow, _ in self.side_narrows:
+            narrow()
+        self.update_idletasks()
+        self.set_side_width(self.side_rows_need())
+        self.update_idletasks()
+        for _, fit in self.side_narrows:  # (back beside the dropdown where the new width has room)
+            fit()
         self.draw_grip()
         self.save_side_width()
