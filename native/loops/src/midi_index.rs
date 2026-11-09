@@ -3,7 +3,7 @@
 //! very same steps.
 use crate::maths::{f2i, fdiv, imax, imin};
 use crate::pyext::{Out, Outs};
-use crate::{Flag, Nd, NdMut};
+use crate::{need, zeros, Flag, Nd, NdMut};
 
 const X_TICK: usize = 0;
 const X_RUN: usize = 1;
@@ -879,8 +879,8 @@ pub fn all_tops(top: NdMut<i32, 2>, data: &[u8], offs: &[i64], nrows: &[i64], nb
                 g_: i64) -> i64 {
     let (span, w) = (top.sh[0] as i64, top.sh[1]);
     let top = top.d;
-    let mut c0 = vec![0i64; w + 1];
-    let mut c1 = vec![0i64; w + 1];
+    let mut c0 = need!(zeros::<i64>(w + 1));
+    let mut c1 = need!(zeros::<i64>(w + 1));
     for &r in ids {
         let r = r as usize;
         let n = cols[r];

@@ -50,6 +50,13 @@ def kind_masks():
 LEVELS = {1: "plain", 2: "SSE4.2", 3: "AVX2", 4: "AVX-512"}  # (sw_level: the builds in use)
 CORES_LEAST = 20000  # (rows: fewer = one core, sharing out costs more than it saves; as fastloops.CORES_LEAST)
 NEED_COPY = -3
+NO_MEMORY = -2  # (a loop couldn't get its memory: Python's MemoryError, as NumPy's code gives; never the plain twin,
+# which would need as much and run minutes)
+
+
+def _out_of_memory(name):
+    """A loop said NO_MEMORY: the same as NumPy running out (the program's "out of memory" message)."""
+    raise MemoryError("not enough memory for %s" % name)
 
 _dll = None
 _ext = None  # (the same file as an extension module: the cheap calls; None = ctypes')
@@ -499,10 +506,12 @@ class Loops(Wraps):
 
     def _again(self, name, got, args):
         """The extension's loop name didn't run (got < 0): NEED_COPY = plain copies once more. -> what it gave
-        (still < 0 = said once in the logs; the caller uses the fastloops loop)."""
+        (still < 0 = said once in the logs; the caller uses the fastloops loop). NO_MEMORY = MemoryError."""
         if got == NEED_COPY:
             got = plain_call(getattr(self.x, name), args)
         if got.__class__ is int and got < 0:
+            if got == NO_MEMORY:
+                _out_of_memory(name)
             _failed_once(name, got)
         return got
 
@@ -515,6 +524,8 @@ class Loops(Wraps):
             if got >= 0:
                 ox[...], oy[...] = wx, wy
         if got < 0:
+            if got == NO_MEMORY:
+                _out_of_memory("stir_spots")
             _failed_once("stir_spots", got)
             fallback(x, y, fp, ip, ox, oy)
 
@@ -539,6 +550,8 @@ class Loops(Wraps):
             group, s, e, rank, order = (_in(a, np.int64) for a in (group, s, e, rank, order))
             m = self._winner_f(group, s, e, rank, order, note, ps, pe)
         if m < 0:
+            if m == NO_MEMORY:
+                _out_of_memory("winner_pieces")
             _failed_once("winner_pieces", m)
             return self.base.winner_pieces(group, s, e, rank, order)
         return note, ps, pe, m
@@ -549,6 +562,8 @@ class Loops(Wraps):
             key, a, b, c = (_in(v, np.int64) for v in (key, a, b, c))
             got = self._key_f(key, a, b, c, out, many)
         if got < 0:
+            if got == NO_MEMORY:
+                _out_of_memory("key_order")
             _failed_once("key_order", got)
             return fallback(key, a, b, c)
         return out

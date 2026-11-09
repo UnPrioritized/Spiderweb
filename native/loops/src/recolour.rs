@@ -4,7 +4,7 @@
 use rayon::prelude::*;
 
 use crate::maths::{npmod, pmax, pmin, rint};
-use crate::{rd, wr, Nd, NdMut};
+use crate::{need, rd, wr, zeros, Nd, NdMut};
 
 /// A place counted from the end when below 0 (Numba's a[-1]).
 #[inline(always)]
@@ -313,9 +313,9 @@ fn at<T: Copy, const CHECK: bool>(s: &[T], i: usize) -> T {
 fn apart_walk<const CHECK: bool>(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64], pick: &[f64],
                                  bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
     let most = if bsize.is_empty() { 1 } else { bsize.iter().copied().max().unwrap_or(1).max(1) };
-    let mut act = vec![0i64; most as usize];
+    let mut act = need!(zeros::<i64>(most as usize));
     let ncu = nc.max(0) as usize;
-    let mut taken = vec![false; ncu];
+    let mut taken = need!(zeros::<bool>(ncu));
     for w in 0..bstart.len() {
         let mut na = 0usize;
         for j in bstart[w]..bstart[w] + bsize[w] {

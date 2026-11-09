@@ -151,7 +151,9 @@ unsafe fn to_tuple(r: Outs) -> *mut PyObj {
         };
         if v.is_null() {
             Py_DecRef(t);
-            return PyLong_FromLongLong(crate::FAILED);
+            // (set up: numpy.empty / a number couldn't be made = no memory (Python's MemoryError, as NumPy's code))
+            let ready = !EMPTY.load(Ordering::Acquire).is_null();
+            return PyLong_FromLongLong(if ready { crate::NO_MEMORY } else { crate::FAILED });
         }
         PyTuple_SetItem(t, i as isize, v);
     }

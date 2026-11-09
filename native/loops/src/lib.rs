@@ -75,6 +75,7 @@ mod play;
 mod recolour;
 mod stir;
 mod tempo;
+mod turn;
 mod winner;
 pub(crate) mod pyext;
 
@@ -203,11 +204,105 @@ pub(crate) fn try_zeros<T: Zero>(n: usize) -> Option<Vec<T>> {
     }
 }
 
-/// Types whose all-zero bytes are a real value (0).
+/// Types whose all-zero bytes are a real value (0 / false).
 pub(crate) unsafe trait Zero {}
 unsafe impl Zero for i64 {}
 unsafe impl Zero for usize {}
 unsafe impl Zero for f64 {}
+unsafe impl Zero for u8 {}
+unsafe impl Zero for bool {}
+
+// ---------------------------------------------------------------- lists that can't end the program
+// Rust ENDS THE PROGRAM when a list can't get its memory (no crash log, no message: the hunt 2026-11-09 saw
+// Spiderweb vanish). Every list as big as the input goes through these instead: no memory = Err(NO_MEMORY), which
+// the loop hands back and native.py turns into Python's MemoryError (the "out of memory" message, as NumPy's code
+// gives). Small fixed lists (a few items) may stay vec![].
+
+/// n zeros (calloc: free until written) or NO_MEMORY.
+#[inline(always)]
+pub(crate) fn zeros<T: Zero>(n: usize) -> Result<Vec<T>, i64> {
+    try_zeros(n).ok_or(NO_MEMORY)
+}
+
+/// n copies of v, or NO_MEMORY.
+#[inline(always)]
+pub(crate) fn filled<T: Clone>(n: usize, v: T) -> Result<Vec<T>, i64> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(n).map_err(|_| NO_MEMORY)?;
+    out.resize(n, v);
+    Ok(out)
+}
+
+/// A copy of s, or NO_MEMORY.
+#[inline(always)]
+pub(crate) fn copied<T: Copy>(s: &[T]) -> Result<Vec<T>, i64> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(s.len()).map_err(|_| NO_MEMORY)?;
+    out.extend_from_slice(s);
+    Ok(out)
+}
+
+/// An empty list with room for n, or NO_MEMORY.
+#[inline(always)]
+pub(crate) fn room<T>(n: usize) -> Result<Vec<T>, i64> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(n).map_err(|_| NO_MEMORY)?;
+    Ok(out)
+}
+
+/// Every item of it (it knows how many), or NO_MEMORY.
+#[inline(always)]
+pub(crate) fn gathered<T, I: ExactSizeIterator<Item = T>>(it: I) -> Result<Vec<T>, i64> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(it.len()).map_err(|_| NO_MEMORY)?;
+    out.extend(it);
+    Ok(out)
+}
+
+/// v.push(x), or NO_MEMORY when v can't grow.
+#[inline(always)]
+pub(crate) fn grow<T>(v: &mut Vec<T>, x: T) -> Result<(), i64> {
+    if v.len() == v.capacity() {
+        v.try_reserve(v.capacity().max(8)).map_err(|_| NO_MEMORY)?;
+    }
+    v.push(x);
+    Ok(())
+}
+
+/// What a loop hands back when it can't go on (code < 0): the code itself (loops giving a plain i64), Err(code)
+/// (loops giving a result), None (inner steps whose caller says NO_MEMORY).
+pub(crate) trait Fail {
+    fn fail(code: i64) -> Self;
+}
+impl Fail for i64 {
+    #[inline(always)]
+    fn fail(code: i64) -> Self {
+        code
+    }
+}
+impl<T> Fail for Result<T, i64> {
+    #[inline(always)]
+    fn fail(code: i64) -> Self {
+        Err(code)
+    }
+}
+impl<T> Fail for Option<T> {
+    #[inline(always)]
+    fn fail(_code: i64) -> Self {
+        None
+    }
+}
+
+/// `?` for any loop: Err(code) -> the loop hands back that code (Fail).
+macro_rules! need {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(code) => return crate::Fail::fail(code),
+        }
+    };
+}
+pub(crate) use need;
 
 // ---------------------------------------------------------------- NumPy arrays
 
@@ -309,7 +404,6 @@ impl Flag {
 impl Kind for Flag {
     const K: usize = K_BOOL;
 }
-unsafe impl Zero for u8 {}
 unsafe impl Zero for i32 {}
 unsafe impl Zero for u64 {}
 

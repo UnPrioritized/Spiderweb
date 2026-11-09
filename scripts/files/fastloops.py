@@ -24,6 +24,9 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
   clash_levels   engine.clash_levels: Hz bass layers' notes clashing on a key -> their levels
+  any_overlap    engine.heard_notes: does a notes shape overlap itself on a track + key (one pass, no sort)
+  turn_sample    merge._sampled: a turned / slanted / taller paste's grid of spots, a key row at a time
+  turn_layers    merge.overlap_layers' heap loop: each note's layer (the first free one)
   note_ends      hzbass.note_lengths: a Hz bass's notes' ends by its Note length
   wave_fill      hzbass.wave_ticks: each note's wave length, one key at a time
   hz_expand ... hz_finish  hz_grid.KeyGrid.made for the plain settings (made_fast): a key's repeats
@@ -419,19 +422,62 @@ def overlap_order(notes):
             k = j + 1
             while k < b and notes[order[k], 0] == notes[order[j], 0]:
                 k += 1
-            for p in range(j + 1, k):
-                v = order[p]
-                q = p - 1
-                while q >= j:
-                    u = order[q]
-                    if notes[u, 3] > notes[v, 3] or (notes[u, 3] == notes[v, 3] and notes[u, 1] < notes[v, 1]):
-                        order[q + 1] = u
-                        q -= 1
-                    else:
-                        break
-                order[q + 1] = v
+            if k - j > 1:
+                _tie_order(notes, order, j, k)
             j = k
     return group, order
+
+
+TIE_SORT_MOST = 32  # (a same-start run longer than this: merge sorted; insertion went n * n on stacked copies)
+
+
+@njit(nogil=True)
+def _tie_order(notes, order, j, k):
+    """order[j:k] (one start) by velocity, quietest first, then the longest first; alike ones kept in their order.
+    Short runs: insertion; long ones: a merge sort (the same order: 80,000 copies on one tick took 2.9 s)."""
+    if k - j <= TIE_SORT_MOST:
+        for p in range(j + 1, k):
+            v = order[p]
+            q = p - 1
+            while q >= j:
+                u = order[q]
+                if notes[u, 3] > notes[v, 3] or (notes[u, 3] == notes[v, 3] and notes[u, 1] < notes[v, 1]):
+                    order[q + 1] = u
+                    q -= 1
+                else:
+                    break
+            order[q + 1] = v
+        return
+    n = k - j
+    src = order[j:k].copy()
+    dst = np.empty(n, np.int64)
+    width = 1
+    while width < n:
+        for lo in range(0, n, 2 * width):
+            mid = min(lo + width, n)
+            hi = min(lo + 2 * width, n)
+            p, q, o = lo, mid, lo
+            while p < mid and q < hi:
+                u, v = src[p], src[q]
+                # (v first only when strictly before u: quieter, or as loud and longer)
+                if notes[v, 3] < notes[u, 3] or (notes[v, 3] == notes[u, 3] and notes[v, 1] > notes[u, 1]):
+                    dst[o] = v
+                    q += 1
+                else:
+                    dst[o] = u
+                    p += 1
+                o += 1
+            while p < mid:
+                dst[o] = src[p]
+                p += 1
+                o += 1
+            while q < hi:
+                dst[o] = src[q]
+                q += 1
+                o += 1
+        src, dst = dst, src
+        width *= 2
+    order[j:k] = src
 
 
 @njit(nogil=True)
@@ -1242,6 +1288,213 @@ def _first_at(arr, n, x, hint):
         else:
             hi = mid
     return lo
+
+
+@njit(nogil=True)
+def any_overlap(notes, g, ng):
+    """engine.heard_notes' check without a sort: notes (start, end, ...) rows, g = each note's group (0 .. ng - 1) ->
+    1 = two notes of one group overlap, 0 = none, 2 = a group's starts go back somewhere (the caller sorts), -1 = a
+    group out of range. In start order a note overlaps an earlier one exactly when it starts before the latest end
+    so far (two notes overlapping = the sorted check's neighbours overlap somewhere between them)."""
+    n = notes.shape[0]
+    if n < 2 or ng <= 0:
+        return 0
+    if notes.shape[1] < 2 or g.shape[0] < n:
+        return -1
+    last = np.full(ng, np.iinfo(np.int64).min, np.int64)
+    most = np.full(ng, np.iinfo(np.int64).min, np.int64)
+    for i in range(n):
+        k = g[i]
+        if k < 0 or k >= ng:
+            return -1
+        s = notes[i, 0]
+        if s < last[k]:
+            return 2
+        last[k] = s
+        if s < most[k]:
+            return 1
+        if notes[i, 1] > most[k]:
+            most[k] = notes[i, 1]
+    return 0
+
+
+@njit(nogil=True)
+def _upper(flat, x, hint):
+    """How many of flat (sorted) are <= x (np.searchsorted side="right"), looked for from hint (the last answer)."""
+    n = flat.shape[0]
+    h = min(hint, n)
+    if h > 0 and flat[h - 1] > x:
+        hi = h - 1
+        step = 1
+        while True:
+            if hi < step:
+                lo = 0
+                break
+            c = hi - step
+            if flat[c] <= x:
+                lo = c + 1
+                break
+            hi = c
+            step *= 2
+    else:
+        lo = h
+        step = 1
+        while True:
+            c = lo + step - 1
+            if c >= n:
+                hi = n
+                break
+            if flat[c] > x:
+                hi = c
+                break
+            lo = c + 1
+            step *= 2
+    while lo < hi:  # (the first of lo .. hi above x)
+        mid = (lo + hi) // 2
+        if flat[mid] <= x:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+@njit(nogil=True)
+def turn_sample(flat, skey, send, g, lo_k, hi_k, n, many):
+    """merge._sampled's grid, one key row at a time: one layer of notes sorted by key, then start (flat = key x
+    (t_all + 1) + start; their keys, ends), g = (b0, p0, ub, up, vb, vp, det, t0, step, t_all, k_all, ppq, e) ->
+    (start, end, key row, which note) of every piece, row after row. The same sums in the same order."""
+    b0, p0, ub, up, vb, vp, det, t0, step = g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8]
+    t_all, k_all, ppq, e = g[9], g[10], g[11], g[12]
+    m = flat.shape[0]
+    room = 1024
+    out = np.empty((4, room), np.int64)
+    c = 0
+    if m == 0 or hi_k < lo_k or n <= 0:
+        return out[0, :0].copy(), out[1, :0].copy(), out[2, :0].copy(), out[3, :0].copy()
+    kmax = np.int64(k_all) - 1
+    t1 = t_all + 1.0
+    one_e = 1.0 - e
+    for row in range(lo_k, hi_k + 1):
+        dk = float(row) - p0
+        hint = 0
+        prev = np.int64(-1)
+        frm = 0
+        for j in range(n + 1):
+            a = np.int64(-1)
+            if j < n:
+                bb = t0 + (j + 0.5) * step
+                db = bb - b0
+                u = (db * vp - dk * vb) / det
+                v = (dk * ub - up * db) / det
+                if u >= -e and u < one_e and v >= -e and v < one_e:
+                    key = min(max(np.int64(v * k_all), 0), kmax)
+                    tick = u * t_all
+                    hint = _upper(flat, key * t1 + tick, hint)
+                    if hint >= 1:
+                        at = min(hint - 1, m - 1)
+                        if skey[at] == key and tick < send[at]:
+                            a = at
+            if j == 0:
+                prev = a
+                continue
+            if j < n and a == prev:
+                continue
+            if prev >= 0:
+                start = np.int64(np.rint((t0 + frm * step) * ppq))
+                end = np.int64(np.rint((t0 + j * step) * ppq))
+                if end > start:
+                    if c == room:
+                        room *= 2
+                        bigger = np.empty((4, room), np.int64)
+                        bigger[:, :c] = out[:, :c]
+                        out = bigger
+                    out[0, c] = start
+                    out[1, c] = end
+                    out[2, c] = row
+                    out[3, c] = prev
+                    c += 1
+            prev = a
+            frm = j
+    return out[0, :c].copy(), out[1, :c].copy(), out[2, :c].copy(), out[3, :c].copy()
+
+
+@njit(nogil=True)
+def _pair_push(h, n, x):
+    """x into the min-heap h[:n] (rows compared as (first, second)) -> the new size."""
+    i = n
+    h[i, 0], h[i, 1] = x[0], x[1]
+    while i > 0:
+        p = (i - 1) // 2
+        if h[p, 0] < h[i, 0] or (h[p, 0] == h[i, 0] and h[p, 1] <= h[i, 1]):
+            break
+        h[p, 0], h[i, 0] = h[i, 0], h[p, 0]
+        h[p, 1], h[i, 1] = h[i, 1], h[p, 1]
+        i = p
+    return n + 1
+
+
+@njit(nogil=True)
+def _pair_pop(h, n):
+    """The smallest row of the min-heap h[:n] taken off (read h[n - 1] after) -> the new size."""
+    n -= 1
+    h[0, 0], h[n, 0] = h[n, 0], h[0, 0]
+    h[0, 1], h[n, 1] = h[n, 1], h[0, 1]
+    i = 0
+    while True:
+        a = 2 * i + 1
+        if a >= n:
+            break
+        b = a + 1
+        if b < n and (h[b, 0] < h[a, 0] or (h[b, 0] == h[a, 0] and h[b, 1] < h[a, 1])):
+            a = b
+        if h[i, 0] < h[a, 0] or (h[i, 0] == h[a, 0] and h[i, 1] <= h[a, 1]):
+            break
+        h[a, 0], h[i, 0] = h[i, 0], h[a, 0]
+        h[a, 1], h[i, 1] = h[i, 1], h[a, 1]
+        i = a
+    return n
+
+
+@njit(nogil=True)
+def turn_layers(s, e, k, first, over, lay):
+    """merge.overlap_layers' heap loop: notes sorted by key, then start (s, e, k), first / over = its marks -> each
+    note's layer into lay (zeros: notes outside the overlapping stretches stay 0; the first free layer, a new one
+    when none) -> 0. One note at a time = the same layers as its blocks of notes starting together."""
+    n = s.shape[0]
+    ends = np.empty((n + 1, 2), np.int64)  # (end, layer)
+    free = np.empty((n + 1, 2), np.int64)  # (layer, 0)
+    ne = nf = 0
+    key = 0
+    used = 0
+    started = False
+    pair = np.zeros(2, np.int64)
+    for i in range(n):
+        if not first[i]:
+            continue
+        if not over[i] or not started or k[i] != key:
+            ne = nf = 0
+            key = k[i]
+            started = True
+            pair[0], pair[1] = e[i], 0
+            ne = _pair_push(ends, ne, pair)
+            used = 1
+            lay[i] = 0
+            continue
+        si = s[i]
+        while ne > 0 and ends[0, 0] <= si:
+            ne = _pair_pop(ends, ne)
+            pair[0], pair[1] = ends[ne, 1], 0
+            nf = _pair_push(free, nf, pair)
+        if nf > 0:
+            nf = _pair_pop(free, nf)
+            j = free[nf, 0]
+        else:
+            j = used
+            used += 1
+        lay[i] = j
+        pair[0], pair[1] = e[i], j
+        ne = _pair_push(ends, ne, pair)
+    return 0
 
 
 @njit(nogil=True)
@@ -2811,6 +3064,9 @@ def warm():
     midi_track(np.zeros((1, 6), np.int64), i1 * 0, 0, 1, 1)
     note_stretches(np.zeros((1, 4), np.int64), True, 0, np.zeros(0, np.int64))
     clash_levels(np.zeros((1, 3), np.int64), np.array([0, 1, 1], np.int64), i1.copy())
+    any_overlap(np.zeros((2, 4), np.int64), np.zeros(2, np.int64), 1)
+    turn_sample(np.zeros(1), i1 * 0, i1 * 0, np.ones(13), 0, 0, 1, False)
+    turn_layers(i1, i1, i1, np.zeros(1, np.uint8), np.zeros(1, np.uint8), i1.copy())
     key_order(i1, i1, i1, i1)
     k_order, k_at = _key_groups(i1)
     on_cores(_key_runs_cores, _key_runs, CORES_LEAST, k_order, k_at, i1, i1, i1)  # (the shared loop made now, not mid-paste)

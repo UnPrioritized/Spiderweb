@@ -33,6 +33,12 @@ py_loops! {
                   => crate::engine::ring_runs_int;
     clash_pairs(items: Nd<i64, 2>, n: i64, most: i64) => crate::engine::clash_pairs;
     clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) => crate::engine::clash_levels;
+    any_overlap(notes: Nd<i64, 2>, g: &[i64], ng: i64) => crate::engine::any_overlap;
+    // ---- turned / slanted / taller pasted notes (turn.rs)
+    turn_sample(flat: &[f64], skey: &[i64], send: &[i64], g: &[f64], lo_k: i64, hi_k: i64, n: i64, many: bool)
+                -> arrays => crate::turn::turn_sample;
+    turn_layers(s: &[i64], e: &[i64], k: &[i64], first: &[u8], over: &[u8], lay: &mut [i64])
+                => crate::turn::turn_layers;
     // ---- Recolour / Stir / Liquify (recolour.rs)
     stir_nearest(keys: &[i64], first: &[i64], last: &[i64], line: &[f64], ms: &[f64], nk: &[i64], nm: &[f64],
                  o: &[i64], base: f64, top: f64, gap: f64, mid: &[f64], key: &[f64], own: bool, out: &mut [i64],

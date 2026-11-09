@@ -747,9 +747,12 @@ def unique_index(a):
         # end, track; rows alike in those four (few) sorted again with the velocity. 3 M notes 0.65 s -> ~0.15 s)
         c = a.T
         order = key_sort(c[2], c[0], c[1], c[4])
-        b = a[order][:, [0, 1, 2, 4]]
         same = np.zeros(len(a), bool)
-        same[1:] = (b[1:] == b[:-1]).all(axis=1)
+        same[1:] = True
+        for col in (2, 0, 1, 4):  # (a column at a time: the whole sorted copy was 2 x all the notes, 381 MB at 5 M)
+            x = c[col][order]
+            same[1:] &= x[1:] == x[:-1]
+            del x
         if not same.any():
             return np.arange(len(a))
         group = same.copy()
@@ -1087,6 +1090,38 @@ def keeps_laps(sh):
 
 
 _FREE = {}  # id(a big stored notes text) -> (it, True): its notes have no overlaps of their own (heard_notes)
+OVERLAP_GROUPS_MOST = 1 << 24  # (any_overlap's tables: tracks x keys; more = the sort below)
+
+
+def self_overlaps(n, who):
+    """Do two of these notes (start, end, key... rows) on the same track (who: 0, 1, 2...) and key overlap?
+    The compiled loop does it in one pass when each track + key's notes come in start order (a paste mostly
+    does; 5 M notes 290 -> ~30 ms); else a sort and each column gathered once (six gathers took 219 of 728 ms)."""
+    fast = loops()
+    if fast and len(n) > 1:
+        k = n[:, 2]
+        lo, hi = int(k.min()), int(k.max())
+        nk = hi - lo + 1
+        groups = (int(who.max()) + 1) * nk
+        rows = n
+        b = n.base
+        if not n.flags.c_contiguous and isinstance(b, np.ndarray) and b.flags.c_contiguous and b.ndim == 2 and \
+                b.dtype == np.int64 and len(b) == len(n) and b.ctypes.data == n.ctypes.data and \
+                n.strides == b.strides:
+            rows = b  # (a paste's notes come as the first columns of a wider array: start / end at the same places)
+        if groups <= OVERLAP_GROUPS_MOST and rows.flags.c_contiguous:
+            got = fast.any_overlap(rows, who * nk + (k - lo), groups)
+            if got in (0, 1):
+                return bool(got)
+    o = key_sort(who * 256 + n[:, 2], n[:, 0])
+    x = who[o]
+    over = x[1:] == x[:-1]
+    x = n[o, 2]
+    over &= x[1:] == x[:-1]
+    del x
+    s = n[o, 0]
+    over &= s[1:] < n[o[:-1], 1]
+    return bool(over.any())
 
 
 def heard_notes(sh, notes, tracks):
@@ -1104,9 +1139,7 @@ def heard_notes(sh, notes, tracks):
             return notes, tracks
     n = np.asarray(notes, np.int64)
     who = np.zeros(len(n), np.int64) if tracks is None else unique_inverse(np.asarray(tracks, np.int64).ravel())[1]
-    o = key_sort(who * 256 + n[:, 2], n[:, 0])
-    same = (who[o[1:]] == who[o[:-1]]) & (n[o[1:], 2] == n[o[:-1], 2])
-    if not (same & (n[o[1:], 0] < n[o[:-1], 1])).any():
+    if not self_overlaps(n, who):
         if big:
             if len(_FREE) > 64:
                 _FREE.clear()
@@ -2121,7 +2154,7 @@ def stretches(notes, owner, split="key"):
             key = np.ascontiguousarray(notes[:, 2]) if split == "key" else np.zeros(len(notes), np.int64)
             s = np.ascontiguousarray(notes[:, 0])
             out, m = fast.note_stretches(notes, split == "key", owner, fast.key_order_cores(key, s, s, s))
-        return out if m == len(out) else out[:m].copy()
+        return shorter(out, m)
     flat = notes[:, 1] <= notes[:, 0]
     key = notes[:, 2] if split == "key" else np.zeros(len(notes), np.int64)
     out = [np.column_stack([key[flat], notes[flat, 0], notes[flat, 1], np.full(int(flat.sum()), owner, np.int64)])]
@@ -2191,6 +2224,14 @@ def clash_arrays(items, chunk=1 << 22):
     return code // n, code % n
 
 
+def shorter(out, m):
+    """A compiled loop's result rows out[:m]: its first rows as they are (no copy: a 5 M-note overlap fix copied all
+    229 MB again when 76 notes went, 2026-11-09), unless most of the room would be wasted, then a copy of them."""
+    if m == len(out):
+        return out
+    return out[:m] if m * 10 >= len(out) * 9 else out[:m].copy()
+
+
 def running_max(values, groups):
     """The largest value so far, starting over in every group (groups: sorted numbers, each group together)."""
     if not len(values):
@@ -2219,7 +2260,7 @@ def resolve_overlaps(notes):
             group = first_seen(notes[:, 4] * 256 + notes[:, 2])
             order = np.ascontiguousarray(overlap_order(notes, group), np.int64)
         out, m = fast.overlap_sweep(notes, order, group)
-        return out if m == len(out) else out[:m].copy()
+        return shorter(out, m)
     group = first_seen(notes[:, 4] * 256 + notes[:, 2])  # groups numbered in the order they first show up
     order = overlap_order(notes, group)
     a, group = np.take(notes, order, axis=0), group[order]  # (take: quicker than notes[order])

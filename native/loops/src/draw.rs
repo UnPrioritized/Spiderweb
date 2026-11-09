@@ -1,7 +1,7 @@
 //! The piano roll's note pictures (roll_draw): fastloops' paint_order, order_screen, order_rects, last_on_pixels,
 //! note_top, paint_notes. The very same steps as those, in the same order, so the same pixels come out.
 use crate::maths::{f2i, fdiv, fmodi, imax, imin, rint};
-use crate::{all_below, rd, try_zeros, wr, Flag, Nd, NdMut, NO_MEMORY};
+use crate::{all_below, copied, need, rd, room, try_zeros, wr, Flag, Nd, NdMut, NO_MEMORY};
 
 const OWN0: i64 = 1 << 32; // (engine.OWN0)
 const NO_END: i64 = 1 << 30; // (fastloops.NO_END)
@@ -45,7 +45,7 @@ pub fn paint_order(notes: Nd<i64, 2>, by_start: &[i64], rank: &[i64], nranks: i6
     for r in 0..nr {
         first[r + 1] += first[r];
     }
-    let mut at: Vec<i64> = first[..nr].to_vec();
+    let mut at: Vec<i64> = need!(copied(&first[..nr]));
     let mut longest = 0i64;
     for j in 0..n {
         let i = rd(by_start, j) as usize;
@@ -109,7 +109,7 @@ fn paint_order_checked(notes: Nd<i64, 2>, by_start: &[i64], rank: &[i64], nranks
     for r in 0..nr {
         first[r + 1] += first[r];
     }
-    let mut at: Vec<i64> = first[..nr].to_vec();
+    let mut at: Vec<i64> = need!(copied(&first[..nr]));
     let mut longest = 0i64;
     let np = pics.len() as i64;
     for j in 0..n {
@@ -238,7 +238,7 @@ pub fn order_rects(s: &[i64], e: &[i64], key: &[i16], color: &[i32], first: &[i6
     let lim = s.len().min(e.len()).min(key.len()).min(color.len());
     let kmax = shown.len().min(row0.len()).min(row1.len()).min(keys.max(0) as usize) as u64;
     let nb = (b1 - b0).max(0) as usize;
-    let mut ranges = Vec::with_capacity(nb);
+    let mut ranges = need!(room(nb));
     let mut total = 0usize;
     let mut ok = out.sh[0] >= 5 && out.d.len() >= 5 * out.sh[1];
     for r in b0..b1 {
@@ -326,7 +326,7 @@ fn order_rects_checked(s: &[i64], e: &[i64], key: &[i16], color: &[i32], first: 
                        t_hi: f64, ax: f64, bx: f64, kb: f64, w: f64, shown: &[Flag], clip: bool, c0: f64, c2: f64,
                        left: i64, right: i64, keys: i64, row0: &[i64], row1: &[i64], out: NdMut<i64, 2>) -> i64 {
     let nb = (b1 - b0).max(0) as usize;
-    let mut ranges = Vec::with_capacity(nb);
+    let mut ranges = need!(room(nb));
     for r in b0..b1 {
         ranges.push(block_range(s, first[wrap(r, first.len())], first[wrap(r + 1, first.len())], t_lo, t_hi));
     }
