@@ -409,12 +409,34 @@ fn net_at(p: &[f64], gy: usize, gx: usize, x: f64, y: f64) -> [f64; 6] {
     out
 }
 
+/// fastloops._even_at: (a number's place on the even grid of the lines l, the stretch du / dv); l empty = even.
+#[inline(always)]
+fn even_at(v: f64, l: &[f64]) -> (f64, f64) {
+    if l.len() < 2 || v < 0.0 || v > 1.0 {
+        return (v, 1.0);
+    }
+    let n = l.len() - 1;
+    let (mut lo, mut hi) = (0usize, n - 1);
+    while lo < hi {
+        let m = (lo + hi + 1) >> 1;
+        if l[m] <= v {
+            lo = m;
+        } else {
+            hi = m - 1;
+        }
+    }
+    let w = l[lo + 1] - l[lo];
+    ((lo as f64 + (v - l[lo]) / w) / n as f64, 1.0 / (n as f64 * w))
+}
+
 /// The numbers warp_newton reads past the spots.
 struct Newton<'a> {
     p: &'a [f64],
     gy: usize,
     gx: usize,
     kind: i64,
+    lx: &'a [f64],
+    ly: &'a [f64],
     bounds: &'a [f64],
     has_b: bool,
     steps: i64,
@@ -429,14 +451,22 @@ fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64,
     let mut b = f64::INFINITY;
     let (mut ox, mut oy) = (x, y);
     for step in 0..d.steps {
+        let (ex, fx) = even_at(x, d.lx);
+        let (ey, fy) = even_at(y, d.ly);
         let e = if d.kind == 2 {
-            net_at(d.p, d.gy, d.gx, x, y)
+            net_at(d.p, d.gy, d.gx, ex, ey)
         } else if d.kind != 0 {
-            eased_at(d.p, d.gy, d.gx, x, y)
+            eased_at(d.p, d.gy, d.gx, ex, ey)
         } else {
-            straight_at(d.p, d.gy, d.gx, x, y)
+            straight_at(d.p, d.gy, d.gx, ex, ey)
         };
-        let (vx, vy, dxx, dxy, dyx, dyy) = (e[0], e[1], e[2], e[3], e[4], e[5]);
+        let (vx, vy, mut dxx, mut dxy, mut dyx, mut dyy) = (e[0], e[1], e[2], e[3], e[4], e[5]);
+        if !d.lx.is_empty() {
+            (dxx, dxy) = (dxx * fx, dxy * fx);
+        }
+        if !d.ly.is_empty() {
+            (dyx, dyy) = (dyx * fy, dyy * fy);
+        }
         let (rx, ry) = (x + vx - px, y + vy - py);
         let err = (rx * rx + ry * ry).sqrt();
         if err < b {
@@ -480,21 +510,24 @@ level_builds!(fn newton_range(s0: usize, px: &[f64], py: &[f64], sx: &[f64], sy:
                               bx: &mut [f64], by: &mut [f64], best: &mut [f64]) => newton_range_inner);
 
 /// fastloops.warp_newton (P: the offsets (gy, gx, 2), or with kind 2 a control net (3 rows + 1, 3 cols + 1, 2);
-/// kind 0 Straight cells, 1 Smooth; bounds (n, 4) read when has_b; many = shared out) -> 0.
+/// kind 0 Straight cells, 1 Smooth; lx / ly a split grid's lines (empty = even); bounds (n, 4) read when has_b;
+/// many = shared out) -> 0.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, sx: &[f64], sy: &[f64], bounds: Nd<f64, 2>,
+pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, lx: &[f64], ly: &[f64], sx: &[f64], sy: &[f64],
+                   bounds: Nd<f64, 2>,
                    has_b: bool, steps: i64, give_step: i64, give_far: f64, bx: &mut [f64], by: &mut [f64],
                    best: &mut [f64], many: bool) -> i64 {
     let n = px.len();
     let (gy, gx) = (p.sh[0], p.sh[1]);
     if p.sh[2] != 2 || gy < 2 || gx < 2 || (has_b && (bounds.sh[1] != 4 || bounds.sh[0] < n))
-        || !(0..=2).contains(&kind) || (kind == 2 && (gy < 4 || gx < 4 || (gy - 1) % 3 != 0 || (gx - 1) % 3 != 0)) {
+        || !(0..=2).contains(&kind) || (kind == 2 && (gy < 4 || gx < 4 || (gy - 1) % 3 != 0 || (gx - 1) % 3 != 0))
+        || lx.len() == 1 || ly.len() == 1 {
         return crate::FAILED;
     }
     let (py, sx, sy) = (&py[..n], &sx[..n], &sy[..n]);
     let (bx, by, best) = (&mut bx[..n], &mut by[..n], &mut best[..n]);
-    let d = Newton { p: p.d, gy, gx, kind, bounds: bounds.d, has_b, steps, give_step, give_far };
+    let d = Newton { p: p.d, gy, gx, kind, lx, ly, bounds: bounds.d, has_b, steps, give_step, give_far };
     match crate::pool_for(many, n, 1) {
         None => newton_range(0, px, py, sx, sy, &d, bx, by, best),
         Some(pool) => {

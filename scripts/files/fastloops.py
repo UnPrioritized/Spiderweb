@@ -811,19 +811,43 @@ def _net_at(C, x, y):
 
 
 @njit(nogil=True)
-def _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+def _even_at(v, L):
+    """warp._to_even for one number: (its place on the even grid, the stretch du / dv); L empty = even (as it is).
+    The same sums: (cell + (v - its line) / its width) / n, 1 / (n * width)."""
+    n = len(L) - 1
+    if n < 1 or v < 0.0 or v > 1.0:
+        return v, 1.0
+    lo, hi = 0, n - 1
+    while lo < hi:
+        m = (lo + hi + 1) >> 1
+        if L[m] <= v:
+            lo = m
+        else:
+            hi = m - 1
+    w = L[lo + 1] - L[lo]
+    return (lo + (v - L[lo]) / w) / n, 1.0 / (n * w)
+
+
+@njit(nogil=True)
+def _newton_one(i, P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
     """warp._newton for spot i (the same steps, sums and order as its arrays). smooth = the kind: 0 Straight
-    cells, 1 Smooth, 2 a control net (handles dragged)."""
+    cells, 1 Smooth, 2 a control net (handles dragged). lx / ly: a split grid's lines (empty = that way even)."""
     x, y = sx[i], sy[i]
     b = np.inf
     ox, oy = x, y
     for step in range(steps):
+        ex, fx = _even_at(x, lx)
+        ey, fy = _even_at(y, ly)
         if smooth == 2:
-            vx, vy, dxx, dxy, dyx, dyy = _net_at(P, x, y)
+            vx, vy, dxx, dxy, dyx, dyy = _net_at(P, ex, ey)
         elif smooth:
-            vx, vy, dxx, dxy, dyx, dyy = _eased_at(P, x, y)
+            vx, vy, dxx, dxy, dyx, dyy = _eased_at(P, ex, ey)
         else:
-            vx, vy, dxx, dxy, dyx, dyy = _straight_at(P, x, y)
+            vx, vy, dxx, dxy, dyx, dyy = _straight_at(P, ex, ey)
+        if len(lx):
+            dxx, dxy = dxx * fx, dxy * fx
+        if len(ly):
+            dyx, dyy = dyx * fy, dyy * fy
         rx, ry = x + vx - px[i], y + vy - py[i]
         err = math.sqrt(rx * rx + ry * ry)
         if err < b:
@@ -850,22 +874,22 @@ def _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, g
 
 
 @njit(nogil=True)
-def warp_newton_one(P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+def warp_newton_one(P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
     """warp._newton (Newton steps toward s + bend(s) = p, the Warp's map turned round), each spot on its own: the
     best spot each reached (bx, by) and how far off (best). bounds (n, 4): kept inside them when has_b. One core."""
     for i in range(len(px)):
-        _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best)
+        _newton_one(i, P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best)
 
 
 @njit(nogil=True, parallel=True)
-def _warp_newton_cores(P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+def _warp_newton_cores(P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
     for i in prange(len(px)):
-        _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best)
+        _newton_one(i, P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best)
 
 
-def warp_newton(P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+def warp_newton(P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
     """warp_newton_one on half the cores (on_cores)."""
-    on_cores(_warp_newton_cores, warp_newton_one, len(px), P, px, py, smooth, sx, sy, bounds, has_b, steps,
+    on_cores(_warp_newton_cores, warp_newton_one, len(px), P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps,
              give_step, give_far, bx, by, best)
 
 

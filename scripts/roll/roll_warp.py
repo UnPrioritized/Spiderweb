@@ -98,7 +98,8 @@ class WarpGrid:
         c, r = wp_.size(g["wp"])
         jj, ii = np.mgrid[0:r + 1, 0:c + 1]
         P = g["P"] * self.warp_factor(g) if g["wp"]["strength"] > 0 else g["P"]
-        u, v = (ii / c).ravel() + P[..., 0].ravel(), (jj / r).ravel() + P[..., 1].ravel()
+        X, Y = wp_.lines(g["wp"])  # (a split grid's lines where they are)
+        u, v = X[ii].ravel() + P[..., 0].ravel(), Y[jj].ravel() + P[..., 1].ravel()
         return self.warp_screen(g["made"], u, v)
 
     def warp_lines(self, g):
@@ -107,14 +108,22 @@ class WarpGrid:
         c, r = wp_.size(g["wp"])
         # (curve handles dragged: the bend read from the control net, curved like Smooth)
         P, smooth = (wp_.shape_of(dict(g["wp"], pts=np.asarray(g["P"]).reshape(-1, 2).tolist()), strength=False)
-                     if g["wp"].get("h") else (g["P"], g["wp"]["smooth"]))
+                     if wp_.netted(g["wp"]) else (g["P"], g["wp"]["smooth"]))
         P = P * (self.warp_factor(g) if g["wp"]["strength"] > 0 else 1.0)
         su, sv = (STEPS * c, STEPS * r) if smooth else (c, r)  # (pieces along a row / a column)
+        X, Y = wp_.lines(g["wp"])
         tu, tv = np.linspace(0.0, 1.0, su + 1), np.linspace(0.0, 1.0, sv + 1)
+        k = STEPS if smooth else 1
+        if g["wp"].get("xs") is not None:  # (a split grid: as many pieces in each cell, wide or thin)
+            tu = np.append((X[:-1, None] + np.arange(k)[None] / k * np.diff(X)[:, None]).ravel(), 1.0)
+        if g["wp"].get("ys") is not None:
+            tv = np.append((Y[:-1, None] + np.arange(k)[None] / k * np.diff(Y)[:, None]).ravel(), 1.0)
         # (rows: v fixed, u along; columns: u fixed, v along)
-        u = np.concatenate([np.tile(tu, r + 1), np.repeat(np.arange(c + 1) / c, sv + 1)])
-        v = np.concatenate([np.repeat(np.arange(r + 1) / r, su + 1), np.tile(tv, c + 1)])
-        d = wp_.bend_at(P, u, v, smooth)
+        u = np.concatenate([np.tile(tu, r + 1), np.repeat(np.arange(c + 1) / c if g["wp"].get("xs") is None else X,
+                                                          sv + 1)])
+        v = np.concatenate([np.repeat(np.arange(r + 1) / r if g["wp"].get("ys") is None else Y, su + 1),
+                            np.tile(tv, c + 1)])
+        d = wp_.bend_at(P, u, v, smooth, wp_.uneven(g["wp"]))
         x, y = self.warp_screen(g["made"], u + d[:, 0], v + d[:, 1])
         xy = np.empty(2 * len(x))
         xy[0::2], xy[1::2] = x, y
@@ -233,7 +242,8 @@ class WarpGrid:
         c, r = wp_.size(g["wp"])
         f = self.warp_factor(g)
         p = np.asarray(g["P"], np.float64).reshape(-1, 2)[k]
-        return np.array([(k % (c + 1)) / c + p[0] * f, (k // (c + 1)) / r + p[1] * f])
+        X, Y = wp_.lines(g["wp"])
+        return np.array([X[k % (c + 1)] + p[0] * f, Y[k // (c + 1)] + p[1] * f])
 
     def warp_handle_spots(self, g):
         """[(point, side, handle x, y, point x, y)] on screen of the handles grid g shows."""

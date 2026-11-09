@@ -235,9 +235,10 @@ class Wraps:
     def liquify_sample_one(self, a, x, y, out):
         self._run("liquify_sample", (a, x, y, out, False), "liquify_sample_one")
 
-    def warp_newton(self, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
-        self._run("warp_newton", (P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best,
-                                  True), "warp_newton")
+    def warp_newton(self, P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by,
+                    best):
+        self._run("warp_newton", (P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_step, give_far, bx,
+                                  by, best, True), "warp_newton")
 
     def warp_soft(self, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
                   now, out):
