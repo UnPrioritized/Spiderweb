@@ -15,7 +15,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE,
                             MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
-                            ROUND_EDGES, bends, forget_kept,
+                            ROUND_EDGES, bends, flip_of_matters, forget_kept,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_stack)
@@ -880,7 +880,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # sideways flip)
         live = {"mirror": any(s["flip_in"] != "whole" for s in areas),
                 "size_of": bool(areas), "flip_by": any(s["flip_side"] for s in sts),
-                "flip_of": any(s["flip_side"] or s["flip_up"] for s in sts),
+                "flip_of": any(flip_of_matters(s) for s in sts),
                 "round_edge": any(s["polar"] or s["kaleido"] >= 2 for s in areas),
                 "ripple_kind": any(s["ripple"] for s in sts)}
         for key, ok in live.items():

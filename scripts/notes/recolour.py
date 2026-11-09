@@ -1236,6 +1236,18 @@ def bends(st):
     return bool(st["polar"] or st["ripple"] or st["kaleido"] >= 2 or st["wring"])
 
 
+def flip_of_matters(st):
+    """Whether Flip what ("flip_of") can change stir st (filled in): it has a flip and moves where colours come from
+    (stir_from: Turn, Twist, Bulge, a more bend, a Centre point off the middle with Squeeze on), or flips sideways by
+    Note order AND upside down (the two flips' order then differs, stirred_colours). Else before = after, so the
+    window greys it (user 11-09: a tester switched it on a stir with nothing to bend and saw no change)."""
+    if not (st["flip_side"] or st["flip_up"]):
+        return False
+    return bool(st["turn"] or st["twist"] or st["bulge"] or bends(st)
+                or (st["squeeze"] and list(st["centre"]) != [50.0, 50.0])
+                or (st["flip_side"] and st["flip_up"] and st["flip_by"] == "order"))
+
+
 def bent(x, y, st, c, k, r):
     """Spots (x, y) in the colour box -> where stir st's more bends have them look, worked backwards from how they
     are seen (Kaleidoscope on top, then Ripple, Twist along a line, Straight to round). Each goes round the Centre
