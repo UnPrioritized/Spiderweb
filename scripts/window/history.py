@@ -213,6 +213,8 @@ class HistoryPanel:
                 self._history_window()
             else:
                 self.history_box.pack(fill="x", pady=(8, 0), before=self.shapes_box)
+                if tip:  # (asked for now; a start putting the saved look back keeps a shut panel shut)
+                    self.open_shut_side()
             self.sync_history(force=True)
             if tip:
                 self.tips.show("history")
@@ -266,8 +268,15 @@ class HistoryPanel:
         self.history_frame = self._history_list(self.history_box, 6)
         self.history_frame.pack(fill="x")
         self.history_box.pack(fill="x", pady=(8, 0), before=self.shapes_box)
+        self.open_shut_side()
         self.sync_history(force=True)
         self.roll.focus_set()
+
+    def open_shut_side(self):
+        """History docked into a shut side panel would be out of sight: the panel opens (hunt 2026-11-10, user
+        took A: History asked for = History shown)."""
+        if not self.side_is_open():
+            self.open_side()
 
 
     # ------------------------------------------------------------ undo / redo

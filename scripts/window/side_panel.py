@@ -1,6 +1,7 @@
 """The side panel of the main window and the drawer (ScrollingSide): scrolls when its rows don't fit, and the line
 between it and the piano roll (the drawer's board) drags it wider or narrower (user 2026-11-09; PLAN.md)."""
 
+import time
 import tkinter as tk
 from tkinter import font as tkfont, ttk
 
@@ -23,6 +24,9 @@ DRAG_START = 4  # px: a press on the strip moving less than this is a click
 HINT_PAD = 8  # px at 100 %: a hint line wraps this far in from the panel's right edge (its padding)...
 HINT_PAD_BOX = 10  # ... or from its box's (a titled box: padding + border)
 HINT_LEAST = 60  # px at 100 %: never wrapped narrower than this
+MOST_SAVED = 20000  # px at 100 %: a remembered width past this is no width (hand-edited settings.ini)
+STRIP_GUARD_MS = 500  # the strip opened the panel: a 2nd press near that spot this soon is the double-click's, eaten
+GUARD_TAG = "SideStripGuard"  # (the bind tag put first on the panel's widgets meanwhile)
 
 
 def is_hint(w):
@@ -165,6 +169,16 @@ class ScrollingSide:
     def shut_side(self, save=True):
         if not self.side_shuts:
             return
+        try:
+            focus = self.focus_get()
+        except (KeyError, tk.TclError):  # (a dropdown's list has the keyboard)
+            focus = None
+        if focus is not None and str(focus).startswith(str(self.side_box)):
+            # (a box of the panel kept the keyboard while hidden: keys changed a number nobody saw, hunt 2026-11-10)
+            commit = getattr(self, "commit_typing", None)
+            if commit is not None:
+                commit()  # (typed without Enter: goes in as a piano roll click would take it)
+            (getattr(self, "roll", None) or self).focus_set()
         gap = round(STRIP_GAP * self.side_scale)
         if self.side_strip.winfo_manager() != "pack":
             self.side_strip.pack(side="right", fill="y", padx=(gap, gap), pady=(0, gap), before=self.side_box)
@@ -184,6 +198,8 @@ class ScrollingSide:
             self.side_box.pack(side="right", fill="y", before=self.side_strip)
             self.side_grip.pack(side="right", fill="y", after=self.side_box)
             self.side_strip.pack_forget()
+            self._strip_hot = False  # (hidden under the mouse: no "left" comes, it showed lit when shut again)
+            self.draw_strip()
         self.show_side_width()
         if self.side_shuts:
             self.side_open_var().set(True)
@@ -210,6 +226,38 @@ class ScrollingSide:
     def strip_x(self):
         """Where the strip's left edge is / would be, in the window (px)."""
         return self.winfo_width() - round((STRIP + 2 * STRIP_GAP) * self.side_scale)
+
+    def guard_strip_spot(self, e):
+        """The strip opened the panel on a click: a double-click's 2nd press lands on whatever the panel now shows
+        there (Export MIDI's end, "…", a tick; hunt 2026-11-10, user took A): presses near that spot within
+        STRIP_GUARD_MS do nothing. Opening stays at once."""
+        x0, y0 = e.x_root, e.y_root
+        until = time.monotonic() + STRIP_GUARD_MS / 1000
+        reach = round(STRIP * self.side_scale)
+
+        def eat(ev):
+            if time.monotonic() < until and abs(ev.x_root - x0) <= reach and abs(ev.y_root - y0) <= reach:
+                return "break"
+            return None
+        for seq in ("<ButtonPress-1>", "<Double-Button-1>", "<ButtonRelease-1>"):
+            self.bind_class(GUARD_TAG, seq, eat)
+        guarded = []
+        todo = [self.side_box, self.side_grip]
+        while todo:
+            w = todo.pop()
+            todo.extend(w.winfo_children())
+            tags = w.bindtags()
+            if GUARD_TAG not in tags:
+                w.bindtags((GUARD_TAG,) + tags)
+                guarded.append(w)
+
+        def unguard():
+            for w in guarded:
+                try:
+                    w.bindtags(tuple(t for t in w.bindtags() if t != GUARD_TAG))
+                except tk.TclError:  # (gone meanwhile)
+                    pass
+        self.after(STRIP_GUARD_MS, unguard)
 
     def strip_press(self, e):
         self._strip_from = (e.x_root, False)
@@ -244,6 +292,7 @@ class ScrollingSide:
         self.draw_strip()
         if not moved:
             self.open_side()  # (a click: back at the width it had)
+            self.guard_strip_spot(e)
         elif self._grip_to is not None:
             self.open_side(self._grip_to)
             self.save_side_width()
@@ -314,11 +363,13 @@ class ScrollingSide:
         """The width dragged last time (px), None when there's none or it doesn't read."""
         if not self.side_name:
             return None
-        try:
-            px = int(float(settings.get("view", f"{self.side_name}_panel_width", "") or ""))
+        try:  # (hand-written "inf" / "1e999" stopped the start, hunt 2026-11-10: any number past MOST_SAVED is no
+            px = float(settings.get("view", f"{self.side_name}_panel_width", "") or "")  # width)
         except ValueError:
             return None
-        return max(self.side_least(), round(px * self.side_scale)) if px > 0 else None
+        if not 0 < px <= MOST_SAVED:  # (also NaN)
+            return None
+        return max(self.side_least(), round(px * self.side_scale))
 
     def save_side_width(self):
         self.side_fixed = self.side_width
@@ -343,7 +394,7 @@ class ScrollingSide:
         text = settings.get("view", f"{self.side_name}_panel_needs", "") or ""
         px, _, mark = text.partition(" @ ")
         try:
-            return round(int(px) * self.side_scale) if mark == self.need_mark() and int(px) > 0 else 0
+            return round(int(px) * self.side_scale) if mark == self.need_mark() and 0 < int(px) <= MOST_SAVED else 0
         except ValueError:
             return 0
 
@@ -414,18 +465,25 @@ class ScrollingSide:
     # While held, only a thin line follows the mouse; the panel takes its width on let go (moving every control of
     # the panel costs ~130 ms a step, measured 2026-11-10: a live drag stuttered)
 
+    def side_shown_width(self):
+        """The width the panel shows now: side_width, unless the window squeezes it (side_most)."""
+        most = self.side_most()
+        return self.side_width if most is None else min(self.side_width, most)
+
     def grip_press(self, e):
-        self._grip_from = (e.x_root, self.side_width)
-        self._grip_to = self.side_width
+        shown = self.side_shown_width()  # (a squeezed panel: from what's seen, hunt 2026-11-10)
+        self._grip_from = (e.x_root, shown)
+        self._grip_to = shown
         self.draw_grip()
         line = self._grip_ghost = tk.Frame(self, width=max(1, round(LINE * self.side_scale)),
                                            bg=look.SIDE_LINE_HOT, cursor="sb_h_double_arrow")
-        self._ghost_at(self.side_width)
+        self._ghost_at(shown)
         line.lift()
 
     def _ghost_at(self, width):
         g = self.side_grip
-        right = g.winfo_rootx() - self.winfo_rootx() + g.winfo_width() // 2 + (self.side_width - width)
+        shown = self._grip_from[1] if self._grip_from else self.side_shown_width()
+        right = g.winfo_rootx() - self.winfo_rootx() + g.winfo_width() // 2 + (shown - width)
         self._grip_ghost.place(x=right, y=g.winfo_y(), height=g.winfo_height())
 
     def grip_drag(self, e):
@@ -447,12 +505,15 @@ class ScrollingSide:
     def grip_release(self, e):
         if self._grip_from is None:
             return
+        shown = self._grip_from[1]
         self._grip_from = None
         self._grip_ghost.destroy()
         self.draw_grip()
         if self._grip_to is None:
             self.shut_side()  # (its width stays what it was: a click on the strip opens it there)
             return
+        if self._grip_to == shown:  # (a click, or let go where it started: the width stays nobody's choice, hunt
+            return  # 2026-11-10: a plain click stopped a never-dragged panel growing for good)
         self.set_side_width(self._grip_to)
         self.save_side_width()
 
