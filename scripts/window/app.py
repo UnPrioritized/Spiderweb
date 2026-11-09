@@ -3179,7 +3179,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         job["thread"].join()
         if job["got"] is None:
             return None
-        self._notes_cache.update(job["own"])
+        cache = self._notes_cache
+        for k, v in job["own"].items():  # (equal to notes remembered before the job: kept once; the thread only
+            job["own"][k] = shared_arrays(v, cache)  # compared its own: 2 M notes kept ~60 MB more an edit)
+        cache.update(job["own"])
         for k in job["used"]:  # (the notes it used are the shapes' as they are now: kept by forget_old_notes)
             self._notes_used[k] = self.shapes_gen
         self._notes_top.update(job["top"])
