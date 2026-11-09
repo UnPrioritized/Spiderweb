@@ -979,7 +979,7 @@
  "warp.rows": "Up:",
  "warp.cells_tip": "How many cells the grid has across and up, 1 to 20 each. Drag the word sideways or use the Up / Down keys to change it.",
  "warp.bend": "Bend:",
- "warp.bend_tip": "Smooth: the colours bend like rubber between the points.\nStraight cells: each cell bends on its own, with sharp folds along the grid lines.",
+ "warp.bend_tip": "Smooth: the colours bend like rubber between the points.\nStraight cells: each cell bends on its own, with sharp folds along the grid lines.\nCurve handles you dragged stay where they are when you switch.",
  "warp.smooth": "Smooth",
  "warp.straight": "Straight cells",
  "warp.edges": "Colour edges:",
