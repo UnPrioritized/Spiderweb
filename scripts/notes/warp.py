@@ -661,39 +661,100 @@ def exact_offsets(ex, a, x, y):
     do spots Newton doesn't settle. ex = solver(wp). Live and let go both come here: the same colours."""
     x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
     n = len(x)
+    ox, oy = np.full(n, np.nan), np.full(n, np.nan)
     if ex is None or not n:
-        return np.full(n, np.nan), np.full(n, np.nan)
+        return ox, oy
     from notes.liquify import sample
     P, smooth, fold, L = ex
     gy, gx = a.shape[:2]
-    near = None
-    if fold is not None and len(fold["fixed"]):
-        # (the map's cells a folded piece's landing reaches (one look per box, not per spot: 192 boxes x 1.1 M
-        # notes took ~0.2 s a move); a spot in one keeps the map's)
-        near = np.zeros((gy - 1, gx - 1), np.uint8)
-        for x0, x1, y0, y1 in fold["fixed"]:
-            i0, i1 = (int(np.clip(np.floor(v * (gx - 1)), 0, gx - 2)) for v in (max(x0, -1.0), min(x1, 2.0)))
-            j0, j1 = (int(np.clip(np.floor(v * (gy - 1)), 0, gy - 2)) for v in (max(y0, -1.0), min(y1, 2.0)))
-            near[j0:j1 + 1, i0:i1 + 1] = 1
+    near = _near_cells(fold, gy, gx)
     fast = compiled("warp_exact") if n >= NEWTON_FAST else None
     if fast:  # (the compiled twin, one pass a spot: files/fastloops.warp_exact, the very same sums)
         to = np.ascontiguousarray
         X, Y = L or (None, None)
-        ox, oy = np.empty(n), np.empty(n)
         fast.warp_exact(to(P, np.float64), _kind(smooth), to(X, np.float64) if X is not None else np.zeros(0),
                         to(Y, np.float64) if Y is not None else np.zeros(0), to(a, np.float64),
                         near.ravel() if near is not None else np.zeros(0, np.uint8), to(x), to(y), STEPS, ox, oy)
         return ox, oy
-    d = sample(a, x, y)
-    sx, sy, err = _newton(P, x, y, smooth, x + d[:, 0], y + d[:, 1], L=L)
-    ox, oy = np.subtract(sx, x, out=sx), np.subtract(sy, y, out=sy)
-    bad = ~(err < 1e-7)  # (not _solve's "settled")
-    if near is not None:
-        i = np.minimum((np.clip(x, 0.0, 1.0) * (gx - 1)).astype(np.int64), gx - 2)
-        j = np.minimum((np.clip(y, 0.0, 1.0) * (gy - 1)).astype(np.int64), gy - 2)
-        bad |= near.ravel()[j * (gx - 1) + i] != 0
-    if bad.any():
-        ox[bad] = oy[bad] = np.nan
+    k = np.flatnonzero(~_landed(near, gy, gx, x, y))  # (spots a fold lands on: not solved, the map's stands)
+    xk, yk = x[k], y[k]
+    d = sample(a, xk, yk)
+    sx, sy, err = _newton(P, xk, yk, smooth, xk + d[:, 0], yk + d[:, 1], L=L)
+    ok = err < 1e-7  # (not _solve's "settled")
+    ox[k[ok]], oy[k[ok]] = sx[ok] - xk[ok], sy[ok] - yk[ok]
+    return ox, oy
+
+
+def _near_cells(fold, gy, gx):
+    """The map's cells (gy - 1, gx - 1) a folded piece's landing reaches (uint8; one look per box, not per spot: 192
+    boxes x 1.1 M notes took ~0.2 s a move), or None: a spot in one keeps the map's answer (exact_offsets)."""
+    if fold is None or not len(fold["fixed"]):
+        return None
+    near = np.zeros((gy - 1, gx - 1), np.uint8)
+    for x0, x1, y0, y1 in fold["fixed"]:
+        i0, i1 = (int(np.clip(np.floor(v * (gx - 1)), 0, gx - 2)) for v in (max(x0, -1.0), min(x1, 2.0)))
+        j0, j1 = (int(np.clip(np.floor(v * (gy - 1)), 0, gy - 2)) for v in (max(y0, -1.0), min(y1, 2.0)))
+        near[j0:j1 + 1, i0:i1 + 1] = 1
+    return near
+
+
+def _landed(near, gy, gx, x, y):
+    """Which spots (x, y) are in a map cell near (_near_cells) marks: fastloops._landed's sums."""
+    if near is None:
+        return np.zeros(len(x), bool)
+    i = np.minimum((np.clip(x, 0.0, 1.0) * (gx - 1)).astype(np.int64), gx - 2)
+    j = np.minimum((np.clip(y, 0.0, 1.0) * (gy - 1)).astype(np.int64), gy - 2)
+    return near.ravel()[j * (gx - 1) + i] != 0
+
+
+LAZY = 1e-6  # (exact3_offsets: a Newton step taken from this close is the answer without looking again, _newton_lazy)
+
+
+def exact3_offsets(ex, a, x, y, tx, ty, kx, ky):
+    """exact_offsets for each spot (x, y) AND the ends of its two arrows ((x + tx, y + ty), (x + kx, y + ky): what
+    Edges: Smooth reads), interleaved three a spot (middle, length arrow's end, key arrow's end), the quicker way
+    (design swarm 2026-11-10, user: a big shape's drag was ~0.3 s a move): the middle as exact_offsets solves it, but
+    a step taken from within LAZY is the answer without looking again (_newton_lazy); each end starts where the
+    middle's answer and the bend's slopes there say it lands (s(p + v) ~ s(p) + J^-1 v: ~1 look instead of ~3), from
+    the map's answer when that can't be used or doesn't settle. Every answer is Newton's to within ~1e-9 like
+    exact_offsets', only reached another way: a note right on a colour edge can tip (13 of 2 M measured). The
+    compiled twin is fastloops.warp_soft2 (the fetches + the vote in one pass, liquify.found); this is its NumPy
+    side, the very same sums. tx / ty / kx / ky: numbers or one a spot."""
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    n = len(x)
+    ox, oy = np.full(3 * n, np.nan), np.full(3 * n, np.nan)
+    if ex is None or not n:
+        return ox, oy
+    from notes.liquify import sample
+    P, smooth, fold, L = ex
+    gy, gx = a.shape[:2]
+    near = _near_cells(fold, gy, gx)
+    k = np.flatnonzero(~_landed(near, gy, gx, x, y))
+    d = sample(a, x[k], y[k])
+    sx, sy, err, J = _newton_lazy(P, x[k], y[k], smooth, x[k] + d[:, 0], y[k] + d[:, 1], L)
+    ok = err < 1e-7
+    k, sx, sy, J = k[ok], sx[ok], sy[ok], J[ok]
+    ox[3 * k], oy[3 * k] = sx - x[k], sy - y[k]
+    det = J[:, 0] * J[:, 3] - J[:, 1] * J[:, 2]
+    turn = np.abs(det) > 1e-6
+    k, sx, sy, J, det = k[turn], sx[turn], sy[turn], J[turn], det[turn]
+    for q, (vx, vy) in enumerate(((tx, ty), (kx, ky))):
+        vx = np.broadcast_to(np.asarray(vx, np.float64), (n,))
+        vy = np.broadcast_to(np.asarray(vy, np.float64), (n,))
+        px, py = x + vx, y + vy
+        todo = ~_landed(near, gy, gx, px, py)
+        g = todo[k]  # (the ends with the middle's answer to start from)
+        kg, wx, wy, Jg, dg = k[g], vx[k[g]], vy[k[g]], J[g], det[g]
+        ux, uy = (Jg[:, 3] * wx - Jg[:, 1] * wy) / dg, (Jg[:, 0] * wy - Jg[:, 2] * wx) / dg
+        ex_, ey_, e = _newton_lazy(P, px[kg], py[kg], smooth, sx[g] + ux, sy[g] + uy, L)[:3]
+        got = e < 1e-7
+        ox[3 * kg[got] + 1 + q], oy[3 * kg[got] + 1 + q] = ex_[got] - px[kg[got]], ey_[got] - py[kg[got]]
+        todo[kg[got]] = False
+        r = np.flatnonzero(todo)  # (the rest: from the map's answer)
+        d = sample(a, px[r], py[r])
+        ex_, ey_, e = _newton_lazy(P, px[r], py[r], smooth, px[r] + d[:, 0], py[r] + d[:, 1], L)[:3]
+        got = e < 1e-7
+        ox[3 * r[got] + 1 + q], oy[3 * r[got] + 1 + q] = ex_[got] - px[r[got]], ey_[got] - py[r[got]]
     return ox, oy
 
 
@@ -992,6 +1053,48 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None, L=None):
             ny = np.clip(ny, bounds[2][live], bounds[3][live])
         sx[live], sy[live] = nx, ny
     return bx, by, best
+
+
+def _newton_lazy(P, px, py, smooth, sx, sy, L=None):
+    """_newton's steps (no bounds) for exact3_offsets: (x, y, how far off, J) with J (n, 4) = the matrix Newton
+    inverts at the best point [a, b, c, e] (the bend's slopes there), and a step taken from within LAZY (and a matrix
+    that can be turned round) the answer without looking again, how far off = err * err (Newton's next step: within
+    1e-9 from there). fastloops._newton_lazy's sums, NumPy only (the compiled side is warp_soft2)."""
+    sx, sy = np.array(sx, np.float64), np.array(sy, np.float64)
+    n = len(px)
+    best = np.full(n, np.inf)
+    bx, by = sx.copy(), sy.copy()
+    J = np.tile(np.array([1.0, 0.0, 0.0, 1.0]), (n, 1))
+    live = np.arange(n)
+    for step in range(STEPS):
+        if not len(live):
+            break
+        x, y = sx[live], sy[live]
+        d0, dx, dy = _with_slopes(P, x, y, smooth, L)
+        rx, ry = x + d0[:, 0] - px[live], y + d0[:, 1] - py[live]
+        err = np.sqrt(rx * rx + ry * ry)
+        a, b, c, e = 1 + dx[:, 0], dy[:, 0], dx[:, 1], 1 + dy[:, 1]
+        better = err < best[live]
+        k = live[better]
+        best[k], bx[k], by[k] = err[better], x[better], y[better]
+        J[k] = np.column_stack([a[better], b[better], c[better], e[better]])
+        go = err > 1e-9
+        live, x, y, rx, ry, err = live[go], x[go], y[go], rx[go], ry[go], err[go]
+        a, b, c, e = a[go], b[go], c[go], e[go]
+        det = a * e - b * c
+        ok = np.abs(det) > 1e-6
+        safe = np.where(ok, det, 1.0)
+        ux = np.where(ok, (e * rx - b * ry) / safe, rx)
+        uy = np.where(ok, (a * ry - c * rx) / safe, ry)
+        far = np.sqrt(ux * ux + uy * uy)
+        cut = np.where(far > 0.2, 0.2 / np.maximum(far, 1e-300), 1.0)
+        nx, ny = x - ux * cut, y - uy * cut
+        lazy = ok & (err <= LAZY)
+        f = live[lazy]
+        bx[f], by[f], best[f] = nx[lazy], ny[lazy], err[lazy] * err[lazy]
+        live, nx, ny = live[~lazy], nx[~lazy], ny[~lazy]
+        sx[live], sy[live] = nx, ny
+    return bx, by, best, J
 
 
 def warped(notes, at, low, now, rc, which, pals, pick, box, own):

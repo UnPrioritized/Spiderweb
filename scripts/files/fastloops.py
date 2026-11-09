@@ -895,19 +895,27 @@ def warp_newton(P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_st
 
 
 @njit(nogil=True)
+def _landed(near, gy, gx, x, y):
+    """The spot (x, y)'s map cell is one a fold lands on (near: (gy - 1) * (gx - 1), or empty)."""
+    if not len(near):
+        return False
+    ci = min(np.int64(min(max(x, 0.0), 1.0) * (gx - 1)), gx - 2)
+    cj = min(np.int64(min(max(y, 0.0), 1.0) * (gy - 1)), gy - 2)
+    return near[cj * (gx - 1) + ci] != 0
+
+
+@njit(nogil=True)
 def _exact_one(i, P, smooth, lx, ly, a, near, x, y, steps, ox, oy, best, nob):
     """warp.exact_offsets for spot i: the map a's answer, then Newton's steps from it; (ox, oy) = the offset, or
-    NaN when it doesn't settle or its map cell is one a fold lands on (near: (gy - 1) * (gx - 1), or empty)."""
+    NaN when it doesn't settle or its map cell is one a fold lands on (near: (gy - 1) * (gx - 1), or empty; not
+    solved at all: its answer would be thrown away)."""
+    if _landed(near, a.shape[0], a.shape[1], x[i], y[i]):
+        ox[i], oy[i] = np.nan, np.nan
+        return
     d0, d1 = _sample2(a, x[i], y[i])
     ox[i], oy[i] = x[i] + d0, y[i] + d1
     _newton_one(i, P, x, y, smooth, lx, ly, ox, oy, nob, False, steps, 0, 0.0, ox, oy, best)
-    bad = not (best[i] < 1e-7)
-    if len(near):
-        gy, gx = a.shape[0], a.shape[1]
-        ci = min(np.int64(min(max(x[i], 0.0), 1.0) * (gx - 1)), gx - 2)
-        cj = min(np.int64(min(max(y[i], 0.0), 1.0) * (gy - 1)), gy - 2)
-        bad = bad or near[cj * (gx - 1) + ci] != 0
-    if bad:
+    if not (best[i] < 1e-7):
         ox[i], oy[i] = np.nan, np.nan
     else:
         ox[i], oy[i] = ox[i] - x[i], oy[i] - y[i]
@@ -932,6 +940,87 @@ def _warp_exact_cores(P, smooth, lx, ly, a, near, x, y, steps, ox, oy):
 def warp_exact(P, smooth, lx, ly, a, near, x, y, steps, ox, oy):
     """warp_exact_one on half the cores (on_cores)."""
     on_cores(_warp_exact_cores, warp_exact_one, len(x), P, smooth, lx, ly, a, near, x, y, steps, ox, oy)
+
+
+@njit(nogil=True)
+def _newton_lazy(P, px, py, smooth, lx, ly, sx, sy, steps, lazy):
+    """_newton_one for one spot p from s (no bounds) + the matrix Newton inverts (a, b, c, e) at the best point (the
+    bend's slopes there): (x, y, how far off, a, b, c, e). lazy > 0: a step taken from a spot already that close (and
+    a matrix that can be turned round) is the answer without looking again, how far off = err * err (Newton's next
+    step: within 1e-9 from there). warp._newton_lazy's sums, one spot."""
+    x, y = sx, sy
+    b = np.inf
+    ox, oy = x, y
+    ja, jb, jc, je = 1.0, 0.0, 0.0, 1.0
+    for step in range(steps):
+        ex, fx = _even_at(x, lx)
+        ey, fy = _even_at(y, ly)
+        if smooth == 2:
+            vx, vy, dxx, dxy, dyx, dyy = _net_at(P, ex, ey)
+        elif smooth:
+            vx, vy, dxx, dxy, dyx, dyy = _eased_at(P, ex, ey)
+        else:
+            vx, vy, dxx, dxy, dyx, dyy = _straight_at(P, ex, ey)
+        if len(lx):
+            dxx, dxy = dxx * fx, dxy * fx
+        if len(ly):
+            dyx, dyy = dyx * fy, dyy * fy
+        rx, ry = x + vx - px, y + vy - py
+        err = math.sqrt(rx * rx + ry * ry)
+        a, bb, c, e = 1 + dxx, dyx, dxy, 1 + dyy
+        if err < b:
+            b, ox, oy = err, x, y
+            ja, jb, jc, je = a, bb, c, e
+        if not err > 1e-9:
+            break
+        det = a * e - bb * c
+        if abs(det) > 1e-6:
+            ux, uy = (e * rx - bb * ry) / det, (a * ry - c * rx) / det
+        else:
+            ux, uy = rx, ry
+        st = math.sqrt(ux * ux + uy * uy)
+        cut = 0.2 / max(st, 1e-300) if st > 0.2 else 1.0
+        nx, ny = x - ux * cut, y - uy * cut
+        if lazy > 0 and err <= lazy and abs(det) > 1e-6:
+            return nx, ny, err * err, ja, jb, jc, je
+        x, y = nx, ny
+    return ox, oy, b, ja, jb, jc, je
+
+
+@njit(nogil=True)
+def _exact3_one(i, P, smooth, lx, ly, a, near, x0, y0, v0, v1, v2, v3, steps, lazy, ox, oy):
+    """warp.exact3_offsets for the spot (x0, y0) and its two arrows' ends (+ (v0, v1), + (v2, v3)): offsets into ox /
+    oy at 3 i .. 3 i + 2 (NaN: the map's). The middle: Newton from the map's answer; each end from where the middle's
+    answer + the bend's slopes there say it lands (s(p + v) ~ s(p) + J^-1 v), else from the map's answer."""
+    gy, gx = a.shape[0], a.shape[1]
+    for q in range(3):
+        ox[3 * i + q], oy[3 * i + q] = np.nan, np.nan
+    sx = sy = det = 0.0
+    ja, jb, jc, je = 1.0, 0.0, 0.0, 1.0
+    guess = False
+    if not _landed(near, gy, gx, x0, y0):
+        d0, d1 = _sample2(a, x0, y0)
+        bx, by, e, ja_, jb_, jc_, je_ = _newton_lazy(P, x0, y0, smooth, lx, ly, x0 + d0, y0 + d1, steps, lazy)
+        if e < 1e-7:
+            ox[3 * i], oy[3 * i] = bx - x0, by - y0
+            sx, sy, ja, jb, jc, je = bx, by, ja_, jb_, jc_, je_
+            det = ja * je - jb * jc
+            guess = abs(det) > 1e-6
+    for q in range(2):
+        vx, vy = (v0, v1) if q == 0 else (v2, v3)
+        px, py = x0 + vx, y0 + vy
+        if _landed(near, gy, gx, px, py):
+            continue
+        if guess:
+            ux, uy = (je * vx - jb * vy) / det, (ja * vy - jc * vx) / det
+            ex, ey, e, _, _, _, _ = _newton_lazy(P, px, py, smooth, lx, ly, sx + ux, sy + uy, steps, lazy)
+            if e < 1e-7:
+                ox[3 * i + 1 + q], oy[3 * i + 1 + q] = ex - px, ey - py
+                continue
+        e0, e1 = _sample2(a, px, py)
+        ex, ey, e, _, _, _, _ = _newton_lazy(P, px, py, smooth, lx, ly, px + e0, py + e1, steps, lazy)
+        if e < 1e-7:
+            ox[3 * i + 1 + q], oy[3 * i + 1 + q] = ex - px, ey - py
 
 
 @njit(nogil=True)
@@ -1169,6 +1258,46 @@ def warp_soft(at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first
     """warp_soft_one on half the cores (on_cores)."""
     on_cores(_warp_soft_cores, warp_soft_one, len(idx), at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys,
              first, last, line, ms, o, base, top, gap, now, out)
+
+
+@njit(nogil=True)
+def _soft2_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
+               P, smooth, lx, ly, near, steps, lazy, ox, oy, out):
+    """_soft_one for note idx[i] with its three exact fetches worked out first (_exact3_one: its middle + its two
+    arrows' ends, the arrows as _soft_one reads them from c) into ox / oy (3 a note). Edges: Smooth only."""
+    j = idx[i]
+    s, e = float(at[j, 0]), float(at[j, 1])
+    h = max((e - s) / 2, 0.5)
+    _exact3_one(i, P, smooth, lx, ly, a, near, x[i], y[i], c[0] * h, c[1] * h, c[2], c[3], steps, lazy, ox, oy)
+    _soft_one(i, at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+              now, out)
+
+
+@njit(nogil=True)
+def warp_soft2_one(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
+                   P, smooth, lx, ly, near, steps, lazy, out):
+    """liquify.found's Edges: Smooth for a Warp with its exact fetches (warp.exact3_offsets) worked out note by note
+    inside: the note each takes its colour from. c as warp_soft's with c[9] = 1. One core."""
+    ox, oy = np.empty(3 * len(idx)), np.empty(3 * len(idx))
+    for i in range(len(idx)):
+        _soft2_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+                   now, P, smooth, lx, ly, near, steps, lazy, ox, oy, out)
+
+
+@njit(nogil=True, parallel=True)
+def _warp_soft2_cores(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+                      now, P, smooth, lx, ly, near, steps, lazy, out):
+    ox, oy = np.empty(3 * len(idx)), np.empty(3 * len(idx))
+    for i in prange(len(idx)):
+        _soft2_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+                   now, P, smooth, lx, ly, near, steps, lazy, ox, oy, out)
+
+
+def warp_soft2(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now, P,
+               smooth, lx, ly, near, steps, lazy, out):
+    """warp_soft2_one on half the cores (on_cores)."""
+    on_cores(_warp_soft2_cores, warp_soft2_one, len(idx), at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first,
+             last, line, ms, o, base, top, gap, now, P, smooth, lx, ly, near, steps, lazy, out)
 
 
 @njit(nogil=True)

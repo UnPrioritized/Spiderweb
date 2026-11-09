@@ -18,6 +18,7 @@ NEEDS = {
     "stir_wrap_one": ("stir_wrap",), "liquify_sample": ("liquify_sample",), "liquify_sample_one": ("liquify_sample",),
     "dice_mix": ("dice_mix",), "recolour_apart": ("recolour_apart",),
     "warp_newton": ("warp_newton",), "warp_soft": ("warp_soft",), "warp_exact": ("warp_exact",),
+    "warp_soft2": ("warp_soft2",),
     "midi_events": ("midi_events", "take_bytes"), "midi_track": ("midi_track", "take_bytes"), "nearest": ("nearest",),
     "spread_line": ("spread_line",), "area_spots": ("area_spots",), "smooth_sor": ("smooth_sor",),
     "dc_block": ("dc_block",),
@@ -247,6 +248,11 @@ class Wraps:
                   top, gap, now, out):
         self._run("warp_soft", (at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o,
                                 base, top, gap, now, out, True), "warp_soft")
+
+    def warp_soft2(self, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top,
+                   gap, now, P, smooth, lx, ly, near, steps, lazy, out):
+        self._run("warp_soft2", (at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base,
+                                 top, gap, now, P, smooth, lx, ly, near, steps, lazy, out, True), "warp_soft2")
 
     def dice_mix(self, seed, c0, c1, c2, c3, out):
         args = (seed, c0, c1, c2, c3, out)

@@ -442,14 +442,26 @@ struct Newton<'a> {
     steps: i64,
     give_step: i64,
     give_far: f64,
+    lazy: f64, // (newton_jac's lazy finish: 0 = off)
 }
 
 /// fastloops._newton_one for spot i (px / py / sx / sy its own numbers): (x, y, how far off).
 #[inline(always)]
 fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64, f64, f64) {
+    let (x, y, b, _) = newton_jac(i, px, py, sx, sy, d);
+    (x, y, b)
+}
+
+/// fastloops._newton_lazy: newton_one + the matrix Newton inverts [a, bb, c, e] at the best point (the bend's slopes
+/// there: what a small step away from the answer lands on). d.lazy > 0 (warp_soft2 only): a step taken from a spot
+/// already that close (and a matrix that can be turned round) is the answer without looking again, its "how far
+/// off" err * err (Newton's next step: within 1e-9 from there).
+#[inline(always)]
+fn newton_jac(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64, f64, f64, [f64; 4]) {
     let (mut x, mut y) = (sx, sy);
     let mut b = f64::INFINITY;
     let (mut ox, mut oy) = (x, y);
+    let mut jb = [1.0, 0.0, 0.0, 1.0];
     for step in 0..d.steps {
         let (ex, fx) = even_at(x, d.lx);
         let (ey, fy) = even_at(y, d.ly);
@@ -469,8 +481,10 @@ fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64,
         }
         let (rx, ry) = (x + vx - px, y + vy - py);
         let err = (rx * rx + ry * ry).sqrt();
+        let (a, bb, c, e) = (1.0 + dxx, dyx, dxy, 1.0 + dyy);
         if err < b {
             (b, ox, oy) = (err, x, y);
+            jb = [a, bb, c, e];
         }
         let mut go = err > 1e-9;
         if d.has_b && step == d.give_step {
@@ -479,7 +493,6 @@ fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64,
         if !go {
             break;
         }
-        let (a, bb, c, e) = (1.0 + dxx, dyx, dxy, 1.0 + dyy);
         let det = a * e - bb * c;
         let (ux, uy) = if det.abs() > 1e-6 { ((e * rx - bb * ry) / det, (a * ry - c * rx) / det) } else { (rx, ry) };
         let st = (ux * ux + uy * uy).sqrt();
@@ -490,9 +503,12 @@ fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64,
             nx = pmin(pmax(nx, d.bounds[k]), d.bounds[k + 1]);
             ny = pmin(pmax(ny, d.bounds[k + 2]), d.bounds[k + 3]);
         }
+        if d.lazy > 0.0 && err <= d.lazy && det.abs() > 1e-6 {
+            return (nx, ny, err * err, jb);
+        }
         (x, y) = (nx, ny);
     }
-    (ox, oy, b)
+    (ox, oy, b, jb)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -527,7 +543,7 @@ pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, lx: &[f64],
     }
     let (py, sx, sy) = (&py[..n], &sx[..n], &sy[..n]);
     let (bx, by, best) = (&mut bx[..n], &mut by[..n], &mut best[..n]);
-    let d = Newton { p: p.d, gy, gx, kind, lx, ly, bounds: bounds.d, has_b, steps, give_step, give_far };
+    let d = Newton { p: p.d, gy, gx, kind, lx, ly, bounds: bounds.d, has_b, steps, give_step, give_far, lazy: 0.0 };
     match crate::pool_for(many, n, 1) {
         None => newton_range(0, px, py, sx, sy, &d, bx, by, best),
         Some(pool) => {
@@ -543,25 +559,33 @@ pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, lx: &[f64],
     0
 }
 
+/// fastloops._landed: the spot's map cell is one a fold lands on (near: (gy - 1) x (gx - 1), or empty).
+#[inline(always)]
+fn landed(near: &[u8], gy: usize, gx: usize, x: f64, y: f64) -> bool {
+    if near.is_empty() {
+        return false;
+    }
+    let ci = f2i(pmin(pmax(x, 0.0), 1.0) * (gx as i64 - 1) as f64).min(gx as i64 - 2);
+    let cj = f2i(pmin(pmax(y, 0.0), 1.0) * (gy as i64 - 1) as f64).min(gy as i64 - 2);
+    near[cj as usize * (gx - 1) + ci as usize] != 0
+}
+
 /// fastloops._exact_one: warp.exact_offsets for spot j: the map's answer, then Newton's steps from it; (offset
-/// across, up), or NaN when it doesn't settle or its map cell is one a fold lands on (near).
+/// across, up), or NaN when it doesn't settle or its map cell is one a fold lands on (near: not solved at all, its
+/// answer would be thrown away).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn exact_range_inner(x: &[f64], y: &[f64], a: &[f64], gy: usize, gx: usize, near: &[u8], d: &Newton,
                      ox: &mut [f64], oy: &mut [f64]) {
     for j in 0..x.len() {
         let (x0, y0) = (x[j], y[j]);
+        (ox[j], oy[j]) = (f64::NAN, f64::NAN);
+        if landed(near, gy, gx, x0, y0) {
+            continue;
+        }
         let (d0, d1) = sample2(a, gy, gx, x0, y0);
         let (sx, sy, e) = newton_one(0, x0, y0, x0 + d0, y0 + d1, d);
-        let mut bad = !(e < 1e-7);
-        if !near.is_empty() {
-            let ci = f2i(pmin(pmax(x0, 0.0), 1.0) * (gx as i64 - 1) as f64).min(gx as i64 - 2);
-            let cj = f2i(pmin(pmax(y0, 0.0), 1.0) * (gy as i64 - 1) as f64).min(gy as i64 - 2);
-            bad = bad || near[cj as usize * (gx - 1) + ci as usize] != 0;
-        }
-        if bad {
-            (ox[j], oy[j]) = (f64::NAN, f64::NAN);
-        } else {
+        if e < 1e-7 {
             (ox[j], oy[j]) = (sx - x0, sy - y0);
         }
     }
@@ -585,7 +609,8 @@ pub fn warp_exact(p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], a: Nd<f64, 3
         return crate::FAILED;
     }
     let (y, ox, oy) = (&y[..n], &mut ox[..n], &mut oy[..n]);
-    let d = Newton { p: p.d, gy, gx, kind, lx, ly, bounds: &[], has_b: false, steps, give_step: 0, give_far: 0.0 };
+    let d = Newton { p: p.d, gy, gx, kind, lx, ly, bounds: &[], has_b: false, steps, give_step: 0, give_far: 0.0,
+                     lazy: 0.0 };
     match crate::pool_for(many, n, 1) {
         None => exact_range(x, y, a.d, my, mx, near, &d, ox, oy),
         Some(pool) => {
@@ -597,6 +622,53 @@ pub fn warp_exact(p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], a: Nd<f64, 3
         }
     }
     0
+}
+
+/// fastloops._exact3_one: warp.exact3_offsets for the spot (x0, y0) and the ends of its two arrows ((x0, y0) +
+/// arrows[0] / [1]): [middle across, up, end 1 across, up, end 2 across, up] offsets (NaN: the map's). The middle is
+/// Newton's answer from the map's, as warp_exact's; each end starts where the middle's answer + the bend's slopes
+/// there say it lands (s(p + v) ~ s(p) + J^-1 v: 1 look instead of ~3), from the map's answer when that can't be
+/// used or doesn't settle. d.lazy on (newton_jac). Spots a fold lands on: not solved (NaN), as warp_exact's.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn exact3_spot(x0: f64, y0: f64, arrows: [(f64, f64); 2], a: &[f64], gy: usize, gx: usize, near: &[u8], d: &Newton)
+               -> [f64; 6] {
+    let mut out = [f64::NAN; 6];
+    let (mut sx, mut sy, mut det) = (0.0, 0.0, 0.0);
+    let mut jc = [1.0, 0.0, 0.0, 1.0];
+    let mut guess = false;
+    if !landed(near, gy, gx, x0, y0) {
+        let (d0, d1) = sample2(a, gy, gx, x0, y0);
+        let (bx, by, e, j) = newton_jac(0, x0, y0, x0 + d0, y0 + d1, d);
+        if e < 1e-7 {
+            (out[0], out[1]) = (bx - x0, by - y0);
+            (sx, sy, jc) = (bx, by, j);
+            det = jc[0] * jc[3] - jc[1] * jc[2];
+            guess = det.abs() > 1e-6;
+        }
+    }
+    let [ja, jb, jcc, je] = jc;
+    for q in 0..2 {
+        let (vx, vy) = arrows[q];
+        let (px, py) = (x0 + vx, y0 + vy);
+        if landed(near, gy, gx, px, py) {
+            continue;
+        }
+        if guess {
+            let (ux, uy) = ((je * vx - jb * vy) / det, (ja * vy - jcc * vx) / det);
+            let (ex, ey, e) = newton_one(0, px, py, sx + ux, sy + uy, d);
+            if e < 1e-7 {
+                (out[2 + 2 * q], out[3 + 2 * q]) = (ex - px, ey - py);
+                continue;
+            }
+        }
+        let (e0, e1) = sample2(a, gy, gx, px, py);
+        let (ex, ey, e) = newton_one(0, px, py, px + e0, py + e1, d);
+        if e < 1e-7 {
+            (out[2 + 2 * q], out[3 + 2 * q]) = (ex - px, ey - py);
+        }
+    }
+    out
 }
 
 /// fastloops._unit_back: a spot of the colour box -> (middle in ticks, key) (liquify._placed + from_unit).
@@ -912,6 +984,73 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], 
                     (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), out.par_chunks_mut(chunk))
                         .into_par_iter().for_each(|(i, xs, ys, oc)| soft_range(i, xs, ys, &[], &[], &s, &d, oc));
                 }
+            });
+        }
+    }
+    0
+}
+
+/// fastloops._soft2_one: soft_one with the note's three exact fetches (its middle + its two arrows' ends, the arrows
+/// as soft_one reads them from c) worked out right here (exact3_spot): nothing handed over in big arrays.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn soft2_range_inner(idx: &[i64], x: &[f64], y: &[f64], s: &Soft, d: &Near, nw: &Newton, near: &[u8],
+                     out: &mut [i64]) {
+    for j in 0..out.len() {
+        let jj = idx[j] as usize;
+        let (st, en) = (s.at[jj * s.cols] as f64, s.at[jj * s.cols + 1] as f64);
+        let h = pmax((en - st) / 2.0, 0.5);
+        let o = exact3_spot(x[j], y[j], [(s.c[0] * h, s.c[1] * h), (s.c[2], s.c[3])], s.a, s.gy, s.gx, near, nw);
+        out[j] = soft_one(jj, x[j], y[j], &o, s, d);
+    }
+}
+level_builds!(fn soft2_range(idx: &[i64], x: &[f64], y: &[f64], s: &Soft, d: &Near, nw: &Newton, near: &[u8],
+                             out: &mut [i64]) => soft2_range_inner);
+
+/// fastloops.warp_soft2 = warp_soft (Edges: Smooth, c[8] = 0; no per-note arrows) with the Warp's exact fetches
+/// worked out inside, three a note by exact3_spot (p / kind / lx / ly / near / steps as warp_exact's, lazy as
+/// newton_jac's) -> 0.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn warp_soft2(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3>, c: &[f64], fp: &[f64],
+                  ring: Nd<f64, 2>, tstart: &[i64], ta: &[f64], tb: &[f64], keys: &[i64], first: &[i64],
+                  last: &[i64], line: &[f64], ms: &[f64], o: &[i64], base: f64, top: f64, gap: f64, now: &[i64],
+                  p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], near: &[u8], steps: i64, lazy: f64,
+                  out: &mut [i64], many: bool) -> i64 {
+    let n = idx.len();
+    let (rows, cols) = (at.sh[0], at.sh[1]);
+    let (gy, gx) = (a.sh[0], a.sh[1]);
+    let nl = ring.sh[0];
+    let (pgy, pgx) = (p.sh[0], p.sh[1]);
+    if cols < 2 || a.sh[2] != 2 || gy < 2 || gx < 2 || ring.sh[1] != 3 || nl > MOST_LOOKS || nl < ROUND_INNER
+        || c.len() < 9 || fp.len() < 14 || !wrap_rows_ok(fp) || keys.is_empty() || tstart.len() < 17 || x.len() < n
+        || y.len() < n || out.len() < n || p.sh[2] != 2 || pgy < 2 || pgx < 2 || !(0..=2).contains(&kind)
+        || (kind == 2 && (pgy < 4 || pgx < 4 || (pgy - 1) % 3 != 0 || (pgx - 1) % 3 != 0))
+        || lx.len() == 1 || ly.len() == 1 || !(near.is_empty() || near.len() == (gy - 1) * (gx - 1)) {
+        return crate::FAILED;
+    }
+    for j in 0..16 {
+        if tstart[j] < 0 || tstart[j + 1] < tstart[j] || tstart[j + 1] - tstart[j] > MOST_LOOKS as i64
+            || tstart[j + 1] as usize > ta.len() || tstart[j + 1] as usize > tb.len() {
+            return crate::FAILED;
+        }
+    }
+    if idx.iter().any(|&j| j < 0 || j as usize >= rows) {
+        return crate::FAILED;
+    }
+    let (x, y, out) = (&x[..n], &y[..n], &mut out[..n]);
+    let d = Near { keys, first, last, line, ms, nk: &[], nm: &[], o, base, top, gap, own: false };
+    let cl = Colours { now, o };
+    let s = Soft { at: at.d, cols, a: a.d, gy, gx, c, fp, ring: ring.d, nl, tstart, ta, tb, cl };
+    let nw = Newton { p: p.d, gy: pgy, gx: pgx, kind, lx, ly, bounds: &[], has_b: false, steps, give_step: 0,
+                      give_far: 0.0, lazy };
+    match crate::pool_for(many, n, 1) {
+        None => soft2_range(idx, x, y, &s, &d, &nw, near, out),
+        Some(pool) => {
+            let chunk = (n / (pool.current_num_threads() * 8)).max(256);
+            pool.install(|| {
+                (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), out.par_chunks_mut(chunk))
+                    .into_par_iter().for_each(|(i, xs, ys, oc)| soft2_range(i, xs, ys, &s, &d, &nw, near, oc));
             });
         }
     }

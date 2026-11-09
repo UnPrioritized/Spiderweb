@@ -60,6 +60,11 @@ py_loops! {
               ring: Nd<f64, 2>, tstart: &[i64], ta: &[f64], tb: &[f64], keys: &[i64], first: &[i64], last: &[i64],
               line: &[f64], ms: &[f64], o: &[i64], base: f64, top: f64, gap: f64, now: &[i64], out: &mut [i64],
               many: bool) => crate::recolour::warp_soft;
+    warp_soft2(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3>, c: &[f64], fp: &[f64],
+               ring: Nd<f64, 2>, tstart: &[i64], ta: &[f64], tb: &[f64], keys: &[i64], first: &[i64], last: &[i64],
+               line: &[f64], ms: &[f64], o: &[i64], base: f64, top: f64, gap: f64, now: &[i64],
+               p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], near: &[u8], steps: i64, lazy: f64,
+               out: &mut [i64], many: bool) => crate::recolour::warp_soft2;
     dice_mix(seed: u64, c0: &[u64], c1: &[u64], c2: &[u64], c3: &[u64], out: &mut [f64]) => crate::recolour::dice_mix;
     recolour_apart(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64], pick: &[f64], bstart: &[i64],
                    bsize: &[i64], nc: i64) => crate::recolour::recolour_apart;
