@@ -50,7 +50,7 @@ class WarpGrid:
             if got:
                 g = wp_.full(got)
             else:
-                g = wp_.full(dict(wp_.empty(w.cols, w.rows), smooth=w.smooth, edge=w.edge))
+                g = wp_.full(dict(wp_.empty(w.cols, w.rows), smooth=w.smooth, edge=w.edge, edges=w.edges))
             out.append({"sh": sh, "made": made, "wp": g, "P": wp_.offsets(g, strength=False)})
         return out
 

@@ -11,15 +11,19 @@ later, planned-features.md).
 
 Saved as {"cols": cells across, "rows": cells up, "pts": [[dx, dy], ...] row by row from the bottom left ((cols + 1)
 x (rows + 1) of them), "smooth": False (only for Straight cells), "strength": % (only != 100), "on": False (only when
-hidden), "edge": STIR_EDGES (only != "escape")}. No point moved = no Warp (clean_warp: None). Never released before
-this layout: no older layout is read (user 2026-11-09).
+hidden), "edge": STIR_EDGES (only != "escape"), "edges": "sharp" (only for Edges: Sharp)}. No point moved = no Warp
+(clean_warp: None). Never released before this layout: no older layout is read (user 2026-11-09).
 
 THE BEND: a point moved = the colour that was at its place is now shown where it went (forward, like the editors).
-Between the points the offsets are blended: Smooth = Catmull-Rom curves through the points (rubber, the editors'
-look), Straight cells = each cell on its own (bilinear: folds along the grid lines). Each spot needs where its colour
-comes FROM, so the bend is turned round (Newton steps on a fine grid, inverse_map) into a Liquify-style "where it
-comes from" map, and the Liquify's lookup (liquify._where / _fetched / _taken / _apart) does the rest: At the edges,
-colour sets, Per chord / run, two notes on a key kept apart, the gate flip's shown places alike.
+Between the points the offsets are blended, each cell from its own 4 corners only, so a moved point bends just the
+4 cells round it: Smooth = eased curved patches (the editors' Warp: the point's surroundings move with it, smooth
+across grid lines; user 2026-11-09 after Catmull-Rom's wider reach was "much, much laggier"), Straight cells =
+bilinear (folds along the grid lines). Each spot needs where its colour comes FROM, so the bend is turned round
+(Newton steps on a fine grid, inverse_map) into a Liquify-style "where it comes from" map, and the Liquify's lookup
+(liquify._where / found / _taken / _apart) does the rest: At the edges, colour sets, Per chord / run, two notes on
+a key kept apart, the gate flip's shown places alike. EDGES (user 2026-11-09: "make it a setting"): Smooth (default,
+my pick) = liquify.found's vote (stretched spots: the 4 notes around, bilinear weights; squashed: the most common
+colour over what the note covers) / Sharp = the nearest note (stair steps on stretched cells).
 """
 
 import json
@@ -29,7 +33,8 @@ import numpy as np
 MOST_CELLS = 20  # (cells across / up at most: the window's Custom boxes, a file too)
 MOST_MOVE = 4.0  # (a point moves at most this many boxes)
 MOST_STRENGTH = 400.0
-DEFAULTS = {"smooth": True, "strength": 100.0, "on": True, "edge": "escape"}
+DEFAULTS = {"smooth": True, "strength": 100.0, "on": True, "edge": "escape", "edges": "smooth"}
+EDGES = ("smooth", "sharp")  # (the window's Edges dropdown by place)
 PER_CELL = 32  # (the turned-round map's steps per cell...)
 MOST_MAP = 257  # (... at most this many a side: 8 cells; more cells share them, 12+ a cell at 20: a drag on a
 # 20 x 20 grid took 0.37 s a move at 513, the bend between points stays smooth)
@@ -66,6 +71,8 @@ def clean_warp(d):
     from notes.recolour import STIR_EDGES
     if d.get("edge") in STIR_EDGES and d["edge"] != DEFAULTS["edge"]:
         out["edge"] = d["edge"]
+    if d.get("edges") == "sharp":
+        out["edges"] = "sharp"
     return out
 
 
@@ -100,13 +107,13 @@ def offsets(wp, strength=True):
     return P
 
 
-def _catmull(P, x, y, slopes=False):
-    """The offsets P (rows up, columns across, 2) at spots (x, y) of the box (0..1; past it: the edge's), on
-    Catmull-Rom curves through the points (the grid padded by straight lines past its ends). slopes: also how they
-    change along x and along y there ((value, d/dx, d/dy); 0 past the box, where the edge's value holds), worked out
-    exactly (Newton's steps in inverse_map: three lookups a step before, stage C's drags)."""
-    Q = np.concatenate([2 * P[:1] - P[1:2], P, 2 * P[-1:] - P[-2:-1]], 0)
-    Q = np.concatenate([2 * Q[:, :1] - Q[:, 1:2], Q, 2 * Q[:, -1:] - Q[:, -2:-1]], 1)
+def _eased(P, x, y, slopes=False):
+    """The offsets P (rows up, columns across, 2) at spots (x, y) of the box (0..1; past it: the edge's) for Smooth:
+    each cell its own curved patch from its 4 corner points, eased in and out (3t^2 - 2t^3 each way), so a moved
+    point bends ONLY the 4 cells round it (image editors' Warp, user 2026-11-09: Catmull-Rom's 2-cell reach made a
+    4 x 4 drag repaint the whole shape). Each point's surroundings move with it as one piece (its handles go along,
+    as the editors' do) and the bend flows smoothly across every grid line. slopes: also how they change along x and
+    y ((value, d/dx, d/dy); 0 past the box), exact, for Newton's steps."""
     gy, gx = P.shape[:2]
 
     def parts(v, g):
@@ -114,39 +121,27 @@ def _catmull(P, x, y, slopes=False):
         f = np.clip(v, 0.0, 1.0) * (g - 1)
         i = np.minimum(f.astype(np.int64), g - 2)
         t = f - i
-        t2, t3 = t * t, t * t * t
-        w = ((-t3 + 2 * t2 - t) / 2, (3 * t3 - 5 * t2 + 2) / 2, (-3 * t3 + 4 * t2 + t) / 2, (t3 - t2) / 2)
+        s = t * t * (3.0 - 2.0 * t)
         if not slopes:
-            return i, w, None
-        inside = ((v >= 0.0) & (v <= 1.0)) * float(g - 1)
-        d = ((-3 * t2 + 4 * t - 1) / 2 * inside, (9 * t2 - 10 * t) / 2 * inside,
-             (-9 * t2 + 8 * t + 1) / 2 * inside, (3 * t2 - 2 * t) / 2 * inside)
-        return i, w, d
-    i, wx, dx = parts(x, gx)
-    j, wy, dy = parts(y, gy)
-    out = np.zeros(np.shape(i) + (2,), np.float64)
-    if slopes:
-        ddx, ddy = np.zeros_like(out), np.zeros_like(out)
-    for a in range(4):
-        row = np.zeros_like(out)
-        if slopes:
-            row_d = np.zeros_like(out)
-        for b in range(4):
-            q = Q[j + a, i + b]
-            row += q * wx[b][..., None]
-            if slopes:
-                row_d += q * dx[b][..., None]
-        out += row * wy[a][..., None]
-        if slopes:
-            ddx += row_d * wy[a][..., None]
-            ddy += row * dy[a][..., None]
-    return (out, ddx, ddy) if slopes else out
+            return i, s, None
+        return i, s, 6.0 * t * (1.0 - t) * ((v >= 0.0) & (v <= 1.0)) * float(g - 1)
+    i, sx, dx = parts(x, gx)
+    j, sy, dy = parts(y, gy)
+    sx_, sy_ = sx[..., None], sy[..., None]
+    a, b, c, d = P[j, i], P[j, i + 1], P[j + 1, i], P[j + 1, i + 1]
+    lo, hi = a + (b - a) * sx_, c + (d - c) * sx_
+    out = lo + (hi - lo) * sy_
+    if not slopes:
+        return out
+    ddx = ((b - a) + ((d - c) - (b - a)) * sy_) * dx[..., None]
+    ddy = (hi - lo) * dy[..., None]
+    return out, ddx, ddy
 
 
 def bend_at(P, x, y, smooth=True):
     """How far the spots (x, y) of the box move under the point offsets P (forward: where their colour goes)."""
     if smooth:
-        return _catmull(P, x, y)
+        return _eased(P, x, y)
     from notes.liquify import sample
     return sample(P, x, y)
 
@@ -202,23 +197,20 @@ _LAST = {}  # ((cols, rows), smooth) -> (the point offsets with strength, their 
 
 def _reach(P0, P, smooth, gx, gy):
     """(rows slice, columns slice) of the map spots that can change when the offsets go from P0 to P (a few points
-    moved), or None = all of them (many moved, another size). A moved point bends only the cells round it (Smooth:
-    2 a side, Straight cells: 1); a spot whose colour comes from there is at most the largest bend there away."""
+    moved), or None = all of them (many moved, another size). A moved point bends only the 4 cells round it (Smooth
+    and Straight cells alike); a spot whose colour comes from there is at most the largest bend there away."""
     if P0.shape != P.shape:
         return None
     moved = np.argwhere((P0 != P).any(2))
     if not len(moved) or len(moved) > 4:
         return None if len(moved) else (slice(0, 0), slice(0, 0))
     rows, cols = P.shape[0] - 1, P.shape[1] - 1
-    k = 2 if smooth else 1
-    j0, i0 = moved.min(0) - k
-    j1, i1 = moved.max(0) + k
-    # (the bend inside those cells comes from the points one more cell round them; Catmull-Rom can overshoot a
-    # little: 1.25x)
-    near = (slice(max(j0 - 1, 0), j1 + 2), slice(max(i0 - 1, 0), i1 + 2))
+    j0, i0 = moved.min(0) - 1
+    j1, i1 = moved.max(0) + 1
+    # (the bend inside those cells is a blend of their corners, never past them: no overshoot)
+    near = (slice(max(j0, 0), j1 + 1), slice(max(i0, 0), i1 + 1))
     both = np.concatenate([P0[near].reshape(-1, 2), P[near].reshape(-1, 2), np.zeros((1, 2))])
-    over = 0.25 * float(np.abs(both).max())
-    lo, hi = both.min(0) - over, both.max(0) + over  # (how far a colour from there can land, each way)
+    lo, hi = both.min(0), both.max(0)  # (how far a colour from there can land, each way)
     u0, u1 = max(i0, 0) / cols + lo[0], min(i1, cols) / cols + hi[0]
     v0, v1 = max(j0, 0) / rows + lo[1], min(j1, rows) / rows + hi[1]
     if j0 <= 0:  # (past the box's edge the edge's bend holds: spots out there are reached too)
@@ -249,7 +241,7 @@ def _solve(P, px, py, smooth):
     for _ in range(STEPS):
         x, y = sx[live], sy[live]
         if smooth:  # (the slopes exact, with the values: one lookup a step)
-            d0, dx, dy = _catmull(P, x, y, slopes=True)
+            d0, dx, dy = _eased(P, x, y, slopes=True)
         else:
             d0 = bend_at(P, x, y, smooth)
         rx, ry = x + d0[:, 0] - px[live], y + d0[:, 1] - py[live]
@@ -282,18 +274,19 @@ def warped(notes, at, low, now, rc, which, pals, pick, box, own):
     """The colours now after rc's Warp: each note takes the colour of the note found where the bend fetches from
     (liquify.liquified's way, with the Warp's own edge choice). Hidden (eye off), strength 0 or none: now as it is."""
     from notes import liquify as lq
-    from notes.recolour import leaders, nearest
+    from notes.recolour import leaders
     wp = clean_warp(rc.get("warp"))
     if not wp or wp.get("on") is False or not wp.get("strength", 100.0) or not len(at):
         return now
     a = inverse_map(wp)
     shown = lq.shown_places(notes, at, rc)
-    w = lq._where(shown, rc, box, own, {"strength": 100.0, "on": True, "edge": full(wp)["edge"]})
+    f = full(wp)
+    w = lq._where(shown, rc, box, own, {"strength": 100.0, "on": True, "edge": f["edge"],
+                                       "soft": f["edges"] == "smooth"})
     idx = np.flatnonzero(lq.touched(a, w["x"], w["y"]))
     if not len(idx):
         return now
-    mid, key = lq._fetched(w, a, w["x"][idx], w["y"][idx], rc, box, own)
-    src = nearest(shown, mid, key, own=False)
+    src = lq.found(w, a, shown, idx, w["x"][idx], w["y"][idx], rc, box, own, now)
     new = np.array(now)
     new[idx] = lq._taken(now, idx, src, pals, rc)
     if rc.get("by"):
@@ -335,7 +328,7 @@ def refit(wp, cols, rows):
 
 def _weights(t, cells, smooth):
     """(len(t), cells + 1): how much each point of a 1-D grid of `cells` cells counts at spots t (0..1), as bend_at
-    blends them (Catmull-Rom with the padded ends / straight)."""
+    blends them (eased / straight)."""
     m = cells + 1
     out = np.empty((len(t), m))
     for i in range(m):

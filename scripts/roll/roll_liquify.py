@@ -530,6 +530,8 @@ class LiquifyBrush:
         if got is None:
             return None
         rule, n, lap, tw, args = got
+        if job.get("warp") is not None and job["warp"].get("edges", "smooth") == "smooth":
+            rule = dict(rule, _soft=True)  # (the Warp's Edges: Smooth, liquify.found: as warp.warped picks)
         # (the notes on the piano roll now: this shape's rows, in start order (painting needs it), and its notes as
         # made now (their colours -> the channel each colour is on: a table))
         drawn = app.drawn

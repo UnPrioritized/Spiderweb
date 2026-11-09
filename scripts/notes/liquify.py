@@ -259,7 +259,9 @@ def _where(at, rc, box, own, lq=None):
     lq = lq or full(clean_liquify(rc.get("liquify")) or {})
     s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
     mid = (s + e) / 2
-    w = {"lq": lq, "edge": lq["edge"], "rows": None, "t0": 0.0, "t1": 0.0}
+    # ("soft": the Warp's Edges: Smooth (found): its lq says so, or rc "_soft" (a Warp drag's Live, roll_liquify))
+    w = {"lq": lq, "edge": lq["edge"], "rows": None, "t0": 0.0, "t1": 0.0,
+         "soft": bool(lq.get("soft") or rc.get("_soft"))}
     if w["edge"] in ("wrap", "bend"):
         w["rows"] = rows_of(at, 0.0)
         w["t0"], w["t1"] = float(at[:, 0].min()), float(at[:, 1].max())
@@ -272,9 +274,13 @@ def _where(at, rc, box, own, lq=None):
 def _fetched(w, a, x, y, rc, box, own):
     """(middle in ticks, key) the spots (x, y) of the colour box fetch their colour from under the map a
     (liquify_from's second half: the edge choices like stir_from's)."""
-    from notes.recolour import from_unit
     d = sample(a, x, y) * (w["lq"]["strength"] / 100)
-    x, y = x + d[:, 0], y + d[:, 1]
+    return _placed(w, x + d[:, 0], y + d[:, 1], rc, box, own)
+
+
+def _placed(w, x, y, rc, box, own):
+    """(middle in ticks, key) of the spots (x, y) of the colour box a map fetches from, after the edge choices."""
+    from notes.recolour import from_unit
     edge = w["edge"]
     if edge != "escape":
         out = lambda v: (v < -1e-9) | (v > 1 + 1e-9)  # noqa: E731 (a hair past the edge stays on it)
@@ -288,6 +294,141 @@ def _fetched(w, a, x, y, rc, box, own):
     elif edge == "bend":
         mid = w["rows"].unstretched(mid, key, w["t0"], w["t1"])
     return mid, key
+
+
+def _unit(w, mid, k, rc, box, own):
+    """Places (middle in ticks, key) -> (x, y) of the colour box as _where counts them (Bend with the outline: the
+    row stretched first)."""
+    from notes.recolour import unit_xy
+    if w["edge"] == "bend":
+        mid = w["rows"].stretched(mid, k, w["t0"], w["t1"])
+    return unit_xy(mid, k, rc, box, own)
+
+
+SOFT_MOST = 4  # (Edges: Smooth, a squashed spot: at most this many looks each way across what it covers)
+SOFT_SQUASHED = 1.25  # (a note covering more than this many notes' worth of the colours' AREA = squashed)
+# (Edges: Smooth, a stretched spot: looks round where it fetches from, out to SOFT_REACH keys' height (as far
+# across, in the colour box's own proportions), each weighing in; the reach grows from 0 (a cell not stretched =
+# exactly the nearest note) to full where a key of the colours shows twice as tall or more)
+SOFT_REACH = 1.0
+_RING = [(0.0, 0.0, 1.0)] + [(0.5 * np.cos(t), 0.5 * np.sin(t), 0.7) for t in np.arange(6) * np.pi / 3] + \
+    [(np.cos(t), np.sin(t), 0.35) for t in np.arange(6) * np.pi / 3 + np.pi / 6]  # (looks: across, up, weight)
+
+
+def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
+    """The notes of at (their places) the notes idx (at spots (x, y) of the box) take their colour from under the map
+    a. Sharp (the Liquify; the Warp's Edges: Sharp): the note nearest the spot the map fetches from. w["soft"] (the
+    Warp's Edges: Smooth, user 2026-11-09: stretched cells came out in big steps, squashed ones noisy; a note has ONE
+    colour, never a blend): where the note covers less than a note's worth of the colours (stretched), looks round
+    the spot it fetches from vote (_round_vote: a stretched staircase's corners round off, a slanted stripe's edge
+    comes out as a slant instead of big steps); where it covers more (squashed), up to SOFT_MOST x SOFT_MOST looks
+    across what it covers vote, the most common colour wins (the look nearest the middle on a tie). The note handed
+    back is one with the winning colour (colour sets / groups / kept_apart then as usual). Live calls it the same
+    way: the brush's live colours == let go's."""
+    from notes.recolour import _sorted_notes, nearest
+    d = sample(a, x, y) * (w["lq"]["strength"] / 100)
+    sx, sy = x + d[:, 0], y + d[:, 1]  # (where in the box each spot fetches from)
+    mid, key = _placed(w, sx, sy, rc, box, own)
+    if not w.get("soft") or not len(idx):
+        return nearest(at, mid, key, own=False, kept=kept)
+    kept = kept or _sorted_notes(at)
+    now = np.asarray(now)
+    s, e, k = (np.asarray(at[idx, c], np.float64) for c in (0, 1, 2))
+    m, h = (s + e) / 2, np.maximum((e - s) / 2, 0.5)
+    # (what the note covers, as two arrows across the box (its length, one key) -> fetched at their ends; the box's
+    # units per tick / key are the same everywhere (unit_xy is straight) except with Bend with the outline)
+    if w["edge"] == "bend":
+        xb, yb = _unit(w, m + h, k, rc, box, own)
+        xd, yd = _unit(w, m, k + 0.5, rc, box, own)
+        tx, ty, kx, ky = xb - x, yb - y, xd - x, yd - y
+    else:
+        bx, by = _unit(w, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), rc, box, own)
+        tx, ty = (bx[1] - bx[0]) * h, (by[1] - by[0]) * h
+        kx, ky = (bx[2] - bx[0]) * 0.5, (by[2] - by[0]) * 0.5
+    m1, k1 = _fetched(w, a, x + tx, y + ty, rc, box, own)
+    m3, k3 = _fetched(w, a, x + kx, y + ky, rc, box, own)
+    vt = np.stack([m1 - mid, k1 - key], 1) * 2  # (along the note's length, in ticks / keys of the colours)
+    vk = np.stack([m3 - mid, k3 - key], 1) * 2  # (across its key)
+    # (in notes' worth: time / the note's length, keys as they are. SQUASHED = the note covers more than
+    # SOFT_SQUASHED notes' AREA of the colours; a slant alone (a shear: one key up = many notes along in time, on
+    # long thin spam) covers no more area and stays with the 4-notes vote: spread looks there only gave noise)
+    ut, uk = vt[:, 0] / (2 * h), vt[:, 1]
+    wt, wk = vk[:, 0] / (2 * h), vk[:, 1]
+    area = np.abs(ut * wk - uk * wt)
+    rt, rk = np.hypot(ut, uk), np.hypot(wt, wk)  # (how long each arrow is, in notes' worth)
+    out = np.empty(len(idx), np.int64)
+    flat = area <= SOFT_SQUASHED
+    # (stretched: how far the looks reach, 0 where a key of the colours shows a key tall or less, SOFT_REACH keys
+    # (in the box) where it shows twice as tall or more)
+    grow = np.clip(1.0 / np.sqrt(np.maximum(area, 1e-12)) - 1.0, 0.0, 1.0)
+    f = np.flatnonzero(flat & (grow < 0.05))
+    if len(f):
+        out[f] = nearest(at, mid[f], key[f], own=False, kept=kept)
+    f = np.flatnonzero(flat & (grow >= 0.05))
+    if len(f):
+        one = np.hypot(kx, ky) * 2  # (one key's height in the box: the same everywhere, or per note with Bend)
+        r = (one[f] if np.ndim(one) else one) * SOFT_REACH * grow[f]
+        out[f] = _round_vote(w, at, kept, sx[f], sy[f], r, rc, box, own, now)
+    q = np.flatnonzero(~flat)
+    if len(q):
+        nt = np.clip(np.ceil(rt[q]), 1, SOFT_MOST).astype(np.int64)
+        nk = np.clip(np.ceil(rk[q]), 1, SOFT_MOST).astype(np.int64)
+        for a_ in range(1, SOFT_MOST + 1):
+            for b_ in range(1, SOFT_MOST + 1):
+                g = q[(nt == a_) & (nk == b_)]
+                if len(g):
+                    out[g] = _covered(at, kept, mid[g], key[g], vt[g], vk[g], a_, b_, now)
+    return out
+
+
+def _round_vote(w, at, kept, sx, sy, r, rc, box, own, now):
+    """Edges: Smooth on a stretched spot: looks in a round patch (radius r, box units) round where each spot fetches
+    from (sx, sy) vote, nearer ones weighing more (_RING); the colour with the most weight wins (a tie: the middle's).
+    A stripe's staircase (each key row one step) magnified by a stretch gets its corners rounded about a key wide:
+    the edge comes out as a slant. The note handed back = the look nearest the middle with the winning colour."""
+    from notes.recolour import nearest
+    n = len(sx)
+    got, wts = [], []
+    for ox, oy, wt in _RING:
+        mid, key = _placed(w, sx + ox * r, sy + oy * r, rc, box, own)
+        got.append(nearest(at, mid, key, own=False, kept=kept))
+        wts.append(wt)
+    got = np.stack(got, 1)  # (n, looks), nearest the middle first
+    col = now[got]
+    K = int(col.max()) + 1
+    rows = np.arange(n)[:, None] * K
+    score = np.bincount((rows + col).ravel(), weights=np.broadcast_to(np.array(wts), col.shape).ravel(),
+                        minlength=n * K).reshape(n, K)
+    score[np.arange(n), col[:, 0]] += 1e-6  # (a tie: the middle's colour)
+    best = np.argmax(score, 1)
+    first = np.argmax(col == best[:, None], 1)  # (the first look (nearest the middle) with that colour)
+    return got[np.arange(n), first]
+
+
+def _covered(at, kept, mid, key, vt, vk, nt, nk, now):
+    """Edges: Smooth on a squashed spot: nt x nk looks spread over what the note covers (the arrows vt / vk round
+    (mid, key)) vote; the most common colour wins (a tie: the one looked at nearest the middle); its look's note."""
+    from notes.recolour import nearest
+    a = (np.arange(nt) + 0.5) / nt - 0.5
+    b = (np.arange(nk) + 0.5) / nk - 0.5
+    A, B = (v.ravel() for v in np.meshgrid(a, b))
+    order = np.argsort(np.hypot(A, B), kind="stable")  # (nearest the middle first)
+    A, B = A[order], B[order]
+    n, s = len(mid), len(A)
+    pm = mid[:, None] + A[None] * vt[:, None, 0] + B[None] * vk[:, None, 0]
+    pk = key[:, None] + A[None] * vt[:, None, 1] + B[None] * vk[:, None, 1]
+    got = nearest(at, pm.ravel(), pk.ravel(), own=False, kept=kept).reshape(n, s)
+    if s == 1:
+        return got[:, 0]
+    col = now[got]  # (colours are small whole numbers: counted per note by bincount)
+    K = int(col.max()) + 1
+    rows = np.arange(n)[:, None] * K
+    count = np.bincount((rows + col).ravel(), minlength=n * K).reshape(n, K)
+    first = np.zeros((n, K), np.int64)
+    for j in range(s - 1, -1, -1):  # (each colour's first look, nearest the middle: written last)
+        first[np.arange(n), col[:, j]] = j
+    best = np.argmax(count * (s + 1) - first, 1)  # (the most common; a tie: the one looked at nearest the middle)
+    return got[np.arange(n), first[np.arange(n), best]]
 
 
 def liquify_from(at, rc, box, own):
@@ -540,13 +681,11 @@ class Live:
         D = np.concatenate(parts) if parts else none
         if not len(D):
             return none
-        from notes.recolour import nearest
         x, y = self.w["x"][D], self.w["y"][D]
         hot = touched(a, x, y)
         got = self.now[D].copy()
         if hot.any():
-            mid, key = _fetched(self.w, a, x[hot], y[hot], self.rc, self.box, self.own)
-            src = nearest(self.at, mid, key, own=False, kept=self.kept)
+            src = found(self.w, a, self.at, D[hot], x[hot], y[hot], self.rc, self.box, self.own, self.now, self.kept)
             got[hot] = _taken(self.now, D[hot], src, self.pals, self.rc)
         moved = got != self.F[D]
         D = D[moved]

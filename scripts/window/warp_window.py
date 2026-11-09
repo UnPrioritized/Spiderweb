@@ -52,6 +52,8 @@ class WarpWindow(tk.Toplevel):
         self.smooth = settings.get("warp", "smooth", "1") != "0"
         edge = settings.get("warp", "edge", "escape")
         self.edge = edge if edge in STIR_EDGES else "escape"
+        edges = settings.get("warp", "edges", wp_.DEFAULTS["edges"])
+        self.edges = edges if edges in wp_.EDGES else wp_.DEFAULTS["edges"]
         self._fit = {}  # id(shape) -> (the Warp a size change left it, the Warp before the first size change)
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
@@ -63,7 +65,8 @@ class WarpWindow(tk.Toplevel):
         grids = [tr("warp.grid_n", cols=c, rows=r) for c, r in wp_.GRIDS] + [tr("warp.custom")]
         rows = (("grid", grids, self.on_grid, 0),
                 ("bend", [tr("warp.smooth"), tr("warp.straight")], self.on_bend, 2),
-                ("edge", [tr(f"stir.edge_{c}") for c in STIR_EDGES], self.on_edge, 3))
+                ("edges", [tr(f"warp.edges_{c}") for c in wp_.EDGES], self.on_edges, 3),
+                ("edge", [tr(f"stir.edge_{c}") for c in STIR_EDGES], self.on_edge, 4))
         for name, values, act, r in rows:
             word = ttk.Label(form, text=tr(f"warp.{name}"))
             word.grid(row=r, column=0, sticky="w", pady=2)
@@ -196,6 +199,15 @@ class WarpWindow(tk.Toplevel):
         put("smooth", "1" if smooth else "0")
         self._change(lambda w, sh: dict(w, smooth=smooth), tr("warp.undo_bend"))
 
+    def on_edges(self):
+        i = self.boxes["edges"].current()
+        if i < 0:
+            return
+        edges = wp_.EDGES[i]
+        self.edges = edges
+        put("edges", edges)
+        self._change(lambda w, sh: dict(w, edges=edges), tr("warp.undo_edges"))
+
     def on_edge(self):
         i = self.boxes["edge"].current()
         if i < 0:
@@ -211,7 +223,7 @@ class WarpWindow(tk.Toplevel):
         ws = [w for w in self.warps() if w]
         if not ws:
             return
-        for key in ("cols", "rows", "smooth", "edge"):
+        for key in ("cols", "rows", "smooth", "edge", "edges"):
             vals = {w[key] for w in ws}
             if len(vals) == 1:
                 v = vals.pop()
@@ -237,9 +249,10 @@ class WarpWindow(tk.Toplevel):
             else:
                 self.warn.pack_forget()
         # (each box: the shapes' own, a shape without a Warp yet = the window's pick for its first drag)
-        mine = {"cols": self.cols, "rows": self.rows, "smooth": self.smooth, "edge": self.edge}
+        mine = {"cols": self.cols, "rows": self.rows, "smooth": self.smooth, "edge": self.edge, "edges": self.edges}
         every = [w or mine for w in ws] or [mine]
-        for name, key, values in (("bend", "smooth", BENDS), ("edge", "edge", STIR_EDGES)):
+        for name, key, values in (("bend", "smooth", BENDS), ("edges", "edges", wp_.EDGES),
+                                  ("edge", "edge", STIR_EDGES)):
             got = {w[key] for w in every}
             b = self.boxes[name]
             v = got.pop() if len(got) == 1 else None
