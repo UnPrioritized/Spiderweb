@@ -1,6 +1,8 @@
 //! The piano roll's note pictures (roll_draw): fastloops' paint_order, order_screen, order_rects, last_on_pixels,
 //! note_top, paint_notes. The very same steps as those, in the same order, so the same pixels come out.
 use crate::maths::{f2i, fdiv, fmodi, imax, imin, rint};
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicI64, Ordering};
 use crate::{all_below, copied, need, rd, room, try_zeros, wr, zeros, Flag, Nd, NdMut, NO_MEMORY};
 
 const OWN0: i64 = 1 << 32; // (engine.OWN0)
@@ -381,104 +383,231 @@ fn order_rects_checked(s: &[i64], e: &[i64], key: &[i16], color: &[i32], first: 
 }
 
 /// fastloops.last_on_pixels (x0 / x1 clamped in place) into out (5 rows, room len(x0)) -> how many.
+/// Shared out over the pool's threads when there are many notes: the clamp and the last note per pixel (the
+/// largest index wins: atomic max, the same as the serial last write), then the kept notes counted per chunk and
+/// each chunk put at its own place (in order, so the same rows as one chunk).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub fn last_on_pixels(x0: &mut [i64], x1: &mut [i64], key: &[i64], color: &[i64], left: i64, right: i64, keys: i64,
                       row0: &[i64], row1: &[i64], out: NdMut<i64, 2>) -> i64 {
     let n = x0.len();
-    for i in 0..n {
-        x0[i] = imax(x0[i], left);
-        x1[i] = imin(x1[i], right);
-    }
     let size_all = (right - left + 1) * keys * 4;
     let mut last: Vec<i64> = match try_zeros(size_all.max(0) as usize) {
         Some(v) => v,
         None => return NO_MEMORY,
     };
     let nl = last.len();
-    for i in 0..n {
-        let size = x1[i] - x0[i];
-        if (0..4).contains(&size) {
-            last[wrap(((x0[i] - left) * keys + key[i]) * 4 + size, nl)] = i as i64;
-        }
-    }
     let room = out.sh[1];
-    let (ra, rest) = out.d.split_at_mut(room);
-    let (rb, rest) = rest.split_at_mut(room);
-    let (rc, rest) = rest.split_at_mut(room);
-    let (rd, re) = rest.split_at_mut(room);
-    let mut m = 0usize;
-    for i in 0..n {
-        let size = x1[i] - x0[i];
-        if (0..4).contains(&size) && last[wrap(((x0[i] - left) * keys + key[i]) * 4 + size, nl)] != i as i64 {
-            continue;
-        }
-        let k = key[i];
-        ra[m] = x0[i];
-        rb[m] = row0[wrap(k, row0.len())];
-        rc[m] = imax(x1[i] - 1, x0[i]);
-        rd[m] = row1[wrap(k, row1.len())] - 1;
-        re[m] = color[i];
-        m += 1;
+    if x1.len() < n || key.len() < n || color.len() < n || out.d.len() < 5 * room {
+        return crate::FAILED;
     }
-    m as i64
+    let pool = crate::pool_for(true, n, 2);
+    let parallel = pool.is_some();
+    let (size, chunks) = chunking(pool, n, 1);
+    let (px0, px1, lp) = (Raw(x0.as_mut_ptr()), Raw(x1.as_mut_ptr()), Raw(last.as_mut_ptr()));
+    // (1: the clamp in place, and each pixel's last note; the checks of the indices come here, once)
+    let fine = each(pool, chunks, |c| {
+        let (x0p, x1p, lpp) = (px0.get(), px1.get(), lp.get());
+        for i in span(c, size, n) {
+            unsafe {
+                let a = imax(*x0p.add(i), left);
+                let b = imin(*x1p.add(i), right);
+                *x0p.add(i) = a;
+                *x1p.add(i) = b;
+                let sz = b - a;
+                if (0..4).contains(&sz) {
+                    let idx = wrap(((a - left) * keys + rd(key, i)) * 4 + sz, nl);
+                    if idx >= nl {
+                        return false;
+                    }
+                    if parallel {
+                        (*(lpp.add(idx) as *const AtomicI64)).fetch_max(i as i64, Ordering::Relaxed);
+                    } else {
+                        *lpp.add(idx) = i as i64;
+                    }
+                }
+            }
+        }
+        true
+    });
+    if fine.iter().any(|&ok| !ok) {
+        return crate::FAILED;
+    }
+    let x0: &[i64] = x0;
+    let x1: &[i64] = x1;
+    let last: &[i64] = &last;
+    // (2: the kept notes per chunk)
+    let kept = each(pool, chunks, |c| {
+        let mut cnt = 0i64;
+        for i in span(c, size, n) {
+            let (a, b) = (rd(x0, i), rd(x1, i));
+            let sz = b - a;
+            if (0..4).contains(&sz) && last[wrap(((a - left) * keys + rd(key, i)) * 4 + sz, nl)] != i as i64 {
+                continue;
+            }
+            cnt += 1;
+        }
+        cnt
+    });
+    let mut offs_of: Vec<i64> = Vec::with_capacity(chunks);
+    let mut total = 0i64;
+    for &k in &kept {
+        offs_of.push(total);
+        total += k;
+    }
+    if total as usize > room {
+        return crate::FAILED;
+    }
+    // (3: each chunk writes its own kept notes, from its own place on)
+    let base = Raw(out.d.as_mut_ptr());
+    each(pool, chunks, |c| {
+        let bp = base.get();
+        let mut p = offs_of[c] as usize;
+        for i in span(c, size, n) {
+            let (a, b) = (rd(x0, i), rd(x1, i));
+            let sz = b - a;
+            let k = rd(key, i);
+            if (0..4).contains(&sz) && last[wrap(((a - left) * keys + k) * 4 + sz, nl)] != i as i64 {
+                continue;
+            }
+            unsafe {
+                // (p < total <= room: each chunk's places are its own)
+                *bp.add(p) = a;
+                *bp.add(room + p) = row0[wrap(k, row0.len())];
+                *bp.add(2 * room + p) = imax(b - 1, a);
+                *bp.add(3 * room + p) = row1[wrap(k, row1.len())] - 1;
+                *bp.add(4 * room + p) = color[i];
+            }
+            p += 1;
+        }
+    });
+    total
+}
+
+/// A raw pointer the pool's threads share: each chunk only touches its own places (counted before).
+#[derive(Clone, Copy)]
+struct Raw<T>(*mut T);
+unsafe impl<T> Send for Raw<T> {}
+unsafe impl<T> Sync for Raw<T> {}
+impl<T> Raw<T> {
+    fn get(self) -> *mut T {
+        self.0
+    }
+}
+
+/// (chunk size, chunks) for n items with `cells` numbers kept per chunk: the pool's threads x 4 (one chunk without
+/// a pool), fewer when the cells would be many.
+fn chunking(pool: Option<&rayon::ThreadPool>, n: usize, cells: usize) -> (usize, usize) {
+    let want = pool.map_or(1, |p| 4 * p.current_num_threads()).min(n.max(1)).min(((1 << 22) / cells.max(1)).max(1));
+    let want = want.max(1);
+    let size = ((n + want - 1) / want).max(1);
+    (size, ((n + size - 1) / size).max(1))
+}
+
+/// The items of chunk c (of `size` each, n items).
+fn span(c: usize, size: usize, n: usize) -> std::ops::Range<usize> {
+    (c * size).min(n)..((c + 1) * size).min(n)
+}
+
+/// f for every chunk (in the pool's threads when there is one), the results in chunk order.
+fn each<T: Send>(pool: Option<&rayon::ThreadPool>, chunks: usize, f: impl Fn(usize) -> T + Sync + Send) -> Vec<T> {
+    match pool {
+        None => (0..chunks).map(f).collect(),
+        Some(p) => p.install(move || (0..chunks).into_par_iter().map(f).collect()),
+    }
 }
 
 /// fastloops.liquify_rects: one shape's notes on screen (rows `on`, start order) put in painting order by their
 /// slot's rank (a stable counting sort; no ranks = as they are), with their colour numbers: x0 / x1 / key / code
-/// into out (4 rows, room len(on)) -> 0.
+/// into out (4 rows, room len(on)) -> 0. Shared out over the pool's threads when there are many notes: each chunk
+/// of notes counts its ranks, the counts give every chunk its places (the same places as one chunk), then each
+/// chunk puts its notes there.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub fn liquify_rects(on: &[i64], slot: &[i64], rank: &[i64], colour: &[i64], x0: &[i64], x1: &[i64], key: &[i64],
                      vq: &[i64], out: NdMut<i64, 2>) -> i64 {
     let n = on.len();
-    if x0.len() < n || x1.len() < n || key.len() < n || vq.len() < n || out.sh[0] < 4 || out.sh[1] < n {
+    if x0.len() < n || x1.len() < n || key.len() < n || vq.len() < n || out.sh[0] < 4 || out.sh[1] < n
+        || out.d.len() < 4 * out.sh[1]
+    {
         return crate::FAILED;
     }
-    // (every place checked once, the ranks counted; then each note put in its place. No lists the size of the notes
-    // made here: fresh memory costs a page fault every 4 KB)
     let ranked = !rank.is_empty();
-    let mut most = 0i64;
-    for &r in on {
-        if r < 0 || r as usize >= slot.len() {
-            return crate::FAILED;
-        }
-        let s = slot[r as usize];
-        if s < 0 || s as usize >= colour.len() || (ranked && s as usize >= rank.len()) {
-            return crate::FAILED;
-        }
-        if ranked {
-            let k = rank[s as usize];
-            if !(0..1 << 20).contains(&k) {
-                return crate::FAILED;
+    let pool = crate::pool_for(true, n, 2);
+    // (every place checked once, the biggest rank found)
+    let (size, chunks) = chunking(pool, n, 1);
+    let checked = each(pool, chunks, |c| -> Option<i64> {
+        let mut most = 0i64;
+        for &r in &on[span(c, size, n)] {
+            if r < 0 || r as usize >= slot.len() {
+                return None;
             }
-            most = most.max(k);
+            let s = slot[r as usize];
+            if s < 0 || s as usize >= colour.len() || (ranked && s as usize >= rank.len()) {
+                return None;
+            }
+            if ranked {
+                let k = rank[s as usize];
+                if !(0..1 << 20).contains(&k) {
+                    return None;
+                }
+                most = most.max(k);
+            }
+        }
+        Some(most)
+    });
+    let mut found = 0i64;
+    for m in checked {
+        match m {
+            Some(v) => found = found.max(v),
+            None => return crate::FAILED,
+        }
+    }
+    // (the places: one level per rank, or one level for all; counts per chunk and level, then running sums)
+    let levels = if ranked && found > 0 { found as usize + 1 } else { 1 };
+    let (size, chunks) = chunking(pool, n, levels);
+    let mut at = need!(zeros::<i64>(levels * chunks));
+    if levels > 1 {
+        let cnt = Raw(at.as_mut_ptr());
+        each(pool, chunks, |c| {
+            let row = unsafe { std::slice::from_raw_parts_mut(cnt.get().add(c * levels), levels) };
+            for &r in &on[span(c, size, n)] {
+                row[rank[slot[r as usize] as usize] as usize] += 1;
+            }
+        });
+    } else {
+        for c in 0..chunks {
+            at[c] = span(c, size, n).len() as i64;
+        }
+    }
+    let mut running = 0i64;
+    for k in 0..levels {
+        for c in 0..chunks {
+            let t = at[c * levels + k];
+            at[c * levels + k] = running;
+            running += t;
         }
     }
     let room = out.sh[1];
-    let (ox0, rest) = out.d.split_at_mut(room);
-    let (ox1, rest) = rest.split_at_mut(room);
-    let (okey, ocode) = rest.split_at_mut(room);
-    let mut at = need!(zeros::<i64>(most as usize + 2));
-    if ranked && most > 0 {
-        // (each rank's first place in out: the counts before it; one rank = as they are)
-        for &r in on {
-            at[rd(rank, rd(slot, r as usize) as usize) as usize + 1] += 1;
+    let cnt = Raw(at.as_mut_ptr());
+    let base = Raw(out.d.as_mut_ptr());
+    each(pool, chunks, |c| {
+        let row = unsafe { std::slice::from_raw_parts_mut(cnt.get().add(c * levels), levels) };
+        let bp = base.get();
+        for i in span(c, size, n) {
+            let s = rd(slot, rd(on, i) as usize) as usize;
+            let k = if levels > 1 { rd(rank, s) as usize } else { 0 };
+            let p = row[k] as usize;
+            row[k] += 1;
+            // (p < n <= room: the counts put every note in its own place)
+            unsafe {
+                *bp.add(p) = rd(x0, i);
+                *bp.add(room + p) = rd(x1, i);
+                *bp.add(2 * room + p) = rd(key, i);
+                *bp.add(3 * room + p) = rd(colour, s) * 32 + rd(vq, i);
+            }
         }
-        for k in 1..at.len() {
-            at[k] += at[k - 1];
-        }
-    }
-    for i in 0..n {
-        let s = rd(slot, rd(on, i) as usize) as usize;
-        let k = if ranked && most > 0 { rd(rank, s) as usize } else { 0 };
-        let p = at[k] as usize;
-        at[k] += 1;
-        ox0[p] = x0[i];
-        ox1[p] = x1[i];
-        okey[p] = key[i];
-        ocode[p] = rd(colour, s) * 32 + vq[i];
-    }
+    });
     0
 }
 

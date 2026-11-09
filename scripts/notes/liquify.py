@@ -412,19 +412,28 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
     from notes.recolour import _sorted_notes, nearest
     s100 = w["lq"]["strength"] / 100
     ox = oy = None
+    ends = None
+    il = None  # (the three exact fetches a spot, interleaved as warp_soft takes them, or None)
     if w.get("exact") is not None:  # (a Warp: each spot's exact fetch where it settles, warp.exact_offsets)
         from notes.warp import exact_offsets
-        ox, oy = exact_offsets(w["exact"], a, x, y)
-    ends = None
-    if ox is not None and w.get("soft") and len(idx):
-        # (Edges: Smooth judges what each note covers from where its two arrows' ends fetch: those EXACT too, like
-        # the middle (Warp Split hunt 2026-11-10: the middle exact but the ends from the map made ~7x the one-note
-        # slivers))
-        ends = _arrows(w, at, idx, x, y, rc, box, own)
-        tx, ty, kx, ky = ends[:4]
-        e1 = exact_offsets(w["exact"], a, x + tx, y + ty)
-        e3 = exact_offsets(w["exact"], a, x + kx, y + ky)
-        ends = ends + (e1, e3)
+        if w.get("soft") and len(idx):
+            # (Edges: Smooth judges what each note covers from where its two arrows' ends fetch: those EXACT too, like
+            # the middle (Warp Split hunt 2026-11-10: the middle exact but the ends from the map made ~7x the one-note
+            # slivers). One call for all three: spot i's middle at 3i, its arrow ends at 3i + 1 and 3i + 2 (each spot
+            # on its own, so the answers are the very same)
+            arrows = _arrows(w, at, idx, x, y, rc, box, own)
+            tx, ty, kx, ky = arrows[:4]
+            X, Y = np.empty(3 * len(x)), np.empty(3 * len(x))
+            X[0::3], Y[0::3] = x, y
+            np.add(x, tx, out=X[1::3])
+            np.add(y, ty, out=Y[1::3])
+            np.add(x, kx, out=X[2::3])
+            np.add(y, ky, out=Y[2::3])
+            il = exact_offsets(w["exact"], a, X, Y)
+            ox, oy = il[0][0::3], il[1][0::3]
+            ends = arrows + ((il[0][1::3], il[1][1::3]), (il[0][2::3], il[1][2::3]))
+        else:
+            ox, oy = exact_offsets(w["exact"], a, x, y)
     fp = _place_numbers(w, rc, box, own) if len(idx) else None
     fast = compiled("warp_soft") if fp is not None else None
     if fast:  # (the compiled pick, note by note: the very same sums as below, files/fastloops.warp_soft (Sharp too,
@@ -438,11 +447,9 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
                       0.0 if w.get("soft") else 1.0, 0.0 if ends is None else 1.0], np.float64)
         out = np.empty(len(idx), np.int64)
         none = np.zeros(0)
-        if ends is not None:  # (three exact fetches a spot, interleaved: the middle's, the two arrow ends')
-            (e1x, e1y), (e3x, e3y) = ends[5], ends[6]
-            ox, oy = np.stack([ox, e1x, e3x], 1).ravel(), np.stack([oy, e1y, e3y], 1).ravel()
+        ox_c, oy_c = il if il is not None else (ox, oy)  # (interleaved: the middle's, the two arrow ends' per spot)
         fast.warp_soft(to(at, np.int64), to(idx, np.int64), to(x, np.float64), to(y, np.float64),
-                       to(ox, np.float64) if ox is not None else none, to(oy, np.float64) if oy is not None else none,
+                       to(ox_c, np.float64) if ox_c is not None else none, to(oy_c, np.float64) if oy_c is not None else none,
                        to(a, np.float64), c, fp, np.asarray(_RING, np.float64), *_COVER_LOOKS, to(keys, np.int64), to(first, np.int64),
                        to(last, np.int64), to(line, np.float64), to(ms, np.float64), to(o, np.int64), float(base),
                        float(top), float(gap), to(now, np.int64), out)
