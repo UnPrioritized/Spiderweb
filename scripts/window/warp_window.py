@@ -411,3 +411,4 @@ def open_warp(app):
         w.focus_set()
     else:
         WarpWindow(app)
+        app.tips.show("warp", wait=True)  # (the first time: what it does, Help → Warp)

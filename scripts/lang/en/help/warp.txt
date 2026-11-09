@@ -1,0 +1,45 @@
+Warp… (in the Recolour row, between Stir… and Liquify…) bends the colours inside a shape with a grid of points, the way the Warp tool of photo editing programs bends a picture. Drag a point on the piano roll and the colours around it follow like rubber. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the bend pulled into its place.
+
+The grid is kept with the shape as points, never baked in. Come back any time and move them again; change the colours underneath (Recolour, Stir, Colours) and they flow along the same bend; move or stretch the shape and the bend goes with it. The colours bend in this order: Recolour, then every Stir, then the Warp, then the Liquify.
+
+## Dragging the points
+
+Open Warp…: the selected shape shows a grid over it. Drag any point and the colours change live while you drag, exactly as they stay when you let go. A point can go anywhere, also past the shape's edge. Each drag is one undo step (Ctrl+Z); a click without moving changes nothing. Esc while dragging puts the point back.
+
+The window follows whichever shape is selected. With several shapes selected, each one shows its own grid. Pressing a shape away from its points picks it but never moves it while the window is open.
+
+## Grid size
+
+3 x 3, 4 x 4 or 5 x 5 cells, or Custom… to set Across and Up apart (1 to 20 each), for example more cells across for a long, flat shape. Changing the size of a shape you already bent keeps its bend: the new points take it over as closely as they can. A bump a coarser grid can't make comes out softer, but going back to the size you started from gives the bend back exactly.
+
+## Bend and Colour edges
+
+Bend: Smooth bends the colours like rubber; each point bends only the 4 cells around it. Straight cells bends each cell on its own, with sharp folds along the grid lines.
+
+Colour edges: Sharp (the start) gives each note the colour of the nearest note, and is the quickest. Smooth makes the edges between colours follow a stretched bend more smoothly, and calms the colours where a cell is squashed. It is slower on big shapes. A note is one key tall, so a shallow edge is still a staircase of one-key steps either way.
+
+## Folds
+
+Drag a point past its neighbours and the grid folds over itself like paper: two parts of the colours lie in the same spot. Pulled part on top (the start) shows the part you pulled over; Pulled part underneath tucks it behind instead. The pulled part is the one whose points moved farther. Along the crease itself a thin line of mixed colours can stay.
+
+## At the edges
+
+What is pulled in where the bend reaches past the shape's edge, as in Stir: Escape, Wrap around, Bend or Cut.
+
+## Mirror
+
+Mirror moves a point's twin too while you drag, so both sides bend alike. Sideways and Up / down mirror across the grid's middle line, 4-way across both. Half turn moves the point opposite through the middle the opposite way, so a bend at 10 o'clock repeats at 4 o'clock.
+
+The mirror lines (or Half turn's ring) are drawn over the grid, and the twins of the point under the mouse light up. A point on a mirror line only slides along it; in 4-way and Half turn the middle point (the cross) can't move. Picking a mirror changes nothing by itself: only your next drags are mirrored. Mirror is a drawing aid and isn't saved with the shape.
+
+## Strength and Show the bend
+
+In the Warp window, untick "Show the bend" to hide a shape's Warp without losing the grid; tick it again and it comes back the same. Strength (0 to 400 %) moves the colours less or further along the same bend: 0 shows none, 200 % twice as far. Dragging a point on a hidden Warp shows it again. Reset puts every point back and takes the Warp away.
+
+## Big shapes
+
+On shapes with millions of notes, letting go takes a moment while the notes are made. While dragging only the notes whose colour changes are worked out, so the grid stays live. 4-way and Half turn bend more of the shape at once, so they are a little slower.
+
+## Edits that change notes
+
+Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes (Glue, Chop, Claw machine, Strum, Gate trim, Gate subtract, Gate extend, Sustain, Fill gaps...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
