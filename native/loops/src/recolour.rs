@@ -376,12 +376,45 @@ fn eased_at(p: &[f64], gy: usize, gx: usize, x: f64, y: f64) -> [f64; 6] {
     out
 }
 
+/// fastloops._bern_part: (cell, 4 bicubic weights, their 4 slopes) of one number along n cells.
+#[inline(always)]
+fn bern_part(v: f64, n: usize) -> (i64, [f64; 4], [f64; 4]) {
+    let f = pmin(pmax(v, 0.0), 1.0) * n as f64;
+    let i = f2i(f).min(n as i64 - 1);
+    let t = f - i as f64;
+    let u = 1.0 - t;
+    let m = (if v >= 0.0 && v <= 1.0 { 1.0 } else { 0.0 }) * n as f64;
+    (i, [u * u * u, 3.0 * t * u * u, 3.0 * t * t * u, t * t * t],
+     [-3.0 * u * u * m, 3.0 * u * (u - 2.0 * t) * m, 3.0 * t * (2.0 * u - t) * m, 3.0 * t * t * m])
+}
+
+/// fastloops._net_at: (value across, up, d/dx across, up, d/dy across, up) of the control net C (gy, gx, 2).
+#[inline(always)]
+fn net_at(p: &[f64], gy: usize, gx: usize, x: f64, y: f64) -> [f64; 6] {
+    let (i, wx, dx) = bern_part(x, (gx - 1) / 3);
+    let (j, wy, dy) = bern_part(y, (gy - 1) / 3);
+    let row = gx * 2;
+    let mut out = [0.0f64; 6];
+    for b in 0..4 {
+        let q0 = (3 * j as usize + b) * row + 3 * i as usize * 2;
+        for c in 0..2 {
+            let (e0, e1, e2, e3) = (p[q0 + c], p[q0 + 2 + c], p[q0 + 4 + c], p[q0 + 6 + c]);
+            let rb = ((e0 * wx[0] + e1 * wx[1]) + e2 * wx[2]) + e3 * wx[3];
+            let sb = ((e0 * dx[0] + e1 * dx[1]) + e2 * dx[2]) + e3 * dx[3];
+            out[c] = out[c] + rb * wy[b];
+            out[2 + c] = out[2 + c] + sb * wy[b];
+            out[4 + c] = out[4 + c] + rb * dy[b];
+        }
+    }
+    out
+}
+
 /// The numbers warp_newton reads past the spots.
 struct Newton<'a> {
     p: &'a [f64],
     gy: usize,
     gx: usize,
-    smooth: bool,
+    kind: i64,
     bounds: &'a [f64],
     has_b: bool,
     steps: i64,
@@ -396,7 +429,13 @@ fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64,
     let mut b = f64::INFINITY;
     let (mut ox, mut oy) = (x, y);
     for step in 0..d.steps {
-        let e = if d.smooth { eased_at(d.p, d.gy, d.gx, x, y) } else { straight_at(d.p, d.gy, d.gx, x, y) };
+        let e = if d.kind == 2 {
+            net_at(d.p, d.gy, d.gx, x, y)
+        } else if d.kind != 0 {
+            eased_at(d.p, d.gy, d.gx, x, y)
+        } else {
+            straight_at(d.p, d.gy, d.gx, x, y)
+        };
         let (vx, vy, dxx, dxy, dyx, dyy) = (e[0], e[1], e[2], e[3], e[4], e[5]);
         let (rx, ry) = (x + vx - px, y + vy - py);
         let err = (rx * rx + ry * ry).sqrt();
@@ -440,20 +479,22 @@ fn newton_range_inner(s0: usize, px: &[f64], py: &[f64], sx: &[f64], sy: &[f64],
 level_builds!(fn newton_range(s0: usize, px: &[f64], py: &[f64], sx: &[f64], sy: &[f64], d: &Newton,
                               bx: &mut [f64], by: &mut [f64], best: &mut [f64]) => newton_range_inner);
 
-/// fastloops.warp_newton (P: the offsets (gy, gx, 2); bounds (n, 4) read when has_b; many = shared out) -> 0.
+/// fastloops.warp_newton (P: the offsets (gy, gx, 2), or with kind 2 a control net (3 rows + 1, 3 cols + 1, 2);
+/// kind 0 Straight cells, 1 Smooth; bounds (n, 4) read when has_b; many = shared out) -> 0.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], smooth: bool, sx: &[f64], sy: &[f64], bounds: Nd<f64, 2>,
+pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, sx: &[f64], sy: &[f64], bounds: Nd<f64, 2>,
                    has_b: bool, steps: i64, give_step: i64, give_far: f64, bx: &mut [f64], by: &mut [f64],
                    best: &mut [f64], many: bool) -> i64 {
     let n = px.len();
     let (gy, gx) = (p.sh[0], p.sh[1]);
-    if p.sh[2] != 2 || gy < 2 || gx < 2 || (has_b && (bounds.sh[1] != 4 || bounds.sh[0] < n)) {
+    if p.sh[2] != 2 || gy < 2 || gx < 2 || (has_b && (bounds.sh[1] != 4 || bounds.sh[0] < n))
+        || !(0..=2).contains(&kind) || (kind == 2 && (gy < 4 || gx < 4 || (gy - 1) % 3 != 0 || (gx - 1) % 3 != 0)) {
         return crate::FAILED;
     }
     let (py, sx, sy) = (&py[..n], &sx[..n], &sy[..n]);
     let (bx, by, best) = (&mut bx[..n], &mut by[..n], &mut best[..n]);
-    let d = Newton { p: p.d, gy, gx, smooth, bounds: bounds.d, has_b, steps, give_step, give_far };
+    let d = Newton { p: p.d, gy, gx, kind, bounds: bounds.d, has_b, steps, give_step, give_far };
     match crate::pool_for(many, n, 1) {
         None => newton_range(0, px, py, sx, sy, &d, bx, by, best),
         Some(pool) => {

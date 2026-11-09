@@ -97,8 +97,11 @@ class WarpGrid:
     def warp_lines(self, g):
         """The grid's lines on screen: [[x0, y0, x1, y1, ...], ...], rows then columns; Smooth = the bent curves
         (each line's spots moved as the colours there are), Straight cells = straight between the points."""
-        (c, r), smooth = wp_.size(g["wp"]), g["wp"]["smooth"]
-        P = g["P"] * (self.warp_factor(g) if g["wp"]["strength"] > 0 else 1.0)
+        c, r = wp_.size(g["wp"])
+        # (curve handles dragged: the bend read from the control net, curved like Smooth)
+        P, smooth = (wp_.shape_of(dict(g["wp"], pts=np.asarray(g["P"]).reshape(-1, 2).tolist()), strength=False)
+                     if g["wp"].get("h") else (g["P"], g["wp"]["smooth"]))
+        P = P * (self.warp_factor(g) if g["wp"]["strength"] > 0 else 1.0)
         su, sv = (STEPS * c, STEPS * r) if smooth else (c, r)  # (pieces along a row / a column)
         tu, tv = np.linspace(0.0, 1.0, su + 1), np.linspace(0.0, 1.0, sv + 1)
         # (rows: v fixed, u along; columns: u fixed, v along)

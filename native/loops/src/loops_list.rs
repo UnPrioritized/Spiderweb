@@ -49,7 +49,7 @@ py_loops! {
               => crate::recolour::stir_wrap;
     liquify_sample(a: Nd<f64, 3>, x: &[f64], y: &[f64], out: NdMut<f64, 2>, many: bool)
                    => crate::recolour::liquify_sample;
-    warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], smooth: bool, sx: &[f64], sy: &[f64], bounds: Nd<f64, 2>,
+    warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, sx: &[f64], sy: &[f64], bounds: Nd<f64, 2>,
                 has_b: bool, steps: i64, give_step: i64, give_far: f64, bx: &mut [f64], by: &mut [f64],
                 best: &mut [f64], many: bool) => crate::recolour::warp_newton;
     warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3>, c: &[f64], fp: &[f64],

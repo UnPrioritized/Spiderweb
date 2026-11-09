@@ -12,7 +12,8 @@ later, planned-features.md).
 Saved as {"cols": cells across, "rows": cells up, "pts": [[dx, dy], ...] row by row from the bottom left ((cols + 1)
 x (rows + 1) of them), "smooth": False (only for Straight cells), "strength": % (only != 100), "on": False (only when
 hidden), "edge": STIR_EDGES (only != "escape"), "edges": "smooth" (only for Colour edges: Smooth), "folds": "under"
-(only for Folds: pulled part underneath)}. No point moved = no Warp
+(only for Folds: pulled part underneath), "h": [[point, side, dx, dy], ...] (only curve handles dragged: each
+cell then a bicubic patch, net / _inner), "corners": [point, ...] (its handles move alone)}. No point moved = no Warp
 (clean_warp: None). Never released before this layout: no older layout is read (user 2026-11-09).
 
 THE BEND: a point moved = the colour that was at its place is now shown where it went (forward, like the editors).
@@ -70,9 +71,7 @@ def clean_warp(d):
                                                 for p in pts):
         return None
     clean = [[round(min(max(float(v), -MOST_MOVE), MOST_MOVE), 6) + 0.0 for v in p] for p in pts]
-    if not any(v for p in clean for v in p):
-        return None
-    out = {"cols": c, "rows": r, "pts": clean}
+    out ={"cols": c, "rows": r, "pts": clean}
     if d.get("smooth") is False:
         out["smooth"] = False
     s = d.get("strength")
@@ -87,7 +86,45 @@ def clean_warp(d):
         out["edges"] = "smooth"
     if d.get("folds") == "under":
         out["folds"] = "under"
+    h = _clean_handles(d.get("h"), c, r)
+    if not any(v for p in clean for v in p) and not any(e[2] or e[3] for e in h):
+        return None
+    if h:
+        out["h"] = h
+        k = d.get("corners")
+        if isinstance(k, list):
+            k = sorted({int(v) for v in k if number(v) and v == int(v) and 0 <= v < len(clean)})
+            if k:
+                out["corners"] = k
     return out
+
+
+def _clean_handles(h, c, r):
+    """A saved "h" -> its clean list [[point, side, dx, dy], ...] (sorted, one per handle, only sides the point has;
+    the last one wins), [] when none / not readable."""
+    if not isinstance(h, list):
+        return []
+    got = {}
+    for e in h:
+        if not (isinstance(e, list) and len(e) == 4 and all(number(v) for v in e)):
+            continue
+        k, s = e[0], e[1]
+        if k != int(k) or s != int(s) or not (0 <= k < (c + 1) * (r + 1)) or not (0 <= s < 4):
+            continue
+        k, s = int(k), int(s)
+        if not side_ok(k % (c + 1), k // (c + 1), s, c, r):
+            continue
+        got[(k, s)] = [round(min(max(float(v), -MOST_MOVE), MOST_MOVE), 6) + 0.0 for v in e[2:]]
+    return [[k, s] + got[(k, s)] for k, s in sorted(got)]
+
+
+SIDES = ((-1, 0), (1, 0), (0, -1), (0, 1))  # (a point's handles by side: left, right, down, up (steps across, up))
+
+
+def side_ok(i, j, s, c, r):
+    """Whether point (i across, j up) of a c x r grid has a handle on side s (a neighbour that way)."""
+    di, dj = SIDES[s]
+    return 0 <= i + di <= c and 0 <= j + dj <= r
 
 
 def cells_ok(v):
@@ -119,6 +156,177 @@ def offsets(wp, strength=True):
     if strength:
         P = P * (full(wp)["strength"] / 100.0)
     return P
+
+
+NET = 2  # (the bend's kind for a grid with dragged handles: P = its control net; 1 / True = Smooth, 0 = Straight)
+
+
+def untouched(P, smooth):
+    """(rows + 1, cols + 1, 4, 2): where each handle of the points P sits when never dragged, as an offset from its
+    point's (SIDES order): Smooth = carried along with its point (0); Straight cells = on the straight line, a third
+    of the way to its neighbour. Sides past the grid's edge: 0 (no handle there)."""
+    R = np.zeros(P.shape[:2] + (4, 2))
+    if not smooth:
+        R[:, 1:, 0] = (P[:, :-1] - P[:, 1:]) / 3.0
+        R[:, :-1, 1] = (P[:, 1:] - P[:, :-1]) / 3.0
+        R[1:, :, 2] = (P[:-1] - P[1:]) / 3.0
+        R[:-1, :, 3] = (P[1:] - P[:-1]) / 3.0
+    return R
+
+
+def handle_rel(wp, strength=False):
+    """(rows + 1, cols + 1, 4, 2): each handle's offset from its point's (offset space; SIDES order): a dragged one as
+    saved (it stays put when Bend switches, moves along with its point), the rest untouched(). strength: times it."""
+    c, r = size(wp)
+    R = untouched(offsets(wp, strength=False), full(wp)["smooth"])
+    for k, s, dx, dy in wp.get("h", ()):
+        R[k // (c + 1), k % (c + 1), s] = (dx, dy)
+    if strength:
+        R = R * (full(wp)["strength"] / 100.0)
+    return R
+
+
+def net(wp, strength=True):
+    """A clean Warp's control net (3 rows + 1, 3 cols + 1, 2): each cell (j, i) a bicubic patch of offsets from the
+    16 controls at [3j .. 3j + 3, 3i .. 3i + 3]: its 4 corner points, the 8 handles on its sides (each shared with the
+    cell across that side) and 4 inner ones (_inner)."""
+    c, r = size(wp)
+    P, R = offsets(wp, strength), handle_rel(wp, strength)
+    C = np.zeros((3 * r + 1, 3 * c + 1, 2))
+    C[::3, ::3] = P
+    C[::3, 1::3] = P[:, :-1] + R[:, :-1, 1]
+    C[::3, 2::3] = P[:, 1:] + R[:, 1:, 0]
+    C[1::3, ::3] = P[:-1] + R[:-1, :, 3]
+    C[2::3, ::3] = P[1:] + R[1:, :, 2]
+    _inner(C, c, r)
+    return C
+
+
+IN_NEAR, IN_FAR = 2.0 / 3.0, 1.0 / 3.0  # (_inner: the side next to an inner control counts 2/3, the one across 1/3)
+
+
+def _inner(C, c, r):
+    """Fill each cell's 4 inner controls of the net C from its sides: the handle each way, read off the side next to
+    it and the one across, shared out by distance; the two ways averaged. Untouched handles give back today's bends
+    exactly (checked in warp_maths): Smooth (all 16 = the nearest corner) and Straight cells (bilinear thirds)."""
+    def q(a, b):
+        return C[b:3 * r + b:3, a:3 * c + a:3]
+    for b in (1, 2):
+        bs, bf = (0, 3) if b == 1 else (3, 0)
+        for a in (1, 2):
+            as_, af = (0, 3) if a == 1 else (3, 0)
+            u = q(as_, b) + (q(a, bs) - q(as_, bs)) * IN_NEAR + (q(a, bf) - q(as_, bf)) * IN_FAR
+            v = q(a, bs) + (q(as_, b) - q(as_, bs)) * IN_NEAR + (q(af, b) - q(af, bs)) * IN_FAR
+            q(a, b)[...] = (u + v) * 0.5
+
+
+def _factor(wp):
+    """The share of an offset the colours move by (Strength %; 0 = shown / dragged as 100 %, like the points)."""
+    s = full(wp)["strength"] / 100.0
+    return s if s > 0 else 1.0
+
+
+def handle_vecs(wp):
+    """(rows + 1, cols + 1, 4, 2) every handle as shown, from its point as shown (box units, SIDES order: a third of a
+    cell that way + its offset times the strength), and (rows + 1, cols + 1, 4) which handles there are."""
+    c, r = size(wp)
+    R = handle_rel(wp) * _factor(wp)
+    jj, ii = np.mgrid[0:r + 1, 0:c + 1]
+    has = np.zeros((r + 1, c + 1, 4), bool)
+    for s, (di, dj) in enumerate(SIDES):
+        R[:, :, s, 0] += di / (3.0 * c)
+        R[:, :, s, 1] += dj / (3.0 * r)
+        has[:, :, s] = (ii + di >= 0) & (ii + di <= c) & (jj + dj >= 0) & (jj + dj <= r)
+    return R, has
+
+
+def set_handle(wp, k, s, vec, alt=False, scale=(1.0, 1.0)):
+    """wp with point k's handle on side s dragged to vec (from its point as shown, box units, as handle_vecs). Like
+    the program's curves: the point's opposite handle turns with it (smooth through the point), keeping its length
+    as seen (scale = screen size of one box unit across / up); alt = this one alone and the point becomes a corner
+    (kept: later drags move one handle). A side the point doesn't have: wp as it was. Not cleaned (a drag goes on)."""
+    c, r = size(wp)
+    k, s = int(k), int(s)
+    i, j = k % (c + 1), k // (c + 1)
+    if not side_ok(i, j, s, c, r):
+        return wp
+    V, has = handle_vecs(wp)
+    f = _factor(wp)
+    di, dj = SIDES[s]
+    base = np.array([di / (3.0 * c), dj / (3.0 * r)])
+    got = {(e[0], e[1]): e for e in wp.get("h", ())}
+    vec = np.asarray(vec, np.float64)
+    got[(k, s)] = [k, s] + ((vec - base) / f).tolist()
+    corners = set(wp.get("corners", ()))
+    if alt:
+        corners.add(k)
+    o = s ^ 1  # (left <-> right, down <-> up)
+    if k not in corners and has[j, i, o]:
+        sc = np.abs(np.asarray(scale, np.float64))
+        length = float(np.hypot(*(V[j, i, o] * sc)))
+        seen = float(np.hypot(*(vec * sc)))
+        if seen > 0 and length > 0:
+            ob = np.array([SIDES[o][0] / (3.0 * c), SIDES[o][1] / (3.0 * r)])
+            got[(k, o)] = [k, o] + ((-vec * (length / seen) - ob) / f).tolist()
+    out = dict(wp, h=[got[key] for key in sorted(got)])
+    if corners:
+        out["corners"] = sorted(corners)
+    return out
+
+
+def reset_handle(wp, k, s):
+    """wp with point k's handle on side s back where it sits untouched (right-click)."""
+    h = [e for e in wp.get("h", ()) if (e[0], e[1]) != (k, s)]
+    out = {key: v for key, v in wp.items() if key != "h"}
+    if h:
+        out["h"] = h
+    else:
+        out.pop("corners", None)
+    return out
+
+
+def shape_of(wp, strength=True):
+    """(what the bend is read from, its kind): the point offsets and Smooth / Straight, or with dragged handles the
+    control net and NET."""
+    if wp.get("h"):
+        return net(wp, strength), NET
+    return offsets(wp, strength), full(wp)["smooth"]
+
+
+def _bern(v, n, slopes):
+    """Bicubic parts of spots v along n cells (past the box: the edge's): (cell, [4 weights], [4 slopes] or None)."""
+    v = np.asarray(v, np.float64)
+    f = np.clip(v, 0.0, 1.0) * n
+    i = np.minimum(f.astype(np.int64), n - 1)
+    t = f - i
+    u = 1.0 - t
+    w = (u * u * u, 3.0 * t * u * u, 3.0 * t * t * u, t * t * t)
+    if not slopes:
+        return i, w, None
+    m = ((v >= 0.0) & (v <= 1.0)) * float(n)
+    return i, w, (-3.0 * u * u * m, 3.0 * u * (u - 2.0 * t) * m, 3.0 * t * (2.0 * u - t) * m, 3.0 * t * t * m)
+
+
+def _net(C, x, y, slopes=False):
+    """The offsets at spots (x, y) of the box from the control net C (NET; sums in fastloops._net_at's order);
+    slopes: (value, d/dx, d/dy), exact, 0 past the box."""
+    c, r = (C.shape[1] - 1) // 3, (C.shape[0] - 1) // 3
+    i, wx, dx = _bern(x, c, slopes)
+    j, wy, dy = _bern(y, r, slopes)
+    i3, j3 = 3 * i, 3 * j
+    val = ddx = ddy = 0.0
+    for b in range(4):
+        e = [C[j3 + b, i3 + a] for a in range(4)]
+        rb = ((e[0] * wx[0][..., None] + e[1] * wx[1][..., None]) + e[2] * wx[2][..., None]) + e[3] * wx[3][..., None]
+        val = val + rb * wy[b][..., None]
+        if slopes:
+            sb = (((e[0] * dx[0][..., None] + e[1] * dx[1][..., None]) + e[2] * dx[2][..., None])
+                  + e[3] * dx[3][..., None])
+            ddx = ddx + sb * wy[b][..., None]
+            ddy = ddy + rb * dy[b][..., None]
+    if not slopes:
+        return val
+    return val, ddx, ddy
 
 
 def _eased(P, x, y, slopes=False):
@@ -171,7 +379,10 @@ def _straight(P, x, y):
 
 
 def bend_at(P, x, y, smooth=True):
-    """How far the spots (x, y) of the box move under the point offsets P (forward: where their colour goes)."""
+    """How far the spots (x, y) of the box move under the point offsets P (forward: where their colour goes). smooth
+    = the kind (NET: P is a control net, shape_of)."""
+    if smooth == NET:
+        return _net(P, x, y)
     if smooth:
         return _eased(P, x, y)
     from notes.liquify import sample
@@ -193,12 +404,12 @@ def inverse_map(wp, quick=False):
     for the notes themselves: let go works the whole map out, so a shape's colours never hang on how it was edited
     (Newton's last digits can differ near a moved point's reach)."""
     f = full(wp)
-    key = json.dumps([size(wp), wp["pts"], f["smooth"], f["strength"], f["folds"]])
+    key = json.dumps([size(wp), wp["pts"], f["smooth"], f["strength"], f["folds"], wp.get("h")])
     got = _MAPS.get(key)
     if got is not None:
         return got
-    P = offsets(wp)
-    smooth, top = f["smooth"], f["folds"] == "top"
+    P, smooth = shape_of(wp)
+    top = f["folds"] == "top"
     fold = _folds(P, smooth, top)  # (None: nothing folds, the plain Newton answers stand)
     gx, gy = map_size(wp)
     last = _LAST.get((size(wp), smooth, top)) if quick else None
@@ -243,6 +454,8 @@ def _reach(P0, P, smooth, gx, gy):
     there is at most the largest bend there away. Each spot is worked out on its own, so parts may overlap."""
     if P0.shape != P.shape:
         return None
+    if smooth == NET:
+        return _reach_net(P0, P, gx, gy)
     moved = np.argwhere((P0 != P).any(2))
     if len(moved) > 4:
         return None
@@ -269,11 +482,43 @@ def _reach_one(P0, P, j, i, gx, gy):
     if i1 >= cols:
         u1 = np.inf
 
-    def span(a, b, g):
-        lo = int(np.floor(max(a, 0.0) * (g - 1))) - 1
-        hi = int(np.ceil(min(b, 1.0) * (g - 1))) + 2
-        return slice(max(lo, 0), min(hi, g))
-    return span(v0, v1, gy), span(u0, u1, gx)
+    return _span(v0, v1, gy), _span(u0, u1, gx)
+
+
+def _span(a, b, g):
+    """Map spots a .. b (box units) on a side of g spots, a spot more each way."""
+    lo = int(np.floor(max(a, 0.0) * (g - 1))) - 1
+    hi = int(np.ceil(min(b, 1.0) * (g - 1))) + 2
+    return slice(max(lo, 0), min(hi, g))
+
+
+MOST_REACH_CELLS = 24  # (_reach_net: more cells changed than this = the whole map)
+
+
+def _reach_net(P0, P, gx, gy):
+    """_reach for control nets (handles dragged): one part per cell any of whose 16 controls changed (a point = its
+    4 cells, a handle = the 2 cells beside its line). A bicubic patch never leaves its controls' hull: a spot whose
+    colour comes from there is at most the largest of them away."""
+    r, c = (P.shape[0] - 1) // 3, (P.shape[1] - 1) // 3
+    ch = (P0 != P).any(2)
+    cells = np.zeros((r, c), bool)
+    for b in range(4):
+        for a in range(4):
+            cells |= ch[b:3 * r + b:3, a:3 * c + a:3]
+    got = np.argwhere(cells)
+    if len(got) > MOST_REACH_CELLS:
+        return None
+    parts = []
+    for j, i in got:
+        near = (slice(3 * j, 3 * j + 4), slice(3 * i, 3 * i + 4))
+        both = np.concatenate([P0[near].reshape(-1, 2), P[near].reshape(-1, 2), np.zeros((1, 2))])
+        lo, hi = both.min(0), both.max(0)
+        u0 = -np.inf if i == 0 else i / c + lo[0]
+        u1 = np.inf if i == c - 1 else (i + 1) / c + hi[0]
+        v0 = -np.inf if j == 0 else j / r + lo[1]
+        v1 = np.inf if j == r - 1 else (j + 1) / r + hi[1]
+        parts.append((_span(v0, v1, gy), _span(u0, u1, gx)))
+    return parts
 
 
 def _solve(P, px, py, smooth, fold=None):
@@ -303,7 +548,9 @@ def _folds(P, smooth, top, always=False):
     FOLD_PIECES x FOLD_PIECES), "land" = the box (x0, x1, y0, y1) each one's colours land in, "rank" = its place
     in the fold rule (higher = on top), "fixed" = the boxes of the folded pieces' landing (only spots in one get
     the rule)."""
-    rows, cols = P.shape[0] - 1, P.shape[1] - 1
+    is_net = smooth == NET
+    step = 3 if is_net else 1
+    rows, cols = (P.shape[0] - 1) // step, (P.shape[1] - 1) // step
     n = FOLD_LOOK
     t = np.linspace(0.0, 1.0, n)
     # (each cell's forward picture on n x n spots: a small quad there turned over (area <= 0) = a fold)
@@ -319,13 +566,22 @@ def _folds(P, smooth, top, always=False):
     flipped = (area <= 0).any((1, 3))  # (rows, cols)
     if not flipped.any() and not always:
         return None
-    moved = np.hypot(P[..., 0], P[..., 1])
+    pts = P[::step, ::step]
+    moved = np.hypot(pts[..., 0], pts[..., 1])
     # (by how far the cell's corners moved, added smallest first: mirrored twin cells get the very same number;
     # cells that tie share a place (user 2026-11-09, a mirrored fold came out lopsided when grid order broke the
     # tie): _fold_pick then takes the answer whose colour travels less)
     c4 = np.sort(np.stack([moved[:-1, :-1], moved[:-1, 1:], moved[1:, :-1], moved[1:, 1:]]), 0)
     rank = (c4[0] + c4[1]) + (c4[2] + c4[3])
-    order = np.unique(rank.ravel(), return_inverse=True)[1].reshape(-1).astype(np.int64)
+    if is_net:  # (cells tying on their corners: the one whose 16 controls moved farther, all told, is more pulled;
+        # sorted first so mirrored twins add up the very same)
+        h = np.hypot(P[..., 0], P[..., 1])
+        sixteen = np.stack([h[b:3 * rows + b:3, a:3 * cols + a:3] for b in range(4) for a in range(4)])
+        more = np.sort(sixteen, 0).sum(0)
+        key = np.stack([rank.ravel(), more.ravel()], 1)
+        order = np.unique(key, axis=0, return_inverse=True)[1].reshape(-1).astype(np.int64)
+    else:
+        order = np.unique(rank.ravel(), return_inverse=True)[1].reshape(-1).astype(np.int64)
     k = FOLD_PIECES
     units, land, ranks, fixed = [], [], [], []
     per = (n - 1) // k  # (looks a piece side: n - 1 must split evenly)
@@ -425,6 +681,11 @@ def _fold_pick(P, px, py, smooth, fold, bx, by, lost=None):
     bx[sp[first]], by[sp[first]] = sx[first], sy[first]
 
 
+def _kind(smooth):
+    """The bend's kind as the compiled loop takes it: 0 Straight cells, 1 Smooth, NET (2) a control net."""
+    return NET if smooth == NET else 1 if smooth else 0
+
+
 def _newton(P, px, py, smooth, sx, sy, bounds=None):
     """Newton steps from (sx, sy) toward s + bend(s) = (px, py) under the offsets P: (x, y, how far off) of the
     best answer each spot reached. bounds (x0, x1, y0, y1 arrays): kept inside them (a fold's piece)."""
@@ -436,7 +697,7 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None):
         n = len(px)
         bnd = to(np.column_stack(bounds), np.float64) if bounds is not None else np.zeros((1, 4))
         bx, by, best = np.empty(n), np.empty(n), np.empty(n)
-        fast.warp_newton(to(P, np.float64), to(px, np.float64), to(py, np.float64), bool(smooth), sx, sy, bnd,
+        fast.warp_newton(to(P, np.float64), to(px, np.float64), to(py, np.float64), _kind(smooth), sx, sy, bnd,
                          bounds is not None, STEPS, GIVE_UP_STEP, GIVE_UP_FAR, bx, by, best)
         return bx, by, best
     best = np.full(len(px), np.inf)
@@ -445,7 +706,8 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None):
     for step in range(STEPS):
         x, y = sx[live], sy[live]
         # (the slopes exact, with the values: one lookup a step)
-        d0, dx, dy = _eased(P, x, y, slopes=True) if smooth else _straight(P, x, y)
+        d0, dx, dy = (_net(P, x, y, slopes=True) if smooth == NET else _eased(P, x, y, slopes=True) if smooth
+                      else _straight(P, x, y))
         rx, ry = x + d0[:, 0] - px[live], y + d0[:, 1] - py[live]
         err = np.sqrt(rx * rx + ry * ry)  # (not hypot: the compiled twin's sqrt gives the very same bits)
         better = err < best[live]
@@ -519,7 +781,9 @@ def refit(wp, cols, rows):
     sx, sy = REFIT_STEPS * max(cols, c0) + 1, REFIT_STEPS * max(rows, r0) + 1
     yy, xx = np.mgrid[0:sy, 0:sx]
     x, y = (xx / (sx - 1)).ravel(), (yy / (sy - 1)).ravel()
-    want = bend_at(offsets(wp, strength=False), x, y, smooth)  # (sy * sx, 2)
+    G, kind = shape_of(wp, strength=False)
+    want = bend_at(G, x, y, kind)  # (sy * sx, 2; handles bend it too: the new grid's start untouched)
+    wp = {k: v for k, v in wp.items() if k not in ("h", "corners")}
     # (the bend = sum of points x (weight across) x (weight up): the weights each way found from a 1-D grid, so the
     # solve is Bx' P By = want with B = each way's weights; least squares each way in turn = the same as all at once)
     Bx = _weights(xx[0] / (sx - 1), cols, smooth)  # (sx, cols + 1)
@@ -565,14 +829,31 @@ def blend(x, y, f):
     def on_grid(d):
         if not d:
             return np.zeros((r + 1, c + 1, 2))
-        P = offsets(d, strength=False)
-        return P if size(d) == (c, r) else bend_at(P, u, v, full(d)["smooth"]).reshape(r + 1, c + 1, 2)
+        if size(d) == (c, r):
+            return offsets(d, strength=False)
+        G, kind = shape_of(d, strength=False)
+        return bend_at(G, u, v, kind).reshape(r + 1, c + 1, 2)
     # (a hidden or 0 % end bends nothing you see: it counts as unmoved, else its bend showed up halfway; hunt
     # 2026-11-09. Both such ends: blended as they are, the steps hidden / 0 % too)
     xs, ys = shows(x), shows(y)
     if xs or ys:
         x, y = xs, ys
-    P = on_grid(x) * (1 - f) + on_grid(y) * f
+    px, py = on_grid(x), on_grid(y)
+    P = px * (1 - f) + py * f
     sx = (x or y).get("strength", DEFAULTS["strength"])
     sy = (y or x).get("strength", DEFAULTS["strength"])
-    return clean_warp(dict(near, pts=P.reshape(-1, 2).tolist(), strength=sx + (sy - sx) * f))
+    out = {k: v for k, v in near.items() if k not in ("h", "corners")}
+    smooth = full(near)["smooth"]
+    if (x or {}).get("h") or (y or {}).get("h"):  # (handles blended like the points: an end without them, or on
+        # another grid, = its handles untouched on this one)
+        def rel(d, Pd):
+            return handle_rel(d) if d and size(d) == (c, r) else untouched(Pd, smooth)
+        R = rel(x, px) * (1 - f) + rel(y, py) * f
+        diff = np.abs(R - untouched(P, smooth)).max(3) > 1e-9
+        h = [[int(j * (c + 1) + i), int(s), float(R[j, i, s, 0]), float(R[j, i, s, 1])]
+             for j, i, s in np.argwhere(diff) if side_ok(i, j, s, c, r)]
+        if h:
+            out["h"] = h
+            if near.get("corners"):
+                out["corners"] = near["corners"]
+    return clean_warp(dict(out, pts=P.reshape(-1, 2).tolist(), strength=sx + (sy - sx) * f))

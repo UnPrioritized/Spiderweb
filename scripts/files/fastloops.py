@@ -777,13 +777,50 @@ def _eased_at(P, x, y):
 
 
 @njit(nogil=True)
+def _bern_part(v, n):
+    """warp._bern with slopes for one number along n cells: (cell, 4 weights, 4 slopes)."""
+    f = min(max(v, 0.0), 1.0) * float(n)
+    i = min(np.int64(f), n - 1)
+    t = f - i
+    u = 1.0 - t
+    m = (1.0 if (v >= 0.0 and v <= 1.0) else 0.0) * float(n)
+    w = np.empty(4)
+    d = np.empty(4)
+    w[0], w[1], w[2], w[3] = u * u * u, 3.0 * t * u * u, 3.0 * t * t * u, t * t * t
+    d[0], d[1] = -3.0 * u * u * m, 3.0 * u * (u - 2.0 * t) * m
+    d[2], d[3] = 3.0 * t * (2.0 * u - t) * m, 3.0 * t * t * m
+    return i, w, d
+
+
+@njit(nogil=True)
+def _net_at(C, x, y):
+    """warp._net(C, x, y, slopes=True) at one spot: (value across, up, d/dx across, up, d/dy across, up)."""
+    i, wx, dx = _bern_part(x, (C.shape[1] - 1) // 3)
+    j, wy, dy = _bern_part(y, (C.shape[0] - 1) // 3)
+    out = np.zeros(6)
+    for b in range(4):
+        r = 3 * j + b
+        q = 3 * i
+        for c in range(2):
+            rb = ((C[r, q, c] * wx[0] + C[r, q + 1, c] * wx[1]) + C[r, q + 2, c] * wx[2]) + C[r, q + 3, c] * wx[3]
+            sb = ((C[r, q, c] * dx[0] + C[r, q + 1, c] * dx[1]) + C[r, q + 2, c] * dx[2]) + C[r, q + 3, c] * dx[3]
+            out[c] = out[c] + rb * wy[b]
+            out[2 + c] = out[2 + c] + sb * wy[b]
+            out[4 + c] = out[4 + c] + rb * dy[b]
+    return out[0], out[1], out[2], out[3], out[4], out[5]
+
+
+@njit(nogil=True)
 def _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
-    """warp._newton for spot i (the same steps, sums and order as its arrays)."""
+    """warp._newton for spot i (the same steps, sums and order as its arrays). smooth = the kind: 0 Straight
+    cells, 1 Smooth, 2 a control net (handles dragged)."""
     x, y = sx[i], sy[i]
     b = np.inf
     ox, oy = x, y
     for step in range(steps):
-        if smooth:
+        if smooth == 2:
+            vx, vy, dxx, dxy, dyx, dyy = _net_at(P, x, y)
+        elif smooth:
             vx, vy, dxx, dxy, dyx, dyy = _eased_at(P, x, y)
         else:
             vx, vy, dxx, dxy, dyx, dyy = _straight_at(P, x, y)
