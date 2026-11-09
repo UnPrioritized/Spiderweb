@@ -26,6 +26,7 @@ from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, rem
 BENDS = (True, False)  # (Smooth, Straight cells: the Bend dropdown by place)
 CELLS = ("cols", "rows")  # (the Custom boxes: cells across, cells up)
 MIRRORS = ("off", "side", "up", "both", "half")  # (the Mirror dropdown by place; both = 4-way, half = Half turn)
+SPLITS = ("across", "down", "both")  # (the Split buttons: a line side to side / top to bottom / both, as seen)
 
 
 def put(name, value):
@@ -142,6 +143,22 @@ class WarpWindow(tk.Toplevel):
                                               command=lambda: self.on_shown("on"))
         t.pack(side="left", padx=(12, 0))
         Tooltip(t, tr("warp.shown_tip"))
+        # (Split, PLAN.md "Warp Split" B: a button picked = the next click on a grid on the piano roll adds the
+        # line(s) there; it lets go after one click, a second click on it or Esc lets go too)
+        word = ttk.Label(form, text=tr("warp.split"))
+        word.grid(row=8, column=0, sticky="w", pady=2)
+        Tooltip(word, tr("warp.split_tip"))
+        prow = ttk.Frame(form)
+        prow.grid(row=8, column=1, sticky="w", padx=(6, 0), pady=2)
+        self.split_mode = ""
+        self.split_var = tk.StringVar(value="")
+        self.split_buttons = {}
+        for k, mode in enumerate(SPLITS):
+            b = ttk.Radiobutton(prow, text=tr(f"warp.split_{mode}"), value=mode, variable=self.split_var,
+                                style="Toolbutton", takefocus=False, command=lambda mode=mode: self.on_split(mode))
+            b.pack(side="left", padx=(0 if not k else 4, 0))
+            Tooltip(b, tr(f"warp.split_{mode}_tip"))
+            self.split_buttons[mode] = b
         buttons = ttk.Frame(box)
         buttons.pack(anchor="w", fill="x", pady=(10, 0))
         b = ttk.Button(buttons, text=tr("warp.reset"), command=self.on_reset)
@@ -152,7 +169,7 @@ class WarpWindow(tk.Toplevel):
         self.hint.pack(anchor="w", fill="x", pady=(10, 0))
         self.warn = ttk.Label(box, text="", foreground=look.WARN, wraplength=int(280 * app.scale), justify="left")
         self.protocol("WM_DELETE_WINDOW", self.close)
-        self.bind("<Escape>", lambda e: self.close())
+        self.bind("<Escape>", lambda e: self.set_split("") if self.split_mode else self.close())
         self.sync()
         remember_place(self, "warp")
         self.deiconify()
@@ -290,6 +307,20 @@ class WarpWindow(tk.Toplevel):
         if not getattr(self.app.roll, "wp", None):
             self.app.roll.draw_warp_grid()
 
+    def on_split(self, mode):
+        """A Split button clicked: picked (the next click on a grid adds the line), or let go when it was picked."""
+        self.set_split("" if self.split_mode == mode else mode)
+
+    def set_split(self, mode):
+        """The Split button picked ("" = none): the hint says what a click does, the piano roll's pointer follows."""
+        self.split_mode = mode
+        self.split_var.set(mode)
+        self.hint.config(text=tr("warp.split_hint" if mode else "warp.hint"))
+        roll = self.app.roll
+        roll.configure(cursor="crosshair" if mode else "")
+        if mode:
+            roll.focus_set()  # (Esc on the piano roll lets go)
+
     def on_shown(self, what, left=None):
         """The show tick (what = "on": the bend shown / hidden, the grid kept either way) or Strength ("strength").
         Only shapes with a Warp change; several picked keep their own strengths until one is typed."""
@@ -359,7 +390,8 @@ class WarpWindow(tk.Toplevel):
             else:
                 b.set("")  # (mixed)
         sizes = {(w["cols"], w["rows"]) for w in every}
-        odd = any(s not in wp_.GRIDS for s in sizes)
+        # (a split grid's lines aren't even: Custom with its counts; a ready size evens them out)
+        odd = any(s not in wp_.GRIDS for s in sizes) or any(w.get("xs") or w.get("ys") for w in every)
         show = self.custom or odd
         b = self.boxes["grid"]
         if show:
@@ -412,6 +444,8 @@ class WarpWindow(tk.Toplevel):
                 self.on_cells(name)
         if not unchanged(self.strength_entry):
             self.on_shown("strength", self.strength_entry)
+        if self.split_mode:
+            self.set_split("")
         self.app.warp_window = None
         self.destroy()
         roll.focus_set()

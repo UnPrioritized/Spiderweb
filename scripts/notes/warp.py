@@ -1136,12 +1136,21 @@ def remove_mirrored(wp, way, k):
     if not w or way not in ("x", "y"):
         return None
     n = size(w)[0 if way == "x" else 1]
+    if not number(k) or k != int(k) or not 1 <= k <= n - 1:
+        return None
     got = remove_line(w, way, k)
-    if got is None or n - k == k:
+    if n - k == k:
         return got
-    # (the mirror's number on the grid left: past k = one less)
+    if got is None:  # (nothing left moved on even lines: the mirror's line taken off a flat grid, kept for it)
+        c, r = size(w)
+        got = dict(empty(c - (way == "x"), r - (way == "y")),
+                   **{key: w[key] for key in ("smooth", "strength", "on", "edge", "edges", "folds", "xs", "ys")
+                      if key in w and key != ("xs" if way == "x" else "ys")})
+        L = lines(w)[0 if way == "x" else 1]
+        got["xs" if way == "x" else "ys"] = [float(v) for v in np.delete(L, int(k))[1:-1]]
+    # (the mirror's number on the grid left: past k = one less; None now = nothing left moved: no Warp)
     m = n - k - 1 if n - k > k else n - k
-    return remove_line(got, way, m) or got
+    return remove_line(got, way, m)
 
 
 REFIT_STEPS = 8  # (spots per cell the re-fit compares at)

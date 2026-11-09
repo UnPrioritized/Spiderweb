@@ -2037,6 +2037,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         arrow, a hand over a shape it can cut with."""
         name = self.custom_cursor(hit)
         app, tool = self.app, self.app.tool.get()
+        if not self.draft and self.warp_split_mode():
+            return "crosshair"  # (a Warp Split button picked: the next click on a grid adds the line)
         if not self.draft and self.warp_on() and getattr(self, "wp_hover_h", None) is not None:
             return "fleur"  # (a Warp curve handle)
         if not self.draft and self.warp_on() and getattr(self, "wp_hover", None) is not None:
@@ -2197,6 +2199,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if not sc:
             return
         if sc["tick"] is None:
+            if sc["deselect"] and not self.draft and self.warp_menu(e, sc["x"], sc["y"]):
+                return  # (on a shown Warp grid: its own short menu, split here / remove this line)
             i = None if self.draft else self.menu_shape(sc["x"], sc["y"])
             kept = None if self.draft or not self.app.sels else self.kept_box()
             rects = [self.box_rect(a) for a in kept or () if a not in self.ruler_boxes(kept)]
@@ -2419,6 +2423,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 return                                                    # Enter)
             if self.warp_escape():  # (a Warp point dragged: back where it was, no step)
                 return "break"
+            if self.warp_split_off():  # (a Warp Split button picked: let go of it)
+                return "break"
             if self.liquify_forget():  # (a Liquify straight stroke's start placed: that goes first, like any
                 return "break"         # other thing going on)
             busy = (self.draft is not None or self.drag is not None or self.typing is not None or self.app.parts
@@ -2446,6 +2452,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 return
             if self.drag:
                 self.delete_dragged()
+            elif self.warp_delete():  # (a Warp grid point picked: the lines through it go, never the shape)
+                pass
             elif self.funnel_parts():
                 self.delete_parts()
             elif self.picked_stroke(sh) is not None and len(self.app.sels) == 1:

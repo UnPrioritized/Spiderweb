@@ -22,7 +22,12 @@ CURVE HANDLES (PLAN.md "Warp curve handles" B, user 2026-11-09; maths in notes/w
 edge, a solid dot). Dragging one = the point's opposite handle turns along (keeps its length as seen); Alt = this
 one alone, the point becomes a corner; right-click = back where it sits untouched (one undo step). The nearer of a
 point and a handle is grabbed (a tie: the point). Mirror modes: the twins' handles copy the dragged point's
-(warp_mirror_handles), exactly mirrored; on a mirror line the mirror wins over the pairing."""
+(warp_mirror_handles), exactly mirrored; on a mirror line the mirror wins over the pairing.
+SPLIT (PLAN.md "Warp Split" B, user 2026-11-09): the window's Split button picked = the next left click on a grid adds
+the line(s) through the grid spot shown there (warp_param: the bend turned round), mirrored with the Mirror pick, one
+undo step, the button lets go (also after a refused click: status line). Right-click on a grid = its own short menu
+(split across / down / both here, Remove this line on an inner line). Delete with a point picked = the inner lines
+through it go (never the shape; a corner: nothing). The picked point follows the split (warp_repick)."""
 
 import time
 
@@ -406,6 +411,199 @@ class WarpGrid:
             return ("handle",) + hd[:3]
         return ("point",) + pt[:2] if pt else None
 
+    # ---- split (PLAN.md "Warp Split" B)
+
+    def warp_split_mode(self):
+        """The Warp window's picked Split button: "across" / "down" / "both", or "" (none)."""
+        w = getattr(self.app, "warp_window", None)
+        return w.split_mode if w else ""
+
+    def warp_split_off(self):
+        """The picked Split button let go. True when one was picked."""
+        w = getattr(self.app, "warp_window", None)
+        if not w or not w.split_mode:
+            return False
+        w.set_split("")
+        return True
+
+    def warp_param(self, g, x, y):
+        """The grid spot (box units, before the bend) shown at screen (x, y) on grid g: s with s + bend(s) = the
+        mouse's spot, the bend as the lines are drawn; None when it's off the grid."""
+        u, v = self.warp_unit(g["made"], x, y)
+        P, smooth = wp_.shape_of(self.warp_cur(g), strength=False)
+        bx, by = wp_._solve(P * self.warp_factor(g), np.array([u], np.float64), np.array([v], np.float64), smooth,
+                            None, wp_.uneven(g["wp"]))
+        s = float(bx[0]), float(by[0])
+        return s if 0.0 < s[0] < 1.0 and 0.0 < s[1] < 1.0 else None
+
+    def warp_split_ways(self, g, mode):
+        """The box's ways ("x" = a line up the box, "y" = one across it) Split mode adds, as seen on screen: "across" =
+        a line from side to side, "down" = top to bottom (a turned shape: the box's other way)."""
+        side = self.warp_axes(g["made"])  # (u runs sideways on screen)
+        return {"across": ["y" if side else "x"], "down": ["x" if side else "y"], "both": ["x", "y"]}[mode]
+
+    def warp_split_at(self, x, y, mode, say=True):
+        """Split mode at screen (x, y): the grid shown there gets its new line(s) through that spot, the mirrored
+        one(s) too with the Mirror pick; one undo step. Nothing fits there = a status line. True when a grid was
+        there."""
+        for g in self.warp_grids():
+            s = self.warp_param(g, x, y)
+            if s is None:
+                continue
+            got = self.warp_split(g, s, mode)
+            if got is None:
+                if say:
+                    self.app.status.config(text=tr("warp.split_no"))
+                return True
+            self.warp_commit(g, got, tr("warp.undo_split"))
+            return True
+        return False
+
+    def warp_split(self, g, s, mode):
+        """Grid g's Warp with Split mode's line(s) at grid spot s, or None when none fits."""
+        mu, mv, half = self.warp_mirror(g)
+        wp, done = self.warp_cur(g), False
+        for way in self.warp_split_ways(g, mode):
+            mir = half or (mu if way == "x" else mv)
+            got = (wp_.split_mirrored if mir else wp_.split)(wp, way, s[0] if way == "x" else s[1])
+            if got is not None:
+                wp, done = got, True
+        return wp if done else None
+
+    def warp_line_at(self, g, x, y):
+        """(way, line number) of grid g's inner line nearest screen (x, y) within GRAB px, or None (way "y" = a line
+        across the box (a row), "x" = one up it; numbered from the left / bottom edge, 1 .. cells - 1)."""
+        c, r = wp_.size(g["wp"])
+        best = None
+        for n, ln in enumerate(self.warp_lines(g)):
+            way, k, cells = ("y", n, r) if n <= r else ("x", n - r - 1, c)
+            if not 1 <= k <= cells - 1 or len(ln) < 4:
+                continue
+            p = np.asarray(ln, np.float64).reshape(-1, 2)
+            a, ab = p[:-1], np.diff(p, axis=0)
+            t = np.clip(((x - a[:, 0]) * ab[:, 0] + (y - a[:, 1]) * ab[:, 1])
+                        / np.maximum((ab ** 2).sum(1), 1e-12), 0.0, 1.0)
+            d = float(np.hypot(a[:, 0] + t * ab[:, 0] - x, a[:, 1] + t * ab[:, 1] - y).min())
+            if d <= GRAB * self.scale and (best is None or d < best[0]):
+                best = (d, way, k)
+        return best[1:] if best else None
+
+    def warp_removed(self, g, wp, way, k):
+        """wp without line k of `way` (its mirror too with the Mirror pick), the bend re-fitted: (the new Warp, its
+        size). Nothing left moved on even lines = a flat grid of that size (the Warp goes)."""
+        mu, mv, half = self.warp_mirror(g)
+        mir = half or (mu if way == "x" else mv)
+        c, r = wp_.size(wp)
+        n = c if way == "x" else r
+        gone = 2 if mir and n - k != k else 1
+        size = (c - gone, r) if way == "x" else (c, r - gone)
+        got = (wp_.remove_mirrored if mir else wp_.remove_line)(wp, way, k)
+        if got is None:
+            got = dict(wp_.empty(*size), **{key: wp[key] for key in ("smooth", "strength", "on", "edge", "edges",
+                                                                     "folds") if key in wp})
+        return got, size
+
+    def warp_remove(self, g, way, k):
+        """Right-click "Remove this line": grid g's line k of `way` goes (mirrored too); one undo step."""
+        got, _ = self.warp_removed(g, self.warp_cur(g), way, k)
+        self.warp_commit(g, got, tr("warp.undo_remove"))
+
+    def warp_delete(self):
+        """Delete with a grid point picked (its handles shown): the inner lines through it go, mirrored too (a point
+        on the box's edge: its inner line; a corner: nothing); one undo step. True when a point was picked (Delete
+        never deletes the shape then)."""
+        if not self.warp_on() or getattr(self, "wp", None):
+            return False
+        for g in self.warp_grids():
+            k = self.warp_pick_of(g)
+            if k is None:
+                continue
+            c, r = wp_.size(g["wp"])
+            i, j = k % (c + 1), k // (c + 1)
+            wp, done = self.warp_cur(g), False
+            if 1 <= i <= c - 1:
+                wp, _ = self.warp_removed(g, wp, "x", i)
+                done = True
+            if 1 <= j <= r - 1:  # (lines up the box gone first: the across line keeps its number)
+                wp, _ = self.warp_removed(g, wp, "y", j)
+                done = True
+            if done:
+                self.warp_commit(g, wp, tr("warp.undo_remove"))
+            return True
+        return False
+
+    def warp_commit(self, g, wp, name):
+        """Grid g's shape gets the Warp wp (a split / removed line): one undo step, the picked point kept when it's
+        still a point of the new grid (else its handles go), the notes made again."""
+        self.warp_repick(g, wp)
+        self.app.push_undo(name=name)
+        f = wp_.full(wp)
+        st = {"sh": g["sh"], "g": dict(g, wp=f, P=wp_.offsets(f, strength=False))}
+        if wp_.clean_warp(wp) is None:  # (nothing left moved, even lines: the Warp goes; a flat grid that size)
+            w = self.app.warp_window
+            w.cols, w.rows = wp_.size(f)
+        self.warp_apply(st, now=True)
+        self.app.sync_recolour()
+        self.app.schedule_autosave()
+        self.redraw()
+
+    def warp_repick(self, g, wp):
+        """The picked point of grid g moved onto the new grid wp (found by where its lines are); gone with a line =
+        no pick."""
+        k = self.warp_pick_of(g)
+        if k is None:
+            return
+        c, _ = wp_.size(g["wp"])
+        X, Y = wp_.lines(g["wp"])
+        X2, Y2 = wp_.lines(wp)
+        i = np.flatnonzero(np.abs(X2 - X[k % (c + 1)]) < 1e-7)
+        j = np.flatnonzero(np.abs(Y2 - Y[k // (c + 1)]) < 1e-7)
+        if len(i) and len(j):
+            self.wp_pick = (self.wp_pick[0], int(j[0]) * len(X2) + int(i[0]), wp_.size(wp))
+        else:
+            self.wp_pick = None
+
+    def warp_menu(self, e, x, y):
+        """Right-click (no drag) on a shown grid while the Warp window is open: its own short menu (Split across /
+        down / both ways here, Remove this line on an inner line). True when one showed."""
+        if not self.warp_on():
+            return False
+        for g in self.warp_grids():
+            s = self.warp_param(g, x, y)
+            line = self.warp_line_at(g, x, y)
+            if s is None and line is None:
+                continue
+            import tkinter as tk
+            m = tk.Menu(self, tearoff=0)
+            sh = g["sh"]
+            for mode, key in (("across", "warp.menu_across"), ("down", "warp.menu_down"), ("both", "warp.menu_both")):
+                ok = s is not None and self.warp_split(g, s, mode) is not None
+                m.add_command(label=tr(key), state="normal" if ok else "disabled",
+                              command=lambda mode=mode: self.warp_menu_do(sh, x, y, mode))
+            if line is not None:
+                m.add_separator()
+                m.add_command(label=tr("warp.menu_remove"),
+                              command=lambda: self.warp_menu_do(sh, x, y, None, line))
+            self.warp_menu_shown = m
+            m.tk_popup(e.x_root, e.y_root)
+            return True
+        return False
+
+    def warp_menu_do(self, sh, x, y, mode, line=None):
+        """A Warp menu item: on sh's grid as it is now (an undo meanwhile: found again by the shape)."""
+        g = next((g for g in self.warp_grids() if g["sh"] is sh), None) if self.warp_on() else None
+        if g is None:
+            return
+        if line is not None:
+            self.warp_remove(g, *line)
+            return
+        s = self.warp_param(g, x, y)
+        got = self.warp_split(g, s, mode) if s is not None else None
+        if got is None:
+            self.app.status.config(text=tr("warp.split_no"))
+            return
+        self.warp_commit(g, got, tr("warp.undo_split"))
+
     # ---- drawing
 
     def draw_warp_grid(self, in_redraw=False):
@@ -529,6 +727,12 @@ class WarpGrid:
         if not self.warp_on():
             return False
         app = self.app
+        mode = self.warp_split_mode()
+        if mode:  # (a Split button picked: this click adds the line(s), never a drag; the button lets go)
+            self.warp_split_off()
+            if self.warp_split_at(e.x, e.y, mode):
+                self.drag = ("warp_none",)
+                return True
         got = self.warp_grab(e.x, e.y)
         if got is None:
             if getattr(self, "wp_pick", None) is not None:  # (off the grid: the picked point's handles go)
@@ -556,7 +760,8 @@ class WarpGrid:
         u, v = self.warp_unit(g["made"], e.x, e.y)
         c, r = wp_.size(g["wp"])
         k = self.warp_factor(g)
-        base = ((i % (c + 1)) / c, (i // (c + 1)) / r)
+        X, Y = wp_.lines(g["wp"])  # (a split grid: its lines where they are)
+        base = (float(X[i % (c + 1)]), float(Y[i // (c + 1)]))
         P = np.array(g["P"], np.float64)
         here = P.reshape(-1, 2)[i]
         # (where the point shows now minus the mouse: the point stays under the mouse where it was grabbed)
