@@ -91,7 +91,8 @@ class CustomPanel:
         self.shape_word.pack(side="left")
         self.custom_combo = name_list(ttk.Combobox(row, textvariable=self.custom_pick, state="readonly", width=18,
                                                     postcommand=self.refresh_custom_names))
-        self.custom_combo.pack(side="left", padx=(5, 0))
+        # (shape names can be long: widens with the panel, Drawer… after it; user 2026-11-10)
+        self.custom_combo.pack(side="left", padx=(5, 0), fill="x", expand=True)
         self.custom_combo.bind("<<ComboboxSelected>>", lambda e: self.on_custom_pick())
         ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer).pack(side="left", padx=(4, 0))
         # under the Shape box while a placed shape's library shape was renamed or deleted (not_in_library)

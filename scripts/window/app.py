@@ -1506,10 +1506,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for w in (self.channels_head, name, self.channels_short):
             Tooltip(w, tr("app.channels_fold_tip"))
             w.bind("<Button-1>", lambda e: self.channels_folded.set(not self.channels_folded.get()))
-        # (a long line wraps under itself instead of being cut at the panel's edge)
-        # (reqwidth: winfo_width is 1 until the window is drawn)
-        box.bind("<Configure>", lambda e: self.channels_short.config(
-            wraplength=max(e.width - head.winfo_reqwidth() - int(30 * self.scale), 50)), add="+")
+        # (a long line wraps under itself instead of being cut at the panel's edge: a hint line of the side panel,
+        # side_panel.fit_hint; the wrap given here only marks it as one)
+        self.channels_short.config(wraplength=int(300 * self.scale))
         for var in (self.channel_mode, self.use_ch10, self.ch10_order, self.new_rounds, self.pad_rounds,
                     self.keep_colours, self.channels_folded):
             var.trace_add("write", lambda *a: self.sync_channels_fold())
@@ -1575,7 +1574,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         names = [name for _, name in DOMINO_STARTS]
         ttk.Label(box, text=tr("app.domino_start")).grid(row=r, column=0, sticky="w", pady=(6, 0))
         self.domino_box = ttk.Combobox(box, state="readonly", values=names)
-        self.domino_box.grid(row=r, column=1, sticky="ew", padx=5, pady=(6, 0))
+        # (short fixed choices: keeps its size on a wider panel, user 2026-11-10)
+        self.domino_box.grid(row=r, column=1, sticky="w", padx=5, pady=(6, 0))
         self.domino_box.current(0)
         self.domino_box.bind("<<ComboboxSelected>>", lambda e: self.schedule_autosave())
         Tooltip(self.domino_box, tr("app.where_copied_and_pasted_notes_start"))

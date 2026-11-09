@@ -20,6 +20,20 @@ SNAP_SHARE = 1 / 3  # dragged narrower than this share of the no-cut width: the 
 STRIP = 20  # px at 100 %: the shut panel's strip, a button all along (user: easy to bring back, no pixel hunting)
 STRIP_GAP = 3  # px at 100 %: plain room between the strip and the window's edge (its resize border)
 DRAG_START = 4  # px: a press on the strip moving less than this is a click
+HINT_PAD = 8  # px at 100 %: a hint line wraps this far in from the panel's right edge (its padding)...
+HINT_PAD_BOX = 10  # ... or from its box's (a titled box: padding + border)
+HINT_LEAST = 60  # px at 100 %: never wrapped narrower than this
+
+
+def is_hint(w):
+    """A label of the panel made with a fixed wrap width (a hint / warning line), not one that wraps to the room
+    it's given by itself (widgets.wrap_to_room)."""
+    if not isinstance(w, tk.Misc) or w.winfo_class() != "TLabel" or getattr(w, "wrap_measure", None):
+        return False
+    try:
+        return int(float(str(w.cget("wraplength")) or 0)) > 0
+    except (tk.TclError, ValueError):
+        return False
 
 
 class ScrollingSide:
@@ -78,6 +92,38 @@ class ScrollingSide:
             if not self.side_open_var().get():
                 self.shut_side(save=False)
         return side
+
+    # ------------------------------------------------------------ hint lines use the room (user 2026-11-10)
+
+    def side_hints(self):
+        """The panel's hint lines: labels made with a fixed wrap width (look.font(8) notes, warnings). Lines that
+        wrap to the room they're given (widgets.wrap_to_room) look after themselves."""
+        out = []
+        todo = [self.side]
+        while todo:
+            w = todo.pop()
+            todo.extend(w.winfo_children())
+            if is_hint(w):
+                out.append(w)
+        return out
+
+    def fit_hint(self, w):
+        """A hint line wraps at the panel's right edge (inside its box), however wide the panel is."""
+        if not w.winfo_ismapped():
+            return
+        box = w.master
+        while box is not self.side and box.winfo_class() != "TLabelframe":
+            box = box.master
+        # (from the panel's own width, known at once: its boxes take theirs a moment later)
+        pad = round((HINT_PAD + (HINT_PAD_BOX if box is not self.side else 0)) * self.side_scale)
+        room = self.side.winfo_rootx() + self.side_canvas.winfo_width() - pad - w.winfo_rootx()
+        wrap = max(round(HINT_LEAST * self.side_scale), room)
+        if abs(int(float(str(w.cget("wraplength")))) - wrap) > 1:
+            w.configure(wraplength=wrap)
+
+    def fit_hints(self):
+        for w in self.side_hints():
+            self.fit_hint(w)
 
     # ------------------------------------------------------------ shut to a strip (main window only)
 
@@ -202,6 +248,9 @@ class ScrollingSide:
     def fit_side(self):
         self.side_row_shown()
         c, side = self.side_canvas, self.side
+        if c.winfo_width() != getattr(self, "_hints_at", None):  # (the panel's width changed: hint lines follow)
+            self._hints_at = c.winfo_width()
+            self.after_idle(self.fit_hints)
         need, have = side.winfo_reqheight(), c.winfo_height()
         # room to spare: stretched to the panel's height; too tall: its own height (0), so
         # it keeps following what it needs
@@ -300,6 +349,8 @@ class ScrollingSide:
         (once for a burst of rows)."""
         if e is not None and not str(e.widget).startswith(str(self.side)):
             return
+        if e is not None and is_hint(e.widget):  # (a hint line shown: wrapped to the room at once)
+            self.fit_hint(e.widget)
         if self._need_wait is None:
             self._need_wait = self.after(NEED_WAIT_MS, self.check_side_need)
 
@@ -410,10 +461,15 @@ class ScrollingSide:
             self._grip_ghost.destroy()
         for narrow, _ in self.side_narrows:
             narrow()
+        hints = self.side_hints()
+        for w in hints:  # (hint lines wrap to any width: they never ask for room)
+            w.configure(wraplength=round(HINT_LEAST * self.side_scale))
         self.update_idletasks()
         self.set_side_width(self.side_rows_need())
         self.update_idletasks()
         for _, fit in self.side_narrows:  # (back beside the dropdown where the new width has room)
             fit()
+        for w in hints:
+            self.fit_hint(w)
         self.draw_grip()
         self.save_side_width()
