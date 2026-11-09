@@ -1456,8 +1456,9 @@ class RollDrawing:
         """The slots of every note shown (on screen or not; kept until the notes change): stack_keys' track places."""
         rendered = self.app.drawn
         kept = getattr(self, "_every_slot", None)
-        if kept is None or kept[0] is not rendered:
-            kept = self._every_slot = (rendered, np.unique(np.asarray(rendered)[:, 4]) if len(rendered)
+        if kept is None or kept[0]() is not rendered:
+            # (a WEAK link: the notes changed and this not asked again = the old notes may go, ~90 MB at 2 M)
+            kept = self._every_slot = (weakref.ref(rendered), np.unique(np.asarray(rendered)[:, 4]) if len(rendered)
                                        else np.zeros(0, np.int64))
         return kept[1]
 
