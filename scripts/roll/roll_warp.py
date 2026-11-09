@@ -28,7 +28,13 @@ the line(s) through the grid spot shown there (warp_param: the bend turned round
 undo step, the button lets go (also after a refused click: status line). Right-click on a grid = its own short menu
 (split across / down / both here, Remove this line on an inner line). Delete with a point picked = the inner lines
 through it go (never the shape; a corner: nothing; only with ONE shape selected). The picked point is kept by where
-its lines are, so it follows a split and comes back with an undo (warp_set_pick)."""
+its lines are, so it follows a split and comes back with an undo (warp_set_pick).
+SEVERAL POINTS (PLAN.md "Warp several points + presets" A, user 2026-11-10: the piano roll's way): Ctrl+click = a point
+added / taken out (let go without a move); a box dragged from an empty spot inside a grid picks its points (Ctrl: added;
+a click alone = none); Esc = none (the next Esc deselects). Dragging any picked point moves them all by its amount
+(warp_group: one per mirror family, the locked middle left out; warp_moved); a plain click on one of several = only it.
+Handles only with ONE picked. Delete = the lines through all of them. Arrow keys (the piano roll has the keyboard) =
+1 px on screen (Shift 10), presses within NUDGE_S = one undo step. Picked points drawn filled."""
 
 import time
 
@@ -37,7 +43,7 @@ import numpy as np
 from files.lang import tr
 from notes import warp as wp_
 from notes.recolour import KEEP, box_of, can_recolour, centre_at, centre_spot, clean_recolour, new_seed
-from roll.roll_shared import ALT
+from roll.roll_shared import ALT, CTRL, SHIFT, draw_boxes
 from window import look
 
 GRAB = 8  # px: how near a grid point the mouse must be to grab it
@@ -46,6 +52,7 @@ PIECE_PX = 6.0  # (a curved grid line: about one straight piece this long on scr
 MOST_PIECES = 2000  # (pieces a whole line at most)
 LIVE_MS = 30  # (every note made again at most this often while dragging when not shown live)
 MOST_GRIDS = 8  # (selected shapes showing a grid at most: more = only the first ones)
+NUDGE_S = 1.0  # (arrow-key nudges this close together = one undo step)
 
 
 class WarpGrid:
@@ -236,13 +243,23 @@ class WarpGrid:
         return tuple(sorted(self.app.sels)), len(self.app.shapes)
 
     def warp_set_pick(self, g, i):
-        """Point i of grid g clicked: its handles show. Kept as the shape's place in the list + WHERE the point's two
-        grid lines sit (box units) + the selection then, so it lasts through undo / redo (they make the shapes anew;
-        hunts 2026-11-09 / 11-10: a split / Delete undone gives the point back) and follows splits; any other
-        selection, shapes added / gone, a grid size change, the window closed, Open / New = gone (warp_drop_pick)."""
+        """Point i of grid g clicked: only it picked, its handles show (warp_set_picks)."""
+        self.warp_set_picks(g, [i])
+
+    def warp_set_picks(self, g, ks):
+        """The points ks of grid g picked (several: PLAN "Warp several points" A, user 2026-11-10; ONE = its handles
+        show). Kept as the shape's place in the list + WHERE each point's two grid lines sit (box units) + the
+        selection then, so they last through undo / redo (they make the shapes anew; hunts 2026-11-09 / 11-10: a
+        split / Delete undone gives the point back) and follow splits; any other selection, shapes added / gone, a
+        grid size change, the window closed, Open / New = gone (warp_drop_pick). None picked = no pick."""
+        ks = list(dict.fromkeys(int(k) for k in ks))
+        if not ks:
+            self.wp_pick = None
+            return
         c, _ = wp_.size(g["wp"])
         X, Y = wp_.lines(g["wp"])
-        self.wp_pick = {"place": self.warp_shape_place(g["sh"]), "at": (float(X[i % (c + 1)]), float(Y[i // (c + 1)])),
+        self.wp_pick = {"place": self.warp_shape_place(g["sh"]),
+                        "ats": [(float(X[k % (c + 1)]), float(Y[k // (c + 1)])) for k in ks],
                         "sig": self.warp_sel_sig()}
 
     def warp_drop_pick(self):
@@ -256,19 +273,27 @@ class WarpGrid:
         if p and p["sig"] != self.warp_sel_sig():
             self.wp_pick = None
 
-    def warp_pick_of(self, g):
-        """The point of grid g clicked last (its handles show), or None (another shape's, the selection changed, or
-        its lines aren't on this grid now: a line removed / an undo meanwhile shows it again when they're back)."""
+    def warp_picks_of(self, g):
+        """The picked points of grid g ([] = none: another shape's, the selection changed, or their lines aren't on
+        this grid now: a line removed / an undo meanwhile shows them again when they're back)."""
         self.warp_check_pick()
         p = getattr(self, "wp_pick", None)
         if not p or p["place"] is None or p["place"] != self.warp_shape_place(g["sh"]):
-            return None
+            return []
         X, Y = wp_.lines(g["wp"])
-        i = np.flatnonzero(np.abs(X - p["at"][0]) < 1e-7)
-        j = np.flatnonzero(np.abs(Y - p["at"][1]) < 1e-7)
-        if not (len(i) and len(j)):
-            return None
-        return int(j[0]) * len(X) + int(i[0])
+        out = []
+        for ax, ay in p["ats"]:
+            i = np.flatnonzero(np.abs(X - ax) < 1e-7)
+            j = np.flatnonzero(np.abs(Y - ay) < 1e-7)
+            if len(i) and len(j):
+                out.append(int(j[0]) * len(X) + int(i[0]))
+        return out
+
+    def warp_pick_of(self, g):
+        """The ONE picked point of grid g (its handles show), or None (none, or several picked: no handles, like
+        2+ shapes show no points; my pick, user ok 2026-11-10)."""
+        ks = self.warp_picks_of(g)
+        return ks[0] if len(ks) == 1 else None
 
     def warp_handle_list(self, g):
         """[(point, side)] of the handles grid g shows: the picked point's own + each neighbour's facing it."""
@@ -557,18 +582,24 @@ class WarpGrid:
         if not self.warp_on() or getattr(self, "wp", None) or len(self.app.sels) != 1:
             return False  # (2+ selected: Delete deletes shapes, whatever was picked)
         for g in self.warp_grids():
-            k = self.warp_pick_of(g)
-            if k is None:
+            ks = self.warp_picks_of(g)
+            if not ks:
                 continue
             c, r = wp_.size(g["wp"])
-            i, j = k % (c + 1), k // (c + 1)
+            X, Y = wp_.lines(g["wp"])
+            # (several picked: the lines through all of them, found by where they sit: each removal re-numbers the
+            # rest, a mirrored one may take a picked line's twin with it)
+            xs = sorted({float(X[k % (c + 1)]) for k in ks if 1 <= k % (c + 1) <= c - 1})
+            ys = sorted({float(Y[k // (c + 1)]) for k in ks if 1 <= k // (c + 1) <= r - 1})
             wp, done = self.warp_cur(g), False
-            if 1 <= i <= c - 1:
-                wp, _ = self.warp_removed(g, wp, "x", i)
-                done = True
-            if 1 <= j <= r - 1:  # (lines up the box gone first: the across line keeps its number)
-                wp, _ = self.warp_removed(g, wp, "y", j)
-                done = True
+            for way, places in (("x", xs), ("y", ys)):  # (lines up the box gone first)
+                for at in places:
+                    L = wp_.lines(wp)[0 if way == "x" else 1]
+                    hit = np.flatnonzero(np.abs(L - at) < 1e-7)
+                    if not len(hit) or not 1 <= int(hit[0]) <= len(L) - 2:
+                        continue  # (gone already: a mirrored twin)
+                    wp, _ = self.warp_removed(g, wp, way, int(hit[0]))
+                    done = True
             if done:
                 self.warp_commit(g, wp, tr("warp.undo_remove"))
             return True
@@ -694,11 +725,12 @@ class WarpGrid:
             locked = None
             if (half or (mu and mv)) and c % 2 == 0 and rows % 2 == 0:
                 locked = (rows // 2) * (c + 1) + c // 2
-            last = []  # (lit twins + the dragged point: drawn after every other point)
+            picked = set(self.warp_picks_of(g))  # (filled, like the dragged one)
+            last = []  # (lit twins + the picked / dragged points: drawn after every other point)
             for i, (x, y) in enumerate(zip(px, py)):
                 if not (room[0] < x < room[2] and room[1] < y < room[3]):
                     continue
-                if i in lit or i == held:
+                if i in lit or i == held or i in picked:
                     last.append(i)
                 elif i == locked:  # (can't move: a small cross, never a square to grab)
                     for a, b in ((-1, -1), (-1, 1)):
@@ -714,14 +746,19 @@ class WarpGrid:
                 if room[0] < hx < room[2] and room[1] < hy < room[3]:
                     self.create_oval(hx - q, hy - q, hx + q, hy + q, fill=look.HANDLE, outline=look.HANDLE_FILL,
                                      width=max(1, round(s)), tags="wpgrid")
-            for i in sorted(last, key=lambda i: i == held):  # (the dragged point on top of all)
+            for i in sorted(last, key=lambda i: (i == held, i in picked)):  # (the dragged point on top of all)
                 x, y = px[i], py[i]
-                if i == held:
+                if i == held or (i in picked and i not in lit):
                     self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_GRID, fill=look.WARP_GRID,
                                           width=line, tags="wpgrid")
                 else:
                     self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_MIRROR_EDGE,
                                           fill=look.WARP_MIRROR, width=line, tags="wpgrid")
+        b = getattr(self, "wp_box", None)
+        if b and max(abs(b["x1"] - b["x0"]), abs(b["y1"] - b["y0"])) >= 3 * s:  # (a box picking points: the Select
+            x0, x1 = sorted((b["x0"], b["x1"]))                                 # box's look)
+            y0, y1 = sorted((b["y0"], b["y1"]))
+            draw_boxes(self, [(x0, y0, x1, y1)], self.kb_w, self.ruler_h, s, tags="wpgrid")
         # (where a full redraw leaves it: under the keyboard + ruler, under what's drawn after it there)
         self.tag_raise("wpgrid")
         if not in_redraw and self.find_withtag("frame"):
@@ -759,7 +796,16 @@ class WarpGrid:
                 self.drag = ("warp_none",)
                 return True
         got = self.warp_grab(e.x, e.y)
+        ctrl = bool(e.state & CTRL)
         if got is None:
+            if getattr(app, "liquify_window", None) is None:
+                for g in self.warp_grids():  # (inside a shown grid, off its points: a box picks points; a click
+                    if self.warp_param(g, e.x, e.y) is not None:  # alone = none picked, Ctrl kept: on release)
+                        before = self.warp_picks_of(g) if ctrl else []
+                        self.wp_box = {"sh": g["sh"], "x0": e.x, "y0": e.y, "x1": e.x, "y1": e.y, "ctrl": ctrl,
+                                       "before": before}
+                        self.drag = ("warp_box",)
+                        return True
             if getattr(self, "wp_pick", None) is not None:  # (off the grid: the picked point's handles go)
                 self.warp_drop_pick()
                 self.draw_warp_grid()
@@ -775,8 +821,25 @@ class WarpGrid:
         if got[0] == "handle":
             return self.warp_handle_press(e, *got[1:])
         g, i = got[1:]
-        self.warp_set_pick(g, i)  # (its handles show)
+        picks = self.warp_picks_of(g)
+        after = None  # (what's picked when let go without a move)
+        if ctrl:  # (Ctrl+click: added / taken out of the picked points, like shapes; held + moved = all dragged)
+            if i in picks:
+                after = [k for k in picks if k != i]
+            else:
+                picks = picks + [i]
+                self.warp_set_picks(g, picks)
+        elif i in picks and len(picks) > 1:  # (a picked point of several: they're dragged; no move = only it)
+            after = [i]
+        else:
+            picks = [i]
+            self.warp_set_pick(g, i)  # (its handles show)
         if self.warp_point_locked(g, i):  # (the middle point in 4-way / Half turn: nothing moves, no undo step)
+            if after is not None:
+                self.warp_set_picks(g, after)
+                self.draw_warp_grid()
+                self.drag = ("warp_none",)
+                return True
             self.draw_warp_grid()
             self.drag = ("warp_none",)
             if np.any(np.asarray(g["P"]).reshape(-1, 2)[i]):  # (moved before the mirror was picked: back to its
@@ -794,7 +857,11 @@ class WarpGrid:
         g = dict(g, P=P)
         self.wp = {"sh": g["sh"], "g": g, "i": i, "grab": grab, "base": base, "k": k, "pushed": False,
                    "old": clean_recolour(g["sh"].get("recolour")), "job": None, "took": 0.0, "way": None,
-                   "shown": 0.0, "jobs": [{"sh": g["sh"], "made": g["made"], "warp": g["wp"], "a": None}]}
+                   "shown": 0.0, "jobs": [{"sh": g["sh"], "made": g["made"], "warp": g["wp"], "a": None}],
+                   "after": after}
+        if len(picks) > 1 and i in picks:  # (several picked: all move by the same amount)
+            self.wp["group"] = self.warp_group(g, i, picks)
+            self.wp["start"] = P.copy()
         if e.state & ALT and i in g["wp"].get("corners", ()):  # (Alt on a corner point: smooth again, its mirror
             # twins too, like the program's curves; kept even without a move: hunt 2026-11-09)
             wp = self.warp_mirror_handles(wp_.smooth_point(g["wp"], i), i, None, *self.warp_mirror(g))
@@ -803,6 +870,37 @@ class WarpGrid:
         self.drag = ("warp",)
         self.draw_warp_grid()
         return True
+
+    def warp_group(self, g, i, picks):
+        """The picked points a group drag sets itself, i first: one per mirror family (a picked point that is
+        another picked one's twin follows by the mirror, never moved twice), the locked middle left out."""
+        c, r = wp_.size(g["wp"])
+        mu, mv, half = self.warp_mirror(g)
+        seen, out = set(), []
+        for k in [i] + [k for k in picks if k != i]:
+            j0, i0 = divmod(k, c + 1)
+            fam = {k} | {jj * (c + 1) + ii for jj, ii in self.warp_twin_spots(c, r, j0, i0, mu, mv, half)}
+            if fam & seen:
+                continue
+            seen |= fam
+            if not self.warp_locked(c, r, j0, i0, mu, mv, half):
+                out.append(k)
+        return out
+
+    def warp_moved(self, g, P0, group, delta):
+        """P0 (rows + 1, cols + 1, 2) with each point of `group` moved by delta (box units / the factor, cut at
+        MOST_MOVE each way) and its mirror twins set: a new array."""
+        c, _ = wp_.size(g["wp"])
+        mu, mv, half = self.warp_mirror(g)
+        P2 = np.array(P0, np.float64)
+        for k in group:
+            j, i = divmod(k, c + 1)
+            new = [min(max(float(P0[j, i, n] + delta[n]), -wp_.MOST_MOVE), wp_.MOST_MOVE) for n in (0, 1)]
+            if mu or mv or half:
+                self.warp_twins(P2, j, i, new, mu, mv, half)
+            else:
+                P2[j, i] = new
+        return P2
 
     def warp_handle_press(self, e, g, k, s):
         """A press on a shown curve handle (point k, side s): it's dragged (Alt held while moving = a corner)."""
@@ -858,7 +956,11 @@ class WarpGrid:
             new = ((u + st["grab"][0] - st["base"][0]) / k, (v + st["grab"][1] - st["base"][1]) / k)
             new = [min(max(float(c), -wp_.MOST_MOVE), wp_.MOST_MOVE) for c in new]
             j, i = divmod(st["i"], wp_.size(g["wp"])[0] + 1)
-            P2 = self.warp_twins(np.array(g["P"]), j, i, new, mu, mv, half) if mu or mv or half else None
+            if st.get("group"):  # (several picked: each moved by the dragged one's amount, twins mirrored)
+                P0 = st["start"]
+                P2 = self.warp_moved(g, P0, st["group"], (new[0] - P0[j, i, 0], new[1] - P0[j, i, 1]))
+            else:
+                P2 = self.warp_twins(np.array(g["P"]), j, i, new, mu, mv, half) if mu or mv or half else None
             if (P2 is None and list(g["P"][j, i]) == new) or (P2 is not None and np.array_equal(P2, g["P"])):
                 return
         if not st["pushed"]:
@@ -874,8 +976,9 @@ class WarpGrid:
             g["P"][j, i] = new
         else:
             g["P"][...] = P2
-            if g["wp"].get("h"):  # (the twins' handles mirror the dragged point's too)
-                g["wp"] = job["warp"] = self.warp_mirror_handles(g["wp"], st["i"], None, mu, mv, half)
+            if g["wp"].get("h") and (mu or mv or half):  # (the twins' handles mirror the dragged points' too)
+                for k in st.get("group") or [st["i"]]:
+                    g["wp"] = job["warp"] = self.warp_mirror_handles(g["wp"], k, None, mu, mv, half)
         st["changed"] = True  # (the map is turned round when shown: moves coming quicker than that cost nothing)
         if st["way"] == "later":  # (its first Recolour: the notes made once, then shown live)
             self.warp_again(st)
@@ -987,18 +1090,110 @@ class WarpGrid:
             self.warp_apply(st, now=st["way"] == "live")  # (shown live: the picture stays till the notes are in)
             self.app.sync_recolour()
             self.app.schedule_autosave()
+        elif st.get("after") is not None and e is not None:  # (a click without a move: Ctrl took it out / a
+            self.warp_set_picks(st["g"], st["after"])           # picked one of several = only it)
         self.wp = None
         self.draw_warp_grid()
+
+    # ---- several points (PLAN.md "Warp several points + presets" A, user 2026-11-10: the piano roll's way)
+
+    def warp_box_drag(self, e):
+        """A box dragged from an empty spot inside a grid: drawn like the piano roll's Select box."""
+        b = getattr(self, "wp_box", None)
+        if b:
+            b["x1"], b["y1"] = e.x, e.y
+            self.draw_warp_grid()
+
+    def warp_box_release(self, e):
+        """The box let go: the points of its grid inside it picked (Ctrl: added to those picked before); hardly
+        moved = a click on the empty grid: none picked (Ctrl: kept as they were)."""
+        b = getattr(self, "wp_box", None)
+        self.wp_box = None
+        self.drag = None
+        if not b:
+            return
+        g = next((g for g in self.warp_grids() if g["sh"] is b["sh"]), None) if self.warp_on() else None
+        if g is not None:
+            if max(abs(b["x1"] - b["x0"]), abs(b["y1"] - b["y0"])) < 3 * self.scale:
+                if not b["ctrl"]:
+                    self.warp_drop_pick()
+            else:
+                x0, x1 = sorted((b["x0"], b["x1"]))
+                y0, y1 = sorted((b["y0"], b["y1"]))
+                px, py = self.warp_points(g)
+                inside = np.flatnonzero((px >= x0) & (px <= x1) & (py >= y0) & (py <= y1)).tolist()
+                self.warp_set_picks(g, list(b["before"]) + inside)
+        self.draw_warp_grid()
+
+    def warp_unpick(self):
+        """Esc with grid points picked (nothing dragged): none picked any more. True when some were."""
+        if not self.warp_on() or getattr(self, "wp", None):
+            return False
+        if any(self.warp_picks_of(g) for g in self.warp_grids()):
+            self.warp_drop_pick()
+            self.draw_warp_grid()
+            return True
+        return False
+
+    def warp_nudge(self, key, state):
+        """An arrow key (the piano roll has the keyboard, grid points picked, nothing dragged): the picked points
+        move one pixel that way on screen (Shift: 10), their mirror twins too. Presses following each other (within
+        NUDGE_S, nothing else in between) = one undo step. True when it moved something."""
+        if not self.warp_on() or getattr(self, "wp", None) or self.drag:
+            return False
+        for g in self.warp_grids():
+            picks = self.warp_picks_of(g)
+            if not picks:
+                continue
+            step = (10 if state & SHIFT else 1) * self.scale
+            dx, dy = {"left": (-step, 0), "right": (step, 0), "up": (0, -step), "down": (0, step)}[key]
+            px, py = self.warp_points(g)
+            k0 = picks[0]
+            x0, y0 = float(px[k0]), float(py[k0])
+            u0, v0 = self.warp_unit(g["made"], x0, y0)
+            u1, v1 = self.warp_unit(g["made"], x0 + dx, y0 + dy)
+            f = self.warp_factor(g)
+            delta = ((float(u1) - float(u0)) / f, (float(v1) - float(v0)) / f)
+            P0 = np.array(g["P"], np.float64)
+            P2 = self.warp_moved(g, P0, self.warp_group(g, k0, picks), delta)
+            if np.array_equal(P0, P2):
+                return True
+            last = getattr(self, "wp_nudged", None)
+            stack = self.app.undo_stack
+            if not (last and stack and stack[-1] is last[0] and time.perf_counter() - last[1] < NUDGE_S):
+                self.app.push_undo(name=tr("warp.undo_nudge"))
+            wp = dict(g["wp"])
+            if wp.get("on") is False:
+                wp["on"] = True
+            mu, mv, half = self.warp_mirror(g)
+            if wp.get("h") and (mu or mv or half):
+                for k in self.warp_group(g, k0, picks):
+                    wp = self.warp_mirror_handles(wp, k, None, mu, mv, half)
+            self.warp_apply({"sh": g["sh"], "g": dict(g, P=P2, wp=wp)}, now=True)
+            self.wp_nudged = (stack[-1] if stack else None, time.perf_counter())
+            self.app.sync_recolour()
+            self.app.schedule_autosave()
+            self.redraw()
+            return True
+        return False
 
     def warp_cancel(self):
         """A drag going on ends as if let go (Ctrl+Z mid-drag: the drag ends first, then its step is taken back)."""
         if getattr(self, "wp", None):
             self.warp_release(None)
+        elif (self.drag or ("",))[0] == "warp_box":
+            self.warp_box_release(None)
         elif (self.drag or ("",))[0] == "warp_none":
             self.drag = None
 
     def warp_escape(self):
-        """Esc mid-drag: the point back where it was, no undo step. True when a drag was going on."""
+        """Esc mid-drag: the point(s) back where they were, no undo step (a box being dragged: gone, the picks as
+        before). True when a drag was going on."""
+        if getattr(self, "wp_box", None):
+            self.wp_box = None
+            self.drag = None
+            self.draw_warp_grid()
+            return True
         st = getattr(self, "wp", None)
         if not st:
             return False

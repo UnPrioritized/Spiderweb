@@ -1014,6 +1014,7 @@
  "warp.undo_drag": "Warp point",
  "warp.undo_handle": "Warp handle",
  "warp.undo_handle_back": "Warp handle back",
+ "warp.undo_nudge": "Nudge Warp points",
  "warp.split": "Split:",
  "warp.split_tip": "Adds a grid line where you click the grid on the piano roll. Nothing moves: the new line follows the bend that's there. Pick a button, then click; click it again or press Esc to stop.",
  "warp.split_across": "Across",

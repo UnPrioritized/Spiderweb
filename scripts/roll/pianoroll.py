@@ -408,7 +408,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
         return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
-                                                     "rccentre", "liquify", "warp", "warp_none", "gliss_copies", "gliss_len", "keyhold",
+                                                     "rccentre", "liquify", "warp", "warp_none", "warp_box", "gliss_copies", "gliss_len", "keyhold",
                                                      "sustop", "lasso_free", "lasso_poly", "lasso_point",
                                                      "lasso_magnet")
 
@@ -1502,6 +1502,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.warp_drag(e)
         elif kind == "warp_none":
             pass
+        elif kind == "warp_box":
+            self.warp_box_drag(e)
         elif kind == "box":
             self.box_mouse = (e.x, e.y, e.state)
             self.box_to()
@@ -1766,6 +1768,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if kind == "warp_none":
             self.drag = None
+            return
+        if kind == "warp_box":
+            self.warp_box_release(e)
             return
         if kind.startswith("lasso"):
             if self.box_timer:
@@ -2425,6 +2430,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 return "break"
             if self.warp_split_off():  # (a Warp Split button picked: let go of it)
                 return "break"
+            if self.warp_unpick():  # (Warp grid points picked: none picked; the next Esc deselects)
+                return "break"
             if self.liquify_forget():  # (a Liquify straight stroke's start placed: that goes first, like any
                 return "break"         # other thing going on)
             busy = (self.draft is not None or self.drag is not None or self.typing is not None or self.app.parts
@@ -2462,6 +2469,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 delete_loaded(self.app, shapes_too=True)  # Domino's Delete; group D)
             else:
                 self.app.delete_selected()
+        elif k in ("left", "right", "up", "down") and not e.state & (CTRL | ALT):
+            if self.warp_nudge(k, e.state):  # (Warp grid points picked: moved a pixel, Shift 10)
+                return "break"
         elif k == "g" and not e.state & CTRL:
             self.app.live.set(not self.app.live.get())
         elif k == "m" and not e.state & CTRL:
