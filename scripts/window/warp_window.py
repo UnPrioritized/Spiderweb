@@ -19,7 +19,8 @@ from files.mathexpr import calc, fmt
 from notes import warp as wp_
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour
 from window import look
-from window.widgets import Scrub, ShortLabel, Tooltip, good, remember_place
+from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
+    unchanged
 
 BENDS = (True, False)  # (Smooth, Straight cells: the Bend dropdown by place)
 CELLS = ("cols", "rows")  # (the Custom boxes: cells across, cells up)
@@ -114,6 +115,27 @@ class WarpWindow(tk.Toplevel):
             self.cells[name] = (e, var)
         self.cells_shown = False
         self.cells_said = {}  # (what sync last put in each box: a box still showing it isn't being typed in)
+        # (Strength % + the show tick: the shapes' own (user 2026-11-09: inside this window, not the side panel);
+        # one undo step each, several picked and different = blank box / half tick, typing sets all)
+        word = ttk.Label(form, text=tr("warp.strength"))
+        word.grid(row=7, column=0, sticky="w", pady=2)
+        Tooltip(word, tr("warp.strength_tip"))
+        srow = ttk.Frame(form)
+        srow.grid(row=7, column=1, sticky="w", padx=(6, 0), pady=2)
+        self.strength_var = tk.StringVar()
+        e = self.strength_entry = ttk.Entry(srow, textvariable=self.strength_var, width=6)
+        e.pack(side="left")
+        Tooltip(e, tr("warp.strength_tip"))
+        Scrub(app, [(e, self.strength_var, lambda: self.on_shown("strength"))], (1, 10, 0.1), 0, wp_.MOST_STRENGTH,
+              label=word, drag_box=True)
+        ttk.Label(srow, text="%").pack(side="left", padx=(4, 0))
+        e.bind("<Return>", lambda ev: self.on_shown("strength"))
+        leave_box(app, e, self.strength_var, lambda left: self.on_shown("strength", left and e))
+        self.shown = tk.BooleanVar(value=True)
+        t = self.shown_tick = ttk.Checkbutton(srow, text=tr("warp.shown"), variable=self.shown,
+                                              command=lambda: self.on_shown("on"))
+        t.pack(side="left", padx=(12, 0))
+        Tooltip(t, tr("warp.shown_tip"))
         buttons = ttk.Frame(box)
         buttons.pack(anchor="w", fill="x", pady=(10, 0))
         b = ttk.Button(buttons, text=tr("warp.reset"), command=self.on_reset)
@@ -259,6 +281,30 @@ class WarpWindow(tk.Toplevel):
         if not getattr(self.app.roll, "wp", None):
             self.app.roll.draw_warp_grid()
 
+    def on_shown(self, what, left=None):
+        """The show tick (what = "on": the bend shown / hidden, the grid kept either way) or Strength ("strength").
+        Only shapes with a Warp change; several picked keep their own strengths until one is typed."""
+        if self.app._loading or (left is not None and unchanged(left)):
+            return
+        if what == "on":
+            self.shown_tick.state(["!alternate"])
+            set_to = {"on": self.shown.get()}
+        else:
+            e, var = self.strength_entry, self.strength_var
+            if not var.get().strip() and getattr(e, "blank_from", None):
+                return
+            try:
+                s = calc(var.get().strip().rstrip("%"))
+                ok = 0 <= s <= wp_.MOST_STRENGTH
+            except (ValueError, ZeroDivisionError):
+                ok = False
+            if not ok:
+                return bad(e)
+            good(e)
+            set_to = {"strength": round(s, 3)}
+        self._change(lambda w, sh: wp_.clean_warp(dict(w, **set_to)),
+                     tr("warp.undo_show" if what == "on" else "warp.undo_strength"))
+
     def on_reset(self):
         """Every point of the selected shapes back where it started (the Warp gone). The window keeps their grid
         size / bend / edge when they all had the same, so the next drag starts as they were."""
@@ -324,6 +370,20 @@ class WarpWindow(tk.Toplevel):
             if typing is not e or var.get() == self.cells_said.get(name):  # (never under the typing)
                 var.set(text)
                 self.cells_said[name] = text
+        # (Strength + tick: greyed while no selected shape has a Warp yet (a first drag starts at 100 %, shown))
+        have = [w for w in ws if w]
+        e = self.strength_entry
+        app._loading = True
+        try:
+            ons = {w["on"] for w in have} or {True}
+            self.shown.set(ons == {True})
+            self.shown_tick.state(["alternate" if len(ons) > 1 else "!alternate"])
+            if typing is not e or unchanged(e):  # (never under the typing)
+                same_or_blank(e, self.strength_var, [fmt(w["strength"]) for w in have] or ["100"])
+        finally:
+            app._loading = False
+        for w in (e, self.shown_tick):
+            w.state(["!disabled"] if have else ["disabled"])
         if show != self.cells_shown:
             self.cells_shown = show
             if show:

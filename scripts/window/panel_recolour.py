@@ -11,7 +11,6 @@ from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.engine import pasted_notes
 from notes.liquify import DEFAULTS as LIQUIFY_DEFAULTS, MOST_STRENGTH
-from notes.warp import MOST_STRENGTH as WARP_MOST, clean_warp, full as warp_full
 from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
     wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
@@ -28,12 +27,6 @@ def full_liquify(rc):
     """A clean Recolour's Liquify with every setting filled in, or None."""
     got = (rc or {}).get("liquify")
     return dict(LIQUIFY_DEFAULTS, **got) if got else None
-
-
-def full_warp(rc):
-    """A clean Recolour's Warp with every setting filled in, or None."""
-    got = clean_warp((rc or {}).get("warp"))
-    return warp_full(got) if got else None
 
 
 class RecolourPanel:
@@ -126,29 +119,6 @@ class RecolourPanel:
         Tooltip(lb, tr("liquify.strength_tip"))
         e.bind("<Return>", lambda ev: self.on_liquify("strength"))
         leave_box(self, e, self.liquify_var, lambda left: self.on_liquify("strength", left and e))
-        # (Warp's row, the same as Liquify's (Warp stage D, user 2026-11-09: tick + Strength %), above it: the
-        # order they bend in)
-        wrow = self.warp_row = ttk.Frame(box)
-        self.warp_shown = tk.BooleanVar(value=True)
-        t = self.warp_tick = ttk.Checkbutton(wrow, text=tr("warp.row"), variable=self.warp_shown,
-                                             command=lambda: self.on_warp("on"))
-        t.pack(side="left")
-        Tooltip(t, tr("warp.row_tip"))
-        lb = ttk.Label(wrow, text=tr("warp.strength"))
-        lb.pack(side="left", padx=(8, 0))
-        self.warp_var = tk.StringVar()
-        e = self.warp_entry = ttk.Entry(wrow, textvariable=self.warp_var, width=7)
-        e.pack(side="left", padx=4)
-        Scrub(self, [(e, self.warp_var, lambda: self.on_warp("strength"))], (1, 10, 0.1), 0, WARP_MOST,
-              label=lb, drag_box=True)
-        ttk.Label(wrow, text="%").pack(side="left")
-        Tooltip(lb, tr("warp.strength_tip"))
-        e.bind("<Return>", lambda ev: self.on_warp("strength"))
-        leave_box(self, e, self.warp_var, lambda left: self.on_warp("strength", left and e))
-        # (both ticks as wide as the longer name, so the two Strength boxes line up)
-        most = max(len(tr("warp.row")), len(tr("liquify.row")))
-        self.warp_tick.config(width=most)
-        self.liquify_tick.config(width=most)
 
     def fit_stir(self):
         """Stir… + Liquify… beside the dropdown (and New shuffle) when the row has room for them, else on their own
@@ -272,27 +242,21 @@ class RecolourPanel:
             self.liquify_tick.state(["alternate" if len(ons) > 1 else "!alternate"])
             same_or_blank(self.liquify_entry, self.liquify_var, [fmt(lq["strength"]) for lq in lqs])
             self._loading = False
-        wps = [wp for wp in (full_warp(r) for r in act) if wp]
-        if wps:
-            self._loading = True
-            ons = {wp["on"] for wp in wps}
-            self.warp_shown.set(ons == {True})
-            self.warp_tick.state(["alternate" if len(ons) > 1 else "!alternate"])
-            same_or_blank(self.warp_entry, self.warp_var, [fmt(wp["strength"]) for wp in wps])
-            self._loading = False
         shown = bool(live)
-        # (the rows under the dropdown, in this order: Amount's row, Warp, Liquify; each only while it has
-        # something to show)
-        order = [(self.recolour_row, shown, 1), (self.warp_row, bool(wps), 2), (self.liquify_row, bool(lqs), 2)]
-        for k, (row, want, pad) in enumerate(order):
-            if want == bool(row.winfo_manager()):
-                continue
-            if not want:
-                row.pack_forget()
-                continue
-            later = next((r for r, _, _ in order[k + 1:] if r.winfo_manager()), None)
-            row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(pad, 0),
-                     **({"before": later} if later else {}))
+        if shown != bool(self.recolour_row.winfo_manager()):
+            if shown:
+                if self.liquify_row.winfo_manager():
+                    self.recolour_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0),
+                                           before=self.liquify_row)
+                else:
+                    self.recolour_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
+            else:
+                self.recolour_row.pack_forget()
+        if bool(lqs) != bool(self.liquify_row.winfo_manager()):
+            if lqs:
+                self.liquify_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(2, 0))
+            else:
+                self.liquify_row.pack_forget()
         if shown != bool(self.recolour_again.winfo_manager()):
             if shown:
                 self.recolour_again.pack(side="left", after=self.recolour_mode)
@@ -410,35 +374,6 @@ class RecolourPanel:
                 return old
             return dict(old, liquify=dict(got, **set_to))
         self.change_recolour(changed, tr("liquify.undo_show" if what == "on" else "liquify.undo_strength"))
-
-    def on_warp(self, what, left=None):
-        """The Warp row: its tick (what = "on": the bend shown / hidden, the grid kept either way) or Strength
-        ("strength"). Only shapes with a Warp change; several picked keep their own strengths."""
-        if self._loading or (left is not None and unchanged(left)):
-            return
-        if what == "on":
-            self.warp_tick.state(["!alternate"])
-            set_to = {"on": self.warp_shown.get()}
-        else:
-            e, var = self.warp_entry, self.warp_var
-            if not var.get().strip() and getattr(e, "blank_from", None):
-                return
-            try:
-                s = calc(var.get().strip().rstrip("%"))
-                ok = 0 <= s <= WARP_MOST
-            except ValueError:
-                ok = False
-            if not ok:
-                return bad(e)
-            good(e)
-            set_to = {"strength": round(s, 3)}
-
-        def changed(old, _sh=None):
-            got = (old or {}).get("warp")
-            if not got:
-                return old
-            return dict(old, warp=clean_warp(dict(got, **set_to)))
-        self.change_recolour(changed, tr("warp.undo_show" if what == "on" else "warp.undo_strength"))
 
     def change_recolour(self, changed, name, push=True):
         """Each selected shape's Recolour = changed(its old one, clean; the shape); one undo step named name (push
