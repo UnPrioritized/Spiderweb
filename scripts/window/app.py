@@ -795,6 +795,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shares_window = None  # Recolour's Shares… (shares_window.py)
         self.stir_window = None  # Recolour's Stir… (stir_window.py)
         self.liquify_window = None  # Recolour's Liquify… (liquify_window.py)
+        self.warp_window = None  # Recolour's Warp… (warp_window.py)
         self.stir_open = set()  # the Stir window's parts shown unfolded ("area", "flips"; autosave)
         self.fill_window = None  # Fill gaps… (fill_window.py)
         self.lines_window = None  # Flip each line… (lines_window.py)

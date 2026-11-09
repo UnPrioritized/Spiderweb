@@ -57,6 +57,10 @@ class RecolourPanel:
         self.recolour_stir = ttk.Button(self.recolour_tools, text=tr("stir.button"), command=self.open_stir)
         self.recolour_stir.pack(side="left")
         Tooltip(self.recolour_stir, tr("stir.button_tip"))
+        # (Warp… between them: the order they bend the colours in, user 2026-11-09)
+        self.recolour_warp = ttk.Button(self.recolour_tools, text=tr("warp.button"), command=self.open_warp)
+        self.recolour_warp.pack(side="left", padx=(4, 0))
+        Tooltip(self.recolour_warp, tr("warp.button_tip"))
         self.recolour_liquify = ttk.Button(self.recolour_tools, text=tr("liquify.button"), command=self.open_liquify)
         self.recolour_liquify.pack(side="left", padx=(4, 0))
         Tooltip(self.recolour_liquify, tr("liquify.button_tip"))
@@ -151,6 +155,10 @@ class RecolourPanel:
         from window.liquify_window import open_liquify
         open_liquify(self)
 
+    def open_warp(self):
+        from window.warp_window import open_warp
+        open_warp(self)
+
     def recolour_targets(self):
         """The selected shapes Recolour works on (not a Hz bass); nothing selected: none (no setting for new
         shapes)."""
@@ -224,6 +232,7 @@ class RecolourPanel:
         self.recolour_amount_tip.text = tr(AMOUNT_WORDS[kind][1])
         self.recolour_stir.config(text=tr("stir.button_on" if stir_on else "stir.button"))
         self.recolour_stir.state(["!disabled" if tgts else "disabled"])
+        self.recolour_warp.state(["!disabled" if tgts else "disabled"])
         self.recolour_liquify.state(["!disabled" if tgts else "disabled"])
         lqs = [lq for lq in (full_liquify(r) for r in act) if lq]
         if lqs:
@@ -264,7 +273,7 @@ class RecolourPanel:
                 self.recolour_mix_tick.pack_forget()
         self.recolour_mix_tip.text = tr("recolour.mix_tip", most=SET)
         for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None),
-                  getattr(self, "liquify_window", None)):
+                  getattr(self, "warp_window", None), getattr(self, "liquify_window", None)):
             if w:
                 w.sync()
 

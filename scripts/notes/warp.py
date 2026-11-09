@@ -192,6 +192,39 @@ def warped(notes, at, low, now, rc, which, pals, pick, box, own):
     return lq._apart(notes, low, new, pals, pick)
 
 
+GRIDS = (3, 4, 5)  # (the window's Grid size choices, cells a side)
+
+
+def refit(wp, n):
+    """A clean Warp moved onto a grid of n x n cells (the window's Grid size changed; user 2026-11-09: re-fit, nothing
+    lost): the new points chosen so their bend matches the old one as closely as it can over the whole box (least
+    squares on REFIT_STEPS spots a side: the bend is linear in the points, so one solve; Smooth / Straight cells as
+    the Warp is), the other settings kept. A bend the new grid can't make (a peak between its points) comes out a
+    little softer. None when nothing is left moved."""
+    wp = clean_warp(wp)
+    if not wp:
+        return None
+    n = int(n)
+    if n == wp["n"]:
+        return wp
+    smooth = full(wp)["smooth"]
+    s = REFIT_STEPS * max(n, wp["n"]) + 1
+    yy, xx = np.mgrid[0:s, 0:s] / (s - 1)
+    x, y = xx.ravel(), yy.ravel()
+    want = bend_at(offsets(wp, strength=False), x, y, smooth)
+    m = (n + 1) ** 2
+    basis = np.empty((len(x), m))
+    for i in range(m):  # (each new point's own bend, moved 1 across)
+        unit = np.zeros((m, 2))
+        unit[i, 0] = 1.0
+        basis[:, i] = bend_at(unit.reshape(n + 1, n + 1, 2), x, y, smooth)[:, 0]
+    P = np.linalg.lstsq(basis, want, rcond=None)[0]
+    return clean_warp(dict(wp, n=n, pts=P.tolist()))
+
+
+REFIT_STEPS = 8  # (spots per cell the re-fit compares at)
+
+
 def blend(x, y, f):
     """Add between's step f (0 = x's end, 1 = y's) of two Warps (either may be None = no point moved: the other fades
     in / out): the points' offsets blended on the nearer end's grid (the other end's bend read at its points),
