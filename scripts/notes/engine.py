@@ -1138,7 +1138,8 @@ def heard_notes(sh, notes, tracks):
         if got is not None and got[0] is text:
             return notes, tracks
     n = np.asarray(notes, np.int64)
-    who = np.zeros(len(n), np.int64) if tracks is None else unique_inverse(np.asarray(tracks, np.int64).ravel())[1]
+    ids, who = (None, np.zeros(len(n), np.int64)) if tracks is None else \
+        unique_inverse(np.asarray(tracks, np.int64).ravel())
     if not self_overlaps(n, who):
         if big:
             if len(_FREE) > 64:
@@ -1147,21 +1148,23 @@ def heard_notes(sh, notes, tracks):
         return notes, tracks
     rows = np.zeros((len(n), 6), np.int64)
     rows[:, :4], rows[:, 4] = n[:, :4], who
+    del who  # (in rows now: 40 MB less at 5 M notes while they're fixed)
     pts = sh.get("pts")
     back = bool(pts) and pts[1][0] < pts[0][0]
     if back:  # (flipped sideways: fixed as the unflipped notes are, then mirrored back = the exact mirror of what showed
         hi = int(n[:, 1].max())  # unflipped; user took B 2026-11-08, the overlaps stay stored; mirrored within 0..hi:
         rows[:, 0], rows[:, 1] = hi - n[:, 1], hi - n[:, 0]  # the compiled loops want no ticks below 0)
     low = min(0, int(rows[:, 0].min()))  # (notes before beat 0: moved up meanwhile, for the same reason)
-    rows[:, :2] -= low
+    if low:
+        rows[:, :2] -= low
     rows = split_overlaps(rows) if way == "split" else resolve_overlaps(rows)
-    rows[:, :2] += low
+    if low:
+        rows[:, :2] += low
     if back:
         rows[:, 0], rows[:, 1] = hi - rows[:, 1], hi - rows[:, 0]
     out = np.ascontiguousarray(rows[:, :4])
     if tracks is None:
         return out, None
-    ids = unique_inverse(np.asarray(tracks, np.int64).ravel())[0]
     return out, ids[rows[:, 4]]
 
 
@@ -2281,6 +2284,32 @@ def resolve_overlaps(notes):
     return a if keep.all() else a[keep]
 
 
+def fixed_already(notes):
+    """True when resolve_overlaps(notes) would give back exactly these rows, in this order: each slot + key's notes
+    together in one block, in it every start later than the one before, every note but the block's last ending
+    after its start and no later than the next one starts (nothing to cut, stretch, merge or reorder). A paste
+    whose own overlaps were fixed already (heard_notes) comes to render so: its 5 M notes 0.07 s + 240 MB saved."""
+    n = len(notes)
+    if n < 2:
+        return True
+    g = notes[:, 4] * 256
+    g += notes[:, 2]
+    same = g[1:] == g[:-1]
+    heads = g[np.flatnonzero(~same) + 1]
+    first = int(g[0])
+    del g
+    if len(heads) > n // 4 + 64:  # (blocks this small: the sweep is quick anyway)
+        return False
+    if len(np.unique(np.append(heads, first))) != len(heads) + 1:  # (a slot + key coming back later)
+        return False
+    s, e = notes[:, 0], notes[:, 1]
+    ok = s[1:] > s[:-1]
+    ok &= e[:-1] <= s[1:]
+    ok &= e[:-1] > s[:-1]
+    ok |= ~same
+    return bool(ok.all())
+
+
 OVERLAP_WAYS = ("stretch", "split")  # (render's way: Single's cut + stretch / split around)
 
 
@@ -2969,7 +2998,7 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
             mine = np.asarray(held, bool)[notes[:, 5]]
             kept = notes[mine]
             notes = np.concatenate([cut_by(fix(notes[~mine]), kept), kept])
-        else:
+        elif not (fix is resolve_overlaps and fixed_already(notes)):  # (nothing to fix: the same rows, no copy)
             notes = fix(notes)
     return notes, count
 
@@ -3015,7 +3044,10 @@ def overlap_fix(mode, overlaps):
         return resolve_overlaps if stretch else split_overlaps
 
     def fix(notes):
-        notes = resolve_overlaps(notes) if stretch else split_overlaps(notes)  # (each track's own first, user)
+        if not stretch:  # (each track's own first, user)
+            notes = split_overlaps(notes)
+        elif not fixed_already(notes):
+            notes = resolve_overlaps(notes)
         if not len(notes):
             return notes
         table = o.get("rank")
