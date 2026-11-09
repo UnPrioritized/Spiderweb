@@ -109,8 +109,8 @@ class ScrollingSide:
 
     def fit_hint(self, w):
         """A hint line wraps at the panel's right edge (inside its box), however wide the panel is."""
-        if not w.winfo_ismapped():
-            return
+        if not w.winfo_ismapped() or getattr(self, "_side_measuring", False):
+            return  # (measuring: a wrap put back to the width now made each double-click one line narrower)
         box = w.master
         while box is not self.side and box.winfo_class() != "TLabelframe":
             box = box.master
@@ -462,10 +462,15 @@ class ScrollingSide:
         for narrow, _ in self.side_narrows:
             narrow()
         hints = self.side_hints()
-        for w in hints:  # (hint lines wrap to any width: they never ask for room)
-            w.configure(wraplength=round(HINT_LEAST * self.side_scale))
-        self.update_idletasks()
-        self.set_side_width(self.side_rows_need())
+        self._side_measuring = True  # (waiting re-wraps would put them back to the width now first)
+        try:
+            for w in hints:  # (hint lines wrap to any width: they never ask for room)
+                w.configure(wraplength=round(HINT_LEAST * self.side_scale))
+            self.update_idletasks()
+            need = self.side_rows_need()
+        finally:
+            self._side_measuring = False
+        self.set_side_width(need)
         self.update_idletasks()
         for _, fit in self.side_narrows:  # (back beside the dropdown where the new width has room)
             fit()
