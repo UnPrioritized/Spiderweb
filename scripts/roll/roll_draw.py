@@ -881,7 +881,7 @@ class RollDrawing:
         self.draw_copy_path()
         self.draw_centre_dots()
         self.draw_liquify_mask()
-        self.draw_warp_grid()
+        self.draw_warp_grid(in_redraw=True)
         self.draw_liquify_brush()
         self.draw_melody_lit()
         self.draw_sustain_stops()

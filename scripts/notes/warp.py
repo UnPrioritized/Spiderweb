@@ -275,13 +275,25 @@ def set_handle(wp, k, s, vec, alt=False, scale=(1.0, 1.0)):
 
 
 def reset_handle(wp, k, s):
-    """wp with point k's handle on side s back where it sits untouched (right-click)."""
+    """wp with point k's handle on side s back where it sits untouched (right-click). Its point's last dragged handle
+    put back = the point smooth again (no corner mark; hunt 2026-11-09)."""
     h = [e for e in wp.get("h", ()) if (e[0], e[1]) != (k, s)]
     out = {key: v for key, v in wp.items() if key != "h"}
     if h:
         out["h"] = h
-    else:
+    if not any(e[0] == k for e in h):
+        out = smooth_point(out, k)
+    if not h:
         out.pop("corners", None)
+    return out
+
+
+def smooth_point(wp, k):
+    """wp with point k no longer a corner (its opposite handles turn together again on the next drag)."""
+    left = [c for c in wp.get("corners", ()) if c != k]
+    out = {key: v for key, v in wp.items() if key != "corners"}
+    if left:
+        out["corners"] = left
     return out
 
 

@@ -194,11 +194,25 @@ class WarpGrid:
         """Grid g's Warp with its points as they are now."""
         return dict(g["wp"], pts=np.asarray(g["P"], np.float64).reshape(-1, 2).tolist())
 
+    def warp_shape_place(self, sh):
+        """sh's place in the shape list (None: not in it)."""
+        return next((n for n, s in enumerate(self.app.shapes) if s is sh), None)
+
+    def warp_set_pick(self, g, i):
+        """Point i of grid g clicked: its handles show. Kept as (shape's place in the list, point, grid size), so it
+        lasts through undo / redo (they make the shapes anew; hunt 2026-11-09) and a grid size change drops it."""
+        self.wp_pick = (self.warp_shape_place(g["sh"]), i, wp_.size(g["wp"]))
+
     def warp_pick_of(self, g):
-        """The point of grid g clicked last (its handles show), or None."""
+        """The point of grid g clicked last (its handles show), or None. Another grid size than when clicked: the
+        pick is dropped (the same number would be another point)."""
         p = getattr(self, "wp_pick", None)
-        c, r = wp_.size(g["wp"])
-        return p[1] if p and p[0] == id(g["sh"]) and p[1] < (c + 1) * (r + 1) else None
+        if not p or p[0] is None or p[0] != self.warp_shape_place(g["sh"]):
+            return None
+        if p[2] != wp_.size(g["wp"]):
+            self.wp_pick = None
+            return None
+        return p[1]
 
     def warp_handle_list(self, g):
         """[(point, side)] of the handles grid g shows: the picked point's own + each neighbour's facing it."""
@@ -321,6 +335,9 @@ class WarpGrid:
         self.app.push_undo(name=tr("warp.undo_handle_back"))
         wp = wp_.reset_handle(self.warp_cur(g), k, s)
         wp = self.warp_mirror_handles(wp, k, s, *self.warp_mirror(g))
+        if not any(h[0] == k for h in wp.get("h", ())) and k in wp.get("corners", ()):
+            # (a point on a mirror line: its twin handle went in the mirroring)
+            wp = self.warp_mirror_handles(wp_.smooth_point(wp, k), k, None, *self.warp_mirror(g))
         if wp.get("on") is False:
             wp["on"] = True
         self.warp_apply({"sh": g["sh"], "g": dict(g, wp=wp)}, now=True)
@@ -381,9 +398,11 @@ class WarpGrid:
 
     # ---- drawing
 
-    def draw_warp_grid(self):
+    def draw_warp_grid(self, in_redraw=False):
         """Each selected shape's grid: lines over a ROLL_BG band (busy colours under it, like the Stir circle) and
-        a small square at each point; the dragged point filled."""
+        a small square at each point; the dragged point filled. in_redraw: drawn inside redraw, which puts what it
+        made under the keyboard + ruler itself (lowering it here under a KEPT keyboard / ruler, still at the bottom,
+        put it under the shape's box squares drawn before it; hunt 2026-11-09)."""
         self.delete("wpgrid")
         if not self.warp_on() or self.sx is None:
             return
@@ -472,7 +491,7 @@ class WarpGrid:
                                           fill=look.WARP_MIRROR, width=line, tags="wpgrid")
         # (where a full redraw leaves it: under the keyboard + ruler, under what's drawn after it there)
         self.tag_raise("wpgrid")
-        if self.find_withtag("frame"):
+        if not in_redraw and self.find_withtag("frame"):
             self.tag_lower("wpgrid", "frame")
             for tag in ("lqbrush", "melodylit", "sustop"):
                 if self.find_withtag(tag):
@@ -517,7 +536,7 @@ class WarpGrid:
         if got[0] == "handle":
             return self.warp_handle_press(e, *got[1:])
         g, i = got[1:]
-        self.wp_pick = (id(g["sh"]), i)  # (its handles show)
+        self.warp_set_pick(g, i)  # (its handles show)
         if self.warp_point_locked(g, i):  # (the middle point in 4-way / Half turn: nothing moves, no undo step)
             self.draw_warp_grid()
             self.drag = ("warp_none",)
@@ -536,6 +555,11 @@ class WarpGrid:
         self.wp = {"sh": g["sh"], "g": g, "i": i, "grab": grab, "base": base, "k": k, "pushed": False,
                    "old": clean_recolour(g["sh"].get("recolour")), "job": None, "took": 0.0, "way": None,
                    "shown": 0.0, "jobs": [{"sh": g["sh"], "made": g["made"], "warp": g["wp"], "a": None}]}
+        if e.state & ALT and i in g["wp"].get("corners", ()):  # (Alt on a corner point: smooth again, its mirror
+            # twins too, like the program's curves; kept even without a move: hunt 2026-11-09)
+            wp = self.warp_mirror_handles(wp_.smooth_point(g["wp"], i), i, None, *self.warp_mirror(g))
+            g["wp"] = self.wp["jobs"][0]["warp"] = wp_.full(wp)
+            self.wp["smooth"] = True
         self.drag = ("warp",)
         self.draw_warp_grid()
         return True
@@ -710,6 +734,9 @@ class WarpGrid:
             st["job"] = None
             if st["way"] == "live":  # (the last mouse moves shown first)
                 self.warp_live()
+        if st.get("smooth") and not st["pushed"]:  # (Alt-click on a corner point, not moved: its own undo step)
+            self.warp_first(st)
+            st["changed"] = True
         if st.get("changed"):
             self.warp_apply(st, now=st["way"] == "live")  # (shown live: the picture stays till the notes are in)
             self.app.sync_recolour()
