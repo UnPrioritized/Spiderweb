@@ -7,6 +7,7 @@ from tkinter import font as tkfont, ttk
 from files import settings
 from files.lang import tr
 from window import look
+from window.widgets import Tooltip
 
 GRIP = 8  # px at 100 %: the strip holding the line between the piano roll and the panel; all of it grabs (user: no
 #           pixel hunting), the line drawn in its middle
@@ -15,6 +16,10 @@ LEAST = 120  # px at 100 %: the panel never gets narrower than this by dragging 
 ROOM_LEFT = 240  # px at 100 %: the piano roll / board keeps at least this much width beside a wide panel
 NEED_WAIT_MS = 60  # rows shown: their needed width checked this long after (once for a burst)
 NEED_SAMPLE = ("app.new_shape_defaults", "app.velocity", "app.last_note")  # (texts measured for need_mark)
+SNAP_SHARE = 1 / 3  # dragged narrower than this share of the no-cut width: the panel snaps shut (user)
+STRIP = 20  # px at 100 %: the shut panel's strip, a button all along (user: easy to bring back, no pixel hunting)
+STRIP_GAP = 3  # px at 100 %: plain room between the strip and the window's edge (its resize border)
+DRAG_START = 4  # px: a press on the strip moving less than this is a click
 
 
 class ScrollingSide:
@@ -23,10 +28,11 @@ class ScrollingSide:
     settings.ini key it's remembered under ([view] <side_name>_panel_width, in px at 100 %)."""
     SIDE_SKIP = (tk.Listbox, tk.Text)  # (they scroll themselves; value widgets clicked take the wheel: wheel_turns)
 
-    def make_side(self, width, name=None):
+    def make_side(self, width, name=None, shuts=False):
         """The panel, side_width pixels wide (wider by the scrollbar while it shows; wider still when the font
         makes texts wider than the usual one, look.WIDE; the width dragged last time when there is one): its frame
-        to fill. Make it BEFORE the piano roll / board is packed (the line goes between them)."""
+        to fill. Make it BEFORE the piano roll / board is packed (the line goes between them). shuts = dragged
+        narrow enough it snaps shut to a strip that brings it back (the main window; user 2026-11-09)."""
         s = self.side_scale = getattr(self, "scale", 1) or 1
         self.side_name = name
         self.side_usual = int(width * look.WIDE)
@@ -62,7 +68,133 @@ class ScrollingSide:
         self.bind("<MouseWheel>", self.side_wheel, add="+")
         self.bind("<Configure>", self.side_window_sized, add="+")
         self.bind("<Map>", self.side_row_shown, add="+")  # (a row shown in the panel may need more width)
+        self.side_shuts = shuts
+        self._strip_from = None
+        if shuts:
+            self.make_strip(bg)
+            if not self.side_open_var().get():
+                self.shut_side(save=False)
         return side
+
+    # ------------------------------------------------------------ shut to a strip (main window only)
+
+    def side_open_var(self):
+        """The View menu's "Side panel" tick (made on first ask: the menu is built before the panel)."""
+        var = getattr(self, "_side_open", None)
+        if var is None:
+            saved = settings.get("view", "side_panel_open", "yes") or "yes"
+            var = self._side_open = tk.BooleanVar(self, value=saved.strip().casefold() not in ("no", "false", "0"))
+        return var
+
+    def make_strip(self, bg):
+        s = self.side_scale
+        st = self.side_strip = tk.Canvas(self, width=max(12, round(STRIP * s)), highlightthickness=0, bd=0,
+                                         bg=look.SIDE_STRIP, cursor="hand2")
+        self._strip_hot = False
+        st.bind("<Configure>", lambda e: self.draw_strip())
+        st.bind("<Enter>", lambda e: self.strip_hot(True))
+        st.bind("<Leave>", lambda e: self.strip_hot(False))
+        st.bind("<ButtonPress-1>", self.strip_press)
+        st.bind("<B1-Motion>", self.strip_drag)
+        st.bind("<ButtonRelease-1>", self.strip_release)
+        Tooltip(st, tr("app.side_strip_tip"))
+
+    def draw_strip(self):
+        st = self.side_strip
+        st.delete("all")
+        st.configure(bg=look.SIDE_STRIP_HOT if self._strip_hot or self._strip_from else look.SIDE_STRIP)
+        w, h = st.winfo_width(), st.winfo_height()
+        st.create_text(w / 2, h / 2, text="◀", fill=look.SIDE_STRIP_ARROW, font=look.font(9))
+
+    def strip_hot(self, on):
+        self._strip_hot = on
+        self.draw_strip()
+
+    def side_is_open(self):
+        return not self.side_shuts or self.side_box.winfo_manager() == "pack"
+
+    def shut_side(self, save=True):
+        if not self.side_shuts:
+            return
+        gap = round(STRIP_GAP * self.side_scale)
+        if self.side_strip.winfo_manager() != "pack":
+            self.side_strip.pack(side="right", fill="y", padx=(gap, gap), pady=(0, gap), before=self.side_box)
+        self.side_box.pack_forget()
+        self.side_grip.pack_forget()
+        self.side_open_var().set(False)
+        if save:
+            self.save_side_open(False)
+
+    def open_side(self, width=None, save=True):
+        if width is not None:
+            self.side_width = max(self.side_least(), int(width))
+        if self.side_shuts and self.side_box.winfo_manager() != "pack":
+            self.side_box.pack(side="right", fill="y", before=self.side_strip)
+            self.side_grip.pack(side="right", fill="y", after=self.side_box)
+            self.side_strip.pack_forget()
+        self.show_side_width()
+        if self.side_shuts:
+            self.side_open_var().set(True)
+            if save:
+                self.save_side_open(True)
+
+    def toggle_side(self):
+        """The View menu's tick (already flipped)."""
+        if self.side_open_var().get():
+            self.open_side()
+        else:
+            self.shut_side()
+
+    def save_side_open(self, on):
+        try:
+            settings.put_many({("view", "side_panel_open"): "yes" if on else "no"})
+        except OSError:
+            pass
+
+    def shut_at(self):
+        """Dragged narrower than this, the panel snaps shut (user: past ~a third of the no-cut width)."""
+        return max(self.side_least(), round(max(self.side_need, self.side_usual) * SNAP_SHARE))
+
+    def strip_x(self):
+        """Where the strip's left edge is / would be, in the window (px)."""
+        return self.winfo_width() - round((STRIP + 2 * STRIP_GAP) * self.side_scale)
+
+    def strip_press(self, e):
+        self._strip_from = (e.x_root, False)
+        self.draw_strip()
+
+    def strip_drag(self, e):
+        if self._strip_from is None:
+            return
+        x0, moved = self._strip_from
+        if not moved and abs(e.x_root - x0) < DRAG_START:
+            return
+        self._strip_from = (x0, True)
+        if self._grip_ghost is None or not self._grip_ghost.winfo_exists():
+            self._grip_ghost = tk.Frame(self, width=max(1, round(LINE * self.side_scale)), bg=look.SIDE_LINE_HOT,
+                                        cursor="sb_h_double_arrow")
+            self._grip_ghost.lift()
+        width = self.winfo_rootx() + self.winfo_width() - e.x_root - round(GRIP * self.side_scale) // 2
+        most = self.side_most()
+        if most is not None:
+            width = min(width, most)
+        self._grip_to = width if width >= self.shut_at() else None
+        x = self.strip_x() if self._grip_to is None else self.winfo_width() - width - round(GRIP * self.side_scale) // 2
+        self._grip_ghost.place(x=x, y=self.side_strip.winfo_y(), height=self.side_strip.winfo_height())
+
+    def strip_release(self, e):
+        if self._strip_from is None:
+            return
+        _, moved = self._strip_from
+        self._strip_from = None
+        if self._grip_ghost is not None and self._grip_ghost.winfo_exists():
+            self._grip_ghost.destroy()
+        self.draw_strip()
+        if not moved:
+            self.open_side()  # (a click: back at the width it had)
+        elif self._grip_to is not None:
+            self.open_side(self._grip_to)
+            self.save_side_width()
 
     def fit_side(self):
         self.side_row_shown()
@@ -245,6 +377,11 @@ class ScrollingSide:
         most = self.side_most()
         if most is not None:
             width = min(width, most)
+        if self.side_shuts and width < self.shut_at():  # (let go here = shut: the line shows where the strip goes)
+            self._grip_to = None
+            g = self.side_grip
+            self._grip_ghost.place(x=self.strip_x(), y=g.winfo_y(), height=g.winfo_height())
+            return
         self._grip_to = max(self.side_least(), width)
         self._ghost_at(self._grip_to)
 
@@ -253,8 +390,11 @@ class ScrollingSide:
             return
         self._grip_from = None
         self._grip_ghost.destroy()
-        self.set_side_width(self._grip_to)
         self.draw_grip()
+        if self._grip_to is None:
+            self.shut_side()  # (its width stays what it was: a click on the strip opens it there)
+            return
+        self.set_side_width(self._grip_to)
         self.save_side_width()
 
     def grip_double(self, e):

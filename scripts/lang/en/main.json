@@ -1170,6 +1170,8 @@
  "menu.ctrl_a": "Ctrl+A",
  "menu.f1": "F1",
  "menu.track_list": "Track list ↔ piano roll",
+ "menu.side_panel": "Side panel",
+ "app.side_strip_tip": "Show the side panel. Click to open it, or drag it out to the width you want.",
  "menu.tab": "Tab",
  "app.new_ask": "Start a new MIDI?\n\nEvery shape and the Conductor (tempo, time and key signatures) are cleared. PPQ, Keys, the output file and channel settings stay.\nThis can't be undone.",
  "app.new_save_first": "Save your current work first?",

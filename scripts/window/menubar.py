@@ -125,6 +125,7 @@ def build_menu(app):
     for key, var, command in (("app.velocity_pane", app.show_velocity, app.toggle_velocity),
                               ("app.tempo_pane", app.show_tempo, app.toggle_tempo),
                               ("app.history", app.show_history, app.toggle_history),
+                              ("menu.side_panel", app.side_open_var(), app.toggle_side),
                               (None, None, None),
                               ("app.show_lines", app.show_lines, redraw),
                               ("app.show_notes", app.show_notes, redraw)):
