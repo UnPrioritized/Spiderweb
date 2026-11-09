@@ -16,7 +16,8 @@ from files.mathexpr import calc, fmt
 from notes import liquify as lq
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour
 from window import look
-from window.widgets import Scrub, ShortLabel, Tooltip, good, remember_place
+from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
+    unchanged
 
 # (Pinch + Bulge and Freeze + Thaw = ONE tool each here, Alt held = the other: user 11-07 "too much options"; the
 # dab maths keep all of them)
@@ -119,6 +120,26 @@ class LiquifyWindow(tk.Toplevel):
         self.edge_box.grid(row=row, column=1, columnspan=3, sticky="w", padx=(6, 0), pady=(6, 2))
         self.edge_box.bind("<<ComboboxSelected>>", lambda e: self.on_edge())
         Tooltip(self.edge_box, tr("liquify.edge_tip"))
+        # (Strength % + the show tick: the shapes' own (user 2026-11-09: in the window, like Warp's; they were a
+        # Recolour row); one undo step each, several picked and different = blank box / half tick, typing sets all)
+        row += 1
+        word = ttk.Label(form, text=tr("liquify.strength"))
+        word.grid(row=row, column=0, sticky="w", pady=2)
+        Tooltip(word, tr("liquify.strength_tip"))
+        self.strength_var = tk.StringVar()
+        e = self.strength_entry = ttk.Entry(form, textvariable=self.strength_var, width=7)
+        e.grid(row=row, column=1, sticky="w", padx=(6, 4), pady=2)
+        Tooltip(e, tr("liquify.strength_tip"))
+        Scrub(app, [(e, self.strength_var, lambda: self.on_shown("strength"))], (1, 10, 0.1), 0, lq.MOST_STRENGTH,
+              label=word, drag_box=True)
+        ttk.Label(form, text="%").grid(row=row, column=2, sticky="w")
+        e.bind("<Return>", lambda ev: self.on_shown("strength"))
+        leave_box(app, e, self.strength_var, lambda left: self.on_shown("strength", left and e))
+        self.shown = tk.BooleanVar(value=True)
+        t = self.shown_tick = ttk.Checkbutton(form, text=tr("liquify.shown"), variable=self.shown,
+                                              command=lambda: self.on_shown("on"))
+        t.grid(row=row, column=3, sticky="w", padx=(12, 0))
+        Tooltip(t, tr("liquify.shown_tip"))
         buttons = ttk.Frame(box)
         buttons.pack(anchor="w", fill="x", pady=(10, 0))
         b = ttk.Button(buttons, text=tr("liquify.restore_all"), command=lambda: self.on_all("restore"))
@@ -216,6 +237,36 @@ class LiquifyWindow(tk.Toplevel):
         self.app.change_recolour(change, tr("liquify.undo_edge"))
         self.sync()
 
+    def on_shown(self, what, left=None):
+        """The show tick (what = "on": the bends shown / hidden, kept either way) or Strength ("strength"). Only
+        shapes with a Liquify change; several picked keep their own strengths until one is typed."""
+        if self.app._loading or (left is not None and unchanged(left)):
+            return
+        if what == "on":
+            self.shown_tick.state(["!alternate"])
+            set_to = {"on": self.shown.get()}
+        else:
+            e, var = self.strength_entry, self.strength_var
+            if not var.get().strip() and getattr(e, "blank_from", None):
+                return
+            try:
+                s = calc(var.get().strip().rstrip("%"))
+                ok = 0 <= s <= lq.MOST_STRENGTH
+            except (ValueError, ZeroDivisionError):
+                ok = False
+            if not ok:
+                return bad(e)
+            good(e)
+            set_to = {"strength": round(s, 3)}
+
+        def changed(old, _sh=None):
+            got = (old or {}).get("liquify")
+            if not got:
+                return old
+            return dict(old, liquify=dict(got, **set_to))
+        self.app.change_recolour(changed, tr("liquify.undo_show" if what == "on" else "liquify.undo_strength"))
+        self.sync()
+
     def on_all(self, kind):
         if (self.app.roll.drag or ("",))[0] == "liquify":
             return
@@ -235,7 +286,7 @@ class LiquifyWindow(tk.Toplevel):
         rcs = [clean_recolour(t.get("recolour")) for t in tgts]
         lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
         lqs = [(r or {}).get("liquify") for r in rcs]
-        zero = lqs and all(g and g.get("strength", 100.0) == 0 for g in lqs)  # (Recolour row's Strength 0 %)
+        zero = lqs and all(g and g.get("strength", 100.0) == 0 for g in lqs)  # (Strength 0 %)
         text = tr("liquify.needs") if lonely else tr("liquify.one") if single else tr("liquify.zero") if zero else ""
         if text != self.warn.cget("text"):
             self.warn.config(text=text)
@@ -246,6 +297,24 @@ class LiquifyWindow(tk.Toplevel):
         # (At the edges: the shapes' own, a shape without a Liquify yet = the window's pick for its first stroke)
         edges = {((r or {}).get("liquify") or {"edge": self.edge}).get("edge", "escape") for r in rcs} or {self.edge}
         self.edge_box.set(tr(f"stir.edge_{edges.pop()}") if len(edges) == 1 else "")
+        # (Strength + tick: greyed while no selected shape has a Liquify yet (a first stroke starts at 100 %, shown))
+        have = [dict(lq.DEFAULTS, **g) for g in lqs if g]
+        e = self.strength_entry
+        try:
+            typing = self.focus_get()
+        except (KeyError, tk.TclError):
+            typing = None
+        app._loading = True
+        try:
+            ons = {g["on"] for g in have} or {True}
+            self.shown.set(ons == {True})
+            self.shown_tick.state(["alternate" if len(ons) > 1 else "!alternate"])
+            if typing is not e or unchanged(e):  # (never under the typing)
+                same_or_blank(e, self.strength_var, [fmt(g["strength"]) for g in have] or ["100"])
+        finally:
+            app._loading = False
+        for w in (e, self.shown_tick):
+            w.state(["!disabled"] if have else ["disabled"])
         self.sync_tool()
         app.roll.draw_liquify_mask()
         app.roll.draw_liquify_brush()

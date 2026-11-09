@@ -42,9 +42,9 @@ At the edges: what is pulled in where the brush pushes colours past the shape's 
 
 A straight stroke takes two clicks: Shift+click where it starts (a dashed circle stays there), then Shift+click where it ends. While you hold Shift, a line with arrows shows the way it will push. Keep holding the second click and the same stroke goes on and on, pushing further the longer you hold (as fast as Rate says). The next straight stroke starts with a new first click. Add Ctrl (Shift+Ctrl+click) to snap the line to every 15° (flat, upright, 45° and in between). Esc forgets the start.
 
-## In the Recolour row
+## Strength and Show the bends
 
-A shape with a Liquify shows a Liquify row under the Recolour settings. Untick it to hide the bends without losing them; tick it again and they come back the same. Strength (0 to 400 %) pushes the same bends less or further: 0 shows none, 200 % pushes twice as far. Brushing a hidden Liquify shows it again.
+In the Liquify window, untick "Show the bends" to hide a shape's bends without losing them; tick it again and they come back the same. Strength (0 to 400 %) pushes the same bends less or further: 0 shows none, 200 % pushes twice as far. Brushing a hidden Liquify shows it again.
 
 ## Big shapes
 
