@@ -53,7 +53,7 @@ from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained
 from notes.bezier import anchor_count, sample
 from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, rows_up_to, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.custom import ROUND, frame_upright, notes_resampled, pack_notes, path_colours
+from notes.custom import ROUND, block_shift, frame_upright, notes_resampled, pack_notes, path_colours, unpack_notes
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask, is_mask
@@ -1168,6 +1168,101 @@ def heard_notes(sh, notes, tracks):
     return out, ids[rows[:, 4]]
 
 
+PASTE_KEPT_MOST = 4  # (pasted texts whose repeat check / own-overlap fix are kept: _PASTE_KEPT)
+PASTE_KEPT_LEAST = 100_000  # (fewer notes: done each time, it's quick)
+_PASTE_KEPT = {}  # packed notes text -> {"stats", "keep", way: the fixed notes as pasted (unmoved) or True: none}
+
+
+def paste_moved(sh, ppq, keys):
+    """A plain pasted-notes shape only MOVED since pasted, none of its notes past the piano roll's edges:
+    (text, rows, ticks, keys shifted, its kept work), else None. Its notes = its packed rows shifted, every row
+    by the same amount (custom.block_shift): repeats and its own overlaps are the very same as unmoved, moved."""
+    text = sh.get("notes")
+    if (sh["kind"] != "custom" or not isinstance(text, str) or len(text) < 10_000 or not sh.get("own_vel")
+            or sh.get("cut") or "merge" in sh or "picture" in sh or sh.get("lapped") or sh.get("_free")
+            or sh.get("hz") or sh.get("cycle")):
+        return None
+    rows = unpack_notes(text)
+    if len(rows) < PASTE_KEPT_LEAST:
+        return None
+    got = block_shift(sh, ppq, rows)
+    if got is None:
+        return None
+    T0, K0 = got
+    kept = _PASTE_KEPT.get(text)
+    if kept is None:
+        if len(_PASTE_KEPT) >= PASTE_KEPT_MOST:
+            _PASTE_KEPT.clear()
+        kept = _PASTE_KEPT[text] = {"stats": (int(rows[:, 0].min()), int(rows[:, 1].min()), int(rows[:, 2].min()),
+                                              int(rows[:, 2].max()))}
+    s0, e0, k0, k1 = kept["stats"]
+    if s0 + T0 < 0 or e0 + T0 <= 0 or k0 + K0 < 0 or k1 + K0 >= keys:  # (cut / clipped at an edge: the long way)
+        return None
+    return text, rows, T0, K0, kept
+
+
+def moved_rows(rows, keep, T0, K0, cols=5):
+    """rows (start, end, key, velocity[, track]) at keep (None: all) shifted by T0 ticks, K0 keys -> a new int64
+    array, made column by column (no whole-array copies on the way)."""
+    n = len(rows) if keep is None else len(keep)
+    out = np.empty((n, cols), np.int64)
+    for c, d in zip(range(cols), (T0, T0, K0, 0, 0)):
+        col = rows[:, c] if keep is None else rows[keep, c]
+        if d:
+            np.add(col, d, out=out[:, c], dtype=np.int64)  # (worked out in 64 bits: kept rows may be 32-bit)
+        else:
+            out[:, c] = col
+    return out
+
+
+def paste_keep(sh, rows, kept):
+    """The rows a pasted shape keeps (unique_rows; an Extract keeps its doubles): None = all."""
+    if sh.get("extract"):
+        return None
+    if "keep" not in kept:
+        keep = unique_index(rows)
+        kept["keep"] = None if len(keep) == len(rows) else keep
+    return kept["keep"]
+
+
+def moved_paste(sh, ppq, keys):
+    """kind_notes_tracks of a pasted shape only moved (paste_moved), or None: exactly what the long way gives
+    (block_notes, the edge cut, unique_rows), without its copies (a 5 M-note move: 0.46 s, +577 MB before)."""
+    got = paste_moved(sh, ppq, keys)
+    if got is None:
+        return None
+    text, rows, T0, K0, kept = got
+    out = moved_rows(rows, paste_keep(sh, rows, kept), T0, K0)
+    return out[:, :4], out[:, 4]
+
+
+def heard_kind(sh, ppq, keys):
+    """heard_notes(sh, *kind_notes_tracks(...)). A pasted shape only moved: its own overlaps fixed ONCE where it was
+    pasted and kept, then shifted (fixing commutes with moving every note by the same ticks and keys: the same
+    notes, test overlap_lean)."""
+    way = sh.get("_heard")
+    got = paste_moved(sh, ppq, keys) if way else None
+    if got is None:
+        return heard_notes(sh, *kind_notes_tracks(sh, ppq, keys))
+    text, rows, T0, K0, kept = got
+    keep = paste_keep(sh, rows, kept)
+    fixed = kept.get(("heard", way, keep is None))
+    if fixed is None:
+        base = moved_rows(rows, keep, 0, 0)
+        n, tr = heard_notes(sh, base[:, :4], base[:, 4])
+        if n.base is base or n is base:  # (no overlaps of its own: nothing to fix)
+            fixed = True
+        else:
+            small = n.min() >= -(1 << 31) and n.max() < 1 << 31
+            fixed = (n.astype(np.int32) if small else n, np.asarray(tr).astype(np.int32))
+        kept[("heard", way, keep is None)] = fixed
+    if fixed is True:
+        out = moved_rows(rows, keep, T0, K0)
+        return out[:, :4], out[:, 4]
+    n, tr = fixed
+    return moved_rows(n, None, T0, K0, 4), tr.astype(np.int64)
+
+
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)
 _warming = threading.local()
 
@@ -1281,7 +1376,7 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
     # (a notes shape's own overlaps fixed as the Channels mode shows them, before glue and every tool: heard_way)
-    return with_glue(*heard_notes(sh, *kind_notes_tracks(sh, ppq, keys)), sh, ppq)
+    return with_glue(*heard_kind(sh, ppq, keys), sh, ppq)
 
 
 _held_wholes = {}  # id(whole's notes) -> (them, (sustain, ppq), held(...)): held_piece's
@@ -1818,6 +1913,9 @@ def _kind_notes_tracks(sh, ppq, keys):
         return voiced_notes(sh, ppq, keys)
     if sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("layers"):
         return layered_notes(sh, ppq, keys)
+    got = moved_paste(sh, ppq, keys)  # (a big paste only moved: its notes shifted, without the copies below)
+    if got is not None:
+        return got
     by_snap = sh.get("by_snap") if sh["kind"] in LINE_KINDS else None  # ("Notes by snap": one step each, paths.py)
     end_dot = sh.get("end_dot", False) and not by_snap
     piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
