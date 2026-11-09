@@ -10,6 +10,7 @@ import itertools
 import json
 import math
 import os
+import sys
 import threading
 import time
 import tkinter as tk
@@ -151,6 +152,40 @@ def old_notes_most():
         _old_notes_most.append(max(OLD_NOTES_LEAST, (total or 16 * 2 ** 30) // OLD_NOTES_SHARE)
                                if system.WINE else None)
     return _old_notes_most[0]
+
+
+SHARE_LEAST = 100_000  # notes: arrays this long in the notes cache are kept once (shared_arrays)
+_SAMPLE = 64  # rows looked at first before two arrays are compared whole
+
+
+def shared_arrays(got, pool):
+    """got (notes, tracks...) as the notes cache keeps it: each big array that's a column of a bigger array nothing
+    else holds = its own copy (a tracks column kept a whole 4-column array alive: 60 MB for 15 at 2 M notes), and
+    each one EQUAL to an array the pool (a notes cache) holds at the same place = that one (the notes before a
+    Recolour and after it are the same notes: kept once). The cache never changes what it hands out, so sharing
+    is safe."""
+    if not isinstance(got, tuple):
+        return got
+    out = list(got)
+    for i, a in enumerate(got):
+        if not isinstance(a, np.ndarray) or len(a) < SHARE_LEAST:
+            continue
+        b = a.base
+        if isinstance(b, np.ndarray) and b.nbytes >= 2 * a.nbytes and sys.getrefcount(b) <= 3:
+            a = out[i] = a.copy()  # (refs: a.base, b, the call's own)
+        del b
+        rows = np.linspace(0, len(a) - 1, _SAMPLE).astype(np.int64)
+        look = a[rows]
+        for v in pool.values():
+            c = v[i] if isinstance(v, tuple) and len(v) > i else None
+            if (c is a or not isinstance(c, np.ndarray) or c.shape != a.shape or c.dtype != a.dtype
+                    or not np.array_equal(c[rows], look) or not np.array_equal(c, a)):
+                continue
+            out[i] = c
+            break
+    return tuple(out)
+
+
 MAX_POINT_BOXES = 40  # a curve with more points than this lists none in the panel (a line saying so instead)
 CHANNEL_CHOICES = [
     ("raw", tr("app.as_drawn"),
@@ -850,6 +885,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.big_skip = set()  # big_ask actions ticked "Don't ask again until Spiderweb is closed"
         self._notes_cache = {}
         self._notes_used = {}  # notes cache key -> shapes_gen when last used (forget_old_notes)
+        self._notes_top = set()  # notes cache keys asked for by something else than another key's making (kept old)
+        self._notes_depth = 0  # notes_tracks calls inside another's making right now
         self.colours_wanted = []  # per shape, how many colours (tracks) its notes ask for (shapes_changed)
         self.leave_boxes = {}  # side panel box -> what takes its number when it's left (widgets.leave_box)
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
@@ -2202,13 +2239,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         cache = self._notes_cache
         got = cache.pop(key, None)
         if got is None:
-            # (reaching past the keys / before beat 0: made whole, then cut: engine.edge_made, the thread's too)
-            got = edge_made(sh, self.ppq, keys, self.notes_tracks) if edges and keys == self.keys else None
-            if got is None:
-                got = fx_notes(sh, self.ppq, keys, lambda s: self.notes_tracks(s, keys, False))
+            self._notes_depth += 1
+            try:
+                # (reaching past the keys / before beat 0: made whole, then cut: engine.edge_made, the thread's too)
+                got = edge_made(sh, self.ppq, keys, self.notes_tracks) if edges and keys == self.keys else None
+                if got is None:
+                    got = fx_notes(sh, self.ppq, keys, lambda s: self.notes_tracks(s, keys, False))
+            finally:
+                self._notes_depth -= 1
+            got = shared_arrays(got, cache)
             self._notes_worked += 1
         cache[key] = got  # (last = used most recently: trim_notes forgets the oldest first)
         self._notes_used[key] = self.shapes_gen
+        if not self._notes_depth:
+            self._notes_top.add(key)
         self.trim_notes()
         return got
 
@@ -2244,10 +2288,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The notes remembered for shapes as they WERE (before a move, an edit...: kept so undo is quick) past
         OLD_NOTES_SHARE of the PC's memory: the oldest forgotten (made again if undo needs them). A few edits of a
         shape with millions of notes kept a copy each: a phone ran out of memory. The notes this making used stay.
-        Wine-like systems only (old_notes_most None elsewhere: nothing forgotten)."""
-        cache, used, gen = self._notes_cache, self._notes_used, self.shapes_gen
+        Wine-like systems only (old_notes_most None elsewhere: nothing forgotten). Every system: notes of shapes as
+        they WERE that only went into making another's notes (the notes before a Recolour / a page, made lifted for
+        the edges...) are forgotten: undo asks for the finished ones (2 M notes: ~240 MB less an edit)."""
+        cache, used, gen, top = self._notes_cache, self._notes_used, self.shapes_gen, self._notes_top
         for k in [k for k in used if k not in cache]:  # (the cache emptied elsewhere: their keys hold big texts)
             del used[k]
+        for k in [k for k in top if k not in cache]:
+            top.discard(k)
+        for k in [k for k in cache if k not in top and used.get(k) != gen]:
+            del cache[k]
+            used.pop(k, None)
         most = old_notes_most()
         if most is None:
             return
@@ -2978,7 +3029,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)
         job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False,
-                              "follow": follow, "stash": {}, "used": []}  # (stash: all_notes' own, for lay_again)
+                              "follow": follow, "stash": {}, "used": [], "top": [], "depth": 0}
+        # (stash: all_notes' own, for lay_again; top / depth: as App.notes_tracks' _notes_top / _notes_depth)
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
@@ -2999,12 +3051,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 k += ("whole",)  # (as App.notes_tracks: the notes before a page are never cut)
             got = known.get(k) or job["own"].get(k)
             if got is None:
-                # (past the edges: made whole, then cut, as App.notes_tracks does: engine.edge_made)
-                got = edge_made(sh, key[1], keys, notes_tracks) if edges and keys == key[2] else None
-                if got is None:
-                    got = fx_notes(sh, key[1], keys, lambda s: notes_tracks(s, keys, False))
+                job["depth"] += 1
+                try:
+                    # (past the edges: made whole, then cut, as App.notes_tracks does: engine.edge_made)
+                    got = edge_made(sh, key[1], keys, notes_tracks) if edges and keys == key[2] else None
+                    if got is None:
+                        got = fx_notes(sh, key[1], keys, lambda s: notes_tracks(s, keys, False))
+                finally:
+                    job["depth"] -= 1
+                got = shared_arrays(got, job["own"])
                 job["own"][k] = got
             job["used"].append(k)
+            if not job["depth"]:
+                job["top"].append(k)
             return got
 
         def work():
@@ -3098,6 +3157,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._notes_cache.update(job["own"])
         for k in job["used"]:  # (the notes it used are the shapes' as they are now: kept by forget_old_notes)
             self._notes_used[k] = self.shapes_gen
+        self._notes_top.update(job["top"])
         self.trim_notes()
         if job["own"]:
             self._notes_time = job["time"]
