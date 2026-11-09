@@ -92,7 +92,8 @@ def ok(p):
 
 def make(base, name, bend, way):
     """base (a Warp, or a flat grid with the window's picks) with the preset laid onto its grid: points, handles and
-    inner controls set (dragged handles / corners it had go), its other settings kept. None = nothing moved (0 %)."""
+    inner controls set (dragged handles / corners it had go), its other settings kept. Bend 0 % = a flat Warp holding
+    only the preset (no bend, the Preset row still shows it). None = not a preset / not readable."""
     p = ok([name, bend, way])
     if p is None:
         return None
@@ -120,11 +121,14 @@ def make(base, name, bend, way):
     # (EVERY handle saved, as if dragged: the preset's bend then stays the same when Cells switches)
     h = [[int(j * (c + 1) + i), int(s), float(R[j, i, s, 0]), float(R[j, i, s, 1])]
          for j in range(r + 1) for i in range(c + 1) for s in range(4) if wp_.side_ok(i, j, s, c, r)]
-    if h:
+    if h and bend != 0:
         out["h"] = h
+    out["preset"] = p  # (Bend 0 %: a flat Warp that still shows its preset, so the Bend box stays live; hunt 11-10)
     got = wp_.clean_warp(out)
     if got is None:
         return None
+    if bend == 0:
+        return got
     # (each cell's inner controls from the bend's twist at its corners; saved as "in" where _inner's rule differs)
     B = wp_.net(got, strength=False)
     inner = []

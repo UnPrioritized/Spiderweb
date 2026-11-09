@@ -53,6 +53,7 @@ MOST_PIECES = 2000  # (pieces a whole line at most)
 LIVE_MS = 30  # (every note made again at most this often while dragging when not shown live)
 MOST_GRIDS = 8  # (selected shapes showing a grid at most: more = only the first ones)
 NUDGE_S = 1.0  # (arrow-key nudges this close together = one undo step)
+NUDGE_REST_MS = 300  # (no arrow press for this long: the notes catch up; a held key on a big shape froze, hunt 11-10)
 
 
 class WarpGrid:
@@ -252,7 +253,7 @@ class WarpGrid:
         selection then, so they last through undo / redo (they make the shapes anew; hunts 2026-11-09 / 11-10: a
         split / Delete undone gives the point back) and follow splits; any other selection, shapes added / gone, a
         grid size change, the window closed, Open / New = gone (warp_drop_pick). None picked = no pick."""
-        ks = list(dict.fromkeys(int(k) for k in ks))
+        ks = [k for k in dict.fromkeys(int(k) for k in ks) if not self.warp_point_locked(g, k)]
         if not ks:
             self.wp_pick = None
             return
@@ -286,7 +287,9 @@ class WarpGrid:
             i = np.flatnonzero(np.abs(X - ax) < 1e-7)
             j = np.flatnonzero(np.abs(Y - ay) < 1e-7)
             if len(i) and len(j):
-                out.append(int(j[0]) * len(X) + int(i[0]))
+                k = int(j[0]) * len(X) + int(i[0])
+                if not self.warp_point_locked(g, k):  # (the locked middle is never picked; hunt 2026-11-10)
+                    out.append(k)
         return out
 
     def warp_pick_of(self, g):
@@ -730,7 +733,7 @@ class WarpGrid:
             for i, (x, y) in enumerate(zip(px, py)):
                 if not (room[0] < x < room[2] and room[1] < y < room[3]):
                     continue
-                if i in lit or i == held or i in picked:
+                if i != locked and (i in lit or i == held or i in picked):
                     last.append(i)
                 elif i == locked:  # (can't move: a small cross, never a square to grab)
                     for a, b in ((-1, -1), (-1, 1)):
@@ -1115,6 +1118,13 @@ class WarpGrid:
         g = next((g for g in self.warp_grids() if g["sh"] is b["sh"]), None) if self.warp_on() else None
         if g is not None:
             if max(abs(b["x1"] - b["x0"]), abs(b["y1"] - b["y0"])) < 3 * self.scale:
+                # (a click on ANOTHER shape lying inside the grid picks that shape, as before boxes (Ctrl = Ctrl+click
+                # on shapes); hunt 2026-11-10)
+                i = self.warp_shape_at(b["x0"], b["y0"])
+                if i is not None and i not in self.app.sels:
+                    self.app.select(i, toggle=b["ctrl"])
+                    self.draw_warp_grid()
+                    return
                 if not b["ctrl"]:
                     self.warp_drop_pick()
             else:
@@ -1154,7 +1164,13 @@ class WarpGrid:
             u1, v1 = self.warp_unit(g["made"], x0 + dx, y0 + dy)
             f = self.warp_factor(g)
             delta = ((float(u1) - float(u0)) / f, (float(v1) - float(v0)) / f)
-            P0 = np.array(g["P"], np.float64)
+            # (presses waiting in the queue (a held key on a big shape: each apply took ~0.5 s and they piled up,
+            # 15 presses froze 10 s; hunt 2026-11-10) add up here; the shape takes them ONCE when the queue is empty)
+            pend = getattr(self, "wp_nudge_pend", None)
+            if pend is not None and pend["sh"] is not g["sh"]:
+                self.warp_nudge_flush()
+                pend = None
+            P0 = np.array(pend["P"] if pend else g["P"], np.float64)
             P2 = self.warp_moved(g, P0, self.warp_group(g, k0, picks), delta)
             if np.array_equal(P0, P2):
                 return True
@@ -1162,20 +1178,55 @@ class WarpGrid:
             stack = self.app.undo_stack
             if not (last and stack and stack[-1] is last[0] and time.perf_counter() - last[1] < NUDGE_S):
                 self.app.push_undo(name=tr("warp.undo_nudge"))
-            wp = dict(g["wp"])
+            wp = dict(pend["wp"] if pend else g["wp"])
             if wp.get("on") is False:
                 wp["on"] = True
             mu, mv, half = self.warp_mirror(g)
             if wp.get("h") and (mu or mv or half):
                 for k in self.warp_group(g, k0, picks):
                     wp = self.warp_mirror_handles(wp, k, None, mu, mv, half)
-            self.warp_apply({"sh": g["sh"], "g": dict(g, P=P2, wp=wp)}, now=True)
             self.wp_nudged = (stack[-1] if stack else None, time.perf_counter())
-            self.app.sync_recolour()
-            self.app.schedule_autosave()
-            self.redraw()
+            self.wp_nudge_pend = {"sh": g["sh"], "g": g, "P": P2, "wp": wp, "step": self.wp_nudged[0]}
+            if getattr(self, "wp_nudge_job", None):
+                self.after_cancel(self.wp_nudge_job)
+            self.wp_nudge_job = self.after_idle(self.warp_nudge_flush)
             return True
         return False
+
+    def warp_nudge_flush(self):
+        """The nudges waiting (warp_nudge) taken by their shape, one notes' remake for all of them; like a held number
+        box label, slow notes wait till the presses pause (App.shapes_changed). An undo / another step pressed in
+        between = they're dropped (the step they belong to is gone)."""
+        if getattr(self, "wp_nudge_job", None):
+            self.after_cancel(self.wp_nudge_job)
+        self.wp_nudge_job = None
+        pend, self.wp_nudge_pend = getattr(self, "wp_nudge_pend", None), None
+        stack = self.app.undo_stack
+        if (pend is None or not stack or stack[-1] is not pend["step"]
+                or not any(s is pend["sh"] for s in self.app.shapes)):
+            return
+        if not self.app.scrubbing:
+            self.app.scrubbing = "nudge"
+        self.warp_apply({"sh": pend["sh"], "g": dict(pend["g"], P=pend["P"], wp=pend["wp"])})
+        app = self.app
+        if app._late_notes and app.notes_late:  # (not the drags' "mouse rests" making: the presses' pause is ours)
+            app.after_cancel(app._late_notes)
+            app._late_notes = None
+        self.app.sync_recolour()
+        self.app.schedule_autosave()
+        self.draw_warp_grid()
+        # (the pause is counted from when all this is done: queued presses come first and start it again)
+        self.wp_nudge_job = self.after_idle(self.warp_nudge_wait)
+
+    def warp_nudge_wait(self):
+        self.wp_nudge_job = self.after(NUDGE_REST_MS, self.warp_nudge_rest)
+
+    def warp_nudge_rest(self):
+        """No arrow press for NUDGE_REST_MS: the notes the presses left for later are made."""
+        self.wp_nudge_job = None
+        if self.app.scrubbing == "nudge":
+            self.app.scrubbing = False
+            self.app.catch_up_notes()
 
     def warp_cancel(self):
         """A drag going on ends as if let go (Ctrl+Z mid-drag: the drag ends first, then its step is taken back)."""

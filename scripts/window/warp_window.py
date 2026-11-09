@@ -81,6 +81,10 @@ class WarpWindow(tk.Toplevel):
         p = pr.ok([settings.get("warp", "preset", "arc"), _number(settings.get("warp", "preset_bend", "50"), 50.0),
                    settings.get("warp", "preset_way", "across")]) or ["arc", 50.0, "across"]
         self.preset, self.preset_bend, self.preset_way = p
+        if not self.preset_bend:  # (0 % is never the next pick's bend: picks did nothing; hunt 2026-11-10)
+            self.preset_bend = 50.0
+        self._warps = {}  # id(a shape's recolour) -> (that recolour, its Warp in full): each cleaned once (hunt 11-10)
+        self._keys = {}  # id(a Warp from warps()) -> (it, fit_key(it))
         self._seen = {}  # fit_key(a Warp) -> pr.matches (what the Preset row shows for it)
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
@@ -221,11 +225,32 @@ class WarpWindow(tk.Toplevel):
 
     def warps(self):
         """The selected shapes' Warps (clean, every setting filled in), None for a shape without one."""
-        out = []
-        for t in self.targets():
-            got = (clean_recolour(t.get("recolour")) or {}).get("warp")
-            out.append(wp_.full(got) if got else None)
-        return out
+        return [self.cleaned(t)[1] for t in self.targets()]
+
+    def cleaned(self, t):
+        """(clean_recolour of shape t, its Warp in full or None), each recolour cleaned once (a refresh cleaned every
+        shape's 3 times: 2 s at 60 shapes with 20 x 20 presets; hunt 2026-11-10). A shape's recolour is replaced on
+        every change, never edited in place."""
+        rc = t.get("recolour")
+        memo = self._warps
+        hit = memo.get(id(rc))
+        if hit is None or hit[0] is not rc:
+            c = clean_recolour(rc)
+            got = (c or {}).get("warp")
+            hit = memo[id(rc)] = (rc, c, wp_.full(got) if got else None)
+            if len(memo) > 1000:
+                memo.pop(next(iter(memo)))
+        return hit[1:]
+
+    def key_of(self, w):
+        """fit_key(w), worked out once for each Warp warps() gave (a refresh asked it 3 times per shape: 2 s at 60
+        shapes with 20 x 20 presets; hunt 2026-11-10)."""
+        hit = self._keys.get(id(w))
+        if hit is None or hit[0] is not w:
+            hit = self._keys[id(w)] = (w, fit_key(w))
+            if len(self._keys) > 1000:
+                self._keys.pop(next(iter(self._keys)))
+        return hit[1]
 
     def _change(self, set_to, name):
         """Every selected shape's Warp changed by set_to(its warp, the shape) -> new warp (None = no Warp); one undo
@@ -323,7 +348,7 @@ class WarpWindow(tk.Toplevel):
         """[name, bend, way] of the preset a shape's Warp still is, or None (none / edited since = Custom)."""
         if not w:
             return None
-        key = fit_key(w)
+        key = self.key_of(w)
         if key not in self._seen:
             if len(self._seen) > 200:
                 self._seen.pop(next(iter(self._seen)))
@@ -336,7 +361,7 @@ class WarpWindow(tk.Toplevel):
         different ones: only the other number changes)."""
         self.preset = name
         put("preset", name)
-        if bend is not None:
+        if bend:  # (0 % is never remembered as the next pick's bend: picking then did nothing; hunt 2026-11-10)
             self.preset_bend = bend
             put("preset_bend", fmt(bend))
         if way is not None:
@@ -352,6 +377,7 @@ class WarpWindow(tk.Toplevel):
             new = pr.make(base, name, own[1] if bend is None else bend, own[2] if way is None else way)
             out = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
             if new:
+                new.pop("on", None)  # (a preset laid = the bend shown again, like a drag; hunt 2026-11-10)
                 out["warp"] = new
             else:
                 out.pop("warp", None)
@@ -365,7 +391,8 @@ class WarpWindow(tk.Toplevel):
             return
         name = pr.PRESETS[i]
         way = "across" if name in pr.NO_WAY else self.way_var.get() or self.preset_way
-        self._lay(name, self.shown_bend(), way, tr("warp.undo_preset"))
+        # (a box at 0 % (the shown preset flattened) never lays the new one flat: the last bend picked instead)
+        self._lay(name, self.shown_bend() or self.preset_bend, way, tr("warp.undo_preset"))
 
     def shown_bend(self):
         """The Bend % box's number, else the last one picked (blank / not a number)."""
@@ -507,7 +534,7 @@ class WarpWindow(tk.Toplevel):
         self.what.config(text=tr("warp.nothing") if not tgts else
                          tr("warp.shape", name=app.shape_label(tgts[0])) if len(tgts) == 1 else
                          tr("warp.n_shapes", n=len(tgts)))
-        rcs = [clean_recolour(t.get("recolour")) for t in tgts]
+        rcs = [self.cleaned(t)[0] for t in tgts]
         lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
         ws = self.warps()
         zero = ws and all(w and w["strength"] == 0 for w in ws)
@@ -616,6 +643,8 @@ class WarpWindow(tk.Toplevel):
                 self.on_cells(name)
         if not unchanged(self.strength_entry):
             self.on_shown("strength", self.strength_entry)
+        if not unchanged(self.amount_entry):  # (Bend % too, like Strength; hunt 2026-11-10)
+            self.on_amount(self.amount_entry)
         if self.split_mode:
             self.set_split("")
         roll.warp_drop_pick()  # (opened again: no point picked; Warp Split hunt 2026-11-10)

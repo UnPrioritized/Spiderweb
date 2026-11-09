@@ -112,8 +112,13 @@ def clean_warp(d, keep=False):
         out["folds"] = "under"
     h = _clean_handles(d.get("h"), c, r)
     inner = _clean_inner(d.get("in"), c, r)
-    if (not keep and not xs and not ys and not any(v for p in clean for v in p) and not any(e[2] or e[3] for e in h)
-            and not inner):
+    preset = None
+    if d.get("preset") is not None:  # (the preset that laid the points: shown while they're still its, warp_presets)
+        from notes.warp_presets import ok
+        preset = ok(d["preset"])
+    # (a preset at Bend 0 % = a flat Warp that still shows its preset: the Bend box stays live; hunt 2026-11-10)
+    if (not keep and not (preset and preset[1] == 0) and not xs and not ys and not any(v for p in clean for v in p)
+            and not any(e[2] or e[3] for e in h) and not inner):
         return None
     if h:
         out["h"] = h
@@ -124,11 +129,8 @@ def clean_warp(d, keep=False):
                 out["corners"] = k
     if inner:
         out["in"] = inner
-    if d.get("preset") is not None:  # (the preset that laid the points: shown while they're still its, warp_presets)
-        from notes.warp_presets import ok
-        p = ok(d["preset"])
-        if p:
-            out["preset"] = p
+    if preset:
+        out["preset"] = preset
     return out
 
 
@@ -998,7 +1000,7 @@ def warped(notes, at, low, now, rc, which, pals, pick, box, own):
     from notes import liquify as lq
     from notes.recolour import leaders
     wp = clean_warp(rc.get("warp"))
-    if not wp or wp.get("on") is False or not wp.get("strength", 100.0) or not len(at):
+    if not shows(wp) or not len(at):  # (also a preset's flat Bend 0 %)
         return now
     a = inverse_map(wp)
     shown = lq.shown_places(notes, at, rc)
@@ -1234,8 +1236,14 @@ REFIT_STEPS = 8  # (spots per cell the re-fit compares at)
 
 
 def shows(d):
-    """d when it bends what's shown (on, strength above 0), else None."""
-    return d if d and d.get("on") is not False and d.get("strength", DEFAULTS["strength"]) != 0 else None
+    """d when it bends what's shown (on, strength above 0, not a preset's flat 0 %), else None."""
+    if not d or d.get("on") is False or d.get("strength", DEFAULTS["strength"]) == 0:
+        return None
+    p = d.get("preset")
+    if (p and p[1] == 0 and not d.get("h") and not d.get("in")
+            and not any(v for q in d.get("pts", ()) for v in q)):  # (a preset at Bend 0 %: nothing bends; hunt 11-10)
+        return None
+    return d
 
 
 def blend(x, y, f):
