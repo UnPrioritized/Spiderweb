@@ -2,7 +2,8 @@
 2026-11-09, PLAN.md: "like Liquify": a small window of its own, the grid dragged on the piano roll). Follows the
 selection like Liquify….
 The window holds Grid size (3 x 3 / 4 x 4 / 5 x 5 cells, or Custom…: cells across and up apart, 1..20 each in two
-number boxes; user 2026-11-09, long thin shapes), Bend (Smooth / Straight cells) and At the edges (Stir's choices),
+number boxes; user 2026-11-09, long thin shapes), Preset + its Bend % + Across / Up (notes/warp_presets.py, user
+2026-11-10), Cells (Smooth / Straight cells; was "Bend:") and At the edges (Stir's choices),
 plus Reset. Each one is the shapes' own (one undo step, only shapes with a Warp change; several picked and different
 = blank); a shape with no Warp yet takes the window's picks (settings.ini [warp]) when its first point is dragged.
 Grid size on a warped shape RE-FITS its bend onto the new grid (user 2026-11-09: nothing lost); sizes changed one
@@ -18,7 +19,8 @@ from files import settings
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes import warp as wp_
-from notes.recolour import KEEP, STIR_EDGES, clean_recolour
+from notes import warp_presets as pr
+from notes.recolour import KEEP, STIR_EDGES, clean_recolour, new_seed
 from window import look
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
     unchanged
@@ -39,6 +41,13 @@ def put(name, value):
 def fit_key(w):
     """A Warp as a dict key (_fit): every setting and point."""
     return json.dumps(wp_.clean_warp(w), sort_keys=True)
+
+
+def _number(text, default):
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return default
 
 
 def saved_cells(name):
@@ -68,6 +77,11 @@ class WarpWindow(tk.Toplevel):
         folds = settings.get("warp", "folds", wp_.DEFAULTS["folds"])
         self.folds = folds if folds in wp_.FOLDS else wp_.DEFAULTS["folds"]
         self._fit = {}  # fit_key(the Warp a size change left) -> the Warp before the first size change
+        # (Preset: the last one picked + its Bend % / way, for shapes without one yet; settings.ini [warp])
+        p = pr.ok([settings.get("warp", "preset", "arc"), _number(settings.get("warp", "preset_bend", "50"), 50.0),
+                   settings.get("warp", "preset_way", "across")]) or ["arc", 50.0, "across"]
+        self.preset, self.preset_bend, self.preset_way = p
+        self._seen = {}  # fit_key(a Warp) -> pr.matches (what the Preset row shows for it)
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
         self.what = ShortLabel(box, text="", foreground=look.HINT)
@@ -76,28 +90,56 @@ class WarpWindow(tk.Toplevel):
         form.pack(anchor="w", fill="x", pady=(8, 0))
         self.boxes = {}
         grids = [tr("warp.grid_n", cols=c, rows=r) for c, r in wp_.GRIDS] + [tr("warp.custom")]
+        # (rows: Grid size, its Custom boxes, Preset, its Bend % + way, then Cells (the old "Bend:" row, renamed so
+        # the preset's Bend % has the editors' name; user 2026-11-10 "cells probably works"), ...)
         rows = (("grid", grids, self.on_grid, 0),
-                ("bend", [tr("warp.smooth"), tr("warp.straight")], self.on_bend, 2),
-                ("edges", [tr(f"warp.edges_{c}") for c in wp_.EDGES], self.on_edges, 3),
-                ("folds", [tr(f"warp.folds_{c}") for c in wp_.FOLDS], self.on_folds, 4),
-                ("edge", [tr(f"stir.edge_{c}") for c in STIR_EDGES], self.on_edge, 5))
+                ("preset", [tr(f"warp.preset_{k}") for k in pr.PRESETS], self.on_preset, 2),
+                ("bend", [tr("warp.smooth"), tr("warp.straight")], self.on_bend, 4),
+                ("edges", [tr(f"warp.edges_{c}") for c in wp_.EDGES], self.on_edges, 5),
+                ("folds", [tr(f"warp.folds_{c}") for c in wp_.FOLDS], self.on_folds, 6),
+                ("edge", [tr(f"stir.edge_{c}") for c in STIR_EDGES], self.on_edge, 7))
         for name, values, act, r in rows:
             word = ttk.Label(form, text=tr(f"warp.{name}"))
             word.grid(row=r, column=0, sticky="w", pady=2)
             Tooltip(word, tr(f"warp.{name}_tip"))
-            b = ttk.Combobox(form, values=values, state="readonly", width=max(len(v) for v in values) + 1)
+            wide = values + ([tr("warp.preset_none"), tr("warp.preset_custom")] if name == "preset" else [])
+            b = ttk.Combobox(form, values=values, state="readonly", width=max(len(v) for v in wide) + 1)
             b.grid(row=r, column=1, sticky="w", padx=(6, 0), pady=2)
             b.bind("<<ComboboxSelected>>", lambda e, act=act: act())
             Tooltip(b, tr(f"warp.{name}_tip"))
             self.boxes[name] = b
+        # (the preset's Bend % (-100 .. 100, a number box like Strength) + Across / Up (greyed for the round ones);
+        # each change lays the preset again: one undo step, a held label drag one step too)
+        word = ttk.Label(form, text=tr("warp.amount"))
+        word.grid(row=3, column=0, sticky="w", pady=2)
+        Tooltip(word, tr("warp.amount_tip"))
+        arow = ttk.Frame(form)
+        arow.grid(row=3, column=1, sticky="w", padx=(6, 0), pady=2)
+        self.amount_var = tk.StringVar()
+        e = self.amount_entry = ttk.Entry(arow, textvariable=self.amount_var, width=6)
+        e.pack(side="left")
+        Tooltip(e, tr("warp.amount_tip"))
+        Scrub(app, [(e, self.amount_var, self.on_amount)], (1, 10, 0.1), -pr.MOST_BEND, pr.MOST_BEND, label=word,
+              drag_box=True)
+        ttk.Label(arow, text="%").pack(side="left", padx=(4, 0))
+        e.bind("<Return>", lambda ev: self.on_amount())
+        leave_box(app, e, self.amount_var, lambda left: self.on_amount(left and e))
+        self.way_var = tk.StringVar(value=self.preset_way)
+        self.way_buttons = []
+        for k, way in enumerate(pr.WAYS):
+            b = ttk.Radiobutton(arow, text=tr(f"warp.way_{way}"), value=way, variable=self.way_var,
+                                command=self.on_way)
+            b.pack(side="left", padx=(12 if not k else 6, 0))
+            Tooltip(b, tr("warp.way_tip"))
+            self.way_buttons.append(b)
         # (Mirror: a drawing aid (user 2026-11-09, PLAN C3): a dragged point's twins move mirrored across the grid's
         # middle as shown on the piano roll; settings.ini only, never the shapes')
         word = ttk.Label(form, text=tr("warp.mirror"))
-        word.grid(row=6, column=0, sticky="w", pady=2)
+        word.grid(row=8, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.mirror_tip"))
         values = [tr(f"warp.mirror_{m}") for m in MIRRORS]
         b = ttk.Combobox(form, values=values, state="readonly", width=max(len(v) for v in values) + 1)
-        b.grid(row=6, column=1, sticky="w", padx=(6, 0), pady=2)
+        b.grid(row=8, column=1, sticky="w", padx=(6, 0), pady=2)
         b.bind("<<ComboboxSelected>>", lambda e: self.on_mirror())
         Tooltip(b, tr("warp.mirror_tip"))
         self.boxes["mirror"] = b
@@ -125,10 +167,10 @@ class WarpWindow(tk.Toplevel):
         # (Strength % + the show tick: the shapes' own (user 2026-11-09: inside this window, not the side panel);
         # one undo step each, several picked and different = blank box / half tick, typing sets all)
         word = ttk.Label(form, text=tr("warp.strength"))
-        word.grid(row=7, column=0, sticky="w", pady=2)
+        word.grid(row=9, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.strength_tip"))
         srow = ttk.Frame(form)
-        srow.grid(row=7, column=1, sticky="w", padx=(6, 0), pady=2)
+        srow.grid(row=9, column=1, sticky="w", padx=(6, 0), pady=2)
         self.strength_var = tk.StringVar()
         e = self.strength_entry = ttk.Entry(srow, textvariable=self.strength_var, width=6)
         e.pack(side="left")
@@ -146,10 +188,10 @@ class WarpWindow(tk.Toplevel):
         # (Split, PLAN.md "Warp Split" B: a button picked = the next click on a grid on the piano roll adds the
         # line(s) there; it lets go after one click, a second click on it or Esc lets go too)
         word = ttk.Label(form, text=tr("warp.split"))
-        word.grid(row=8, column=0, sticky="w", pady=2)
+        word.grid(row=10, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.split_tip"))
         prow = ttk.Frame(form)
-        prow.grid(row=8, column=1, sticky="w", padx=(6, 0), pady=2)
+        prow.grid(row=10, column=1, sticky="w", padx=(6, 0), pady=2)
         self.split_mode = ""
         self.split_var = tk.StringVar(value="")
         self.split_buttons = {}
@@ -209,10 +251,15 @@ class WarpWindow(tk.Toplevel):
         self.app.roll.warp_drop_pick()
 
         def set_to(w, sh):
+            c, r = wp_.size(w)
+            p = self.preset_of(w)
+            if p:  # (still a preset: laid again on the new grid, exactly, instead of re-fitted)
+                flat = {k: v for k, v in w.items() if k not in ("xs", "ys")}
+                return pr.make(dict(flat, cols=cols or c, rows=rows or r), *p)
             # (looked up by the Warp itself, not the shape: undo / redo makes new shape objects; hunt 2026-11-09)
             base = self._fit.get(fit_key(w))
             src = base if base is not None else w
-            c, r = wp_.size(w)  # (the other way as it is NOW: across set, then up = both kept)
+            # (the other way as it is NOW: across set, then up = both kept)
             got = wp_.refit(src, cols or c, rows or r)
             if len(self._fit) > 200:
                 self._fit.pop(next(iter(self._fit)))
@@ -269,6 +316,97 @@ class WarpWindow(tk.Toplevel):
         self.smooth = smooth
         put("smooth", "1" if smooth else "0")
         self._change(lambda w, sh: dict(w, smooth=smooth), tr("warp.undo_bend"))
+
+    # ---- presets (PLAN.md "Warp several points + presets" B, user 2026-11-10: a starting point, the editors' set)
+
+    def preset_of(self, w):
+        """[name, bend, way] of the preset a shape's Warp still is, or None (none / edited since = Custom)."""
+        if not w:
+            return None
+        key = fit_key(w)
+        if key not in self._seen:
+            if len(self._seen) > 200:
+                self._seen.pop(next(iter(self._seen)))
+            self._seen[key] = pr.matches(wp_.clean_warp(w))
+        return self._seen[key]
+
+    def _lay(self, name, bend, way, undo):
+        """The preset laid on every selected shape's grid as it is (a shape without a Warp: a grid with the window's
+        picks), its hand edits replaced; one undo step. bend / way None = each shape's own (several picked with
+        different ones: only the other number changes)."""
+        self.preset = name
+        put("preset", name)
+        if bend is not None:
+            self.preset_bend = bend
+            put("preset_bend", fmt(bend))
+        if way is not None:
+            self.preset_way = way
+            put("preset_way", way)
+        self.app.roll.warp_drop_pick()
+
+        def change(old, sh):
+            got = (old or {}).get("warp")
+            base = wp_.full(got) if got else dict(wp_.empty(self.cols, self.rows), smooth=self.smooth,
+                                                     edge=self.edge, edges=self.edges, folds=self.folds)
+            own = self.preset_of(got) or [name, self.preset_bend, self.preset_way]
+            new = pr.make(base, name, own[1] if bend is None else bend, own[2] if way is None else way)
+            out = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
+            if new:
+                out["warp"] = new
+            else:
+                out.pop("warp", None)
+            return out
+        self.app.change_recolour(change, undo)
+        self.sync()
+
+    def on_preset(self):
+        i = self.boxes["preset"].current()
+        if i < 0:
+            return
+        name = pr.PRESETS[i]
+        way = "across" if name in pr.NO_WAY else self.way_var.get() or self.preset_way
+        self._lay(name, self.shown_bend(), way, tr("warp.undo_preset"))
+
+    def shown_bend(self):
+        """The Bend % box's number, else the last one picked (blank / not a number)."""
+        try:
+            v = calc(self.amount_var.get().strip().rstrip("%"))
+            if -pr.MOST_BEND <= v <= pr.MOST_BEND:
+                return round(v, 3)
+        except (ValueError, ZeroDivisionError):
+            pass
+        return self.preset_bend
+
+    def shown_preset(self):
+        """The one preset every selected shape still is (None: mixed, none or Custom)."""
+        got = {tuple(p[:1]) if p else None for p in (self.preset_of(w) for w in self.warps())}
+        return next(iter(got))[0] if len(got) == 1 and None not in got else None
+
+    def on_amount(self, left=None):
+        """Bend % typed / stepped: the shown preset laid again at it (each shape keeps its own way)."""
+        if self.app._loading or (left is not None and unchanged(left)):
+            return
+        e, var = self.amount_entry, self.amount_var
+        if not var.get().strip():
+            return
+        try:
+            v = calc(var.get().strip().rstrip("%"))
+            ok = -pr.MOST_BEND <= v <= pr.MOST_BEND
+        except (ValueError, ZeroDivisionError):
+            ok = False
+        if not ok:
+            return bad(e)
+        good(e)
+        name = self.shown_preset()
+        if name is None:
+            return
+        self._lay(name, round(v, 3), None, tr("warp.undo_preset_bend"))
+
+    def on_way(self):
+        name = self.shown_preset()
+        if name is None or name in pr.NO_WAY:
+            return
+        self._lay(name, None, self.way_var.get(), tr("warp.undo_preset_way"))
 
     def on_edges(self):
         i = self.boxes["edges"].current()
@@ -393,6 +531,7 @@ class WarpWindow(tk.Toplevel):
                 b.current(values.index(v))
             else:
                 b.set("")  # (mixed)
+        self.sync_preset(ws)
         sizes = {(w["cols"], w["rows"]) for w in every}
         # (a split grid's lines aren't even: Custom with its counts; a ready size evens them out)
         odd = any(s not in wp_.GRIDS for s in sizes) or any(w.get("xs") or w.get("ys") for w in every)
@@ -437,6 +576,35 @@ class WarpWindow(tk.Toplevel):
                 self.cells_row.grid_remove()
         if not getattr(app.roll, "wp", None):  # (the grid on the piano roll: as the shapes are now)
             app.roll.draw_warp_grid()
+
+    def sync_preset(self, ws):
+        """The Preset row: the one preset the selected shapes still are, "None" (no Warp), "Custom" (edited since a
+        preset / dragged by hand) or blank (mixed); Bend % + Across / Up only while one preset shows."""
+        ps = [self.preset_of(w) for w in ws]
+        kinds = {p[0] if p else ("custom" if w else "none") for p, w in zip(ps, ws)}
+        b = self.boxes["preset"]
+        one = next(iter(kinds)) if len(kinds) == 1 else None
+        if one in pr.PRESETS:
+            b.current(pr.PRESETS.index(one))
+        else:
+            b.set(tr("warp.preset_none") if one == "none" else tr("warp.preset_custom") if one == "custom" else "")
+        live = one in pr.PRESETS
+        e = self.amount_entry
+        try:
+            typing = self.focus_get()
+        except (KeyError, tk.TclError):
+            typing = None
+        self.app._loading = True
+        try:
+            if typing is not e or unchanged(e):  # (never under the typing)
+                same_or_blank(e, self.amount_var, [fmt(p[1]) for p in ps if p] if live else [fmt(self.preset_bend)])
+            ways = {p[2] for p in ps if p} if live else {self.preset_way}
+            self.way_var.set(next(iter(ways)) if len(ways) == 1 else "")
+        finally:
+            self.app._loading = False
+        e.state(["!disabled"] if live else ["disabled"])
+        for w in self.way_buttons:
+            w.state(["!disabled"] if live and one not in pr.NO_WAY else ["disabled"])
 
     def close(self):
         roll = self.app.roll

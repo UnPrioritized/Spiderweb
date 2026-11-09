@@ -14,6 +14,10 @@ Click a point and its handles show: small dots on the lines around it, plus the 
 
 Dragging a dot turns the one on the other side of the point too, so the line runs smoothly through the point. Hold Alt while dragging to move one dot alone and make a sharp corner there. Hold Alt while you press a corner point to make it smooth again. Right-click a dot you dragged to put it back; when all of a point's dots are back, it's smooth again. Moving a point carries its dots along. Mirror moves the twins' dots as mirror images too. Changing the grid size keeps the bend but puts the dots back.
 
+## Presets
+
+Preset lays a ready-made bend onto the grid: Arc, Arc lower, Arc upper, Arch, Bulge, Shell lower, Shell upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze or Twist. Bend sets how strong it is, from -100 to 100 % (a minus number bends the other way); Across or Up turns it to run along the time or along the keys (the round ones, Fisheye, Inflate and Twist, have no way). The points and their curve handles are set for you on the grid as it is, so a small grid already shows the whole bend and a finer one follows it more closely. A preset is a starting point: drag a point or a dot afterwards and Preset shows Custom. Picking a preset again lays it again over your changes (Ctrl+Z brings them back). Changing the grid size of an untouched preset lays it again on the new grid.
+
 ## Grid size
 
 3 x 3, 4 x 4 or 5 x 5 cells, or Custom… to set Across and Up apart (1 to 20 each), for example more cells across for a long, flat shape. Changing the size of a shape you already bent keeps its bend: the new points take it over as closely as they can. A bump a coarser grid can't make comes out softer, but going back to the size you started from gives the bend back exactly.
@@ -24,9 +28,9 @@ The grid's lines don't have to be evenly spaced. Click Across, Down or Both in t
 
 Right-click the grid for the same choices at that spot (Split across here, Split down here, Split both ways here). Right-click right on a line for Remove this line. Or click a point and press Delete: the lines through it go (a point on the shape's edge loses only its inside line; a corner keeps both). Removing a line keeps the bend as closely as the fewer lines allow. A split grid shows Custom under Grid size; picking a ready size or typing a count spaces the lines evenly again.
 
-## Bend and Colour edges
+## Cells and Colour edges
 
-Bend: Smooth bends the colours like rubber; each point bends only the 4 cells around it. Straight cells bends each cell on its own, with sharp folds along the grid lines. Switching moves only the curve handles you never dragged: the ones you dragged stay where they are.
+Cells: Smooth bends the colours like rubber; each point bends only the 4 cells around it. Straight cells bends each cell on its own, with sharp folds along the grid lines. Switching moves only the curve handles you never dragged: the ones you dragged stay where they are.
 
 Colour edges: Sharp (the start) gives each note the colour of the nearest note, and is the quickest. Smooth makes the edges between colours follow a stretched bend more smoothly, and calms the colours where a cell is squashed. It is slower on big shapes. A note is one key tall, so a shallow edge is still a staircase of one-key steps either way.
 

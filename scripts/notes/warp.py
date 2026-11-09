@@ -15,7 +15,8 @@ hidden), "edge": STIR_EDGES (only != "escape"), "edges": "smooth" (only for Colo
 (only for Folds: pulled part underneath), "h": [[point, side, dx, dy], ...] (only curve handles dragged: each
 cell then a bicubic patch, net / _inner), "corners": [point, ...] (its handles move alone), "in": [[cell, slot, dx,
 dy], ...] (only after a split that needs them: a cell's inner controls off _inner's rule), "xs" / "ys": the inner
-grid lines' places across / up in the box (only when not evenly spaced: Split, user 2026-11-09)}. No point moved
+grid lines' places across / up in the box (only when not evenly spaced: Split, user 2026-11-09), "preset": [name,
+bend %, way] (the preset that laid the points; shown only while they still are its, warp_presets.matches)}. No point moved
 and even lines = no Warp (clean_warp: None). Never released before this layout: no older layout is read (user
 2026-11-09).
 
@@ -123,6 +124,11 @@ def clean_warp(d, keep=False):
                 out["corners"] = k
     if inner:
         out["in"] = inner
+    if d.get("preset") is not None:  # (the preset that laid the points: shown while they're still its, warp_presets)
+        from notes.warp_presets import ok
+        p = ok(d["preset"])
+        if p:
+            out["preset"] = p
     return out
 
 
