@@ -11,7 +11,8 @@ later, planned-features.md).
 
 Saved as {"cols": cells across, "rows": cells up, "pts": [[dx, dy], ...] row by row from the bottom left ((cols + 1)
 x (rows + 1) of them), "smooth": False (only for Straight cells), "strength": % (only != 100), "on": False (only when
-hidden), "edge": STIR_EDGES (only != "escape"), "edges": "sharp" (only for Edges: Sharp)}. No point moved = no Warp
+hidden), "edge": STIR_EDGES (only != "escape"), "edges": "smooth" (only for Colour edges: Smooth), "folds": "under"
+(only for Folds: pulled part underneath)}. No point moved = no Warp
 (clean_warp: None). Never released before this layout: no older layout is read (user 2026-11-09).
 
 THE BEND: a point moved = the colour that was at its place is now shown where it went (forward, like the editors).
@@ -21,9 +22,16 @@ across grid lines; user 2026-11-09 after Catmull-Rom's wider reach was "much, mu
 bilinear (folds along the grid lines). Each spot needs where its colour comes FROM, so the bend is turned round
 (Newton steps on a fine grid, inverse_map) into a Liquify-style "where it comes from" map, and the Liquify's lookup
 (liquify._where / found / _taken / _apart) does the rest: At the edges, colour sets, Per chord / run, two notes on
-a key kept apart, the gate flip's shown places alike. EDGES (user 2026-11-09: "make it a setting"): Smooth (default,
-my pick) = liquify.found's vote (stretched spots: the 4 notes around, bilinear weights; squashed: the most common
-colour over what the note covers) / Sharp = the nearest note (stair steps on stretched cells).
+a key kept apart, the gate flip's shown places alike. EDGES (user 2026-11-09: "make it a setting"): Sharp (default,
+user after Smooth lagged) = the nearest note (stair steps on stretched cells) / Smooth = liquify.found's vote
+(stretched spots: looks round where it fetches from; squashed: the most common colour over what the note covers).
+
+FOLDS (user 2026-11-09, PLAN C4): a point dragged past its neighbours folds the grid over itself, so a spot there
+gets its colour from two (or more) places. Newton alone took whichever it landed on = torn patches. Now, where any
+cell folds (_folds: a piece of it turned over), each spot there is solved in EVERY piece covering it and one rule
+picks: the PULLED part (the cell whose 4 corner points moved farther, all told; inside one folded cell the piece
+that moved farther) on top ("top", default) or underneath ("under"); like folded paper. Never hangs on drag history.
+Grids without a fold: unchanged. (Image editors' Warp: the cell drawn later covers; no choice.)
 """
 
 import json
@@ -33,8 +41,9 @@ import numpy as np
 MOST_CELLS = 20  # (cells across / up at most: the window's Custom boxes, a file too)
 MOST_MOVE = 4.0  # (a point moves at most this many boxes)
 MOST_STRENGTH = 400.0
-DEFAULTS = {"smooth": True, "strength": 100.0, "on": True, "edge": "escape", "edges": "smooth"}
-EDGES = ("smooth", "sharp")  # (the window's Edges dropdown by place)
+DEFAULTS = {"smooth": True, "strength": 100.0, "on": True, "edge": "escape", "edges": "sharp", "folds": "top"}
+EDGES = ("sharp", "smooth")  # (the window's Edges dropdown by place; Sharp the default, user 2026-11-09: Smooth laggy)
+FOLDS = ("top", "under")  # (the window's Folds dropdown by place: the pulled part on top / underneath)
 PER_CELL = 32  # (the turned-round map's steps per cell...)
 MOST_MAP = 257  # (... at most this many a side: 8 cells; more cells share them, 12+ a cell at 20: a drag on a
 # 20 x 20 grid took 0.37 s a move at 513, the bend between points stays smooth)
@@ -71,8 +80,10 @@ def clean_warp(d):
     from notes.recolour import STIR_EDGES
     if d.get("edge") in STIR_EDGES and d["edge"] != DEFAULTS["edge"]:
         out["edge"] = d["edge"]
-    if d.get("edges") == "sharp":
-        out["edges"] = "sharp"
+    if d.get("edges") == "smooth":
+        out["edges"] = "smooth"
+    if d.get("folds") == "under":
+        out["folds"] = "under"
     return out
 
 
@@ -160,34 +171,38 @@ def inverse_map(wp, quick=False):
     spots they can reach worked out again, the rest kept (a 20 x 20 grid's whole map took 0.33 s a move). Never kept
     for the notes themselves: let go works the whole map out, so a shape's colours never hang on how it was edited
     (Newton's last digits can differ near a moved point's reach)."""
-    key = json.dumps([size(wp), wp["pts"], wp.get("smooth", True), wp.get("strength", 100.0)])
+    f = full(wp)
+    key = json.dumps([size(wp), wp["pts"], f["smooth"], f["strength"], f["folds"]])
     got = _MAPS.get(key)
     if got is not None:
         return got
     P = offsets(wp)
-    smooth = full(wp)["smooth"]
+    smooth, top = f["smooth"], f["folds"] == "top"
+    fold = _folds(P, smooth, top)  # (None: nothing folds, the plain Newton answers stand)
     gx, gy = map_size(wp)
-    last = _LAST.get((size(wp), smooth)) if quick else None
+    last = _LAST.get((size(wp), smooth, top)) if quick else None
     parts = _reach(last[0], P, smooth, gx, gy) if last is not None else None
     if parts is None:
         jj, ii = np.mgrid[0:gy, 0:gx]
         px, py = (ii / (gx - 1)).ravel(), (jj / (gy - 1)).ravel()
-        bx, by = _solve(P, px, py, smooth)
+        bx, by = _solve(P, px, py, smooth, fold)
         m = np.stack([bx - px, by - py], 1).reshape(gy, gx, 2)
-    else:  # (each moved point's own reach: mirrored twins sit far apart, one box round them all = most of the map)
+    else:  # (each moved point's own reach: mirrored twins sit far apart, one box round them all = most of the map;
+        # their parts may overlap: every spot in any of them solved once, in one go)
         m = np.array(last[1])
+        want = np.zeros((gy, gx), bool)
         for part in parts:
-            jj, ii = np.mgrid[part]
-            if not jj.size:
-                continue
-            px, py = (ii / (gx - 1)).ravel(), (jj / (gy - 1)).ravel()
-            bx, by = _solve(P, px, py, smooth)
-            m[part] = np.stack([bx - px, by - py], 1).reshape(jj.shape + (2,))
+            want[part] = True
+        jj, ii = np.nonzero(want)
+        if len(jj):
+            px, py = ii / (gx - 1), jj / (gy - 1)
+            bx, by = _solve(P, px, py, smooth, fold)
+            m[jj, ii] = np.stack([bx - px, by - py], 1)
     m[np.abs(m) < 1e-12] = 0.0  # (spots the bend never reached fetch from themselves exactly)
     m.setflags(write=False)
     if quick:
         _LAST.clear()
-        _LAST[(size(wp), smooth)] = (P, m)
+        _LAST[(size(wp), smooth, top)] = (P, m)
         return m
     if len(_MAPS) > 8:
         _MAPS.pop(next(iter(_MAPS)))
@@ -238,16 +253,154 @@ def _reach_one(P0, P, j, i, gx, gy):
     return span(v0, v1, gy), span(u0, u1, gx)
 
 
-def _solve(P, px, py, smooth):
+def _solve(P, px, py, smooth, fold=None):
     """Where the colour each spot (px, py) shows comes from under the offsets P: s with s + bend(s) = p (Newton
-    steps from p - bend(p)); where the bend folds over itself the nearest settled answer."""
+    steps from p - bend(p)). fold (_folds; None = the grid folds nowhere): spots a folded piece covers are solved in
+    every piece covering them and the fold rule picks (FOLDS at the top)."""
     d = bend_at(P, px, py, smooth)
-    sx, sy = px - d[:, 0], py - d[:, 1]
+    bx, by, err = _newton(P, px, py, smooth, px - d[:, 0], py - d[:, 1])
+    # (Newton that never settled (a far stretch next to a fold): left as it was, it took the nearest wrong spot =
+    # torn specks beside the fold; those spots are solved piece by piece too)
+    lost = err > 1e-7
+    if fold is not None or lost.any():
+        _fold_pick(P, px, py, smooth, fold or _folds(P, smooth, True, always=True), bx, by, lost)
+    return bx, by
+
+
+FOLD_LOOK = 9  # (spots a cell side where _folds looks whether a piece turned over / how far a cell's colours land)
+FOLD_PIECES = 4  # (a folded cell solved in this many pieces a side: inside it, two layers may come from one cell)
+FAR = 8.0  # (a box edge's cell reaches this far past the box: the edge's bend holds out there)
+GIVE_UP_STEP, GIVE_UP_FAR = 6, 0.02  # (a fold's piece: still this far off after this many steps = not in it)
+
+
+def _folds(P, smooth, top, always=False):
+    """Where the grid of offsets P folds over itself, or None (nowhere: no spot has two sources). Else a dict:
+    "units" = pieces (x0, x1, y0, y1) of the box each solved on its own (every cell; a folded cell cut in
+    FOLD_PIECES x FOLD_PIECES), "land" = the box (x0, x1, y0, y1) each one's colours land in, "rank" = its place
+    in the fold rule (higher = on top), "fixed" = the boxes of the folded pieces' landing (only spots in one get
+    the rule)."""
+    rows, cols = P.shape[0] - 1, P.shape[1] - 1
+    n = FOLD_LOOK
+    t = np.linspace(0.0, 1.0, n)
+    # (each cell's forward picture on n x n spots: a small quad there turned over (area <= 0) = a fold)
+    cu = (np.arange(cols)[:, None] + t[None]) / cols  # (cols, n)
+    cv = (np.arange(rows)[:, None] + t[None]) / rows  # (rows, n)
+    X = np.broadcast_to(cu[None, None, :, :], (rows, n, cols, n))  # (rows, n up, cols, n across)
+    Y = np.broadcast_to(cv[:, :, None, None], (rows, n, cols, n))
+    d = bend_at(P, X.ravel(), Y.ravel(), smooth).reshape(rows, n, cols, n, 2)
+    fx, fy = X + d[..., 0], Y + d[..., 1]
+    ax, ay = fx[:, :-1, :, 1:] - fx[:, :-1, :, :-1], fy[:, :-1, :, 1:] - fy[:, :-1, :, :-1]
+    bx, by = fx[:, 1:, :, :-1] - fx[:, :-1, :, :-1], fy[:, 1:, :, :-1] - fy[:, :-1, :, :-1]
+    area = ax * by - ay * bx  # (rows, n-1, cols, n-1)
+    flipped = (area <= 0).any((1, 3))  # (rows, cols)
+    if not flipped.any() and not always:
+        return None
+    moved = np.hypot(P[..., 0], P[..., 1])
+    rank = moved[:-1, :-1] + moved[:-1, 1:] + moved[1:, :-1] + moved[1:, 1:]
+    order = np.empty(rows * cols, np.int64)  # (by how far the cell's corners moved; a tie: grid order)
+    order[np.lexsort((np.arange(rows * cols), rank.ravel()))] = np.arange(rows * cols)
+    k = FOLD_PIECES
+    units, land, ranks, fixed = [], [], [], []
+    per = (n - 1) // k  # (looks a piece side: n - 1 must split evenly)
+    for j in range(rows):
+        for i in range(cols):
+            base = order[j * cols + i] * (k * k + 1)
+            x0, x1, y0, y1 = i / cols, (i + 1) / cols, j / rows, (j + 1) / rows
+            if not flipped[j, i]:
+                pieces = [(0, n - 1, 0, n - 1, 0)]
+            else:  # (pieces ranked inside the cell by how far they moved: the farther one is "more pulled")
+                mv = np.hypot(d[j, :, i, :, 0], d[j, :, i, :, 1])
+                pieces = []
+                for b in range(k):
+                    for a in range(k):
+                        pieces.append((a * per, (a + 1) * per, b * per, (b + 1) * per,
+                                       float(mv[b * per:(b + 1) * per + 1, a * per:(a + 1) * per + 1].mean())))
+                inner = np.argsort([p[4] for p in pieces], kind="stable")
+                pieces = [pieces[m][:4] + (int(r) + 1,) for r, m in zip(np.argsort(inner), range(len(pieces)))]
+            for a0, a1, b0, b1, sub in pieces:
+                px_ = fx[j, b0:b1 + 1, i, a0:a1 + 1]
+                py_ = fy[j, b0:b1 + 1, i, a0:a1 + 1]
+                pad = 0.02 / max(cols, rows)  # (the curved patch between the looks bulges a hair)
+                L = [px_.min() - pad, px_.max() + pad, py_.min() - pad, py_.max() + pad]
+                u = [x0 + (x1 - x0) * a0 / (n - 1), x0 + (x1 - x0) * a1 / (n - 1),
+                     y0 + (y1 - y0) * b0 / (n - 1), y0 + (y1 - y0) * b1 / (n - 1)]
+                # (a piece on the box's edge reaches on past it: out there the edge's bend holds, so its colours land
+                # out there too)
+                if a0 == 0 and i == 0:
+                    u[0], L[0] = -FAR, -np.inf
+                if a1 == n - 1 and i == cols - 1:
+                    u[1], L[1] = 1 + FAR, np.inf
+                if b0 == 0 and j == 0:
+                    u[2], L[2] = -FAR, -np.inf
+                if b1 == n - 1 and j == rows - 1:
+                    u[3], L[3] = 1 + FAR, np.inf
+                units.append(u)
+                land.append(L)
+                ranks.append(base + sub)
+                if flipped[j, i]:
+                    fixed.append(L)
+    ranks = np.asarray(ranks, np.int64)
+    return {"units": np.asarray(units), "land": np.asarray(land), "rank": ranks if top else -ranks,
+            "fixed": np.asarray(fixed)}
+
+
+def _fold_pick(P, px, py, smooth, fold, bx, by, lost=None):
+    """_solve's fold rule: spots a folded piece's colours land on (and lost ones: plain Newton never settled) solved
+    in every piece landing there (Newton kept inside it), the highest ranked answer wins (bx, by changed in place).
+    A spot no piece answers keeps Newton's."""
+    F = fold["fixed"]
+    inside = np.zeros(len(px), bool) if lost is None else lost.copy()
+    for x0, x1, y0, y1 in F:
+        inside |= (px >= x0) & (px <= x1) & (py >= y0) & (py <= y1)
+    s = np.flatnonzero(inside)
+    if not len(s):
+        return
+    U, L, R = fold["units"], fold["land"], fold["rank"]
+    sp, up = [], []  # (spot, piece) pairs: each piece landing on the spot
+    qx, qy = px[s], py[s]
+    for k in range(len(U)):
+        x0, x1, y0, y1 = L[k]
+        m = np.flatnonzero((qx >= x0) & (qx <= x1) & (qy >= y0) & (qy <= y1))
+        if len(m):
+            sp.append(s[m])
+            up.append(np.full(len(m), k))
+    if not sp:
+        return
+    sp, up = np.concatenate(sp), np.concatenate(up)
+    # (a spot only one piece can land on has one answer: Newton's stands when it settled; only 2+ pieces / lost
+    # spots are solved piece by piece (most of a fold's box: quick while dragging))
+    many = np.bincount(sp, minlength=len(px)) >= 2
+    if lost is not None:
+        many |= lost
+    keep = many[sp]
+    sp, up = sp[keep], up[keep]
+    if not len(sp):
+        return
+    lo_x, hi_x, lo_y, hi_y = U[up, 0], U[up, 1], U[up, 2], U[up, 3]
+    # (start in the piece's middle, its own part of the box; past the box: the box's edge)
+    cx = (np.clip(lo_x, 0, 1) + np.clip(hi_x, 0, 1)) / 2
+    cy = (np.clip(lo_y, 0, 1) + np.clip(hi_y, 0, 1)) / 2
+    sx, sy, err = _newton(P, px[sp], py[sp], smooth, cx, cy, (lo_x, hi_x, lo_y, hi_y))
+    ok = (err < 1e-7) & (sx >= lo_x - 1e-9) & (sx <= hi_x + 1e-9) & (sy >= lo_y - 1e-9) & (sy <= hi_y + 1e-9)
+    if not ok.any():
+        return
+    sp, sx, sy, r = sp[ok], sx[ok], sy[ok], R[up[ok]]
+    o = np.lexsort((-r, sp))  # (each spot's answers, highest rank first)
+    sp, sx, sy = sp[o], sx[o], sy[o]
+    first = np.ones(len(sp), bool)
+    first[1:] = sp[1:] != sp[:-1]
+    bx[sp[first]], by[sp[first]] = sx[first], sy[first]
+
+
+def _newton(P, px, py, smooth, sx, sy, bounds=None):
+    """Newton steps from (sx, sy) toward s + bend(s) = (px, py) under the offsets P: (x, y, how far off) of the
+    best answer each spot reached. bounds (x0, x1, y0, y1 arrays): kept inside them (a fold's piece)."""
+    sx, sy = np.array(sx, np.float64), np.array(sy, np.float64)
     best = np.full(len(px), np.inf)
     bx, by = sx.copy(), sy.copy()
     live = np.arange(len(px))
     h = 1e-5
-    for _ in range(STEPS):
+    for step in range(STEPS):
         x, y = sx[live], sy[live]
         if smooth:  # (the slopes exact, with the values: one lookup a step)
             d0, dx, dy = _eased(P, x, y, slopes=True)
@@ -259,6 +412,8 @@ def _solve(P, px, py, smooth):
         k = live[better]
         best[k], bx[k], by[k] = err[better], x[better], y[better]
         go = err > 1e-9
+        if bounds is not None and step == GIVE_UP_STEP:  # (a piece the spot isn't in: stuck at its edge, far off)
+            go &= err < GIVE_UP_FAR
         if not go.any():
             break
         live, x, y, rx, ry, d0 = live[go], x[go], y[go], rx[go], ry[go], d0[go]
@@ -275,8 +430,12 @@ def _solve(P, px, py, smooth):
         uy = np.where(ok, (a * ry - c * rx) / safe, ry)
         step = np.hypot(ux, uy)
         cut = np.where(step > 0.2, 0.2 / np.maximum(step, 1e-300), 1.0)
-        sx[live], sy[live] = x - ux * cut, y - uy * cut
-    return bx, by
+        nx, ny = x - ux * cut, y - uy * cut
+        if bounds is not None:
+            nx = np.clip(nx, bounds[0][live], bounds[1][live])
+            ny = np.clip(ny, bounds[2][live], bounds[3][live])
+        sx[live], sy[live] = nx, ny
+    return bx, by, best
 
 
 def warped(notes, at, low, now, rc, which, pals, pick, box, own):

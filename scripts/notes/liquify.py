@@ -397,24 +397,41 @@ def _round_vote(w, at, kept, sx, sy, r, rc, box, own, now):
     """Edges: Smooth on a stretched spot: looks in a round patch (radius r, box units) round where each spot fetches
     from (sx, sy) vote, nearer ones weighing more (_RING); the colour with the most weight wins (a tie: the middle's).
     A stripe's staircase (each key row one step) magnified by a stretch gets its corners rounded about a key wide:
-    the edge comes out as a slant. The note handed back = the look nearest the middle with the winning colour."""
+    the edge comes out as a slant. The note handed back = the look nearest the middle with the winning colour.
+    QUICK FIRST (C4, user 11-09: "quite laggy"): the middle + the outer ring first; all one colour = that colour (the
+    middle's note), the inner ring never looked at (most spots, away from a colour's edge); only the rest vote whole.
+    (Rule, not a shortcut: live and let go both go through here.)"""
     from notes.recolour import nearest
     n = len(sx)
-    got, wts = [], []
-    for ox, oy, wt in _RING:
-        mid, key = _placed(w, sx + ox * r, sy + oy * r, rc, box, own)
-        got.append(nearest(at, mid, key, own=False, kept=kept))
-        wts.append(wt)
-    got = np.stack(got, 1)  # (n, looks), nearest the middle first
+    ring = np.asarray(_RING, np.float64)
+    r = np.broadcast_to(np.asarray(r, np.float64), (n,))[:, None]
+
+    def looks(rows, which):  # (those spots' looks, all in one go: one placing + one search)
+        L = ring[which]
+        mid, key = _placed(w, (sx[rows, None] + L[:, 0] * r[rows]).ravel(),
+                           (sy[rows, None] + L[:, 1] * r[rows]).ravel(), rc, box, own)
+        return nearest(at, mid, key, own=False, kept=kept).reshape(len(rows), len(L))
+    outer = np.r_[0, 7:len(ring)]
+    first = looks(np.arange(n), outer)
+    c = now[first]
+    mixed = np.flatnonzero((c != c[:, :1]).any(1))
+    out = first[:, 0].copy()
+    if not len(mixed):
+        return out
+    got = np.empty((len(mixed), len(ring)), np.int64)
+    got[:, outer] = first[mixed]
+    got[:, 1:7] = looks(mixed, slice(1, 7))
+    n = len(mixed)
     col = now[got]
     K = int(col.max()) + 1
     rows = np.arange(n)[:, None] * K
-    score = np.bincount((rows + col).ravel(), weights=np.broadcast_to(np.array(wts), col.shape).ravel(),
+    score = np.bincount((rows + col).ravel(), weights=np.broadcast_to(ring[:, 2], col.shape).ravel(),
                         minlength=n * K).reshape(n, K)
     score[np.arange(n), col[:, 0]] += 1e-6  # (a tie: the middle's colour)
     best = np.argmax(score, 1)
-    first = np.argmax(col == best[:, None], 1)  # (the first look (nearest the middle) with that colour)
-    return got[np.arange(n), first]
+    pos = np.argmax(col == best[:, None], 1)  # (the first look (nearest the middle) with that colour)
+    out[mixed] = got[np.arange(n), pos]
+    return out
 
 
 def _covered(at, kept, mid, key, vt, vk, nt, nk, now):

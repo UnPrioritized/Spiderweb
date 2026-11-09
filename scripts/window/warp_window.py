@@ -56,6 +56,8 @@ class WarpWindow(tk.Toplevel):
         self.edge = edge if edge in STIR_EDGES else "escape"
         edges = settings.get("warp", "edges", wp_.DEFAULTS["edges"])
         self.edges = edges if edges in wp_.EDGES else wp_.DEFAULTS["edges"]
+        folds = settings.get("warp", "folds", wp_.DEFAULTS["folds"])
+        self.folds = folds if folds in wp_.FOLDS else wp_.DEFAULTS["folds"]
         self._fit = {}  # id(shape) -> (the Warp a size change left it, the Warp before the first size change)
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
@@ -68,7 +70,8 @@ class WarpWindow(tk.Toplevel):
         rows = (("grid", grids, self.on_grid, 0),
                 ("bend", [tr("warp.smooth"), tr("warp.straight")], self.on_bend, 2),
                 ("edges", [tr(f"warp.edges_{c}") for c in wp_.EDGES], self.on_edges, 3),
-                ("edge", [tr(f"stir.edge_{c}") for c in STIR_EDGES], self.on_edge, 4))
+                ("folds", [tr(f"warp.folds_{c}") for c in wp_.FOLDS], self.on_folds, 4),
+                ("edge", [tr(f"stir.edge_{c}") for c in STIR_EDGES], self.on_edge, 5))
         for name, values, act, r in rows:
             word = ttk.Label(form, text=tr(f"warp.{name}"))
             word.grid(row=r, column=0, sticky="w", pady=2)
@@ -81,10 +84,10 @@ class WarpWindow(tk.Toplevel):
         # (Mirror: a drawing aid (user 2026-11-09, PLAN C3): a dragged point's twins move mirrored across the grid's
         # middle as shown on the piano roll; settings.ini only, never the shapes')
         word = ttk.Label(form, text=tr("warp.mirror"))
-        word.grid(row=5, column=0, sticky="w", pady=2)
+        word.grid(row=6, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.mirror_tip"))
         ticks = ttk.Frame(form)
-        ticks.grid(row=5, column=1, sticky="w", padx=(6, 0), pady=2)
+        ticks.grid(row=6, column=1, sticky="w", padx=(6, 0), pady=2)
         self.mirror = {}
         for k, name in enumerate(("side", "up")):
             var = tk.BooleanVar(value=settings.get("warp", f"mirror_{name}", "0") == "1")
@@ -225,6 +228,15 @@ class WarpWindow(tk.Toplevel):
         put("edges", edges)
         self._change(lambda w, sh: dict(w, edges=edges), tr("warp.undo_edges"))
 
+    def on_folds(self):
+        i = self.boxes["folds"].current()
+        if i < 0:
+            return
+        folds = wp_.FOLDS[i]
+        self.folds = folds
+        put("folds", folds)
+        self._change(lambda w, sh: dict(w, folds=folds), tr("warp.undo_folds"))
+
     def on_edge(self):
         i = self.boxes["edge"].current()
         if i < 0:
@@ -249,7 +261,7 @@ class WarpWindow(tk.Toplevel):
         ws = [w for w in self.warps() if w]
         if not ws:
             return
-        for key in ("cols", "rows", "smooth", "edge", "edges"):
+        for key in ("cols", "rows", "smooth", "edge", "edges", "folds"):
             vals = {w[key] for w in ws}
             if len(vals) == 1:
                 v = vals.pop()
@@ -275,10 +287,11 @@ class WarpWindow(tk.Toplevel):
             else:
                 self.warn.pack_forget()
         # (each box: the shapes' own, a shape without a Warp yet = the window's pick for its first drag)
-        mine = {"cols": self.cols, "rows": self.rows, "smooth": self.smooth, "edge": self.edge, "edges": self.edges}
+        mine = {"cols": self.cols, "rows": self.rows, "smooth": self.smooth, "edge": self.edge, "edges": self.edges,
+                "folds": self.folds}
         every = [w or mine for w in ws] or [mine]
         for name, key, values in (("bend", "smooth", BENDS), ("edges", "edges", wp_.EDGES),
-                                  ("edge", "edge", STIR_EDGES)):
+                                  ("folds", "folds", wp_.FOLDS), ("edge", "edge", STIR_EDGES)):
             got = {w[key] for w in every}
             b = self.boxes[name]
             v = got.pop() if len(got) == 1 else None

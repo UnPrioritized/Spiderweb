@@ -54,7 +54,8 @@ class WarpGrid:
             if got:
                 g = wp_.full(got)
             else:
-                g = wp_.full(dict(wp_.empty(w.cols, w.rows), smooth=w.smooth, edge=w.edge, edges=w.edges))
+                g = wp_.full(dict(wp_.empty(w.cols, w.rows), smooth=w.smooth, edge=w.edge, edges=w.edges,
+                                     folds=w.folds))
             out.append({"sh": sh, "made": made, "wp": g, "P": wp_.offsets(g, strength=False)})
         return out
 
@@ -176,10 +177,13 @@ class WarpGrid:
                     self.create_line(*p, fill=col, width=width, tags="wpgrid")
             mu, mv = self.warp_mirror(g)
             for on, u, v in ((mu, [0.5, 0.5], [0.0, 1.0]), (mv, [0.0, 1.0], [0.5, 0.5])):
-                if on:  # (the mirror line: the box's own middle, unbent; thin + dashed, never one thick dashed line)
+                if on:  # (the mirror line: the box's own middle, unbent; SOLID in its own colour, a bit thicker (C4:
+                    # dashed, it vanished on an even grid, right on the grid's middle line; Windows draws Tk's dashes
+                    # 2 px on / off), cut to the view first)
                     x, y = self.warp_screen(g["made"], u, v)
                     for p in clip_polyline([float(x[0]), float(y[0]), float(x[1]), float(y[1])], room):
-                        self.create_line(*p, fill=look.WARP_GRID, width=line, dash=(6, 4), tags="wpgrid")
+                        self.create_line(*p, fill=look.WARP_MIRROR, width=line + 2 * max(1, round(s)),
+                                         tags="wpgrid")
             px, py = self.warp_points(g)
             r = 4 * s
             held = st["i"] if st and st["g"] is g else None
