@@ -168,18 +168,21 @@ def inverse_map(wp, quick=False):
     smooth = full(wp)["smooth"]
     gx, gy = map_size(wp)
     last = _LAST.get((size(wp), smooth)) if quick else None
-    part = _reach(last[0], P, smooth, gx, gy) if last is not None else None
-    if part is None:
+    parts = _reach(last[0], P, smooth, gx, gy) if last is not None else None
+    if parts is None:
         jj, ii = np.mgrid[0:gy, 0:gx]
-    else:
-        jj, ii = np.mgrid[part]
-    px, py = (ii / (gx - 1)).ravel(), (jj / (gy - 1)).ravel()
-    bx, by = _solve(P, px, py, smooth)
-    if part is None:
+        px, py = (ii / (gx - 1)).ravel(), (jj / (gy - 1)).ravel()
+        bx, by = _solve(P, px, py, smooth)
         m = np.stack([bx - px, by - py], 1).reshape(gy, gx, 2)
-    else:
+    else:  # (each moved point's own reach: mirrored twins sit far apart, one box round them all = most of the map)
         m = np.array(last[1])
-        m[part] = np.stack([bx - px, by - py], 1).reshape(jj.shape + (2,))
+        for part in parts:
+            jj, ii = np.mgrid[part]
+            if not jj.size:
+                continue
+            px, py = (ii / (gx - 1)).ravel(), (jj / (gy - 1)).ravel()
+            bx, by = _solve(P, px, py, smooth)
+            m[part] = np.stack([bx - px, by - py], 1).reshape(jj.shape + (2,))
     m[np.abs(m) < 1e-12] = 0.0  # (spots the bend never reached fetch from themselves exactly)
     m.setflags(write=False)
     if quick:
@@ -196,17 +199,23 @@ _LAST = {}  # ((cols, rows), smooth) -> (the point offsets with strength, their 
 
 
 def _reach(P0, P, smooth, gx, gy):
-    """(rows slice, columns slice) of the map spots that can change when the offsets go from P0 to P (a few points
-    moved), or None = all of them (many moved, another size). A moved point bends only the 4 cells round it (Smooth
-    and Straight cells alike); a spot whose colour comes from there is at most the largest bend there away."""
+    """[(rows slice, columns slice), ...] of the map spots that can change when the offsets go from P0 to P (a few
+    points moved: one part each, a mirrored drag's twins too), or None = all of them (many moved, another size). A
+    moved point bends only the 4 cells round it (Smooth and Straight cells alike); a spot whose colour comes from
+    there is at most the largest bend there away. Each spot is worked out on its own, so parts may overlap."""
     if P0.shape != P.shape:
         return None
     moved = np.argwhere((P0 != P).any(2))
-    if not len(moved) or len(moved) > 4:
-        return None if len(moved) else (slice(0, 0), slice(0, 0))
+    if len(moved) > 4:
+        return None
+    return [_reach_one(P0, P, j, i, gx, gy) for j, i in moved]
+
+
+def _reach_one(P0, P, j, i, gx, gy):
+    """_reach's part for the one moved point (j, i)."""
     rows, cols = P.shape[0] - 1, P.shape[1] - 1
-    j0, i0 = moved.min(0) - 1
-    j1, i1 = moved.max(0) + 1
+    j0, i0 = j - 1, i - 1
+    j1, i1 = j + 1, i + 1
     # (the bend inside those cells is a blend of their corners, never past them: no overshoot)
     near = (slice(max(j0, 0), j1 + 1), slice(max(i0, 0), i1 + 1))
     both = np.concatenate([P0[near].reshape(-1, 2), P[near].reshape(-1, 2), np.zeros((1, 2))])

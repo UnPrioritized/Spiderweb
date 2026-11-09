@@ -9,7 +9,11 @@ changed are worked out and painted (roll_liquify's Live machinery, the Warp's tu
 Liquify's map); where that can't follow (a Liquify on the shape too, few notes, Single channel...) every note is made
 again at most every LIVE_MS. Let go = ONE undo step (pushed at the first real move: a click alone leaves none). Esc
 mid-drag = the point back, no step. Ctrl+Z mid-drag = ends as if let go, then that step is taken back. With the window
-open a press on a shape off a point never moves it: an unselected shape gets selected, a selected one stays."""
+open a press on a shape off a point never moves it: an unselected shape gets selected, a selected one stays.
+MIRROR (window ticks, user 2026-11-09, PLAN C3): each drag move sets the dragged point's twins across the grid's
+middle line(s) AS SHOWN ON THE PIANO ROLL (a turned shape: the box's other way; warp_axes), offsets mirrored; a
+point on a mirror line keeps 0 across it (slides along it only); twins jump to the mirrored spot at the first move
+(a lopsided grid stays as it is until then). Dashed middle lines show while ticked (unbent: the box's own middle)."""
 
 import time
 
@@ -106,6 +110,38 @@ class WarpGrid:
         k = (r + 1) * a
         return rows + [xy[k + i * b:k + (i + 1) * b] for i in range(c + 1)]
 
+    def warp_axes(self, made):
+        """True when the colour box's u (across) runs sideways on screen (False: a turned shape, u runs up / down)."""
+        x, y = self.warp_screen(made, [0.0, 1.0, 0.5, 0.5], [0.5, 0.5, 0.0, 1.0])
+        return abs(x[1] - x[0]) + abs(y[3] - y[2]) >= abs(y[1] - y[0]) + abs(x[3] - x[2])
+
+    def warp_mirror(self, g):
+        """(mirror across u = 0.5, mirror across v = 0.5) for grid g from the window's Sideways / Up / down ticks."""
+        w = getattr(self.app, "warp_window", None)
+        side, up = w.mirrored() if w else (False, False)
+        if not (side or up):
+            return False, False
+        return (side, up) if self.warp_axes(g["made"]) else (up, side)
+
+    @staticmethod
+    def warp_twins(P, j, i, new, mu, mv):
+        """P (rows + 1, cols + 1, 2) with point (j, i) at offsets new and its mirror twins set (mu: across u = 0.5,
+        mv: across v = 0.5); a point on a mirror line keeps 0 across it. Changes P in place."""
+        r, c = P.shape[0] - 1, P.shape[1] - 1
+        dx, dy = new
+        if mu and 2 * i == c:
+            dx = 0.0
+        if mv and 2 * j == r:
+            dy = 0.0
+        P[j, i] = (dx, dy)
+        if mu:
+            P[j, c - i] = (-dx, dy)
+        if mv:
+            P[r - j, i] = (dx, -dy)
+        if mu and mv:
+            P[r - j, c - i] = (-dx, -dy)
+        return P
+
     def warp_hit(self, x, y, grids=None):
         """(grid, point number) of the grid point under the mouse (the nearest within GRAB px), or None."""
         if not self.warp_on():
@@ -138,6 +174,12 @@ class WarpGrid:
             for width, col in ((band, look.ROLL_BG), (line, look.WARP_GRID)):
                 for p in pieces:
                     self.create_line(*p, fill=col, width=width, tags="wpgrid")
+            mu, mv = self.warp_mirror(g)
+            for on, u, v in ((mu, [0.5, 0.5], [0.0, 1.0]), (mv, [0.0, 1.0], [0.5, 0.5])):
+                if on:  # (the mirror line: the box's own middle, unbent; thin + dashed, never one thick dashed line)
+                    x, y = self.warp_screen(g["made"], u, v)
+                    for p in clip_polyline([float(x[0]), float(y[0]), float(x[1]), float(y[1])], room):
+                        self.create_line(*p, fill=look.WARP_GRID, width=line, dash=(6, 4), tags="wpgrid")
             px, py = self.warp_points(g)
             r = 4 * s
             held = st["i"] if st and st["g"] is g else None
@@ -210,7 +252,9 @@ class WarpGrid:
         new = ((u + st["grab"][0] - st["base"][0]) / k, (v + st["grab"][1] - st["base"][1]) / k)
         new = [min(max(float(c), -wp_.MOST_MOVE), wp_.MOST_MOVE) for c in new]
         j, i = divmod(st["i"], wp_.size(g["wp"])[0] + 1)
-        if list(g["P"][j, i]) == new:
+        mu, mv = self.warp_mirror(g)
+        P2 = self.warp_twins(np.array(g["P"]), j, i, new, mu, mv) if mu or mv else None
+        if (P2 is None and list(g["P"][j, i]) == new) or (P2 is not None and np.array_equal(P2, g["P"])):
             return
         if not st["pushed"]:
             self.warp_first(st)
@@ -218,7 +262,10 @@ class WarpGrid:
         if st["way"] is None:  # (how it shows, worked out from the grid before this move: Live starts from it)
             job["a"] = self.warp_map(g)
             st["way"] = self.liquify_way(st["jobs"])
-        g["P"][j, i] = new
+        if P2 is None:
+            g["P"][j, i] = new
+        else:
+            g["P"][...] = P2
         st["changed"] = True  # (the map is turned round when shown: moves coming quicker than that cost nothing)
         if st["way"] == "later":  # (its first Recolour: the notes made once, then shown live)
             self.warp_again(st)

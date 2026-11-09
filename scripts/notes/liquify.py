@@ -196,6 +196,18 @@ def least_radius(shape, J, r):
     return max([r] + need)
 
 
+def _runs(idx, gap=3):
+    """Sorted grid numbers -> [(first, last), ...] of the runs in them (numbers closer than gap = one run)."""
+    idx = [int(v) for v in idx]
+    out = []
+    for v in idx:
+        if out and v - out[-1][1] < gap:
+            out[-1][1] = v
+        else:
+            out.append([v, v])
+    return [tuple(r) for r in out]
+
+
 def finer(a, m, r, J, cells=2.0):
     """The map a and mask m (None: none) on a finer grid when a brush of radius r px (J: the colour box's units per
     screen px at its spot) reaches fewer than `cells` grid steps either way (a long shape zoomed in: the brush did
@@ -670,15 +682,21 @@ class Live:
         gy, gx = self.grid
         none = np.zeros(0, np.int64)
         rows, cols = np.flatnonzero(diff.any(1)), np.flatnonzero(diff.any(0))
-        # (a cell looks at its 4 corners: the cells around every changed grid point)
-        j0, j1 = max(int(rows[0]) - 1, 0), min(int(rows[-1]), gy - 2)
-        i0, i1 = max(int(cols[0]) - 1, 0), min(int(cols[-1]), gx - 2)
+        # (a cell looks at its 4 corners: the cells around every changed grid point. Changes in separate places (a
+        # mirrored Warp drag's twins) = a box round each, not one round them all)
+        boxes = [(r0, r1, c0, c1) for r0, r1 in _runs(rows) for c0, c1 in _runs(cols)
+                 if diff[r0:r1 + 1, c0:c1 + 1].any()]
         parts = []
-        for j in range(j0, j1 + 1):
-            lo, hi = int(self.row_at[j]), int(self.row_at[j + 1]) if j + 1 < gy else len(self.cells)
-            c = self.cx[lo:hi]
-            parts.append(self.cells[lo + int(np.searchsorted(c, i0)):lo + int(np.searchsorted(c, i1, "right"))])
+        for r0, r1, c0, c1 in boxes:
+            j0, j1 = max(r0 - 1, 0), min(r1, gy - 2)
+            i0, i1 = max(c0 - 1, 0), min(c1, gx - 2)
+            for j in range(j0, j1 + 1):
+                lo, hi = int(self.row_at[j]), int(self.row_at[j + 1]) if j + 1 < gy else len(self.cells)
+                c = self.cx[lo:hi]
+                parts.append(self.cells[lo + int(np.searchsorted(c, i0)):lo + int(np.searchsorted(c, i1, "right"))])
         D = np.concatenate(parts) if parts else none
+        if len(boxes) > 1:  # (boxes reaching into each other: a note once)
+            D = np.unique(D)
         if not len(D):
             return none
         x, y = self.w["x"][D], self.w["y"][D]
