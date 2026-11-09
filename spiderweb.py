@@ -28,6 +28,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
     font_dialog.py   the font window (type a font's name or pick one)
     widgets.py       tooltips
+    side_panel.py    the side panel of the main window and the drawer
     snap_picker.py   the Snap dropdown (note pictures) and the Customised snap window
     tool_picker.py   the drawing tools' button: the tool picked last, its list and pinned tools
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help

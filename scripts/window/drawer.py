@@ -34,7 +34,8 @@ from window.drawer_mouse import CTRL, MOD_KEYS, SHIFT, STICK_RANK, DrawerMouse
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers
 from window.sticky import BEND, REACH, Targets, key_points
-from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, ScrollingSide, Tooltip, remember_place, wrap_to_room
+from window.side_panel import ScrollingSide
+from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, remember_place, wrap_to_room
 
 LIBRARY = os.path.join(USER, "shapes")
 # Always in the library (not files). A saved shape with the same name is used instead; deleting it brings these back.

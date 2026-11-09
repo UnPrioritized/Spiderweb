@@ -117,7 +117,8 @@ from window.track_list import TrackList, build_onion, build_strip, sync_onion
 from window.load_extract import sync_channels, sync_extract
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
-from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, ScrollingSide, StatusLine, Tooltip, bad, click_first,
+from window.side_panel import ScrollingSide
+from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, StatusLine, Tooltip, bad, click_first,
                             fit_dropdowns, good, grid_shown, mac_buttons, no_focus, set_glide, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
 
 
