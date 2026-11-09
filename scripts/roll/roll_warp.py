@@ -33,7 +33,7 @@ class WarpGrid:
     # ---- where things are
 
     def warp_grids(self):
-        """[{sh, made, wp (every setting filled in), P (raw offsets: (n + 1) up, (n + 1) across, 2)}] of the selected
+        """[{sh, made, wp (every setting filled in), P (raw offsets: rows + 1 up, cols + 1 across, 2)}] of the selected
         shapes Recolour can change (a shape without a Warp: a flat grid with the window's picks). While a point is
         dragged its shape shows the dragged grid."""
         w = self.app.warp_window
@@ -50,7 +50,7 @@ class WarpGrid:
             if got:
                 g = wp_.full(got)
             else:
-                g = wp_.full(dict(wp_.empty(w.grid_n), smooth=w.smooth, edge=w.edge))
+                g = wp_.full(dict(wp_.empty(w.cols, w.rows), smooth=w.smooth, edge=w.edge))
             out.append({"sh": sh, "made": made, "wp": g, "P": wp_.offsets(g, strength=False)})
         return out
 
@@ -80,30 +80,31 @@ class WarpGrid:
 
     def warp_points(self, g):
         """Screen (x, y) of every grid point as the colours show it (row by row from the bottom left)."""
-        n = g["wp"]["n"]
-        jj, ii = np.mgrid[0:n + 1, 0:n + 1]
+        c, r = wp_.size(g["wp"])
+        jj, ii = np.mgrid[0:r + 1, 0:c + 1]
         P = g["P"] * self.warp_factor(g) if g["wp"]["strength"] > 0 else g["P"]
-        u, v = (ii / n).ravel() + P[..., 0].ravel(), (jj / n).ravel() + P[..., 1].ravel()
+        u, v = (ii / c).ravel() + P[..., 0].ravel(), (jj / r).ravel() + P[..., 1].ravel()
         return self.warp_screen(g["made"], u, v)
 
     def warp_lines(self, g):
         """The grid's lines on screen: [[x0, y0, x1, y1, ...], ...], rows then columns; Smooth = the bent curves
         (each line's spots moved as the colours there are), Straight cells = straight between the points."""
-        n, smooth = g["wp"]["n"], g["wp"]["smooth"]
+        (c, r), smooth = wp_.size(g["wp"]), g["wp"]["smooth"]
         P = g["P"] * (self.warp_factor(g) if g["wp"]["strength"] > 0 else 1.0)
-        s = STEPS * n if smooth else n
-        t = np.linspace(0.0, 1.0, s + 1)
-        fixed = np.arange(n + 1) / n
+        su, sv = (STEPS * c, STEPS * r) if smooth else (c, r)  # (pieces along a row / a column)
+        tu, tv = np.linspace(0.0, 1.0, su + 1), np.linspace(0.0, 1.0, sv + 1)
         # (rows: v fixed, u along; columns: u fixed, v along)
-        u = np.concatenate([np.tile(t, n + 1), np.repeat(fixed, s + 1)])
-        v = np.concatenate([np.repeat(fixed, s + 1), np.tile(t, n + 1)])
+        u = np.concatenate([np.tile(tu, r + 1), np.repeat(np.arange(c + 1) / c, sv + 1)])
+        v = np.concatenate([np.repeat(np.arange(r + 1) / r, su + 1), np.tile(tv, c + 1)])
         d = wp_.bend_at(P, u, v, smooth)
         x, y = self.warp_screen(g["made"], u + d[:, 0], v + d[:, 1])
         xy = np.empty(2 * len(x))
         xy[0::2], xy[1::2] = x, y
         xy = xy.tolist()
-        m = 2 * (s + 1)
-        return [xy[i * m:(i + 1) * m] for i in range(2 * (n + 1))]
+        a, b = 2 * (su + 1), 2 * (sv + 1)
+        rows = [xy[i * a:(i + 1) * a] for i in range(r + 1)]
+        k = (r + 1) * a
+        return rows + [xy[k + i * b:k + (i + 1) * b] for i in range(c + 1)]
 
     def warp_hit(self, x, y, grids=None):
         """(grid, point number) of the grid point under the mouse (the nearest within GRAB px), or None."""
@@ -182,9 +183,9 @@ class WarpGrid:
             return True
         g, i = got
         u, v = self.warp_unit(g["made"], e.x, e.y)
-        n = g["wp"]["n"]
+        c, r = wp_.size(g["wp"])
         k = self.warp_factor(g)
-        base = ((i % (n + 1)) / n, (i // (n + 1)) / n)
+        base = ((i % (c + 1)) / c, (i // (c + 1)) / r)
         P = np.array(g["P"], np.float64)
         here = P.reshape(-1, 2)[i]
         # (where the point shows now minus the mouse: the point stays under the mouse where it was grabbed)
@@ -208,8 +209,7 @@ class WarpGrid:
         k = st["k"]
         new = ((u + st["grab"][0] - st["base"][0]) / k, (v + st["grab"][1] - st["base"][1]) / k)
         new = [min(max(float(c), -wp_.MOST_MOVE), wp_.MOST_MOVE) for c in new]
-        n = g["wp"]["n"]
-        j, i = divmod(st["i"], n + 1)
+        j, i = divmod(st["i"], wp_.size(g["wp"])[0] + 1)
         if list(g["P"][j, i]) == new:
             return
         if not st["pushed"]:
@@ -253,9 +253,9 @@ class WarpGrid:
         """The grid's turned-round map (zeros: no point moved), as warp.warped uses it."""
         wp = wp_.clean_warp(dict(g["wp"], pts=g["P"].reshape(-1, 2).tolist()))
         if wp and wp.get("on") is not False and wp.get("strength", 100.0):
-            return wp_.inverse_map(wp)
-        size = min(wp_.MOST_MAP, wp_.PER_CELL * g["wp"]["n"] + 1)
-        return np.zeros((size, size, 2))
+            return wp_.inverse_map(wp, quick=True)  # (let go: the whole map, warp.warped)
+        gx, gy = wp_.map_size(g["wp"])
+        return np.zeros((gy, gx, 2))
 
     def warp_live(self):
         st = getattr(self, "wp", None)

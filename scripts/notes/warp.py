@@ -2,15 +2,17 @@
 dragging a point bends the colours with it like rubber. Notes never move or change length; only which colour each
 one has changes, like the Stir and the Liquify.
 
-THE GRID (rc["warp"]): n x n cells over the shape's colour box (recolour.unit_xy's 0..1 box: flipped / turned with
-the shape, a piece's whole's box), so (n + 1) x (n + 1) points, each one moved by an offset [dx, dy] in that box.
-Saved as the points, never baked (dragged again later; the colours under it can change and they bend the same way).
-Applied after every stir, before the Liquify (user 2026-11-09: fixed order Stir -> Warp -> Liquify; "order added" =
-its own rework later, planned-features.md).
+THE GRID (rc["warp"]): cols x rows cells over the shape's colour box (recolour.unit_xy's 0..1 box: flipped / turned
+with the shape, a piece's whole's box), so (cols + 1) x (rows + 1) points, each one moved by an offset [dx, dy] in
+that box. Cells across and up are set apart (Custom grid size, user 2026-11-09: long thin shapes). Saved as the
+points, never baked (dragged again later; the colours under it can change and they bend the same way). Applied after
+every stir, before the Liquify (user 2026-11-09: fixed order Stir -> Warp -> Liquify; "order added" = its own rework
+later, planned-features.md).
 
-Saved as {"n": cells a side, "pts": [[dx, dy], ...] row by row from the bottom left ((n + 1)^2 of them), "smooth":
-False (only for Straight cells), "strength": % (only != 100), "on": False (only when hidden), "edge": STIR_EDGES (only
-!= "escape")}. No point moved = no Warp (clean_warp: None).
+Saved as {"cols": cells across, "rows": cells up, "pts": [[dx, dy], ...] row by row from the bottom left ((cols + 1)
+x (rows + 1) of them), "smooth": False (only for Straight cells), "strength": % (only != 100), "on": False (only when
+hidden), "edge": STIR_EDGES (only != "escape")}. No point moved = no Warp (clean_warp: None). Never released before
+this layout: no older layout is read (user 2026-11-09).
 
 THE BEND: a point moved = the colour that was at its place is now shown where it went (forward, like the editors).
 Between the points the offsets are blended: Smooth = Catmull-Rom curves through the points (rubber, the editors'
@@ -24,12 +26,13 @@ import json
 
 import numpy as np
 
-MOST_CELLS = 16  # (cells a side a file may hold; the window offers 3 / 4 / 5)
+MOST_CELLS = 20  # (cells across / up at most: the window's Custom boxes, a file too)
 MOST_MOVE = 4.0  # (a point moves at most this many boxes)
 MOST_STRENGTH = 400.0
 DEFAULTS = {"smooth": True, "strength": 100.0, "on": True, "edge": "escape"}
 PER_CELL = 32  # (the turned-round map's steps per cell...)
-MOST_MAP = 513  # (... at most this many a side)
+MOST_MAP = 257  # (... at most this many a side: 8 cells; more cells share them, 12+ a cell at 20: a drag on a
+# 20 x 20 grid took 0.37 s a move at 513, the bend between points stays smooth)
 STEPS = 25  # (Newton steps at most; most spots settle in 3-5)
 _MAPS = {}  # the warp's json -> its turned-round map (read-only); the last few kept
 
@@ -42,17 +45,17 @@ def clean_warp(d):
     """A saved rc["warp"] -> its clean form (see the top), or None (no Warp: nothing moved, or not readable)."""
     if not isinstance(d, dict):
         return None
-    n, pts = d.get("n"), d.get("pts")
-    if not (number(n) and n == int(n) and 1 <= n <= MOST_CELLS) or not isinstance(pts, list):
+    c, r, pts = d.get("cols"), d.get("rows"), d.get("pts")
+    if not (cells_ok(c) and cells_ok(r)) or not isinstance(pts, list):
         return None
-    n = int(n)
-    if len(pts) != (n + 1) ** 2 or not all(isinstance(p, list) and len(p) == 2 and all(number(v) for v in p)
-                                           for p in pts):
+    c, r = int(c), int(r)
+    if len(pts) != (c + 1) * (r + 1) or not all(isinstance(p, list) and len(p) == 2 and all(number(v) for v in p)
+                                                for p in pts):
         return None
     clean = [[round(min(max(float(v), -MOST_MOVE), MOST_MOVE), 6) + 0.0 for v in p] for p in pts]
     if not any(v for p in clean for v in p):
         return None
-    out = {"n": n, "pts": clean}
+    out = {"cols": c, "rows": r, "pts": clean}
     if d.get("smooth") is False:
         out["smooth"] = False
     s = d.get("strength")
@@ -66,20 +69,32 @@ def clean_warp(d):
     return out
 
 
+def cells_ok(v):
+    """A count of cells a file / box may hold (whole, 1..MOST_CELLS)."""
+    return number(v) and v == int(v) and 1 <= v <= MOST_CELLS
+
+
 def full(wp):
     """Every setting of a clean Warp filled in."""
     return dict(DEFAULTS, **wp)
 
 
-def empty(n):
-    """A grid of n x n cells with no point moved (as saved: the window's start)."""
-    return {"n": int(n), "pts": [[0.0, 0.0] for _ in range((int(n) + 1) ** 2)]}
+def size(wp):
+    """(cells across, cells up) of a Warp."""
+    return wp["cols"], wp["rows"]
+
+
+def empty(cols, rows):
+    """A grid of cols x rows cells with no point moved (as saved: the window's start)."""
+    cols, rows = int(cols), int(rows)
+    return {"cols": cols, "rows": rows, "pts": [[0.0, 0.0] for _ in range((cols + 1) * (rows + 1))]}
 
 
 def offsets(wp, strength=True):
-    """A clean Warp's point offsets as an array (n + 1 up, n + 1 across, 2), times its strength (strength=True)."""
-    n = wp["n"]
-    P = np.asarray(wp["pts"], np.float64).reshape(n + 1, n + 1, 2)
+    """A clean Warp's point offsets as an array (rows + 1 up, cols + 1 across, 2), times its strength
+    (strength=True)."""
+    c, r = size(wp)
+    P = np.asarray(wp["pts"], np.float64).reshape(r + 1, c + 1, 2)
     if strength:
         P = P * (full(wp)["strength"] / 100.0)
     return P
@@ -136,19 +151,95 @@ def bend_at(P, x, y, smooth=True):
     return sample(P, x, y)
 
 
-def inverse_map(wp):
+def map_size(wp):
+    """(across, up) points of a Warp's turned-round map: PER_CELL steps a cell, at most MOST_MAP a side."""
+    c, r = size(wp)
+    return min(MOST_MAP, PER_CELL * c + 1), min(MOST_MAP, PER_CELL * r + 1)
+
+
+def inverse_map(wp, quick=False):
     """A clean Warp turned round: (up, across, 2) Liquify-style map, each grid spot p = how far (in box units) the
     colour it shows comes from (s with s + bend(s) = p, so the map = s - p). Read-only, the last few kept. Where the
-    bend folds over itself (a point dragged past its neighbours) the nearest settled answer is used."""
-    key = json.dumps([wp["n"], wp["pts"], wp.get("smooth", True), wp.get("strength", 100.0)])
+    bend folds over itself (a point dragged past its neighbours) the nearest settled answer is used.
+    quick (a point being dragged, roll_warp): a few points moved since the last quick map of this grid = only the
+    spots they can reach worked out again, the rest kept (a 20 x 20 grid's whole map took 0.33 s a move). Never kept
+    for the notes themselves: let go works the whole map out, so a shape's colours never hang on how it was edited
+    (Newton's last digits can differ near a moved point's reach)."""
+    key = json.dumps([size(wp), wp["pts"], wp.get("smooth", True), wp.get("strength", 100.0)])
     got = _MAPS.get(key)
     if got is not None:
         return got
     P = offsets(wp)
     smooth = full(wp)["smooth"]
-    g = min(MOST_MAP, PER_CELL * wp["n"] + 1)
-    jj, ii = np.mgrid[0:g, 0:g]
-    px, py = (ii / (g - 1)).ravel(), (jj / (g - 1)).ravel()
+    gx, gy = map_size(wp)
+    last = _LAST.get((size(wp), smooth)) if quick else None
+    part = _reach(last[0], P, smooth, gx, gy) if last is not None else None
+    if part is None:
+        jj, ii = np.mgrid[0:gy, 0:gx]
+    else:
+        jj, ii = np.mgrid[part]
+    px, py = (ii / (gx - 1)).ravel(), (jj / (gy - 1)).ravel()
+    bx, by = _solve(P, px, py, smooth)
+    if part is None:
+        m = np.stack([bx - px, by - py], 1).reshape(gy, gx, 2)
+    else:
+        m = np.array(last[1])
+        m[part] = np.stack([bx - px, by - py], 1).reshape(jj.shape + (2,))
+    m[np.abs(m) < 1e-12] = 0.0  # (spots the bend never reached fetch from themselves exactly)
+    m.setflags(write=False)
+    if quick:
+        _LAST.clear()
+        _LAST[(size(wp), smooth)] = (P, m)
+        return m
+    if len(_MAPS) > 8:
+        _MAPS.pop(next(iter(_MAPS)))
+    _MAPS[key] = m
+    return m
+
+
+_LAST = {}  # ((cols, rows), smooth) -> (the point offsets with strength, their map) of the last quick map
+
+
+def _reach(P0, P, smooth, gx, gy):
+    """(rows slice, columns slice) of the map spots that can change when the offsets go from P0 to P (a few points
+    moved), or None = all of them (many moved, another size). A moved point bends only the cells round it (Smooth:
+    2 a side, Straight cells: 1); a spot whose colour comes from there is at most the largest bend there away."""
+    if P0.shape != P.shape:
+        return None
+    moved = np.argwhere((P0 != P).any(2))
+    if not len(moved) or len(moved) > 4:
+        return None if len(moved) else (slice(0, 0), slice(0, 0))
+    rows, cols = P.shape[0] - 1, P.shape[1] - 1
+    k = 2 if smooth else 1
+    j0, i0 = moved.min(0) - k
+    j1, i1 = moved.max(0) + k
+    # (the bend inside those cells comes from the points one more cell round them; Catmull-Rom can overshoot a
+    # little: 1.25x)
+    near = (slice(max(j0 - 1, 0), j1 + 2), slice(max(i0 - 1, 0), i1 + 2))
+    both = np.concatenate([P0[near].reshape(-1, 2), P[near].reshape(-1, 2), np.zeros((1, 2))])
+    over = 0.25 * float(np.abs(both).max())
+    lo, hi = both.min(0) - over, both.max(0) + over  # (how far a colour from there can land, each way)
+    u0, u1 = max(i0, 0) / cols + lo[0], min(i1, cols) / cols + hi[0]
+    v0, v1 = max(j0, 0) / rows + lo[1], min(j1, rows) / rows + hi[1]
+    if j0 <= 0:  # (past the box's edge the edge's bend holds: spots out there are reached too)
+        v0 = -np.inf
+    if i0 <= 0:
+        u0 = -np.inf
+    if j1 >= rows:
+        v1 = np.inf
+    if i1 >= cols:
+        u1 = np.inf
+
+    def span(a, b, g):
+        lo = int(np.floor(max(a, 0.0) * (g - 1))) - 1
+        hi = int(np.ceil(min(b, 1.0) * (g - 1))) + 2
+        return slice(max(lo, 0), min(hi, g))
+    return span(v0, v1, gy), span(u0, u1, gx)
+
+
+def _solve(P, px, py, smooth):
+    """Where the colour each spot (px, py) shows comes from under the offsets P: s with s + bend(s) = p (Newton
+    steps from p - bend(p)); where the bend folds over itself the nearest settled answer."""
     d = bend_at(P, px, py, smooth)
     sx, sy = px - d[:, 0], py - d[:, 1]
     best = np.full(len(px), np.inf)
@@ -184,13 +275,7 @@ def inverse_map(wp):
         step = np.hypot(ux, uy)
         cut = np.where(step > 0.2, 0.2 / np.maximum(step, 1e-300), 1.0)
         sx[live], sy[live] = x - ux * cut, y - uy * cut
-    m = np.stack([bx - px, by - py], 1).reshape(g, g, 2)
-    m[np.abs(m) < 1e-12] = 0.0  # (spots the bend never reached fetch from themselves exactly)
-    m.setflags(write=False)
-    if len(_MAPS) > 8:
-        _MAPS.pop(next(iter(_MAPS)))
-    _MAPS[key] = m
-    return m
+    return bx, by
 
 
 def warped(notes, at, low, now, rc, which, pals, pick, box, own):
@@ -216,34 +301,48 @@ def warped(notes, at, low, now, rc, which, pals, pick, box, own):
     return lq._apart(notes, low, new, pals, pick)
 
 
-GRIDS = (3, 4, 5)  # (the window's Grid size choices, cells a side)
+GRIDS = ((3, 3), (4, 4), (5, 5))  # (the window's ready Grid size choices, (across, up); then Custom…)
 
 
-def refit(wp, n):
-    """A clean Warp moved onto a grid of n x n cells (the window's Grid size changed; user 2026-11-09: re-fit, nothing
-    lost): the new points chosen so their bend matches the old one as closely as it can over the whole box (least
-    squares on REFIT_STEPS spots a side: the bend is linear in the points, so one solve; Smooth / Straight cells as
-    the Warp is), the other settings kept. A bend the new grid can't make (a peak between its points) comes out a
-    little softer. None when nothing is left moved."""
+def refit(wp, cols, rows):
+    """A clean Warp moved onto a grid of cols x rows cells (the window's Grid size changed; user 2026-11-09: re-fit,
+    nothing lost): the new points chosen so their bend matches the old one as closely as it can over the whole box
+    (least squares on REFIT_STEPS spots a cell: the bend is linear in the points, so one solve; across and up are
+    apart for both Smooth and Straight cells, so it splits into one small solve each way); the other settings
+    kept. A bend the new grid can't make (a peak between its points) comes out a little softer. None when nothing is
+    left moved."""
     wp = clean_warp(wp)
     if not wp:
         return None
-    n = int(n)
-    if n == wp["n"]:
+    cols, rows = int(cols), int(rows)
+    c0, r0 = size(wp)
+    if (cols, rows) == (c0, r0):
         return wp
     smooth = full(wp)["smooth"]
-    s = REFIT_STEPS * max(n, wp["n"]) + 1
-    yy, xx = np.mgrid[0:s, 0:s] / (s - 1)
-    x, y = xx.ravel(), yy.ravel()
-    want = bend_at(offsets(wp, strength=False), x, y, smooth)
-    m = (n + 1) ** 2
-    basis = np.empty((len(x), m))
-    for i in range(m):  # (each new point's own bend, moved 1 across)
-        unit = np.zeros((m, 2))
-        unit[i, 0] = 1.0
-        basis[:, i] = bend_at(unit.reshape(n + 1, n + 1, 2), x, y, smooth)[:, 0]
-    P = np.linalg.lstsq(basis, want, rcond=None)[0]
-    return clean_warp(dict(wp, n=n, pts=P.tolist()))
+    sx, sy = REFIT_STEPS * max(cols, c0) + 1, REFIT_STEPS * max(rows, r0) + 1
+    yy, xx = np.mgrid[0:sy, 0:sx]
+    x, y = (xx / (sx - 1)).ravel(), (yy / (sy - 1)).ravel()
+    want = bend_at(offsets(wp, strength=False), x, y, smooth)  # (sy * sx, 2)
+    # (the bend = sum of points x (weight across) x (weight up): the weights each way found from a 1-D grid, so the
+    # solve is Bx' P By = want with B = each way's weights; least squares each way in turn = the same as all at once)
+    Bx = _weights(xx[0] / (sx - 1), cols, smooth)  # (sx, cols + 1)
+    By = _weights(yy[:, 0] / (sy - 1), rows, smooth)  # (sy, rows + 1)
+    W = want.reshape(sy, sx, 2)
+    px, py = np.linalg.pinv(Bx), np.linalg.pinv(By)
+    P = np.einsum("aj,jkd,bk->abd", py, W, px)
+    return clean_warp(dict(wp, cols=cols, rows=rows, pts=P.reshape(-1, 2).tolist()))
+
+
+def _weights(t, cells, smooth):
+    """(len(t), cells + 1): how much each point of a 1-D grid of `cells` cells counts at spots t (0..1), as bend_at
+    blends them (Catmull-Rom with the padded ends / straight)."""
+    m = cells + 1
+    out = np.empty((len(t), m))
+    for i in range(m):
+        unit = np.zeros((1, m, 2))
+        unit[0, i, 0] = 1.0
+        out[:, i] = bend_at(np.repeat(unit, 2, 0), t, np.zeros_like(t), smooth)[:, 0]
+    return out
 
 
 REFIT_STEPS = 8  # (spots per cell the re-fit compares at)
@@ -257,15 +356,15 @@ def blend(x, y, f):
     if not x and not y:
         return None
     near = (x if f < 0.5 else y) or x or y
-    n = near["n"]
-    jj, ii = np.mgrid[0:n + 1, 0:n + 1]
-    u, v = (ii / n).ravel(), (jj / n).ravel()
+    c, r = size(near)
+    jj, ii = np.mgrid[0:r + 1, 0:c + 1]
+    u, v = (ii / c).ravel(), (jj / r).ravel()
 
     def on_grid(d):
         if not d:
-            return np.zeros((n + 1, n + 1, 2))
+            return np.zeros((r + 1, c + 1, 2))
         P = offsets(d, strength=False)
-        return P if d["n"] == n else bend_at(P, u, v, full(d)["smooth"]).reshape(n + 1, n + 1, 2)
+        return P if size(d) == (c, r) else bend_at(P, u, v, full(d)["smooth"]).reshape(r + 1, c + 1, 2)
     P = on_grid(x) * (1 - f) + on_grid(y) * f
     sx = (x or y).get("strength", DEFAULTS["strength"])
     sy = (y or x).get("strength", DEFAULTS["strength"])
