@@ -14,6 +14,8 @@ py_loops! {
                 t_hi: f64, ax: f64, bx: f64, kb: f64, w: f64, shown: &[Flag], clip: bool, c0: f64, c2: f64,
                 left: i64, right: i64, keys: i64, row0: &[i64], row1: &[i64], out: NdMut<i64, 2>)
                 => crate::draw::order_rects;
+    liquify_rects(on: &[i64], slot: &[i64], rank: &[i64], colour: &[i64], x0: &[i64], x1: &[i64], key: &[i64],
+                  vq: &[i64], out: NdMut<i64, 2>) => crate::draw::liquify_rects;
     last_on_pixels(x0: &mut [i64], x1: &mut [i64], key: &[i64], color: &[i64], left: i64, right: i64, keys: i64,
                    row0: &[i64], row1: &[i64], out: NdMut<i64, 2>) => crate::draw::last_on_pixels;
     note_top(top_px: &mut [i64], half: &mut [u8], kb: i64, top: i64, w: i64, h: i64, x0: &[i64], y0: &[i64],

@@ -8,6 +8,7 @@ import numpy as np
 NEEDS = {
     "paint_order": ("paint_order",), "order_screen": ("screen_count", "order_screen"),
     "order_rects": ("screen_count", "order_rects"), "last_on_pixels": ("last_on_pixels",), "note_top": ("note_top",),
+    "liquify_rects": ("liquify_rects",),
     "paint_notes": ("paint_notes",),
     "overlap_order": ("overlap_order",), "overlap_sweep": ("overlap_sweep",), "note_stretches": ("note_stretches",),
     "radix_order": ("radix_order",), "ring_runs": ("ring_runs", "ring_runs_int"),
@@ -92,13 +93,25 @@ class Wraps:
         return self.base.order_rects(s, e, key, color, first, b0, b1, t_lo, t_hi, ax, bx, kb, w, shown, clip, c0, c2,
                                      left, right, keys, row0, row1)
 
-    def last_on_pixels(self, x0, x1, key, color, left, right, keys, row0, row1):
-        out = np.empty((5, len(x0)), np.int64)
+    def last_on_pixels(self, x0, x1, key, color, left, right, keys, row0, row1, out=None):
+        kept = out is not None and out.shape[0] == 5 and out.shape[1] >= len(x0)  # (the caller's room, used again)
+        if not kept:
+            out = np.empty((5, len(x0)), np.int64)
         args = (x0, x1, key, color, left, right, keys, row0, row1, out)
         m = self.x.last_on_pixels(*args)
         if m >= 0 or (m := self._again("last_on_pixels", m, args)) >= 0:
-            return rows_of(out, m)
+            return tuple(out[r, :m] for r in range(5)) if kept else rows_of(out, m)
         return self.base.last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1)
+
+    def liquify_rects(self, on, slot, rank, colour, x0, x1, key, vq, out=None):
+        n = len(on)  # (out: room (4, at least n) to use again, the caller's; fresh memory faults in page by page)
+        if out is None or out.shape[0] != 4 or out.shape[1] < n:
+            out = np.empty((4, n), np.int64)
+        args = (on, slot, rank, colour, x0, x1, key, vq, out)
+        got = self.x.liquify_rects(*args)
+        if got >= 0 or (got := self._again("liquify_rects", got, args)) >= 0:
+            return out[0, :n], out[1, :n], out[2, :n], out[3, :n]
+        return self.base.liquify_rects(on, slot, rank, colour, x0, x1, key, vq)
 
     def note_top(self, top_px, half, kb, top, w, h, x0, y0, x1, y1, color, shade):
         args = (top_px, half, kb, top, w, h, x0, y0, x1, y1, color, shade)

@@ -9,6 +9,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   order_screen   roll_draw.note_rects' screen(): the notes on screen, their pixels, colours, in painting order
   order_rects    order_screen + last_on_pixels in one (the notes in between never made)
   last_on_pixels roll_draw.note_rects' end: notes on the very same pixels (only the last shows) left out
+  liquify_rects  roll_liquify.liquify_paint: a shape's notes on screen in painting order (by their slot's rank) + colours
   note_top       roll_draw.note_pixels: which note is on top at every pixel (and whether it's its outline)
   paint_notes    roll_draw.paint_region: the notes' colours straight into the picture (the last painted wins)
   overlap_order  engine.resolve_overlaps' groups and sort (first_seen + overlap_order)
@@ -78,9 +79,10 @@ OWN0 = 1 << 32  # (engine.OWN0)
 
 
 @njit(nogil=True)
-def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1):
+def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1, out=None):
     """The notes' rectangles (x0, y0, x1, y1, colour) with x clamped to left..right; of notes up to 3 pixels long
-    on the very same pixels only the last is kept (the others are painted over)."""
+    on the very same pixels only the last is kept (the others are painted over).
+    out: the library's room (unused here)."""
     n = len(x0)
     for i in range(n):
         x0[i] = max(x0[i], left)
@@ -103,6 +105,35 @@ def last_on_pixels(x0, x1, key, color, left, right, keys, row0, row1):
         ra[m], rb[m], rc[m], rd[m], re[m] = x0[i], row0[key[i]], max(x1[i] - 1, x0[i]), row1[key[i]] - 1, color[i]
         m += 1
     return ra[:m].copy(), rb[:m].copy(), rc[:m].copy(), rd[:m].copy(), re[:m].copy()
+
+
+@njit(nogil=True)
+def liquify_rects(on, slot, rank, colour, x0, x1, key, vq, out=None):
+    """One shape's notes on screen (rows on, start order) in painting order: by their slot's rank, notes of a rank
+    as they come (np.argsort(kind="stable")); no ranks (empty) = as they are. -> (x0, x1, key, colour number).
+    out: the library's room to use again (not used here)."""
+    n = len(on)
+    most = 0
+    if len(rank):
+        for i in range(n):
+            most = max(most, rank[slot[on[i]]])
+    at = np.zeros(most + 2, np.int64)
+    if len(rank):
+        for i in range(n):
+            at[rank[slot[on[i]]] + 1] += 1
+        for k in range(1, len(at)):
+            at[k] += at[k - 1]
+    ox0 = np.empty(n, np.int64)
+    ox1 = np.empty(n, np.int64)
+    okey = np.empty(n, np.int64)
+    ocode = np.empty(n, np.int64)
+    for i in range(n):
+        s = slot[on[i]]
+        k = rank[s] if len(rank) else 0
+        p = at[k]
+        at[k] += 1
+        ox0[p], ox1[p], okey[p], ocode[p] = x0[i], x1[i], key[i], colour[s] * 32 + vq[i]
+    return ox0, ox1, okey, ocode
 
 
 @njit(nogil=True)
@@ -925,12 +956,15 @@ def _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, las
               out):
     """liquify.found's Edges: Smooth for note idx[i] at spot (x[i], y[i]) of the box (the same sums, the same
     order as its arrays). c = [tick's step across, up (box units), half a key's across, up, one key's height,
-    strength / 100, SOFT_SQUASHED, SOFT_REACH]."""
+    strength / 100, SOFT_SQUASHED, SOFT_REACH, 1 = Edges: Sharp (the nearest note alone, C7)]."""
     s100 = c[5]
     x0, y0 = x[i], y[i]
     d0, d1 = _sample2(a, x0, y0)
     sx, sy = x0 + d0 * s100, y0 + d1 * s100
     mid, key = _unit_back(sx, sy, fp)
+    if c[8] != 0:  # (Edges: Sharp, the Liquify: the nearest note alone)
+        out[i] = _near_at(mid, key, keys, first, last, line, ms, o, base, top, gap)
+        return
     j = idx[i]
     s, e = float(at[j, 0]), float(at[j, 1])
     h = max((e - s) / 2, 0.5)

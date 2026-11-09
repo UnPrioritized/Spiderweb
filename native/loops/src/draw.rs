@@ -1,7 +1,7 @@
 //! The piano roll's note pictures (roll_draw): fastloops' paint_order, order_screen, order_rects, last_on_pixels,
 //! note_top, paint_notes. The very same steps as those, in the same order, so the same pixels come out.
 use crate::maths::{f2i, fdiv, fmodi, imax, imin, rint};
-use crate::{all_below, copied, need, rd, room, try_zeros, wr, Flag, Nd, NdMut, NO_MEMORY};
+use crate::{all_below, copied, need, rd, room, try_zeros, wr, zeros, Flag, Nd, NdMut, NO_MEMORY};
 
 const OWN0: i64 = 1 << 32; // (engine.OWN0)
 const NO_END: i64 = 1 << 30; // (fastloops.NO_END)
@@ -422,6 +422,64 @@ pub fn last_on_pixels(x0: &mut [i64], x1: &mut [i64], key: &[i64], color: &[i64]
         m += 1;
     }
     m as i64
+}
+
+/// fastloops.liquify_rects: one shape's notes on screen (rows `on`, start order) put in painting order by their
+/// slot's rank (a stable counting sort; no ranks = as they are), with their colour numbers: x0 / x1 / key / code
+/// into out (4 rows, room len(on)) -> 0.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn liquify_rects(on: &[i64], slot: &[i64], rank: &[i64], colour: &[i64], x0: &[i64], x1: &[i64], key: &[i64],
+                     vq: &[i64], out: NdMut<i64, 2>) -> i64 {
+    let n = on.len();
+    if x0.len() < n || x1.len() < n || key.len() < n || vq.len() < n || out.sh[0] < 4 || out.sh[1] < n {
+        return crate::FAILED;
+    }
+    // (every place checked once, the ranks counted; then each note put in its place. No lists the size of the notes
+    // made here: fresh memory costs a page fault every 4 KB)
+    let ranked = !rank.is_empty();
+    let mut most = 0i64;
+    for &r in on {
+        if r < 0 || r as usize >= slot.len() {
+            return crate::FAILED;
+        }
+        let s = slot[r as usize];
+        if s < 0 || s as usize >= colour.len() || (ranked && s as usize >= rank.len()) {
+            return crate::FAILED;
+        }
+        if ranked {
+            let k = rank[s as usize];
+            if !(0..1 << 20).contains(&k) {
+                return crate::FAILED;
+            }
+            most = most.max(k);
+        }
+    }
+    let room = out.sh[1];
+    let (ox0, rest) = out.d.split_at_mut(room);
+    let (ox1, rest) = rest.split_at_mut(room);
+    let (okey, ocode) = rest.split_at_mut(room);
+    let mut at = need!(zeros::<i64>(most as usize + 2));
+    if ranked && most > 0 {
+        // (each rank's first place in out: the counts before it; one rank = as they are)
+        for &r in on {
+            at[rd(rank, rd(slot, r as usize) as usize) as usize + 1] += 1;
+        }
+        for k in 1..at.len() {
+            at[k] += at[k - 1];
+        }
+    }
+    for i in 0..n {
+        let s = rd(slot, rd(on, i) as usize) as usize;
+        let k = if ranked && most > 0 { rd(rank, s) as usize } else { 0 };
+        let p = at[k] as usize;
+        at[k] += 1;
+        ox0[p] = x0[i];
+        ox1[p] = x1[i];
+        okey[p] = key[i];
+        ocode[p] = rd(colour, s) * 32 + vq[i];
+    }
+    0
 }
 
 /// fastloops.note_top. -> 0.

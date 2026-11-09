@@ -383,17 +383,17 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
     way: the brush's live colours == let go's."""
     from notes.recolour import _sorted_notes, nearest
     s100 = w["lq"]["strength"] / 100
-    fp = _place_numbers(w, rc, box, own) if w.get("soft") and len(idx) else None
+    fp = _place_numbers(w, rc, box, own) if len(idx) else None
     fast = compiled("warp_soft") if fp is not None else None
-    if fast:  # (the compiled pick, note by note: the very same sums as below, files/fastloops.warp_soft; user
-        # 11-09: heavy per-note work compiled)
+    if fast:  # (the compiled pick, note by note: the very same sums as below, files/fastloops.warp_soft (Sharp too,
+        # C7: the nearest note alone); user 11-09: heavy per-note work compiled)
         kept = kept or _sorted_notes(at)
         to = np.ascontiguousarray
         _, _, o, _, ms, keys, first, last, line, base, top, gap = kept
         bx, by = _unit(w, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), rc, box, own)
         kx, ky = (bx[2] - bx[0]) * 0.5, (by[2] - by[0]) * 0.5
-        c = np.array([bx[1] - bx[0], by[1] - by[0], kx, ky, np.hypot(kx, ky) * 2, s100, SOFT_SQUASHED, SOFT_REACH],
-                     np.float64)
+        c = np.array([bx[1] - bx[0], by[1] - by[0], kx, ky, np.hypot(kx, ky) * 2, s100, SOFT_SQUASHED, SOFT_REACH,
+                      0.0 if w.get("soft") else 1.0], np.float64)
         out = np.empty(len(idx), np.int64)
         fast.warp_soft(to(at, np.int64), to(idx, np.int64), to(x, np.float64), to(y, np.float64), to(a, np.float64),
                        c, fp, np.asarray(_RING, np.float64), *_COVER_LOOKS, to(keys, np.int64), to(first, np.int64),
@@ -669,6 +669,8 @@ class Live:
         cx = np.minimum((np.clip(p["w"]["x"], 0.0, 1.0) * (gx - 1)).astype(np.int64), gx - 2)
         cy = np.minimum((np.clip(p["w"]["y"], 0.0, 1.0) * (gy - 1)).astype(np.int64), gy - 2)
         from files.speed import key_sort
+        p["cell_of"] = cy * (gx - 1) + cx  # (each note's cell, as touched finds it)
+        p["every_note"] = np.arange(len(cy), dtype=np.int64)  # (every note's place, C7: one list kept)
         p["cells"] = cells = key_sort(cy, cx) if len(cy) else np.zeros(0, np.int64)
         p["cx"] = cx[cells]
         p["row_at"] = np.searchsorted(cy[cells], np.arange(gy))  # (each cell row's first place in cells)
@@ -746,9 +748,14 @@ class Live:
         B = A
         if self.bursts is not None:  # (every note of the bursts they're in: kept_apart's colours there change)
             of, first, size, o = self.bursts
-            b = np.unique(of[A])
+            mark = np.zeros(len(first), bool)  # (np.unique(of[A]) without its sort, C7)
+            mark[of[A]] = True
+            b = np.flatnonzero(mark)
             B = o[self._spread(first[b], size[b])]
-        new = _apart(self.notes[B], self.low[B], self.P[B].copy(), self.pals, self.pick[B])
+        if self.bursts is None:  # (no two notes overlap on a key: kept_apart leaves every colour as it is, C7)
+            new = self.P[B]
+        else:
+            new = _apart(self.notes[B], self.low[B], self.P[B].copy(), self.pals, self.pick[B])
         self.ever[B] = True
         return B, new
 
@@ -762,30 +769,56 @@ class Live:
         # mirrored Warp drag's twins) = a box round each, not one round them all)
         boxes = [(r0, r1, c0, c1) for r0, r1 in _runs(rows) for c0, c1 in _runs(cols)
                  if diff[r0:r1 + 1, c0:c1 + 1].any()]
-        parts = []
-        for r0, r1, c0, c1 in boxes:
-            j0, j1 = max(r0 - 1, 0), min(r1, gy - 2)
-            i0, i1 = max(c0 - 1, 0), min(c1, gx - 2)
-            for j in range(j0, j1 + 1):
-                lo, hi = int(self.row_at[j]), int(self.row_at[j + 1]) if j + 1 < gy else len(self.cells)
-                c = self.cx[lo:hi]
-                parts.append(self.cells[lo + int(np.searchsorted(c, i0)):lo + int(np.searchsorted(c, i1, "right"))])
-        D = np.concatenate(parts) if parts else none
-        if len(boxes) > 1:  # (boxes reaching into each other: a note once)
-            D = np.unique(D)
+        spans = [(max(r0 - 1, 0), min(r1, gy - 2), max(c0 - 1, 0), min(c1, gx - 2)) for r0, r1, c0, c1 in boxes]
+        reach = np.zeros((gy - 1, gx - 1), bool)
+        for j0, j1, i0, i1 in spans:
+            reach[j0:j1 + 1, i0:i1 + 1] = True
+        every = bool(reach.all())  # (C7: every cell (a 4-way mirrored Warp drag): the notes as they are, no lists)
+        if every:
+            D = self.every_note
+        else:
+            parts = []
+            for j0, j1, i0, i1 in spans:
+                for j in range(j0, j1 + 1):
+                    lo, hi = int(self.row_at[j]), int(self.row_at[j + 1]) if j + 1 < gy else len(self.cells)
+                    c = self.cx[lo:hi]
+                    parts.append(self.cells[lo + int(np.searchsorted(c, i0)):
+                                            lo + int(np.searchsorted(c, i1, "right"))])
+            D = np.concatenate(parts) if parts else none
+            if len(boxes) > 1:  # (boxes reaching into each other: a note once; marked, then read in order =
+                # np.unique's result without its sort, C7)
+                mark = np.zeros(len(self.at), bool)
+                mark[D] = True
+                D = np.flatnonzero(mark)
         if not len(D):
             return none
-        x, y = self.w["x"][D], self.w["y"][D]
-        hot = touched(a, x, y)
-        got = self.now[D].copy()
-        if hot.any():
-            src = found(self.w, a, self.at, D[hot], x[hot], y[hot], self.rc, self.box, self.own, self.now, self.kept)
-            got[hot] = _taken(self.now, D[hot], src, self.pals, self.rc)
-        moved = got != self.F[D]
-        D = D[moved]
-        if not len(D):
-            return none
-        self.F[D] = got[moved]
+        X, Y = (self.w["x"], self.w["y"]) if every else (self.w["x"][D], self.w["y"][D])
+        if a.shape[:2] == (gy, gx):  # (C7: each note's cell kept from the start (_parts): touched's sums, no gathers)
+            nz = (a != 0).any(2)
+            cell = (nz[:-1, :-1] | nz[1:, :-1] | nz[:-1, 1:] | nz[1:, 1:]).ravel()
+            hot = cell[self.cell_of if every else self.cell_of[D]]
+        else:
+            hot = touched(a, X, Y)
+        if hot.all():  # (every note in a pushed cell: no colour kept as it was)
+            src = found(self.w, a, self.at, D, X, Y, self.rc, self.box, self.own, self.now, self.kept)
+            got = _taken(self.now, D, src, self.pals, self.rc)
+        else:
+            got = self.now[D]  # (a copy: D is a list of places)
+            if hot.any():
+                H = D[hot]
+                src = found(self.w, a, self.at, H, X[hot], Y[hot], self.rc, self.box, self.own, self.now, self.kept)
+                got[hot] = _taken(self.now, H, src, self.pals, self.rc)
+        if every:
+            D = np.flatnonzero(got != self.F)
+            if not len(D):
+                return none
+            self.F[D] = got[D]
+        else:
+            moved = got != self.F[D]
+            D = D[moved]
+            if not len(D):
+                return none
+            self.F[D] = got[moved]
         if self.lead is None:
             return D
         heads = D[self.lead[D] == D]  # (a group's colour is its first note's: only first notes changing count)

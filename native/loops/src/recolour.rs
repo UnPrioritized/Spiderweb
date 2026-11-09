@@ -55,34 +55,104 @@ pub struct Near<'a> {
     own: bool,
 }
 
+/// line[i] (negative i counted from the end, like the halving search read it).
+#[inline(always)]
+fn lb_at(line: &[f64], i: i64) -> f64 {
+    line[wrap(i, line.len())]
+}
+
+/// The first place in lo .. hi of the sorted line holding v or more (hi: none): the plain halving search's very
+/// answer (there's only one), found from a guess where v would sit if the row's notes were evenly spread, then
+/// steps doubling out from it until v is between, then halving (C7: a row of spam = a few reads next to each other
+/// instead of ~20 spread over megabytes; worst case about twice the halving's reads).
+#[inline(always)]
+fn lower_bound(line: &[f64], lo: i64, hi: i64, v: f64) -> i64 {
+    // (no closures in the hot loops: see round_look)
+    if hi - lo <= 16 {
+        let (mut a, mut b) = (lo, hi);
+        while a < b {
+            let h = (a + b) >> 1;
+            if lb_at(line, h) < v {
+                a = h + 1;
+            } else {
+                b = h;
+            }
+        }
+        return a;
+    }
+    let (a0, a1) = (lb_at(line, lo), lb_at(line, hi - 1));
+    if !(a0 < v) {
+        return lo; // (v at or before the first, or not a number: the halving ends there too)
+    }
+    if a1 < v {
+        return hi;
+    }
+    if !(a1 > a0) {
+        return hi - 1;
+    }
+    // (now line[lo] < v <= line[hi - 1]; keep line[l] < v <= line[r], the answer in l + 1 ..= r)
+    let f = (v - a0) / (a1 - a0);
+    let g = (lo + (f * (hi - 1 - lo) as f64) as i64).max(lo + 1).min(hi - 1);
+    let (mut l, mut r);
+    if lb_at(line, g) < v {
+        l = g;
+        let mut step = 1i64;
+        r = g + 1;
+        while r < hi - 1 && lb_at(line, r) < v {
+            l = r;
+            step <<= 1;
+            r = l + step;
+        }
+        r = r.min(hi - 1);
+    } else {
+        r = g;
+        let mut step = 1i64;
+        l = g - 1;
+        while l > lo && lb_at(line, l) >= v {
+            r = l;
+            step <<= 1;
+            l = r - step;
+        }
+        l = l.max(lo);
+    }
+    while r - l > 1 {
+        let m = (l + r) >> 1;
+        if lb_at(line, m) < v {
+            l = m;
+        } else {
+            r = m;
+        }
+    }
+    r
+}
+
 /// fastloops._near_one for spot s (mid m, key k).
 #[inline(always)]
 fn near_one(s: usize, m: f64, k: f64, d: &Near) -> i64 {
+    let (row, p) = near_place(m, k, d);
+    let mut got = d.o[p];
+    if d.own && d.nk[s] == d.keys[row] && (d.nm[s] - m).abs() <= (d.ms[p] - m).abs() + 1e-9 {
+        got = s as i64;
+    }
+    got
+}
+
+/// near_one's (key row, place in the line) of the note nearest (m, k), the spot's own note left out.
+#[inline(always)]
+fn near_place(m: f64, k: f64, d: &Near) -> (usize, usize) {
     let q = rint(k);
     let row = nearest_row(d.keys, q);
     let (lo, hi) = (d.first[row], d.last[row]);
     let c = pmin(pmax(m, d.base), d.top);
     let v = c - d.base + row as f64 * d.gap;
-    let (mut a, mut b) = (lo, hi);
-    while a < b {
-        let h = (a + b) >> 1;
-        if d.line[wrap(h, d.line.len())] < v {
-            a = h + 1;
-        } else {
-            b = h;
-        }
-    }
+    let a = lower_bound(d.line, lo, hi, v);
     let mut p = a.max(lo).min(hi - 1);
     let p0 = (p - 1).max(lo);
     let nms = d.ms.len();
     if (d.ms[wrap(p0, nms)] - m).abs() <= (d.ms[wrap(p, nms)] - m).abs() {
         p = p0;
     }
-    let mut got = d.o[wrap(p, d.o.len())];
-    if d.own && d.nk[s] == d.keys[row] && (d.nm[s] - m).abs() <= (d.ms[wrap(p, nms)] - m).abs() + 1e-9 {
-        got = s as i64;
-    }
-    got
+    (row, wrap(p, d.o.len()))
 }
 
 #[inline(always)]
@@ -411,31 +481,43 @@ fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
 const ROUND_INNER: usize = 7; // (fastloops.ROUND_INNER: look 0 the middle, 1 .. 6 the inner ring)
 const MOST_LOOKS: usize = 16;
 
+/// round_one's look k: its place in the line.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn round_look(sx: f64, sy: f64, r: f64, ring: &[f64], k: usize, fp: &[f64], d: &Near) -> usize {
+    let (m, kk) = unit_back(sx + ring[k * 3] * r, sy + ring[k * 3 + 1] * r, fp);
+    near_place(m, kk, d).1
+}
+
 /// fastloops._round_at: a stretched spot's looks round where it fetches from (sx, sy) vote.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn round_one(sx: f64, sy: f64, r: f64, ring: &[f64], nl: usize, fp: &[f64], d: &Near, now: &[i64]) -> i64 {
-    let mut got = [0i64; MOST_LOOKS];
-    let look = |k: usize| {
-        let (m, kk) = unit_back(sx + ring[k * 3] * r, sy + ring[k * 3 + 1] * r, fp);
-        near_one(0, m, kk, d)
-    };
-    got[0] = look(0);
+fn round_one(sx: f64, sy: f64, r: f64, ring: &[f64], nl: usize, fp: &[f64], d: &Near, cl: &Colours) -> i64 {
+    // (got = places in the line; their colours from cl; the note handed back = o of the winner's place)
+    let mut got = [0usize; MOST_LOOKS];
+    let mut col = [0i64; MOST_LOOKS];
+    // (C7: a plain function, never a closure: a closure isn't built for the processor level the loop runs at,
+    // so its rint became a slow library call, ~60 ns a look)
+    got[0] = round_look(sx, sy, r, ring, 0, fp, d);
+    col[0] = cl.at(got[0]);
+    let mut same = true;
     for k in ROUND_INNER..nl {
-        got[k] = look(k);
+        got[k] = round_look(sx, sy, r, ring, k, fp, d);
+        col[k] = cl.at(got[k]);
+        same &= col[k] == col[0];
     }
-    let c0 = now[got[0] as usize];
-    if (ROUND_INNER..nl).all(|k| now[got[k] as usize] == c0) {
-        return got[0];
+    if same {
+        return cl.o[got[0]];
     }
     for k in 1..ROUND_INNER {
-        got[k] = look(k);
+        got[k] = round_look(sx, sy, r, ring, k, fp, d);
+        col[k] = cl.at(got[k]);
     }
     let mut cols = [0i64; MOST_LOOKS];
     let mut score = [0.0f64; MOST_LOOKS];
     let mut nc = 0usize;
     for k in 0..nl {
-        let c = now[got[k] as usize];
+        let c = col[k];
         let mut q = 0;
         while q < nc && cols[q] != c {
             q += 1;
@@ -454,36 +536,49 @@ fn round_one(sx: f64, sy: f64, r: f64, ring: &[f64], nl: usize, fp: &[f64], d: &
         }
     }
     for k in 0..nl {
-        if now[got[k] as usize] == cols[best] {
-            return got[k];
+        if col[k] == cols[best] {
+            return cl.o[got[k]];
         }
     }
-    got[0]
+    cl.o[got[0]]
+}
+
+/// The colour of each place in the line (the votes count places; the note handed back = o of the winner's).
+struct Colours<'a> {
+    now: &'a [i64],
+    o: &'a [i64],
+}
+
+impl Colours<'_> {
+    #[inline(always)]
+    fn at(&self, p: usize) -> i64 {
+        self.now[self.o[p] as usize]
+    }
 }
 
 /// fastloops._cover_at: a squashed note's nt x nk looks (tstart / ta / tb) vote, the most common colour wins.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn cover_one(mid: f64, key: f64, vt: (f64, f64), vk: (f64, f64), nt: i64, nk: i64, tstart: &[i64], ta: &[f64],
-             tb: &[f64], d: &Near, now: &[i64]) -> i64 {
+             tb: &[f64], d: &Near, cl: &Colours) -> i64 {
     let t = ((nt - 1) * 4 + (nk - 1)) as usize;
     let (a0, a1) = (tstart[t] as usize, tstart[t + 1] as usize);
     let s = a1 - a0;
-    let mut got = [0i64; MOST_LOOKS];
+    let mut got = [0usize; MOST_LOOKS];
     for j in 0..s {
         let pm = mid + ta[a0 + j] * vt.0 + tb[a0 + j] * vk.0;
         let pk = key + ta[a0 + j] * vt.1 + tb[a0 + j] * vk.1;
-        got[j] = near_one(0, pm, pk, d);
+        got[j] = near_place(pm, pk, d).1;
     }
     if s == 1 {
-        return got[0];
+        return cl.o[got[0]];
     }
     let mut cols = [0i64; MOST_LOOKS];
     let mut count = [0i64; MOST_LOOKS];
     let mut firstj = [0i64; MOST_LOOKS];
     let mut nc = 0usize;
     for j in 0..s {
-        let c = now[got[j] as usize];
+        let c = cl.at(got[j]);
         let mut q = 0;
         while q < nc && cols[q] != c {
             q += 1;
@@ -503,7 +598,7 @@ fn cover_one(mid: f64, key: f64, vt: (f64, f64), vk: (f64, f64), nt: i64, nk: i6
             best = q;
         }
     }
-    got[firstj[best] as usize]
+    cl.o[got[firstj[best] as usize]]
 }
 
 /// The numbers warp_soft reads past the notes.
@@ -520,7 +615,7 @@ struct Soft<'a> {
     tstart: &'a [i64],
     ta: &'a [f64],
     tb: &'a [f64],
-    now: &'a [i64],
+    cl: Colours<'a>,
 }
 
 /// fastloops._soft_one: note j at spot (x0, y0) of the box -> the note it takes its colour from.
@@ -530,6 +625,9 @@ fn soft_one(j: usize, x0: f64, y0: f64, s: &Soft, d: &Near) -> i64 {
     let (d0, d1) = sample2(s.a, s.gy, s.gx, x0, y0);
     let (sx, sy) = (x0 + d0 * s100, y0 + d1 * s100);
     let (mid, key) = unit_back(sx, sy, s.fp);
+    if s.c[8] != 0.0 {
+        return near_one(0, mid, key, d); // (Edges: Sharp, the Liquify: the nearest note alone, C7)
+    }
     let (st, en) = (s.at[j * s.cols] as f64, s.at[j * s.cols + 1] as f64);
     let h = pmax((en - st) / 2.0, 0.5);
     let (xx, yy) = (x0 + s.c[0] * h, y0 + s.c[1] * h);
@@ -548,11 +646,11 @@ fn soft_one(j: usize, x0: f64, y0: f64, s: &Soft, d: &Near) -> i64 {
         if grow < 0.05 {
             return near_one(0, mid, key, d);
         }
-        return round_one(sx, sy, s.c[4] * s.c[7] * grow, s.ring, s.nl, s.fp, d, s.now);
+        return round_one(sx, sy, s.c[4] * s.c[7] * grow, s.ring, s.nl, s.fp, d, &s.cl);
     }
     let nt = pmin(pmax((ut * ut + uk * uk).sqrt().ceil(), 1.0), 4.0) as i64;
     let nk = pmin(pmax((wt * wt + wk * wk).sqrt().ceil(), 1.0), 4.0) as i64;
-    cover_one(mid, key, (vt0, vt1), (vk0, vk1), nt, nk, s.tstart, s.ta, s.tb, d, s.now)
+    cover_one(mid, key, (vt0, vt1), (vk0, vk1), nt, nk, s.tstart, s.ta, s.tb, d, &s.cl)
 }
 
 #[inline(always)]
@@ -577,7 +675,7 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3
     let (gy, gx) = (a.sh[0], a.sh[1]);
     let nl = ring.sh[0];
     if cols < 2 || a.sh[2] != 2 || gy < 2 || gx < 2 || ring.sh[1] != 3 || nl > MOST_LOOKS || nl < ROUND_INNER
-        || c.len() < 8 || fp.len() < 14 || keys.is_empty() || tstart.len() < 17 || x.len() < n || y.len() < n
+        || c.len() < 9 || fp.len() < 14 || keys.is_empty() || tstart.len() < 17 || x.len() < n || y.len() < n
         || out.len() < n {
         return crate::FAILED;
     }
@@ -593,7 +691,8 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3
     }
     let (x, y, out) = (&x[..n], &y[..n], &mut out[..n]);
     let d = Near { keys, first, last, line, ms, nk: &[], nm: &[], o, base, top, gap, own: false };
-    let s = Soft { at: at.d, cols, a: a.d, gy, gx, c, fp, ring: ring.d, nl, tstart, ta, tb, now };
+    let cl = Colours { now, o };
+    let s = Soft { at: at.d, cols, a: a.d, gy, gx, c, fp, ring: ring.d, nl, tstart, ta, tb, cl };
     match crate::pool_for(many, n, 1) {
         None => soft_range(idx, x, y, &s, &d, out),
         Some(pool) => {

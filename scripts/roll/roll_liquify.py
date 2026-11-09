@@ -33,6 +33,7 @@ SNAP_ANGLE = math.radians(15)  # (Shift+Ctrl+click: a straight stroke's way snap
 ARROW_EVERY = 70  # (px between the direction arrows on a straight stroke's line)
 MASK_STEP = 3  # (the freeze mask's red tint worked out every this many screen pixels, then stretched: it's soft)
 MASK_ALPHA = 0.45  # (fully frozen: this see-through)
+PAINT_MARGIN = 8  # (a repainted region's notes found for 1 / this of its size more round it, kept while the next fit, C7)
 
 
 class LiquifyBrush:
@@ -607,12 +608,22 @@ class LiquifyBrush:
         B, L = got
         n = live["n"]
         t = np.asarray(live["lap"][B] + (live["turn"](L) if live["turn"] else L), np.int64)
-        kinds, which = np.unique(t, return_inverse=True)
+        lo = int(t.min()) if len(t) else 0
+        span = int(t.max()) - lo + 1 if len(t) else 0
+        if span <= max(4 * len(t), 1 << 16):  # (C7: the colours are a few small numbers: a table, not a sort)
+            kinds = np.flatnonzero(np.bincount(t - lo, minlength=span)) + lo
+            table = np.zeros(span, np.int64)
+            table[kinds - lo] = np.arange(len(kinds))
+            which = table[t - lo]
+        else:
+            kinds, which = np.unique(t, return_inverse=True)
         slots = [self.liquify_slot(live, v) for v in kinds.tolist()]
         if None in slots:
             return False
         slot = np.asarray(slots, np.int64)[which.reshape(-1)]
-        p = self.liquify_rows(live, n[B])
+        if live.get("rows_of") is None:  # (C7: each note's row, looked up once a stroke, not every move)
+            live["rows_of"] = self.liquify_rows(live, n)
+        p = live["rows_of"][B]
         ok = p >= 0
         p, slot = p[ok], slot[ok]
         S = live["S"]
@@ -628,20 +639,25 @@ class LiquifyBrush:
         """The picture repainted where rows p of R (one shape's notes, start order, their new channels) are: every
         note of R there painted again on top, in the piano roll's own order (the brushed shape is selected: its
         notes are on top of all others), then the red line; the same pixels note_rects + paint_rects give."""
-        from roll.roll_draw import ghost_code, stack_keys, stack_rule
+        from roll.roll_draw import stack_rule
         from roll.roll_shared import note_colours, slot_colours
-        from files.speed import loops
+        from files.speed import compiled, loops
         app, ppq = self.app, self.app.ppq
         drawn, rows = live["drawn"], live["rows"]
         kb, top = int(self.kb_w), int(self.ruler_h)
         w, h = self.winfo_width(), self.winfo_height()
         ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
-        P = drawn[rows[p]]
-        x0 = np.round(P[:, 0] * ax + bx)
-        x1 = np.round(P[:, 1] * ax + bx)
-        kp = P[:, 2]
-        X0, X1 = max(kb, int(x0.min()) - 1), min(w, int(x1.max()) + 2)
+        # (C7: each row's screen places for this view, worked out once a view: the rows changed only read them)
+        view = (ax, bx, ay, by, kb, top, w, h, app.keys)
+        if live.get("paint_view") is None or live["paint_view"][0] != view:
+            R = drawn[rows]
+            live["paint_view"] = (view, np.round(R[:, 0] * ax + bx).astype(np.int64),
+                                  np.round(R[:, 1] * ax + bx).astype(np.int64),
+                                  np.ascontiguousarray(R[:, 2], np.int64), np.ascontiguousarray(R[:, 3]))
+        _, ALL0, ALL1, KEY, VEL = live["paint_view"]
+        kp = KEY[p]
+        X0, X1 = max(kb, int(ALL0[p].min()) - 1), min(w, int(ALL1[p].max()) + 2)
         Y0 = max(top, int(np.round((kp.max() + 0.5) * ay + by)) - 1)
         Y1 = min(h, int(np.round((kp.min() - 0.5) * ay + by)) + 2)
         if X1 <= X0 or Y1 <= Y0:
@@ -651,48 +667,93 @@ class LiquifyBrush:
         row1 = np.round((keys - 0.5) * ay + by).astype(np.int64)
         shown = ~((row1 < top) | (row0 > h))
         row1 = np.maximum(row1, row0 + 1)
-        shown &= ~((row1 < Y0) | (row0 >= Y1))
-        t_lo, t_hi = self.x2t(X0 - 2) * ppq, self.x2t(X1 + 2) * ppq
-        longest = live["longest"]
-        # (each shown key row's notes in that time, from the rows by key; back in start order (R's): painting order)
-        ks = np.flatnonzero(shown)
-        key_at, key_starts = live["key_at"], live["key_starts"]
-        a0, a1 = key_at[ks], key_at[ks + 1]
-        lo_t, hi_t = math.ceil(t_lo - longest), math.floor(t_hi)
-        parts = [live["by_key"][int(a + np.searchsorted(key_starts[a:b], lo_t, "left")):
-                                int(a + np.searchsorted(key_starts[a:b], hi_t, "right"))]
-                 for a, b in zip(a0.tolist(), a1.tolist()) if b > a]
-        idx = np.sort(np.concatenate(parts)) if parts else np.zeros(0, np.int64)
-        notes = drawn[rows[idx]]
-        notes[:, 4] = live["S"][idx]  # (their channels as brushed so far)
-        # (note_rects' screen(): the same sums, order and colour numbers)
-        nx0, nx1 = np.round(notes[:, 0] * ax + bx), np.round(notes[:, 1] * ax + bx)
-        on = ~((nx1 < kb) | (nx0 > w)) & shown[notes[:, 2]]
-        on &= ~((nx1 < X0) | (nx0 >= X1))
-        on = np.flatnonzero(on)
+        # (C7: what a region's notes are, where they show and their order by start stay the same from move to move
+        # (only their channels change): kept for a region a little bigger than asked (PAINT_MARGIN px round it) and
+        # used again while the asked one fits in it and covers at least half of it. Notes past the asked region
+        # change no pixel in it (painting stops at its edges; each note's order among the others is kept))
+        got = live.get("paint_at")
+        if got is not None:
+            E0, F0, E1, F1 = got[1]
+            if got[0] != view or not (E0 <= X0 and F0 <= Y0 and X1 <= E1 and Y1 <= F1) or \
+                    (X1 - X0) * (Y1 - Y0) * 2 < (E1 - E0) * (F1 - F0):
+                got = None
+        if got is None:
+            mx, my = max(4, (X1 - X0) // PAINT_MARGIN), max(4, (Y1 - Y0) // PAINT_MARGIN)
+            E0, F0 = max(kb, X0 - mx), max(top, Y0 - my)
+            E1, F1 = min(w, X1 + mx), min(h, Y1 + my)
+            shown &= ~((row1 < F0) | (row0 >= F1))
+            region = (E0, F0, E1, F1)
+            t_lo, t_hi = self.x2t(E0 - 2) * ppq, self.x2t(E1 + 2) * ppq
+            longest = live["longest"]
+            # (each shown key row's notes in that time, from the rows by key; back in start order (R's): painting
+            # order. Key rows never share a note: marked, then read in order = sorted without a sort)
+            ks = np.flatnonzero(shown)
+            key_at, key_starts = live["key_at"], live["key_starts"]
+            a0, a1 = key_at[ks], key_at[ks + 1]
+            lo_t, hi_t = math.ceil(t_lo - longest), math.floor(t_hi)
+            mark = np.zeros(len(rows), bool)
+            by_key = live["by_key"]
+            for a, b in zip(a0.tolist(), a1.tolist()):
+                if b > a:
+                    mark[by_key[int(a + np.searchsorted(key_starts[a:b], lo_t, "left")):
+                                int(a + np.searchsorted(key_starts[a:b], hi_t, "right"))]] = True
+            idx = np.flatnonzero(mark)
+            # (note_rects' screen(): the same sums, order and colour numbers)
+            nx0, nx1 = ALL0[idx], ALL1[idx]
+            on = ~((nx1 < kb) | (nx0 > w)) & shown[KEY[idx]]
+            on &= ~((nx1 < E0) | (nx0 >= E1))
+            on = idx[on]
+            vel = VEL[on]
+            nkey = KEY[on]
+            got = live["paint_at"] = (view, region, on, ALL0[on], ALL1[on], nkey, vel,
+                                      np.asarray(np.clip(vel, 0, 127) // 4, np.int64),
+                                      bool(len(vel) and vel.min() < 0),
+                                      not len(nkey) or (nkey.min() >= 0 and nkey.max() < app.keys))
+        _, _, on, nx0, nx1, nkey, vel, vq, ghost, keys_ok = got
+        use10 = bool(getattr(app, "picture_use10", False))
+        ctab = live.get("colour_tab")
+        if ctab is None or ctab[0] != use10:  # (C7: each slot's colour from a table: one look-up a note)
+            every = live["every"]
+            ok = len(every) and 0 <= int(every.min()) and int(every.max()) < (1 << 22)
+            ctab = live["colour_tab"] = (use10, note_colours(np.arange(int(every.max()) + 1), slot_colours(use10))
+                                         if ok else None)
+        ctab = ctab[1]
         rule = stack_rule(app)
-        if len(on) and rule[0] == "track":  # (one shape's notes: only the track places order them, each slot's
-            # place = stack_keys' with every slot counted (live["every"] holds every slot here); a table, stage F)
-            if live.get("place") is None:
-                from roll.roll_draw import track_ranks
-                live["place"] = track_ranks(live["every"], *rule[1:])[0]
-            key_of = live["place"][np.searchsorted(live["every"], notes[on, 4])]
-            on = on[np.argsort(key_of, kind="stable")]
-        elif len(on) and rule[0] != "shape":  # ("shape": one shape's notes all alike, kept as they are)
-            key_of = stack_keys(notes[on], list(self.on_top()), getattr(app, "behind_owner", None), rule,
-                                live["every"])[0]
-            on = on[np.argsort(key_of, kind="stable")]
-        color = note_colours(notes[on, 4], slot_colours(getattr(app, "picture_use10", False)))
-        vel = notes[on, 3]
-        code = color * 32 + np.clip(vel, 0, 127) // 4
-        if len(vel) and vel.min() < 0:
-            code = np.where(vel < 0, ghost_code(color, vel), code)
-        cols = [nx0[on].astype(np.int64), nx1[on].astype(np.int64), notes[on, 2].astype(np.int64), code]
+        if rule[0] == "track" and live.get("place") is None:  # (each slot's place = stack_keys' with every slot
+            # counted (live["every"] holds every slot here); a table, stage F)
+            from roll.roll_draw import track_ranks
+            live["place"] = track_ranks(live["every"], *rule[1:])[0]
+            # (C7: each slot's place as a small number in a table by slot: the order is the same as by the places
+            # (ties too), and a stable sort of small numbers is a counting sort, not a full one)
+            every, place = live["every"], live["place"]
+            rank = np.unique(place, return_inverse=True)[1].reshape(-1)
+            if len(every) and 0 <= int(every.min()) and int(every.max()) < (1 << 22) and rank.max() < 65535:
+                live["place_tab"] = rank[np.searchsorted(every, np.arange(int(every.max()) + 1))].astype(np.uint16)
+            else:
+                live["place_tab"] = None
+        quick = compiled("liquify_rects") if not ghost and ctab is not None else None
+        if quick and (rule[0] == "shape" or (rule[0] == "track" and live["place_tab"] is not None)):
+            # (C7: order + colours compiled, into room kept for the stroke)
+            if rule[0] == "shape":
+                rank = np.zeros(0, np.int64)
+            else:
+                if live.get("rank64") is None:
+                    live["rank64"] = live["place_tab"].astype(np.int64)
+                rank = live["rank64"]
+            room = live.get("rects_room")
+            if room is None or room.shape[1] < len(on):
+                room = live["rects_room"] = np.empty((4, len(on)), np.int64)
+            cols = list(quick.liquify_rects(on, live["S"], rank, ctab, nx0, nx1, nkey, vq, room))
+        else:
+            cols = self.liquify_cols(live, rule, on, nx0, nx1, nkey, vel, vq, ghost, ctab, use10)
         left, right = kb - 2, int(w) + 2
         fast = loops()
-        if fast and (not len(cols[2]) or (cols[2].min() >= 0 and cols[2].max() < app.keys)):
+        if fast and keys_ok:
+            room = live.get("pixels_room")  # (C7: room kept for the stroke: fresh memory faults in page by page)
+            if room is None or room.shape[1] < len(cols[0]):
+                room = live["pixels_room"] = np.empty((5, len(cols[0])), np.int64)
             rects = fast.last_on_pixels(*(np.ascontiguousarray(v, np.int64) for v in cols), left, right, app.keys,
-                                        row0, row1)
+                                        row0, row1, room)
         else:
             a, b, key, c = cols
             a, b = np.maximum(a, left), np.minimum(b, right)
@@ -712,6 +773,41 @@ class LiquifyBrush:
         self.paint_rects(sub, rects, region, True)
         self._img[Y0 - top:Y1 - top, X0 - kb:X1 - kb] = sub
         self._tiles.put(self._img, X0 - kb, Y0 - top, X1 - kb, Y1 - top)
+
+    def liquify_cols(self, live, rule, on, nx0, nx1, nkey, vel, vq, ghost, ctab, use10):
+        """liquify_paint's notes on screen in painting order + their colour numbers [x0, x1, key, code], NumPy's
+        way (fastloops.liquify_rects is its compiled twin for the track / shape orders)."""
+        from roll.roll_draw import ghost_code, stack_keys
+        from roll.roll_shared import note_colours, slot_colours
+        slot = live["S"][on]  # (their channels as brushed so far)
+        if len(on) and rule[0] == "track":  # (one shape's notes: only the track places order them)
+            tab = live["place_tab"]
+            if tab is not None:
+                key_of = tab[slot]
+            else:
+                key_of = live["place"][np.searchsorted(live["every"], slot)]
+            if (key_of[1:] >= key_of[:-1]).all():  # (one track place for all: the order as it is)
+                o = None
+            else:
+                o = np.argsort(key_of, kind="stable")
+        elif len(on) and rule[0] != "shape":  # ("shape": one shape's notes all alike, kept as they are)
+            notes = live["drawn"][live["rows"][on]]
+            notes[:, 4] = slot
+            o = np.argsort(stack_keys(notes, list(self.on_top()), getattr(self.app, "behind_owner", None), rule,
+                                      live["every"])[0], kind="stable")
+        else:
+            o = None
+        if ghost:  # (faint notes in it: as before)
+            if o is not None:
+                slot, nx0, nx1, nkey, vel = slot[o], nx0[o], nx1[o], nkey[o], vel[o]
+            color = note_colours(slot, slot_colours(use10))
+            code = np.where(vel < 0, ghost_code(color, vel), color * 32 + np.clip(vel, 0, 127) // 4)
+        else:  # (the colour numbers first, then put in order: one array less to reorder)
+            color = ctab[slot] if ctab is not None else note_colours(slot, slot_colours(use10))
+            code = color * 32 + vq
+            if o is not None:
+                code, nx0, nx1, nkey = code[o], nx0[o], nx1[o], nkey[o]
+        return [nx0, nx1, nkey, code]
 
     # ---- the freeze mask
 
