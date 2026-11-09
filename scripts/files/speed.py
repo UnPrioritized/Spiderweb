@@ -97,6 +97,19 @@ def loops():
     return _loops
 
 
+def compiled(name):
+    """loops() when its loop name is really compiled (the library has it, or Numba's), else None: the NumPy code
+    then (a library older than the loop would hand it to the plain-Python twin, far slower than NumPy)."""
+    fast = _loops
+    if fast is None:
+        return None
+    x = getattr(fast, "x", False)  # (native.Loops: its extension module; Numba's module has none)
+    if x is False:
+        return fast
+    from files.native_wraps import NEEDS
+    return fast if x is not None and all(hasattr(x, n) for n in NEEDS.get(name, (name,))) else None
+
+
 def key_sort(key, *cols):
     """np.lexsort((..., cols[1], cols[0], key)): rows by key, then each column in turn, rows alike in their order.
     The compiled loop for whole-number columns and a small key range (keys of a piano roll), else NumPy's."""

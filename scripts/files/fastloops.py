@@ -20,6 +20,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   stir_nearest   recolour.nearest after its sort: each spot's nearest note
   stir_wrap      recolour.Rows.wrapped (Stir's Wrap around)   (all three on half the cores: on_cores)
   liquify_sample liquify.sample: Liquify's map at spots of the colour box (on half the cores)
+  warp_newton    warp._newton: the Warp's bend turned round, Newton steps each spot (a fold's pieces kept inside)
+  warp_soft      liquify.found's Edges: Smooth (the Warp's): each note's pick, its looks + vote (both on half the cores)
   midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
   midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
   note_stretches engine.stretches (Multi channel): one shape's notes on a key joined into stretches
@@ -677,6 +679,309 @@ def _liquify_sample_cores(a, x, y, out):
 def liquify_sample(a, x, y, out):
     """liquify_sample_one on half the cores (on_cores)."""
     on_cores(_liquify_sample_cores, liquify_sample_one, len(x), a, x, y, out)
+
+
+@njit(nogil=True)
+def _sample2(a, x, y):
+    """liquify.sample of the map a (gy, gx, 2) at one spot: (across, up), the same sums in the same order."""
+    gy, gx = a.shape[0], a.shape[1]
+    fx = min(max(x, 0.0), 1.0) * (gx - 1)
+    fy = min(max(y, 0.0), 1.0) * (gy - 1)
+    i0 = min(np.int64(fx), gx - 2)
+    j0 = min(np.int64(fy), gy - 2)
+    tx, ty = fx - i0, fy - j0
+    v0 = (a[j0, i0, 0] * (1 - tx) + a[j0, i0 + 1, 0] * tx) * (1 - ty) + (a[j0 + 1, i0, 0] * (1 - tx)
+                                                                        + a[j0 + 1, i0 + 1, 0] * tx) * ty
+    v1 = (a[j0, i0, 1] * (1 - tx) + a[j0, i0 + 1, 1] * tx) * (1 - ty) + (a[j0 + 1, i0, 1] * (1 - tx)
+                                                                        + a[j0 + 1, i0 + 1, 1] * tx) * ty
+    return v0, v1
+
+
+@njit(nogil=True)
+def _eased_part(v, g):
+    """warp._eased's parts(v, g) with slopes for one number: (cell, eased share, its slope)."""
+    f = min(max(v, 0.0), 1.0) * (g - 1)
+    i = min(np.int64(f), g - 2)
+    t = f - i
+    s = t * t * (3.0 - 2.0 * t)
+    m = 1.0 if (v >= 0.0 and v <= 1.0) else 0.0
+    return i, s, 6.0 * t * (1.0 - t) * m * float(g - 1)
+
+
+@njit(nogil=True)
+def _eased_at(P, x, y):
+    """warp._eased(P, x, y, slopes=True) at one spot: (value across, up, d/dx across, up, d/dy across, up)."""
+    i, sx, dx = _eased_part(x, P.shape[1])
+    j, sy, dy = _eased_part(y, P.shape[0])
+    out = np.empty(6)
+    for c in range(2):
+        a, b, cc, d = P[j, i, c], P[j, i + 1, c], P[j + 1, i, c], P[j + 1, i + 1, c]
+        lo, hi = a + (b - a) * sx, cc + (d - cc) * sx
+        out[c] = lo + (hi - lo) * sy
+        out[2 + c] = ((b - a) + ((d - cc) - (b - a)) * sy) * dx
+        out[4 + c] = (hi - lo) * dy
+    return out[0], out[1], out[2], out[3], out[4], out[5]
+
+
+@njit(nogil=True)
+def _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+    """warp._newton for spot i (the same steps, sums and order as its arrays)."""
+    x, y = sx[i], sy[i]
+    b = np.inf
+    ox, oy = x, y
+    h = 1e-5
+    for step in range(steps):
+        if smooth:
+            vx, vy, dxx, dxy, dyx, dyy = _eased_at(P, x, y)
+        else:
+            vx, vy = _sample2(P, x, y)
+            dxx = dxy = dyx = dyy = 0.0
+        rx, ry = x + vx - px[i], y + vy - py[i]
+        err = math.sqrt(rx * rx + ry * ry)
+        if err < b:
+            b, ox, oy = err, x, y
+        go = err > 1e-9
+        if has_b and step == give_step:
+            go = go and err < give_far
+        if not go:
+            break
+        if not smooth:
+            ax, ay = _sample2(P, x + h, y)
+            dxx, dxy = (ax - vx) / h, (ay - vy) / h
+            ax, ay = _sample2(P, x, y + h)
+            dyx, dyy = (ax - vx) / h, (ay - vy) / h
+        a, bb, c, e = 1 + dxx, dyx, dxy, 1 + dyy
+        det = a * e - bb * c
+        if abs(det) > 1e-6:
+            ux, uy = (e * rx - bb * ry) / det, (a * ry - c * rx) / det
+        else:
+            ux, uy = rx, ry
+        st = math.sqrt(ux * ux + uy * uy)
+        cut = 0.2 / max(st, 1e-300) if st > 0.2 else 1.0
+        nx, ny = x - ux * cut, y - uy * cut
+        if has_b:
+            nx = min(max(nx, bounds[i, 0]), bounds[i, 1])
+            ny = min(max(ny, bounds[i, 2]), bounds[i, 3])
+        x, y = nx, ny
+    bx[i], by[i], best[i] = ox, oy, b
+
+
+@njit(nogil=True)
+def warp_newton_one(P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+    """warp._newton (Newton steps toward s + bend(s) = p, the Warp's map turned round), each spot on its own: the
+    best spot each reached (bx, by) and how far off (best). bounds (n, 4): kept inside them when has_b. One core."""
+    for i in range(len(px)):
+        _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best)
+
+
+@njit(nogil=True, parallel=True)
+def _warp_newton_cores(P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+    for i in prange(len(px)):
+        _newton_one(i, P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best)
+
+
+def warp_newton(P, px, py, smooth, sx, sy, bounds, has_b, steps, give_step, give_far, bx, by, best):
+    """warp_newton_one on half the cores (on_cores)."""
+    on_cores(_warp_newton_cores, warp_newton_one, len(px), P, px, py, smooth, sx, sy, bounds, has_b, steps,
+             give_step, give_far, bx, by, best)
+
+
+@njit(nogil=True)
+def _unit_back(x, y, fp):
+    """liquify._placed + recolour.from_unit for one spot of the colour box (Edges: escape = clipped, else wrapped
+    round then clipped): (middle in ticks, key). fp = [cut, turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f1, f2, t0,
+    width, k0, height, k1 > k0]."""
+    if fp[0] != 0.0:
+        if x < -1e-9 or x > 1 + 1e-9:
+            x = np.mod(x, 1.0)
+        if y < -1e-9 or y > 1 + 1e-9:
+            y = np.mod(y, 1.0)
+    x, y = min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0)
+    if fp[1] != 0.0:
+        x2 = fp[2] + x * fp[3]
+        y2 = fp[4] + y * fp[5] if fp[6] != 0.0 else y
+        x, y = 0.5 + fp[8] * (y2 - 0.5), 0.5 + fp[7] * (x2 - 0.5)
+    return fp[9] + x * fp[10], (fp[11] + y * fp[12] if fp[13] != 0.0 else fp[11])
+
+
+@njit(nogil=True)
+def _near_at(m, k, keys, first, last, line, ms, o, base, top, gap):
+    """recolour.nearest (own=False) for one spot (middle m, key k): _near_one without a note of its own."""
+    nkeys = len(keys)
+    q = np.rint(k)
+    lo_, hi_ = 0, nkeys
+    while lo_ < hi_:
+        h = (lo_ + hi_) >> 1
+        if keys[h] < q:
+            lo_ = h + 1
+        else:
+            hi_ = h
+    i = min(max(lo_, 0), nkeys - 1)
+    j = max(i - 1, 0)
+    row = j if abs(keys[j] - q) <= abs(keys[i] - q) else i
+    lo, hi = first[row], last[row]
+    c = min(max(m, base), top)
+    v = c - base + row * gap
+    a, b = lo, hi
+    while a < b:
+        h = (a + b) >> 1
+        if line[h] < v:
+            a = h + 1
+        else:
+            b = h
+    p = min(max(a, lo), hi - 1)
+    p0 = max(p - 1, lo)
+    if abs(ms[p0] - m) <= abs(ms[p] - m):
+        p = p0
+    return o[p]
+
+
+ROUND_INNER = 7  # (liquify._RING: look 0 = the middle, 1 .. 6 the inner ring, 7 on the outer ring)
+SOFT_TABLE = 4  # (liquify.SOFT_MOST: _cover_at's table holds (nt - 1) * 4 + nk - 1)
+
+
+@njit(nogil=True)
+def _round_at(sx, sy, r, ring, fp, keys, first, last, line, ms, o, base, top, gap, now):
+    """liquify._round_vote for one spot fetching from (sx, sy), looks out to r: the middle + the outer ring first;
+    all one colour = the middle's note; else the inner ring too and the colour with the most weight wins (a tie: the
+    middle's, then the lower colour), its first look's note."""
+    L = len(ring)
+    got = np.empty(L, np.int64)
+    for k in range(L):
+        if k == 0 or k >= ROUND_INNER:
+            m, kk = _unit_back(sx + ring[k, 0] * r, sy + ring[k, 1] * r, fp)
+            got[k] = _near_at(m, kk, keys, first, last, line, ms, o, base, top, gap)
+    c0 = now[got[0]]
+    mixed = False
+    for k in range(ROUND_INNER, L):
+        if now[got[k]] != c0:
+            mixed = True
+    if not mixed:
+        return got[0]
+    for k in range(1, ROUND_INNER):
+        m, kk = _unit_back(sx + ring[k, 0] * r, sy + ring[k, 1] * r, fp)
+        got[k] = _near_at(m, kk, keys, first, last, line, ms, o, base, top, gap)
+    cols = np.empty(L, np.int64)
+    score = np.zeros(L)
+    nc = 0
+    for k in range(L):  # (each colour's weight summed in look order, as np.bincount does)
+        c = now[got[k]]
+        q = 0
+        while q < nc and cols[q] != c:
+            q += 1
+        if q == nc:
+            cols[q] = c
+            nc += 1
+        score[q] += ring[k, 2]
+    score[0] += 1e-6  # (the middle's colour is the first one met)
+    best = 0
+    for q in range(1, nc):
+        if score[q] > score[best] or (score[q] == score[best] and cols[q] < cols[best]):
+            best = q
+    for k in range(L):
+        if now[got[k]] == cols[best]:
+            return got[k]
+    return got[0]
+
+
+@njit(nogil=True)
+def _cover_at(mid, key, vt0, vt1, vk0, vk1, nt, nk, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+              now):
+    """liquify._covered for one note: nt x nk looks over what it covers (tstart / ta / tb: each count's looks,
+    nearest the middle first) vote, the most common colour wins (a tie: the one looked at first); its look's note."""
+    t = (nt - 1) * SOFT_TABLE + (nk - 1)
+    a0, a1 = tstart[t], tstart[t + 1]
+    s = a1 - a0
+    got = np.empty(s, np.int64)
+    for j in range(s):
+        pm = mid + ta[a0 + j] * vt0 + tb[a0 + j] * vk0
+        pk = key + ta[a0 + j] * vt1 + tb[a0 + j] * vk1
+        got[j] = _near_at(pm, pk, keys, first, last, line, ms, o, base, top, gap)
+    if s == 1:
+        return got[0]
+    cols = np.empty(s, np.int64)
+    count = np.zeros(s, np.int64)
+    firstj = np.zeros(s, np.int64)
+    nc = 0
+    for j in range(s):
+        c = now[got[j]]
+        q = 0
+        while q < nc and cols[q] != c:
+            q += 1
+        if q == nc:
+            cols[q], firstj[q] = c, j
+            nc += 1
+        count[q] += 1
+    best = 0
+    for q in range(1, nc):
+        vq, vb = count[q] * (s + 1) - firstj[q], count[best] * (s + 1) - firstj[best]
+        if vq > vb or (vq == vb and cols[q] < cols[best]):
+            best = q
+    return got[firstj[best]]
+
+
+@njit(nogil=True)
+def _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
+              out):
+    """liquify.found's Edges: Smooth for note idx[i] at spot (x[i], y[i]) of the box (the same sums, the same
+    order as its arrays). c = [tick's step across, up (box units), half a key's across, up, one key's height,
+    strength / 100, SOFT_SQUASHED, SOFT_REACH]."""
+    s100 = c[5]
+    x0, y0 = x[i], y[i]
+    d0, d1 = _sample2(a, x0, y0)
+    sx, sy = x0 + d0 * s100, y0 + d1 * s100
+    mid, key = _unit_back(sx, sy, fp)
+    j = idx[i]
+    s, e = float(at[j, 0]), float(at[j, 1])
+    h = max((e - s) / 2, 0.5)
+    X, Y = x0 + c[0] * h, y0 + c[1] * h
+    d0, d1 = _sample2(a, X, Y)
+    m1, k1 = _unit_back(X + d0 * s100, Y + d1 * s100, fp)
+    X, Y = x0 + c[2], y0 + c[3]
+    d0, d1 = _sample2(a, X, Y)
+    m3, k3 = _unit_back(X + d0 * s100, Y + d1 * s100, fp)
+    vt0, vt1 = (m1 - mid) * 2, (k1 - key) * 2
+    vk0, vk1 = (m3 - mid) * 2, (k3 - key) * 2
+    ut, uk = vt0 / (2 * h), vt1
+    wt, wk = vk0 / (2 * h), vk1
+    area = abs(ut * wk - uk * wt)
+    if area <= c[6]:
+        grow = min(max(1.0 / math.sqrt(max(area, 1e-12)) - 1.0, 0.0), 1.0)
+        if grow < 0.05:
+            out[i] = _near_at(mid, key, keys, first, last, line, ms, o, base, top, gap)
+        else:
+            out[i] = _round_at(sx, sy, c[4] * c[7] * grow, ring, fp, keys, first, last, line, ms, o, base, top, gap,
+                               now)
+        return
+    nt = np.int64(min(max(np.ceil(math.sqrt(ut * ut + uk * uk)), 1.0), float(SOFT_TABLE)))
+    nk = np.int64(min(max(np.ceil(math.sqrt(wt * wt + wk * wk)), 1.0), float(SOFT_TABLE)))
+    out[i] = _cover_at(mid, key, vt0, vt1, vk0, vk1, nt, nk, tstart, ta, tb, keys, first, last, line, ms, o, base,
+                       top, gap, now)
+
+
+@njit(nogil=True)
+def warp_soft_one(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
+                  out):
+    """liquify.found's Edges: Smooth (the Warp's) for every note idx: the note each takes its colour from. One
+    core."""
+    for i in range(len(idx)):
+        _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+                  now, out)
+
+
+@njit(nogil=True, parallel=True)
+def _warp_soft_cores(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+                     now, out):
+    for i in prange(len(idx)):
+        _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+                  now, out)
+
+
+def warp_soft(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
+              out):
+    """warp_soft_one on half the cores (on_cores)."""
+    on_cores(_warp_soft_cores, warp_soft_one, len(idx), at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first,
+             last, line, ms, o, base, top, gap, now, out)
 
 
 @njit(nogil=True)

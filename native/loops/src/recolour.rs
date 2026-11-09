@@ -3,7 +3,7 @@
 //! dice_mix, recolour_apart. The same sums in the same order as those.
 use rayon::prelude::*;
 
-use crate::maths::{npmod, pmax, pmin, rint};
+use crate::maths::{f2i, npmod, pmax, pmin, rint};
 use crate::{need, rd, wr, zeros, Nd, NdMut};
 
 /// A place counted from the end when below 0 (Numba's a[-1]).
@@ -227,6 +227,380 @@ pub fn liquify_sample(a: Nd<f64, 3>, x: &[f64], y: &[f64], out: NdMut<f64, 2>, m
             pool.install(|| {
                 (x.par_chunks(chunk), y.par_chunks(chunk), out.par_chunks_mut(chunk * 2)).into_par_iter()
                     .for_each(|(xc, yc, oc)| sample_range(a.d, gy, gx, xc, yc, oc));
+            });
+        }
+    }
+    0
+}
+
+// ---- the Warp (notes/warp.py, liquify.py; user 2026-11-09: heavy per-spot work compiled)
+
+/// fastloops._sample2: the map a (gy, gx, 2) at one spot, (across, up).
+#[inline(always)]
+fn sample2(a: &[f64], gy: usize, gx: usize, x: f64, y: f64) -> (f64, f64) {
+    let fx = pmin(pmax(x, 0.0), 1.0) * (gx as i64 - 1) as f64;
+    let fy = pmin(pmax(y, 0.0), 1.0) * (gy as i64 - 1) as f64;
+    let i0 = f2i(fx).min(gx as i64 - 2);
+    let j0 = f2i(fy).min(gy as i64 - 2);
+    let (tx, ty) = (fx - i0 as f64, fy - j0 as f64);
+    let row = gx * 2;
+    let p = j0 as usize * row + i0 as usize * 2;
+    let mut v = [0.0f64; 2];
+    for (c, vc) in v.iter_mut().enumerate() {
+        let (a00, a01, a10, a11) = (a[p + c], a[p + 2 + c], a[p + row + c], a[p + row + 2 + c]);
+        *vc = (a00 * (1.0 - tx) + a01 * tx) * (1.0 - ty) + (a10 * (1.0 - tx) + a11 * tx) * ty;
+    }
+    (v[0], v[1])
+}
+
+/// fastloops._eased_part: (cell, eased share, its slope) of one number along g points.
+#[inline(always)]
+fn eased_part(v: f64, g: usize) -> (i64, f64, f64) {
+    let f = pmin(pmax(v, 0.0), 1.0) * (g as i64 - 1) as f64;
+    let i = f2i(f).min(g as i64 - 2);
+    let t = f - i as f64;
+    let s = t * t * (3.0 - 2.0 * t);
+    let m = if v >= 0.0 && v <= 1.0 { 1.0 } else { 0.0 };
+    (i, s, 6.0 * t * (1.0 - t) * m * (g as i64 - 1) as f64)
+}
+
+/// fastloops._eased_at: (value across, up, d/dx across, up, d/dy across, up) of the offsets P (gy, gx, 2).
+#[inline(always)]
+fn eased_at(p: &[f64], gy: usize, gx: usize, x: f64, y: f64) -> [f64; 6] {
+    let (i, sx, dx) = eased_part(x, gx);
+    let (j, sy, dy) = eased_part(y, gy);
+    let row = gx * 2;
+    let q = j as usize * row + i as usize * 2;
+    let mut out = [0.0f64; 6];
+    for c in 0..2 {
+        let (a, b, cc, d) = (p[q + c], p[q + 2 + c], p[q + row + c], p[q + row + 2 + c]);
+        let (lo, hi) = (a + (b - a) * sx, cc + (d - cc) * sx);
+        out[c] = lo + (hi - lo) * sy;
+        out[2 + c] = ((b - a) + ((d - cc) - (b - a)) * sy) * dx;
+        out[4 + c] = (hi - lo) * dy;
+    }
+    out
+}
+
+/// The numbers warp_newton reads past the spots.
+struct Newton<'a> {
+    p: &'a [f64],
+    gy: usize,
+    gx: usize,
+    smooth: bool,
+    bounds: &'a [f64],
+    has_b: bool,
+    steps: i64,
+    give_step: i64,
+    give_far: f64,
+}
+
+/// fastloops._newton_one for spot i (px / py / sx / sy its own numbers): (x, y, how far off).
+#[inline(always)]
+fn newton_one(i: usize, px: f64, py: f64, sx: f64, sy: f64, d: &Newton) -> (f64, f64, f64) {
+    let (mut x, mut y) = (sx, sy);
+    let mut b = f64::INFINITY;
+    let (mut ox, mut oy) = (x, y);
+    let h = 1e-5;
+    for step in 0..d.steps {
+        let (vx, vy, mut dxx, mut dxy, mut dyx, mut dyy) = if d.smooth {
+            let e = eased_at(d.p, d.gy, d.gx, x, y);
+            (e[0], e[1], e[2], e[3], e[4], e[5])
+        } else {
+            let (vx, vy) = sample2(d.p, d.gy, d.gx, x, y);
+            (vx, vy, 0.0, 0.0, 0.0, 0.0)
+        };
+        let (rx, ry) = (x + vx - px, y + vy - py);
+        let err = (rx * rx + ry * ry).sqrt();
+        if err < b {
+            (b, ox, oy) = (err, x, y);
+        }
+        let mut go = err > 1e-9;
+        if d.has_b && step == d.give_step {
+            go = go && err < d.give_far;
+        }
+        if !go {
+            break;
+        }
+        if !d.smooth {
+            let (ax, ay) = sample2(d.p, d.gy, d.gx, x + h, y);
+            (dxx, dxy) = ((ax - vx) / h, (ay - vy) / h);
+            let (ax, ay) = sample2(d.p, d.gy, d.gx, x, y + h);
+            (dyx, dyy) = ((ax - vx) / h, (ay - vy) / h);
+        }
+        let (a, bb, c, e) = (1.0 + dxx, dyx, dxy, 1.0 + dyy);
+        let det = a * e - bb * c;
+        let (ux, uy) = if det.abs() > 1e-6 { ((e * rx - bb * ry) / det, (a * ry - c * rx) / det) } else { (rx, ry) };
+        let st = (ux * ux + uy * uy).sqrt();
+        let cut = if st > 0.2 { 0.2 / pmax(st, 1e-300) } else { 1.0 };
+        let (mut nx, mut ny) = (x - ux * cut, y - uy * cut);
+        if d.has_b {
+            let k = i * 4;
+            nx = pmin(pmax(nx, d.bounds[k]), d.bounds[k + 1]);
+            ny = pmin(pmax(ny, d.bounds[k + 2]), d.bounds[k + 3]);
+        }
+        (x, y) = (nx, ny);
+    }
+    (ox, oy, b)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn newton_range_inner(s0: usize, px: &[f64], py: &[f64], sx: &[f64], sy: &[f64], d: &Newton, bx: &mut [f64],
+                      by: &mut [f64], best: &mut [f64]) {
+    for j in 0..px.len() {
+        let (x, y, e) = newton_one(s0 + j, px[j], py[j], sx[j], sy[j], d);
+        bx[j] = x;
+        by[j] = y;
+        best[j] = e;
+    }
+}
+level_builds!(fn newton_range(s0: usize, px: &[f64], py: &[f64], sx: &[f64], sy: &[f64], d: &Newton,
+                              bx: &mut [f64], by: &mut [f64], best: &mut [f64]) => newton_range_inner);
+
+/// fastloops.warp_newton (P: the offsets (gy, gx, 2); bounds (n, 4) read when has_b; many = shared out) -> 0.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], smooth: bool, sx: &[f64], sy: &[f64], bounds: Nd<f64, 2>,
+                   has_b: bool, steps: i64, give_step: i64, give_far: f64, bx: &mut [f64], by: &mut [f64],
+                   best: &mut [f64], many: bool) -> i64 {
+    let n = px.len();
+    let (gy, gx) = (p.sh[0], p.sh[1]);
+    if p.sh[2] != 2 || gy < 2 || gx < 2 || (has_b && (bounds.sh[1] != 4 || bounds.sh[0] < n)) {
+        return crate::FAILED;
+    }
+    let (py, sx, sy) = (&py[..n], &sx[..n], &sy[..n]);
+    let (bx, by, best) = (&mut bx[..n], &mut by[..n], &mut best[..n]);
+    let d = Newton { p: p.d, gy, gx, smooth, bounds: bounds.d, has_b, steps, give_step, give_far };
+    match crate::pool_for(many, n, 1) {
+        None => newton_range(0, px, py, sx, sy, &d, bx, by, best),
+        Some(pool) => {
+            let chunk = (n / (pool.current_num_threads() * 8)).max(256);
+            pool.install(|| {
+                (px.par_chunks(chunk), py.par_chunks(chunk), sx.par_chunks(chunk), sy.par_chunks(chunk),
+                 bx.par_chunks_mut(chunk), by.par_chunks_mut(chunk), best.par_chunks_mut(chunk))
+                    .into_par_iter().enumerate()
+                    .for_each(|(c, (a, b, e, f, g, h, k))| newton_range(c * chunk, a, b, e, f, &d, g, h, k));
+            });
+        }
+    }
+    0
+}
+
+/// fastloops._unit_back: a spot of the colour box -> (middle in ticks, key) (liquify._placed + from_unit).
+#[inline(always)]
+fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
+    if fp[0] != 0.0 {
+        if x < -1e-9 || x > 1.0 + 1e-9 {
+            x = npmod(x, 1.0);
+        }
+        if y < -1e-9 || y > 1.0 + 1e-9 {
+            y = npmod(y, 1.0);
+        }
+    }
+    x = pmin(pmax(x, 0.0), 1.0);
+    y = pmin(pmax(y, 0.0), 1.0);
+    if fp[1] != 0.0 {
+        let x2 = fp[2] + x * fp[3];
+        let y2 = if fp[6] != 0.0 { fp[4] + y * fp[5] } else { y };
+        (x, y) = (0.5 + fp[8] * (y2 - 0.5), 0.5 + fp[7] * (x2 - 0.5));
+    }
+    (fp[9] + x * fp[10], if fp[13] != 0.0 { fp[11] + y * fp[12] } else { fp[11] })
+}
+
+const ROUND_INNER: usize = 7; // (fastloops.ROUND_INNER: look 0 the middle, 1 .. 6 the inner ring)
+const MOST_LOOKS: usize = 16;
+
+/// fastloops._round_at: a stretched spot's looks round where it fetches from (sx, sy) vote.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn round_one(sx: f64, sy: f64, r: f64, ring: &[f64], nl: usize, fp: &[f64], d: &Near, now: &[i64]) -> i64 {
+    let mut got = [0i64; MOST_LOOKS];
+    let look = |k: usize| {
+        let (m, kk) = unit_back(sx + ring[k * 3] * r, sy + ring[k * 3 + 1] * r, fp);
+        near_one(0, m, kk, d)
+    };
+    got[0] = look(0);
+    for k in ROUND_INNER..nl {
+        got[k] = look(k);
+    }
+    let c0 = now[got[0] as usize];
+    if (ROUND_INNER..nl).all(|k| now[got[k] as usize] == c0) {
+        return got[0];
+    }
+    for k in 1..ROUND_INNER {
+        got[k] = look(k);
+    }
+    let mut cols = [0i64; MOST_LOOKS];
+    let mut score = [0.0f64; MOST_LOOKS];
+    let mut nc = 0usize;
+    for k in 0..nl {
+        let c = now[got[k] as usize];
+        let mut q = 0;
+        while q < nc && cols[q] != c {
+            q += 1;
+        }
+        if q == nc {
+            cols[q] = c;
+            nc += 1;
+        }
+        score[q] += ring[k * 3 + 2];
+    }
+    score[0] += 1e-6;
+    let mut best = 0;
+    for q in 1..nc {
+        if score[q] > score[best] || (score[q] == score[best] && cols[q] < cols[best]) {
+            best = q;
+        }
+    }
+    for k in 0..nl {
+        if now[got[k] as usize] == cols[best] {
+            return got[k];
+        }
+    }
+    got[0]
+}
+
+/// fastloops._cover_at: a squashed note's nt x nk looks (tstart / ta / tb) vote, the most common colour wins.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn cover_one(mid: f64, key: f64, vt: (f64, f64), vk: (f64, f64), nt: i64, nk: i64, tstart: &[i64], ta: &[f64],
+             tb: &[f64], d: &Near, now: &[i64]) -> i64 {
+    let t = ((nt - 1) * 4 + (nk - 1)) as usize;
+    let (a0, a1) = (tstart[t] as usize, tstart[t + 1] as usize);
+    let s = a1 - a0;
+    let mut got = [0i64; MOST_LOOKS];
+    for j in 0..s {
+        let pm = mid + ta[a0 + j] * vt.0 + tb[a0 + j] * vk.0;
+        let pk = key + ta[a0 + j] * vt.1 + tb[a0 + j] * vk.1;
+        got[j] = near_one(0, pm, pk, d);
+    }
+    if s == 1 {
+        return got[0];
+    }
+    let mut cols = [0i64; MOST_LOOKS];
+    let mut count = [0i64; MOST_LOOKS];
+    let mut firstj = [0i64; MOST_LOOKS];
+    let mut nc = 0usize;
+    for j in 0..s {
+        let c = now[got[j] as usize];
+        let mut q = 0;
+        while q < nc && cols[q] != c {
+            q += 1;
+        }
+        if q == nc {
+            cols[q] = c;
+            firstj[q] = j as i64;
+            nc += 1;
+        }
+        count[q] += 1;
+    }
+    let s1 = s as i64 + 1;
+    let mut best = 0;
+    for q in 1..nc {
+        let (vq, vb) = (count[q] * s1 - firstj[q], count[best] * s1 - firstj[best]);
+        if vq > vb || (vq == vb && cols[q] < cols[best]) {
+            best = q;
+        }
+    }
+    got[firstj[best] as usize]
+}
+
+/// The numbers warp_soft reads past the notes.
+struct Soft<'a> {
+    at: &'a [i64],
+    cols: usize,
+    a: &'a [f64],
+    gy: usize,
+    gx: usize,
+    c: &'a [f64],
+    fp: &'a [f64],
+    ring: &'a [f64],
+    nl: usize,
+    tstart: &'a [i64],
+    ta: &'a [f64],
+    tb: &'a [f64],
+    now: &'a [i64],
+}
+
+/// fastloops._soft_one: note j at spot (x0, y0) of the box -> the note it takes its colour from.
+#[inline(always)]
+fn soft_one(j: usize, x0: f64, y0: f64, s: &Soft, d: &Near) -> i64 {
+    let s100 = s.c[5];
+    let (d0, d1) = sample2(s.a, s.gy, s.gx, x0, y0);
+    let (sx, sy) = (x0 + d0 * s100, y0 + d1 * s100);
+    let (mid, key) = unit_back(sx, sy, s.fp);
+    let (st, en) = (s.at[j * s.cols] as f64, s.at[j * s.cols + 1] as f64);
+    let h = pmax((en - st) / 2.0, 0.5);
+    let (xx, yy) = (x0 + s.c[0] * h, y0 + s.c[1] * h);
+    let (d0, d1) = sample2(s.a, s.gy, s.gx, xx, yy);
+    let (m1, k1) = unit_back(xx + d0 * s100, yy + d1 * s100, s.fp);
+    let (xx, yy) = (x0 + s.c[2], y0 + s.c[3]);
+    let (d0, d1) = sample2(s.a, s.gy, s.gx, xx, yy);
+    let (m3, k3) = unit_back(xx + d0 * s100, yy + d1 * s100, s.fp);
+    let (vt0, vt1) = ((m1 - mid) * 2.0, (k1 - key) * 2.0);
+    let (vk0, vk1) = ((m3 - mid) * 2.0, (k3 - key) * 2.0);
+    let (ut, uk) = (vt0 / (2.0 * h), vt1);
+    let (wt, wk) = (vk0 / (2.0 * h), vk1);
+    let area = (ut * wk - uk * wt).abs();
+    if area <= s.c[6] {
+        let grow = pmin(pmax(1.0 / pmax(area, 1e-12).sqrt() - 1.0, 0.0), 1.0);
+        if grow < 0.05 {
+            return near_one(0, mid, key, d);
+        }
+        return round_one(sx, sy, s.c[4] * s.c[7] * grow, s.ring, s.nl, s.fp, d, s.now);
+    }
+    let nt = pmin(pmax((ut * ut + uk * uk).sqrt().ceil(), 1.0), 4.0) as i64;
+    let nk = pmin(pmax((wt * wt + wk * wk).sqrt().ceil(), 1.0), 4.0) as i64;
+    cover_one(mid, key, (vt0, vt1), (vk0, vk1), nt, nk, s.tstart, s.ta, s.tb, d, s.now)
+}
+
+#[inline(always)]
+fn soft_range_inner(idx: &[i64], x: &[f64], y: &[f64], s: &Soft, d: &Near, out: &mut [i64]) {
+    for j in 0..out.len() {
+        out[j] = soft_one(idx[j] as usize, x[j], y[j], s, d);
+    }
+}
+level_builds!(fn soft_range(idx: &[i64], x: &[f64], y: &[f64], s: &Soft, d: &Near, out: &mut [i64])
+              => soft_range_inner);
+
+/// fastloops.warp_soft (at: the notes' places; idx: the notes picked for; a: the map (gy, gx, 2); c / fp: the
+/// numbers _soft_one / _unit_back read; ring (looks, 3); many = shared out) -> 0.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3>, c: &[f64], fp: &[f64],
+                 ring: Nd<f64, 2>, tstart: &[i64], ta: &[f64], tb: &[f64], keys: &[i64], first: &[i64],
+                 last: &[i64], line: &[f64], ms: &[f64], o: &[i64], base: f64, top: f64, gap: f64, now: &[i64],
+                 out: &mut [i64], many: bool) -> i64 {
+    let n = idx.len();
+    let (rows, cols) = (at.sh[0], at.sh[1]);
+    let (gy, gx) = (a.sh[0], a.sh[1]);
+    let nl = ring.sh[0];
+    if cols < 2 || a.sh[2] != 2 || gy < 2 || gx < 2 || ring.sh[1] != 3 || nl > MOST_LOOKS || nl < ROUND_INNER
+        || c.len() < 8 || fp.len() < 14 || keys.is_empty() || tstart.len() < 17 || x.len() < n || y.len() < n
+        || out.len() < n {
+        return crate::FAILED;
+    }
+    for j in 0..16 {
+        // (each count's looks fit the small tables)
+        if tstart[j] < 0 || tstart[j + 1] < tstart[j] || tstart[j + 1] - tstart[j] > MOST_LOOKS as i64
+            || tstart[j + 1] as usize > ta.len() || tstart[j + 1] as usize > tb.len() {
+            return crate::FAILED;
+        }
+    }
+    if idx.iter().any(|&j| j < 0 || j as usize >= rows) {
+        return crate::FAILED;
+    }
+    let (x, y, out) = (&x[..n], &y[..n], &mut out[..n]);
+    let d = Near { keys, first, last, line, ms, nk: &[], nm: &[], o, base, top, gap, own: false };
+    let s = Soft { at: at.d, cols, a: a.d, gy, gx, c, fp, ring: ring.d, nl, tstart, ta, tb, now };
+    match crate::pool_for(many, n, 1) {
+        None => soft_range(idx, x, y, &s, &d, out),
+        Some(pool) => {
+            let chunk = (n / (pool.current_num_threads() * 8)).max(256);
+            pool.install(|| {
+                (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), out.par_chunks_mut(chunk))
+                    .into_par_iter().for_each(|(i, xs, ys, oc)| soft_range(i, xs, ys, &s, &d, oc));
             });
         }
     }

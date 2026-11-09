@@ -30,6 +30,8 @@ import zlib
 
 import numpy as np
 
+from files.speed import compiled
+
 SCALE = 4096  # (map units per colour box: 1/4096 of the box is the finest push kept)
 MOST_PUSH = 8.0  # (a spot looks at most this many boxes away: int16 / SCALE)
 GRID_LONG = 256  # (grid points along the shape's longer side on screen when its first stroke is made)
@@ -325,6 +327,48 @@ SOFT_SQUASHED = 1.25  # (a note covering more than this many notes' worth of the
 SOFT_REACH = 1.0
 _RING = [(0.0, 0.0, 1.0)] + [(0.5 * np.cos(t), 0.5 * np.sin(t), 0.7) for t in np.arange(6) * np.pi / 3] + \
     [(np.cos(t), np.sin(t), 0.35) for t in np.arange(6) * np.pi / 3 + np.pi / 6]  # (looks: across, up, weight)
+# (the compiled pick (fastloops.warp_soft) takes the same looks: look 0 the middle, 1 .. 6 the inner ring
+# (fastloops.ROUND_INNER = 7), _covered's looks for every count in one table (SOFT_MOST 4 a side there too))
+
+
+def _cover_looks(nt, nk):
+    """_covered's nt x nk looks (shares along the note, across its key), nearest the middle first."""
+    a = (np.arange(nt) + 0.5) / nt - 0.5
+    b = (np.arange(nk) + 0.5) / nk - 0.5
+    A, B = (v.ravel() for v in np.meshgrid(a, b))
+    order = np.argsort(np.hypot(A, B), kind="stable")  # (nearest the middle first)
+    return A[order], B[order]
+
+
+def _cover_table():
+    """Every look count's looks in one table for the compiled vote: (start of each (nt - 1) * SOFT_MOST + nk - 1,
+    across shares, up shares)."""
+    start, ta, tb = [0], [], []
+    for nt in range(1, SOFT_MOST + 1):
+        for nk in range(1, SOFT_MOST + 1):
+            A, B = _cover_looks(nt, nk)
+            ta.extend(A.tolist())
+            tb.extend(B.tolist())
+            start.append(len(ta))
+    return np.asarray(start, np.int64), np.asarray(ta, np.float64), np.asarray(tb, np.float64)
+
+
+def _place_numbers(w, rc, box, own):
+    """_placed's numbers as the compiled votes take them (fastloops._unit_back), or None: Wrap around / Bend with
+    the outline need their key rows (NumPy's way)."""
+    edge = w["edge"]
+    if edge in ("wrap", "bend"):
+        return None
+    from notes.recolour import whole_shares
+    f = rc.get("frame")
+    turned = bool(f and f[1])
+    t0, t1, k0, k1 = own if turned else box
+    (a0, a1), (b0, b1) = whole_shares(rc) if turned else ((0.0, 1.0), (0.0, 1.0))
+    return np.array([edge != "escape", turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f[1] if turned else 1,
+                     f[2] if turned else 1, t0, max(t1 - t0, 1.0), k0, k1 - k0, k1 > k0], np.float64)
+
+
+_COVER_LOOKS = _cover_table()
 
 
 def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
@@ -338,7 +382,25 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
     back is one with the winning colour (colour sets / groups / kept_apart then as usual). Live calls it the same
     way: the brush's live colours == let go's."""
     from notes.recolour import _sorted_notes, nearest
-    d = sample(a, x, y) * (w["lq"]["strength"] / 100)
+    s100 = w["lq"]["strength"] / 100
+    fp = _place_numbers(w, rc, box, own) if w.get("soft") and len(idx) else None
+    fast = compiled("warp_soft") if fp is not None else None
+    if fast:  # (the compiled pick, note by note: the very same sums as below, files/fastloops.warp_soft; user
+        # 11-09: heavy per-note work compiled)
+        kept = kept or _sorted_notes(at)
+        to = np.ascontiguousarray
+        _, _, o, _, ms, keys, first, last, line, base, top, gap = kept
+        bx, by = _unit(w, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), rc, box, own)
+        kx, ky = (bx[2] - bx[0]) * 0.5, (by[2] - by[0]) * 0.5
+        c = np.array([bx[1] - bx[0], by[1] - by[0], kx, ky, np.hypot(kx, ky) * 2, s100, SOFT_SQUASHED, SOFT_REACH],
+                     np.float64)
+        out = np.empty(len(idx), np.int64)
+        fast.warp_soft(to(at, np.int64), to(idx, np.int64), to(x, np.float64), to(y, np.float64), to(a, np.float64),
+                       c, fp, np.asarray(_RING, np.float64), *_COVER_LOOKS, to(keys, np.int64), to(first, np.int64),
+                       to(last, np.int64), to(line, np.float64), to(ms, np.float64), to(o, np.int64), float(base),
+                       float(top), float(gap), to(now, np.int64), out)
+        return out
+    d = sample(a, x, y) * s100
     sx, sy = x + d[:, 0], y + d[:, 1]  # (where in the box each spot fetches from)
     mid, key = _placed(w, sx, sy, rc, box, own)
     if not w.get("soft") or not len(idx):
@@ -367,7 +429,8 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
     ut, uk = vt[:, 0] / (2 * h), vt[:, 1]
     wt, wk = vk[:, 0] / (2 * h), vk[:, 1]
     area = np.abs(ut * wk - uk * wt)
-    rt, rk = np.hypot(ut, uk), np.hypot(wt, wk)  # (how long each arrow is, in notes' worth)
+    # (how long each arrow is, in notes' worth; sqrt, not hypot: the compiled twin's gives the very same bits)
+    rt, rk = np.sqrt(ut * ut + uk * uk), np.sqrt(wt * wt + wk * wk)
     out = np.empty(len(idx), np.int64)
     flat = area <= SOFT_SQUASHED
     # (stretched: how far the looks reach, 0 where a key of the colours shows a key tall or less, SOFT_REACH keys
@@ -438,11 +501,7 @@ def _covered(at, kept, mid, key, vt, vk, nt, nk, now):
     """Edges: Smooth on a squashed spot: nt x nk looks spread over what the note covers (the arrows vt / vk round
     (mid, key)) vote; the most common colour wins (a tie: the one looked at nearest the middle); its look's note."""
     from notes.recolour import nearest
-    a = (np.arange(nt) + 0.5) / nt - 0.5
-    b = (np.arange(nk) + 0.5) / nk - 0.5
-    A, B = (v.ravel() for v in np.meshgrid(a, b))
-    order = np.argsort(np.hypot(A, B), kind="stable")  # (nearest the middle first)
-    A, B = A[order], B[order]
+    A, B = _cover_looks(nt, nk)
     n, s = len(mid), len(A)
     pm = mid[:, None] + A[None] * vt[:, None, 0] + B[None] * vk[:, None, 0]
     pk = key[:, None] + A[None] * vt[:, None, 1] + B[None] * vk[:, None, 1]

@@ -38,6 +38,8 @@ import json
 
 import numpy as np
 
+from files.speed import compiled
+
 MOST_CELLS = 20  # (cells across / up at most: the window's Custom boxes, a file too)
 MOST_MOVE = 4.0  # (a point moves at most this many boxes)
 MOST_STRENGTH = 400.0
@@ -48,6 +50,7 @@ PER_CELL = 32  # (the turned-round map's steps per cell...)
 MOST_MAP = 257  # (... at most this many a side: 8 cells; more cells share them, 12+ a cell at 20: a drag on a
 # 20 x 20 grid took 0.37 s a move at 513, the bend between points stays smooth)
 STEPS = 25  # (Newton steps at most; most spots settle in 3-5)
+NEWTON_FAST = 64  # (spots: from this many the compiled steps (fastloops.warp_newton), fewer = NumPy's, the same)
 _MAPS = {}  # the warp's json -> its turned-round map (read-only); the last few kept
 
 
@@ -396,6 +399,16 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None):
     """Newton steps from (sx, sy) toward s + bend(s) = (px, py) under the offsets P: (x, y, how far off) of the
     best answer each spot reached. bounds (x0, x1, y0, y1 arrays): kept inside them (a fold's piece)."""
     sx, sy = np.array(sx, np.float64), np.array(sy, np.float64)
+    fast = compiled("warp_newton") if len(px) >= NEWTON_FAST else None
+    if fast:  # (the compiled twin: each spot's very same steps, files/fastloops.warp_newton; user 11-09: heavy
+        # per-spot work compiled)
+        to = np.ascontiguousarray
+        n = len(px)
+        bnd = to(np.column_stack(bounds), np.float64) if bounds is not None else np.zeros((1, 4))
+        bx, by, best = np.empty(n), np.empty(n), np.empty(n)
+        fast.warp_newton(to(P, np.float64), to(px, np.float64), to(py, np.float64), bool(smooth), sx, sy, bnd,
+                         bounds is not None, STEPS, GIVE_UP_STEP, GIVE_UP_FAR, bx, by, best)
+        return bx, by, best
     best = np.full(len(px), np.inf)
     bx, by = sx.copy(), sy.copy()
     live = np.arange(len(px))
@@ -407,7 +420,7 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None):
         else:
             d0 = bend_at(P, x, y, smooth)
         rx, ry = x + d0[:, 0] - px[live], y + d0[:, 1] - py[live]
-        err = np.hypot(rx, ry)
+        err = np.sqrt(rx * rx + ry * ry)  # (not hypot: the compiled twin's sqrt gives the very same bits)
         better = err < best[live]
         k = live[better]
         best[k], bx[k], by[k] = err[better], x[better], y[better]
@@ -428,8 +441,8 @@ def _newton(P, px, py, smooth, sx, sy, bounds=None):
         safe = np.where(ok, det, 1.0)
         ux = np.where(ok, (e * rx - b * ry) / safe, rx)
         uy = np.where(ok, (a * ry - c * rx) / safe, ry)
-        step = np.hypot(ux, uy)
-        cut = np.where(step > 0.2, 0.2 / np.maximum(step, 1e-300), 1.0)
+        far = np.sqrt(ux * ux + uy * uy)
+        cut = np.where(far > 0.2, 0.2 / np.maximum(far, 1e-300), 1.0)
         nx, ny = x - ux * cut, y - uy * cut
         if bounds is not None:
             nx = np.clip(nx, bounds[0][live], bounds[1][live])
