@@ -1011,5 +1011,11 @@
  "warp.undo_bend": "Warp bend",
  "warp.undo_edge": "Warp at the edges",
  "warp.undo_reset": "Reset Warp",
- "warp.undo_drag": "Warp point"
+ "warp.undo_drag": "Warp point",
+ "warp.row": "Warp",
+ "warp.row_tip": "Untick to hide the Warp's bend without losing the grid; tick to show it again.",
+ "warp.strength": "Strength",
+ "warp.strength_tip": "How far the grid's bend moves the colours. 100 % = as dragged, 200 % = twice as far along the same bend, 0 % = none. Up to 400 %.",
+ "warp.undo_show": "Warp on / off",
+ "warp.undo_strength": "Warp strength"
 }
