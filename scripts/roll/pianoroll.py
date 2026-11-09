@@ -1991,6 +1991,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.app.show_position(self.position_text(e))
         self.tempo_hover(e)
         self.liquify_motion(e)
+        if not self.drag and not self.draft and (self.warp_on() or getattr(self, "wp_hover", None)):
+            self.warp_hover(e.x, e.y)  # (Warp: the point under the mouse lights its mirror twins)
         if not self.drag and self.lasso_motion(e):  # (a Polygonal loop's next line follows the mouse)
             return
         if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):
@@ -2034,8 +2036,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         arrow, a hand over a shape it can cut with."""
         name = self.custom_cursor(hit)
         app, tool = self.app, self.app.tool.get()
-        if not self.draft and self.warp_on() and self.warp_hit(e.x, e.y) is not None:
-            return "fleur"  # (a Warp grid point: a press drags it)
+        if not self.draft and self.warp_on() and getattr(self, "wp_hover", None) is not None:
+            # (a Warp grid point: a press drags it; the locked middle (4-way / Half turn) = the plain arrow)
+            return "arrow" if getattr(self, "wp_hover_locked", False) else "fleur"
         if self.draft or hit and hit[0] != "inside":
             return name
         area = self.area_box_hit(e) if tool == "select" and getattr(app, "stir_window", None) else None

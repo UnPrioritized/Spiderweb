@@ -259,8 +259,9 @@ PATH_LINE = pick("#0d8f46", "#62d996")  # Copy along a path: the path on the pia
 STIR_RING = pick("#1f1f22", "#f2f2f4")  # Stir's Only inside a circle dashes (over a ROLL_BG band: busy colours, 11-03)
 LIQUIFY_BRUSH = pick("#1f1f22", "#f2f2f4")  # Liquify's brush circle (over a ROLL_BG band, like the Stir circle)
 WARP_GRID = pick("#1f1f22", "#f2f2f4")  # Warp's grid lines + points on the piano roll (over a ROLL_BG band)
-WARP_MIRROR = pick("#d81b8c", "#ff6ec7")  # Warp's mirror lines (own colour: on an even grid they lie right on the
-# grid's own middle line, C4 11-09)
+WARP_MIRROR = pick("#ff3cc8", "#ff6ed4")  # Warp's mirror accent: mirror lines, Half turn marker, lit twin points (own
+# colour: on an even grid the lines lie right on the grid's own middle line; user 11-09 C5: on top, with a dark edge)
+WARP_MIRROR_EDGE = pick("#1f1f22", "#1f1f22")  # (the dark edge round the mirror accent: shows on busy colours both looks)
 LIQUIFY_FREEZE = pick("#e01e1e", "#ff4a4a")  # Liquify's freeze mask: see-through red tint (image editors' red mask)
 STIR_BOX = pick("#0d8f46", "#62d996")  # the Stir area's box: a solid line + filled handles, the Centre point's green
 # (user 11-04: apart from the area's white + black dashes; a dark band (orange mock) blurred into gate-1 spam)

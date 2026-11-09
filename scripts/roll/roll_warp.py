@@ -10,10 +10,13 @@ Liquify's map); where that can't follow (a Liquify on the shape too, few notes, 
 again at most every LIVE_MS. Let go = ONE undo step (pushed at the first real move: a click alone leaves none). Esc
 mid-drag = the point back, no step. Ctrl+Z mid-drag = ends as if let go, then that step is taken back. With the window
 open a press on a shape off a point never moves it: an unselected shape gets selected, a selected one stays.
-MIRROR (window ticks, user 2026-11-09, PLAN C3): each drag move sets the dragged point's twins across the grid's
-middle line(s) AS SHOWN ON THE PIANO ROLL (a turned shape: the box's other way; warp_axes), offsets mirrored; a
-point on a mirror line keeps 0 across it (slides along it only); twins jump to the mirrored spot at the first move
-(a lopsided grid stays as it is until then). Dashed middle lines show while ticked (unbent: the box's own middle)."""
+MIRROR (window dropdown, user 2026-11-09, PLAN C3 + C5): each drag move sets the dragged point's twins across the
+grid's middle line(s) AS SHOWN ON THE PIANO ROLL (a turned shape: the box's other way; warp_axes), offsets mirrored;
+Half turn = the point opposite through the middle, offsets turned round. A point on a mirror line keeps 0 across it
+(slides along it only); the middle point in 4-way / Half turn is LOCKED (a cross; a press moves nothing, no step);
+twins jump to the mirrored spot at the first move (a lopsided grid stays as it is until then). Look: mirror lines /
+Half turn's circle-with-dot ON TOP of the grid in the accent with a dark edge, points over them, the hovered /
+dragged point's twins lit in the accent (wp_hover, set by pianoroll.hover_cursor), the dragged point last."""
 
 import time
 
@@ -117,19 +120,45 @@ class WarpGrid:
         return abs(x[1] - x[0]) + abs(y[3] - y[2]) >= abs(y[1] - y[0]) + abs(x[3] - x[2])
 
     def warp_mirror(self, g):
-        """(mirror across u = 0.5, mirror across v = 0.5) for grid g from the window's Sideways / Up / down ticks."""
+        """(mirror across u = 0.5, mirror across v = 0.5, half turn) for grid g from the window's Mirror pick, the
+        lines as shown on the piano roll (a turned shape: swapped). Half turn = round the middle, the same on screen
+        whatever the Flip / Turn (a half turn is its own mirror both ways)."""
         w = getattr(self.app, "warp_window", None)
-        side, up = w.mirrored() if w else (False, False)
+        mode = w.mirrored() if w else "off"
+        if mode == "half":
+            return False, False, True
+        side, up = mode in ("side", "both"), mode in ("up", "both")
         if not (side or up):
-            return False, False
-        return (side, up) if self.warp_axes(g["made"]) else (up, side)
+            return False, False, False
+        return ((side, up) if self.warp_axes(g["made"]) else (up, side)) + (False,)
 
     @staticmethod
-    def warp_twins(P, j, i, new, mu, mv):
+    def warp_locked(c, r, j, i, mu, mv, half):
+        """Point (j, i) of a c x r cell grid can't move: the middle point in 4-way / Half turn (its own twin)."""
+        return (half or (mu and mv)) and 2 * i == c and 2 * j == r
+
+    @staticmethod
+    def warp_twin_spots(c, r, j, i, mu, mv, half):
+        """The points (j, i)'s drag moves too: [(j2, i2), ...] (itself left out)."""
+        if half:
+            out = [(r - j, c - i)]
+        else:
+            out = ([(j, c - i)] if mu else []) + ([(r - j, i)] if mv else []) + ([(r - j, c - i)] if mu and mv else [])
+        return [s for s in dict.fromkeys(out) if s != (j, i)]
+
+    @staticmethod
+    def warp_twins(P, j, i, new, mu, mv, half=False):
         """P (rows + 1, cols + 1, 2) with point (j, i) at offsets new and its mirror twins set (mu: across u = 0.5,
-        mv: across v = 0.5); a point on a mirror line keeps 0 across it. Changes P in place."""
+        mv: across v = 0.5, half: the point opposite through the middle, moved the opposite way); a point on a
+        mirror line keeps 0 across it, the middle in Half turn stays. Changes P in place."""
         r, c = P.shape[0] - 1, P.shape[1] - 1
         dx, dy = new
+        if half:
+            if 2 * i == c and 2 * j == r:
+                dx = dy = 0.0
+            P[j, i] = (dx, dy)
+            P[r - j, c - i] = (-dx, -dy)
+            return P
         if mu and 2 * i == c:
             dx = 0.0
         if mv and 2 * j == r:
@@ -142,6 +171,23 @@ class WarpGrid:
         if mu and mv:
             P[r - j, c - i] = (-dx, -dy)
         return P
+
+    def warp_point_locked(self, g, i):
+        """Point number i of grid g can't move with the Mirror picked now."""
+        c, r = wp_.size(g["wp"])
+        j, i = divmod(i, c + 1)
+        return self.warp_locked(c, r, j, i, *self.warp_mirror(g))
+
+    def warp_hover(self, x, y):
+        """The mouse moved (no button held, Warp window open): the point under it remembered and the grid drawn
+        again when that changed, so its twins light up. Returns warp_hit's answer."""
+        got = self.warp_hit(x, y) if self.warp_on() else None
+        key = (id(got[0]["sh"]), got[1]) if got else None
+        self.wp_hover_locked = bool(got) and self.warp_point_locked(*got)
+        if key != getattr(self, "wp_hover", None):
+            self.wp_hover = key
+            self.draw_warp_grid()
+        return got
 
     def warp_hit(self, x, y, grids=None):
         """(grid, point number) of the grid point under the mouse (the nearest within GRAB px), or None."""
@@ -170,28 +216,70 @@ class WarpGrid:
         band = line + 2 * max(1, round(s))
         room = (-10, -10, self.winfo_width() + 10, self.winfo_height() + 10)
         st = getattr(self, "wp", None)
+        hover = getattr(self, "wp_hover", None)
         for g in self.warp_grids():
             pieces = [p for ln in self.warp_lines(g) for p in clip_polyline(ln, room)]
             for width, col in ((band, look.ROLL_BG), (line, look.WARP_GRID)):
                 for p in pieces:
                     self.create_line(*p, fill=col, width=width, tags="wpgrid")
-            mu, mv = self.warp_mirror(g)
+            # (MIRROR LOOK, user 2026-11-09 C5: ON TOP of the grid in its own accent with a dark edge, the points
+            # drawn over it; order: grid lines -> mirror lines / marker -> points -> lit twins + the dragged point)
+            mu, mv, half = self.warp_mirror(g)
+            accent = line + 2 * max(1, round(s))
+            edge = accent + 2 * max(1, round(s))
             for on, u, v in ((mu, [0.5, 0.5], [0.0, 1.0]), (mv, [0.0, 1.0], [0.5, 0.5])):
-                if on:  # (the mirror line: the box's own middle, unbent; SOLID in its own colour, a bit thicker (C4:
-                    # dashed, it vanished on an even grid, right on the grid's middle line; Windows draws Tk's dashes
-                    # 2 px on / off), cut to the view first)
+                if on:  # (the mirror line: the box's own middle, unbent, solid (Windows draws Tk's dashes 2 px on /
+                    # off: they vanished on the grid's own middle line), cut to the view first)
                     x, y = self.warp_screen(g["made"], u, v)
                     for p in clip_polyline([float(x[0]), float(y[0]), float(x[1]), float(y[1])], room):
-                        self.create_line(*p, fill=look.WARP_MIRROR, width=line + 2 * max(1, round(s)),
-                                         tags="wpgrid")
+                        self.create_line(*p, fill=look.WARP_MIRROR_EDGE, width=edge, tags="wpgrid")
+                        self.create_line(*p, fill=look.WARP_MIRROR, width=accent, tags="wpgrid")
+            if half:  # (Half turn: a small circle with a dot at the box's own middle, no lines)
+                x, y = self.warp_screen(g["made"], [0.5], [0.5])
+                x, y, rr, d = float(x[0]), float(y[0]), 8 * s, 2.5 * s
+                if room[0] < x < room[2] and room[1] < y < room[3]:
+                    self.create_oval(x - rr, y - rr, x + rr, y + rr, outline=look.WARP_MIRROR_EDGE, width=edge,
+                                     tags="wpgrid")
+                    self.create_oval(x - rr, y - rr, x + rr, y + rr, outline=look.WARP_MIRROR, width=accent,
+                                     tags="wpgrid")
+                    self.create_oval(x - d, y - d, x + d, y + d, fill=look.WARP_MIRROR,
+                                     outline=look.WARP_MIRROR_EDGE, width=max(1, round(s)), tags="wpgrid")
             px, py = self.warp_points(g)
+            px, py = px.tolist(), py.tolist()
+            c, rows = wp_.size(g["wp"])
             r = 4 * s
             held = st["i"] if st and st["g"] is g else None
-            for i, (x, y) in enumerate(zip(px.tolist(), py.tolist())):
-                if room[0] < x < room[2] and room[1] < y < room[3]:
-                    self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_GRID,
-                                          fill=look.WARP_GRID if i == held else look.ROLL_BG, width=line,
-                                          tags="wpgrid")
+            lead = held if held is not None else (hover[1] if hover and hover[0] == id(g["sh"]) else None)
+            lit = set()
+            if lead is not None and (mu or mv or half):
+                j0, i0 = divmod(lead, c + 1)
+                lit = {jj * (c + 1) + ii for jj, ii in self.warp_twin_spots(c, rows, j0, i0, mu, mv, half)}
+            locked = None
+            if (half or (mu and mv)) and c % 2 == 0 and rows % 2 == 0:
+                locked = (rows // 2) * (c + 1) + c // 2
+            last = []  # (lit twins + the dragged point: drawn after every other point)
+            for i, (x, y) in enumerate(zip(px, py)):
+                if not (room[0] < x < room[2] and room[1] < y < room[3]):
+                    continue
+                if i in lit or i == held:
+                    last.append(i)
+                elif i == locked:  # (can't move: a small cross, never a square to grab)
+                    for a, b in ((-1, -1), (-1, 1)):
+                        self.create_line(x + a * r, y + b * r, x - a * r, y - b * r, fill=look.ROLL_BG,
+                                         width=line + 2 * max(1, round(s)), tags="wpgrid")
+                        self.create_line(x + a * r, y + b * r, x - a * r, y - b * r, fill=look.WARP_GRID,
+                                         width=line + max(1, round(s)), tags="wpgrid")
+                else:
+                    self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_GRID, fill=look.ROLL_BG,
+                                          width=line, tags="wpgrid")
+            for i in sorted(last, key=lambda i: i == held):  # (the dragged point on top of all)
+                x, y = px[i], py[i]
+                if i == held:
+                    self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_GRID, fill=look.WARP_GRID,
+                                          width=line, tags="wpgrid")
+                else:
+                    self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_MIRROR_EDGE,
+                                          fill=look.WARP_MIRROR, width=line, tags="wpgrid")
         self.tag_raise("wpgrid")
 
     # ---- the mouse
@@ -228,6 +316,9 @@ class WarpGrid:
             self.drag = ("warp_none",)  # (held: nothing moves; let go ends it)
             return True
         g, i = got
+        if self.warp_point_locked(g, i):  # (the middle point in 4-way / Half turn: nothing moves, no undo step)
+            self.drag = ("warp_none",)
+            return True
         u, v = self.warp_unit(g["made"], e.x, e.y)
         c, r = wp_.size(g["wp"])
         k = self.warp_factor(g)
@@ -256,8 +347,8 @@ class WarpGrid:
         new = ((u + st["grab"][0] - st["base"][0]) / k, (v + st["grab"][1] - st["base"][1]) / k)
         new = [min(max(float(c), -wp_.MOST_MOVE), wp_.MOST_MOVE) for c in new]
         j, i = divmod(st["i"], wp_.size(g["wp"])[0] + 1)
-        mu, mv = self.warp_mirror(g)
-        P2 = self.warp_twins(np.array(g["P"]), j, i, new, mu, mv) if mu or mv else None
+        mu, mv, half = self.warp_mirror(g)
+        P2 = self.warp_twins(np.array(g["P"]), j, i, new, mu, mv, half) if mu or mv or half else None
         if (P2 is None and list(g["P"][j, i]) == new) or (P2 is not None and np.array_equal(P2, g["P"])):
             return
         if not st["pushed"]:

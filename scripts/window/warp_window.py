@@ -7,8 +7,8 @@ plus Reset. Each one is the shapes' own (one undo step, only shapes with a Warp 
 = blank); a shape with no Warp yet takes the window's picks (settings.ini [warp]) when its first point is dragged.
 Grid size on a warped shape RE-FITS its bend onto the new grid (user 2026-11-09: nothing lost); sizes changed one
 after another re-fit from the bend before the first of them (_fit), so 4 x 4 -> 12 x 3 -> 4 x 4 gives the bend back.
-Mirror: Sideways / Up / down ticks (user 2026-11-09, PLAN C3) = a drawing aid in settings.ini [warp] mirror_side /
-mirror_up, read by roll_warp at every drag move."""
+Mirror: ONE dropdown Off / Sideways / Up / down / 4-way / Half turn (user 2026-11-09, PLAN C3 + C5; like the drawer's)
+= a drawing aid in settings.ini [warp] mirror, read by roll_warp at every drag move."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -23,6 +23,7 @@ from window.widgets import Scrub, ShortLabel, Tooltip, good, remember_place
 
 BENDS = (True, False)  # (Smooth, Straight cells: the Bend dropdown by place)
 CELLS = ("cols", "rows")  # (the Custom boxes: cells across, cells up)
+MIRRORS = ("off", "side", "up", "both", "half")  # (the Mirror dropdown by place; both = 4-way, half = Half turn)
 
 
 def put(name, value):
@@ -86,16 +87,15 @@ class WarpWindow(tk.Toplevel):
         word = ttk.Label(form, text=tr("warp.mirror"))
         word.grid(row=6, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.mirror_tip"))
-        ticks = ttk.Frame(form)
-        ticks.grid(row=6, column=1, sticky="w", padx=(6, 0), pady=2)
-        self.mirror = {}
-        for k, name in enumerate(("side", "up")):
-            var = tk.BooleanVar(value=settings.get("warp", f"mirror_{name}", "0") == "1")
-            t = ttk.Checkbutton(ticks, text=tr(f"warp.mirror_{name}"), variable=var,
-                                command=lambda name=name: self.on_mirror(name))
-            t.pack(side="left", padx=(0 if not k else 10, 0))
-            Tooltip(t, tr("warp.mirror_tip"))
-            self.mirror[name] = var
+        values = [tr(f"warp.mirror_{m}") for m in MIRRORS]
+        b = ttk.Combobox(form, values=values, state="readonly", width=max(len(v) for v in values) + 1)
+        b.grid(row=6, column=1, sticky="w", padx=(6, 0), pady=2)
+        b.bind("<<ComboboxSelected>>", lambda e: self.on_mirror())
+        Tooltip(b, tr("warp.mirror_tip"))
+        self.boxes["mirror"] = b
+        mode = settings.get("warp", "mirror", "off")
+        self.mirror = mode if mode in MIRRORS else "off"
+        b.current(MIRRORS.index(self.mirror))
         # (Custom…: cells across and up, number boxes like the Liquify window's; shown under Grid size)
         self.cells_row = ttk.Frame(form)
         self.cells = {}
@@ -247,11 +247,15 @@ class WarpWindow(tk.Toplevel):
         self._change(lambda w, sh: dict(w, edge=edge), tr("warp.undo_edge"))
 
     def mirrored(self):
-        """(sideways, up / down) mirror ticks, as on the piano roll."""
-        return self.mirror["side"].get(), self.mirror["up"].get()
+        """The Mirror pick (MIRRORS), as on the piano roll."""
+        return self.mirror
 
-    def on_mirror(self, name):
-        put(f"mirror_{name}", "1" if self.mirror[name].get() else "0")
+    def on_mirror(self):
+        i = self.boxes["mirror"].current()
+        if i < 0:
+            return
+        self.mirror = MIRRORS[i]
+        put("mirror", self.mirror)
         if not getattr(self.app.roll, "wp", None):
             self.app.roll.draw_warp_grid()
 
