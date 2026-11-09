@@ -75,6 +75,7 @@ mod play;
 mod recolour;
 mod stir;
 mod tempo;
+mod turn;
 mod winner;
 pub(crate) mod pyext;
 

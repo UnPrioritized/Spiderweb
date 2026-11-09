@@ -12,6 +12,7 @@ NEEDS = {
     "overlap_order": ("overlap_order",), "overlap_sweep": ("overlap_sweep",), "note_stretches": ("note_stretches",),
     "radix_order": ("radix_order",), "ring_runs": ("ring_runs", "ring_runs_int"),
     "clash_pairs": ("clash_pairs", "take2"), "clash_levels": ("clash_levels",), "any_overlap": ("any_overlap",),
+    "turn_sample": ("turn_sample",), "turn_layers": ("turn_layers",),
     "stir_nearest": ("stir_nearest",), "stir_nearest_one": ("stir_nearest",), "stir_wrap": ("stir_wrap",),
     "stir_wrap_one": ("stir_wrap",), "liquify_sample": ("liquify_sample",), "liquify_sample_one": ("liquify_sample",),
     "dice_mix": ("dice_mix",), "recolour_apart": ("recolour_apart",),
@@ -165,6 +166,20 @@ class Wraps:
         pa, pb = np.empty(got >> 1, np.int64), np.empty(got >> 1, np.int64)
         self.x.take2(pa, pb)
         return pa, pb, True
+
+    def turn_sample(self, flat, skey, send, g, lo_k, hi_k, n, many):
+        args = (flat, skey, send, g, lo_k, hi_k, n, many)
+        got = self._tuple("turn_sample", args)
+        return got if got is not None else self.base.turn_sample(*args)
+
+    def turn_layers(self, s, e, k, first, over, lay):
+        args = (s, e, k, first, over, lay)
+        got = self.x.turn_layers(*args)
+        if got < 0:
+            got = self._again("turn_layers", got, args)
+            if got < 0:
+                got = self.base.turn_layers(*args)
+        return got
 
     def any_overlap(self, notes, g, ng):
         got = self.x.any_overlap(notes, g, ng)

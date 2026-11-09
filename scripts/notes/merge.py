@@ -14,6 +14,8 @@ import math
 
 import numpy as np
 
+from files.speed import key_sort, loops
+
 
 def comes_from_left(stay, slide):
     """True if slide's middle is before stay's."""
@@ -827,7 +829,7 @@ def turned_notes(sh, ppq):
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
     # (notes alike in start, end and key: sampled once, each copy given the same pieces with its own velocity and
     # track; millions of copies were a layer each, a project with a small zip bomb never opened)
-    o = np.lexsort((rows[:, 1], rows[:, 0], rows[:, 2]))
+    o = key_sort(rows[:, 2], rows[:, 0], rows[:, 1])
     srt = rows[o]
     new = np.ones(len(srt), bool)
     new[1:] = (srt[1:, :3] != srt[:-1, :3]).any(axis=1)
@@ -842,7 +844,7 @@ def turned_notes(sh, ppq):
     out[:, 3:5] = srt[at, 3:5]
     # (in the order sampling every layer of all the notes gave: by layer, then key, then start)
     layer = np.zeros(len(rows), np.int64) if (lay := overlap_layers(rows)) is None else lay
-    return out[np.lexsort((out[:, 0], out[:, 2], layer[o][at]))]
+    return out[key_sort(layer[o][at], out[:, 2], out[:, 0])]
 
 
 def _layered(sh, rows, t_all, k_all, ppq):
@@ -864,7 +866,7 @@ def overlap_layers(rows):
     """Each note's layer so no two notes on one key in a layer overlap (start, end, key columns; fewest layers: the
     first free one), or None when no notes overlap (one layer). Only the notes in overlapping stretches are dealt
     with one by one."""
-    order = np.lexsort((rows[:, 0], rows[:, 2]))
+    order = key_sort(rows[:, 2], rows[:, 0])
     s, e, k = rows[order, 0], rows[order, 1], rows[order, 2]
     if len(s) < 2:
         return None
@@ -881,6 +883,13 @@ def overlap_layers(rows):
     first = over.copy()
     first[:-1] |= over[1:]
     lay = np.zeros(len(s), np.int64)
+    fast = loops()
+    if fast is not None:  # (compiled: one note at a time = the same layers as the blocks below)
+        fast.turn_layers(np.ascontiguousarray(s), np.ascontiguousarray(e), np.ascontiguousarray(k),
+                         first.view(np.uint8), over.view(np.uint8), lay)
+        out = np.empty(len(s), np.int64)
+        out[order] = lay
+        return out
     import heapq
     # (overlapping notes starting together on a key = one block, given the lowest free layers in one go: the same
     # layers as one by one, as long as none of them ends where it starts; a million copies of a note took minutes)
@@ -934,9 +943,17 @@ def _sampled(sh, rows, t_all, k_all, ppq, src=False):
         return (np.zeros((0, 5), np.int64), np.zeros(0, np.int64)) if src else np.zeros((0, 5), np.int64)
     n = min(n, max(1, MOST_SAMPLES // (hi_k - lo_k + 1)))
     step = span / n
-    order = np.lexsort((rows[:, 0], rows[:, 2]))  # by key, then start (notes on one key don't overlap)
+    order = key_sort(rows[:, 2], rows[:, 0])  # by key, then start (notes on one key don't overlap)
     srt = rows[order]
     flat = srt[:, 2] * (t_all + 1) + srt[:, 0]  # (one sorted number per note start)
+    fast = loops()
+    if fast is not None:  # (compiled: each spot looked for near the last one, rows on several cores; same numbers)
+        g = np.array([b0, p0, ub, up, vb, vp, det, t0, step, t_all, k_all, ppq, 1e-9], np.float64)
+        start, end, row, val = fast.turn_sample(flat, np.ascontiguousarray(srt[:, 2]), np.ascontiguousarray(srt[:, 1]),
+                                                g, lo_k, hi_k, n, True)
+        got = srt[val]
+        out = np.column_stack([start, end, row, got[:, 3], got[:, 4]])
+        return (out, order[val]) if src else out
     bb = t0 + (np.arange(n) + 0.5)[None, :] * step
     # (a few key rows at a time: the whole grid at once held ~1 GB of spots on a big paste; same numbers row by row)
     chunk = max(1, CHUNK_SPOTS // n)
