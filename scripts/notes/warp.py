@@ -202,7 +202,9 @@ def inverse_map(wp, quick=False):
     fold = _folds(P, smooth, top)  # (None: nothing folds, the plain Newton answers stand)
     gx, gy = map_size(wp)
     last = _LAST.get((size(wp), smooth, top)) if quick else None
-    parts = _reach(last[0], P, smooth, gx, gy) if last is not None else None
+    # (a fold now or in the last map: the fold rule ranks cells by EVERY corner's move, so a spot far from the moved
+    # point can change layer: the whole map, else live != let go; hunt 2026-11-09)
+    parts = _reach(last[0], P, smooth, gx, gy) if last is not None and fold is None and not last[2] else None
     if parts is None:
         jj, ii = np.mgrid[0:gy, 0:gx]
         px, py = (ii / (gx - 1)).ravel(), (jj / (gy - 1)).ravel()
@@ -223,7 +225,7 @@ def inverse_map(wp, quick=False):
     m.setflags(write=False)
     if quick:
         _LAST.clear()
-        _LAST[(size(wp), smooth, top)] = (P, m)
+        _LAST[(size(wp), smooth, top)] = (P, m, fold is not None)
         return m
     if len(_MAPS) > 8:
         _MAPS.pop(next(iter(_MAPS)))
@@ -543,6 +545,11 @@ def _weights(t, cells, smooth):
 REFIT_STEPS = 8  # (spots per cell the re-fit compares at)
 
 
+def shows(d):
+    """d when it bends what's shown (on, strength above 0), else None."""
+    return d if d and d.get("on") is not False and d.get("strength", DEFAULTS["strength"]) != 0 else None
+
+
 def blend(x, y, f):
     """Add between's step f (0 = x's end, 1 = y's) of two Warps (either may be None = no point moved: the other fades
     in / out): the points' offsets blended on the nearer end's grid (the other end's bend read at its points),
@@ -560,6 +567,11 @@ def blend(x, y, f):
             return np.zeros((r + 1, c + 1, 2))
         P = offsets(d, strength=False)
         return P if size(d) == (c, r) else bend_at(P, u, v, full(d)["smooth"]).reshape(r + 1, c + 1, 2)
+    # (a hidden or 0 % end bends nothing you see: it counts as unmoved, else its bend showed up halfway; hunt
+    # 2026-11-09. Both such ends: blended as they are, the steps hidden / 0 % too)
+    xs, ys = shows(x), shows(y)
+    if xs or ys:
+        x, y = xs, ys
     P = on_grid(x) * (1 - f) + on_grid(y) * f
     sx = (x or y).get("strength", DEFAULTS["strength"])
     sy = (y or x).get("strength", DEFAULTS["strength"])

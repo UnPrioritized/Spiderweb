@@ -10,6 +10,7 @@ after another re-fit from the bend before the first of them (_fit), so 4 x 4 -> 
 Mirror: ONE dropdown Off / Sideways / Up / down / 4-way / Half turn (user 2026-11-09, PLAN C3 + C5; like the drawer's)
 = a drawing aid in settings.ini [warp] mirror, read by roll_warp at every drag move."""
 
+import json
 import tkinter as tk
 from tkinter import ttk
 
@@ -32,6 +33,11 @@ def put(name, value):
         settings.put("warp", name, value)
     except OSError:
         pass
+
+
+def fit_key(w):
+    """A Warp as a dict key (_fit): every setting and point."""
+    return json.dumps(wp_.clean_warp(w), sort_keys=True)
 
 
 def saved_cells(name):
@@ -60,7 +66,7 @@ class WarpWindow(tk.Toplevel):
         self.edges = edges if edges in wp_.EDGES else wp_.DEFAULTS["edges"]
         folds = settings.get("warp", "folds", wp_.DEFAULTS["folds"])
         self.folds = folds if folds in wp_.FOLDS else wp_.DEFAULTS["folds"]
-        self._fit = {}  # id(shape) -> (the Warp a size change left it, the Warp before the first size change)
+        self._fit = {}  # fit_key(the Warp a size change left) -> the Warp before the first size change
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
         self.what = ShortLabel(box, text="", foreground=look.HINT)
@@ -183,11 +189,14 @@ class WarpWindow(tk.Toplevel):
         """Every selected warped shape's grid made cols x rows cells (None = that way as it is), re-fitted from its
         bend before the first of these size changes (a point dragged since = from the bend now)."""
         def set_to(w, sh):
-            made, base = self._fit.get(id(sh), (None, None))
-            src = base if made is not None and wp_.clean_warp(w) == made else w
+            # (looked up by the Warp itself, not the shape: undo / redo makes new shape objects; hunt 2026-11-09)
+            base = self._fit.get(fit_key(w))
+            src = base if base is not None else w
             c, r = wp_.size(w)  # (the other way as it is NOW: across set, then up = both kept)
             got = wp_.refit(src, cols or c, rows or r)
-            self._fit[id(sh)] = (got, wp_.clean_warp(src))
+            if len(self._fit) > 200:
+                self._fit.pop(next(iter(self._fit)))
+            self._fit[fit_key(got)] = wp_.clean_warp(src)
             return got
         self._change(set_to, tr("warp.undo_grid"))
 
@@ -397,6 +406,12 @@ class WarpWindow(tk.Toplevel):
         roll = self.app.roll
         if (roll.drag or ("",))[0] in ("warp", "warp_none"):
             roll.warp_release(None)
+        # (numbers typed without Enter count, like the Stir window: X / Esc never lose them; hunt 2026-11-09)
+        for name in CELLS:
+            if self.cells[name][1].get() != self.cells_said.get(name):
+                self.on_cells(name)
+        if not unchanged(self.strength_entry):
+            self.on_shown("strength", self.strength_entry)
         self.app.warp_window = None
         self.destroy()
         roll.focus_set()

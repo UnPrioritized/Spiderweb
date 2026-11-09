@@ -152,6 +152,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
         self.bind("<Leave>", self.liquify_leave, add="+")  # (Liquify's brush circle goes with the mouse)
+        self.bind("<Leave>", self.warp_leave, add="+")  # (the Warp's lit twins go dark)
         for key in ("Alt_L", "Alt_R"):  # (Alt while brushing = the opposite tool, holding still too)
             self.bind(f"<KeyPress-{key}>", lambda e: self.liquify_alt(e, True), add="+")
             self.bind(f"<KeyRelease-{key}>", lambda e: self.liquify_alt(e, False), add="+")
@@ -407,7 +408,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """The left button holds a shape, its point / handle / box, or the kept Select box's side: shortcuts wait
         (user)."""
         return bool(self.drag) and self.drag[0] in ("move", "handle", "resize", "skew", "turn", "stretch", "path",
-                                                     "rccentre", "liquify", "gliss_copies", "gliss_len", "keyhold",
+                                                     "rccentre", "liquify", "warp", "warp_none", "gliss_copies", "gliss_len", "keyhold",
                                                      "sustop", "lasso_free", "lasso_poly", "lasso_point",
                                                      "lasso_magnet")
 

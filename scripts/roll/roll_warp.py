@@ -189,6 +189,13 @@ class WarpGrid:
             self.draw_warp_grid()
         return got
 
+    def warp_leave(self, e=None):
+        """The mouse left the piano roll: the hovered point forgotten, its lit twins dark again."""
+        if getattr(self, "wp_hover", None) is not None:
+            self.wp_hover = None
+            self.wp_hover_locked = False
+            self.draw_warp_grid()
+
     def warp_hit(self, x, y, grids=None):
         """(grid, point number) of the grid point under the mouse (the nearest within GRAB px), or None."""
         if not self.warp_on():
@@ -280,7 +287,13 @@ class WarpGrid:
                 else:
                     self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_MIRROR_EDGE,
                                           fill=look.WARP_MIRROR, width=line, tags="wpgrid")
+        # (where a full redraw leaves it: under the keyboard + ruler, under what's drawn after it there)
         self.tag_raise("wpgrid")
+        if self.find_withtag("frame"):
+            self.tag_lower("wpgrid", "frame")
+            for tag in ("lqbrush", "melodylit", "sustop"):
+                if self.find_withtag(tag):
+                    self.tag_raise(tag, "wpgrid")
 
     # ---- the mouse
 
@@ -318,6 +331,8 @@ class WarpGrid:
         g, i = got
         if self.warp_point_locked(g, i):  # (the middle point in 4-way / Half turn: nothing moves, no undo step)
             self.drag = ("warp_none",)
+            if np.any(np.asarray(g["P"]).reshape(-1, 2)[i]):  # (moved before the mirror was picked: back to its
+                self.warp_centre_back(g, i)  # place, one undo step; hunt 2026-11-09)
             return True
         u, v = self.warp_unit(g["made"], e.x, e.y)
         c, r = wp_.size(g["wp"])
@@ -334,6 +349,21 @@ class WarpGrid:
         self.drag = ("warp",)
         self.draw_warp_grid()
         return True
+
+    def warp_centre_back(self, g, i):
+        """The locked middle point, moved before 4-way / Half turn was picked, put back on its place (one undo
+        step; a hidden Warp shown again, as a drag does)."""
+        self.app.push_undo(name=tr("warp.undo_drag"))
+        P = np.array(g["P"], np.float64)
+        P.reshape(-1, 2)[i] = 0.0
+        wp = dict(g["wp"])
+        if wp.get("on") is False:
+            wp["on"] = True
+        st = {"sh": g["sh"], "g": dict(g, P=P, wp=wp)}
+        self.warp_apply(st, now=True)
+        self.app.sync_recolour()
+        self.app.schedule_autosave()
+        self.redraw()
 
     def warp_drag(self, e):
         st = getattr(self, "wp", None)

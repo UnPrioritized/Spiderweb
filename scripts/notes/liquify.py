@@ -849,6 +849,13 @@ def blend(x, y, f):
             return np.zeros((gy, gx, 2))
         a = map_of(d)
         return a if d["grid"] == g else sample(a, u, v)
+    # (a hidden or 0 % end bends nothing you see: it counts as unpushed, else its bends showed up halfway; hunt
+    # 2026-11-09. Both such ends: blended as they are, the steps hidden / 0 % too)
+    def shows(d):
+        return d if d and d.get("on") is not False and d.get("strength", DEFAULTS["strength"]) != 0 else None
+    xs, ys = shows(x), shows(y)
+    if xs or ys:
+        x, y = xs, ys
     a = on_grid(x) * (1 - f) + on_grid(y) * f
     sx = (x or y).get("strength", DEFAULTS["strength"])
     sy = (y or x).get("strength", DEFAULTS["strength"])

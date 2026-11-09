@@ -323,6 +323,10 @@ class LiquifyWindow(tk.Toplevel):
         roll = self.app.roll
         if (roll.drag or ("",))[0] == "liquify":
             roll.liquify_release(None)
+        # (numbers typed without Enter count, like the Stir window: X / Esc never lose them; hunt 2026-11-09)
+        self.take_typed()
+        if not unchanged(self.strength_entry):
+            self.on_shown("strength", self.strength_entry)
         self.app.liquify_window = None
         roll.lq_end = None  # (a straight stroke's start: forgotten with the window)
         self.destroy()
