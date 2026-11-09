@@ -14,7 +14,7 @@ from files import settings
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes import liquify as lq
-from notes.recolour import KEEP, STIR_EDGES, clean_recolour
+from notes.recolour import KEEP, STIR_EDGES, clean_recolour, forget_kept
 from window import look
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
     unchanged
@@ -327,6 +327,8 @@ class LiquifyWindow(tk.Toplevel):
             self.on_shown("strength", self.strength_entry)
         self.app.liquify_window = None
         roll.lq_end = None  # (a straight stroke's start: forgotten with the window)
+        if not (getattr(self.app, "stir_window", None) or getattr(self.app, "warp_window", None)):
+            forget_kept()  # (what quick strokes kept, like the Stir window's: ~200 MB on a 2 M-note shape)
         self.destroy()
         roll.focus_set()
         roll.draw_liquify_mask()

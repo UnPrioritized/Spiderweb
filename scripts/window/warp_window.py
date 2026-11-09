@@ -20,7 +20,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes import warp as wp_
 from notes import warp_presets as pr
-from notes.recolour import KEEP, STIR_EDGES, clean_recolour, new_seed
+from notes.recolour import KEEP, STIR_EDGES, clean_recolour, forget_kept, new_seed
 from window import look
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
     unchanged
@@ -649,6 +649,8 @@ class WarpWindow(tk.Toplevel):
             self.set_split("")
         roll.warp_drop_pick()  # (opened again: no point picked; Warp Split hunt 2026-11-10)
         self.app.warp_window = None
+        if not (getattr(self.app, "stir_window", None) or getattr(self.app, "liquify_window", None)):
+            forget_kept()  # (what quick drags kept, like the Stir window's: ~200 MB on a 2 M-note shape)
         self.destroy()
         roll.focus_set()
         roll.draw_warp_grid()
