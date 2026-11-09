@@ -2037,6 +2037,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         arrow, a hand over a shape it can cut with."""
         name = self.custom_cursor(hit)
         app, tool = self.app, self.app.tool.get()
+        if not self.draft and self.warp_on() and getattr(self, "wp_hover_h", None) is not None:
+            return "fleur"  # (a Warp curve handle)
         if not self.draft and self.warp_on() and getattr(self, "wp_hover", None) is not None:
             # (a Warp grid point: a press drags it; the locked middle (4-way / Half turn) = the plain arrow)
             return "arrow" if getattr(self, "wp_hover_locked", False) else "fleur"
@@ -2132,6 +2134,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if self.stop_right(e):  # a sustained shape's stop line: removed
             return
         if not self.draft and self.centre_right(e):  # Recolour's Centre point dot: back to the middle
+            return
+        if not self.draft and self.warp_right(e):  # a Warp curve handle: back where it sits untouched
             return
         finished = bool(self.draft and self.draft["kind"] in ("poly", "arc"))
         if self.follow:  # a shape started with a click, not finished: dropped

@@ -1012,6 +1012,8 @@
  "warp.undo_edge": "Warp at the edges",
  "warp.undo_reset": "Reset Warp",
  "warp.undo_drag": "Warp point",
+ "warp.undo_handle": "Warp handle",
+ "warp.undo_handle_back": "Warp handle back",
  "warp.shown": "Show the bend",
  "warp.shown_tip": "Untick to hide the Warp's bend without losing the grid; tick to show it again. Dragging a point shows it again too.",
  "warp.strength": "Strength:",

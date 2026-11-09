@@ -16,7 +16,13 @@ Half turn = the point opposite through the middle, offsets turned round. A point
 (slides along it only); the middle point in 4-way / Half turn is LOCKED (a cross; a press moves nothing, no step);
 twins jump to the mirrored spot at the first move (a lopsided grid stays as it is until then). Look: mirror lines /
 Half turn's circle-with-dot ON TOP of the grid in the accent with a dark edge, points over them, the hovered /
-dragged point's twins lit in the accent (wp_hover, set by pianoroll.hover_cursor), the dragged point last."""
+dragged point's twins lit in the accent (wp_hover, set by pianoroll.hover_cursor), the dragged point last.
+CURVE HANDLES (PLAN.md "Warp curve handles" B, user 2026-11-09; maths in notes/warp.py): the point clicked last
+(wp_pick) shows its handles + the facing handle of each neighbour, drawn like the Curve tool's (a line on a white
+edge, a solid dot). Dragging one = the point's opposite handle turns along (keeps its length as seen); Alt = this
+one alone, the point becomes a corner; right-click = back where it sits untouched (one undo step). The nearer of a
+point and a handle is grabbed (a tie: the point). Mirror modes: the twins' handles copy the dragged point's
+(warp_mirror_handles), exactly mirrored; on a mirror line the mirror wins over the pairing."""
 
 import time
 
@@ -25,6 +31,7 @@ import numpy as np
 from files.lang import tr
 from notes import warp as wp_
 from notes.recolour import KEEP, box_of, can_recolour, centre_at, centre_spot, clean_recolour, new_seed
+from roll.roll_shared import ALT
 from window import look
 
 GRAB = 8  # px: how near a grid point the mouse must be to grab it
@@ -181,10 +188,158 @@ class WarpGrid:
         j, i = divmod(i, c + 1)
         return self.warp_locked(c, r, j, i, *self.warp_mirror(g))
 
+    # ---- curve handles
+
+    def warp_cur(self, g):
+        """Grid g's Warp with its points as they are now."""
+        return dict(g["wp"], pts=np.asarray(g["P"], np.float64).reshape(-1, 2).tolist())
+
+    def warp_pick_of(self, g):
+        """The point of grid g clicked last (its handles show), or None."""
+        p = getattr(self, "wp_pick", None)
+        c, r = wp_.size(g["wp"])
+        return p[1] if p and p[0] == id(g["sh"]) and p[1] < (c + 1) * (r + 1) else None
+
+    def warp_handle_list(self, g):
+        """[(point, side)] of the handles grid g shows: the picked point's own + each neighbour's facing it."""
+        k0 = self.warp_pick_of(g)
+        if k0 is None:
+            return []
+        c, r = wp_.size(g["wp"])
+        i, j = k0 % (c + 1), k0 // (c + 1)
+        out = []
+        for s, (di, dj) in enumerate(wp_.SIDES):
+            if wp_.side_ok(i, j, s, c, r):
+                out.append((k0, s))
+                out.append(((j + dj) * (c + 1) + i + di, s ^ 1))
+        return out
+
+    def warp_box_spot(self, g, k):
+        """Point k of grid g where it shows, in box units."""
+        c, r = wp_.size(g["wp"])
+        f = self.warp_factor(g)
+        p = np.asarray(g["P"], np.float64).reshape(-1, 2)[k]
+        return np.array([(k % (c + 1)) / c + p[0] * f, (k // (c + 1)) / r + p[1] * f])
+
+    def warp_handle_spots(self, g):
+        """[(point, side, handle x, y, point x, y)] on screen of the handles grid g shows."""
+        hl = self.warp_handle_list(g)
+        if not hl:
+            return []
+        c, r = wp_.size(g["wp"])
+        V, _ = wp_.handle_vecs(self.warp_cur(g))
+        a = np.array([self.warp_box_spot(g, k) for k, s in hl])
+        h = a + np.array([V[k // (c + 1), k % (c + 1), s] for k, s in hl])
+        x, y = self.warp_screen(g["made"], np.concatenate([h[:, 0], a[:, 0]]), np.concatenate([h[:, 1], a[:, 1]]))
+        n = len(hl)
+        return [(k, s, float(x[m]), float(y[m]), float(x[n + m]), float(y[n + m])) for m, (k, s) in enumerate(hl)]
+
+    def warp_handle_hit(self, x, y, grids=None):
+        """(grid, point, side, distance) of the shown handle nearest the mouse within GRAB px, or None."""
+        if not self.warp_on():
+            return None
+        best = None
+        for g in (self.warp_grids() if grids is None else grids):
+            for k, s, hx, hy, _, _ in self.warp_handle_spots(g):
+                d = float(np.hypot(hx - x, hy - y))
+                if d <= GRAB * self.scale and (best is None or d < best[3]):
+                    best = (g, k, s, d)
+        return best
+
+    def warp_scale(self, made):
+        """Screen px of one box unit across / up (a turned shape: its own ways), for a handle's length as seen."""
+        x, y = self.warp_screen(made, [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])
+        return float(np.hypot(x[1] - x[0], y[1] - y[0])), float(np.hypot(x[2] - x[0], y[2] - y[0]))
+
+    @staticmethod
+    def warp_mirror_handles(wp, k, s, mu, mv, half):
+        """wp with point k's handles copied onto its mirror twins (mirrored exactly, corner mark too). s = the handle
+        just dragged / put back (None: a point drag): on a mirror line the point is its own twin, so the handle
+        across the line becomes s's mirror (the mirror wins over the pairing) and a handle along the line keeps 0
+        across it. Every handle's offset kept within MOST_MOVE."""
+        c, r = wp_.size(wp)
+        i, j = k % (c + 1), k // (c + 1)
+        H = {(e[0], e[1]): [float(e[2]), float(e[3])] for e in wp.get("h", ())}
+        corners = set(wp.get("corners", ()))
+        ways = [(True, True)] if half else ([(True, False)] if mu else []) + ([(False, True)] if mv else []) + (
+            [(True, True)] if mu and mv else [])
+
+        def twin(fu, fv):
+            return (r - j if fv else j) * (c + 1) + (c - i if fu else i)
+
+        def side(q, fu, fv):
+            return q ^ 1 if (fu and q < 2) or (fv and q >= 2) else q
+
+        def flip(d, fu, fv):
+            return [-d[0] if fu else d[0], -d[1] if fv else d[1]]
+        if s is not None:
+            for fu, fv in ways:
+                if twin(fu, fv) != k:
+                    continue
+                for q in range(4):  # (a handle its own twin: 0 across the line)
+                    if side(q, fu, fv) == q and (k, q) in H:
+                        H[(k, q)] = [0.0 if fu else H[(k, q)][0], 0.0 if fv else H[(k, q)][1]]
+            for fu, fv in ways:
+                q = side(s, fu, fv)
+                if twin(fu, fv) != k or q == s:
+                    continue
+                if (k, s) in H:
+                    H[(k, q)] = flip(H[(k, s)], fu, fv)
+                else:
+                    H.pop((k, q), None)
+        for fu, fv in ways:
+            t = twin(fu, fv)
+            if t == k:
+                continue
+            for q in range(4):
+                H.pop((t, side(q, fu, fv)), None)
+                if (k, q) in H:
+                    H[(t, side(q, fu, fv))] = flip(H[(k, q)], fu, fv)
+            if k in corners:
+                corners.add(t)
+            else:
+                corners.discard(t)
+        m = wp_.MOST_MOVE
+        out = {key: v for key, v in wp.items() if key not in ("h", "corners")}
+        if H:
+            out["h"] = [[a, b] + [min(max(v, -m), m) + 0.0 for v in H[(a, b)]] for a, b in sorted(H)]
+            if corners:
+                out["corners"] = sorted(corners)
+        return out
+
+    def warp_right(self, e):
+        """Right-click (Warp window open) on a shown handle: back where it sits untouched (one undo step; its
+        twins too). True when it was on a handle."""
+        if not self.warp_on():
+            return False
+        got = self.warp_handle_hit(e.x, e.y)
+        if got is None:
+            return False
+        g, k, s, _ = got
+        if not any((h[0], h[1]) == (k, s) for h in g["wp"].get("h", ())):
+            return True  # (untouched already: nothing to put back)
+        self.app.push_undo(name=tr("warp.undo_handle_back"))
+        wp = wp_.reset_handle(self.warp_cur(g), k, s)
+        wp = self.warp_mirror_handles(wp, k, s, *self.warp_mirror(g))
+        if wp.get("on") is False:
+            wp["on"] = True
+        self.warp_apply({"sh": g["sh"], "g": dict(g, wp=wp)}, now=True)
+        self.app.sync_recolour()
+        self.app.schedule_autosave()
+        self.redraw()
+        return True
+
     def warp_hover(self, x, y):
         """The mouse moved (no button held, Warp window open): the point under it remembered and the grid drawn
-        again when that changed, so its twins light up. Returns warp_hit's answer."""
-        got = self.warp_hit(x, y) if self.warp_on() else None
+        again when that changed, so its twins light up (a nearer handle: wp_hover_h, the move pointer). Returns
+        warp_hit's answer."""
+        grids = self.warp_grids() if self.warp_on() else []
+        got = self.warp_hit(x, y, grids, dist=True) if grids else None
+        hd = self.warp_handle_hit(x, y, grids) if grids else None
+        if hd and (got is None or hd[3] < got[2]):
+            got = None
+        self.wp_hover_h = (id(hd[0]["sh"]), hd[1], hd[2]) if hd and got is None else None
+        got = got[:2] if got else None
         key = (id(got[0]["sh"]), got[1]) if got else None
         self.wp_hover_locked = bool(got) and self.warp_point_locked(*got)
         if key != getattr(self, "wp_hover", None):
@@ -194,13 +349,15 @@ class WarpGrid:
 
     def warp_leave(self, e=None):
         """The mouse left the piano roll: the hovered point forgotten, its lit twins dark again."""
+        self.wp_hover_h = None
         if getattr(self, "wp_hover", None) is not None:
             self.wp_hover = None
             self.wp_hover_locked = False
             self.draw_warp_grid()
 
-    def warp_hit(self, x, y, grids=None):
-        """(grid, point number) of the grid point under the mouse (the nearest within GRAB px), or None."""
+    def warp_hit(self, x, y, grids=None, dist=False):
+        """(grid, point number) of the grid point under the mouse (the nearest within GRAB px), or None (dist: +
+        its distance)."""
         if not self.warp_on():
             return None
         best = None
@@ -210,7 +367,17 @@ class WarpGrid:
             i = int(np.argmin(d))
             if d[i] <= GRAB * self.scale and (best is None or d[i] < best[2]):
                 best = (g, i, float(d[i]))
-        return best[:2] if best else None
+        return best if dist or not best else best[:2]
+
+    def warp_grab(self, x, y, grids=None):
+        """What a press at (x, y) grabs: ("point", grid, number), ("handle", grid, point, side) or None. The
+        nearer wins; a tie = the point."""
+        grids = self.warp_grids() if grids is None else grids
+        pt = self.warp_hit(x, y, grids, dist=True)
+        hd = self.warp_handle_hit(x, y, grids)
+        if hd and (pt is None or hd[3] < pt[2]):
+            return ("handle",) + hd[:3]
+        return ("point",) + pt[:2] if pt else None
 
     # ---- drawing
 
@@ -254,6 +421,14 @@ class WarpGrid:
                                      tags="wpgrid")
                     self.create_oval(x - d, y - d, x + d, y + d, fill=look.WARP_MIRROR,
                                      outline=look.WARP_MIRROR_EDGE, width=max(1, round(s)), tags="wpgrid")
+            # (curve handles: like the Curve tool's, a line on a white edge under the points, the dots over them)
+            hs = [h for h in self.warp_handle_spots(g)
+                  if not (h[2] < room[0] and h[4] < room[0] or h[2] > room[2] and h[4] > room[2]
+                          or h[3] < room[1] and h[5] < room[1] or h[3] > room[3] and h[5] > room[3])]
+            for width, edged in ((max(3, round(3.5 * s)), True), (max(1, round(1.5 * s)), False)):
+                for _, _, hx, hy, ax, ay in hs:
+                    self.create_line(ax, ay, hx, hy, fill=look.HANDLE_FILL if edged else look.HANDLE, width=width,
+                                     tags="wpgrid")
             px, py = self.warp_points(g)
             px, py = px.tolist(), py.tolist()
             c, rows = wp_.size(g["wp"])
@@ -282,6 +457,11 @@ class WarpGrid:
                 else:
                     self.create_rectangle(x - r, y - r, x + r, y + r, outline=look.WARP_GRID, fill=look.ROLL_BG,
                                           width=line, tags="wpgrid")
+            q = r + 0.5 * s
+            for _, _, hx, hy, _, _ in hs:
+                if room[0] < hx < room[2] and room[1] < hy < room[3]:
+                    self.create_oval(hx - q, hy - q, hx + q, hy + q, fill=look.HANDLE, outline=look.HANDLE_FILL,
+                                     width=max(1, round(s)), tags="wpgrid")
             for i in sorted(last, key=lambda i: i == held):  # (the dragged point on top of all)
                 x, y = px[i], py[i]
                 if i == held:
@@ -311,7 +491,7 @@ class WarpGrid:
 
     def warp_target(self, x, y):
         """A press at (x, y) is the Warp's (a grid point, or a shape it picks)."""
-        return self.warp_hit(x, y) is not None or self.warp_shape_at(x, y) is not None
+        return self.warp_grab(x, y) is not None or self.warp_shape_at(x, y) is not None
 
     def warp_press(self, e):
         """A left press while the Warp window is open: on a grid point = it's dragged (True); on a shape Recolour
@@ -320,8 +500,11 @@ class WarpGrid:
         if not self.warp_on():
             return False
         app = self.app
-        got = self.warp_hit(e.x, e.y)
+        got = self.warp_grab(e.x, e.y)
         if got is None:
+            if getattr(self, "wp_pick", None) is not None:  # (off the grid: the picked point's handles go)
+                self.wp_pick = None
+                self.draw_warp_grid()
             if getattr(app, "liquify_window", None) is not None:
                 return False
             i = self.warp_shape_at(e.x, e.y)
@@ -331,8 +514,12 @@ class WarpGrid:
                 app.select(i)
             self.drag = ("warp_none",)  # (held: nothing moves; let go ends it)
             return True
-        g, i = got
+        if got[0] == "handle":
+            return self.warp_handle_press(e, *got[1:])
+        g, i = got[1:]
+        self.wp_pick = (id(g["sh"]), i)  # (its handles show)
         if self.warp_point_locked(g, i):  # (the middle point in 4-way / Half turn: nothing moves, no undo step)
+            self.draw_warp_grid()
             self.drag = ("warp_none",)
             if np.any(np.asarray(g["P"]).reshape(-1, 2)[i]):  # (moved before the mirror was picked: back to its
                 self.warp_centre_back(g, i)  # place, one undo step; hunt 2026-11-09)
@@ -347,6 +534,23 @@ class WarpGrid:
         grab = (base[0] + here[0] * k - u, base[1] + here[1] * k - v)
         g = dict(g, P=P)
         self.wp = {"sh": g["sh"], "g": g, "i": i, "grab": grab, "base": base, "k": k, "pushed": False,
+                   "old": clean_recolour(g["sh"].get("recolour")), "job": None, "took": 0.0, "way": None,
+                   "shown": 0.0, "jobs": [{"sh": g["sh"], "made": g["made"], "warp": g["wp"], "a": None}]}
+        self.drag = ("warp",)
+        self.draw_warp_grid()
+        return True
+
+    def warp_handle_press(self, e, g, k, s):
+        """A press on a shown curve handle (point k, side s): it's dragged (Alt held while moving = a corner)."""
+        c, r = wp_.size(g["wp"])
+        pt = self.warp_box_spot(g, k)
+        V, _ = wp_.handle_vecs(self.warp_cur(g))
+        u, v = self.warp_unit(g["made"], e.x, e.y)
+        hv = V[k // (c + 1), k % (c + 1), s]
+        grab = (pt[0] + hv[0] - u, pt[1] + hv[1] - v)  # (the handle stays under the mouse where it was grabbed)
+        g = dict(g, P=np.array(g["P"], np.float64))
+        self.wp = {"sh": g["sh"], "g": g, "i": None, "hs": (k, s), "grab": grab, "pt": pt,
+                   "scale": self.warp_scale(g["made"]), "pushed": False,
                    "old": clean_recolour(g["sh"].get("recolour")), "job": None, "took": 0.0, "way": None,
                    "shown": 0.0, "jobs": [{"sh": g["sh"], "made": g["made"], "warp": g["wp"], "a": None}]}
         self.drag = ("warp",)
@@ -376,24 +580,38 @@ class WarpGrid:
             return self.warp_release(e)
         g = st["g"]
         u, v = self.warp_unit(g["made"], e.x, e.y)
-        k = st["k"]
-        new = ((u + st["grab"][0] - st["base"][0]) / k, (v + st["grab"][1] - st["base"][1]) / k)
-        new = [min(max(float(c), -wp_.MOST_MOVE), wp_.MOST_MOVE) for c in new]
-        j, i = divmod(st["i"], wp_.size(g["wp"])[0] + 1)
         mu, mv, half = self.warp_mirror(g)
-        P2 = self.warp_twins(np.array(g["P"]), j, i, new, mu, mv, half) if mu or mv or half else None
-        if (P2 is None and list(g["P"][j, i]) == new) or (P2 is not None and np.array_equal(P2, g["P"])):
-            return
+        hw = None
+        if st.get("hs") is not None:  # (a curve handle: from its point as shown, box units)
+            k, s = st["hs"]
+            vec = (u + st["grab"][0] - st["pt"][0], v + st["grab"][1] - st["pt"][1])
+            hw = wp_.set_handle(self.warp_cur(g), k, s, vec, alt=bool(e.state & ALT), scale=st["scale"])
+            hw = self.warp_mirror_handles(hw, k, s, mu, mv, half)
+            if (hw.get("h"), hw.get("corners")) == (g["wp"].get("h"), g["wp"].get("corners")):
+                return
+        else:
+            k = st["k"]
+            new = ((u + st["grab"][0] - st["base"][0]) / k, (v + st["grab"][1] - st["base"][1]) / k)
+            new = [min(max(float(c), -wp_.MOST_MOVE), wp_.MOST_MOVE) for c in new]
+            j, i = divmod(st["i"], wp_.size(g["wp"])[0] + 1)
+            P2 = self.warp_twins(np.array(g["P"]), j, i, new, mu, mv, half) if mu or mv or half else None
+            if (P2 is None and list(g["P"][j, i]) == new) or (P2 is not None and np.array_equal(P2, g["P"])):
+                return
         if not st["pushed"]:
             self.warp_first(st)
         job = st["jobs"][0]
         if st["way"] is None:  # (how it shows, worked out from the grid before this move: Live starts from it)
             job["a"] = self.warp_map(g)
             st["way"] = self.liquify_way(st["jobs"])
-        if P2 is None:
+        if hw is not None:
+            hw["on"] = g["wp"].get("on", True)  # (warp_first may have shown a hidden Warp)
+            g["wp"] = job["warp"] = wp_.full(hw)
+        elif P2 is None:
             g["P"][j, i] = new
         else:
             g["P"][...] = P2
+            if g["wp"].get("h"):  # (the twins' handles mirror the dragged point's too)
+                g["wp"] = job["warp"] = self.warp_mirror_handles(g["wp"], st["i"], None, mu, mv, half)
         st["changed"] = True  # (the map is turned round when shown: moves coming quicker than that cost nothing)
         if st["way"] == "later":  # (its first Recolour: the notes made once, then shown live)
             self.warp_again(st)
@@ -413,7 +631,7 @@ class WarpGrid:
     def warp_first(self, st):
         """The drag's first real move: its undo step; a hidden Warp shown again in it (else the drag works blind,
         like Liquify's brush)."""
-        self.app.push_undo(name=tr("warp.undo_drag"))
+        self.app.push_undo(name=tr("warp.undo_handle" if st.get("hs") is not None else "warp.undo_drag"))
         st["pushed"] = True
         g = st["g"]
         if g["wp"].get("on") is False:
