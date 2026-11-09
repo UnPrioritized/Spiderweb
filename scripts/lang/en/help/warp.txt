@@ -18,6 +18,12 @@ Dragging a dot turns the one on the other side of the point too, so the line run
 
 3 x 3, 4 x 4 or 5 x 5 cells, or Custom… to set Across and Up apart (1 to 20 each), for example more cells across for a long, flat shape. Changing the size of a shape you already bent keeps its bend: the new points take it over as closely as they can. A bump a coarser grid can't make comes out softer, but going back to the size you started from gives the bend back exactly.
 
+## Split
+
+The grid's lines don't have to be evenly spaced. Click Across, Down or Both in the Split row, then click the grid on the piano roll: a new line goes through that spot (Both adds one each way). Nothing moves when you split: the new line follows the bend already there, so you can add more points just where you need them. The button lets go after one click; Esc or clicking it again lets go without splitting. With a Mirror picked, the mirrored line is added too.
+
+Right-click the grid for the same choices at that spot (Split across here, Split down here, Split both ways here). Right-click right on a line for Remove this line. Or click a point and press Delete: the lines through it go (a point on the shape's edge loses only its inside line; a corner keeps both). Removing a line keeps the bend as closely as the fewer lines allow. A split grid shows Custom under Grid size; picking a ready size or typing a count spaces the lines evenly again.
+
 ## Bend and Colour edges
 
 Bend: Smooth bends the colours like rubber; each point bends only the 4 cells around it. Straight cells bends each cell on its own, with sharp folds along the grid lines. Switching moves only the curve handles you never dragged: the ones you dragged stay where they are.
