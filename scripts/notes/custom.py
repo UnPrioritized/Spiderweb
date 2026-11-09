@@ -3534,6 +3534,22 @@ def notes_resampled(sh):
     return abs(abs(sh["pts"][2][1] - sh["pts"][0][1]) - float(rows[:, 2].max() + 1)) > 1e-6
 
 
+def block_shift(sh, ppq, rows=None):
+    """A pasted-notes shape (not a picture) only MOVED since pasted: (ticks, keys) every note is shifted by, else
+    None (block_notes: then its notes are exactly its packed rows shifted)."""
+    if "picture" in sh:
+        return None
+    rows = unpack_notes(sh["notes"]) if rows is None else rows
+    (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
+    ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
+    t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
+    t0, k0 = b0 * ppq, p0 + 0.5
+    if (up == 0 and vb == 0 and abs(ub * ppq - t_all) <= 1e-9 * t_all and abs(vp - k_all) <= 1e-9 * k_all
+            and abs(t0 - round(t0)) <= 1e-9 and abs(k0 - round(k0)) <= 1e-9):
+        return int(round(t0)), int(round(k0))
+    return None
+
+
 def block_notes(sh, ppq):
     """A pasted-notes shape's (start, end, pitch, velocity, track) notes where its box is now. Each note is a flat
     line in the box; a stretched / turned box makes them like any line (a note turned upright = 1-tick notes up the
@@ -3546,10 +3562,9 @@ def block_notes(sh, ppq):
         t_all, k_all = (float(n) for n in sh["picture"]["grid"])
     else:  # (only moved: upright, its notes' own size, on a tick and a key = every note shifted by as much; the
         # same notes as the way below, checked on random boxes, dev/scratch/lag_block.py; 3 M notes 0.5 s -> quick)
-        t0, k0 = b0 * ppq, p0 + 0.5
-        if (up == 0 and vb == 0 and abs(ub * ppq - t_all) <= 1e-9 * t_all and abs(vp - k_all) <= 1e-9 * k_all
-                and abs(t0 - round(t0)) <= 1e-9 and abs(k0 - round(k0)) <= 1e-9):
-            T0, K0 = int(round(t0)), int(round(k0))
+        got = block_shift(sh, ppq, rows)
+        if got is not None:
+            T0, K0 = got
             return np.column_stack([rows[:, 0] + T0, rows[:, 1] + T0, rows[:, 2] + K0, rows[:, 3], rows[:, 4]])
     v = (rows[:, 2] + 0.5) / k_all
     ends = []
