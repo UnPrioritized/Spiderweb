@@ -32,7 +32,7 @@ from notes.sustain import alike
 from notes.engine import free_box, past_edges
 from notes.paths import rows_up_to
 from notes.custom import ROUND
-from notes.recolour import KEEP, box_of, carried, colour_sets, is_recoloured, turn_again, without_recolour
+from notes.recolour import KEEP, box_of, carried, is_recoloured, turn_again, without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
@@ -1829,23 +1829,16 @@ class JoinSplit:
             rows = unpack_notes(sh["notes"]).copy()
             low = rows[:, 4] % ROUND
             lap = rows[:, 4] - low  # (each note's round stays)
-            if is_recoloured(sh):  # (a Stir: each colour set turned round on its own, like the Stir's "reverse";
-                # across sets colours moved into another set, hunt 11-06)
-                which, owns = colour_sets(low)
-                new = low.copy()
-                for s, own in enumerate(owns):
-                    m = which == s
-                    new[m] = own[::-1][np.searchsorted(own, low[m])]
-                # (and the Stir told: it stirs from the colours before and swaps its result the same way, so the
-                # pattern stays exactly, tracks turned round; stirring the swapped colours made another one, sweep
-                # 11-06: even an extra track)
-                swap = {int(a): int(b) for own in owns for a, b in zip(own.tolist(), own[::-1].tolist())}
+            olds = np.unique(low)
+            new = olds[::-1][np.searchsorted(olds, low)]  # (the WHOLE list turned round, colour sets too: user 11-09
+            # expected the track list flipped top to bottom; per set was only needed before "turned" below)
+            if is_recoloured(sh):  # (the Stir told: it stirs from the colours before and swaps its result the same
+                # way, so the pattern stays exactly, tracks turned round; stirring the swapped colours made another
+                # one, sweep 11-06: even an extra track)
+                swap = {int(a): int(b) for a, b in zip(olds.tolist(), olds[::-1].tolist())}
                 rc = dict(sh["recolour"])
                 tw = turn_again(rc.pop("turned", None), swap)
                 sh["recolour"] = dict(rc, turned=tw) if tw else rc
-            else:
-                olds = np.unique(low)
-                new = olds[::-1][np.searchsorted(olds, low)]
             rows[:, 4] = lap + new
             sh["notes"] = pack_notes(rows)
         self.shapes_changed()
