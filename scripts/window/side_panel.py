@@ -2,9 +2,10 @@
 between it and the piano roll (the drawer's board) drags it wider or narrower (user 2026-11-09; PLAN.md)."""
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import font as tkfont, ttk
 
 from files import settings
+from files.lang import tr
 from window import look
 
 GRIP = 8  # px at 100 %: the strip holding the line between the piano roll and the panel; all of it grabs (user: no
@@ -12,6 +13,8 @@ GRIP = 8  # px at 100 %: the strip holding the line between the piano roll and t
 LINE = 2  # px at 100 %: that line
 LEAST = 120  # px at 100 %: the panel never gets narrower than this by dragging (stage C: snaps shut past it)
 ROOM_LEFT = 240  # px at 100 %: the piano roll / board keeps at least this much width beside a wide panel
+NEED_WAIT_MS = 60  # rows shown: their needed width checked this long after (once for a burst)
+NEED_SAMPLE = ("app.new_shape_defaults", "app.velocity", "app.last_note")  # (texts measured for need_mark)
 
 
 class ScrollingSide:
@@ -27,7 +30,10 @@ class ScrollingSide:
         s = self.side_scale = getattr(self, "scale", 1) or 1
         self.side_name = name
         self.side_usual = int(width * look.WIDE)
-        self.side_width = width = self.saved_side_width() or self.side_usual
+        self.side_fixed = self.saved_side_width()  # (None = never dragged: follows what the rows need)
+        self.side_need = self.saved_side_need()  # (the widest the rows have needed: none of their text cut)
+        self.side_width = width = self.side_fixed or max(self.side_usual, self.side_need)
+        self._need_wait = None
         box = self.side_box = ttk.Frame(self, width=width)
         box.pack(side="right", fill="y")
         box.pack_propagate(False)
@@ -55,9 +61,11 @@ class ScrollingSide:
         side.bind("<Configure>", lambda e: self.after_idle(self.fit_side))
         self.bind("<MouseWheel>", self.side_wheel, add="+")
         self.bind("<Configure>", self.side_window_sized, add="+")
+        self.bind("<Map>", self.side_row_shown, add="+")  # (a row shown in the panel may need more width)
         return side
 
     def fit_side(self):
+        self.side_row_shown()
         c, side = self.side_canvas, self.side
         need, have = side.winfo_reqheight(), c.winfo_height()
         # room to spare: stretched to the panel's height; too tall: its own height (0), so
@@ -126,12 +134,76 @@ class ScrollingSide:
         return max(self.side_least(), round(px * self.side_scale)) if px > 0 else None
 
     def save_side_width(self):
+        self.side_fixed = self.side_width
         if not self.side_name:
             return
         try:
             settings.put_many({("view", f"{self.side_name}_panel_width"): round(self.side_width / self.side_scale)})
         except OSError:
             pass  # (not remembered: the next start opens at the usual width)
+
+    # ------------------------------------------------------------ the width the rows need (no text cut)
+
+    def need_mark(self):
+        """What the needed width depends on besides the rows: screen scaling, font, language. A remembered width
+        made under another mark isn't used."""
+        sample = " ".join(tr(k) for k in NEED_SAMPLE)
+        return f"{self.side_scale:.3f}/{look.WIDE:.3f}/{tkfont.Font(font='TkDefaultFont').measure(sample)}"
+
+    def saved_side_need(self):
+        if not self.side_name:
+            return 0
+        text = settings.get("view", f"{self.side_name}_panel_needs", "") or ""
+        px, _, mark = text.partition(" @ ")
+        try:
+            return round(int(px) * self.side_scale) if mark == self.need_mark() and int(px) > 0 else 0
+        except ValueError:
+            return 0
+
+    def side_row_shown(self, e=None):
+        """A row of the panel came into view (or the panel changed size): its needed width checked a moment later
+        (once for a burst of rows)."""
+        if e is not None and not str(e.widget).startswith(str(self.side)):
+            return
+        if self._need_wait is None:
+            self._need_wait = self.after(NEED_WAIT_MS, self.check_side_need)
+
+    def loosen_wraps(self):
+        """Lines that wrap to the room they get (widgets.wrap_to_room) stop asking for their one-line width, so
+        they never count as needing room. True when one changed."""
+        changed = False
+        todo = [self.side]
+        while todo:
+            w = todo.pop()
+            todo.extend(w.winfo_children())
+            if getattr(w, "wrap_measure", None) and str(w.cget("width")) != "1":
+                w.wrap_measure()  # (its edges measured while it still asks for one line)
+                w.configure(width=1)
+                changed = True
+        return changed
+
+    def side_rows_need(self):
+        """The width the panel's rows ask for now (px, inside the panel; wrapping lines not counted)."""
+        if self.loosen_wraps():
+            self.update_idletasks()
+        return self.side.winfo_reqwidth()
+
+    def check_side_need(self):
+        self._need_wait = None
+        if not self.side.winfo_exists():
+            return
+        need = self.side_rows_need()
+        if need <= self.side_need:
+            return
+        self.side_need = need
+        if self.side_name:
+            try:
+                settings.put_many({("view", f"{self.side_name}_panel_needs"):
+                                   f"{round(need / self.side_scale)} @ {self.need_mark()}"})
+            except OSError:
+                pass
+        if self.side_fixed is None and need > self.side_width:  # (never dragged: it grows so nothing is cut)
+            self.set_side_width(need)
 
     # ------------------------------------------------------------ the line
 
@@ -186,10 +258,11 @@ class ScrollingSide:
         self.save_side_width()
 
     def grip_double(self, e):
-        """Double-click = back to the usual width (stage B: the smallest width with no cut text)."""
+        """Double-click = the smallest width with no cut text (user): what the widest rows shown so far need."""
         self._grip_from = None
         if self._grip_ghost is not None and self._grip_ghost.winfo_exists():
             self._grip_ghost.destroy()
-        self.set_side_width(self.side_usual)
+        self.side_need = max(self.side_need, self.side_rows_need())
+        self.set_side_width(self.side_need)
         self.draw_grip()
         self.save_side_width()

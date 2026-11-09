@@ -378,18 +378,22 @@ def wrap_to_room(label):
     makes it narrower, which wraps it again, on and on (froze the window)."""
     edge = []  # (the label's own edges beside its text: measured once, while it isn't wrapped yet)
 
-    def fit(e):
-        if e.width <= 1:
-            return
+    def measure():
         if not edge:
             text = str(label.cget("text"))
             font = tkfont.Font(font=label.cget("font") or "TkDefaultFont")
             edge.append(max(4, label.winfo_reqwidth() - max(font.measure(t) for t in text.split("\n"))))
+
+    def fit(e):
+        if e.width <= 1:
+            return
+        measure()
         room = max(1, e.width - edge[0])
         if str(label.cget("wraplength")) != str(room):
             label.configure(wraplength=room)
     label.bind("<Configure>", fit, add="+")
-    return label
+    label.wrap_measure = measure  # (side_panel.loosen_wraps: measured first, then it stops asking for its
+    return label  #                  one-line width)
 
 
 def chart_edges(s, left_texts, left, bottom):

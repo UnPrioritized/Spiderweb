@@ -6,7 +6,7 @@ from tkinter import TclError, ttk
 from files.lang import tr
 from files.mathexpr import calc
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, wrap_to_room
 
 
 class LassoPanel:
@@ -20,7 +20,9 @@ class LassoPanel:
         self.lasso_cut_btn.pack(side="left")
         self.lasso_cancel_btn = ttk.Button(row, text=tr("panel_lasso.cancel"), command=lambda: self.roll.drop_lasso())
         self.lasso_cancel_btn.pack(side="left", padx=4)
-        self.lasso_hint = ttk.Label(row, text=tr("panel_lasso.none"), foreground=look.HINT)
+        # (wraps beside the buttons: one line was cut at the panel's edge)
+        self.lasso_hint = wrap_to_room(ttk.Label(row, text=tr("panel_lasso.none"), foreground=look.HINT,
+                                                 justify="left"))
         Tooltip(self.lasso_cut_btn, tr("panel_lasso.cut_tip"))
         Tooltip(self.lasso_cancel_btn, tr("panel_lasso.cancel_tip"))
         w = self.lasso_width_row = ttk.Frame(box)
@@ -69,7 +71,7 @@ class LassoPanel:
         if las:
             self.lasso_hint.pack_forget()
         else:
-            self.lasso_hint.pack(side="left", padx=(4, 0))
+            self.lasso_hint.pack(side="left", fill="x", expand=True, padx=(4, 0))
         if magnet:
             self.lasso_width_row.pack(fill="x", pady=(4, 0))
         else:
