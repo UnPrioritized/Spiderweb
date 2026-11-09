@@ -53,7 +53,10 @@ py_loops! {
                 bounds: Nd<f64, 2>,
                 has_b: bool, steps: i64, give_step: i64, give_far: f64, bx: &mut [f64], by: &mut [f64],
                 best: &mut [f64], many: bool) => crate::recolour::warp_newton;
-    warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3>, c: &[f64], fp: &[f64],
+    warp_exact(p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], a: Nd<f64, 3>, near: &[u8], x: &[f64], y: &[f64],
+               steps: i64, ox: &mut [f64], oy: &mut [f64], many: bool) => crate::recolour::warp_exact;
+    warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], oy: &[f64], a: Nd<f64, 3>, c: &[f64],
+              fp: &[f64],
               ring: Nd<f64, 2>, tstart: &[i64], ta: &[f64], tb: &[f64], keys: &[i64], first: &[i64], last: &[i64],
               line: &[f64], ms: &[f64], o: &[i64], base: f64, top: f64, gap: f64, now: &[i64], out: &mut [i64],
               many: bool) => crate::recolour::warp_soft;

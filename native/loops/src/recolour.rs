@@ -543,6 +543,62 @@ pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, lx: &[f64],
     0
 }
 
+/// fastloops._exact_one: warp.exact_offsets for spot j: the map's answer, then Newton's steps from it; (offset
+/// across, up), or NaN when it doesn't settle or its map cell is one a fold lands on (near).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn exact_range_inner(x: &[f64], y: &[f64], a: &[f64], gy: usize, gx: usize, near: &[u8], d: &Newton,
+                     ox: &mut [f64], oy: &mut [f64]) {
+    for j in 0..x.len() {
+        let (x0, y0) = (x[j], y[j]);
+        let (d0, d1) = sample2(a, gy, gx, x0, y0);
+        let (sx, sy, e) = newton_one(0, x0, y0, x0 + d0, y0 + d1, d);
+        let mut bad = !(e < 1e-7);
+        if !near.is_empty() {
+            let ci = f2i(pmin(pmax(x0, 0.0), 1.0) * (gx as i64 - 1) as f64).min(gx as i64 - 2);
+            let cj = f2i(pmin(pmax(y0, 0.0), 1.0) * (gy as i64 - 1) as f64).min(gy as i64 - 2);
+            bad = bad || near[cj as usize * (gx - 1) + ci as usize] != 0;
+        }
+        if bad {
+            (ox[j], oy[j]) = (f64::NAN, f64::NAN);
+        } else {
+            (ox[j], oy[j]) = (sx - x0, sy - y0);
+        }
+    }
+}
+level_builds!(fn exact_range(x: &[f64], y: &[f64], a: &[f64], gy: usize, gx: usize, near: &[u8], d: &Newton,
+                             ox: &mut [f64], oy: &mut [f64]) => exact_range_inner);
+
+/// fastloops.warp_exact (p / kind / lx / ly as warp_newton's; a: the turned-round map (my, mx, 2); near: its cells
+/// a fold lands on ((my - 1) x (mx - 1), or empty); many = shared out) -> 0.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn warp_exact(p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], a: Nd<f64, 3>, near: &[u8], x: &[f64],
+                  y: &[f64], steps: i64, ox: &mut [f64], oy: &mut [f64], many: bool) -> i64 {
+    let n = x.len();
+    let (gy, gx) = (p.sh[0], p.sh[1]);
+    let (my, mx) = (a.sh[0], a.sh[1]);
+    if p.sh[2] != 2 || gy < 2 || gx < 2 || !(0..=2).contains(&kind)
+        || (kind == 2 && (gy < 4 || gx < 4 || (gy - 1) % 3 != 0 || (gx - 1) % 3 != 0))
+        || lx.len() == 1 || ly.len() == 1 || a.sh[2] != 2 || my < 2 || mx < 2
+        || !(near.is_empty() || near.len() == (my - 1) * (mx - 1)) || y.len() < n || ox.len() < n || oy.len() < n {
+        return crate::FAILED;
+    }
+    let (y, ox, oy) = (&y[..n], &mut ox[..n], &mut oy[..n]);
+    let d = Newton { p: p.d, gy, gx, kind, lx, ly, bounds: &[], has_b: false, steps, give_step: 0, give_far: 0.0 };
+    match crate::pool_for(many, n, 1) {
+        None => exact_range(x, y, a.d, my, mx, near, &d, ox, oy),
+        Some(pool) => {
+            let chunk = (n / (pool.current_num_threads() * 8)).max(256);
+            pool.install(|| {
+                (x.par_chunks(chunk), y.par_chunks(chunk), ox.par_chunks_mut(chunk), oy.par_chunks_mut(chunk))
+                    .into_par_iter().for_each(|(xc, yc, oa, ob)| exact_range(xc, yc, a.d, my, mx, near, &d, oa, ob));
+            });
+        }
+    }
+    0
+}
+
 /// fastloops._unit_back: a spot of the colour box -> (middle in ticks, key) (liquify._placed + from_unit).
 #[inline(always)]
 fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
@@ -706,10 +762,15 @@ struct Soft<'a> {
 
 /// fastloops._soft_one: note j at spot (x0, y0) of the box -> the note it takes its colour from.
 #[inline(always)]
-fn soft_one(j: usize, x0: f64, y0: f64, s: &Soft, d: &Near) -> i64 {
+fn soft_one(j: usize, x0: f64, y0: f64, o0: f64, o1: f64, s: &Soft, d: &Near) -> i64 {
     let s100 = s.c[5];
-    let (d0, d1) = sample2(s.a, s.gy, s.gx, x0, y0);
-    let (sx, sy) = (x0 + d0 * s100, y0 + d1 * s100);
+    // (o0 / o1: the spot's exact fetch, a Warp's (warp.exact_offsets); NaN = the map's, blended)
+    let (sx, sy) = if o0.is_nan() {
+        let (d0, d1) = sample2(s.a, s.gy, s.gx, x0, y0);
+        (x0 + d0 * s100, y0 + d1 * s100)
+    } else {
+        (x0 + o0, y0 + o1)
+    };
     let (mid, key) = unit_back(sx, sy, s.fp);
     if s.c[8] != 0.0 {
         return near_one(0, mid, key, d); // (Edges: Sharp, the Liquify: the nearest note alone, C7)
@@ -740,19 +801,25 @@ fn soft_one(j: usize, x0: f64, y0: f64, s: &Soft, d: &Near) -> i64 {
 }
 
 #[inline(always)]
-fn soft_range_inner(idx: &[i64], x: &[f64], y: &[f64], s: &Soft, d: &Near, out: &mut [i64]) {
+fn soft_range_inner(idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], oy: &[f64], s: &Soft, d: &Near,
+                    out: &mut [i64]) {
+    // (ox / oy empty: every spot the map's)
+    let has = !ox.is_empty();
     for j in 0..out.len() {
-        out[j] = soft_one(idx[j] as usize, x[j], y[j], s, d);
+        let (o0, o1) = if has { (ox[j], oy[j]) } else { (f64::NAN, f64::NAN) };
+        out[j] = soft_one(idx[j] as usize, x[j], y[j], o0, o1, s, d);
     }
 }
-level_builds!(fn soft_range(idx: &[i64], x: &[f64], y: &[f64], s: &Soft, d: &Near, out: &mut [i64])
-              => soft_range_inner);
+level_builds!(fn soft_range(idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], oy: &[f64], s: &Soft, d: &Near,
+                            out: &mut [i64]) => soft_range_inner);
 
 /// fastloops.warp_soft (at: the notes' places; idx: the notes picked for; a: the map (gy, gx, 2); c / fp: the
-/// numbers _soft_one / _unit_back read; ring (looks, 3); many = shared out) -> 0.
+/// numbers _soft_one / _unit_back read; ring (looks, 3); ox / oy: each spot's exact fetch (NaN: the map's), or
+/// both empty; many = shared out) -> 0.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3>, c: &[f64], fp: &[f64],
+pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], ox: &[f64], oy: &[f64], a: Nd<f64, 3>,
+                 c: &[f64], fp: &[f64],
                  ring: Nd<f64, 2>, tstart: &[i64], ta: &[f64], tb: &[f64], keys: &[i64], first: &[i64],
                  last: &[i64], line: &[f64], ms: &[f64], o: &[i64], base: f64, top: f64, gap: f64, now: &[i64],
                  out: &mut [i64], many: bool) -> i64 {
@@ -762,7 +829,7 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3
     let nl = ring.sh[0];
     if cols < 2 || a.sh[2] != 2 || gy < 2 || gx < 2 || ring.sh[1] != 3 || nl > MOST_LOOKS || nl < ROUND_INNER
         || c.len() < 9 || fp.len() < 14 || keys.is_empty() || tstart.len() < 17 || x.len() < n || y.len() < n
-        || out.len() < n {
+        || out.len() < n || ox.len() != oy.len() || !(ox.is_empty() || ox.len() >= n) {
         return crate::FAILED;
     }
     for j in 0..16 {
@@ -779,13 +846,22 @@ pub fn warp_soft(at: Nd<i64, 2>, idx: &[i64], x: &[f64], y: &[f64], a: Nd<f64, 3
     let d = Near { keys, first, last, line, ms, nk: &[], nm: &[], o, base, top, gap, own: false };
     let cl = Colours { now, o };
     let s = Soft { at: at.d, cols, a: a.d, gy, gx, c, fp, ring: ring.d, nl, tstart, ta, tb, cl };
+    let has = !ox.is_empty();
+    let (ox, oy) = if has { (&ox[..n], &oy[..n]) } else { (ox, oy) };
     match crate::pool_for(many, n, 1) {
-        None => soft_range(idx, x, y, &s, &d, out),
+        None => soft_range(idx, x, y, ox, oy, &s, &d, out),
         Some(pool) => {
             let chunk = (n / (pool.current_num_threads() * 8)).max(256);
             pool.install(|| {
-                (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), out.par_chunks_mut(chunk))
-                    .into_par_iter().for_each(|(i, xs, ys, oc)| soft_range(i, xs, ys, &s, &d, oc));
+                if has {
+                    (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), ox.par_chunks(chunk),
+                     oy.par_chunks(chunk), out.par_chunks_mut(chunk))
+                        .into_par_iter()
+                        .for_each(|(i, xs, ys, a, b, oc)| soft_range(i, xs, ys, a, b, &s, &d, oc));
+                } else {
+                    (idx.par_chunks(chunk), x.par_chunks(chunk), y.par_chunks(chunk), out.par_chunks_mut(chunk))
+                        .into_par_iter().for_each(|(i, xs, ys, oc)| soft_range(i, xs, ys, &[], &[], &s, &d, oc));
+                }
             });
         }
     }

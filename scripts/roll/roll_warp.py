@@ -40,7 +40,9 @@ from roll.roll_shared import ALT
 from window import look
 
 GRAB = 8  # px: how near a grid point the mouse must be to grab it
-STEPS = 8  # (a Smooth grid line's pieces per cell)
+STEPS = 8  # (a Smooth grid line's pieces per cell at least; more when a cell is big on screen: PIECE_PX)
+PIECE_PX = 6.0  # (a curved grid line: about one straight piece this long on screen)
+MOST_PIECES = 2000  # (pieces a whole line at most)
 LIVE_MS = 30  # (every note made again at most this often while dragging when not shown live)
 MOST_GRIDS = 8  # (selected shapes showing a grid at most: more = only the first ones)
 
@@ -107,6 +109,22 @@ class WarpGrid:
         u, v = X[ii].ravel() + P[..., 0].ravel(), Y[jj].ravel() + P[..., 1].ravel()
         return self.warp_screen(g["made"], u, v)
 
+    def warp_pieces(self, g, X, Y):
+        """(pieces a cell across, up) for a curved grid's lines: about one per PIECE_PX on screen (user 2026-11-09: a
+        zoomed-in grid's curves showed corners every STEPS-th), at least STEPS, at most MOST_PIECES a line."""
+        c, r = wp_.size(g["wp"])
+        x, y = self.warp_points(g)
+        x, y = x.reshape(r + 1, c + 1), y.reshape(r + 1, c + 1)
+        jj, ii = np.mgrid[0:r + 1, 0:c + 1]
+        x0, y0 = self.warp_screen(g["made"], X[ii].ravel(), Y[jj].ravel())  # (the grid unbent: a bulge's size too)
+        x0, y0 = x0.reshape(r + 1, c + 1), y0.reshape(r + 1, c + 1)
+        out = []
+        for ax in (1, 0):  # (along a row: across; along a column: up)
+            n = c if ax == 1 else r
+            far = max(float(np.hypot(np.diff(a, axis=ax), np.diff(b, axis=ax)).max()) for a, b in ((x, y), (x0, y0)))
+            out.append(int(min(max(STEPS, np.ceil(far / PIECE_PX)), max(STEPS, MOST_PIECES // n))))
+        return out[0], out[1]
+
     def warp_lines(self, g):
         """The grid's lines on screen: [[x0, y0, x1, y1, ...], ...], rows then columns; Smooth = the bent curves
         (each line's spots moved as the colours there are), Straight cells = straight between the points."""
@@ -115,14 +133,14 @@ class WarpGrid:
         P, smooth = (wp_.shape_of(dict(g["wp"], pts=np.asarray(g["P"]).reshape(-1, 2).tolist()), strength=False)
                      if wp_.netted(g["wp"]) else (g["P"], g["wp"]["smooth"]))
         P = P * (self.warp_factor(g) if g["wp"]["strength"] > 0 else 1.0)
-        su, sv = (STEPS * c, STEPS * r) if smooth else (c, r)  # (pieces along a row / a column)
         X, Y = wp_.lines(g["wp"])
+        ku, kv = self.warp_pieces(g, X, Y) if smooth else (1, 1)
+        su, sv = ku * c, kv * r  # (pieces along a row / a column)
         tu, tv = np.linspace(0.0, 1.0, su + 1), np.linspace(0.0, 1.0, sv + 1)
-        k = STEPS if smooth else 1
         if g["wp"].get("xs") is not None:  # (a split grid: as many pieces in each cell, wide or thin)
-            tu = np.append((X[:-1, None] + np.arange(k)[None] / k * np.diff(X)[:, None]).ravel(), 1.0)
+            tu = np.append((X[:-1, None] + np.arange(ku)[None] / ku * np.diff(X)[:, None]).ravel(), 1.0)
         if g["wp"].get("ys") is not None:
-            tv = np.append((Y[:-1, None] + np.arange(k)[None] / k * np.diff(Y)[:, None]).ravel(), 1.0)
+            tv = np.append((Y[:-1, None] + np.arange(kv)[None] / kv * np.diff(Y)[:, None]).ravel(), 1.0)
         # (rows: v fixed, u along; columns: u fixed, v along)
         u = np.concatenate([np.tile(tu, r + 1), np.repeat(np.arange(c + 1) / c if g["wp"].get("xs") is None else X,
                                                           sv + 1)])
@@ -840,7 +858,7 @@ class WarpGrid:
             self.warp_first(st)
         job = st["jobs"][0]
         if st["way"] is None:  # (how it shows, worked out from the grid before this move: Live starts from it)
-            job["a"] = self.warp_map(g)
+            job["a"], job["exact"] = self.warp_map(g), self.warp_solver(g)
             st["way"] = self.liquify_way(st["jobs"])
         if hw is not None:
             hw["on"] = g["wp"].get("on", True)  # (warp_first may have shown a hidden Warp)
@@ -889,6 +907,11 @@ class WarpGrid:
         gx, gy = wp_.map_size(g["wp"])
         return np.zeros((gy, gx, 2))
 
+    @staticmethod
+    def warp_solver(g):
+        """warp.solver of the grid as it is now (each note's exact fetch while dragging, as warp.warped's)."""
+        return wp_.solver(wp_.clean_warp(dict(g["wp"], pts=g["P"].reshape(-1, 2).tolist())))
+
     def warp_live(self):
         st = getattr(self, "wp", None)
         if not st:
@@ -899,7 +922,7 @@ class WarpGrid:
             self.warp_again(st)  # (a new picture under it: zoomed / scrolled mid-drag)
         elif st["way"] == "live":
             for job in st["jobs"]:
-                job["a"] = self.warp_map(st["g"])
+                job["a"], job["exact"] = self.warp_map(st["g"]), self.warp_solver(st["g"])
             if all(self.liquify_show(job) for job in st["jobs"]):
                 st["shown"] = time.perf_counter()
                 st["took"] = st["shown"] - t0
@@ -917,7 +940,8 @@ class WarpGrid:
         self.redraw()
         for job in st["jobs"]:
             job["made"] = st["g"]["made"] = self.stir_made(job["sh"], "warp") or job["made"]
-            job["a"] = self.warp_map(st["g"])  # (Live starts from the grid as it's now made)
+            # (Live starts from the grid as it's now made)
+            job["a"], job["exact"] = self.warp_map(st["g"]), self.warp_solver(st["g"])
         st["way"] = self.liquify_way(st["jobs"])
         if st["way"] == "later":
             st["way"] = "full"

@@ -22,6 +22,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   stir_wrap      recolour.Rows.wrapped (Stir's Wrap around)   (all three on half the cores: on_cores)
   liquify_sample liquify.sample: Liquify's map at spots of the colour box (on half the cores)
   warp_newton    warp._newton: the Warp's bend turned round, Newton steps each spot (a fold's pieces kept inside)
+  warp_exact     warp.exact_offsets: each note's spot fetched exactly (Newton from the map's answer)
   warp_soft      liquify.found's Edges: Smooth (the Warp's): each note's pick, its looks + vote (both on half the cores)
   midi_events    midi_out.track_events: one track's note-ons / offs as MIDI file bytes
   midi_track     midi_out's tracks made side by side: one track's notes sorted (radix_order) + midi_events
@@ -894,6 +895,46 @@ def warp_newton(P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_st
 
 
 @njit(nogil=True)
+def _exact_one(i, P, smooth, lx, ly, a, near, x, y, steps, ox, oy, best, nob):
+    """warp.exact_offsets for spot i: the map a's answer, then Newton's steps from it; (ox, oy) = the offset, or
+    NaN when it doesn't settle or its map cell is one a fold lands on (near: (gy - 1) * (gx - 1), or empty)."""
+    d0, d1 = _sample2(a, x[i], y[i])
+    ox[i], oy[i] = x[i] + d0, y[i] + d1
+    _newton_one(i, P, x, y, smooth, lx, ly, ox, oy, nob, False, steps, 0, 0.0, ox, oy, best)
+    bad = not (best[i] < 1e-7)
+    if len(near):
+        gy, gx = a.shape[0], a.shape[1]
+        ci = min(np.int64(min(max(x[i], 0.0), 1.0) * (gx - 1)), gx - 2)
+        cj = min(np.int64(min(max(y[i], 0.0), 1.0) * (gy - 1)), gy - 2)
+        bad = bad or near[cj * (gx - 1) + ci] != 0
+    if bad:
+        ox[i], oy[i] = np.nan, np.nan
+    else:
+        ox[i], oy[i] = ox[i] - x[i], oy[i] - y[i]
+
+
+@njit(nogil=True)
+def warp_exact_one(P, smooth, lx, ly, a, near, x, y, steps, ox, oy):
+    """warp.exact_offsets for every spot: each spot's exact fetch from the map's answer (NaN: the map's stands).
+    One core."""
+    best, nob = np.empty(len(x)), np.zeros((1, 4))
+    for i in range(len(x)):
+        _exact_one(i, P, smooth, lx, ly, a, near, x, y, steps, ox, oy, best, nob)
+
+
+@njit(nogil=True, parallel=True)
+def _warp_exact_cores(P, smooth, lx, ly, a, near, x, y, steps, ox, oy):
+    best, nob = np.empty(len(x)), np.zeros((1, 4))
+    for i in prange(len(x)):
+        _exact_one(i, P, smooth, lx, ly, a, near, x, y, steps, ox, oy, best, nob)
+
+
+def warp_exact(P, smooth, lx, ly, a, near, x, y, steps, ox, oy):
+    """warp_exact_one on half the cores (on_cores)."""
+    on_cores(_warp_exact_cores, warp_exact_one, len(x), P, smooth, lx, ly, a, near, x, y, steps, ox, oy)
+
+
+@njit(nogil=True)
 def _unit_back(x, y, fp):
     """liquify._placed + recolour.from_unit for one spot of the colour box (Edges: escape = clipped, else wrapped
     round then clipped): (middle in ticks, key). fp = [cut, turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f1, f2, t0,
@@ -1028,15 +1069,19 @@ def _cover_at(mid, key, vt0, vt1, vk0, vk1, nt, nk, tstart, ta, tb, keys, first,
 
 
 @njit(nogil=True)
-def _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
-              out):
+def _soft_one(i, at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top,
+              gap, now, out):
     """liquify.found's Edges: Smooth for note idx[i] at spot (x[i], y[i]) of the box (the same sums, the same
     order as its arrays). c = [tick's step across, up (box units), half a key's across, up, one key's height,
-    strength / 100, SOFT_SQUASHED, SOFT_REACH, 1 = Edges: Sharp (the nearest note alone, C7)]."""
+    strength / 100, SOFT_SQUASHED, SOFT_REACH, 1 = Edges: Sharp (the nearest note alone, C7)]. ox / oy: each
+    spot's exact fetch (a Warp's, warp.exact_offsets; NaN = the map's), or both empty."""
     s100 = c[5]
     x0, y0 = x[i], y[i]
-    d0, d1 = _sample2(a, x0, y0)
-    sx, sy = x0 + d0 * s100, y0 + d1 * s100
+    if len(ox) and not np.isnan(ox[i]):
+        sx, sy = x0 + ox[i], y0 + oy[i]
+    else:
+        d0, d1 = _sample2(a, x0, y0)
+        sx, sy = x0 + d0 * s100, y0 + d1 * s100
     mid, key = _unit_back(sx, sy, fp)
     if c[8] != 0:  # (Edges: Sharp, the Liquify: the nearest note alone)
         out[i] = _near_at(mid, key, keys, first, last, line, ms, o, base, top, gap)
@@ -1070,28 +1115,28 @@ def _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, las
 
 
 @njit(nogil=True)
-def warp_soft_one(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
-                  out):
+def warp_soft_one(at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top,
+                  gap, now, out):
     """liquify.found's Edges: Smooth (the Warp's) for every note idx: the note each takes its colour from. One
     core."""
     for i in range(len(idx)):
-        _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
-                  now, out)
+        _soft_one(i, at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top,
+                  gap, now, out)
 
 
 @njit(nogil=True, parallel=True)
-def _warp_soft_cores(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
-                     now, out):
+def _warp_soft_cores(at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top,
+                     gap, now, out):
     for i in prange(len(idx)):
-        _soft_one(i, at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
-                  now, out)
+        _soft_one(i, at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top,
+                  gap, now, out)
 
 
-def warp_soft(at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap, now,
-              out):
+def warp_soft(at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base, top, gap,
+              now, out):
     """warp_soft_one on half the cores (on_cores)."""
-    on_cores(_warp_soft_cores, warp_soft_one, len(idx), at, idx, x, y, a, c, fp, ring, tstart, ta, tb, keys, first,
-             last, line, ms, o, base, top, gap, now, out)
+    on_cores(_warp_soft_cores, warp_soft_one, len(idx), at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys,
+             first, last, line, ms, o, base, top, gap, now, out)
 
 
 @njit(nogil=True)

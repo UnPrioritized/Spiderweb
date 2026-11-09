@@ -565,7 +565,8 @@ class LiquifyBrush:
                 "code": code if order is None else code[order], "order": order, "n": n, "lap": lap,
                 "turn": turned_map(tw) if tw else None, "img": self._img, "made": (mn, np.asarray(mt, np.int64)),
                 "slots": {}, "longest": int((drawn[mine, 1] - R0).max()),
-                "every": self.every_slot(), "calc": lq.Live(*args[:4], rule, *args[4:], self.liquify_map(job))}
+                "every": self.every_slot(), "calc": lq.Live(*args[:4], rule, *args[4:], self.liquify_map(job),
+                                                            exact=job.get("exact"))}
 
     @staticmethod
     def liquify_map(job):
@@ -602,7 +603,7 @@ class LiquifyBrush:
         live = job["live"]
         if live["img"] is not self._img:
             return False
-        got = live["calc"].update(self.liquify_map(job))
+        got = live["calc"].update(self.liquify_map(job), job.get("exact"))
         if got is None:
             return True
         B, L = got

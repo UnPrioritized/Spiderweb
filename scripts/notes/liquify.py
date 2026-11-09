@@ -383,6 +383,10 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
     way: the brush's live colours == let go's."""
     from notes.recolour import _sorted_notes, nearest
     s100 = w["lq"]["strength"] / 100
+    ox = oy = None
+    if w.get("exact") is not None:  # (a Warp: each spot's exact fetch where it settles, warp.exact_offsets)
+        from notes.warp import exact_offsets
+        ox, oy = exact_offsets(w["exact"], a, x, y)
     fp = _place_numbers(w, rc, box, own) if len(idx) else None
     fast = compiled("warp_soft") if fp is not None else None
     if fast:  # (the compiled pick, note by note: the very same sums as below, files/fastloops.warp_soft (Sharp too,
@@ -395,12 +399,17 @@ def found(w, a, at, idx, x, y, rc, box, own, now, kept=None):
         c = np.array([bx[1] - bx[0], by[1] - by[0], kx, ky, np.hypot(kx, ky) * 2, s100, SOFT_SQUASHED, SOFT_REACH,
                       0.0 if w.get("soft") else 1.0], np.float64)
         out = np.empty(len(idx), np.int64)
-        fast.warp_soft(to(at, np.int64), to(idx, np.int64), to(x, np.float64), to(y, np.float64), to(a, np.float64),
-                       c, fp, np.asarray(_RING, np.float64), *_COVER_LOOKS, to(keys, np.int64), to(first, np.int64),
+        none = np.zeros(0)
+        fast.warp_soft(to(at, np.int64), to(idx, np.int64), to(x, np.float64), to(y, np.float64),
+                       to(ox, np.float64) if ox is not None else none, to(oy, np.float64) if oy is not None else none,
+                       to(a, np.float64), c, fp, np.asarray(_RING, np.float64), *_COVER_LOOKS, to(keys, np.int64), to(first, np.int64),
                        to(last, np.int64), to(line, np.float64), to(ms, np.float64), to(o, np.int64), float(base),
                        float(top), float(gap), to(now, np.int64), out)
         return out
     d = sample(a, x, y) * s100
+    if ox is not None:
+        got = ~np.isnan(ox)
+        d[got, 0], d[got, 1] = ox[got], oy[got]
     sx, sy = x + d[:, 0], y + d[:, 1]  # (where in the box each spot fetches from)
     mid, key = _placed(w, sx, sy, rc, box, own)
     if not w.get("soft") or not len(idx):
@@ -620,7 +629,7 @@ class Live:
     the grid cells around it, then their Per chord / run groups, then whole bursts of notes sounding together on a
     key (kept_apart looks at nothing else), so the colours given are the very ones the whole shape gets."""
 
-    def __init__(self, notes, at, low, now, rc, which, pals, pick, box, own, a):
+    def __init__(self, notes, at, low, now, rc, which, pals, pick, box, own, a, exact=None):
         self.notes, self.at, self.low, self.now, self.rc = notes, at, low, now, rc
         self.pals, self.pick, self.box, self.own = pals, pick, box, own
         # (what doesn't change while brushing: kept for the shape's next stroke too (its notes before the Liquify are
@@ -637,6 +646,9 @@ class Live:
         else:
             parts = got[2]
         self.__dict__.update(parts)
+        # (a Warp drag: warp.solver of the grid now, its spots fetched exactly like warp.warped's; its own copy of w:
+        # the kept parts' is shared with the next stroke)
+        self.w = dict(self.w, exact=exact)
         self.at_in, self.key = at, key
         self.out = np.array(now)  # (every note's colour as brushed so far: liquified's very result; let go uses it)
         _LIVE_KEPT["live"] = weakref.ref(self)
@@ -645,7 +657,7 @@ class Live:
         self.P = self.F if self.lead is None else self.F[self.lead]
         self.ever = np.zeros(len(self.at), bool)
         self.zero = True
-        self.update(a)
+        self.update(a, exact)
 
     @classmethod
     def _parts(cls, notes, at, now, rc, box, own, grid):
@@ -706,9 +718,10 @@ class Live:
         of[o] = burst
         return of, np.flatnonzero(~over), np.bincount(burst), o
 
-    def update(self, a):
+    def update(self, a, exact=None):
         """The map is a now: (notes whose colour may have changed, their colours) (before their round / turn), or
-        None when nothing changed."""
+        None when nothing changed. exact: a Warp drag's warp.solver for this map."""
+        self.w["exact"] = exact
         got = self._update(a)
         if got is not None:
             self.out[got[0]] = got[1]

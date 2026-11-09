@@ -622,6 +622,71 @@ def inverse_map(wp, quick=False):
 
 
 _LAST = {}  # ((cols, rows), smooth) -> (the point offsets with strength, their map) of the last quick map
+_SOLVERS = {}  # inverse_map's key -> solver(wp)'s answer (the last few)
+
+
+def solver(wp):
+    """What exact_offsets needs for a clean Warp: (offsets with strength, kind, folds, lines), or None (hidden /
+    strength 0 / no point moved)."""
+    if not wp or wp.get("on") is False or not wp.get("strength", 100.0):
+        return None
+    f = full(wp)
+    key = json.dumps([size(wp), wp["pts"], f["smooth"], f["strength"], f["folds"], wp.get("h"), wp.get("in"),
+                      wp.get("xs"), wp.get("ys")])
+    got = _SOLVERS.get(key)
+    if got is None:
+        P, smooth = shape_of(wp)
+        L = uneven(wp)
+        got = (P, smooth, _folds(P, smooth, f["folds"] == "top", L=L), L)
+        if len(_SOLVERS) > 8:
+            _SOLVERS.pop(next(iter(_SOLVERS)))
+        _SOLVERS[key] = got
+    return got
+
+
+def exact_offsets(ex, a, x, y):
+    """Where each spot (x, y) of the box EXACTLY fetches its colour from, as offsets (ox, oy) (NaN: the map a's
+    blended answer stands). The map is only PER_CELL steps a cell: blended between them, a big shape's bend came out
+    in visible straight pieces with corners, and a kink in the bend (Straight cells, a corner handle) smeared over a
+    whole step (user 2026-11-09, "the warp feels low resolution"). So every spot takes Newton's answer started from
+    the map's (2-3 steps, compiled). Spots a folded piece lands on keep the map's (the fold rule chose there), and so
+    do spots Newton doesn't settle. ex = solver(wp). Live and let go both come here: the same colours."""
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    n = len(x)
+    if ex is None or not n:
+        return np.full(n, np.nan), np.full(n, np.nan)
+    from notes.liquify import sample
+    P, smooth, fold, L = ex
+    gy, gx = a.shape[:2]
+    near = None
+    if fold is not None and len(fold["fixed"]):
+        # (the map's cells a folded piece's landing reaches (one look per box, not per spot: 192 boxes x 1.1 M
+        # notes took ~0.2 s a move); a spot in one keeps the map's)
+        near = np.zeros((gy - 1, gx - 1), np.uint8)
+        for x0, x1, y0, y1 in fold["fixed"]:
+            i0, i1 = (int(np.clip(np.floor(v * (gx - 1)), 0, gx - 2)) for v in (max(x0, -1.0), min(x1, 2.0)))
+            j0, j1 = (int(np.clip(np.floor(v * (gy - 1)), 0, gy - 2)) for v in (max(y0, -1.0), min(y1, 2.0)))
+            near[j0:j1 + 1, i0:i1 + 1] = 1
+    fast = compiled("warp_exact") if n >= NEWTON_FAST else None
+    if fast:  # (the compiled twin, one pass a spot: files/fastloops.warp_exact, the very same sums)
+        to = np.ascontiguousarray
+        X, Y = L or (None, None)
+        ox, oy = np.empty(n), np.empty(n)
+        fast.warp_exact(to(P, np.float64), _kind(smooth), to(X, np.float64) if X is not None else np.zeros(0),
+                        to(Y, np.float64) if Y is not None else np.zeros(0), to(a, np.float64),
+                        near.ravel() if near is not None else np.zeros(0, np.uint8), to(x), to(y), STEPS, ox, oy)
+        return ox, oy
+    d = sample(a, x, y)
+    sx, sy, err = _newton(P, x, y, smooth, x + d[:, 0], y + d[:, 1], L=L)
+    ox, oy = np.subtract(sx, x, out=sx), np.subtract(sy, y, out=sy)
+    bad = ~(err < 1e-7)  # (not _solve's "settled")
+    if near is not None:
+        i = np.minimum((np.clip(x, 0.0, 1.0) * (gx - 1)).astype(np.int64), gx - 2)
+        j = np.minimum((np.clip(y, 0.0, 1.0) * (gy - 1)).astype(np.int64), gy - 2)
+        bad |= near.ravel()[j * (gx - 1) + i] != 0
+    if bad.any():
+        ox[bad] = oy[bad] = np.nan
+    return ox, oy
 
 
 def _reach(P0, P, smooth, gx, gy, L=None):
@@ -934,6 +999,7 @@ def warped(notes, at, low, now, rc, which, pals, pick, box, own):
     f = full(wp)
     w = lq._where(shown, rc, box, own, {"strength": 100.0, "on": True, "edge": f["edge"],
                                        "soft": f["edges"] == "smooth"})
+    w["exact"] = solver(wp)  # (each note's exact fetch, not the map's blend: exact_offsets)
     idx = np.flatnonzero(lq.touched(a, w["x"], w["y"]))
     if not len(idx):
         return now
