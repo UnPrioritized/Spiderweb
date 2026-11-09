@@ -1285,7 +1285,7 @@ def fx_notes(sh, ppq, keys, get):
             rule["ppq"] = ppq
         # (Stir, and Per chord / run (a run cut in two got a new first note, hunt 11-07): a piece looks its colours up
         # in the whole)
-        if ((rule.get("stir") or rule.get("liquify") or rule.get("by") and rule["mode"] != KEEP)
+        if ((rule.get("stir") or rule.get("liquify") or rule.get("warp") or rule.get("by") and rule["mode"] != KEEP)
                 and (sh.get("cut") or sh.get("colour_cut"))
                 and not (rule.get("frame") or (1, 0))[1]):  # (turned: notes made anew)
             got = stirred_piece(sh, notes, tracks, held_, get, gate, rule)

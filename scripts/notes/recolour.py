@@ -42,9 +42,12 @@ from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
-KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "liquify")  # (what mode KEEP looks at)
-# ("liquify" = the Liquify brush's bend map, notes/liquify.py: applied after every stir; Off with only a Liquify =
-# KEEP too)
+KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "liquify", "warp")  # (what mode KEEP
+# looks at)
+# ("liquify" = the Liquify brush's bend map, notes/liquify.py: applied after every stir and the Warp; Off with only a
+# Liquify = KEEP too)
+# ("warp" = the Warp grid, notes/warp.py: after every stir, before the Liquify (user 11-09: fixed order); Off with
+# only a Warp = KEEP too)
 # ("turned" = Reverse track order on a stirred shape, sweep 11-06: [[colour before, colour now], ...] of the colours
 # it swapped (only those moved). The Stir works out the colours from the ones before and the result is swapped the
 # same way, so the reverse is EXACTLY the stirred pattern with its tracks turned round: the stir's dice and "two
@@ -177,7 +180,9 @@ def clean_recolour(r):
     stir = clean_stir(r.get("stir"))
     from notes.liquify import clean_liquify
     liquify = clean_liquify(r.get("liquify"))
-    if r["mode"] == KEEP and not stir and not liquify:
+    from notes.warp import clean_warp
+    warp = clean_warp(r.get("warp"))
+    if r["mode"] == KEEP and not stir and not liquify and not warp:
         return None
     a = r.get("amount", 100)
     if not number(a):
@@ -231,7 +236,9 @@ def clean_recolour(r):
         out["stir"] = stir
     if liquify:
         out["liquify"] = liquify
-    tw = clean_turned(r.get("turned"))
+    if warp:
+        out["warp"] = warp
+    tw =clean_turned(r.get("turned"))
     if tw:
         out["turned"] = tw
     return out
@@ -745,7 +752,8 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     from it (and a piece's whole's box, rc "whole": colour_box), so pushing a shape against an edge keeps its
     colours."""
     rc = kept_rule(rc)
-    if (rc.get("stir") or rc.get("liquify")) and tracks is not None and len(notes) >= BEFORE_STIR_LEAST:
+    if (rc.get("stir") or rc.get("liquify") or rc.get("warp")) and tracks is not None \
+            and len(notes) >= BEFORE_STIR_LEAST:
         got = before_liquify(notes, tracks, rc, held, gate, own)
         if got is None:
             return notes, tracks
@@ -756,7 +764,7 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
 
 
 def kept_rule(rc):
-    """rc as recoloured works with it: Off + a Stir / Liquify (KEEP) = the shape's own colours only, the same however
+    """rc as recoloured works with it: Off + a Stir / Warp / Liquify (KEEP) =the shape's own colours only, the same however
     it got there: settings left from another mode (Per chord, Colours, Mix, Shares) wait for it, the seed too (which
     of two notes sounding together gives way: never random here)."""
     if rc["mode"] == KEEP:
@@ -767,10 +775,10 @@ def kept_rule(rc):
 
 def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
     """recoloured's work up to the Liquify: (rc, settled notes, each note's round, the "turned" list, all_stirred's
-    arguments with the colours after every stir), or None = nothing to recolour. Big shapes keep it (the brush's
+    arguments with the colours after every stir and the Warp), or None = nothing to recolour. Big shapes keep it (the brush's
     strokes and Stir knob turns change nothing before it). Liquify's brush starts a stroke with it too (Live)."""
     rc = kept_rule(rc)
-    if gate and rc.get("liquify"):  # (the Liquify works on where notes show: liquify.shown_places)
+    if gate and (rc.get("liquify") or rc.get("warp")):  # (they work on where notes show: liquify.shown_places)
         rc = dict(rc, _gate=True)
     if tracks is None or len(notes) < BEFORE_STIR_LEAST:
         b = _before_stir(notes, tracks, rc, held, gate, own) if tracks is not None or rc["mode"] in SPLIT else None
@@ -778,10 +786,12 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
             return None
         notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2) = b
         now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2)
+        now = warped_now(n, at, low, now, rc, which, pals, pick, box, own2)
         return rc, notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2)
     # (only the Stir changed since last time (a knob turned): the colours before it are kept, user 11-07: 3 M
-    # notes took a second a change; the same for Liquify, and a brush stroke keeps the stirred colours too)
-    key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify")}, sort_keys=True), held, gate,
+    # notes took a second a change; the same for Liquify / Warp, and a brush stroke keeps the stirred colours too)
+    key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify", "warp")}, sort_keys=True), held,
+           gate,
            None if own is None else tuple(own))
     got = _BEFORE_STIR.get("got")
     if got is None or got[0]() is not notes or got[1]() is not tracks or got[2] != key:
@@ -800,10 +810,21 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
         now = kept[2]
     else:
         now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2)
-        if rc.get("liquify"):  # (kept for the next brush stroke: only the Liquify changes then)
+        if rc.get("liquify") or rc.get("warp"):  # (kept for the next brush stroke / Warp drag: only they change then)
             now = np.array(now)
             now.setflags(write=False)
             _BEFORE_STIR["stirred"] = (b, skey, now)
+    if rc.get("warp"):  # (the Warp's colours kept too: a Liquify stroke on a warped shape redoes neither)
+        wkey = skey + json.dumps(rc.get("warp"), sort_keys=True)
+        kept = _BEFORE_STIR.get("warped")
+        if kept is not None and kept[0] is b and kept[1] == wkey:
+            now = kept[2]
+        else:
+            now = warped_now(n, at, low, now, rc, which, pals, pick, box, own2)
+            if rc.get("liquify"):
+                now = np.array(now)
+                now.setflags(write=False)
+                _BEFORE_STIR["warped"] = (b, wkey, now)
     return rc, notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2)
 
 
@@ -845,7 +866,7 @@ def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
         tracks = np.zeros(len(notes), np.int64)
     if tracks is None or not len(notes) or plan(tracks, rc) is None:
         return notes, tracks
-    if gate and rc.get("liquify"):  # (the Liquify works on where notes show: liquify.shown_places)
+    if gate and (rc.get("liquify") or rc.get("warp")):  # (they work on where notes show: liquify.shown_places)
         rc = dict(rc, _gate=True)
     t = np.asarray(tracks, np.int64)
     if not held:
@@ -896,9 +917,19 @@ def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
 
 
 def all_stirred(notes, at, low, now, rc, which, pals, pick, box, own):
-    """now after every stir of rc in order, then its Liquify (applied last, user 11-07)."""
+    """now after every stir of rc in order, then its Warp, then its Liquify (applied last, user 11-07; Warp before
+    it, user 11-09)."""
     now = stirs_only(notes, at, low, now, rc, which, pals, pick, box, own)
+    now = warped_now(notes, at, low, now, rc, which, pals, pick, box, own)
     return liquified_now(notes, at, low, now, rc, which, pals, pick, box, own)
+
+
+def warped_now(notes, at, low, now, rc, which, pals, pick, box, own):
+    """now after rc's Warp (notes/warp.py), or as it is without one."""
+    if not rc.get("warp"):
+        return now
+    from notes.warp import warped
+    return warped(notes, at, low, now, rc, which, pals, pick, box, own)
 
 
 def liquified_now(notes, at, low, now, rc, which, pals, pick, box, own):

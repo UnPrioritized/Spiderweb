@@ -4,8 +4,9 @@ shape around. Notes never move or change length; only which colour each one has 
 THE BEND MAP (rc["liquify"]["map"]): one grid over the shape's colour box (recolour.unit_xy's 0..1 box: flipped /
 turned with the shape, a piece's whole's box), each grid point saying how far (in that box) the colour seen there is
 fetched from: a spot p shows the colour found at p + strength * map(p) (between grid points: blended). Kept with the
-shape, so it is applied again after every edit (never baked): the colours under it (Recolour mode, Stir) can change
-and they flow along the same bends. Applied LAST, after every stir (recolour.all_stirred). One map per shape, no list
+shape, so it is applied again after every edit (never baked): the colours under it (Recolour mode, Stir, Warp) can
+change and they flow along the same bends. Applied LAST, after every stir and the Warp (recolour.all_stirred; the
+Warp reuses this file's lookup: notes/warp.py). One map per shape, no list
 of strokes (user: like the editors; mistakes are fixed with Restore / undo).
 
 Saved as {"grid": [across, up], "map": text (zlib + base64 of int16 pairs, 1 / SCALE of the box each), "frozen":
@@ -251,11 +252,11 @@ def touched(a, x, y):
     return cell[j, i]
 
 
-def _where(at, rc, box, own):
-    """liquify_from's first half: rc's Liquify settings (filled in) and each note's place (x, y) in the colour box,
-    with what the edge rule needs later."""
+def _where(at, rc, box, own, lq=None):
+    """liquify_from's first half: rc's Liquify settings (filled in; lq: these instead, the Warp's) and each note's
+    place (x, y) in the colour box, with what the edge rule needs later."""
     from notes.recolour import rows_of, unit_xy
-    lq = full(clean_liquify(rc.get("liquify")) or {})
+    lq = lq or full(clean_liquify(rc.get("liquify")) or {})
     s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
     mid = (s + e) / 2
     w = {"lq": lq, "edge": lq["edge"], "rows": None, "t0": 0.0, "t1": 0.0}

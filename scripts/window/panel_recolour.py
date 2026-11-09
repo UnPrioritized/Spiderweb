@@ -315,8 +315,9 @@ class RecolourPanel:
 
         def changed(old, _sh=None):
             if what == "mode":
-                if mode is None:  # (Off: a Stir / Liquify stays, on the colours as they are)
-                    return dict(old, mode=KEEP) if old and (old.get("stir") or old.get("liquify")) else None
+                if mode is None:  # (Off: a Stir / Warp / Liquify stays, on the colours as they are)
+                    return dict(old, mode=KEEP) if old and (old.get("stir") or old.get("liquify")
+                                                            or old.get("warp")) else None
                 if old and old["mode"] == mode:
                     return old
                 # (another mode: its own Amount to start from, the word means another thing there)
