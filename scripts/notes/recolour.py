@@ -134,7 +134,9 @@ FLIP_IN = ("whole", "inside", "outside")
 # (tilt / skew: the area's box turned (degrees, counterclockwise as measured) / slanted (its top slid along by
 # this much of its height), PLAN C2b; only with a reach)
 MOST_SKEW = 10.0
-SPOT_LEAST, SPOT_MOST = -100.0, 200.0  # (the area's own spot may sit past the box: an area drawn beside the shape, hunt C 7)
+SPOT_LEAST, SPOT_MOST = -1000.0, 1100.0  # (the area's own spot AND the Centre point may sit past the box: an area
+# drawn beside the shape, hunt C 7; the largest area (Size 200 % x Stretch 1000 %) reaches 10 boxes from its middle,
+# 1050 either side of 50; a far Centre point = gently curved bands, user 2026-11-10)
 # (shape: area "drawn" = a library drawing's own copy (PLAN C2, user 11-04): {"name", "loops": [[[u, v], ...], ...]
 # its filled outline in its 0..1 box (v up), "aspect": its width / height as drawn}; Size = its box's width)
 # (spot: the area's own middle [% across, % up] when it doesn't move with the Centre point (PLAN C1, user 11-04:
@@ -329,7 +331,7 @@ def one_stir(s):
     if s.get("ripple_kind") in RIPPLE_KINDS[1:]:
         out["ripple_kind"] = s["ripple_kind"]
     c = s.get("centre")
-    if isinstance(c, list) and len(c) == 2 and all(number(x) and 0 <= x <= 100 for x in c) and \
+    if isinstance(c, list) and len(c) == 2 and all(number(x) and SPOT_LEAST <= x <= SPOT_MOST for x in c) and \
             [round(x, 3) for x in c] != [50, 50]:
         out["centre"] = [round(float(x), 3) for x in c]
     if s.get("sets") == "move":

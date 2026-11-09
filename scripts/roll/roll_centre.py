@@ -332,7 +332,7 @@ class CentreDots:
         got = area_from_box(st, *pcts, self.area_k(made, st), keep="stretch" if sized else "size")
         if got is None:  # (turned inside out / flat: stays as it was last)
             return
-        lo, hi = (SPOT_LEAST, SPOT_MOST) if self.target_stir(target)["spot"] else (0.0, 100.0)
+        lo, hi = SPOT_LEAST, SPOT_MOST  # (own spot or Centre point: both may sit past the box)
         middle = [round(min(max(v, lo), hi), 3) for v in got["middle"]]
         put = {"tilt": round(got["tilt"], 3), "skew": round(min(max(got["skew"], -MOST_SKEW), MOST_SKEW), 4)}
         if sized:
@@ -477,7 +477,8 @@ class CentreDots:
             self.app.change_recolour(lambda old, sh: with_stir(old, i, lambda st: dict(st, reach=size))
                                      if stir_at(old, i)["reach"] else old, None, False)
             return
-        lo, hi = (SPOT_LEAST, SPOT_MOST) if kind == "spot" else (0.0, 100.0)  # (an own spot may sit past the box)
+        lo, hi = (SPOT_LEAST, SPOT_MOST) if kind in ("spot", "stir") else (0.0, 100.0)  # (a stir's Centre point /
+        # own spot may sit past the box; Clumps' centre stays inside)
         c = [min(max(v, lo), hi) for v in c]
         c = [round(v, 3) if e.state & SHIFT else float(round(v)) for v in c]
         self.set_centre(kind, c, None, push=False)

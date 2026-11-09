@@ -198,7 +198,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(word, tr("stir.centre_tip"))
         self.middle = ttk.Button(form, text=tr("stir.middle"), command=self.on_middle)  # (BMC tester 11-04)
         Tooltip(self.middle, tr("stir.middle_tip"))
-        self._put(None, (1, word), (2, self._pair(form, "centre", 0, 100)), (3, self._pair(form, "centre", 0, 100, 1)),
+        self._put(None, (1, word), (2, self._pair(form, "centre", SPOT_LEAST, SPOT_MOST)),
+                  (3, self._pair(form, "centre", SPOT_LEAST, SPOT_MOST, 1)),
                   (4, self.middle), pady=8)
         self.squeeze = tk.BooleanVar(value=True)  # (BMC tester 11-03: off = the point only says where it turns)
         self.squeeze_tick = ttk.Checkbutton(form, text=tr("stir.squeeze"), variable=self.squeeze,
@@ -1307,7 +1308,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 continue
             mid = got["middle"]
             own = st["spot"] or any(v < 0 or v > 100 for v in mid)  # (drawn past the box: its own spot, hunt C 7)
-            lo, hi = (SPOT_LEAST, SPOT_MOST) if own else (0.0, 100.0)
+            lo, hi = SPOT_LEAST, SPOT_MOST
             middle = [round(min(max(v, lo), hi), 3) for v in mid]
             puts[id(t)] = dict(area=DRAWN, round=True, seen=seen,
                                reach=round(min(max(got["reach"], LEAST_REACH),
