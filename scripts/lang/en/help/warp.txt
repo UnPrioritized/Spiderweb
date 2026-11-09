@@ -7,10 +7,12 @@ The grid is kept with the shape as points, never baked in. Come back any time an
 Open Warp…: the selected shape shows a grid over it. Drag any point and the colours change live while you drag, exactly as they stay when you let go. A point can go anywhere, also past the shape's edge. Each drag is one undo step (Ctrl+Z); a click without moving changes nothing. Esc while dragging puts the point back.
 
 The window follows whichever shape is selected. With several shapes selected, each one shows its own grid. Pressing a shape away from its points picks it but never moves it while the window is open.
+[clip:warp-grid]
 
 ## Curve handles
 
 Click a point and its handles show: small dots on the lines around it, plus the dot of each neighbour that faces it. The grid line between two points is a curve shaped by the two dots facing each other on it, like the pen tool's curves. Drag a dot to bend the line and the colours along it.
+[clip:warp-handles]
 
 Dragging a dot turns the one on the other side of the point too, so the line runs smoothly through the point. Hold Alt while dragging to move one dot alone and make a sharp corner there. Hold Alt while you press a corner point to make it smooth again. Right-click a dot you dragged to put it back; when all of a point's dots are back, it's smooth again. Moving a point carries its dots along. Mirror moves the twins' dots as mirror images too. Changing the grid size keeps the bend but puts the dots back.
 
@@ -21,6 +23,7 @@ Ctrl+click points to pick several: a picked point is filled; Ctrl+click it again
 ## Presets
 
 Preset lays a ready-made bend onto the grid: Arc, Arc lower, Arc upper, Arch, Bulge, Shell lower, Shell upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze or Twist. Bend sets how strong it is, from -100 to 100 % (a minus number bends the other way); Across or Up turns it to run along the time or along the keys (the round ones, Fisheye, Inflate and Twist, have no way). The points and their curve handles are set for you on the grid as it is, so a small grid already shows the whole bend and a finer one follows it more closely. A preset is a starting point: drag a point or a dot afterwards and Preset shows Custom. Picking a preset again lays it again over your changes (Ctrl+Z brings them back). Picking a preset, changing Bend and changing the way are each one undo step; dragging the Bend word sideways changes it live. Changing the grid size of an untouched preset lays it again on the new grid.
+[clip:warp-preset]
 
 ## Grid size
 
