@@ -649,6 +649,7 @@ class WarpWindow(tk.Toplevel):
             self.set_split("")
         roll.warp_drop_pick()  # (opened again: no point picked; Warp Split hunt 2026-11-10)
         self.app.warp_window = None
+        self.app.colour_window_closed()  # (quick drags' kept work let go: memory use, user 2026-11-10)
         self.destroy()
         roll.focus_set()
         roll.draw_warp_grid()

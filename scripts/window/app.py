@@ -836,6 +836,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.stir_window = None  # Recolour's Stir… (stir_window.py)
         self.liquify_window = None  # Recolour's Liquify… (liquify_window.py)
         self.warp_window = None  # Recolour's Warp… (warp_window.py)
+        # (big shapes' quick Stir / Warp / Liquify work is kept only while one of their windows is open: ~210-315 MB
+        # at 2 M notes otherwise held all the time; user 2026-11-10)
+        from notes.recolour import keep_while
+        keep_while(self.colour_window_open)
         self.stir_open = set()  # the Stir window's parts shown unfolded ("area", "flips"; autosave)
         self.fill_window = None  # Fill gaps… (fill_window.py)
         self.lines_window = None  # Flip each line… (lines_window.py)
@@ -3449,6 +3453,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes.clear()
         self.select(None)
         self.shapes_changed()
+
+    def colour_window_open(self):
+        """True while the Stir, Warp or Liquify window is open (recolour.keeping: their quick work is kept then)."""
+        return bool(self.stir_window or self.warp_window or self.liquify_window)
+
+    def colour_window_closed(self):
+        """A Stir / Warp / Liquify window closed: none of them open now = their quick work let go (memory use,
+        user 2026-11-10: the first drag after opening one again makes it, ~0.2 s at 2 M notes)."""
+        if not self.colour_window_open():
+            from notes.recolour import forget_kept
+            forget_kept()
 
     def new_project(self):
         """The Project tab's New: a new MIDI. The shapes and the tempo line go (their Select boxes / picks too); PPQ,

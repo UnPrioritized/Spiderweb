@@ -15,7 +15,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE,
                             MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
-                            ROUND_EDGES, bends, flip_of_matters, forget_kept,
+                            ROUND_EDGES, bends, flip_of_matters,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_stack)
@@ -1387,7 +1387,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.call_off(self.hold)
         self.take_typing()
         self.app.stir_window = None
-        forget_kept()  # (what quick Stir changes kept: only needed while the knobs turn, hunt 11-07)
+        self.app.colour_window_closed()  # (quick Stir changes' kept work: only while a window needs it, hunt 11-07)
         roll = self.app.roll
         if (roll.drag or ("",))[0] == "rccentre":  # (a Centre point dot held: let go, what it moved kept)
             roll.drag = None
