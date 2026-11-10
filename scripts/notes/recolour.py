@@ -780,7 +780,7 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
     rc = kept_rule(rc)
     if gate and (rc.get("liquify") or rc.get("warp")):  # (they work on where notes show: liquify.shown_places)
         rc = dict(rc, _gate=True)
-    if tracks is None or len(notes) < BEFORE_STIR_LEAST:
+    if tracks is None or len(notes) < BEFORE_STIR_LEAST or not keeping():
         b = _before_stir(notes, tracks, rc, held, gate, own) if tracks is not None or rc["mode"] in SPLIT else None
         if b is None:
             return None
@@ -830,6 +830,19 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
 
 BEFORE_STIR_LEAST = 100_000  # (notes: smaller shapes are quick anyway, no memory kept for them)
 _BEFORE_STIR = {}  # "got": (weak notes, weak tracks, key, _before_stir's result) of the last big stirred shape
+_KEEP_WHILE = [None]  # a function: True = keep the quick work now (the app: a Stir / Warp / Liquify window open)
+
+
+def keep_while(fn):
+    """fn() True = big shapes' quick Stir / Warp / Liquify work may be kept (before_liquify, _sorted_notes, rows_of);
+    False = worked out each time, nothing kept (memory use 2026-11-10: ~210-315 MB at 2 M notes). None = always."""
+    _KEEP_WHILE[0] = None if fn is None else weakref.WeakMethod(fn) if hasattr(fn, "__self__") else lambda: fn
+
+
+def keeping():
+    ref = _KEEP_WHILE[0]
+    fn = None if ref is None else ref()
+    return True if fn is None else bool(fn())
 
 
 def forget_kept():
@@ -2006,7 +2019,7 @@ def rows_of(at, smooth=0.0):
     if got is not None and got[0] is at:
         return got[1]
     rows = Rows(at, smooth)
-    if len(at) >= BEFORE_STIR_LEAST and not at.flags.writeable:
+    if len(at) >= BEFORE_STIR_LEAST and not at.flags.writeable and keeping():
         if any(g[0] is not at for g in _ROWS.values()):
             _ROWS.clear()
         _ROWS[smooth] = (at, rows)
@@ -2041,7 +2054,7 @@ def _sorted_notes(at):
     gap = 2 * (top - base) + 2
     line = ms - base + np.repeat(np.arange(len(keys)) * gap, last - first)
     out = (nk, nm, o, ks, ms, keys, first, last, line, base, top, gap)
-    if n >= BEFORE_STIR_LEAST and not at.flags.writeable:  # (only arrays nobody changes: the kept ones)
+    if n >= BEFORE_STIR_LEAST and not at.flags.writeable and keeping():  # (only arrays nobody changes: the kept ones)
         _SORTED["got"] = (at, out)
     return out
 

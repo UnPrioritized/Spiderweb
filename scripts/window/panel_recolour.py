@@ -2,6 +2,7 @@
 kept where they are. Shares… opens window/shares_window.py."""
 
 import tkinter as tk
+import weakref
 from tkinter import ttk
 
 import numpy as np
@@ -152,15 +153,18 @@ class RecolourPanel:
         if not len(tracks):
             return []
         # (worked out once per remembered notes: the Stir window asks at every mouse move, 78 ms a move on 1 M
-        # notes, hunt 11-04 T1; the cache holds the tracks themselves, so an id is never another's)
+        # notes, hunt 11-04 T1; a WEAK link to the tracks: tracks the notes cache forgot go, their colours too
+        # (it kept every old version's tracks: ~60 MB an edit at 2 M notes); a live link = the id is never another's)
         cache = self.__dict__.setdefault("_owns_cache", {})
         got = cache.get(id(tracks))
-        if got is not None and got[0] is tracks:
+        if got is not None and got[0]() is tracks:
             return got[1]
         owns = colour_sets(np.asarray(tracks, np.int64) % ROUND)[1]
+        for k in [k for k, v in cache.items() if v[0]() is None]:
+            del cache[k]
         if len(cache) >= 64:
             del cache[next(iter(cache))]
-        cache[id(tracks)] = (tracks, owns)
+        cache[id(tracks)] = (weakref.ref(tracks), owns)
         return owns
 
     def colour_count(self, sh):

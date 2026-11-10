@@ -326,6 +326,7 @@ class LiquifyWindow(tk.Toplevel):
         if not unchanged(self.strength_entry):
             self.on_shown("strength", self.strength_entry)
         self.app.liquify_window = None
+        self.app.colour_window_closed()  # (quick strokes' kept work let go: memory use, user 2026-11-10)
         roll.lq_end = None  # (a straight stroke's start: forgotten with the window)
         self.destroy()
         roll.focus_set()
