@@ -989,6 +989,7 @@
  "app.edo31_audio_needs_builtin": "Audio is ticked, but the MIDI out isn't Built-in BASSMIDI, Kestrel (GPU) or Rendered ahead, so playback plays the usual way (keys above 127 are skipped).\nPick one of them in Settings (Help menu) → Sound to hear 31-EDO.",
  "app.edo31_lanes": "31-EDO: overlaps keep their pitch",
  "app.edo31_lanes_tip": "In 31-EDO, channels come in groups of three, and the 2nd and 3rd channel of a group play\n2 and 4 octaves higher. On: overlapping shapes only go on channels 1, 4, 7, 11 and 14, then on the\nnext port's, so they keep their pitch here and in other 31-EDO players. Off: channels 1-16 as usual.\nChanges the channels and ports of the exported MIDI. Only with Multi channel. Saved with the project.",
+ "app.edo31_lanes_grey_tip": "Not used while \"31-EDO: overlaps keep their pitch\" is ticked: the tracks only go on\nchannels 1, 4, 7, 11 and 14 then. Untick it to use this again.",
  "app.edo31_loaded": "Play the loaded MIDI in 31-EDO",
  "app.edo31_loaded_tip": "Plays the loaded MIDI in 31-EDO too, each key row tuned like your own notes.\nIt all plays as one piano sound: the MIDI's pitch bends, instrument changes, volume / expression, sustain pedal and other controls are left out.\nNeeds 31-EDO and Audio ticked.",
  "app.edo31_loaded_left": "Played in 31-EDO, one piano sound: the loaded MIDI's {list} left out.",

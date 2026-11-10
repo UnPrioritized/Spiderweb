@@ -1418,6 +1418,7 @@ class ProjectFiles:
                 self.after(win_poll, poll)
                 return
             self._exporting = None
+            self.after_idle(self.lanes_after_export)  # (31-EDO lanes changed while it ran: taken now)
             if win.winfo_exists():
                 win.destroy()
             # (tracks dragged, renamed, re-channelled, split or removed: not "exactly as loaded", 10-29 measure)
@@ -1519,6 +1520,7 @@ class ProjectFiles:
                 self.after(100, poll)
                 return
             self._exporting = None
+            self.after_idle(self.lanes_after_export)
             self.busy(None)
             e = job["error"]
             if isinstance(e, Cancelled):

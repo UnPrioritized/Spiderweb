@@ -1618,12 +1618,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # the 16th colour)
         self.ch10_tick = ttk.Checkbutton(ch, text=tr("app.use_ch10"), variable=self.use_ch10,
                                          command=self.on_use_ch10)
-        Tooltip(self.ch10_tick, tr("app.use_ch10_tip"))
+        self.ch10_tip = Tooltip(self.ch10_tick, tr("app.use_ch10_tip"))
         # (user 2026-10-18: shown only while Use channel 10 is ticked; off = channel 10 last, so ticking that changes
         # no colour)
         self.order_tick = ttk.Checkbutton(ch, text=tr("app.ch10_order"), variable=self.ch10_order,
                                           command=self.on_channel_mode)
-        Tooltip(self.order_tick, tr("app.ch10_order_tip"))
+        self.order_tip = Tooltip(self.order_tick, tr("app.ch10_order_tip"))
         # (user 2026-10-17: a Colours round's channels never used again, so each round can be edited alone elsewhere)
         self.rounds_tick = ttk.Checkbutton(ch, text=tr("app.new_rounds"), variable=self.new_rounds,
                                            command=self.on_channel_mode)
@@ -2078,11 +2078,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         words = [tr("app.ch_short_" + mode)]
         if mode == "auto":
             words.append(tr("app.ch_short_" + SPLIT_CHOICES[max(self.split_box.current(), 0)][0]))
-            if self.edo_lanes_on():
+            lanes = self.edo_lanes_on()  # (then channel 10 and the order aren't used: greyed, sync_edo_lanes)
+            if lanes:
                 words.append(tr("app.ch_short_edo_lanes"))
-            if self.all16():
+            if self.all16() and not lanes:
                 words.append(tr("app.ch_short_ch10"))
-            if self.in_order():
+            if self.in_order() and not lanes:
                 words.append(tr("app.ch_short_order"))
             if self.rounds_apart():
                 words.append(tr("app.ch_short_rounds"))
@@ -2248,7 +2249,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 tick.pack_forget()
         tick.state(["!disabled" if self.channel_mode.get() == "auto" else "disabled"])
         on = self.edo_lanes_on()
+        self.sync_ch10_grey(on)
         if on == engine.edo_lanes:
+            return
+        if getattr(self, "_exporting", None):  # (Export with a loaded MIDI reads it from its thread while it writes
+            self._lanes_owed = True            # your tracks: the file keeps the press's channels; changed once done)
             return
         engine.edo_lanes = on
         if self.player.running:
@@ -2256,6 +2261,24 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.start_play(keep=True)
         elif getattr(self, "ahead_play", None) is not None:
             self.play_changed()
+
+    def sync_ch10_grey(self, lanes):
+        """"Use channel 10" + "Channels 1-16 in order" greyed while "Overlaps keep their pitch" applies (hunt
+        2026-11-10, user took A): the tracks go on 1, 4, 7, 11, 14 then, so they'd change nothing; their tick kept,
+        the tip says why."""
+        if not hasattr(self, "order_tip"):  # (before the Channels rows are all made)
+            return
+        for w, tip, key in ((self.ch10_tick, self.ch10_tip, "app.use_ch10_tip"),
+                            (self.order_tick, self.order_tip, "app.ch10_order_tip")):
+            if w.instate(["disabled"]) != lanes:
+                w.state(["disabled" if lanes else "!disabled"])
+                tip.text = tr("app.edo31_lanes_grey_tip") if lanes else tr(key)
+
+    def lanes_after_export(self):
+        """An export just ended: a lanes change made while it ran (sync_edo_lanes waited) taken now."""
+        if getattr(self, "_lanes_owed", False):
+            self._lanes_owed = False
+            self.shapes_changed()
 
     def edo_lanes_ticked(self):
         self.shapes_changed()  # (the track list's channels, the export; sync_edo_lanes from there)
