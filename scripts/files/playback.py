@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+import weakref
 
 import numpy as np
 
@@ -537,9 +538,15 @@ class Player:
                 threading.Thread(target=self._sort, daemon=True).start()
 
     def _new_notes(self, notes):
-        """notes_ver goes up when these notes aren't the ones handed over last (the same array = unchanged)."""
-        if notes is not self._notes_of:
-            self._notes_of = notes
+        """notes_ver goes up when these notes aren't the ones handed over last (the same array = unchanged). Held
+        weakly: the same array can only come again while someone else keeps it, and after Stop the player held a
+        big loaded MIDI's 31-EDO rows (~190 MB at 4 M notes) for nothing."""
+        old = self._notes_of() if self._notes_of is not None else None
+        if notes is not old:
+            try:
+                self._notes_of = weakref.ref(notes)
+            except TypeError:  # (a list: kept as it is)
+                self._notes_of = lambda kept=notes: kept
             self.notes_ver += 1
 
     def _time_map(self, bpm, tempo):

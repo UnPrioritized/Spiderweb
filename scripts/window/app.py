@@ -2212,6 +2212,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             elif getattr(self, "ahead_play", None) is not None:  # (Rendered ahead's sound made while stopped: old)
                 self.play_changed()
         self.edo_warn()
+        self.edo_loaded_tidy()
         self.roll.request_redraw()
 
     def sync_edo_loaded(self):
@@ -2253,8 +2254,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             errors.write_log(*sys.exc_info(), "(a loaded MIDI's notes for 31-EDO)")
             return None
 
+    def edo_loaded_tidy(self):
+        """The loaded MIDI's 31-EDO copies let go while they can't be used (the tick, 31-EDO or Audio off, or a MIDI
+        out without 31-EDO picked): ~0.6 GB at 4 M notes stayed until the MIDI was closed. Made again when needed."""
+        if self.loaded is not None and not self.edo_loaded_wanted():
+            from notes.loaded import edo_forget
+            edo_forget(self.loaded)
+            if getattr(self, "ahead_play", None) is not None:
+                self.ahead_play._edo_part = None
+
     def edo_loaded_ticked(self):
         """The Loaded MIDI tick: heard from now on (playing: started again from where it is)."""
+        self.edo_loaded_tidy()
         self.schedule_autosave()
         if self.player.running:
             self.stop_play()

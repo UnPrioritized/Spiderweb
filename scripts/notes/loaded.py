@@ -656,9 +656,19 @@ def edo_notes(lm):
     tracks = [n for n in range(len(lm.tracks)) if n not in lm.gone]
     g = gather_box(lm, {"t0": 0, "t1": lm.last_tick + 1, "k0": 0, "k1": 255, "tracks": tracks})
     lane = g["lane"]
-    out = (g["trk"], g["s"], g["e"], lane & 255, lane >> 8, g["vel"])
+    # (small types: kept beside the rows, ~23 bytes a note instead of 48)
+    out = (g["trk"].astype(np.int32), g["s"].astype(np.int64), g["e"].astype(np.int64), (lane & 255).astype(np.uint8),
+           (lane >> 8).astype(np.uint8), g["vel"].astype(np.uint8))
+    del g, lane
     lm._edo_notes = (key, out)
     return out
+
+
+def edo_forget(lm):
+    """The 31-EDO copies of lm's notes let go (the Loaded MIDI tick / 31-EDO / Audio off: ~0.4 GB at 4 M notes)."""
+    for name in ("_edo_notes", "_edo_rows"):
+        if getattr(lm, name, None) is not None:
+            setattr(lm, name, None)
 
 
 def edo_left_out(lm):

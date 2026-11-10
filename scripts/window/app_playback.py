@@ -753,6 +753,7 @@ class Playback:
                 kestrel.let_go()  # (its soundfonts kept loaded: freed, user 2026-10-28)
         self.sync_builtin()
         self.edo_warn()
+        self.edo_loaded_tidy()
         if self.hz_window:
             self.hz_window.show_cc()  # (16 channels or plenty)
         self.schedule_autosave()

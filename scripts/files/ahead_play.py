@@ -334,6 +334,7 @@ class AheadPlay:
                 lm._ahead_carries = None
             self.maker.close()
         self.maker, self.key = None, None
+        self._edo_part = None  # (31-EDO's loaded part: made again when needed)
         try:  # (its grey goes at once: another MIDI out picked while making stopped left it, hunt 2026-11-03)
             self.draw_grey()
         except Exception:  # (closing: the window's gone)
@@ -473,6 +474,10 @@ class AheadPlay:
         lm = getattr(m.song, "lm", None) if m is not None else None
         if self.audio is None and lm is not None and lm is not self.app.loaded:
             m.set_song(None)
+        if self.audio is None and self._edo_part is not None and self.app.loaded is None:
+            self._edo_part = None  # (31-EDO's loaded part + the sound made with it: that MIDI's gone)
+            if m is not None:
+                m.set_song(None)
 
     def idle_wanted(self):
         """True while making ahead while stopped is on for this window (Rendered ahead picked, the tick on, not
