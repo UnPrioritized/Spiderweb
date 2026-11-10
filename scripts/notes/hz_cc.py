@@ -369,8 +369,8 @@ def cc_apart(rendered, per_shape, use10, ports=0):
     (and port, ports = the player's) nothing else plays on; none free = left shared. per_shape = {shape's number:
     slot_events of it alone}. Returns (rendered with the moved notes (a copy, only when some move), {slot:
     messages})."""
-    from notes.engine import auto_count, channels_of, ports_of  # (engine.py imports this file)
-    per = 16 if use10 else 15  # (slots a round of channels: engine.CHANNELS without channel 10)
+    from notes.engine import auto_count, channel_round, channels_of, ports_of  # (engine.py imports this file)
+    per = channel_round(use10)  # (slots a round of channels: engine.CHANNELS without channel 10)
 
     def place(slot):  # (a track added by hand: its own channel, port A)
         return int(ports_of(slot, use10, ports)) if ports else 0, int(channels_of(slot, use10))

@@ -22,6 +22,7 @@ What's new:
 
 • Play the loaded MIDI in 31-EDO (under Keys, with 256 keys and the 31-EDO + Audio ticks on): a loaded MIDI's notes play tuned like yours, every key up to 255, as one piano sound (its pitch bends, instruments and controls are left out; the status line counts them). See Help → 31-EDO.
 • Changed: 31-EDO plays its pitches like other 31-EDO players (the 31-EDO template): row 0 is now C-1, channels go in groups of three where the 2nd and 3rd channel play 2 and 4 octaves higher, and channel 10 plays drums. A setting in Settings → Sound plays channel 10 as piano instead.
+• 31-EDO: overlaps keep their pitch (under Multi channel, on by default): in 31-EDO, overlapping shapes only go on channels 1, 4, 7, 11 and 14, then on the next port's, so they don't jump octaves, here or in the saved MIDI.
 
 • Smaller and quicker: Spiderweb.exe is about 40 % smaller (about 70 MB instead of 116 MB), and its first start no longer waits while the speed-ups get ready. Opening, undo and redo, changing the gate and Stir on huge projects are up to 15 % faster. Running from the scripts gets the full speed with nothing extra to install.
 

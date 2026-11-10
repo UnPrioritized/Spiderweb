@@ -42,7 +42,7 @@ from notes.fx import (flip_shape, flipped as fx_flipped, glue_after, tidy_glue, 
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
                             turn_velocities, unflipped_starts, why_not as gate_why_not)
 from notes.glue import added as glue_added, glue_box, to_shares as glue_shares
-from notes import hz_cc
+from notes import engine, hz_cc
 from notes.hz_cc import cc_spans
 from notes.passengers import spans as passenger_spans
 from notes.hzbass import fit_length, has_cc, own_channels
@@ -972,6 +972,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
         self.edo31_audio = tk.BooleanVar(value=False)  # ... and played that way (Built-in BASSMIDI)
         self.edo31_loaded = tk.BooleanVar(value=False)  # ... a loaded MIDI too, forced (App.edo_loaded)
+        self.edo31_lanes = tk.BooleanVar(value=True)  # ... Multi channel only on each group's first channel (sync_edo_lanes)
         self.show_history = tk.BooleanVar(value=False)  # the History panel (off on a fresh start, like the velocity pane)
         self.show_velocity = tk.BooleanVar(value=False)  # off on a fresh start: turning it on shows its tip
         self.vel_tool = tk.StringVar(value="line")
@@ -1570,7 +1571,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # side_panel.fit_hint; the wrap given here only marks it as one)
         self.channels_short.config(wraplength=int(300 * self.scale))
         for var in (self.channel_mode, self.use_ch10, self.ch10_order, self.new_rounds, self.pad_rounds,
-                    self.keep_colours, self.channels_folded):
+                    self.keep_colours, self.channels_folded, self.edo31_lanes):
             var.trace_add("write", lambda *a: self.sync_channels_fold())
         self.mode_buttons = {}
         for value, text, tip in CHANNEL_CHOICES:
@@ -1582,6 +1583,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.single_split_tick = ttk.Checkbutton(ch, text=tr("app.single_split"), variable=self.single_split,
                                                  command=self.on_channel_mode)
         Tooltip(self.single_split_tick, tr("app.single_split_tip"))
+        # (user 2026-11-10: 31-EDO projects only, under Multi channel, greyed unless it's picked)
+        self.edo_lanes_tick = ttk.Checkbutton(ch, text=tr("app.edo31_lanes"), variable=self.edo31_lanes,
+                                              command=self.edo_lanes_ticked)
+        Tooltip(self.edo_lanes_tick, tr("app.edo31_lanes_tip"))
         # (user 2026-11-06: Multi channel's Remove overlaps; who wins + the way shown only once it's ticked)
         self.multi_rows = ttk.Frame(ch)
         self.multi_cut_tick = ttk.Checkbutton(self.multi_rows, text=tr("app.multi_cut"), variable=self.multi_cut,
@@ -2073,6 +2078,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         words = [tr("app.ch_short_" + mode)]
         if mode == "auto":
             words.append(tr("app.ch_short_" + SPLIT_CHOICES[max(self.split_box.current(), 0)][0]))
+            if self.edo_lanes_on():
+                words.append(tr("app.ch_short_edo_lanes"))
             if self.all16():
                 words.append(tr("app.ch_short_ch10"))
             if self.in_order():
@@ -2215,7 +2222,41 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.play_changed()
         self.edo_warn()
         self.edo_loaded_tidy()
+        self.sync_edo_lanes()
         self.roll.request_redraw()
+
+    def edo_lanes_on(self):
+        """True while Multi channel's tracks go only on the first channel of each 31-EDO group (1, 4, 7, 11, 14, then
+        the next port's): "Overlaps keep their pitch" (user 2026-11-10), a 31-EDO project with Multi channel."""
+        return self.edo() and self.channel_mode.get() == "auto" and self.edo31_lanes.get()
+
+    def sync_edo_lanes(self):
+        """The "Overlaps keep their pitch" tick: shown only in a 31-EDO project (Keys 256 + 31-EDO), under Multi
+        channel, greyed unless Multi channel is picked; engine.edo_lanes follows it (the export's channels / ports and
+        playback). A change while playing = played again from there (note-offs where their note-ons went)."""
+        tick = getattr(self, "edo_lanes_tick", None)
+        if tick is None:  # (before the side panel is made)
+            return
+        shown = self.edo()
+        if shown != bool(tick.winfo_manager()):
+            if shown:
+                tick.pack(anchor="w", padx=(18, 0), pady=(1, 0), after=self.mode_buttons["auto"])
+            else:
+                tick.pack_forget()
+        tick.state(["!disabled" if self.channel_mode.get() == "auto" else "disabled"])
+        on = self.edo_lanes_on()
+        if on == engine.edo_lanes:
+            return
+        engine.edo_lanes = on
+        if self.player.running:
+            self.stop_play()
+            self.start_play(keep=True)
+        elif getattr(self, "ahead_play", None) is not None:
+            self.play_changed()
+
+    def edo_lanes_ticked(self):
+        self.shapes_changed()  # (the track list's channels, the export; sync_edo_lanes from there)
+        self.schedule_autosave()
 
     def sync_edo_loaded(self):
         """The Loaded MIDI tick greyed until 31-EDO + Audio are ticked and a MIDI is loaded."""
@@ -2516,6 +2557,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.rounds_tick.pack_forget()
                 self.multi_rows.pack_forget()
         self.sync_overlap_rows()
+        self.sync_edo_lanes()
         if self.all16() != bool(self.order_tick.winfo_manager()):  # (only shown with Use channel 10, user)
             if self.all16():
                 self.order_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)

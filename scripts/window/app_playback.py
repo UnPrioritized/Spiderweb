@@ -14,7 +14,7 @@ from files import errors
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.ahead_play import FOLLOW_S
-from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, cc_list
+from files.playback import AHEAD, BUILTIN, EDO_LANE, KESTREL, MAESTRO, cc_list
 from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, RATE, Live, Synth, SynthError, silent_list
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
@@ -81,6 +81,12 @@ def scrub_note(out, ch, p, vel):
         out.note(0 if ch is None else -1 - ch, p, vel, rows=True)
     else:
         out.note(ch, p, vel)
+
+
+def edo_place(ch):
+    """A channel as right-drag listening tells 31-EDO rows apart: its place in its group (0-2: channels 1 and 4 sound
+    a row alike, so one key; "Overlaps keep their pitch" puts overlaps there), channel 10 as itself (drums)."""
+    return 9 if ch == 9 else int(EDO_LANE[ch & 15])
 
 
 def readable(n):
@@ -1683,7 +1689,7 @@ class Playback:
             if v <= -2:  # (a faint track's copy: -2 - its velocity)
                 v = -2 - v
             ch = slot_track_channel(slot, self.picture_use10)[1]
-            k = (-1 - ch if tuned else ch, p)
+            k = (-1 - edo_place(ch) if tuned else ch, p)
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
         held = self._scrub_held
@@ -1700,7 +1706,7 @@ class Playback:
             drums = out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
             edo = tuned and self.edo_loaded()  # own drum channel; other MIDI outs' channel 10 is drums already;
             for (ch, p), (s, v) in got.items():  # 31-EDO's Loaded MIDI tick: rows, like playback plays them)
-                k = (-1 - ch, p) if edo else (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
+                k = (-1 - edo_place(ch), p) if edo else (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
                 if k not in now:  # (sounding without a start in this sweep: held on as it is, a new key sounds)
                     now[k] = (held.get(k, -1) if s is None else -2 - s, v)
             if rough:  # (too many notes to read in time: every key drawn, one loudness; user 2026-10-25)

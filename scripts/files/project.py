@@ -43,6 +43,7 @@ from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text
+from notes import engine  # (engine.edo_lanes: 31-EDO "Overlaps keep their pitch")
 from files import clipboard, notes_clip
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                conductor_clip, dms_path, get_from_clipboard, put_on_clipboard, read_notes,
@@ -318,7 +319,7 @@ class ProjectFiles:
             **({"loaded": dict(link)} if link else {}),
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
-            "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()), "edo31_loaded": bool(self.edo31_loaded.get()),
+            "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()), "edo31_loaded": bool(self.edo31_loaded.get()), "edo31_lanes": bool(self.edo31_lanes.get()),
             # (overlap fixing, user 2026-11-06: only when on, so files without them stay as they were)
             **{k: True for k, v in (("single_split", self.single_split), ("multi_cut", self.multi_cut),
                                     ("multi_later", self.multi_later), ("multi_stretch", self.multi_stretch))
@@ -483,6 +484,7 @@ class ProjectFiles:
         self.edo31.set(data.get("edo31") is True)
         self.edo31_audio.set(data.get("edo31_audio") is True)
         self.edo31_loaded.set(data.get("edo31_loaded") is True)
+        self.edo31_lanes.set(data.get("edo31_lanes") is not False)  # (default on: files saved without it too)
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
         self.sync_channels_fold()
         if start in starts:
@@ -1588,7 +1590,7 @@ class ProjectFiles:
         if (out[:, 2] > 127).any():
             note += tr("project.it_has_keys_above_127_256")
         if slot_ports(auto_count(out[:, 4]), cc, self.picture_use10):  # (as write_midi decides)
-            note += tr("project.ports_midi")
+            note += tr("project.ports_midi_edo" if engine.edo_lanes else "project.ports_midi")
         mixed = self.track_list.mixed_note()  # (tracks holding several channels: no longer one each, PLAN #11 E1)
         note += mixed + self.tempo_notes(plan) + self.cc_note(cc, True)
         messagebox.showinfo(tr("project.spiderweb"),
@@ -1845,7 +1847,7 @@ class ProjectFiles:
                 + (tr("project.dms_keys_256") if mod else
                    trn("project.notes_above_key_127_left_out", high, high=high) if high else "")
                 + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else "")
-                + (tr("project.ports_dms") if ports else "") + self.track_list.mixed_note(domino=True)
+                + (tr("project.ports_dms_edo" if engine.edo_lanes else "project.ports_dms") if ports else "") + self.track_list.mixed_note(domino=True)
                 + self.loaded_left_out())
         slow = tempo_items(tempo)[1] if tempo else 0
         warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "") + self.cc_note(cc)

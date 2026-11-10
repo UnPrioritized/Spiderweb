@@ -96,6 +96,16 @@ SHAPE_DEFAULTS = {"vel0": 127, "vel1": 127, "end_dot": False}
 # slot 0 = track 1 channel 1, slot 9 = track 10 channel 11, slot 15 = track 16 channel 1 again, ...
 CHANNELS = [c for c in range(16) if c != 9]
 LAST10 = np.array(CHANNELS + [9], np.int64)  # ("Use channel 10": the shapes' 16 channels in order, render)
+# 31-EDO "Overlaps keep their pitch" (user 2026-11-10; App.sync_edo_lanes sets edo_lanes): Multi channel's slots go
+# only on the first channel of each 31-EDO group (1, 4, 7, 11, 14: the others play 2 / 4 octaves up, playback.EDO_LANE),
+# then the next port's same five. Only the slot -> channel / port mapping changes; slots, colours, tracks stay.
+EDO_SAFE = np.array([0, 3, 6, 10, 13], np.int64)
+edo_lanes = False
+
+
+def channel_round(use10=False):
+    """Slots in one round of channels (then the next track / port): 15, 16 with channel 10, 5 with edo_lanes."""
+    return len(EDO_SAFE) if edo_lanes else 16 if use10 else len(CHANNELS)
 CLASH = 1 << 16  # a track number this or past it: a Hz bass layer's note clashing with another layer's (layered_notes):
 #                  its track // CLASH = how many channels past the shape's own (in every Channels mode)
 OWN0 = 1 << 32  # a slot this or past it: a track added by hand (files/own_tracks.py), OWN0 + its id * 16 + its
@@ -3160,13 +3170,18 @@ def slot_track_channel(slot, use10=False):
     (OWN0): its own channel."""
     if slot >= OWN0:
         return slot, slot & 15
+    if edo_lanes:
+        return slot, int(EDO_SAFE[slot % len(EDO_SAFE)])
     return slot, slot % 16 if use10 else CHANNELS[slot % len(CHANNELS)]
 
 
 def channels_of(slots, use10=False):
     """slot_track_channel's channels of many slots at once."""
     slots = np.asarray(slots, np.int64)
-    ch = slots % 16 if use10 else np.asarray(CHANNELS, np.int64)[slots % len(CHANNELS)]
+    if edo_lanes:
+        ch = EDO_SAFE[slots % len(EDO_SAFE)]
+    else:
+        ch = slots % 16 if use10 else np.asarray(CHANNELS, np.int64)[slots % len(CHANNELS)]
     hand = slots >= OWN0
     return np.where(hand, slots & 15, ch) if hand.any() else ch
 
@@ -3174,7 +3189,7 @@ def channels_of(slots, use10=False):
 def ports_of(slots, use10, ports):
     """slot_port's ports of many slots at once, going round ports (a player's)."""
     slots = np.asarray(slots, np.int64)
-    return np.where(slots >= OWN0, 0, slots // (16 if use10 else len(CHANNELS)) % ports)
+    return np.where(slots >= OWN0, 0, slots // channel_round(use10) % ports)
 
 
 PORTS = 16  # MIDI ports players tell apart (measured: port 16 = port 0)
@@ -3186,11 +3201,14 @@ def slot_port(slot, use10=False):
     (user 2026-10-26)."""
     if slot >= OWN0:
         return 0
-    return slot //(16 if use10 else len(CHANNELS)) % PORTS
+    return slot // channel_round(use10) % PORTS
 
 
 def slot_ports(slots, cc, use10=False):
     """True when the tracks get ports (MIDI export, .dms): only with CC lines going out (a Hz bass's: hz_cc) and
     more slots than one round of channels, so a CC can't reach another slot's notes on the same channel number (user
-    2026-10-21, picked over sharing channels); without CC lines files stay as they always were."""
+    2026-10-21, picked over sharing channels); without CC lines files stay as they always were. edo_lanes: whenever
+    there are more than 5 slots (overlapping notes on one key and channel would cut each other)."""
+    if edo_lanes:
+        return slots > len(EDO_SAFE)
     return bool(cc) and slots > (16 if use10 else len(CHANNELS))
