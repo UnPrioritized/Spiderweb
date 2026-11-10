@@ -1109,7 +1109,7 @@ def warped(notes, at, low, now, rc, which, pals, pick, box, own):
     shown = lq.shown_places(notes, at, rc)
     f = full(wp)
     w = lq._where(shown, rc, box, own, {"strength": 100.0, "on": True, "edge": f["edge"],
-                                       "soft": f["edges"] == "smooth"})
+                                       "soft": f["edges"] == "smooth"}, now)
     w["exact"] = solver(wp)  # (each note's exact fetch, not the map's blend: exact_offsets)
     idx = np.flatnonzero(lq.touched(a, w["x"], w["y"]))
     if not len(idx):

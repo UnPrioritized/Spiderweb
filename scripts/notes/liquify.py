@@ -266,19 +266,22 @@ def touched(a, x, y):
     return cell[j, i]
 
 
-def _where(at, rc, box, own, lq=None):
+def _where(at, rc, box, own, lq=None, colours=None):
     """liquify_from's first half: rc's Liquify settings (filled in; lq: these instead, the Warp's) and each note's
-    place (x, y) in the colour box, with what the edge rule needs later."""
-    from notes.recolour import rows_of, unit_xy
+    place (x, y) in the colour box, with what the edge rule needs later. colours: each note's colour now (Repeat
+    the colours finds the rows' repeats in them)."""
+    from notes.recolour import WRAPS, rows_of, unit_xy
     lq = lq or full(clean_liquify(rc.get("liquify")) or {})
     s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
     mid = (s + e) / 2
     # ("soft": the Warp's Edges: Smooth (found): its lq says so, or rc "_soft" (a Warp drag's Live, roll_liquify))
-    w = {"lq": lq, "edge": lq["edge"], "rows": None, "t0": 0.0, "t1": 0.0,
+    w = {"lq": lq, "edge": lq["edge"], "rows": None, "t0": 0.0, "t1": 0.0, "rep": None,
          "soft": bool(lq.get("soft") or rc.get("_soft"))}
-    if w["edge"] in ("wrap", "bend"):
+    if w["edge"] in WRAPS or w["edge"] == "bend":
         w["rows"] = rows_of(at, 0.0)
         w["t0"], w["t1"] = float(at[:, 0].min()), float(at[:, 1].max())
+        if w["edge"] == "repeat" and colours is not None and len(at):
+            w["rep"] = w["rows"].repeat_of(at, colours)
     if w["edge"] == "bend":
         mid = w["rows"].stretched(mid, k, w["t0"], w["t1"])
     w["x"], w["y"] = unit_xy(mid, k, rc, box, own)
@@ -313,9 +316,9 @@ def _arrows(w, at, idx, x, y, rc, box, own):
 
 def _placed(w, x, y, rc, box, own):
     """(middle in ticks, key) of the spots (x, y) of the colour box a map fetches from, after the edge choices."""
-    from notes.recolour import from_unit
+    from notes.recolour import WRAPS, from_unit
     edge = w["edge"]
-    if edge == "wrap":  # (left as it is: Rows.wrapped brings it back by the notes' own repeat, user 2026-11-10)
+    if edge in WRAPS:  # (left as it is: Rows.wrapped brings it back by the notes' own repeat, user 2026-11-10)
         pass
     elif edge != "escape":
         out = lambda v: (v < -1e-9) | (v > 1 + 1e-9)  # noqa: E731 (a hair past the edge stays on it)
@@ -324,8 +327,8 @@ def _placed(w, x, y, rc, box, own):
     else:
         x, y = np.clip(x, 0, 1), np.clip(y, 0, 1)
     mid, key = from_unit(np.asarray(x, np.float64), np.asarray(y, np.float64), rc, box, own)
-    if edge == "wrap":
-        mid, key = w["rows"].wrapped(mid, key)
+    if edge in WRAPS:
+        mid, key = w["rows"].wrapped(mid, key, w.get("rep"))
     elif edge == "bend":
         mid = w["rows"].unstretched(mid, key, w["t0"], w["t1"])
     return mid, key
@@ -387,14 +390,18 @@ def _place_numbers(w, rc, box, own):
     turned = bool(f and f[1])
     t0, t1, k0, k1 = own if turned else box
     (a0, a1), (b0, b1) = whole_shares(rc) if turned else ((0.0, 1.0), (0.0, 1.0))
-    fp = np.array([{"escape": 0, "wrap": 2}.get(edge, 1), turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f[1] if turned else 1,
-                   f[2] if turned else 1, t0, max(t1 - t0, 1.0), k0, k1 - k0, k1 > k0], np.float64)
-    if edge == "wrap":
+    fp = np.array([{"escape": 0, "wrap": 2, "repeat": 2}.get(edge, 1), turned, a0, a1 - a0, b0, b1 - b0, b1 > b0,
+                   f[1] if turned else 1, f[2] if turned else 1, t0, max(t1 - t0, 1.0), k0, k1 - k0, k1 > k0],
+                  np.float64)
+    if edge in ("wrap", "repeat"):  # (Repeat the colours: repeat_of's ends + the key height after them)
         rows = w["rows"]
         if not len(rows.keys):
             return None
+        rep = w.get("rep")
+        aw, bw = (rows.a, rows.bw) if rep is None else rep[:2]
         fp = np.concatenate([fp, [1.0, float(len(rows.keys))], np.asarray(rows.keys, np.float64),
-                             np.asarray(rows.a, np.float64), np.asarray(rows.bw, np.float64)])
+                             np.asarray(aw, np.float64), np.asarray(bw, np.float64)]
+                            + ([[rep[2]]] if rep is not None and rep[2] is not None else []))
     return fp
 
 
@@ -611,12 +618,12 @@ def _covered(at, kept, mid, key, vt, vk, nt, nk, now):
     return got[np.arange(n), first[np.arange(n), best]]
 
 
-def liquify_from(at, rc, box, own):
+def liquify_from(at, rc, box, own, colours=None):
     """(the notes moved (their places in at), middle in ticks, key) each one's colour comes from under rc's Liquify
     (stir_from's way: the edge choices alike). Notes where nothing was pushed are left out."""
     lq = full(clean_liquify(rc.get("liquify")))
     a = map_of(lq)
-    w = _where(at, rc, box, own)
+    w = _where(at, rc, box, own, colours=colours)
     idx = np.flatnonzero(touched(a, w["x"], w["y"]))
     mid, key = _fetched(w, a, w["x"][idx], w["y"][idx], rc, box, own)
     return idx, mid, key
@@ -679,7 +686,7 @@ def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
         if got is not None:
             return got
     shown = shown_places(notes, at, rc)
-    idx, mid, key = liquify_from(shown, rc, box, own)
+    idx, mid, key = liquify_from(shown, rc, box, own, now)
     if not len(idx):
         return now
     # (own=False: the spots are only some notes'; a spot that didn't move finds its own note anyway, the nearest)
@@ -749,7 +756,7 @@ class Live:
         p = {}
         groups_at, at = at, shown_places(notes, at, rc)  # (groups by the places, the map by where notes show)
         p["at"] = at
-        p["w"] = _where(at, rc, box, own)
+        p["w"] = _where(at, rc, box, own, colours=now)
         lq = p["w"]["lq"]
         p["off"] = lq.get("on") is False or not lq.get("strength") or not len(at)
         # (made once, every piece side by side in memory: nearest's compiled search took a copy of a key column

@@ -36,7 +36,7 @@ Rate: how fast a held brush keeps working. Twirl, Pinch, Restore, Smooth and Fre
 
 Smoothing: the brush trails behind the mouse on a string, so shaky hand movements come out as smooth strokes. The higher, the longer the string (a line from the brush to the mouse shows it). When the mouse rests, the brush catches up with it.
 
-At the edges: what is pulled in where the brush pushes colours past the shape's edge, as in Stir: Escape, Wrap around, Bend or Cut.
+At the edges: what is pulled in where the brush pushes colours past the shape's edge, as in Stir: Escape, Wrap around, Repeat the colours (a colour cycle carries on past the edge with no seam), Bend or Cut.
 
 ## Straight strokes
 

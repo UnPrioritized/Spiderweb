@@ -700,7 +700,8 @@ fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
         let nr = fp[15] as usize;
         let keys = &fp[16..16 + nr];
         let base = keys[0] - 0.5;
-        let h = (keys[nr - 1] - keys[0]) + 1.0;
+        // (Repeat the colours: its key height after the rows' numbers)
+        let h = if fp.len() > 16 + 3 * nr { fp[16 + 3 * nr] } else { (keys[nr - 1] - keys[0]) + 1.0 };
         if k < base || k >= base + h {
             k = base + npmod(k - base, h);
         }

@@ -31,7 +31,7 @@ from files.about import HERE
 from files.native_wraps import NEEDS, Wraps
 from files.system import MAC, WINDOWS, WINE
 
-ABI = 6  # (the library's sw_abi(): another one = not used)
+ABI = 7  # (the library's sw_abi(): another one = not used)
 # The library's element kinds (lib.rs K_*, the same order): (NumPy kind letter, bytes, the dtype copies are made in)
 KIND_TYPES = [("i", 8, np.int64), ("f", 8, np.float64), ("u", 1, np.uint8), ("i", 1, np.int8), ("i", 2, np.int16),
               ("u", 2, np.uint16), ("i", 4, np.int32), ("u", 4, np.uint32), ("u", 8, np.uint64), ("f", 4, np.float32),

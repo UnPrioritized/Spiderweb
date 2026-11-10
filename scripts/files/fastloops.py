@@ -1029,7 +1029,7 @@ def _unit_back(x, y, fp):
     round then clipped; Wrap around: neither, the rows below bring it back): (middle in ticks, key). fp = [edge (0
     escape, 1 tiled, 2 Wrap around), turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f1, f2, t0, width, k0, height,
     k1 > k0] (+ Wrap around: 1, rows R, the R rows' keys, first starts, repeat ends = recolour.Rows.wrapped after
-    it: key_wrapped's, then _wrap_one's sums)."""
+    it: key_wrapped's, then _wrap_one's sums; + Repeat the colours' key height after them when it has one)."""
     if fp[0] != 2.0:
         if fp[0] != 0.0:
             if x < -1e-9 or x > 1 + 1e-9:
@@ -1046,6 +1046,8 @@ def _unit_back(x, y, fp):
         nr = np.int64(fp[15])
         base = fp[16] - 0.5
         h = (fp[16 + nr - 1] - fp[16]) + 1.0
+        if len(fp) > 16 + 3 * nr:
+            h = fp[16 + 3 * nr]
         if k < base or k >= base + h:
             k = base + np.mod(k - base, h)
         q = np.rint(k)
