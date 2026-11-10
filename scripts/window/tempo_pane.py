@@ -47,7 +47,7 @@ from window.notes_wait import stale_ok
 from window.canvas_keep import KeepsItems
 from window.conductor_marks import ROW, ConductorMarks
 from window.melody_window import open_melody
-from window.widgets import Scrub, ShortLabel, Tooltip, unit_word
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, ShortLabel, Tooltip, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
 NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
@@ -3003,6 +3003,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             box.bind("<KP_Enter>", lambda e: self.close_typing(True))
             box.bind("<Escape>", lambda e: self.close_typing(False))
             box.bind("<FocusOut>", lambda e: self.after_idle(self.typing_left))
+            for k in UNDO_KEYS:  # (the box's own: the main undo took back a step out of sight, user 2026-11-10)
+                box.bind(k, lambda e, b=box: (self.typing_undo(b), "break")[1])
+            for k in REDO_KEYS:
+                box.bind(k, lambda e, b=box: (self.typing_redo(b), "break")[1])
         for box, other in zip(boxes, boxes[::-1]):  # (Tab / Shift+Tab only go round the two rows)
             for key in ("<Tab>", "<Shift-Tab>", "<ISO_Left_Tab>"):
                 box.bind(key, lambda e, o=other: (o.focus_set(), o.select_range(0, "end"), "break")[-1])
@@ -3015,6 +3019,39 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         boxes[0].select_range(0, "end")
         boxes[0].focus_set()
         self._typing = (frame, var, item, place, place.get())
+        self._typing_rows = (boxes, (var.get(), place.get()), None)  # (rows, as opened, what Ctrl+Z took back)
+
+    def typing_undo(self, box):
+        """Ctrl+Z in the double-click box (user 2026-11-10): typed rows back to how they opened (box stays, nothing
+        saved; the changed row selected, the one typed in when both); nothing typed = closed like Esc."""
+        boxes, opened, _ = self._typing_rows
+        now = tuple(b.get() for b in boxes)
+        if now == opened:
+            return self.close_typing(False)
+        for b, text in zip(boxes, opened):
+            b.delete(0, "end")
+            b.insert(0, text)
+        self._typing_rows = (boxes, opened, now)
+        self.typing_pick(box, [i for i in range(2) if now[i] != opened[i]])
+
+    def typing_redo(self, box):
+        """Ctrl+Y in the double-click box: what Ctrl+Z took back, while nothing was typed since."""
+        boxes, opened, undone = self._typing_rows
+        if undone is None or tuple(b.get() for b in boxes) != opened:
+            return
+        for b, text in zip(boxes, undone):
+            b.delete(0, "end")
+            b.insert(0, text)
+        self._typing_rows = (boxes, opened, None)
+        self.typing_pick(box, [i for i in range(2) if undone[i] != opened[i]])
+
+    def typing_pick(self, box, changed):
+        """The row that changed gets the keyboard, its text selected (the one typed in when both changed)."""
+        boxes = self._typing_rows[0]
+        b = box if len(changed) != 1 else boxes[changed[0]]
+        b.focus_set()
+        b.select_range(0, "end")
+        b.icursor("end")
 
     def place_text(self, b):
         """A beat as bar:beat:tick, "5:3:240" (bars and beats from 1, ticks from 0; the time signature's beats)."""
