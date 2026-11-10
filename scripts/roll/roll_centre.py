@@ -10,8 +10,9 @@ import math
 import numpy as np
 
 from files.lang import tr
-from notes.engine import free_box
-from notes.recolour import (DRAWN, KEEP, LEAST_REACH, SPOT_LEAST, SPOT_MOST, LEAST_STRETCH, MOST_REACH, MOST_SKEW, MOST_STRETCH, area_corners,
+from notes.engine import free_box, pages_coloured
+from notes.fx import pages
+from notes.recolour import (DRAWN, KEEP, PAGE, pages_before, LEAST_REACH, SPOT_LEAST, SPOT_MOST, LEAST_STRETCH, MOST_REACH, MOST_SKEW, MOST_STRETCH, area_corners,
                             area_dist, area_from_box, area_global, area_local, area_outlines, area_scales, centre_at,
                             fit_reach, most_reach,
                             centre_spot, clean_recolour, drawn_gauge, without_recolour)
@@ -70,6 +71,15 @@ class CentreDots:
         (no notes)."""
         app = self.app
         plain = without_recolour(sh)
+        rc = clean_recolour(sh.get("recolour"))
+        if rc and PAGE in (rc.get("order") or ()):  # (a step before a note tool page works on the notes before it:
+            # the dot / grid / brush on those, stage F)
+            n_pages = len(pages(sh.get("fx")))
+            w = app.stir_window
+            j = pages_before(rc, n_pages, "mode" if kind == "clumps" else kind,
+                             w.tab if kind == "stir" and w else 0)
+            if j < n_pages:
+                plain = pages_coloured(plain, {}, j)
         notes, _ = app.notes_tracks(plain)
         if not len(notes):
             return None

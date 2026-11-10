@@ -116,7 +116,7 @@ class RecolourPanel:
                 if j is not None:
                     rc = clean_recolour(self.shapes[i]["recolour"])
                     o = order_of(rc)
-                    got = [(k, o[:p].count(k), rc) for p, k in enumerate(o) if p > j]
+                    got = [(k, o[:p].count(k), rc, self.shapes[i]) for p, k in enumerate(o) if p > j]
                     if len(got) > len(most):
                         most = got
         return most

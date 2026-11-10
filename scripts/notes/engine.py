@@ -37,7 +37,7 @@ from notes.ripples import clean_ripples, free_span, grows_free
 from notes.chop import apply_chop
 from notes.claw import apply_claw
 from notes.copypath import apply_path
-from notes.fx import (at_step, clean_fx, flip_shape, glue_from, groups, idle, mirrored, notes_box, pages, reverse_velocity, swapped, toggled,
+from notes.fx import (at_step, clean_fx, flip_shape, glue_from, groups, idle, is_page, mirrored, notes_box, pages, reverse_velocity, swapped, toggled,
                       turn_notes, turn_pts, turn_shape, velocities)
 from notes.gaterange import clean_range
 from notes.gateflip import is_flipped as is_gate_flipped, is_pasted_flipped, mirrored_runs, unflipped_starts
@@ -46,7 +46,8 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
-from notes.recolour import KEEP, box_of, clean_recolour, is_recoloured, recoloured, rule_of, without_recolour
+from notes.recolour import (KEEP, PAGE, box_of, clean_recolour, is_recoloured, page_split, recoloured, rule_of,
+                            without_recolour)
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.extend import clean_extend, extended, is_extended
 from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained
@@ -1273,6 +1274,50 @@ def heard_kind(sh, ppq, keys):
     return moved_rows(n, None, T0, K0, 4), tr.astype(np.int64)
 
 
+def colour_split(sh):
+    """recolour.page_split for shape sh (a Recolour on): its colour steps that run before one of its note tool pages,
+    or None (all after them: no "page" in its saved order, or every page entry first)."""
+    r = sh["recolour"]
+    o = r.get("order") if isinstance(r, dict) else None
+    if not isinstance(o, list) or PAGE not in o:
+        return None
+    n = len(pages(sh.get("fx")))
+    rc = clean_recolour(r) if n else None
+    if rc is None:
+        return None
+    return page_split(dict(rc, **{k: r[k] for k in ("_upto", "most") if k in r}), n)
+
+
+def pages_coloured(sh, inner, keep):
+    """sh (without its Recolour) with a {"tool": "colours", "rc": ...} step in front of each page j of inner (the
+    colour steps running right before it: fx_notes / colour_step) and only its first keep pages (the ones after the
+    colour step being edited skipped, with the steps after them)."""
+    out, j = [], 0
+    for st in sh.get("fx") or ():
+        if is_page(st):
+            if j >= keep:
+                break
+            if j in inner:
+                out.append({"tool": "colours", "rc": inner[j]})
+            j += 1
+        out.append(st)
+    sh = {k: v for k, v in sh.items() if k != "fx"}
+    if out:
+        sh["fx"] = out
+    return sh
+
+
+def colour_step(notes, tracks, rc, ppq):
+    """The notes after a "colours" step (pages_coloured): their colours only, as Recolour rc makes them (the notes as
+    they are then, never settled: the page after it gets the very same notes, only coloured)."""
+    rule = rule_of(rc)
+    if rule is None or not len(notes):
+        return notes, tracks
+    if rule.get("stir"):
+        rule["ppq"] = ppq
+    return recoloured(notes, tracks, rule, True, False, None)
+
+
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)
 _warming = threading.local()
 
@@ -1283,9 +1328,8 @@ def fx_notes(sh, ppq, keys, get):
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     sh = made_from(sh)  # (a Hz bass's CC lines make no notes: never from them, whoever asks)
     if "recolour" in sh:  # (colours only, on the notes as they come out at the very end: recolour.py)
-        notes, tracks = get(without_recolour(sh))
         if not is_recoloured(sh):
-            return notes, tracks
+            return get(without_recolour(sh))
         # (held: overlaps kept, not settled; a Domino paste keeps its own overlaps too, as with Recolour off
         # (Multi channel, user 2026-10-30; Single channel cuts them on its track afterwards anyway)
         held_ = is_sustained(sh) or sh.get("held") is True or keeps_laps(sh)
@@ -1293,14 +1337,26 @@ def fx_notes(sh, ppq, keys, get):
         rule = rule_of(sh["recolour"])
         if rule.get("stir"):  # (a stir round as seen counts beats: recolour.area_scales)
             rule["ppq"] = ppq
+        split = colour_split(sh)  # (colour steps before a note tool page, PLAN.md stage F; None = all after them)
         # (Stir, and Per chord / run (a run cut in two got a new first note, hunt 11-07): a piece looks its colours up
         # in the whole)
         if ((rule.get("stir") or rule.get("liquify") or rule.get("warp") or rule.get("by") and rule["mode"] != KEEP)
                 and (sh.get("cut") or sh.get("colour_cut"))
                 and not (rule.get("frame") or (1, 0))[1]):  # (turned: notes made anew)
+            notes, tracks = get(without_recolour(sh))
             got = stirred_piece(sh, notes, tracks, held_, get, gate, rule)
             if got is not None:
                 return got
+        if split is None:
+            notes, tracks = get(without_recolour(sh))
+        else:  # (each part of the colour steps in front of its page; the rest at the end as always)
+            inner, final, keep = split
+            notes, tracks = get(pages_coloured(without_recolour(sh), inner, keep))
+            if final is None:
+                return notes, tracks
+            rule = rule_of(final)
+            if rule.get("stir"):
+                rule["ppq"] = ppq
         return recoloured(notes, tracks, rule, held_, gate, free_box(sh, notes, get, keys))
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
@@ -1376,6 +1432,8 @@ def fx_notes(sh, ppq, keys, get):
         if last["tool"] == "glue":
             g = glue_level(sh)
             return with_glue(notes, tracks, dict(g, glue=at_step(g.get("glue"), last)), ppq)
+        if last["tool"] == "colours":  # (colour steps in front of a page: pages_coloured)
+            return colour_step(notes, tracks, last["rc"], ppq)
         return fx_step(notes, tracks, last, sh, ppq, keys)
     if sh.get("_m"):
         if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)

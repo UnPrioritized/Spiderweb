@@ -13,10 +13,16 @@ from window.widgets import Tooltip
 MOST_NAMES_CHARS = 60  # (the names cut with "…" past this many letters)
 
 
-def step_name(rc, kind, n=0):
+def step_name(rc, kind, n=0, sh=None):
     """The name of colour step kind ("mode", "stir", "warp", "liquify", "turned"; n = the n-th of its kind) of
     Recolour rc: "Shuffle" / "Split: Scattered" / "Split: Clumps", "Stir 2", "Warp", "Liquify", "Reverse track
-    order"."""
+    order"; "page" = shape sh's n-th note tool page as its tab shows it ("Claw 2": numbered among all its pages)."""
+    if kind == "page":
+        from notes.fx import pages
+        ps = pages(sh.get("fx")) if sh is not None else []
+        if n >= len(ps):
+            return tr("order.page")
+        return tr(f"{ps[n]['tool']}.tab", n=n + 1) + (tr("tool_window.off_mark") if ps[n].get("off") else "")
     if kind == "mode":
         return tr("recolour." + (rc or {}).get("mode", "shuffle"))
     if kind == "stir":
@@ -57,7 +63,7 @@ class EditLine(ttk.Frame):
         steps = self.app.edit_hidden_steps(self.kind)
         text = ""
         if steps:
-            text = tr("edit.hidden", names=names_line([step_name(rc, k, n) for k, n, rc in steps]))
+            text = tr("edit.hidden", names=names_line([step_name(rc, k, n, sh) for k, n, rc, sh in steps]))
         self.shown = len(steps)
         if text == self.text:
             return

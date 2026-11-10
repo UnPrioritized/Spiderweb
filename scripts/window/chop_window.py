@@ -14,12 +14,12 @@ from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAPS, snap_beats, snap_text
-from notes.fx import before_page
+from notes.fx import before_page, pages
 from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
                         too_many, top)
 from window import look
 from window.snap_picker import SnapPicker
-from window.tool_window import ORANGE, ToolWindow
+from window.tool_window import ORANGE, ToolWindow, page_place_added
 from window.widgets import Scrub, Tooltip, bad, good
 
 RHYTHMS_FILE = os.path.join(USER, "rhythms.json")
@@ -534,6 +534,7 @@ def quick_chop(app):
     app.push_undo(name=tr("chop.quick_step"))
     for i in app.note_tool_sels():
         sh = app.shapes[i]
+        page_place_added(sh, len(pages(sh.get("fx"))))  # (after the colour effects there now: order added)
         sh["fx"] = (sh.get("fx") or []) + [{"tool": "chop", "cfg": dict(chop)}]
     app.shapes_changed()
     app.status.config(text=tr("chop.quick_done", snap=snap_text(snap)))

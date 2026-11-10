@@ -260,7 +260,7 @@ def clean_recolour(r):
     o = r.get("order")
     if o is not None:
         o = order_of(dict(out, order=o))
-        if o != default_order(out):
+        if not is_default_order(o, out):
             out["order"] = o
     return out
 
@@ -270,7 +270,14 @@ def clean_recolour(r):
 # "warp", "liquify", "turned" (Reverse track order). Saved only when it differs from default_order (today's fixed
 # order: old files and tests stay the same); new steps go at the END (= order added, ordered). Stage F adds "page"
 # entries (note tool pages) the same way. Stage A only keeps it: nothing runs by it yet.
+# PAGES (stage F, user 2026-11-10): "page" = the n-th note tool page of the shape (sh["fx"]'s Claw / Strum / Chop /
+# Trim / Copy along a path pages, in their tab order): the colour steps before it run on the notes before that page
+# (engine.fx_notes: a "colours" step put in front of it), its copies keep the colours they had (a painted stamp). A
+# shape's pages missing from the order sit after its last "page" entry, or first when it has none (old files and
+# every shape before stage F: every page before Recolour). Pages only ever keep their tab order among themselves.
 ORDER_KINDS = ("mode", "stir", "warp", "liquify", "turned")
+PAGE = "page"
+MOST_PAGES = 2000  # (fx.MAX_STEPS)
 MOST_TURNS = 20  # (Reverse steps a shape may hold, like MOST_STIRS)
 
 
@@ -316,18 +323,31 @@ def default_order(rc):
 def order_of(rc, base=None):
     """rc's colour steps in the order they run: its saved "order" (or base, or default_order without one), each
     step only as often as rc holds it (gone ones dropped from the end of their kind), missing ones added at the end
-    in default order."""
+    in default order. "page" entries (stage F) are kept as they are."""
     rc = rc or {}
     o = base if base is not None else rc.get("order")
     if not isinstance(o, list):
         return default_order(rc)
     n, out = order_counts(rc), []
     seen = dict.fromkeys(ORDER_KINDS, 0)
+    pages_ = 0
     for k in o:
-        if isinstance(k, str) and k in n and seen[k] < n[k]:
+        if k == PAGE and pages_ < MOST_PAGES:
+            pages_ += 1
+            out.append(k)
+        elif isinstance(k, str) and k in n and seen[k] < n[k]:
             seen[k] += 1
             out.append(k)
     return out + [k for k in ORDER_KINDS for _ in range(n[k] - seen[k])]
+
+
+def is_default_order(o, rc):
+    """Is order o (order_of's form) rc's default: every "page" entry first (= no entry: pages before Recolour), then
+    default_order?"""
+    p = 0
+    while p < len(o) and o[p] == PAGE:
+        p += 1
+    return o[p:] == default_order(rc)
 
 
 def with_order(rc, o):
@@ -336,9 +356,132 @@ def with_order(rc, o):
         return None
     out = {k: v for k, v in rc.items() if k != "order"}
     o = order_of(out, o)
-    if o != default_order(out):
+    if not is_default_order(o, out):
         out["order"] = o
     return out
+
+
+def full_order(rc, n_pages):
+    """rc's order (clean or None) as it runs on a shape with n_pages note tool pages: exactly n_pages "page"
+    entries, the ones missing put after its last "page" entry (first without any), extra ones dropped from the end.
+    (the order, for each place its place in order_of(rc) or None: a page put in)."""
+    o = order_of(rc) if rc else []
+    have = o.count(PAGE)
+    places = list(range(len(o)))
+    if have > n_pages:  # (extra entries: the last ones dropped)
+        drop, k = have - n_pages, len(o)
+        while drop:
+            k -= 1
+            if o[k] == PAGE:
+                del o[k]
+                del places[k]
+                drop -= 1
+    elif have < n_pages:
+        at = (max(i for i, k in enumerate(o) if k == PAGE) + 1) if have else 0
+        o[at:at] = [PAGE] * (n_pages - have)
+        places[at:at] = [None] * (n_pages - have)
+    return o, places
+
+
+def page_added(rc, n_pages):
+    """rc (clean or None) after a note tool page was added after the shape's n_pages pages: its place at the END of
+    the order (order added, user 2026-11-10: a page added after a colour effect goes after it)."""
+    if not rc:
+        return rc
+    o, _ = full_order(rc, n_pages)
+    return with_order(rc, o + [PAGE])
+
+
+def page_removed(rc, j, n_pages):
+    """rc (clean or None) after the shape's page j (of its n_pages) was taken away: that page's place goes."""
+    if not rc:
+        return rc
+    o, _ = full_order(rc, n_pages)
+    seen = -1
+    for k in range(len(o)):
+        if o[k] == PAGE:
+            seen += 1
+            if seen == j:
+                return with_order(rc, o[:k] + o[k + 1:])
+    return rc
+
+
+def shape_order(sh):
+    """Shape sh's whole order: its colour steps and note tool pages (order_of + full_order)."""
+    from notes.fx import pages
+    return full_order(clean_recolour(sh.get("recolour")), len(pages(sh.get("fx"))))[0]
+
+
+def pages_before(rc, n_pages, kind, n=0):
+    """How many of the shape's n_pages note tool pages run before rc's n-th step of kind (one it doesn't have yet:
+    all of them, a new step goes at the end)."""
+    o, _ = full_order(rc, n_pages)
+    seen, p = -1, 0
+    for k in o:
+        if k == PAGE:
+            p += 1
+        elif k == kind:
+            seen += 1
+            if seen == n:
+                return p
+    return n_pages
+
+
+def tags_of(o):
+    """An order's steps as (kind, n): the n-th step of its kind."""
+    return [(k, o[:p].count(k)) for p, k in enumerate(o)]
+
+
+def inner_steps(rc, n_pages):
+    """Does a colour step of rc (with _upto: of the ones running now) run before one of the shape's n_pages pages?"""
+    if not rc or not n_pages:
+        return False
+    return page_split(rc, n_pages) is not None
+
+
+def page_split(r, n_pages):
+    """Saved Recolour r (clean, "_upto" too) on a shape with n_pages pages, when some colour step runs before a page
+    or the step being edited hides pages after it: ({page j: the clean Recolour of the steps right before page j},
+    the clean Recolour of the steps after every page or None, how many pages run: the ones after the edited step are
+    skipped too). None: every colour step after the pages (recoloured as before stage F)."""
+    if not r or not n_pages:
+        return None
+    o, places = full_order(r, n_pages)
+    u = r.get("_upto")
+    if isinstance(u, int) and not isinstance(u, bool) and u in places:
+        cut = places.index(u) + 1
+        o, places = o[:cut], places[:cut]
+    keep = o.count(PAGE)
+    tags = tags_of(o)
+    before, seg, j = {}, [], 0
+    for kind, n in tags:
+        if kind == PAGE:
+            if seg:
+                before[j] = seg
+            seg = []
+            j += 1
+        else:
+            seg.append((kind, n))
+    if not before and keep == n_pages:
+        return None
+    base = {k: v for k, v in r.items() if k != "_upto"}
+    first = min(before) if before else None
+
+    def part(tg, k):
+        got = _restacked(base, tg)
+        if got is None:
+            return None
+        if isinstance(got.get("liquify"), dict) and "frozen" in got["liquify"]:  # (the mask makes no notes)
+            got = dict(got, liquify={a: b for a, b in got["liquify"].items() if a != "frozen"})
+        if k != first and got.get("turned"):  # (the stored colours' own swap undone once, by the first part only)
+            o2 = order_of(got)
+            got = with_order(clean_recolour(dict(got, turns=turns_of(got), turned=None)), o2)
+        if got is not None and r.get("most") == 16:
+            got = dict(got, most=16)
+        return got
+    inner = {jj: p for jj, p in ((jj, part(tg, jj)) for jj, tg in before.items()) if p}
+    final = part(seg, None) if seg else None
+    return inner, final, keep
 
 
 def ordered(old, new):
@@ -438,21 +581,56 @@ def step_removed(rc, a):
     return _restacked(out, tags)
 
 
-def hidden_by_clumps(rc):
-    """The places in rc's order whose step shows nothing because Split: Clumps runs after it (every note takes its
-    area's colour there, at any Amount; hunt 11-10 #5, user: greyed in the Colour effects window + a tip)."""
-    o = order_of(rc)
+def shape_moved(sh, a, b):
+    """Shape sh's Recolour (clean, or None without one) with the step at place a of shape_order(sh) moved to place b
+    (the Colour effects window's drag, its pages too: stage F). A page never passes another page (they keep their tab
+    order), a Stir passing a Stir = the tabs swap places (_restacked). As it is when nothing moves."""
+    rc = clean_recolour(sh.get("recolour"))
+    o = shape_order(sh)
+    if not rc or not (0 <= a < len(o) and 0 <= b < len(o)) or a == b:
+        return rc
+    if o[a] == PAGE and PAGE in o[min(a, b):max(a, b) + 1][1 if b > a else 0:None if b > a else -1]:
+        return rc
+    tags = tags_of(o)
+    tags.insert(b, tags.pop(a))
+    return _restacked(rc, tags)
+
+
+def shape_step_removed(sh, a):
+    """Shape sh's Recolour (clean or None) without the colour step at place a of shape_order(sh) (a page there: only
+    its place goes; the caller takes the page off sh["fx"])."""
+    rc = clean_recolour(sh.get("recolour"))
+    o = shape_order(sh)
+    if not rc or not 0 <= a < len(o):
+        return rc
+    tags = tags_of(o)
+    kind, n = tags.pop(a)
+    if kind == PAGE:
+        return with_order(rc, [k for k, _ in tags])
+    out = dict(rc)
+    if kind in ("warp", "liquify"):
+        out.pop(kind, None)
+    return _restacked(out, tags)
+
+
+def hidden_by_clumps(rc, o=None):
+    """The places in rc's order (or o: shape_order's, with its pages) whose step shows nothing because Split: Clumps
+    runs after it (every note takes its area's colour there, at any Amount; hunt 11-10 #5, user: greyed in the Colour
+    effects window + a tip). Note tool pages before it stay: they move notes."""
+    o = order_of(rc) if o is None else o
     if (rc or {}).get("mode") != "clumps" or "mode" not in o:
         return set()
-    return set(range(o.index("mode")))
+    return {p for p in range(o.index("mode")) if o[p] != PAGE}
 
 
 def steps_of(rc):
     """The colour steps that run now: order_of(rc), cut after step rc["_upto"] while an earlier step is edited
-    (PLAN.md stage C, user 2026-11-10: the later ones skipped, fully off, until the user leaves it)."""
+    (PLAN.md stage C, user 2026-11-10: the later ones skipped, fully off, until the user leaves it). "page" entries
+    left out (the note tool pages run in engine.fx_notes: page_split)."""
     o = order_of(rc)
     u = (rc or {}).get("_upto")
-    return o[:u + 1] if isinstance(u, int) and 0 <= u < len(o) - 1 else o
+    o = o[:u + 1] if isinstance(u, int) and 0 <= u < len(o) - 1 else o
+    return [k for k in o if k != PAGE]
 
 
 def step_place(rc, kind, n=0):

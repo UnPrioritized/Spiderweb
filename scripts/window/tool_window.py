@@ -14,11 +14,45 @@ from tkinter import ttk
 
 from files.lang import tr
 from notes.fx import copied, is_page, pages
+from notes.recolour import clean_recolour, page_added, page_removed
 from notes.sliced import steps_kept
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, placed, wheel_ready, wheel_turns
 
 NEW = "new"  # the "+" tab
+
+
+def page_place_added(sh, n_pages):
+    """A note tool page is being added after shape sh's n_pages pages: its place in the order of the colour effects
+    (recolour.page_added: after every colour effect there now, PLAN.md stage F). Changes sh."""
+    rc = clean_recolour(sh.get("recolour"))
+    if rc:
+        new = page_added(rc, n_pages)
+        if new != rc:
+            sh["recolour"] = dict(sh["recolour"], **({"order": new["order"]} if "order" in new else {}))
+            if "order" not in new:
+                sh["recolour"].pop("order", None)
+
+
+def page_place_gone(sh, j, n_pages):
+    """Shape sh's page j (of n_pages) is being taken away: its place in the order goes too. Changes sh."""
+    rc = clean_recolour(sh.get("recolour"))
+    if rc:
+        new = page_removed(rc, j, n_pages)
+        if new != rc:
+            sh["recolour"] = dict(sh["recolour"], **({"order": new["order"]} if "order" in new else {}))
+            if "order" not in new:
+                sh["recolour"].pop("order", None)
+
+
+def put_colours(shapes, rcs):
+    """Each shape i of rcs gets its Recolour rcs[i] back (None: none)."""
+    for i, r in rcs.items():
+        if i < len(shapes):
+            if r:
+                shapes[i]["recolour"] = r
+            else:
+                shapes[i].pop("recolour", None)
 TOOL_WINDOWS = ("claw_window", "strum_window", "chop_window", "trim_window", "path_window")  # (the app's open note tool windows)
 TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
 
@@ -503,6 +537,12 @@ class ToolWindow(tk.Toplevel):
         """Remove: the page shown taken off the selected shapes; "+" is picked."""
         if self.at is None:
             return
+        for i in self.targets:  # (its place in the order of the colour effects goes too, stage F)
+            sh = self.app.shapes[i]
+            fx = sh.get("fx") or []
+            k = self.at[i]
+            if k < len(fx) and is_page(fx[k]):
+                page_place_gone(sh, len(pages(fx[:k])), len(pages(fx)))
         self.change_steps(lambda fx, k: fx[:k] + fx[k + 1:])
         self.at = None
         self.cfg = dict(self.DEFAULTS)
@@ -535,9 +575,14 @@ class ToolWindow(tk.Toplevel):
         """The selected shapes' steps, by shape number."""
         return {i: self.app.shapes[i].get("fx") for i in self.targets if i < len(self.app.shapes)}
 
+    def colour_orders(self):
+        """The selected shapes' Recolour, by shape number (a page added / taken away changes its order: stage F)."""
+        return {i: self.app.shapes[i].get("recolour") for i in self.targets if i < len(self.app.shapes)}
+
     def undo_state(self):
         """For Ctrl+Z inside: the page shown, its settings and every selected shape's steps."""
-        return json.dumps({"at": self.at, "cfg": self.cfg, "fx": self.settings()}, sort_keys=True)
+        return json.dumps({"at": self.at, "cfg": self.cfg, "fx": self.settings(), "rc": self.colour_orders()},
+                          sort_keys=True)
 
     def put_state(self, state):
         s = json.loads(state)
@@ -549,6 +594,7 @@ class ToolWindow(tk.Toplevel):
                 sh["fx"] = fx
             else:
                 sh.pop("fx", None)
+        put_colours(self.app.shapes, {int(i): r for i, r in (s.get("rc") or {}).items()})
         self.now = self.settings()
         self.show()
         self.sync_tabs()
@@ -560,6 +606,7 @@ class ToolWindow(tk.Toplevel):
         self.targets = sorted(app.note_tool_sels())  # (not pictures)
         self.saved_sel = app.sel_state()  # (for the undo step)
         self.before = self.now = self.settings()  # (before: put back by X / Esc; now: as this window last left them)
+        self.before_rc = self.colour_orders()
         self.at = None
         self.cfg = dict(self.DEFAULTS)
         n = len(self.targets)
@@ -602,6 +649,7 @@ class ToolWindow(tk.Toplevel):
                 saved[i]["fx"] = fx
             else:
                 saved[i].pop("fx", None)
+        put_colours(saved, self.before_rc)
 
     def settle(self, also=()):
         """Something else is about to change in the main window: the change tried so far is kept (its own undo
@@ -614,6 +662,7 @@ class ToolWindow(tk.Toplevel):
                 w.put_back(saved)
             sel = self.saved_sel
             self.saved_sel, self.before = self.app.sel_state(), self.now
+            self.before_rc = self.colour_orders()
             self.app.add_undo_step(json.dumps(saved), tr(f"{self.KEY}.step"), sel)
             self.undo.seen()  # (its own step: a step made after it on the piano roll is undone first, local_step)
 
@@ -645,6 +694,7 @@ class ToolWindow(tk.Toplevel):
                 sh = self.app.shapes[i]
                 fx = copied(sh.get("fx") or [])
                 self.at[i] = len(fx)
+                page_place_added(sh, len(pages(fx)))  # (after the colour effects there now: order added, stage F)
                 sh["fx"] = fx + [{"tool": self.KEY, "cfg": self.page_cfg(i, cl)}]
         else:
             for i in self.targets:
@@ -674,6 +724,11 @@ class ToolWindow(tk.Toplevel):
                 sh = self.app.shapes[i]
                 fx = sh.get("fx") or []
                 if any(is_page(st) and not st.get("cfg") for st in fx):
+                    ps = pages(fx)
+                    n = len(ps)
+                    for j in reversed([j for j, st in enumerate(ps) if not st.get("cfg")]):
+                        page_place_gone(sh, j, n)  # (their places in the colour effects' order too, stage F)
+                        n -= 1
                     self.put_fx(sh, [st for st in fx if not is_page(st) or st.get("cfg")])
         self.now = self.settings()
 
@@ -699,6 +754,7 @@ class ToolWindow(tk.Toplevel):
                 app.shapes[i]["fx"] = fx
             else:
                 app.shapes[i].pop("fx", None)
+        put_colours(app.shapes, self.before_rc)
         app.shapes_changed()
         self.close()
 

@@ -19,8 +19,8 @@ from files.system import ALT
 from notes import liquify as lq
 from files.speed import key_sort
 from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, clean_recolour, new_seed, rule_of,
-                            liquify_last, order_of, ordered, step_place, turned_map, with_most, with_order,
-                            without_recolour)
+                            liquify_last, order_of, ordered, page_split, step_place, turned_map, with_most,
+                            with_order, without_recolour)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 
@@ -516,6 +516,11 @@ class LiquifyBrush:
         old = clean_recolour(made_from(sh).get("recolour"))
         if old is None:
             return "later"
+        from notes.fx import pages
+        n_pages = len(pages(sh.get("fx")))
+        u = app.edit_place(sh, idx)
+        if n_pages and page_split(dict(old, **({"_upto": u} if u is not None else {})), n_pages) is not None:
+            return None  # (colour steps before a note tool page / pages skipped: made whole, stage F)
         _, notes, own, _ = job["made"]
         _, tracks = app.notes_tracks(without_recolour(sh))
         base = dict(old)

@@ -64,11 +64,13 @@ Split: Clumps gives every note the colour of its area, at any Rough edges, so an
 
 While you change an effect that isn't the last one, the effects after it are switched off, so you see exactly what it does and it stays quick. Its window names them and has a Preview all button; they come back when you pick another shape, close the window, play, save or export.
 
+The list shows the shape's note tool pages too (Claw, Strum, Chop, Gate trim, Copy along a path). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes below the colour effects there are now. Pages keep their own order among themselves, and while you change a colour effect above a page, that page is switched off too.
+
 ## With the rest of Spiderweb
 
 Two notes on the same key that sound together always keep different colours, so they never cut each other off. With "Repeated colours get new channels", Shuffle and Split keep each note on the channels of the repeat it was in before. Stir, Warp and Liquify move a note to the repeat its new colour came from, so a bent stripe stays on one track however far it bends (no colour cuts in players that colour by track).
 
-Recolour comes last, after everything else (Sustain and Gate subtract too): it only changes colours.
+Recolour comes last, after everything else (Sustain and Gate subtract too): it only changes colours. Colour effects you put above a note tool page are the exception: they run before that page.
 
 Flip and Turn 90° take the colours along: a flipped shape shows its colours mirrored. Gate aware flip reverses every key row exactly, colours included. After a flip or turn, the Clumps numbers stay as you set them (the window says so), while the areas move with the shape. After a turn, Shuffle and Split: Scattered pick new colours.
 

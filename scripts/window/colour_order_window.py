@@ -14,10 +14,12 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.custom import ROUND, pack_notes, unpack_notes
-from notes.recolour import KEEP, MODES, clean_recolour, hidden_by_clumps, new_seed, order_of, step_moved, \
-    step_removed, step_tags, turned_map
+from notes.fx import is_page, pages
+from notes.recolour import KEEP, MODES, PAGE, clean_recolour, hidden_by_clumps, new_seed, order_of, shape_moved, \
+    shape_order, shape_step_removed, tags_of, turned_map
 from window import look
 from window.edit_line import step_name
+from window.tool_window import TOOL_WINDOWS, ToolWindow
 from window.widgets import ShortLabel, Tooltip, remember_place
 
 START_AMOUNT = {"shuffle": 100.0, "scatter": 50.0, "clumps": 20.0}  # (as the side panel's dropdown: panel_recolour)
@@ -78,8 +80,8 @@ class ColourOrderWindow(tk.Toplevel):
         sh, rc = self.first()
         if sh is None:
             return []
-        kinds = order_of(rc)
-        return [t for t in self.targets() if order_of(clean_recolour(t.get("recolour"))) == kinds]
+        kinds = shape_order(sh)
+        return [t for t in self.targets() if shape_order(t) == kinds]
 
     def sync(self):
         if not self.winfo_exists():
@@ -90,12 +92,13 @@ class ColourOrderWindow(tk.Toplevel):
         self.what.config(text=tr("order.nothing") if sh is None else
                          tr("order.shape", name=app.shape_label(sh)) if len(tgts) == 1 else
                          tr("order.n_shapes", n=len(tgts), name=app.shape_label(sh)))
-        tags = step_tags(rc) if sh is not None else []
-        grey = hidden_by_clumps(rc) if rc else set()
-        shown = (tuple(tags), tuple(step_name(rc, k, n) for k, n in tags), tuple(sorted(grey)))
+        o = shape_order(sh) if sh is not None else []
+        tags = tags_of(o)
+        grey = hidden_by_clumps(rc, o) if rc else set()
+        shown = (tuple(tags), tuple(step_name(rc, k, n, sh) for k, n in tags), tuple(sorted(grey)))
         if shown != self.shown:
             self.shown = shown
-            self.build(rc, tags, grey)
+            self.build(rc, tags, grey, sh)
         same = len(self.matching())
         left = len(tgts) - same
         text = "\n".join(x for x in (trn("order.others", same - 1, n=same - 1) if same > 1 and left else "",
@@ -108,7 +111,7 @@ class ColourOrderWindow(tk.Toplevel):
                 self.others.pack_forget()
         self.add.state(["!disabled" if tgts else "disabled"])
 
-    def build(self, rc, tags, grey):
+    def build(self, rc, tags, grey, sh=None):
         for r in self.rows:
             r[0].destroy()
         self.rows = []
@@ -126,11 +129,11 @@ class ColourOrderWindow(tk.Toplevel):
             Tooltip(grip, tr("order.drag_tip"))
             num = ttk.Label(r, text=f"{p + 1}.", foreground=look.HINT, width=3)
             num.pack(side="left")
-            name = ttk.Label(r, text=step_name(rc, kind, n), foreground=look.LABEL_OFF if off else "",
+            name = ttk.Label(r, text=step_name(rc, kind, n, sh), foreground=look.LABEL_OFF if off else "",
                              cursor="hand2" if kind != "turned" else "fleur")
             name.pack(side="left")
             tip = tr("order.clumps_hidden") if off else tr("order.reverse_tip") if kind == "turned" \
-                else tr("order.open_tip")
+                else tr("order.page_tip") if kind == PAGE else tr("order.open_tip")
             Tooltip(name, tip)
             x = ttk.Label(r, text="×", foreground=look.CLOSE, cursor="hand2", padding=(10, 0, 2, 0))
             x.pack(side="right")
@@ -186,12 +189,14 @@ class ColourOrderWindow(tk.Toplevel):
     def open_step(self, p):
         """The effect at place p of the shown shape's order: its own window (that Stir tab)."""
         sh, rc = self.first()
-        tags = step_tags(rc) if sh is not None else []
+        tags = tags_of(shape_order(sh)) if sh is not None else []
         if not 0 <= p < len(tags):
             return
         kind, n = tags[p]
         app = self.app
-        if kind == "mode":
+        if kind == PAGE:  # (that note tool page's own window, on its tab)
+            open_page(app, sh, n)
+        elif kind == "mode":
             app.open_shares()
         elif kind == "stir":
             app.open_stir()
@@ -204,15 +209,20 @@ class ColourOrderWindow(tk.Toplevel):
 
     def move(self, a, b):
         """Step a of the shown order to place b, for every matching shape (one undo step)."""
-        kinds = order_of(self.first()[1])
-        self.app.change_recolour(lambda old, t: step_moved(old, a, b) if order_of(old) == kinds else old,
+        sh = self.first()[0]
+        if sh is None:
+            return
+        kinds = shape_order(sh)
+        self.app.change_recolour(lambda old, t: shape_moved(t, a, b) if shape_order(t) == kinds else old,
                                  tr("order.undo_move"))
         self.sync()
 
     def on_remove(self, e, p):
         if not (0 <= e.x < e.widget.winfo_width() and 0 <= e.y < e.widget.winfo_height()):
             return  # (let go off the ×, like a button)
-        self.app.colour_step_removed(p, order_of(self.first()[1]))
+        sh = self.first()[0]
+        if sh is not None:
+            self.app.colour_step_removed(p, shape_order(sh))
         self.sync()
 
     # ---- Add ▾
@@ -257,16 +267,28 @@ def remove_step(app, p, kinds):
     """App.colour_step_removed: step p taken away from every selected shape whose steps are kinds (one undo step).
     A Reverse step on notes whose stored colours it swapped: once no Recolour keeps that swap, the notes get their
     colours back (else the Reverse would stay, hidden in the notes)."""
-    tgts = [t for t in app.recolour_targets() if order_of(clean_recolour(t.get("recolour"))) == kinds]
+    tgts = [t for t in app.recolour_targets() if shape_order(t) == kinds]
     if not tgts or not 0 <= p < len(kinds):
         return False
     app.commit_typing()
     if app.notes_late:
         app.shapes_changed(now=True)
+    for attr in TOOL_WINDOWS:  # (a note tool window's try kept first: it follows the pages there are now)
+        w = getattr(app, attr, None)
+        if w:
+            w.settle()
     app.push_undo(name=tr("order.undo_remove"))
     for t in tgts:
         old = clean_recolour(t.get("recolour"))
-        new = step_removed(old, p)
+        new = shape_step_removed(t, p)
+        if kinds[p] == PAGE:  # (a note tool page: taken off the shape, its place in the order too, stage F)
+            n = kinds[:p].count(PAGE)
+            fx = list(t.get("fx") or [])
+            at = [k for k, st in enumerate(fx) if is_page(st)]
+            if n < len(at):
+                ToolWindow.put_fx(t, fx[:at[n]] + fx[at[n] + 1:])
+        if old is None:
+            continue
         tw = old.get("turned")
         if tw and "notes" in t and not (new or {}).get("turned"):
             rows = unpack_notes(t["notes"]).copy()
@@ -282,6 +304,27 @@ def remove_step(app, p, kinds):
     app.sync_recolour()
     app.schedule_autosave()
     return True
+
+
+PAGE_WINDOWS = {"claw": ("window.claw_window", "open_claw", "claw_window"),
+                "strum": ("window.strum_window", "open_strum", "strum_window"),
+                "chop": ("window.chop_window", "open_chop", "chop_window"),
+                "trim": ("window.trim_window", "open_trim", "trim_window"),
+                "path": ("window.path_window", "open_path", "path_window")}
+
+
+def open_page(app, sh, n):
+    """Shape sh's n-th note tool page: its tool's window opened on that page's tab (stage F)."""
+    import importlib
+    fx = sh.get("fx") or []
+    at = [k for k, st in enumerate(fx) if is_page(st)]
+    if n >= len(at) or fx[at[n]]["tool"] not in PAGE_WINDOWS:
+        return
+    mod, fn, attr = PAGE_WINDOWS[fx[at[n]]["tool"]]
+    getattr(importlib.import_module(mod), fn)(app)
+    w = getattr(app, attr, None)
+    if w and w.targets and w.same() and w.app.shapes[w.targets[0]] is sh:
+        w.pick_page(at[n])
 
 
 def open_colour_order(app):

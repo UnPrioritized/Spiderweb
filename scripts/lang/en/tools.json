@@ -1046,6 +1046,8 @@
  "order.drag_tip": "Drag up or down to move this effect.",
  "order.open_tip": "Click to open this effect. Drag to move it.",
  "order.reverse_tip": "Turns the colour order round at this point. It has no settings of its own. Drag to move it.",
+ "order.page_tip": "A note tool page: it changes the notes. Colour effects above it colour the notes first, so its copies keep those colours; effects below it colour what it made. Click to open it. Drag to move it among the colour effects (pages keep their own order).",
+ "order.page": "Note tool page",
  "order.remove_tip": "Take this effect away.",
  "order.clumps_hidden": "Hidden: Split: Clumps runs after it and gives every note its area's colour, so this effect shows nothing. Move it below Clumps to see it.",
  "order.others": "Changes here also go to the {n} other selected shapes with the same effects.",
