@@ -195,7 +195,13 @@ def runs_own_way(sh):
     """Is sh made by expanded (an order of its own, steps switched off, or a step being edited with the steps after
     it skipped: "_upto", App.edit_view)?"""
     return not sh.get("_run") and (ALWAYS[0] or sh.get("order") is not None or bool(sh.get("off"))
-                                   or sh.get("_upto") is not None)
+                                   or sh.get("_upto") is not None or sh.get("_before") is not None)
+
+
+def before_view(sh, tag):
+    """sh made only up to the step BEFORE step tag (tag and every later one skipped): the notes tag gets (a note
+    tool page's window: Trim's longest row, Copy along a path's preview; fx.before_page). Never saved."""
+    return dict(sh, _before=[tag[0], tag[1]])
 
 
 # EDITING ONE STEP (stage C, user 2026-11-11: every step, like the colour effects): while a step's own window
@@ -267,6 +273,11 @@ def expanded(sh):
     upto = sh.get("_upto")  # (any step being edited: the later ones skipped, stage C)
     if isinstance(upto, (list, tuple)) and len(upto) == 2 and tuple(upto) in tags:
         tags = tags[:tags.index(tuple(upto)) + 1]
+    before = sh.get("_before")  # (the notes a step gets: it and the later ones skipped, before_view)
+    if isinstance(before, (list, tuple)) and len(before) == 2 and tuple(before) in tags:
+        tags = tags[:tags.index(tuple(before))]
+    inside = in_whole(sh)  # (a sliced piece: run inside its whole's steps)
+    tags = [t for t in tags if t[0] not in inside]
     off = off_tags(sh)
     tags = [t for t in tags if t[0] == FX or t not in off]
     if "picture" in sh:
@@ -289,8 +300,11 @@ def expanded(sh):
     groups = [it[1] for it in items if it[0] == "c"]
     last_page = max((p for p, t in enumerate(seq) if t[0] == FX and is_page(fx[t[1]])), default=-1)
     have = own_steps(sh)
-    E = {k: v for k, v in sh.items() if k not in ("order", "off", "recolour", "_upto") + LENGTHS}
+    E = {k: v for k, v in sh.items() if k not in ("order", "off", "recolour", "_upto", "_before") + LENGTHS}
     E["_run"] = True  # (made so: never expanded again)
+    if inside:  # (its whole made with them, in this order: sliced.source)
+        E["_whole"] = dict({k: copy.deepcopy(sh[k]) for k in inside}, order=list(sh["order"]),
+                           **({"off": copy.deepcopy(sh["off"])} if sh.get("off") else {}))
     if GATE_FLIP in have:
         E.pop("gate_flip", None)
     if GLUE in have:
@@ -336,21 +350,70 @@ def expanded(sh):
     return E
 
 
+def _lengths_inside(sh):
+    """sh's Sustain / Gate extend / subtract ordered before one of its running note tool pages (switched-off ones
+    left out): [(kind, place among sh's fx entries)], in their order."""
+    from notes.fx import is_page
+    fx = sh.get("fx") or []
+    if not fx or sh.get("order") is None:
+        return []
+    off = off_tags(sh)
+    tags = [t for t in order_of(sh) if t[0] == FX or (t[0] in LENGTHS and t not in off and t[0] in sh)]
+    last = max((p for p, t in enumerate(tags) if t[0] == FX and is_page(fx[t[1]]) and not fx[t[1]].get("off")),
+               default=-1)
+    out, n = [], 0
+    for p, t in enumerate(tags):
+        if t[0] == FX:
+            n += 1
+        elif p < last:
+            out.append((t[0], n))
+    return out
+
+
+def in_whole(sh):
+    """The Sustain / Gate extend / subtract a sliced piece sh runs INSIDE its whole's steps (ordered before one of
+    the whole's pages: made with the whole, on all its notes, before the piece is cut out: sliced.source hands them
+    over as sh["_whole"], engine.whole_tools / the whole's own runner put them in), so the piece's own runner leaves
+    them out. An empty set for every other shape."""
+    if not sh.get("cut") or sh.get("order") is None or not any(k in sh for k in LENGTHS):
+        return set()
+    from notes.sliced import source, whole_made
+    if not whole_made(sh["cut"]):
+        return set()
+    got = source(sh)
+    return {k for k, _ in _lengths_inside(got[0])} if got else set()
+
+
 def whole_steps(sh):
     """A sliced piece's whole sh's note tool steps as engine.whole_tools runs them: (its fx, with a "glue0" entry
-    where its glue before the pages runs when its order puts that later; does that glue run first, before them all?
-    (False: put in, or switched off)."""
+    where its glue before the pages runs when its order puts that later, and its Sustain / Gate extend / subtract
+    ordered before a page as entries there (in_whole); does that glue run first, before them all? (False: put in, or
+    switched off)."""
     fx = list(sh.get("fx") or [])
-    if not runs_own_way(sh) or GLUE not in own_steps(sh):
-        return fx, True
-    if (GLUE, 0) in off_tags(sh):
-        return fx, False
-    tags = [t for t in order_of(sh) if t[0] in (FX, GLUE)]
-    k = tags.index((GLUE, 0))
-    if not k:
-        return fx, True
-    n = sum(1 for t in tags[:k] if t[0] == FX)
-    return fx[:n] + [{"tool": "glue0"}] + fx[n:], False
+    first = True
+    if runs_own_way(sh) and GLUE in own_steps(sh):
+        if (GLUE, 0) in off_tags(sh):
+            first = False
+        else:
+            tags = [t for t in order_of(sh) if t[0] in (FX, GLUE)]
+            k = tags.index((GLUE, 0))
+            if k:
+                n = sum(1 for t in tags[:k] if t[0] == FX)
+                fx = fx[:n] + [{"tool": "glue0"}] + fx[n:]
+                first = False
+    inside = _lengths_inside(sh)
+    if inside:
+        out, n = [], 0
+        put = {}
+        for k, at in inside:
+            put.setdefault(at, []).append({"tool": k, "cfg": sh[k]})
+        for st in fx:
+            out += put.pop(n, [])
+            out.append(st)
+            if st["tool"] != "glue0":
+                n += 1
+        fx = out
+    return fx, first
 
 
 def moved(sh, a, b):
@@ -615,4 +678,11 @@ def carried(sh, src):
     o = clean_order(sh.get("order"))
     if o:
         with_order(sh, order_of(sh, tags_of(o)))
+    if sh.get("off"):  # (only the steps sh has: an Add between step without a step only one end had)
+        have = set(order_of(sh))
+        off = [t for t in sh["off"] if (t[0], t[1]) in have]
+        if off:
+            sh["off"] = off
+        else:
+            sh.pop("off")
     return sh

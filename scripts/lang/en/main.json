@@ -2384,6 +2384,7 @@
  "join_split.splitting_changes": "Splitting this shape changes this:\n\n• ",
  "join_split.ctrl_z_gives_it_back": "\n\nCtrl+Z gives the old shape back.",
  "convert.glue": "Glue",
+ "convert.order": "The order of the steps (Properties)",
  "join_split.joining_these_changes": "Joining these changes this:\n\n• ",
  "join_split.ctrl_z_gives_them_back": "\n\nCtrl+Z gives the old shapes back.",
  "join_split.leaves_tracks": "The shapes are in different tracks: the new shape leaves them, and Spiderweb picks its channels.",

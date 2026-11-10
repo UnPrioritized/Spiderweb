@@ -1869,10 +1869,11 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
     flipped along the axes m). A turn step turns the notes back, not the drawing (close, not exact). A flip / turn with
     no page switched on before it does nothing (before_step)."""
     up = []  # (the steps, last first: from the end down to the notes, then back up; no recursion: lists can be long)
-    extra = sum(1 for st in fx if st["tool"] == "glue0")  # (the glue before the pages put in by whole_steps)
+    put_in = ("glue0", "sustain", "extend", "subtract")  # (put in by whole_steps: not sh's own fx entries)
+    extra = sum(1 for st in fx if st["tool"] in put_in)
     while fx:
         last, fx = fx[-1], fx[:-1]
-        if last["tool"] == "glue0":
+        if last["tool"] in put_in:
             extra -= 1
         if last["tool"] in ("flip", "turn") and idle(fx):
             continue
@@ -1902,6 +1903,13 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
             boxes = glue_from(sh.get("glue"), sh.get("fx"))
             if boxes and len(a):
                 a = apply_glue(a, boxes, glue_box(np.concatenate(cached_arrays(g))), ppq, True)
+        elif last["tool"] == "extend":  # (ordered before a page: on the whole's notes there, steps.in_whole)
+            a = extended(a, last["cfg"], ppq)
+        elif last["tool"] == "subtract":
+            a = subtracted(a, last["cfg"], ppq)
+        elif last["tool"] == "sustain":  # (the pieces made by a cut keep the note's spot and track columns)
+            if len(a):
+                a = held(a, None, last["cfg"], ppq)[0]
         elif last["tool"] in ("path", "strum"):  # (the last column = the tracks: the copies' colours go on them,
             # hunt; a Strum wrap's later rounds too, so sliced line pieces keep them)
             notes, tr = fx_step(a[:, :-1], a[:, -1], last, sh, ppq)
