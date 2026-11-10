@@ -192,8 +192,49 @@ def off_tags(sh):
 
 
 def runs_own_way(sh):
-    """Is sh made by expanded (an order of its own or steps switched off)?"""
-    return not sh.get("_run") and (ALWAYS[0] or sh.get("order") is not None or bool(sh.get("off")))
+    """Is sh made by expanded (an order of its own, steps switched off, or a step being edited with the steps after
+    it skipped: "_upto", App.edit_view)?"""
+    return not sh.get("_run") and (ALWAYS[0] or sh.get("order") is not None or bool(sh.get("off"))
+                                   or sh.get("_upto") is not None)
+
+
+# EDITING ONE STEP (stage C, user 2026-11-11: every step, like the colour effects): while a step's own window
+# changes it, the steps after it are skipped (sh["_upto"] = its tag, never saved; App.edit_view), so it's quick and
+# shows exactly what it does; they come back when the user leaves it.
+
+def hidden_after(sh, tag):
+    """The steps of sh after step tag (kind, n) that run now (switched-off ones left out): what editing tag hides;
+    [] = none (tag is the last, or sh doesn't have it)."""
+    tags = order_of(sh)
+    tag = tuple(tag)
+    if tag not in tags:
+        return []
+    off = off_tags(sh)
+    fx = sh.get("fx") or []
+    return [t for t in tags[tags.index(tag) + 1:]
+            if t not in off and not (t[0] == FX and t[1] < len(fx) and fx[t[1]].get("off") is True)]
+
+
+def cut_needed(sh, tag):
+    """Does editing tag need the runner (sh["_upto"])? Yes on a shape made its own way, or when a step that isn't a
+    colour effect comes after it (a page, Sustain...); the colour effects alone after it: the Recolour's own cut (rc
+    "_upto", as before)."""
+    return runs_own_way(sh) or tag[0] not in COLOURS or any(t[0] not in COLOURS for t in hidden_after(sh, tag))
+
+
+def upto_view(sh, tag):
+    """sh made only up to step tag (the ones after it skipped): a shape the runner makes."""
+    return dict(sh, _upto=[tag[0], tag[1]])
+
+
+def colour_input(sh, tag):
+    """The shape whose notes colour step tag of sh works on, with only the colour effects of its group up to tag as
+    its Recolour (E["recolour"]), or None: sh isn't made its own way (its Recolour's notes are the ones without it,
+    as before) or tag doesn't run. For the overlays and Live brushing (roll_centre.stir_made, roll_liquify)."""
+    if not runs_own_way(sh) or tuple(tag) not in order_of(sh):
+        return None
+    E = expanded(upto_view(sh, tag))
+    return E if E is not None and "recolour" in E else None
 
 
 def expanded(sh):
@@ -223,6 +264,9 @@ def expanded(sh):
             t = (o[p], o[:p].count(o[p]))
             if t in tags:
                 tags = tags[:tags.index(t) + 1]
+    upto = sh.get("_upto")  # (any step being edited: the later ones skipped, stage C)
+    if isinstance(upto, (list, tuple)) and len(upto) == 2 and tuple(upto) in tags:
+        tags = tags[:tags.index(tuple(upto)) + 1]
     off = off_tags(sh)
     tags = [t for t in tags if t[0] == FX or t not in off]
     if "picture" in sh:
@@ -245,7 +289,7 @@ def expanded(sh):
     groups = [it[1] for it in items if it[0] == "c"]
     last_page = max((p for p, t in enumerate(seq) if t[0] == FX and is_page(fx[t[1]])), default=-1)
     have = own_steps(sh)
-    E = {k: v for k, v in sh.items() if k not in ("order", "off", "recolour") + LENGTHS}
+    E = {k: v for k, v in sh.items() if k not in ("order", "off", "recolour", "_upto") + LENGTHS}
     E["_run"] = True  # (made so: never expanded again)
     if GATE_FLIP in have:
         E.pop("gate_flip", None)
@@ -480,11 +524,15 @@ def after_change(sh, before):
                 kinds.append(k)
         s = tags_of(kinds)
     s = [t for t in s if t[0] not in gone]
+    new = []
     if grew:
         n = sum(1 for t in s if t[0] == FX)
-        s = s + [(FX, i) for i in range(n, len(fx_new))]
-    s = s + [(k, 0) for k in added if (k, 0) not in s]
-    return with_order(sh, order_of(sh, s))
+        new = [(FX, i) for i in range(n, len(fx_new))]
+    new += [(k, 0) for k in added if (k, 0) not in s]
+    if len(new) > 1:  # (several new in one change (glue + a page...): among themselves as the default has them)
+        d = {t: p for p, t in enumerate(default_order(sh))}
+        new.sort(key=lambda t: d.get(t, len(d)))
+    return with_order(sh, order_of(sh, s + new))
 
 
 def _without(sh, kind):

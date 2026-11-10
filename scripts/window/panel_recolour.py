@@ -11,6 +11,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.engine import pasted_notes
+from notes.steps import COLOURS, FX, cut_needed, hidden_after, upto_view
 from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, edited_step, enough, \
     is_recoloured, new_seed, order_of, ordered, palettes, step_place, turns_of, wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
@@ -21,7 +22,21 @@ AMOUNT_WORDS = {"shuffle": ("recolour.amount", "recolour.amount_tip"),
                 "scatter": ("recolour.amount", "recolour.amount_tip_scatter"),
                 "clumps": ("recolour.rough", "recolour.amount_tip_clumps")}
 START_AMOUNT = {"shuffle": 100.0, "scatter": 50.0, "clumps": 20.0}
-EDIT_WINDOWS = {"stir": "stir_window", "warp": "warp_window", "liquify": "liquify_window", "mode": "shares_window"}
+EDIT_WINDOWS = {"stir": "stir_window", "warp": "warp_window", "liquify": "liquify_window", "mode": "shares_window",
+                "sustain": "sustain_window", "extend": "extend_window", "subtract": "subtract_window"}
+
+
+def edit_windows(kind):
+    """The App attributes of the windows editing steps of kind ("fx" = a note tool page: any note tool window)."""
+    if kind == FX:
+        from window.tool_window import TOOL_WINDOWS
+        return TOOL_WINDOWS
+    return (EDIT_WINDOWS[kind],) if kind in EDIT_WINDOWS else ()
+
+
+def all_edit_windows():
+    from window.tool_window import TOOL_WINDOWS
+    return tuple(EDIT_WINDOWS.values()) + TOOL_WINDOWS
 
 
 class RecolourPanel:
@@ -36,16 +51,28 @@ class RecolourPanel:
 
     def colour_edit_set(self, step):
         """step = ("stir", tab) / ("warp", 0) / ("liquify", 0) / ("mode", 0) of the selected shapes was just
-        changed (None: no step alone, e.g. a step added / taken out, a Reverse: the edit ends). Call before
-        shapes_changed: it makes the notes as shown. Playing: never (heard whole). Only while the step's own window
-        is open (Stir / Warp / Liquify / Shares: the side panel's Recolour row alone edits nothing for long)."""
-        if step is not None and (self.player.running or not self.sels or not getattr(self, EDIT_WINDOWS[step[0]],
-                                                                                         None)):
+        changed (None: no step alone, e.g. a step added / taken out, a Reverse: the edit ends). Every other step too
+        (PLAN.md "Properties" stage C, user 2026-11-11): ("fx", k) = the note tool page at sh["fx"][k], ("sustain",
+        0), ("extend", 0), ("subtract", 0). Call before shapes_changed: it makes the notes as shown. Playing: never
+        (heard whole). Only while the step's own window is open (Stir / Warp / Liquify / Shares, a note tool window,
+        Sustain / Gate extend / Gate subtract: the side panel's Recolour row alone edits nothing for long)."""
+        if step is not None and (self.player.running or not self.sels or not self.edit_window_open(step[0])):
             step = None
         new = None if step is None else (tuple(step), frozenset(self.sels))
         if new != self.colour_edit:
             self.colour_edit = new
             self.after_idle(self.sync_edit_lines)
+
+    def edit_window_open(self, kind):
+        """Is the window that edits steps of kind open?"""
+        return any(getattr(self, name, None) for name in edit_windows(kind))
+
+    def colour_edit_drop(self, kind):
+        """The edit of a step of kind ends with no notes made here (the caller makes them next: a Cancel)."""
+        e = self.colour_edit
+        if e is not None and e[0][0] == kind:
+            self.colour_edit = None
+            self.sync_edit_lines()
 
     def colour_edit_start(self, step):
         """A stroke / drag of step starts on the selected shapes (roll_liquify / roll_warp): the steps after it are
@@ -67,24 +94,41 @@ class RecolourPanel:
         if self.edit_shown:
             self.shapes_changed(now=True)
 
-    def edit_place(self, sh, i=None):
-        """Where the step being edited sits in shape sh's (place i in self.shapes) order while the steps after it
-        are skipped, or None (nothing skipped for it)."""
+    def edit_tag(self, sh, i=None):
+        """The step of shape sh (place i in self.shapes) being edited now while steps after it are skipped (its tag
+        (kind, n), notes/steps.py), or None (nothing skipped for it)."""
         e = self.colour_edit
-        if e is None or self.player.running or frozenset(self.sels) != e[1] or not is_recoloured(sh):
+        if e is None or self.player.running or frozenset(self.sels) != e[1]:
             return None
         if i is None:
             i = next((j for j, s in enumerate(self.shapes) if s is sh), None)
         if i not in e[1]:
             return None
+        if e[0][0] in COLOURS and not is_recoloured(sh):
+            return None
+        return e[0] if hidden_after(sh, e[0]) else None
+
+    def edit_place(self, sh, i=None):
+        """Where the colour step being edited sits in shape sh's Recolour order while the colour steps after it are
+        skipped by the Recolour's own cut (rc "_upto"), or None (nothing skipped so, or skipped by the runner:
+        edit_view's sh["_upto"])."""
+        t = self.edit_tag(sh, i)
+        if t is None or t[0] not in COLOURS or cut_needed(sh, t):
+            return None
         rc = clean_recolour(sh["recolour"])
-        j = step_place(rc, *e[0])
+        j = step_place(rc, *t)
         return j if j is not None and j < len(order_of(rc)) - 1 else None
 
     def edit_view(self, sh, i=None):
-        """sh as its notes are shown: without the steps after the one being edited (rc "_upto", recolour.steps_of)."""
-        j = self.edit_place(sh, i)
-        return sh if j is None else dict(sh, recolour=dict(sh["recolour"], _upto=j))
+        """sh as its notes are shown: without the steps after the one being edited (colour effects only after it: rc
+        "_upto", recolour.steps_of; anything else: sh["_upto"], made by the runner, steps.expanded)."""
+        t = self.edit_tag(sh, i)
+        if t is None:
+            return sh
+        if t[0] in COLOURS and not cut_needed(sh, t):
+            j = self.edit_place(sh, i)
+            return sh if j is None else dict(sh, recolour=dict(sh["recolour"], _upto=j))
+        return upto_view(sh, t)
 
     def edit_shapes(self):
         """self.shapes as their notes are shown (edit_view each; self.shapes itself when nothing is skipped)."""
@@ -104,26 +148,23 @@ class RecolourPanel:
         return len(self.edit_hidden_steps(kind))
 
     def edit_hidden_steps(self, kind):
-        """The later colour steps skipped while a step of kind is edited, as (kind, n, its Recolour) in order (n = the
-        n-th of its kind: "stir" 1 = Stir tab 2), of the shape skipping the most; [] = none."""
+        """The later steps skipped while a step of kind is edited, as (tag, shape) in order (tag = (kind, n), n = the
+        n-th of its kind: "stir" 1 = Stir tab 2; ("fx", k) = sh["fx"][k]), of the shape skipping the most; [] =
+        none."""
         e = self.colour_edit
         if e is None or e[0][0] != kind:
             return []
         most = []
         for i in sorted(e[1]):
-            if i < len(self.shapes):
-                j = self.edit_place(self.shapes[i], i)
-                if j is not None:
-                    rc = clean_recolour(self.shapes[i]["recolour"])
-                    o = order_of(rc)
-                    got = [(k, o[:p].count(k), rc, self.shapes[i]) for p, k in enumerate(o) if p > j]
-                    if len(got) > len(most):
-                        most = got
+            if i < len(self.shapes) and self.edit_tag(self.shapes[i], i) is not None:
+                got = [(t, self.shapes[i]) for t in hidden_after(self.shapes[i], e[0])]
+                if len(got) > len(most):
+                    most = got
         return most
 
     def sync_edit_lines(self):
-        """The windows' "later effects hidden" lines (window/edit_line.py)."""
-        for name in EDIT_WINDOWS.values():
+        """The windows' "later steps hidden" lines (window/edit_line.py)."""
+        for name in all_edit_windows():
             w = getattr(self, name, None)
             line = getattr(w, "edit_line", None) if w else None
             if line is not None and w.winfo_exists():
