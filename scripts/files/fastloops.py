@@ -1026,15 +1026,17 @@ def _exact3_one(i, P, smooth, lx, ly, a, near, x0, y0, v0, v1, v2, v3, steps, la
 @njit(nogil=True)
 def _unit_back(x, y, fp):
     """liquify._placed + recolour.from_unit for one spot of the colour box (Edges: escape = clipped, else wrapped
-    round then clipped): (middle in ticks, key). fp = [cut, turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f1, f2, t0,
-    width, k0, height, k1 > k0] (+ Wrap around: 1, rows R, the R rows' keys, first starts, last ends =
-    recolour.Rows.wrapped after it, _wrap_one's sums)."""
-    if fp[0] != 0.0:
-        if x < -1e-9 or x > 1 + 1e-9:
-            x = np.mod(x, 1.0)
-        if y < -1e-9 or y > 1 + 1e-9:
-            y = np.mod(y, 1.0)
-    x, y = min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0)
+    round then clipped; Wrap around: neither, the rows below bring it back): (middle in ticks, key). fp = [edge (0
+    escape, 1 tiled, 2 Wrap around), turned, a0, a1 - a0, b0, b1 - b0, b1 > b0, f1, f2, t0, width, k0, height,
+    k1 > k0] (+ Wrap around: 1, rows R, the R rows' keys, first starts, repeat ends = recolour.Rows.wrapped after
+    it: key_wrapped's, then _wrap_one's sums)."""
+    if fp[0] != 2.0:
+        if fp[0] != 0.0:
+            if x < -1e-9 or x > 1 + 1e-9:
+                x = np.mod(x, 1.0)
+            if y < -1e-9 or y > 1 + 1e-9:
+                y = np.mod(y, 1.0)
+        x, y = min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0)
     if fp[1] != 0.0:
         x2 = fp[2] + x * fp[3]
         y2 = fp[4] + y * fp[5] if fp[6] != 0.0 else y
@@ -1042,6 +1044,10 @@ def _unit_back(x, y, fp):
     m, k = fp[9] + x * fp[10], (fp[11] + y * fp[12] if fp[13] != 0.0 else fp[11])
     if len(fp) > 15 and fp[14] == 1.0:  # (Wrap around: past its key row's notes = back in on that row's other side)
         nr = np.int64(fp[15])
+        base = fp[16] - 0.5
+        h = (fp[16 + nr - 1] - fp[16]) + 1.0
+        if k < base or k >= base + h:
+            k = base + np.mod(k - base, h)
         q = np.rint(k)
         lo_, hi_ = 0, nr
         while lo_ < hi_:
@@ -1445,7 +1451,9 @@ def _stir_one(px, py, fp, ip):
         ca, sa = fp[6], fp[7]
     X, Y = dx * rx, dy * ry
     px, py = cx + (X * ca - Y * sa) / rx, cy + (X * sa + Y * ca) / ry
-    if ip[21]:  # Escape
+    if ip[21] == 2:  # Wrap around: left as it is (recolour.Rows.wrapped brings it back after)
+        pass
+    elif ip[21]:  # Escape
         px, py = min(max(px, 0.0), 1.0), min(max(py, 0.0), 1.0)
     else:
         if px < -1e-9 or px > 1 + 1e-9:

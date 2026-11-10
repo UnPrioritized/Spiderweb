@@ -1152,7 +1152,7 @@ def stir_from(at, rc, box, own, spots=None):
         fast.stir_spots(x, y, fp, ip, ox, oy)
         mid, key = from_unit(ox, oy, rc, box, own)
         if edge == "wrap":
-            mid = rows.wrapped(mid, key)
+            mid, key = rows.wrapped(mid, key)
         elif edge == "bend":
             mid = rows.unstretched(mid, key, t0, t1)
         return mid, key
@@ -1181,7 +1181,9 @@ def stir_from(at, rc, box, own, spots=None):
     ca, sa = np.cos(a), np.sin(a)
     X, Y = dx * rx, dy * ry  # (spin: turned round as seen; else rx = ry = 1, the box's own way)
     x, y = cx + (X * ca - Y * sa) / rx, cy + (X * sa + Y * ca) / ry
-    if edge != "escape":  # (what went out one side comes back in the other: the colours tiled, user 11-02)
+    if edge == "wrap":  # (left as it is: Rows.wrapped brings it back by the notes' own repeat, user 2026-11-10)
+        pass
+    elif edge != "escape":  # (what went out one side comes back in the other: the colours tiled, user 11-02)
         out = lambda v: (v < -1e-9) | (v > 1 + 1e-9)  # (on the edge, or a hair past it: stays on it)
         x = np.clip(np.where(out(x), np.mod(x, 1.0), x), 0, 1)
         y = np.clip(np.where(out(y), np.mod(y, 1.0), y), 0, 1)
@@ -1194,9 +1196,9 @@ def stir_from(at, rc, box, own, spots=None):
             sx, sy = x + (sx - x) * w, y + (sy - y) * w
         x, y = sx, sy
     mid, key = from_unit(x, y, rc, box, own)
-    if edge == "wrap":  # (a spot past its key row's notes comes back in on that row's other side: a box's row
-        # spans the whole box, so a rectangle is the box's tiling exactly)
-        mid = rows.wrapped(mid, key)
+    if edge == "wrap":  # (a spot past the key rows / its key row's notes comes back in on the other side, every
+        # whole number of key rows / the row's repeat length: a whole number of colour turns lines up)
+        mid, key = rows.wrapped(mid, key)
     elif edge == "bend":
         mid = rows.unstretched(mid, key, t0, t1)
     return mid, key
@@ -1241,7 +1243,7 @@ def stir_numbers(st, c, k, r):
          ("side", "up", "rings").index(st["ripple_kind"]) if st["ripple"] else -1, int(bool(st["wring"])),
          int(bool(st["polar"])), int(st["area_kaleido"]), int(st["area_ripple"]), int(st["area_wring"]),
          int(st["area_polar"]), int(st["round_edge"] == "cut"), int(whole_twist), int(per_note),
-         int(st["edge"] == "escape"), int(st["squeeze"])]
+         {"escape": 1, "wrap": 2}.get(st["edge"], 0), int(st["squeeze"])]  # (2: neither tiled nor clipped)
     return np.array(f, np.float64), np.array(i, np.int64)
 
 
@@ -1969,6 +1971,7 @@ class Rows:
         np.minimum.at(self.a, inv, np.asarray(at[:, 0], np.float64))
         np.maximum.at(self.b, inv, np.asarray(at[:, 1], np.float64))
         self.a0, self.b0 = self.a, self.b
+        self.at = at  # (kept until bw is first asked for, then let go)
         self.g = np.full(len(self.keys), np.inf)  # (each row's shortest note's half: its first / last middle)
         np.minimum.at(self.g, inv, np.asarray(at[:, 1] - at[:, 0], np.float64) / 2)
         if smooth > 0 and len(self.keys) > 2:
@@ -1981,18 +1984,42 @@ class Rows:
         j = np.maximum(i - 1, 0)
         return np.where(np.abs(self.keys[j] - q) <= np.abs(self.keys[i] - q), j, i)
 
+    @property
+    def bw(self):
+        """Each key row's REPEAT end for Wrap around (user 2026-11-10: colours shifted at the seam): its last note's
+        start + the row's usual start-to-start step (the median of its steps, lower one on an even count; steps of 0
+        left out), so a row of n evenly spaced notes repeats every n steps and a whole number of colour turns comes
+        round exactly. A row with one start (no step) keeps its last end; never before its last end."""
+        got = getattr(self, "_bw", None)
+        if got is None:
+            got = self._bw = repeat_ends(self.at, self.keys, self.b0)
+            self.at = None
+        return got
+
+    def key_wrapped(self, key):
+        """Keys past the notes' lowest / highest key row come back in on the other side, repeating every whole
+        number of key rows (lowest .. highest + 1: a key row past the top = the bottom one)."""
+        base = float(self.keys[0]) - 0.5
+        h = float(self.keys[-1] - self.keys[0]) + 1.0
+        key = np.asarray(key, np.float64)
+        return np.where((key < base) | (key >= base + h), base + np.mod(key - base, h), key)
+
     def wrapped(self, mid, key):
+        """(middle, key) of spots past the notes (Wrap around): the key round the key rows first (key_wrapped), then
+        a middle past its key row's notes back in on that row's other side, every repeat length (bw)."""
+        key = self.key_wrapped(key)
+        bw = self.bw
         fast = loops()
         if fast and len(mid):  # (the compiled walk: the very same numbers, files/fastloops.stir_wrap)
             to = np.ascontiguousarray
             out = np.empty(len(mid), np.float64)
-            fast.stir_wrap(to(self.keys, np.int64), to(self.a, np.float64), to(self.b, np.float64),
+            fast.stir_wrap(to(self.keys, np.int64), to(self.a, np.float64), to(bw, np.float64),
                            to(mid, np.float64), to(key, np.float64), out)
-            return out
+            return out, key
         r = self.row(key)
-        a, b = self.a[r], self.b[r]
+        a, b = self.a[r], bw[r]
         w = np.maximum(b - a, 1.0)
-        return np.where((mid < a) | (mid > b), a + np.mod(mid - a, w), mid)
+        return np.where((mid < a) | (mid > b), a + np.mod(mid - a, w), mid), key
 
     def mirrored(self, mid, key):
         r = self.row(key)
@@ -2008,6 +2035,34 @@ class Rows:
         r = self.row(key)
         a, b = self.a[r], self.b[r]
         return a + (mid - t0) / max(t1 - t0, 1.0) * (b - a)
+
+
+def repeat_ends(at, keys, ends):
+    """Rows.bw for the notes at whose key rows are keys (sorted) and last ends ends."""
+    from files.speed import key_sort
+    k = np.asarray(at[:, 2], np.int64)
+    s = np.asarray(at[:, 0])
+    whole = s.dtype == np.int64
+    o = key_sort(k, s) if whole else np.lexsort((np.asarray(s, np.float64), k))
+    ks, ss = k[o], s[o]
+    row = np.searchsorted(keys, ks)  # (each note's key row, in keys' order)
+    last = np.full(len(keys), -np.inf)
+    np.maximum.at(last, row, np.asarray(ss, np.float64))
+    same = ks[1:] == ks[:-1]
+    step = (ss[1:] - ss[:-1])[same]
+    srow = row[1:][same]
+    keep = step > 0
+    step, srow = step[keep], srow[keep]
+    out = np.asarray(ends, np.float64).copy()
+    if len(step):
+        o2 = key_sort(srow.astype(np.int64), step) if whole else np.lexsort((np.asarray(step, np.float64), srow))
+        step, srow = np.asarray(step[o2], np.float64), srow[o2]
+        count = np.bincount(srow, minlength=len(keys))
+        first = np.concatenate([[0], np.cumsum(count)[:-1]])
+        has = count > 0
+        med = step[(first + (count - 1) // 2)[has]]
+        out[has] = np.maximum(out[has], last[has] + med)
+    return out
 
 
 _ROWS = {}  # (smooth) -> (at, its Rows) of the last big kept at

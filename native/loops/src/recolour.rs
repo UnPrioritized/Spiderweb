@@ -674,27 +674,36 @@ fn exact3_spot(x0: f64, y0: f64, arrows: [(f64, f64); 2], a: &[f64], gy: usize, 
 /// fastloops._unit_back: a spot of the colour box -> (middle in ticks, key) (liquify._placed + from_unit).
 #[inline(always)]
 fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
-    if fp[0] != 0.0 {
-        if x < -1e-9 || x > 1.0 + 1e-9 {
-            x = npmod(x, 1.0);
+    if fp[0] != 2.0 {
+        // (2 = Wrap around: neither tiled nor clipped, the rows below bring it back)
+        if fp[0] != 0.0 {
+            if x < -1e-9 || x > 1.0 + 1e-9 {
+                x = npmod(x, 1.0);
+            }
+            if y < -1e-9 || y > 1.0 + 1e-9 {
+                y = npmod(y, 1.0);
+            }
         }
-        if y < -1e-9 || y > 1.0 + 1e-9 {
-            y = npmod(y, 1.0);
-        }
+        x = pmin(pmax(x, 0.0), 1.0);
+        y = pmin(pmax(y, 0.0), 1.0);
     }
-    x = pmin(pmax(x, 0.0), 1.0);
-    y = pmin(pmax(y, 0.0), 1.0);
     if fp[1] != 0.0 {
         let x2 = fp[2] + x * fp[3];
         let y2 = if fp[6] != 0.0 { fp[4] + y * fp[5] } else { y };
         (x, y) = (0.5 + fp[8] * (y2 - 0.5), 0.5 + fp[7] * (x2 - 0.5));
     }
     let m = fp[9] + x * fp[10];
-    let k = if fp[13] != 0.0 { fp[11] + y * fp[12] } else { fp[11] };
+    let mut k = if fp[13] != 0.0 { fp[11] + y * fp[12] } else { fp[11] };
     if fp.len() > 15 && fp[14] == 1.0 {
-        // (Wrap around: fp[15] rows, then their keys, first starts, last ends (checked by warp_soft): wrap_one's sums)
+        // (Wrap around: fp[15] rows, then their keys, first starts, repeat ends (checked by warp_soft): the key round
+        // the key rows (Rows.key_wrapped), then wrap_one's sums)
         let nr = fp[15] as usize;
         let keys = &fp[16..16 + nr];
+        let base = keys[0] - 0.5;
+        let h = (keys[nr - 1] - keys[0]) + 1.0;
+        if k < base || k >= base + h {
+            k = base + npmod(k - base, h);
+        }
         let q = rint(k);
         let (mut lo, mut hi) = (0usize, nr);
         while lo < hi {

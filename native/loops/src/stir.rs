@@ -163,7 +163,9 @@ fn stir_one(mut px: f64, mut py: f64, fp: &FP, ip: &IP) -> (f64, f64) {
     let (xx, yy) = (dx * rx, dy * ry);
     px = cx + (xx * ca - yy * sa) / rx;
     py = cy + (xx * sa + yy * ca) / ry;
-    if ip[21] != 0 {
+    if ip[21] == 2 {
+        // Wrap around: left as it is (recolour.Rows.wrapped brings it back after)
+    } else if ip[21] != 0 {
         // Escape
         px = pmin(pmax(px, 0.0), 1.0);
         py = pmin(pmax(py, 0.0), 1.0);
