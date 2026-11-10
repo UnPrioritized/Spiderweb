@@ -139,18 +139,23 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
 LATE_S = 0.15  # making the notes took longer than this (s): after an edit they're made in the background (late_ok)
-OLD_NOTES_SHARE = 16  # notes remembered for shapes as they WERE (undo targets) may take 1/16 of the PC's memory
+OLD_NOTES_SHARE = 8  # the notes cache (shapes as they WERE = undo targets) may take 1/8 of the PC's memory...
+OLD_NOTES_MOST = 2 ** 30  # (bytes) ...and at most 1 GB (user 2026-11-10: a big limit; undo past it makes notes again)
+WINE_NOTES_SHARE = 16  # (Wine-like systems: 1/16, phones)
 OLD_NOTES_LEAST = 256 * 2 ** 20  # (bytes; at least this much: forget_old_notes)
 _old_notes_most = []
 
 
 def old_notes_most():
-    """Bytes the notes of shapes as they were may take (App.forget_old_notes; the PC's memory asked once). None = no
-    limit: only Wine-like systems get one (phones; Windows kept as it was, its undo stays quick)."""
+    """Bytes the notes cache may take before the notes of shapes as they WERE go, oldest first (App.forget_old_notes;
+    the PC's memory asked once): the smaller of OLD_NOTES_MOST and 1/OLD_NOTES_SHARE of it (unknown = 1 GB), Wine
+    1/WINE_NOTES_SHARE if smaller. Undo of a forgotten version makes its notes again (2 M notes: ~1 s, user OK)."""
     if not _old_notes_most:
         total = system.total_memory()
-        _old_notes_most.append(max(OLD_NOTES_LEAST, (total or 16 * 2 ** 30) // OLD_NOTES_SHARE)
-                               if system.WINE else None)
+        most = min(OLD_NOTES_MOST, total // OLD_NOTES_SHARE) if total else OLD_NOTES_MOST
+        if system.WINE:
+            most = min(most, max(OLD_NOTES_LEAST, (total or 16 * 2 ** 30) // WINE_NOTES_SHARE))
+        _old_notes_most.append(max(OLD_NOTES_LEAST, most))
     return _old_notes_most[0]
 
 
@@ -2320,17 +2325,33 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         most = old_notes_most()
         if most is None:
             return
-        sizes = {k: sum(a.nbytes for a in (v if isinstance(v, (tuple, list)) else (v,)) if isinstance(a, np.ndarray))
-                 for k, v in cache.items()}
+        # (arrays shared between entries (shared_arrays) count once; forgetting an entry frees only the arrays no
+        # other entry holds)
+        held, sizes, holders = {}, {}, {}
+        for k, v in cache.items():
+            ids = set()
+            for a in (v if isinstance(v, (tuple, list)) else (v,)):
+                if isinstance(a, np.ndarray):
+                    b = a.base if isinstance(a.base, np.ndarray) else a
+                    ids.add(id(b))
+                    sizes[id(b)] = b.nbytes
+            held[k] = ids
+            for i in ids:
+                holders[i] = holders.get(i, 0) + 1
         total = sum(sizes.values())
         if total <= most:
             return
-        for k in [k for k in cache if used.get(k) != gen]:  # (oldest first)
+        for k in [k for k in cache if used.get(k) != gen and k not in need]:  # (oldest first; never what's used now)
             if total <= most:
                 break
-            total -= sizes[k]
+            for i in held[k]:
+                holders[i] -= 1
+                if not holders[i]:
+                    total -= sizes[i]
             del cache[k]
             used.pop(k, None)
+            deps.pop(k, None)
+            top.discard(k)
 
     def shapes_changed(self, now=False, moving=False):
         """Recalculate every note (overlaps depend on all shapes together) and refresh the screen.
