@@ -69,16 +69,17 @@ def _colour_order(sh, n_pages):
     """The shape's colour steps + "page" entries as its Recolour runs them (recolour.full_order), or []."""
     from notes.recolour import clean_recolour, full_order
     r = sh.get("recolour")
-    rc = clean_recolour(r) if isinstance(r, dict) else None
+    rc = clean_recolour(r) if isinstance(r, dict) and not sh.get("hz") else None  # (never a Hz bass: can_recolour)
     if not rc:
         return []
     return full_order(rc, n_pages)[0]
 
 
-def core(sh):
-    """The fx entries and the colour steps in the order they run (tags): a colour step sits right before the page
-    its Recolour puts it in front of (after the flips / velocities before that page, as engine.pages_coloured
-    does), the rest after every fx entry."""
+def core(sh, s=None):
+    """The fx entries and the colour steps in the order they run (tags): a colour step sits before the page its
+    Recolour puts it in front of, the rest after every page. Between two pages (or after the last), the flips /
+    turns / velocities / glue places there and the colour steps there go as the saved order s (tags) has them (one
+    missing from s: after the others; no s: the fx entries first, as engine.pages_coloured does)."""
     from notes.fx import is_page
     from notes.recolour import PAGE
     fx = sh.get("fx") or []
@@ -90,16 +91,31 @@ def core(sh):
         else:
             segs[-1].append((k, seen.get(k, 0)))
             seen[k] = seen.get(k, 0) + 1
-    out, j = [], 0
+    pos = {t: p for p, t in enumerate(s)} if s else None
+    far = len(s or ()) + 1
+
+    def merged(a, b):
+        if pos is None or not a or not b:
+            return a + b
+        out, i, k = [], 0, 0
+        while i < len(a) and k < len(b):
+            if pos.get(b[k], far) < pos.get(a[i], far):
+                out.append(b[k])
+                k += 1
+            else:
+                out.append(a[i])
+                i += 1
+        return out + a[i:] + b[k:]
+    out, j, run = [], 0, []
     for i, st in enumerate(fx):
         if is_page(st):
-            if j < len(segs):
-                out += segs[j]
+            out += merged(run, segs[j] if j < len(segs) else [])
+            run = []
             j += 1
-        out.append((FX, i))
-    for s in segs[j:]:
-        out += s
-    return out
+            out.append((FX, i))
+        else:
+            run.append((FX, i))
+    return out + merged(run, [t for seg in segs[j:] for t in seg])
 
 
 def default_order(sh):
@@ -144,7 +160,7 @@ def order_of(sh, kept=None):
     if s is None:
         return default_order(sh)
     have = own_steps(sh)
-    base = core(sh)
+    base = core(sh, s)
     there = set(base)
     groups, anchor, placed = {}, None, set()
     for t in s:
@@ -159,6 +175,138 @@ def order_of(sh, kept=None):
         out.append(t)
         out += groups.get(t, ())
     return out + [(k, 0) for k in OWN if k in have and k not in placed]
+
+
+# RUNNING IN THAT ORDER (stage B): a shape with an order of its own (sh["order"]) or steps switched off is made as
+# expanded(sh): every step one more entry of its note tool steps (the runner's own tools below, engine.fx_notes runs
+# them one after another like the pages, each made on top of the notes before it, remembered per step). A shape
+# without either goes the old way (engine.fx_notes as it was = old files and every shape made before, exactly).
+RUNNER = ("glue0", "gate_flip", "sustain", "extend", "subtract", "colours")  # ("colours": a group of colour steps)
+TURNS = ("flip", "turn")
+ALWAYS = [False]  # (checks only: every shape made by expanded, its default order too: the same notes as the old way)
+
+
+def off_tags(sh):
+    """The steps of sh switched off (a set of tags; pages: their own "off", not here)."""
+    return {(k, n) for k, n in clean_off(sh.get("off")) or ()}
+
+
+def runs_own_way(sh):
+    """Is sh made by expanded (an order of its own or steps switched off)?"""
+    return not sh.get("_run") and (ALWAYS[0] or sh.get("order") is not None or bool(sh.get("off")))
+
+
+def expanded(sh):
+    """sh as the runner makes it, or None (the old way: runs_own_way says no, or nothing to run). Its steps in
+    order_of's order, the ones switched off left out, the ones after a colour step being edited (rc "_upto") too;
+    each OWN step = a runner entry of sh["fx"] (glue before the pages stays at the bottom while it runs first);
+    colour steps next to each other = one "colours" entry (recolour.part_of; "full": no page after it, so it colours
+    as the Recolour at the end does), the ones at the very end = the shape's Recolour as always. A flip / turn right
+    after colour steps runs before them (the colours follow a flip by their frame, recolour.carried: the same look).
+    A picture: no glue / pages (as always), only Sustain, Gate extend / subtract and the colours."""
+    if not runs_own_way(sh):
+        return None
+    from notes.recolour import PAGE, clean_recolour, full_order, part_of, with_order as rc_order
+    from notes.fx import is_page
+    tags = order_of(sh)
+    if not tags:
+        return None
+    raw = sh.get("recolour") if isinstance(sh.get("recolour"), dict) else None
+    rc = clean_recolour(raw) if raw else None
+    fx = sh.get("fx") or []
+    colours_all = [t for t in tags if t[0] in COLOURS]
+    u = raw.get("_upto") if raw else None
+    if rc and isinstance(u, int) and not isinstance(u, bool):  # (a colour step being edited: the later ones skipped)
+        o, places = full_order(rc, sum(1 for st in fx if is_page(st)))
+        if u in places and o[places.index(u)] != PAGE:
+            p = places.index(u)
+            t = (o[p], o[:p].count(o[p]))
+            if t in tags:
+                tags = tags[:tags.index(t) + 1]
+    off = off_tags(sh)
+    tags = [t for t in tags if t[0] == FX or t not in off]
+    if "picture" in sh:
+        tags = [t for t in tags if t[0] not in (FX, GLUE)]
+    seq = []
+    for t in tags:
+        if t[0] == FX and fx[t[1]]["tool"] in TURNS:
+            j = len(seq)
+            while j and seq[j - 1][0] in COLOURS:
+                j -= 1
+            seq.insert(j, t)
+        else:
+            seq.append(t)
+    items = []
+    for t in seq:
+        if t[0] in COLOURS and items and items[-1][0] == "c":
+            items[-1][1].append(t)
+        else:
+            items.append(["c", [t]] if t[0] in COLOURS else ["t", t])
+    groups = [it[1] for it in items if it[0] == "c"]
+    last_page = max((p for p, t in enumerate(seq) if t[0] == FX and is_page(fx[t[1]])), default=-1)
+    have = own_steps(sh)
+    E = {k: v for k, v in sh.items() if k not in ("order", "off", "recolour") + LENGTHS}
+    E["_run"] = True  # (made so: never expanded again)
+    if GATE_FLIP in have:
+        E.pop("gate_flip", None)
+    if GLUE in have:
+        E["_noglue0"] = True  # (no glue at the bottom unless it runs first: below)
+    base = dict(rc, most=raw["most"]) if rc and raw.get("most") == 16 else rc
+    out, gate = [], False
+    for idx, (what, t) in enumerate(items):
+        if what == "c":
+            if len(groups) == 1 and t == colours_all and idx == len(items) - 1:  # (every colour step together at the
+                # end: the Recolour as it is)
+                sub = rc_order({k: v for k, v in raw.items() if k != "_upto"}, [k for k in full_order(rc, 0)[0]
+                                                                              if k != PAGE])
+            else:
+                sub = part_of(base, t, t is groups[0])
+            if sub is None:
+                continue
+            if idx == len(items) - 1:
+                E["recolour"] = sub
+                if gate:
+                    E["_gate"] = True
+                continue
+            full = seq.index(t[0]) > last_page
+            out.append(dict({"tool": "colours", "rc": sub}, **({"full": True, "gate": gate} if full else {})))
+            continue
+        k, n = t
+        if k == FX:
+            out.append(fx[n])
+        elif k == GLUE:
+            if not out:
+                del E["_noglue0"]
+            else:
+                out.append({"tool": "glue0"})
+        elif k == GATE_FLIP:
+            out.append({"tool": "gate_flip"})
+            gate = True
+        else:
+            out.append({"tool": k, "cfg": sh[k]})
+            if k == "sustain":
+                E["_sus"] = True
+    E.pop("fx", None)
+    if out:
+        E["fx"] = out
+    return E
+
+
+def whole_steps(sh):
+    """A sliced piece's whole sh's note tool steps as engine.whole_tools runs them: (its fx, with a "glue0" entry
+    where its glue before the pages runs when its order puts that later; does that glue run first, before them all?
+    (False: put in, or switched off)."""
+    fx = list(sh.get("fx") or [])
+    if not runs_own_way(sh) or GLUE not in own_steps(sh):
+        return fx, True
+    if (GLUE, 0) in off_tags(sh):
+        return fx, False
+    tags = [t for t in order_of(sh) if t[0] in (FX, GLUE)]
+    k = tags.index((GLUE, 0))
+    if not k:
+        return fx, True
+    n = sum(1 for t in tags[:k] if t[0] == FX)
+    return fx[:n] + [{"tool": "glue0"}] + fx[n:], False
 
 
 def with_order(sh, tags):
@@ -235,8 +383,38 @@ def with_off(sh, tag, off):
 # away leaves the order (so put back later, it goes at the end again).
 
 def signature(sh):
-    """What after_change compares: sh's fx entries (the very dicts) and its OWN steps."""
-    return list(sh.get("fx") or ()), frozenset(own_steps(sh))
+    """What after_change compares: sh's fx entries (the very dicts), its OWN steps, its colour steps (the Stir tabs
+    and Reverse swaps, how many of each kind)."""
+    return list(sh.get("fx") or ()), frozenset(own_steps(sh)), _colour_sig(sh)
+
+
+def _colour_sig(sh):
+    r = sh.get("recolour")
+    if not isinstance(r, dict):
+        return None
+    from notes.recolour import order_counts, turns_of
+    st = r.get("stir")
+    return list(st) if isinstance(st, list) else [st] if st else [], list(turns_of(r)), order_counts(r)
+
+
+def _colours_gone(old, new):
+    """The colour steps (tags, numbered as in old) taken away from signature part old to new: a Stir tab / Reverse
+    by which one went (the last ones when it can't tell), the others by kind."""
+    if not old:
+        return []
+    new = new or ([], [], {})
+    out = []
+    for kind in COLOURS:
+        a, b = old[2].get(kind, 0), new[2].get(kind, 0)
+        if a <= b:
+            continue
+        at = None
+        if kind in ("stir", "turned"):
+            i = 0 if kind == "stir" else 1
+            if len(old[i]) == a and len(new[i]) == b:
+                at = _gone_at(old[i], new[i])
+        out += [(kind, n) for n in (at if at is not None else range(b, a))]
+    return out
 
 
 def _gone_at(old, new):
@@ -261,19 +439,23 @@ def _gone_at(old, new):
 def after_change(sh, before):
     """sh (changed) after an edit: before = signature(sh as it was). New OWN steps and fx entries go at the end of
     its order; taken away ones leave it. Nothing to do: sh as it is."""
-    fx_old, own_old = before
+    fx_old, own_old = before[:2]
+    col_old = before[2] if len(before) > 2 else None
     fx_new = list(sh.get("fx") or ())
     own_new = own_steps(sh)
     added = [k for k in OWN if k in own_new and k not in own_old]
     gone = {k for k in own_old if k not in own_new}
     grew = len(fx_new) > len(fx_old) and all(a is b or a == b for a, b in zip(fx_old, fx_new))
     shrank = len(fx_new) < len(fx_old)
-    if not (added or gone or grew or shrank):
-        return sh
     s = saved(sh)
+    lost = _colours_gone(col_old, _colour_sig(sh)) if s is not None else []
+    if not (added or gone or grew or shrank or lost):
+        return sh
+    if lost:  # (a Stir tab / Reverse taken out: its own entry leaves, so the later ones keep their places)
+        s = tags_of([k for k, n in s if (k, n) not in lost])
     if s is None:
-        if not added and not (grew and own_new):
-            return sh  # (the default is still right: nothing of OWN to keep in place)
+        if not added and not grew:
+            return sh  # (the default is still right)
         was = dict(sh)  # (the order as it was: without the new steps)
         if grew:
             was["fx"] = fx_new[:len(fx_old)] or None

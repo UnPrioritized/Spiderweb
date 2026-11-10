@@ -1168,8 +1168,8 @@ class JoinSplit:
         """own_heard's notes that a HELD note of another shape (Sustain / Keep both) cuts as shown end where it cuts
         them: a held note is never stretched over them, so nothing hangs on their hidden tail, and a cut inside it
         made a piece starting with the held note that Single keeps (same start = no cut; sweep 2026-11-08)."""
-        from notes.sustain import is_sustained
-        held = [j for j, s in enumerate(self.shapes) if j != i and (s.get("held") is True or is_sustained(s))]
+        from notes.sustain import is_sustained, sustain_on
+        held = [j for j, s in enumerate(self.shapes) if j != i and (s.get("held") is True or sustain_on(s))]
         if not held or not len(out):
             return out
         r = np.asarray(self.rendered[:, :6], np.int64)
@@ -2035,11 +2035,11 @@ class JoinSplit:
         Sustain or held notes), so cut pieces sound as before; else as they are. groups (Single channel: each note's
         slot as shown, single_groups): fixed per slot instead, tracks kept."""
         from notes.engine import keeps_laps
-        from notes.sustain import is_sustained
+        from notes.sustain import is_sustained, sustain_on
         from window.app import fix_rows
         mode = self.channel_mode.get()
         rule = self.overlap_rule() or {}
-        if (mode == "raw" or not len(notes) or is_sustained(sh) or sh.get("held") is True
+        if (mode == "raw" or not len(notes) or sustain_on(sh) or sh.get("held") is True
                 or mode == "auto" and keeps_laps(sh) and not rule.get("across")):
             return notes, tracks
         notes = np.asarray(notes, np.int64)

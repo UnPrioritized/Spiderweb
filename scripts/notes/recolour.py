@@ -466,22 +466,26 @@ def page_split(r, n_pages):
         return None
     base = {k: v for k, v in r.items() if k != "_upto"}
     first = min(before) if before else None
-
-    def part(tg, k):
-        got = _restacked(base, tg)
-        if got is None:
-            return None
-        if isinstance(got.get("liquify"), dict) and "frozen" in got["liquify"]:  # (the mask makes no notes)
-            got = dict(got, liquify={a: b for a, b in got["liquify"].items() if a != "frozen"})
-        if k != first and got.get("turned"):  # (the stored colours' own swap undone once, by the first part only)
-            o2 = order_of(got)
-            got = with_order(clean_recolour(dict(got, turns=turns_of(got), turned=None)), o2)
-        if got is not None and r.get("most") == 16:
-            got = dict(got, most=16)
-        return got
-    inner = {jj: p for jj, p in ((jj, part(tg, jj)) for jj, tg in before.items()) if p}
-    final = part(seg, None) if seg else None
+    inner = {jj: p for jj, p in ((jj, part_of(base, tg, jj == first)) for jj, tg in before.items()) if p}
+    final = part_of(base, seg, first is None) if seg else None
     return inner, final, keep
+
+
+def part_of(r, tags, first):
+    """The clean Recolour of only the steps tags ((kind, n) of r's order) of saved Recolour r, run apart from the
+    others (before a note tool page, or with other steps between: steps.expanded). first: the first such part run
+    (it undoes the stored colours' own swap; the later ones don't). None: it does nothing."""
+    got = _restacked(r, tags)
+    if got is None:
+        return None
+    if isinstance(got.get("liquify"), dict) and "frozen" in got["liquify"]:  # (the mask makes no notes)
+        got = dict(got, liquify={a: b for a, b in got["liquify"].items() if a != "frozen"})
+    if not first and got.get("turned"):  # (the stored colours' own swap undone once, by the first part only)
+        o2 = order_of(got)
+        got = with_order(clean_recolour(dict(got, turns=turns_of(got), turned=None)), o2)
+    if got is not None and r.get("most") == 16:
+        got = dict(got, most=16)
+    return got
 
 
 def ordered(old, new):

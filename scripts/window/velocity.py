@@ -870,13 +870,13 @@ class VelocityPane(KeepsItems, tk.Canvas):
         (before the overlaps between them are fixed); a shape keeping its own velocities: its stored notes where they
         show (own_places). Shapes sampled (turned / taller) or held are left out (none of theirs greyed)."""
         from notes.custom import notes_resampled
-        from notes.sustain import is_sustained
+        from notes.sustain import is_sustained, sustain_on
         app = self.app
         n = len(app.shapes) + 1
         parts, mine = [], []
         for o, sh in enumerate(app.shapes):
             try:
-                if is_sustained(sh) or sh.get("held") is True or sh.get("hz") or "picture" in sh:
+                if sustain_on(sh) or sh.get("held") is True or sh.get("hz") or "picture" in sh:
                     continue
                 if sh.get("own_vel") and "notes" in sh:
                     if notes_resampled(sh):

@@ -497,12 +497,12 @@ class LiquifyBrush:
         sh = job["sh"]
         from notes.engine import is_gate_flipped, is_pasted_flipped, keeps_laps, made_from, past_edges
         from notes.mask import is_mask
-        from notes.sustain import is_sustained
+        from notes.sustain import is_sustained, sustain_on
         if (self._img is None or self._tiles is None or app.channel_mode.get() != "auto" or len(app.sels) != 1
                 or getattr(app, "loaded", None) is not None or self.hidden_shade()
                 or app.mask_preview.get() and any(is_mask(s) for s in app.shapes)
                 or app.notes_late or getattr(app, "_bg_notes", False) or sh.get("cut") or sh.get("colour_cut")
-                or "picture" in sh or is_sustained(sh) or past_edges(sh, app.keys, app.ppq) is not None
+                or "picture" in sh or sustain_on(sh) or past_edges(sh, app.keys, app.ppq) is not None
                 or getattr(self, "copy_src", None)):
             return None
         kb, top = int(self.kb_w), int(self.ruler_h)
@@ -553,7 +553,7 @@ class LiquifyBrush:
         rule = rule_of(with_most(dict(sh, recolour=base), app.all16())["recolour"])
         if rule.get("stir"):
             rule["ppq"] = app.ppq
-        held_ = is_sustained(sh) or sh.get("held") is True or keeps_laps(sh)  # (as engine.fx_notes')
+        held_ = sustain_on(sh) or sh.get("held") is True or keeps_laps(sh)  # (as engine.fx_notes')
         gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
         got = before_liquify(notes, tracks, rule, held_, gate, own)
         if got is None:

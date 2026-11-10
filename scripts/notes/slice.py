@@ -467,8 +467,8 @@ def _halves(sh, parts, ppq):
     mirrored = bool(colours_back(sh))  # (a gate flipped paste: the pieces keep its colours' channels)
     from notes.passengers import shared_out
     rides = shared_out(sh, parts, ppq) if "cc" in sh else [None] * len(parts)  # (its CCs by time per track)
-    from notes.sustain import is_sustained
-    held = is_sustained(sh) or sh.get("held") is True  # (Sustain done in its notes: they keep their overlaps)
+    from notes.sustain import is_sustained, sustain_on
+    held = sustain_on(sh) or sh.get("held") is True  # (Sustain done in its notes: they keep their overlaps)
     whole = np.unique(np.concatenate([np.asarray(n[:, 4], np.int64) for n in parts]))  # (its colours, in order)
     out = []
     for n, cc in zip(parts, rides):

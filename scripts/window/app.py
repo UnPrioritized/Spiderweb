@@ -51,7 +51,7 @@ from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, pi
                         slot_pal, slot_rule, tidy_groups)
 from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
 from notes.recolour import counted_starts, first_starts, is_recoloured, with_most, without_recolour
-from notes.sustain import is_sustained
+from notes.sustain import is_sustained, sustain_on
 from notes.strips import gap_of, has_strips, strip_colours, strip_laps, strip_spans
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
@@ -504,7 +504,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                               for sh in shapes],
                              # (a Domino paste keeps its own overlaps outside Single channel: user 2026-10-30; not
                              # with Remove overlaps ticked, user 2026-11-06)
-                             [is_sustained(sh) or sh.get("held") is True or mode == "auto" and keeps_laps(sh)
+                             [sustain_on(sh) or sh.get("held") is True or mode == "auto" and keeps_laps(sh)
                               and not across for sh in shapes],
                              backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
@@ -537,7 +537,7 @@ def cut_across(rendered, shapes, overlaps):
     your tracks' places, so yours moved down and the list no longer showed who won); those emptied tracks keep
     counting as tracks with notes everywhere (App.cut_emptied: list, exports), so nothing moves. The loaded MIDI's
     tracks first, in their listed order (overlaps "files")."""
-    held = np.flatnonzero([is_sustained(sh) or sh.get("held") is True for sh in shapes])
+    held = np.flatnonzero([sustain_on(sh) or sh.get("held") is True for sh in shapes])
     before = np.unique(rendered[:, 4])
     files = overlaps.get("files") or ()
     out = remove_across(rendered, np.isin(rendered[:, 5], held), overlaps,
@@ -572,7 +572,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch")
             tracks = np.unique(np.asarray(t, np.int64))
             laid[i] = {int(u): int(on[min(k, len(ids) - 1)]) for k, u in enumerate(tracks.tolist())}
         # (a Domino paste keeps its own overlaps in Multi channel too, as copied: user 2026-10-30, round trip)
-        fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True and not (
+        fix = mode != "raw" and not sustain_on(sh) and sh.get("held") is not True and not (
             mode == "auto" and keeps_laps(sh))
         if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
             together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
@@ -582,7 +582,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch")
         together = np.concatenate(together)
         there = np.isin(rendered[:, 4], np.unique(together[together[:, 4] < OWN0, 4]))
         if there.any():  # (sustained / held shapes and pictures keep their overlaps, as in render: hunt 10-26)
-            keeps = np.array([is_sustained(s) or s.get("held") is True or picture_like(s) for s in shapes] + [True])
+            keeps = np.array([sustain_on(s) or s.get("held") is True or picture_like(s) for s in shapes] + [True])
             there &= ~keeps[np.minimum(rendered[:, 5], len(shapes))]
         if there.any():
             parts[0] = rendered[~there]

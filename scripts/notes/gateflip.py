@@ -6,7 +6,8 @@ reads exactly reversed, gates, colours and all (user 2026-10-11: r g b w -> w b 
 and last end kept. Not the same as reversing the Range graph: that still lays every row from its left edge (user's
 pictures). With Multi channel each colour keeps the channel it has unflipped (engine.render back: channels handed
 out by where each colour starts unflipped, unflipped_starts).
-Done before glue, note tool pages and Sustain. Switching it on / off turns the velocities round once, like a flip
+Done at its place in the shape's step order (notes/steps.py; by default after the note tool pages, velocities and
+glue places after the last page then, before Sustain). Switching it on / off turns the velocities round once, like a flip
 (drawing them again in the velocity pane overrides that as usual)."""
 
 import numpy as np
@@ -75,7 +76,10 @@ def put_back(parts, flips):
 def colours_back(sh):
     """True if sh is gate flipped, its colours given the channels they have unflipped (engine.render back). Pasted
     notes sliced from a flipped paste ("flip_colours", slice.slice_notes): "whole" = flipped over the whole paste,
-    its pieces counted together (their runs went across the cuts); flipped again they're as pasted."""
+    its pieces counted together (their runs went across the cuts); flipped again they're as pasted. Switched off
+    (Properties: sh["off"]): as unflipped."""
+    if ["gate_flip", 0] in [list(t) for t in sh.get("off") or ()]:
+        return False
     if is_pasted(sh):
         if sh.get("flip_colours") is True:
             return "whole" if sh.get("gate_flip") is not True else False

@@ -23,7 +23,7 @@ from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
-from notes.sustain import is_sustained
+from notes.sustain import is_sustained, sustain_on
 from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, heard_marks, kept_bpms, ruler_marks, short_bpm, tempo_text
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
@@ -1519,7 +1519,7 @@ class RollDrawing:
         """covered_ends for these notes at this zoom (None: no sustained shape, nothing to save), remembered per notes
         (which = "fast" / "plain": the two ways' arrays, made = the array they came from), tag (what else group()
         depends on) and zoom. group(): each note's painting group."""
-        if not any(is_sustained(sh) for sh in self.app.shapes):
+        if not any(sustain_on(sh) for sh in self.app.shapes):
             return None
         room = math.ceil(3 * self.app.ppq / self.sx) + 1  # (3 px: its edge well inside the note over it)
         got = self._cover.get(which)
