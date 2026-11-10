@@ -159,15 +159,25 @@ def _one_sound_rows(r, s, e):
     return end_o, end_o > s
 
 
-def edo_columns(notes, edo_first):
-    """Rows (start, end, key row, velocity, ...) as a 31-EDO Song's columns (start, end, key, velocity, channel,
-    port) in start order (a stable sort, as Song does)."""
+EDO_DRUMS = 9  # (31-EDO: channel 10's drum notes on port 1 channel 10, made drums in the pieces: Song.drums)
+
+
+def edo_code_of(notes, edo_first, use10, drums):
+    """playback.edo_code of rows (start, end, key row, velocity, slot, ...): each on the channel its slot is played
+    on (a loaded MIDI's rows: its file channel), channel 10 = drums when drums."""
     from files.playback import edo_code
+    from notes.engine import channels_of
+    return edo_code(notes[:, 2], edo_first, channels_of(notes[:, 4], use10), EDO_DRUMS if drums else None)
+
+
+def edo_columns(notes, edo_first, use10=False, drums=False):
+    """Rows (start, end, key row, velocity, slot, ...) as a 31-EDO Song's columns (start, end, key, velocity,
+    channel, port) in start order (a stable sort, as Song does)."""
     notes = np.asarray(notes)
     if notes.ndim != 2 or not len(notes):
         notes = np.zeros((0, 6), np.int64)
     order = np.argsort(notes[:, 0], kind="stable")
-    code = edo_code(notes[order, 2], edo_first)
+    code = edo_code_of(notes[order], edo_first, use10, drums)
     return (notes[order, 0].astype(np.int64), notes[order, 1].astype(np.int64),
             ((code >> 8) & 0x7F).astype(np.uint8), np.clip(notes[order, 3], 1, 127).astype(np.uint8),
             (code & 15).astype(np.uint8), (code >> 24).astype(np.uint8))
@@ -177,9 +187,10 @@ class EdoPart:
     """A loaded MIDI's notes in 31-EDO (App.edo_loaded_rows) as a Song's columns, made ONCE for Song.joined; one =
     also how one sound a row leaves them: one = (row order, each note kept or not, each note's new end)."""
 
-    def __init__(self, rows, edo_first, one=False):
-        self.rows, self.edo_first = rows, edo_first
-        self.start, self.end, self.key, self.vel, self.chan, self.port = edo_columns(rows, edo_first)
+    def __init__(self, rows, edo_first, one=False, drums=False):
+        self.rows, self.edo_first, self.drums = rows, edo_first, drums
+        # (its rows' slots = OWN0 + file channel: use10 doesn't matter for them)
+        self.start, self.end, self.key, self.vel, self.chan, self.port = edo_columns(rows, edo_first, False, drums)
         self.one = None
         if one:
             n = len(self.start)
@@ -191,8 +202,9 @@ class EdoPart:
             self.row = row.astype(np.int32)  # (< 2 ** 19)
             self.one = (ro.astype(np.int32) if n < 2 ** 31 else ro, keep, new_end)
 
-    def fits(self, rows, edo_first, one):
-        return rows is self.rows and edo_first == self.edo_first and (self.one is not None or not one)
+    def fits(self, rows, edo_first, one, drums=False):
+        return (rows is self.rows and edo_first == self.edo_first and drums == self.drums
+                and (self.one is not None or not one))
 
 
 class Song:
@@ -202,11 +214,14 @@ class Song:
     31-EDO's sound (R6, like live play: playback.edo_code), each row on its own pitch-bent channel from that channel
     (port x 16 + channel), the bends at every piece's start."""
 
-    def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None, edo_first=None, one_sound=False):
-        """one_sound (31-EDO on BASSMIDI): a row sounds ONE note at a time, like live play (_one_sound)."""
+    def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None, edo_first=None, one_sound=False,
+                 drums=False):
+        """one_sound (31-EDO on BASSMIDI): a row sounds ONE note at a time, like live play (_one_sound). drums
+        (31-EDO): channel 10's notes are drums (EDO_DRUMS), else rows too."""
         from notes.engine import channels_of, ports_of
         notes = np.asarray(notes)
         self.edo_first = edo_first
+        self.drums = bool(drums) and edo_first is not None
         if len(notes) and edo_first is None:
             notes = notes[notes[:, 2] <= 127]
         self.ppq = ppq
@@ -224,8 +239,7 @@ class Song:
         self.chan = channels_of(slot, use10).astype(np.uint8) if n else np.zeros(0, np.uint8)
         self.port = (ports_of(slot, use10, ports).astype(np.uint8) if n and ports else np.zeros(n, np.uint8))
         if edo_first is not None and n:  # (31-EDO: the row decides channel + key, the note's colour doesn't)
-            from files.playback import edo_code
-            code = edo_code(notes[order, 2], edo_first)
+            code = edo_code_of(notes[order], edo_first, use10, self.drums)
             self.chan, self.key = (code & 15).astype(np.uint8), ((code >> 8) & 0x7F).astype(np.uint8)
             self.port = (code >> 24).astype(np.uint8)
             del code
@@ -251,20 +265,20 @@ class Song:
         self.key, self.vel, self.chan, self.port = self.key[idx], self.vel[idx], self.chan[idx], self.port[idx]
 
     @classmethod
-    def joined(cls, notes, part, ccs, ports, use10, ppq, bpm, tempo, edo_first, one=False):
+    def joined(cls, notes, part, ccs, ports, use10, ppq, bpm, tempo, edo_first, one=False, drums=False):
         """The same Song as Song(own notes + part's rows after them, ...) in 31-EDO, without sorting the loaded
         MIDI's millions of notes again (part = an EdoPart made once): your own notes merged into its start order
         (before a loaded note starting at the same tick, as a stable sort puts them), one = one sound a row, worked
         out again only on the rows your notes touch (the others keep part's). Rendered ahead with the Loaded MIDI
         tick: built at every edit, the whole build froze the window ~0.65 s at 4 M notes."""
         self = cls.__new__(cls)
-        self.edo_first, self.ppq = edo_first, ppq
+        self.edo_first, self.ppq, self.drums = edo_first, ppq, bool(drums)
         self.tempo = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
         self.map = TimeMap(ppq, self.tempo)
-        own = list(edo_columns(notes, edo_first))
-        cols = (part.start, part.end, part.key, part.vel, part.chan, part.port)
+        own = list(edo_columns(notes, edo_first, use10, drums))
         if one and part.one is None:  # (made without: made now, kept)
-            part.__init__(part.rows, edo_first, True)
+            part.__init__(part.rows, edo_first, True, part.drums)
+        cols = (part.start, part.end, part.key, part.vel, part.chan, part.port)
         if not one:
             keep, ends = None, part.end
         elif not len(own[0]):
@@ -484,7 +498,9 @@ class Song:
             sel = np.flatnonzero(port == p)
             sel = sel[np.lexsort((order[sel], tick[sel]))]
             q = moved.get(p, p)
-            head = [(0, b"\xff\x21\x01" + bytes([q & 127]))] + ([] if q % 16 in file_ports else [(0, _MELODIC_10)])
+            # (31-EDO's channel 10 as drums: port 1's left drums, EDO_DRUMS)
+            drums = q % 16 in file_ports or (getattr(self, "drums", False) and q == EDO_DRUMS >> 4)
+            head = [(0, b"\xff\x21\x01" + bytes([q & 127]))] + ([] if drums else [(0, _MELODIC_10)])
             tracks.append(_track(head, _messages(tick[sel], st[sel], d1[sel], d2[sel])))
         return tracks
 
@@ -504,7 +520,9 @@ class Song:
                   for t, m in [(0, b) for b in self.bends] + self.ccs]
             extra = synth.cc_events(cc)
             used = sorted({int(c) for c in np.unique(chans)} | {int(c[4]) for c in cc})
-            drums = np.array([(synth._EV_DRUMS, 0, c, 0, 0) for c in used if c % 16 == 9], synth.EVENT)
+            kit = EDO_DRUMS if getattr(self, "drums", False) else -1  # (31-EDO's channel 10 as drums)
+            drums = np.array([(synth._EV_DRUMS, 1 if c == kit else 0, c, 0, 0) for c in used if c % 16 == 9],
+                             synth.EVENT)
             extra = np.concatenate([drums, extra]) if len(drums) else extra
             tempo = self.tempo if len(self.tempo) > 1 else None
             self._bass = synth.events(rows, self.ppq, 60e6 / self.tempo[0][1], chans, extra, True, tempo)
@@ -786,7 +804,7 @@ class Maker:
         another PPQ / tempo = everything. Returns True when anything was thrown away."""
         old = self.song
         if old is None or song is None or old.ppq != song.ppq or old.edo_first != song.edo_first or \
-                not same_tempo(old, song):
+                getattr(old, "drums", False) != getattr(song, "drums", False) or not same_tempo(old, song):
             self.set_song(song)
             return True
         lo_old, lo_new = getattr(old, "lm", None), getattr(song, "lm", None)

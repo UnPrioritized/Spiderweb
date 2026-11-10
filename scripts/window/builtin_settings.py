@@ -53,6 +53,12 @@ class BuiltinPanel(ttk.Frame):
         self.fonts = FontList(box, app)  # (shared with the Hz bass preview)
         self.fonts.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
         r += 1
+        # (31-EDO's channel 10, every MIDI out that plays 31-EDO: user 2026-11-10)
+        c = ttk.Checkbutton(box, text=tr("bs.edo10_piano"), variable=app.edo10_piano, command=app.on_edo10_piano,
+                            takefocus=False)
+        c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        Tooltip(c, tr("bs.edo10_piano_tip"))
+        r += 1
         first = set(box.grid_slaves())  # (rows from here on: Built-in BASSMIDI's own)
 
         lb = ttk.Label(box, text=tr("ps.voices"))

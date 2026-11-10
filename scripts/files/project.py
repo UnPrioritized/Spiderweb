@@ -656,6 +656,7 @@ class ProjectFiles:
                               "tempo_log": self.tempo_pane.log,
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
+                              "edo10_piano": self.edo10_piano.get(),
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
                               "kestrel_slow_down": self.slow_kestrel.get(), "play_slow_down": self.slow_builtin.get(),
@@ -880,6 +881,8 @@ class ProjectFiles:
                 self.voices_var.set(str(v))
             self.play_guard.set(win.get("play_voice_guard") is True)
             self.play_limiter.set(win.get("play_limiter") is True)
+            self.edo10_piano.set(win.get("edo10_piano") is True)
+            self.out.edo_drums = not self.edo10_piano.get()
             v = win.get("loaded_synths")
             if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 16:
                 self.loaded_synths = v

@@ -1018,6 +1018,8 @@
  "bs.synths_tip": "A loaded MIDI plays on this many synths side by side, each on its own processor core, so busy parts of dense MIDIs can sound fuller (half your cores to start). More = fewer notes left out in the busiest parts, but less room for the rest of your PC: lower it if your PC slows down while playing. Heard from the next Play.",
  "bs.slow_down": "Slow down to keep up",
  "bs.slow_down_tip": "Ticked: when the processor can't make the sound fast enough, the song plays slower instead (down to 10 %), the pitch the same, and goes back to its own speed once it can. With \"Lower it by itself when overloaded\" ticked too, the voice limit is lowered only once it's at the slowest, or once playing slower stops helping (very many notes ringing at once). Busy loaded MIDIs can slow down a lot. Heard at once.",
+ "bs.edo10_piano": "31-EDO: play channel 10 as piano",
+ "bs.edo10_piano_tip": "In 31-EDO projects with Audio ticked.\nOff: channel 10 plays drums, its keys as written, like other 31-EDO players do (your notes and a loaded MIDI's).\nTicked: channel 10 plays tuned key rows in a piano sound, like the other channels.\nHeard at once.",
  "bs.limiter": "Use OmniMIDI Limiter",
  "bs.limiter_tip": "Ticked: sound louder than full volume is turned down instead of clipped (clipping = a harsh, broken sound in busy parts), so busy parts sound cleaner but flatter. Off: too loud is clipped. Heard at once.",
  "bs.limiter_slow": "\nThe compiled loops aren't working here, so playback may break up for a moment while you edit with it on.",

@@ -96,7 +96,7 @@ EDO_NAMES = ["C", "C^", "C#", "Db", "Dv", "D", "D^", "D#", "Eb", "Ev", "E", "E^"
              "G", "G^", "G#", "Ab", "Av", "A", "A^", "A#", "Bb", "Bv", "B", "B^", "Cv"]
 EDO_WHITE = {0, 5, 10, 13, 18, 23, 28}  # the 7 plain notes
 EDO_BLACK = {2, 3, 7, 8, 15, 16, 20, 21, 25, 26}  # sharps and flats (the other 14 rows: half sharps / half flats)
-EDO_PIANO = range(23, 249)  # A0 .. C8, a real 88-key piano's range
+EDO_PIANO = range(54, 256)  # A0 .. the top row (C8 is past it), a real 88-key piano's range (row 0 = C-1)
 # Note colours per channel, blue first: the first 15 = channels 1-9, 11-16 (a slot's channel, engine.CHANNELS), so
 # a colour always means the same channel; the 16th (CH10) = channel 10's, used only when channel 10 is ("Use
 # channel 10" / an image's own tick: slot_colours)
@@ -349,6 +349,7 @@ def velocity_shades(color):
 
 
 def note_name(p, edo=False):
-    if edo:  # (Cv sits just under the next octave's C)
-        return f"{EDO_NAMES[p % EDO]}{p // EDO + (p % EDO == EDO - 1)}"
+    if edo:  # (Cv sits just under the next octave's C; row 0 = C-1 = MIDI key 0 on a channel group's first channel,
+        # as the 31-EDO template plays it, user 2026-11-10)
+        return f"{EDO_NAMES[p % EDO]}{p // EDO - 1 + (p % EDO == EDO - 1)}"
     return f"{NOTE_NAMES[p % 12]}{p // 12 - 1}"

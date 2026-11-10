@@ -81,6 +81,7 @@ class LoadedSong:
         self._led = set()  # (ticks a lead-up was tried for, PLAN E: once each)
         self.ppq, self.tempo, self.map, self.edo_first = own.ppq, own.tempo, own.map, own.edo_first
         self.bends = own.bends
+        self.drums = getattr(own, "drums", False)  # (31-EDO's channel 10 as drums: your shapes' part)
         n = len(lm.tracks)
         self.masks = mute_masks(muted, n)
         tport, _ = track_ports(lm)

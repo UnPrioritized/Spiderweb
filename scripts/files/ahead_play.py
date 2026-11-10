@@ -259,14 +259,16 @@ class AheadPlay:
         one = edo is not None and engine == "bassmidi"
         rows = self.app.edo_loaded_rows(AHEAD) if edo is not None else None  # (31-EDO's Loaded MIDI tick)
         n = len(rows) if rows is not None else 0
+        drums = self.app.out.edo_drums  # (31-EDO: channel 10 = drums, Settings → Sound)
         if n and len(rendered) >= n:  # (play_apart puts them after your own: those joined to a part made once)
-            if self._edo_part is None or not self._edo_part.fits(rows, edo, one):
+            if self._edo_part is None or not self._edo_part.fits(rows, edo, one, drums):
                 self._edo_part = None  # (the old one let go first: memory)
-                self._edo_part = EdoPart(rows, edo, one)
+                self._edo_part = EdoPart(rows, edo, one, drums)
             own = Song.joined(np.asarray(rendered)[:len(rendered) - n], self._edo_part, ccs, ports,
-                              self.app.picture_use10, ppq, bpm, tempo, edo, one)
+                              self.app.picture_use10, ppq, bpm, tempo, edo, one, drums)
         else:
-            own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo, one_sound=one)
+            own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo, one_sound=one,
+                       drums=drums)
         lm = self._loaded()
         return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else ())
 

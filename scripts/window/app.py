@@ -735,6 +735,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.play_voices = 1000  # Built-in BASSMIDI's voice limit (user; with the window settings)
         self.play_guard = tk.BooleanVar(self, value=False)  # lowered by itself while overloaded (user: off to start)
         self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)
+        # 31-EDO: channel 10 as tuned rows in a piano sound (user 2026-11-10; off = drums, the template's way)
+        self.edo10_piano = tk.BooleanVar(self, value=False)
         # synths side by side playing a loaded MIDI (user 2026-10-24: all cores would halt the PC; half to start)
         self.loaded_synths = GROUP_DEFAULT
         self.synths_var = tk.StringVar(self, value=str(GROUP_DEFAULT))

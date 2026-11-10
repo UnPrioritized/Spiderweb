@@ -689,8 +689,10 @@ def edo_left_out(lm):
 
 
 def edo_rows(lm, muted, ppq):
-    """lm's notes as the player's rows (start, end, key row, velocity, slot 0, owner -1) in ppq's ticks, the muted
-    tracks / channels (TrackList.loaded_mutes) left out. Kept on lm until something it reads changes."""
+    """lm's notes as the player's rows (start, end, key row, velocity, slot, owner -1) in ppq's ticks, the muted
+    tracks / channels (TrackList.loaded_mutes) left out. slot = OWN0 + the file channel, so engine.channels_of gives
+    the channel it's played on (31-EDO's channel groups: playback.edo_code). Kept on lm until something it reads
+    changes."""
     key = (lm.hide_ver, lm.gone, tuple(muted), ppq)
     got = getattr(lm, "_edo_rows", None)
     if got is not None and got[0] == key:
@@ -703,7 +705,8 @@ def edo_rows(lm, muted, ppq):
         trk, s, e, k, ch, vel = (a[keep] for a in (trk, s, e, k, ch, vel))
     if ppq != lm.ppq:  # (the project's ticks: the same beats)
         s, e = s * ppq // lm.ppq, e * ppq // lm.ppq
-    rows = np.column_stack([s, e, k, vel, np.zeros(len(s), np.int64), np.full(len(s), -1, np.int64)]).astype(np.int64)
+    from notes.engine import OWN0
+    rows = np.column_stack([s, e, k, vel, OWN0 + ch.astype(np.int64), np.full(len(s), -1, np.int64)]).astype(np.int64)
     lm._edo_rows = (key, rows)
     return rows
 

@@ -74,9 +74,13 @@ def _same_opts(a, b):
 
 
 def scrub_note(out, ch, p, vel):
-    """Right-drag listening's note on / off: channel None = a piano roll row played in 31-EDO, else as it is (a
-    loaded MIDI's notes stay as written then, like playback)."""
-    out.note(ch or 0, p, vel, rows=ch is None)
+    """Right-drag listening's note on / off: channel None = a piano roll row played in 31-EDO, -1 - n = a row played
+    on channel n (31-EDO's channel groups: its octaves), else as it is (a loaded MIDI's notes stay as written then,
+    like playback)."""
+    if ch is None or ch < 0:
+        out.note(0 if ch is None else -1 - ch, p, vel, rows=True)
+    else:
+        out.note(ch, p, vel)
 
 
 def readable(n):
@@ -232,12 +236,14 @@ class Playback:
             self.out.handle.drum_parts(files_ports)
             return
         from files.kestrel import PART_TYPE
+        # (31-EDO: channel 10's drum notes go to port 1's channel 10, MidiOut.drum_code: drums there)
+        kit = {0} if self.out.tuned and self.out.drum_code is not None else set()
         for port in range(16):
-            self.out.handle.send(PART_TYPE | 9 << 8 | (1 if port in files_ports else 0) << 16 | port << 24)
+            self.out.handle.send(PART_TYPE | 9 << 8 | (1 if port in files_ports | kit else 0) << 16 | port << 24)
         # 31-EDO (13g): its channels bent for this play on the highest two ports the loaded MIDI leaves free (hunt
         # 2026-10-29: on its ports they played as drums / bent its notes), else the last ones put back
         from files.playback import edo_ports
-        self.out.bend_edo(edo_ports(files_ports) if self.out.tuned else False)
+        self.out.bend_edo(edo_ports(files_ports | kit) if self.out.tuned else False)
 
     def play_end(self, ppq, beats, start):
         """Where playing stops: one beat after the last note ends (a loaded MIDI's too; or after the play line if
@@ -1499,6 +1505,20 @@ class Playback:
         self.note_builtin()
         self.schedule_autosave()
 
+    def on_edo10_piano(self):
+        """Settings → Sound's 31-EDO channel 10 tick: heard from now on (playing: started again from where it is,
+        like the 31-EDO ticks; sounding notes end first, their offs where their ons went)."""
+        playing = self.player.running
+        if playing:
+            self.stop_play()
+        self.scrub_end()
+        self.out.edo_drums = not self.edo10_piano.get()
+        if playing:
+            self.start_play(keep=True)
+        else:
+            self.play_changed()  # (Rendered ahead's sound made while stopped: old)
+        self.schedule_autosave()
+
     def on_kestrel_opt(self, key):
         """A Kestrel (GPU) row in Settings → Sound changed (app.kestrel_vars[key]): Lower it by itself is heard at
         once, the others from the next Play (Kestrel opened again with them: fresh_builtin). Max voices typed wrong
@@ -1645,7 +1665,7 @@ class Playback:
                 self.status.config(text=err)
                 return False
         lo, hi = min(t_from, t_to), max(t_from, t_to)
-        now = {}  # (channel, key) -> (start of the latest note there, velocity); channel None = a 31-EDO row
+        now = {}  # (channel, key) -> (start of the latest note there, velocity); channel -1 - n = a 31-EDO row on n
         from roll.roll_draw import TRACK_FADE
         seen = TRACK_FADE[0] > 0  # (like Domino: every note shown is heard, the track list's faint tracks too;
         near = self.roll.visible_notes(lo, hi)  # Faint 0 % = not shown, not heard; user 2026-11-01)
@@ -1658,11 +1678,12 @@ class Playback:
             if len(wrapped):
                 near = np.concatenate([np.asarray(near, np.int64), np.asarray(wrapped, np.int64)])
         s_, e_ = near[:, 0], near[:, 1]
-        tuned = out.tuned  # (31-EDO: a row is one channel whatever its colour: kept by row)
+        tuned = out.tuned  # (31-EDO: a row + its channel's place in its group: scrub_note)
         for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
             if v <= -2:  # (a faint track's copy: -2 - its velocity)
                 v = -2 - v
-            k = (None if tuned else slot_track_channel(slot, self.picture_use10)[1], p)
+            ch = slot_track_channel(slot, self.picture_use10)[1]
+            k = (-1 - ch if tuned else ch, p)
             if k not in now or s > now[k][0]:
                 now[k] = (s, v)
         held = self._scrub_held
@@ -1679,7 +1700,7 @@ class Playback:
             drums = out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
             edo = tuned and self.edo_loaded()  # own drum channel; other MIDI outs' channel 10 is drums already;
             for (ch, p), (s, v) in got.items():  # 31-EDO's Loaded MIDI tick: rows, like playback plays them)
-                k = (None, p) if edo else (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
+                k = (-1 - ch, p) if edo else (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
                 if k not in now:  # (sounding without a start in this sweep: held on as it is, a new key sounds)
                     now[k] = (held.get(k, -1) if s is None else -2 - s, v)
             if rough:  # (too many notes to read in time: every key drawn, one loudness; user 2026-10-25)
@@ -1738,6 +1759,7 @@ class Playback:
             from files.playback import MidiOut
             side = self._scrub_side = MidiOut(self.make_live)
         side.edo = self.out.edo  # (31-EDO's sound works there)
+        side.edo_drums = self.out.edo_drums
         return side
 
     def scrub_end(self):

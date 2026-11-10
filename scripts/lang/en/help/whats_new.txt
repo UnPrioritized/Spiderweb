@@ -21,6 +21,7 @@ What's new:
 • The side panel can be made wider or narrower: drag the line between it and the piano roll, or double-click the line for the smallest width where nothing is cut. Drag it far to the right and it shuts into a strip at the window's edge; click the strip (or View → Side panel) to bring it back. Until you drag it, it now gets wider by itself where a text would be cut (some Windows 11 setups cut the end of a row). The drawer's panel can be resized too. See Help → Side panel width.
 
 • Play the loaded MIDI in 31-EDO (under Keys, with 256 keys and the 31-EDO + Audio ticks on): a loaded MIDI's notes play tuned like yours, every key up to 255, as one piano sound (its pitch bends, instruments and controls are left out; the status line counts them). See Help → 31-EDO.
+• Changed: 31-EDO plays its pitches like other 31-EDO players (the 31-EDO template): row 0 is now C-1, channels go in groups of three where the 2nd and 3rd channel play 2 and 4 octaves higher, and channel 10 plays drums. A setting in Settings → Sound plays channel 10 as piano instead.
 
 • Smaller and quicker: Spiderweb.exe is about 40 % smaller (about 70 MB instead of 116 MB), and its first start no longer waits while the speed-ups get ready. Opening, undo and redo, changing the gate and Stir on huge projects are up to 15 % faster. Running from the scripts gets the full speed with nothing extra to install.
 
