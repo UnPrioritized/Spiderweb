@@ -43,7 +43,7 @@ from notes.custom import ROUND
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
 KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "turns", "liquify", "warp", "order",
-             "stir_at", "_upto")  # (what mode KEEP
+             "stir_held", "_upto")  # (what mode KEEP
 # looks at)
 # ("liquify" = the Liquify brush's bend map, notes/liquify.py: applied after every stir and the Warp; Off with only a
 # Liquify = KEEP too)
@@ -254,9 +254,9 @@ def clean_recolour(r):
         ts = [x for x in (clean_turned(t) for t in ts[:MOST_TURNS]) if x]
         if ts != ([tw] if tw else []):
             out["turns"] = ts
-    a = r.get("stir_at")  # (a lone Stir reset: its place in the order, kept till a stir comes back)
-    if number(a) and a == int(a) and 0 <= a <= len(ORDER_KINDS) + MOST_STIRS + MOST_TURNS and not stir:
-        out["stir_at"] = int(a)
+    a = r.get("stir_held")  # (Stir tabs all back at their defaults: they keep their places in the order, user 11-10)
+    if number(a) and a == int(a) and 1 <= a <= MOST_STIRS and not stir:
+        out["stir_held"] = int(a)
     o = r.get("order")
     if o is not None:
         o = order_of(dict(out, order=o))
@@ -296,10 +296,12 @@ def moves_colours(kind, d):
 
 
 def order_counts(rc):
-    """How many steps of each kind rc holds (a Stir counts once per tab, {} tabs kept in a stack too)."""
+    """How many steps of each kind rc holds (a Stir counts once per tab, {} tabs kept in a stack too; tabs all back
+    at their defaults = "stir_held" of them)."""
     rc = rc or {}
     st = rc.get("stir")
-    return {"mode": int(rc.get("mode") in MODES), "stir": len(st) if isinstance(st, list) else int(bool(st)),
+    n = len(st) if isinstance(st, list) else int(bool(st))
+    return {"mode": int(rc.get("mode") in MODES), "stir": n or int(rc.get("stir_held") or 0),
             "warp": int(moves_colours("warp", rc.get("warp"))),
             "liquify": int(moves_colours("liquify", rc.get("liquify"))),
             "turned": len(turns_of(rc))}
@@ -348,14 +350,7 @@ def ordered(old, new):
     old = old or {}
     if new.get("order") != old.get("order"):
         return new
-    base = order_of(old)
-    at = old.get("stir_at")
-    if at is not None and order_counts(new)["stir"] and not order_counts(old)["stir"]:
-        # (the lone Stir reset before comes back where it was, like a reset tab of a stack, hunt 11-10)
-        base = base[:at] + ["stir"] + base[at:]
-    if order_counts(new)["stir"] and "stir_at" in new:
-        new = {k: v for k, v in new.items() if k != "stir_at"}
-    return with_order(new, base)
+    return with_order(new, order_of(old))
 
 
 def stir_removed(rc, i):
@@ -404,7 +399,13 @@ def step_place(rc, kind, n=0):
     return None
 
 
-EDIT_SKIP = ("stir", "warp", "liquify", "turned", "turns", "order", "stir_at", "frame", "whole", "most", "ppq")
+EDIT_SKIP = ("stir", "warp", "liquify", "turned", "turns", "order", "stir_held", "frame", "whole", "most", "ppq")
+
+
+def stirs_of(rc):
+    """rc's Stir tabs in order, every setting filled in (tabs held at their defaults too: "stir_held")."""
+    rc = rc or {}
+    return stir_stack(rc.get("stir")) or [full_stir(None)] * int(rc.get("stir_held") or 0)
 
 
 def edited_step(old, new):
@@ -414,7 +415,7 @@ def edited_step(old, new):
     old, new = old or {}, new or {}
     if order_counts(old) != order_counts(new) or order_of(old) != order_of(new):
         return None
-    a, b = stir_stack(old.get("stir")), stir_stack(new.get("stir"))
+    a, b = stirs_of(old), stirs_of(new)
     for i, (x, y) in enumerate(zip(a, b)):
         if x != y:
             return "stir", i

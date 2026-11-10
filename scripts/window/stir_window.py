@@ -18,7 +18,7 @@ from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_ST
                             ROUND_EDGES, bends, flip_of_matters, order_of,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
-                            stir_removed, stir_stack)
+                            stir_removed, stir_stack, stirs_of)
 from roll.roll_live import STROKE_TOOLS
 from window import look
 from window.drawer import library_lists, shape_path
@@ -35,12 +35,14 @@ AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "area
 BEND_BOXES = ("polar", "ripple", "ripple_len", "kaleido", "kaleido_turn", "wring", "wring_angle")
 
 
-def stirred_rc(old, stir):
+def stirred_rc(old, stir, held=0):
     """A shape's Recolour (clean, or None = Off) with its Stir = stir (one stir, a list of them: stacked, or None =
-    none)."""
-    rc = {k: v for k, v in (old or {}).items() if k != "stir"}
+    none; held = tabs kept in the order when they all are at their defaults)."""
+    rc = {k: v for k, v in (old or {}).items() if k not in ("stir", "stir_held")}
     if stir:
         rc["stir"] = stir
+    if held:
+        rc["stir_held"] = held  # (clean_recolour drops it when a stir is left)
     if not old:
         rc.update(mode=KEEP, seed=new_seed())
     return clean_recolour(rc)
@@ -48,7 +50,7 @@ def stirred_rc(old, stir):
 
 def stir_at(rc, i):
     """Stir number i (0 = the first) of a Recolour, every setting filled in (none there yet: the defaults)."""
-    stack = stir_stack((rc or {}).get("stir"))
+    stack = stirs_of(rc)
     return stack[i] if i < len(stack) else full_stir(None)
 
 
@@ -75,13 +77,18 @@ def library_area(app, name):
 
 def with_stir(old, i, change):
     """old's Recolour with stir number i = change(that stir, filled in) (the stack padded with plain stirs up to it;
-    change None = that stir taken out of the stack)."""
-    stack = stir_stack((old or {}).get("stir"))
+    change None = that stir taken out of the stack). Tabs all back at their defaults (knobs to 0, Reset, typed 0)
+    keep their places in the colour steps' order ("stir_held", user 2026-11-10: a stir at 0 went to the end and the
+    user couldn't tell which effect was hidden); only × takes a tab's place away."""
+    stack = stirs_of(old)
+    had = len(stack)
     stack += [full_stir(None)] * (i + 1 - len(stack))
     if change is None:
+        if i >= had:
+            return old
         del stack[i]
         if old:  # (its own place in the colour steps' order goes too: the later tabs keep theirs)
-            old = {k: v for k, v in dict(old, order=stir_removed(old, i)).items() if k != "stir_at"}
+            old = dict(old, order=stir_removed(old, i))
     else:
         was = stack[i]
         if was == full_stir(None):  # (a stir made now: Smooth corners on from the start; old files keep their 0)
@@ -89,19 +96,12 @@ def with_stir(old, i, change):
         stack[i] = change(dict(was))
         if stack[i] == was:  # (nothing changed: old as it is, no plain stir padded in, hunt 11-04 8)
             return old
-    return stirred_rc(old, stack or None)
+    return stirred_rc(old, stack or None, held=len(stack) if had else 0)
 
 
 def reset_stir(old, i):
-    """old's Recolour with stir number i back to its start. The only stir: no stir at all, but its place in the
-    colour steps' order is remembered ("stir_at") so the next change puts it back there, as a stack's reset tab
-    keeps its place (hunt 11-10)."""
-    new = with_stir(old, i, lambda st: full_stir(None))
-    if new and len(stir_stack(old.get("stir"))) == 1 and not stir_stack(new.get("stir")):
-        o = order_of(old)
-        if "stir" in o:
-            new = dict(new, stir_at=o.index("stir"))
-    return new
+    """old's Recolour with stir number i back to its start (its place in the order kept, with_stir)."""
+    return with_stir(old, i, lambda st: full_stir(None))
 
 
 class StirWindow(HeldKnobs, tk.Toplevel):
@@ -655,7 +655,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     def sync_tabs(self, tgts):
         """The tab row: one tab per stir (the most any selected shape has, at least one; a new tab from "+" shown
         until something else is picked)."""
-        count = max([len(stir_stack((clean_recolour(t.get("recolour")) or {}).get("stir"))) for t in tgts] + [1])
+        rcs = [clean_recolour(t.get("recolour")) for t in tgts]
+        count = max([len(stirs_of(r)) for r in rcs] + [1])
         if self.fresh and self.tab == count and count < MOST_STIRS:
             count += 1
         else:
@@ -693,7 +694,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 w.state(["!disabled" if on else "disabled"])
         self.tab_add.state(["!disabled" if on and count < MOST_STIRS and not self.fresh else "disabled"])
         shown = self.stirs()
-        self.drop_live = on and (count > 1 or any(s != full_stir(None) for s in shown))
+        # (a tab held at its defaults keeps a place in the order: × takes it away)
+        self.drop_live = on and (count > 1 or any(s != full_stir(None) for s in shown)
+                                 or any((r or {}).get("stir_held") for r in rcs))
         for x in self.tab_drops:
             x.config(foreground=look.CLOSE if self.drop_live else look.LABEL_OFF,
                      cursor="hand2" if self.drop_live else "")
@@ -776,7 +779,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.wheel = None
             self.app.change_recolour(
                 lambda old, sh: with_stir(old, i, None)
-                if i < len(stir_stack((old or {}).get("stir"))) else old, tr("stir.undo_drop"))
+                if i < len(stirs_of(old)) else old, tr("stir.undo_drop"))
         # (each tab's remembered area moves down with its tab)
         self.area_mem = {t - (t > i): m for t, m in self.area_mem.items() if t != i}
         self.tab = max(0, i - 1)
@@ -1189,7 +1192,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 good(b["entry"])
         self.forget_area()  # (else picking an area after Reset brought the old slant / Size back, user 11-06)
         self.app.change_recolour(
-            lambda old, sh: reset_stir(old, i) if old and i < len(stir_stack(old.get("stir"))) else old,
+            lambda old, sh: reset_stir(old, i) if old and i < len(stirs_of(old)) else old,
             tr("stir.undo_reset"))
         self.sync()
 

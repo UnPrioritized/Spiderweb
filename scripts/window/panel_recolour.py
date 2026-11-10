@@ -101,15 +101,24 @@ class RecolourPanel:
 
     def edit_hidden_count(self, kind):
         """How many later colour steps are skipped while a step of kind is edited (the most of any shape), 0."""
+        return len(self.edit_hidden_steps(kind))
+
+    def edit_hidden_steps(self, kind):
+        """The later colour steps skipped while a step of kind is edited, as (kind, n, its Recolour) in order (n = the
+        n-th of its kind: "stir" 1 = Stir tab 2), of the shape skipping the most; [] = none."""
         e = self.colour_edit
         if e is None or e[0][0] != kind:
-            return 0
-        most = 0
-        for i in e[1]:
+            return []
+        most = []
+        for i in sorted(e[1]):
             if i < len(self.shapes):
                 j = self.edit_place(self.shapes[i], i)
                 if j is not None:
-                    most = max(most, len(order_of(clean_recolour(self.shapes[i]["recolour"]))) - 1 - j)
+                    rc = clean_recolour(self.shapes[i]["recolour"])
+                    o = order_of(rc)
+                    got = [(k, o[:p].count(k), rc) for p, k in enumerate(o) if p > j]
+                    if len(got) > len(most):
+                        most = got
         return most
 
     def sync_edit_lines(self):

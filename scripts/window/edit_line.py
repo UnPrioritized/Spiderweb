@@ -1,13 +1,40 @@
 """The line the Stir / Warp / Liquify / Shares windows show while the colour effects after the one being edited are
 skipped (Order of colour settings, PLAN.md stage C, user 2026-11-10: fully off while an earlier one is edited, worked
-out again once the user leaves it): "2 later effects hidden while you edit this one" + a Preview all button (the
-whole result now, without leaving the window)."""
+out again once the user leaves it): "Hidden while you edit this one: Warp, Liquify" (named, user's D check-in: a
+count alone left them unsure which was which) + a Preview all button (the whole result now, without leaving the
+window). step_name: a colour step's name as the user sees it (the Colour effects window uses it too)."""
 
 from tkinter import ttk
 
-from files.lang import tr, trn
+from files.lang import tr
 from window import look
 from window.widgets import Tooltip
+
+MOST_NAMES_CHARS = 60  # (the names cut with "…" past this many letters)
+
+
+def step_name(rc, kind, n=0):
+    """The name of colour step kind ("mode", "stir", "warp", "liquify", "turned"; n = the n-th of its kind) of
+    Recolour rc: "Shuffle" / "Split: Scattered" / "Split: Clumps", "Stir 2", "Warp", "Liquify", "Reverse track
+    order"."""
+    if kind == "mode":
+        return tr("recolour." + (rc or {}).get("mode", "shuffle"))
+    if kind == "stir":
+        return tr("stir.tab", n=n + 1)
+    if kind == "turned":
+        return tr("join_split.reverse_tracks")
+    return tr(kind + ".title")
+
+
+def names_line(names, most=MOST_NAMES_CHARS):
+    """names joined with ", ", cut with "…" past most letters (whole names only, at least one)."""
+    out = ""
+    for k, name in enumerate(names):
+        nxt = name if not out else out + ", " + name
+        if k and len(nxt) > most:
+            return out + ", …"
+        out = nxt
+    return out
 
 
 class EditLine(ttk.Frame):
@@ -24,15 +51,19 @@ class EditLine(ttk.Frame):
         b.pack(side="right", padx=(6, 0))
         Tooltip(b, tr("edit.preview_all_tip"))
         Tooltip(self.label, tr("edit.hidden_tip"))
-        self.shown = 0
+        self.shown, self.text = 0, ""  # (how many later steps are hidden, the line's text)
 
     def sync(self):
-        n = self.app.edit_hidden_count(self.kind)
-        if n == self.shown:
+        steps = self.app.edit_hidden_steps(self.kind)
+        text = ""
+        if steps:
+            text = tr("edit.hidden", names=names_line([step_name(rc, k, n) for k, n, rc in steps]))
+        self.shown = len(steps)
+        if text == self.text:
             return
-        self.shown = n
-        if n:
-            self.label.config(text=trn("edit.hidden", n, n=n))
+        self.text = text
+        if text:
+            self.label.config(text=text)
             self.pack(anchor="w", fill="x", pady=(6, 0), after=self.after_w)
         else:
             self.pack_forget()
