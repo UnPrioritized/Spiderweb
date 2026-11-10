@@ -425,6 +425,8 @@ class Pair:
                     near_end, far_end = far_end, near_end
                 got = blend_order(near_end, far_end, got, len(pages(out.get("fx"))))
             out["recolour"] = got
+        from notes.steps import carried
+        carried(out, a if f < 0.5 else b)  # (its steps' order + ones switched off: the nearer end's for now, steps.py)
         return clean_shape(out)
 
 

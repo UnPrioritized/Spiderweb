@@ -474,7 +474,7 @@ def _halves(sh, parts, ppq):
     for n, cc in zip(parts, rides):
         half = {k: copy.deepcopy(v) for k, v in sh.items()
                 if k not in ("notes", "pts", "vel_env", "fx", "glue", "between", "gate_flip", "flip_colours", "unmerge",
-                              "leftover_of", "cc", "sustain", "subtract", "extend", "recolour")}
+                              "leftover_of", "cc", "sustain", "subtract", "extend", "recolour", "order", "off")}
         # (pages / glue / a velocity line / a gate aware flip / Sustain / Gate subtract / Recolour: in its notes, as
         # they sound (user 2026-10-23); a merge's notes cut: no Split back)
         half.update(notes_shape(n, ppq, sh.get("name")), paste=paste)

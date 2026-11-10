@@ -571,6 +571,8 @@ def clean_shape(sh):
     rc = clean_recolour(sh.get("recolour"))
     if rc is not None:  # its notes' colours changed (recolour.py)
         out["recolour"] = rc
+    from notes.steps import kept_in
+    kept_in(out, sh)  # (the order of its steps + the ones switched off: steps.py; saved only when not the default)
     # (again on what was read: a number written as text, "nan" or "1e400", got past sane as text; and where it
     # reaches, its strokes too)
     return out if sane(out) and within_reach(out) else None

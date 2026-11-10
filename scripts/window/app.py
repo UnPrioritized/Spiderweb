@@ -27,6 +27,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
+from notes.steps import after_change as steps_after_change, signature as steps_signature
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
                           split_overlaps, heard_way, keeps_laps,
@@ -2500,6 +2501,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             deps.pop(k, None)
             top.discard(k)
 
+    def steps_noted(self):
+        """Every shape's step order kept up (notes/steps.py, PLAN.md "Properties" A): a step it didn't have at the
+        last change goes at the end of its order, one taken away leaves it. A shape seen for the first time (new,
+        opened, undone, pasted) keeps the order it came with."""
+        seen = getattr(self, "_step_sigs", None) or {}
+        now = {}
+        for sh in self.shapes:
+            got = seen.get(id(sh))
+            sig = steps_signature(sh)
+            if got is not None and got[0] is sh:
+                if got[1] != sig:
+                    steps_after_change(sh, got[1])
+                    sig = steps_signature(sh)
+            now[id(sh)] = (sh, sig)
+        self._step_sigs = now
+
     def shapes_changed(self, now=False, moving=False):
         """Recalculate every note (overlaps depend on all shapes together) and refresh the screen.
         While dragging, if that's slow (lots of notes), only the lines follow the mouse: the notes catch up when the
@@ -2531,6 +2548,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for sh in self.shapes:  # ("Shape length follows the notes": after any change to its box too, hunt)
             if (sh.get("hz") or {}).get("grow"):
                 fit_length(sh)
+        self.steps_noted()
         busy = self._notes_time + self._mask_time  # (the masks' preview is made after the notes, mask.py)
         slow = busy > 0.15 or self._merges_owed
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
