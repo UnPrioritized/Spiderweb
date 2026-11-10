@@ -328,7 +328,7 @@ def _placed(w, x, y, rc, box, own):
         x, y = np.clip(x, 0, 1), np.clip(y, 0, 1)
     mid, key = from_unit(np.asarray(x, np.float64), np.asarray(y, np.float64), rc, box, own)
     if edge in WRAPS:
-        mid, key = w["rows"].wrapped(mid, key, w.get("rep"))
+        mid, key = w["rows"].wrapped(mid, key, w.get("rep"), edge)
     elif edge == "bend":
         mid = w["rows"].unstretched(mid, key, w["t0"], w["t1"])
     return mid, key
@@ -385,21 +385,26 @@ def _place_numbers(w, rc, box, own):
     edge = w["edge"]
     if edge == "bend":
         return None
-    from notes.recolour import whole_shares
+    from notes.recolour import BOUNCES, WRAPS, whole_shares
     f = rc.get("frame")
     turned = bool(f and f[1])
     t0, t1, k0, k1 = own if turned else box
     (a0, a1), (b0, b1) = whole_shares(rc) if turned else ((0.0, 1.0), (0.0, 1.0))
-    fp = np.array([{"escape": 0, "wrap": 2, "repeat": 2}.get(edge, 1), turned, a0, a1 - a0, b0, b1 - b0, b1 > b0,
-                   f[1] if turned else 1, f[2] if turned else 1, t0, max(t1 - t0, 1.0), k0, k1 - k0, k1 > k0],
-                  np.float64)
-    if edge in ("wrap", "repeat"):  # (Repeat the colours: repeat_of's ends + the key height after them)
+    fp = np.array([0 if edge == "escape" else 2 if edge in WRAPS else 1, turned, a0, a1 - a0, b0,
+                   b1 - b0, b1 > b0, f[1] if turned else 1, f[2] if turned else 1, t0, max(t1 - t0, 1.0), k0,
+                   k1 - k0, k1 > k0], np.float64)
+    if edge in WRAPS:  # (Repeat the colours: repeat_of's ends + the key height after them; Bounce back: 2.0 /
+        # edge twice 3.0 with its bounce lines)
         rows = w["rows"]
         if not len(rows.keys):
             return None
         rep = w.get("rep")
-        aw, bw = (rows.a, rows.bw) if rep is None else rep[:2]
-        fp = np.concatenate([fp, [1.0, float(len(rows.keys))], np.asarray(rows.keys, np.float64),
+        if edge in BOUNCES:
+            aw, bw = rows.bounce_lines(edge == "bounce2")
+        else:
+            aw, bw = (rows.a, rows.bw) if rep is None else rep[:2]
+        fp = np.concatenate([fp, [{"bounce": 2.0, "bounce2": 3.0}.get(edge, 1.0), float(len(rows.keys))],
+                             np.asarray(rows.keys, np.float64),
                              np.asarray(aw, np.float64), np.asarray(bw, np.float64)]
                             + ([[rep[2]]] if rep is not None and rep[2] is not None else []))
     return fp

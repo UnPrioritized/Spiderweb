@@ -20,6 +20,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   stir_spots     recolour.stir_from's middle (Bulge, the more bends, Turn / Twist, edges, Squeeze), note by note
   stir_nearest   recolour.nearest after its sort: each spot's nearest note
   stir_wrap      recolour.Rows.wrapped (Stir's Wrap around)   (all three on half the cores: on_cores)
+  stir_bounce    recolour.Rows.wrapped(bounce=True) (Bounce back, on half the cores)
   liquify_sample liquify.sample: Liquify's map at spots of the colour box (on half the cores)
   warp_newton    warp._newton: the Warp's bend turned round, Newton steps each spot (a fold's pieces kept inside)
   warp_exact     warp.exact_offsets: each note's spot fetched exactly (Newton from the map's answer)
@@ -682,6 +683,47 @@ def stir_wrap(keys, a, b, mid, key, out):
 
 
 @njit(nogil=True)
+def _bounce_one(i, keys, a, b, mid, key):
+    """recolour.Rows.wrapped(bounce=True) for spot i: past its key row's notes = bounced back off that end."""
+    nkeys = len(keys)
+    q = np.rint(key[i])
+    lo_, hi_ = 0, nkeys
+    while lo_ < hi_:
+        h = (lo_ + hi_) >> 1
+        if keys[h] < q:
+            lo_ = h + 1
+        else:
+            hi_ = h
+    r = min(max(lo_, 0), nkeys - 1)
+    j = max(r - 1, 0)
+    row = j if abs(keys[j] - q) <= abs(keys[r] - q) else r
+    m, s, e = mid[i], a[row], b[row]
+    if m < s or m > e:
+        w = max(e - s, 1.0)
+        u = np.mod(m - s, 2 * w)
+        return s + (2 * w - u if u > w else u)
+    return m
+
+
+@njit(nogil=True)
+def stir_bounce_one(keys, a, b, mid, key, out):
+    """recolour.Rows.wrapped (Bounce back) for every spot. One core."""
+    for i in range(len(mid)):
+        out[i] = _bounce_one(i, keys, a, b, mid, key)
+
+
+@njit(nogil=True, parallel=True)
+def _stir_bounce_cores(keys, a, b, mid, key, out):
+    for i in prange(len(mid)):
+        out[i] = _bounce_one(i, keys, a, b, mid, key)
+
+
+def stir_bounce(keys, a, b, mid, key, out):
+    """stir_bounce_one on half the cores (on_cores)."""
+    on_cores(_stir_bounce_cores, stir_bounce_one, len(mid), keys, a, b, mid, key, out)
+
+
+@njit(nogil=True)
 def _sample_at(i, a, x, y, out):
     """liquify.sample for spot i: the map a blended between its 4 grid points (the same sums, the same order)."""
     gy, gx = a.shape[0], a.shape[1]
@@ -1042,14 +1084,31 @@ def _unit_back(x, y, fp):
         y2 = fp[4] + y * fp[5] if fp[6] != 0.0 else y
         x, y = 0.5 + fp[8] * (y2 - 0.5), 0.5 + fp[7] * (x2 - 0.5)
     m, k = fp[9] + x * fp[10], (fp[11] + y * fp[12] if fp[13] != 0.0 else fp[11])
-    if len(fp) > 15 and fp[14] == 1.0:  # (Wrap around: past its key row's notes = back in on that row's other side)
+    if len(fp) > 15 and (fp[14] == 1.0 or fp[14] == 2.0 or fp[14] == 3.0):  # (Wrap around: past its key row's
+        # notes = back in on that row's other side; 2.0 / 3.0 = Bounce back / edge twice: bounced off the ends
+        # instead, Rows.key_bounced + _bounce_one's sums, the rows' numbers = their bounce lines)
+        bounce = fp[14] != 1.0
         nr = np.int64(fp[15])
-        base = fp[16] - 0.5
-        h = (fp[16 + nr - 1] - fp[16]) + 1.0
-        if len(fp) > 16 + 3 * nr:
-            h = fp[16 + 3 * nr]
-        if k < base or k >= base + h:
-            k = base + np.mod(k - base, h)
+        if bounce:
+            if fp[14] == 3.0:
+                base = fp[16] - 0.5
+                h = (fp[16 + nr - 1] - fp[16]) + 1.0
+            else:
+                base = fp[16]
+                h = fp[16 + nr - 1] - fp[16]
+            if k < base or k > base + h:
+                if h <= 0.0:
+                    k = base
+                else:
+                    u = np.mod(k - base, 2 * h)
+                    k = base + (2 * h - u if u > h else u)
+        else:
+            base = fp[16] - 0.5
+            h = (fp[16 + nr - 1] - fp[16]) + 1.0
+            if len(fp) > 16 + 3 * nr:
+                h = fp[16 + 3 * nr]
+            if k < base or k >= base + h:
+                k = base + np.mod(k - base, h)
         q = np.rint(k)
         lo_, hi_ = 0, nr
         while lo_ < hi_:
@@ -1063,7 +1122,12 @@ def _unit_back(x, y, fp):
         row = j if abs(fp[16 + j] - q) <= abs(fp[16 + r] - q) else r
         s, e = fp[16 + nr + row], fp[16 + 2 * nr + row]
         if m < s or m > e:
-            m = s + np.mod(m - s, max(e - s, 1.0))
+            w = max(e - s, 1.0)
+            if bounce:
+                u = np.mod(m - s, 2 * w)
+                m = s + (2 * w - u if u > w else u)
+            else:
+                m = s + np.mod(m - s, w)
     return m, k
 
 
@@ -3673,7 +3737,7 @@ def warm():
     fp, ip = np.zeros(64), np.zeros(64, np.int64)
     for fn in (stir_spots_one, _stir_spots_cores):
         fn(e0, e0, fp, ip, e0.copy(), e0.copy())
-    for fn in (stir_wrap_one, _stir_wrap_cores):
+    for fn in (stir_wrap_one, _stir_wrap_cores, stir_bounce_one, _stir_bounce_cores):
         fn(i0e, e0, e0, e0, e0, e0.copy())
     for fn in (stir_nearest_one, _stir_nearest_cores):
         fn(i0e, i0e, i0e, e0, e0, i0e, e0, i0e, 0.0, 1.0, 1.0, e0, e0, False, i0e.copy())

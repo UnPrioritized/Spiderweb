@@ -47,7 +47,7 @@ Drag a point past its neighbours and the grid folds over itself like paper: two 
 
 ## At the edges
 
-What is pulled in where the bend reaches past the shape's edge, as in Stir: Escape, Wrap around, Repeat the colours (a colour cycle carries on past the edge with no seam), Bend or Cut.
+What is pulled in where the bend reaches past the shape's edge, as in Stir: Escape, Wrap around, Repeat the colours (a colour cycle carries on past the edge with no seam), Bounce back (the colours bounce back off the edge like a mirror: no seam, but they run backwards: 1 2 3 2 1), Bounce back, edge twice (the edge colour shows twice: 1 2 3 3 2 1), Bend or Cut.
 
 ## Mirror
 

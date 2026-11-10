@@ -47,6 +47,8 @@ py_loops! {
                  many: bool) => crate::recolour::stir_nearest;
     stir_wrap(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64], many: bool)
               => crate::recolour::stir_wrap;
+    stir_bounce(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64], many: bool)
+              => crate::recolour::stir_bounce;
     liquify_sample(a: Nd<f64, 3>, x: &[f64], y: &[f64], out: NdMut<f64, 2>, many: bool)
                    => crate::recolour::liquify_sample;
     warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, lx: &[f64], ly: &[f64], sx: &[f64], sy: &[f64],

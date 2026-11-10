@@ -229,6 +229,75 @@ fn wrap_range_inner(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64]
 level_builds!(fn wrap_range(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64])
               => wrap_range_inner);
 
+/// fastloops._bounce_one's sums: m past s .. e bounced back off that end (there and back, as far as it goes).
+#[inline(always)]
+fn bounce_in(m: f64, s: f64, e: f64) -> f64 {
+    let w = pmax(e - s, 1.0);
+    let u = npmod(m - s, 2.0 * w);
+    s + if u > w { 2.0 * w - u } else { u }
+}
+
+/// fastloops._bounce_one for one spot.
+#[inline(always)]
+fn bounce_one(m: f64, k: f64, keys: &[i64], a: &[f64], b: &[f64]) -> f64 {
+    let row = nearest_row(keys, rint(k));
+    let (s, e) = (a[row], b[row]);
+    if m < s || m > e {
+        return bounce_in(m, s, e);
+    }
+    m
+}
+
+#[inline(always)]
+fn bounce_range_inner(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64]) {
+    // (wrap_range_inner's checks + search; bounced instead of wrapped)
+    let (nk, n) = (keys.len(), out.len());
+    if nk == 0 || a.len() < nk || b.len() < nk || mid.len() < n || key.len() < n {
+        for (j, o) in out.iter_mut().enumerate() {
+            *o = bounce_one(mid[j], key[j], keys, a, b);
+        }
+        return;
+    }
+    for j in 0..n {
+        let q = rint(rd(key, j));
+        let (mut lo, mut hi) = (0usize, nk);
+        while lo < hi {
+            let h = (lo + hi) >> 1;
+            if (rd(keys, h) as f64) < q {
+                lo = h + 1;
+            } else {
+                hi = h;
+            }
+        }
+        let r = lo.min(nk - 1);
+        let jj = r.saturating_sub(1);
+        let (kj, kr) = (rd(keys, jj) as f64, rd(keys, r) as f64);
+        let row = if (kj - q).abs() <= (kr - q).abs() { jj } else { r };
+        let (m, s, e) = (rd(mid, j), rd(a, row), rd(b, row));
+        wr(out, j, if m < s || m > e { bounce_in(m, s, e) } else { m });
+    }
+}
+level_builds!(fn bounce_range(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64])
+              => bounce_range_inner);
+
+/// fastloops.stir_bounce (many = shared out) -> 0.
+#[inline(always)]
+pub fn stir_bounce(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64], many: bool) -> i64 {
+    let n = mid.len();
+    let (key, out) = (&key[..n], &mut out[..n]);
+    match crate::pool_for(many, n, 1) {
+        None => bounce_range(keys, a, b, mid, key, out),
+        Some(pool) => {
+            let chunk = (n / (pool.current_num_threads() * 8)).max(1024);
+            pool.install(|| {
+                (mid.par_chunks(chunk), key.par_chunks(chunk), out.par_chunks_mut(chunk)).into_par_iter()
+                    .for_each(|(mc, kc, oc)| bounce_range(keys, a, b, mc, kc, oc));
+            });
+        }
+    }
+    0
+}
+
 /// fastloops.stir_wrap (many = shared out) -> 0.
 #[inline(always)]
 pub fn stir_wrap(keys: &[i64], a: &[f64], b: &[f64], mid: &[f64], key: &[f64], out: &mut [f64], many: bool) -> i64 {
@@ -694,16 +763,34 @@ fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
     }
     let m = fp[9] + x * fp[10];
     let mut k = if fp[13] != 0.0 { fp[11] + y * fp[12] } else { fp[11] };
-    if fp.len() > 15 && fp[14] == 1.0 {
+    if fp.len() > 15 && (fp[14] == 1.0 || fp[14] == 2.0 || fp[14] == 3.0) {
         // (Wrap around: fp[15] rows, then their keys, first starts, repeat ends (checked by warp_soft): the key round
-        // the key rows (Rows.key_wrapped), then wrap_one's sums)
+        // the key rows (Rows.key_wrapped), then wrap_one's sums; 2.0 / 3.0 = Bounce back / edge twice:
+        // key_bounced + bounce_in, the rows' numbers = their bounce lines)
+        let bounce = fp[14] != 1.0;
         let nr = fp[15] as usize;
         let keys = &fp[16..16 + nr];
-        let base = keys[0] - 0.5;
-        // (Repeat the colours: its key height after the rows' numbers)
-        let h = if fp.len() > 16 + 3 * nr { fp[16 + 3 * nr] } else { (keys[nr - 1] - keys[0]) + 1.0 };
-        if k < base || k >= base + h {
-            k = base + npmod(k - base, h);
+        if bounce {
+            let (base, h) = if fp[14] == 3.0 {
+                (keys[0] - 0.5, (keys[nr - 1] - keys[0]) + 1.0)
+            } else {
+                (keys[0], keys[nr - 1] - keys[0])
+            };
+            if k < base || k > base + h {
+                if h <= 0.0 {
+                    k = base;
+                } else {
+                    let u = npmod(k - base, 2.0 * h);
+                    k = base + if u > h { 2.0 * h - u } else { u };
+                }
+            }
+        } else {
+            let base = keys[0] - 0.5;
+            // (Repeat the colours: its key height after the rows' numbers)
+            let h = if fp.len() > 16 + 3 * nr { fp[16 + 3 * nr] } else { (keys[nr - 1] - keys[0]) + 1.0 };
+            if k < base || k >= base + h {
+                k = base + npmod(k - base, h);
+            }
         }
         let q = rint(k);
         let (mut lo, mut hi) = (0usize, nr);
@@ -720,6 +807,9 @@ fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
         let row = if (keys[j] - q).abs() <= (keys[r] - q).abs() { j } else { r };
         let (s, e) = (fp[16 + nr + row], fp[16 + 2 * nr + row]);
         if m < s || m > e {
+            if bounce {
+                return (bounce_in(m, s, e), k);
+            }
             return (s + npmod(m - s, pmax(e - s, 1.0)), k);
         }
     }
@@ -728,7 +818,7 @@ fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
 
 /// unit_back's Wrap around rows in fp sound: a whole row count >= 1 and that many keys / starts / ends after it.
 fn wrap_rows_ok(fp: &[f64]) -> bool {
-    if fp.len() <= 15 || fp[14] != 1.0 {
+    if fp.len() <= 15 || (fp[14] != 1.0 && fp[14] != 2.0 && fp[14] != 3.0) {
         return true;
     }
     let r = fp[15];

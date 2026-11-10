@@ -15,7 +15,8 @@ NEEDS = {
     "clash_pairs": ("clash_pairs", "take2"), "clash_levels": ("clash_levels",), "any_overlap": ("any_overlap",),
     "turn_sample": ("turn_sample",), "turn_layers": ("turn_layers",),
     "stir_nearest": ("stir_nearest",), "stir_nearest_one": ("stir_nearest",), "stir_wrap": ("stir_wrap",),
-    "stir_wrap_one": ("stir_wrap",), "liquify_sample": ("liquify_sample",), "liquify_sample_one": ("liquify_sample",),
+    "stir_wrap_one": ("stir_wrap",), "stir_bounce": ("stir_bounce",), "stir_bounce_one": ("stir_bounce",),
+    "liquify_sample": ("liquify_sample",), "liquify_sample_one": ("liquify_sample",),
     "dice_mix": ("dice_mix",), "recolour_apart": ("recolour_apart",),
     "warp_newton": ("warp_newton",), "warp_soft": ("warp_soft",), "warp_exact": ("warp_exact",),
     "warp_soft2": ("warp_soft2",),
@@ -229,6 +230,12 @@ class Wraps:
 
     def stir_wrap_one(self, keys, a, b, mid, key, out):
         self._run("stir_wrap", (keys, a, b, mid, key, out, False), "stir_wrap_one")
+
+    def stir_bounce(self, keys, a, b, mid, key, out):
+        self._run("stir_bounce", (keys, a, b, mid, key, out, True), "stir_bounce")
+
+    def stir_bounce_one(self, keys, a, b, mid, key, out):
+        self._run("stir_bounce", (keys, a, b, mid, key, out, False), "stir_bounce_one")
 
     def liquify_sample(self, a, x, y, out):
         self._run("liquify_sample", (a, x, y, out, True), "liquify_sample")

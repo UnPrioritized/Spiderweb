@@ -161,8 +161,12 @@ STIR_SETS = ("stay", "move")  # (more than one colour set: each note keeps its s
 # so the stir bends with the outline; BMC tester 11-03: Wrap turned into "the box cut out" on round / slanted shapes)
 # "repeat" (Repeat the colours, user 2026-11-10): Wrap around, but each key row comes back by a whole number of its
 # colours' own repeats (Rows.repeat_of), the key rows by a whole number of the pattern's repeat up / down
-STIR_EDGES = ("escape", "wrap", "repeat", "cut", "bend")
-WRAPS = ("wrap", "repeat")  # (the edges Rows.wrapped brings back: neither tiled nor clipped before)
+# "bounce" / "bounce2" (Bounce back / Bounce back, edge twice, user 2026-11-10): a spot past its key row's notes
+# bounces back into the row (Rows.bounce_lines), the keys off the lowest / highest key row: no seam, the colours run
+# backwards past the edge. "bounce" turns at the end note (1 2 3 2 1), "bounce2" shows it twice (1 2 3 3 2 1)
+STIR_EDGES = ("escape", "wrap", "repeat", "bounce", "bounce2", "cut", "bend")
+BOUNCES = ("bounce", "bounce2")
+WRAPS = ("wrap", "repeat") + BOUNCES  # (the edges Rows.wrapped brings back: neither tiled nor clipped before)
 BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": [0, 0],
                   "stir": STIR_DEFAULTS}  # (left out when so: Add between blends from them)
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
@@ -1159,7 +1163,7 @@ def stir_from(at, rc, box, own, spots=None, colours=None):
         fast.stir_spots(x, y, fp, ip, ox, oy)
         mid, key = from_unit(ox, oy, rc, box, own)
         if edge in WRAPS:
-            mid, key = rows.wrapped(mid, key, rep)
+            mid, key = rows.wrapped(mid, key, rep, edge)
         elif edge == "bend":
             mid = rows.unstretched(mid, key, t0, t1)
         return mid, key
@@ -1204,8 +1208,9 @@ def stir_from(at, rc, box, own, spots=None, colours=None):
         x, y = sx, sy
     mid, key = from_unit(x, y, rc, box, own)
     if edge in WRAPS:  # (a spot past the key rows / its key row's notes comes back in on the other side, every
-        # whole number of key rows / the row's repeat length: a whole number of colour turns lines up)
-        mid, key = rows.wrapped(mid, key, rep)
+        # whole number of key rows / the row's repeat length: a whole number of colour turns lines up; Bounce back:
+        # bounced off the ends instead)
+        mid, key = rows.wrapped(mid, key, rep, edge)
     elif edge == "bend":
         mid = rows.unstretched(mid, key, t0, t1)
     return mid, key
@@ -1250,7 +1255,8 @@ def stir_numbers(st, c, k, r):
          ("side", "up", "rings").index(st["ripple_kind"]) if st["ripple"] else -1, int(bool(st["wring"])),
          int(bool(st["polar"])), int(st["area_kaleido"]), int(st["area_ripple"]), int(st["area_wring"]),
          int(st["area_polar"]), int(st["round_edge"] == "cut"), int(whole_twist), int(per_note),
-         {"escape": 1, "wrap": 2, "repeat": 2}.get(st["edge"], 0), int(st["squeeze"])]  # (2: neither tiled nor clipped)
+         {"escape": 1, "wrap": 2, "repeat": 2, "bounce": 2, "bounce2": 2}.get(st["edge"], 0),
+         int(st["squeeze"])]  # (2: neither tiled nor clipped)
     return np.array(f, np.float64), np.array(i, np.int64)
 
 
@@ -1999,9 +2005,16 @@ class Rows:
         round exactly. A row with one start (no step) keeps its last end; never before its last end."""
         got = getattr(self, "_bw", None)
         if got is None:
-            got = self._bw = repeat_ends(self.at, self.keys, self.b0)
+            got, self._bounce = repeat_ends(self.at, self.keys, self.a0, self.b0)
+            self._bw = got
             self.at = None
         return got
+
+    def bounce_lines(self, twice=False):
+        """Each key row's (lo, hi) Bounce back bounces off (repeat_ends): its first / last note's middle (the end
+        note not shown again: 1 2 3 2 1), twice: half a step further out (Bounce back, edge twice: 1 2 3 3 2 1)."""
+        self.bw
+        return self._bounce[2:] if twice else self._bounce[:2]
 
     def key_wrapped(self, key, h=None):
         """Keys past the notes' lowest / highest key row come back in on the other side, repeating every whole
@@ -2012,6 +2025,21 @@ class Rows:
             h = float(self.keys[-1] - self.keys[0]) + 1.0
         key = np.asarray(key, np.float64)
         return np.where((key < base) | (key >= base + h), base + np.mod(key - base, h), key)
+
+    def key_bounced(self, key, twice=False):
+        """Bounce back: keys past the lowest / highest key row bounce back off that row (one past the top = the row
+        below it, and so on, as far as it goes); twice: off its outer edge, half a key past it (one past the top =
+        the top row again). One key row (not twice): every key past it = it."""
+        if twice:
+            base, h = float(self.keys[0]) - 0.5, float(self.keys[-1] - self.keys[0]) + 1.0
+        else:
+            base, h = float(self.keys[0]), float(self.keys[-1] - self.keys[0])
+        key = np.asarray(key, np.float64)
+        out = (key < base) | (key > base + h)
+        if h <= 0:
+            return np.where(out, base, key)
+        u = np.mod(key - base, 2 * h)
+        return np.where(out, base + np.where(u > h, 2 * h - u, u), key)
 
     def repeat_of(self, at, colours):
         """Repeat the colours (user 2026-11-10: Wrap around shifted a colour cycle at the seam): (each key row's
@@ -2027,22 +2055,34 @@ class Rows:
         self._rep = (colours, c, rep)
         return rep
 
-    def wrapped(self, mid, key, rep=None):
+    def wrapped(self, mid, key, rep=None, edge=None):
         """(middle, key) of spots past the notes (Wrap around): the key round the key rows first (key_wrapped), then
         a middle past its key row's notes back in on that row's other side, every repeat length (bw). rep:
-        repeat_of's (window starts, window ends, key height) instead (Repeat the colours)."""
-        key = self.key_wrapped(key, None if rep is None else rep[2])
-        aw, bw = (self.a, self.bw) if rep is None else rep[:2]
+        repeat_of's (window starts, window ends, key height) instead (Repeat the colours). edge "bounce" / "bounce2"
+        (Bounce back / edge twice): the key bounced off the key rows (key_bounced), then a middle past its row's
+        bounce_lines bounced back off them (as far out as it goes: there and back, again and again), so the colours
+        carry on with no seam, backwards."""
+        bounce = edge in BOUNCES
+        if bounce:
+            key = self.key_bounced(key, edge == "bounce2")
+            aw, bw = self.bounce_lines(edge == "bounce2")
+        else:
+            key = self.key_wrapped(key, None if rep is None else rep[2])
+            aw, bw = (self.a, self.bw) if rep is None else rep[:2]
         fast = loops()
-        if fast and len(mid):  # (the compiled walk: the very same numbers, files/fastloops.stir_wrap)
+        if fast and len(mid):  # (the compiled walk: the very same numbers, files/fastloops.stir_wrap / stir_bounce)
             to = np.ascontiguousarray
             out = np.empty(len(mid), np.float64)
-            fast.stir_wrap(to(self.keys, np.int64), to(aw, np.float64), to(bw, np.float64),
-                           to(mid, np.float64), to(key, np.float64), out)
+            (fast.stir_bounce if bounce else fast.stir_wrap)(
+                to(self.keys, np.int64), to(aw, np.float64), to(bw, np.float64), to(mid, np.float64),
+                to(key, np.float64), out)
             return out, key
         r = self.row(key)
         a, b = aw[r], bw[r]
         w = np.maximum(b - a, 1.0)
+        if bounce:
+            u = np.mod(mid - a, 2 * w)
+            return np.where((mid < a) | (mid > b), a + np.where(u > w, 2 * w - u, u), mid), key
         return np.where((mid < a) | (mid > b), a + np.mod(mid - a, w), mid), key
 
     def mirrored(self, mid, key):
@@ -2061,8 +2101,12 @@ class Rows:
         return a + (mid - t0) / max(t1 - t0, 1.0) * (b - a)
 
 
-def repeat_ends(at, keys, ends):
-    """Rows.bw for the notes at whose key rows are keys (sorted) and last ends ends."""
+def repeat_ends(at, keys, starts, ends):
+    """(Rows.bw, (lo, hi, lo2, hi2)) for the notes at whose key rows are keys (sorted), first starts starts and
+    last ends ends. Bounce back's lines: each row's first / last note's middle (lo, hi: 1 2 3 2 1); edge twice: half
+    the row's usual step further out (lo2, hi2: 1 2 3 3 2 1). Middles, not starts / repeat ends: the notes' middles
+    mirror onto middles, the same on both sides whatever the gate. A row without a step: its first start .. last
+    end (both)."""
     from files.speed import key_sort
     k = np.asarray(at[:, 2], np.int64)
     s = np.asarray(at[:, 0])
@@ -2078,6 +2122,8 @@ def repeat_ends(at, keys, ends):
     keep = step > 0
     step, srow = step[keep], srow[keep]
     out = np.asarray(ends, np.float64).copy()
+    lo, hi = np.asarray(starts, np.float64).copy(), out.copy()
+    lo2, hi2 = lo.copy(), hi.copy()
     if len(step):
         o2 = key_sort(srow.astype(np.int64), step) if whole else np.lexsort((np.asarray(step, np.float64), srow))
         step, srow = np.asarray(step[o2], np.float64), srow[o2]
@@ -2086,7 +2132,12 @@ def repeat_ends(at, keys, ends):
         has = count > 0
         med = step[(first + (count - 1) // 2)[has]]
         out[has] = np.maximum(out[has], last[has] + med)
-    return out
+        mids = (np.asarray(ss, np.float64) + np.asarray(at[o, 1], np.float64)) / 2
+        cut = np.flatnonzero(np.r_[True, ks[1:] != ks[:-1]])  # (each row's notes in a run, in keys' order)
+        m0, m1 = np.minimum.reduceat(mids, cut), np.maximum.reduceat(mids, cut)
+        lo[has], hi[has] = m0[has], m1[has]
+        lo2[has], hi2[has] = m0[has] - med / 2, m1[has] + med / 2
+    return out, (lo, hi, lo2, hi2)
 
 
 REPEAT_TRIES = 64  # (a row's repeat: at most this many lengths tried; colours a stir mixed never repeat anyway)
