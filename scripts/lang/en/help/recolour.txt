@@ -62,7 +62,13 @@ Effect order… (in the Stir, Warp, Liquify and Shares windows, beside Preview a
 
 Split: Clumps gives every note the colour of its area, at any Rough edges, so an effect above it shows nothing: the window greys those lines. Move an effect below Clumps to see it.
 
-While you change an effect that isn't the last one, the effects after it are switched off, so you see exactly what it does and it stays quick. Its window names them and has a Preview all button; they come back when you pick another shape, close the window, play, save or export.
+While you change an effect that isn't the last one, the effects after it are switched off, so you see exactly what it does and it stays quick. Its window names them and has a Preview all button for a quick look at the full result (your next change hides them again); they come back when you pick another shape, close the window, play, save or export. What you play, export or copy always has every effect.
+
+Reverse track order (right-click the shape) is an effect in the list too, on drawn shapes and pasted notes alike: each time you use it, a new Reverse goes at the end and turns round the colours as they look at that point. Two Reverses right after each other cancel out, so using it twice in a row gives the shape back as it was.
+
+A Stir turned back to nothing (Reset, or every knob at 0) keeps its place in the list while its tab is there; × on the tab takes it away. A Liquify or a Warp gets its place with your first stroke or drag, not with a freeze mask or a split line alone.
+
+Shapes from files made before keep their look: their effects load in the order they always ran.
 
 The list shows the shape's note tool pages too (Claw, Strum, Chop, Gate trim, Copy along a path). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes below the colour effects there are now. Pages keep their own order among themselves, and while you change a colour effect above a page, that page is switched off too.
 
@@ -74,7 +80,7 @@ Recolour comes last, after everything else (Sustain and Gate subtract too): it o
 
 Flip and Turn 90° take the colours along: a flipped shape shows its colours mirrored. Gate aware flip reverses every key row exactly, colours included. After a flip or turn, the Clumps numbers stay as you set them (the window says so), while the areas move with the shape. After a turn, Shuffle and Split: Scattered pick new colours.
 
-Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, wherever you move them. (A spam piece that you flip lays its spam again from its new start, so its notes move a little and get new colours.) Slicing pasted notes (Slice or Lasso) turns the pieces into plain notes with the colours you saw, without Recolour. Add between blends Recolour step by step when both shapes use the same mode.
+Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, wherever you move them. (A spam piece that you flip lays its spam again from its new start, so its notes move a little and get new colours.) Slicing pasted notes (Slice or Lasso) turns the pieces into plain notes with the colours you saw, without Recolour. Add between blends Recolour step by step when both shapes use the same mode. When the two shapes have their effects in different orders, each step takes the order of the nearer shape: effects both have blend, an effect only one has fades in or out, and the order switches halfway.
 
 Turn into plain notes, Gate sensitive merge, Copy to Domino and Export MIDI all keep the colours you see.
 
