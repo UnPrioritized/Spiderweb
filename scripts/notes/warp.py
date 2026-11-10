@@ -1097,11 +1097,12 @@ def _newton_lazy(P, px, py, smooth, sx, sy, L=None):
     return bx, by, best, J
 
 
-def warped(notes, at, low, now, rc, which, pals, pick, box, own):
+def warped(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     """The colours now after rc's Warp: each note takes the colour of the note found where the bend fetches from
-    (liquify.liquified's way, with the Warp's own edge choice). Hidden (eye off), strength 0 or none: now as it is."""
+    (liquify.liquified's way, with the Warp's own edge choice), its round too (laps: recolour.laps_of). Hidden (eye
+    off), strength 0 or none: now as it is."""
     from notes import liquify as lq
-    from notes.recolour import leaders
+    from notes.recolour import carry, leaders
     wp = clean_warp(rc.get("warp"))
     if not shows(wp) or not len(at):  # (also a preset's flat Bend 0 %)
         return now
@@ -1117,8 +1118,10 @@ def warped(notes, at, low, now, rc, which, pals, pick, box, own):
     src = lq.found(w, a, shown, idx, w["x"][idx], w["y"][idx], rc, box, own, now)
     new = np.array(now)
     new[idx] = lq._taken(now, idx, src, pals, rc)
-    if rc.get("by"):
-        new = new[leaders(at, rc["by"])]
+    lead = leaders(at, rc["by"]) if rc.get("by") else None
+    if lead is not None:
+        new = new[lead]
+    carry(laps, src, idx, lead)
     return lq._apart(notes, low, new, pals, pick)
 
 

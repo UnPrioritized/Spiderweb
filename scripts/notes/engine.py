@@ -1531,8 +1531,11 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
         if not now[1]:
             rule = dict(rule, frame=[now[0] * then[0], 0, 0, now[3] * then[3]])
     whole = {k: v for k, v in without_recolour(got[0]).items() if k != "gate_flip"}
+    rounds = bool(sh.get("_rounds"))  # (the whole's rounds too: a piece's notes take the round with the colour)
+    if rounds:
+        whole["_rounds"] = True
     wn, wt = get(dict(whole, recolour=rc))
-    return from_whole(notes, tracks, wn, wt, held_, lambda n: places_of(n, rule, gate, box_of(n)))
+    return from_whole(notes, tracks, wn, wt, held_, lambda n: places_of(n, rule, gate, box_of(n)), rounds)
 
 
 def free_box(sh, notes, get, keys):

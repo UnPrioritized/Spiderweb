@@ -680,17 +680,17 @@ def shown_places(notes, at, rc):
     return places_of(notes, rc, False, box_of(notes))
 
 
-def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
+def liquified(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     """The colours now after rc's Liquify: each note takes the colour of the note found where the map fetches from
     (recolour.stirred's way: colour sets "stay", Per chord / run by the group's first note, two notes on a key kept
-    apart). Hidden (eye off) or none: now as it is. Live does the same for a brush stroke, only where it changed:
-    keep both in step."""
-    from notes.recolour import leaders, nearest
+    apart), its round too (laps: recolour.laps_of). Hidden (eye off) or none: now as it is. Live does the same for a
+    brush stroke, only where it changed: keep both in step."""
+    from notes.recolour import carry, leaders, nearest
     lq = clean_liquify(rc.get("liquify"))
     if not lq or not lq.get("map") or lq.get("on") is False or not len(at) or not lq.get("strength", 100.0):
         return now
     lv = _LIVE_KEPT.get("live")
-    lv = lv() if lv is not None else None
+    lv = lv() if lv is not None and laps is None else None  # (Live keeps no rounds: carried ones worked out whole)
     if lv is not None:  # (the brush stroke just let go already worked these colours out: Live == liquified)
         got = lv.done_colours(notes, at, now, rc, box, own, map_of(full(lq)))
         if got is not None:
@@ -703,8 +703,10 @@ def liquified(notes, at, low, now, rc, which, pals, pick, box, own):
     src = nearest(shown, mid, key, own=False)
     new = np.array(now)
     new[idx] = _taken(now, idx, src, pals, rc)
-    if rc.get("by"):
-        new = new[leaders(at, rc["by"])]
+    lead = leaders(at, rc["by"]) if rc.get("by") else None
+    if lead is not None:
+        new = new[lead]
+    carry(laps, src, idx, lead)
     return _apart(notes, low, new, pals, pick)
 
 

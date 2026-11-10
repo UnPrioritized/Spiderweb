@@ -56,7 +56,7 @@ Stir… (beside the Recolour dropdown) bends the colours the notes have now with
 
 ## With the rest of Spiderweb
 
-Two notes on the same key that sound together always keep different colours, so they never cut each other off. With "Repeated colours get new channels", each note stays on the channels of the repeat it was in before.
+Two notes on the same key that sound together always keep different colours, so they never cut each other off. With "Repeated colours get new channels", Shuffle and Split keep each note on the channels of the repeat it was in before. Stir, Warp and Liquify move a note to the repeat its new colour came from, so a bent stripe stays on one track however far it bends (no colour cuts in players that colour by track).
 
 Recolour comes last, after everything else (Sustain and Gate subtract too): it only changes colours.
 

@@ -765,9 +765,41 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
         if got is None:
             return notes, tracks
         rc, notes, lap, tw, (n, at, low, now, which, pals, pick, box, own) = got
-        now = liquified_now(n, at, low, now, rc, which, pals, pick, box, own)
-        return notes.copy(), lap + (turned_map(tw)(now) if tw else now)  # (a copy: whoever gets it may change it)
+        laps = laps_of(lap)
+        now = liquified_now(n, at, low, now, rc, which, pals, pick, box, own, laps=laps)
+        # (a copy: whoever gets it may change it)
+        return notes.copy(), laps_now(lap, laps) + (turned_map(tw)(now) if tw else now)
     return _recoloured(notes, tracks, rc, held, gate, own)
+
+
+def laps_of(lap):
+    """[each note's round] for the bends to carry along, or None when every note is in one round (nothing to carry).
+    THE REPEAT FOLLOWS THE COLOUR (user 2026-11-10): a note that takes another note's colour (Stir / Warp / Liquify)
+    takes its round too, so with "Repeated colours get new channels" a bent stripe stays on ONE track (its round
+    was cut at fixed beats before: colour seams in players colouring by track)."""
+    if lap is None:
+        return None
+    lap = np.asarray(lap)
+    return [lap] if len(lap) and (lap != lap[0]).any() else None
+
+
+def laps_now(lap, laps):
+    """Each note's round after the bends carried laps (laps_of) along: lap itself when there was nothing to carry."""
+    return lap if laps is None else laps[0]
+
+
+def carry(laps, src, idx=None, lead=None):
+    """laps (laps_of) after a bend: notes idx (None = every note) took the colour of notes src, then every note its
+    Per chord / run group's first note's (lead, None = none)."""
+    if laps is None:
+        return
+    r = laps[0]
+    if idx is None:
+        r = r[src]
+    else:
+        r = r.copy()
+        r[idx] = r[src]
+    laps[0] = r if lead is None else r[lead]
 
 
 def kept_rule(rc):
@@ -792,9 +824,10 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
         if b is None:
             return None
         notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2) = b
-        now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2)
-        now = warped_now(n, at, low, now, rc, which, pals, pick, box, own2)
-        return rc, notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2)
+        laps = laps_of(lap)
+        now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2, laps=laps)
+        now = warped_now(n, at, low, now, rc, which, pals, pick, box, own2, laps=laps)
+        return rc, notes2, laps_now(lap, laps), tw, (n, at, low, now, which, pals, pick, box, own2)
     # (only the Stir changed since last time (a knob turned): the colours before it are kept, user 11-07: 3 M
     # notes took a second a change; the same for Liquify / Warp, and a brush stroke keeps the stirred colours too)
     key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify", "warp")}, sort_keys=True), held,
@@ -811,28 +844,29 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
     if b is None:
         return None
     notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2) = b
+    laps = laps_of(lap)
     skey = json.dumps(rc.get("stir"), sort_keys=True)
     kept = _BEFORE_STIR.get("stirred")
     if kept is not None and kept[0] is b and kept[1] == skey:
-        now = kept[2]
+        now, laps = kept[2], None if kept[3] is None else [kept[3]]
     else:
-        now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2)
+        now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2, laps=laps)
         if rc.get("liquify") or rc.get("warp"):  # (kept for the next brush stroke / Warp drag: only they change then)
             now = np.array(now)
             now.setflags(write=False)
-            _BEFORE_STIR["stirred"] = (b, skey, now)
+            _BEFORE_STIR["stirred"] = (b, skey, now, None if laps is None else laps[0])
     if rc.get("warp"):  # (the Warp's colours kept too: a Liquify stroke on a warped shape redoes neither)
         wkey = skey + json.dumps(rc.get("warp"), sort_keys=True)
         kept = _BEFORE_STIR.get("warped")
         if kept is not None and kept[0] is b and kept[1] == wkey:
-            now = kept[2]
+            now, laps = kept[2], None if kept[3] is None else [kept[3]]
         else:
-            now = warped_now(n, at, low, now, rc, which, pals, pick, box, own2)
+            now = warped_now(n, at, low, now, rc, which, pals, pick, box, own2, laps=laps)
             if rc.get("liquify"):
                 now = np.array(now)
                 now.setflags(write=False)
-                _BEFORE_STIR["warped"] = (b, wkey, now)
-    return rc, notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2)
+                _BEFORE_STIR["warped"] = (b, wkey, now, None if laps is None else laps[0])
+    return rc, notes2, laps_now(lap, laps), tw, (n, at, low, now, which, pals, pick, box, own2)
 
 
 BEFORE_STIR_LEAST = 100_000  # (notes: smaller shapes are quick anyway, no memory kept for them)
@@ -904,9 +938,9 @@ def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
     if rc["mode"] == KEEP:
         if keep:
             return keep(notes, lap, tw, (notes, at, low, low, which, pals, pick, box, own))
-        if tw:
-            return notes, lap + turned_map(tw)(all_stirred(notes, at, low, low, rc, which, pals, pick, box, own))
-        return notes, lap + all_stirred(notes, at, low, low, rc, which, pals, pick, box, own)
+        laps = laps_of(lap)
+        now = all_stirred(notes, at, low, low, rc, which, pals, pick, box, own, laps=laps)
+        return notes, laps_now(lap, laps) + (turned_map(tw)(now) if tw else now)
     roll = dice(at, low, rc["seed"], 0, corner)
     clumps = rc["mode"] == "clumps"
     if clumps:  # (every note takes the colour of the area it lands in: the throw = where it lands)
@@ -933,44 +967,46 @@ def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
             new[m] = kept_apart(notes[m], low[m], got, p, pick[m])
     if keep:
         return keep(notes, lap, None, (notes, at, low, new, which, pals, pick, box, own))
-    return notes, lap + all_stirred(notes, at, low, new, rc, which, pals, pick, box, own)
+    laps = laps_of(lap)
+    now = all_stirred(notes, at, low, new, rc, which, pals, pick, box, own, laps=laps)
+    return notes, laps_now(lap, laps) + now
 
 
-def all_stirred(notes, at, low, now, rc, which, pals, pick, box, own):
+def all_stirred(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     """now after every stir of rc in order, then its Warp, then its Liquify (applied last, user 11-07; Warp before
-    it, user 11-09)."""
-    now = stirs_only(notes, at, low, now, rc, which, pals, pick, box, own)
-    now = warped_now(notes, at, low, now, rc, which, pals, pick, box, own)
-    return liquified_now(notes, at, low, now, rc, which, pals, pick, box, own)
+    it, user 11-09). laps: the notes' rounds carried along (laps_of)."""
+    now = stirs_only(notes, at, low, now, rc, which, pals, pick, box, own, laps=laps)
+    now = warped_now(notes, at, low, now, rc, which, pals, pick, box, own, laps=laps)
+    return liquified_now(notes, at, low, now, rc, which, pals, pick, box, own, laps=laps)
 
 
-def warped_now(notes, at, low, now, rc, which, pals, pick, box, own):
+def warped_now(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     """now after rc's Warp (notes/warp.py), or as it is without one."""
     if not rc.get("warp"):
         return now
     from notes.warp import warped
-    return warped(notes, at, low, now, rc, which, pals, pick, box, own)
+    return warped(notes, at, low, now, rc, which, pals, pick, box, own, laps=laps)
 
 
-def liquified_now(notes, at, low, now, rc, which, pals, pick, box, own):
+def liquified_now(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     """now after rc's Liquify (notes/liquify.py), or as it is without one."""
     if not rc.get("liquify"):
         return now
     from notes.liquify import liquified
-    return liquified(notes, at, low, now, rc, which, pals, pick, box, own)
+    return liquified(notes, at, low, now, rc, which, pals, pick, box, own, laps=laps)
 
 
-def stirs_only(notes, at, low, now, rc, which, pals, pick, box, own):
+def stirs_only(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     """now after every stir of rc in order (stacked stirs: each on the colours the one before left; a stir at its
     defaults skipped)."""
     st = rc.get("stir")
     for one in (st if isinstance(st, list) else [st] if st else []):
         if one:
-            now = stirred(notes, at, low, now, dict(rc, stir=one), which, pals, pick, box, own)
+            now = stirred(notes, at, low, now, dict(rc, stir=one), which, pals, pick, box, own, laps=laps)
     return now
 
 
-def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
+def stirred(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     """Recolour's Stir: the colours now (each note's, without its round) bent round the stir's Centre point: each note
     looks at the note found where it comes from (stir_from, any colour set) and takes its colour; with more than
     one colour set (a user's feedback 2026-11-02: the pattern broke into patches when each note only looked at its
@@ -1032,8 +1068,10 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
         # (a colour the note's block doesn't have: the found note's colour itself, as Move does; keeping its own
         # left a whole area unstirred, a tester's file 11-03: a 17th colour alone in the 2nd block)
         new = np.where(pool[i] == want, want, now[src])
-    if rc.get("by"):
-        new = new[leaders(at, rc["by"])]
+    lead = leaders(at, rc["by"]) if rc.get("by") else None
+    if lead is not None:
+        new = new[lead]
+    carry(laps, src, lead=lead)  # (the round comes with the colour: laps_of)
     if inside is not None and full["reverse"] and inside.any():  # (tester 11-04: inside the area the tracks'
         # order turned round, each colour set on its own: its first colour <-> its last)
         new = new.copy()
@@ -1056,10 +1094,12 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own):
     return new
 
 
-def from_whole(notes, tracks, wn, wt, held=False, back=None):
+def from_whole(notes, tracks, wn, wt, held=False, back=None, rounds=False):
     """A stirred piece's notes and tracks: settled as recoloured does (held: not), each note the colour of the
     whole's recoloured note (wn, wt) at its spot (back(notes): where each was before a flip): the whole's note on
-    its key covering its middle (the one a cut sliver came from), else the nearest; its own round kept."""
+    its key covering its middle (the one a cut sliver came from), else the nearest; its own round kept, or with
+    rounds (the shape made with "_rounds", wt too) that note's round as well (the round follows the colour,
+    laps_of)."""
     t = np.asarray(tracks, np.int64)
     if not held:
         notes, t = settled(notes, t)
@@ -1097,6 +1137,8 @@ def from_whole(notes, tracks, wn, wt, held=False, back=None):
         same_end = (line_e[je] == want) & (ws[ce] <= ps)
         got = np.where(same_end & ~same_start, ce, got)
     got = np.where(same_start, c, got)
+    if rounds:
+        return notes, np.asarray(wt, np.int64)[got]
     return notes, t - t % ROUND + np.asarray(wt, np.int64)[got] % ROUND
 
 
