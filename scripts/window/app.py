@@ -2193,7 +2193,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         return self.keys == KEYS[1] and self.edo31.get()
 
     def edo_ticked(self):
+        lanes = engine.edo_lanes
         self.sync_edo()
+        if engine.edo_lanes != lanes:  # ("Overlaps keep their pitch" came / went: the track list's channels, the
+            self.shapes_changed()     # folded Channels line, the export, as its own tick does)
         self.schedule_autosave()
         if self.edo31.get():
             self.tips.show("edo31", wait=True)  # (the first time: what the ticks do)
