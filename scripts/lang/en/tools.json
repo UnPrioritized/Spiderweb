@@ -1020,7 +1020,7 @@
  "warp.edges_sharp": "Sharp",
  "warp.undo_edges": "Warp colour edges",
  "warp.edge": "At the edges:",
- "warp.edge_tip": "Where colours come from when a bend reaches past the shape's edge, like the Stir's choice of the same name.",
+ "warp.edge_tip": "Where colours come from when a bend reaches past the shape's edge, like the Stir's choice of the same name. Help → At the edges explains each one.",
  "warp.mirror": "Mirror:",
  "warp.mirror_off": "Off",
  "warp.mirror_side": "Sideways",

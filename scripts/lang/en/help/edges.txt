@@ -1,0 +1,24 @@
+At the edges is a dropdown in the [page:stir|Stir], [page:warp|Warp] and [page:liquify|Liquify] windows. When a stir, a bend or a brush stroke pulls in colours from past the shape's notes, a spot there has no colour of its own: this choice decides what it shows. Each window keeps its own choice for each shape.
+
+Escape (the start): the colours past the edge are gone, and the colours at the edge stretch in to fill the gaps.
+
+Wrap around: what goes out one side comes back in on the other side of the notes, as if the colours were a repeating tile. Each key row wraps on its own, so on a round or slanted shape it follows the shape's own edge. Up and down, the highest key row wraps round to the lowest.
+
+Repeat the colours: like Wrap around, but when the colours repeat (a colour cycle, or a slant up the keys), each key row comes back in by a whole number of its repeats, so the cycle carries on past the edge with no seam, whatever the shape's length. Rows whose colours don't repeat (already stirred, for example) wrap around as usual.
+[clip:edges-repeat]
+
+A colour cycle pulled in from past the left edge by a Warp: Wrap around (left) leaves uneven bands where the colours come back in, Repeat the colours (right) carries the bands on evenly.
+
+Bounce back: colours that go past the edge bounce back off it, as if the edge were a mirror, in each key row and at the lowest and highest keys, so there's never a seam at the edge. Past the edge the colours run backwards (a colour cycle comes back in the other order), turning in the middle of the last colour, so it shows once: 1 2 3 2 1.
+
+Bounce back, edge twice: the same, but the last colour shows twice, turning at its outer end: 1 2 3 3 2 1.
+[clip:edges-bounce]
+
+The same Warp with Bounce back (left) and Bounce back, edge twice (right): on the right the colour at the edge comes back twice as wide.
+
+Cut by the outline: the colours are worked out on the box around the shape, and the outline cuts them out, like a picture seen through a stencil. On a round or slanted shape, spots that come from the empty parts of the box take the nearest note's colour, so you may see flat patches there.
+
+Bend with the outline: each key row is stretched to fill the box first, so the colours follow the shape (on a circle a swirl bends along the edge) and never come from empty space. Near a sharp tip the rows get very short, so the colours there still stretch a lot. In the Stir window, the "Smooth corners" box under the dropdown rounds the outline's corners for this stretch, so they leave no straight seam; a new stir starts at 20 %, 0 is sharp.
+[clip:edges-four]
+
+A round shape stirred around a point near its left side: Escape (top left), Wrap around (top right), Cut by the outline (bottom left) and Bend with the outline (bottom right).

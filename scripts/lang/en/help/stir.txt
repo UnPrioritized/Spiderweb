@@ -41,7 +41,7 @@ Ripple moves the colours along a wave, so straight stripes go wavy. Height is ho
 
 Ripple Sideways (height 3 %, length 12 %) and Rings (height 2 %, length 8 %).
 
-Kaleidoscope mirrors one slice of the colours round the Centre point, like a kaleidoscope. Slices is how many times it repeats (0 is off), and turn picks which slice of the colours is used. Spots far out in the corners may land past the shape's edge: "At the edges" decides what they show (Wrap around repeats the colours there).
+Kaleidoscope mirrors one slice of the colours round the Centre point, like a kaleidoscope. Slices is how many times it repeats (0 is off), and turn picks which slice of the colours is used. Spots far out in the corners may land past the shape's edge: "[page:edges|At the edges]" decides what they show (Wrap around repeats the colours there).
 [clip:stir-kaleido]
 
 Kaleidoscope with 6 slices, and with 3 slices turned 30°.
@@ -108,10 +108,7 @@ Reverse the track order inside the area (under Flip and reverse, with an Area): 
 
 ## At the edges and colour sets
 
-At the edges (beside the knobs): what happens to colours stirred past the edge of the shape. "Escape" (the default): they're gone, and the colours at the edge stretch in to fill the gaps. "Wrap around": what goes out one side comes back in on the other side of the notes, as if the colours were a repeating tile; on a round or slanted shape this follows the shape's own edge, row by row. "Repeat the colours": like Wrap around, but when the shape's colours repeat (a colour cycle, or a slant up the keys), each key row comes back in a whole number of its repeats, so the cycle carries on past the edge with no seam, whatever the shape's length; rows whose colours don't repeat (already stirred, for example) wrap around as usual. "Bounce back": colours that go past the edge bounce back off it, as if the edge were a mirror, row by row and at the lowest and highest keys, so there's never a seam at the edge; past it the colours run backwards (a colour cycle comes back in the other order), turning in the middle of the last colour, so it shows once (1 2 3 2 1). "Bounce back, edge twice": the same, but the last colour shows twice, turning at its outer end (1 2 3 3 2 1). "Cut by the outline": the stir is worked out on the box around the shape, and the outline cuts it out, like a picture seen through a stencil; on a round or slanted shape, spots that come from the empty parts of the box take the nearest note's colour, so you may see flat patches there. "Bend with the outline": each key row is stretched to fill the box first, so the swirl follows the shape (on a circle it bends along the edge) and never comes from empty space. Its "Smooth corners" box (under the dropdown) rounds the outline's corners for this stretch, so they leave no straight seam; a new stir starts at 20 %, 0 is sharp. Near a sharp tip the rows get very short, so the colours there still stretch a lot.
-[clip:stir-edges]
-
-A round shape turned around a point near its left side: Escape (top left), Wrap around (top right), Cut by the outline (bottom left) and Bend with the outline (bottom right).
+At the edges (beside the knobs): what happens to colours stirred past the edge of the shape: Escape (the default), Wrap around, Repeat the colours, Bounce back, Bounce back, edge twice, Cut by the outline or Bend with the outline. The [page:edges|At the edges] page explains each one, with pictures.
 
 Colour sets (shown when a shape has more than one set of channels, 15 colours each, 16 with channel 10): "Stay in their set" (the default) keeps each note in its own set of tracks and gives it the matching colour there, so the whole pattern bends together. "Move between sets" gives each note the colour and track of the note it's stirred from, so notes can move to another set.
 
