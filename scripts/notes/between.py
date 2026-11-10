@@ -321,14 +321,27 @@ class Pair:
         if x is not None and y is not None:  # (both ends with Gate extend: step by step when in the same unit)
             from notes.extend import mixed_extend
             out["extend"] = mixed_extend(x, y, f, mix)
-        from notes.recolour import (BLEND_DEFAULTS, KEEP, blend_sizes, clean_recolour, full_stir, size_parts,
-                                    stir_stack)
+        from notes.recolour import (BLEND_DEFAULTS, KEEP, KEEP_KEYS, blend_sizes, clean_recolour, full_stir,
+                                    size_parts, stir_stack)
         x, y = clean_recolour(a.get("recolour")), clean_recolour(b.get("recolour"))
         # (Off + a Stir at one end, plain Off at the other: the stir fades out step by step, hunt 2026-11-02)
         if x and not y and x["mode"] == KEEP:
             y = {"mode": KEEP, "seed": x["seed"]}
         elif y and not x and y["mode"] == KEEP:
             x = {"mode": KEEP, "seed": y["seed"]}
+        clumps_off = False  # (Clumps at one end only: it switches on halfway, PLAN.md "Order of colour settings" G)
+        ends = (x, y)  # (each end's own steps: the steps' order comes from them, blend_order)
+        if x and y and x["mode"] != y["mode"] and KEEP in (x["mode"], y["mode"]):
+            # (Shuffle / Scattered / Clumps at one end only, the other Off with colour effects: its step fades in like
+            # any other step only one end has: Amount 0 = Off exactly; Clumps colours every note at any Amount, so it
+            # switches halfway; user 2026-11-10 "an effect only one end has fades in / out")
+            has, lacks = (x, y) if y["mode"] == KEEP else (y, x)
+            pad = dict(lacks, **{k: v for k, v in has.items() if k not in KEEP_KEYS}, mode=has["mode"])
+            if has["mode"] != "clumps":
+                pad["amount"] = 0.0
+            elif (lacks is x) == (f < 0.5):
+                clumps_off = True
+            x, y = (pad, y) if lacks is x else (x, pad)
         if x and y and x["mode"] == y["mode"]:  # (both ends recoloured alike: the numbers step by step, a setting
             near = x if f < 0.5 else y  # only one end has its default there; choices, dice, flips: the nearer end's)
             # (stacked stirs: the shorter stack padded, so an extra one fades in. A stir with nothing to blend with
@@ -401,8 +414,41 @@ class Pair:
                 steps = got["stir"] if isinstance(got["stir"], list) else [got["stir"]]
                 for j in sized:
                     steps[j] = dict(steps[j], size_mix=blend_sizes(sx[j], sy[j], steps[j]["reach"], f))
+            if clumps_off:
+                got["mode"] = KEEP
+            got = clean_recolour(got)
+            if got:  # (the steps in order: the nearer end's, the far end's own ones where they sit there)
+                from notes.fx import pages
+                pa, pb = len(pages(a.get("fx"))), len(pages(b.get("fx")))
+                near_end, far_end = (ends[0], pa), (ends[1], pb)
+                if f >= 0.5:
+                    near_end, far_end = far_end, near_end
+                got = blend_order(near_end, far_end, got, len(pages(out.get("fx"))))
             out["recolour"] = got
         return clean_shape(out)
+
+
+def blend_order(near, far, got, n_pages):
+    """An Add between step's Recolour got (clean) with its colour steps in order (user 2026-11-10: matching steps
+    blend, one only one end has fades in / out, the order switches halfway where the ends differ): the nearer end's
+    order, each step only the far end has put right after the step it follows there (first when none). near / far =
+    (that end's clean Recolour or None, its note tool pages); n_pages = the step's own pages (none when the ends'
+    pages differ: they switch off)."""
+    from notes.recolour import PAGE, full_order, order_counts, tags_of, turns_of, with_order
+    want = dict(order_counts(got), turned=len(turns_of(got)))
+    want[PAGE] = n_pages
+
+    def tags(end):
+        rc, n = end
+        o = full_order(rc, n)[0] if rc else []
+        return [t for t in tags_of(o) if t[1] < want.get(t[0], 0)]
+    out, far_tags = tags(near), tags(far)
+    for p, t in enumerate(far_tags):
+        if t in out:
+            continue
+        before = next((u for u in reversed(far_tags[:p]) if u in out), None)
+        out.insert(out.index(before) + 1 if before else 0, t)
+    return with_order(got, [k for k, _ in out])
 
 
 def _full_cycle(c):
