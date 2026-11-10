@@ -57,6 +57,32 @@ TOUCH_PX = 8  # ends closer than this on screen (times the display scaling) coun
 ON_PX = 1e-6  # Slice / Lasso cuts a line where their line crosses it: onto a corner only when right on it
 
 
+def shown_code(a):
+    """Start and key as one number (keys inside the project, < 1024)."""
+    return a[:, 0] * 1024 + (a[:, 2] & 1023)
+
+
+def shown_slots(rows, notes, colour):
+    """Each of a shape's notes' slot as shown (rows = its rendered rows): each colour (colour = per note) on the slot
+    its first note shown where it starts has; None when a colour has no note shown where it starts."""
+    if not len(rows):
+        return None
+    have = shown_code(rows)
+    o = np.argsort(have, kind="stable")
+    have, row_slot = have[o], rows[o, 4]
+    want = shown_code(notes)
+    at = np.minimum(np.searchsorted(have, want), max(len(have) - 1, 0))
+    found = have[at] == want
+    names, inv = np.unique(colour, return_inverse=True)
+    inv = inv.ravel()
+    first = np.full(len(names), -1, np.int64)
+    hit = np.flatnonzero(found)
+    first[inv[hit[::-1]]] = row_slot[at[hit[::-1]]]
+    if (first < 0).any():
+        return None
+    return first[inv]
+
+
 def multi_slots(rows, multi):
     """A shape's rendered rows with each note's slot from its rows in Multi channel (multi; Turn into plain notes in
     Single channel / As drawn: Multi channel later shows its colours, hunt): the note starting there on its key, else
@@ -1112,23 +1138,10 @@ class JoinSplit:
             return rows
         notes = np.asarray(notes, np.int64)[:, :4]
         colour = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
-
-        def code(a):  # (start and key as one number: keys inside the project, < 1024)
-            return a[:, 0] * 1024 + (a[:, 2] & 1023)
-        have = code(rows)
-        o = np.argsort(have, kind="stable")
-        have, row_slot = have[o], rows[o, 4]
-        want = code(notes)
-        at = np.minimum(np.searchsorted(have, want), max(len(have) - 1, 0))
-        found = have[at] == want
-        names, inv = np.unique(colour, return_inverse=True)
-        inv = inv.ravel()
-        first = np.full(len(names), -1, np.int64)  # (each colour's slot: from its first note shown where it starts)
-        hit = np.flatnonzero(found)
-        first[inv[hit[::-1]]] = row_slot[at[hit[::-1]]]
-        if (first < 0).any():
+        code = shown_code
+        slots = shown_slots(rows, notes, colour)
+        if slots is None:
             return rows  # (a colour with no note shown where it starts: can't tell its slot)
-        slots = first[inv]
         got, got_slots = self.heard_overlaps(sh, notes, slots)
         got = np.asarray(got, np.int64)
         got_slots = np.asarray(got_slots, np.int64)
@@ -1961,12 +1974,28 @@ class JoinSplit:
                 got = self.notes_tracks(sh)
             else:
                 got = shape_notes_tracks(made, self.ppq, 256)
-        return self.heard_overlaps(sh, *got)
+        return self.heard_overlaps(sh, *got, groups=self.single_groups(sh, *got))
 
-    def heard_overlaps(self, sh, notes, tracks):
+    def single_groups(self, sh, notes, tracks):
+        """Single channel: each note's slot as shown, so its overlaps are fixed between its tracks sharing a channel
+        too (a plain notes shape with several colours, e.g. Merge leftovers, shows them all on one channel: a cut
+        left the quieter track's note under a cut-off loud one, which then sounded loud; sweep 2026-11-09). None:
+        other modes, one track, a shape not shown (a piece being cut again), or a colour not found as shown."""
+        if self.channel_mode.get() != "single" or tracks is None or not len(notes):
+            return None
+        i = next((j for j, s in enumerate(self.shapes) if s is sh), None)
+        ren = getattr(self, "rendered", None)
+        if i is None or ren is None or not len(ren):
+            return None
+        ren = np.asarray(ren)
+        rows = ren[ren[:, 5] == i]
+        return shown_slots(rows, np.asarray(notes, np.int64), np.asarray(tracks, np.int64))
+
+    def heard_overlaps(self, sh, notes, tracks, groups=None):
         """A pasted-notes shape's notes and tracks with its own overlaps on each track fixed as the Channels mode fixes
         them (Single channel; Multi channel only for notes Spiderweb made, or with Remove overlaps; never As drawn,
-        Sustain or held notes), so cut pieces sound as before; else as they are."""
+        Sustain or held notes), so cut pieces sound as before; else as they are. groups (Single channel: each note's
+        slot as shown, single_groups): fixed per slot instead, tracks kept."""
         from notes.engine import keeps_laps
         from notes.sustain import is_sustained
         from window.app import fix_rows
@@ -1977,15 +2006,20 @@ class JoinSplit:
             return notes, tracks
         notes = np.asarray(notes, np.int64)
         who = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
-        across = rule.get("across") and tracks is not None and len(np.unique(who)) > 1
-        o = np.lexsort((notes[:, 0], notes[:, 2], who))
-        same = (notes[o[1:], 2] == notes[o[:-1], 2]) & (who[o[1:]] == who[o[:-1]])
+        grp = who if groups is None else np.asarray(groups, np.int64)
+        across = rule.get("across") and groups is None and tracks is not None and len(np.unique(who)) > 1
+        o = np.lexsort((notes[:, 0], notes[:, 2], grp))
+        same = (notes[o[1:], 2] == notes[o[:-1], 2]) & (grp[o[1:]] == grp[o[:-1]])
         if not across and not (same & (notes[o[1:], 0] < notes[o[:-1], 1])).any():
             return notes, tracks  # (no overlaps: as they are)
         # (rows kept past the keys ("Keep notes made there") are never fixed when shown: left as they are)
         inside = (notes[:, 2] >= 0) & (notes[:, 2] < self.keys)
-        rows = np.column_stack([notes[inside, :4], who[inside], np.zeros(int(inside.sum()), np.int64)])
+        rows = np.column_stack([notes[inside, :4], grp[inside],
+                                who[inside] if groups is not None else np.zeros(int(inside.sum()), np.int64)])
         fixed = fix_rows(rows, rule.get("way", "stretch"))
+        if groups is not None:  # (fixed per slot shown; each note keeps its own track)
+            fixed = fixed.copy()
+            fixed[:, 4] = fixed[:, 5]
         if across and len(fixed):
             # (Multi's Remove overlaps: then between its tracks too, in the track list's order = its tracks' order;
             # Later tracks win turns it round: hunt 2026-11-08, a cut through a quiet note under another track's
