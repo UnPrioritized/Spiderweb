@@ -19,7 +19,7 @@ from files.system import ALT
 from notes import liquify as lq
 from files.speed import key_sort
 from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, clean_recolour, new_seed, rule_of,
-                            liquify_last, order_of, ordered, turned_map, with_most, with_order,
+                            liquify_last, order_of, ordered, step_place, turned_map, with_most, with_order,
                             without_recolour)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
@@ -130,6 +130,10 @@ class LiquifyBrush:
         app.push_undo(name=tr("liquify.undo_mask" if tool in lq.MASK_TOOLS else "liquify.undo"))
         if tool not in lq.MASK_TOOLS:
             hit = self.liquify_shown_again(hit)
+            # (a Liquify before other colour steps: they're skipped while it is brushed, PLAN.md stage C; the notes
+            # shown without them first, so the stroke paints on what it changes)
+            if app.colour_edit_start(("liquify", 0)):
+                self.redraw()
         jobs = []
         finer = False
         for sh, made in hit:
@@ -476,6 +480,7 @@ class LiquifyBrush:
             else:
                 sh.pop("recolour", None)
         if notes:
+            self.app.colour_edit_set(("liquify", 0))  # (the steps after it skipped while brushed: PLAN.md stage C)
             self.app.shapes_changed(now=now)
         else:
             self.draw_liquify_mask()
@@ -522,12 +527,16 @@ class LiquifyBrush:
             base.pop("warp", None)
             base["liquify"] = {"edge": job["warp"]["edge"]}
             base = with_order(base, ["liquify" if k == "warp" else k for k in o])
-            if old.get("liquify"):
+            lp, u = step_place(old, "liquify"), app.edit_place(sh, idx)
+            if old.get("liquify") and (u is None or lp is None or lp <= u):  # (a Liquify after it skipped: no matter)
                 return None
         settings = {k: v for k, v in (base.get("liquify") or {}).items() if k not in ("grid", "map", "frozen")}
         # (the rule as the notes are made with this stroke's map: any map stands in, Live is handed the real one; a
         # first stroke's Liquify goes at the end of the order, as ordered() puts it)
         base["liquify"] = dict(settings, grid=[2, 2], map=lq.encode(np.full((2, 2, 2), 1.0 / lq.SCALE)))
+        upto = app.edit_place(sh, idx)  # (an earlier step brushed: the steps after it skipped, PLAN.md stage C)
+        if upto is not None:
+            base["_upto"] = upto
         if not liquify_last(base):
             return None
         rule = rule_of(with_most(dict(sh, recolour=base), app.all16())["recolour"])
@@ -554,7 +563,7 @@ class LiquifyBrush:
         faint = drawn[mine, 3] < -1  # (faint copies of other tracks: painted under everything, left alone)
         if faint.any():
             mine = mine[~faint]
-        mn, mt = app.notes_tracks(sh)
+        mn, mt = app.notes_tracks(app.edit_view(sh, idx))  # (as shown: the later colour steps skipped meanwhile)
         if not len(mine) or mt is None or not len(mn):
             return None
         # (this shape's rows of the piano roll's notes in start order: "rows" into drawn (never changed), their

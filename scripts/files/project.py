@@ -1191,6 +1191,7 @@ class ProjectFiles:
 
     def save_project(self, ask=False):
         """Into the project file opened / saved last; none yet (or ask: Save as…) = asks where. True if saved."""
+        self.colour_edit_leave()  # (a colour step being edited: its later steps shown again, PLAN.md stage C)
         path = self.project_file
         if ask or not path:
             os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -1545,6 +1546,7 @@ class ProjectFiles:
         poll()
 
     def generate(self):
+        self.colour_edit_leave()  # (a colour step being edited: the whole result written, PLAN.md stage C)
         if self.loaded is not None:
             return self.export_loaded()
         if self.midi_link is not None:  # (its MIDI isn't loaded: the file holds the notes, nothing to export without it)
@@ -1796,6 +1798,7 @@ class ProjectFiles:
     def export_dms(self):
         """Export to Domino: every note in a .dms file (Domino's own song file, PPQ up to 65535) next to the MIDI
         file the Output file box names, with the same name. Asked before replacing, like Export MIDI."""
+        self.colour_edit_leave()  # (a colour step being edited: the whole result written, PLAN.md stage C)
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
@@ -1932,6 +1935,7 @@ class ProjectFiles:
         if getattr(self, "key_pane", None) is self.tempo_pane:
             self.tempo_pane.copy(domino=True)
             return
+        self.colour_edit_leave()  # (a colour step being edited: the whole result copied, PLAN.md stage C)
         tl = self.track_list
         if self.tracks_shown() and tl.boxes:  # (boxes on the Conductor row alone: its stretch alone, user 11-05)
             from window.track_tempo import note_boxes, tempo_spans
@@ -2032,6 +2036,9 @@ class ProjectFiles:
         Domino", App.put_clipboard): never a message box nor a question; a copy that would ask (big_ask) or can't be
         made gives "skipped" in place of None ("" = nothing worth saying, e.g. no notes). got: copied_music's
         answer worked out already (Ctrl+C with Spiderweb Notes too: worked out once, hunt 2026-10-29)."""
+        if not got:
+            self.colour_edit_leave()  # (a colour step being edited: the whole result copied, PLAN.md stage C)
+
         def fail(text, box=messagebox.showerror):
             if quiet:
                 return "skipped"
@@ -2161,6 +2168,7 @@ class ProjectFiles:
     def copy_music(self):
         """copied_music for App.put_clipboard (both Ctrl+C extras share it); False when the project's numbers can't be
         read (each copy then says so its own way)."""
+        self.colour_edit_leave()  # (a colour step being edited: the whole result copied, PLAN.md stage C)
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError:

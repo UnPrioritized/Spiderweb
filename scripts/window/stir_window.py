@@ -22,6 +22,7 @@ from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_ST
 from roll.roll_live import STROKE_TOOLS
 from window import look
 from window.drawer import library_lists, shape_path
+from window.edit_line import EditLine
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob, ThinBar
 from window.widgets import (Scrub, ShortLabel, Tooltip, bad, good, grid_shown, name_index, name_list, remember_place,
@@ -366,6 +367,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
         # (why a stir shows nothing: Channels not Multi channel / one colour; shown only then, hunt 2026-11-02)
         self.warn = ttk.Label(box, text="", foreground=look.WARN, wraplength=int(300 * app.scale), justify="left")
+        self.edit_line = EditLine(box, app, "stir", self.hint, 320)  # (later colour steps hidden: PLAN.md stage C)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(10, 0))
         ttk.Button(row, text=tr("shares.close"), command=self.close).pack(side="right")
@@ -751,6 +753,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.fresh = False
         self.tab = self.tab_var.get()
         self.wheel = None
+        self.app.colour_edit_leave("stir", keep=("stir", self.tab))  # (another tab: the later steps come back)
         self.sync()
 
     def on_add(self):
@@ -758,6 +761,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.take_typing()
         self.tab, self.fresh = self.tab_count, True
         self.wheel = None
+        self.app.colour_edit_leave("stir")
         self.sync()
 
     def on_drop(self):
@@ -1401,6 +1405,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.call_off(self.hold)
         self.take_typing()
         self.app.stir_window = None
+        self.app.colour_edit_leave("stir")  # (a Stir's later colour steps worked out again, PLAN.md stage C)
         self.app.colour_window_closed()  # (quick Stir changes' kept work: only while a window needs it, hunt 11-07)
         roll = self.app.roll
         if (roll.drag or ("",))[0] == "rccentre":  # (a Centre point dot held: let go, what it moved kept)

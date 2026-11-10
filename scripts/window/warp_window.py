@@ -22,6 +22,7 @@ from notes import warp as wp_
 from notes import warp_presets as pr
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour, new_seed
 from window import look
+from window.edit_line import EditLine
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
     unchanged
 
@@ -214,6 +215,7 @@ class WarpWindow(tk.Toplevel):
                               wraplength=int(280 * app.scale), justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(10, 0))
         self.warn = ttk.Label(box, text="", foreground=look.WARN, wraplength=int(280 * app.scale), justify="left")
+        self.edit_line = EditLine(box, app, "warp", self.hint, 200)  # (later colour steps hidden: PLAN.md stage C)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Escape>", lambda e: self.set_split("") if self.split_mode else self.close())
         self.sync()
@@ -649,6 +651,7 @@ class WarpWindow(tk.Toplevel):
             self.set_split("")
         roll.warp_drop_pick()  # (opened again: no point picked; Warp Split hunt 2026-11-10)
         self.app.warp_window = None
+        self.app.colour_edit_leave("warp")  # (its later colour steps worked out again, PLAN.md stage C)
         self.app.colour_window_closed()  # (quick drags' kept work let go: memory use, user 2026-11-10)
         self.destroy()
         roll.focus_set()

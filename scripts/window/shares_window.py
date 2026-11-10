@@ -16,6 +16,7 @@ from files.mathexpr import calc, fmt
 from notes.recolour import KEEP, MOST_PUSH, MOST_TIGHT, PATTERNS, SPLIT, TIGHT, clean_recolour, palettes, wanted, \
     weights
 from window import look
+from window.edit_line import EditLine
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, bad, good, remember_place, show_mixed, wheel_ready
 
@@ -350,6 +351,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
         self.hint = ttk.Label(box, text=tr("shares.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
+        self.edit_line = EditLine(box, app, "mode", self.hint, 220)  # (later colour steps hidden: PLAN.md stage C)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(10, 0))
         ttk.Button(row, text=tr("shares.close"), command=self.close).pack(side="right")
@@ -737,6 +739,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
             self.call_off(self.hold)
         self.take_typing()
         self.app.shares_window = None
+        self.app.colour_edit_leave("mode")  # (Shuffle / Split's later colour steps worked out again, PLAN.md C)
         roll = self.app.roll
         if (roll.drag or ("",))[0] == "rccentre":  # (a Centre point dot held: let go, what it moved kept)
             roll.drag = None

@@ -115,6 +115,7 @@ class Playback:
         """keep = started again at once (play line moved while playing, new PPQ): Built-in BASSMIDI keeps a voice
         limit lowered by itself."""
         self.scrub_end()
+        self.colour_edit_leave()  # (a colour step being edited: heard whole, its later steps back; PLAN.md stage C)
         try:
             ppq, bpm, beats = self.read_project()
         except ValueError as e:
@@ -420,6 +421,9 @@ class Playback:
 
     def _ahead_idle(self):
         self._ahead_idle_job = None
+        if self.edit_shown:  # (a colour step being edited: made once its later steps are back, PLAN.md stage C;
+            self._ahead_idle_job = self.after(AHEAD_IDLE_MS, self._ahead_idle)  # the whole result each change
+            return                                                               # undid the speed-up)
         try:
             go = self.ahead_play.idle()
         except Exception as e:  # (never a dead loop with no word: logged, said once)

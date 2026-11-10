@@ -970,6 +970,9 @@ class WarpGrid:
             self.warp_first(st)
         job = st["jobs"][0]
         if st["way"] is None:  # (how it shows, worked out from the grid before this move: Live starts from it)
+            # (a Warp before other colour steps: they're skipped while it is dragged, PLAN.md stage C; shown so first)
+            if self.app.colour_edit_start(("warp", 0)):
+                self.redraw()
             job["a"], job["exact"] = self.warp_map(g), self.warp_solver(g)
             st["way"] = self.liquify_way(st["jobs"])
         if hw is not None:
@@ -1074,6 +1077,7 @@ class WarpGrid:
             sh["recolour"] = new
         else:
             sh.pop("recolour", None)
+        self.app.colour_edit_set(("warp", 0))  # (the steps after it skipped while dragged: PLAN.md stage C)
         self.app.shapes_changed(now=now)
 
     def warp_release(self, e):

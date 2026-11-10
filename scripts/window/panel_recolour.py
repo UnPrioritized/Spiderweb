@@ -11,8 +11,8 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.engine import pasted_notes
-from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
-    ordered, wanted, without_recolour
+from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, edited_step, enough, \
+    is_recoloured, new_seed, order_of, ordered, palettes, step_place, wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
@@ -21,10 +21,104 @@ AMOUNT_WORDS = {"shuffle": ("recolour.amount", "recolour.amount_tip"),
                 "scatter": ("recolour.amount", "recolour.amount_tip_scatter"),
                 "clumps": ("recolour.rough", "recolour.amount_tip_clumps")}
 START_AMOUNT = {"shuffle": 100.0, "scatter": 50.0, "clumps": 20.0}
+EDIT_WINDOWS = {"stir": "stir_window", "warp": "warp_window", "liquify": "liquify_window", "mode": "shares_window"}
 
 
 class RecolourPanel:
     """Mixed into App."""
+
+    # ---- one colour step edited: the steps after it skipped (Order of colour settings, PLAN.md stage C)
+    # (user 2026-11-10: while an earlier step is edited the later ones are FULLY OFF, so it is as quick as editing
+    # the last one; worked out again once the user leaves it: another shape picked, another Stir tab, its window
+    # closed, Play, save / export / copy, Preview all. What leaves Spiderweb (App.outgoing) is always whole.)
+    colour_edit = None  # ((kind, n) = the step being edited, the selection it started with) or None
+    edit_shown = False  # the notes made last (app.rendered) skip steps so (App.shapes_changed)
+
+    def colour_edit_set(self, step):
+        """step = ("stir", tab) / ("warp", 0) / ("liquify", 0) / ("mode", 0) of the selected shapes was just
+        changed (None: no step alone, e.g. a step added / taken out, a Reverse: the edit ends). Call before
+        shapes_changed: it makes the notes as shown. Playing: never (heard whole). Only while the step's own window
+        is open (Stir / Warp / Liquify / Shares: the side panel's Recolour row alone edits nothing for long)."""
+        if step is not None and (self.player.running or not self.sels or not getattr(self, EDIT_WINDOWS[step[0]],
+                                                                                         None)):
+            step = None
+        new = None if step is None else (tuple(step), frozenset(self.sels))
+        if new != self.colour_edit:
+            self.colour_edit = new
+            self.after_idle(self.sync_edit_lines)
+
+    def colour_edit_start(self, step):
+        """A stroke / drag of step starts on the selected shapes (roll_liquify / roll_warp): the steps after it are
+        skipped from now on. True = that hid steps not hidden before (the notes were made again here)."""
+        self.colour_edit_set(step)
+        if self.colour_hidden() and not self.edit_shown:
+            self.shapes_changed(now=True)
+            return True
+        return False
+
+    def colour_edit_leave(self, kind=None, keep=None):
+        """The user left the step being edited (kind: only when it is of that kind; keep: not when it is that very
+        step, e.g. the Stir tab shown): the steps after it are worked out again."""
+        e = self.colour_edit
+        if e is None or kind is not None and e[0][0] != kind or keep is not None and e[0] == tuple(keep):
+            return
+        self.colour_edit = None
+        self.sync_edit_lines()
+        if self.edit_shown:
+            self.shapes_changed(now=True)
+
+    def edit_place(self, sh, i=None):
+        """Where the step being edited sits in shape sh's (place i in self.shapes) order while the steps after it
+        are skipped, or None (nothing skipped for it)."""
+        e = self.colour_edit
+        if e is None or self.player.running or frozenset(self.sels) != e[1] or not is_recoloured(sh):
+            return None
+        if i is None:
+            i = next((j for j, s in enumerate(self.shapes) if s is sh), None)
+        if i not in e[1]:
+            return None
+        rc = clean_recolour(sh["recolour"])
+        j = step_place(rc, *e[0])
+        return j if j is not None and j < len(order_of(rc)) - 1 else None
+
+    def edit_view(self, sh, i=None):
+        """sh as its notes are shown: without the steps after the one being edited (rc "_upto", recolour.steps_of)."""
+        j = self.edit_place(sh, i)
+        return sh if j is None else dict(sh, recolour=dict(sh["recolour"], _upto=j))
+
+    def edit_shapes(self):
+        """self.shapes as their notes are shown (edit_view each; self.shapes itself when nothing is skipped)."""
+        e = self.colour_edit
+        if e is None or self.player.running or frozenset(self.sels) != e[1]:
+            return self.shapes
+        out = [self.edit_view(sh, i) if i in e[1] else sh for i, sh in enumerate(self.shapes)]
+        return out if any(a is not b for a, b in zip(out, self.shapes)) else self.shapes
+
+    def colour_hidden(self):
+        """Some shape's later colour steps are skipped by the step being edited now (edit_shown: in the notes made
+        last)."""
+        return self.edit_shapes() is not self.shapes
+
+    def edit_hidden_count(self, kind):
+        """How many later colour steps are skipped while a step of kind is edited (the most of any shape), 0."""
+        e = self.colour_edit
+        if e is None or e[0][0] != kind:
+            return 0
+        most = 0
+        for i in e[1]:
+            if i < len(self.shapes):
+                j = self.edit_place(self.shapes[i], i)
+                if j is not None:
+                    most = max(most, len(order_of(clean_recolour(self.shapes[i]["recolour"]))) - 1 - j)
+        return most
+
+    def sync_edit_lines(self):
+        """The windows' "later effects hidden" lines (window/edit_line.py)."""
+        for name in EDIT_WINDOWS.values():
+            w = getattr(self, name, None)
+            line = getattr(w, "edit_line", None) if w else None
+            if line is not None and w.winfo_exists():
+                line.sync()
 
     def _build_recolour(self):
         """Recolour [Off / Shuffle] [New shuffle]; under it, while on: Amount [n] %, [Per note] [Shares…], and
@@ -326,6 +420,8 @@ class RecolourPanel:
                 t["recolour"] = r
             else:
                 t.pop("recolour", None)
+        # (one colour step changed: the ones after it skipped while it is edited, PLAN.md stage C)
+        self.colour_edit_set(next((s for s in map(edited_step, olds, new) if s), None))
         self.shapes_changed()
         self.sync_recolour()
         self.schedule_autosave()

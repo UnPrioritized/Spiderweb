@@ -43,7 +43,7 @@ from notes.custom import ROUND
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
 KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "turns", "liquify", "warp", "order",
-             "stir_at")  # (what mode KEEP
+             "stir_at", "_upto")  # (what mode KEEP
 # looks at)
 # ("liquify" = the Liquify brush's bend map, notes/liquify.py: applied after every stir and the Warp; Off with only a
 # Liquify = KEEP too)
@@ -385,6 +385,49 @@ def order_moved(rc, a, b):
     return with_order(rc, o)
 
 
+def steps_of(rc):
+    """The colour steps that run now: order_of(rc), cut after step rc["_upto"] while an earlier step is edited
+    (PLAN.md stage C, user 2026-11-10: the later ones skipped, fully off, until the user leaves it)."""
+    o = order_of(rc)
+    u = (rc or {}).get("_upto")
+    return o[:u + 1] if isinstance(u, int) and 0 <= u < len(o) - 1 else o
+
+
+def step_place(rc, kind, n=0):
+    """Where the n-th step of kind ("stir" n = Stir tab n) sits in rc's order, or None (rc has none)."""
+    seen = -1
+    for j, k in enumerate(order_of(rc)):
+        if k == kind:
+            seen += 1
+            if seen == n:
+                return j
+    return None
+
+
+EDIT_SKIP = ("stir", "warp", "liquify", "turned", "turns", "order", "stir_at", "frame", "whole", "most", "ppq")
+
+
+def edited_step(old, new):
+    """Which colour step a change from Recolour old to new edited: ("stir", tab), ("warp", 0), ("liquify", 0),
+    ("mode", 0) (Shuffle / Split's own settings), or None (none of them alone: a step added / taken out, a Reverse
+    pressed, a step moved, nothing). Both clean or None."""
+    old, new = old or {}, new or {}
+    if order_counts(old) != order_counts(new) or order_of(old) != order_of(new):
+        return None
+    a, b = stir_stack(old.get("stir")), stir_stack(new.get("stir"))
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return "stir", i
+    for kind in ("warp", "liquify"):
+        x, y = old.get(kind), new.get(kind)
+        if x != y and not (kind == "liquify" and {k: v for k, v in (x or {}).items() if k != "frozen"}
+                           == {k: v for k, v in (y or {}).items() if k != "frozen"}):
+            return kind, 0
+    if new.get("mode") in MODES and any(old.get(k) != new.get(k) for k in set(old) | set(new) if k not in EDIT_SKIP):
+        return "mode", 0
+    return None
+
+
 def clean_turned(tw):
     """A saved rc["turned"] -> sorted [[before, now], ...] that swap colours one for one (no colour staying), or
     None."""
@@ -655,6 +698,9 @@ def rule_of(r):
     rc = clean_recolour(r)
     if rc is not None:
         rc["most"] = 16 if r.get("most") == 16 else MOST
+        u = r.get("_upto")
+        if isinstance(u, int) and not isinstance(u, bool) and 0 <= u < len(order_of(rc)) - 1:
+            rc["_upto"] = u  # (the steps after step u skipped while it is edited: App.edit_shapes, never saved)
     return rc
 
 
@@ -894,15 +940,17 @@ def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
     colours."""
     rc = kept_rule(rc)
     if (rc.get("stir") or rc.get("liquify") or rc.get("warp")) and tracks is not None \
-            and len(notes) >= BEFORE_STIR_LEAST and kept_shape(rc):  # (another order: everything worked out)
-        got = before_liquify(notes, tracks, rc, held, gate, own)
-        if got is None:
+            and len(notes) >= BEFORE_STIR_LEAST and keeping():
+        if gate and (rc.get("liquify") or rc.get("warp")):  # (they work on where notes show: liquify.shown_places)
+            rc = dict(rc, _gate=True)
+        b = _kept_before(notes, tracks, rc, held, gate, own)
+        if b is None:
             return notes, tracks
-        rc, notes, lap, tw, (n, at, low, now, which, pals, pick, box, own) = got
-        laps = laps_of(lap)
-        now = liquified_now(n, at, low, now, rc, which, pals, pick, box, own, laps=laps)
+        notes2, lap = b[0], b[1]
+        head, rest = split_order(steps_of(rc))
+        now, _, laps = _kept_run(b, rc, rest, head.count("turned"), laps_of(lap))
         # (a copy: whoever gets it may change it)
-        return notes.copy(), laps_now(lap, laps) + (turned_map(tw)(now) if tw else now)
+        return notes2.copy(), laps_now(lap, laps) + now
     return _recoloured(notes, tracks, rc, held, gate, own)
 
 
@@ -955,23 +1003,33 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
     rc = kept_rule(rc)
     if gate and (rc.get("liquify") or rc.get("warp")):  # (they work on where notes show: liquify.shown_places)
         rc = dict(rc, _gate=True)
-    if tracks is None or len(notes) < BEFORE_STIR_LEAST or not keeping() or not kept_shape(rc):
+    steps = steps_of(rc)
+    head, rest = split_order(steps)
+    body, end_turn, _ = bend_tail(rest)
+    if tracks is None or len(notes) < BEFORE_STIR_LEAST or not keeping():
         b = _before_stir(notes, tracks, rc, held, gate, own) if tracks is not None or rc["mode"] in SPLIT else None
         if b is None:
             return None
-        notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2) = b
+        notes2, lap, _, (n, at, low, now, which, pals, pick, box, own2) = b
         laps = laps_of(lap)
-        head, rest = split_order(order_of(rc))
-        body, end_turn, _ = bend_tail(rest)
         now, pick = run_steps(body, n, at, low, now, rc, which, pals, pick, box, own2, laps=laps,
                               turn0=head.count("turned"))
-        return rc, notes2, laps_now(lap, laps), tw if end_turn else None, (n, at, low, now, which, pals, pick, box,
-                                                                          own2)
-    # (only the Stir changed since last time (a knob turned): the colours before it are kept, user 11-07: 3 M
-    # notes took a second a change; the same for Liquify / Warp, and a brush stroke keeps the stirred colours too)
-    key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify", "warp")}, sort_keys=True), held,
-           gate,
-           None if own is None else tuple(own))
+    else:
+        b = _kept_before(notes, tracks, rc, held, gate, own)
+        if b is None:
+            return None
+        notes2, lap, _, (n, at, low, now, which, pals, pick, box, own2) = b
+        now, pick, laps = _kept_run(b, rc, body, head.count("turned"), laps_of(lap), keep_end=True)
+    tw = turn_swap(turns_of(rc)[steps.count("turned") - 1], pals) if end_turn else None
+    return rc, notes2, laps_now(lap, laps), tw, (n, at, low, now, which, pals, pick, box, own2)
+
+
+def _kept_before(notes, tracks, rc, held, gate, own):
+    """_before_stir's result for a big shape, kept while nothing before the first Stir / Warp / Liquify changes (user
+    11-07: 3 M notes took a second a Stir knob change), or None (nothing to recolour)."""
+    head, _ = split_order(steps_of(rc))
+    key = (json.dumps({k: v for k, v in rc.items() if k not in ("stir", "liquify", "warp", "_upto")}, sort_keys=True),
+           json.dumps(head), held, gate, None if own is None else tuple(own))
     got = _BEFORE_STIR.get("got")
     if got is None or got[0]() is not notes or got[1]() is not tracks or got[2] != key:
         # (weak links: the shape's notes gone = the kept work goes too, hunt 11-07: ~150 MB a million notes stayed)
@@ -979,33 +1037,72 @@ def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
         got = (weakref.ref(notes, gone), weakref.ref(tracks, gone), key,
                _before_stir(notes, tracks, rc, held, gate, own))
         _BEFORE_STIR["got"] = got
-    b = got[3]
-    if b is None:
-        return None
-    notes2, lap, tw, (n, at, low, now, which, pals, pick, box, own2) = b
-    laps = laps_of(lap)
-    skey = json.dumps(rc.get("stir"), sort_keys=True)
-    kept = _BEFORE_STIR.get("stirred")
-    if kept is not None and kept[0] is b and kept[1] == skey:
-        now, laps = kept[2], None if kept[3] is None else [kept[3]]
-    else:
-        now = stirs_only(n, at, low, now, rc, which, pals, pick, box, own2, laps=laps)
-        if rc.get("liquify") or rc.get("warp"):  # (kept for the next brush stroke / Warp drag: only they change then)
-            now = np.array(now)
-            now.setflags(write=False)
-            _BEFORE_STIR["stirred"] = (b, skey, now, None if laps is None else laps[0])
-    if rc.get("warp"):  # (the Warp's colours kept too: a Liquify stroke on a warped shape redoes neither)
-        wkey = skey + json.dumps(rc.get("warp"), sort_keys=True)
-        kept = _BEFORE_STIR.get("warped")
-        if kept is not None and kept[0] is b and kept[1] == wkey:
-            now, laps = kept[2], None if kept[3] is None else [kept[3]]
-        else:
-            now = warped_now(n, at, low, now, rc, which, pals, pick, box, own2, laps=laps)
-            if rc.get("liquify"):
-                now = np.array(now)
-                now.setflags(write=False)
-                _BEFORE_STIR["warped"] = (b, wkey, now, None if laps is None else laps[0])
-    return rc, notes2, laps_now(lap, laps), tw, (n, at, low, now, which, pals, pick, box, own2)
+        _BEFORE_STIR.pop("chain", None)
+    return got[3]
+
+
+CHAIN_MOST = 8  # (colours kept after this many steps at most: each one is a copy of every note's colour)
+
+
+def _step_key(k, rc, i_stir, i_turn):
+    """A colour step's own settings as text (what its result depends on beside the steps before it)."""
+    if k == "stir":
+        st = rc.get("stir")
+        stirs = st if isinstance(st, list) else [st] if st else []
+        return "stir" + json.dumps(stirs[i_stir] if i_stir < len(stirs) else None, sort_keys=True)
+    if k == "turned":
+        turns = turns_of(rc)
+        return "turned" + json.dumps(turns[i_turn] if i_turn < len(turns) else None)
+    if k in ("warp", "liquify"):
+        return k + json.dumps(rc.get(k), sort_keys=True)
+    return k  # ("mode": its settings are in _kept_before's key)
+
+
+def _kept_run(b, rc, steps, turn0, laps, keep_end=False):
+    """(now, pick, laps) after steps (split_order's rest, or the part of it before the Liquify) on a big shape's kept
+    _before_stir result b, from the colours kept after the longest run of the same steps with the same settings
+    (PLAN.md stage C: any order; a change of step n redoes it and the ones after only). Kept: after each step but
+    between two Stirs (unless it is the one before the last) and before Reverses at the end only (keep_end: the end
+    too: before_liquify's colours, the brush's Live starts from the very same arrays). Read-only."""
+    n, at, low, now, which, pals, pick, box, own = b[3]
+    chain = _BEFORE_STIR.get("chain")
+    if chain is None or chain[0] is not b:
+        chain = _BEFORE_STIR["chain"] = (b, [])
+    kept = chain[1]
+    keys, ns, nt = [], 0, turn0
+    for k in steps:
+        keys.append(_step_key(k, rc, ns, nt))
+        ns += k == "stir"
+        nt += k == "turned"
+    start = 0
+    for e in reversed(kept):  # (the longest run already worked out)
+        i = e[0]
+        if i < len(steps) and e[1] == tuple(keys[:i + 1]):
+            start = i + 1
+            now, pick = e[2], e[3]
+            laps = None if e[4] is None else [e[4]]
+            break
+    del kept[sum(1 for e in kept if e[0] < start):]
+    ns = steps[:start].count("stir")
+    nt = turn0 + steps[:start].count("turned")
+    last = len(steps) - 1
+    for i in range(start, len(steps)):
+        k = steps[i]
+        now, pick = run_steps([k], n, at, low, now, rc, which, pals, pick, box, own, laps=laps, turn0=nt, stir0=ns)
+        ns += k == "stir"
+        nt += k == "turned"
+        if i == last and not keep_end:
+            break
+        if i < last and (all(x == "turned" for x in steps[i + 1:])
+                         or k == "stir" and steps[i + 1] == "stir" and i + 1 < last):
+            continue
+        if len(kept) >= CHAIN_MOST:
+            continue
+        for a in (now, pick, None if laps is None else laps[0]):
+            if isinstance(a, np.ndarray) and a.flags.writeable:
+                a.setflags(write=False)
+        kept.append((i, tuple(keys[:i + 1]), now, pick, None if laps is None else laps[0]))
+    return now, pick, laps
 
 
 BEFORE_STIR_LEAST = 100_000  # (notes: smaller shapes are quick anyway, no memory kept for them)
@@ -1075,12 +1172,12 @@ def _recoloured(notes, tracks, rc, held, gate, own, keep=None):
     box, own = colour_box(notes, rc, own)
     at = places_of(notes, rc, gate, box_of(notes))
     pick = dice(at, low, rc["seed"], 1, (box[0], box[2]))
-    order = order_of(rc)
+    order = steps_of(rc)
     if keep:  # (the steps before the first bend made here (Shuffle / Split, a Reverse); the rest is the caller's;
         # "the turned" handed on = the LAST Reverse's swap as it works there, made by the caller when it is last)
         head, rest = split_order(order)
         now, pick = run_steps(head, notes, at, low, low, rc, which, pals, pick, box, own)
-        last = turn_swap(turns_of(rc)[-1], pals) if "turned" in rest else None
+        last = turn_swap(turns_of(rc)[order.count("turned") - 1], pals) if "turned" in rest else None
         return keep(notes, lap, last, (notes, at, low, now, which, pals, pick, box, own))
     laps = laps_of(lap)
     now, _ = run_steps(order, notes, at, low, low, rc, which, pals, pick, box, own, laps=laps)
@@ -1106,7 +1203,7 @@ def bend_tail(rest):
 def kept_shape(rc):
     """True when rc's order is one before_liquify's kept work follows: after the leading Shuffle / Split / Reverse,
     every Stir, then the Warp, then the Liquify, then a Reverse (today's fixed order of them; any of them missing)."""
-    body, _, _ = bend_tail(split_order(order_of(rc))[1])
+    body, _, _ = bend_tail(split_order(steps_of(rc))[1])
     i = 0
     while i < len(body) and body[i] == "stir":
         i += 1
@@ -1116,7 +1213,7 @@ def kept_shape(rc):
 def liquify_last(rc, kind="liquify"):
     """True when kind ("liquify", or "warp" for a Warp drag) is rc's last colour step but a Reverse after it: the
     brush's Live work (roll_liquify) follows only that (it bends the colours before_liquify hands over)."""
-    _, rest = split_order(order_of(rc))
+    _, rest = split_order(steps_of(rc))
     body = rest[:-1] if rest and rest[-1] == "turned" else rest
     return bool(body) and body[-1] == kind
 
@@ -1180,16 +1277,16 @@ def turn_swap(tw, pals):
     return reversal(sorted(cols))
 
 
-def run_steps(steps, notes, at, low, now, rc, which, pals, pick, box, own, laps=None, turn0=0):
+def run_steps(steps, notes, at, low, now, rc, which, pals, pick, box, own, laps=None, turn0=0, stir0=0):
     """(now after the colour steps (order_of's form) in order, the dice "pick" the later steps use): "mode" =
     Shuffle / Split (_mode_step: on the colours as they are by then), "stir" = rc's n-th stir, "warp", "liquify",
     "turned" = rc's n-th Reverse track order swap (turns_of; turn0 = how many came before these steps) (PLAN.md
-    stage B, user 2026-11-10: true order, a Reverse in the middle turns the colours round there). laps: the rounds
-    carried along (laps_of)."""
+    stage B, user 2026-11-10: true order, a Reverse in the middle turns the colours round there; stir0 = how many
+    Stirs came before). laps: the rounds carried along (laps_of)."""
     st = rc.get("stir")
     stirs = st if isinstance(st, list) else [st] if st else []
     turns = turns_of(rc)
-    n, nt = 0, turn0
+    n, nt = stir0, turn0
     for k in steps:
         if k == "mode":
             now, pick = _mode_step(notes, at, low, now, rc, which, pals, pick, box, own)

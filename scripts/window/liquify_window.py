@@ -16,6 +16,7 @@ from files.mathexpr import calc, fmt
 from notes import liquify as lq
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour
 from window import look
+from window.edit_line import EditLine
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
     unchanged
 
@@ -158,6 +159,7 @@ class LiquifyWindow(tk.Toplevel):
                               wraplength=int(300 * app.scale), justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(10, 0))
         self.warn = ttk.Label(box, text="", foreground=look.WARN, wraplength=int(300 * app.scale), justify="left")
+        self.edit_line = EditLine(box, app, "liquify", self.hint, 220)  # (later colour steps hidden: PLAN.md C)
         self.protocol("WM_DELETE_WINDOW", self.close)
         # (Esc: a straight stroke's start placed goes first, like on the piano roll; then the window closes)
         self.bind("<Escape>", lambda e: self.on_escape())
@@ -326,6 +328,7 @@ class LiquifyWindow(tk.Toplevel):
         if not unchanged(self.strength_entry):
             self.on_shown("strength", self.strength_entry)
         self.app.liquify_window = None
+        self.app.colour_edit_leave("liquify")  # (its later colour steps worked out again, PLAN.md stage C)
         self.app.colour_window_closed()  # (quick strokes' kept work let go: memory use, user 2026-11-10)
         roll.lq_end = None  # (a straight stroke's start: forgotten with the window)
         self.destroy()

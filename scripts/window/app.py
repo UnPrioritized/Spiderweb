@@ -2604,10 +2604,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 completed(sh)  # (with the whole's glue / note tool pages)
         stash = (self._job_stash or {}) if made is not None else {}  # (made in the background: its all_notes' stash)
         self._job_stash = None
+        shown = self.edit_shapes()  # (a colour step being edited: the steps after it skipped, panel_recolour)
 
         def make():
             stash.clear()
-            return all_notes(self.shapes, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
+            return all_notes(shown, self.ppq, self.keys, self.channel_mode.get(), self.channel_split,
                              self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
                              keep=self.keep_colours.get(),
                              busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels(), stash=stash,
@@ -2620,8 +2621,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.fit_into(made):  # (shapes laid on tracks got more colours: laid down the rows, laid again)
             if any("into_ch" in sh for sh in self.shapes):  # (a paste's lanes tidied too, so undo / redo give
                 tidy_tracks(self)                           # back the same: found by the track sweep)
-            made = lay_again(made, stash, self.shapes, self.own_channels()) or make()
+            made = lay_again(made, stash, shown, self.own_channels()) or make()
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _, self.cut_emptied = made
+        self.edit_shown = shown is not self.shapes  # (these notes skip a colour step's later steps: App.outgoing)
         self.forget_old_notes()
         self.off_all = self.offrange_rows()  # (before play_changed: App.outgoing reads them)
         self.made_version += 1
@@ -2632,7 +2634,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.channel_mode.get() == "single" and any(is_mask(sh) and not silent(sh) for sh in self.shapes):
             # (Single channel: sounding masks' notes cut the pattern's where they start; what a mask shows / Apply
             # makes = the pattern as it sounds without them, user)
-            self.pattern = all_notes(self.shapes, self.ppq, self.keys, "single", self.channel_split, self.all16(),
+            self.pattern = all_notes(shown, self.ppq, self.keys, "single", self.channel_split, self.all16(),
                                      self.notes_tracks, quiet=True, own=self.own_channels(),
                                      overlaps=self.overlap_rule())[2]
         if self.mask_preview.get():
@@ -2681,6 +2683,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.update_status()
         self.schedule_autosave()
         self.sync_history()
+        self.sync_edit_lines()
 
     def slots_pal(self):
         """The picture colours by slot as the notes have them now (the first picture's, else the first copy's)."""
@@ -2703,7 +2706,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def notes_key(self):
         """Everything the notes are made from (shapes_changed): a background result is used only for exactly this."""
         mode, split = self.channel_mode.get(), SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
-        return (tuple(shape_key(sh) for sh in self.shapes), self.ppq, self.keys, mode, split, self.all16(),
+        return (tuple(shape_key(sh) for sh in self.edit_shapes()), self.ppq, self.keys, mode, split, self.all16(),
                 self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode),
                 tuple(json.dumps(sh.get("strips")) for sh in self.shapes),  # (Channel per strip: not in shape_key)
                 tuple(sorted(self.own_channels().items())), tuple(sorted(self.own_channels().fixed)),
@@ -3486,6 +3489,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.parts = set()
         self.stroke = self.ripple_pick = None
         self._edit_key = self._scrub = None
+        if self.colour_edit is not None and frozenset(self.sels) != self.colour_edit[1]:
+            self.colour_edit_leave()  # (another shape picked: a colour step's later steps worked out again)
         self.sync_panel()
         self.roll.request_redraw()
         self.update_status()
@@ -4203,16 +4208,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """(App.outgoing's notes, their voice_slots {shape: {track: slot}}): the export's own channel layout, so the
         Hz basses' CC lines and pasted notes' CCs go on the channels their notes are WRITTEN on (hunt 2026-11-08:
         wrapped notes moved a Hz bass to another channel, its Cutoff stayed on the old one). Wrap off / nothing
-        wrapped = (rendered, voice_slots) as always."""
-        if not self.wraps_offrange() or not len(self.off_all):
+        wrapped = (rendered, voice_slots) as always. A colour step being edited (its later steps skipped on the piano
+        roll, panel_recolour.edit_shapes): the WHOLE result all the same."""
+        wrap = self.wraps_offrange() and bool(len(self.off_all))
+        hidden = self.edit_shown
+        if not wrap and not hidden:
             return self.rendered, self.voice_slots
-        key = (self.made_version, id(self.rendered), id(self.off_all), self.ppq, self.keys, self.channel_mode.get())
+        key = (self.made_version, id(self.rendered), id(self.off_all), self.ppq, self.keys, self.channel_mode.get(),
+               wrap, hidden)
         if self._outgoing is not None and self._outgoing[0] == key:
             return self._outgoing[1]
         mode = self.channel_mode.get()
         got = all_notes(self.shapes, self.ppq, self.keys, mode, self.channel_split, self.all16(), self.notes_tracks,
                         rounds=self.rounds_apart(), order=self.in_order(), keep=self.keep_colours.get(),
-                        busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=True)
+                        busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=wrap)
         self._outgoing = (key, (got[2], got[4]))
         return self._outgoing[1]
 
