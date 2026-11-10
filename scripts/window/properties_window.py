@@ -2,7 +2,8 @@
 menu (roll_menu.properties_item), Alt+Enter, and the Properties… button in every step's window (edit_line.EditLine).
 It replaced the Effect order window. One window that follows the selection and stays open beside the piano roll.
 
-It shows the selected shape (several selected: the one picked first, stage D; stage E lists them) in the Settings
+It shows the selected shape (several selected: listed on the left like the Settings window's pages, the ones picked
+there shown together: differing values empty / "Mixed", steps only some have marked "2 of 3"; stage E) in the Settings
 window's look (settings_window.Form): its basics at the top (kind / name / "Made by", place and size, gate and
 velocity, colours and channel), then ONE ordered list of every step done to its notes (notes/steps.py order_of):
 the fixed ones greyed at the top (the notes as drawn; Single channel's own overlap fix) and each movable one a line
@@ -10,13 +11,15 @@ with a drag grip, an on / off tick, its name (click = its own window, on that ta
 Every change is one undo step; typing a step's number = editing that step (the steps after it are hidden until the
 user leaves it: PLAN.md stage C, App.colour_edit). Add ▾ opens the existing tool windows."""
 
+import copy
 import importlib
 import tkinter as tk
+import weakref
 from tkinter import ttk
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes import steps as S
 from notes.custom import ROUND, SPAM_FILLS, gate_ticks, pack_notes, unpack_notes
@@ -26,8 +29,10 @@ from notes.recolour import (KEEP, MODES, PAGE, clean_recolour, edited_step, new_
 from window import look
 from window.edit_line import names_line, tag_name
 from window.settings_window import ScrollPage
-from window.widgets import ShortLabel, Tooltip, bad, good, leave_box, remember_place, unchanged
+from window.widgets import ListTip, ShortLabel, Tooltip, bad, good, leave_box, remember_place, unchanged
 
+LIST_CHARS = 22  # the shape list's width in letters (longer names: cut, the whole name in a tip)
+TIP_MOST = 12  # a Mixed value's tip lists this many shapes' values at most
 DRAG_PX = 4  # (a press moving less than this is a click: opens the step's window)
 LIST_MOST = 330  # the tallest the step list shows at 100 % size, in pixels (longer lists scroll)
 WRAP = 320  # grey lines' width at 100 % size
@@ -66,8 +71,32 @@ class PropertiesWindow(tk.Toplevel):
         self.transient(app)
         self.resizable(False, False)
         s = app.scale
-        box = self.box = ttk.Frame(self, padding=12)
-        box.pack(fill="both", expand=True)
+        self.listed = []  # (the shapes in the list on the left: the selection, stage E)
+        self.picked = []  # (the ones shown: picked in that list; all of them at first)
+        self.our_sels = None  # (a selection made here for Add ▾: the list stays as it was)
+        self.keys_of = {}  # (each picked shape's steps as keys: step_keys)
+        outer = ttk.Frame(self, padding=12)
+        outer.pack(fill="both", expand=True)
+        side = self.side = ttk.Frame(outer)  # (several selected: like the Settings window's list, user 2026-11-11)
+        head_lb = ttk.Label(side, text=tr("props.shapes_head"))
+        head_lb.pack(anchor="w")
+        Tooltip(head_lb, tr("props.list_tip"))
+        lrow = ttk.Frame(side)
+        lrow.pack(fill="both", expand=True, pady=(4, 0))
+        self.shape_list = tk.Listbox(lrow, activestyle="none", exportselection=False, selectmode="extended",
+                                     width=LIST_CHARS, height=8, highlightthickness=1,
+                                     font=look.font(look.USUAL_SIZE))
+        sb = ttk.Scrollbar(lrow, orient="vertical", command=self.shape_list.yview)
+        self.shape_list.config(yscrollcommand=sb.set)
+        self.shape_list.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        self.shape_list.bind("<<ListboxSelect>>", self.on_pick)
+        ListTip(self.shape_list)
+        self.like = ttk.Button(side, text=tr("props.like_this"), command=self.make_like)
+        self.like.pack(anchor="w", fill="x", pady=(6, 0))
+        self.like_tip = Tooltip(self.like, tr("props.like_this_tip"))
+        box = self.box = ttk.Frame(outer)
+        box.pack(side="right", fill="both", expand=True)
         self.what = ShortLabel(box, least=30, text="")
         self.what.pack(anchor="w", fill="x")
         self.more = ttk.Label(box, text="", foreground=look.HINT, wraplength=int(WRAP * s), justify="left")
@@ -126,6 +155,7 @@ class PropertiesWindow(tk.Toplevel):
         self.r = 0
         self.parts = {}  # name -> the widgets of its row (shown / hidden by sync)
         self.vars, self.entries = {}, {}
+        self.tips, self.tip_base = {}, {}  # (a value's / box's tip: its own text, + each shape's value when Mixed)
 
         def head(key):
             lb = ttk.Label(f, text=tr(key))
@@ -141,7 +171,9 @@ class PropertiesWindow(tk.Toplevel):
             widget.grid(row=self.r, column=1, sticky="w", pady=2)
             if tip:
                 Tooltip(lb, tr(tip))
-                Tooltip(widget, tr(tip))
+            if not isinstance(widget, ttk.Frame):
+                self.tips[name] = Tooltip(widget, tr(tip) if tip else "")
+                self.tip_base[name] = tr(tip) if tip else ""
             self.parts[name] = [lb, widget]
             self.r += 1
             return widget
@@ -162,6 +194,8 @@ class PropertiesWindow(tk.Toplevel):
                 leave_box(self.app, e, var, lambda left=False, key=key, e=e: fn(key, left and e))
                 boxes.append(e)
                 self.entries[key] = e
+                self.tips[key] = Tooltip(e, tr(tip))
+                self.tip_base[key] = tr(tip)
             word = ttk.Label(fr, text=tr(unit) if unit else "", foreground=look.HINT)
             word.pack(side="left", padx=(5, 0))
             row(name, label, fr, tip)
@@ -200,27 +234,91 @@ class PropertiesWindow(tk.Toplevel):
     # ---- what it shows
 
     def shape(self):
-        """(index, shape) shown: the one picked first (app.sel), or (None, None)."""
+        """(index, shape) of the first shape shown, or (None, None)."""
+        got = self.picks()
+        return got[0] if got else (None, None)
+
+    def picks(self):
+        """[(index, shape)] shown together (picked in the list on the left; one selected: it)."""
+        shapes = self.app.shapes
+        return [(i, shapes[i]) for i in self.picked if i < len(shapes)]
+
+    def follow(self):
+        """The list on the left follows the selection (a selection made here for Add ▾ keeps it); what is picked in
+        it stays picked while it is still there, else every shape in it is shown."""
         app = self.app
-        i = app.sel if app.sel is not None and app.sel in app.sels else (min(app.sels) if app.sels else None)
-        if i is None or i >= len(app.shapes):
-            return None, None
-        return i, app.shapes[i]
+        sels = sorted(i for i in app.sels if i < len(app.shapes))
+        if self.our_sels is not None and frozenset(app.sels) == self.our_sels:
+            listed = [i for i in self.listed if i < len(app.shapes)]
+        else:
+            self.our_sels = None
+            listed = sels
+        if listed != self.listed:
+            self.listed = listed
+            self.picked = listed[:]  # (my pick: several selected = all of them shown together)
+        else:
+            there = set(listed)
+            keep = [i for i in self.picked if i in there]
+            self.picked = keep or listed[:]
+        self.sync_list()
+
+    def sync_list(self):
+        """The list on the left: shown while 2+ shapes are selected, its names and picks as they are now."""
+        app = self.app
+        many = len(self.listed) > 1
+        if many != bool(self.side.winfo_manager()):
+            if many:
+                self.side.pack(side="left", fill="y", padx=(0, 14), before=self.box)
+            else:
+                self.side.pack_forget()
+        if not many:
+            return
+        lb = self.shape_list
+        names = tuple(tr("props.list_row", n=i + 1, name=app.shape_label(app.shapes[i])) for i in self.listed)
+        if names != getattr(self, "_names", None):
+            self._names = names
+            lb.delete(0, "end")
+            lb.insert("end", *names)
+        place = {i: k for k, i in enumerate(self.listed)}
+        want = sorted(place[i] for i in self.picked if i in place)
+        if list(lb.curselection()) != want:
+            lb.selection_clear(0, "end")
+            for k in want:
+                lb.selection_set(k)
+            if want:
+                lb.see(want[0])
+        one = len(self.picked) == 1
+        self.like.state(["!disabled" if one else "disabled"])
+        self.like_tip.text = tr("props.like_this_tip" if one else "props.like_this_one")
+
+    def on_pick(self, e=None):
+        got = [self.listed[k] for k in self.shape_list.curselection() if k < len(self.listed)]
+        if not got or got == self.picked:
+            return
+        self.app.commit_typing()
+        self.picked = got
+        self.shown = None
+        self.sync(follow=False)
 
     def after_notes(self):
         """The notes were made again (App.shapes_changed's take-in): the numbers that come from them."""
         if self.winfo_exists():
             self.sync()
 
-    def sync(self):
+    def sync(self, follow=True):
         if not self.winfo_exists():
             return
         app = self.app
-        i, sh = self.shape()
-        n = len(app.sels)
-        self.what.config(text=tr("props.nothing") if sh is None else tr("props.shape", n=i + 1,
-                                                                          name=app.shape_label(sh)))
-        more = tr("props.first_of", n=n) if sh is not None and n > 1 else ""
+        if follow:
+            self.follow()
+        else:
+            self.sync_list()
+        picks = self.picks()
+        i, sh = picks[0] if picks else (None, None)
+        n = len(picks)
+        self.what.config(text=tr("props.nothing") if sh is None else tr("props.shape", n=i + 1, name=app.shape_label(sh))
+                         if n == 1 else tr("props.shapes", n=n))
+        more = tr("props.several", n=n) if n > 1 else ""
         if more != self.more.cget("text"):
             self.more.config(text=more)
             if more:
@@ -239,10 +337,10 @@ class PropertiesWindow(tk.Toplevel):
             elif not part.winfo_manager():
                 part.pack(after=prev, **kw)
             prev = part
-        self.sync_basics(sh)
-        self.sync_steps(i, sh)
-        self.sync_hidden(i, sh)
-        hz = bool(sh is not None and sh.get("hz"))
+        self.sync_basics(picks)
+        self.sync_steps(picks)
+        self.sync_hidden(picks)
+        hz = any(s.get("hz") for _, s in picks)
         if hz != bool(self.hz_button.winfo_manager()):
             if hz:
                 self.hz_button.pack(side="left", padx=(6, 0))
@@ -263,93 +361,153 @@ class PropertiesWindow(tk.Toplevel):
         e.config(style="TEntry")
         good(e)
 
+    def put_all(self, key, pairs):
+        """Box key for several shapes, pairs = [(index, its text)]: the text when they're all the same, else empty
+        with every shape's value in its tip (the shared Mixed rule, widgets.same_or_blank); typing sets them all."""
+        texts = {t for _, t in pairs}
+        self.put(key, texts.pop() if len(texts) == 1 else "")
+        self.tip_for(key, pairs)
+
+    def show_value(self, name, widget, pairs):
+        """A read-only value for several shapes: the text, or "Mixed" with each shape's value in its tip."""
+        texts = {t for _, t in pairs}
+        widget.config(text=next(iter(texts)) if len(texts) == 1 else tr("widgets.mixed"))
+        self.tip_for(name, pairs)
+
+    def tip_for(self, name, pairs):
+        tip = self.tips.get(name)
+        if tip is None:
+            return
+        base = self.tip_base.get(name, "")
+        tip.text = (mixed_text(pairs) + ("\n\n" + base if base else "")) if len({t for _, t in pairs}) > 1 else base
+
     def place_of(self, sh):
         """(first tick, length in ticks, lowest key, highest key) of sh's notes as made (remembered ones only: never
         made here), or None (none known yet / no notes)."""
         got = self.app.notes_known(sh)
         if got is None:
             return None
-        notes = np.asarray(got[0])
-        if not len(notes):
-            return None
-        a, z = int(notes[:, 0].min()), int(notes[:, 1].max())
-        return a, z - a, int(notes[:, 2].min()), int(notes[:, 2].max())
+        notes = got[0]
+        if not isinstance(notes, np.ndarray):
+            notes = np.asarray(notes)
+            return place_in(notes)
+        places = self.__dict__.setdefault("_places", {})  # (kept per notes array, weakly: 1,000 shapes picked)
+        hit = places.get(id(notes))
+        if hit is not None and hit[0]() is notes:
+            return hit[1]
+        out = place_in(notes)
+        if len(places) > 4 * max(64, len(self.picked)):
+            for k in [k for k, v in places.items() if v[0]() is None]:
+                del places[k]
+        places[id(notes)] = (weakref.ref(notes), out)
+        return out
 
-    def sync_basics(self, sh):
+    def sync_basics(self, picks):
         app = self.app
         for w in self.basics.winfo_children():
-            if sh is None and w.winfo_manager():
+            if not picks and w.winfo_manager():
                 w.grid_remove()
-        if sh is None:
+        if not picks:
             return
         for name in self.heads:
             for w in self.heads[name]:
                 w.grid()
-        self.kind.config(text=kind_text(sh))
-        self.name.config(text=app.shape_label(sh))
+        self.show_value("kind", self.kind, [(i, kind_text(sh)) for i, sh in picks])
+        self.show_value("name", self.name, [(i, app.shape_label(sh)) for i, sh in picks])
         self.show_part("kind", True)
         self.show_part("name", True)
-        made = made_text(sh)
-        self.made.config(text=made)
-        self.show_part("made", bool(made))
-        got = self.place_of(sh)
-        for key, fr, v in zip(("start", "length", "low", "high"), (self.start, self.length, self.low, self.high),
-                              got or ("", "", "", "")):
+        made = [(i, made_text(sh)) for i, sh in picks]
+        self.show_value("made", self.made, made)
+        self.show_part("made", any(t for _, t in made))
+        places = [(i, sh, self.place_of(sh)) for i, sh in picks]
+        known = [(i, sh, p) for i, sh, p in places if p is not None]
+        for k, (key, fr) in enumerate(zip(("start", "length", "low", "high"),
+                                          (self.start, self.length, self.low, self.high))):
             self.show_part(key, True)
-            self.put(key, fmt(v) if got else "")
-            state = "normal" if got and not (key in ("length", "high") and sh.get("hz")) else "disabled"
-            fr.boxes[0].config(state=state)
-        if got:
-            from roll.roll_shared import note_name
-            self.low.word.config(text=note_name(got[2]))
-            self.high.word.config(text=note_name(got[3]))
-        custom = sh.get("kind") == "custom" and "notes" not in sh and "picture" not in sh
-        self.show_part("inside", custom)
+            self.put_all(key, [(i, fmt(p[k])) for i, _, p in known])
+            ok = [1 for _, sh, _ in known if not (key in ("length", "high") and sh.get("hz"))]
+            fr.boxes[0].config(state="normal" if ok else "disabled")
+        from roll.roll_shared import note_name
+        for k, fr in ((2, self.low), (3, self.high)):
+            names = {note_name(p[k]) for _, _, p in known}
+            fr.word.config(text=names.pop() if len(names) == 1 else "")
+        custom = [(i, sh) for i, sh in picks if is_custom(sh)]
+        self.show_part("inside", bool(custom))
         if custom:
-            self.inside.config(text=fill_text(sh))
-        spam = custom and sh.get("fill") in SPAM_FILLS and not sh.get("hz")
-        self.show_part("gate", spam)
+            self.show_value("inside", self.inside, [(i, fill_text(sh)) for i, sh in custom])
+        spam = [(i, sh) for i, sh in custom if sh.get("fill") in SPAM_FILLS and not sh.get("hz")]
+        self.show_part("gate", bool(spam))
         if spam:
-            self.put("gate", fmt(gate_ticks(sh["gate"], app.ppq)))
+            self.put_all("gate", [(i, fmt(gate_ticks(sh["gate"], app.ppq))) for i, sh in spam])
         self.show_part("vel0", True)
-        self.put("vel0", fmt(sh.get("vel0", 100)))
-        self.put("vel1", fmt(sh.get("vel1", 100)))
-        self.show_part("vel_note", bool(sh.get("vel_env")))
-        self.colours.config(text=colours_text(sh))
+        self.put_all("vel0", [(i, fmt(sh.get("vel0", 100))) for i, sh in picks])
+        self.put_all("vel1", [(i, fmt(sh.get("vel1", 100))) for i, sh in picks])
+        self.show_part("vel_note", any(sh.get("vel_env") for _, sh in picks))
+        self.show_value("colours", self.colours, [(i, colours_text(sh)) for i, sh in picks])
         self.show_part("colours", True)
-        self.channel.config(text=channel_text(app, sh))
+        self.show_value("channel", self.channel, [(i, channel_text(app, sh)) for i, sh in picks])
         self.show_part("channel", True)
 
     # ---- the steps
 
-    def sync_steps(self, i, sh):
-        tags = S.order_of(sh) if sh is not None else []
-        hidden = set(self.hidden_tags(i, sh))
-        names = tuple(tag_name(sh, t) for t in tags) if sh is not None else ()
-        offs = tuple(S.is_off(sh, t) for t in tags) if sh is not None else ()
-        shown = (id(sh), tuple(tags), names, offs, tuple(sorted(hidden)), self.fixed_lines(sh))
+    def step_lines(self, picks):
+        """Every step any shown shape has, in order (stage E: shapes with different lists = each step once, a step
+        only some have placed after the step it follows in the first shape having it): [(key, [(index, shape,
+        tag)])]. Also keeps self.keys_of (each shape's own list as keys)."""
+        where, order = {}, []
+        self.keys_of = {}
+        for i, sh in picks:
+            tags = S.order_of(sh)
+            keys = step_keys(sh, tags)
+            self.keys_of[i] = keys
+            if not order:  # (the first: its list as it is)
+                order = list(keys)
+                for k, t in zip(keys, tags):
+                    where[k] = [(i, sh, t)]
+                continue
+            prev = None
+            for k, t in zip(keys, tags):
+                if k in where:
+                    where[k].append((i, sh, t))
+                else:
+                    order.insert(order.index(prev) + 1 if prev is not None else 0, k)
+                    where[k] = [(i, sh, t)]
+                prev = k
+        return [(k, where[k]) for k in order]
+
+    def sync_steps(self, picks):
+        lines = self.step_lines(picks)
+        hidden = self.hidden_keys(picks)
+        names = tuple(tag_name(h[0][1], h[0][2]) for _, h in lines)
+        offs = tuple(tuple(S.is_off(sh, t) for _, sh, t in h) for _, h in lines)
+        shown = (tuple(id(sh) for _, sh in picks), tuple(k for k, _ in lines), tuple(len(h) for _, h in lines), names,
+                 offs, tuple(sorted(hidden, key=repr)), self.fixed_lines(picks))
         if shown != self.shown:
             self.shown = shown
-            self.build_fixed(sh)
-            self.build(sh, tags, names, offs, hidden)
+            self.build_fixed(picks)
+            self.build(picks, lines, names, hidden)
+        else:
+            for r, (k, h) in zip(self.rows, lines):
+                r["holders"] = h
+                r["tag"] = h[0][2]
         for r in self.rows:
             if r["box"] is not None:
-                self.put_number(r, sh)
+                self.put_number(r)
 
-    def fixed_lines(self, sh):
+    def fixed_lines(self, picks):
         """The fixed steps at the top (they can't move: every step works on them): the notes as drawn, Single
         channel's own overlap fix."""
-        if sh is None:
+        if not picks:
             return ()
         out = ["props.fixed_drawn"]
-        if self.app.channel_mode.get() == "single" and not sh.get("hz"):
+        if self.app.channel_mode.get() == "single" and any(not sh.get("hz") for _, sh in picks):
             out.append("props.fixed_single")
         return tuple(out)
 
-    def build_fixed(self, sh):
+    def build_fixed(self, picks):
         for w in self.fixed.winfo_children():
             w.destroy()
-        for key in self.fixed_lines(sh):
+        for key in self.fixed_lines(picks):
             lb = ttk.Label(self.fixed, text=tr(key), foreground=look.LABEL_OFF)
             lb.pack(anchor="w", padx=(20, 0), pady=1)
             Tooltip(lb, tr(key + "_tip"))
@@ -365,6 +523,7 @@ class PropertiesWindow(tk.Toplevel):
         tick.pack(side="left")
         lb = ttk.Label(fr, text="")
         lb.pack(side="left")
+        count = ttk.Label(fr, text="", foreground=look.HINT, padding=(6, 0, 0, 0))  # ("2 of 3": stage E)
         x = ttk.Label(fr, text="×", foreground=look.CLOSE, cursor="hand2", padding=(8, 0, 2, 0))
         x.pack(side="right")
         x.bind("<Enter>", lambda e: x.config(foreground=look.CLOSE_HOT))
@@ -377,44 +536,60 @@ class PropertiesWindow(tk.Toplevel):
         entry = ttk.Entry(fr, textvariable=boxvar, width=7)
         entry.bind("<Return>", lambda e: self.on_number(p))
         leave_box(self.app, entry, boxvar, lambda left=False: self.on_number(p, left and entry))
-        for w in (fr, grip, lb):
+        for w in (fr, grip, lb, count):
             w.bind("<ButtonPress-1>", lambda e: self.on_press(e, p))
             w.bind("<B1-Motion>", self.on_motion)
             w.bind("<ButtonRelease-1>", self.on_release)
-        return {"tag": None, "frame": fr, "grip": grip, "name": lb, "tick": tick, "var": var, "box": None,
-                "entry": entry, "boxvar": boxvar, "word": word, "x": x, "tick_tip": Tooltip(tick, ""),
-                "name_tip": Tooltip(lb, ""), "box_tip": Tooltip(entry, "")}
+        return {"tag": None, "key": None, "holders": [], "frame": fr, "grip": grip, "name": lb, "count": count,
+                "tick": tick, "var": var, "box": None, "entry": entry, "boxvar": boxvar, "word": word, "x": x,
+                "tick_tip": Tooltip(tick, ""), "name_tip": Tooltip(lb, ""), "box_tip": Tooltip(entry, ""),
+                "count_tip": Tooltip(count, "")}
 
-    def build(self, sh, tags, names, offs, hidden):
+    def build(self, picks, lines, names, hidden):
         """The lines shown: the kept ones filled in again, more made when needed, the rest taken out."""
         self.empty.pack_forget()
-        n = len(tags) if sh is not None else 0
+        n = len(lines)
         for r in self.pool[n:]:
             if r["frame"].winfo_manager():
                 r["frame"].pack_forget()
         self.rows = []
-        if sh is None:
+        if not picks:
             self.scroll.fit()
             return
-        if not tags:
+        if not lines:
             self.empty.pack(anchor="w", padx=(20, 0))
-        clumps = clumps_hidden(sh)
-        for p, (tag, name, off) in enumerate(zip(tags, names, offs)):
+        clumps = {}  # (each shape's steps hidden by Split: Clumps)
+        for p, ((key, holders), name) in enumerate(zip(lines, names)):
             if p == len(self.pool):
                 self.pool.append(self.make_row(p))
             r = self.pool[p]
             if not r["frame"].winfo_manager():
                 r["frame"].pack(anchor="w", fill="x", pady=1)
-            r["tag"] = tag
-            r["var"].set(not off)
+            _, sh, tag = holders[0]
+            r["tag"], r["key"], r["holders"] = tag, key, holders
+            offs = [S.is_off(s, t) for _, s, t in holders]
+            off = all(offs)
+            r["var"].set(not any(offs))  # (half ticked: a click switches them all on)
             can_off = tag[0] != S.FX or is_page((sh.get("fx") or [])[tag[1]])
-            r["tick"].state(["!disabled" if can_off else "disabled"])
-            r["tick_tip"].text = tr("props.tick_tip" if can_off else "props.tick_never")
-            grey = off or tag in hidden or tag in clumps
+            r["tick"].state(["!disabled" if can_off else "disabled",
+                             "alternate" if any(offs) and not off else "!alternate"])
+            r["tick_tip"].text = tr("props.tick_tip" if can_off else "props.tick_never") + (
+                "\n\n" + tr("props.tick_mixed") if any(offs) and not off else "")
+            some_clumps = any(t in clumps.setdefault(i, clumps_hidden(s)) for i, s, t in holders)
+            grey = off or key in hidden or some_clumps
             opens = self.opens(sh, tag)
             r["name"].config(text=name, foreground=look.LABEL_OFF if grey else "", cursor="hand2" if opens else "fleur")
-            r["name_tip"].text = (tr("props.hidden_tip") if tag in hidden else tr("props.clumps_hidden")
-                                  if tag in clumps else tr("props.open_tip") if opens else tr("props.no_window_tip"))
+            r["name_tip"].text = (tr("props.hidden_tip") if key in hidden else tr("props.clumps_hidden")
+                                  if some_clumps else tr("props.open_tip") if opens else tr("props.no_window_tip"))
+            count = r["count"]
+            if len(picks) > 1 and len(holders) < len(picks):
+                count.config(text=tr("props.count", n=len(holders), of=len(picks)))
+                r["count_tip"].text = tr("props.count_tip", names=names_line(
+                    [tr("props.list_row", n=i + 1, name=self.app.shape_label(s)) for i, s, _ in holders]))
+                if not count.winfo_manager():
+                    count.pack(side="left", after=r["name"])
+            elif count.winfo_manager():
+                count.pack_forget()
             spec = number_spec(sh, tag)
             word, entry = r["word"], r["entry"]
             if spec is None:
@@ -440,9 +615,18 @@ class PropertiesWindow(tk.Toplevel):
         """The unit words' width in letters: the longest one's (any language)."""
         return max(len(tr(k)) for k in {spec[0] for spec in NUMBERS.values()} | {"props.unit_pct"})
 
-    def put_number(self, r, sh):
-        v = number_of(sh, r["tag"], self.app.ppq)
-        text = "" if v is None else fmt(round(v, 3))
+    def put_number(self, r):
+        """Line r's number: the same for every shape having its step, else empty + each one's in the tip."""
+        ppq = self.app.ppq
+        pairs = []
+        for i, sh, tag in r["holders"]:
+            v = number_of(sh, tag, ppq)
+            pairs.append((i, "" if v is None else fmt(round(v, 3))))
+        texts = {t for _, t in pairs}
+        text = texts.pop() if len(texts) == 1 else ""
+        base = tr("props.number_tip." + r["tag"][0])
+        r["box_tip"].text = (mixed_text([(i, t or "–") for i, t in pairs]) + "\n\n" + base
+                             if len({t for _, t in pairs}) > 1 else base)
         if self.focus_get() is r["box"] and r["boxvar"].get() != text:
             return
         self.app._loading = True
@@ -452,15 +636,25 @@ class PropertiesWindow(tk.Toplevel):
             self.app._loading = False
         good(r["box"])
 
-    def hidden_tags(self, i, sh):
-        """The steps of the shown shape hidden while one is edited now (stage C), in order."""
-        if sh is None:
-            return []
-        t = self.app.edit_tag(sh, i)
-        return S.hidden_after(sh, t) if t is not None else []
+    def hidden_keys(self, picks):
+        """The steps (as keys) of the shown shapes hidden while one is edited now (stage C)."""
+        out = set()
+        for i, sh in picks:
+            t = self.app.edit_tag(sh, i)
+            if t is not None:
+                keys = step_keys(sh, S.order_of(sh))
+                tags = S.order_of(sh)
+                gone = set(S.hidden_after(sh, t))
+                out.update(k for k, tg in zip(keys, tags) if tg in gone)
+        return out
 
-    def sync_hidden(self, i, sh):
-        tags = self.hidden_tags(i, sh)
+    def sync_hidden(self, picks):
+        tags, sh = [], None
+        for i, s in picks:  # (the shape hiding the most, as the step windows' line: App.edit_hidden_steps)
+            t = self.app.edit_tag(s, i)
+            got = S.hidden_after(s, t) if t is not None else []
+            if len(got) > len(tags):
+                tags, sh = got, s
         text = tr("edit.hidden", names=names_line([tag_name(sh, t) for t in tags])) if tags else ""
         if text != self.hidden_text.cget("text"):
             self.hidden_text.config(text=text)
@@ -521,10 +715,9 @@ class PropertiesWindow(tk.Toplevel):
         return kind in ("mode", "stir", "warp", "liquify", "sustain", "extend", "subtract")
 
     def open_step(self, p):
-        i, sh = self.shape()
-        if sh is None or not 0 <= p < len(self.rows):
+        if not 0 <= p < len(self.rows) or not self.rows[p]["holders"]:
             return
-        kind, n = self.rows[p]["tag"]
+        i, sh, (kind, n) = self.rows[p]["holders"][0]  # (several: as the first shape having it has it)
         app = self.app
         if kind == S.FX:
             fx = sh.get("fx") or []
@@ -552,9 +745,12 @@ class PropertiesWindow(tk.Toplevel):
             app.shapes_changed(now=True)
         app.push_undo(name=name)
 
-    def done(self, step=None):
-        """After a change: the notes, the panel and the windows follow (step: the step it edited, stage C)."""
+    def done(self, step=None, targets=None):
+        """After a change: the notes, the panel and the windows follow (step: the step it edited, stage C; targets:
+        the shapes it went to: the later steps are hidden only when that is the whole selection, App.colour_edit)."""
         app = self.app
+        if step is not None and targets is not None and set(targets) != set(app.sels):
+            step = None
         app.colour_edit_set(step)
         app.shapes_changed()
         app.sync_recolour()
@@ -562,19 +758,46 @@ class PropertiesWindow(tk.Toplevel):
         app.schedule_autosave()
         self.sync()
 
+    def same_list(self, r):
+        """The shown shapes whose list of steps is the same as the first one having line r's step (moving / ×
+        go to them only, user 2026-11-11), and how many shown shapes are left out."""
+        ref = self.keys_of.get(r["holders"][0][0])
+        picks = self.picks()
+        out = [(i, sh) for i, sh in picks if self.keys_of.get(i) == ref]
+        return out, len(picks) - len(out)
+
+    def skipped_line(self, done, left):
+        """The line saying how many shapes a move / × went to and why the others didn't follow ("" = all)."""
+        return trn("props.skipped", left, n=done, left=left) if left else ""
+
     def move(self, a, b):
-        """Step a of the shown shape's order to place b (one undo step); an order it can't keep = a line says why."""
-        i, sh = self.shape()
-        if sh is None:
+        """Line a to place b (one undo step) on every shown shape with the same list as the first one having it; an
+        order it can't keep = a line says why."""
+        if not (0 <= a < len(self.rows) and 0 <= b < len(self.rows)):
             return
-        new = S.moved(sh, a, b)
-        if new is None:
-            return self.say(tr("props.cant_move"))
-        self.say("")
+        r = self.rows[a]
+        keys = [x["key"] for x in self.rows]
+        key = keys.pop(a)
+        keys.insert(b, key)
+        targets, left = self.same_list(r)
+        own = self.keys_of[targets[0][0]]
+        mine = set(own)
+        ra = own.index(key)
+        rb = [k for k in keys if k in mine].index(key)
+        if ra == rb:
+            return self.say(tr("props.move_nothing") if left else "")
+        news = []
+        for i, sh in targets:
+            new = S.moved(sh, ra, rb)
+            if new is None:
+                return self.say(tr("props.cant_move"))
+            news.append((sh, new))
+        self.say(self.skipped_line(len(targets), left))
         self.editing = None
         self.begin(tr("props.undo_move"))
-        sh.clear()
-        sh.update(new)
+        for sh, new in news:
+            sh.clear()
+            sh.update(new)
         self.done()
 
     def say(self, text):
@@ -586,66 +809,86 @@ class PropertiesWindow(tk.Toplevel):
                 self.status.pack_forget()
 
     def on_tick(self, p):
-        i, sh = self.shape()
-        if sh is None or not 0 <= p < len(self.rows):
+        """On / off: every shown shape having that step (a half tick = some off: a click switches them all on)."""
+        if not 0 <= p < len(self.rows):
             return
         r = self.rows[p]
         off = not r["var"].get()
-        if S.is_off(sh, r["tag"]) == off:
-            return
+        change = [(sh, tag) for _, sh, tag in r["holders"] if S.is_off(sh, tag) != off]
+        if not change:
+            return self.sync(follow=False)
         self.editing = None
         self.begin(tr("props.undo_off" if off else "props.undo_on"))
-        S.with_off(sh, r["tag"], off)
+        for sh, tag in change:
+            S.with_off(sh, tag, off)
         self.done()
 
     def on_remove(self, e, p):
         if not (0 <= e.x < e.widget.winfo_width() and 0 <= e.y < e.widget.winfo_height()):
             return  # (let go off the ×, like a button)
-        i, sh = self.shape()
-        if sh is None or not 0 <= p < len(self.rows):
+        if not 0 <= p < len(self.rows):
             return
-        tag = self.rows[p]["tag"]
+        r = self.rows[p]
+        targets, left = self.same_list(r)
+        tag = r["holders"][0][2]
+        self.say(self.skipped_line(len(targets), left))
         self.editing = None
-        self.begin(tr("props.undo_remove", name=tag_name(sh, tag)))
-        removed(self.app, sh, tag)
+        self.begin(tr("props.undo_remove", name=tag_name(r["holders"][0][1], tag)))
+        for _, sh in targets:
+            removed(self.app, sh, tag)
         self.done()
 
     def on_number(self, p, left=None):
-        """A step's main number typed (Enter / the box left): that step is being edited now (stage C)."""
+        """A step's main number typed (Enter / the box left): every shown shape having that step (with the same unit)
+        gets it, and that step is being edited now (stage C)."""
         if self.app._loading or not 0 <= p < len(self.rows):
             return
         r = self.rows[p]
         if left is not None and unchanged(left):
             return
-        i, sh = self.shape()
-        if sh is None:
+        holders = r["holders"]
+        if not holders:
             return
-        tag = r["tag"]
-        spec = number_spec(sh, tag)
+        tag0 = holders[0][2]
+        spec = number_spec(holders[0][1], tag0)
         text = r["boxvar"].get().strip().rstrip("%°")
+        if not text and tag0[0] != "sustain" and len({number_of(sh, t, self.app.ppq) for _, sh, t in holders}) > 1:
+            return good(r["box"])  # (a Mixed box left empty: nothing typed)
         try:
-            v = None if not text and tag[0] == "sustain" else float(calc(text))
+            v = None if not text and tag0[0] == "sustain" else float(calc(text))
             if v is not None and not spec[1] <= v <= spec[2]:
                 raise ValueError
         except (ValueError, ZeroDivisionError):
             return bad(r["box"])
         good(r["box"])
-        old = number_of(sh, tag, self.app.ppq)
-        if old is not None and v is not None and abs(old - v) < 1e-9 or old is None and v is None:
+        ppq = self.app.ppq
+        changes, other_unit, step, tags = [], 0, None, set()
+        for i, sh, tag in holders:
+            if number_spec(sh, tag) != spec:  # (Gate extend in % on one, in ticks on another: the same unit only)
+                other_unit += 1
+                continue
+            old = number_of(sh, tag, ppq)
+            if old is not None and v is not None and abs(old - v) < 1e-9 or old is None and v is None:
+                continue
+            if tag[0] in S.COLOURS:
+                rc = clean_recolour(sh.get("recolour"))
+                new = ordered(rc, clean_recolour(with_number(sh, tag, v, ppq)["recolour"]))
+                if new == rc:
+                    continue
+                changes.append((i, sh, "recolour", new))
+                step = step or edited_step(rc, new) or tag
+            else:
+                changes.append((i, sh, tag[0], with_number(sh, tag, v, ppq)[tag[0]]))
+                step = step or tag
+            tags.add(tuple(tag))
+        self.say(trn("props.other_unit", other_unit, n=other_unit) if other_unit else "")
+        if not changes:
             return
-        self.editing = tag[0]
-        if tag[0] in S.COLOURS:
-            rc = clean_recolour(sh.get("recolour"))
-            new = ordered(rc, clean_recolour(with_number(sh, tag, v, self.app.ppq)["recolour"]))
-            if new == rc:
-                return
-            self.begin(tr("props.undo_number", name=tag_name(sh, tag)))
-            sh["recolour"] = new
-            self.done(edited_step(rc, new) or tag)
-        else:
-            self.begin(tr("props.undo_number", name=tag_name(sh, tag)))
-            sh[tag[0]] = with_number(sh, tag, v, self.app.ppq)[tag[0]]
-            self.done(tag)
+        self.editing = tag0[0]
+        self.begin(tr("props.undo_number", name=tag_name(holders[0][1], tag0)))
+        for _, sh, k, val in changes:
+            sh[k] = val
+        self.done(step if len(tags) == 1 else None, [i for i, *_ in changes])
 
     # ---- the basics typed
 
@@ -667,84 +910,98 @@ class PropertiesWindow(tk.Toplevel):
         app = self.app
         if app._loading or left is not None and unchanged(left):
             return
-        i, sh = self.shape()
-        got = self.place_of(sh) if sh is not None else None
-        if got is None:
+        if self.blank(key):
             return
-        a, n, lo, hi = got
         t_lo, p_lo, p_hi = app.point_limits()
-        ppq = app.ppq
-        if key == "start":
-            v = self.number_in(key, t_lo, 10 ** 9)
-            change = None if v is None or round(v) == a else ("move", (round(v) - a) / ppq, 0)
-        elif key == "low":
-            v = self.number_in(key, p_lo, p_hi)
-            change = None if v is None or round(v) == lo or round(v) + hi - lo > p_hi else ("move", 0, round(v) - lo)
-        elif key == "length":
-            v = self.number_in(key, 1, 10 ** 9)
-            change = None if v is None or round(v) == n or not n else ("size", a / ppq, round(v) / n, None, 1.0)
-        else:
-            v = self.number_in(key, p_lo, p_hi)
-            if v is None or round(v) == hi or round(v) < lo or hi == lo:
-                change = None
+        lo_hi = {"start": (t_lo, 10 ** 9), "low": (p_lo, p_hi), "length": (1, 10 ** 9)}.get(key, (p_lo, p_hi))
+        v = self.number_in(key, *lo_hi)
+        if v is None:
+            return
+        v, ppq = round(v), app.ppq
+        changes = []  # (several shown: each one moved / sized the same way, user 2026-11-11: typing sets them all)
+        for i, sh in self.picks():
+            got = self.place_of(sh)
+            if got is None or key in ("length", "high") and sh.get("hz"):
+                continue
+            a, n, lo, hi = got
+            if key == "start":
+                change = None if v == a else ("move", (v - a) / ppq, 0)
+            elif key == "low":
+                change = None if v == lo or v + hi - lo > p_hi else ("move", 0, v - lo)
+            elif key == "length":
+                change = None if v == n or not n else ("size", a / ppq, v / n, lo - 0.5, 1.0)
             else:
-                change = ("size", 0.0, 1.0, lo - 0.5, (round(v) - lo + 1) / (hi - lo + 1))
-        if change is None:
-            return self.sync()
+                change = (None if v == hi or v < lo or hi == lo else
+                          ("size", 0.0, 1.0, lo - 0.5, (v - lo + 1) / (hi - lo + 1)))
+            if change is not None:
+                changes.append((sh, change))
+        if not changes:
+            return self.sync(follow=False)
         self.begin(tr("props.undo_place"))
-        if change[0] == "move":
-            db, dp = change[1], change[2]
-            sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
-        else:
-            _, ab, kx, ap, ky = change
-            ap = lo - 0.5 if ap is None else ap
-            new = app.stretched(sh, ab, kx, ap, ky)
-            sh.clear()
-            sh.update(new)
+        for sh, change in changes:
+            if change[0] == "move":
+                db, dp = change[1], change[2]
+                sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+            else:
+                _, ab, kx, ap, ky = change
+                new = app.stretched(sh, ab, kx, ap, ky)
+                sh.clear()
+                sh.update(new)
         app.roll.box_kept = None  # (a kept Select box was round the old place)
         self.done()
+
+    def blank(self, key):
+        """Box key left empty while it shows Mixed (several shapes, different values): nothing typed."""
+        if self.vars[key].get().strip():
+            return False
+        good(self.entries[key])
+        self.sync(follow=False)
+        return True
 
     def on_gate(self, key, left=None):
         app = self.app
         if app._loading or left is not None and unchanged(left):
             return
-        i, sh = self.shape()
-        if sh is None or sh.get("kind") != "custom" or sh.get("fill") not in SPAM_FILLS or sh.get("hz"):
+        if self.blank(key):
             return
         v = self.number_in(key, 0.5, 10 ** 7)
         if v is None:
             return
         beats = int(v + 0.5) / app.ppq
-        if abs(sh["gate"] - beats) < 1e-12 and not sh.get("range"):
-            return self.sync()
-        if not app.confirm_big([dict(sh, gate=beats)]):
-            return self.sync()
+        spam = [sh for _, sh in self.picks() if is_custom(sh) and sh.get("fill") in SPAM_FILLS and not sh.get("hz")
+                and not (abs(sh["gate"] - beats) < 1e-12 and not sh.get("range"))]
+        if not spam:
+            return self.sync(follow=False)
+        if not app.confirm_big([dict(sh, gate=beats) for sh in spam]):
+            return self.sync(follow=False)
         self.begin(tr("panel_custom.spam_gate"))
-        sh["gate"] = beats
-        if sh.get("range"):  # (a gate typed = one flat gate again, kept for the Range window: like the panel)
-            sh["range_kept"] = sh.pop("range")
+        for sh in spam:
+            sh["gate"] = beats
+            if sh.get("range"):  # (a gate typed = one flat gate again, kept for the Range window: like the panel)
+                sh["range_kept"] = sh.pop("range")
         self.done()
 
     def on_velocity(self, key, left=None):
         app = self.app
         if app._loading or left is not None and unchanged(left):
             return
-        i, sh = self.shape()
-        if sh is None:
+        if self.blank(key):
             return
         v = self.number_in(key, 1, 127)
         if v is None:
             return
         v = int(round(v))
-        if sh.get(key) == v and not sh.get("vel_env"):
-            return
+        shapes = [sh for _, sh in self.picks() if sh.get(key, 100) != v or sh.get("vel_env")]
+        if not shapes:
+            return self.sync(follow=False)
         from notes.fx import with_velocity
         self.begin(tr("app.velocity"))
-        sh[key] = v
-        sh.pop("vel_env", None)
-        sh.pop("own_vel", None)
-        if sh.get("fx"):
-            sh["fx"] = with_velocity(sh["fx"], [[0.0, sh["vel0"]], [1.0, sh["vel1"]]])
+        for sh in shapes:
+            sh[key] = v
+            sh.pop("vel_env", None)
+            sh.pop("own_vel", None)
+            if sh.get("fx"):
+                sh["fx"] = with_velocity(sh["fx"], [[0.0, sh.get("vel0", 100)], [1.0, sh.get("vel1", 100)]])
         self.done()
 
     # ---- Add ▾ / Hz bass settings…
@@ -756,39 +1013,68 @@ class PropertiesWindow(tk.Toplevel):
         i, sh = self.shape()
         if sh is None:
             return
-        tools = bool(app.note_tool_sels())
+        # (Add goes to every shown shape, user 2026-11-11: the tools work on the selection, so picking some in the list
+        # on the left selects just those first: to_picked; what is greyed is worked out on the shown ones)
+        picks = self.picks()
+        was = (set(app.sels), app.sel)
+        app.sels, app.sel = {i for i, _ in picks}, picks[0][0]
+        try:
+            tools = bool(app.note_tool_sels())
+            sus = [bool(importlib.import_module("window.sustain_window").sustain_targets(app)),
+                   bool(importlib.import_module("window.subtract_window").subtract_targets(app))]
+            gf = app.gate_flip_state()
+            colours = bool(app.recolour_targets())
+            rev = bool(app.reverse_targets())
+        finally:
+            app.sels, app.sel = was
+        go = self.to_picked
         for tool in ADD_TOOLS:
             mod, fn, _ = PAGE_WINDOWS[tool]
             m.add_command(label=tr("props.add_" + tool), state="normal" if tools else "disabled",
-                          command=lambda mod=mod, fn=fn: getattr(importlib.import_module(mod), fn)(app))
-        m.add_command(label=tr("roll_menu.glue"), command=app.glue_selected, state="normal" if tools else "disabled")
+                          command=go(lambda mod=mod, fn=fn: getattr(importlib.import_module(mod), fn)(app)))
+        m.add_command(label=tr("roll_menu.glue"), command=go(app.glue_selected), state="normal" if tools else "disabled")
         m.add_separator()
         for kind in ("sustain", "extend", "subtract"):
             mod = importlib.import_module(f"window.{kind}_window")
-            ok = bool(mod.sustain_targets(app) if kind == "sustain" else
-                      importlib.import_module("window.subtract_window").subtract_targets(app))
+            ok = sus[0] if kind == "sustain" else sus[1]
             m.add_command(label=tr(kind + ".menu"), state="normal" if ok else "disabled",
-                          command=lambda mod=mod, kind=kind: getattr(mod, "open_" + kind)(app))
-        gf = app.gate_flip_state()
+                          command=go(lambda mod=mod, kind=kind: getattr(mod, "open_" + kind)(app)))
         if gf:
-            m.add_command(label=tr("app.gate_flip"), command=app.gate_flip,
+            m.add_command(label=tr("app.gate_flip"), command=go(app.gate_flip),
                           state="normal" if gf[0] and not gf[1] else "disabled")
-        if not app.recolour_targets():
+        if not colours:
             return
         m.add_separator()
-        rc = clean_recolour(sh.get("recolour"))
-        has = rc_order(rc) if rc else []
+        has = set()
+        for _, s in picks:
+            rc = clean_recolour(s.get("recolour"))
+            if rc and "mode" in rc_order(rc):
+                has.add("mode")
         for mode in MODES:  # (one Shuffle / Split a shape: greyed while it has one)
-            m.add_command(label=tr("recolour." + mode), command=lambda mode=mode: self.add_mode(mode),
+            m.add_command(label=tr("recolour." + mode), command=go(lambda mode=mode: self.add_mode(mode)),
                           state="disabled" if "mode" in has else "normal")
-        m.add_command(label=tr("stir.button"), command=self.add_stir)
-        m.add_command(label=tr("warp.button"), command=app.open_warp)
-        m.add_command(label=tr("liquify.button"), command=app.open_liquify)
+        m.add_command(label=tr("stir.button"), command=go(self.add_stir))
+        m.add_command(label=tr("warp.button"), command=go(app.open_warp))
+        m.add_command(label=tr("liquify.button"), command=go(app.open_liquify))
         last = rc_tags(shape_order(sh))[-1:]
         twice = bool(last) and last[0][0] == "turned"
         m.add_command(label=tr("order.add_reverse_last" if twice else "join_split.reverse_tracks"),
-                      command=app.reverse_tracks,
-                      state="normal" if app.reverse_targets() and not twice else "disabled")
+                      command=go(app.reverse_tracks), state="normal" if rev and not twice else "disabled")
+
+    def to_picked(self, fn):
+        """fn run on the shown shapes: when only some of the selected ones are picked in the list on the left, they
+        are selected first (the list stays as it is: our_sels)."""
+        def run():
+            app = self.app
+            want = {i for i, _ in self.picks()}
+            if want and want != set(app.sels):
+                listed = list(self.listed)
+                self.our_sels = frozenset(want)
+                app.select_many(want, self.picks()[0][0])
+                self.listed = listed
+                self.our_sels = frozenset(app.sels)
+            fn()
+        return run
 
     def add_mode(self, mode):
         self.editing = None
@@ -805,6 +1091,29 @@ class PropertiesWindow(tk.Toplevel):
         i, sh = self.shape()
         if w and not w.fresh and sh is not None and rc_order(clean_recolour(sh.get("recolour"))).count("stir"):
             w.on_add()
+
+    def make_like(self):
+        """"Make the others like this": the one shape shown gives its whole list of steps (steps, order, numbers, off
+        ticks) to every other shape in the list on the left; one undo step (user 2026-11-11). What a shape can't
+        have (colour effects on a Hz bass, pages on an image...) is left out of it, and a line says so."""
+        app = self.app
+        picks = self.picks()
+        if len(picks) != 1 or len(self.listed) < 2:
+            return
+        i, src = picks[0]
+        others = [app.shapes[j] for j in self.listed if j != i and j < len(app.shapes)]
+        if not others:
+            return
+        self.editing = None
+        app.commit_typing()
+        app.colour_edit_leave()
+        self.begin(tr("props.undo_like"))
+        left_out = 0
+        for sh in others:
+            left_out += made_like(sh, src)
+            settle_steps(app, sh)
+        self.say(trn("props.like_left_out", left_out, n=left_out) if left_out else "")
+        self.done()
 
     def open_hz(self):
         from window.hz_window import open_hz
@@ -1028,3 +1337,128 @@ def open_page(app, sh, n):
     w = getattr(app, attr, None)
     if w and w.targets and w.same() and w.app.shapes[w.targets[0]] is sh:
         w.pick_page(at[n])
+
+
+# ---- several shapes (stage E)
+
+def step_keys(sh, tags):
+    """Shape sh's steps (tags in order) as keys alike across shapes: the colour effects, Glue, Gate aware flip,
+    Sustain, Gate extend / subtract by kind and number; an fx entry by what it is (its tool, a flip's way, a turn's
+    angle) and how many of those came before it ("Strum 2" = the 2nd Strum page)."""
+    fx = sh.get("fx") or []
+    seen, out = {}, []
+    for kind, n in tags:
+        if kind != S.FX:
+            out.append((kind, n))
+            continue
+        st = fx[n] if n < len(fx) else {}
+        what = (st.get("tool"), st.get("axis"), st.get("deg"))
+        m = seen.get(what, 0)
+        seen[what] = m + 1
+        out.append((S.FX,) + what + (m,))
+    return out
+
+
+def mixed_text(pairs):
+    """A Mixed value's tip: the shared sentence, then each shape's value ("Shape 3: 120"), at most TIP_MOST."""
+    lines = [tr("props.value_of", n=i + 1, value=t) for i, t in pairs[:TIP_MOST]]
+    if len(pairs) > TIP_MOST:
+        lines.append(trn("props.more_values", len(pairs) - TIP_MOST, n=len(pairs) - TIP_MOST))
+    return tr("widgets.mixed_tip") + "\n\n" + "\n".join(lines)
+
+
+def place_in(notes):
+    """(first tick, length in ticks, lowest key, highest key) of notes, or None (no notes)."""
+    if not len(notes):
+        return None
+    a, z = int(notes[:, 0].min()), int(notes[:, 1].max())
+    return a, z - a, int(notes[:, 2].min()), int(notes[:, 2].max())
+
+
+def is_custom(sh):
+    """A drawn custom shape with its own inside (not plain notes / an image)."""
+    return sh.get("kind") == "custom" and "notes" not in sh and "picture" not in sh
+
+
+LIKE_KEYS = ("fx", "glue", "sustain", "extend", "subtract")
+
+
+def made_like(sh, src):
+    """Shape sh's steps made like src's: every step, its order, its numbers, its off tick (Make the others like
+    this). Steps sh can't have are left out: colour effects on a Hz bass, note tool pages / glue on an image, Sustain
+    / Gate extend / subtract on a Hz bass or an image, Gate aware flip on a shape that isn't a flipped custom shape;
+    a sliced piece keeps its own flips (its notes come from its whole's pages). Returns how many were left out.
+    Changes sh."""
+    from notes.fx import tidy_glue
+    from notes.gateflip import is_flipped, is_pasted_flipped, turn_velocities
+    from notes.mask import is_mask
+    from notes.recolour import can_recolour, turns_of
+    from notes.sliced import steps_kept
+    if is_mask(sh):
+        return 1
+    left = 0
+    have, want = S.own_steps(sh), S.own_steps(src)
+    if (S.GATE_FLIP in want) != (S.GATE_FLIP in have):
+        can = sh.get("kind") == "custom" and (is_flipped(sh) or is_pasted_flipped(sh))
+        if S.GATE_FLIP in want and not can:
+            left += 1
+        else:  # (switched as Gate aware flip does: the velocities turned round too)
+            if S.GATE_FLIP in have:
+                del sh["gate_flip"]
+            else:
+                sh["gate_flip"] = True
+            turn_velocities(sh)
+    picture, hz = "picture" in sh, bool(sh.get("hz"))
+    for key in LIKE_KEYS:
+        if (picture and key in ("fx", "glue") or (picture or hz) and key in S.LENGTHS
+                or key == "fx" and steps_kept(sh)):
+            left += bool(src.get(key))
+            continue
+        if src.get(key):
+            sh[key] = copy.deepcopy(src[key])
+        else:
+            sh.pop(key, None)
+    tidy_glue(sh)
+    old = clean_recolour(sh.get("recolour"))
+    got = clean_recolour(src.get("recolour"))
+    if not can_recolour(sh):
+        left += bool(got)
+    else:
+        new = None
+        if got:
+            new = copy.deepcopy(got)
+            turns = turns_of(got)
+            new.pop("turned", None)
+            new.pop("turns", None)
+            if old and old.get("turned"):  # (its notes hold their own swap: it stays, unswapped at the start)
+                new["turned"] = old["turned"]
+            if turns:
+                new["turns"] = turns
+            new = clean_recolour(new)
+        tw = (old or {}).get("turned")
+        if tw and "notes" in sh and not (new or {}).get("turned"):  # (as colour_removed: the notes' colours back)
+            rows = unpack_notes(sh["notes"]).copy()
+            low = rows[:, 4] % ROUND
+            rows[:, 4] = rows[:, 4] - low + turned_map(tw, back=True)(low)
+            sh["notes"] = pack_notes(np.asarray(rows, np.int64))
+        if new:
+            sh["recolour"] = new
+        else:
+            sh.pop("recolour", None)
+    S.carried(sh, src)  # (its order and off ticks)
+    if sh.get("off"):  # (steps it couldn't take: their off ticks go)
+        there = set(S.order_of(sh))
+        off = [t for t in sh["off"] if tuple(t) in there]
+        if off:
+            sh["off"] = off
+        else:
+            sh.pop("off", None)
+    return left
+
+
+def settle_steps(app, sh):
+    """sh's steps were set as a whole here: App.steps_noted takes them as they are (it would put steps new to sh at
+    the end of its order)."""
+    sigs = getattr(app, "_step_sigs", None)
+    if sigs is not None:
+        sigs[id(sh)] = (sh, S.signature(sh))
