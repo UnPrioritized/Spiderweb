@@ -124,8 +124,8 @@ class TrackList(tk.Canvas):
         self.open = set()
         self._chans = self._lines = None
         self.owners = set()  # id() of the shapes with notes on it (follow: it keeps showing them when channels change)
-        # slots shown faintly behind each track on the piano roll ("Show multiple tracks"; per track, like Domino's,
-        # user 2026-10-26: {track: its set}; behind = the highlighted one's)
+        # slots shown faintly behind each track on the piano roll ("Show multiple tracks"; per track, user
+        # 2026-10-26: {track: its set}; behind = the highlighted one's. One shared set = other editors' way)
         self._behind = {}
         self.onion = app.onion  # ... while this is on (the main toolbar's toggle; off = one track)
         self.onion.trace_add("write", lambda *_: self.shown_changed())
@@ -752,7 +752,7 @@ class TrackList(tk.Canvas):
 
     @property
     def behind(self):
-        """The tracks shown behind the highlighted one (each track keeps its own, like Domino's)."""
+        """The tracks shown behind the highlighted one (each track keeps its own)."""
         return self._behind.get(self.current, set())
 
     @behind.setter
