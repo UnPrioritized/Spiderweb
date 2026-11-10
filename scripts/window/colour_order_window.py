@@ -242,8 +242,12 @@ class ColourOrderWindow(tk.Toplevel):
         m.add_command(label=tr("stir.button"), command=self.add_stir)
         m.add_command(label=tr("warp.button"), command=app.open_warp)
         m.add_command(label=tr("liquify.button"), command=app.open_liquify)
-        m.add_command(label=tr("join_split.reverse_tracks"), command=app.reverse_tracks,
-                      state="normal" if app.reverse_targets() else "disabled")
+        # (a Reverse right after a Reverse would cancel it: Add never takes a line away, so greyed + said why)
+        last = tags_of(shape_order(sh))[-1:] if sh is not None else []
+        twice = bool(last) and last[0][0] == "turned"
+        m.add_command(label=tr("order.add_reverse_last" if twice else "join_split.reverse_tracks"),
+                      command=app.reverse_tracks,
+                      state="normal" if app.reverse_targets() and not twice else "disabled")
 
     def add_mode(self, mode):
         self.app.change_recolour(lambda old, t: old if old and old["mode"] in MODES else
