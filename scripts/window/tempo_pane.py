@@ -1409,9 +1409,11 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                 tip.schedule()                       # click on its part, hunt 2026-10-24)
 
     def snap_beat(self, b, e):
-        """On the grid (Shift: free): the Select box's move, the catch-up being added, a click's play line."""
+        """On the grid (Shift: whole ticks, never between them: MIDI's rule, user 2026-11-10): the Select box's
+        move, the catch-up being added, a click's play line."""
         if e.state & SHIFT:
-            return max(0.0, b)
+            ppq = max(1, self.app.ppq)
+            return max(0.0, round(b * ppq) / ppq)
         sb = self.app.snap_beats()
         return max(0.0, round(b / sb) * sb) if sb else max(0.0, b)
 
