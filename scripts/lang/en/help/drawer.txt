@@ -1,4 +1,4 @@
-The drawer (Custom shape → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: Select (V), Slice (K) (see Drawer: Slice), Lasso (J) (see Drawer: Lasso), Eraser (E), Line (L), Polyline (P), Freehand (F), Curve (C), Arc (A), Square (S) and Circle (O). Areas (B) colours the areas inside (see Drawer: Areas). Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels). Double right-click switches between Select and the tool you used last.
+The drawer (Custom shape → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: Select (V), Slice (K) (see [page:drawer_slice|Drawer: Slice]), Lasso (J) (see [page:drawer_lasso|Drawer: Lasso]), Eraser (E), Line (L), Polyline (P), Freehand (F), Curve (C), Arc (A), Square (S) and Circle (O). Areas (B) colours the areas inside (see [page:drawer_areas|Drawer: Areas]). Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels). Double right-click switches between Select and the tool you used last.
 
 Grid (top bar) sets how many grid squares the board has across (4 to 64). Clear removes everything drawn (Ctrl+Z brings it back). Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. Help (F1) opens these pages.
 
@@ -23,8 +23,8 @@ Open (or double-click a name, or Enter) opens a saved shape from the library; Ne
 
 Rename (or F2, or click the picked name again) changes a saved shape's name; Delete removes it. While the list has the keyboard (its picked name is blue), Delete and Enter work on the list; click the board to give the keyboard back to the drawing (the picked name turns grey).
 
-Export copies the whole drawing as a line of text to share; Import adds a shared drawing to your library (see Sharing shapes).
+Export copies the whole drawing as a line of text to share; Import adds a shared drawing to your library (see [page:sharing|Sharing shapes]).
 
-Lines and curves that meet end to end count as one outline, and so does a line whose ends land on another line or on itself. Closed: Empty, Fill and Spam all work. Gaps (red dots at the loose ends): Fill and Spam close each one with a straight line (see Inside fill).
+Lines and curves that meet end to end count as one outline, and so does a line whose ends land on another line or on itself. Closed: Empty, Fill and Spam all work. Gaps (red dots at the loose ends): Fill and Spam close each one with a straight line (see [page:fill|Inside fill]).
 
 Wheel = zoom, middle-drag = scroll, Reset view = back to the middle of the board.

@@ -36,7 +36,7 @@ Note length: how long each note is, as % of the step (100 % = up to the next not
 
 Note length 50 %, 100 % and 200 %.
 
-For notes that run over into the next ones like a run played by hand, right-click the run → Gate extend…: each note ends later by a % of its own length or by ticks (see Help → Gate extend). It works on any shape.
+For notes that run over into the next ones like a run played by hand, right-click the run → Gate extend…: each note ends later by a % of its own length or by ticks (see Help → [page:extend|Gate extend]). It works on any shape.
 
 ## Bending a run
 

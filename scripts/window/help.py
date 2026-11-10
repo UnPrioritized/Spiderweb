@@ -16,7 +16,8 @@ from files import system
 from files.system import open_path
 from window import look
 from window.widgets import WrapRow, placed, remember_place, set_least
-from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS, NEXT, SECTION_NAMES, SECTIONS, SEE, TOOL_TOPICS, TOPICS
+from window.help_texts import (BY_ID, DRAWER_TOOL_TOPICS, NEXT, PAGE_LINK, SECTION_NAMES, SECTIONS, SEE,
+                               TOOL_TOPICS, TOPICS, link_words)
 
 TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
 # the tips' place once dragged (window_places; "tip" was saved where the first tip showed, moved or not: left behind)
@@ -506,12 +507,13 @@ class HelpWindow(tk.Toplevel):
             page = topic["page"]
             if topic_id == "whats_new":
                 page = with_build_date(page)
+            links = 0
             for n, part in enumerate(re.split(r"\[clip:([^\]]*)\]\n?", page)):
                 if n % 2:  # (the odd parts are the clip names)
                     if self.add_clip(part):
                         t.insert("end", "\n")
                 else:
-                    t.insert("end", part)
+                    links = self.put_text(part, links)
             heads = []
             for i in range(1, int(t.index("end").split(".")[0])):
                 if t.get(f"{i}.0") == "•":
@@ -541,13 +543,32 @@ class HelpWindow(tk.Toplevel):
     def found_by(self, topic):
         """The search words found only in the topic's hidden search words or its tip (not on its page): the
         words holding them, so the page shows why it was found and they get highlighted."""
-        shown = (topic["title"] + " " + topic["page"]).lower()
+        shown = (topic["title"] + " " + topic["text"]).lower()
         hidden = re.findall(r"[\w'-]+", (topic.get("words", "") + " " + topic["tip"]).lower())
         out = []
         for w in dict.fromkeys(self.query.get().lower().split()):
             if w not in shown:
                 out += [h for h in dict.fromkeys(hidden) if w in h and h not in out]
         return out
+
+    def put_text(self, part, links):
+        """A piece of a page at the end of the text, its "[page:<id>|words]" marks as links that open that page
+        (an unknown page: the words as plain text). links = how many were put before (each gets its own tag, so
+        only the one under the mouse is underlined); returns the new count."""
+        t, at = self.text, 0
+        for m in PAGE_LINK.finditer(part):
+            t.insert("end", part[at:m.start()])
+            words, tid = link_words(m), m.group(1)
+            if tid in BY_ID:
+                tag = f"page_link:{links}"
+                links += 1
+                t.insert("end", words, ("link", tag))
+                self.bind_link(tag, lambda tid=tid: self.open_topic(tid))
+            else:
+                t.insert("end", words)
+            at = m.end()
+        t.insert("end", part[at:])
+        return links
 
     def topic_links(self, top, heads):
         """One line of links at the page's top (at index top) to its headings (their line numbers), when it has

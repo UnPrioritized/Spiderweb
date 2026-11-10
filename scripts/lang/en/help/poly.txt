@@ -4,4 +4,4 @@ Selected polyline: drag its squares to move points; middle-click adds a point at
 
 Last note (panel) works at every point: each piece is its own line.
 
-Right-click it: Formula (a shape or a pattern along it, see Formulas).
+Right-click it: Formula (a shape or a pattern along it, see [page:formulas|Formulas]).

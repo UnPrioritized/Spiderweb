@@ -28,4 +28,4 @@ A stroke of a live shape (or of any placed drawing): right-click the stroke on t
 
 In the drawer, a pattern's sizes are hundredths of the board, so they grow and shrink with the placed shape. Funnel curves: a shape runs from the curve's start to its wall end inside the funnel (Slow start is x²); linked curves get the same formula; Back to the default curve resets it. Curve formulas saved in older versions (curves.json) are in the Shape list now.
 
-The velocity pane has a Formula tool too: a line with a pattern swinging around it (see Velocity pane).
+The velocity pane has a Formula tool too: a line with a pattern swinging around it (see [page:velocity|Velocity pane]).

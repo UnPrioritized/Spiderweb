@@ -32,4 +32,4 @@ With two or more notes selected, Join into one note (J) turns them into one bend
 
 Quick detune: with the Select tool and one note selected, drag the top or bottom edge of its row up or down to spread it into detuned copies, from as far below to as far above its pitch. Dragging the edge sideways moves the note as usual, and a double-click still deletes it. Zoomed far out (small rows) there's no edge to drag: zoom in first. The drag goes in half-key steps (hold Ctrl for any cent). While dragging, the wheel or Up / Down picks how many copies (2 to 9), and Esc cancels. Each copy is a note of its own with its own tune; copies more than half a key away sit on the row nearest their pitch.
 
-The Sketch tool (S) shapes the same bend line by hand, with curves and wobbles too: see Sketch tool.
+The Sketch tool (S) shapes the same bend line by hand, with curves and wobbles too: see [page:hz_sketch|Sketch tool].

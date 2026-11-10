@@ -8,7 +8,7 @@ Zoomed in, drag the red line in a note up or down to tune that note alone (whole
 
 In the window's Hz settings…: Pitch moves every tone in cents (100 = one key). Gates: Alternating = gates of two sizes take turns so the tone is exact; Fixed = every gate is a whole number of ticks, a little off.
 
-Hz shape… (in Hz settings…) sets how the notes look inside each wave and how long they last: see the Hz shape page.
+Hz shape… (in Hz settings…) sets how the notes look inside each wave and how long they last: see the [page:hz_shape|Hz shape] page.
 
 Auto gates (what a new Hz bass starts with): a note that holds still gets Fixed gates when they're off its tone by no more than the threshold (the number next to Gates, in cents), else Alternating ones. A slide is always Alternating.
 

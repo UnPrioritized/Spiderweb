@@ -10,7 +10,7 @@ Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = next / previous track, Ctrl
 
 Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo / redo (see History), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one curve, Ctrl+Shift+G split into separate shapes, Ctrl+R turn into live shape, Alt+W claw machine, Alt+S strum, Alt+U chop, Ctrl+U quick chop, Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
 
-Hold W = see the piano roll as it will be exported (with Keep notes made there and Wrap them around on; see Notes past the keys).
+Hold W = see the piano roll as it will be exported (with Keep notes made there and Wrap them around on; see [page:offrange|Notes past the keys]).
 
 Playing: Space play / stop. Click the bar numbers = move the play line. Drag along them = select every key in that time.
 
@@ -18,7 +18,7 @@ Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl
 
 Number boxes: drag the name, Up / Down, wheel after a click; Shift = big steps, Ctrl = small.
 
-Tab = the piano roll ↔ the track list (see Track list).
+Tab = the piano roll ↔ the track list (see [page:tracks|Track list]).
 
 F1 = Help. Ctrl+S = save. Ctrl+Shift+C = Copy to Domino (notes copied in Domino paste with Ctrl+V).
 

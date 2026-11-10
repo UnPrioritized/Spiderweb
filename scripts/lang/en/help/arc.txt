@@ -2,4 +2,4 @@ A piece of a perfect circle. Click its start, a point it passes through, then it
 
 It's round as the piano roll looks while you draw it. Put the end on the start for a whole circle.
 
-Selected: drag its round middle point (any tool) to bend it, its squares to move the ends. Right-click it: Formula (a shape or a pattern along it, see Formulas).
+Selected: drag its round middle point (any tool) to bend it, its squares to move the ends. Right-click it: Formula (a shape or a pattern along it, see [page:formulas|Formulas]).

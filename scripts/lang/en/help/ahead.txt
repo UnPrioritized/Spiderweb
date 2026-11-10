@@ -1,4 +1,4 @@
-Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead of the play line, in small pieces, and plays it from there. Since nothing has to sound at the very moment it's played, every note can ring, even in the densest walls, and the sound never breaks up or gets "Overloaded". Pick it in Settings (Help menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see Playing and listening).
+Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead of the play line, in small pieces, and plays it from there. Since nothing has to sound at the very moment it's played, every note can ring, even in the densest walls, and the sound never breaks up or gets "Overloaded". Pick it in Settings (Help menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playing and listening]).
 
 ## Playing
 
@@ -30,7 +30,7 @@ Merlin can't use more than one soundfont yet either: with several in the list, K
 
 • BASSMIDI (processor): works on any PC. Slower to make in busy parts.
 
-Merlin and Kestrel need 64-bit Windows or Linux and a fairly recent graphics card with an up-to-date driver (see Kestrel (GPU) playback).
+Merlin and Kestrel need 64-bit Windows or Linux and a fairly recent graphics card with an up-to-date driver (see [page:kestrel|Kestrel (GPU) playback]).
 
 ## Settings
 
@@ -56,8 +56,8 @@ Render ahead, Slow down to keep up and Lower it by itself work at once, even whi
 
 ## Also
 
-31-EDO Audio plays through Rendered ahead too (see 31-EDO).
+31-EDO Audio plays through Rendered ahead too (see [page:edo31|31-EDO]).
 
 The Hz bass preview has an Engine choice of its own (Hz settings… → Preview): with Merlin or Kestrel picked there, it uses Rendered ahead's settings.
 
-Merlin is part of Kestrel 1.4.0, by thtstickyboi (see Kestrel (GPU) playback).
+Merlin is part of Kestrel 1.4.0, by thtstickyboi (see [page:kestrel|Kestrel (GPU) playback]).

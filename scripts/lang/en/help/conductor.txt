@@ -45,7 +45,7 @@ Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with ever
 
 Above: the 600 BPM stop is above the view and the 40 BPM one below it.
 
-To draw a jumpy tempo that follows the melody for you, make a Select box and right-click → Fill with tempo jumps…. See Help → Fill with tempo jumps.
+To draw a jumpy tempo that follows the melody for you, make a Select box and right-click → Fill with tempo jumps…. See Help → [page:fill_tempo|Fill with tempo jumps].
 
 The ruler above the piano roll shows each tempo change ("120 → 60", "60 ↗ 180"); rest the mouse on one for the exact BPMs. Inside a Keep timing part the tempo you hear follows in purple brackets ("120 → 60 (120)"), and changes of its heard tempo line show in purple. The number in the pane's top row is the exact tempo at the play line, with the heard tempo after it in purple brackets where the two differ.
 [clip:conductor-ruler]

@@ -1,6 +1,6 @@
 Press Tab to swap the piano roll for the track list, and Tab again to go back. It shows the tracks your MIDI will have: one row per track, in the same order as Export MIDI and Export to Domino write them, each with a small picture of its notes in its channel's colour.
 
-The All tracks row at the very top shows every track's notes together, each in its track's colour. It's taller than the tracks, so it doesn't look like one more track. It's highlighted while no track is: the piano roll then shows every track, and Spiderweb puts each new shape on channels itself (see Channels).
+The All tracks row at the very top shows every track's notes together, each in its track's colour. It's taller than the tracks, so it doesn't look like one more track. It's highlighted while no track is: the piano roll then shows every track, and Spiderweb puts each new shape on channels itself (see [page:channels|Channels]).
 
 The Conductor row under it has a line at each tempo change: the faster the tempo, the taller the line, from this song's slowest tempo (lowest) to its fastest (tallest), so any tempo a MIDI file can hold fits. When the fastest is more than 4 times the slowest, the heights use the doubling scale, so one huge jump doesn't flatten the rest. Rest the mouse on it to see the BPM there. Short lines at its top mark time and key signatures. Inside Keep timing parts, purple lines show the tempo you drew there (the file holds it, and its notes are moved so they keep their time).
 
@@ -8,7 +8,7 @@ Click the Conductor row to highlight it, like a track: the piano roll keeps show
 
 A new project starts with one empty Track 1 and nothing highlighted: shapes you draw go into it, and Spiderweb adds more tracks when it needs them. Track 1 stays in the list (and in Export MIDI) even when it's empty. If you remove it, add a track by hand to get one back, or just draw: Spiderweb makes a track for the notes by itself.
 
-Spiderweb picks the tracks for your shapes itself (see Channels): use the list to check which shapes land on which track before you export. You can also add tracks of your own (see below). Rest the mouse on a track's name to see its channel, how many notes it has and which shapes they come from. Long names end in "…" and show whole there.
+Spiderweb picks the tracks for your shapes itself (see [page:channels|Channels]): use the list to check which shapes land on which track before you export. You can also add tracks of your own (see below). Rest the mouse on a track's name to see its channel, how many notes it has and which shapes they come from. Long names end in "…" and show whole there.
 
 Zoom and scroll with the scrollbars, like the piano roll: drag an end of the bar under the list to zoom in time, drag an end of the bar on its right to make the rows taller or shorter. Ctrl+wheel zooms in time, Ctrl+Shift+wheel changes the rows' height, Shift+wheel scrolls sideways. Zoomed far out, each column holds 2, 4, 8... bars, so the bar numbers never run into each other. The track list remembers its zoom and where you were, also after Spiderweb restarts. While playing, you can scroll freely: the list (and the piano roll) waits until you stop for half a second, then jumps back to the play line.
 
@@ -61,7 +61,7 @@ Highlight a track, then draw or paste: the new shape is laid on that track, like
 • Tracks Spiderweb adds next to yours get a green tinted name; they go away by themselves when no shape uses them. Change one in Properties… to keep it as yours.
 • With All tracks highlighted, a pasted shape that was laid in this project stays on its tracks, and a duplicate always does.
 • Changing a track's channel in Properties… moves its shapes to the new channel.
-• One of a loaded MIDI's tracks works the same: the shape goes into that track, on its channel (see Load MIDI).
+• One of a loaded MIDI's tracks works the same: the shape goes into that track, on its channel (see [page:load_midi|Load MIDI]).
 • Pictures, masks, Hz basses and Channel per strip shapes can't be laid on a track yet: they keep their own channels, and the status line says so. Pasted notes with CC events go in like any: their events go along on each track's channel.
 • A small CC before a track's (or Ch row's) channel means it sends CC events (volume, pan, pitch bend…): your notes' or a loaded MIDI's own. Its tip names them, and the piano roll's ruler shows each one in its CC row. The same event on many tracks at once shows once, like "Volume 127 (200 tracks)". Where they're too close together to read, the row says how many, like "1,234 CC events": zoom in to read each one.
 
@@ -72,7 +72,7 @@ Drag on the tracks' pictures to draw a Select box over some tracks and some time
 • Drag inside the box to move its notes to other tracks and in time. The box's left edge lands on the nearest snap line, and tracks keep their distance from each other. Hold Ctrl to move copies instead.
 • A shape wholly inside the box moves as it is. A shape only partly inside is cut at the box's edge: both parts become plain notes, and the part inside moves.
 • Moved notes stay on the tracks they land on: inside one of yours, pinned on one of Spiderweb's, drawn into one of a loaded MIDI's.
-• A loaded MIDI's notes in the box become an Extract first (see Load MIDI), then move with the rest. Copies of them are plain notes and hide nothing in the file.
+• A loaded MIDI's notes in the box become an Extract first (see [page:load_midi|Load MIDI]), then move with the rest. Copies of them are plain notes and hide nothing in the file.
 • Ctrl+C copies the notes in the box, Ctrl+X cuts them and Delete deletes them. Ctrl+V pastes at the play line, starting from the highlighted track and going down, like in Domino; a box goes round what came in.
 • Copy to Domino (Ctrl+Shift+C) copies only the notes in the box while a box is there (the tempo too when the box holds the Conductor row, see below).
 • The Conductor row works like a track here, as in Domino. A box on it holds the tempo changes and time and key signatures in its stretch: Ctrl+C copies them, Delete and Ctrl+X take them out (the tempo before the box goes on), and dragging the box moves them in time (Ctrl: copies). With the Conductor row highlighted, Ctrl+V pastes the copied tempo at the play line, replacing that stretch. Copy to Domino copies the Conductor track alone, ready to paste into Domino's Conductor track.

@@ -22,7 +22,7 @@ Letters that would go past the highest key are cut off, never squeezed.
 Letter turn and Flip letters: turn each letter on its own spot (Flip turns it upside down first). The player directions set them to 90 and ticked, which stands the letters upright in a player; you can change them after, for example to 45.
 [clip:text-align]
 
-Text is a custom shape, so Empty, Fill, Spam and Outline spam work on its letters too (see Inside fill).
+Text is a custom shape, so Empty, Fill, Spam and Outline spam work on its letters too (see [page:fill|Inside fill]).
 [clip:text-inside]
 
 Threshold (Fill / Spam): how much of a key's height has to be inside a letter for that key to play there. 50% = the key's middle. Lower = chunkier letters, higher = thinner.
@@ -31,7 +31,7 @@ Threshold (Fill / Spam): how much of a key's height has to be inside a letter fo
 Grow: makes the letters' strokes thicker, in keys (minus = thinner). Big values can look odd in tight corners.
 [clip:text-grow]
 
-Spam text can be a Hz bass too: one tone for all the letters, and the text keeps its own length (see Hz bass).
+Spam text can be a Hz bass too: one tone for all the letters, and the text keeps its own length (see [page:hz_bass|Hz bass]).
 
 Letters the font doesn't have are taken from another font. If no font on the PC has a letter, the status line says so.
 

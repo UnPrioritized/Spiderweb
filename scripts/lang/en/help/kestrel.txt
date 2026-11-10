@@ -1,4 +1,4 @@
-Kestrel (GPU, Experimental) is a MIDI out that makes the sound on your graphics card instead of the processor. It can keep hundreds of thousands of notes ringing at once, so very dense MIDIs sound much fuller than they do through Built-in BASSMIDI. Pick it in Settings (Help menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see Playback).
+Kestrel (GPU, Experimental) is a MIDI out that makes the sound on your graphics card instead of the processor. It can keep hundreds of thousands of notes ringing at once, so very dense MIDIs sound much fuller than they do through Built-in BASSMIDI. Pick it in Settings (Help menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playback]).
 
 It needs 64-bit Windows or Linux and a fairly recent graphics card with an up-to-date driver. The first Play starts Kestrel, which takes a few seconds while it reads your soundfonts (a small "Starting Kestrel…" window). After that the soundfonts stay loaded while Kestrel is your MIDI out: changing its settings is quick, and changing the soundfont list reads only the soundfonts you added. Picking another MIDI out lets them go. If Kestrel can't start, or stops while playing, a window says why and offers Built-in BASSMIDI instead.
 
@@ -19,8 +19,8 @@ Lower it by itself and Slow down to keep up are heard at once. Changing any of t
 
 When the card can't keep up, a red "Overloaded" shows at the right end of the status line (while "Lower it by itself" lowers the voices, with how many it lets sound now: "Overloaded: 470,000 of 1,000,000 voices", of your Max voices): lower Max voices, pick a bigger Block size, or tick "Lower it by itself" or "Slow down to keep up" (an orange "Slowed to 62 %" shows while it plays slower). Where the sound stutters, the play line waits with it, so the line always stays on what you hear.
 
-31-EDO Audio plays through Kestrel too (see 31-EDO). The Hz bass preview can use the graphics card through its own Engine choice (see Preview (Hz bass)); the synth window and the live keys still play through Built-in BASSMIDI.
+31-EDO Audio plays through Kestrel too (see [page:edo31|31-EDO]). The Hz bass preview can use the graphics card through its own Engine choice (see [page:hz_preview|Preview (Hz bass)]); the synth window and the live keys still play through Built-in BASSMIDI.
 
-To hear every note of a very dense part, with nothing left out, try Rendered ahead in the MIDI out list: it makes the sound ahead of the play line instead of at once (see Rendered ahead playback).
+To hear every note of a very dense part, with nothing left out, try Rendered ahead in the MIDI out list: it makes the sound ahead of the play line instead of at once (see [page:ahead|Rendered ahead playback]).
 
 Kestrel is made by thtstickyboi, with the live playing part by mbms (mbms0). It's free and open source (Mozilla Public License 2.0): see THIRD-PARTY-NOTICES.txt next to Spiderweb.

@@ -1,4 +1,4 @@
-With the funnel selected, middle-click on its line (any tool) to start curves there (a diamond); middle-click near a curve to add an anchor. The curves work like any curve: drag the anchors and handle dots (see Curves: anchors and handles). A start's two curves are linked, so they change together (see Linking funnel curves).
+With the funnel selected, middle-click on its line (any tool) to start curves there (a diamond); middle-click near a curve to add an anchor. The curves work like any curve: drag the anchors and handle dots (see [page:curves_pen|Curves: anchors and handles]). A start's two curves are linked, so they change together (see [page:funnel_links|Linking funnel curves]).
 [clip:funnel_curves-start-and-handles]
 
 Highlighting: with the funnel selected and the Select tool, click one of its lines or curves again to highlight it (purple). A curve comes with the curves linked to it (teal); Ctrl+click adds or removes just one.
@@ -6,6 +6,6 @@ Highlighting: with the funnel selected and the Select tool, click one of its lin
 
 With something highlighted:
 
-Del = delete it. Right-click = Formula (shapes and patterns, see Formulas), Back to the default curve, and linking.
+Del = delete it. Right-click = Formula (shapes and patterns, see [page:formulas|Formulas]), Back to the default curve, and linking.
 
 Ctrl+H / Ctrl+J = flip the curves (end to end / inside out). Ctrl+C / Ctrl+V = copy a curve's shape onto others. Esc = clear the highlight.

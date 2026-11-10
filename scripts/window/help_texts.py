@@ -11,7 +11,11 @@ buttons (help.py).
 Clips (short GIFs, clips/<name>.gif next to Spiderweb) show in the Help window only: clips/<topic id>.gif at the top
 of its topic, and "[clip:<name>]" on a line of its own in a text puts clips/<name>.gif right there (name them
 <topic id>-<what it shows>). A still picture works the same way as clips/<name>.png (the GIF wins when both are
-there). A clip that isn't there is just left out."""
+there). A clip that isn't there is just left out.
+
+Links to another page: "[page:<topic id>|shown words]" (or "[page:<topic id>]" = that page's title) anywhere in a
+text; the Help window shows the words as a link that opens that page. An unknown id shows the words as plain text.
+Searching and the drawer's help see only the shown words."""
 
 import re
 
@@ -139,10 +143,22 @@ for _id, _section in TOPIC_LIST:
     if f"help.{_id}.words" in texts():
         _t["words"] = tr(f"help.{_id}.words")
     TOPICS.append(_t)
-for _t in TOPICS:  # "page" = the text with its clips (Help window); "text" = without (drawer's help, search)
-    _t["page"] = _t["text"]
-    _t["text"] = re.sub(r"(?m)^(## |\^\^ )", "", re.sub(r"\n*\[clip:[^\]]*\]\n*", "\n\n", _t["text"])).strip()
 BY_ID = {t["id"]: t for t in TOPICS}
+PAGE_LINK = re.compile(r"\[page:([a-z0-9_]+)(?:\|([^\]]*))?\]")  # [page:<id>|shown words] / [page:<id>]
+
+
+def link_words(m):
+    """The words a page link shows: its own, else the linked page's title (an unknown id: the id itself)."""
+    if m.group(2) is not None:
+        return m.group(2)
+    t = BY_ID.get(m.group(1))
+    return t["title"] if t else m.group(1)
+
+
+for _t in TOPICS:  # "page" = the text with its clips and links (Help window); "text" = without (drawer's help, search)
+    _t["page"] = _t["text"]
+    _t["text"] = re.sub(r"(?m)^(## |\^\^ )", "", re.sub(r"\n*\[clip:[^\]]*\]\n*", "\n\n",
+                                                         PAGE_LINK.sub(link_words, _t["text"]))).strip()
 # tips that follow another one: "Got it" on the first shows the second (the first time only)
 NEXT = {"welcome": "view"}
 # related topics: the clickable "See also" line under a topic in the Help window

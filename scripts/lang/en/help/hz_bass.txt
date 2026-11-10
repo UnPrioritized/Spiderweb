@@ -12,6 +12,6 @@ With short gates the tone wobbles (Alternating) or is off (Fixed): an orange lin
 
 Any custom shape with Spam or Outline spam can have Hz bass too: tick Hz bass in the panel for one tone, or press Notes… to place notes for it. The shape keeps its length (notes past its end aren't used) unless Shape length follows the notes is ticked in the window's Hz settings….
 
-Spam text can have one too: one tone for all the letters, and the text keeps its own length. Funnels too: see Funnel.
+Spam text can have one too: one tone for all the letters, and the text keeps its own length. Funnels too: see [page:funnel|Funnel].
 
 The rest is in the Hz bass section of this Help: placing notes, the tone, slides, the preview, effects and the synth window.

@@ -17,4 +17,4 @@ The sides can also have a pattern: right-click the polygon → Formula → Patte
 
 The pattern's height is in hundredths of the polygon's height, so it grows with the shape. Symmetric halves work on it too. "Turn into plain lines" makes the result plain lines (the polygon settings go).
 
-They're custom shapes, so their inside can be filled (see Inside fill) and they resize, turn and skew like any custom shape (see Custom shapes: resize, turn, skew). With Live shape on they're drawn into the live shape instead.
+They're custom shapes, so their inside can be filled (see [page:fill|Inside fill]) and they resize, turn and skew like any custom shape (see [page:custom_edit|Custom shapes: resize, turn, skew]). With Live shape on they're drawn into the live shape instead.

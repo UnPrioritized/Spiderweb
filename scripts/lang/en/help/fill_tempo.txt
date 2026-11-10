@@ -66,8 +66,8 @@ Higher notes jump further: the area's highest note jumps the whole way, its lowe
 
 ## Keeping the timing
 
-• Keep the audio: the whole area becomes one Keep timing part (see Help → Conductor pane), so every note keeps its sound time, inside the area and after it.
-• A catch-up BPM after each jump: the jumps are real tempo changes and each jump lands on time. Each gap holds the jump's tempo for the % you type, then a catch-up brings the music back on time before the next note. Catch-up shape picks how the catch-up runs (Flat, Fast, then slow, Slow, then fast, or Up and down; see Help → Conductor pane). Gaps too short for a catch-up stay at the normal tempo; the status line says how many. When no catch-up can make up the time (for example a long stop at a very slow tempo), nothing is laid and the status line says so.
+• Keep the audio: the whole area becomes one Keep timing part (see Help → [page:conductor|Conductor pane]), so every note keeps its sound time, inside the area and after it.
+• A catch-up BPM after each jump: the jumps are real tempo changes and each jump lands on time. Each gap holds the jump's tempo for the % you type, then a catch-up brings the music back on time before the next note. Catch-up shape picks how the catch-up runs (Flat, Fast, then slow, Slow, then fast, or Up and down; see Help → [page:conductor|Conductor pane]). Gaps too short for a catch-up stay at the normal tempo; the status line says how many. When no catch-up can make up the time (for example a long stop at a very slow tempo), nothing is laid and the status line says so.
 [clip:melody-catch]
 
 Above: each jump drops to 90 BPM, then a catch-up at 180 BPM brings the next note back on time.

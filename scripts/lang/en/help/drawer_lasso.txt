@@ -18,6 +18,6 @@ While the loop waits you can change it. Ctrl+Z undoes those changes one at a tim
 
 • Enter: cuts. Esc: throws the loop away.
 
-The piano roll's Lasso works the same way; its Help page has pictures.
+The piano roll's [page:lasso|Lasso] works the same way; its Help page has pictures.
 
 The pieces stay where they were, in the same layer and group. Curves, arcs and polylines stay curves, arcs and polylines; circles, freehand strokes and strokes with a Formula become polylines. Ctrl+Z undoes a cut.
