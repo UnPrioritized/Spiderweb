@@ -771,7 +771,10 @@ fn unit_back(mut x: f64, mut y: f64, fp: &[f64]) -> (f64, f64) {
         let nr = fp[15] as usize;
         let keys = &fp[16..16 + nr];
         if bounce {
-            let (base, h) = if fp[14] == 3.0 {
+            // (the lowest / highest key line after the rows' numbers: Rows.bounce_of's, on the colours' runs)
+            let (base, h) = if fp.len() >= 16 + 3 * nr + 2 {
+                (fp[16 + 3 * nr], fp[16 + 3 * nr + 1] - fp[16 + 3 * nr])
+            } else if fp[14] == 3.0 {
                 (keys[0] - 0.5, (keys[nr - 1] - keys[0]) + 1.0)
             } else {
                 (keys[0], keys[nr - 1] - keys[0])

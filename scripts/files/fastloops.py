@@ -1090,7 +1090,11 @@ def _unit_back(x, y, fp):
         bounce = fp[14] != 1.0
         nr = np.int64(fp[15])
         if bounce:
-            if fp[14] == 3.0:
+            if len(fp) >= 16 + 3 * nr + 2:  # (the lowest / highest key line after the rows' numbers:
+                # Rows.bounce_of's, on the colours' runs)
+                base = fp[16 + 3 * nr]
+                h = fp[16 + 3 * nr + 1] - base
+            elif fp[14] == 3.0:
                 base = fp[16] - 0.5
                 h = (fp[16 + nr - 1] - fp[16]) + 1.0
             else:

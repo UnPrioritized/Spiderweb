@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Once, OnceLock};
 
 /// The library's version of this C edge: scripts/files/native.py refuses a library with another one.
-pub const ABI: i64 = 8;
+pub const ABI: i64 = 9;
 pub const FAILED: i64 = -1;
 pub const NO_MEMORY: i64 = -2;
 pub const NEED_COPY: i64 = -3;

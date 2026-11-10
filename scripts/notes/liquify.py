@@ -270,7 +270,7 @@ def _where(at, rc, box, own, lq=None, colours=None):
     """liquify_from's first half: rc's Liquify settings (filled in; lq: these instead, the Warp's) and each note's
     place (x, y) in the colour box, with what the edge rule needs later. colours: each note's colour now (Repeat
     the colours finds the rows' repeats in them)."""
-    from notes.recolour import WRAPS, rows_of, unit_xy
+    from notes.recolour import BOUNCES, WRAPS, rows_of, unit_xy
     lq = lq or full(clean_liquify(rc.get("liquify")) or {})
     s, e, k = (np.asarray(at[:, c], np.float64) for c in (0, 1, 2))
     mid = (s + e) / 2
@@ -282,6 +282,8 @@ def _where(at, rc, box, own, lq=None, colours=None):
         w["t0"], w["t1"] = float(at[:, 0].min()), float(at[:, 1].max())
         if w["edge"] == "repeat" and colours is not None and len(at):
             w["rep"] = w["rows"].repeat_of(at, colours)
+        elif w["edge"] in BOUNCES and colours is not None and len(at):  # (Bounce back: lines on the colours' runs)
+            w["rep"] = w["rows"].bounce_of(at, colours, w["edge"] == "bounce2")
     if w["edge"] == "bend":
         mid = w["rows"].stretched(mid, k, w["t0"], w["t1"])
     w["x"], w["y"] = unit_xy(mid, k, rc, box, own)
@@ -399,14 +401,17 @@ def _place_numbers(w, rc, box, own):
         if not len(rows.keys):
             return None
         rep = w.get("rep")
-        if edge in BOUNCES:
-            aw, bw = rows.bounce_lines(edge == "bounce2")
+        if edge in BOUNCES:  # (+ the lowest / highest key line after the rows' numbers)
+            if rep is None:
+                rep = rows.bounce_of(None, None, edge == "bounce2")
+            aw, bw = rep[:2]
+            more = [[float(rep[2]), float(rep[3])]]
         else:
             aw, bw = (rows.a, rows.bw) if rep is None else rep[:2]
+            more = [[rep[2]]] if rep is not None and rep[2] is not None else []
         fp = np.concatenate([fp, [{"bounce": 2.0, "bounce2": 3.0}.get(edge, 1.0), float(len(rows.keys))],
                              np.asarray(rows.keys, np.float64),
-                             np.asarray(aw, np.float64), np.asarray(bw, np.float64)]
-                            + ([[rep[2]]] if rep is not None and rep[2] is not None else []))
+                             np.asarray(aw, np.float64), np.asarray(bw, np.float64)] + more)
     return fp
 
 

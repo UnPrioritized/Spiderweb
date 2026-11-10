@@ -1146,6 +1146,8 @@ def stir_from(at, rc, box, own, spots=None, colours=None):
         t0, t1 = float(at[:, 0].min()), float(at[:, 1].max())
         if edge == "repeat" and colours is not None:
             rep = rows.repeat_of(at, colours)
+        elif edge in BOUNCES and colours is not None and len(at):
+            rep = rows.bounce_of(at, colours, edge == "bounce2")
     if edge == "bend":  # (each key row stretched to the notes' whole width: no empty spot left to come from)
         mid = rows.stretched(mid, k, t0, t1)
     x, y = unit_xy(mid, k, rc, box, own)
@@ -2026,14 +2028,13 @@ class Rows:
         key = np.asarray(key, np.float64)
         return np.where((key < base) | (key >= base + h), base + np.mod(key - base, h), key)
 
-    def key_bounced(self, key, twice=False):
+    def key_bounced(self, key, twice=False, lines=None):
         """Bounce back: keys past the lowest / highest key row bounce back off that row (one past the top = the row
-        below it, and so on, as far as it goes); twice: off its outer edge, half a key past it (one past the top =
-        the top row again). One key row (not twice): every key past it = it."""
-        if twice:
-            base, h = float(self.keys[0]) - 0.5, float(self.keys[-1] - self.keys[0]) + 1.0
-        else:
-            base, h = float(self.keys[0]), float(self.keys[-1] - self.keys[0])
+        below it, and so on, as far as it goes); twice: off its outer edge, half the rows' usual gap past it (one past
+        the top = the top row again; key_lines). lines: (lowest, highest) to bounce off instead (key_bounces: the
+        colours' runs). One key row (not twice): every key past it = it."""
+        k0, k1 = key_lines(self.keys, twice) if lines is None else lines
+        base, h = float(k0), float(k1) - float(k0)
         key = np.asarray(key, np.float64)
         out = (key < base) | (key > base + h)
         if h <= 0:
@@ -2055,6 +2056,24 @@ class Rows:
         self._rep = (colours, c, rep)
         return rep
 
+    def bounce_of(self, at, colours, twice=False):
+        """Bounce back's (row starts' lines, row ends' lines, lowest key line, highest key line) on these notes'
+        colours (row_bounces, key_bounces); colours None = the plain lines (bounce_lines, key_lines). Worked out once
+        for these notes + colours (kept: drags ask again every move)."""
+        if colours is None or not len(self.keys):
+            return self.bounce_lines(twice) + key_lines(self.keys, twice)
+        kept = getattr(self, "_bnc", None)
+        if kept is None:
+            kept = self._bnc = {}
+        got = kept.get(twice)
+        c = np.asarray(colours)
+        if got is not None and (got[0] is colours or (len(got[1]) == len(c) and np.array_equal(got[1], c))):
+            return got[2]
+        lines = self.bounce_lines(False) + self.bounce_lines(True)
+        out = row_bounces(at, self.keys, c, lines, twice) + key_bounces(at, self.keys, self.a0, self.b0, c, twice)
+        kept[twice] = (colours, c, out)
+        return out
+
     def wrapped(self, mid, key, rep=None, edge=None):
         """(middle, key) of spots past the notes (Wrap around): the key round the key rows first (key_wrapped), then
         a middle past its key row's notes back in on that row's other side, every repeat length (bw). rep:
@@ -2063,9 +2082,11 @@ class Rows:
         bounce_lines bounced back off them (as far out as it goes: there and back, again and again), so the colours
         carry on with no seam, backwards."""
         bounce = edge in BOUNCES
-        if bounce:
-            key = self.key_bounced(key, edge == "bounce2")
-            aw, bw = self.bounce_lines(edge == "bounce2")
+        if bounce:  # (rep: bounce_of's lines on the colours; None = the plain ones)
+            if rep is None:
+                rep = self.bounce_of(None, None, edge == "bounce2")
+            key = self.key_bounced(key, edge == "bounce2", rep[2:])
+            aw, bw = rep[:2]
         else:
             key = self.key_wrapped(key, None if rep is None else rep[2])
             aw, bw = (self.a, self.bw) if rep is None else rep[:2]
@@ -2167,34 +2188,187 @@ def row_repeats(at, keys, a, bw, colours):
     last = np.append(first[1:], len(ks))
     row = np.searchsorted(keys, ks[first])
     for r, i0, i1 in zip(row.tolist(), first.tolist(), last.tolist()):
-        n = i1 - i0
-        if n < 4:
-            continue
         c, t = cs[i0:i1], ss[i0:i1]
-        if not (t[1:] > t[:-1]).all():  # (two notes starting together: no single order to repeat by)
-            continue
-        runs = np.flatnonzero(c[1:] != c[:-1]) + 1
-        if len(runs) < 2:  # (one colour (or one change): plain Wrap around comes out the same)
-            continue
-        r1 = int(runs[0])  # (the first WHOLE run's start; the row's first run may be cut short)
-        tries = runs[1:][c[runs[1:]] == c[r1]] - r1
-        p = 0
-        for q in tries[tries <= n // 2][:REPEAT_TRIES].tolist():
-            m = min(REPEAT_LOOK, n - q)
-            P = t[q] - t[0]
-            tol = 0 if whole else 1e-6 * max(1.0, abs(float(P)))  # (whole ticks: exact)
-            if not (np.array_equal(c[:m], c[q:q + m]) and (np.abs(t[q:q + m] - t[:m] - P) <= tol).all()):
-                continue
-            if np.array_equal(c[:n - q], c[q:]) and (np.abs(t[q:] - t[:n - q] - P) <= tol).all():
-                p = q
-                break
+        p = row_period(c, t, whole)
         if p:
             P = float(t[p] - t[0])
             # (halfway between the first note's middle and the one before it in the cycle: note p - 1, a repeat back)
             m0, mp = (float(t[0]) + float(es[i0])) / 2, (float(t[p - 1]) + float(es[i0 + p - 1])) / 2 - P
             lo[r] = (m0 + mp) / 2
-            out[r] = lo[r] + P * (n // p)
+            out[r] = lo[r] + P * (len(c) // p)
     return lo, out
+
+
+def row_period(c, t, whole):
+    """The shortest p (notes) a key row's colours c (read by start t, sorted) repeat EXACTLY by, each p notes later
+    by the same time, over at least two repeats; 0 = none (fewer than 4 notes, two starting together, one colour /
+    one change). Colours may come in runs: the lengths tried are where the colour of the row's first whole run comes
+    again at a run's start."""
+    n = len(c)
+    if n < 4 or not (t[1:] > t[:-1]).all():  # (two notes starting together: no single order to repeat by)
+        return 0
+    runs = np.flatnonzero(c[1:] != c[:-1]) + 1
+    if len(runs) < 2:  # (one colour (or one change): plain Wrap around comes out the same)
+        return 0
+    r1 = int(runs[0])  # (the first WHOLE run's start; the row's first run may be cut short)
+    tries = runs[1:][c[runs[1:]] == c[r1]] - r1
+    for q in tries[tries <= n // 2][:REPEAT_TRIES].tolist():
+        m = min(REPEAT_LOOK, n - q)
+        P = t[q] - t[0]
+        tol = 0 if whole else 1e-6 * max(1.0, abs(float(P)))  # (whole ticks: exact)
+        if not (np.array_equal(c[:m], c[q:q + m]) and (np.abs(t[q:q + m] - t[:m] - P) <= tol).all()):
+            continue
+        if np.array_equal(c[:n - q], c[q:]) and (np.abs(t[q:] - t[:n - q] - P) <= tol).all():
+            return q
+    return 0
+
+
+def _run_at(bounds, i, n):
+    """(first, last) note of the colour run holding note i; bounds = where runs start (the first left out)."""
+    j = int(np.searchsorted(bounds, i, "right"))
+    return (int(bounds[j - 1]) if j else 0), (int(bounds[j]) - 1 if j < len(bounds) else n - 1)
+
+
+def _whole_run(edges):
+    """The end run's length as if whole: edges = run edges from the end inward (the end first). The run itself,
+    unless it's shorter than the next two, which are alike (a regular pattern): then theirs."""
+    e = np.asarray(edges, np.int64)
+    if len(e) >= 4:
+        l0, l1, l2 = abs(int(e[1] - e[0])), abs(int(e[2] - e[1])), abs(int(e[3] - e[2]))
+        if l1 == l2 and l0 < l1:
+            return l1
+    return abs(int(e[1] - e[0]))
+
+
+def row_bounces(at, keys, colours, lines, twice):
+    """Each key row's (lo, hi) for Bounce back on the colours (user 2026-11-10: with colours in runs the end colour
+    showed twice as wide, Bounce back looked like edge twice): Bounce back turns in the MIDDLE of the end colour's
+    run (shown once at its own width: ... 2 1 2 ...), edge twice at the run's outer end (... 2 1 1 2 ...). A row
+    whose colours repeat (row_period) takes its end runs as if WHOLE (a row starting partway into a run turns as if
+    the run were all there: the same band on every row); any other row its end runs as it has them (edge twice:
+    the line it had). One note a colour = the lines it had. lines: repeat_ends' (lo, hi, lo2, hi2)."""
+    from files.speed import key_sort
+    lo, hi = (np.asarray(v, np.float64).copy() for v in (lines[2:] if twice else lines[:2]))
+    if not len(at):
+        return lo, hi
+    k = np.asarray(at[:, 2], np.int64)
+    s = np.asarray(at[:, 0])
+    whole = s.dtype == np.int64
+    o = key_sort(k, s) if whole else np.lexsort((np.asarray(s, np.float64), k))
+    ks, ss, cs = k[o], s[o], np.asarray(colours)[o]
+    ms = (np.asarray(ss, np.float64) + np.asarray(at[:, 1], np.float64)[o]) / 2
+    first = np.flatnonzero(np.concatenate([[True], ks[1:] != ks[:-1]]))
+    last = np.append(first[1:], len(ks))
+    row = np.searchsorted(keys, ks[first])
+    for r, i0, i1 in zip(row.tolist(), first.tolist(), last.tolist()):
+        n = i1 - i0
+        c, t, m = cs[i0:i1], ss[i0:i1], ms[i0:i1]
+        if n < 2 or not (t[1:] > t[:-1]).all():
+            continue
+        bounds = np.flatnonzero(c[1:] != c[:-1]) + 1
+        if not len(bounds):  # (one colour: any line gives the same)
+            continue
+        p = row_period(c, t, whole)
+        if p:
+            P = float(t[p] - t[0])
+
+            def mid(i):  # (note i's middle, the row repeated both ways)
+                q = i // p
+                return float(m[i - q * p]) + P * q
+            a0, a1 = _run_at(bounds, p, n)  # (the first colour's run in the 2nd repeat: whole)
+            a0, a1 = a0 - p, a1 - p
+            b0, b1 = _run_at(bounds, n - 1 - p, n)  # (the last colour's run a repeat back: whole)
+            b0, b1 = b0 + p, b1 + p
+            if twice:
+                L, H = (mid(a0 - 1) + mid(a0)) / 2, (mid(b1) + mid(b1 + 1)) / 2
+            else:
+                L, H = (mid(a0) + mid(a1)) / 2, (mid(b0) + mid(b1)) / 2
+        else:  # (no repeat found: the end runs as the row has them; one cut short next to two whole runs of the
+            # same length (a cycle too short to show two repeats) = as if whole, the row's usual step apart)
+            d = np.sort(np.diff(np.asarray(t, np.float64)))
+            st = float(d[(len(d) - 1) // 2])
+            a0, a1, b0, b1 = 0, int(bounds[0]) - 1, int(bounds[-1]), n - 1
+            a0, b1 = a1 + 1 - _whole_run(np.r_[0, bounds, n]), b0 - 1 + _whole_run(np.r_[n, bounds[::-1], 0])
+
+            def mid(i):  # (note i's middle; before / after the row: the usual step on)
+                return float(m[0]) + i * st if i < 0 else float(m[n - 1]) + (i - n + 1) * st if i >= n else float(m[i])
+            if twice:
+                L, H = mid(a0) - st / 2, mid(b1) + st / 2
+            else:
+                L, H = (mid(a0) + mid(a1)) / 2, (mid(b0) + mid(b1)) / 2
+        if H > L:
+            lo[r], hi[r] = L, H
+    return lo, hi
+
+
+def key_lines(keys, twice):
+    """(lowest, highest) key line Bounce back bounces keys off: the lowest / highest key row; edge twice: half the
+    key rows' usual gap past them (rows on every key: half a key; rows 2 keys apart: a key, user 2026-11-10: the
+    top showed the edge row once). One key row: edge twice half a key each way."""
+    k0, k1 = float(keys[0]), float(keys[-1])
+    if not twice:
+        return k0, k1
+    d = np.diff(np.asarray(keys, np.float64))
+    g = float(np.sort(d)[(len(d) - 1) // 2]) if len(d) else 1.0  # (the median gap, lower one on an even count)
+    return k0 - g / 2, k1 + g / 2
+
+
+def key_bounces(at, keys, a0, b0, colours, twice):
+    """key_lines on the colours (Bounce back up / down, as row_bounces along the rows): the key rows coming in runs
+    of one colour pattern (By key colours), looked at in KEY_LOOKS spots along the time; Bounce back turns in the
+    middle of the lowest / highest run, edge twice at its outer end. A pattern repeating up / down every v keys
+    takes its end runs as if whole; otherwise the runs as they are (edge twice: key_lines)."""
+    k0, k1 = key_lines(keys, twice)
+    if len(keys) < 2:
+        return k0, k1
+    got, inside = _key_looks(at, keys, a0, b0, colours)
+    nk = len(keys)
+    least = max(1, KEY_LOOKS // 16)
+
+    def same(i, j):
+        both = inside[i] & inside[j]
+        return both.sum() >= least and bool((got[i][both] == got[j][both]).all())
+    v = _key_period(_key_grid(keys, got, inside))
+    kl = np.asarray(keys)
+    gap = (k1 - float(keys[-1])) * 2  # (edge twice's gap; 0 for Bounce back)
+
+    def run(i):  # (first, last) key row of the run of rows alike holding row i
+        a = i
+        while a > 0 and same(a - 1, i):
+            a -= 1
+        b = i
+        while b < nk - 1 and same(b + 1, i):
+            b += 1
+        return a, b
+    lo, hi = k0, k1
+    if v:
+        ib, it = np.searchsorted(kl, kl[0] + v), np.searchsorted(kl, kl[-1] - v)
+        if ib < nk and kl[ib] == kl[0] + v and kl[it] == kl[-1] - v:
+            a, b = run(int(ib))
+            if not (a == 0 and b == nk - 1):
+                lo = float(kl[a]) - v - gap / 2 if twice else (float(kl[a]) + float(kl[b])) / 2 - v
+            a, b = run(int(it))
+            if not (a == 0 and b == nk - 1):
+                hi = float(kl[b]) + v + gap / 2 if twice else (float(kl[a]) + float(kl[b])) / 2 + v
+            return (lo, hi) if hi > lo else (k0, k1)
+    # (no repeat found: the end runs as they are; one cut short next to two whole runs alike = as if whole, the
+    # rows' usual gap apart)
+    g = (float(np.sort(np.diff(kl.astype(np.float64)))[(nk - 2) // 2]))
+    edges = [0]
+    while edges[-1] < nk and len(edges) < 4:
+        edges.append(run(edges[-1])[1] + 1)
+    a, b = 0, edges[1] - 1
+    if b == nk - 1:  # (all one run: any line gives the same)
+        return k0, k1
+    first = float(kl[b]) - (_whole_run(edges) - 1) * g
+    lo = first - g / 2 if twice else (first + float(kl[b])) / 2
+    edges = [nk - 1]
+    while edges[-1] >= 0 and len(edges) < 4:
+        edges.append(run(edges[-1])[0] - 1)
+    a = edges[1] + 1
+    top = float(kl[a]) + (_whole_run(edges) - 1) * g
+    hi = top + g / 2 if twice else (float(kl[a]) + top) / 2
+    return (lo, hi) if hi > lo else (k0, k1)
 
 
 def key_repeat(at, keys, a0, b0, colours):
@@ -2204,23 +2378,42 @@ def key_repeat(at, keys, a0, b0, colours):
     rows (lowest .. highest + 1). None found = None (plain Wrap around's height)."""
     if len(keys) < 2:
         return None
-    lo, hi = int(keys[0]), int(keys[-1])
-    h = hi - lo + 1
+    v = _key_period(_key_grid(keys, *_key_looks(at, keys, a0, b0, colours)))
+    h = int(keys[-1]) - int(keys[0]) + 1
+    return float(v * (h // v)) if v else None
+
+
+def _key_looks(at, keys, a0, b0, colours):
+    """(colours, inside): each key row's colours looked at in the same KEY_LOOKS spots along the time, and which
+    of those spots lie inside the row's notes."""
     t = np.linspace(float(np.min(a0)), float(np.max(b0)), KEY_LOOKS)
     kk = np.repeat(np.asarray(keys, np.float64), KEY_LOOKS)
     tt = np.tile(t, len(keys))
     got = np.asarray(colours)[nearest(at, tt, kk, own=False)].reshape(len(keys), KEY_LOOKS)
     inside = (t[None, :] >= np.asarray(a0)[:, None]) & (t[None, :] <= np.asarray(b0)[:, None])
-    grid = np.full((h, KEY_LOOKS), -1, np.int64)
+    return got, inside
+
+
+def _key_grid(keys, got, inside):
+    """_key_looks' rows on every key lowest .. highest (-1 = no note there)."""
+    lo = int(keys[0])
+    grid = np.full((int(keys[-1]) - lo + 1, KEY_LOOKS), -1, np.int64)
     grid[np.asarray(keys) - lo] = np.where(inside, got, -1)
+    return grid
+
+
+def _key_period(grid):
+    """The smallest v (keys) the grid's rows repeat by wherever both have notes, over at least two repeats; 0 =
+    none."""
+    h = len(grid)
     for v in range(1, h // 2 + 1):
         x, y = grid[:-v], grid[v:]
         both = (x >= 0) & (y >= 0)
         if both.sum() < KEY_LOOKS // 4:  # (too little side by side to tell)
             continue
         if (x[both] == y[both]).all():
-            return float(v * (h // v))
-    return None
+            return v
+    return 0
 
 
 _ROWS = {}  # (smooth) -> (at, its Rows) of the last big kept at
