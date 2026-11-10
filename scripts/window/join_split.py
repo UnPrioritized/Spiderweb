@@ -258,6 +258,7 @@ class JoinSplit:
     def turn_into_live(self):
         """The selected shapes -> one live shape (notes/convert.py), where the first of them was."""
         self.commit_typing()  # (a typed number: to the shapes before they're replaced)
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         problem = self.live_problem()
         if problem:  # (the shortcut: say why)
             self.status.config(text=problem)
@@ -317,6 +318,7 @@ class JoinSplit:
 
     def split_selected(self):
         self.commit_typing()  # (a typed number: to the shape before it's replaced)
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         problem = self.split_problem()
         if problem:  # (the shortcut: say why)
             self.status.config(text=problem)
@@ -353,6 +355,7 @@ class JoinSplit:
 
     def join_selected(self):
         self.commit_typing()  # (a typed number: to the shapes before they're replaced)
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         problem = self.join_problem()
         if problem:  # (the shortcut: say why)
             self.status.config(text=problem)
@@ -508,6 +511,7 @@ class JoinSplit:
         their own right after it (user: to delete or keep later). apart ("..., keep shapes separate"): merged_apart.
         to_right "up" / "down": merged_up_down. Asked from the Gate sensitive merge window (merge_window.py)."""
         self.commit_typing()  # (a number typed in a panel box: to the two shapes before they're replaced)
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         pair = self.merge_pair()
         way = to_right if to_right in ("up", "down") else "right" if to_right else "left"
         problem = self.merge_problem(way, apart)
@@ -743,6 +747,7 @@ class JoinSplit:
         which moved their channels): each selected shape is replaced by a shape of its notes exactly as they sound
         now, each note on the channel it has now (like Apply mask, App.copied). One step."""
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         got = self.plain_targets()
         if not got:
             return
@@ -780,6 +785,7 @@ class JoinSplit:
         image colours too); one that had notes and lost them all to another's same-start notes goes, its Extract
         handed to a shape that stays. One undo step."""
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         got = self.fill_targets()
         if not got:
             self.status.config(text=tr("fill_gaps.nothing"))
@@ -869,6 +875,7 @@ class JoinSplit:
         go (else kept, never cut by the overlap rule). Each shape becomes its own plain-notes shape, colours kept.
         One undo step; nothing changing = status line, no step."""
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         got = self.line_targets()
         if not got:
             self.status.config(text=tr("lines.nothing"))
@@ -934,6 +941,7 @@ class JoinSplit:
         = status line, no step."""
         from window.app import own_chs, placed_on  # (app.py imports this file)
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         got = self.line_targets()
         multi = self.multi_rendered()[1]
         rows = multi[np.isin(multi[:, 5], got)] if got else multi[:0]
@@ -1555,6 +1563,7 @@ class JoinSplit:
         wholly inside: not cut, selected. -> True when done, False when there was nothing to cut, None when the
         question was answered No (the loop stays)."""
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         boxes = self.roll.kept_box() or None
@@ -1667,6 +1676,7 @@ class JoinSplit:
         their colours; the inside pieces (and shapes wholly under it) end up selected. only: cut just these (the
         right-click's, knife_menu). -> True when cut."""
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         if self.notes_late:  # (notes still catching up with a drag: made now)
             self.shapes_changed(now=True)
         knife = self.shapes[k]
@@ -1772,6 +1782,7 @@ class JoinSplit:
         if not got:
             return
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         if self.notes_late:
             self.shapes_changed(now=True)
         use10 = bool(self.picture_use10)

@@ -272,6 +272,7 @@ class MaskPanel:
         channels as they sound (track = the channel each came out on). A mask in a group = the whole group, once,
         before its first member (user); holes over one shape the same (mask.worked_units). The new shapes are selected; one undo step."""
         self.commit_typing()
+        self.colour_edit_leave()  # (a colour step being edited: whole first)
         masks = self.mask_indices()
         if not masks:
             return

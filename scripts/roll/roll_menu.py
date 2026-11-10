@@ -45,6 +45,7 @@ class ShapeMenu:
         """Right-click (no drag) near shape i: it gets selected (unless it already is), then the menu."""
         app = self.app
         app.commit_typing()  # (a number typed in a panel box goes to the shapes picked until now, before any item)
+        app.colour_edit_leave()  # (a colour step being edited: whole first)
         if i not in app.sels:
             app.select(i)
         sh = app.shapes[i]
@@ -285,6 +286,7 @@ class ShapeMenu:
         at once (user asked; each shape's own options are left out). i: the shape right-clicked on, if any."""
         app = self.app
         app.commit_typing()  # (a number typed in a panel box: to the selected shapes first)
+        app.colour_edit_leave()  # (a colour step being edited: whole first)
         m = tk.Menu(self, tearoff=0)
 
         def item(label, key, fn, on=True, keys=True):

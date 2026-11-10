@@ -74,6 +74,7 @@ class FoldWindow(tk.Toplevel):
         self.job = None
         self.shown = None  # (the settings the piano roll shows now)
         app.commit_typing()
+        app.colour_edit_leave()  # (a colour step being edited: whole first)
         if app.notes_late:
             app.shapes_changed(now=True)
         app.roll.cancel_draft()
