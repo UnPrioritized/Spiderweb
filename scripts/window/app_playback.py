@@ -179,10 +179,8 @@ class Playback:
             left = self.edo_left_text()
             if left:
                 self.status.config(text=left)
-        elif along and self.out.tuned and self.edo31_loaded.get():  # (too many notes to hold: as written, said)
-            from notes.loaded import EDO_MOST
-            if self.loaded.notes > EDO_MOST:
-                self.status.config(text=tr("app.edo31_loaded_too_many", n=f"{EDO_MOST:,}"))
+        elif self.edo_loaded_wanted():  # (too many notes to hold: as written, said; Rendered ahead too, hunt)
+            self.status.config(text=tr("app.edo31_loaded_too_many", n=f"{self.edo_most():,}"))
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
         if self.loaded is not None:  # (a redraw now: the loaded notes' exact pictures start reading ahead the way

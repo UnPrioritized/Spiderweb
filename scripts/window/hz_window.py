@@ -452,8 +452,8 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzMouse, HzGates, HzSound,
             ports = PORTS if slot_ports(auto_count(app.rendered[:, 4]), mine, use10) else 0
             in_file = sharers(app.rendered, i, mine, use10, ports)
             in_play, own = set(), False
-            if not app.out.tuned:  # (31-EDO: channels by key row, not these)
-                device = app.midi_device.get()
+            device = app.midi_device.get()
+            if not app.edo_heard(device):  # (31-EDO: channels by key row, not these; the MIDI out not open yet too)
                 rendered, msgs, live = app.play_apart(ppq, bpm, device)  # (Built-in BASSMIDI: 6 ports, 90 channels)
                 slots = np.unique(rendered[rendered[:, 5] == i, 4]).tolist()
                 in_play = sharers(rendered, i, {s: msgs[s] for s in slots if s in msgs}, use10, live) - in_file
@@ -481,7 +481,8 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzMouse, HzGates, HzSound,
     def cc_names(self, numbers):
         """The shapes (their numbers) for show_cc's tip, by their place in the Shapes list (alike names: "Line, Line")."""
         app = self.app
-        numbers = sorted(k for k in numbers if k < len(app.shapes))  # (notes made before shapes went: their own)
+        # (notes made before shapes went: their own; a loaded MIDI's notes are no shape)
+        numbers = sorted(k for k in numbers if 0 <= k < len(app.shapes))
         return "; ".join(tr("hz.cc_name", n=k + 1, label=app.shape_label(app.shapes[k]))
                          for k in numbers[:5]) + ("…" if len(numbers) > 5 else "")
 

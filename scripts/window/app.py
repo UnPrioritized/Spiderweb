@@ -2219,14 +2219,26 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             on = self.edo31.get() and self.edo31_audio.get() and self.loaded is not None
             tick.state(["!disabled" if on else "disabled"])
 
+    def edo_heard(self, device=None):
+        """True when the piano roll's notes are played in 31-EDO on this MIDI out (None: the one picked), opened or
+        not yet (out.tuned only knows the open one: before the first Play it said no)."""
+        return self.edo() and self.edo31_audio.get() and (device or self.midi_device.get()) in (BUILTIN, KESTREL, AHEAD)
+
     def edo_loaded(self, device=None):
         """True when the loaded MIDI is played in 31-EDO, forced (user 2026-11-10): its notes go out as rows, like
         Spiderweb's own, on the tuned channels (one piano sound; its bends, instruments and controllers left out).
         device = the MIDI out to plan for (None: the one picked). Past EDO_MOST notes: played as written."""
+        return self.edo_loaded_wanted(device) and self.loaded.notes <= self.edo_most()
+
+    def edo_loaded_wanted(self, device=None):
+        """edo_loaded before the note count: the tick on, a loaded MIDI still the same, 31-EDO heard on device."""
+        return (self.loaded is not None and self.edo31_loaded.get() and self.edo_heard(device)
+                and not getattr(self.loaded, "changed", False))
+
+    @staticmethod
+    def edo_most():
         from notes.loaded import EDO_MOST
-        return (self.loaded is not None and self.edo31_loaded.get() and self.edo() and self.edo31_audio.get()
-                and not getattr(self.loaded, "changed", False) and self.loaded.notes <= EDO_MOST
-                and (device or self.midi_device.get()) in (BUILTIN, KESTREL, AHEAD))
+        return EDO_MOST
 
     def edo_loaded_rows(self, device=None):
         """The loaded MIDI's notes as rows for the player while edo_loaded, else None (notes.loaded.edo_rows)."""
