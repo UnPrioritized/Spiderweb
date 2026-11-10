@@ -24,6 +24,8 @@ What's new:
 • Changed: 31-EDO plays its pitches like other 31-EDO players (the 31-EDO template): row 0 is now C-1, channels go in groups of three where the 2nd and 3rd channel play 2 and 4 octaves higher, and channel 10 plays drums. A setting in Settings → Sound plays channel 10 as piano instead.
 • 31-EDO: overlaps keep their pitch (under Multi channel, on by default): in 31-EDO, overlapping shapes only go on channels 1, 4, 7, 11 and 14, then on the next port's, so they don't jump octaves, here or in the saved MIDI.
 
+• Gate extend has "Same amount for every note (from the average length)" (with %): every note of the shape ends the same number of ticks later, worked out from its average note length, so a slanted line's ends stay as even as its starts. See Help → Gate extend.
+
 • Changed: Repeated colours get new channels: a stripe bent by Stir, Warp or Liquify now stays on one track (no more colour cuts in other MIDI programs). Colours in Spiderweb stay the same; projects using a bend with this tick may put some notes on other tracks when exported.
 
 • Smaller and quicker: Spiderweb.exe is about 40 % smaller (about 70 MB instead of 116 MB), and its first start no longer waits while the speed-ups get ready. Opening, undo and redo, changing the gate and Stir on huge projects are up to 15 % faster. Running from the scripts gets the full speed with nothing extra to install.

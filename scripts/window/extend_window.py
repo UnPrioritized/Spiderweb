@@ -4,6 +4,7 @@ they run over into the notes after them like a run played by hand. The Gate subt
 shape" graph) with one side only and an "Amount in" choice: Ticks or % of each note's own length (default %, 50)."""
 
 import json
+import tkinter as tk
 from tkinter import ttk
 
 import numpy as np
@@ -46,6 +47,7 @@ class ExtendWindow(SubtractWindow):
     def side_data(self):
         d = side_data()
         d["unit"] = "pct"
+        d["sames"] = []  # (per shape: "Same amount for every note"; kept while in ticks, used only with %)
         return d
 
     @property
@@ -63,6 +65,26 @@ class ExtendWindow(SubtractWindow):
         self.unit_box.bind("<<ComboboxSelected>>", lambda e: self.pick_unit(UNITS[self.unit_box.current()]))
         for w in (self.unit_label, self.unit_box):
             Tooltip(w, tr("extend.unit_tip"))
+        self.same_var = tk.BooleanVar(value=False)
+        self.same_tick = ttk.Checkbutton(box, text=tr("extend.same"), variable=self.same_var, command=self.put_same)
+        self.same_tick.pack(anchor="w", pady=(6, 0))
+        Tooltip(self.same_tick, tr("extend.same_tip"))
+
+    def put_same(self):
+        """"Same amount for every note" clicked: every shape takes it (a half-ticked one: a click = all on)."""
+        if not self.idx:
+            return
+        self.adopt()
+        self.take_typing()
+        self.sides["end"]["sames"] = [self.same_var.get()] * len(self.idx)
+        self.show_controls()
+        self.store()
+        self.hist.mark()
+
+    def show(self):
+        super().show()
+        on = any(self.ons) and bool(self.idx) and self.pct  # (Ticks: every note gets the same amount already)
+        self.same_tick.state(["!disabled"] if on else ["disabled"])
 
     # ---- the hooks (subtract_window.SubtractWindow)
 
@@ -149,6 +171,9 @@ class ExtendWindow(SubtractWindow):
         side = {k: v for k, v in side.items() if k not in ("off", "touch", "cuts")}
         if self.pct:
             side["unit"] = "pct"
+            sames = self.sides["end"].get("sames") or []
+            if i < len(sames) and sames[i]:
+                side["same"] = True
         return side
 
     def load(self, start):
@@ -159,6 +184,7 @@ class ExtendWindow(SubtractWindow):
         got = next((e for e in exts if e), None)
         d = self.sides["end"]
         d["unit"] = "pct" if got is None or got.get("unit") == "pct" else "ticks"
+        d["sames"] = [bool(e and e.get("same")) for e in exts]
         super().load(start)
         if start:
             self.use_first()
@@ -175,6 +201,10 @@ class ExtendWindow(SubtractWindow):
         super().show_controls()
         if hasattr(self, "unit_box"):
             self.unit_box.current(UNITS.index("pct" if self.pct else "ticks"))
+        if hasattr(self, "same_tick"):
+            sames = self.sides["end"].get("sames") or []
+            self.same_var.set(bool(sames) and all(sames))
+            self.same_tick.state(["alternate"] if any(sames) and not all(sames) else ["!alternate"])
 
     def pick_unit(self, unit):
         """Ticks <-> %: the numbers shown stay (10 ticks -> 10 %), every shape takes the unit."""

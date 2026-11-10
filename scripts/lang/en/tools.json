@@ -952,6 +952,8 @@
  "extend.unit_pct": "% of each note's length",
  "extend.unit_ticks": "Ticks",
  "extend.unit_tip": "% of each note's length: a note of 10 ticks with 50 % ends 5 ticks later, a note of 40 ticks 20 ticks later.\nTicks: every note ends the same number of ticks later.\nSwitching keeps the numbers shown.",
+ "extend.same": "Same amount for every note (from the average length)",
+ "extend.same_tip": "Every note of the shape ends the same number of ticks later: the % of its notes' average length.\nKeeps the ends of a slanted line as even as its starts, where the notes differ by a tick.\nOnly with %: Ticks always adds the same amount.",
  "extend.by": "Add",
  "extend.from": "Add from",
  "extend.by_tip": "How much later each note ends (0 = none: with a graph, where nothing is added yet).",

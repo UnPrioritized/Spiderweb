@@ -4,7 +4,8 @@ notes after it like a run played by hand (user 2026-11-02, stage E2 of the gliss
 side of Gate subtract (subtract.py), built the same way.
 
 sh["extend"] = {"by": the amount, "unit": "pct" (by = % of each note's own length) or none (by = beats, shown in whole
-ticks like Gate subtract: a PPQ change keeps the look), + the graph like Gate subtract's ("vary": True while it's
+ticks like Gate subtract: a PPQ change keeps the look), "same": True (% only: % of the shape's AVERAGE note length,
+every note the same amount), + the graph like Gate subtract's ("vary": True while it's
 used; "to", "graph", "dir", "rows", "join", "count" kept while it's off)}.
 A note never runs into the next note on its own key (every colour together, like Sustain; my pick: two notes on one
 key at once is a clash in any MIDI player): it stops where that one starts, or stays as it was if it already reached
@@ -54,7 +55,9 @@ def clean_extend(s):
     out: dict = {"by": by}
     if s.get("unit") == "pct":
         out["unit"] = "pct"
-    to = _amount(s.get("to"), most)
+        if s.get("same") is True:
+            out["same"] = True
+    to =_amount(s.get("to"), most)
     if to is not None:  # (the graph: kept while it's off too)
         out.update(to=to, graph=clean_graph(s.get("graph") or ()) or [list(p) for p in STRAIGHT],
                    dir=s["dir"] if s.get("dir") in DIRS else "time")
@@ -117,7 +120,15 @@ def extended(notes, ext, ppq):
     s, e = out[:, 0].astype(np.int64), out[:, 1].astype(np.int64)
     # (% of its own length to the NEAREST tick, halves up: rounded down, notes 3 and 4 ticks long got 1 and 2 at
     # 50 %, twice as uneven as the line's own steps, user 2026-11-06)
-    add = ((e - s) * n * 2 + 100) // 200 if is_pct(ext) else n
+    if is_pct(ext) and ext.get("same"):
+        # ("Same amount for every note": % of the shape's AVERAGE length, so a slanted line's ends follow its starts
+        # exactly, like the ticks unit; user 2026-11-10, idea B)
+        avg = float(np.mean(e - s))
+        add = np.floor(avg * n / 100 + 0.5).astype(np.int64)
+    elif is_pct(ext):
+        add = ((e - s) * n * 2 + 100) // 200
+    else:
+        add = n
     want = e + add
     out[:, 1] = np.minimum(want, np.maximum(e, next_starts(notes)))
     return out

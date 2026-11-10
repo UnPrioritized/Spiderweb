@@ -7,6 +7,8 @@ A run as drawn, and with Gate extend at 100 %: every note twice as long, running
 
 Amount in: % of each note's length (the default) or Ticks. With 50 %, a note of 10 ticks ends 5 ticks later and a note of 40 ticks 20 ticks later, so short notes stay short. With Ticks every note ends the same number of ticks later. Switching keeps the numbers shown.
 
+Same amount for every note (with % only): every note ends the same number of ticks later, worked out from the shape's average note length. Use it on a slanted line whose notes differ by a tick: the ends then follow the starts as evenly as with Ticks. Leave it off for shapes whose notes really are different lengths.
+
 Add: how much each note gets (0 = none). Drag the box or the word beside it sideways to change the number. In ticks, the number follows the PPQ, so changing the PPQ keeps the look.
 
 A note never runs into the next note on its own key: it stops where that one starts (two notes on one key at once clash in any MIDI player). Notes on other keys overlap freely.
