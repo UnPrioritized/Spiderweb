@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.engine import pasted_notes
 from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, enough, new_seed, palettes, \
-    wanted, without_recolour
+    ordered, wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
@@ -315,7 +315,7 @@ class RecolourPanel:
         new = []
         for o, t in zip(olds, tgts):
             c = changed(o, t)
-            new.append(clean_recolour(c) if c else None)
+            new.append(ordered(o, clean_recolour(c)) if c else None)  # (new colour steps at the end of the order)
         if all(o == n for o, n in zip(olds, new)):
             self.sync_recolour()
             return False

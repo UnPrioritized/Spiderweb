@@ -19,7 +19,7 @@ from files.system import ALT
 from notes import liquify as lq
 from files.speed import key_sort
 from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, clean_recolour, new_seed, rule_of,
-                            turned_map, with_most, without_recolour)
+                            ordered, turned_map, with_most, without_recolour)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 
@@ -469,7 +469,7 @@ class LiquifyBrush:
                 base["liquify"] = got
             else:
                 base.pop("liquify", None)
-            new = clean_recolour(base)
+            new = ordered(old, clean_recolour(base))  # (a first Liquify goes at the end of the colour steps' order)
             if new:
                 sh["recolour"] = new
             else:
@@ -935,7 +935,7 @@ class LiquifyBrush:
         else:  # (only the mask: no notes made again (engine.made_from), the others not painted again either)
             tgts = app.recolour_targets()
             olds = [clean_recolour(t.get("recolour")) for t in tgts]
-            news = [clean_recolour(change(o, t)) for o, t in zip(olds, tgts)]
+            news = [ordered(o, clean_recolour(change(o, t))) for o, t in zip(olds, tgts)]
             if any(o != n for o, n in zip(olds, news)):
                 app.push_undo(name=tr(names[kind]))
                 for t, r in zip(tgts, news):

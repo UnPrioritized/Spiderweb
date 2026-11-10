@@ -18,7 +18,7 @@ from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_ST
                             ROUND_EDGES, bends, flip_of_matters,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
-                            stir_stack)
+                            stir_removed, stir_stack)
 from roll.roll_live import STROKE_TOOLS
 from window import look
 from window.drawer import library_lists, shape_path
@@ -79,6 +79,8 @@ def with_stir(old, i, change):
     stack += [full_stir(None)] * (i + 1 - len(stack))
     if change is None:
         del stack[i]
+        if old:  # (its own place in the colour steps' order goes too: the later tabs keep theirs)
+            old = dict(old, order=stir_removed(old, i))
     else:
         was = stack[i]
         if was == full_stir(None):  # (a stir made now: Smooth corners on from the start; old files keep their 0)

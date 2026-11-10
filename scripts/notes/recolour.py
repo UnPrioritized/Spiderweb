@@ -42,7 +42,7 @@ from notes.custom import ROUND
 
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
-KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "liquify", "warp")  # (what mode KEEP
+KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "liquify", "warp", "order")  # (what mode KEEP
 # looks at)
 # ("liquify" = the Liquify brush's bend map, notes/liquify.py: applied after every stir and the Warp; Off with only a
 # Liquify = KEEP too)
@@ -248,7 +248,102 @@ def clean_recolour(r):
     tw =clean_turned(r.get("turned"))
     if tw:
         out["turned"] = tw
+    o = r.get("order")
+    if o is not None:
+        o = order_of(dict(out, order=o))
+        if o != default_order(out):
+            out["order"] = o
     return out
+
+
+# ORDER (rc "order", PLAN.md "Order of colour settings" stage A, user 11-10): the colour steps of a shape in the
+# order they run, one entry per step: "mode" (Shuffle / Scattered / Clumps), "stir" (the n-th "stir" = Stir tab n),
+# "warp", "liquify", "turned" (Reverse track order). Saved only when it differs from default_order (today's fixed
+# order: old files and tests stay the same); new steps go at the END (= order added, ordered). Stage F adds "page"
+# entries (note tool pages) the same way. Stage A only keeps it: nothing runs by it yet.
+ORDER_KINDS = ("mode", "stir", "warp", "liquify", "turned")
+
+
+def order_counts(rc):
+    """How many steps of each kind rc holds (a Stir counts once per tab, {} tabs kept in a stack too)."""
+    rc = rc or {}
+    st = rc.get("stir")
+    return {"mode": int(rc.get("mode") in MODES), "stir": len(st) if isinstance(st, list) else int(bool(st)),
+            "warp": int(bool(rc.get("warp"))), "liquify": int(bool(rc.get("liquify"))),
+            "turned": int(bool(rc.get("turned")))}
+
+
+def default_order(rc):
+    """Today's fixed order of rc's steps: Shuffle / Scattered / Clumps, every Stir tab, Warp, Liquify, Reverse."""
+    n = order_counts(rc)
+    return [k for k in ORDER_KINDS for _ in range(n[k])]
+
+
+def order_of(rc, base=None):
+    """rc's colour steps in the order they run: its saved "order" (or base, or default_order without one), each
+    step only as often as rc holds it (gone ones dropped from the end of their kind), missing ones added at the end
+    in default order."""
+    rc = rc or {}
+    o = base if base is not None else rc.get("order")
+    if not isinstance(o, list):
+        return default_order(rc)
+    n, out = order_counts(rc), []
+    seen = dict.fromkeys(ORDER_KINDS, 0)
+    for k in o:
+        if isinstance(k, str) and k in n and seen[k] < n[k]:
+            seen[k] += 1
+            out.append(k)
+    return out + [k for k in ORDER_KINDS for _ in range(n[k] - seen[k])]
+
+
+def with_order(rc, o):
+    """rc (a dict, not changed) with order o (order_of's form): saved only when it differs from the default."""
+    if rc is None:
+        return None
+    out = {k: v for k, v in rc.items() if k != "order"}
+    o = order_of(out, o)
+    if o != default_order(out):
+        out["order"] = o
+    return out
+
+
+def ordered(old, new):
+    """new (a Recolour made from old, both clean or None) with its order carried on from old: steps kept keep their
+    places, new ones go at the end (= order added). A saved order that differs from old's (given on purpose:
+    stir_removed / order_moved, even back to the default = none saved) is kept as it is."""
+    if not new:
+        return new
+    old = old or {}
+    if new.get("order") != old.get("order"):
+        return new
+    return with_order(new, order_of(old))
+
+
+def stir_removed(rc, i):
+    """rc's order with Stir tab i taken out (its own "stir" entry, so the later tabs keep their places); call it
+    on the Recolour BEFORE the tab goes, give the result's "order" to the new one (ordered keeps it)."""
+    o = order_of(rc)
+    seen = -1
+    for j, k in enumerate(o):
+        if k == "stir":
+            seen += 1
+            if seen == i:
+                return o[:j] + o[j + 1:]
+    return o
+
+
+def order_moved(rc, a, b):
+    """rc with step a of its order moved to place b (stage E's list; two Stir tabs swap places only with their
+    tabs, so a Stir never passes another Stir here)."""
+    o = order_of(rc)
+    if not (0 <= a < len(o) and 0 <= b < len(o)):
+        return rc
+    k = o.pop(a)
+    if k == "stir" and "stir" in o[min(a, b):max(a, b)]:
+        o.insert(a, k)
+        return rc
+    o.insert(b, k)
+    return with_order(rc, o)
 
 
 def clean_turned(tw):

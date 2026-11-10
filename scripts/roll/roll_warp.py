@@ -42,7 +42,7 @@ import numpy as np
 
 from files.lang import tr
 from notes import warp as wp_
-from notes.recolour import KEEP, box_of, can_recolour, centre_at, centre_spot, clean_recolour, new_seed
+from notes.recolour import KEEP, box_of, can_recolour, centre_at, centre_spot, clean_recolour, new_seed, ordered
 from roll.roll_shared import ALT, CTRL, SHIFT, draw_boxes
 from window import look
 
@@ -1069,7 +1069,7 @@ class WarpGrid:
             base["warp"] = got
         else:
             base.pop("warp", None)
-        new = clean_recolour(base)
+        new = ordered(old, clean_recolour(base))  # (a first Warp goes at the end of the colour steps' order)
         if new:
             sh["recolour"] = new
         else:

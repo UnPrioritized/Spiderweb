@@ -32,7 +32,7 @@ from notes.sustain import alike
 from notes.engine import free_box, past_edges
 from notes.paths import rows_up_to
 from notes.custom import ROUND
-from notes.recolour import KEEP, box_of, carried, is_recoloured, turn_again, without_recolour
+from notes.recolour import KEEP, box_of, carried, clean_recolour, is_recoloured, ordered, turn_again, without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
@@ -1851,7 +1851,11 @@ class JoinSplit:
                 swap = {int(a): int(b) for a, b in zip(olds.tolist(), olds[::-1].tolist())}
                 rc = dict(sh["recolour"])
                 tw = turn_again(rc.pop("turned", None), swap)
-                sh["recolour"] = dict(rc, turned=tw) if tw else rc
+                got = dict(rc, turned=tw) if tw else rc
+                # (a first reverse goes at the end of the colour steps' order)
+                o = (ordered(clean_recolour(sh["recolour"]), clean_recolour(got)) or {}).get("order")
+                got = {k: v for k, v in got.items() if k != "order"}
+                sh["recolour"] = dict(got, order=o) if o else got
             rows[:, 4] = lap + new
             sh["notes"] = pack_notes(rows)
         self.shapes_changed()
