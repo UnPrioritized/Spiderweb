@@ -2,7 +2,8 @@
 skipped (Order of colour settings, PLAN.md stage C, user 2026-11-10: fully off while an earlier one is edited, worked
 out again once the user leaves it): "Hidden while you edit this one: Warp, Liquify" (named, user's D check-in: a
 count alone left them unsure which was which) + a Preview all button (the whole result now, without leaving the
-window). step_name: a colour step's name as the user sees it (the Colour effects window uses it too)."""
+window), and ALWAYS an "Effect order…" button beside it (user 2026-11-11: on the side panel it read like one more
+effect). step_name: a colour step's name as the user sees it (the Effect order window uses it too)."""
 
 from tkinter import ttk
 
@@ -45,7 +46,7 @@ def names_line(names, most=MOST_NAMES_CHARS):
 
 class EditLine(ttk.Frame):
     """kind = the step kind the window edits ("stir", "warp", "liquify", "mode"); after = the widget it is packed
-    after while shown."""
+    after. Always shown (Effect order…); the hidden line + Preview all only while later steps are hidden."""
 
     def __init__(self, parent, app, kind, after, wrap=280):
         super().__init__(parent)
@@ -53,11 +54,17 @@ class EditLine(ttk.Frame):
         self.label = ttk.Label(self, text="", foreground=look.HINT, wraplength=int(wrap * app.scale),
                                justify="left")
         self.label.pack(side="left", fill="x", expand=True)
-        b = ttk.Button(self, text=tr("edit.preview_all"), command=self.on_preview)
-        b.pack(side="right", padx=(6, 0))
+        b = self.preview = ttk.Button(self, text=tr("edit.preview_all"), command=self.on_preview)
         Tooltip(b, tr("edit.preview_all_tip"))
+        b = self.order = ttk.Button(self, text=tr("order.button"), command=self.on_order)
+        b.pack(side="right", padx=(6, 0))
+        Tooltip(b, tr("order.button_tip"))
         Tooltip(self.label, tr("edit.hidden_tip"))
         self.shown, self.text = 0, ""  # (how many later steps are hidden, the line's text)
+        if after is not None and after.winfo_manager() == "pack":
+            self.pack(anchor="w", fill="x", pady=(6, 0), after=after)
+        else:
+            self.pack(anchor="w", fill="x", pady=(6, 0))
 
     def sync(self):
         steps = self.app.edit_hidden_steps(self.kind)
@@ -68,11 +75,15 @@ class EditLine(ttk.Frame):
         if text == self.text:
             return
         self.text = text
-        if text:
-            self.label.config(text=text)
-            self.pack(anchor="w", fill="x", pady=(6, 0), after=self.after_w)
+        self.label.config(text=text)
+        if text:  # (Preview all right of Effect order…: packed before it = further right)
+            self.preview.pack(side="right", padx=(6, 0), before=self.order)
         else:
-            self.pack_forget()
+            self.preview.pack_forget()
 
     def on_preview(self):
         self.app.colour_edit_leave()
+
+    def on_order(self):
+        from window.colour_order_window import open_colour_order
+        open_colour_order(self.app)

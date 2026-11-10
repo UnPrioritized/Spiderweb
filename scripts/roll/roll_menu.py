@@ -190,6 +190,7 @@ class ShapeMenu:
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         self.new_colours_menu(m)
+        self.order_item(m)
         if app.fill_targets():
             item(tr("fill_gaps.menu"), "", lambda: open_fill(app))
         if fold_targets(app):  # (Fold tracks…, fold_window.py)
@@ -325,6 +326,7 @@ class ShapeMenu:
         if app.plain_targets():
             item(tr("roll_menu.turn_into_plain_notes"), "", app.turn_into_plain_notes)
         self.new_colours_menu(m)
+        self.order_item(m)
         if app.fill_targets():
             item(tr("fill_gaps.menu"), "", lambda: open_fill(app))
         if fold_targets(app):
@@ -443,6 +445,14 @@ class ShapeMenu:
         ok = app.reverse_targets()
         m.add_command(label=tr("join_split.reverse_tracks"), command=app.reverse_tracks,
                       state="normal" if ok else "disabled")
+
+    def order_item(self, m):
+        """Effect order… (colour_order_window.py) under Reverse track order, when Recolour works on a selected shape
+        (not a Hz bass); left out otherwise (user 2026-11-11: off the side panel, here + in the effect windows)."""
+        app = self.app
+        if app.recolour_targets():
+            from window.colour_order_window import open_colour_order
+            m.add_command(label=tr("order.button"), command=lambda: open_colour_order(app))
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""

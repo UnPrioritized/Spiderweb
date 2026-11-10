@@ -161,13 +161,8 @@ class RecolourPanel:
         self.recolour_liquify = ttk.Button(self.recolour_tools, text=tr("liquify.button"), command=self.open_liquify)
         self.recolour_liquify.pack(side="left", padx=(4, 0))
         Tooltip(self.recolour_liquify, tr("liquify.button_tip"))
-        # (Effects…: every colour effect of the shape in the order it runs, PLAN.md "Order of colour settings" E; on a
-        # line of its own under the dropdown / Stir… line, so the side panel needs no more width: fit_stir)
-        self.recolour_order_line = ttk.Frame(box)
-        self.recolour_order = ttk.Button(self.recolour_order_line, text=tr("order.button"),
-                                         command=self.open_colour_order)
-        self.recolour_order.pack(side="left")
-        Tooltip(self.recolour_order, tr("order.button_tip"))
+        # (Effect order… is NOT here: it read like one more effect, user 2026-11-11; it sits beside Preview all in the
+        # Stir / Warp / Liquify / Shares windows (edit_line.EditLine) + the shape's right-click menu)
         box.bind("<Configure>", lambda e: self.fit_stir(), add="+")
         self.stir_narrow = False  # (held on their own line while the side panel measures: side_narrows)
 
@@ -220,8 +215,7 @@ class RecolourPanel:
             return w.winfo_reqwidth() + sum(pad) if isinstance(pad, tuple) else w.winfo_reqwidth() + 2 * int(pad)
         others = sum(wide(w) for w in c.pack_slaves() if w is not b)
         fits = not narrow and others + b.winfo_reqwidth() + 4 <= room
-        o = self.recolour_order_line
-        if fits == (b.winfo_manager() == "pack" and b.pack_info().get("in") == c) and o.winfo_manager():
+        if fits == (b.winfo_manager() == "pack" and b.pack_info().get("in") == c):
             return
         if fits:
             b.pack(in_=c, side="left", padx=(4, 0))
@@ -229,7 +223,6 @@ class RecolourPanel:
         else:
             line.pack(anchor="w", after=c, pady=(2, 0), padx=(wide(self.recolour_word) + 5, 0))
             b.pack(in_=line, side="left", padx=(0, 0))
-        o.pack(anchor="w", after=c if fits else line, pady=(2, 0), padx=(wide(self.recolour_word) + 5, 0))
 
     def open_shares(self):
         from window.shares_window import open_shares
@@ -334,7 +327,6 @@ class RecolourPanel:
         self.recolour_stir.state(["!disabled" if tgts else "disabled"])
         self.recolour_warp.state(["!disabled" if tgts else "disabled"])
         self.recolour_liquify.state(["!disabled" if tgts else "disabled"])
-        self.recolour_order.state(["!disabled" if tgts else "disabled"])
         shown = bool(live)
         if shown != bool(self.recolour_row.winfo_manager()):
             if shown:

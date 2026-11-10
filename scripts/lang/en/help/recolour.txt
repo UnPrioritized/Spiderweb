@@ -58,7 +58,7 @@ Stir… (beside the Recolour dropdown) bends the colours the notes have now with
 
 A shape's colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order) run in the order you added them, each on the colours the one before left. A Stir and then Split: Scattered puts specks on a clean swirl; Split: Scattered and then a Stir bends the specks too.
 
-Effects… (beside Liquify…) opens the Colour effects window: the selected shape's effects from top (runs first) to bottom. Drag a line up or down to change the order, click a name to open that effect, × takes it away, and Add adds a new one at the end. With several shapes selected, changes go to every shape with the same effects in the same order.
+Effect order… (in the Stir, Warp, Liquify and Shares windows, beside Preview all, and on the shape's right-click menu) opens the Effect order window: the selected shape's effects from top (runs first) to bottom. Drag a line up or down to change the order, click a name to open that effect, × takes it away, and Add adds a new one at the end. With several shapes selected, changes go to every shape with the same effects in the same order.
 
 Split: Clumps gives every note the colour of its area, at any Rough edges, so an effect above it shows nothing: the window greys those lines. Move an effect below Clumps to see it.
 

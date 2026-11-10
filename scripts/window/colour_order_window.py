@@ -1,5 +1,7 @@
-"""The Colour effects window (Effects… on the side panel's Recolour row, panel_recolour.py; Order of colour settings,
-PLAN.md stage E, user 2026-11-10: a visible list in its own small window). It lists the first selected shape's colour
+"""The Effect order window (Effect order… beside Preview all in the Stir / Warp / Liquify / Shares windows,
+edit_line.py, and on the shape's right-click menu, roll_menu.py; user 2026-11-11: "Effects…" on the side panel read
+like one more effect; Order of colour settings, PLAN.md stage E, user 2026-11-10: a visible list in its own small
+window). It lists the first selected shape's colour
 effects in the order they run (recolour.order_of: Shuffle / Split, each Stir tab, Warp, Liquify, each Reverse track
 order step), the top one first. Drag a line up / down = another order (recolour.step_moved: a Stir past another Stir
 = the tabs swap places); click a name = open that effect's own window (that Stir tab); × = take it away
