@@ -968,7 +968,7 @@
  "extend.list": "{name} (Extended)",
  "strips.list": "{name} (Ch. per strip)",
  "warp.button": "Warp…",
- "warp.button_tip": "Bend the colours with a grid of points, like an image editor's Warp. Drag a point and the colours around it follow like rubber. The notes stay where they are: only which colour each one has changes.\nThe Warp bends after the Stir and before the Liquify.",
+ "warp.button_tip": "Bend the colours with a grid of points, like an image editor's Warp. Drag a point and the colours around it follow like rubber. The notes stay where they are: only which colour each one has changes.\nColour settings work in the order they were added: a Warp added after a Stir bends the stirred colours.",
  "warp.title": "Warp",
  "warp.nothing": "Select a shape to warp its colours.",
  "warp.shape": "Warping: {name}",

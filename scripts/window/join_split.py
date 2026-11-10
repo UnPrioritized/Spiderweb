@@ -32,7 +32,7 @@ from notes.sustain import alike
 from notes.engine import free_box, past_edges
 from notes.paths import rows_up_to
 from notes.custom import ROUND
-from notes.recolour import KEEP, box_of, carried, clean_recolour, is_recoloured, ordered, turn_again, without_recolour
+from notes.recolour import box_of, carried, clean_recolour, is_recoloured, ordered, turn_again, without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
@@ -1808,21 +1808,19 @@ class JoinSplit:
 
     def reverse_targets(self):
         """The New colours ▸ shapes Reverse track order can turn round: 2+ colours, no Channel per strip (its
-        strips pick the channels, the colours wouldn't count), colours that play apart in this Channels mode
-        (app.colours_apart: else nothing changes until Multi channel, hunt 11-06), and no Colours Shuffle /
-        Scattered / Clumps (it picks the shown colours again from the same list: the reverse barely showed)."""
+        strips pick the channels, the colours wouldn't count) and colours that play apart in this Channels mode
+        (app.colours_apart: else nothing changes until Multi channel, hunt 11-06). With Colours Shuffle / Scattered
+        / Clumps on it turns round the colours they show (a colour step in the order, PLAN.md stage B)."""
         return [i for i in self.new_colour_targets() if self.reverse_why(i) is None]
 
     def reverse_why(self, i):
-        """Why shape i can't be reversed: None (it can), "colours" (Colours Shuffle / Split on: the menu says to
-        turn it off first) or "no" (one colour, Channel per strip, colours playing together in this mode)."""
+        """Why shape i can't be reversed: None (it can) or "no" (one colour, Channel per strip, colours playing
+        together in this mode)."""
         from window.app import colours_apart
         sh = self.shapes[i]
         if "strips" in sh or len(np.unique(unpack_notes(sh["notes"])[:, 4] % ROUND)) < 2 \
                 or not colours_apart(sh, self.channel_mode.get()):
             return "no"
-        if is_recoloured(sh) and sh["recolour"].get("mode") != KEEP:
-            return "colours"
         return None
 
     def reverse_tracks(self):

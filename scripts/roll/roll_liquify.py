@@ -19,7 +19,8 @@ from files.system import ALT
 from notes import liquify as lq
 from files.speed import key_sort
 from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, clean_recolour, new_seed, rule_of,
-                            ordered, turned_map, with_most, without_recolour)
+                            liquify_last, order_of, ordered, turned_map, with_most, with_order,
+                            without_recolour)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 
@@ -513,15 +514,22 @@ class LiquifyBrush:
         _, notes, own, _ = job["made"]
         _, tracks = app.notes_tracks(without_recolour(sh))
         base = dict(old)
+        # (the step brushed must be the last colour step but a Reverse: the order of colour settings, PLAN.md stage B;
+        # a step after it = can't follow: made whole, like a Liquify after a Warp drag)
         if job.get("warp") is not None:  # (a Warp drag (roll_warp.py): the colours before the Warp, its turned-round
-            # map standing in for a Liquify's, with the Warp's edge; a Liquify after it = can't follow: made whole)
-            if base.get("liquify"):
-                return None
+            # map standing in for a Liquify's, at the Warp's place in the order, with the Warp's edge)
+            o = order_of(old) if old.get("warp") else order_of(old) + ["warp"]  # (a first drag: at the end)
             base.pop("warp", None)
             base["liquify"] = {"edge": job["warp"]["edge"]}
+            base = with_order(base, ["liquify" if k == "warp" else k for k in o])
+            if old.get("liquify"):
+                return None
         settings = {k: v for k, v in (base.get("liquify") or {}).items() if k not in ("grid", "map", "frozen")}
-        # (the rule as the notes are made with this stroke's map: any map stands in, Live is handed the real one)
+        # (the rule as the notes are made with this stroke's map: any map stands in, Live is handed the real one; a
+        # first stroke's Liquify goes at the end of the order, as ordered() puts it)
         base["liquify"] = dict(settings, grid=[2, 2], map=lq.encode(np.full((2, 2, 2), 1.0 / lq.SCALE)))
+        if not liquify_last(base):
+            return None
         rule = rule_of(with_most(dict(sh, recolour=base), app.all16())["recolour"])
         if rule.get("stir"):
             rule["ppq"] = app.ppq

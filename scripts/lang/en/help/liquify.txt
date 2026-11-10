@@ -1,6 +1,6 @@
 Liquify… (in the Recolour row, beside Stir…) is a brush you paint with on the piano roll. It pushes the colours inside a shape around, like a finger through wet paint, the way the Liquify tool of photo editing programs bends a picture. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the brush pulled into its place.
 
-The bends are kept with the shape and worked out again after every change. Change the colours underneath (Recolour, Stir, Colours) and they flow along the same bends; move or stretch the shape and the bends go with it. Liquify is applied last, after Recolour, every Stir and the Warp.
+The bends are kept with the shape and worked out again after every change. Change the colours underneath (Recolour, Stir, Colours) and they flow along the same bends; move or stretch the shape and the bends go with it. Colour settings work in the order they were added: a Liquify added after a Stir or a Warp bends their colours, one added before them is bent by them.
 
 ## Brushing
 

@@ -433,12 +433,11 @@ class ShapeMenu:
         m.add_cascade(label=tr("join_split.new_colours"), menu=sub,
                       state="normal" if app.channel_mode.get() == "auto" else "disabled")
         # Reverse track order (user 11-05 picked A: right here, beside New colours; greyed with one colour)
-        # (greyed: one colour, colours playing together in this Channels mode, or Colours Shuffle / Split on =
-        # "turn Colours off first" in the label: a greyed menu item can't show a tip, hunt 11-06)
+        # (greyed: one colour or colours playing together in this Channels mode; with Colours Shuffle / Split on it
+        # turns round the colours they show, PLAN.md stage B)
         ok = app.reverse_targets()
-        why = [app.reverse_why(i) for i in app.new_colour_targets()]
-        label = tr("join_split.reverse_tracks") if ok or "colours" not in why else tr("join_split.reverse_colours")
-        m.add_command(label=label, command=app.reverse_tracks, state="normal" if ok else "disabled")
+        m.add_command(label=tr("join_split.reverse_tracks"), command=app.reverse_tracks,
+                      state="normal" if ok else "disabled")
 
     def glue_items(self, item):
         """Glue (glue.py): in the kept Select boxes if there are any, else all the selected shapes' notes."""
