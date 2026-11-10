@@ -2331,19 +2331,21 @@ def key_bounces(at, keys, a0, b0, colours, twice):
     nk = len(keys)
     least = max(1, KEY_LOOKS // 16)
 
-    def same(i, j):
+    def same(i, j):  # (too little side by side to tell = alike: only a real colour change ends a run)
         both = inside[i] & inside[j]
-        return both.sum() >= least and bool((got[i][both] == got[j][both]).all())
+        return both.sum() < least or bool((got[i][both] == got[j][both]).all())
     v = _key_period(_key_grid(keys, got, inside))
     kl = np.asarray(keys)
     gap = (k1 - float(keys[-1])) * 2  # (edge twice's gap; 0 for Bounce back)
 
-    def run(i):  # (first, last) key row of the run of rows alike holding row i
+    def run(i):  # (first, last) key row of the run of rows alike holding row i: NEIGHBOURS compared (a slanted
+        # band's rows far apart share too little time; comparing each with row i ended a one-colour run inside the
+        # rows, so spots inside the rows bounced to other rows: sweep 2026-11-10)
         a = i
-        while a > 0 and same(a - 1, i):
+        while a > 0 and same(a - 1, a):
             a -= 1
         b = i
-        while b < nk - 1 and same(b + 1, i):
+        while b < nk - 1 and same(b + 1, b):
             b += 1
         return a, b
     lo, hi = k0, k1
