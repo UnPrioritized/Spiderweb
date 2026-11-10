@@ -2209,6 +2209,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.out.edo = tuned
             if playing:
                 self.start_play(keep=True)
+            elif getattr(self, "ahead_play", None) is not None:  # (Rendered ahead's sound made while stopped: old)
+                self.play_changed()
         self.edo_warn()
         self.roll.request_redraw()
 
