@@ -1897,21 +1897,28 @@ def row_twins(at, colours, among=None):
     """Each note's twin for the sideways colour flip by Note order (tester 11-04, PLAN B): on its key row, counted by
     start (then colour), the 1st note <-> the last, the 2nd <-> the 2nd-last and so on, whatever their lengths; a
     row of one note keeps its own. among (a mask): only those notes count, each row's part among them (the rest
-    stay their own twin)."""
+    stay their own twin). Copies stacked exactly on one place (same start, end, colour) count as ONE note, all
+    with the same twin (partial_sweep 11-10: a paste's hidden copies merged by a velocity line moved the twins)."""
     n = len(at)
     twin = np.arange(n)
     idx = twin.copy() if among is None else np.flatnonzero(among)
     if not len(idx):
         return twin
     k = np.asarray(at[idx, 2], np.int64)
-    o = np.lexsort((np.asarray(colours)[idx], np.asarray(at[idx, 0], np.int64), k))
-    ks = k[o]
-    starts = np.flatnonzero(np.r_[True, ks[1:] != ks[:-1]])
-    sizes = np.diff(np.r_[starts, len(ks)])
+    s, e = np.asarray(at[idx, 0], np.int64), np.asarray(at[idx, 1], np.int64)
+    c = np.asarray(colours)[idx]
+    o = np.lexsort((e, c, s, k))
+    ks, ss, es, cs = k[o], s[o], e[o], c[o]
+    new_row = np.r_[True, ks[1:] != ks[:-1]]
+    new_place = new_row | np.r_[True, (ss[1:] != ss[:-1]) | (es[1:] != es[:-1]) | (cs[1:] != cs[:-1])]
+    place = np.cumsum(new_place) - 1  # (each sorted note's place; copies share one)
+    at_place = np.flatnonzero(new_place)  # (each place's first note)
+    starts = np.flatnonzero(new_row[at_place])  # (each row's first place)
+    sizes = np.diff(np.r_[starts, len(at_place)])
     first = np.repeat(starts, sizes)
     last = first + np.repeat(sizes, sizes) - 1
     got = idx[o]
-    twin[got] = got[first + last - np.arange(len(ks))]
+    twin[got] = got[at_place[(first + last - np.arange(len(at_place)))[place]]]
     return twin
 
 
@@ -1943,6 +1950,45 @@ def smooth_ends(pos, vals, r):
     return out
 
 
+_PLACES = {}  # (places_count's last answer: a weak link to its at, so Cols built 3 times a stir sorts once)
+
+
+def places_count(at):
+    """How many different places (start, end, key) at's notes sit on: copies stacked exactly on one place (a
+    paste's kept overlaps, only their velocity / colour differ) count once, so a velocity line merging hidden copies
+    never moves Cols' slices (partial_sweep 11-10: the whole upside-down flip shifted)."""
+    a = np.asarray(at)
+    n = len(a)
+    mark = (n, float(a[:, :3].sum())) if n else (0, 0.0)  # (an array changed in place since: worked out again)
+    got = _PLACES.get("got")
+    if got is not None and got[0]() is at and got[2] == mark:
+        return got[1]
+    count = n
+    if n > 1:
+        k, s, e = a[:, 2], a[:, 0], a[:, 1]
+        if a.dtype == np.int64 and np.abs(a[:, :2]).max() < 1 << 52:
+            o = key_sort(np.asarray(k, np.int64), s + e)  # (by key, then middle: compiled when it's there)
+        else:
+            o = np.lexsort((s + e, k))
+        ks, ss, es = k[o], s[o], e[o]
+        tie = (ks[1:] == ks[:-1]) & (ss[1:] + es[1:] == ss[:-1] + es[:-1])
+        if tie.any():
+            same = tie & (ss[1:] == ss[:-1])
+            if (tie == same).all():  # (every tie an exact copy of the one before it)
+                count = n - int(same.sum())
+            else:  # (one middle, different starts: those groups counted exactly)
+                grp = np.zeros(n, bool)
+                grp[1:] |= tie
+                grp[:-1] |= tie
+                rows = np.column_stack([ks[grp], ss[grp], es[grp]])
+                count = n - int(grp.sum()) + len(np.unique(rows, axis=0))
+    try:
+        _PLACES["got"] = (weakref.ref(at), count, mark)
+    except TypeError:  # (a plain list: nothing kept)
+        pass
+    return count
+
+
 class Cols:
     """The lowest and highest key of at's notes around each time (notes put in slices by their middle; a slice
     without notes counts as the nearest one with notes), for Stir's upside-down colour flip. smooth: Smooth corners,
@@ -1952,7 +1998,7 @@ class Cols:
         mid = (np.asarray(at[:, 0], np.float64) + np.asarray(at[:, 1], np.float64)) / 2
         k = np.asarray(at[:, 2], np.float64)
         self.t0 = float(mid.min())
-        self.n = int(max(1, min(1024, len(at) // 8)))  # (about 8 notes a slice)
+        self.n = int(max(1, min(1024, places_count(at) // 8)))  # (about 8 notes a slice; copies on one place = one)
         self.w = max(float(mid.max()) - self.t0, 1.0) / self.n
         b = self.slice(mid)
         lo, hi = np.full(self.n, np.inf), np.full(self.n, -np.inf)
@@ -2639,6 +2685,27 @@ def kept_apart(notes, old, new, colours, pick):
     over[1:] &= ks[1:] == ks[:-1]
     if not over.any():
         return new
+    # (copies stacked exactly on one place, same colour before and now (a paste's kept overlaps): counted ONCE, each
+    # taking its first one's colour; a hidden copy made a pair a burst of 3 = another way of keeping apart, 11-10)
+    # (only notes sharing a key and start with the one before them can be copies: most shapes have none = no work)
+    twin = over[1:] & (ss[1:] == ss[:-1])
+    ib = np.empty(0, np.int64)
+    if twin.any():
+        both = np.zeros(len(o), bool)
+        both[1:] |= twin
+        both[:-1] |= twin
+        ib = o[both]
+        rows = np.column_stack([s[ib], e[ib], k[ib], np.asarray(old, np.int64)[ib], np.asarray(new, np.int64)[ib]])
+        _, first, inv = np.unique(rows, axis=0, return_index=True, return_inverse=True)
+    if len(ib) and len(first) < len(ib):
+        keep = np.ones(len(s), bool)
+        keep[ib] = False
+        keep[ib[first]] = True
+        out = np.array(new, copy=True)
+        out[keep] = kept_apart(notes[keep], np.asarray(old)[keep], np.asarray(new)[keep], colours,
+                               np.asarray(pick)[keep])
+        out[ib] = out[ib[first][np.ravel(inv)]]
+        return out
     new = new.copy()
     # (a note whose colour before isn't one of these (Mix across sets + a Stir's "Stay": it came from another set)
     # falls back on its dice's colour here, never its own: the compiled walk read past the colour list = every
