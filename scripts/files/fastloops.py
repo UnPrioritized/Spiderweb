@@ -1609,7 +1609,99 @@ def dice_mix(seed, c0, c1, c2, c3, out):
 def recolour_apart(order, ss, e, old, new, pick, bstart, bsize, nc):
     """recolour.kept_apart's walk through its bursts of 3+ notes (old / new: colour numbers 0 .. nc - 1, new changed
     in place): a note keeps no colour that a note sounding with it, of ANOTHER colour before, has now (its own one
-    first, else the free one its dice pick, its own one when none is free)."""
+    first, else the free one its dice pick, its own one when none is free). The notes still sounding are counted per
+    colour now and per (colour before, colour now) and kept in a heap by their ends, so a note looks at the colours,
+    never at every note sounding with it (long held notes: 4x the notes took 14x, 2026-11-11); more colours than
+    APART_TABLE_MOST allows a table for: the old note-by-note walk (_apart_scan)."""
+    if nc * nc > APART_TABLE_MOST:
+        _apart_scan(order, ss, e, old, new, pick, bstart, bsize, nc)
+        return
+    most = max(1, bsize.max() if len(bsize) else 1)
+    he = np.empty(most, np.int64)  # (the heap: each sounding note's end + the note)
+    hi = np.empty(most, np.int64)
+    now = np.zeros(nc, np.int64)  # (sounding notes per colour now)
+    pair = np.zeros(nc * nc, np.int64)  # (sounding notes per colour before * nc + colour now)
+    taken = np.zeros(nc, np.bool_)
+    for w in range(len(bstart)):
+        hn = 0
+        for j in range(bstart[w], bstart[w] + bsize[w]):
+            i = order[j]
+            while hn > 0 and he[0] <= ss[j]:  # (ending where this one starts: touching, fine)
+                x = hi[0]
+                now[new[x]] -= 1
+                pair[old[x] * nc + new[x]] -= 1
+                hn -= 1
+                _heap_down(he, hi, hn)
+            count = 0
+            base = old[i] * nc
+            for c in range(nc):
+                t = now[c] - pair[base + c] > 0
+                taken[c] = t
+                if t:
+                    count += 1
+            if taken[new[i]]:
+                free = nc - count
+                if free == 0 or not taken[old[i]]:
+                    new[i] = old[i]
+                else:
+                    r = min(int(pick[i] * free), free - 1)
+                    for c in range(nc):
+                        if not taken[c]:
+                            if r == 0:
+                                new[i] = c
+                                break
+                            r -= 1
+            now[new[i]] += 1
+            pair[old[i] * nc + new[i]] += 1
+            _heap_up(he, hi, hn, e[i], i)
+            hn += 1
+        while hn > 0:  # (the burst over: its notes let go)
+            x = hi[0]
+            now[new[x]] -= 1
+            pair[old[x] * nc + new[x]] -= 1
+            hn -= 1
+            _heap_down(he, hi, hn)
+
+
+APART_TABLE_MOST = 1 << 22  # (recolour_apart: colours x colours counted at most; past it the old walk)
+
+
+@njit(nogil=True)
+def _heap_up(he, hi, hn, end, i):
+    """recolour_apart's heap: (end, i) put in at place hn (hn = the heap's size before)."""
+    p = hn
+    while p > 0:
+        q = (p - 1) // 2
+        if he[q] <= end:
+            break
+        he[p], hi[p] = he[q], hi[q]
+        p = q
+    he[p], hi[p] = end, i
+
+
+@njit(nogil=True)
+def _heap_down(he, hi, hn):
+    """recolour_apart's heap: its top taken out (hn = the heap's size after), the last one sifted down."""
+    if hn == 0:
+        return
+    end, i = he[hn], hi[hn]
+    p = 0
+    while True:
+        q = 2 * p + 1
+        if q >= hn:
+            break
+        if q + 1 < hn and he[q + 1] < he[q]:
+            q += 1
+        if he[q] >= end:
+            break
+        he[p], hi[p] = he[q], hi[q]
+        p = q
+    he[p], hi[p] = end, i
+
+
+@njit(nogil=True)
+def _apart_scan(order, ss, e, old, new, pick, bstart, bsize, nc):
+    """recolour_apart's old walk (every sounding note looked at, for each note): many colours only."""
     act = np.empty(max(1, bsize.max() if len(bsize) else 1), np.int64)
     taken = np.zeros(nc, np.bool_)
     for w in range(len(bstart)):

@@ -3399,18 +3399,24 @@ def kept_apart(notes, old, new, colours, pick):
     lst = colours.tolist()
     for w in big.tolist():
         sounding = []  # (end, note) of the notes still sounding in this burst
+        now, pair = {}, {}  # (sounding notes per colour now / per (colour before, colour now): fastloops' counts)
         for j in range(int(starts[w]), int(starts[w]) + int(size[w])):
             i = int(o[j])
             while sounding and sounding[0][0] <= ss[j]:  # (ending where this one starts: touching, fine)
-                heapq.heappop(sounding)
+                x = heapq.heappop(sounding)[1]
+                now[int(new[x])] -= 1
+                pair[int(old[x]), int(new[x])] -= 1
             mine = int(old[i])
-            taken = {int(new[x]) for _, x in sounding if int(old[x]) != mine}
+            taken = {c for c, m in now.items() if m - pair.get((mine, c), 0) > 0}
             if int(new[i]) in taken:
                 free = [c for c in lst if c not in taken]
                 if not free or mine in free:
                     new[i] = mine
                 else:
                     new[i] = free[min(int(pick[i] * len(free)), len(free) - 1)]
+            c = int(new[i])
+            now[c] = now.get(c, 0) + 1
+            pair[mine, c] = pair.get((mine, c), 0) + 1
             heapq.heappush(sounding, (int(es[j]), i))
     return new
 

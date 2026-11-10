@@ -1189,11 +1189,130 @@ pub fn dice_mix(seed: u64, c0: &[u64], c1: &[u64], c2: &[u64], c3: &[u64], out: 
 #[inline(always)]
 pub fn recolour_apart(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64], pick: &[f64],
                       bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
-    if apart_plain(order, ss, e, old, new, pick, bstart, bsize, nc) {
-        apart_walk::<false>(order, ss, e, old, new, pick, bstart, bsize, nc)
-    } else {
-        apart_walk::<true>(order, ss, e, old, new, pick, bstart, bsize, nc)
+    let table = nc > 0 && nc.saturating_mul(nc) <= APART_TABLE_MOST;
+    match (apart_plain(order, ss, e, old, new, pick, bstart, bsize, nc), table) {
+        (true, true) => apart_counts::<false>(order, ss, e, old, new, pick, bstart, bsize, nc),
+        (false, true) => apart_counts::<true>(order, ss, e, old, new, pick, bstart, bsize, nc),
+        (true, false) => apart_walk::<false>(order, ss, e, old, new, pick, bstart, bsize, nc),
+        (false, false) => apart_walk::<true>(order, ss, e, old, new, pick, bstart, bsize, nc),
     }
+}
+
+/// fastloops.APART_TABLE_MOST: colours x colours counted at most; past it the old note-by-note walk.
+const APART_TABLE_MOST: i64 = 1 << 22;
+
+/// fastloops.recolour_apart's counting walk: the notes still sounding counted per colour now and per (colour
+/// before, colour now), kept in a heap by their ends (fastloops._heap_up / _heap_down, the same steps).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn apart_counts<const CHECK: bool>(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64],
+                                   pick: &[f64], bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
+    let most = if bsize.is_empty() { 1 } else { bsize.iter().copied().max().unwrap_or(1).max(1) } as usize;
+    let mut he = need!(zeros::<i64>(most));
+    let mut hi = need!(zeros::<i64>(most));
+    let ncu = nc.max(0) as usize;
+    let mut now = need!(zeros::<i64>(ncu));
+    let mut pair = need!(zeros::<i64>(ncu * ncu));
+    let mut taken = need!(zeros::<bool>(ncu));
+    for w in 0..bstart.len() {
+        let mut hn = 0usize;
+        for j in bstart[w]..bstart[w] + bsize[w] {
+            let ju = j as usize;
+            let i = at::<_, CHECK>(order, ju) as usize;
+            let sj = at::<_, CHECK>(ss, ju);
+            while hn > 0 && he[0] <= sj {
+                let x = hi[0] as usize;
+                let (ox, nx) = (at::<_, CHECK>(old, x) as usize, at::<_, CHECK>(new, x) as usize);
+                now[nx] -= 1;
+                pair[ox * ncu + nx] -= 1;
+                hn -= 1;
+                heap_down(&mut he, &mut hi, hn);
+            }
+            let oi = at::<_, CHECK>(old, i);
+            let base = oi as usize * ncu;
+            let mut count = 0i64;
+            for c in 0..ncu {
+                let t = now[c] - pair[base + c] > 0;
+                taken[c] = t;
+                if t {
+                    count += 1;
+                }
+            }
+            if taken[at::<_, CHECK>(new, i) as usize] {
+                let free = nc - count;
+                if free == 0 || !taken[oi as usize] {
+                    new[i] = oi;
+                } else {
+                    let mut r = crate::maths::f2i(pick[i] * free as f64).min(free - 1);
+                    for c in 0..ncu {
+                        if !taken[c] {
+                            if r == 0 {
+                                new[i] = c as i64;
+                                break;
+                            }
+                            r -= 1;
+                        }
+                    }
+                }
+            }
+            let ni = new[i] as usize;
+            now[ni] += 1;
+            pair[base + ni] += 1;
+            heap_up(&mut he, &mut hi, hn, at::<_, CHECK>(e, i), i as i64);
+            hn += 1;
+        }
+        while hn > 0 {
+            let x = hi[0] as usize;
+            let (ox, nx) = (old[x] as usize, new[x] as usize);
+            now[nx] -= 1;
+            pair[ox * ncu + nx] -= 1;
+            hn -= 1;
+            heap_down(&mut he, &mut hi, hn);
+        }
+    }
+    0
+}
+
+#[inline(always)]
+fn heap_up(he: &mut [i64], hi: &mut [i64], hn: usize, end: i64, i: i64) {
+    let mut p = hn;
+    while p > 0 {
+        let q = (p - 1) / 2;
+        if he[q] <= end {
+            break;
+        }
+        he[p] = he[q];
+        hi[p] = hi[q];
+        p = q;
+    }
+    he[p] = end;
+    hi[p] = i;
+}
+
+#[inline(always)]
+fn heap_down(he: &mut [i64], hi: &mut [i64], hn: usize) {
+    if hn == 0 {
+        return;
+    }
+    let (end, i) = (he[hn], hi[hn]);
+    let mut p = 0usize;
+    loop {
+        let mut q = 2 * p + 1;
+        if q >= hn {
+            break;
+        }
+        if q + 1 < hn && he[q + 1] < he[q] {
+            q += 1;
+        }
+        if he[q] >= end {
+            break;
+        }
+        he[p] = he[q];
+        hi[p] = hi[q];
+        p = q;
+    }
+    he[p] = end;
+    hi[p] = i;
 }
 
 /// Every place recolour_apart will read checked once: bursts inside order / ss, notes inside e / old / new / pick,
