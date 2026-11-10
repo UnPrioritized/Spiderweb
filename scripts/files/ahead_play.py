@@ -241,7 +241,7 @@ class AheadPlay:
         from window.hz_preview import font_list
         from files.render_ahead import engine_used
         engine = self.picked if self.audio is not None and self.picked else engine_used(self.app.ahead_engine.get())
-        lm = self.app.loaded
+        lm = self._loaded()
         if engine != "merlin":  # (BASSMIDI with a loaded MIDI: the card's piece files read by BASSMIDI, L4)
             return engine, None
         why = merlin_gap(ccs, font_list(self.app.hz_preview)) or (loaded_gap(lm) if lm is not None else None)
@@ -256,8 +256,15 @@ class AheadPlay:
         edo = self._edo_first(engine)  # (BASSMIDI: one sound a row, as live Built-in play; hunt 2026-11-07)
         own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo,
                    one_sound=edo is not None and engine == "bassmidi")
-        lm = self.app.loaded
+        lm = self._loaded()
         return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else ())
+
+    def _loaded(self):
+        """The loaded MIDI made from its own bytes, or None: none loaded, or 31-EDO's Loaded MIDI tick (its notes
+        come in the rows instead, App.play_apart)."""
+        from files.playback import AHEAD
+        app = self.app
+        return None if app.loaded is None or app.edo_loaded(AHEAD) else app.loaded
 
     def _edo_first(self, engine):
         """31-EDO's first channel for this engine while the 31-EDO + Audio ticks are on, else None: BASSMIDI's after

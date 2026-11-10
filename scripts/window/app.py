@@ -969,6 +969,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.keys_var = tk.StringVar(value=str(KEYS[0]))
         self.edo31 = tk.BooleanVar(value=False)  # 256 keys shown as 31-EDO (the look only: edo())
         self.edo31_audio = tk.BooleanVar(value=False)  # ... and played that way (Built-in BASSMIDI)
+        self.edo31_loaded = tk.BooleanVar(value=False)  # ... a loaded MIDI too, forced (App.edo_loaded)
         self.show_history = tk.BooleanVar(value=False)  # the History panel (off on a fresh start, like the velocity pane)
         self.show_velocity = tk.BooleanVar(value=False)  # off on a fresh start: turning it on shows its tip
         self.vel_tool = tk.StringVar(value="line")
@@ -1535,6 +1536,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             e.master.config(width=b.winfo_reqwidth(), height=e.winfo_reqheight())
             e.master.pack_propagate(False)
         r += 1
+        # (a line of its own under Keys, shown with the 31-EDO ticks: beside them it widened the panel)
+        self.edo_loaded_tick = ttk.Checkbutton(box, text=tr("app.edo31_loaded"), variable=self.edo31_loaded,
+                                               command=self.edo_loaded_ticked)
+        self.edo_loaded_tick.grid(row=r, column=1, sticky="w", padx=5, pady=1)
+        self.edo_loaded_tick.grid_remove()
+        Tooltip(self.edo_loaded_tick, tr("app.edo31_loaded_tip"))
+        r += 1
         ttk.Label(box, text=tr("app.output_file")).grid(row=r, column=0, sticky="w", pady=1)
         out = ttk.Frame(box)
         out.grid(row=r, column=1, sticky="ew", padx=5)
@@ -1805,6 +1813,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         sh = self.selected()
         self.sync_title()
         self.sync_ppq_lock()
+        self.sync_edo_loaded()  # (a MIDI loaded / gone)
         self._loading = True
         for key, var in self.fvars.items():
             var.set(fmt(self.target()[key]))
@@ -2185,9 +2194,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         big = self.keys == KEYS[1]
         if big and not self.edo_ticks.winfo_manager():
             self.edo_ticks.pack(side="left")
+            self.edo_loaded_tick.grid()
         elif not big and self.edo_ticks.winfo_manager():
             self.edo_ticks.pack_forget()
+            self.edo_loaded_tick.grid_remove()
         self.edo_audio_tick.state(["!disabled" if self.edo31.get() else "disabled"])
+        self.sync_edo_loaded()
         tuned = self.edo() and self.edo31_audio.get()
         if tuned != self.out.edo:  # (sounding notes end first: their note-offs go where their note-ons went)
             playing = self.player.running
@@ -2199,6 +2211,42 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.start_play(keep=True)
         self.edo_warn()
         self.roll.request_redraw()
+
+    def sync_edo_loaded(self):
+        """The Loaded MIDI tick greyed until 31-EDO + Audio are ticked and a MIDI is loaded."""
+        tick = getattr(self, "edo_loaded_tick", None)
+        if tick is not None:  # (built with the side panel)
+            on = self.edo31.get() and self.edo31_audio.get() and self.loaded is not None
+            tick.state(["!disabled" if on else "disabled"])
+
+    def edo_loaded(self, device=None):
+        """True when the loaded MIDI is played in 31-EDO, forced (user 2026-11-10): its notes go out as rows, like
+        Spiderweb's own, on the tuned channels (one piano sound; its bends, instruments and controllers left out).
+        device = the MIDI out to plan for (None: the one picked). Past EDO_MOST notes: played as written."""
+        from notes.loaded import EDO_MOST
+        return (self.loaded is not None and self.edo31_loaded.get() and self.edo() and self.edo31_audio.get()
+                and not getattr(self.loaded, "changed", False) and self.loaded.notes <= EDO_MOST
+                and (device or self.midi_device.get()) in (BUILTIN, KESTREL, AHEAD))
+
+    def edo_loaded_rows(self, device=None):
+        """The loaded MIDI's notes as rows for the player while edo_loaded, else None (notes.loaded.edo_rows)."""
+        if not self.edo_loaded(device):
+            return None
+        from notes.loaded import edo_rows
+        try:
+            return edo_rows(self.loaded, self.track_list.loaded_mutes(), self.ppq)
+        except Exception:  # (a file that changed / went: plays nothing of it, said when drawing / exporting)
+            errors.write_log(*sys.exc_info(), "(a loaded MIDI's notes for 31-EDO)")
+            return None
+
+    def edo_loaded_ticked(self):
+        """The Loaded MIDI tick: heard from now on (playing: started again from where it is)."""
+        self.schedule_autosave()
+        if self.player.running:
+            self.stop_play()
+            self.start_play(keep=True)
+        else:
+            self.play_changed()  # (Rendered ahead's making while stopped: made again)
 
     def edo_warn(self):
         """The Audio tick orange (+ its tip says why) while it's on but the MIDI out can't play 31-EDO."""

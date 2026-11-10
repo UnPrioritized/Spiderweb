@@ -1,7 +1,9 @@
-31-EDO splits the octave into 31 equal steps instead of 12. Spiderweb can show and play it when Keys (under Project) is set to 256: then two ticks show next to Keys.
+31-EDO splits the octave into 31 equal steps instead of 12. Spiderweb can show and play it when Keys (under Project) is set to 256: then the 31-EDO ticks show next to Keys and under it.
 
 31-EDO: the piano roll shows 31 keys an octave (key 0 = C0). On the keyboard, white keys are the 7 plain notes, black keys sharps and flats, and the short grey keys half sharps (^) and half flats (v); their rows are white, dark and light. Zoomed in, every row is named.
 
 Audio (only while 31-EDO is ticked): playback and listening with the right mouse button play the notes in 31-EDO, every key up to 255. It works with Built-in BASSMIDI, Kestrel (GPU) or Rendered ahead as the MIDI out; with another one the tick turns orange and playback plays the usual way (keys above 127 skipped).
 
-Only the look and the sound here change: the saved MIDI and Copy to Domino keep the same key numbers, so play it in a player set up for 31-EDO. Both ticks are saved with the project.
+Play the loaded MIDI in 31-EDO (under Keys; with Audio ticked and a MIDI loaded): a loaded MIDI plays as written at first, so its notes don't follow the 31-EDO rows. Ticked, its notes play tuned like yours, every key up to 255. The tuning needs every channel's pitch bend for itself, so it all plays as one piano sound: the MIDI's pitch bends, instrument changes, volume / expression, sustain pedal and other controls are left out (the status line counts them at Play).
+
+Only the look and the sound here change: the saved MIDI and Copy to Domino keep the same key numbers, so play it in a player set up for 31-EDO. The ticks are saved with the project; the saved MIDI and Copy to Domino are the same with "Play the loaded MIDI in 31-EDO" ticked.

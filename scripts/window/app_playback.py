@@ -144,7 +144,8 @@ class Playback:
         # (Overlapping shapes keep their colours: shapes overlapping on a key share its channel, render keep)
         self.player.shared = self.rows_apart()
         # (Rendered ahead: the loaded MIDI is made ahead with the rest, files/ahead_loaded.py; not played live too)
-        along = self.loaded is not None and self.out.name != AHEAD
+        # (31-EDO's Loaded MIDI tick: its notes go along with your own instead, play_apart)
+        along = self.loaded is not None and self.out.name != AHEAD and not self.edo_loaded()
         self.player.along = along
         rendered, ccs, ports = self.play_parts(ppq, bpm)
         end, tempo = self.end_and_tempo(ppq, bpm, beats, self.playhead)
@@ -174,6 +175,14 @@ class Playback:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo and not self.out.tuned:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
+        if self.edo_loaded():  # (what the tuned play leaves out of the loaded MIDI, when it has any; user)
+            left = self.edo_left_text()
+            if left:
+                self.status.config(text=left)
+        elif along and self.out.tuned and self.edo31_loaded.get():  # (too many notes to hold: as written, said)
+            from notes.loaded import EDO_MOST
+            if self.loaded.notes > EDO_MOST:
+                self.status.config(text=tr("app.edo31_loaded_too_many", n=f"{EDO_MOST:,}"))
         self.play_btn.config(text=tr("app.stop_space"))
         self.roll.show_playhead(start=True)
         if self.loaded is not None:  # (a redraw now: the loaded notes' exact pictures start reading ahead the way
@@ -181,6 +190,14 @@ class Playback:
         self._play_job = self.after(15, self._play_tick)
         if self.out.name == AHEAD:  # (the first time: what the faint grey and the wait at Play are)
             self.after_idle(lambda: self.tips.show("ahead", wait=True))
+
+    def edo_left_text(self):
+        """The status line's "left out" text for 31-EDO's Loaded MIDI tick: the loaded MIDI's pitch bends, instrument
+        changes and controller changes counted (only the kinds it has), "" when it has none."""
+        from notes.loaded import edo_left_out
+        parts = [trn(k, n, n=n) for k, n in zip(("n.pitch_bends", "n.instrument_changes", "n.controller_changes"),
+                                                edo_left_out(self.loaded)) if n]
+        return tr("app.edo31_loaded_left", list=tr("app.edo31_left_sep").join(parts)) if parts else ""
 
     def kestrel_stuck(self, live, now):
         """Kestrel made no new sound for STUCK_PLAY_S while the speakers kept taking it (silence handed out): its
@@ -416,15 +433,21 @@ class Playback:
             if any("cc" in sh for sh in self.shapes) else {}
         # (tracks muted in the track list: not played; + wrapped kept notes, App.outgoing)
         heard = self.track_list.unmuted(self.outgoing())
+        edo = self.edo_loaded_rows(device)  # (31-EDO's Loaded MIDI tick: its notes as rows, beside your own)
+
+        def with_edo(notes):
+            if edo is None or not len(edo):
+                return notes
+            return np.concatenate([np.asarray(notes, np.int64).reshape(-1, edo.shape[1]), edo])
         if not per_shape and not any(pasted.values()):
-            return heard, {}, 0
+            return with_edo(heard), {}, 0
         ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO, AHEAD) else 0
         rendered, msgs = cc_apart(heard, per_shape, self.picture_use10, ports) if per_shape else (heard, {})
         for s, ms in pasted.items():
             if ms:
                 msgs.setdefault(s, []).extend(ms)
                 msgs[s].sort(key=lambda e: e[0])
-        return rendered, msgs, ports
+        return with_edo(rendered), msgs, ports
 
     def _play_tick(self):
         self._play_job = None
@@ -1645,7 +1668,7 @@ class Playback:
                 now[k] = (s, v)
         held = self._scrub_held
         # (a loaded MIDI's notes drawn on top there; Spiderweb's own win a key both sound; 31-EDO: its notes played
-        # as written, like playback plays them, Spiderweb's own rows tuned beside them)
+        # as written, like playback plays them, Spiderweb's own rows tuned beside them; Loaded MIDI ticked: tuned too)
         if self.loaded is not None:
             from roll.roll_loaded import loud_on, scrub_notes, shown_only, shown_tracks
             order, faint = shown_tracks(self, self.loaded)
@@ -1655,8 +1678,9 @@ class Playback:
             got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm, loud_on(self),
                                      shown_only(self, self.loaded))
             drums = out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
-            for (ch, p), (s, v) in got.items():  # own drum channel; other MIDI outs' channel 10 is drums already)
-                k = (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
+            edo = tuned and self.edo_loaded()  # own drum channel; other MIDI outs' channel 10 is drums already;
+            for (ch, p), (s, v) in got.items():  # 31-EDO's Loaded MIDI tick: rows, like playback plays them)
+                k = (None, p) if edo else (LIVE_DRUMS_CODE if drums and ch == 9 else ch, p)
                 if k not in now:  # (sounding without a start in this sweep: held on as it is, a new key sounds)
                     now[k] = (held.get(k, -1) if s is None else -2 - s, v)
             if rough:  # (too many notes to read in time: every key drawn, one loudness; user 2026-10-25)

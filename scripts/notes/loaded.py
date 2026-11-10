@@ -642,6 +642,62 @@ def gather_box(lm, box, cancel=None, progress=None, most=None, held=False):
     return out
 
 
+EDO_MOST = 4_000_000  # notes a loaded MIDI may have to be played in 31-EDO (edo_rows: all read into memory)
+
+
+def edo_notes(lm):
+    """Every note of lm as (track, start, end, key, channel, velocity) arrays, for playing it in 31-EDO (user
+    2026-11-10: forced, one piano sound): removed tracks and Extract's hidden notes left out, keys up to 255.
+    Read once per hidden set (gather_box over the whole song), kept on lm."""
+    key = (lm.hide_ver, lm.gone)
+    got = getattr(lm, "_edo_notes", None)
+    if got is not None and got[0] == key:
+        return got[1]
+    tracks = [n for n in range(len(lm.tracks)) if n not in lm.gone]
+    g = gather_box(lm, {"t0": 0, "t1": lm.last_tick + 1, "k0": 0, "k1": 255, "tracks": tracks})
+    lane = g["lane"]
+    out = (g["trk"], g["s"], g["e"], lane & 255, lane >> 8, g["vel"])
+    lm._edo_notes = (key, out)
+    return out
+
+
+def edo_left_out(lm):
+    """(pitch bends, instrument changes, controller changes: CC + key / channel pressure) in lm's tracks (removed
+    ones not counted): what playing it in 31-EDO leaves out. From the load's own counts, nothing read."""
+    from files import midi_scan as S
+    got = getattr(lm, "_edo_left", None)
+    if got is not None and got[0] == lm.gone:
+        return got[1]
+    c = np.zeros(S.C_CHANNELS, np.int64)  # (counts up to C_BEND)
+    for n, t in enumerate(lm.mf.tracks):
+        if n not in lm.gone and t.counts is not None:
+            got = np.asarray(t.counts, np.int64)[:len(c)]
+            c[:len(got)] += got
+    out = (int(c[S.C_BEND]), int(c[S.C_PROG]), int(c[S.C_CC] + c[S.C_PRESS] + c[S.C_POLY]))
+    lm._edo_left = (lm.gone, out)
+    return out
+
+
+def edo_rows(lm, muted, ppq):
+    """lm's notes as the player's rows (start, end, key row, velocity, slot 0, owner -1) in ppq's ticks, the muted
+    tracks / channels (TrackList.loaded_mutes) left out. Kept on lm until something it reads changes."""
+    key = (lm.hide_ver, lm.gone, tuple(muted), ppq)
+    got = getattr(lm, "_edo_rows", None)
+    if got is not None and got[0] == key:
+        return got[1]
+    trk, s, e, k, ch, vel = edo_notes(lm)
+    if len(muted):
+        from files.play_loaded import mute_masks
+        mask = mute_masks(muted, len(lm.tracks)).astype(np.int64)
+        keep = ((mask[trk] >> ch) & 1) == 0
+        trk, s, e, k, ch, vel = (a[keep] for a in (trk, s, e, k, ch, vel))
+    if ppq != lm.ppq:  # (the project's ticks: the same beats)
+        s, e = s * ppq // lm.ppq, e * ppq // lm.ppq
+    rows = np.column_stack([s, e, k, vel, np.zeros(len(s), np.int64), np.full(len(s), -1, np.int64)]).astype(np.int64)
+    lm._edo_rows = (key, rows)
+    return rows
+
+
 def set_boxes(lm, boxes, found=None):
     """The loaded notes hidden = the ones these Extract boxes took (the shapes holding them now, in order); a box
     not seen before is gathered (found = {box_key: gather_box's} made already). The overview loses them too."""

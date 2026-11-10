@@ -318,7 +318,7 @@ class ProjectFiles:
             **({"loaded": dict(link)} if link else {}),
             "ppq": self.pvar["ppq"].get(), "bpm": self.pvar["bpm"].get(),
             "output": self.pvar["output"].get(), "channel_mode": self.channel_mode.get(), "channel_split": self.channel_split,
-            "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()),
+            "use_ch10": bool(self.use_ch10.get()), "ch10_order": bool(self.ch10_order.get()), "new_rounds": bool(self.new_rounds.get()), "pad_rounds": bool(self.pad_rounds.get()),"keys": self.keys, "edo31": bool(self.edo31.get()), "edo31_audio": bool(self.edo31_audio.get()), "edo31_loaded": bool(self.edo31_loaded.get()),
             # (overlap fixing, user 2026-11-06: only when on, so files without them stay as they were)
             **{k: True for k, v in (("single_split", self.single_split), ("multi_cut", self.multi_cut),
                                     ("multi_later", self.multi_later), ("multi_stretch", self.multi_stretch))
@@ -482,6 +482,7 @@ class ProjectFiles:
         self.keys_var.set(str(KEYS[1] if data.get("keys") == KEYS[1] else KEYS[0]))
         self.edo31.set(data.get("edo31") is True)
         self.edo31_audio.set(data.get("edo31_audio") is True)
+        self.edo31_loaded.set(data.get("edo31_loaded") is True)
         self.split_box.current(SPLITS.index(split) if split in SPLITS else 0)
         self.sync_channels_fold()
         if start in starts:
