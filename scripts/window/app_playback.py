@@ -452,7 +452,17 @@ class Playback:
         if not per_shape and not any(pasted.values()):
             return with_edo(heard), {}, 0
         ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO, AHEAD) else 0
-        rendered, msgs = cc_apart(heard, per_shape, self.picture_use10, ports) if per_shape else (heard, {})
+        if per_shape and self.edo_heard(device or self.out.name):
+            # (31-EDO played tuned: the channel sets the octave, so a moved Hz bass jumped 2 / 4 octaves; its CC lines
+            # never reach the tuned notes anyway (live play sends none, Rendered ahead's go on the plain channels))
+            rendered, msgs = heard, {}
+            for messages in per_shape.values():
+                for s, events in messages.items():
+                    msgs.setdefault(s, []).extend(events)
+            for events in msgs.values():
+                events.sort(key=lambda e: e[0])
+        else:
+            rendered, msgs = cc_apart(heard, per_shape, self.picture_use10, ports) if per_shape else (heard, {})
         for s, ms in pasted.items():
             if ms:
                 msgs.setdefault(s, []).extend(ms)
