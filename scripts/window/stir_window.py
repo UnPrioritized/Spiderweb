@@ -15,7 +15,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE,
                             MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
-                            ROUND_EDGES, bends, flip_of_matters,
+                            ROUND_EDGES, bends, flip_of_matters, order_of,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
                             stir_removed, stir_stack)
@@ -80,7 +80,7 @@ def with_stir(old, i, change):
     if change is None:
         del stack[i]
         if old:  # (its own place in the colour steps' order goes too: the later tabs keep theirs)
-            old = dict(old, order=stir_removed(old, i))
+            old = {k: v for k, v in dict(old, order=stir_removed(old, i)).items() if k != "stir_at"}
     else:
         was = stack[i]
         if was == full_stir(None):  # (a stir made now: Smooth corners on from the start; old files keep their 0)
@@ -89,6 +89,18 @@ def with_stir(old, i, change):
         if stack[i] == was:  # (nothing changed: old as it is, no plain stir padded in, hunt 11-04 8)
             return old
     return stirred_rc(old, stack or None)
+
+
+def reset_stir(old, i):
+    """old's Recolour with stir number i back to its start. The only stir: no stir at all, but its place in the
+    colour steps' order is remembered ("stir_at") so the next change puts it back there, as a stack's reset tab
+    keeps its place (hunt 11-10)."""
+    new = with_stir(old, i, lambda st: full_stir(None))
+    if new and len(stir_stack(old.get("stir"))) == 1 and not stir_stack(new.get("stir")):
+        o = order_of(old)
+        if "stir" in o:
+            new = dict(new, stir_at=o.index("stir"))
+    return new
 
 
 class StirWindow(HeldKnobs, tk.Toplevel):
@@ -1173,8 +1185,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 good(b["entry"])
         self.forget_area()  # (else picking an area after Reset brought the old slant / Size back, user 11-06)
         self.app.change_recolour(
-            lambda old, sh: with_stir(old, i, lambda st: full_stir(None))
-            if old and i < len(stir_stack(old.get("stir"))) else old, tr("stir.undo_reset"))
+            lambda old, sh: reset_stir(old, i) if old and i < len(stir_stack(old.get("stir"))) else old,
+            tr("stir.undo_reset"))
         self.sync()
 
     def take_typing(self):

@@ -32,7 +32,7 @@ from notes.sustain import alike
 from notes.engine import free_box, past_edges
 from notes.paths import rows_up_to
 from notes.custom import ROUND
-from notes.recolour import box_of, carried, clean_recolour, is_recoloured, ordered, turn_again, without_recolour
+from notes.recolour import box_of, carried, clean_recolour, is_recoloured, reverse_list, reversed_rc, without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
@@ -1818,8 +1818,9 @@ class JoinSplit:
         together in this mode)."""
         from window.app import colours_apart
         sh = self.shapes[i]
-        if "strips" in sh or len(np.unique(unpack_notes(sh["notes"])[:, 4] % ROUND)) < 2 \
-                or not colours_apart(sh, self.channel_mode.get()):
+        t = unpack_notes(sh["notes"])[:, 4]
+        shown = reverse_list(sh["recolour"], t, self.all16()) if is_recoloured(sh) else np.unique(t % ROUND)
+        if "strips" in sh or len(shown) < 2 or not colours_apart(sh, self.channel_mode.get()):
             return "no"
         return None
 
@@ -1845,15 +1846,13 @@ class JoinSplit:
             # expected the track list flipped top to bottom; per set was only needed before "turned" below)
             if is_recoloured(sh):  # (the Stir told: it stirs from the colours before and swaps its result the same
                 # way, so the pattern stays exactly, tracks turned round; stirring the swapped colours made another
-                # one, sweep 11-06: even an extra track)
+                # one, sweep 11-06: even an extra track. A Reverse step at the end of the order: recolour.reversed_rc)
                 swap = {int(a): int(b) for a, b in zip(olds.tolist(), olds[::-1].tolist())}
-                rc = dict(sh["recolour"])
-                tw = turn_again(rc.pop("turned", None), swap)
-                got = dict(rc, turned=tw) if tw else rc
-                # (a first reverse goes at the end of the colour steps' order)
-                o = (ordered(clean_recolour(sh["recolour"]), clean_recolour(got)) or {}).get("order")
-                got = {k: v for k, v in got.items() if k != "order"}
-                sh["recolour"] = dict(got, order=o) if o else got
+                got = reversed_rc(sh["recolour"], rows[:, 4], swap, self.all16())
+                if got:
+                    sh["recolour"] = got
+                else:
+                    sh.pop("recolour", None)
             rows[:, 4] = lap + new
             sh["notes"] = pack_notes(rows)
         self.shapes_changed()

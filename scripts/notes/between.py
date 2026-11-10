@@ -383,9 +383,12 @@ class Pair:
             x, y = ({k: stacks[id(r)] if k == "stir" else r.get(k, BLEND_DEFAULTS.get(k))
                      for k in set(x) | set(y)} for r in (x, y))
             got = {k: mix(x[k], y[k], f) for k in x
-                   if k not in ("seed", "frame", "whole", "cut_frame", "liquify", "warp", "order")}
-            # (the colour steps' order: the nearer end's for now, PLAN.md "Order of colour settings" stage G)
-            got.update({k: near[k] for k in ("seed", "frame", "whole", "cut_frame", "order") if k in near})
+                   if k not in ("seed", "frame", "whole", "cut_frame", "liquify", "warp", "order", "turned", "turns",
+                                "stir_at")}
+            # (the colour steps' order + Reverse swaps: the nearer end's for now (swaps never blend), PLAN.md "Order of
+            # colour settings" stage G)
+            got.update({k: near[k] for k in ("seed", "frame", "whole", "cut_frame", "order", "turned", "turns",
+                                             "stir_at") if k in near})
             from notes.liquify import blend  # (Liquify: the bend maps blended spot by spot, one end's fades)
             lb = blend(x.get("liquify"), y.get("liquify"), f)
             if lb:
