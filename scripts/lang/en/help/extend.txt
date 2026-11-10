@@ -28,7 +28,7 @@ The menu item has a tick while a selected shape has it, and the Shapes list says
 
 ## With other features
 
-Gate extend comes after everything else that makes the notes, Sustain too, and before Gate subtract: a shape with both gets its gaps cut from the longer notes.
+At first Gate extend comes after everything else that makes the notes, Sustain too, and before Gate subtract: a shape with both gets its gaps cut from the longer notes. [page:properties|Properties] can move it anywhere.
 
 Flipping or turning the shape moves the graph with it. Slicing and splitting keep it on every piece, with the graph cut so every note keeps its amount. Join, Turn into live shape and Gate sensitive merge keep it when all the shapes have the same settings. An Add between group gets it step by step when both ends have it in the same unit.
 

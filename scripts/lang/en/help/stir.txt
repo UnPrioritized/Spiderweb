@@ -119,7 +119,7 @@ Several stirs on one shape: the tabs at the top (Stir 1, Stir 2, ...) each hold 
 
 Stir 1 turns the stripes 90°; Stir 2 adds a small swirl in one spot.
 
-Reset puts the shown stir back to nothing; the tab keeps its place in the order of the colour effects (Effect order…) until you take it away with ×. An area picked after Reset starts plain (Size 50 %, no stretch, angle or slant). The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
+Reset puts the shown stir back to nothing; the tab keeps its place in the order of the steps (Properties…) until you take it away with ×. An area picked after Reset starts plain (Size 50 %, no stretch, angle or slant). The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
 
 ## With the rest of Spiderweb
 

@@ -8,7 +8,7 @@ Select: click a selected shape again = the next shape under it. Ctrl+drag after 
 
 Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = next / previous track, Ctrl+Alt+wheel = zoom, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch.
 
-Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo / redo (see History), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one curve, Ctrl+Shift+G split into separate shapes, Ctrl+R turn into live shape, Alt+W claw machine, Alt+S strum, Alt+U chop, Ctrl+U quick chop, Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
+Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo / redo (see History), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one curve, Ctrl+Shift+G split into separate shapes, Ctrl+R turn into live shape, Alt+W claw machine, Alt+S strum, Alt+U chop, Ctrl+U quick chop, Alt+Enter Properties, Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
 
 Hold W = see the piano roll as it will be exported (with Keep notes made there and Wrap them around on; see [page:offrange|Notes past the keys]).
 

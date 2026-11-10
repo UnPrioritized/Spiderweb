@@ -1,6 +1,6 @@
 Warp… (in the Recolour row, between Stir… and Liquify…) bends the colours inside a shape with a grid of points, the way the Warp tool of photo editing programs bends a picture. Drag a point on the piano roll and the colours around it follow like rubber. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the bend pulled into its place.
 
-The grid is kept with the shape as points, never baked in. Come back any time and move them again; change the colours underneath (Recolour, Stir, Colours) and they flow along the same bend; move or stretch the shape and the bend goes with it. The colour effects work in the order you added them: a Warp added after a Stir bends the stirred colours (Effect order… shows and changes the order; Help → Recolour).
+The grid is kept with the shape as points, never baked in. Come back any time and move them again; change the colours underneath (Recolour, Stir, Colours) and they flow along the same bend; move or stretch the shape and the bend goes with it. The colour effects work in the order you added them: a Warp added after a Stir bends the stirred colours (Properties… shows and changes the order; Help → [page:properties|Properties]).
 
 ## Dragging the points
 

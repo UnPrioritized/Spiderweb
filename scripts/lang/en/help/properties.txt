@@ -1,0 +1,43 @@
+Select a shape, then right-click it → Properties… (the last item), or press Alt+Enter. The Properties window shows everything about the shape and everything done to its notes, in the order it happens. It stays open beside the piano roll and follows the selection: click another shape and it shows that one. The Properties… button in the Stir, Warp, Liquify and Shares windows opens it too.
+
+## The basics
+
+At the top: what kind of shape it is, its name, and "Made by" when a command made it from another shape (Turn into plain notes, Fill gaps, Fold tracks, Flip each line, Split into pieces, Apply mask). It was made once: changing that other shape now doesn't change this one.
+
+Place and size: Start, Length, Lowest key and Highest key, worked out from the notes as they come out. Type another number to move the shape (Start, Lowest key) or to stretch or squeeze it (Length from its start, Highest key from its lowest key). Each change is one undo step.
+
+Gate and velocity: the gate of a spam shape and the velocity at the start and at the end. Velocity drawn in the velocity pane says so; typing a number puts a straight line back.
+
+Colours and channel show how its notes take turns over channels and what decides its channels. Change those in the side panel.
+
+## The steps
+
+Under the basics is one list of every step done to the notes after they're made, the top one first, each working on what the one above it left: note tool pages (Claw machine, Strum, Chop, Gate trim, Copy along a path), glue, Sustain, Gate aware flip, Gate extend, Gate subtract and the colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order). A flip, turn or velocity line done after a note tool page is a step too.
+
+The greyed lines at the top can't move: "The notes as drawn" (the drawing, its fill, Colours and velocity: every step works on them) and, in Single channel, "Overlaps fixed", so the steps work on the notes as you hear them.
+
+Each step's line has:
+
+• A grip: drag the line up or down to change the order. Any step can go anywhere, so Sustain can come before a Claw machine page, or a Stir after Copy along a path so one swirl goes across every copy. Only a flip, turn, velocity line or glue place needs a note tool page above it. The note tool tabs follow the order of the list. Each move is one undo step.
+
+• A tick: untick it to switch the step off. It's left out everywhere (on the piano roll, when playing and in exports) and saved as off until you tick it again. Flips, turns, velocity lines and glue places can't be switched off; × takes them away.
+
+• Its name: click it to open that step's own window (its tab, for a note tool page or a Stir).
+
+• Its main number, where it has one: Amount for Shuffle and Split, Turn for a Stir, Strength for Warp and Liquify, "each note at most" for Sustain, the amount for Gate extend and Gate subtract. Type a number to change it there.
+
+• ×: takes the step away.
+
+Add (under the list) adds a step at the end: it opens that tool's window. New steps always go at the end; files from older versions keep the order they always had. Split: Clumps gives every note the colour of its area, so a colour effect above it shows nothing: its line is greyed. A Hz bass shape has a Hz bass settings… button.
+
+## While you change a step
+
+While you change any step that isn't the last one (in its window, or its number here), the steps after it are switched off, so you see exactly what it does and it stays quick. Its window names them and has a Preview all button for a quick look at the full result. They come back when you pick another shape or tab, close the window, play, save, export or copy. What you play, export or copy always has every step that's ticked.
+
+## Several shapes
+
+With several shapes selected, they're listed on the left, all shown together at first. Click one to see it alone; Ctrl+click or Shift+click picks several. A value they share is shown; where they differ the box is empty (or says Mixed): rest the mouse on it to see each shape's value. Typing a number sets it on every shape shown, as one undo step.
+
+The step list has every step any of them has. A step only some have says "2 of 3": a number typed goes to the shapes having it. Moving a step or × goes only to the shapes whose steps are all the same, and a line says how many were left as they are. Add goes to all of them.
+
+Make the others like this (under the list, with one shape clicked): gives that shape's steps (which ones, their order, their numbers and their on / off ticks) to every other shape in the list, as one undo step. Steps a shape can't have (colour effects on a Hz bass, note tool pages on an image…) are left out, and a line says how many.

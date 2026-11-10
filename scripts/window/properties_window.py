@@ -147,6 +147,9 @@ class PropertiesWindow(tk.Toplevel):
         self.sync()
         remember_place(self, "properties")
         self.deiconify()
+        tips = getattr(app, "tips", None)
+        if tips is not None:
+            tips.show("properties", parent=self, wait=True)  # (the first time: what it does, Help → Properties)
 
     # ---- the basics (settings_window.Form's look: a heading with a line, "Name:" + its control)
 
