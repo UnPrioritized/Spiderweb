@@ -545,6 +545,9 @@ class ProjectFiles:
         self.playhead = max(0.0, playhead) if playhead is not None and math.isfinite(playhead) else 0.0
         self.sel = None
         self.sels = set()
+        if getattr(self, "colour_edit", None) is not None:  # (a colour step edited in the project before: forgotten)
+            self.colour_edit = None
+            self.after_idle(self.sync_edit_lines)
         self.roll.box_kept = None  # (an empty Select box / ruler band too)
         self.parts = set()
         self.stroke = self.ripple_pick = None

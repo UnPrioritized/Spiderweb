@@ -131,6 +131,7 @@ def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None, tempo=None):
     first (on a thread, the status line says how far): moved = an Extract (user 2026-10-26), copied = a plain copy
     (nothing hidden), deleted = Delete loaded notes'. False when nothing was done (the status line says why)."""
     from window.app import can_go_in
+    app.colour_edit_leave()  # (a colour step being edited: the cut / copied notes from the whole result)
     r = app.rendered
     inside = boxed(app, boxes)
     owners = np.unique(r[inside, 5]).tolist()

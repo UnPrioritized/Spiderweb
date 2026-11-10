@@ -340,6 +340,7 @@ class PathWindow(ToolWindow):
         if not self.plain_ok():
             return
         app, ppq = self.app, self.app.ppq
+        app.colour_edit_leave()  # (a colour step being edited: the copies made from the whole result)
         if app.notes_late:  # (notes still catching up with a drag: made now, so the colours shown are known)
             app.shapes_changed(now=True)
         # (outside Multi channel each copy keeps its Multi channel colours too, like Turn into plain notes: hunt)

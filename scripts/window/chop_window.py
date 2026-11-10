@@ -531,6 +531,7 @@ def quick_chop(app):
         return
     snap = app.snap.get()
     chop = clean_chop(dict(CHOP_DEFAULTS, len=piece_beats(snap, app), snap=snap))
+    app.colour_edit_leave()  # (a colour step being edited: the new page would be hidden after it)
     app.push_undo(name=tr("chop.quick_step"))
     for i in app.note_tool_sels():
         sh = app.shapes[i]

@@ -552,6 +552,7 @@ class ToolWindow(tk.Toplevel):
 
     def change_steps(self, fn):
         """Each selected shape's steps -> fn(its steps, the page shown's place) (tidied), shown on the piano roll."""
+        self.app.colour_edit_leave()  # (a colour step being edited: a page change ends it, so the page shows)
         for i in self.targets:
             sh = self.app.shapes[i]
             fx = fn(copied(sh.get("fx") or []), self.at[i])
@@ -585,6 +586,7 @@ class ToolWindow(tk.Toplevel):
                           sort_keys=True)
 
     def put_state(self, state):
+        self.app.colour_edit_leave()  # (its own Ctrl+Z changes pages: a colour step being edited ends)
         s = json.loads(state)
         self.at = {int(i): k for i, k in s["at"].items()} if s["at"] is not None else None
         self.cfg = s["cfg"]
@@ -684,6 +686,7 @@ class ToolWindow(tk.Toplevel):
             self.late = self.after(250, self.preview)
             return
         started = time.perf_counter()
+        self.app.colour_edit_leave()  # (a colour step being edited: a page change ends it, so the page shows)
         cl = self.clean(self.cfg)
         cl = dict(cl) if cl else None
         if self.at is None:

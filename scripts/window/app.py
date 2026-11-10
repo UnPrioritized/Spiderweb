@@ -3804,6 +3804,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not whole and self.picked():
             return self.roll.copy_stroke(*self.picked())
         if self.sels:
+            self.colour_edit_leave()  # (a colour step being edited: each colour's row from the whole result)
             shapes = [sh if cut else self.without_cc(sh)
                       for sh in copy.deepcopy([self.shapes[i] for i in sorted(self.sels)])]
             cols = self.copy_columns(sorted(self.sels))  # (each colour's row: pasted the same way, like Domino)
