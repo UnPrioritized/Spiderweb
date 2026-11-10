@@ -1920,13 +1920,19 @@ def smooth_ends(pos, vals, r):
     pass over r), the reach shrunk near either end so it stays even on both sides: a straight line stays exactly
     as it is (evenly spaced places), a corner rounds over about 3 r. Twice (11-08): one pass rounded a corner into
     an arc that met the straight parts with a sudden change of bend, a faint straight line where the rounding ends
-    (stir sweep: a triangle's tip flipped upside down, Bend on a diamond / disc). NaN values: left out, stay NaN."""
+    (stir sweep: a triangle's tip flipped upside down, Bend on a diamond / disc). NaN values: left out, stay NaN.
+    The reach near the ends EASES into the full reach (11-10, a crease on discs at Smooth corners ~35-50 %: it grew
+    one per row, then stopped at once on one row): from half the full reach to 1.5 x it the growth slows smoothly
+    (x - (x - 0.5)^2 / 2, in full reaches); never past the end, so straight lines stay exact; places 1.5 full reaches
+    or more from the ends as before."""
     vals = np.asarray(vals, np.float64)
     ok = np.isfinite(vals)
     if r <= 0 or ok.sum() < 3:
         return vals
     p, v = np.asarray(pos, np.float64)[ok], vals[ok]
-    reach = np.minimum(r / np.sqrt(2.0), np.minimum(p - p[0], p[-1] - p))
+    full = r / np.sqrt(2.0)
+    x = np.minimum(p - p[0], p[-1] - p) / full
+    reach = full * np.where(x <= 0.5, x, np.where(x >= 1.5, 1.0, x - (x - 0.5) ** 2 / 2))
     lo = np.searchsorted(p, p - reach - 1e-9, side="left")
     hi = np.searchsorted(p, p + reach + 1e-9, side="right")
     for _ in range(2):
