@@ -839,7 +839,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.stir_window = None  # Recolour's Stir… (stir_window.py)
         self.liquify_window = None  # Recolour's Liquify… (liquify_window.py)
         self.warp_window = None  # Recolour's Warp… (warp_window.py)
-        self.colour_order_window = None  # Recolour's Effects… (colour_order_window.py)
+        self.properties_window = None  # Properties… (properties_window.py)
         # (big shapes' quick Stir / Warp / Liquify work is kept only while one of their windows is open: ~210-315 MB
         # at 2 M notes otherwise held all the time; user 2026-11-10)
         from notes.recolour import keep_while
@@ -1098,7 +1098,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                          ("Alt-u Alt-U", lambda: open_chop(self)), ("Control-u Control-U", lambda: quick_chop(self)),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
-                         ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
+                         ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True)),
+                         ("Alt-Return Alt-KP_Enter", self.open_properties)):  # (Properties…, properties_window.py)
             for k in keys.split():
                 self.bind_all(f"<{k}>", self.hotkey(fn))
         self._device_was = self.midi_device.get()
@@ -1853,6 +1854,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 w.sync()
         if self.hz_window:
             self.hz_window.sync()
+        if self.properties_window:  # (it follows the selection)
+            self.properties_window.sync()
         if self.sel is not None and self.row_of(self.sel) is not None:
             self.listbox.see(self.row_of(self.sel))
         # the first time one is selected: how it's edited
@@ -2702,7 +2705,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.update_status()
         self.schedule_autosave()
         self.sync_history()
-        self.sync_edit_lines()
+        self.sync_edit_lines()  # (the Properties window too: its place / size numbers come from these notes)
 
     def slots_pal(self):
         """The picture colours by slot as the notes have them now (the first picture's, else the first copy's)."""

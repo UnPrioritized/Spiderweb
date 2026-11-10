@@ -353,6 +353,61 @@ def whole_steps(sh):
     return fx[:n] + [{"tool": "glue0"}] + fx[n:], False
 
 
+def moved(sh, a, b):
+    """A copy of shape sh with the step at place a of order_of(sh) moved to place b (the Properties window's drag,
+    stage D), or None when that order can't be kept (a flip / turn / velocity line / glue place put before every
+    note tool page: there it would be the drawing itself, not a step). The three places the order lives in are
+    rewritten: sh["fx"] (pages and the entries between them in their new order: the page tabs follow), the
+    Recolour's order (its "page" entries; a Stir passing a Stir = the tabs swap, like the Effect order window did)
+    and sh["order"] (the other steps)."""
+    from notes.fx import is_page
+    from notes.recolour import PAGE, _restacked, clean_recolour
+    from notes.sliced import steps_kept
+    tags = order_of(sh)
+    if not (0 <= a < len(tags) and 0 <= b < len(tags)) or a == b:
+        return None
+    new = list(tags)
+    new.insert(b, new.pop(a))
+    fx = sh.get("fx") or []
+    fx_tags = [t for t in new if t[0] == FX]
+    if fx_tags and not is_page(fx[fx_tags[0][1]]) and not steps_kept(sh):
+        return None
+    out = dict(sh)
+    at = {}
+    if fx:
+        out["fx"] = [fx[n] for _, n in fx_tags]
+        at = {n: k for k, (_, n) in enumerate(fx_tags)}
+    raw = sh.get("recolour")
+    rc = clean_recolour(raw) if isinstance(raw, dict) and not sh.get("hz") else None
+    if rc:
+        seq = [(PAGE, 0) if t[0] == FX else t for t in new
+               if t[0] in COLOURS or t[0] == FX and is_page(fx[t[1]])]
+        got = _restacked(rc, seq)
+        if got:
+            out["recolour"] = got
+        else:
+            out.pop("recolour", None)
+    seen, want = {}, []
+    for k, n in new:
+        if k == FX:
+            want.append((FX, at[n]))
+        elif k in COLOURS:
+            want.append((k, seen.get(k, 0)))
+            seen[k] = seen.get(k, 0) + 1
+        else:
+            want.append((k, n))
+    off = [[k, n] for k, n in (out.get("off") or ())]
+    if off and any(k in COLOURS for k, _ in off):  # (an off colour step keeps being the one switched off)
+        place = {}
+        for k, n in new:
+            if k in COLOURS:
+                place.setdefault(k, []).append(n)
+        off = [[k, place[k].index(n)] if k in place and n in place[k] else [k, n] for k, n in off]
+        out["off"] = off
+    with_order(out, want)
+    return out if order_of(out) == want else None
+
+
 def with_order(sh, tags):
     """sh (changed) keeping order tags (order_of's form): saved only when it differs from the default."""
     if tags == default_order(sh):

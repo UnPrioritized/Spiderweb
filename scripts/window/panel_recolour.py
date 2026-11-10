@@ -36,7 +36,7 @@ def edit_windows(kind):
 
 def all_edit_windows():
     from window.tool_window import TOOL_WINDOWS
-    return tuple(EDIT_WINDOWS.values()) + TOOL_WINDOWS
+    return tuple(EDIT_WINDOWS.values()) + TOOL_WINDOWS + ("properties_window",)
 
 
 class RecolourPanel:
@@ -64,8 +64,10 @@ class RecolourPanel:
             self.after_idle(self.sync_edit_lines)
 
     def edit_window_open(self, kind):
-        """Is the window that edits steps of kind open?"""
-        return any(getattr(self, name, None) for name in edit_windows(kind))
+        """Is the window that edits steps of kind open? (The Properties window too, while its own box for a step of
+        kind was the last thing changed there: PLAN.md "Properties" stage D.)"""
+        pw = getattr(self, "properties_window", None)
+        return any(getattr(self, name, None) for name in edit_windows(kind)) or bool(pw and pw.editing == kind)
 
     def colour_edit_drop(self, kind):
         """The edit of a step of kind ends with no notes made here (the caller makes them next: a Cancel)."""
@@ -202,7 +204,7 @@ class RecolourPanel:
         self.recolour_liquify = ttk.Button(self.recolour_tools, text=tr("liquify.button"), command=self.open_liquify)
         self.recolour_liquify.pack(side="left", padx=(4, 0))
         Tooltip(self.recolour_liquify, tr("liquify.button_tip"))
-        # (Effect order… is NOT here: it read like one more effect, user 2026-11-11; it sits beside Preview all in the
+        # (Properties… (was Effect order…) is NOT here: it read like one more effect, user 2026-11-11; it sits beside Preview all in the
         # Stir / Warp / Liquify / Shares windows (edit_line.EditLine) + the shape's right-click menu)
         box.bind("<Configure>", lambda e: self.fit_stir(), add="+")
         self.stir_narrow = False  # (held on their own line while the side panel measures: side_narrows)
@@ -281,14 +283,9 @@ class RecolourPanel:
         from window.warp_window import open_warp
         open_warp(self)
 
-    def open_colour_order(self):
-        from window.colour_order_window import open_colour_order
-        open_colour_order(self)
-
-    def colour_step_removed(self, p, kinds):
-        """The Colour effects window's ×: step p off every selected shape whose steps are kinds (one undo step)."""
-        from window.colour_order_window import remove_step
-        return remove_step(self, p, kinds)
+    def open_properties(self):
+        from window.properties_window import open_properties
+        open_properties(self)
 
     def recolour_targets(self):
         """The selected shapes Recolour works on (not a Hz bass); nothing selected: none (no setting for new
@@ -391,7 +388,7 @@ class RecolourPanel:
         self.recolour_mix_tip.text = tr("recolour.mix_tip", most=SET)
         for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None),
                   getattr(self, "warp_window", None), getattr(self, "liquify_window", None),
-                  getattr(self, "colour_order_window", None)):
+                  getattr(self, "properties_window", None)):
             if w:
                 w.sync()
 

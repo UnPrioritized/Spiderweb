@@ -307,6 +307,8 @@ class MaskPanel:
                     sh.pop(k, None)
                 sh["into"] = [own_id(s)]
                 made[i].append(sh)
+            for sh in made[i]:  # (Properties' "Made by": the mask it was applied with)
+                sh["made_by"] = ["mask", self.shape_label(self.shapes[i])]
         if not made:
             self.status.config(text=tr("mask.apply_nothing"))
             return

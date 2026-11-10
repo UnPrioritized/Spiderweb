@@ -511,6 +511,9 @@ def clean_shape(sh):
                 out["extract"] = ex
             if sh.get("made") in ("mask", "leftovers", "path", "plain"):
                 out["made"] = sh["made"]
+            mb = sh.get("made_by")  # (the one-time command that made it + the shape it came from: Properties)
+            if isinstance(mb, list) and len(mb) == 2 and all(isinstance(x, str) for x in mb):
+                out["made_by"] = [mb[0][:20], mb[1][:200]]
             if isinstance(sh.get("leftover_of"), str):  # (a two-shapes merge's leftovers: its Split takes them back)
                 out["leftover_of"] = sh["leftover_of"][:64]
             if sh.get("lapped") is True:  # (merge leftovers: each note's Colours round on its track, + LAP x round)

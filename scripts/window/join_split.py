@@ -755,6 +755,7 @@ class JoinSplit:
         if not new:
             self.status.config(text=tr("join_split.plain_nothing"))
             return
+        self.made_by(new, "plain")
         self.roll.cancel_draft()
         self.push_undo(name=tr("roll_menu.turn_into_plain_notes"))
         self.put_plain(new)
@@ -816,6 +817,7 @@ class JoinSplit:
             self.status.config(text=tr("fill_gaps.no_gaps"))
             return
         self.plain_kept(new, same == "both")
+        self.made_by(new, "fill_gaps")
         gone = [i for i in sorted(had) if i not in new]  # (shapes that never had notes stay as they are, hunt)
         lost = clean_extract([g for i in gone for g in extract_groups(held_extract(self.shapes[i]))])
         if lost and new:  # (its loaded notes stay out of the file while the filled notes are there, hunt)
@@ -835,6 +837,14 @@ class JoinSplit:
             self.select_many([], None)
         self.shapes_changed()
         self.status.config(text=trn("fill_gaps.done", len(kept), n=len(kept)))
+
+    def made_by(self, new, command):
+        """Each new plain shape remembers the one-time command that made it and the shape it came from (shown in
+        the Properties window's basics: "Made by", PLAN.md "Properties"). Called while self.shapes still holds
+        the old ones."""
+        for i, sh in new.items():
+            if i < len(self.shapes):
+                sh["made_by"] = [command, self.shape_label(self.shapes[i])]
 
     def plain_kept(self, new, held=False):
         """Fill gaps / the line tools: what each new plain shape keeps of the shape it replaces (pasted / plain
@@ -908,6 +918,7 @@ class JoinSplit:
             self.status.config(text=tr("lines.no_change"))
             return
         self.plain_kept(new, held=bool(align) and not remove)  # (lined up + overlaps kept: none cut by the rule)
+        self.made_by(new, "line_flip")
         gone = sorted(emptied)
         lost = clean_extract([g for i in gone for g in extract_groups(held_extract(self.shapes[i]))])
         if lost and new:  # (its loaded notes stay out of the file, like Fill gaps: hunt 2026-11-07)
@@ -983,6 +994,7 @@ class JoinSplit:
         finally:
             self.busy(None)
         new = {i: sh for i, sh in new.items() if i in pieces and pieces[i][1].max(initial=0) > 0}
+        self.made_by(new, "split_lines")
         for i, sh in new.items():
             if i in ccs:
                 sh.pop("cc", None)

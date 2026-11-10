@@ -2,8 +2,9 @@
 skipped (Order of colour settings, PLAN.md stage C, user 2026-11-10: fully off while an earlier one is edited, worked
 out again once the user leaves it): "Hidden while you edit this one: Warp, Liquify" (named, user's D check-in: a
 count alone left them unsure which was which) + a Preview all button (the whole result now, without leaving the
-window), and ALWAYS an "Effect order…" button beside it (user 2026-11-11: on the side panel it read like one more
-effect). step_name: a colour step's name as the user sees it (the Effect order window uses it too)."""
+window), and ALWAYS a "Properties…" button beside it (was Effect order…, user 2026-11-11; PLAN.md "Properties" stage
+D); the other steps' windows show it only on the hidden line. step_name: a colour step's name as the user sees it (the
+Properties window uses it too)."""
 
 from tkinter import ttk
 
@@ -86,10 +87,11 @@ class EditLine(ttk.Frame):
         b = self.preview = ttk.Button(self, text=tr("edit.preview_all"), command=self.on_preview)
         Tooltip(b, tr("edit.preview_all_tip"))
         self.order = None
-        if order:
-            b = self.order = ttk.Button(self, text=tr("order.button"), command=self.on_order)
+        b = self.props = ttk.Button(self, text=tr("props.button"), command=self.on_order)
+        Tooltip(b, tr("props.button_tip"))
+        if order:  # (always there; without: only on the hidden line, beside Preview all: stage D, my pick)
+            self.order = b
             b.pack(side="right", padx=(6, 0))
-            Tooltip(b, tr("order.button_tip"))
         Tooltip(self.label, tr("edit.hidden_tip"))
         self.shown, self.text = 0, ""  # (how many later steps are hidden, the line's text)
         self.place = dict(anchor="w", fill="x", pady=(6, 0))
@@ -110,13 +112,15 @@ class EditLine(ttk.Frame):
             return
         self.text = text
         self.label.config(text=text)
-        if self.order is None:  # (no Effect order…: the whole line only while something is hidden)
+        if self.order is None:  # (no Properties… always: the whole line only while something is hidden)
             if text:
                 self.pack(**self.place)
+                self.props.pack(side="right", padx=(6, 0))
             else:
                 self.pack_forget()
-        if text:  # (Preview all right of Effect order…: packed before it = further right)
-            self.preview.pack(side="right", padx=(6, 0), **({"before": self.order} if self.order else {}))
+                self.props.pack_forget()
+        if text:  # (Preview all right of Properties…: packed before it = further right)
+            self.preview.pack(side="right", padx=(6, 0), before=self.props)
         else:
             self.preview.pack_forget()
 
@@ -124,5 +128,5 @@ class EditLine(ttk.Frame):
         self.app.colour_edit_leave()
 
     def on_order(self):
-        from window.colour_order_window import open_colour_order
-        open_colour_order(self.app)
+        from window.properties_window import open_properties
+        open_properties(self.app)
