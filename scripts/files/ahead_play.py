@@ -23,7 +23,8 @@ import time
 import numpy as np
 
 from files import errors
-from files.ahead_pieces import BLOCK, Maker, Song, same_tempo
+from files.ahead_pieces import BLOCK, EdoPart, Maker, Song, same_tempo
+from files.playback import AHEAD
 from files.synth import RATE, Player, Synth, SynthError
 
 FLOOR_VOICES = {"voices": 1024, "bass_voices": 50}  # lowering never goes under these
@@ -223,6 +224,7 @@ class AheadPlay:
         self._why_said = None  # (why Kestrel stands in, as last said while stopped)
         self.idle_anchor = None
         self._failed_at = None
+        self._edo_part = None  # (31-EDO's Loaded MIDI tick: its notes as Song columns, made once: Song.joined)
 
     # ------------------------------------------------------------ settings
 
@@ -254,8 +256,17 @@ class AheadPlay:
         as the track list mutes them) when one is loaded."""
         from files.ahead_loaded import song_for
         edo = self._edo_first(engine)  # (BASSMIDI: one sound a row, as live Built-in play; hunt 2026-11-07)
-        own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo,
-                   one_sound=edo is not None and engine == "bassmidi")
+        one = edo is not None and engine == "bassmidi"
+        rows = self.app.edo_loaded_rows(AHEAD) if edo is not None else None  # (31-EDO's Loaded MIDI tick)
+        n = len(rows) if rows is not None else 0
+        if n and len(rendered) >= n:  # (play_apart puts them after your own: those joined to a part made once)
+            if self._edo_part is None or not self._edo_part.fits(rows, edo, one):
+                self._edo_part = None  # (the old one let go first: memory)
+                self._edo_part = EdoPart(rows, edo, one)
+            own = Song.joined(np.asarray(rendered)[:len(rendered) - n], self._edo_part, ccs, ports,
+                              self.app.picture_use10, ppq, bpm, tempo, edo, one)
+        else:
+            own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo, one_sound=one)
         lm = self._loaded()
         return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else ())
 

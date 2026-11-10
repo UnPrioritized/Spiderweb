@@ -121,6 +121,80 @@ def _messages(ticks, st, d1, d2, last=0):
     return body.tobytes()
 
 
+def _rows(key, chan, port):
+    """Each note's row on the synth (port, channel, key) as one number (< 2 ** 19)."""
+    return (port.astype(np.int64) << 11) | (chan.astype(np.int64) << 7) | key
+
+
+def one_sound(start, end, key, chan, port):
+    """Song._one_sound's sums on notes in start order: (the kept notes' places, in order; every note's new end)."""
+    n = len(start)
+    if n < 2:
+        return np.arange(n), np.asarray(end, np.int64).copy()
+    row = _rows(key, chan, port)
+    o = np.lexsort((start, row))
+    end_o, keep = _one_sound_rows(row[o], start[o], end[o])
+    idx = np.sort(o[keep])  # (start order kept)
+    new_end = np.empty(n, np.int64)
+    new_end[o] = end_o
+    return idx, new_end
+
+
+def _one_sound_rows(r, s, e):
+    """one_sound on notes in row order (row, then start): (their new ends, which are kept)."""
+    n = len(r)
+    if n < 2:
+        return np.asarray(e, np.int64).copy(), np.asarray(e) > np.asarray(s)
+    same = np.zeros(n, bool)
+    same[1:] = r[1:] == r[:-1]
+    # the furthest end so far within each row (rows one after another, each lifted above the ones before)
+    grp = np.cumsum(~same) - 1
+    t0 = int(min(s.min(), e.min()))
+    span = int(max(s.max(), e.max())) - t0 + 2
+    reach = np.maximum.accumulate(e - t0 + grp * span) - grp * span + t0
+    nxt = np.zeros(n, bool)
+    nxt[:-1] = same[1:] & (s[1:] < reach[:-1])  # (the next note on the row starts while this run sounds)
+    end_o = reach.copy()
+    end_o[:-1] = np.where(nxt[:-1], s[1:], reach[:-1])
+    return end_o, end_o > s
+
+
+def edo_columns(notes, edo_first):
+    """Rows (start, end, key row, velocity, ...) as a 31-EDO Song's columns (start, end, key, velocity, channel,
+    port) in start order (a stable sort, as Song does)."""
+    from files.playback import edo_code
+    notes = np.asarray(notes)
+    if notes.ndim != 2 or not len(notes):
+        notes = np.zeros((0, 6), np.int64)
+    order = np.argsort(notes[:, 0], kind="stable")
+    code = edo_code(notes[order, 2], edo_first)
+    return (notes[order, 0].astype(np.int64), notes[order, 1].astype(np.int64),
+            ((code >> 8) & 0x7F).astype(np.uint8), np.clip(notes[order, 3], 1, 127).astype(np.uint8),
+            (code & 15).astype(np.uint8), (code >> 24).astype(np.uint8))
+
+
+class EdoPart:
+    """A loaded MIDI's notes in 31-EDO (App.edo_loaded_rows) as a Song's columns, made ONCE for Song.joined; one =
+    also how one sound a row leaves them: one = (row order, each note kept or not, each note's new end)."""
+
+    def __init__(self, rows, edo_first, one=False):
+        self.rows, self.edo_first = rows, edo_first
+        self.start, self.end, self.key, self.vel, self.chan, self.port = edo_columns(rows, edo_first)
+        self.one = None
+        if one:
+            n = len(self.start)
+            row = _rows(self.key, self.chan, self.port)
+            ro = np.lexsort((self.start, row))
+            end_o, keep_o = _one_sound_rows(row[ro], self.start[ro], self.end[ro])
+            keep, new_end = np.zeros(n, bool), np.empty(n, np.int64)
+            keep[ro], new_end[ro] = keep_o, end_o
+            self.row = row.astype(np.int32)  # (< 2 ** 19)
+            self.one = (ro.astype(np.int32) if n < 2 ** 31 else ro, keep, new_end)
+
+    def fits(self, rows, edo_first, one):
+        return rows is self.rows and edo_first == self.edo_first and (self.one is not None or not one)
+
+
 class Song:
     """What the pieces are made of. notes = App.play_parts' rows (start, end, key, velocity, slot ... in ticks),
     ccs = its [(tick, message)] (playback.cc_list: channel | port << 24), ports = its synth ports (0 = one port),
@@ -170,30 +244,69 @@ class Song:
         the next ends where that one starts, the last of such a run at the run's furthest end; notes left with no
         length go (their sound was let go at once). Plain on / off pairs let BASSMIDI's off end every voice of the
         key at the first end: a short note on a long one cut the long one (hunt 2026-11-07, heard: 1.2 s shorter)."""
-        n = len(self.start)
-        if n < 2:
+        if len(self.start) < 2:
             return
-        row = (self.port.astype(np.int64) << 11) | (self.chan.astype(np.int64) << 7) | self.key
-        o = np.lexsort((self.start, row))
-        r, s, e = row[o], self.start[o], self.end[o]
-        same = np.zeros(n, bool)
-        same[1:] = r[1:] == r[:-1]
-        # the furthest end so far within each row (rows one after another, each lifted above the ones before)
-        grp = np.cumsum(~same) - 1
-        t0 = int(min(s.min(), e.min()))
-        span = int(max(s.max(), e.max())) - t0 + 2
-        reach = np.maximum.accumulate(e - t0 + grp * span) - grp * span + t0
-        nxt = np.zeros(n, bool)
-        nxt[:-1] = same[1:] & (s[1:] < reach[:-1])  # (the next note on the row starts while this run sounds)
-        end = reach.copy()
-        end[:-1] = np.where(nxt[:-1], s[1:], reach[:-1])
-        keep = end > s
-        back = o[keep]
-        idx = np.sort(back)  # (start order kept)
-        new_end = np.empty(n, np.int64)
-        new_end[o] = end
+        idx, new_end = one_sound(self.start, self.end, self.key, self.chan, self.port)
         self.start, self.end = self.start[idx], new_end[idx]
         self.key, self.vel, self.chan, self.port = self.key[idx], self.vel[idx], self.chan[idx], self.port[idx]
+
+    @classmethod
+    def joined(cls, notes, part, ccs, ports, use10, ppq, bpm, tempo, edo_first, one=False):
+        """The same Song as Song(own notes + part's rows after them, ...) in 31-EDO, without sorting the loaded
+        MIDI's millions of notes again (part = an EdoPart made once): your own notes merged into its start order
+        (before a loaded note starting at the same tick, as a stable sort puts them), one = one sound a row, worked
+        out again only on the rows your notes touch (the others keep part's). Rendered ahead with the Loaded MIDI
+        tick: built at every edit, the whole build froze the window ~0.65 s at 4 M notes."""
+        self = cls.__new__(cls)
+        self.edo_first, self.ppq = edo_first, ppq
+        self.tempo = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
+        self.map = TimeMap(ppq, self.tempo)
+        own = list(edo_columns(notes, edo_first))
+        cols = (part.start, part.end, part.key, part.vel, part.chan, part.port)
+        if one and part.one is None:  # (made without: made now, kept)
+            part.__init__(part.rows, edo_first, True)
+        if not one:
+            keep, ends = None, part.end
+        elif not len(own[0]):
+            _, keep, ends = part.one
+        else:  # (the rows your notes are on worked out again, in row order: no sorting of the loaded notes)
+            ro, keep, ends = part.one
+            touched = np.zeros(1 << 19, bool)
+            o_row = _rows(own[2], own[4], own[5])
+            touched[o_row] = True
+            mine = ro[touched[part.row[ro]]].astype(np.int64)  # (theirs on those rows: row, start, then as they came)
+            row = part.row[mine].astype(np.int64)
+            oo = np.lexsort((own[0], o_row))  # (yours the same way: before a loaded note at the same row + tick)
+            lo = int(min(part.start[mine].min() if len(mine) else 0, own[0].min()))
+            comp = (row << 44) | (part.start[mine] - lo)
+            at = np.searchsorted(comp, (o_row[oo] << 44) | (own[0][oo] - lo), "left")
+            src = np.insert(mine, at, -1 - oo)  # (a loaded note's place; yours = -1 - its number)
+            r = np.insert(row, at, o_row[oo])
+            s = np.insert(part.start[mine], at, own[0][oo])
+            e = np.insert(part.end[mine], at, own[1][oo])
+            del comp, row
+            end_o, keep_o = _one_sound_rows(r, s, e)
+            keep, ends = keep.copy(), ends.copy()
+            theirs = src >= 0
+            keep[src[theirs]], ends[src[theirs]] = keep_o[theirs], end_o[theirs]
+            k = -1 - src[~theirs]
+            o_keep, o_end = np.zeros(len(own[0]), bool), np.empty(len(own[0]), np.int64)
+            o_keep[k], o_end[k] = keep_o[~theirs], end_o[~theirs]
+            own = [a[o_keep] for a in own]
+            own[1] = o_end[o_keep]
+        pos = np.flatnonzero(keep) if keep is not None else None
+        base = [a[pos] for a in cols] if pos is not None else list(cols)
+        if pos is not None:
+            base[1] = ends[pos]
+        # yours go before the first loaded note starting at / after them (a stable sort, yours first)
+        p0 = np.searchsorted(part.start, own[0], "left")
+        at = np.searchsorted(pos, p0, "left") if pos is not None else p0
+        self.start, self.end, self.key, self.vel, self.chan, self.port = (
+            np.insert(b, at, x) if len(x) else b for b, x in zip(base, own))
+        from files.playback import edo_bends
+        self.bends = edo_bends(first=edo_first)
+        self._finish(ccs)
+        return self
 
     @classmethod
     def on_channels(cls, notes, chans, ccs, ppq, bpm, tempo=None):
