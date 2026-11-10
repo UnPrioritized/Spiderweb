@@ -423,6 +423,11 @@ class ShapeMenu:
         usual overlap rules) or one channel by hand. Plain notes only, else left out; greyed outside Multi channel."""
         app = self.app
         if not app.new_colour_targets():
+            # (a drawn shape: Reverse track order alone, kept as a colour step in the shape; PLAN.md stage E,
+            # user 2026-11-10: no Turn into plain notes needed)
+            if any(app.reverse_drawn(i) for i in app.sels):
+                m.add_command(label=tr("join_split.reverse_tracks"), command=app.reverse_tracks,
+                              state="normal" if app.reverse_targets() else "disabled")
             return
         sub = tk.Menu(m, tearoff=False)
         sub.add_command(label=tr("join_split.new_free"), command=lambda: app.new_colours(None))

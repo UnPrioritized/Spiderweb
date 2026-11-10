@@ -190,8 +190,6 @@ def clean_recolour(r):
     liquify = clean_liquify(r.get("liquify"))
     from notes.warp import clean_warp
     warp = clean_warp(r.get("warp"))
-    if r["mode"] == KEEP and not stir and not liquify and not warp:
-        return None
     a = r.get("amount", 100)
     if not number(a):
         a = 100
@@ -254,6 +252,8 @@ def clean_recolour(r):
         ts = [x for x in (clean_turned(t) for t in ts[:MOST_TURNS]) if x]
         if ts != ([tw] if tw else []):
             out["turns"] = ts
+    if out["mode"] == KEEP and not stir and not liquify and not warp and not turns_of(out):
+        return None  # (Off with nothing left; a Reverse step alone stays: a drawn shape keeps its own here, stage E)
     a = r.get("stir_held")  # (Stir tabs all back at their defaults: they keep their places in the order, user 11-10)
     if number(a) and a == int(a) and 1 <= a <= MOST_STIRS and not stir:
         out["stir_held"] = int(a)
@@ -378,6 +378,73 @@ def order_moved(rc, a, b):
         return rc
     o.insert(b, k)
     return with_order(rc, o)
+
+
+def step_tags(rc):
+    """rc's order as (kind, n): the n-th step of its kind ("stir" n = Stir tab n, "turned" n = turns_of(rc)[n])."""
+    o = order_of(rc)
+    return [(k, o[:p].count(k)) for p, k in enumerate(o)]
+
+
+def _restacked(rc, tags):
+    """rc with its steps in the order tags (step_tags' entries, rearranged or some left out): the Stir tabs and
+    Reverse swaps put in that order too (a Stir moved past another = the tabs swap places), the rest as it is."""
+    out = {k: v for k, v in rc.items() if k not in ("stir", "stir_held", "turns", "order")}
+    st = rc.get("stir")
+    stack = st if isinstance(st, list) else [st] if st else []
+    held = int(rc.get("stir_held") or 0)
+    stirs = [n for k, n in tags if k == "stir"]
+    if stack:
+        new = [stack[n] for n in stirs if n < len(stack)]
+        if any(new):
+            out["stir"] = new if len(new) > 1 else new[0]
+        elif new:
+            out["stir_held"] = len(new)
+    elif held and stirs:
+        out["stir_held"] = len(stirs)
+    turns = turns_of(rc)
+    out["turns"] = [turns[n] for k, n in tags if k == "turned" and n < len(turns)]
+    for kind in ("warp", "liquify"):
+        if kind in rc and (kind, 0) not in tags and moves_colours(kind, rc.get(kind)):
+            out.pop(kind, None)
+    if out.get("mode") in MODES and ("mode", 0) not in tags:
+        out["mode"] = KEEP
+    got = clean_recolour(out)
+    return with_order(got, [k for k, _ in tags]) if got else None
+
+
+def step_moved(rc, a, b):
+    """rc (clean) with its step at place a of the order moved to place b (the Colour effects window's drag; a Stir
+    past another Stir = the two tabs swap places, a Reverse past another the same). rc as it is when nothing moves."""
+    tags = step_tags(rc)
+    if not (0 <= a < len(tags) and 0 <= b < len(tags)) or a == b:
+        return rc
+    tags.insert(b, tags.pop(a))
+    return _restacked(rc, tags)
+
+
+def step_removed(rc, a):
+    """rc (clean) without its step at place a of the order (the Colour effects window's ×): Shuffle / Split = Off
+    (the other steps stay), a Stir tab, the Warp, the Liquify (its freeze mask too), a Reverse step. None = no
+    Recolour left. A Reverse on notes whose stored colours it swapped: the caller puts the notes back too
+    (App.colour_step_removed)."""
+    tags = step_tags(rc)
+    if not 0 <= a < len(tags):
+        return rc
+    kind, _ = tags.pop(a)
+    out = dict(rc)
+    if kind in ("warp", "liquify"):
+        out.pop(kind, None)
+    return _restacked(out, tags)
+
+
+def hidden_by_clumps(rc):
+    """The places in rc's order whose step shows nothing because Split: Clumps runs after it (every note takes its
+    area's colour there, at any Amount; hunt 11-10 #5, user: greyed in the Colour effects window + a tip)."""
+    o = order_of(rc)
+    if (rc or {}).get("mode") != "clumps" or "mode" not in o:
+        return set()
+    return set(range(o.index("mode")))
 
 
 def steps_of(rc):
@@ -1251,8 +1318,8 @@ def reversed_rc(r, tracks, swap, all16=False):
     new}, their own list turned round): a Reverse step added at the END of the order turning round every colour
     shown there (reverse_list); pressed right after another Reverse, the two cancel (that step goes; hunt 11-10:
     a second press folded into the first, wherever it sat)."""
-    rc = clean_recolour(r)
-    S = reversal(reverse_list(r, tracks, all16))
+    rc = clean_recolour(r) or {"mode": KEEP, "seed": 1}  # (none yet: a drawn shape's first Reverse step, stage E)
+    S = reversal(reverse_list(rc, tracks, all16))
     out = {k: v for k, v in rc.items() if k not in ("turned", "turns", "order")}
     stored = turn_again(rc.get("turned"), swap)
     if stored:

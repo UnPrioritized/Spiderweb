@@ -32,7 +32,8 @@ from notes.sustain import alike
 from notes.engine import free_box, past_edges
 from notes.paths import rows_up_to
 from notes.custom import ROUND
-from notes.recolour import box_of, carried, clean_recolour, is_recoloured, reverse_list, reversed_rc, without_recolour
+from notes.recolour import box_of, can_recolour, carried, clean_recolour, is_recoloured, reverse_list, reversed_rc, \
+    without_recolour
 from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merged, merged_up_down, mover,
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
@@ -1811,14 +1812,30 @@ class JoinSplit:
         strips pick the channels, the colours wouldn't count) and colours that play apart in this Channels mode
         (app.colours_apart: else nothing changes until Multi channel, hunt 11-06). With Colours Shuffle / Scattered
         / Clumps on it turns round the colours they show (a colour step in the order, PLAN.md stage B)."""
-        return [i for i in self.new_colour_targets() if self.reverse_why(i) is None]
+        plain = set(self.new_colour_targets())
+        return [i for i in sorted(self.sels) if (i in plain or self.reverse_drawn(i)) and self.reverse_why(i) is None]
+
+    def reverse_drawn(self, i):
+        """Shape i is a drawn shape Reverse track order keeps as a colour step of its own (PLAN.md stage E, user
+        2026-11-10: no Turn into plain notes needed): not plain notes, a Hz bass, a mask or a picture."""
+        sh = self.shapes[i]
+        return "notes" not in sh and can_recolour(sh) and not is_mask(sh) and "picture" not in sh \
+            and not sh.get("into")
+
+    def reverse_colours(self, i):
+        """Shape i's colours before Recolour (its stored ones; a drawn shape's as it makes them), any rounds."""
+        sh = self.shapes[i]
+        if "notes" in sh:
+            return unpack_notes(sh["notes"])[:, 4]
+        tracks = self.notes_tracks(without_recolour(sh))[1]
+        return np.zeros(0, np.int64) if tracks is None else np.asarray(tracks, np.int64)
 
     def reverse_why(self, i):
         """Why shape i can't be reversed: None (it can) or "no" (one colour, Channel per strip, colours playing
         together in this mode)."""
         from window.app import colours_apart
         sh = self.shapes[i]
-        t = unpack_notes(sh["notes"])[:, 4]
+        t = self.reverse_colours(i)
         shown = reverse_list(sh["recolour"], t, self.all16()) if is_recoloured(sh) else np.unique(t % ROUND)
         if "strips" in sh or len(shown) < 2 or not colours_apart(sh, self.channel_mode.get()):
             return "no"
@@ -1838,6 +1855,14 @@ class JoinSplit:
         self.push_undo(name=tr("join_split.reverse_tracks"))
         for i in got:
             sh = self.shapes[i]
+            if "notes" not in sh:  # (a drawn shape: only a Reverse step in its Recolour, nothing stored swaps)
+                t = self.reverse_colours(i)
+                rc = reversed_rc(sh.get("recolour"), t, {}, self.all16())
+                if rc:
+                    sh["recolour"] = rc
+                else:
+                    sh.pop("recolour", None)
+                continue
             rows = unpack_notes(sh["notes"]).copy()
             low = rows[:, 4] % ROUND
             lap = rows[:, 4] - low  # (each note's round stays)
@@ -1848,14 +1873,15 @@ class JoinSplit:
                 # way, so the pattern stays exactly, tracks turned round; stirring the swapped colours made another
                 # one, sweep 11-06: even an extra track. A Reverse step at the end of the order: recolour.reversed_rc)
                 swap = {int(a): int(b) for a, b in zip(olds.tolist(), olds[::-1].tolist())}
-                got = reversed_rc(sh["recolour"], rows[:, 4], swap, self.all16())
-                if got:
-                    sh["recolour"] = got
+                rc = reversed_rc(sh["recolour"], rows[:, 4], swap, self.all16())
+                if rc:
+                    sh["recolour"] = rc
                 else:
                     sh.pop("recolour", None)
             rows[:, 4] = lap + new
             sh["notes"] = pack_notes(rows)
         self.shapes_changed()
+        self.sync_recolour()  # (the Colour effects window lists the new Reverse step)
         self.status.config(text=trn("join_split.reverse_done", len(got), n=len(got)))
 
     def lasso_magnet_notes(self):

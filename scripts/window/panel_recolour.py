@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.custom import ROUND
 from notes.engine import pasted_notes
 from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, edited_step, enough, \
-    is_recoloured, new_seed, order_of, ordered, palettes, step_place, wanted, without_recolour
+    is_recoloured, new_seed, order_of, ordered, palettes, step_place, turns_of, wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
@@ -161,6 +161,13 @@ class RecolourPanel:
         self.recolour_liquify = ttk.Button(self.recolour_tools, text=tr("liquify.button"), command=self.open_liquify)
         self.recolour_liquify.pack(side="left", padx=(4, 0))
         Tooltip(self.recolour_liquify, tr("liquify.button_tip"))
+        # (Effects…: every colour effect of the shape in the order it runs, PLAN.md "Order of colour settings" E; on a
+        # line of its own under the dropdown / Stir… line, so the side panel needs no more width: fit_stir)
+        self.recolour_order_line = ttk.Frame(box)
+        self.recolour_order = ttk.Button(self.recolour_order_line, text=tr("order.button"),
+                                         command=self.open_colour_order)
+        self.recolour_order.pack(side="left")
+        Tooltip(self.recolour_order, tr("order.button_tip"))
         box.bind("<Configure>", lambda e: self.fit_stir(), add="+")
         self.stir_narrow = False  # (held on their own line while the side panel measures: side_narrows)
 
@@ -213,7 +220,8 @@ class RecolourPanel:
             return w.winfo_reqwidth() + sum(pad) if isinstance(pad, tuple) else w.winfo_reqwidth() + 2 * int(pad)
         others = sum(wide(w) for w in c.pack_slaves() if w is not b)
         fits = not narrow and others + b.winfo_reqwidth() + 4 <= room
-        if fits == (b.winfo_manager() == "pack" and b.pack_info().get("in") == c):
+        o = self.recolour_order_line
+        if fits == (b.winfo_manager() == "pack" and b.pack_info().get("in") == c) and o.winfo_manager():
             return
         if fits:
             b.pack(in_=c, side="left", padx=(4, 0))
@@ -221,6 +229,7 @@ class RecolourPanel:
         else:
             line.pack(anchor="w", after=c, pady=(2, 0), padx=(wide(self.recolour_word) + 5, 0))
             b.pack(in_=line, side="left", padx=(0, 0))
+        o.pack(anchor="w", after=c if fits else line, pady=(2, 0), padx=(wide(self.recolour_word) + 5, 0))
 
     def open_shares(self):
         from window.shares_window import open_shares
@@ -237,6 +246,15 @@ class RecolourPanel:
     def open_warp(self):
         from window.warp_window import open_warp
         open_warp(self)
+
+    def open_colour_order(self):
+        from window.colour_order_window import open_colour_order
+        open_colour_order(self)
+
+    def colour_step_removed(self, p, kinds):
+        """The Colour effects window's ×: step p off every selected shape whose steps are kinds (one undo step)."""
+        from window.colour_order_window import remove_step
+        return remove_step(self, p, kinds)
 
     def recolour_targets(self):
         """The selected shapes Recolour works on (not a Hz bass); nothing selected: none (no setting for new
@@ -316,6 +334,7 @@ class RecolourPanel:
         self.recolour_stir.state(["!disabled" if tgts else "disabled"])
         self.recolour_warp.state(["!disabled" if tgts else "disabled"])
         self.recolour_liquify.state(["!disabled" if tgts else "disabled"])
+        self.recolour_order.state(["!disabled" if tgts else "disabled"])
         shown = bool(live)
         if shown != bool(self.recolour_row.winfo_manager()):
             if shown:
@@ -338,7 +357,8 @@ class RecolourPanel:
                 self.recolour_mix_tick.pack_forget()
         self.recolour_mix_tip.text = tr("recolour.mix_tip", most=SET)
         for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None),
-                  getattr(self, "warp_window", None), getattr(self, "liquify_window", None)):
+                  getattr(self, "warp_window", None), getattr(self, "liquify_window", None),
+                  getattr(self, "colour_order_window", None)):
             if w:
                 w.sync()
 
@@ -389,9 +409,10 @@ class RecolourPanel:
 
         def changed(old, _sh=None):
             if what == "mode":
-                if mode is None:  # (Off: a Stir / Warp / Liquify stays, on the colours as they are)
+                if mode is None:  # (Off: a Stir / Warp / Liquify / Reverse step stays, on the colours as they are)
                     return dict(old, mode=KEEP) if old and (old.get("stir") or old.get("liquify")
-                                                            or old.get("warp")) else None
+                                                            or old.get("warp") or old.get("stir_held")
+                                                            or turns_of(old)) else None
                 if old and old["mode"] == mode:
                     return old
                 # (another mode: its own Amount to start from, the word means another thing there)

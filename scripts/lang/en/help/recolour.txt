@@ -54,6 +54,16 @@ Push bunches the areas toward one side, a step per click; the dot in the middle 
 
 Stir… (beside the Recolour dropdown) bends the colours the notes have now with Turn and Twist round a Centre point, on the whole shape or only inside an area, without adding or taking away any colour. It has a page of its own: Help → Stir.
 
+## The order of the colour effects
+
+A shape's colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order) run in the order you added them, each on the colours the one before left. A Stir and then Split: Scattered puts specks on a clean swirl; Split: Scattered and then a Stir bends the specks too.
+
+Effects… (beside Liquify…) opens the Colour effects window: the selected shape's effects from top (runs first) to bottom. Drag a line up or down to change the order, click a name to open that effect, × takes it away, and Add adds a new one at the end. With several shapes selected, changes go to every shape with the same effects in the same order.
+
+Split: Clumps gives every note the colour of its area, at any Rough edges, so an effect above it shows nothing: the window greys those lines. Move an effect below Clumps to see it.
+
+While you change an effect that isn't the last one, the effects after it are switched off, so you see exactly what it does and it stays quick. Its window names them and has a Preview all button; they come back when you pick another shape, close the window, play, save or export.
+
 ## With the rest of Spiderweb
 
 Two notes on the same key that sound together always keep different colours, so they never cut each other off. With "Repeated colours get new channels", Shuffle and Split keep each note on the channels of the repeat it was in before. Stir, Warp and Liquify move a note to the repeat its new colour came from, so a bent stripe stays on one track however far it bends (no colour cuts in players that colour by track).

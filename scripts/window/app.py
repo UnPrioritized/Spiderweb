@@ -838,6 +838,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.stir_window = None  # Recolour's Stir… (stir_window.py)
         self.liquify_window = None  # Recolour's Liquify… (liquify_window.py)
         self.warp_window = None  # Recolour's Warp… (warp_window.py)
+        self.colour_order_window = None  # Recolour's Effects… (colour_order_window.py)
         # (big shapes' quick Stir / Warp / Liquify work is kept only while one of their windows is open: ~210-315 MB
         # at 2 M notes otherwise held all the time; user 2026-11-10)
         from notes.recolour import keep_while

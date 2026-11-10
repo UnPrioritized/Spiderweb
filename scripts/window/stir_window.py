@@ -759,6 +759,17 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.app.colour_edit_leave("stir", keep=("stir", self.tab))  # (another tab: the later steps come back)
         self.sync()
 
+    def show_tab(self, i):
+        """Stir tab i shown (the Colour effects window's click on "Stir i + 1")."""
+        if self.drawing or i == self.tab and not self.fresh:
+            return
+        self.take_typing()
+        self.tab, self.fresh = i, False
+        self.tab_var.set(i)
+        self.wheel = None
+        self.app.colour_edit_leave("stir", keep=("stir", i))
+        self.sync()
+
     def on_add(self):
         """A new stir after the others (saved once one of its settings changes)."""
         self.take_typing()
