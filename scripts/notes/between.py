@@ -318,6 +318,14 @@ class Pair:
                 if alike(dict(x, rows=None), dict(y, rows=None)):  # (Each key row switches at the middle)
                     out[key] = mix(x, y, f)
                 continue
+            if key == "fx" and x is not None and y is not None and not alike(x, y):
+                # (velocity lines drawn after an end's pages (trailing "vel" steps) are that end's own, like a line
+                # drawn on a step: the pages compared without them. Drawn on one end, every step lost its pages,
+                # sweep 488597830)
+                xs, ys = _no_trailing_vel(x), _no_trailing_vel(y)
+                if xs and ys and alike(xs, ys):
+                    out[key] = mix(xs, ys, f)
+                continue
             if x is not None and y is not None and alike(x, y):
                 out[key] = mix(x, y, f)
         x, y = a.get("sustain"), b.get("sustain")
@@ -501,6 +509,14 @@ def _form(x):
 
 def alike(a, b):
     return json.dumps(_form(a), sort_keys=True) == json.dumps(_form(b), sort_keys=True)
+
+
+def _no_trailing_vel(fx):
+    """fx without the velocity lines drawn after its pages (the "vel" steps at its end)."""
+    k = len(fx)
+    while k and fx[k - 1].get("tool") == "vel":
+        k -= 1
+    return fx[:k]
 
 
 def _env(sh):
