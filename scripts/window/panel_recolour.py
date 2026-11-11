@@ -61,7 +61,16 @@ class RecolourPanel:
         new = None if step is None else (tuple(step), frozenset(self.sels))
         if new != self.colour_edit:
             self.colour_edit = new
+            self.props_edit_ended()
             self.after_idle(self.sync_edit_lines)
+
+    def props_edit_ended(self):
+        """The Properties window's "a step of this kind is edited here" mark goes once that edit ends (else the side
+        panel's Recolour row went on hiding later steps long after: it alone never edits)."""
+        pw = getattr(self, "properties_window", None)
+        e = self.colour_edit
+        if pw is not None and pw.editing is not None and (e is None or e[0][0] != pw.editing):
+            pw.editing = None
 
     def edit_window_open(self, kind):
         """Is the window that edits steps of kind open? (The Properties window too, while its own box for a step of
@@ -74,6 +83,7 @@ class RecolourPanel:
         e = self.colour_edit
         if e is not None and e[0][0] == kind:
             self.colour_edit = None
+            self.props_edit_ended()
             self.sync_edit_lines()
 
     def colour_edit_start(self, step):
@@ -92,6 +102,7 @@ class RecolourPanel:
         if e is None or kind is not None and e[0][0] != kind or keep is not None and e[0] == tuple(keep):
             return
         self.colour_edit = None
+        self.props_edit_ended()
         self.sync_edit_lines()
         if self.edit_shown:
             self.shapes_changed(now=True)

@@ -547,6 +547,7 @@ class ProjectFiles:
         self.sels = set()
         if getattr(self, "colour_edit", None) is not None:  # (a colour step edited in the project before: forgotten)
             self.colour_edit = None
+            self.props_edit_ended()
             self.after_idle(self.sync_edit_lines)
         self.roll.box_kept = None  # (an empty Select box / ruler band too)
         self.parts = set()

@@ -43,6 +43,8 @@ PAGE_WINDOWS = {"claw": ("window.claw_window", "open_claw", "claw_window"),
                 "trim": ("window.trim_window", "open_trim", "trim_window"),
                 "path": ("window.path_window", "open_path", "path_window")}
 ADD_TOOLS = ("claw", "strum", "chop", "trim", "path")
+NUDGE_SHAPES = 16  # Length / Highest key typed for at most this many shapes: nudged until the notes land (sized)
+NUDGE_TRIES = 10  # notes made at most this many times a shape while nudging
 # (a step's main number in its box: (unit word key, lowest, highest); None = it has none: the click opens it)
 NUMBERS = {"mode": ("props.unit_pct", 0.0, 100.0), "stir": ("props.unit_deg", -360000.0, 360000.0),
            "warp": ("props.unit_pct", 0.0, 400.0), "liquify": ("props.unit_pct", 0.0, 400.0),
@@ -67,6 +69,7 @@ class PropertiesWindow(tk.Toplevel):
         self.app = app
         app.properties_window = self
         self.editing = None  # (the kind of step whose number was typed here last: it is being edited, stage C)
+        self.busy = False  # (a change from here is starting: its own boxes take nothing, begin)
         self.title(tr("props.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -317,6 +320,8 @@ class PropertiesWindow(tk.Toplevel):
         else:
             self.sync_list()
         picks = self.picks()
+        if self.status.winfo_manager() and tuple(id(s) for _, s in picks) != getattr(self, "said_for", None):
+            self.say("")  # (other shapes shown: the line was about the ones before)
         i, sh = picks[0] if picks else (None, None)
         n = len(picks)
         self.what.config(text=tr("props.nothing") if sh is None else tr("props.shape", n=i + 1, name=app.shape_label(sh))
@@ -384,10 +389,15 @@ class PropertiesWindow(tk.Toplevel):
         base = self.tip_base.get(name, "")
         tip.text = (mixed_text(pairs) + ("\n\n" + base if base else "")) if len({t for _, t in pairs}) > 1 else base
 
-    def place_of(self, sh):
-        """(first tick, length in ticks, lowest key, highest key) of sh's notes as made (remembered ones only: never
-        made here), or None (none known yet / no notes)."""
-        got = self.app.notes_known(sh)
+    def place_of(self, sh, i=None):
+        """(first tick, length in ticks, lowest key, highest key) of sh's notes as SHOWN (i: its place in app.shapes;
+        while a step is edited = without the later steps, as on the piano roll), or as made whole when those aren't
+        known; remembered ones only (never made here), or None (none known yet / no notes)."""
+        app = self.app
+        view = app.edit_view(sh, i)
+        got = app.notes_known(view) if view is not sh else None
+        if got is None:
+            got = app.notes_known(sh)
         if got is None:
             return None
         notes = got[0]
@@ -422,7 +432,7 @@ class PropertiesWindow(tk.Toplevel):
         made = [(i, made_text(sh)) for i, sh in picks]
         self.show_value("made", self.made, made)
         self.show_part("made", any(t for _, t in made))
-        places = [(i, sh, self.place_of(sh)) for i, sh in picks]
+        places = [(i, sh, self.place_of(sh, i)) for i, sh in picks]
         known = [(i, sh, p) for i, sh, p in places if p is not None]
         for k, (key, fr) in enumerate(zip(("start", "length", "low", "high"),
                                           (self.start, self.length, self.low, self.high))):
@@ -484,7 +494,8 @@ class PropertiesWindow(tk.Toplevel):
         names = tuple(tag_name(h[0][1], h[0][2]) for _, h in lines)
         offs = tuple(tuple(S.is_off(sh, t) for _, sh, t in h) for _, h in lines)
         shown = (tuple(id(sh) for _, sh in picks), tuple(k for k, _ in lines), tuple(len(h) for _, h in lines), names,
-                 offs, tuple(sorted(hidden, key=repr)), self.fixed_lines(picks))
+                 offs, tuple(sorted(hidden, key=repr)), self.fixed_lines(picks),
+                 tuple(number_spec(h[0][1], h[0][2]) for _, h in lines))  # (a unit switched: its word follows)
         if shown != self.shown:
             self.shown = shown
             self.build_fixed(picks)
@@ -741,12 +752,29 @@ class PropertiesWindow(tk.Toplevel):
             getattr(mod, "open_" + kind)(app)
 
     def begin(self, name):
-        """Before a change from this window: typing elsewhere taken, one undo step."""
+        """Before a change from this window: typing elsewhere taken, one undo step. While it runs, this window's own
+        boxes take nothing (busy): the box being typed in IS this change (Enter), or was taken first (take_typed);
+        asking it again went round and round (an error, nothing applied)."""
         app = self.app
-        app.commit_typing()
+        self.busy = True
+        try:
+            app.commit_typing()
+        finally:
+            self.busy = False
         if app.notes_late:
             app.shapes_changed(now=True)
         app.push_undo(name=name)
+
+    def take_typed(self):
+        """A number typed in one of this window's boxes but not entered: it goes in first (its own undo step), before
+        a tick / × / drag / Make the others like this works out its own change."""
+        try:
+            w = self.focus_get()
+        except KeyError:
+            return
+        fn = self.app.leave_boxes.get(w)
+        if fn is not None and str(w).startswith(str(self)):
+            fn()
 
     def done(self, step=None, targets=None):
         """After a change: the notes, the panel and the windows follow (step: the step it edited, stage C; targets:
@@ -771,11 +799,14 @@ class PropertiesWindow(tk.Toplevel):
 
     def skipped_line(self, done, left):
         """The line saying how many shapes a move / × went to and why the others didn't follow ("" = all)."""
-        return trn("props.skipped", left, n=done, left=left) if left else ""
+        return trn("props.done_on", done, n=done) + " " + trn("props.skipped", left, left=left) if left else ""
 
     def move(self, a, b):
         """Line a to place b (one undo step) on every shown shape with the same list as the first one having it; an
         order it can't keep = a line says why."""
+        if not (0 <= a < len(self.rows) and 0 <= b < len(self.rows)):
+            return
+        self.take_typed()  # (first: the new order is worked out on the shapes with that number in)
         if not (0 <= a < len(self.rows) and 0 <= b < len(self.rows)):
             return
         r = self.rows[a]
@@ -804,6 +835,8 @@ class PropertiesWindow(tk.Toplevel):
         self.done()
 
     def say(self, text):
+        """The orange line under the list; it goes once other shapes are shown (sync)."""
+        self.said_for = tuple(id(sh) for _, sh in self.picks())
         self.status.config(text=text)
         if bool(text) != bool(self.status.winfo_manager()):
             if text:
@@ -815,8 +848,11 @@ class PropertiesWindow(tk.Toplevel):
         """On / off: every shown shape having that step (a half tick = some off: a click switches them all on)."""
         if not 0 <= p < len(self.rows):
             return
+        off = not self.rows[p]["var"].get()  # (read first: taking a typed number may fill the ticks in again)
+        self.take_typed()
+        if not 0 <= p < len(self.rows):
+            return
         r = self.rows[p]
-        off = not r["var"].get()
         change = [(sh, tag) for _, sh, tag in r["holders"] if S.is_off(sh, tag) != off]
         if not change:
             return self.sync(follow=False)
@@ -829,6 +865,9 @@ class PropertiesWindow(tk.Toplevel):
     def on_remove(self, e, p):
         if not (0 <= e.x < e.widget.winfo_width() and 0 <= e.y < e.widget.winfo_height()):
             return  # (let go off the ×, like a button)
+        if not 0 <= p < len(self.rows):
+            return
+        self.take_typed()
         if not 0 <= p < len(self.rows):
             return
         r = self.rows[p]
@@ -844,7 +883,7 @@ class PropertiesWindow(tk.Toplevel):
     def on_number(self, p, left=None):
         """A step's main number typed (Enter / the box left): every shown shape having that step (with the same unit)
         gets it, and that step is being edited now (stage C)."""
-        if self.app._loading or not 0 <= p < len(self.rows):
+        if self.app._loading or self.busy or not 0 <= p < len(self.rows):
             return
         r = self.rows[p]
         if left is not None and unchanged(left):
@@ -855,8 +894,8 @@ class PropertiesWindow(tk.Toplevel):
         tag0 = holders[0][2]
         spec = number_spec(holders[0][1], tag0)
         text = r["boxvar"].get().strip().rstrip("%°")
-        if not text and tag0[0] != "sustain" and len({number_of(sh, t, self.app.ppq) for _, sh, t in holders}) > 1:
-            return good(r["box"])  # (a Mixed box left empty: nothing typed)
+        if not text and len({number_of(sh, t, self.app.ppq) for _, sh, t in holders}) > 1:
+            return good(r["box"])  # (a Mixed box left empty: nothing typed; Sustain too: 0 takes "at most" off all)
         try:
             v = None if not text and tag0[0] == "sustain" else float(calc(text))
             if v is not None and not spec[1] <= v <= spec[2]:
@@ -911,7 +950,7 @@ class PropertiesWindow(tk.Toplevel):
     def on_place(self, key, left=None):
         """Start / Length / Lowest key / Highest key typed: the shape moved or sized (one undo step)."""
         app = self.app
-        if app._loading or left is not None and unchanged(left):
+        if app._loading or self.busy or left is not None and unchanged(left):
             return
         if self.blank(key):
             return
@@ -923,7 +962,7 @@ class PropertiesWindow(tk.Toplevel):
         v, ppq = round(v), app.ppq
         changes = []  # (several shown: each one moved / sized the same way, user 2026-11-11: typing sets them all)
         for i, sh in self.picks():
-            got = self.place_of(sh)
+            got = self.place_of(sh, i)
             if got is None or key in ("length", "high") and sh.get("hz"):
                 continue
             a, n, lo, hi = got
@@ -940,18 +979,62 @@ class PropertiesWindow(tk.Toplevel):
                 changes.append((sh, change))
         if not changes:
             return self.sync(follow=False)
-        self.begin(tr("props.undo_place"))
+        nudge = len(changes) <= NUDGE_SHAPES
+        news = []
         for sh, change in changes:
             if change[0] == "move":
                 db, dp = change[1], change[2]
-                sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+                news.append((sh, dict(sh, pts=[[b + db, p + dp] for b, p in sh["pts"]])))
             else:
-                _, ab, kx, ap, ky = change
-                new = app.stretched(sh, ab, kx, ap, ky)
-                sh.clear()
-                sh.update(new)
+                news.append((sh, self.sized(sh, change, key, v) if nudge else app.stretched(sh, *change[1:])))
+        self.begin(tr("props.undo_place"))
+        for sh, new in news:
+            sh.clear()
+            sh.update(new)
         app.roll.box_kept = None  # (a kept Select box was round the old place)
         self.done()
+
+    def sized(self, sh, change, key, v):
+        """sh sized so its notes' Length / Highest key come out as typed (v), or as near as its notes can (a spam
+        gate makes lengths in whole gates; key rows round): the stretch is nudged and the notes made again until they
+        land (NUDGE_TRIES at most), the nearest kept (a tie: the smaller stretch)."""
+        from notes.engine import shape_notes_tracks
+        app = self.app
+        _, ab, kx, ap, ky = change
+        k0 = kx if key == "length" else ky
+
+        def made(k):
+            new = app.stretched(sh, ab, k, ap, 1.0) if key == "length" else app.stretched(sh, ab, 1.0, ap, k)
+            try:
+                got = place_in(np.asarray(shape_notes_tracks(new, app.ppq, app.keys)[0]).reshape(-1, 4))
+            except Exception:
+                got = None
+            return new, None if got is None else got[1] if key == "length" else got[3]
+
+        best, tried = None, []
+
+        def keep(k):
+            nonlocal best
+            new, r = made(k)
+            tried.append((k, r))
+            if r is not None and (best is None or (abs(r - v), abs(k - 1)) < (abs(best[1] - v), abs(best[2] - 1))):
+                best = (new, r, k)
+            return r
+
+        k = k0
+        for _ in range(NUDGE_TRIES):
+            r = keep(k)
+            if r is None or r == v:
+                break
+            lo = [t for t in tried if t[1] is not None and t[1] < v]
+            hi = [t for t in tried if t[1] is not None and t[1] > v]
+            if lo and hi:  # (one under, one over: halfway between the nearest ones)
+                k = (max(lo, key=lambda t: t[1])[0] + min(hi, key=lambda t: t[1])[0]) / 2
+            else:
+                k = k * (v / max(r, 1) if key == "length" else (v + 0.5 - ap) / max(0.5, r + 0.5 - ap))
+            if any(abs(k - t[0]) < 1e-9 for t in tried):
+                break
+        return best[0] if best is not None else made(k0)[0]
 
     def blank(self, key):
         """Box key left empty while it shows Mixed (several shapes, different values): nothing typed."""
@@ -963,7 +1046,7 @@ class PropertiesWindow(tk.Toplevel):
 
     def on_gate(self, key, left=None):
         app = self.app
-        if app._loading or left is not None and unchanged(left):
+        if app._loading or self.busy or left is not None and unchanged(left):
             return
         if self.blank(key):
             return
@@ -986,7 +1069,7 @@ class PropertiesWindow(tk.Toplevel):
 
     def on_velocity(self, key, left=None):
         app = self.app
-        if app._loading or left is not None and unchanged(left):
+        if app._loading or self.busy or left is not None and unchanged(left):
             return
         if self.blank(key):
             return
@@ -1278,6 +1361,8 @@ def removed(app, sh, tag):
         fx = list(sh.get("fx") or [])
         if n >= len(fx):
             return
+        if fx[n]["tool"] == "glue":  # (only this place's boxes go: the glue before the pages stays)
+            return glue_part_removed(sh, sum(1 for st in fx[:n + 1] if st["tool"] == "glue"))
         if is_page(fx[n]):
             j = sum(1 for st in fx[:n] if is_page(st))
             rc = clean_recolour(sh.get("recolour"))
@@ -1286,10 +1371,8 @@ def removed(app, sh, tag):
                 if got:
                     sh["recolour"] = got
         ToolWindow.put_fx(sh, fx[:n] + fx[n + 1:])
-    elif kind == S.GLUE:
-        from notes.fx import tidy_glue
-        sh.pop("glue", None)
-        tidy_glue(sh)
+    elif kind == S.GLUE:  # (the boxes glued before the pages only: the later Glue lines keep theirs)
+        glue_part_removed(sh, 0)
     elif kind == S.GATE_FLIP:
         from notes.gateflip import turn_velocities
         sh.pop("gate_flip", None)
@@ -1304,6 +1387,36 @@ def removed(app, sh, tag):
             sh["off"] = off
         else:
             sh.pop("off", None)
+
+
+def glue_part_removed(sh, g):
+    """One Glue line's boxes taken off sh (g = 0: the glue before the pages, g = k: the k-th glue place's), the others
+    kept where they are. Glue on everything (no boxes) = one Glue line: all of it goes. Changes sh."""
+    from notes.fx import glue_groups, regrouped, tidy_glue
+    from window.tool_window import ToolWindow
+    groups = glue_groups(sh.get("glue"), sh.get("fx"))
+    if groups is None or not 0 <= g < len(groups):
+        sh.pop("glue", None)
+    else:
+        groups[g] = []
+        old = sh.get("fx") or []
+        glue, fx = regrouped(groups, old)
+        places = iter(st for st in fx or () if st["tool"] == "glue")
+        kept = []  # (the places left keep being the same objects: the step order follows them, steps.after_change)
+        for j, st in enumerate(old):
+            if st["tool"] != "glue":
+                kept.append(st)
+            elif groups[sum(1 for s in old[:j + 1] if s["tool"] == "glue")]:
+                new = next(places)
+                st.pop("from", None)
+                st.update(new)
+                kept.append(st)
+        if glue:
+            sh["glue"] = glue
+        else:
+            sh.pop("glue", None)
+        ToolWindow.put_fx(sh, kept)
+    tidy_glue(sh)
 
 
 def colour_removed(sh, tag):

@@ -53,6 +53,10 @@ def tag_name(sh, tag):
             return tr("step.turn_cw" if st["deg"] > 0 else "step.turn_ccw", deg=f"{round(abs(st['deg']), 1):g}")
         if st["tool"] == "flip":
             return tr("step.flip_" + st["axis"])
+        if st["tool"] == "glue":  # (named by the page before it: two Glue lines told apart, "Glue after Strum 1")
+            k = sum(1 for s in fx[:n] if is_page(s))
+            if k:
+                return tr("step.glue_after", page=step_name(None, "page", k - 1, sh))
         return tr("step." + st["tool"])
     if kind == "glue":
         return tr("step.glue")
