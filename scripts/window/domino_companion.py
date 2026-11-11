@@ -478,8 +478,8 @@ class Companion:
             return
         self.ready = self.alive(self.ready)
         d = self.overlay.domino
-        if self.ready and d is not None and dl.alive(d) and dl.busy(d):
-            return
+        if self.ready and d is not None and dl.alive(d) and (dl.busy(d) or not dl.roll_shown(d)):
+            return  # (also while Domino shows its track list: they go in once the piano roll is back)
         shapes, self.ready = self.ready, []
         if shapes:
             self.send(shapes)
@@ -1138,6 +1138,9 @@ class Companion:
         if d is None or self.busy or not self.match_ppq():
             self.quick = None
             return
+        if dl.alive(d) and not dl.roll_shown(d):  # (the track list shown: its selection is another kind of thing)
+            self.quick = None
+            return self.say(tr("companion.take_no_roll"), warn=True)
         self.done_drawing()  # (what was drawn here first goes in first)
         self.busy, self.was_front, self._then, self.job = True, dl.front_window(), then, d
         dl.Copy(self.bar, d, lambda rows, ppq, start: self.safely(self.took, rows, ppq, start))

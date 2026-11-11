@@ -424,17 +424,39 @@ def find_all():
 
 
 _GRID_CLASS = re.compile(r"Afx:[0-9A-Fa-f]+:8:")  # (32-bit "Afx:400000:8:", 64-bit the address in 16 digits)
+ZOOM_IDS = (32807, 32808, 32809, 32810)  # (Domino's zoom buttons: siblings of the piano roll's grid; the track list
+# holds its own)
+
+
+def _visible(hwnd):
+    return bool(_api()[0].IsWindowVisible(hwnd))
+
+
+def _ctrl_id(hwnd):
+    return _api()[0].GetDlgCtrlID(hwnd)
+
+
+def _parent(hwnd):
+    return _api()[0].GetParent(hwnd)
+
+
+def _in_roll(h):
+    """h sits in the piano roll's frame: its parent also holds Domino's zoom buttons. Domino's track list view (Tab)
+    has a big window with a scroll bar on its right too, but its zoom buttons are its OWN children (measured
+    2026-11-12 on 1.43 32-bit, 1.45 dev009 + dev002 (256 keys) 64-bit: same layout; test domino_grid_views)."""
+    p = _parent(h)
+    return bool(p) and any(_ctrl_id(c) in ZOOM_IDS and _visible(c) for c in _children(p))
 
 
 def grid_window(top):
     """Domino's note grid window: the biggest visible 'Afx:<load address>:8:' window with a narrow child (its own
-    vertical scroll bar) on its right edge. None when the piano roll isn't shown."""
-    u, _ = _api()
+    vertical scroll bar) on its right edge, inside the piano roll's frame. None when the piano roll isn't shown
+    (minimised, or another view such as the track list)."""
     best, area = None, 0
     todo = list(_children(top))
     while todo:
         h = todo.pop()
-        if not u.IsWindowVisible(h):
+        if not _visible(h):
             continue
         kids = _children(h)
         todo.extend(kids)
@@ -443,9 +465,9 @@ def grid_window(top):
         r = _rect(h)
         for c in kids:
             cr = _rect(c)
-            if u.IsWindowVisible(c) and cr[2] >= r[2] - 2 and cr[2] - cr[0] < 60 and cr[3] - cr[1] > (r[3] - r[1]) // 2:
+            if _visible(c) and cr[2] >= r[2] - 2 and cr[2] - cr[0] < 60 and cr[3] - cr[1] > (r[3] - r[1]) // 2:
                 a = (r[2] - r[0]) * (r[3] - r[1])
-                if a > area:
+                if a > area and _in_roll(h):
                     best, area = (h, c), a
     return best
 
@@ -730,7 +752,8 @@ def song_tracks(d):
 
 
 def view(d, tries=4):
-    """(ViewState, None) for a Domino, or (None, reason): "unknown build", "not readable", "hidden"."""
+    """(ViewState, None) for a Domino, or (None, reason): "unknown build", "not readable", "hidden" (minimised),
+    "no roll" (another of its views shown)."""
     if not system.WINDOWS:
         return None, "not windows"
     if d.build is None:
@@ -745,8 +768,8 @@ def view(d, tries=4):
         g = d.grid
         if not g or not all(u.IsChild(d.top, h) and u.IsWindowVisible(h) for h in g):
             g = d.grid = grid_window(d.top)  # (looked for again only when the old one is gone / hidden)
-        if g is None:
-            return None, "hidden"
+        if g is None:  # (another view shown, e.g. the track list: Tab)
+            return None, "no roll"
         nums = read_numbers(d)
         if nums is None:
             return None, "not readable"

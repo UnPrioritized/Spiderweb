@@ -79,6 +79,20 @@ def busy(d):
     return not u.SendMessageTimeoutW(d.top, 0, 0, 0, 0x2, 300, ctypes.byref(res))  # WM_NULL: answers?
 
 
+def roll_shown(d):
+    """Domino shows its piano roll (not its track list or another view: Tab / View → Track List). Sends wait and
+    Take is refused otherwise: the cursor is put with a click on the piano roll's ruler, and the overlay has
+    nowhere to go."""
+    if not system.WINDOWS:
+        return True
+    u = _u()
+    g = d.grid
+    if g and all(u.IsChild(d.top, h) and u.IsWindowVisible(h) for h in g):
+        return True
+    g = d.grid = dv.grid_window(d.top)
+    return g is not None
+
+
 def menu_open(d):
     """One of Domino's menus (menu bar / right-click) is open."""
     from files.system import wintypes as W

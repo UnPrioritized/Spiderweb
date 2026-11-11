@@ -3140,6 +3140,8 @@
  "companion.state_unknown_build": "Unknown Domino version",
  "companion.state_not_readable": "Can't read Domino's view",
  "companion.state_hidden": "Domino's piano roll is hidden",
+ "companion.state_no_roll": "Domino isn't showing its piano roll (track list open?): switch back to it to draw here",
+ "companion.take_no_roll": "Take works on Domino's piano roll: switch back to it (Tab) first",
  "companion.state_starting": "Waiting for Domino…",
  "companion.ppq_set": "PPQ is Domino's {ppq} now",
  "companion.sent_n": "{n} notes put into Domino",
