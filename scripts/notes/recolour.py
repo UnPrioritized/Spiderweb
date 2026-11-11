@@ -1187,6 +1187,15 @@ def places_of(notes, rc, gate, box):
 
 
 def recoloured(notes, tracks, rc, held=False, gate=False, own=None):
+    """_recoloured_all, then kept_apart's remembered work let go (_APART: it holds a few columns of every note,
+    only worth keeping while one shape's colour steps run)."""
+    try:
+        return _recoloured_all(notes, tracks, rc, held, gate, own)
+    finally:
+        _APART.clear()
+
+
+def _recoloured_all(notes, tracks, rc, held=False, gate=False, own=None):
     """The shape's notes and tracks after its Recolour rc (rule_of). Nothing to shuffle (plan): unchanged. First
     the notes are settled as their colours before would sound (render's overlap rule on each colour: a note cut
     where a later one of its colour starts on its key, notes starting together made one), so a new colour never
@@ -3358,39 +3367,140 @@ def same_rows(rows):
     return order[new], inv
 
 
-def kept_apart(notes, old, new, colours, pick):
+class _Apart:
+    """kept_apart's work that depends only on where the notes sit (not their colours): each colour step of a run
+    (run_steps: Shuffle / Split, every Stir, Warp, Liquify) keeps the same notes apart, so it is done once per notes
+    array (_apart_plan) and handed down to the notes kept for the next level (_apart_fewer, no sorting again).
+    o / ks / ss / es / over: the notes by key and start, where each overlaps one before it (over None: none does).
+    ib: the notes that may be stacked copies (sharing key and start with the one before); place: each note's place
+    number (start, end, key alike = one number; -1 = not looked at, outside ib)."""
+    __slots__ = ("e", "o", "ks", "ss", "es", "over", "ib", "place", "unique", "__weakref__")
+
+
+_APART = OrderedDict()  # id(notes) -> (weak link, its _Apart): big notes only, the newest few
+APART_KEPT = [True]  # (False = the plain way: nothing remembered, copies grouped by same_rows; test apart_kept_same)
+
+
+def _apart_sorted(p):
+    """p's over / ib from its sorted columns (o, ks, ss, es)."""
+    ks, ss = p.ks, p.ss
+    reach = np.maximum.accumulate(p.es + ks * (1 << 40))  # (the latest end so far, counted per key: keys far apart)
+    over = np.zeros(len(p.o), bool)
+    over[1:] = ss[1:] + ks[1:] * (1 << 40) < reach[:-1]
+    over[1:] &= ks[1:] == ks[:-1]
+    p.over = over if over.any() else None
+    p.ib = None
+    if p.over is not None:
+        # (only notes sharing a key and start with the one before them can be copies: most shapes have none)
+        twin = over[1:] & (ss[1:] == ss[:-1])
+        if twin.any():
+            both = np.zeros(len(p.o), bool)
+            both[1:] |= twin
+            both[:-1] |= twin
+            p.ib = p.o[both]
+
+
+def _apart_plan(notes):
+    """notes' _Apart, made or remembered (big arrays only, by the array itself like box_of's _BOXES: notes are never
+    changed in place; the weak link never keeps them alive). Sustain before a Chop page = ~5x stacked notes,
+    ~1.4 M at 250 k drawn: every colour step sorted them all again, twice (2026-11-12)."""
+    big = isinstance(notes, np.ndarray) and len(notes) > 20000 and APART_KEPT[0]
+    if big:
+        got = _APART.get(id(notes))
+        if got is not None and got[0]() is notes:
+            _APART.move_to_end(id(notes))
+            return got[1]
+    p = _Apart()
+    s, e, k = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
+    p.e = e
+    p.o = o = key_sort(k, s)  # (np.lexsort((s, k)), compiled when it's there)
+    p.ks, p.ss, p.es = k[o], s[o], e[o]
+    _apart_sorted(p)
+    p.place, p.unique = None, False
+    if p.ib is not None and APART_KEPT[0]:
+        ib = p.ib
+        si, ei, ki = s[ib], e[ib], k[ib]
+        order = key_sort(ki, si, ei)
+        si, ei, ki = si[order], ei[order], ki[order]
+        new = np.ones(len(ib), bool)
+        new[1:] = (si[1:] != si[:-1]) | (ei[1:] != ei[:-1]) | (ki[1:] != ki[:-1])
+        p.place = np.full(len(s), -1, np.int64)
+        p.place[ib[order]] = np.cumsum(new) - 1
+    if big:
+        key = id(notes)
+
+        def gone(ref):  # (the notes let go: their plan too, at once)
+            if _APART.get(key, (None,))[0] is ref:
+                del _APART[key]
+        try:
+            _APART[key] = (weakref.ref(notes, gone), p)
+        except TypeError:  # (a view of another array can't be linked weakly: not remembered)
+            return p
+        while len(_APART) > 2:
+            _APART.popitem(last=False)
+    return p
+
+
+def _apart_fewer(p, keep):
+    """The _Apart of notes[keep] from p's (the same as made anew: kept rows stay in their order)."""
+    q = _Apart()
+    rank = np.cumsum(keep) - 1
+    m = keep[p.o]
+    q.o = rank[p.o[m]]
+    q.ks, q.ss, q.es = p.ks[m], p.ss[m], p.es[m]
+    q.e = p.e[keep]
+    _apart_sorted(q)
+    q.place = p.place[keep]
+    q.unique = True  # (one note of each (place, colour before, colour now) kept: no two alike among ib's)
+    return q
+
+
+def _apart_groups(p, ib, oi, ni):
+    """same_rows' groups of the rows (place, colour before, colour now) of ib: (each group's first = lowest row,
+    each row's group), or None when a row has no place (then same_rows)."""
+    pl = p.place[ib]
+    if not len(pl) or pl.min() < 0:
+        return None
+    if p.unique:  # (handed down: every row its own group, as same_rows would find; a row without a place (a
+        every = np.arange(len(ib))  # zero-length note's edge case) went the same_rows way above)
+        return every, every
+    order = key_sort(pl, oi, ni)  # (stable: equal rows in their order)
+    a, b, c = pl[order], oi[order], ni[order]
+    new = np.ones(len(ib), bool)
+    new[1:] = (a[1:] != a[:-1]) | (b[1:] != b[:-1]) | (c[1:] != c[:-1])
+    inv = np.empty(len(ib), np.int64)
+    inv[order] = np.cumsum(new) - 1
+    return order[new], inv
+
+
+def kept_apart(notes, old, new, colours, pick, plan=None):
     """new colours with every clash put right: a note sounding on its key together with earlier ones (overlapping,
     not just touching) gets a colour none of those with ANOTHER colour before has now (its own one first, else a
     free one from its dice), or its own one when all are taken. Notes of one colour before may share (sustained).
-    Only bursts of notes overlapping on a key are looked at: pairs all at once, bigger ones note by note."""
-    s, e, k = (np.asarray(notes[:, c], np.int64) for c in (0, 1, 2))
-    o = key_sort(k, s)  # (np.lexsort((s, k)), compiled when it's there)
-    ks, ss, es = k[o], s[o], e[o]
-    reach =np.maximum.accumulate(es + ks * (1 << 40))  # (the latest end so far, counted per key: keys far apart)
-    over = np.zeros(len(o), bool)
-    over[1:] = ss[1:] + ks[1:] * (1 << 40) < reach[:-1]
-    over[1:] &= ks[1:] == ks[:-1]
-    if not over.any():
+    Only bursts of notes overlapping on a key are looked at: pairs all at once, bigger ones note by note.
+    plan: notes' _Apart when the caller has it (the level above: _apart_fewer)."""
+    p = _apart_plan(notes) if plan is None else plan
+    if p.over is None:
         return new
+    o, ss, es, e, over = p.o, p.ss, p.es, p.e, p.over
     # (copies stacked exactly on one place, same colour before and now (a paste's kept overlaps): counted ONCE, each
     # taking its first one's colour; a hidden copy made a pair a burst of 3 = another way of keeping apart, 11-10)
-    # (only notes sharing a key and start with the one before them can be copies: most shapes have none = no work)
-    twin = over[1:] & (ss[1:] == ss[:-1])
-    ib = np.empty(0, np.int64)
-    if twin.any():
-        both = np.zeros(len(o), bool)
-        both[1:] |= twin
-        both[:-1] |= twin
-        ib = o[both]
-        rows = np.column_stack([s[ib], e[ib], k[ib], np.asarray(old, np.int64)[ib], np.asarray(new, np.int64)[ib]])
-        first, inv = same_rows(rows)
+    ib = np.empty(0, np.int64) if p.ib is None else p.ib
+    if len(ib):
+        oi, ni = np.asarray(old, np.int64)[ib], np.asarray(new, np.int64)[ib]
+        got = _apart_groups(p, ib, oi, ni) if APART_KEPT[0] and p.place is not None else None
+        if got is None:
+            s, k = np.asarray(notes[:, 0], np.int64), np.asarray(notes[:, 2], np.int64)
+            got = same_rows(np.column_stack([s[ib], e[ib], k[ib], oi, ni]))
+        first, inv = got
     if len(ib) and len(first) < len(ib):
-        keep = np.ones(len(s), bool)
+        keep = np.ones(len(notes), bool)
         keep[ib] = False
         keep[ib[first]] = True
         out = np.array(new, copy=True)
+        fewer = _apart_fewer(p, keep) if APART_KEPT[0] and p.place is not None else None
         out[keep] = kept_apart(notes[keep], np.asarray(old)[keep], np.asarray(new)[keep], colours,
-                               np.asarray(pick)[keep])
+                               np.asarray(pick)[keep], plan=fewer)
         out[ib] = out[ib[first][np.ravel(inv)]]
         return out
     new = new.copy()
