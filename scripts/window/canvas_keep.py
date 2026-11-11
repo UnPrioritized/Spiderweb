@@ -88,8 +88,11 @@ class KeepsItems:
             iid = old[j][1]
         else:
             iid = getattr(tk.Canvas, "create_" + kind)(self, *args, **kw)
-            if k["i"] < len(old):  # (under the next old item still to come: its place in the order)
-                tk.Canvas.tag_lower(self, iid, old[k["i"]][1])
+            j = k["i"]  # (under the next old item still to come: its place in the order; one deleted during this
+            while j < len(old) and old[j][1] in k["dead"]:  # redraw, e.g. the play line, is gone: Tk on Linux
+                j += 1  # raises an error for it, Windows' Tk let it pass)
+            if j < len(old):
+                tk.Canvas.tag_lower(self, iid, old[j][1])
         k["new"].append((how, iid))
         return iid
 
