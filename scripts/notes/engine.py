@@ -3209,7 +3209,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
         """Unflipped starts of piece i of a gate flipped paste, its runs counted across all such pieces of the
         paste (sliced after the flip: a run went across the cut)."""
         if i not in made:
-            mine = [j for j in range(len(note_lists)) if pastes[j] == pastes[i] and back[j] == "whole"]
+            mine = [j for j in range(len(note_lists)) if pastes[j] == pastes[i] and isinstance(back[j], str)
+                    and back[j] == "whole"]
             got = unflipped_starts(np.concatenate([note_lists[j] for j in mine]))
             at = np.cumsum([0] + [len(note_lists[j]) for j in mine])
             made.update({j: got[at[n]:at[n + 1]] for n, j in enumerate(mine)})
@@ -3273,7 +3274,10 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                         units.append(lst[:0])
                 us = [paste_unit[pid, t] for t in ids.tolist()]
                 b = back[len(unit_of)]
-                starts = whole_starts(len(unit_of)) if b == "whole" else unflipped_starts(lst) if b else lst[:, 0]
+                if isinstance(b, np.ndarray):  # (recoloured: each note counted from its colour's first start, an array)
+                    starts = b
+                else:
+                    starts = whole_starts(len(unit_of)) if b == "whole" else unflipped_starts(lst) if b else lst[:, 0]
                 o = np.argsort(which, kind="stable")  # (each track's notes in their order: one sort, no masks)
                 cut, every = np.searchsorted(which[o], np.arange(len(ids) + 1)), lst[o]
                 first = np.minimum.reduceat(np.asarray(starts)[o], cut[:-1])
@@ -3291,7 +3295,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
                         had = extra.get(us[k], span)
                         extra[us[k]] = (min(had[0], span[0]), max(had[1], span[1]))
                 unit_of.append(np.asarray(us, np.int64)[which])
-                if b:  # (a gate flipped piece: the whole paste's tracks by where they start unflipped, below)
+                if b is not None and b is not False:  # (gate flipped / recoloured piece: the whole paste's tracks by
+                    # where they start unflipped / as counted, below)
                     paste_back.add(pid)
                 continue
             if voice_slots is not None and len(unit_of) in voice_slots:
