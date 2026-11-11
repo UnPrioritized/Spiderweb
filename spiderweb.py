@@ -35,6 +35,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     help.py          the tip popups and the Help window (F1, searchable)
     domino_overlay.py Domino companion: the see-through window lying over Domino's note grid, following it
     domino_companion.py Draw on Domino: the floating bar, switching app.roll to the overlay piano roll and back
+    domino_box_watch.py Draw on Domino: the boxes the user drags in Domino's piano roll, watched + kept
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     settings_backup.py  an update's first start: the older version's settings + presets copied to user/backups
     drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
@@ -177,6 +178,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     domino_view.py   Domino companion: where a running Domino's piano roll is on the screen and what it shows
     domino_builds.py Domino versions without a hand-made table: their reading spots found by class name
+    domino_boxes.py  Domino's own select box worked out from a drag (quantize snap, bars, which notes it takes)
+    mouse_watch.py   the left mouse button pressed / let go anywhere on the screen (raw input, Windows only)
     domino_link.py   Domino companion: notes into Domino (its cursor + paste) and its selection out (copy + delete)
     clipboard.py     the Windows clipboard (bytes in any format, and text)
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)

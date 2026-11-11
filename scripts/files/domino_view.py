@@ -63,6 +63,8 @@ class Build:
     path_obj: int = 4   # [S + path_at] + this -> the path text
     rows_at: int = 0    # P + this: rows it can scroll + (+ 4) rows on screen = how many keys (128 / 256: the
                         # 256 keys mod); 0 = 128
+    ts_vt: int = 0      # a time signature event's vtable (its top / bottom numbers where a note's key / velocity
+    #                     sit); 0 = not known (bars taken as 4/4)
 
 
 # sha256 of Domino.exe -> Build, checked by hand. Other Domino versions: found by name (files/domino_builds.py,
@@ -73,7 +75,7 @@ BUILDS = {
         beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234,
         c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC,
         tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, note_vt=0x55AB28, undo_at=0x188, path_at=0xA8,
-        doc_path_at=0x18C),
+        doc_path_at=0x18C, ts_vt=0x55B750),
 }
 # (shown when a Domino can't be read)
 KNOWN_VERSIONS = "Domino 1.41b, 1.42, 1.43, 1.44, and the 64-bit 1.45 test builds (the 256 keys mod too)"
@@ -244,7 +246,8 @@ def moved(b, delta):
     """A moving build's (64-bit, 1.45 x86) addresses moved to where this Domino was loaded."""
     from dataclasses import replace
     return replace(b, p_vtable=b.p_vtable + delta, h_vtable=b.h_vtable + delta, c_vtable=b.c_vtable + delta,
-                   note_vt=b.note_vt + delta, data_at=b.data_at + delta, file_base=b.file_base + delta)
+                   note_vt=b.note_vt + delta, data_at=b.data_at + delta, file_base=b.file_base + delta,
+                   ts_vt=b.ts_vt + delta if b.ts_vt else 0)
 
 
 def _module_base(ph):
@@ -739,6 +742,73 @@ def track_selected(d, track):
     on = out[:, 5] != 0
     notes = out[:, 0] == d.build.note_vt
     return int((on & notes).sum()), int((on & ~notes).sum())
+
+
+def song_sigs(d):
+    """The song's time signatures [(tick, top, bottom)] (bottom 4 = quarters) from the Conductor track, or None
+    (build without the time signature class: bars then read as 4/4). Their numbers sit where a note's key /
+    velocity do (measured 2026-11-12, dev/scratch/sb_probe4.py: 1.43 + 1.45 32-bit, 1.45 64-bit)."""
+    b = getattr(d, "build", None)
+    if b is None or not b.ts_vt:
+        return None
+    out = _track_events(d, 0)
+    if out is None:
+        return None
+    ts = out[out[:, 0] == b.ts_vt]
+    return [(int(r[1]), int(r[3]), int(r[4])) for r in ts if r[3] > 0 and r[4] > 0]
+
+
+QUANTIZE_BOX = 1004  # (the toolbar's quantize box: its item = files/domino_boxes.UNITS)
+SELECT_TOOL = 32851  # (the Select tool's command = its toolbar button)
+
+
+def _send(h, msg, wp=0, lp=0):
+    """SendMessage with a time limit (a Domino not answering never stops Spiderweb): the answer or None."""
+    u, _ = _api()
+    out = ctypes.c_size_t()
+    u.SendMessageTimeoutW.argtypes = [W.HWND, ctypes.c_uint, W.WPARAM, W.LPARAM, ctypes.c_uint, ctypes.c_uint,
+                                      ctypes.POINTER(ctypes.c_size_t)]
+    if not u.SendMessageTimeoutW(h, msg, wp, lp, 0x2, 100, ctypes.byref(out)):  # SMTO_ABORTIFHUNG
+        return None
+    return ctypes.c_ssize_t(out.value).value
+
+
+def _all_children(top):
+    found = []
+    u, _ = _api()
+    u.EnumChildWindows(top, _PROC(lambda h, _l: found.append(h) or True), 0)
+    return found
+
+
+def quantize_item(d):
+    """The quantize box's item picked in Domino now (domino_boxes.UNITS index), or None."""
+    if not system.WINDOWS:
+        return None
+    u, _ = _api()
+    h = getattr(d, "_quantize", None)
+    if not h or not u.IsWindow(h):
+        h = next((c for c in _all_children(d.top) if _ctrl_id(c) == QUANTIZE_BOX and _class(c) == "ComboBox"), None)
+        d._quantize = h
+    got = _send(h, 0x147) if h else None  # CB_GETCURSEL
+    return got if got is not None and got >= 0 else None
+
+
+def select_tool(d):
+    """Is Domino's Select tool picked (its toolbar button pressed)? None = no toolbar shows it."""
+    if not system.WINDOWS:
+        return None
+    u, _ = _api()
+    bars = [h for h in getattr(d, "_toolbars", ()) if u.IsWindow(h)]
+    if not bars:
+        bars = d._toolbars = [c for c in _all_children(d.top) if _class(c) == "ToolbarWindow32"]
+    seen = None
+    for h in bars:
+        st = _send(h, 0x412, SELECT_TOOL)  # TB_GETSTATE (-1: no such button there)
+        if st is not None and st != -1:
+            if st & 1:  # TBSTATE_CHECKED
+                return True
+            seen = False
+    return seen
 
 
 def song_tracks(d):

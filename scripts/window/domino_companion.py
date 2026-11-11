@@ -38,6 +38,7 @@ from notes.engine import SHAPE_DEFAULTS, clean_shape
 from notes.passengers import pack_cc, placed as cc_placed
 from roll.overlay_roll import OverlayRoll
 from window import domino_overlay as dov
+from window.domino_box_watch import BoxWatch
 from window import look
 from window.big_ask import ask as ask_big
 from window.tool_picker import ToolPicker
@@ -214,6 +215,7 @@ class Companion:
         self.roll.fit_view()
         self.overlay.forward_to(self.roll, wheel=self.wheel, pressed=self.pressed)
         self.overlay.may_switch = self.may_switch
+        self.box_watch = BoxWatch(self)  # (the boxes dragged in Domino's piano roll: PLAN.md stage B)
         self._switch_wait = None  # (since when another Domino in front waits for what goes into this one)
         self._offered = set()     # (Domino versions not known that "Try anyway" was offered for)
         self._left_out = 0        # (notes of the send going on above the Domino's keys: said with its result)
@@ -278,6 +280,7 @@ class Companion:
             if d is not None and not self.busy:
                 dl.to_domino(d)
         self.overlay.set_drawing(self.drawing())
+        self.box_watch.sync(not self.drawing())
         self.sync_keys()
 
     def sync_keys(self):
@@ -387,13 +390,13 @@ class Companion:
             self.unlink()
         self.close_list_elsewhere()
         try:
+            self.box_watch.tick()
+        except Exception:  # (a failed look never stops following Domino; logged once a minute at most)
+            self.log_once("_box_err", "(Draw on Domino: watching the boxes dragged)")
+        try:
             self.watch()
         except Exception:  # (a failed look never stops following Domino; logged once a minute at most)
-            if time.monotonic() - getattr(self, "_watch_err", -99) > 60:
-                self._watch_err = time.monotonic()
-                import sys
-                from files.errors import write_log
-                write_log(*sys.exc_info(), "(Draw on Domino: looking at the remembered shapes)")
+            self.log_once("_watch_err", "(Draw on Domino: looking at the remembered shapes)")
         self._ticks += 1
         if self._ticks % 10 == 0:
             self.adopt_windows()
@@ -404,6 +407,20 @@ class Companion:
             return
         if self.app.ppq != (self.domino_ppq() or self.app.ppq):  # (another song opened in Domino)
             self.match_ppq()
+
+    def log_once(self, name, what):
+        """The error being handled written to the log, once a minute at most per name."""
+        if time.monotonic() - getattr(self, name, -99) > 60:
+            setattr(self, name, time.monotonic())
+            import sys
+            from files.errors import write_log
+            write_log(*sys.exc_info(), what)
+
+    def take_boxes(self, d):
+        """(boxes, how) a Take reaches on other tracks (stage D): the boxes dragged in Domino's piano roll while
+        they're still its selection ("drawn"), else groups of the current track's selected notes ("groups"):
+        [(start tick, end tick (not in it), lowest key, highest key)]."""
+        return self.box_watch.for_take(d)
 
     def adopt_windows(self):
         """Windows opened from the overlay (its right-click menu: Claw machine, Tumours, Copy along a path...) belong
@@ -1910,6 +1927,7 @@ class Companion:
                 except tk.TclError:
                     setattr(app, name, None)
         app.unbind_class(KEY_TAG, "<KeyPress>")
+        self.box_watch.stop()
         app.roll = self.main_roll
         app.companion = None
         app.companion_tops = ()

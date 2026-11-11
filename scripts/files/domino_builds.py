@@ -32,6 +32,7 @@ FAMILY_64 = dict(top_row=0x228, row_px=0x4D0, beat_px=0x4D4, left=0x6A8, cursor=
 CLASSES = {"p_vtable": b".?AVCPianoRollWnd@@", "h_vtable": b".?AVCTrackSheet@@", "c_vtable": b".?AVCMainFrame@@",
            "note_vt": b".?AVCEventNote@@"}
 SLOTS = {"p_slot": "p_vtable", "h_slot": "h_vtable", "c_slot": "c_vtable"}
+TIME_SIGNATURE = b".?AVCEventTimeSignature@@"  # (Draw on Domino's box snap: the bars, files/domino_boxes.py)
 
 
 class _PE:
@@ -157,6 +158,7 @@ def _from_file(path, build_type):
     got = {k: find(pe, n) for k, n in CLASSES.items()}
     if None in got.values():
         return None
+    got["ts_vt"] = find(pe, TIME_SIGNATURE) or 0  # (optional: not found = bars read as 4/4)
     _, dat = pe.section(".data")
     size = pe.secs.get(".data", (0, 0))[1]  # (as loaded: the part zero in the file too; 1.45's slots are there)
     ver = pe.version() or "?"
