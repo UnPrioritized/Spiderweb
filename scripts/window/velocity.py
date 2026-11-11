@@ -212,8 +212,9 @@ def heard_places(sh, rows, start, end, way, ppq):
         every[:, :2] = (hi - every[:, [1, 0]]) if back else every[:, :2] + low
         idx = np.full(len(every), -1, np.int64)
         idx[np.flatnonzero(first)] = got[first, 5]
-        base = np.column_stack([every[:, :3], np.arange(len(every))]).astype(np.int64)
-        flip = mirrored_runs(base, None, True)[0]
+        base = np.column_stack([every[:, :3], rows[every[:, 5], 3], np.arange(len(every))]).astype(np.int64)
+        # (Gate extend / subtract ordered before the flip: done first, as made; sweep 206592156)
+        flip = mirrored_runs(_lengths_before_flip(sh, base, ppq), None, True)[0]
         mark = idx >= 0
         ps[idx[mark]], pe[idx[mark]] = flip[mark, 0], flip[mark, 1]
     if partner is not None:
