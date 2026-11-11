@@ -1241,11 +1241,21 @@ class JoinSplit:
         rows = np.array(rows, np.int64, copy=True)
         across = heard & (notes[:, 0] < 0)  # (cut to start on beat 0 when heard: its real start back)
         if across.any():
-            at = {(k, e): s for s, e, k in notes[across][:, :3].tolist()}
+            # (several notes across beat 0 on one key ending together (stacked colours): each its own real start, by
+            # its colour's slot first; one dict entry gave them all the same, and Fold merged them, sweep 177537430)
+            at, by_slot = {}, {}
+            for (s, e, k), t in zip(notes[across][:, :3].tolist(), tracks[across].tolist()):
+                at.setdefault((k, e), []).append(s)
+                by_slot.setdefault((k, e, slot_of.get(t)), []).append(s)
             for j in np.flatnonzero(rows[:, 0] == 0):
-                s = at.get((int(rows[j, 2]), int(rows[j, 1])))
-                if s is not None:
+                k, e, sl = int(rows[j, 2]), int(rows[j, 1]), int(rows[j, 4])
+                got = by_slot.get((k, e, sl)) or at.get((k, e))
+                if got:
+                    s = got.pop(0)
                     rows[j, 0] = s
+                    for other in (at.get((k, e)), by_slot.get((k, e, sl))):
+                        if other is not None and other is not got and s in other:
+                            other.remove(s)
         hid = ~heard
         if not hid.any():
             return rows
