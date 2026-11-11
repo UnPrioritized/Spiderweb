@@ -140,6 +140,15 @@ def ruler_click(d, v, beat):
     return True
 
 
+def in_place(d, track, tick):
+    """Domino's current track and cursor are still track / tick (a paste lands there). Unreadable = True (as
+    before: nothing to check with)."""
+    got, place = dv.song_tracks(d), dv.song_place(d)
+    if got is None or place is None:
+        return True
+    return got[0] == track and place[0] == tick
+
+
 def put_cursor(d, tick):
     """Domino's cursor to tick or the nearest place before it Domino's grid allows -> where it is (ticks), or
     None. Only a click on the ruler when tick is in view (the view stays); stepped back by Domino's own grid unit
@@ -388,6 +397,23 @@ def give_back(d, was):
             u.AttachThreadInput(mine, theirs, False)
 
 
+def take_keyboard(d, hwnd):
+    """The keyboard from Domino to hwnd (Spiderweb's window over it) when Domino has it now (never from another
+    program): from Domino's input queue (AttachThreadInput), no key pressed. True when moved."""
+    if not system.WINDOWS or not hwnd or not in_front(d):
+        return False
+    u, k = _u(), ctypes.windll.kernel32
+    theirs = u.GetWindowThreadProcessId(u.GetForegroundWindow(), None)
+    mine = k.GetCurrentThreadId()
+    attached = theirs and theirs != mine and u.AttachThreadInput(mine, theirs, True)
+    try:
+        u.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            u.AttachThreadInput(mine, theirs, False)
+    return not in_front(d)
+
+
 def to_domino(d):
     """The keyboard to Domino when Spiderweb has it (never taken from another program): Domino's own keys (Space,
     Ctrl+Z ...) work again, user 2026-11-06. True when Domino has it now."""
@@ -450,9 +476,12 @@ class Paste:
     CHECK_MS = 350   # (a "Failed to open clipboard" box shows within this)
     SETTLED_MS = 1500  # (Domino answering, its song unchanged this long after the paste = nothing landed)
 
-    def __init__(self, widget, d, raw, done, cmd=PASTE):
+    def __init__(self, widget, d, raw, done, cmd=PASTE, where=None):
+        """where = (Domino track, cursor tick) Spiderweb set up for this paste: checked right before it goes (the
+        user may click another track / the ruler in Domino meanwhile, hunt 2026-11-12); moved = put back (once
+        more), else done(False, "moved") and nothing pasted. Unreadable = pasted as before."""
         self.w, self.d, self.done, self.tries, self.cmd, self.raw = widget, d, done, 0, cmd, raw
-        self.started, self.puts = time.monotonic(), 1
+        self.started, self.puts, self.where, self.refixed = time.monotonic(), 1, where, 0
         if not dc.put_on_clipboard(raw):
             widget.after_idle(done, False, "clipboard")
             return
@@ -472,6 +501,13 @@ class Paste:
                 return self.done(False, "clipboard")
             self.puts += 1
             return self.w.after(self.SETTLE_MS, self.free)
+        if self.where is not None and not in_place(self.d, *self.where):
+            # (Domino's track or cursor changed since it was set: put back once, then checked again)
+            if self.refixed >= 2 or not (switch_track(self.d, self.where[0])
+                                         and put_cursor(self.d, self.where[1]) == self.where[1]):
+                return self.done(False, "moved")
+            self.refixed += 1
+            return self.w.after(40, self.free)
         self.before = boxes(self.d)
         self.mark = dv.song_mark(self.d)
         command(self.d, self.cmd, wait=False)

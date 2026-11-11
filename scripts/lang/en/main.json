@@ -3157,6 +3157,7 @@
  "companion.send_failed_landed": "The notes didn't arrive in Domino (another program may have used the clipboard): the shape stays here (press Send to try again)",
  "companion.send_failed_clipboard":"Couldn't use the clipboard: the shape stays here (press Send to try again)",
  "companion.send_failed_tracks": "Couldn't add the tracks this shape needs in Domino: the shape stays here (press Send to try again)",
+ "companion.send_failed_moved": "Domino's track or cursor changed while the notes were going in, so nothing was put there: the shape stays here (press Send to try again)",
  "companion.send_failed_busy": "Domino stayed busy (a window or menu of it open, or the mouse held): the shape stays here (press Send to try again)",
  "companion.send_failed_error": "Something went wrong while putting the notes into Domino: the shape stays here (press Send to try again)",
  "companion.conductor_current": "Domino's Conductor track is picked: pick a note track in Domino first (the shape stays here)",
@@ -3198,6 +3199,7 @@
  "companion.took_n": "Took {n} notes from Domino: change them, then press Send",
  "companion.took_n_one": "Took 1 note from Domino: change it, then press Send",
  "companion.took_onion": "Took {notes} from {tracks} in Domino (with the onion skin tracks): change them, then press Send",
- "companion.onion_skipped": "The notes in the box on onion skin tracks {tracks} couldn't be taken, so they stay in Domino as they were",
+ "companion.onion_drag_box": "Onion skin tracks were left alone: drag a box in Domino to take their notes too",
+ "companion.onion_skipped":"The notes in the box on onion skin tracks {tracks} couldn't be taken, so they stay in Domino as they were",
  "companion.onion_skipped_one": "The notes in the box on onion skin track {tracks} couldn't be taken, so they stay in Domino as they were"
 }

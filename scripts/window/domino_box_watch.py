@@ -22,6 +22,7 @@ from files import mouse_watch, system
 LET_WAIT_S = 0.15     # after a let go, Domino has made its selection by then (read once the button is up)
 VIEWS_KEPT = 64       # Domino's views kept with their time (a press is read with the view it was made on)
 CHECK_S = 0.25        # kept boxes checked against Domino's selection this often (longer on dense tracks)
+SLOW_S = 0.03         # a full read slower than this: later checks look at a cheap mark first (check)
 
 
 def _ms():
@@ -46,6 +47,7 @@ class BoxWatch:
         self.let = None        # (press, (ms, x, y, view), moved, when judged)
         self._check_at = 0.0
         self._every = CHECK_S
+        self._slow, self._mark = False, None  # (the current track slow to read: its cheap mark, check)
         self.last = None       # (tests: the last drag judged: (box, how))
 
     # --- on / off with Domino's mouse ---
@@ -165,15 +167,34 @@ class BoxWatch:
         self._check_at = time.monotonic()
 
     def check(self, d, got=None):
-        """The kept boxes still Domino's selection? (Read every CHECK_S, longer on dense tracks.)"""
+        """The kept boxes still Domino's selection? (Read every CHECK_S, longer on dense tracks.) On a track slow to
+        read, the whole read only when its events / Domino's undo list / the current track changed (hunt 2026-11-12:
+        a 2 M-note track froze the bar ~0.8 s every few seconds); a Take checks them fully anyway (for_take)."""
         t = time.perf_counter()
+        if got is None and self._slow:
+            mark = self.mark(d)
+            if mark is not None and mark == self._mark:
+                self._check_at = time.monotonic()
+                return None
         got = got or self.state(d)
         if got is None:
             return self.boxes.clear("not readable")
         notes, track, depth, _ = got
         self.boxes.still(notes, track, depth)
+        took = time.perf_counter() - t
+        self._slow = took > SLOW_S
+        self._mark = self.mark(d) if self._slow else None
         self._check_at = time.monotonic()
-        self._every = max(CHECK_S, 8 * (time.perf_counter() - t))
+        self._every = max(CHECK_S, 8 * took) if not self._slow else CHECK_S
+
+    @staticmethod
+    def mark(d):
+        """(current track, its events' mark, Domino's undo count): cheap, without reading the notes."""
+        got = dv.song_tracks(d)
+        if got is None:
+            return None
+        m = dv.track_mark(d, got[0])
+        return None if m is None else (got[0], m, dv.undo_depth(d))
 
     # --- for a Take (stage D) ---
     def for_take(self, d):

@@ -602,6 +602,23 @@ def song_mark(d):
     return tuple(out)
 
 
+def track_mark(d, track):
+    """Something that changes when the track's events change (song_mark for one track: its event-pointer list
+    only, a few ms at a million notes), or None. A selection change alone doesn't move it."""
+    import zlib
+    b = getattr(d, "build", None)
+    got = _track_list(d) if b is not None and b.events_at else None
+    if got is None or not 0 <= track < len(got[1]) or not got[1][track]:
+        return None
+    ph, tracks = got
+    t = tracks[track]
+    ev, m = _p(ph, t + b.events_at, b), _i32(ph, t + b.events_at + b.ptr)
+    if m is None or not 0 <= m <= 50_000_000:
+        return None
+    raw = _read(ph, ev, b.ptr * m) if m else b""
+    return (t, m, zlib.crc32(raw)) if len(raw) == b.ptr * m else None
+
+
 def _track_list(d):
     """(process handle, [each track's object]) in track-list order, or None."""
     got = _song_obj(d)
