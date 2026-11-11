@@ -1726,8 +1726,11 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
             return None
         then = was
     got = source(without_recolour(piece))
-    if got is None or tracks is None:
+    if got is None:
         return None
+    if tracks is None:  # (one colour before it, a line: the whole's colours all the same; partial sweep 56456115, a
+        # Scattered line's pieces were coloured anew, the note cut in two changed colour)
+        tracks = np.zeros(len(notes), np.int64)
     # (the whole as it was cut: its own box, flipped as it was then (rc "cut_frame", recolour.carried; old pieces
     # without it: never flipped); the piece's notes mirrored back only by the flips made since)
     rc = {k: v for k, v in own.items() if k not in ("whole", "frame", "cut_frame")}
