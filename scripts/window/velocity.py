@@ -114,10 +114,24 @@ def shown_starts(sh, rows, ppq, start, end, shown):
     at = dict(zip(su.tolist(), np.r_[0, np.cumsum(sn)[:-1]].tolist()))
     pos = 0
     for k, n in zip(ku.tolist(), kn.tolist()):
+        mine = o[pos:pos + n]
         if count.get(k) == n:
-            mine, theirs = o[pos:pos + n], so[at[k]:at[k] + n]
+            theirs = so[at[k]:at[k] + n]
             start[mine] = shown[theirs, 0]
             end[mine] = shown[theirs, 1]
+        elif k in count:  # (stacked exact copies show as one note: matched by place, sweep 392761329)
+            places = np.stack([start[mine], end[mine]], axis=1)
+            uniq, which = np.unique(places, axis=0, return_inverse=True)
+            theirs = so[at[k]:at[k] + count[k]]
+            if len(uniq) == count[k]:
+                start[mine] = shown[theirs[which.ravel()], 0]
+                end[mine] = shown[theirs[which.ravel()], 1]
+            else:  # (copies merged in part: each laid note -> the first shown one starting at or after it (the
+                # start side only moves starts later); sweep 305535209)
+                ss = shown[theirs, 0]
+                j = np.minimum(np.searchsorted(ss, start[mine], "left"), len(ss) - 1)
+                start[mine] = shown[theirs[j], 0]
+                end[mine] = shown[theirs[j], 1]
         pos += n
     return start, end
 
