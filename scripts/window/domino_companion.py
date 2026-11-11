@@ -33,8 +33,9 @@ from files import domino_view as dv
 from files import settings, system
 from files.domino_clip import LONGEST, MOST_NOTES, clip_data, cut_gates
 from files.lang import tr, trn
-from notes.custom import notes_shape
+from notes.custom import notes_shape, unpack_notes
 from notes.engine import SHAPE_DEFAULTS, clean_shape
+from notes.passengers import pack_cc, placed as cc_placed
 from roll.overlay_roll import OverlayRoll
 from window import domino_overlay as dov
 from window import look
@@ -47,6 +48,9 @@ LEFT_OUT = ("hz", "picture")  # (they open windows of their own: from the main w
 BAR_GAP = 8  # px between the bar and the grid's top right corner at first
 DOMINO_KEYS = 128
 MARK = "domino_send"  # (a shape key: drawn / taken here, goes into Domino with Send; dropped when this ends)
+# (a shape key: a Take's [Domino's pid, [[copied track, Domino track, its track object (0 = the current track at
+# Send)], ...]]: Send puts each colour back into its own track, send_back; user 2026-11-12)
+BACK = "domino_back"
 REST_S = 0.25  # Domino's song PPQ checked once nothing changed for this long (no drag / typing going on)
 SAID_MS = 4000
 SELECTED_S = 0.25  # Domino's selection read this often for the outlines of remembered shapes picked there
@@ -172,6 +176,7 @@ class Companion:
         self._ticks = 0
         self.quick = None      # a flip on Domino's selection (Take + flip + Send): its steps leave the history
         self._then = None      # (what a Take does next with the shape it made)
+        self._rides = []       # (a Take's copied other events: CC... of the copied tracks)
         held = self._before_held = app.undo_stack + app.redo_stack  # (kept: their ids stay theirs)
         self.before = {id(s) for s in held}  # (steps from before this started: never undone from here)
         self.linked = []       # undo / redo steps that changed Domino too (sent, taken): Ctrl+Z there = Domino's
@@ -185,7 +190,8 @@ class Companion:
         self.old_keys = None   # the same for its keys (128 / 256: the 256 keys mod)
         # shapes remembered inside Domino (PLAN K, files/domino_shapes.py): kept on the app, so they outlive this
         self.records = app.__dict__.setdefault("domino_records", [])
-        self.sending = None    # (shapes, rows, first track) of the send going on: remembered once it lands
+        self.sending = None    # (shapes, rows, first track[, each row's track]) of the send going on: remembered once
+        # it lands (each row's track: a send back into the tracks a Take came from, send_back)
         self._pid = None       # (the Domino the records were last looked at with)
         self._codes = {}       # (each watched track's notes at the last look: what's new since = pasted / moved)
         self._seen = None      # (what the last look saw: the same again = no search)
@@ -531,6 +537,11 @@ class Companion:
         app, d = self.app, self.overlay.domino
         if d is None or not self.match_ppq():
             return self.say(tr("companion.send_failed_domino"), warn=True)
+        back = [sh for sh in shapes if self.goes_back(sh, d)]
+        if back:  # (taken from several tracks: back into those tracks; the rest goes in after, the usual way)
+            rest = [sh for sh in shapes if not any(sh is b for b in back)]
+            self.ready = rest + [s for s in self.ready if not any(s is x for x in rest)]
+            return self.send_back(back)
         rows = self.notes_for(shapes)
         fit = (rows[:, 2] >= 0) & (rows[:, 2] < self.domino_keys())  # (the 256 keys mod: up to 255)
         self._left_out = int((~fit).sum())  # (said with the result: never dropped without a word, hunt 2026-11-06)
@@ -585,6 +596,150 @@ class Companion:
         except Exception:
             self.failed()
         return None
+
+    @staticmethod
+    def goes_back(sh, d):
+        """sh was taken from several of THIS Domino's tracks (or with their CCs): Send puts it back there."""
+        got = sh.get(BACK)
+        return (isinstance(got, list) and len(got) == 2 and d is not None and got[0] == d.pid
+                and isinstance(got[1], list) and bool(got[1]))
+
+    def send_back(self, shapes):
+        """Shapes taken from several of Domino's tracks (user 2026-11-12, PLAN.md A): each colour back into the
+        track it came from (followed by Domino's track object when tracks were moved; a track deleted meanwhile and
+        colours that weren't in the take = new tracks at the bottom, Domino's own Add Track), the copied CCs back
+        with them. Every channels mode: Single = each track's overlaps removed with the notes already in it (as
+        send_single), Multi + Remove overlaps = across those tracks (as send_across), else plain pastes. One paste
+        per track (Substitute Paste where Domino's notes change), one Domino step each, then the current track back
+        (paste_jobs)."""
+        from window.app import wrapped_in
+        app, d = self.app, self.overlay.domino
+        got, ids = dv.song_tracks(d), dv.track_ids(d)
+        if got is None or ids is None:  # (Domino's tracks unreadable: the usual way, said)
+            for sh in shapes:
+                sh.pop(BACK, None)
+            self.say(tr("companion.tracks_unread"), warn=True)
+            return self.send(shapes)
+        cur, count, ppq = got[0], len(got[1]), app.ppq
+        where = {p: k for k, p in enumerate(ids)}
+        parts, cc, new = [], [], {}  # (notes, each note's home), (tick, home, tag, body), (shape, colour) -> code
+        # (a home = a Domino track, or a new one at the bottom: -1 - its place among the new ones)
+        for i, sh in enumerate(shapes):
+            homes = {}
+            for c, _track, ptr in sh[BACK][1]:
+                h = where.get(ptr) if ptr else cur  # (0 = the current track at Send)
+                homes[int(c)] = h if h is not None and 0 < h < count else new.setdefault((i, int(c)), -1 - len(new))
+            n, t = app.notes_tracks(sh)
+            n = np.asarray(n, np.int64).reshape(-1, 4)
+            t = np.zeros(len(n), np.int64) if t is None else np.asarray(t, np.int64).ravel()
+            if app.wraps_offrange():  # (kept notes past the keys wrapped in, like every other way out)
+                n, t = wrapped_in(sh, n, t, ppq, app.keys, app.notes_tracks)
+                n = np.asarray(n, np.int64).reshape(-1, 4)[:, :4]
+                t = np.zeros(len(n), np.int64) if t is None else np.asarray(t, np.int64).ravel()
+            cols, inv = np.unique(t, return_inverse=True)
+            for c in cols.tolist():  # (a colour that wasn't in the take: a new track too)
+                if c not in homes:
+                    homes[c] = new.setdefault((i, c), -1 - len(new))
+            parts.append((n, np.array([homes[c] for c in cols.tolist()], np.int64)[inv.ravel()]))
+            if isinstance(sh.get("cc"), str):
+                for tick, c, tag, body in cc_placed(sh, unpack_notes(sh["notes"]), ppq):
+                    h = homes.get(int(c))
+                    cc.append((int(tick), new.setdefault((i, int(c)), -1 - len(new)) if h is None else h, tag, body))
+        notes = np.concatenate([n for n, _ in parts]) if parts else np.zeros((0, 4), np.int64)
+        home = np.concatenate([h for _, h in parts]) if parts else np.zeros(0, np.int64)
+        fit = (notes[:, 2] >= 0) & (notes[:, 2] < self.domino_keys())
+        self._left_out = int((~fit).sum())
+        notes, home = notes[fit], home[fit]
+        self.pending = [s for s in self.pending if not any(s is x for x in shapes)]
+        if not len(notes) and not cc:
+            return self.say(tr("companion.no_notes"), warn=True)
+        if len(notes) and int(notes[:, 1].max()) - int(notes[:, 0].min()) > LONGEST:
+            return self.say(tr("project.too_long_to_copy_for_domino", longest=LONGEST), warn=True)
+        if len(notes) > MOST_NOTES:
+            return self.say(tr("project.too_many_to_copy_for_domino", notes=len(notes), most=MOST_NOTES), warn=True)
+        if not ask_big(app, "domino", len(notes), parent=self.bar):
+            return None
+        self.was_front = dl.front_window()
+        self.busy, self.job = True, d
+        try:
+            used = sorted({int(h) for h in np.unique(home) if h < 0} | {h for _, h, _, _ in cc if h < 0}, reverse=True)
+            steps = 0
+            if used:  # (Domino's own Add Track at the bottom, one per track gone / colour not in the take)
+                steps = dl.add_tracks(d, len(used), app.all16())
+                now = dv.song_tracks(d)
+                if steps is None or now is None or len(now[1]) < count + len(used):
+                    return self.not_sent(tr("companion.send_failed_tracks"))
+                made = {h: len(now[1]) - len(used) + k for k, h in enumerate(used)}  # (-1 first: in take order)
+                look = np.array([made.get(-1 - k, 0) for k in range(-min(used))], np.int64)
+                home = np.where(home < 0, look[np.maximum(-1 - home, 0)], home)
+                cc = [(t, made[h] if h < 0 else h, tag, body) for t, h, tag, body in cc]
+            jobs, out = self.back_jobs(d, notes, home, cc)
+            self.sending = (shapes, out[:, :6], None, out[:, 6])
+            if not jobs:
+                self.busy = False
+                self.landed.append((shapes, 0, (steps, d)))
+                self.take_off()
+                return self.app.after_idle(self.flush)
+            self.paste_jobs(shapes, jobs, 0, steps, len(notes), cur)
+        except Exception:
+            self.failed()
+        return None
+
+    def back_jobs(self, d, notes, home, cc):
+        """send_back's pastes: notes (start, end, key, velocity) each going into Domino track home[i], cc = [(tick,
+        track, tag, body)] -> (paste_jobs' jobs with each track's CCs, the notes as sent (start, end, key, velocity,
+        0, 0, track)). The channels mode's overlap rule against each track's notes already there; a track unreadable
+        or holding other events in its changed stretch = only its new notes, cut among themselves (said)."""
+        app = self.app
+        mode, rule = app.channel_mode.get(), app.overlap_rule() or {}
+        tracks = sorted(set(home.tolist()) | {h for _, h, _, _ in cc})
+        k_of = {t: k for k, t in enumerate(tracks)}
+        ks = np.array([k_of[t] for t in home.tolist()], np.int64)
+        new = np.column_stack([notes[:, :4], ks]) if len(notes) else np.zeros((0, 5), np.int64)
+        there = {k: dv.track_notes(d, t) for t, k in k_of.items()}
+        others = {k: dv.track_others(d, t) for t, k in k_of.items()}
+        empty = np.zeros((0, 4), np.int64)
+        across = mode == "auto" and rule.get("across")
+        if across:
+            alone = dl.merge_across({k: empty for k in k_of.values()}, new, rule)[1]
+            alone = {k: alone[alone[:, 4] == k, :4] for k in k_of.values()}
+        else:
+            alone = {k: new[new[:, 4] == k, :4] for k in k_of.values()}
+            if mode == "single":
+                alone = {k: dl.merge_single(empty, a, self.single_way())[0] for k, a in alone.items()}
+        unread = [k for k in k_of.values() if there[k] is None or others[k] is None]
+        per = {}
+        if across and not unread:
+            per = dl.merge_across({k: a[:, :4] for k, a in there.items()}, new, rule)[0]
+        elif mode == "single":
+            per = {k: dl.merge_single(there[k][:, :4], new[new[:, 4] == k, :4], self.single_way())
+                   for k in k_of.values() if k not in unread}
+        jobs, warn = [], bool(unread)
+        for t, k in k_of.items():
+            mine = sorted((e for e in cc if e[1] == t), key=lambda e: e[0])
+            rides = [(tick, 0, 0, 0, (tag, body)) for tick, _, tag, body in mine]
+            lo = min([e[0] for e in mine], default=None)
+            hi = max([e[0] for e in mine], default=None)
+            whole, changed, added = per.get(k, (None, empty, alone[k]))
+            if len(changed):
+                moved = np.concatenate([changed[:, 0], added[:, 0]])
+                a, b = int(moved.min()), int(moved.max()) + 1
+                if lo is not None:
+                    a, b = min(a, lo), max(b, hi + 1)
+                if ((others[k] >= a) & (others[k] < b)).any():
+                    warn = True
+                    whole, a, b, added = None, None, None, alone[k]
+                else:
+                    jobs.append((t, whole, a, b, alone[k], rides))
+                    continue
+            if len(added):  # (a track getting only CCs, no notes: a Domino copy can't hold it, left out)
+                first =min(([int(added[:, 0].min())] if len(added) else []) + ([lo] if lo is not None else []))
+                jobs.append((t, added, first, None, None, rides))
+        if warn:
+            self.say(tr("companion.tracks_unread"), warn=True)
+        out = np.zeros((len(notes), 7), np.int64)
+        out[:, :4], out[:, 6] = notes[:, :4], home
+        return jobs, out
 
     def safely(self, run, *args):
         """run(*args) for a step of a send / Take coming back later: a failure never leaves it busy for good (no
@@ -761,7 +916,8 @@ class Companion:
         events from where the cursor landed (it can land before the first changed note: hunt 2026-11-06) = that
         track gets only its new notes alone, Domino's left as they are (said). One failing after others went in:
         those taken back with Domino's Undo (base = the steps before the first paste; hunt 2026-11-06: half a send
-        stayed in Domino, out of undo)."""
+        stayed in Domino, out of undo). A job's 6th item (send_back): that track's CCs going back with its notes,
+        [(tick, 0, 0, 0, (tag, body))] in time order (clip_data's cc)."""
         d = self.job
         base = steps if base is None else base
 
@@ -776,13 +932,15 @@ class Companion:
         if i == len(jobs):
             dl.switch_track(d, back)
             return self.sent(shapes, True, "", n, steps)
-        track, notes, first, end, alone = jobs[i]
+        track, notes, first, end, alone = jobs[i][:5]
+        rides = jobs[i][5] if len(jobs[i]) > 5 else []
         at = dl.put_cursor(d, first) if dl.switch_track(d, track) else None
         if at is not None and end is not None and self.stretch_unsafe(d, track, at, end):
             self.say(tr("companion.track_events"), warn=True)
             if not len(alone):  # (none of its new notes left: nothing goes on this track)
                 return self.paste_jobs(shapes, jobs, i + 1, steps, n, back, base)
-            notes, first, end = alone, int(alone[:, 0].min()), None
+            notes, end = alone, None
+            first = min(([int(alone[:, 0].min())] if len(alone) else []) + ([rides[0][0]] if rides else []))
             at = dl.put_cursor(d, first)
         if at is None:
             return failed("cursor")
@@ -792,8 +950,13 @@ class Companion:
             rows = rows[(rows[:, 0] >= at) & (rows[:, 0] < end)]
         rows, _ = cut_gates(rows)
         ppq = self.app.ppq
-        length = end - at if end is not None else max(int(rows[:, 1].max()) - at, 1)
-        raw = clip_data(rows, ppq, int(self.app.beats * ppq), "note", span=(at, length), own=())
+        if end is not None:
+            length = end - at
+        else:
+            last = ([int(rows[:, 1].max())] if len(rows) else []) + ([rides[-1][0] + 1] if rides else [])
+            length = max(max(last) - at, 1)
+        raw = clip_data(rows, ppq, int(self.app.beats * ppq), "note", span=(at, length), own=(),
+                        cc={0: list(rides)} if rides else None)
 
         def done(ok, why):
             if not ok:
@@ -869,11 +1032,14 @@ class Companion:
         """A send landed: a record of the shapes + their notes as Domino holds them now (gates its overlaps cut,
         notes Domino kept only one of left out); other records on those tracks take Spiderweb's own trims."""
         got, self.sending = self.sending, None
-        if got is None or not any(s is x for s, x in zip(got[0], shapes)) or got[2] is None:
+        if got is None or not any(s is x for s, x in zip(got[0], shapes)) or got[2] is None and len(got) < 4:
             return
-        _, rows, first = got
-        slots = np.unique(rows[:, 4])
-        track = first + np.searchsorted(slots, rows[:, 4])  # (a track per channel used, from the current one down)
+        rows, first = got[1], got[2]
+        if len(got) > 3:  # (send_back: each note's own track)
+            track = np.asarray(got[3], np.int64)
+        else:
+            slots = np.unique(rows[:, 4])
+            track = first + np.searchsorted(slots, rows[:, 4])  # (a track per channel used, from the current one down)
         tracks = {int(t): dv.track_notes(d, int(t)) for t in np.unique(track)}
         if any(v is None for v in tracks.values()):
             return
@@ -1141,16 +1307,24 @@ class Companion:
         if dl.alive(d) and not dl.roll_shown(d):  # (the track list shown: its selection is another kind of thing)
             self.quick = None
             return self.say(tr("companion.take_no_roll"), warn=True)
+        if dl.alive(d) and (dv.track_selected(d, 0) or (0, 0))[1]:
+            # (the track list's Select All selects the Conductor's tempos too: Domino's Delete would take them out,
+            # and Send never puts tempos back; measured 2026-11-12)
+            self.quick = None
+            return self.say(tr("companion.take_conductor"), warn=True)
         self.done_drawing()  # (what was drawn here first goes in first)
         self.busy, self.was_front, self._then, self.job = True, dl.front_window(), then, d
-        dl.Copy(self.bar, d, lambda rows, ppq, start: self.safely(self.took, rows, ppq, start))
+        self._rides = []  # (the copied tracks' other events (CC...): Domino's Delete takes the selected ones out too)
+        dl.Copy(self.bar, d, lambda rows, ppq, start: self.safely(self.took, rows, ppq, start),
+                passengers=self._rides)
 
     def took(self, rows, ppq, start, tries=0):
         d = self.job
         if rows is not None and dl.alive(d) and dl.busy(d) and tries < 5:
             # (the user acts in Domino right now: the selection may change before the Delete: copied again once
             # Domino is free, so the Delete takes exactly what was copied, hunt 2026-11-06)
-            dl.Copy(self.bar, d, lambda r, p, s: self.safely(self.took, r, p, s, tries + 1))
+            self._rides = []
+            dl.Copy(self.bar, d, lambda r, p, s: self.safely(self.took, r, p, s, tries + 1), passengers=self._rides)
             return
         self.busy, self._own = False, time.monotonic()
         then, self._then = self._then, None
@@ -1166,8 +1340,10 @@ class Companion:
             return self.say(tr("companion.take_" + ppq), warn=True)
         if d is None or ppq != app.ppq:
             return self.say(tr("companion.send_failed_domino"), warn=True)
-        start = self.copy_start(d, rows, start)
-        lifted, rows = self.lifted(d, rows, start)  # (shapes sent from here, all their notes taken: the shapes)
+        rides, self._rides = list(self._rides), []
+        src = self.sources(d, rows, rides)  # (each copied track's own track in Domino: read before the Delete)
+        start = self.copy_start(d, rows, start, src)
+        lifted, rows = self.lifted(d, rows, start, src)  # (shapes sent from here, all their notes taken: the shapes)
         new = []
         for r in lifted:
             for one in r["shape"]:
@@ -1182,8 +1358,18 @@ class Companion:
             made = notes_shape(rows, ppq, tr("companion.taken_name"))
             tracks = np.unique(rows[:, 4])
             made["cols"] = (tracks - tracks.min()).tolist()
+            several = src is not None and len(src) > 1
+            back = several or src is not None and bool(rides)
+            if back and rides:  # (the copied tracks' CCs ride along, back into their tracks with Send)
+                made["cc"] = pack_cc([(t - first, k, tag, body) for t, k, tag, body in rides])
             sh = clean_shape({**SHAPE_DEFAULTS, **app.defaults, **made})
             sh[MARK] = 1
+            if back:
+                # (Send puts each colour back into the track it came from, followed by Domino's track object if it
+                # moves; one track: the current one at Send, as before, user 2026-11-12)
+                ids = dv.track_ids(d) or []
+                sh[BACK] = [d.pid, [[int(c), int(t), int(ids[t]) if several and 0 < t < len(ids) else 0]
+                                    for c, t in sorted(src.items())]]
             sh["pts"] = [[b + (start + first) / ppq, p] for b, p in sh["pts"]]
             new.append(sh)
         dl.command(d, dl.DELETE)
@@ -1206,21 +1392,51 @@ class Companion:
         self.app.after_idle(self.flush)
 
     @staticmethod
-    def copy_start(d, rows, start):
+    def sources(d, rows, rides):
+        """Each copied track's own track in Domino ({copied track: Domino track}), read before Take's Delete: the
+        tracks holding selected notes, in order, paired with the copied tracks holding notes, each pair's note
+        count the same (Domino copies every selected note, from whichever tracks: its piano roll keeps a selection
+        made on another track, the track list selects many). A copied track with only other events (CC...): at the
+        same distance as the others when they all agree. None = unreadable / not adding up (Send as before)."""
+        got = dv.song_tracks(d)
+        if got is None or not len(rows):
+            return None
+        picked = []
+        for t in range(1, len(got[1])):
+            s = dv.track_selected(d, t)
+            if s is None:
+                return None
+            if s[0]:
+                picked.append((t, s[0]))
+        copied, counts = np.unique(rows[:, 4], return_counts=True)
+        if len(copied) != len(picked) or any(int(n) != m for n, (_, m) in zip(counts, picked)):
+            return None
+        out = {int(c): t for c, (t, _) in zip(copied, picked)}
+        shift = {t - c for c, t in out.items()}
+        for c in {int(k) for _, k, _, _ in rides} - set(out):
+            if len(shift) == 1 and 0 < c + next(iter(shift)) < len(got[1]):
+                out[c] = c + next(iter(shift))
+        return out
+
+    @staticmethod
+    def copy_start(d, rows, start, src=None):
         """Where Domino's copy of its selection really starts: read from its memory (the first selected note of the
-        current track), since its cursor is that place only after a box selection (Select All / clicked notes copy
-        from elsewhere: Take put them in the wrong place). Unreadable = the cursor, as before."""
-        mine = rows[rows[:, 4] == 0] if len(rows) else rows
+        copied track), since its cursor is that place only after a box selection (Select All / clicked notes copy
+        from elsewhere: Take put them in the wrong place). Unreadable = the cursor, as before. src: sources()."""
+        first = int(rows[:, 4].min()) if len(rows) else 0
+        mine = rows[rows[:, 4] == first] if len(rows) else rows
         now = dv.song_tracks(d)
-        got = dv.track_notes(d, now[0]) if now is not None and len(mine) else None
+        track = src.get(first) if src else now[0] if now is not None and first == 0 else None
+        got = dv.track_notes(d, track) if track is not None and len(mine) else None
         if got is None:
             return start
         sel = got[got[:, 4] != 0]
         return int(sel[:, 0].min()) - int(mine[:, 0].min()) if len(sel) else start
 
-    def lifted(self, d, rows, start):
+    def lifted(self, d, rows, start, src=None):
         """Remembered shapes alive in Domino whose notes were ALL taken (rows = Domino's copied selection: tick from
-        start, gate, key, velocity, copied track from the current one down) -> (those records, the rows left)."""
+        start, gate, key, velocity, copied track: its Domino track from src (sources()), else from the current one
+        down) -> (those records, the rows left)."""
         now = dv.song_tracks(d)
         mine = [r for r in self.mine(d) if r["alive"]]
         if not mine or now is None or not len(rows):
@@ -1228,7 +1444,7 @@ class Companion:
         cur = now[0]
         taken = {}
         for i, (t, g, k, v, c) in enumerate(rows[:, :5].tolist()):
-            taken.setdefault((cur + c, start + t, g, k, v), []).append(i)
+            taken.setdefault((src[c] if src and c in src else cur + c, start + t, g, k, v), []).append(i)
         out, used = [], set()
         for r in mine:
             picks = []

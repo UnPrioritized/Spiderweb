@@ -729,6 +729,18 @@ def _track_events(d, track):
     return out
 
 
+def track_selected(d, track):
+    """(selected notes, selected other events) of a track, or None (unreadable). Domino's piano roll keeps a
+    selection made on another track (Copy / Delete act on it), the track list's Select All selects every track's
+    events, the Conductor's tempos too (measured 2026-11-12, dev/scratch/sa_probe.py, 1.43 + 1.45 64-bit)."""
+    out = _track_events(d, track)
+    if out is None:
+        return None
+    on = out[:, 5] != 0
+    notes = out[:, 0] == d.build.note_vt
+    return int((on & notes).sum()), int((on & ~notes).sum())
+
+
 def song_tracks(d):
     """(current track, [each track's channel, 0-based]) read from Domino's memory, or None. Track 0 = Conductor.
     Found 2026-11-06 on 1.43 (dev/scratch/di_probe.py: a MIDI with known channels, Domino's track commands)."""
