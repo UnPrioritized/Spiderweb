@@ -1494,7 +1494,13 @@ def fx_notes(sh, ppq, keys, get):
     if is_pasted_flipped(sh) or is_gate_flipped(sh):  # (each run on a key mirrored inside itself, gateflip.py)
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         got = stepped_piece(sh, "gate_flip", notes, tracks, ppq, get) if is_gate_flipped(sh) else None
-        return with_glue(*(got or mirrored_runs(notes, tracks, bool(sh.get("own_vel")))), sh, ppq)
+        if got is None:
+            got = mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
+            if not sh.get("own_vel"):  # (READ WHERE THE NOTE SHOWS, user 2026-11-12, A: a shape reading its own line
+                # reads it at each note's start after the flip; with the partner's velocity (uneven notes don't land
+                # where their partner started) a line set notes outside it, sweep 392761239)
+                got = (line_at_shown({k: v for k, v in sh.items() if k != "gate_flip"}, got[0], ppq), got[1])
+        return with_glue(*got, sh, ppq)
     # (a notes shape's own overlaps fixed as the Channels mode shows them, before glue and every tool: heard_way)
     if sh.get("_noglue0"):  # (its glue before the pages runs later, or is switched off: steps.expanded)
         return heard_kind(sh, ppq, keys)
@@ -1565,10 +1571,9 @@ def run_step(notes, tracks, step, sh, ppq, get):
         return with_glue(notes, tracks, dict(g, glue=boxes), ppq)
     if tool == "gate_flip":
         out, tr_ = mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
-        # (lengths changed by a step before it (Gate extend / subtract / Sustain first, Properties): a note no longer
-        # lands where its partner started, so a shape reading its own line reads it where the note shows now; with the
-        # partner's velocity a line set a note outside it, sweep 492773031)
-        if any(st.get("tool") in ("sustain", "extend", "subtract") for st in sh.get("fx") or ()):
+        # (READ WHERE THE NOTE SHOWS, user 2026-11-12, A: a shape reading its own line reads it at each note's start
+        # after the flip; sweep 492773031: Gate extend first, the partner's velocity set a note outside a line)
+        if not sh.get("own_vel"):
             out = line_at_shown(sh, out, ppq)
         return out, tr_
     if tool in ("extend", "subtract"):  # (a sliced piece: on its whole's notes, cut where it was: stepped_piece)
