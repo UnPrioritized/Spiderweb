@@ -2505,16 +2505,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             deps.pop(k, None)
             top.discard(k)
 
-    def steps_noted(self):
+    def steps_noted(self, only_seen=False):
         """Every shape's step order kept up (notes/steps.py, PLAN.md "Properties" A): a step it didn't have at the
         last change goes at the end of its order, one taken away leaves it. A shape seen for the first time (new,
-        opened, undone, pasted) keeps the order it came with."""
+        opened, undone, pasted) keeps the order it came with. only_seen: the steps as they are now noted, nothing put
+        in an order (Add between steps just remade with the order they're made with)."""
         seen = getattr(self, "_step_sigs", None) or {}
         now = {}
         for sh in self.shapes:
             got = seen.get(id(sh))
             sig = steps_signature(sh)
-            if got is not None and got[0] is sh:
+            if got is not None and got[0] is sh and not only_seen:
                 if got[1] != sig:
                     steps_after_change(sh, got[1])
                     sig = steps_signature(sh)
@@ -2536,8 +2537,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self._late_notes:
             self.after_cancel(self._late_notes)
             self._late_notes = None
+        # (the user's own new steps placed first, so Add between sees a step's order as it'll be kept; the steps it
+        # remakes come with their own order: noted as they are, sweep 69812094)
+        self.steps_noted()
         if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
+            self.steps_noted(only_seen=True)
         if tidy_groups(self.shapes):  # (masks: a group of one = on its own, the first member Add; mask.py)
             self.after_idle(self.sync_mask)
         if self.loaded is not None:  # (Extract: the loaded notes the shapes took stay hidden, the rest come back)

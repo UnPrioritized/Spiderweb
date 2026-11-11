@@ -102,6 +102,16 @@ def clean_between(b):
             ext = False if b["ext"] is False else clean_extend(b["ext"])
             if ext is not None:
                 out["ext"] = ext
+        if b["role"] == "step" and isinstance(b.get("fxvel"), list):  # (velocity lines drawn after its pages)
+            from notes.fx import clean_pts
+            try:
+                got = [{"tool": "vel", "pts": clean_pts(s["pts"])} for s in b["fxvel"]]
+            except (KeyError, TypeError, ValueError, IndexError):
+                got = []
+            if got and all(s["pts"] for s in got):
+                out["fxvel"] = got
+                if isinstance(b.get("ord"), list) and all(isinstance(k, str) for k in b["ord"]):
+                    out["ord"] = list(b["ord"])
     return out
 
 
@@ -606,7 +616,34 @@ def with_own(step, b):
     for key, mark in OWN.items():
         if mark in b:
             step = with_sus(step, b[mark], key)
+    if b.get("fxvel"):  # (velocity lines drawn on it after its pages: its own, like its velocity, sweep 69812094)
+        from notes.fx import pages
+        if pages(step.get("fx")):
+            step = dict(step, fx=list(step["fx"]) + json.loads(json.dumps(b["fxvel"])))
+            if b.get("ord"):
+                step["order"] = list(b["ord"])
     return step
+
+
+OWN_MARKS = ("sus", "sub", "ext", "fxvel", "ord")  # (every own mark kept in sh["between"])
+
+
+def own_fx_vel(mine, want):
+    """mine (a step as it is) = want (as made) but for velocity lines drawn after its pages (fx "vel" steps at the
+    end, and the step order that put them there)? -> those vel steps, else None."""
+    from notes.fx import pages
+    fx = list(mine.get("fx") or [])
+    k = len(fx)
+    while k and fx[k - 1].get("tool") == "vel":
+        k -= 1
+    if k == len(fx) or not pages(fx[:k]):
+        return None
+    core = dict(mine, fx=fx[:k])
+    core.pop("order", None)
+    base = {key: v for key, v in want.items() if key != "order"}
+    if not close(_no_own(core), _no_own(base)):
+        return None
+    return fx[k:]
 
 
 def _clean_vel(v):
@@ -864,7 +901,18 @@ def sync_groups(shapes):
             mine = _plain(sh)
             if close(mine, want):
                 continue
-            if close(_no_own(mine), _no_own(want)):  # (only its velocity / Sustain / Gate subtract: its own, user)
+            plain = with_own(now.at(b["at"])[0], {k: v for k, v in b.items() if k not in ("fxvel", "ord")})
+            vels = own_fx_vel(mine, plain)
+            if vels is not None:  # (a velocity line drawn on it after its pages: its own too, it stays a step)
+                b["fxvel"] = json.loads(json.dumps(vels))
+                if mine.get("order"):
+                    b["ord"] = list(mine["order"])
+                else:
+                    b.pop("ord", None)
+                mine = dict(mine, fx=[s for s in mine["fx"]][:len(mine["fx"]) - len(vels)])
+                mine.pop("order", None)
+            if close(_no_own(mine), _no_own(want if vels is None else plain)):
+                # (only its velocity / Sustain / Gate subtract: its own, user)
                 if not close(mine, dict(_no_vel(mine), **{k: want[k] for k in VEL_KEYS if k in want})):
                     b["vel"] = {k: sh[k] for k in VEL_KEYS if k in sh}
                 for key, mark in OWN.items():
@@ -872,7 +920,7 @@ def sync_groups(shapes):
                         b[mark] = json.loads(json.dumps(mine.get(key, False)))
                 continue
             b["role"] = "key"
-            for k in ("sig", "vel", *OWN.values()):
+            for k in ("sig", "vel", *OWN_MARKS):
                 b.pop(k, None)
             changed = keyed = True
         if keyed:
@@ -885,7 +933,7 @@ def sync_groups(shapes):
             if b.get("vel"):
                 new = with_vel(new, b["vel"])
             new = with_own(new, b)
-            if b.get("vel") or any(m in b for m in OWN.values()):
+            if b.get("vel") or any(m in b for m in OWN_MARKS):
                 sig = fingerprint(new)
             if b.get("sig") == sig and old == sig:
                 continue
@@ -893,7 +941,7 @@ def sync_groups(shapes):
             sh.update(json.loads(json.dumps(new)))
             sh["between"] = dict({"id": gid, "role": "step", "at": b["at"], "sig": sig},
                                  **({"vel": b["vel"]} if b.get("vel") else {}),
-                                 **{m: b[m] for m in OWN.values() if m in b})
+                                 **{m: b[m] for m in OWN_MARKS if m in b})
             changed = True
     return changed
 
