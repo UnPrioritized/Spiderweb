@@ -133,3 +133,75 @@ pub fn pieces(group: &[i64], s: &[i64], e: &[i64], rank: &[i64], order: &[i64], 
     };
     pieces_built(group, s, e, rank, order, note, ps, pe, &mut hr, &mut hi)
 }
+
+/// fastloops.stop_pieces (sustain.cut_at's per-place maxima): reach = the running furthest stop inside a stretch,
+/// top = the loudest covering note from the heap (-loud: lowest on top), last = the longest end ending there.
+/// Needs (stop_pieces checks): every o[k] a row of place / a / b / v / e, its places inside reach / top / last,
+/// hr / hi as long as o.
+#[inline(always)]
+fn stops_inner(o: &[i64], place: &[i64], a: &[i64], b: &[i64], v: &[i64], e: &[i64], reach: &mut [i64],
+               top: &mut [i64], last: &mut [i64], hr: &mut [i64], hi: &mut [i64]) -> i64 {
+    let (n, m) = (reach.len(), o.len());
+    for j in 0..n {
+        put!(last, j, -1);
+    }
+    let (mut k, mut size, mut stretch_end, mut run) = (0usize, 0usize, 0i64, -1i64);
+    for j in 0..n {
+        let jj = j as i64;
+        if jj >= stretch_end {
+            // (a new stretch: nothing before it covers it, the heap emptied too)
+            run = -1;
+            size = 0;
+        }
+        while k < m {
+            let i = at!(o, k);
+            if at!(place, i) > jj {
+                break;
+            }
+            size = heap_push(hr, hi, size, -(at!(v, i) * 4294967296 + i), k as i64);
+            run = run.max(at!(b, i));
+            stretch_end = stretch_end.max(at!(place, i) + at!(b, i) - at!(a, i));
+            k += 1;
+        }
+        while size > 0 {
+            // (ended ones off the top)
+            let i = at!(o, at!(hi, 0));
+            if at!(place, i) + at!(b, i) - at!(a, i) > jj {
+                break;
+            }
+            size = heap_pop(hr, hi, size);
+        }
+        put!(reach, j, run);
+        put!(top, j, if size > 0 { -at!(hr, 0) } else { -1 });
+    }
+    for k in 0..m {
+        let i = at!(o, k);
+        let p = at!(place, i) + at!(b, i) - at!(a, i) - 1;
+        let x = at!(e, i);
+        if x > at!(last, p) {
+            put!(last, p, x);
+        }
+    }
+    0
+}
+
+level_builds!(fn stops_built(o: &[i64], place: &[i64], a: &[i64], b: &[i64], v: &[i64], e: &[i64],
+                           reach: &mut [i64], top: &mut [i64], last: &mut [i64], hr: &mut [i64], hi: &mut [i64])
+                           -> i64 => stops_inner);
+
+pub fn stop_pieces(o: &[i64], place: &[i64], a: &[i64], b: &[i64], v: &[i64], e: &[i64], reach: &mut [i64],
+                   top: &mut [i64], last: &mut [i64], hr: &mut [i64], hi: &mut [i64]) -> i64 {
+    let rows = place.len().min(a.len()).min(b.len()).min(v.len()).min(e.len());
+    let (m, n) = (o.len(), reach.len() as i64);
+    if hr.len() < m || hi.len() < m || top.len() < reach.len() || last.len() < reach.len()
+        || o.iter().any(|&i| {
+            i < 0 || i as usize >= rows || {
+                let (s, l) = (place[i as usize], b[i as usize] - a[i as usize]);
+                s < 0 || l < 1 || s + l > n
+            }
+        })
+    {
+        panic!("a place past the rows"); // (caught at the C edge: the caller uses its slower code)
+    }
+    stops_built(o, place, a, b, v, e, reach, top, last, hr, hi)
+}

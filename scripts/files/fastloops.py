@@ -39,6 +39,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
                  the key groups on half the cores: on_cores)
   radix_order    np.argsort(kind="stable") of whole numbers (Copy / Export to Domino: domino_clip.start_key_order)
   ring_runs      roll_draw.ring_parts' runs: the selection's red outline, each key row's notes joined
+  stop_pieces    sustain.cut_at's per-place maxima (Sustain stops): furthest stop, loudest note, longest end
   clash_pairs    engine.clash_arrays (Multi channel): which owners' stretches clash
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
@@ -1945,6 +1946,43 @@ def ring_runs(s, e, k, order, gap, big):
         reach = max(reach, e[i] + k[i] * big)
     rb[m] = reach - rk[m] * big
     return rk[:m + 1], ra[:m + 1], rb[:m + 1]
+
+
+@njit(nogil=True)
+def stop_pieces(o, place, a, b, v, e, reach, top, last, hr, hi):
+    """sustain.cut_at's per-place maxima (its _range_max x2 + np.maximum.at): o = the notes reaching a stop, in
+    (key, first stop) order, so their places never go down; note i covers places place[i] .. place[i] + b[i] - a[i]
+    - 1 (stops a[i] .. b[i] - 1), places laid end to end key row stretch by stretch (sustain._cover). Walked once:
+    reach = the furthest stop (b) of the notes covering each place (the running most inside a stretch: the furthest
+    reaching note started by then always covers it), top = the loudest (velocity v << 32 | note) from a heap of the
+    covering notes (-loud: the lowest on top), last = the longest end of the notes whose last place it is (-1:
+    none). hr / hi: heap room, as long as o."""
+    n, m = len(reach), len(o)
+    for j in range(n):
+        last[j] = -1
+    k, size, stretch_end, run = 0, 0, 0, -1
+    for j in range(n):
+        if j >= stretch_end:  # (a new stretch: nothing before it covers it, the heap emptied too)
+            run, size = -1, 0
+        while k < m and place[o[k]] <= j:
+            i = o[k]
+            size = _heap_push(hr, hi, size, -(v[i] * 4294967296 + i), k)
+            run = max(run, b[i])
+            stretch_end = max(stretch_end, place[i] + b[i] - a[i])
+            k += 1
+        while size:  # (ended ones off the top)
+            i = o[hi[0]]
+            if place[i] + b[i] - a[i] > j:
+                break
+            size = _heap_pop(hr, hi, size)
+        reach[j] = run
+        top[j] = -hr[0] if size else -1
+    for k in range(m):
+        i = o[k]
+        p = place[i] + b[i] - a[i] - 1
+        if e[i] > last[p]:
+            last[p] = e[i]
+    return 0
 
 
 @njit(nogil=True)
@@ -3863,6 +3901,7 @@ def warm():
     on_cores(_key_runs_cores, _key_runs, CORES_LEAST, k_order, k_at, i1, i1, i1)  # (the shared loop made now, not mid-paste)
     radix_order(i1, 1)
     ring_runs(i1, i1, i1, i1, 0.5, 1)
+    stop_pieces(i1 * 0, i1 * 0, i1 * 0, i1, i1, i1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy())
     clash_pairs(np.zeros((1, 4), np.int64), 1, 1 << 28)
     wave_fill(i1, 0, 1, i1, np.zeros(1), np.zeros(1))
     note_ends(i1, i1 + 1, i1, True, 2, 0.0, 50.0, True, np.zeros(1), 0.0, np.int64(1) << 40)

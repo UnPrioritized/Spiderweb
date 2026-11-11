@@ -3341,6 +3341,23 @@ def settled(notes, t):
     return out, t[idx]
 
 
+def same_rows(rows):
+    """kept_apart's copies: rows (start, end, key, colour before, colour now) -> (each group of equal rows' first row,
+    each row's group): the groups np.unique(rows, axis=0, return_index=True, return_inverse=True) gives (first =
+    the lowest row; the groups numbered in another order), by the compiled key sort (np.unique sorted the rows as
+    bytes: 0.4 s a call on ~1 M stacked copies, Sustain before a page makes them; 2026-11-11)."""
+    n = len(rows)
+    o1 = np.argsort(rows[:, 4], kind="stable")
+    r1 = rows[o1]
+    order = o1[key_sort(r1[:, 2], r1[:, 0], r1[:, 1], r1[:, 3])]  # (by key, start, end, before, now; equal rows
+    sr = rows[order]                                               # in their order)
+    new = np.ones(n, bool)
+    new[1:] = (sr[1:] != sr[:-1]).any(1)
+    inv = np.empty(n, np.int64)
+    inv[order] = np.cumsum(new) - 1
+    return order[new], inv
+
+
 def kept_apart(notes, old, new, colours, pick):
     """new colours with every clash put right: a note sounding on its key together with earlier ones (overlapping,
     not just touching) gets a colour none of those with ANOTHER colour before has now (its own one first, else a
@@ -3366,7 +3383,7 @@ def kept_apart(notes, old, new, colours, pick):
         both[:-1] |= twin
         ib = o[both]
         rows = np.column_stack([s[ib], e[ib], k[ib], np.asarray(old, np.int64)[ib], np.asarray(new, np.int64)[ib]])
-        _, first, inv = np.unique(rows, axis=0, return_index=True, return_inverse=True)
+        first, inv = same_rows(rows)
     if len(ib) and len(first) < len(ib):
         keep = np.ones(len(s), bool)
         keep[ib] = False
