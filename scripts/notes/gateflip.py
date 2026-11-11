@@ -132,10 +132,17 @@ def _mirrored(notes):
     """mirrored_runs' work: (the order, the notes in it, them mirrored, each one's partner at the other end of its
     run)."""
     order, gaps = row_order(notes)
-    new = (gaps < 0) | (gaps > gap_of(gaps))
+    a = notes[order]
+    # (EXACT DUPLICATES IGNORED, user 2026-11-12: a stacked copy of a note (same start, end, key) doesn't count
+    # towards the usual gap, so stacking / merging copies never moves notes; sweep 492780538)
+    dup = np.zeros(len(a), bool)
+    if len(a) > 1:
+        dup[1:] = (a[1:, 0] == a[:-1, 0]) & (a[1:, 1] == a[:-1, 1]) & (a[1:, 2] == a[:-1, 2])
+    usual = gap_of(gaps[~dup]) if dup.any() else gap_of(gaps)
+    new = (gaps < 0) | (gaps > usual)
+    new &= ~dup | (gaps < 0)
     first = np.flatnonzero(new)
     run = np.cumsum(new) - 1
-    a = notes[order]
     lo = np.minimum.reduceat(a[:, 0], first)[run]
     hi = np.maximum.reduceat(a[:, 1], first)[run]
     out = a.copy()
