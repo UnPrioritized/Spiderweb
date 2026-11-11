@@ -1535,6 +1535,24 @@ def reads_line(sh):
     return all(s.get("tool") in ("sustain", "extend", "subtract", "colours") for s in sh.get("fx") or ())
 
 
+def line_at_shown(sh, out, ppq):
+    """Gate aware flip's mirrored notes out of a shape reading its own velocity line (reads_line; sh without the
+    flip): each note's velocity read off the line where it shows now (READ WHERE THE NOTE SHOWS, user 2026-11-12).
+    Anything else: out as it is."""
+    if not len(out) or not reads_line(sh):
+        return out
+    env = velocity_env(sh)
+    if len({v for _, v in env}) == 1:
+        return out
+    path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
+    t_lo, t_hi = float(path.min()), float(path.max())
+    if grows_free(sh):
+        t_lo, t_hi = free_span(sh, ppq) or (t_lo, t_hi)
+    out = out.copy()
+    out[:, 3] = env_velocities(env, from0_starts(sh, out, out[:, 0], ppq), t_lo, t_hi)
+    return out
+
+
 def run_step(notes, tracks, step, sh, ppq, get):
     """The notes after one of the runner's own steps (steps.RUNNER; sh: the shape as it is before it, its notes
     notes / tracks): glue before the pages, Gate aware flip, Sustain, Gate extend, Gate subtract."""
@@ -1550,16 +1568,8 @@ def run_step(notes, tracks, step, sh, ppq, get):
         # (lengths changed by a step before it (Gate extend / subtract / Sustain first, Properties): a note no longer
         # lands where its partner started, so a shape reading its own line reads it where the note shows now; with the
         # partner's velocity a line set a note outside it, sweep 492773031)
-        if len(out) and reads_line(sh) and any(st.get("tool") in ("sustain", "extend", "subtract")
-                                                for st in sh.get("fx") or ()):
-            env = velocity_env(sh)
-            if len({v for _, v in env}) > 1:
-                path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
-                t_lo, t_hi = float(path.min()), float(path.max())
-                if grows_free(sh):
-                    t_lo, t_hi = free_span(sh, ppq) or (t_lo, t_hi)
-                out = out.copy()
-                out[:, 3] = env_velocities(env, from0_starts(sh, out, out[:, 0], ppq), t_lo, t_hi)
+        if any(st.get("tool") in ("sustain", "extend", "subtract") for st in sh.get("fx") or ()):
+            out = line_at_shown(sh, out, ppq)
         return out, tr_
     if tool in ("extend", "subtract"):  # (a sliced piece: on its whole's notes, cut where it was: stepped_piece)
         got = stepped_piece(sh, tool, notes, tracks, ppq, get, step["cfg"]) if sh.get("cut") else None
