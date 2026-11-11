@@ -1583,6 +1583,7 @@ def stepped_piece(sh, step, notes, tracks, ppq, get):
     if (tracks is None) != (wt0 is None):
         return None
     _, lo, hi = piece_ticks(src, part, ppq)
+    made = w0  # (the whole's notes as remembered: the same array for every piece)
     w0 = np.asarray(w0, np.int64)[:, :4]
     wt = np.zeros(len(w0), np.int64) if wt0 is None else np.asarray(wt0, np.int64)
     mine = np.asarray(notes, np.int64)[:, :4]
@@ -1590,17 +1591,38 @@ def stepped_piece(sh, step, notes, tracks, ppq, get):
     rows = _owned_rows(w0, wt, mine, pt, lo, hi)
     if rows is None:
         return None
+    w1 = _stepped_whole(made, w0, step, cfg, ppq, bool(sh.get("own_vel")))
     if step == "gate_flip":  # (runs mirrored across the cut: the knife cuts the notes where they are now)
-        w1 = np.asarray(mirrored_runs(w0, wt0, bool(sh.get("own_vel")))[0], np.int64)
         keep = (w1[:, 0] < hi) & (w1[:, 1] > lo)
         return _clipped(w1[keep], lo, hi), None if tracks is None else wt[keep]
-    w1 = np.asarray(extended(w0, cfg, ppq) if step == "extend" else subtracted(w0, cfg, ppq), np.int64)[rows]
+    w1 = w1[rows]
     w = w0[rows]
     out = w1.copy()  # (each of its notes as the whole's finished note, still cut where it was cut)
     out[:, 0] = np.where(mine[:, 0] > w[:, 0], np.maximum(w1[:, 0], mine[:, 0]), w1[:, 0])
     out[:, 1] = np.where(mine[:, 1] < w[:, 1], np.minimum(w1[:, 1], mine[:, 1]), w1[:, 1])
     keep = out[:, 1] > out[:, 0]
     return out[keep], None if tracks is None else pt[keep]
+
+
+_stepped_wholes = {}  # (id(whole's notes), step, settings, ppq, own_vel) -> (them, the step done): stepped_piece's
+
+
+def _stepped_whole(made, w0, step, cfg, ppq, own_vel):
+    """The whole's notes w0 (made: the array they came from, remembered by the caller) after step, worked out once
+    for all its pieces (a line cut into 180 pieces did it 180 times)."""
+    key = (id(made), step, json.dumps(cfg, sort_keys=True), ppq, own_vel)
+    was = _stepped_wholes.get(key)
+    if was is not None and was[0] is made:
+        return was[1]
+    if len(_stepped_wholes) > 16:
+        _stepped_wholes.clear()
+    if step == "gate_flip":
+        w1 = mirrored_runs(w0, None, own_vel)[0]
+    else:
+        w1 = extended(w0, cfg, ppq) if step == "extend" else subtracted(w0, cfg, ppq)
+    w1 = np.asarray(w1, np.int64)
+    _stepped_wholes[key] = (made, w1)
+    return w1
 
 
 def _owned_rows(w0, wt, mine, pt, lo, hi):
