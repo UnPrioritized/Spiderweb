@@ -73,6 +73,18 @@ def own_places(sh, rows, ppq, way=None, shown=None):
     return start, end
 
 
+def flip_runs(sh):
+    """Is sh's Gate aware flip mirroring its pasted notes' runs now (not switched off in Properties, not skipped while
+    an earlier step is edited)? Switched off it showed them unmirrored and a line missed them (sweep 75423057)."""
+    if not is_pasted_flipped(sh):
+        return False
+    from notes.steps import hidden_after, is_off
+    if is_off(sh, ("gate_flip", 0)):
+        return False
+    u = sh.get("_upto")
+    return u is None or ("gate_flip", 0) not in hidden_after(sh, tuple(u))
+
+
 def starts_moved(sh):
     """True when a step moves the shape's notes' starts after they're laid (Gate subtract's start side, on)."""
     from notes.steps import is_off
@@ -118,7 +130,7 @@ def _own_places(sh, rows, ppq, way=None):
     start, end = np.rint(np.minimum(a, b)), np.rint(np.maximum(a, b))
     if way and len(rows) > 1:
         return heard_places(sh, rows, start, end, way, ppq)
-    if is_pasted_flipped(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
+    if flip_runs(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
         base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], np.arange(len(rows))]).astype(np.int64)
         got = mirrored_runs(base, None, True)[0]
         start, end = got[:, 0].astype(float), got[:, 1].astype(float)
@@ -169,7 +181,7 @@ def heard_places(sh, rows, start, end, way, ppq):
         ps, pe = hi - pe, hi - ps
     else:
         ps, pe = ps + low, pe + low
-    if is_pasted_flipped(sh):  # (Gate aware flip: the fixed notes' runs mirrored, each piece where its partner was)
+    if flip_runs(sh):  # (Gate aware flip: the fixed notes' runs mirrored, each piece where its partner was)
         every = got.copy()
         every[:, :2] = (hi - every[:, [1, 0]]) if back else every[:, :2] + low
         idx = np.full(len(every), -1, np.int64)

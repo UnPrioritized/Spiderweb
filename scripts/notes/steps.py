@@ -611,6 +611,15 @@ def after_change(sh, before):
     shrank = len(fx_new) < len(fx_old)
     s = saved(sh)
     lost = _colours_gone(col_old, _colour_sig(sh)) if s is not None else []
+    if (s is not None and not (added or gone or grew or shrank or lost) and fx_new and len(fx_new) == len(fx_old)
+            and fx_new[-1] is not fx_old[-1] and fx_new[-1].get("tool") == fx_old[-1].get("tool") == "vel"
+            and all(a is b for a, b in zip(fx_old[:-1], fx_new[:-1]))):
+        # (a velocity line drawn over the last one replaced it (fx.with_velocity): drawn on the notes as shown, so it
+        # goes at the END like a new one; left in the old one's place before a Gate aware flip it set the mirrored
+        # notes, sweep 177544490)
+        last = (FX, len(fx_new) - 1)
+        s = order_of(sh, s)
+        return with_order(sh, order_of(sh, [t for t in s if t != last] + [last]))
     if not (added or gone or grew or shrank or lost):
         return sh
     if lost:  # (a Stir tab / Reverse taken out: its own entry leaves, so the later ones keep their places)
