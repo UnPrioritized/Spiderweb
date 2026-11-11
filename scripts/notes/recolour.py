@@ -970,7 +970,14 @@ def is_recoloured(sh):
 
 
 def without_recolour(sh):
-    return {k: v for k, v in sh.items() if k != "recolour"}
+    """sh without its Recolour. An order of its own (Properties, notes/steps.py) keeps its other steps where they
+    were: Sustain... placed after a colour step stayed after the page that step followed (else, with the colour
+    steps gone, it fell to the top: As drawn / Single made it before the page)."""
+    out = {k: v for k, v in sh.items() if k != "recolour"}
+    if sh.get("order") is not None and "recolour" in sh:
+        from notes.steps import COLOURS, order_of, with_order
+        with_order(out, [t for t in order_of(sh) if t[0] not in COLOURS])
+    return out
 
 
 def new_seed():

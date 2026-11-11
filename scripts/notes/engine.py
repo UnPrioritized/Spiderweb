@@ -994,10 +994,10 @@ def made_from(sh):
     again."""
     rc = sh.get("recolour")
     if isinstance(rc, dict) and isinstance(rc.get("liquify"), dict) and "frozen" in rc["liquify"]:
-        from notes.recolour import clean_recolour
+        from notes.recolour import clean_recolour, without_recolour
         rc = dict(rc, liquify={k: v for k, v in rc["liquify"].items() if k != "frozen"})
         # (only a mask: no Recolour at all, the very key of the shape without it)
-        sh = dict(sh, recolour=rc) if clean_recolour(rc) else {k: v for k, v in sh.items() if k != "recolour"}
+        sh = dict(sh, recolour=rc) if clean_recolour(rc) else without_recolour(sh)
     hz = sh.get("hz")
     if not isinstance(hz, dict):
         return sh
