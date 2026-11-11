@@ -131,10 +131,36 @@ def _own_places(sh, rows, ppq, way=None):
     if way and len(rows) > 1:
         return heard_places(sh, rows, start, end, way, ppq)
     if flip_runs(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
-        base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], np.arange(len(rows))]).astype(np.int64)
-        got = mirrored_runs(base, None, True)[0]
+        base = np.column_stack([start, np.maximum(end, start + 1), rows[:, 2], rows[:, 3],
+                                np.arange(len(rows))]).astype(np.int64)
+        lens = _lengths_before_flip(sh, base, ppq)
+        got = mirrored_runs(lens, None, True)[0]
         start, end = got[:, 0].astype(float), got[:, 1].astype(float)
     return start, end
+
+
+def _lengths_before_flip(sh, notes, ppq):
+    """notes (start, end, key, velocity, ...) with the Gate extend / subtract its step order runs BEFORE the Gate
+    aware flip (Properties) done to them: the flip mirrors the runs of the notes as they are then (sweep 292796160: a
+    line read places from runs before Gate extend and set the wrong notes). Rows keep their order."""
+    from notes.steps import GATE_FLIP, off_tags, order_of
+    if sh.get("order") is None:
+        return notes
+    tags, off = order_of(sh), off_tags(sh)
+    if (GATE_FLIP, 0) not in tags:
+        return notes
+    for t in tags[:tags.index((GATE_FLIP, 0))]:
+        if t in off or not isinstance(sh.get(t[0]), dict):
+            continue
+        if t[0] == "extend":
+            from notes.extend import extended, is_extended
+            if is_extended(sh):
+                notes = extended(notes, sh["extend"], ppq)
+        elif t[0] == "subtract":
+            from notes.subtract import is_subtracted, subtracted
+            if is_subtracted(sh):
+                notes = subtracted(notes, sh["subtract"], ppq)
+    return notes
 
 
 def heard_places(sh, rows, start, end, way, ppq):

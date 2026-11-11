@@ -1517,7 +1517,21 @@ def run_step(notes, tracks, step, sh, ppq, get):
         g = unflipped(sh) if sh.get("_m") else sh
         return with_glue(notes, tracks, dict(g, glue=boxes), ppq)
     if tool == "gate_flip":
-        return mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
+        out, tr_ = mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
+        # (lengths changed by a step before it (Gate extend / subtract / Sustain first, Properties): a note no longer
+        # lands where its partner started, so a shape reading its own line reads it where the note shows now; with the
+        # partner's velocity a line set a note outside it, sweep 492773031)
+        if len(out) and reads_line(sh) and any(st.get("tool") in ("sustain", "extend", "subtract")
+                                                for st in sh.get("fx") or ()):
+            env = velocity_env(sh)
+            if len({v for _, v in env}) > 1:
+                path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
+                t_lo, t_hi = float(path.min()), float(path.max())
+                if grows_free(sh):
+                    t_lo, t_hi = free_span(sh, ppq) or (t_lo, t_hi)
+                out = out.copy()
+                out[:, 3] = env_velocities(env, from0_starts(sh, out, out[:, 0], ppq), t_lo, t_hi)
+        return out, tr_
     if tool in ("extend", "subtract"):  # (a sliced piece: on its whole's notes, cut where it was: stepped_piece)
         got = stepped_piece(sh, tool, notes, tracks, ppq, get, step["cfg"]) if sh.get("cut") else None
         if got is not None:
