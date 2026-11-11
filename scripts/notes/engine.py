@@ -2024,7 +2024,10 @@ def whole_tools(whole, raw, spots, tracks, ppq):
     """A line piece's whole's notes (raw (start, end, key), each one's spot, tracks) with its velocities, after its
     glue and note tool pages: (start, end, key, velocity) rows, their spots, tracks."""
     t = dedupe(np.concatenate(cached_arrays(whole)))[:, 0] * ppq
-    vel = env_velocities(velocity_env(whole), raw[:, 0], float(t.min()), float(t.max()))
+    # (a note across beat 0 of a shape made later reads it where it shows, as the shape uncut does: from0_starts;
+    # sweep 277533358, its velocity changed when cut)
+    vel = env_velocities(velocity_env(whole), from0_starts(whole, raw, raw[:, 0], ppq), float(t.min()),
+                         float(t.max()))
     who = tracks if tracks is not None else np.zeros(len(raw), np.int64)
     a = np.column_stack([raw, vel, np.arange(len(raw)), who]).astype(np.int64)  # (spots ride along as row numbers)
     fx, glued_first = whole_steps(whole)  # (its glue before the pages where its order puts it: steps.py)

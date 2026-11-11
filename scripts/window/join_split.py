@@ -2042,8 +2042,9 @@ class JoinSplit:
         # ("Keep notes made there": under key 0 / before beat 0 too, cut like the rest)
         # (made as shown: its own overlaps fixed at the base, before Gate aware flip / pages, as App.notes_tracks
         # does; fixed only afterwards, a gate flipped paste's runs came out mirrored from other notes, sweep 11-08)
-        from window.app import as_heard
-        made = as_heard(sh, self.channel_mode.get(), self.overlap_rule())
+        # (as App.notes_tracks makes it: outside Multi channel without its Recolour, as shown; sweep 76216109: As
+        # drawn, a cut gave the pieces the Recolour's notes, stacked twins merged + overlaps cut)
+        made = self.notes_cache_key(sh)[0]
         if self.keeps_offrange() and past_edges(sh, self.keys, self.ppq) is not None:
             got = whole_notes_tracks(made, self.ppq, self.keys)
         else:
