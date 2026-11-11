@@ -30,7 +30,8 @@ Windows, nothing to install. Linux and Windows users can also [run it from sourc
   from one shape to another), Recolour and Stir (swirls and bends made from the colours you drew), Gate trim, Gate
   extend, Fill gaps, Fold tracks (many tracks onto fewer), slicing (with a line, a Lasso loop or another shape) and merging.
 - **Draw on Domino** (Experimental, Windows): Spiderweb's drawing tools right on Domino's piano roll; each finished
-  shape goes into Domino's current track by itself.
+  shape goes into Domino's current track by itself. Real Windows only: the button isn't there on Linux or macOS,
+  or under Wine / Bottles / Proton.
 - **Load MIDI:** open a MIDI file, even a huge dense one, draw on top of it, change its tempo, reorder or draw into
   its tracks; the export changes only what you changed.
 - **Track list and Conductor pane:** see and arrange the tracks your MIDI will have (Tab), and draw the tempo as a

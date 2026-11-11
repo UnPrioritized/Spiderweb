@@ -1668,10 +1668,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         btns.grid(row=r + 2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         # (New / Open… / Save… are in the File menu: the row got too crammed, user 2026-10-22)
         ttk.Button(btns, text=tr("app.export_midi"), command=self.generate).pack(side="right")  # (under Export)
-        if system.WINDOWS:  # (Domino companion: Spiderweb's tools right on Domino's piano roll)
-            b = ttk.Button(btns, text=tr("companion.button"), command=self.start_companion)
-            b.pack(side="left")
-            Tooltip(b, tr("companion.button_tip"))
+        self.companion_button = self.make_companion_button(btns)
+
+    def make_companion_button(self, parent):
+        """Draw on Domino's button (Spiderweb's tools right on Domino's piano roll), or None: REAL Windows only, gone
+        (not greyed) on Linux / Mac and under a Windows-compatible layer too (user 2026-11-12)."""
+        if not system.REAL_WINDOWS:
+            return None
+        b = ttk.Button(parent, text=tr("companion.button"), command=self.start_companion)
+        b.pack(side="left")
+        Tooltip(b, tr("companion.button_tip"))
+        return b
 
     def _build_shape_list(self, side):
         box = self.shapes_box = ttk.LabelFrame(side, text=tr("app.shapes"), padding=6)
@@ -4631,6 +4638,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def start_companion(self):
         """Draw on Domino: Spiderweb's tools right on Domino's piano roll (window/domino_companion.py)."""
+        if not system.REAL_WINDOWS:  # (no button there; anything else asking for it = nothing, quietly)
+            return
         from window.domino_companion import start
         start(self)
 

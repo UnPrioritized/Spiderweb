@@ -29,6 +29,9 @@ def _wine_version():
 
 
 WINE = _wine_version()  # (untested under Wine: the program never names it, only the logs do)
+# Real Windows, not a Windows-compatible layer: Draw on Domino exists only here (user 2026-11-12: Linux users running
+# Domino + Spiderweb through such a layer found it broken; hidden everywhere else, not greyed)
+REAL_WINDOWS = WINDOWS and not WINE
 
 try:
     from ctypes import wintypes  # Windows' C types (import it from here, never from ctypes)

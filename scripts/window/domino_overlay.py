@@ -21,7 +21,7 @@ FIND_MS = 500  # how often the front-most Domino is looked for again
 
 
 def available():
-    return system.WINDOWS
+    return system.REAL_WINDOWS  # (not under a Windows-compatible layer either, user 2026-11-12)
 
 
 def start_domino(path, *files):

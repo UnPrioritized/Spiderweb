@@ -1,6 +1,8 @@
-Draw on Domino (Project, beside Export MIDI; Windows only) puts Spiderweb's drawing tools right on Domino's piano roll. Spiderweb's window hides and a small bar floats over Domino instead. What you draw lands on Domino's own grid and goes into Domino as real notes. If Domino isn't running, Spiderweb starts it (the first time it asks where Domino.exe is).
+Draw on Domino (Project, beside Export MIDI) puts Spiderweb's drawing tools right on Domino's piano roll. Spiderweb's window hides and a small bar floats over Domino instead. What you draw lands on Domino's own grid and goes into Domino as real notes. If Domino isn't running, Spiderweb starts it (the first time it asks where Domino.exe is).
 
 It's experimental. Spiderweb works with Domino from the outside, following its window and putting notes in through Domino's own commands and clipboard. It has been tested, but not every song, setting and order of actions can be, so something could still go wrong: notes in the wrong place or missing, a step Ctrl+Z doesn't take back, or Domino closing. Save your song in Domino first and keep backups of songs that matter. The safe way always works: draw in Spiderweb, then Copy to Domino (Ctrl+Shift+C) and paste in Domino. Each start asks first, until you tick "Don't show this again".
+
+It works on Windows only. On Linux and macOS, and when Spiderweb or Domino runs through a layer that runs Windows programs on another system, the button isn't there; Copy to Domino and pasting work as usual.
 
 [clip:companion-draw]
 
