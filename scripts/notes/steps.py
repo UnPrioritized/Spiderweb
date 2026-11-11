@@ -277,6 +277,10 @@ def expanded(sh):
     if isinstance(before, (list, tuple)) and len(before) == 2 and tuple(before) in tags:
         tags = tags[:tags.index(tuple(before))]
     inside = in_whole(sh)  # (a sliced piece: run inside its whole's steps)
+    # (glue ordered after one of those: it glues the piece's notes as they come out of the whole, so it can't go to
+    # the bottom; there it glued before the Sustain and held notes outside the box changed, sweep 292805004)
+    glue_late = bool(inside) and (GLUE, 0) in tags and any(
+        t[0] in inside for t in tags[:tags.index((GLUE, 0))])
     tags = [t for t in tags if t[0] not in inside]
     off = off_tags(sh)
     tags = [t for t in tags if t[0] == FX or t not in off]
@@ -333,7 +337,7 @@ def expanded(sh):
         if k == FX:
             out.append(fx[n])
         elif k == GLUE:
-            if not out:
+            if not out and not glue_late:
                 del E["_noglue0"]
             else:
                 out.append({"tool": "glue0"})
@@ -377,6 +381,8 @@ def in_whole(sh):
     them out. An empty set for every other shape."""
     if not sh.get("cut") or sh.get("order") is None or not any(k in sh for k in LENGTHS):
         return set()
+    if FX not in sh["order"]:  # (an order saying nothing about the whole's pages (made on the piece: glue added
+        return set()           # after its Sustain): they keep their default place, first; sweep 292805004)
     from notes.sliced import source, whole_made
     if not whole_made(sh["cut"]):
         return set()
