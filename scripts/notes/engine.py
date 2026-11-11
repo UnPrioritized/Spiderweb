@@ -1141,7 +1141,7 @@ def self_overlaps(n, who):
     return bool(over.any())
 
 
-def heard_notes(sh, notes, tracks):
+def heard_notes(sh, notes, tracks, ppq=None):
     """A notes shape's notes with its own overlaps on each track fixed as sh["_heard"] says (heard_way; Single's
     rule: the later start wins, cut + stretch or split around). None / no overlaps: as they are. A big pasted text
     found without overlaps is remembered (moved / stretched / cut copies of it never get any)."""
@@ -1165,6 +1165,7 @@ def heard_notes(sh, notes, tracks):
         return notes, tracks
     rows = np.zeros((len(n), 6), np.int64)
     rows[:, :4], rows[:, 4] = n[:, :4], who
+    rows[:, 5] = np.arange(len(n))  # (each note's row, ridden along: _read_at_shown)
     del who  # (in rows now: 40 MB less at 5 M notes while they're fixed)
     pts = sh.get("pts")
     back = bool(pts) and pts[1][0] < pts[0][0]
@@ -1179,10 +1180,38 @@ def heard_notes(sh, notes, tracks):
         rows[:, :2] += low
     if back:
         rows[:, 0], rows[:, 1] = hi - rows[:, 1], hi - rows[:, 0]
+        # (READ WHERE THE NOTE SHOWS, user 2026-11-12: mirrored back, a note's start moves (stretched to an earlier
+        # note's end, or cut); a shape reading its own line reads it at that shown start, as with Gate subtract;
+        # case 392786383)
+        if ppq:
+            rows = _read_at_shown(sh, rows, n, ppq)
     out = np.ascontiguousarray(rows[:, :4])
     if tracks is None:
         return out, None
     return out, ids[rows[:, 4]]
+
+
+def _read_at_shown(sh, rows, n, ppq):
+    """heard_notes' fixed rows (column 5 = each one's row in n) of a sideways-flipped shape reading its own velocity
+    line: a note whose start moved reads the line at its shown start. Only when the line read at the unmoved starts
+    gives exactly their velocities (the reading the notes were made with); else as they are."""
+    if not reads_line(sh):
+        return rows
+    env = velocity_env(sh)
+    if len({v for _, v in env}) == 1:
+        return rows
+    path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
+    t_lo, t_hi = float(path.min()), float(path.max())
+    moved = rows[:, 0] != np.asarray(n)[rows[:, 5], 0]
+    if not moved.any():
+        return rows
+    got = env_velocities(env, from0_starts(sh, rows, rows[:, 0], ppq), t_lo, t_hi)
+    same = ~moved & (rows[:, 3] == np.asarray(n)[rows[:, 5], 3])  # (not merged with a louder one)
+    if not (got[same] == rows[same, 3]).all():
+        return rows
+    rows = rows.copy()
+    rows[moved, 3] = got[moved]
+    return rows
 
 
 PASTE_KEPT_MOST = 4  # (pasted texts whose repeat check / own-overlap fix are kept: _PASTE_KEPT)
@@ -1260,7 +1289,7 @@ def heard_kind(sh, ppq, keys):
     way = sh.get("_heard")
     got = paste_moved(sh, ppq, keys) if way else None
     if got is None:
-        return heard_notes(sh, *kind_notes_tracks(sh, ppq, keys))
+        return heard_notes(sh, *kind_notes_tracks(sh, ppq, keys), ppq)
     text, rows, T0, K0, kept = got
     keep = paste_keep(sh, rows, kept)
     fixed = kept.get(("heard", way, keep is None))
