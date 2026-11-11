@@ -32,6 +32,7 @@ from window.settings_window import ScrollPage
 from window.widgets import ListTip, ShortLabel, Tooltip, bad, good, leave_box, remember_place, unchanged
 
 LIST_CHARS = 22  # the shape list's width in letters (longer names: cut, the whole name in a tip)
+SHORT_CHARS = 32  # a folded basics group's grey line asks this many letters' room (the window a bit wider: user 2026-11-12 OK)
 TIP_MOST = 12  # a Mixed value's tip lists this many shapes' values at most
 DRAG_PX = 4  # (a press moving less than this is a click: opens the step's window)
 LIST_MOST = 330  # the tallest the step list shows at 100 % size, in pixels (longer lists scroll)
@@ -163,13 +164,34 @@ class PropertiesWindow(tk.Toplevel):
         self.vars, self.entries = {}, {}
         self.tips, self.tip_base = {}, {}  # (a value's / box's tip: its own text, + each shape's value when Mixed)
 
-        def head(key):
-            lb = ttk.Label(f, text=tr(key))
-            lb.grid(row=self.r, column=0, columnspan=2, sticky="w", pady=(14 if self.r else 0, 0))
+        self.group_of, self.want, self.shorts, self.arrows = {}, {}, {}, {}
+        self.group = None
+
+        def head(key, group):
+            """A fold-away group's header (user 2026-11-12, the window was too tall): ▶ / ▼ + its name + (folded) a
+            grey line of what it holds; a click anywhere on it folds / unfolds (remembered, autosave). Folded at
+            first. The arrow in a spot of its own (▶ and ▼ differ in width: the name must not jump); the grey line
+            cut with "…" + a tip if long, so it never makes the window wider."""
+            hd = ttk.Frame(f, cursor="hand2")
+            hd.grid(row=self.r, column=0, columnspan=2, sticky="ew", pady=(6 if self.r else 0, 0))
+            arrow = ttk.Label(hd, width=2, cursor="hand2")
+            arrow.pack(side="left")
+            word = ttk.Label(hd, text=tr(key), cursor="hand2")
+            word.pack(side="left")
+            short = ShortLabel(hd, least=SHORT_CHARS, foreground=look.HINT, cursor="hand2")
+            short.pack(side="left", fill="x", expand=True, padx=(8, 0))
+            for w in (hd, arrow, word):
+                Tooltip(w, tr("props.fold_tip"))
+            for w in (hd, arrow, word, short):
+                w.bind("<Button-1>", lambda e, g=group: self.on_fold(g))
+            self.arrows[group], self.shorts[group] = arrow, short
+            self.group = group
             sep = ttk.Separator(f)
-            sep.grid(row=self.r + 1, column=0, columnspan=2, sticky="ew", pady=(3, 6))
+            sep.grid(row=self.r + 1, column=0, columnspan=2, sticky="ew", pady=(3, 4))
+            self.parts["sep_" + group] = [sep]
+            self.group_of["sep_" + group] = group
             self.r += 2
-            return [lb, sep]
+            return [hd]
 
         def row(name, label, widget, tip=None):
             lb = ttk.Label(f, text=tr(label))
@@ -181,6 +203,7 @@ class PropertiesWindow(tk.Toplevel):
                 self.tips[name] = Tooltip(widget, tr(tip) if tip else "")
                 self.tip_base[name] = tr(tip) if tip else ""
             self.parts[name] = [lb, widget]
+            self.group_of[name] = self.group
             self.r += 1
             return widget
 
@@ -208,16 +231,16 @@ class PropertiesWindow(tk.Toplevel):
             fr.boxes, fr.word = boxes, word
             return fr
 
-        self.heads = {"shape": head("props.head_shape")}
+        self.heads = {"shape": head("props.head_shape", "shape")}
         self.kind = value("kind", "props.kind")
         self.name = value("name", "props.name")
         self.made = value("made", "props.made_by", "props.made_by_tip")
-        self.heads["place"] = head("props.head_place")
+        self.heads["place"] = head("props.head_place", "place")
         self.start = number("start", "props.start", "unit.ticks", "props.start_tip", self.on_place)
         self.length = number("length", "props.length", "unit.ticks", "props.length_tip", self.on_place)
         self.low = number("low", "props.low", None, "props.low_tip", self.on_place)
         self.high = number("high", "props.high", None, "props.high_tip", self.on_place)
-        self.heads["gate"] = head("props.head_gate")
+        self.heads["gate"] = head("props.head_gate", "gate")
         self.inside = value("inside", "props.inside", "props.inside_tip")
         self.gate = number("gate", "props.gate", "unit.ticks", "props.gate_tip", self.on_gate)
         self.vel = number("vel0", "props.velocity", None, "props.velocity_tip", self.on_velocity, two="vel1")
@@ -225,17 +248,48 @@ class PropertiesWindow(tk.Toplevel):
                                   wraplength=int(WRAP * self.app.scale), justify="left")
         self.vel_note.grid(row=self.r, column=1, sticky="w")
         self.parts["vel_note"] = [self.vel_note]
+        self.group_of["vel_note"] = self.group
         self.r += 1
-        self.heads["colours"] = head("props.head_colours")
+        self.heads["colours"] = head("props.head_colours", "colours")
         self.colours = value("colours", "props.colours", "props.colours_tip")
         self.channel = value("channel", "props.channel", "props.channel_tip")
+        for name in self.parts:
+            self.want[name] = name.startswith("sep_")
 
     def show_part(self, name, on):
+        """Row name wanted or not (what the picked shapes have); shown only while its group is unfolded too."""
+        self.want[name] = on
+        on = on and self.group_of.get(name) in self.app.props_open
         for w in self.parts[name]:
             if on and not w.winfo_manager():
                 w.grid()
             elif not on and w.winfo_manager():
                 w.grid_remove()
+
+    def on_fold(self, group):
+        """A basics group's header clicked: folded / unfolded (a number typed in another box stays typed: nothing
+        here touches the boxes; folding the group a typed box is in takes the number in first, like a new pick)."""
+        app = self.app
+        if group in app.props_open:
+            app.commit_typing()
+        app.props_open ^= {group}
+        self.sync_folds()
+
+    def sync_folds(self):
+        """Arrows, rows and the grey one-line summaries as each group is folded / unfolded now."""
+        app = self.app
+        for group, arrow in self.arrows.items():
+            shown = group in app.props_open
+            if arrow.cget("text") != ("▼" if shown else "▶"):
+                arrow.config(text="▼" if shown else "▶")
+            short = self.shorts[group]
+            if shown == bool(short.winfo_manager()):
+                if shown:
+                    short.pack_forget()
+                else:
+                    short.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        for name in self.parts:
+            self.show_part(name, self.want.get(name, False))
 
     # ---- what it shows
 
@@ -324,27 +378,33 @@ class PropertiesWindow(tk.Toplevel):
             self.say("")  # (other shapes shown: the line was about the ones before)
         i, sh = picks[0] if picks else (None, None)
         n = len(picks)
-        self.what.config(text=tr("props.nothing") if sh is None else tr("props.shape", n=i + 1, name=app.shape_label(sh))
-                         if n == 1 else tr("props.shapes", n=n))
+        # (one shape: no title line, the folded Shape line names it (user 2026-11-12: the window was too tall))
+        self.what.config(text=tr("props.nothing") if sh is None else "" if n == 1 else tr("props.shapes", n=n))
         more = tr("props.several", n=n) if n > 1 else ""
         if more != self.more.cget("text"):
             self.more.config(text=more)
-            if more:
-                self.more.pack(anchor="w", fill="x", after=self.what)
-            else:
-                self.more.pack_forget()
         # (nothing selected: only the line saying so; a frame whose rows all go keeps its size in Tk, so whole parts
-        # are taken out)
-        prev = self.more if self.more.winfo_manager() else self.what
-        for part, kw in ((self.basics, dict(anchor="w", fill="x", pady=(6, 0))),
-                         (self.steps_head, dict(anchor="w", fill="x", pady=(14, 0))),
-                         (self.steps_line, dict(fill="x", pady=(3, 6))), (self.fixed, dict(anchor="w", fill="x")),
-                         (self.scroll, dict(anchor="w", fill="x"))):
-            if sh is None:
-                part.pack_forget()
-            elif not part.winfo_manager():
-                part.pack(after=prev, **kw)
-            prev = part
+        # are taken out; each shown part packed before the next shown one, in this order)
+        order = ((self.what, n != 1, dict(anchor="w", fill="x")), (self.more, bool(more), dict(anchor="w", fill="x")),
+                 (self.basics, sh is not None, dict(anchor="w", fill="x", pady=(6 if n != 1 else 0, 0))),
+                 (self.steps_head, sh is not None, dict(anchor="w", fill="x", pady=(10, 0))),
+                 (self.steps_line, sh is not None, dict(fill="x", pady=(3, 6))),
+                 (self.fixed, sh is not None, dict(anchor="w", fill="x")),
+                 (self.scroll, sh is not None, dict(anchor="w", fill="x")))
+        for k, (part, on, kw) in enumerate(order):
+            if not on:
+                if part.winfo_manager():
+                    part.pack_forget()
+                continue
+            if part is self.basics and part.winfo_manager() and getattr(self, "_basics_pad", None) != kw["pady"]:
+                part.pack_configure(pady=kw["pady"])
+            if part is self.basics:
+                self._basics_pad = kw["pady"]
+            if part.winfo_manager():
+                continue
+            after = [p for p, o, _ in order[k + 1:] if o and p.winfo_manager()]
+            after += [w for w in (self.hidden, self.status) if w.winfo_manager()]
+            part.pack(before=after[0] if after else self.buttons, **kw)
         self.sync_basics(picks)
         self.sync_steps(picks)
         self.sync_hidden(picks)
@@ -424,7 +484,8 @@ class PropertiesWindow(tk.Toplevel):
             return
         for name in self.heads:
             for w in self.heads[name]:
-                w.grid()
+                if not w.winfo_manager():
+                    w.grid()
         self.show_value("kind", self.kind, [(i, kind_text(sh)) for i, sh in picks])
         self.show_value("name", self.name, [(i, app.shape_label(sh)) for i, sh in picks])
         self.show_part("kind", True)
@@ -456,10 +517,45 @@ class PropertiesWindow(tk.Toplevel):
         self.put_all("vel0", [(i, fmt(sh.get("vel0", 100))) for i, sh in picks])
         self.put_all("vel1", [(i, fmt(sh.get("vel1", 100))) for i, sh in picks])
         self.show_part("vel_note", any(sh.get("vel_env") for _, sh in picks))
-        self.show_value("colours", self.colours, [(i, colours_text(sh)) for i, sh in picks])
+        cols = [(i, colours_text(sh)) for i, sh in picks]
+        chans = [(i, channel_text(app, sh)) for i, sh in picks]
+        self.show_value("colours", self.colours, cols)
         self.show_part("colours", True)
-        self.show_value("channel", self.channel, [(i, channel_text(app, sh)) for i, sh in picks])
+        self.show_value("channel", self.channel, chans)
         self.show_part("channel", True)
+        # (the folded groups' grey lines: what each holds, "Mixed" (plain) where the picked shapes differ)
+        mixed = tr("widgets.mixed")
+
+        def one(pairs):
+            texts = {t for _, t in pairs}
+            return next(iter(texts)) if len(texts) == 1 else mixed
+
+        names = [(i, app.shape_label(sh)) for i, sh in picks]
+        shorts = {"shape": one(names)}
+        if known:
+            got = [one([(i, fmt(p[k])) for i, _, p in known]) for k in range(2)]
+            keys = [one([(i, note_name(p[k])) for i, _, p in known]) for k in (2, 3)]
+            shorts["place"] = tr("props.place_short", start=got[0], length=got[1], low=keys[0], high=keys[1])
+        else:
+            shorts["place"] = ""
+        gate = []
+        if custom:
+            gate.append(one([(i, fill_text(sh)) for i, sh in custom]))
+        if spam:
+            ticks = {gate_ticks(sh["gate"], app.ppq) for _, sh in spam}
+            if len(ticks) == 1:
+                t = ticks.pop()
+                gate.append(trn("props.gate_short", t, n=fmt(t)))
+            else:
+                gate.append(mixed)
+        gate.append(tr("props.vel_short", a=one([(i, fmt(sh.get("vel0", 100))) for i, sh in picks]),
+                       b=one([(i, fmt(sh.get("vel1", 100))) for i, sh in picks])))
+        shorts["gate"] = ", ".join(gate)
+        shorts["colours"] = ", ".join((one(cols), one(chans)))
+        for group, text in shorts.items():
+            if self.shorts[group].cget("text") != text:
+                self.shorts[group].config(text=text)
+        self.sync_folds()
 
     # ---- the steps
 

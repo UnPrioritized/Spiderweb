@@ -2,6 +2,8 @@ Select a shape, then right-click it → Properties… (the last item), or press 
 
 ## The basics
 
+The basics come in four groups, folded shut at first so the window stays short: each shows one grey line of what it holds. Click a group's name to open or shut it; Spiderweb remembers which ones you keep open.
+
 At the top: what kind of shape it is, its name, and "Made by" when a command made it from another shape (Turn into plain notes, Fill gaps, Fold tracks, Flip each line, Split into pieces, Apply mask). It was made once: changing that other shape now doesn't change this one.
 
 Place and size: Start, Length, Lowest key and Highest key, worked out from the notes as they come out. Type another number to move the shape (Start, Lowest key) or to stretch or squeeze it (Length from its start, Highest key from its lowest key). Each change is one undo step.

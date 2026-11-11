@@ -845,6 +845,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         from notes.recolour import keep_while
         keep_while(self.colour_window_open)
         self.stir_open = set()  # the Stir window's parts shown unfolded ("area", "flips"; autosave)
+        self.props_open = set()  # the Properties window's basics groups shown unfolded ("shape", "place"...; autosave)
         self.fill_window = None  # Fill gaps… (fill_window.py)
         self.lines_window = None  # Flip each line… (lines_window.py)
         self.melody_window = None  # Fill with tempo jumps… (melody_window.py)
