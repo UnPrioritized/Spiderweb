@@ -40,6 +40,27 @@ import numpy as np
 from files.speed import key_sort, loops
 from notes.custom import ROUND
 
+
+def _numpy_atan2_exact():
+    """NumPy's arctan2 = the system's (what the own loops call)? On Linux with AVX-512 NumPy has its own fast one,
+    a last digit off now and then (2026-11-12): the Stir's spots then differed from the own loops'."""
+    q = np.linspace(-7.3, 7.9, 4001)
+    p = q[::-1] * 1.37 + 0.11
+    return all(float(a) == math.atan2(y, x) for a, y, x in zip(np.arctan2(q, p), q, p))
+
+
+_EXACT_ATAN2 = np.frompyfunc(math.atan2, 2, 1)
+
+
+def atan2(y, x):
+    """np.arctan2, or math.atan2 note by note where NumPy's differs from the system's (only there: slower)."""
+    if _ATAN2_SAME:
+        return np.arctan2(y, x)
+    return _EXACT_ATAN2(y, x).astype(np.float64)
+
+
+_ATAN2_SAME = _numpy_atan2_exact()
+
 MODES = ("shuffle", "scatter", "clumps")
 KEEP = "keep"  # (Off with a Stir: the colours as they are, only stirred; the dropdown shows Off)
 KEEP_KEYS = ("mode", "seed", "stir", "frame", "whole", "most", "ppq", "turned", "turns", "liquify", "warp", "order",
@@ -2030,7 +2051,7 @@ def bent(x, y, st, c, k, r):
         X, Y = seen(m)
         t = math.radians(st["kaleido_turn"])
         wedge = 2 * np.pi / st["kaleido"]
-        a = np.mod(np.arctan2(Y, X) - t, wedge)
+        a = np.mod(atan2(Y, X) - t, wedge)
         a = np.where(a > wedge / 2, wedge - a, a) + t
         R = np.hypot(X, Y)
         x, y = put(m, R * np.cos(a), R * np.sin(a), w)
@@ -2060,7 +2081,7 @@ def bent(x, y, st, c, k, r):
     if st["polar"]:  # (angle -> across the box, distance -> up: straight stripes become rays / rings)
         m, w = where("polar", True)
         X, Y = seen(m)
-        across = (np.arctan2(Y, X) + np.pi) / (2 * np.pi)
+        across = (atan2(Y, X) + np.pi) / (2 * np.pi)
         up = area_spot_q(x, y, st, k) if w is not None else np.hypot(X, Y) / far(m)
         f = st["polar"] / 100 * (1.0 if w is None else w)
         x, y = x + (across - x) * f, y + (up - y) * f

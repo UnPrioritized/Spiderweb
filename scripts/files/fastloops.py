@@ -1465,7 +1465,8 @@ def _stir_one(px, py, fp, ip):
         inside = ip[0] and ip[14]
         mx, my = (fp[9], fp[10]) if inside else (cx, cy)
         X, Y = (px - mx) * rx, (py - my) * ry
-        a = np.mod(np.arctan2(Y, X) - fp[21], fp[22])
+        a = np.mod(math.atan2(Y, X) - fp[21], fp[22])  # (math: the system's atan2, as the own loops; NumPy's
+        # own fast one on Linux differs in the last digit, 2026-11-12)
         if a > fp[23]:
             a = fp[22] - a
         a = a + fp[21]
@@ -1502,7 +1503,7 @@ def _stir_one(px, py, fp, ip):
         inside = ip[0] and ip[17]
         mx, my = (fp[9], fp[10]) if inside else (cx, cy)
         X, Y = (px - mx) * rx, (py - my) * ry
-        across = (np.arctan2(Y, X) + np.pi) / tau
+        across = (math.atan2(Y, X) + np.pi) / tau
         up = _stir_q(px, py, fp, ip) if inside else np.hypot(X, Y) / fp[30]
         f = fp[29] * ((hard if ip[18] else w) if inside else 1.0)
         px, py = px + (across - px) * f, py + (up - py) * f
