@@ -1620,7 +1620,11 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
              and not src.get("fx"))  # (cut where the line's time reaches the cut: the piece = a stretch of time)
     if gate and not timed:
         return None
-    w0, wt0 = get({k: v for k, v in src.items() if k != step})
+    from notes.steps import before_view, order_of
+    if runner and (step, 0) in order_of(src):  # (its own order: the whole up to just before this step, not with
+        w0, wt0 = get(before_view(src, (step, 0)))  # the steps after it too; sweep 277542201: Sustain after a
+    else:                                          # first Gate subtract was held before being shortened)
+        w0, wt0 = get({k: v for k, v in src.items() if k != step})
     if not len(w0):
         return None
     if not runner and (tracks is None) != (wt0 is None):
@@ -1714,6 +1718,10 @@ def held_piece(sh, notes, tracks, ppq, get):
     if not isinstance(part[0], (int, float)) or src.get("glue") or src.get("fx"):
         return None
     whole = dict({k: v for k, v in src.items() if k != "sustain"}, **velocity(sh["cut"]["whole"]))
+    if sh.get("_run") and sh.get("fx") and all(st.get("tool") in RUNNER for st in sh["fx"]):
+        # (made by the runner: the whole gets the steps that ran before this Sustain too (Gate subtract first...),
+        # not only the drawing; sweep 277542201: a subtracted note was held again over the cut)
+        whole["fx"], whole["_run"] = json.loads(json.dumps(sh["fx"])), True
     w0, wt0 = get(whole)
     if not len(w0):
         return None
