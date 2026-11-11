@@ -61,10 +61,56 @@ def with_lead(sh, base, pts):
     return tidy_env(env)
 
 
-def own_places(sh, rows, ppq, way=None):
+def own_places(sh, rows, ppq, way=None, shown=None):
     """Where each stored note of a shape keeping its own velocities (rows: unpack_notes) shows: (start, end) ticks as
     floats, flipped runs too; own_repainted's (a line changes the notes starting under it) and leftover_bars'. way:
-    the shape's own overlaps fixed so (engine.heard_way): each note where the piece holding its own start shows."""
+    the shape's own overlaps fixed so (engine.heard_way): each note where the piece holding its own start shows.
+    shown: the shape's notes as made (App.notes_of): Gate subtract's start side moves starts later, each note then
+    goes where it shows (user 2026-11-12: a line drawn over a note's shown start reaches it)."""
+    start, end = _own_places(sh, rows, ppq, way)
+    if shown is not None and len(rows) and starts_moved(sh):
+        start, end = shown_starts(sh, rows, ppq, start, end, shown)
+    return start, end
+
+
+def starts_moved(sh):
+    """True when a step moves the shape's notes' starts after they're laid (Gate subtract's start side, on)."""
+    from notes.steps import is_off
+    from notes.subtract import is_subtracted, side_used
+    return is_subtracted(sh) and side_used(sh["subtract"].get("start")) and not is_off(sh, ("subtract", 0))
+
+
+def shown_starts(sh, rows, ppq, start, end, shown):
+    """own_places' (start, end) moved to the notes as made: on each key the n-th note laid = the n-th note shown
+    (Gate subtract keeps their order); a key where the counts differ (merged...) stays as laid."""
+    from notes.custom import block_notes
+    try:
+        made = block_notes(sh, ppq)
+    except Exception:  # noqa: BLE001 (anything odd: as laid)
+        return start, end
+    shown = np.asarray(shown)
+    if len(made) != len(rows) or not len(shown):
+        return start, end
+    start, end = start.copy(), end.copy()
+    keys = made[:, 2].astype(np.int64)
+    sk = shown[:, 2].astype(np.int64)
+    o = np.lexsort((np.arange(len(rows)), start, keys))
+    so = np.lexsort((shown[:, 1], shown[:, 0], sk))
+    ku, kn = np.unique(keys[o], return_counts=True)
+    su, sn = np.unique(sk[so], return_counts=True)
+    count = dict(zip(su.tolist(), sn.tolist()))
+    at = dict(zip(su.tolist(), np.r_[0, np.cumsum(sn)[:-1]].tolist()))
+    pos = 0
+    for k, n in zip(ku.tolist(), kn.tolist()):
+        if count.get(k) == n:
+            mine, theirs = o[pos:pos + n], so[at[k]:at[k] + n]
+            start[mine] = shown[theirs, 0]
+            end[mine] = shown[theirs, 1]
+        pos += n
+    return start, end
+
+
+def _own_places(sh, rows, ppq, way=None):
     (b0, p0), (b1, _), (b2, _) = sh["pts"]
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
     v = (rows[:, 2] + 0.5) / k_all
@@ -137,14 +183,14 @@ def heard_places(sh, rows, start, end, way, ppq):
     return ps.astype(float), pe.astype(float)
 
 
-def own_repainted(sh, text, drawn, ppq, way=None):
+def own_repainted(sh, text, drawn, ppq, way=None, shown=None):
     """Packed notes text (custom.pack_notes) of a shape keeping its notes' own velocities (pasted / Extract: sh
     ["own_vel"]) after velocities drawn ([[beat, v]]): only the notes starting under the drawn stretch change, the
-    others keep theirs. text = the notes to start from. Returns text itself when no note changed."""
+    others keep theirs. text = the notes to start from. Returns text itself when no note changed. shown: own_places'."""
     rows = unpack_notes(text)
     if not len(rows) or not drawn:
         return text
-    start, end = own_places(sh, rows, ppq, way)
+    start, end = own_places(sh, rows, ppq, way, shown)
     # (a note across beat 0 reads the line at beat 0, where it shows; wholly before it: its own, user 2026-11-08)
     start = np.where((start < 0) & (end > 0), 0.0, start)
     beat = start / ppq
@@ -503,7 +549,8 @@ class VelocityPane(KeepsItems, tk.Canvas):
             if sh.get("own_vel") and "notes" in sh:
                 # pasted / Extract notes: only the notes under the drawn stretch change, the rest keep their own
                 base = had[2] if had else sh["notes"]
-                sh["notes"] = own_repainted(sh, base, drawn, app.ppq, app.heard_way_of(sh))
+                shown = app.notes_of(sh) if starts_moved(sh) else None  # (Gate subtract's start side: where shown)
+                sh["notes"] = own_repainted(sh, base, drawn, app.ppq, app.heard_way_of(sh), shown)
                 done[i] = (sh, sh["notes"], base, (lo, hi), fx)
                 continue
             base = had[2] if had else velocity_env(sh)
@@ -884,7 +931,8 @@ class VelocityPane(KeepsItems, tk.Canvas):
                     rows = unpack_notes(sh["notes"])
                     if not len(rows):
                         continue
-                    start = own_places(sh, rows, app.ppq, app.heard_way_of(sh))[0]
+                    start = own_places(sh, rows, app.ppq, app.heard_way_of(sh),
+                                       app.notes_of(sh) if starts_moved(sh) else None)[0]
                     (_, p0), _, (_, p2) = sh["pts"]
                     k_all = float(rows[:, 2].max() + 1)
                     key = np.floor(p0 + (rows[:, 2] + 0.5) / k_all * (p2 - p0) + 1e-9)

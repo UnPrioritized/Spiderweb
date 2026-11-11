@@ -48,7 +48,7 @@ from notes.strum import apply_strum
 from notes.trim import apply_trim
 from notes.recolour import (KEEP, PAGE, box_of, clean_recolour, is_recoloured, page_split, recoloured, rule_of,
                             without_recolour)
-from notes.subtract import clean_subtract, is_subtracted, subtracted
+from notes.subtract import clean_subtract, is_subtracted, side_used, subtracted
 from notes.extend import clean_extend, extended, is_extended
 from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained, sustain_on
 from notes.bezier import anchor_count, sample
@@ -1371,7 +1371,8 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
         if not is_subtracted(sh):
             return notes, tracks
-        return stepped_piece(sh, "subtract", notes, tracks, ppq, get) or (subtracted(notes, sh["subtract"], ppq), tracks)
+        return stepped_piece(sh, "subtract", notes, tracks, ppq, get) or (
+            shown_subtracted(notes, sh["subtract"], sh, ppq), tracks)
     if "extend" in sh:  # (gates made longer after Sustain, before Gate subtract: extend.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "extend"})
         if not is_extended(sh):
@@ -1471,6 +1472,36 @@ def fx_notes(sh, ppq, keys, get):
     return with_glue(*heard_kind(sh, ppq, keys), sh, ppq)
 
 
+def shown_subtracted(notes, sub, sh, ppq):
+    """subtracted(), and a shape whose notes read its own velocity line: a note Gate subtract's start side moved reads
+    it where it shows now (user 2026-11-12: a line drawn over a note's shown start sets it; old projects may change a
+    few velocities). Pages, glue, own velocities, pieces, Gate aware flip, Hz bass: as before (velocities made there)."""
+    out = subtracted(notes, sub, ppq)
+    if not len(out) or not side_used(sub.get("start")) or not reads_line(sh):
+        return out
+    moved = out[:, 0] != np.asarray(notes)[:, 0]
+    if not moved.any():
+        return out
+    env = velocity_env(sh)
+    if len({v for _, v in env}) == 1:
+        return out
+    path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
+    t_lo, t_hi = float(path.min()), float(path.max())
+    if grows_free(sh):
+        t_lo, t_hi = free_span(sh, ppq) or (t_lo, t_hi)
+    out = out.copy()
+    out[moved, 3] = env_velocities(env, from0_starts(sh, out[moved], out[moved, 0], ppq), t_lo, t_hi)
+    return out
+
+
+def reads_line(sh):
+    """Do sh's notes take their velocities straight off its velocity line, read at each note's start (shown_subtracted)?"""
+    if (sh.get("own_vel") or sh.get("merge") or sh.get("cut") or sh.get("glue") or sh.get("gate_flip") or sh.get("hz")
+            or "picture" in sh or sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("tones")):
+        return False
+    return all(s.get("tool") in ("sustain", "extend", "subtract", "colours") for s in sh.get("fx") or ())
+
+
 def run_step(notes, tracks, step, sh, ppq, get):
     """The notes after one of the runner's own steps (steps.RUNNER; sh: the shape as it is before it, its notes
     notes / tracks): glue before the pages, Gate aware flip, Sustain, Gate extend, Gate subtract."""
@@ -1487,7 +1518,9 @@ def run_step(notes, tracks, step, sh, ppq, get):
         got = stepped_piece(sh, tool, notes, tracks, ppq, get, step["cfg"]) if sh.get("cut") else None
         if got is not None:
             return got
-        return (extended if tool == "extend" else subtracted)(notes, step["cfg"], ppq), tracks
+        if tool == "subtract":
+            return shown_subtracted(notes, step["cfg"], sh, ppq), tracks
+        return extended(notes, step["cfg"], ppq), tracks
     sus = step["cfg"]  # (Sustain)
     got = held_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
     if got is not None:
