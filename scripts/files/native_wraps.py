@@ -11,7 +11,7 @@ NEEDS = {
     "liquify_rects": ("liquify_rects",),
     "paint_notes": ("paint_notes",),
     "overlap_order": ("overlap_order",), "overlap_sweep": ("overlap_sweep",), "note_stretches": ("note_stretches",),
-    "radix_order": ("radix_order",), "ring_runs": ("ring_runs", "ring_runs_int"),
+    "radix_order": ("radix_order",), "ring_runs": ("ring_runs", "ring_runs_int"), "stop_pieces": ("stop_pieces",),
     "clash_pairs": ("clash_pairs", "take2"), "clash_levels": ("clash_levels",), "any_overlap": ("any_overlap",),
     "turn_sample": ("turn_sample",), "turn_layers": ("turn_layers",),
     "stir_nearest": ("stir_nearest",), "stir_nearest_one": ("stir_nearest",), "stir_wrap": ("stir_wrap",),
@@ -187,6 +187,13 @@ class Wraps:
         args = (flat, skey, send, g, lo_k, hi_k, n, many)
         got = self._tuple("turn_sample", args)
         return got if got is not None else self.base.turn_sample(*args)
+
+    def stop_pieces(self, o, place, a, b, v, e, reach, top, last, hr, hi):
+        args = (o, place, a, b, v, e, reach, top, last, hr, hi)
+        got = self.x.stop_pieces(*args)
+        if got < 0 and (got := self._again("stop_pieces", got, args)) < 0:
+            return self.base.stop_pieces(*args)
+        return got
 
     def turn_layers(self, s, e, k, first, over, lay):
         args = (s, e, k, first, over, lay)

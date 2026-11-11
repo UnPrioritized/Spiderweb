@@ -466,22 +466,26 @@ def page_split(r, n_pages):
         return None
     base = {k: v for k, v in r.items() if k != "_upto"}
     first = min(before) if before else None
-
-    def part(tg, k):
-        got = _restacked(base, tg)
-        if got is None:
-            return None
-        if isinstance(got.get("liquify"), dict) and "frozen" in got["liquify"]:  # (the mask makes no notes)
-            got = dict(got, liquify={a: b for a, b in got["liquify"].items() if a != "frozen"})
-        if k != first and got.get("turned"):  # (the stored colours' own swap undone once, by the first part only)
-            o2 = order_of(got)
-            got = with_order(clean_recolour(dict(got, turns=turns_of(got), turned=None)), o2)
-        if got is not None and r.get("most") == 16:
-            got = dict(got, most=16)
-        return got
-    inner = {jj: p for jj, p in ((jj, part(tg, jj)) for jj, tg in before.items()) if p}
-    final = part(seg, None) if seg else None
+    inner = {jj: p for jj, p in ((jj, part_of(base, tg, jj == first)) for jj, tg in before.items()) if p}
+    final = part_of(base, seg, first is None) if seg else None
     return inner, final, keep
+
+
+def part_of(r, tags, first):
+    """The clean Recolour of only the steps tags ((kind, n) of r's order) of saved Recolour r, run apart from the
+    others (before a note tool page, or with other steps between: steps.expanded). first: the first such part run
+    (it undoes the stored colours' own swap; the later ones don't). None: it does nothing."""
+    got = _restacked(r, tags)
+    if got is None:
+        return None
+    if isinstance(got.get("liquify"), dict) and "frozen" in got["liquify"]:  # (the mask makes no notes)
+        got = dict(got, liquify={a: b for a, b in got["liquify"].items() if a != "frozen"})
+    if not first and got.get("turned"):  # (the stored colours' own swap undone once, by the first part only)
+        o2 = order_of(got)
+        got = with_order(clean_recolour(dict(got, turns=turns_of(got), turned=None)), o2)
+    if got is not None and r.get("most") == 16:
+        got = dict(got, most=16)
+    return got
 
 
 def ordered(old, new):
@@ -966,7 +970,14 @@ def is_recoloured(sh):
 
 
 def without_recolour(sh):
-    return {k: v for k, v in sh.items() if k != "recolour"}
+    """sh without its Recolour. An order of its own (Properties, notes/steps.py) keeps its other steps where they
+    were: Sustain... placed after a colour step stayed after the page that step followed (else, with the colour
+    steps gone, it fell to the top: As drawn / Single made it before the page)."""
+    out = {k: v for k, v in sh.items() if k != "recolour"}
+    if sh.get("order") is not None and "recolour" in sh:
+        from notes.steps import COLOURS, order_of, with_order
+        with_order(out, [t for t in order_of(sh) if t[0] not in COLOURS])
+    return out
 
 
 def new_seed():
@@ -3330,6 +3341,23 @@ def settled(notes, t):
     return out, t[idx]
 
 
+def same_rows(rows):
+    """kept_apart's copies: rows (start, end, key, colour before, colour now) -> (each group of equal rows' first row,
+    each row's group): the groups np.unique(rows, axis=0, return_index=True, return_inverse=True) gives (first =
+    the lowest row; the groups numbered in another order), by the compiled key sort (np.unique sorted the rows as
+    bytes: 0.4 s a call on ~1 M stacked copies, Sustain before a page makes them; 2026-11-11)."""
+    n = len(rows)
+    o1 = np.argsort(rows[:, 4], kind="stable")
+    r1 = rows[o1]
+    order = o1[key_sort(r1[:, 2], r1[:, 0], r1[:, 1], r1[:, 3])]  # (by key, start, end, before, now; equal rows
+    sr = rows[order]                                               # in their order)
+    new = np.ones(n, bool)
+    new[1:] = (sr[1:] != sr[:-1]).any(1)
+    inv = np.empty(n, np.int64)
+    inv[order] = np.cumsum(new) - 1
+    return order[new], inv
+
+
 def kept_apart(notes, old, new, colours, pick):
     """new colours with every clash put right: a note sounding on its key together with earlier ones (overlapping,
     not just touching) gets a colour none of those with ANOTHER colour before has now (its own one first, else a
@@ -3355,7 +3383,7 @@ def kept_apart(notes, old, new, colours, pick):
         both[:-1] |= twin
         ib = o[both]
         rows = np.column_stack([s[ib], e[ib], k[ib], np.asarray(old, np.int64)[ib], np.asarray(new, np.int64)[ib]])
-        _, first, inv = np.unique(rows, axis=0, return_index=True, return_inverse=True)
+        first, inv = same_rows(rows)
     if len(ib) and len(first) < len(ib):
         keep = np.ones(len(s), bool)
         keep[ib] = False

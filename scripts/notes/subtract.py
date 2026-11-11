@@ -25,6 +25,7 @@ import math
 
 import numpy as np
 
+from files.speed import key_sort
 from notes.gaterange import DIRS, STRAIGHT, clean_graph, keys_up
 
 MOST = 10 ** 4  # beats a typed amount may be
@@ -186,7 +187,7 @@ def touching(notes):
     out = np.zeros(len(notes), bool)
     if len(notes) < 2:
         return out
-    order = np.lexsort((notes[:, 0], notes[:, 2]))
+    order = key_sort(notes[:, 2], notes[:, 0])  # (= np.lexsort((start, key)); the compiled sort when it can)
     s, e, p = notes[order, 0], notes[order, 1], notes[order, 2]
     out[order[:-1]] = (p[1:] == p[:-1]) & (s[1:] <= e[:-1])
     return out
@@ -197,7 +198,7 @@ def touched(notes):
     out = np.zeros(len(notes), bool)
     if len(notes) < 2:
         return out
-    order = np.lexsort((notes[:, 0], notes[:, 2]))
+    order = key_sort(notes[:, 2], notes[:, 0])  # (= np.lexsort((start, key)); the compiled sort when it can)
     s, e, p = notes[order, 0], notes[order, 1], notes[order, 2]
     out[order[1:]] = (p[1:] == p[:-1]) & (s[1:] <= e[:-1])
     return out

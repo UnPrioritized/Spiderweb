@@ -17,6 +17,8 @@ import math
 
 import numpy as np
 
+from files.speed import key_sort, loops
+
 MOST_GAP = 10 ** 4  # beats a typed hold gap may be
 MOST_STOPS = 10 ** 6  # stops made by "every"
 MOST_PIECES = 20 * 10 ** 6  # notes the stops may cut the notes into (like Chop's limit)
@@ -73,11 +75,17 @@ def is_sustained(sh):
     return isinstance(sh.get("sustain"), dict) and not sh.get("hz") and "picture" not in sh
 
 
+def sustain_on(sh):
+    """is_sustained and its Sustain step not switched off (Properties: an off step is skipped everywhere, so its
+    notes aren't held: overlaps fixed as without it). Windows / marks editing the Sustain ask is_sustained."""
+    return is_sustained(sh) and ["sustain", 0] not in [list(t) for t in sh.get("off") or ()]
+
+
 def row_order(notes):
     """notes (start, end, pitch, ...) -> (the order key row by key row, in time; each note's gap to the notes
     before it on its key: what has sounded until then, -1 for a row's first note). Every colour together (user: a
     row is held whole, colours stacking on each other)."""
-    order = np.lexsort((notes[:, 0], notes[:, 2]))
+    order = key_sort(notes[:, 2], notes[:, 0])  # (= np.lexsort((start, key)); the compiled sort when it can)
     s, e, p = notes[order, 0], notes[order, 1], notes[order, 2]
     gap = np.full(len(s), -1, np.int64)
     if len(s) > 1:
@@ -87,6 +95,30 @@ def row_order(notes):
         ran = np.maximum.accumulate(e - e.min() + row * shift) - row * shift + e.min()
         gap[1:] = np.where(same, np.maximum(s[1:] - ran[:-1], 0), -1)
     return order, gap
+
+
+def runs_in(notes, order, gap, k=None):
+    """The groups row_order's gaps make (a row's first note, or one starting more than gap ticks after everything
+    before it on its row has ended, starts one) from the compiled loop (fastloops.ring_runs): (each group's first
+    place in order, how many notes, its last end), or None (no loop / numbers too big: the NumPy way). order = the
+    notes in (k, start) order; k: each note's row (default its key)."""
+    from files.speed import loops
+    fast = loops()
+    if fast is None or len(order) < 2 or gap < 0:
+        return None
+    s = notes[:, 0].astype(np.int64)
+    e = notes[:, 1].astype(np.int64)
+    k = (notes[:, 2] if k is None else k).astype(np.int64)
+    lo, k0 = int(s.min()), int(k.min())
+    big = int(e.max()) - lo + int(gap) + 2
+    if big <= 0 or (int(k.max()) - k0 + 1) * big >= 1 << 62:
+        return None
+    s, e, k = np.ascontiguousarray(s - lo), np.ascontiguousarray(e - lo), np.ascontiguousarray(k - k0)
+    rk, ra, rb = fast.ring_runs(s, e, k, np.ascontiguousarray(order, np.int64), int(gap), big)
+    at = (k * big + s)[order]  # (sorted: a group's first note starts after everything before it on its row)
+    first = np.searchsorted(at, rk * big + ra, side="left")
+    lens = np.diff(np.append(first, len(order)))
+    return first, lens, rb + lo
 
 
 def auto_gap(notes):
@@ -123,11 +155,18 @@ def sustained(notes, sus, ppq, reach=None):
     if len(notes) < (1 if reach is not None else 2):
         return notes
     gap = hold_gap(sus, notes, ppq)
-    order, gaps = row_order(notes)
-    new = (gaps < 0) | (gaps > gap)  # (a new group: a row's first note, or after a hole)
-    first = np.flatnonzero(new)
-    group = np.cumsum(new) - 1
-    ends = np.maximum.reduceat(notes[order, 1], first)[group]
+    order = key_sort(notes[:, 2], notes[:, 0])
+    got = runs_in(notes, order, gap)
+    if got is not None:  # (the compiled loop: the same groups)
+        first, lens, run_end = got
+        group = np.repeat(np.arange(len(first), dtype=np.int64), lens)
+        ends = np.repeat(run_end, lens)
+    else:
+        order, gaps = row_order(notes)
+        new = (gaps < 0) | (gaps > gap)  # (a new group: a row's first note, or after a hole)
+        first = np.flatnonzero(new)
+        group = np.cumsum(new) - 1
+        ends = np.maximum.reduceat(notes[order, 1], first)[group]
     if reach is not None:
         p = notes[order, 2]
         last = np.flatnonzero(np.append(p[1:] != p[:-1], True))  # (each row's last note)
@@ -211,14 +250,14 @@ def _cover(notes, stops):
     """Which stops each note reaches: (a, b) = the note sounds at stops[a:b] (starting on one counts; its end
     doesn't), and the key rows' stretches of stops reached by some note, laid end to end as one flat list:
     (each note's place in it (for the reaching ones), each stretch's (pitch, first stop, offset, length), how many
-    places in all)."""
+    places in all, the reaching notes in (key, first stop) order: their places never go down)."""
     s, e, p = notes[:, 0], notes[:, 1], notes[:, 2]
-    a = np.searchsorted(stops, s, side="left")
-    b = np.searchsorted(stops, e, side="left")
+    a = np.searchsorted(stops, s, side="left").astype(np.int64)
+    b = np.searchsorted(stops, e, side="left").astype(np.int64)
     hit = np.flatnonzero(b > a)
     if not len(hit):
-        return a, b, hit, None, None, 0
-    o = hit[np.lexsort((a[hit], p[hit]))]
+        return a, b, hit, None, None, 0, hit
+    o = hit[key_sort(p[hit].astype(np.int64), a[hit])]  # (= np.lexsort((a[hit], p[hit])); the compiled sort)
     po, ao, bo = p[o], a[o], b[o]
     row = np.concatenate([[0], np.cumsum(po[1:] != po[:-1])])
     lift = int(len(stops)) + 1  # (running end per row: each row lifted past the one before, like row_order)
@@ -232,7 +271,7 @@ def _cover(notes, stops):
     offs = np.concatenate([[0], np.cumsum(lens)[:-1]])
     place = np.empty(len(notes), np.int64)
     place[o] = offs[seg] + ao - ao[first][seg]
-    return a, b, hit, place, (po[first], ao[first], offs, lens), int(lens.sum())
+    return a, b, hit, place, (po[first], ao[first], offs, lens), int(lens.sum()), o
 
 
 def _range_max(n, starts, lens, vals, fill):
@@ -265,17 +304,25 @@ def cut_at(notes, tracks, stops):
     starting on a stop on the same key make ONE note there (the sustain starts again: the loudest velocity, as long
     as the longest). Worked out per key row and stop, never per note and stop (a held spam row: every note across
     every stop). Too many pieces = left whole (too_many_pieces tells the window)."""
-    a, b, hit, place, segs, n = _cover(notes, stops)
+    a, b, hit, place, segs, n, o = _cover(notes, stops)
     if segs is None or len(notes) + n > MOST_PIECES:
         return notes, tracks
     s, e = notes[:, 0], notes[:, 1]
-    lens = b[hit] - a[hit]
-    starts = place[hit]
-    reach = _range_max(n, starts, lens, b[hit].astype(np.int64), np.int64(-1))  # (the furthest stop reached)
     idx = np.int64(1) << 32
-    loud = _range_max(n, starts, lens, notes[hit, 3].astype(np.int64) * idx + hit, np.int64(-1))
-    last = np.full(n, -1, np.int64)  # (the longest end of the notes ending before the next stop)
-    np.maximum.at(last, starts + lens - 1, e[hit].astype(np.int64))
+    fast = loops()
+    if fast is not None:  # (the compiled loop: one walk, the same maxima; fastloops.stop_pieces)
+        m = len(o)
+        reach, loud, last = np.empty(n, np.int64), np.empty(n, np.int64), np.empty(n, np.int64)
+        col = [np.ascontiguousarray(notes[:, c], np.int64) for c in (3, 1)]
+        fast.stop_pieces(np.ascontiguousarray(o, np.int64), place, a, b, col[0], col[1], reach, loud, last,
+                         np.empty(m, np.int64), np.empty(m, np.int64))
+    else:
+        lens = b[hit] - a[hit]
+        starts = place[hit]
+        reach = _range_max(n, starts, lens, b[hit].astype(np.int64), np.int64(-1))  # (the furthest stop reached)
+        loud = _range_max(n, starts, lens, notes[hit, 3].astype(np.int64) * idx + hit, np.int64(-1))
+        last = np.full(n, -1, np.int64)  # (the longest end of the notes ending before the next stop)
+        np.maximum.at(last, starts + lens - 1, e[hit].astype(np.int64))
     pitch, first, offs, seglen = segs
     j = np.repeat(first - offs, seglen) + np.arange(n)  # (each place's stop)
     take = (loud & (idx - 1)).astype(np.int64)

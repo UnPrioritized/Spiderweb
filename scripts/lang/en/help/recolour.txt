@@ -58,11 +58,11 @@ Stir… (beside the Recolour dropdown) bends the colours the notes have now with
 
 A shape's colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order) run in the order you added them, each on the colours the one before left. A Stir and then Split: Scattered puts specks on a clean swirl; Split: Scattered and then a Stir bends the specks too.
 
-Effect order… (in the Stir, Warp, Liquify and Shares windows, beside Preview all, and on the shape's right-click menu) opens the Effect order window: the selected shape's effects from top (runs first) to bottom. Drag a line up or down to change the order, click a name to open that effect, × takes it away, and Add adds a new one at the end. With several shapes selected, moving a line and × go to every shape with the same effects in the same order; Add goes to every selected shape.
+Properties… (in the Stir, Warp, Liquify and Shares windows, beside Preview all, and the last item on the shape's right-click menu; Alt+Enter) lists every step done to the shape from top (runs first) to bottom, the colour effects among them: drag a line to change the order, untick it to switch it off, click a name to open it, × takes it away. See [page:properties|Properties].
 
-Split: Clumps gives every note the colour of its area, at any Rough edges, so an effect above it shows nothing: the window greys those lines. Move an effect below Clumps to see it.
+Split: Clumps gives every note the colour of its area, at any Rough edges, so an effect above it shows nothing: Properties greys those lines. Move an effect below Clumps to see it.
 
-While you change an effect that isn't the last one, the effects after it are switched off, so you see exactly what it does and it stays quick. Its window names them and has a Preview all button for a quick look at the full result (your next change hides them again); they come back when you pick another shape, close the window, play, save or export. What you play, export or copy always has every effect.
+While you change an effect that isn't the last step, the steps after it are switched off, so you see exactly what it does and it stays quick. Its window names them and has a Preview all button for a quick look at the full result (your next change hides them again); they come back when you pick another shape, close the window, play, save or export. What you play, export or copy always has every step.
 
 Reverse track order (right-click the shape) is an effect in the list too, on drawn shapes and pasted notes alike: each time you use it, a new Reverse goes at the end and turns round the colours as they look at that point. Two Reverses right after each other cancel out, so using it twice in a row gives the shape back as it was.
 
@@ -70,7 +70,7 @@ A Stir turned back to nothing (Reset, or every knob at 0) keeps its place in the
 
 Shapes from files made before keep their look: their effects load in the order they always ran.
 
-The list shows the shape's note tool pages too (Claw, Strum, Chop, Gate trim, Copy along a path). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes below the colour effects there are now. Pages keep their own order among themselves, and while you change a colour effect above a page, that page is switched off too.
+The list shows the shape's note tool pages too (Claw, Strum, Chop, Gate trim, Copy along a path). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes at the end. Pages can be dragged into any order (their tabs follow), and while you change a colour effect above a page, that page is switched off too.
 
 ## With the rest of Spiderweb
 

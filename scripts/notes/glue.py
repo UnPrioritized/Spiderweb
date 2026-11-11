@@ -15,6 +15,8 @@ import math
 
 import numpy as np
 
+from files.speed import key_sort
+
 
 def clean_glue(g):
     """Glue from a file -> True, a list of boxes, or None (none)."""
@@ -138,7 +140,24 @@ def apply_glue(a, glue, box, ppq, tracks):
         return a
     sel = a[idx]
     who = sel[:, -1] if tracks else np.zeros(len(sel), np.int64)
-    order = np.lexsort((sel[:, 1], sel[:, 0], sel[:, 2], who))
+    order = key_sort(who, sel[:, 2], sel[:, 0], sel[:, 1])  # (= np.lexsort((end, start, key, who)): compiled sort)
+    k0, nk = int(sel[:, 2].min()), int(sel[:, 2].max()) - int(sel[:, 2].min()) + 1
+    w0 = int(who.min())
+    got = None
+    if (int(who.max()) - w0 + 1) * nk < 1 << 40:  # (the compiled loop: the same runs, sustain.runs_in)
+        from notes.sustain import runs_in
+        got = runs_in(sel, order, 0, (who - w0) * nk + (sel[:, 2] - k0))
+    if got is not None:
+        first, lens, run_end = got
+        if len(first) == len(order):
+            return a
+        glued = sel[order[first]].copy()
+        glued[:, 1] = run_end
+        keep = np.ones(len(a), bool)
+        keep[idx] = False
+        out = np.concatenate([a[keep], glued])
+        where = np.concatenate([np.flatnonzero(keep), idx[order[first]]])
+        return out[key_sort(where, where)]
     s, e = sel[order, 0], sel[order, 1]
     seg = np.ones(len(order), bool)
     seg[1:] = (sel[order[1:], 2] != sel[order[:-1], 2]) | (who[order[1:]] != who[order[:-1]])
@@ -159,4 +178,4 @@ def apply_glue(a, glue, box, ppq, tracks):
     keep[idx] = False
     out = np.concatenate([a[keep], glued])
     where = np.concatenate([np.flatnonzero(keep), idx[order[first]]])
-    return out[np.argsort(where, kind="stable")]
+    return out[key_sort(where, where)]  # (= a stable argsort; where holds no two alike)

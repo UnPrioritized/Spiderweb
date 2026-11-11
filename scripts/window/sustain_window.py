@@ -155,6 +155,8 @@ class SustainWindow(tk.Toplevel):
         for value in ("ticks", "beats"):
             ttk.Radiobutton(row, text=tr("sustain.unit_" + value), value=value, variable=self.unit,
                             command=self.set_unit).pack(side="left", padx=(6, 0))
+        from window.edit_line import EditLine  # ("Hidden while you edit this one: ..." + Preview all, stage C)
+        self.edit_line = EditLine(box, app, "sustain", row, order=False)
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(10, 0))
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
@@ -247,6 +249,7 @@ class SustainWindow(tk.Toplevel):
         self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.sus_now()
         self.kept = self.own_now()  # (put back by Cancel)
+        self.now = self.before  # (store tells a change from this: opening changes nothing = no step edited)
         self.load(start)
         if start and self.idx:
             self.store()
@@ -645,6 +648,8 @@ class SustainWindow(tk.Toplevel):
 
     def store(self):
         """Put each shape's settings on it and show them."""
+        had = [is_sustained(t) for t in self.tgts]
+        was = getattr(self, "now", None)
         for i, t in enumerate(self.tgts):
             if not self.on[i]:
                 t.pop("sustain", None)
@@ -659,6 +664,11 @@ class SustainWindow(tk.Toplevel):
             t["sustain"] = sus
         self.now = self.sus_now()
         self.show()
+        # (its settings changed on shapes that keep it: the steps after it skipped until the user leaves it, stage C;
+        # put on / taken off: whole; nothing changed (the window opening): as it was)
+        if self.now != was:
+            edited = had and all(had) and all(is_sustained(t) for t in self.tgts)
+            self.app.colour_edit_set(("sustain", 0) if edited else None)
         self.app.shapes_changed()
 
     def on_gap(self):
@@ -696,12 +706,14 @@ class SustainWindow(tk.Toplevel):
             self.app.roll.cancel_draft()
             for i, part in zip(self.idx, json.loads(self.kept)):
                 put_own(self.app.shapes[i], part)
+        self.app.colour_edit_drop("sustain")  # (whole again: made just below)
         self.close()
         self.app.shapes_changed()
 
     def close(self):
         self.closed = True
         self.app.sustain_window = None
+        self.app.colour_edit_leave("sustain")  # (the steps after it worked out again)
         roll = self.app.roll
         if roll.drag and roll.drag[0] == "sustop":  # (a stop held: let go, its moves kept)
             roll.stop_tidy()

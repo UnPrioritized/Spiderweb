@@ -33,6 +33,8 @@ py_loops! {
               => crate::engine::ring_runs;
     ring_runs_int(s: &[i64], e: &[i64], k: &[i64], order: &[i64], gap: i64, big: i64, out: NdMut<i64, 2>)
                   => crate::engine::ring_runs_int;
+    stop_pieces(o: &[i64], place: &[i64], a: &[i64], b: &[i64], v: &[i64], e: &[i64], reach: &mut [i64],
+                top: &mut [i64], last: &mut [i64], hr: &mut [i64], hi: &mut [i64]) => crate::winner::stop_pieces;
     clash_pairs(items: Nd<i64, 2>, n: i64, most: i64) => crate::engine::clash_pairs;
     clash_levels(rows: Nd<i64, 2>, offs: &[i64], out: &mut [i64]) => crate::engine::clash_levels;
     any_overlap(notes: Nd<i64, 2>, g: &[i64], ng: i64) => crate::engine::any_overlap;

@@ -145,6 +145,17 @@ def shared_settings(shapes):
     if "fx" in keep and "glue" not in keep:  # (the pages kept, the glue not: no place for it)
         from notes.fx import tidy_glue
         keep = tidy_glue(keep)
+    # (the steps' order + the ones switched off (Properties): kept when all alike, notes/steps.py; else the usual
+    # order, and the steps' "off" gone: said)
+    ways = {json.dumps([sh.get("order"), sh.get("off")]) for sh in shapes}
+    if len(ways) == 1:
+        o, off = json.loads(ways.pop())
+        if o:
+            keep["order"] = o
+        if off:
+            keep["off"] = off
+    else:
+        lost.append(tr("convert.order"))
     names = {sh.get("by_snap_name") for sh in shapes}
     if "by_snap" in keep and len(names) == 1 and None not in names:  # (Notes by snap's "1/32": kept too, hunt)
         keep["by_snap_name"] = names.pop()

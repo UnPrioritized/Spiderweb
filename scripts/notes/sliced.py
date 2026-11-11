@@ -350,6 +350,11 @@ def source(sh):
     src.update(tools(cut["whole"]))
     src.update(inner(cut["whole"]))  # (cut from a piece: that one's own cut; moved along with it)
     src.update(velocity(cut["whole"] if same_vel else sh))
+    if "_whole" in src:  # (the piece's Sustain / Gate extend / subtract ordered before the whole's pages: run on the
+        # whole, in that order, by its own runner; the piece leaves them out: steps.in_whole)
+        src.update(json.loads(json.dumps(src.pop("_whole"))))
+        src.pop("_run", None)
+        src.pop("_noglue0", None)
     if sh["kind"] == "custom":
         same_gate = cut.get("gate") is not None and close(velocity(sh, GATE), cut["gate"])
         src.update(velocity(cut["whole"] if same_gate else sh, GATE))

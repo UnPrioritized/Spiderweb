@@ -9,7 +9,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import notes_shape
 from notes.engine import OWN0, SHAPE_DEFAULTS, clean_shape, keeps_laps, own_id
-from notes.sustain import is_sustained
+from notes.sustain import is_sustained, sustain_on
 from notes.passengers import carried, track_map
 from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THICKNESS, can_mask, free_colour, is_mask,
                         is_solid, loops_of, mask_units, new_group_id, slot_pal, slot_rule, tidy_groups, unit_of,
@@ -307,6 +307,8 @@ class MaskPanel:
                     sh.pop(k, None)
                 sh["into"] = [own_id(s)]
                 made[i].append(sh)
+            for sh in made[i]:  # (Properties' "Made by": the mask it was applied with)
+                sh["made_by"] = ["mask", self.shape_label(self.shapes[i])]
         if not made:
             self.status.config(text=tr("mask.apply_nothing"))
             return
@@ -356,7 +358,7 @@ class MaskPanel:
             first = self.shapes[int(owners[0])]
             new["picture_notes"] = {"pal": slot_pal(first["picture"]["set"].get("pal"), slot_rule(first),
                                                     self.picture_use10)}
-        if any(is_sustained(self.shapes[o]) for o in np.unique(owners).tolist()):
+        if any(sustain_on(self.shapes[o]) for o in np.unique(owners).tolist()):
             new["held"] = True
         if any(keeps_laps(self.shapes[o]) for o in np.unique(owners).tolist()):
             new["paste_laps"] = True  # (a Domino paste's overlaps stay as in the preview, Multi too: overlap hunt 11-08)

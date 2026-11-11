@@ -497,12 +497,12 @@ class LiquifyBrush:
         sh = job["sh"]
         from notes.engine import is_gate_flipped, is_pasted_flipped, keeps_laps, made_from, past_edges
         from notes.mask import is_mask
-        from notes.sustain import is_sustained
+        from notes.sustain import is_sustained, sustain_on
         if (self._img is None or self._tiles is None or app.channel_mode.get() != "auto" or len(app.sels) != 1
                 or getattr(app, "loaded", None) is not None or self.hidden_shade()
                 or app.mask_preview.get() and any(is_mask(s) for s in app.shapes)
                 or app.notes_late or getattr(app, "_bg_notes", False) or sh.get("cut") or sh.get("colour_cut")
-                or "picture" in sh or is_sustained(sh) or past_edges(sh, app.keys, app.ppq) is not None
+                or "picture" in sh or past_edges(sh, app.keys, app.ppq) is not None
                 or getattr(self, "copy_src", None)):
             return None
         kb, top = int(self.kb_w), int(self.ruler_h)
@@ -516,13 +516,31 @@ class LiquifyBrush:
         old = clean_recolour(made_from(sh).get("recolour"))
         if old is None:
             return "later"
-        from notes.fx import pages
-        n_pages = len(pages(sh.get("fx")))
-        u = app.edit_place(sh, idx)
-        if n_pages and page_split(dict(old, **({"_upto": u} if u is not None else {})), n_pages) is not None:
-            return None  # (colour steps before a note tool page / pages skipped: made whole, stage F)
-        _, notes, own, _ = job["made"]
-        _, tracks = app.notes_tracks(without_recolour(sh))
+        src = None  # (the step brushed made by the runner, the steps after it skipped (a page after it, an order of
+        # its own...: PLAN.md "Properties" stage C): its colour group is the shape's last step then, so Live follows
+        # it like a last Liquify, on the notes that group gets)
+        view = app.edit_view(sh, idx)
+        if view.get("_upto") is not None:
+            from notes.steps import expanded
+            src = expanded(view)
+            if src is None or "recolour" not in src or src.get("_sus"):  # (held under a Sustain before it: whole)
+                return None
+            old = clean_recolour(made_from(src).get("recolour"))
+            if old is None:
+                return None
+            notes, tracks = app.notes_tracks(without_recolour(src))
+            from notes.engine import free_box
+            own = free_box(without_recolour(src), notes, app.notes_tracks, app.keys)
+        else:
+            if sustain_on(sh):  # (held: the colours worked out on held notes, made whole)
+                return None
+            from notes.fx import pages
+            n_pages = len(pages(sh.get("fx")))
+            u = app.edit_place(sh, idx)
+            if n_pages and page_split(dict(old, **({"_upto": u} if u is not None else {})), n_pages) is not None:
+                return None  # (colour steps before a note tool page / pages skipped: made whole, stage F)
+            _, notes, own, _ = job["made"]
+            _, tracks = app.notes_tracks(without_recolour(sh))
         base = dict(old)
         # (the step brushed must be the last colour step but a Reverse: the order of colour settings, PLAN.md stage B;
         # a step after it = can't follow: made whole, like a Liquify after a Warp drag)
@@ -530,7 +548,7 @@ class LiquifyBrush:
         if job.get("warp") is not None:  # (a Warp drag (roll_warp.py): the colours before the Warp, its turned-round
             # map standing in for a Liquify's, at the Warp's place in the order, with the Warp's edge)
             o = order_of(old) if old.get("warp") else order_of(old) + ["warp"]  # (a first drag: at the end)
-            lp, u = step_place(old, "liquify"), app.edit_place(sh, idx)
+            lp, u = step_place(old, "liquify"), app.edit_place(sh, idx) if src is None else None
             if old.get("liquify") and (u is None or lp is None or lp <= u):  # (a Liquify after it skipped: no matter)
                 return None
             base.pop("warp", None)
@@ -545,16 +563,18 @@ class LiquifyBrush:
         base["liquify"] = dict(settings, grid=[2, 2], map=lq.encode(np.full((2, 2, 2), 1.0 / lq.SCALE)))
         if stand_in is not None:
             base = with_order(base, stand_in)
-        upto = app.edit_place(sh, idx)  # (an earlier step brushed: the steps after it skipped, PLAN.md stage C)
-        if upto is not None:
+        upto = app.edit_place(sh, idx) if src is None else None  # (an earlier step brushed: the steps after it
+        if upto is not None:                                       # skipped, PLAN.md stage C)
             base["_upto"] = upto
         if not liquify_last(base):
             return None
-        rule = rule_of(with_most(dict(sh, recolour=base), app.all16())["recolour"])
+        s = sh if src is None else src
+        rule = rule_of(with_most(dict(s, recolour=base), app.all16())["recolour"])
         if rule.get("stir"):
             rule["ppq"] = app.ppq
-        held_ = is_sustained(sh) or sh.get("held") is True or keeps_laps(sh)  # (as engine.fx_notes')
-        gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
+        # (as engine.fx_notes')
+        held_ = sustain_on(s) or s.get("held") is True or keeps_laps(s) or s.get("_sus") is True
+        gate = is_pasted_flipped(s) or is_gate_flipped(s) or s.get("_gate") is True
         got = before_liquify(notes, tracks, rule, held_, gate, own)
         if got is None:
             return None

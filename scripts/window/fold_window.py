@@ -312,6 +312,9 @@ class FoldWindow(tk.Toplevel):
         """The project's shapes with the folded one in place of the selected ones (not shown yet): m["new"]."""
         app = self.app
         sh = m["got"][0]
+        labels = [app.shape_label(self.originals[i]) for i in self.got]  # (Properties' "Made by")
+        sh["made_by"] = ["fold", labels[0] if len(labels) == 1 else tr("props.and_more", name=labels[0],
+                                                                         n=len(labels) - 1)]
         keep = app.shapes
         app.shapes = load_state(self.state0)  # (put_plain works on app.shapes: only during this call)
         try:

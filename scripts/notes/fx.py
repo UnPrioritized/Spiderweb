@@ -195,7 +195,11 @@ def regrouped(groups, fx):
 
 
 def before_page(sh, k):
-    """sh as its step k gets the notes: only the steps before it, and only the glue done before it."""
+    """sh as its step k gets the notes: only the steps before it, and only the glue done before it (a shape whose
+    steps run in an order of its own: every step ordered before it, Sustain... too, steps.before_view)."""
+    from notes.steps import FX, before_view, order_of, runs_own_way
+    if runs_own_way(sh) and (FX, k) in order_of(sh):
+        return before_view(sh, (FX, k))
     fx = sh.get("fx") or []
     out = {key: v for key, v in sh.items() if key != "fx"}
     if fx[:k]:

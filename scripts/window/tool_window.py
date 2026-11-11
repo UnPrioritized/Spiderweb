@@ -271,6 +271,8 @@ class ToolWindow(tk.Toplevel):
         self.what = ttk.Label(head, text="", foreground=look.HINT)
         self.what.pack(side="left")
         self.build_tabs(top, head)
+        from window.edit_line import EditLine  # ("Hidden while you edit this one: ..." + Preview all, stage C)
+        self.edit_line = EditLine(top, app, "fx", None, order=False)
         self.build(box)
         self.targets = []
         self.undo = LocalUndo(self, self.undo_state, self.put_state, main=app.last_step)
@@ -484,6 +486,7 @@ class ToolWindow(tk.Toplevel):
     def pick_page(self, k):
         """A tab clicked: its page's settings show and change from now on (the same page on every selected shape)."""
         self.catch_up()
+        self.app.colour_edit_leave("fx", keep=("fx", k))  # (another page picked: the steps after the one edited back)
         self.at = {i: k for i in self.targets}
         st = self.page_step()
         self.cfg = dict(self.DEFAULTS, **copied(st.get("cfg") or {}))
@@ -494,6 +497,7 @@ class ToolWindow(tk.Toplevel):
     def new_page(self):
         """"+": the settings start from the defaults; a page is added once one changes."""
         self.catch_up()
+        self.app.colour_edit_leave("fx")
         self.at = None
         self.cfg = dict(self.DEFAULTS)
         self.show()
@@ -686,12 +690,12 @@ class ToolWindow(tk.Toplevel):
             self.late = self.after(250, self.preview)
             return
         started = time.perf_counter()
-        self.app.colour_edit_leave()  # (a colour step being edited: a page change ends it, so the page shows)
         cl = self.clean(self.cfg)
         cl = dict(cl) if cl else None
         if self.at is None:
             if cl is None or not self.targets:  # (a new page that would change nothing isn't added)
                 return
+            self.app.colour_edit_leave()  # (a page added: a step being edited ends, so the new page shows)
             self.at = {}
             for i in self.targets:
                 sh = self.app.shapes[i]
@@ -706,6 +710,10 @@ class ToolWindow(tk.Toplevel):
                 k = self.at[i]
                 fx[k] = dict(fx[k], cfg=self.page_cfg(i, cl))  # (None = changes nothing for now: dropped on close)
                 sh["fx"] = fx
+            # (this page being edited: the steps after it skipped until the user leaves it, PLAN.md "Properties"
+            # stage C; pages at different places on the shapes: no one step, nothing skipped)
+            ks = set(self.at.values())
+            self.app.colour_edit_set(("fx", ks.pop()) if len(ks) == 1 else None)
         self.now = self.settings()
         self.sync_tabs()
         app = self.app
@@ -758,6 +766,7 @@ class ToolWindow(tk.Toplevel):
             else:
                 app.shapes[i].pop("fx", None)
         put_colours(app.shapes, self.before_rc)
+        app.colour_edit_drop("fx")  # (a page being edited: whole again, made just below)
         app.shapes_changed()
         self.close()
 
@@ -788,5 +797,6 @@ class ToolWindow(tk.Toplevel):
             self.after_cancel(self.late)
         self.drop_jobs()
         setattr(self.app, self.ATTR, None)
+        self.app.colour_edit_leave("fx")  # (a page being edited: the steps after it worked out again)
         self.destroy()
         self.app.roll.focus_set()

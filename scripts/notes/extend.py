@@ -19,6 +19,8 @@ import math
 
 import numpy as np
 
+from files.speed import key_sort
+
 from notes.gaterange import DIRS, STRAIGHT, clean_graph, flipped_range, turned_range
 from notes.subtract import amounts, part_side
 
@@ -99,7 +101,8 @@ def next_starts(notes):
     s, p = notes[:, 0].astype(np.int64), notes[:, 2].astype(np.int64)
     big = np.int64(1) << 40
     keys = p * big + s
-    order = np.argsort(keys, kind="stable")
+    order = key_sort(p, s) if int(np.abs(s).max(initial=0)) < big // 2 else np.argsort(keys, kind="stable")  # (the
+    # compiled sort: the same order as the keys sorted while starts stay within half of big)
     k = keys[order]
     at = np.searchsorted(k, keys, side="right")
     out = np.full(len(notes), np.iinfo(np.int64).max // 4, np.int64)

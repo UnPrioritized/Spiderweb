@@ -27,6 +27,7 @@ from window.help import Tips, open_help
 from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
+from notes.steps import after_change as steps_after_change, signature as steps_signature
 from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
                           split_overlaps, heard_way, keeps_laps,
@@ -50,7 +51,7 @@ from notes.mask import (MASK_DEFAULTS, as_used, can_mask, is_mask, mask_view, pi
                         slot_pal, slot_rule, tidy_groups)
 from notes.merge import has_colours, merge_parts, velocity_reversed as merge_vrev
 from notes.recolour import counted_starts, first_starts, is_recoloured, with_most, without_recolour
-from notes.sustain import is_sustained
+from notes.sustain import is_sustained, sustain_on
 from notes.strips import gap_of, has_strips, strip_colours, strip_laps, strip_spans
 from notes.pattern import moved_formulas
 from notes.paths import KEYS
@@ -503,7 +504,7 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
                               for sh in shapes],
                              # (a Domino paste keeps its own overlaps outside Single channel: user 2026-10-30; not
                              # with Remove overlaps ticked, user 2026-11-06)
-                             [is_sustained(sh) or sh.get("held") is True or mode == "auto" and keeps_laps(sh)
+                             [sustain_on(sh) or sh.get("held") is True or mode == "auto" and keeps_laps(sh)
                               and not across for sh in shapes],
                              backs, ordered, laps, keep,
                              [s or r and not has_colours(sh, turns=True) for sh, r, s in zip(shapes, took, strips)],
@@ -536,7 +537,7 @@ def cut_across(rendered, shapes, overlaps):
     your tracks' places, so yours moved down and the list no longer showed who won); those emptied tracks keep
     counting as tracks with notes everywhere (App.cut_emptied: list, exports), so nothing moves. The loaded MIDI's
     tracks first, in their listed order (overlaps "files")."""
-    held = np.flatnonzero([is_sustained(sh) or sh.get("held") is True for sh in shapes])
+    held = np.flatnonzero([sustain_on(sh) or sh.get("held") is True for sh in shapes])
     before = np.unique(rendered[:, 4])
     files = overlaps.get("files") or ()
     out = remove_across(rendered, np.isin(rendered[:, 5], held), overlaps,
@@ -571,7 +572,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch")
             tracks = np.unique(np.asarray(t, np.int64))
             laid[i] = {int(u): int(on[min(k, len(ids) - 1)]) for k, u in enumerate(tracks.tolist())}
         # (a Domino paste keeps its own overlaps in Multi channel too, as copied: user 2026-10-30, round trip)
-        fix = mode != "raw" and not is_sustained(sh) and sh.get("held") is not True and not (
+        fix = mode != "raw" and not sustain_on(sh) and sh.get("held") is not True and not (
             mode == "auto" and keeps_laps(sh))
         if mode == "single" and fix:  # (Single channel: no overlaps between the shapes on a track either, user
             together.append(in_track(n, on[np.minimum(colour, len(ids) - 1)], i, False))  # 2026-10-26)
@@ -581,7 +582,7 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch")
         together = np.concatenate(together)
         there = np.isin(rendered[:, 4], np.unique(together[together[:, 4] < OWN0, 4]))
         if there.any():  # (sustained / held shapes and pictures keep their overlaps, as in render: hunt 10-26)
-            keeps = np.array([is_sustained(s) or s.get("held") is True or picture_like(s) for s in shapes] + [True])
+            keeps = np.array([sustain_on(s) or s.get("held") is True or picture_like(s) for s in shapes] + [True])
             there &= ~keeps[np.minimum(rendered[:, 5], len(shapes))]
         if there.any():
             parts[0] = rendered[~there]
@@ -838,12 +839,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.stir_window = None  # Recolour's Stir… (stir_window.py)
         self.liquify_window = None  # Recolour's Liquify… (liquify_window.py)
         self.warp_window = None  # Recolour's Warp… (warp_window.py)
-        self.colour_order_window = None  # Recolour's Effects… (colour_order_window.py)
+        self.properties_window = None  # Properties… (properties_window.py)
         # (big shapes' quick Stir / Warp / Liquify work is kept only while one of their windows is open: ~210-315 MB
         # at 2 M notes otherwise held all the time; user 2026-11-10)
         from notes.recolour import keep_while
         keep_while(self.colour_window_open)
         self.stir_open = set()  # the Stir window's parts shown unfolded ("area", "flips"; autosave)
+        self.props_open = set()  # the Properties window's basics groups shown unfolded ("shape", "place"...; autosave)
         self.fill_window = None  # Fill gaps… (fill_window.py)
         self.lines_window = None  # Flip each line… (lines_window.py)
         self.melody_window = None  # Fill with tempo jumps… (melody_window.py)
@@ -1097,7 +1099,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                          ("Alt-u Alt-U", lambda: open_chop(self)), ("Control-u Control-U", lambda: quick_chop(self)),
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
-                         ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True))):
+                         ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True)),
+                         ("Alt-Return Alt-KP_Enter", self.open_properties)):  # (Properties…, properties_window.py)
             for k in keys.split():
                 self.bind_all(f"<{k}>", self.hotkey(fn))
         self._device_was = self.midi_device.get()
@@ -1852,6 +1855,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 w.sync()
         if self.hz_window:
             self.hz_window.sync()
+        if self.properties_window:  # (it follows the selection)
+            self.properties_window.sync()
         if self.sel is not None and self.row_of(self.sel) is not None:
             self.listbox.see(self.row_of(self.sel))
         # the first time one is selected: how it's edited
@@ -2500,6 +2505,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             deps.pop(k, None)
             top.discard(k)
 
+    def steps_noted(self):
+        """Every shape's step order kept up (notes/steps.py, PLAN.md "Properties" A): a step it didn't have at the
+        last change goes at the end of its order, one taken away leaves it. A shape seen for the first time (new,
+        opened, undone, pasted) keeps the order it came with."""
+        seen = getattr(self, "_step_sigs", None) or {}
+        now = {}
+        for sh in self.shapes:
+            got = seen.get(id(sh))
+            sig = steps_signature(sh)
+            if got is not None and got[0] is sh:
+                if got[1] != sig:
+                    steps_after_change(sh, got[1])
+                    sig = steps_signature(sh)
+            now[id(sh)] = (sh, sig)
+        self._step_sigs = now
+
     def shapes_changed(self, now=False, moving=False):
         """Recalculate every note (overlaps depend on all shapes together) and refresh the screen.
         While dragging, if that's slow (lots of notes), only the lines follow the mouse: the notes catch up when the
@@ -2531,6 +2552,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         for sh in self.shapes:  # ("Shape length follows the notes": after any change to its box too, hunt)
             if (sh.get("hz") or {}).get("grow"):
                 fit_length(sh)
+        self.steps_noted()
         busy = self._notes_time + self._mask_time  # (the masks' preview is made after the notes, mask.py)
         slow = busy > 0.15 or self._merges_owed
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
@@ -2684,7 +2706,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.update_status()
         self.schedule_autosave()
         self.sync_history()
-        self.sync_edit_lines()
+        self.sync_edit_lines()  # (the Properties window too: its place / size numbers come from these notes)
 
     def slots_pal(self):
         """The picture colours by slot as the notes have them now (the first picture's, else the first copy's)."""

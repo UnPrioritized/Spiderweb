@@ -755,6 +755,7 @@ class JoinSplit:
         if not new:
             self.status.config(text=tr("join_split.plain_nothing"))
             return
+        self.made_by(new, "plain")
         self.roll.cancel_draft()
         self.push_undo(name=tr("roll_menu.turn_into_plain_notes"))
         self.put_plain(new)
@@ -816,6 +817,7 @@ class JoinSplit:
             self.status.config(text=tr("fill_gaps.no_gaps"))
             return
         self.plain_kept(new, same == "both")
+        self.made_by(new, "fill_gaps")
         gone = [i for i in sorted(had) if i not in new]  # (shapes that never had notes stay as they are, hunt)
         lost = clean_extract([g for i in gone for g in extract_groups(held_extract(self.shapes[i]))])
         if lost and new:  # (its loaded notes stay out of the file while the filled notes are there, hunt)
@@ -835,6 +837,14 @@ class JoinSplit:
             self.select_many([], None)
         self.shapes_changed()
         self.status.config(text=trn("fill_gaps.done", len(kept), n=len(kept)))
+
+    def made_by(self, new, command):
+        """Each new plain shape remembers the one-time command that made it and the shape it came from (shown in
+        the Properties window's basics: "Made by", PLAN.md "Properties"). Called while self.shapes still holds
+        the old ones."""
+        for i, sh in new.items():
+            if i < len(self.shapes):
+                sh["made_by"] = [command, self.shape_label(self.shapes[i])]
 
     def plain_kept(self, new, held=False):
         """Fill gaps / the line tools: what each new plain shape keeps of the shape it replaces (pasted / plain
@@ -908,6 +918,7 @@ class JoinSplit:
             self.status.config(text=tr("lines.no_change"))
             return
         self.plain_kept(new, held=bool(align) and not remove)  # (lined up + overlaps kept: none cut by the rule)
+        self.made_by(new, "line_flip")
         gone = sorted(emptied)
         lost = clean_extract([g for i in gone for g in extract_groups(held_extract(self.shapes[i]))])
         if lost and new:  # (its loaded notes stay out of the file, like Fill gaps: hunt 2026-11-07)
@@ -983,6 +994,7 @@ class JoinSplit:
         finally:
             self.busy(None)
         new = {i: sh for i, sh in new.items() if i in pieces and pieces[i][1].max(initial=0) > 0}
+        self.made_by(new, "split_lines")
         for i, sh in new.items():
             if i in ccs:
                 sh.pop("cc", None)
@@ -1168,8 +1180,8 @@ class JoinSplit:
         """own_heard's notes that a HELD note of another shape (Sustain / Keep both) cuts as shown end where it cuts
         them: a held note is never stretched over them, so nothing hangs on their hidden tail, and a cut inside it
         made a piece starting with the held note that Single keeps (same start = no cut; sweep 2026-11-08)."""
-        from notes.sustain import is_sustained
-        held = [j for j, s in enumerate(self.shapes) if j != i and (s.get("held") is True or is_sustained(s))]
+        from notes.sustain import is_sustained, sustain_on
+        held = [j for j, s in enumerate(self.shapes) if j != i and (s.get("held") is True or sustain_on(s))]
         if not held or not len(out):
             return out
         r = np.asarray(self.rendered[:, :6], np.int64)
@@ -2035,11 +2047,11 @@ class JoinSplit:
         Sustain or held notes), so cut pieces sound as before; else as they are. groups (Single channel: each note's
         slot as shown, single_groups): fixed per slot instead, tracks kept."""
         from notes.engine import keeps_laps
-        from notes.sustain import is_sustained
+        from notes.sustain import is_sustained, sustain_on
         from window.app import fix_rows
         mode = self.channel_mode.get()
         rule = self.overlap_rule() or {}
-        if (mode == "raw" or not len(notes) or is_sustained(sh) or sh.get("held") is True
+        if (mode == "raw" or not len(notes) or sustain_on(sh) or sh.get("held") is True
                 or mode == "auto" and keeps_laps(sh) and not rule.get("across")):
             return notes, tracks
         notes = np.asarray(notes, np.int64)

@@ -498,8 +498,8 @@ class ChopWindow(ToolWindow):
             if self.info.cget("text"):
                 self.info.config(text="")
             return
-        shapes = [app.shapes[i] for i in self.targets if i < len(app.shapes)]
-        after = sum(len(app.notes_of(sh)) for sh in shapes)
+        # (as shown: the steps after the page being edited skipped meanwhile, stage C: never made whole here)
+        after = sum(len(app.notes_of(app.edit_view(app.shapes[i], i))) for i in self.targets if i < len(app.shapes))
 
         def page_input(i):  # (the shape's notes as this page gets them)
             sh = app.shapes[i]

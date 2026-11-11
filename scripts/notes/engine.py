@@ -50,7 +50,7 @@ from notes.recolour import (KEEP, PAGE, box_of, clean_recolour, is_recoloured, p
                             without_recolour)
 from notes.subtract import clean_subtract, is_subtracted, subtracted
 from notes.extend import clean_extend, extended, is_extended
-from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained
+from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained, sustain_on
 from notes.bezier import anchor_count, sample
 from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, rows_up_to, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
@@ -66,6 +66,7 @@ from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_c
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
 from notes.smooth import clean_level, smooth_path
+from notes.steps import RUNNER, expanded, whole_steps
 from notes.text import clean_text
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
 
@@ -510,6 +511,9 @@ def clean_shape(sh):
                 out["extract"] = ex
             if sh.get("made") in ("mask", "leftovers", "path", "plain"):
                 out["made"] = sh["made"]
+            mb = sh.get("made_by")  # (the one-time command that made it + the shape it came from: Properties)
+            if isinstance(mb, list) and len(mb) == 2 and all(isinstance(x, str) for x in mb):
+                out["made_by"] = [mb[0][:20], mb[1][:200]]
             if isinstance(sh.get("leftover_of"), str):  # (a two-shapes merge's leftovers: its Split takes them back)
                 out["leftover_of"] = sh["leftover_of"][:64]
             if sh.get("lapped") is True:  # (merge leftovers: each note's Colours round on its track, + LAP x round)
@@ -571,6 +575,8 @@ def clean_shape(sh):
     rc = clean_recolour(sh.get("recolour"))
     if rc is not None:  # its notes' colours changed (recolour.py)
         out["recolour"] = rc
+    from notes.steps import kept_in
+    kept_in(out, sh)  # (the order of its steps + the ones switched off: steps.py; saved only when not the default)
     # (again on what was read: a number written as text, "nan" or "1e400", got past sane as text; and where it
     # reaches, its strokes too)
     return out if sane(out) and within_reach(out) else None
@@ -988,10 +994,10 @@ def made_from(sh):
     again."""
     rc = sh.get("recolour")
     if isinstance(rc, dict) and isinstance(rc.get("liquify"), dict) and "frozen" in rc["liquify"]:
-        from notes.recolour import clean_recolour
+        from notes.recolour import clean_recolour, without_recolour
         rc = dict(rc, liquify={k: v for k, v in rc["liquify"].items() if k != "frozen"})
         # (only a mask: no Recolour at all, the very key of the shape without it)
-        sh = dict(sh, recolour=rc) if clean_recolour(rc) else {k: v for k, v in sh.items() if k != "recolour"}
+        sh = dict(sh, recolour=rc) if clean_recolour(rc) else without_recolour(sh)
     hz = sh.get("hz")
     if not isinstance(hz, dict):
         return sh
@@ -1085,7 +1091,7 @@ def heard_way(sh, mode, rule=None):
     on them (user 2026-11-08: Glue, note tool pages, Recolour, flips work on the notes AS SHOWN; a long quiet note
     under a loud one shows loud to the long note's end in Single channel)."""
     if (mode == "raw" or "notes" not in sh or "picture" in sh or "picture_notes" in sh or is_mask(sh)
-            or sh.get("held") is True or is_sustained(sh) or sh.get("_sus") is True):
+            or sh.get("held") is True or sustain_on(sh) or sh.get("_sus") is True):
         return None
     rule = rule or {}
     if mode == "auto" and keeps_laps(sh) and not rule.get("across"):
@@ -1327,13 +1333,16 @@ def fx_notes(sh, ppq, keys, get):
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     sh = made_from(sh)  # (a Hz bass's CC lines make no notes: never from them, whoever asks)
+    run = expanded(sh)  # (an order of its own / steps switched off: every step one entry, in that order: steps.py)
+    if run is not None:
+        return get(run)
     if "recolour" in sh:  # (colours only, on the notes as they come out at the very end: recolour.py)
         if not is_recoloured(sh):
             return get(without_recolour(sh))
         # (held: overlaps kept, not settled; a Domino paste keeps its own overlaps too, as with Recolour off
         # (Multi channel, user 2026-10-30; Single channel cuts them on its track afterwards anyway)
-        held_ = is_sustained(sh) or sh.get("held") is True or keeps_laps(sh)
-        gate = is_pasted_flipped(sh) or is_gate_flipped(sh)
+        held_ = sustain_on(sh) or sh.get("held") is True or keeps_laps(sh) or sh.get("_sus") is True
+        gate = is_pasted_flipped(sh) or is_gate_flipped(sh) or sh.get("_gate") is True
         rule = rule_of(sh["recolour"])
         if rule.get("stir"):  # (a stir round as seen counts beats: recolour.area_scales)
             rule["ppq"] = ppq
@@ -1373,9 +1382,9 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get(dict(bare, _sus=True))
         got = held_piece(sh, notes, tracks, ppq, get)
         return got if got is not None else held(notes, tracks, auto_sustain(sh, get), ppq)
-    if "picture" in sh:  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
-        return kind_notes_tracks(sh, ppq, keys)
     fx = sh.get("fx")
+    if "picture" in sh and not (fx and fx[-1]["tool"] in RUNNER):
+        return kind_notes_tracks(sh, ppq, keys)  # (no glue / chop / claw / strum on a picture: its notes are its picture, user)
     if fx and (is_pasted_flipped(sh) or is_gate_flipped(sh)):
         # (note tool pages first, then each key row reversed: a Claw's spacing turns round too, user 2026-11-05)
         # (velocity lines drawn after the last page come AFTER the flip: they were drawn on the notes as shown, so
@@ -1432,8 +1441,16 @@ def fx_notes(sh, ppq, keys, get):
         if last["tool"] == "glue":
             g = glue_level(sh)
             return with_glue(notes, tracks, dict(g, glue=at_step(g.get("glue"), last)), ppq)
-        if last["tool"] == "colours":  # (colour steps in front of a page: pages_coloured)
+        if last["tool"] == "colours":  # (colour steps in front of a page: pages_coloured; or anywhere: steps.expanded)
+            if last.get("full"):  # (no page after them: coloured as the Recolour at the end colours)
+                rule = rule_of(last["rc"])
+                if rule.get("stir"):
+                    rule["ppq"] = ppq
+                held_ = sh.get("_sus") is True or sh.get("held") is True or keeps_laps(sh)
+                return recoloured(notes, tracks, rule, held_, bool(last.get("gate")), free_box(rest, notes, get, keys))
             return colour_step(notes, tracks, last["rc"], ppq)
+        if last["tool"] in RUNNER:
+            return run_step(notes, tracks, last, rest, ppq, get)
         return fx_step(notes, tracks, last, sh, ppq, keys)
     if sh.get("_m"):
         if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)
@@ -1444,7 +1461,39 @@ def fx_notes(sh, ppq, keys, get):
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
         return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
     # (a notes shape's own overlaps fixed as the Channels mode shows them, before glue and every tool: heard_way)
+    if sh.get("_noglue0"):  # (its glue before the pages runs later, or is switched off: steps.expanded)
+        return heard_kind(sh, ppq, keys)
     return with_glue(*heard_kind(sh, ppq, keys), sh, ppq)
+
+
+def run_step(notes, tracks, step, sh, ppq, get):
+    """The notes after one of the runner's own steps (steps.RUNNER; sh: the shape as it is before it, its notes
+    notes / tracks): glue before the pages, Gate aware flip, Sustain, Gate extend, Gate subtract."""
+    tool = step["tool"]
+    if tool == "glue0":  # (the boxes glued before the pages, on the drawing as it is here: glue_level's way)
+        boxes = glue_from(sh.get("glue"), sh.get("fx"))
+        if not boxes:
+            return notes, tracks
+        g = unflipped(sh) if sh.get("_m") else sh
+        return with_glue(notes, tracks, dict(g, glue=boxes), ppq)
+    if tool == "gate_flip":
+        return mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
+    if tool == "extend":
+        return extended(notes, step["cfg"], ppq), tracks
+    if tool == "subtract":
+        return subtracted(notes, step["cfg"], ppq), tracks
+    sus = step["cfg"]  # (Sustain)
+    got = held_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
+    if got is not None:
+        return got
+    if "gap" not in sus and sh.get("glue"):  # (Auto: worked out without glue, as auto_sustain does)
+        bare = {k: v for k, v in sh.items() if k not in ("glue", "_noglue0")}
+        fx = [st for st in sh.get("fx") or () if st["tool"] not in ("glue", "glue0")]
+        bare.pop("fx", None)
+        if fx:
+            bare["fx"] = fx
+        sus = dict(sus, _auto=auto_gap(get(dict(bare, _sus=True))[0]))
+    return held(notes, tracks, sus, ppq)
 
 
 _held_wholes = {}  # id(whole's notes) -> (them, (sustain, ppq), held(...)): held_piece's
@@ -1806,10 +1855,11 @@ def whole_tools(whole, raw, spots, tracks, ppq):
     vel = env_velocities(velocity_env(whole), raw[:, 0], float(t.min()), float(t.max()))
     who = tracks if tracks is not None else np.zeros(len(raw), np.int64)
     a = np.column_stack([raw, vel, np.arange(len(raw)), who]).astype(np.int64)  # (spots ride along as row numbers)
-    first = glue_from(whole.get("glue"), whole.get("fx")) if len(a) else None  # (the rest at its places: run_steps)
-    if first:
+    fx, glued_first = whole_steps(whole)  # (its glue before the pages where its order puts it: steps.py)
+    first = glue_from(whole.get("glue"), whole.get("fx")) if len(a) and glued_first else None  # (the rest at its
+    if first:  # places: run_steps)
         a = apply_glue(a, first, glue_box(np.concatenate(cached_arrays(whole))), ppq, True)
-    a = run_steps(a, whole.get("fx") or [], whole, ppq)
+    a = run_steps(a, fx, whole, ppq)
     return a[:, :4], spots[a[:, 4]], a[:, 5] if tracks is not None or path_colours(whole) else None
 
 
@@ -1819,11 +1869,16 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
     flipped along the axes m). A turn step turns the notes back, not the drawing (close, not exact). A flip / turn with
     no page switched on before it does nothing (before_step)."""
     up = []  # (the steps, last first: from the end down to the notes, then back up; no recursion: lists can be long)
+    put_in = ("glue0", "sustain", "extend", "subtract")  # (put in by whole_steps: not sh's own fx entries)
+    extra = sum(1 for st in fx if st["tool"] in put_in)
     while fx:
         last, fx = fx[-1], fx[:-1]
+        if last["tool"] in put_in:
+            extra -= 1
         if last["tool"] in ("flip", "turn") and idle(fx):
             continue
-        up.append(dict(last, _at=len(fx)) if last["tool"] == "glue" else last)  # (its place: which boxes)
+        # (a glue's place: which boxes, on the drawing as it is after that many of sh's own steps)
+        up.append(dict(last, _at=len(fx) - extra) if last["tool"] in ("glue", "glue0") else last)
         if last["tool"] == "flip":
             m = toggled(m, last["axis"])
         elif last["tool"] == "turn":
@@ -1843,6 +1898,18 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
             boxes = at_step(g.get("glue"), last)
             if boxes and len(a):
                 a = apply_glue(a, boxes, glue_box(np.concatenate(cached_arrays(g))), ppq, True)
+        elif last["tool"] == "glue0":  # (the boxes before the pages, glued where the order puts them)
+            g = glue_level(sh, last["_at"])
+            boxes = glue_from(sh.get("glue"), sh.get("fx"))
+            if boxes and len(a):
+                a = apply_glue(a, boxes, glue_box(np.concatenate(cached_arrays(g))), ppq, True)
+        elif last["tool"] == "extend":  # (ordered before a page: on the whole's notes there, steps.in_whole)
+            a = extended(a, last["cfg"], ppq)
+        elif last["tool"] == "subtract":
+            a = subtracted(a, last["cfg"], ppq)
+        elif last["tool"] == "sustain":  # (the pieces made by a cut keep the note's spot and track columns)
+            if len(a):
+                a = held(a, None, last["cfg"], ppq)[0]
         elif last["tool"] in ("path", "strum"):  # (the last column = the tracks: the copies' colours go on them,
             # hunt; a Strum wrap's later rounds too, so sliced line pieces keep them)
             notes, tr = fx_step(a[:, :-1], a[:, -1], last, sh, ppq)

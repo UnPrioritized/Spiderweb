@@ -242,6 +242,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.graph_part = self.make_graph(ttk.Frame(box), s)
         self.after_graph = row = ttk.Frame(box)
         row.pack(anchor="e", pady=(10, 0))
+        from window.edit_line import EditLine  # ("Hidden while you edit this one: ..." + Preview all, stage C)
+        self.edit_line = EditLine(box, app, self.KEY, None, order=False, before=row)
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda ev: self.cancel())
@@ -341,6 +343,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.sub_now()
         self.kept = self.own_now()  # (put back by Cancel)
+        self.now = self.before  # (store tells a change from this: opening changes nothing = no step edited)
         self.load(start)
         if start and self.idx:
             self.store()
@@ -749,6 +752,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
 
     def store(self):
         """Put each shape's settings on it and show them."""
+        had = [self.has_it(t) for t in self.tgts]
+        was = getattr(self, "now", None)
         for i, t in enumerate(self.tgts):
             if not self.ons[i]:
                 t.pop(self.KEY, None)
@@ -756,6 +761,11 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             t[self.KEY] = self.made_of(i)
         self.now = self.sub_now()
         self.show()
+        # (its settings changed on shapes that keep it: the steps after it skipped until the user leaves it, stage C;
+        # put on / taken off: whole; nothing changed (the window opening): as it was)
+        if self.now != was:
+            edited = had and all(had) and all(self.has_it(t) for t in self.tgts)
+            self.app.colour_edit_set((self.KEY, 0) if edited else None)
         self.app.shapes_changed()
 
     # ---- closing
@@ -782,12 +792,14 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             self.app.roll.cancel_draft()  # (as it was: an Add between step tried out stays one)
             for i, part in zip(self.idx, json.loads(self.kept)):
                 self.put_own(self.app.shapes[i], part)
+        self.app.colour_edit_drop(self.KEY)  # (whole again: made just below)
         self.close()
         self.app.shapes_changed()
 
     def close(self):
         self.closed = True
         setattr(self.app, self.ATTR, None)
+        self.app.colour_edit_leave(self.KEY)  # (the steps after it worked out again)
         self.destroy()
         self.app.roll.focus_set()
 

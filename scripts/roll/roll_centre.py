@@ -12,6 +12,7 @@ import numpy as np
 from files.lang import tr
 from notes.engine import free_box, pages_coloured
 from notes.fx import pages
+from notes.steps import colour_input
 from notes.recolour import (DRAWN, KEEP, PAGE, pages_before, LEAST_REACH, SPOT_LEAST, SPOT_MOST, LEAST_STRETCH, MOST_REACH, MOST_SKEW, MOST_STRETCH, area_corners,
                             area_dist, area_from_box, area_global, area_local, area_outlines, area_scales, centre_at,
                             fit_reach, most_reach,
@@ -72,7 +73,11 @@ class CentreDots:
         app = self.app
         plain = without_recolour(sh)
         rc = clean_recolour(sh.get("recolour"))
-        if rc and PAGE in (rc.get("order") or ()):  # (a step before a note tool page works on the notes before it:
+        w = app.stir_window
+        got = colour_input(sh, ("mode" if kind == "clumps" else kind, w.tab if kind == "stir" and w else 0))
+        if got is not None:  # (made its own way (an order of its own, steps off): the notes its colour group gets,
+            plain = without_recolour(got)  # Sustain / pages before it... included; PLAN.md "Properties" stage C)
+        elif rc and PAGE in (rc.get("order") or ()):  # (a step before a note tool page works on the notes before it:
             # the dot / grid / brush on those, stage F)
             n_pages = len(pages(sh.get("fx")))
             w = app.stir_window
