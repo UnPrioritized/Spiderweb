@@ -80,6 +80,11 @@ def colours_back(sh):
     (Properties: sh["off"]): as unflipped."""
     if ["gate_flip", 0] in [list(t) for t in sh.get("off") or ()]:
         return False
+    u = sh.get("_upto")  # (a step before the flip being edited: the flip is skipped meanwhile, so as unflipped)
+    if u is not None:
+        from notes.steps import hidden_after
+        if ("gate_flip", 0) in hidden_after(sh, tuple(u)):
+            return False
     if is_pasted(sh):
         if sh.get("flip_colours") is True:
             return "whole" if sh.get("gate_flip") is not True else False
