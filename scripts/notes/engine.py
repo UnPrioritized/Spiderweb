@@ -1483,10 +1483,11 @@ def run_step(notes, tracks, step, sh, ppq, get):
         return with_glue(notes, tracks, dict(g, glue=boxes), ppq)
     if tool == "gate_flip":
         return mirrored_runs(notes, tracks, bool(sh.get("own_vel")))
-    if tool == "extend":
-        return extended(notes, step["cfg"], ppq), tracks
-    if tool == "subtract":
-        return subtracted(notes, step["cfg"], ppq), tracks
+    if tool in ("extend", "subtract"):  # (a sliced piece: on its whole's notes, cut where it was: stepped_piece)
+        got = stepped_piece(sh, tool, notes, tracks, ppq, get, step["cfg"]) if sh.get("cut") else None
+        if got is not None:
+            return got
+        return (extended if tool == "extend" else subtracted)(notes, step["cfg"], ppq), tracks
     sus = step["cfg"]  # (Sustain)
     got = held_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
     if got is not None:
@@ -1556,18 +1557,25 @@ def _without_marks(side):
     return {k: v for k, v in side.items() if k != "cuts"} if isinstance(side, dict) else side
 
 
-def stepped_piece(sh, step, notes, tracks, ppq, get):
+def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     """A sliced piece of a line (Split here / Slice / Lasso) with Gate aware flip, Gate extend or Gate subtract (step):
     that step done on the WHOLE shape's notes, then cut at the piece's own ends, a knife through the finished notes
     (partial sweep 50337141 / 53101013 / 53101035: done on the piece alone, a note cut in two had its cut end
     shortened / lengthened and its runs mirrored inside the piece moved the cut). notes / tracks: the piece's own
     before the step. A graph across the shape or Gate extend's "Same amount" stay worked out on the piece (its own
     cut graph / average, as it was cut). None: not such a piece, or its notes aren't the whole's cut at its ends
-    (made alone, as before)."""
-    if sh["kind"] not in LINE_KINDS or not sh.get("cut") or not len(notes):
+    (made alone, as before). Gate extend / subtract also on a piece cut through its whole's notes (pages / glue, a
+    custom shape: partial sweep 68824084 / 69006198): each note found in the whole's (the one it is, or a part of).
+    cfg: the step's settings when made by the runner (steps.expanded; sh = the shape before the step there: the
+    colour steps before it don't count, the notes' times do)."""
+    runner = cfg is not None
+    if not sh.get("cut") or not len(notes) or not runner and (sh.get("order") is not None or sh.get("_run")):
         return None
-    cfg = sh.get(step)
-    if step != "gate_flip":
+    gate = step == "gate_flip"
+    if gate and (runner or sh["kind"] not in LINE_KINDS):
+        return None
+    if not gate:
+        cfg = cfg if runner else sh.get(step)
         if not isinstance(cfg, dict) or cfg.get("vary") or cfg.get("same") or (cfg.get("start") or {}).get("vary"):
             return None
         cfg = dict(_without_marks(cfg), **({"start": _without_marks(cfg["start"])} if cfg.get("start") else {}))
@@ -1575,20 +1583,26 @@ def stepped_piece(sh, step, notes, tracks, ppq, get):
     if got is None:
         return None
     src, part, _ = got
-    if not isinstance(part[0], (int, float)) or src.get("glue") or src.get("fx"):
+    timed = (sh["kind"] in LINE_KINDS and isinstance(part[0], (int, float)) and not src.get("glue")
+             and not src.get("fx"))  # (cut where the line's time reaches the cut: the piece = a stretch of time)
+    if gate and not timed:
         return None
     w0, wt0 = get({k: v for k, v in src.items() if k != step})
     if not len(w0):
         return None
-    if (tracks is None) != (wt0 is None):
+    if not runner and (tracks is None) != (wt0 is None):
         return None
-    _, lo, hi = piece_ticks(src, part, ppq)
     made = w0  # (the whole's notes as remembered: the same array for every piece)
     w0 = np.asarray(w0, np.int64)[:, :4]
-    wt = np.zeros(len(w0), np.int64) if wt0 is None else np.asarray(wt0, np.int64)
     mine = np.asarray(notes, np.int64)[:, :4]
     pt = np.zeros(len(mine), np.int64) if tracks is None else np.asarray(tracks, np.int64)
-    rows = _owned_rows(w0, wt, mine, pt, lo, hi)
+    if runner:  # (matched by the notes alone, each keeps its own colour)
+        wt, pick = np.zeros(len(w0), np.int64), np.zeros(len(mine), np.int64)
+    else:
+        wt, pick = (np.zeros(len(w0), np.int64) if wt0 is None else np.asarray(wt0, np.int64)), pt
+    # (where to look: the piece's stretch of time, or its notes' own)
+    lo, hi = piece_ticks(src, part, ppq)[1:] if timed else (int(mine[:, 0].min()), int(mine[:, 1].max()))
+    rows = _owned_rows(w0, wt, mine, pick, lo, hi)
     if rows is None:
         return None
     w1 = _stepped_whole(made, w0, step, cfg, ppq, bool(sh.get("own_vel")))
