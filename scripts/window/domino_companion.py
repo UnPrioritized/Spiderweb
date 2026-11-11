@@ -27,6 +27,7 @@ from tkinter import font as tkfont
 
 import numpy as np
 
+from files import domino_boxes as dbx
 from files import domino_link as dl
 from files import domino_shapes as dsh
 from files import domino_view as dv
@@ -1330,6 +1331,9 @@ class Companion:
             self.quick = None
             return self.say(tr("companion.take_conductor"), warn=True)
         self.done_drawing()  # (what was drawn here first goes in first)
+        # (onion skin on: the tracks it shows + the boxes, read BEFORE Domino's Copy / Delete change the selection;
+        # PLAN.md stage D)
+        self._onion = self.onion_plan(d) if dl.alive(d) else None
         self.busy, self.was_front, self._then, self.job = True, dl.front_window(), then, d
         self._rides = []  # (the copied tracks' other events (CC...): Domino's Delete takes the selected ones out too)
         dl.Copy(self.bar, d, lambda rows, ppq, start: self.safely(self.took, rows, ppq, start),
@@ -1372,60 +1376,266 @@ class Companion:
             self.app.after_idle(self.flush)
             return self.say(tr("companion.take_cc_unread"), warn=True)
         rides = keep
-        new = []
-        for r in lifted:
-            for one in r["shape"]:
-                one = copy.deepcopy(one)
-                one["pts"] = [[b + r["dt"] / ppq, p + r["dk"]] for b, p in one["pts"]]
-                one[MARK] = 1
-                one.pop("cc", None)  # (its CCs stay in Domino: never taken, or put straight back; user 2026-11-12)
-                new.append(one)
-        if len(rows):
-            first = int(rows[:, 0].min())
-            rows = rows.copy()
-            rows[:, 0] -= first
-            made = notes_shape(rows, ppq, tr("companion.taken_name"))
-            tracks = np.unique(rows[:, 4])
-            made["cols"] = (tracks - tracks.min()).tolist()
-            several = src is not None and len(src) > 1
-            back = several or src is not None and bool(rides)
-            if back and rides:  # (the copied tracks' CCs ride along, back into their tracks with Send)
-                made["cc"] = pack_cc([(t - first, k, tag, body) for t, k, tag, body in rides])
-            sh = clean_shape({**SHAPE_DEFAULTS, **app.defaults, **made})
-            sh[MARK] = 1
-            if back:
-                # (Send puts each colour back into the track it came from, followed by Domino's track object if it
-                # moves; one track: the current one at Send, as before, user 2026-11-12)
-                ids = dv.track_ids(d) or []
-                sh[BACK] = [d.pid, [[int(c), int(t), int(ids[t]) if several and 0 < t < len(ids) else 0]
-                                    for c, t in sorted(src.items())]]
-            sh["pts"] = [[b + (start + first) / ppq, p] for b, p in sh["pts"]]
-            new.append(sh)
+        plan, self._onion = getattr(self, "_onion", None), None
+        jobs, unread = self.onion_jobs(d, plan, src) if plan else ([], [])
+        if plan and src is None:
+            unread = list(plan[0])  # (which track the copy came from isn't known: the onion tracks are left alone)
+        cur = (dv.song_tracks(d) or (None,))[0]
+
+        def finish(extra, steps, skipped):
+            """The taken shape (+ the onion tracks' notes taken out: extra [(Domino track, rows tick (song), gate,
+            key, velocity)]) on the overlay; steps = Domino steps beyond the Delete (onion pastes)."""
+            self.busy, self._own = False, time.monotonic()  # (ours just now: Domino in front isn't the user yet)
+            taken, srcs = rows, dict(src or {})
+            if extra:  # (each onion track = one more colour, remembering its own track: Send puts it back there)
+                c = max([int(rows[:, 4].max())] if len(rows) else [-1])
+                c = max(c, max(srcs, default=-1)) + 1
+                parts = [taken]
+                for k, (t, got) in enumerate(extra):
+                    one = np.zeros((len(got), taken.shape[1] if len(taken) else 5), np.int64)
+                    one[:, :4] = got[:, :4]
+                    one[:, 0] -= start
+                    one[:, 4] = c + k
+                    srcs[c + k] = t
+                    parts.append(one)
+                taken = np.concatenate([p for p in parts if len(p)]) if any(len(p) for p in parts) else taken
+            new = []
+            for r in lifted:
+                for one in r["shape"]:
+                    one = copy.deepcopy(one)
+                    one["pts"] = [[b + r["dt"] / ppq, p + r["dk"]] for b, p in one["pts"]]
+                    one[MARK] = 1
+                    one.pop("cc", None)  # (its CCs stay in Domino: never taken, or put straight back; user 2026-11-12)
+                    new.append(one)
+            if len(taken):
+                first = int(taken[:, 0].min())
+                taken = taken.copy()
+                taken[:, 0] -= first
+                made = notes_shape(taken, ppq, tr("companion.taken_name"))
+                tracks = np.unique(taken[:, 4])
+                made["cols"] = (tracks - tracks.min()).tolist()
+                several = bool(srcs) and len(srcs) > 1
+                back = several or bool(srcs) and bool(rides)
+                if back and rides:  # (the copied tracks' CCs ride along, back into their tracks with Send)
+                    made["cc"] = pack_cc([(t - first, k, tag, body) for t, k, tag, body in rides])
+                sh = clean_shape({**SHAPE_DEFAULTS, **app.defaults, **made})
+                sh[MARK] = 1
+                if back:
+                    # (Send puts each colour back into the track it came from, followed by Domino's track object if
+                    # it moves; one track: the current one at Send, as before, user 2026-11-12)
+                    ids = dv.track_ids(d) or []
+                    sh[BACK] = [d.pid, [[int(c), int(t), int(ids[t]) if several and 0 < t < len(ids) else 0]
+                                        for c, t in sorted(srcs.items())]]
+                sh["pts"] = [[b + (start + first) / ppq, p] for b, p in sh["pts"]]
+                new.append(sh)
+            if dl.alive(d):
+                dl.give_back(d, self.was_front)
+            app.roll.cancel_draft()
+            app.add_copies(new, 0, tr("companion.take_step"))
+            self.link(app.undo_stack[-1], (1 + steps, d))
+            for r in lifted:  # (out of Domino: asleep; any undo putting the notes back wakes them, hunt 2026-11-06)
+                r["alive"] = False
+            self._gen = (app.shapes_gen, time.monotonic())
+            n = len(taken)
+            if lifted:
+                shapes = trn("companion.n_shapes", len(lifted), n=len(lifted))
+                self.say(tr("companion.took_shapes", shapes=shapes, notes=trn("n.notes", n, n=n)) if n
+                         else tr("companion.took_shapes_only", shapes=shapes))
+            elif extra:
+                self.say(tr("companion.took_onion", notes=trn("n.notes", n, n=n),
+                            tracks=trn("n.tracks", len(extra) + 1, n=len(extra) + 1)))
+            else:
+                self.say(trn("companion.took_n", n, n=n))
+            if skipped:  # (an onion track left as it was: said, its notes stay in Domino)
+                self.say(tr("companion.onion_skipped", tracks=", ".join(str(t) for t in skipped)), warn=True)
+            if getattr(self, "_onion_cc", False):
+                self._onion_cc = False
+                self.say(tr("companion.cc_not_back"), warn=True)
+            if left:  # (CCs staying in Domino: back in their own tracks, at their own ticks; part of the Take's undo)
+                by = {}
+                for t, c, tag, body in sorted(left, key=lambda e: e[0]):
+                    by.setdefault(src[int(c)], []).append((start + int(t), tag, body))
+                now = dv.song_tracks(d)
+                self.busy = True
+                self.put_back(d, sorted(by.items()), app.undo_stack[-1], now[0] if now is not None else None)
+            if then:
+                then(app.shapes[len(app.shapes) - len(new):])
+            self.app.after_idle(self.flush)
         dl.command(d, dl.DELETE)
-        dl.give_back(d, self.was_front)
-        app.roll.cancel_draft()
-        app.add_copies(new, 0, tr("companion.take_step"))
-        self.link(app.undo_stack[-1])
-        for r in lifted:  # (out of Domino: asleep; any undo putting the notes back wakes them, hunt 2026-11-06)
-            r["alive"] = False
-        self._gen = (app.shapes_gen, time.monotonic())
-        n = len(rows)
-        if lifted:
-            shapes = trn("companion.n_shapes", len(lifted), n=len(lifted))
-            self.say(tr("companion.took_shapes", shapes=shapes, notes=trn("n.notes", n, n=n)) if n
-                     else tr("companion.took_shapes_only", shapes=shapes))
-        else:
-            self.say(trn("companion.took_n", n, n=n))
-        if left:  # (the CCs staying in Domino: back in their own tracks, at their own ticks; part of the Take's undo)
-            by = {}
-            for t, c, tag, body in sorted(left, key=lambda e: e[0]):
-                by.setdefault(src[int(c)], []).append((start + int(t), tag, body))
-            now = dv.song_tracks(d)
+        if jobs:  # (the onion tracks' notes in the boxes taken out one track at a time, then the shape: stage D)
             self.busy = True
-            self.put_back(d, sorted(by.items()), app.undo_stack[-1], now[0] if now is not None else None)
-        if then:
-            then(app.shapes[len(app.shapes) - len(new):])
-        self.app.after_idle(self.flush)
+            return self.onion_step(d, jobs, 0, cur, [], 0, list(unread), finish)
+        return finish([], 0, unread)
+
+    # --- onion skin: the tracks Domino shows behind, their notes in the boxes taken too (PLAN.md stage D) ---
+    def onion_plan(self, d):
+        """(tracks onion skin shows behind the current one, the boxes) for a Take, or None (off / nothing)."""
+        try:
+            tracks = dv.onion_tracks(d) or []
+            if not tracks:
+                return None
+            boxes, _how = self.take_boxes(d)
+        except Exception:  # (an unreadable Domino: the Take as before)
+            self.log_once("_onion_log", "(Draw on Domino: onion skin)")
+            return None
+        return (tracks, boxes) if boxes else None
+
+    @staticmethod
+    def onion_jobs(d, plan, src):
+        """[(Domino track, its notes in the boxes: rows tick (song), gate, key, velocity)] for the onion tracks the
+        copy didn't already take (a selected track's notes came with Domino's Copy), + the tracks unreadable."""
+        tracks, boxes = plan
+        done = set((src or {}).values())
+        jobs, unread = [], []
+        if src is None:
+            return jobs, unread
+        for t in tracks:
+            if t in done:
+                continue
+            notes = dv.track_notes(d, t)
+            if notes is None:
+                unread.append(t)
+                continue
+            hit = dbx.inside(notes, boxes, ordered=True)
+            if hit.any():
+                jobs.append((t, notes[hit][:, :4].astype(np.int64)))
+        return jobs, unread
+
+    def onion_step(self, d, jobs, i, back, took, steps, skipped, finish):
+        """One onion track: its box notes out of Domino (onion_out), then the next; at the end the current track
+        back and finish(took, steps, skipped). A track that can't be done = left as it was (skipped, said)."""
+        if i == len(jobs) or not dl.alive(d):
+            skipped += [t for t, _ in jobs[i:]]
+            if dl.alive(d) and back is not None:
+                dl.switch_track(d, back)
+            return finish(took, steps, skipped)
+        track, rows = jobs[i]
+
+        def next_one(ok, n=None, cc_lost=False):
+            """ok = the notes are out of Domino; n = Domino steps made (counted for the Take's undo even when the
+            track failed half way); cc_lost = its CC couldn't be put back (said)."""
+            n = (1 if ok else 0) if n is None else n
+            if ok:
+                took.append((track, rows))
+            else:
+                skipped.append(track)
+            if cc_lost:
+                self._onion_cc = True
+            self.safely(self.onion_step, d, jobs, i + 1, back, took, steps + n, skipped, finish)
+        try:
+            self.onion_out(d, track, rows, next_one)
+        except Exception:
+            self.log_once("_onion_log", "(Draw on Domino: onion skin)")
+            next_one(False)
+
+    def onion_out(self, d, track, taken, done):
+        """Track's notes taken (rows tick, gate, key, velocity) out of Domino: on that track, the stretch from them
+        on replaced by what's left in it (Substitute Paste, one Domino step), its CC put back as they were (read with
+        a Domino copy of the track); nothing left in the stretch = it reaches on to the next event (Domino refuses an
+        empty paste), back to the one before, or Select All + Delete when the track holds nothing else.
+        done(ok, Domino steps)."""
+        if not dl.switch_track(d, track):
+            return done(False)
+        notes, others = dv.track_notes(d, track), dv.track_others(d, track)
+        if notes is None or others is None:
+            return done(False)
+        code = lambda a: a[:, 0].astype(np.int64) * 256 + a[:, 2]  # noqa: E731  (tick + key: keys 0..255)
+        gone = np.isin(code(notes), code(taken))
+        if int(gone.sum()) < len(taken):  # (changed meanwhile: left alone)
+            return done(False)
+        kept, a = notes[~gone], int(taken[:, 0].min())
+        b = int(taken[:, 0].max()) + 1
+        # (reached to NOTES only: a track's last event is Domino's own end of the track (at its last note's end), never
+        # in a Domino copy; a stretch ending on a note's start + 1 never holds it; live 2026-11-12)
+        later = sorted(int(t) for t in kept[:, 0] if t >= b)
+        before = sorted(int(t) for t in kept[:, 0] if t < a)
+        if not len(kept):  # (no note stays on the track: Select All + Delete, its CC put back as they were)
+            return self.onion_empty(d, track, done)
+        at = dl.put_cursor(d, a)
+        if at is None:
+            return done(False)
+
+        def stuff(lo, hi):
+            k = kept[(kept[:, 0] >= lo) & (kept[:, 0] < hi)]
+            return k, int(((others >= lo) & (others < hi)).sum())
+        k, cc = stuff(at, b)
+        if not len(k) and not cc:
+            if later:  # (reaches on to the next note, pasted back as it was)
+                b = later[0] + 1
+            else:  # (back to the note before)
+                at = dl.put_cursor(d, before[-1])
+                if at is None:
+                    return done(False)
+            k, cc = stuff(at, b)
+        if not cc:
+            return self.onion_paste(d, k, at, b, [], done)
+        there = []  # (the stretch's CC: only a Domino copy carries them, byte for byte)
+
+        def copied(got, ppq, _start):
+            if got is None or ppq != self.app.ppq or not dl.alive(d):
+                return done(False)
+            rides = sorted(((int(t), 0, 0, 0, (tag, body)) for t, _c, tag, body in there if at <= t < b),
+                           key=lambda e: e[0])
+            if len(rides) != cc:  # (not every event in the stretch came with the copy: left alone)
+                return done(False)
+            now = dl.put_cursor(d, at)
+            if now != at:
+                return done(False)
+            self.onion_paste(d, k, at, b, rides, done)
+
+        def guarded(got, ppq, start):  # (a failure here leaves the track alone; the Take still ends with its shape)
+            try:
+                copied(got, ppq, start)
+            except Exception:
+                self.log_once("_onion_log", "(Draw on Domino: onion skin)")
+                done(False)
+        dl.Copy(self.bar, d, guarded, whole=True, passengers=there)
+
+    def onion_empty(self, d, track, done):
+        """Every note of the track was taken: Select All + Delete (one Domino step), then its CC (a whole-track
+        Domino copy read them first, byte for byte) pasted back at their own ticks (one more). done(ok, steps)."""
+        there = []
+
+        def copied(got, ppq, _start):
+            if got is None or ppq != self.app.ppq or not dl.alive(d):
+                return done(False)
+            dl.command(d, dl.SELECT_ALL)
+            dl.command(d, dl.DELETE)
+            left = dv.track_notes(d, track)
+            if left is None or len(left):
+                return done(False, 1)  # (one step made: counted for the Take's undo)
+            if not there:
+                return done(True, 1)
+            events = sorted(((int(t), tag, body) for t, _c, tag, body in there), key=lambda e: e[0])
+            at = dl.put_cursor(d, events[0][0])
+            if at is None:
+                return done(True, 1, True)  # (the notes are out; the CC not back: said, Ctrl+Z gives it back)
+            raw = events_clip(self.app.ppq, events, at, events[-1][0] - at + 1)
+            dl.Paste(self.bar, d, raw, lambda ok, why: done(True, 2 if ok else 1, not ok))
+
+        def guarded(got, ppq, start):
+            try:
+                copied(got, ppq, start)
+            except Exception:
+                self.log_once("_onion_log", "(Draw on Domino: onion skin)")
+                done(False)
+        dl.Copy(self.bar, d, guarded, whole=True, passengers=there)
+
+    def onion_paste(self, d, kept, at, end, rides, done):
+        """Substitute Paste of kept (rows tick, gate, key, velocity) + rides over [at, end) on the current track."""
+        rows = np.zeros((len(kept), 6), np.int64)
+        if len(kept):
+            rows[:, 0] = kept[:, 0]
+            rows[:, 1] = kept[:, 0] + kept[:, 1]
+            rows[:, 2], rows[:, 3] = kept[:, 2], kept[:, 3]
+        rows, _ = cut_gates(rows)
+        ppq = self.app.ppq
+        if len(rows):
+            raw = clip_data(rows, ppq, int(self.app.beats * ppq), "note", span=(at, end - at), own=(),
+                            cc={0: list(rides)} if rides else None)
+        else:  # (only CC left in the stretch: a copy of one track holding just them)
+            raw = events_clip(ppq, [(t, e[0], e[1]) for t, _a, _b, _c, e in rides], at, end - at)
+        dl.Paste(self.bar, d, raw, lambda ok, why: done(ok), cmd=dl.SWAP_PASTE)
 
     def put_back(self, d, jobs, step, back, i=0):
         """Take's CCs that stay in Domino (took): jobs = [(track, [(tick, tag, body)])] pasted back one track at a

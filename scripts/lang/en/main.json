@@ -3196,5 +3196,7 @@
  "companion.taken_name": "Notes from Domino",
  "companion.take_step": "Take from Domino",
  "companion.took_n": "Took {n} notes from Domino: change them, then press Send",
- "companion.took_n_one": "Took 1 note from Domino: change it, then press Send"
+ "companion.took_n_one": "Took 1 note from Domino: change it, then press Send",
+ "companion.took_onion": "Took {notes} from {tracks} in Domino (with the onion skin tracks): change them, then press Send",
+ "companion.onion_skipped": "The notes in the box on onion skin track {tracks} couldn't be taken, so they stay in Domino as they were"
 }
