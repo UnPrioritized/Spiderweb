@@ -40,7 +40,7 @@ from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
 from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
-from notes.sliced import (CANT, completed, cut_group, cut_in_two, keep_velocity, keep_was, knife_hits,
+from notes.sliced import (CANT, completed, cut_group, cut_in_two, keep_velocity, keep_was, keyed_pieces, knife_hits,
                           knife_in_two, moved_by, notes_across, rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_dot, piece_velocity, sections,
@@ -68,12 +68,20 @@ def shown_slots(rows, notes, colour):
     its first note shown where it starts has; None when a colour has no note shown where it starts."""
     if not len(rows):
         return None
-    have = shown_code(rows)
-    o = np.argsort(have, kind="stable")
-    have, row_slot = have[o], rows[o, 4]
-    want = shown_code(notes)
-    at = np.minimum(np.searchsorted(have, want), max(len(have) - 1, 0))
-    found = have[at] == want
+    # (start, key and velocity first: two colours' notes starting together on one key showed both on the first one's
+    # slot, so a Slice fixed them as one channel and the quieter note was lost, sweep 69812067; else start + key)
+    found = np.zeros(len(notes), bool)
+    row_slot = np.zeros(len(notes), np.int64)
+    for vel in (True, False):
+        have = shown_code(rows) * (128 if vel else 1) + (np.clip(rows[:, 3], 0, 127) if vel else 0)
+        o = np.argsort(have, kind="stable")
+        have, slots = have[o], rows[o, 4]
+        want = shown_code(notes) * (128 if vel else 1) + (np.clip(notes[:, 3], 0, 127) if vel else 0)
+        got = np.minimum(np.searchsorted(have, want), max(len(have) - 1, 0))
+        hit = (have[got] == want) & ~found
+        row_slot[hit] = slots[got[hit]]
+        found |= hit
+    at = np.arange(len(notes))
     names, inv = np.unique(colour, return_inverse=True)
     inv = inv.ravel()
     first = np.full(len(names), -1, np.int64)
@@ -1300,19 +1308,30 @@ class JoinSplit:
             if key in kept:
                 new[i]["cut_of"] = key
 
+    def keep_turns(self, made, lap=True):
+        """Shapes about to be unlinked from their Add between group keep the group's colour turn + repeat (sh["team"]),
+        so they stay on the group's channels: made = shape number -> the shapes taking its place (plain copies:
+        lap=False, a plain-notes shape keeps only its turn, hunt; Slice / Lasso pieces: the turn + repeat, user
+        2026-11-12: unlinked in-between shapes keep their group's channels, like plain notes)."""
+        laps = []  # (an Add between group: unlinked, user; each shape keeps its colour turn and its repeat, so with
+        turns = between_turns(self.shapes, laps)  # "Repeated colours get new channels" it stays on its channels, hunt)
+        gids = {group_of(self.shapes[i]) for i in made} - {None}
+        if not gids:
+            return
+        for i, sh in enumerate(self.shapes):
+            if group_of(sh) in gids and turns[i] is not None:
+                sh["team"] = list(turns[i]) + ([laps[i]] if laps[i] is not None else [])
+        for i, parts in made.items():
+            if turns[i] is not None:
+                for p in parts:
+                    if not p.get("cycle"):
+                        p["team"] = list(turns[i]) + ([laps[i]] if lap and laps[i] is not None else [])
+
     def put_plain(self, new, in_place=False):
         """plain_copies' shapes in place of the ones they were made of (no undo step: the caller's). in_place: each
         old shape's dict takes the new one's contents (the same shapes, so a big project's notes can be made in the
         background: App.late_ok)."""
-        laps = []  # (an Add between group: unlinked, user; each shape keeps its colour turn and its repeat, so with
-        turns = between_turns(self.shapes, laps)  # "Repeated colours get new channels" it stays on its channels, hunt)
-        gids = {group_of(self.shapes[i]) for i in new} - {None}
-        for i, sh in enumerate(self.shapes):
-            if group_of(sh) in gids and turns[i] is not None:
-                sh["team"] = list(turns[i]) + ([laps[i]] if laps[i] is not None else [])
-        for i in new:
-            if turns[i] is not None:
-                new[i]["team"] = list(turns[i])
+        self.keep_turns({i: [sh] for i, sh in new.items()}, lap=False)
         self.mark_cut_of(new)
         self.unlink_groups(sorted(new))
         for i, sh in new.items():
@@ -1339,6 +1358,9 @@ class JoinSplit:
         old = self.shapes[i]
         self.roll.cancel_draft()
         self.push_undo(name=name)
+        if velocity:  # (pieces of it: one key, their own, keyed_pieces)
+            self.keep_turns({i: parts})
+            keyed_pieces(old, parts)
         self.unlink_groups([i])
         for p in parts:
             p.pop("between", None)
@@ -1982,6 +2004,10 @@ class JoinSplit:
         self.roll.cancel_draft()
         if name is not None:
             self.push_undo(name=name)
+        self.keep_turns(done)  # (user 2026-11-12: cut in-between shapes keep their group's channels)
+        for i, parts in done.items():
+            if i not in plain:
+                keyed_pieces(self.shapes[i], parts)
         self.unlink_groups(done)
         for parts in done.values():
             for p in parts:

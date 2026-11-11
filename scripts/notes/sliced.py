@@ -397,6 +397,8 @@ def cut_group(sh):
     cut = sh.get("cut")
     if not cut or not cut.get("whole"):
         return sh.get("cut_of")
+    if cut.get("id"):  # (the cut's own key: copies of one drawing cut together stay apart, sweep 69994088)
+        return cut["id"]
     whole = cut["whole"]
     got = _groups.get(id(whole))  # (pieces share one whole: worked out once, not per piece per redraw)
     if got is None or got[0] is not whole:
@@ -408,6 +410,34 @@ def cut_group(sh):
 
 
 _groups = {}  # id(whole) -> (whole, its key): cut_group's
+
+
+def new_cut_id():
+    import uuid
+    return uuid.uuid4().hex[:16]
+
+
+def keyed_pieces(old, parts):
+    """Pieces cut from shape old share ONE key (cut["id"]): old's own group when it's a piece already (its other
+    pieces keep theirs), else a new one. Keyed by the drawing alone, exact copies of one shape (Ctrl+D) cut together
+    became one shape: their stacked notes merged into one (sweep 2026-11-12, seed 69994088)."""
+    key = cut_group(old) or new_cut_id()
+    for p in parts:
+        if isinstance(p.get("cut"), dict):
+            p["cut"] = dict(p["cut"], id=key)
+
+
+def fresh_cut_ids(copies):
+    """Copied / duplicated pieces: a new key per group copied (pieces copied together stay together), so a copy is a
+    shape of its own, not one with the pieces it was copied from (keep colours: editing one changed the other's note
+    lengths, sweep 2026-11-11)."""
+    fresh = {}
+    for sh in copies:
+        if isinstance(sh.get("cut"), dict) and sh["cut"].get("whole"):
+            key = cut_group(sh)
+            sh["cut"] = dict(sh["cut"], id=fresh.setdefault(key, new_cut_id()))
+        elif sh.get("cut_of"):
+            sh["cut_of"] = fresh.setdefault(sh["cut_of"], new_cut_id())
 
 
 def paths_of(sh):
@@ -1119,6 +1149,8 @@ def rejoined(olds, new, join=None):
         whole["cut"] = json.loads(json.dumps(src["cut"]))
     out = dict(new, cut={"whole": whole, "was": outline(new), "part": list(part), "vel": None,
                          "marks": list(marks.values())})
+    if olds[0]["cut"].get("id"):  # (still one of those pieces: their key, keyed_pieces)
+        out["cut"]["id"] = olds[0]["cut"]["id"]
     if knives:
         out["cut"]["knife"] = knives
     if keep:
@@ -1201,6 +1233,7 @@ def fresh_marks(copies):
             m["id"] = new.setdefault(m["id"], uuid.uuid4().hex[:12])
         if "paste" in sh:
             sh["paste"] = new.setdefault(("paste", sh["paste"]), uuid.uuid4().hex[:12])
+    fresh_cut_ids(copies)  # (pieces of a drawing too: the copies a shape of their own)
 
 
 def slice_in_two(sh, halves, a, b):
@@ -1364,4 +1397,6 @@ def clean_cut(c):
             return None
     if c.get("own_vel"):
         out["own_vel"] = True
+    if isinstance(c.get("id"), str) and c["id"]:  # (its cut's key: keyed_pieces)
+        out["id"] = c["id"][:32]
     return out
