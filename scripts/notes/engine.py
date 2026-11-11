@@ -1195,7 +1195,7 @@ def _read_at_shown(sh, rows, n, ppq):
     """heard_notes' fixed rows (column 5 = each one's row in n) of a sideways-flipped shape reading its own velocity
     line: a note whose start moved reads the line at its shown start. Only when the line read at the unmoved starts
     gives exactly their velocities (the reading the notes were made with); else as they are."""
-    if not reads_line(sh):
+    if not reads_line(_unglued_view(sh)):  # (glue runs after: its notes read the line as these do)
         return rows
     env = velocity_env(sh)
     if len({v for _, v in env}) == 1:
@@ -1541,11 +1541,24 @@ def reads_line(sh):
     return all(s.get("tool") in ("sustain", "extend", "subtract", "colours") for s in sh.get("fx") or ())
 
 
+def _unglued_view(sh):
+    """sh without its glue (for reads_line: glue that runs AFTER a step doesn't change where that step's notes read
+    their line; a glue added made them read it the old way again, sweep 106580335)."""
+    if not sh.get("glue") and not any(s.get("tool") in ("glue", "glue0") for s in sh.get("fx") or ()):
+        return sh
+    out = {k: v for k, v in sh.items() if k not in ("glue", "_noglue0")}
+    fx = [s for s in sh.get("fx") or () if s.get("tool") not in ("glue", "glue0")]
+    out.pop("fx", None)
+    if fx:
+        out["fx"] = fx
+    return out
+
+
 def line_at_shown(sh, out, ppq):
     """Gate aware flip's mirrored notes out of a shape reading its own velocity line (reads_line; sh without the
     flip): each note's velocity read off the line where it shows now (READ WHERE THE NOTE SHOWS, user 2026-11-12).
     Anything else: out as it is."""
-    if not len(out) or not reads_line(sh):
+    if not len(out) or not reads_line(_unglued_view(sh)):  # (glue runs after the flip)
         return out
     env = velocity_env(sh)
     if len({v for _, v in env}) == 1:
