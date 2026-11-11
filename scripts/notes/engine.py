@@ -1496,7 +1496,11 @@ def shown_subtracted(notes, sub, sh, ppq):
 
 def reads_line(sh):
     """Do sh's notes take their velocities straight off its velocity line, read at each note's start (shown_subtracted)?"""
-    if (sh.get("own_vel") or sh.get("merge") or sh.get("cut") or sh.get("glue") or sh.get("gate_flip") or sh.get("hz")
+    # (glue that runs AFTER Gate subtract (the step order: "_noglue0", no "glue0" before it) glues the notes as read
+    # here: adding it left the velocities read at the old starts, sweep 75545074)
+    glued_first = sh.get("glue") and not (sh.get("_noglue0") and not any(
+        s.get("tool") == "glue0" for s in sh.get("fx") or ()))
+    if (sh.get("own_vel") or sh.get("merge") or sh.get("cut") or glued_first or sh.get("gate_flip") or sh.get("hz")
             or "picture" in sh or sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("tones")):
         return False
     return all(s.get("tool") in ("sustain", "extend", "subtract", "colours") for s in sh.get("fx") or ())
