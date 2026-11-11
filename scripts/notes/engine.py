@@ -1369,10 +1369,14 @@ def fx_notes(sh, ppq, keys, get):
         return recoloured(notes, tracks, rule, held_, gate, free_box(sh, notes, get, keys))
     if "subtract" in sh:  # (gates made shorter at the very end, after Sustain too: subtract.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "subtract"})
-        return (subtracted(notes, sh["subtract"], ppq), tracks) if is_subtracted(sh) else (notes, tracks)
+        if not is_subtracted(sh):
+            return notes, tracks
+        return stepped_piece(sh, "subtract", notes, tracks, ppq, get) or (subtracted(notes, sh["subtract"], ppq), tracks)
     if "extend" in sh:  # (gates made longer after Sustain, before Gate subtract: extend.py)
         notes, tracks = get({k: v for k, v in sh.items() if k != "extend"})
-        return (extended(notes, sh["extend"], ppq), tracks) if is_extended(sh) else (notes, tracks)
+        if not is_extended(sh):
+            return notes, tracks
+        return stepped_piece(sh, "extend", notes, tracks, ppq, get) or (extended(notes, sh["extend"], ppq), tracks)
     if "sustain" in sh:  # (held on last, after everything else: sustain.py)
         bare = {k: v for k, v in sh.items() if k != "sustain"}
         if not is_sustained(sh):
@@ -1459,7 +1463,8 @@ def fx_notes(sh, ppq, keys, get):
         return mirrored(notes, sh["_m"], notes_box(notes)), tracks
     if is_pasted_flipped(sh) or is_gate_flipped(sh):  # (each run on a key mirrored inside itself, gateflip.py)
         notes, tracks = get({k: v for k, v in sh.items() if k not in ("gate_flip", "glue")})
-        return with_glue(*mirrored_runs(notes, tracks, bool(sh.get("own_vel"))), sh, ppq)
+        got = stepped_piece(sh, "gate_flip", notes, tracks, ppq, get) if is_gate_flipped(sh) else None
+        return with_glue(*(got or mirrored_runs(notes, tracks, bool(sh.get("own_vel")))), sh, ppq)
     # (a notes shape's own overlaps fixed as the Channels mode shows them, before glue and every tool: heard_way)
     if sh.get("_noglue0"):  # (its glue before the pages runs later, or is switched off: steps.expanded)
         return heard_kind(sh, ppq, keys)
@@ -1524,11 +1529,115 @@ def auto_sustain(sh, get):
     return dict(sus, _auto=auto_gap(notes))
 
 
+def piece_ticks(src, part, ppq):
+    """A line piece's own stretch: (its first tick or None at the line's start, lo, hi), the ticks its cuts sit on
+    (no cut at an end = no limit there). src / part: sliced.source's."""
+    from notes.sliced import BIG, beat_on, paths_of
+    paths = paths_of(src)
+
+    def tick(c):
+        k = int(c // BIG)
+        if k >= len(paths) or len(paths[k]) < 1:
+            return None
+        return int(round(float(beat_on(paths[k], c - k * BIG)) * ppq))
+    tl = tick(part[0]) if part[0] else None
+    tr = tick(part[1]) if part[1] is not None else None
+    return tl, (-1 << 62) if tl is None else tl, (1 << 62) if tr is None else tr
+
+
+def _clipped(notes, lo, hi):
+    out = notes[:, :4].copy()
+    out[:, 0] = np.maximum(out[:, 0], lo)
+    out[:, 1] = np.minimum(out[:, 1], hi)
+    return out
+
+
+def _without_marks(side):
+    return {k: v for k, v in side.items() if k != "cuts"} if isinstance(side, dict) else side
+
+
+def stepped_piece(sh, step, notes, tracks, ppq, get):
+    """A sliced piece of a line (Split here / Slice / Lasso) with Gate aware flip, Gate extend or Gate subtract (step):
+    that step done on the WHOLE shape's notes, then cut at the piece's own ends, a knife through the finished notes
+    (partial sweep 50337141 / 53101013 / 53101035: done on the piece alone, a note cut in two had its cut end
+    shortened / lengthened and its runs mirrored inside the piece moved the cut). notes / tracks: the piece's own
+    before the step. A graph across the shape or Gate extend's "Same amount" stay worked out on the piece (its own
+    cut graph / average, as it was cut). None: not such a piece, or its notes aren't the whole's cut at its ends
+    (made alone, as before)."""
+    if sh["kind"] not in LINE_KINDS or not sh.get("cut") or not len(notes):
+        return None
+    cfg = sh.get(step)
+    if step != "gate_flip":
+        if not isinstance(cfg, dict) or cfg.get("vary") or cfg.get("same") or (cfg.get("start") or {}).get("vary"):
+            return None
+        cfg = dict(_without_marks(cfg), **({"start": _without_marks(cfg["start"])} if cfg.get("start") else {}))
+    got = source(sh)
+    if got is None:
+        return None
+    src, part, _ = got
+    if not isinstance(part[0], (int, float)) or src.get("glue") or src.get("fx"):
+        return None
+    w0, wt0 = get({k: v for k, v in src.items() if k != step})
+    if not len(w0):
+        return None
+    if (tracks is None) != (wt0 is None):
+        return None
+    _, lo, hi = piece_ticks(src, part, ppq)
+    w0 = np.asarray(w0, np.int64)[:, :4]
+    wt = np.zeros(len(w0), np.int64) if wt0 is None else np.asarray(wt0, np.int64)
+    mine = np.asarray(notes, np.int64)[:, :4]
+    pt = np.zeros(len(mine), np.int64) if tracks is None else np.asarray(tracks, np.int64)
+    rows = _owned_rows(w0, wt, mine, pt, lo, hi)
+    if rows is None:
+        return None
+    if step == "gate_flip":  # (runs mirrored across the cut: the knife cuts the notes where they are now)
+        w1 = np.asarray(mirrored_runs(w0, wt0, bool(sh.get("own_vel")))[0], np.int64)
+        keep = (w1[:, 0] < hi) & (w1[:, 1] > lo)
+        return _clipped(w1[keep], lo, hi), None if tracks is None else wt[keep]
+    w1 = np.asarray(extended(w0, cfg, ppq) if step == "extend" else subtracted(w0, cfg, ppq), np.int64)[rows]
+    w = w0[rows]
+    out = w1.copy()  # (each of its notes as the whole's finished note, still cut where it was cut)
+    out[:, 0] = np.where(mine[:, 0] > w[:, 0], np.maximum(w1[:, 0], mine[:, 0]), w1[:, 0])
+    out[:, 1] = np.where(mine[:, 1] < w[:, 1], np.minimum(w1[:, 1], mine[:, 1]), w1[:, 1])
+    keep = out[:, 1] > out[:, 0]
+    return out[keep], None if tracks is None else pt[keep]
+
+
+def _owned_rows(w0, wt, mine, pt, lo, hi):
+    """Which of the whole's notes w0 (colours wt) each of a piece's notes mine (colours pt) is, or a part of (same
+    key, velocity and colour, inside it), each whole note taken once; None: one of them isn't any (not simply cut
+    out of the whole: stepped_piece makes it alone)."""
+    near = np.flatnonzero((w0[:, 0] <= hi) & (w0[:, 1] >= lo))
+    exact = {}
+    for i, row, t in zip(near.tolist(), w0[near].tolist(), wt[near].tolist()):
+        exact.setdefault((*row, t), []).append(i)
+    rows = np.full(len(mine), -1, np.int64)
+    left = []
+    for j, (row, t) in enumerate(zip(mine.tolist(), pt.tolist())):
+        got = exact.get((*row, t))
+        if got:
+            rows[j] = got.pop()
+        else:
+            left.append(j)
+    if left:
+        used = set(rows[rows >= 0].tolist())
+        wn = w0[near]
+        for j in left:
+            s, e, k, v = mine[j].tolist()
+            hit = near[(wn[:, 2] == k) & (wn[:, 0] <= s) & (wn[:, 1] >= e) & (wn[:, 3] == v) & (wt[near] == pt[j])]
+            free = [i for i in hit.tolist() if i not in used]
+            if not free:
+                return None
+            rows[j] = free[0]
+            used.add(free[0])
+    return rows
+
+
 def held_piece(sh, notes, tracks, ppq, get):
     """A sliced piece of a sustained line (notes, tracks: its own, before Sustain): held as the WHOLE shape holds them,
     cut at the piece's own cuts, and the held ends of earlier notes crossing its start starting again there (partial
     sweep 11-02: held per piece, a note held across the cut ended at its own end). None: not such a piece."""
-    from notes.sliced import BIG, beat_on, paths_of, velocity
+    from notes.sliced import velocity
     got = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
     if got is None or not len(notes):
         return None
@@ -1546,16 +1655,7 @@ def held_piece(sh, notes, tracks, ppq, get):
             _held_wholes.clear()
         was = _held_wholes[id(w0)] = (w0, (hold, ppq), held(w0, wt0, sh["sustain"], ppq))
     w1, wt1 = was[2]
-    paths = paths_of(src)
-
-    def tick(c):
-        k = int(c // BIG)
-        if k >= len(paths) or len(paths[k]) < 1:
-            return None
-        return int(round(float(beat_on(paths[k], c - k * BIG)) * ppq))
-    tl = tick(part[0]) if part[0] else None
-    tr = tick(part[1]) if part[1] is not None else None
-    lo, hi = (-1 << 62) if tl is None else tl, (1 << 62) if tr is None else tr
+    tl, lo, hi = piece_ticks(src, part, ppq)
     w1 = np.asarray(w1, np.int64)
     wt1 = np.zeros(len(w1), np.int64) if wt1 is None else np.asarray(wt1, np.int64)
     ends = {}

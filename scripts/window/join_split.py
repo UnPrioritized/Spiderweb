@@ -1437,16 +1437,17 @@ class JoinSplit:
         self.status.config(text=tr("join_split.split_in_two_baked" if baked else "join_split.split_in_two"))
         self.tips.show("join", wait=True)
 
-    def cut_at(self, sh, at, mark=None, exact=False):
+    def cut_at(self, sh, at, mark=None, exact=False, spot=None):
         """A line kind cut in two at the spot at (x, y on screen) -> its two halves, or None (too near an end).
         They're pieces that keep their notes (sliced.py); mark: the cut's mark ({"kind": "slice", "dir": ...}; default
         Split here's scissors). exact (Slice / Lasso: where their line crosses it): never moved onto a corner near it
-        (a right-click is)."""
+        (a right-click is). spot: that crossing (beat, key): the notes are cut there, not where the curve's drawing
+        was split (found to the nearest of 64 points a part: a Slice cut a curve's note 2 ticks off, sweep 53101035)."""
         got = self._cut_at(sh, at, exact)
         if got:
             roll = self.roll
             scale = (abs(roll.t2x(1) - roll.t2x(0)), abs(roll.p2y(0) - roll.p2y(1)))
-            cut_in_two(sh, got, got[0]["pts"][-1], scale, mark or {"kind": "split"})
+            cut_in_two(sh, got, got[0]["pts"][-1] if spot is None else spot, scale, mark or {"kind": "split"})
         return got
 
     def _cut_at(self, sh, at, exact=False):
@@ -1544,7 +1545,7 @@ class JoinSplit:
                         # (the piece the crossing is on)
                         k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))
                         got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": [sb[0] - sa[0], sb[1] - sa[1]]},
-                                          exact=True)
+                                          exact=True, spot=(float(pt[0]), float(pt[1])))
                         if got:
                             pieces[k:k + 1] = got
             else:
@@ -1952,7 +1953,8 @@ class JoinSplit:
         for pt, way in hits:
             at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
             k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))  # (the piece it's on)
-            got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": way}, exact=True)  # (its mark along the loop)
+            got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": way}, exact=True,  # (its mark along the loop)
+                              spot=(float(pt[0]), float(pt[1])))
             if got:
                 pieces[k:k + 1] = got
         if len(pieces) == 1:  # (only too near an end to cut)
