@@ -36,6 +36,20 @@ Your project's own shapes are hidden while you draw on Domino, and come back whe
 
 There is one selection: Domino's own. Select notes in Domino with its select box, then press Take: they come out of Domino into Spiderweb, at the same spot, as one shape. Change it with Spiderweb's tools (flip it, Sustain…, move or stretch it), then press Send and it goes back into Domino. In Domino that is two steps to undo (the delete and the paste).
 
+## Several tracks
+
+Take can work on several of Domino's tracks at once: select them in Domino's track list (Tab), go back to the piano roll and press Take. Each track becomes one colour of the shape, so Stir… can mix them. Send puts every note back into the track its colour came from, whichever track is current, in Single and Multi channel alike. A track you moved in Domino in the meantime is followed; a track you deleted, and any colour that wasn't in the Take, goes to new tracks at the bottom.
+
+Controllers (CC: volume, pan...) selected with the notes go along with the shape and back into their own tracks on Send. A selected track that holds only controllers is left in Domino as it is, and so are controllers when every note you took is a remembered shape (see below).
+
+Take says no, and takes nothing, when Domino's Conductor track is selected too (its tempos would be taken out), or when Spiderweb can't tell which track a selected controller is on.
+
+## Onion skin
+
+With Domino's onion skin on (View → Onion Skin), Take also takes the notes of the tracks it shows behind the current one: the previous or next track, the tracks you picked, or the tracks of the same colour. Only the notes inside your select boxes come: drag a box in Domino's piano roll as usual, and Ctrl+drag (or Shift+drag) to add more boxes. A note counts when it starts inside a box, the same way Domino's own box picks the current track's notes. Without boxes (after Select All, for example), each group of selected notes makes its own box.
+
+Spiderweb takes the notes out of each onion track one after another, so Domino visibly switches tracks for a moment and then goes back to yours. The other notes and the controllers in those tracks stay as they are. In Domino each track is one more step to undo; Ctrl+Z on Spiderweb's layer (with a drawing tool picked) puts every track back at once. A track whose notes can't be taken safely is left as it was, and the line under the bar names it. Tracks set to the Automatic colour never match in "same colour" mode, just as Domino shows none behind them.
+
 ## Shapes Spiderweb remembers
 
 A shape you sent stays a shape for Spiderweb after it goes into Domino. Select all its notes in Domino and press Take, and it comes back as the shape itself, with its curve, points and handles, ready to change, wherever it is now. Notes you select that aren't part of a sent shape come out as plain notes, as before.

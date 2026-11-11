@@ -1447,7 +1447,8 @@ class Companion:
             else:
                 self.say(trn("companion.took_n", n, n=n))
             if skipped:  # (an onion track left as it was: said, its notes stay in Domino)
-                self.say(tr("companion.onion_skipped", tracks=", ".join(str(t) for t in skipped)), warn=True)
+                self.say(trn("companion.onion_skipped", len(skipped), tracks=", ".join(str(t) for t in skipped)),
+                         warn=True)
             if getattr(self, "_onion_cc", False):
                 self._onion_cc = False
                 self.say(tr("companion.cc_not_back"), warn=True)

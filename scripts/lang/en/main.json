@@ -3168,7 +3168,7 @@
  "companion.track_events":"Domino's track has other events (controllers, bends...) where its notes would change: Domino's notes there were left as they are, overlaps were only removed among the new notes",
  "companion.tracks_unread":"Couldn't use the notes already in Domino's tracks (unreadable, or other events where they'd change): overlaps were only removed among the new notes",
  "companion.take": "Take",
- "companion.take_tip": "Take the notes selected in Domino into Spiderweb, at the same spot, to change them with Spiderweb's tools (they leave Domino until you press Send).\nA shape sent from here comes back as the shape itself (its curve, its points) when all its notes are selected, wherever Domino moved it",
+ "companion.take_tip": "Take the notes selected in Domino into Spiderweb, at the same spot, to change them with Spiderweb's tools (they leave Domino until you press Send).\nWith onion skin on, the notes of the tracks it shows inside your select boxes come too, one colour per track.\nA shape sent from here comes back as the shape itself (its curve, its points) when all its notes are selected, wherever Domino moved it",
  "companion.bake": "Bake",
  "companion.bake_tip": "Make the selected notes of shapes sent from here plain notes for good: Take no longer brings those shapes back as shapes.\nSpiderweb remembers a shape while its notes are unchanged in Domino (moved together is fine)",
  "companion.bake_nothing": "Select notes of a shape sent from here in Domino first",
@@ -3180,13 +3180,13 @@
  "companion.n_shapes_one": "1 shape",
  "companion.shapes_not_saved": "Couldn't save which notes are Spiderweb shapes beside the song ({name}): they're kept until Spiderweb closes",
  "companion.send": "Send",
- "companion.send_tip": "Put the shapes on Domino's piano roll into Domino's current track (Enter does this too).\nA shape you draw stays here to be changed until you're done with it: it goes in by itself when you draw the next one, go back to Domino's mouse or press a key of Domino's",
+ "companion.send_tip": "Put the shapes on Domino's piano roll into Domino's current track (Enter does this too). Notes taken from several tracks go back into the tracks they came from.\nA shape you draw stays here to be changed until you're done with it: it goes in by itself when you draw the next one, go back to Domino's mouse or press a key of Domino's",
  "companion.flip_sideways": "↔",
  "companion.flip_sideways_tip": "Flip sideways: the shapes selected here, or else the notes selected in Domino (in one click; Domino's own Undo takes it back in 2 steps)",
  "companion.flip_upside": "↕",
  "companion.flip_upside_tip": "Flip upside down: the shapes selected here, or else the notes selected in Domino (in one click; Domino's own Undo takes it back in 2 steps)",
  "companion.stir": "Stir…",
- "companion.stir_tip": "Stir the selected shape's colours (Domino puts each colour on its own track, from the current one down)",
+ "companion.stir_tip": "Stir the selected shape's colours (each colour goes on its own track in Domino: a taken track's colour goes back into that track, others from the current one down)",
  "companion.sustain": "Sustain…",
  "companion.sustain_tip": "Sustain for the selected shape",
  "companion.pick_first": "Take notes from Domino first (or select a shape)",
@@ -3198,5 +3198,6 @@
  "companion.took_n": "Took {n} notes from Domino: change them, then press Send",
  "companion.took_n_one": "Took 1 note from Domino: change it, then press Send",
  "companion.took_onion": "Took {notes} from {tracks} in Domino (with the onion skin tracks): change them, then press Send",
- "companion.onion_skipped": "The notes in the box on onion skin track {tracks} couldn't be taken, so they stay in Domino as they were"
+ "companion.onion_skipped": "The notes in the box on onion skin tracks {tracks} couldn't be taken, so they stay in Domino as they were",
+ "companion.onion_skipped_one": "The notes in the box on onion skin track {tracks} couldn't be taken, so they stay in Domino as they were"
 }

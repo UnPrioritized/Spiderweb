@@ -39,6 +39,10 @@ What's new:
 
 • Changed: Settings… moved from the Help menu to the File menu (just above Exit), and Ctrl+, opens it.
 
+• Draw on Domino: Take works on several tracks at once (select them in Domino's track list), one colour per track, and Send puts every note back into the track it came from, controllers (CC) too. With Domino's onion skin on, Take also takes the notes of the tracks it shows inside your select boxes (Ctrl+drag adds a box). See Help → Draw on Domino.
+
+• Fixed: Draw on Domino kept drawing its shapes over Domino's track list (Tab); it now waits until the piano roll is back. It's also gone on Linux, macOS and Windows-compatible layers, where it never worked.
+
 ## Version 1.7.2
 ^^ 2026/11/06 20:34:48 UTC+07:00 · 5ec9217
 
