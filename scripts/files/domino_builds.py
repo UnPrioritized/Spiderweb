@@ -17,7 +17,7 @@ from dataclasses import replace
 # places inside each part, the same in every 32-bit Domino measured (1.41b - 1.44)
 FAMILY_32 = dict(top_row=0xB8, row_px=0x1CC, beat_px=0x1D0, left=0x234, cursor=0x190, song=0x184, ppq_at=0xC,
                  tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, undo_at=0x188, path_at=0xA8,
-                 doc_path_at=0x18C)
+                 doc_path_at=0x18C, onion_at=0x34, colour_at=0x48)
 # 32-bit 1.45 (dev009 x86, loads elsewhere each start; dev/scratch/dk145_probe.py, 2026-11-07): the view, ruler and
 # main window keep their numbers elsewhere (rows_at as in 64-bit: 0x10 before the top row); tracks and notes as in
 # FAMILY_32, the song's .mid import path at [[S+0xA0]+4] (dev/scratch/dk145_path.py)
@@ -28,7 +28,7 @@ FAMILY_32_145 = dict(FAMILY_32, top_row=0x144, row_px=0x2EC, beat_px=0x2F0, left
 FAMILY_64 = dict(top_row=0x228, row_px=0x4D0, beat_px=0x4D4, left=0x6A8, cursor=0x448, song=0x430, ppq_at=0x18,
                  tracks_at=0x28, track_now=0x48, track_ch=0xC, events_at=0x28, undo_at=0x438, undo_n=0x20,
                  path_at=0x140, path_obj=8, doc_path_at=0x440, n_tick=8, n_sel=0xC, n_key=0x10, n_vel=0x11, n_gate=0x14,
-                 rows_at=0x218, ptr=8)
+                 rows_at=0x218, ptr=8, onion_at=0x60, colour_at=0x78)
 CLASSES = {"p_vtable": b".?AVCPianoRollWnd@@", "h_vtable": b".?AVCTrackSheet@@", "c_vtable": b".?AVCMainFrame@@",
            "note_vt": b".?AVCEventNote@@"}
 SLOTS = {"p_slot": "p_vtable", "h_slot": "h_vtable", "c_slot": "c_vtable"}

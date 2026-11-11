@@ -65,6 +65,9 @@ class Build:
                         # 256 keys mod); 0 = 128
     ts_vt: int = 0      # a time signature event's vtable (its top / bottom numbers where a note's key / velocity
     #                     sit); 0 = not known (bars taken as 4/4)
+    onion_at: int = 0   # a track + this -> its onion skin object (+ ptr: u32, byte 0 = on, byte 1 = mode; + 3 ptr ->
+    #                     picked track numbers (u16 each), + 4 ptr = how many); 0 = not known
+    colour_at: int = 0  # a track + this: its onion skin colour byte (0-6 Red..Purple, 0xFF Automatic)
 
 
 # sha256 of Domino.exe -> Build, checked by hand. Other Domino versions: found by name (files/domino_builds.py,
@@ -75,7 +78,7 @@ BUILDS = {
         beat_px=0x1D0, h_slot=0x5B4C8C, h_vtable=0x567F4C, left=0x234,
         c_slot=0x5B49F4, c_vtable=0x55D60C, cursor=0x190, song=0x184, ppq_at=0xC,
         tracks_at=0x14, track_now=0x24, track_ch=0x8, events_at=0x18, note_vt=0x55AB28, undo_at=0x188, path_at=0xA8,
-        doc_path_at=0x18C, ts_vt=0x55B750),
+        doc_path_at=0x18C, ts_vt=0x55B750, onion_at=0x34, colour_at=0x48),
 }
 # (shown when a Domino can't be read)
 KNOWN_VERSIONS = "Domino 1.41b, 1.42, 1.43, 1.44, and the 64-bit 1.45 test builds (the 256 keys mod too)"
@@ -756,6 +759,79 @@ def song_sigs(d):
         return None
     ts = out[out[:, 0] == b.ts_vt]
     return [(int(r[1]), int(r[3]), int(r[4])) for r in ts if r[3] > 0 and r[4] > 0]
+
+
+ONION_PREVIOUS, ONION_NEXT, ONION_PICKED, ONION_COLOUR = 0, 1, 2, 3  # (View > Onion Skin's modes)
+AUTOMATIC = 0xFF  # (Track > Onion Skin Color > Automatic)
+
+
+def onion_setting(d):
+    """Domino's onion skin setting as the CURRENT track sees it: (on, mode, picked track numbers, every track's
+    onion colour byte), or None (unknown build / unreadable). Each track holds its own copy (Apply Only To This
+    Track); 1.45 dev002 only updates the current track's, so the current one is read (measured 2026-11-12,
+    dev/scratch/onion_mem.py, onion_pick.py, onion_c_check.py)."""
+    b = getattr(d, "build", None)
+    if b is None or not b.onion_at or not b.colour_at:
+        return None
+    got = song_tracks(d)
+    tl = _track_list(d) if got else None
+    if tl is None:
+        return None
+    ph, tracks = tl
+    now = got[0]
+    o = _p(ph, tracks[now] + b.onion_at, b) if tracks[now] else 0
+    flags = _i32(ph, o + b.ptr) if o else None
+    if flags is None:
+        return None
+    on, mode = flags & 0xFF, flags >> 8 & 0xFF
+    picked = []
+    if mode == ONION_PICKED:
+        arr, n = _p(ph, o + 3 * b.ptr, b), _i32(ph, o + 4 * b.ptr)
+        if n is None or not 0 <= n <= 65535:
+            return None
+        raw = _read(ph, arr, 2 * n) if n else b""
+        if len(raw) != 2 * n:
+            return None
+        picked = list(struct.unpack(f"<{n}H", raw))
+    colours = []
+    for t in tracks:
+        one = _read(ph, t + b.colour_at, 1) if t else b""
+        if not one:
+            return None
+        colours.append(one[0])
+    if on > 1 or mode > ONION_COLOUR:
+        return None  # (not the numbers measured: never guessed)
+    return bool(on), mode, picked, colours
+
+
+def onion_tracks(d):
+    """The tracks onion skin shows behind the current track now (track numbers, the current one and the Conductor
+    left out; [] when it's off), or None (unknown / unreadable). Same colour: tracks with the current track's colour;
+    an Automatic track never matches any (Domino's own "Next of Same Color" and its drawing both show none:
+    measured 2026-11-12 on 40 Automatic tracks, dev/scratch/onion_auto.py)."""
+    got = onion_setting(d)
+    now = (song_tracks(d) or (None,))[0]
+    if got is None or now is None:
+        return None
+    on, mode, picked, colours = got
+    return shown_behind(now, on, mode, picked, colours)
+
+
+def shown_behind(now, on, mode, picked, colours):
+    """onion_tracks' rule on numbers already read (also for tests)."""
+    n = len(colours)
+    if not on:
+        return []
+    if mode == ONION_PREVIOUS:
+        want = [now - 1]
+    elif mode == ONION_NEXT:
+        want = [now + 1]
+    elif mode == ONION_PICKED:
+        want = sorted(set(picked))
+    else:
+        c = colours[now]
+        want = [] if c == AUTOMATIC else [i for i in range(n) if colours[i] == c]
+    return [i for i in want if 1 <= i < n and i != now]
 
 
 QUANTIZE_BOX = 1004  # (the toolbar's quantize box: its item = files/domino_boxes.UNITS)
