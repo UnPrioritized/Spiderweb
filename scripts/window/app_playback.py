@@ -1539,6 +1539,36 @@ class Playback:
             self.play_changed()  # (Rendered ahead's sound made while stopped: old)
         self.schedule_autosave()
 
+    def on_edo_tuning(self, ev=None):
+        """Settings → Sound's 31-EDO tuning (C pinned / A = Hz; user 2026-11-12): a wrong Hz goes back to the one in
+        use; a change is heard at once (playing: started again from where it is, like the channel 10 tick)."""
+        from files.playback import EDO_A_RANGE, edo_bends, set_edo_a
+        try:
+            v = round(float(self.edo_a_var.get().strip().replace(",", ".")), 1)
+            ok = EDO_A_RANGE[0] <= v <= EDO_A_RANGE[1]
+        except ValueError:
+            ok = False
+        if ok:
+            self.edo_a = v
+        self.edo_a_var.set(f"{self.edo_a:g}")
+        playing = self.player.running
+        if not set_edo_a(self.edo_a if self.edo_pin_a.get() else None):
+            self.schedule_autosave()
+            return
+        if playing:
+            self.stop_play()
+        self.scrub_end()
+        if self.out.name == BUILTIN and self.out.handle:  # (its 31-EDO channels are bent once, at open)
+            for msg in edo_bends():
+                self.out.handle.send(msg)
+        elif self.out.edo_bent is not None:  # (Kestrel: bent again now)
+            self.out.bend_edo()
+        if playing:
+            self.start_play(keep=True)
+        else:
+            self.play_changed()  # (Rendered ahead's sound made while stopped: old)
+        self.schedule_autosave()
+
     def on_kestrel_opt(self, key):
         """A Kestrel (GPU) row in Settings → Sound changed (app.kestrel_vars[key]): Lower it by itself is heard at
         once, the others from the next Play (Kestrel opened again with them: fresh_builtin). Max voices typed wrong

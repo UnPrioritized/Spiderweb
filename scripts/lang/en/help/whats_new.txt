@@ -35,6 +35,8 @@ What's new:
 
 • Smaller and quicker: Spiderweb.exe is about 40 % smaller (about 70 MB instead of 116 MB), and its first start no longer waits while the speed-ups get ready. Opening, undo and redo, changing the gate and Stir on huge projects are up to 15 % faster. Running from the scripts gets the full speed with nothing extra to install.
 
+• 31-EDO tuning (Settings → Sound): keep 31-EDO pinned to C as before, or pick "A =" and type the Hz (440 is the usual standard) to tune it to A instead. Only the sound changes. See Help → 31-EDO.
+
 • Changed: Settings… moved from the Help menu to the File menu (just above Exit), and Ctrl+, opens it.
 
 ## Version 1.7.2

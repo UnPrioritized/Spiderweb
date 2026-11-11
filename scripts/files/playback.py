@@ -4,6 +4,7 @@
 import bisect
 import ctypes
 import heapq
+import math
 import os
 import sys
 import threading
@@ -39,6 +40,34 @@ EDO = 31
 EDO_FIRST = 96  # (synth.LIVE_PORTS x 16)
 _EDO_KEYS = np.array([round(s * 1200 / EDO / 100) for s in range(EDO)], np.int64)  # nearest key above C, per step
 EDO_BENDS = [8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s])) / 100 * 4096) for s in range(EDO)]
+# 31-EDO tuning (Settings → Sound, user 2026-11-12): C PINNED (default) = step 0 is the usual C, so A (step 23) sits
+# EDO_A_BELOW cents under A = 440 (~437.6 Hz), as other 31-EDO players tune it; "A =" moves every step by the same
+# cents so step 23 = the Hz typed (sound only: saved MIDI / Domino copies never change). The shift rides on each
+# step's bend (+-2 keys): a step's own bend is at most ~48 cents, so A_RANGE keeps the sum inside the bend range.
+EDO_A_BELOW = 900 - 23 * 1200 / EDO  # (9.68 cents)
+EDO_A_RANGE = (401.0, 477.0)
+EDO_A_DEFAULT = 440.0
+edo_shift = 0.0  # cents added to every 31-EDO step now (0 = C pinned); set by set_edo_a
+
+
+def edo_shift_for(a_hz):
+    """Cents every 31-EDO step moves so step 23 (A4) sounds at a_hz; None / 0 = C pinned (no shift)."""
+    return 1200 * math.log2(a_hz / 440) + EDO_A_BELOW if a_hz else 0.0
+
+
+def set_edo_a(a_hz):
+    """31-EDO's A from now on (None = C pinned): later edo_bends carry it. Returns True when it changed."""
+    global edo_shift
+    new = edo_shift_for(a_hz)
+    changed = new != edo_shift
+    edo_shift = new
+    return changed
+
+
+def step_bends(shift=0.0):
+    """Each 31-EDO step's pitch-bend value (0..16383, +-2 keys) with every step moved `shift` cents."""
+    return [max(0, min(16383, 8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s]) + shift) / 100 * 4096)))
+            for s in range(EDO)]
 # Kestrel (13g): 16 ports of its own and no Hz bass channels, so 31-EDO goes on the TOP two ports (15-16), or the
 # highest two a loaded MIDI leaves free (hunt 2026-10-29: Lagtester's 8 ports shared 7-8 = drums + bends clashed)
 EDO_KESTREL = 14 * 16
@@ -55,9 +84,9 @@ def edo_ports(used):
 
 def edo_bends(center=False, first=EDO_FIRST):
     """The 31 pitch-bend messages setting up 31-EDO's channels from `first` (center: put back to no bend), packed for
-    Live.send / KestrelOut.send (top byte = channel group)."""
+    Live.send / KestrelOut.send (top byte = channel group); the tuning picked now (edo_shift) included."""
     out = []
-    for step, bend in enumerate(EDO_BENDS):
+    for step, bend in enumerate(EDO_BENDS if not edo_shift else step_bends(edo_shift)):
         ch, bend = first + step, 8192 if center else bend
         out.append(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
     return out

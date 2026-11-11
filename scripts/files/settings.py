@@ -114,6 +114,8 @@ APP_KEYS = {
     "play_voice_guard": ("sound", "lower_by_itself", bool),
     "play_limiter": ("sound", "omnimidi_limiter", bool),
     "edo10_piano": ("sound", "edo31_channel_10_as_piano", bool),
+    "edo31_pin_a": ("sound", "edo31_tuned_to_a", bool),  # (off = C pinned, user 2026-11-12)
+    "edo31_a_hz": ("sound", "edo31_a_hz", float),
     "loaded_synths": ("sound", "loaded_midi_synths", int),
     "kestrel_voices": ("sound", "kestrel_max_voices", int),
     "kestrel_lower": ("sound", "kestrel_lower_by_itself", bool),

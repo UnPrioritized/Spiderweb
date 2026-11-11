@@ -98,7 +98,7 @@ from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, STACK_MODES, list_order, painting_order, stack_rule, track_ranks
 from files import clipboard, errors, notes_clip, speed, system
 from files.about import ICONS, VERSION
-from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, KESTREL, MidiOut, Player
+from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, EDO_A_DEFAULT, KESTREL, MidiOut, Player
 from files.slow_down import SlowDown
 from files.midi_out import PPQ_WARN, track_slots
 from files.domino_clip import DOMINO_STARTS, FORMAT as DOMINO_FORMAT, on_clipboard
@@ -738,6 +738,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)
         # 31-EDO: channel 10 as tuned rows in a piano sound (user 2026-11-10; off = drums, the template's way)
         self.edo10_piano = tk.BooleanVar(self, value=False)
+        # 31-EDO tuning (user 2026-11-12): C pinned (default, today's sound) or A = edo_a Hz (playback.set_edo_a)
+        self.edo_pin_a = tk.BooleanVar(self, value=False)
+        self.edo_a = EDO_A_DEFAULT  # (the Hz in use with "A =", kept while C pinned is picked)
+        self.edo_a_var = tk.StringVar(self, value=f"{EDO_A_DEFAULT:g}")
         # synths side by side playing a loaded MIDI (user 2026-10-24: all cores would halt the PC; half to start)
         self.loaded_synths = GROUP_DEFAULT
         self.synths_var = tk.StringVar(self, value=str(GROUP_DEFAULT))

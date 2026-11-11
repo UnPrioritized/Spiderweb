@@ -59,6 +59,7 @@ class BuiltinPanel(ttk.Frame):
         c.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
         Tooltip(c, tr("bs.edo10_piano_tip"))
         r += 1
+        r = self.edo_tuning_row(r)
         first = set(box.grid_slaves())  # (rows from here on: Built-in BASSMIDI's own)
 
         lb = ttk.Label(box, text=tr("ps.voices"))
@@ -109,6 +110,50 @@ class BuiltinPanel(ttk.Frame):
         self.state.grid(row=r, column=1, columnspan=2, sticky="w", pady=(3, 0))
 
         self.refresh()
+
+    def edo_tuning_row(self, r):
+        """31-EDO tuning (user 2026-11-12; every MIDI out that plays 31-EDO): "C pinned" (default, today's sound) or
+        "A =" [Hz] with a line saying 440 Hz is the usual one; the box shows only with "A =" picked."""
+        from files.playback import EDO_A_RANGE
+        app, box = self.app, self
+        lb = ttk.Label(box, text=tr("bs.edo_tuning"))
+        lb.grid(row=r, column=0, sticky="w", padx=(0, 8), pady=3)
+        row = ttk.Frame(box)
+        row.grid(row=r, column=1, columnspan=2, sticky="w", pady=3)
+        cb = self.edo_tuning_box = ttk.Combobox(row, values=[tr("bs.edo_tuning_c"), tr("bs.edo_tuning_a")],
+                                                state="readonly", width=24)
+        cb.pack(side="left")
+        part = ttk.Frame(row)  # (the Hz box + its unit: shown with "A =")
+        e = self.edo_a_entry = ttk.Entry(part, textvariable=app.edo_a_var, width=7)
+        e.pack(side="left")
+        ttk.Label(part, text=tr("bs.edo_tuning_hz")).pack(side="left", padx=(4, 0))
+        e.bind("<Return>", lambda ev: (app.on_edo_tuning(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: app.on_edo_tuning())
+        Scrub(app, [(e, app.edo_a_var, app.on_edo_tuning)], (1, 10, 0.1), *EDO_A_RANGE, label=lb, no_undo=True)
+        hint = ttk.Label(box, text=tr("bs.edo_tuning_hint"), foreground=look.HINT, font=look.font(8),
+                         wraplength=round(320 * app.scale), justify="left")
+
+        def show(*_):
+            if not cb.winfo_exists():
+                return
+            on = app.edo_pin_a.get()
+            cb.current(1 if on else 0)
+            if on:
+                part.pack(side="left", padx=(6, 0))
+                hint.grid(row=r + 1, column=1, columnspan=2, sticky="w", pady=(0, 3))
+            else:
+                part.pack_forget()
+                hint.grid_remove()
+
+        def picked(ev=None):
+            app.edo_pin_a.set(cb.current() == 1)  # (by place: translated names)
+            app.on_edo_tuning()
+        cb.bind("<<ComboboxSelected>>", picked)
+        follow(cb, app.edo_pin_a, show)
+        show()
+        for w in (cb, lb, e):
+            Tooltip(w, tr("bs.edo_tuning_tip"))
+        return r + 2
 
     def kestrel_rows(self, r):
         """Kestrel (GPU)'s own rows (shown instead of Built-in BASSMIDI's while it's the MIDI out; the soundfont
@@ -459,6 +504,7 @@ class BuiltinPanel(ttk.Frame):
         app.on_loaded_synths()
         if app.synths_var.get() != str(app.loaded_synths):
             app.synths_var.set(str(app.loaded_synths))
+        app.on_edo_tuning()  # (31-EDO's A typed without Enter)
         app.on_ahead_seconds()
         if app.ahead_var.get() != str(app.ahead_seconds):
             app.ahead_var.set(str(app.ahead_seconds))

@@ -233,7 +233,9 @@ class AheadPlay:
         app = self.app
         opts = {k: v for k, v in app.ahead_opts.items() if k not in ("lower", "limiter", "ceiling_db", "while_stopped",
                                                                    "dc_blocker")}
-        return engine, tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)), app.kestrel_opts.get("card", "")
+        from files import playback  # (31-EDO's tuning: in the pieces' bends, so a change = all made again)
+        return (engine, tuple(sorted(opts.items())), tuple(font_list(app.hz_preview)), app.kestrel_opts.get("card", ""),
+                playback.edo_shift if app.out.edo else 0.0)
 
     def engine_for(self, ccs):
         """(the engine the song is made with, why Kestrel stands in for Merlin or None). R6: what Merlin can't do yet
@@ -301,7 +303,7 @@ class AheadPlay:
         if self.maker is not None:
             self.maker.close()
         self.maker, self.key = None, None
-        engine, _, fonts, card = key
+        engine, _, fonts, card = key[:4]  # (the 5th, 31-EDO's tuning, only makes it new)
         synth = None
         if engine == "bassmidi":
             try:

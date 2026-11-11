@@ -664,6 +664,7 @@ class ProjectFiles:
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "edo10_piano": self.edo10_piano.get(),
+                              "edo31_pin_a": self.edo_pin_a.get(), "edo31_a_hz": self.edo_a,
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
                               "kestrel_slow_down": self.slow_kestrel.get(), "play_slow_down": self.slow_builtin.get(),
@@ -893,6 +894,13 @@ class ProjectFiles:
             self.play_limiter.set(win.get("play_limiter") is True)
             self.edo10_piano.set(win.get("edo10_piano") is True)
             self.out.edo_drums = not self.edo10_piano.get()
+            from files.playback import EDO_A_RANGE, set_edo_a
+            v = win.get("edo31_a_hz")
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and EDO_A_RANGE[0] <= v <= EDO_A_RANGE[1]:
+                self.edo_a = round(float(v), 1)
+                self.edo_a_var.set(f"{self.edo_a:g}")
+            self.edo_pin_a.set(win.get("edo31_pin_a") is True)
+            set_edo_a(self.edo_a if self.edo_pin_a.get() else None)
             v = win.get("loaded_synths")
             if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 16:
                 self.loaded_synths = v
