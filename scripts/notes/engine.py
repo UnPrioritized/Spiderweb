@@ -1651,6 +1651,7 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     out = w1.copy()  # (each of its notes as the whole's finished note, still cut where it was cut)
     out[:, 0] = np.where(mine[:, 0] > w[:, 0], np.maximum(w1[:, 0], mine[:, 0]), w1[:, 0])
     out[:, 1] = np.where(mine[:, 1] < w[:, 1], np.minimum(w1[:, 1], mine[:, 1]), w1[:, 1])
+    out[:, 3] = mine[:, 3]  # (its own velocity: a velocity line on the piece keeps it)
     keep = out[:, 1] > out[:, 0]
     return out[keep], None if tracks is None else pt[keep]
 
@@ -1697,8 +1698,10 @@ def _owned_rows(w0, wt, mine, pt, lo, hi):
         wn = w0[near]
         for j in left:
             s, e, k, v = mine[j].tolist()
-            hit = near[(wn[:, 2] == k) & (wn[:, 0] <= s) & (wn[:, 1] >= e) & (wn[:, 3] == v) & (wt[near] == pt[j])]
-            free = [i for i in hit.tolist() if i not in used]
+            hit = near[(wn[:, 2] == k) & (wn[:, 0] <= s) & (wn[:, 1] >= e) & (wt[near] == pt[j])]
+            # (its own velocity first; a velocity line on the piece since: by place alone, sweep 73407007, the piece
+            # was made alone and Gate subtract shortened its cut end again)
+            free = sorted((i for i in hit.tolist() if i not in used), key=lambda i: int(w0[i, 3]) != v)
             if not free:
                 return None
             rows[j] = free[0]
