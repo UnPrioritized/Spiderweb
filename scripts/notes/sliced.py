@@ -1231,9 +1231,20 @@ def fresh_marks(copies):
         drop_extract(sh)  # (a copy of an Extract shape hides no loaded notes: the plan's choice; merges' parts too)
         for m in (sh.get("cut") or {}).get("marks", []):
             m["id"] = new.setdefault(m["id"], uuid.uuid4().hex[:12])
-        if "paste" in sh:
-            sh["paste"] = new.setdefault(("paste", sh["paste"]), uuid.uuid4().hex[:12])
-    fresh_cut_ids(copies)  # (pieces of a drawing too: the copies a shape of their own)
+        for t in _with_parts(sh):  # (a merged shape's pasted parts too: user 2026-11-12, a copy takes its own
+            if "paste" in t:      # channels; sharing the id made copy + original one paste, sweep 177535815)
+                t["paste"] = new.setdefault(("paste", t["paste"]), uuid.uuid4().hex[:12])
+    fresh_cut_ids(copies)
+
+
+def _with_parts(sh):
+    """sh and every part merged into it (parts of parts too)."""
+    out, todo = [], [sh]
+    while todo:
+        t = todo.pop()
+        out.append(t)
+        todo.extend(p for p in (t.get("merge") or {}).get("parts", []) if isinstance(p, dict))
+    return out  # (pieces of a drawing too: the copies a shape of their own)
 
 
 def slice_in_two(sh, halves, a, b):
