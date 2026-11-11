@@ -617,9 +617,14 @@ def after_change(sh, before):
         # (a velocity line drawn over the last one replaced it (fx.with_velocity): drawn on the notes as shown, so it
         # goes at the END like a new one; left in the old one's place before a Gate aware flip it set the mirrored
         # notes, sweep 177544490)
+        # (only past a Gate aware flip / Sustain / Gate extend / subtract after it: moved past colour steps, it changed
+        # how a Warp coloured the notes, sweep 192797645)
         last = (FX, len(fx_new) - 1)
         s = order_of(sh, s)
-        return with_order(sh, order_of(sh, [t for t in s if t != last] + [last]))
+        later = s[s.index(last) + 1:] if last in s else []
+        if any(t[0] in (GATE_FLIP,) + tuple(LENGTHS) for t in later):
+            return with_order(sh, order_of(sh, [t for t in s if t != last] + [last]))
+        return sh
     if not (added or gone or grew or shrank or lost):
         return sh
     if lost:  # (a Stir tab / Reverse taken out: its own entry leaves, so the later ones keep their places)
