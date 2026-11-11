@@ -3142,6 +3142,8 @@
  "companion.state_hidden": "Domino's piano roll is hidden",
  "companion.state_no_roll": "Domino isn't showing its piano roll (track list open?): switch back to it to draw here",
  "companion.take_no_roll": "Take works on Domino's piano roll: switch back to it (Tab) first",
+ "companion.take_cc_unread": "Couldn't read which of Domino's tracks the selected controllers (CC) are on: nothing was taken, so none of them is lost",
+ "companion.cc_not_back": "Some controllers (CC) of the Take couldn't be put back into Domino: Ctrl+Z gives the Take back",
  "companion.take_conductor": "Domino's Conductor track is selected too (its tempos would be taken out): select only note tracks in Domino's track list, then Take",
  "companion.state_starting": "Waiting for Domino…",
  "companion.ppq_set": "PPQ is Domino's {ppq} now",

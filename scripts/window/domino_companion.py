@@ -31,7 +31,7 @@ from files import domino_link as dl
 from files import domino_shapes as dsh
 from files import domino_view as dv
 from files import settings, system
-from files.domino_clip import LONGEST, MOST_NOTES, clip_data, cut_gates
+from files.domino_clip import LONGEST, MOST_NOTES, clip_data, cut_gates, events_clip
 from files.lang import tr, trn
 from notes.custom import notes_shape, unpack_notes
 from notes.engine import SHAPE_DEFAULTS, clean_shape
@@ -1344,12 +1344,24 @@ class Companion:
         src = self.sources(d, rows, rides)  # (each copied track's own track in Domino: read before the Delete)
         start = self.copy_start(d, rows, start, src)
         lifted, rows = self.lifted(d, rows, start, src)  # (shapes sent from here, all their notes taken: the shapes)
+        # CCs ride along only with the plain notes of their own track; the rest STAY IN DOMINO (user 2026-11-12: a
+        # CC-only track, or a track whose notes all came back as remembered shapes): put straight back after the
+        # Delete (Domino deletes every selected event; Spiderweb only reads its selection)
+        noted = {int(c) for c in np.unique(rows[:, 4])} if len(rows) and src is not None else set()
+        keep = [e for e in rides if int(e[1]) in noted]
+        left = [e for e in rides if int(e[1]) not in noted]
+        if left and (src is None or any(int(e[1]) not in src for e in left)):
+            self.quick = None  # (which track they're on isn't known: nothing taken, so nothing is lost)
+            self.app.after_idle(self.flush)
+            return self.say(tr("companion.take_cc_unread"), warn=True)
+        rides = keep
         new = []
         for r in lifted:
             for one in r["shape"]:
                 one = copy.deepcopy(one)
                 one["pts"] = [[b + r["dt"] / ppq, p + r["dk"]] for b, p in one["pts"]]
                 one[MARK] = 1
+                one.pop("cc", None)  # (its CCs stay in Domino: never taken, or put straight back; user 2026-11-12)
                 new.append(one)
         if len(rows):
             first = int(rows[:, 0].min())
@@ -1387,9 +1399,45 @@ class Companion:
                      else tr("companion.took_shapes_only", shapes=shapes))
         else:
             self.say(trn("companion.took_n", n, n=n))
+        if left:  # (the CCs staying in Domino: back in their own tracks, at their own ticks; part of the Take's undo)
+            by = {}
+            for t, c, tag, body in sorted(left, key=lambda e: e[0]):
+                by.setdefault(src[int(c)], []).append((start + int(t), tag, body))
+            now = dv.song_tracks(d)
+            self.busy = True
+            self.put_back(d, sorted(by.items()), app.undo_stack[-1], now[0] if now is not None else None)
         if then:
             then(app.shapes[len(app.shapes) - len(new):])
         self.app.after_idle(self.flush)
+
+    def put_back(self, d, jobs, step, back, i=0):
+        """Take's CCs that stay in Domino (took): jobs = [(track, [(tick, tag, body)])] pasted back one track at a
+        time (a Domino copy of one track holding only those events), each paste one more Domino step of the Take's
+        linked step; then the current track back. One failing = said (they're in Spiderweb's Take undo: Ctrl+Z)."""
+        if i == len(jobs) or not dl.alive(d):
+            if dl.alive(d):
+                if back is not None:
+                    dl.switch_track(d, back)
+                dl.give_back(d, self.was_front)
+            self.busy = False
+            self.app.after_idle(self.flush)
+            return None
+        track, events = jobs[i]
+        at = dl.put_cursor(d, events[0][0]) if dl.switch_track(d, track) else None
+        if at is None:
+            self.say(tr("companion.cc_not_back"), warn=True)
+            return self.put_back(d, jobs, step, back, len(jobs))
+        raw = events_clip(self.app.ppq, events, at, events[-1][0] - at + 1)
+
+        def done(ok, why):
+            if ok:
+                n, dd = self.domino_steps.get(id(step), (1, d))
+                self.domino_steps[id(step)] = (n + 1, dd)
+                return self.safely(self.put_back, d, jobs, step, back, i + 1)
+            self.say(tr("companion.cc_not_back"), warn=True)
+            self.safely(self.put_back, d, jobs, step, back, len(jobs))
+        dl.Paste(self.bar, d, raw, done)
+        return None
 
     @staticmethod
     def sources(d, rows, rides):
