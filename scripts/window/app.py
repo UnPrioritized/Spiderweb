@@ -1100,7 +1100,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                          ("Control-v Control-V", self.paste), ("Control-h Control-H", lambda: self.flip(True)),
                          ("Control-j Control-J", lambda: self.flip(False)), ("Control-a Control-A", self.select_all),
                          ("Control-Left", lambda: self.rotate(False)), ("Control-Right", lambda: self.rotate(True)),
-                         ("Alt-Return Alt-KP_Enter", self.open_properties)):  # (Properties…, properties_window.py)
+                         ("Alt-Return Alt-KP_Enter", self.open_properties),  # (Properties…, properties_window.py)
+                         ("Control-comma", lambda: open_settings(self))):  # (File → Settings…, user 2026-11-12)
             for k in keys.split():
                 self.bind_all(f"<{k}>", self.hotkey(fn))
         self._device_was = self.midi_device.get()
@@ -1200,7 +1201,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # Help + Settings: always at the top right corner, whatever row the buttons are on (user)
         corner = self.corner = ttk.Frame(top)
         corner.grid(row=0, column=2, sticky="ne", padx=(8, 0))  # (at the top: the tools may wrap onto more lines)
-        # (Help + Settings buttons: left out while the menu bar's Help menu has them, user 2026-10-22; kept here,
+        # (Help + Settings buttons: left out while the menu bar has them (Help menu, File → Settings…), user 2026-10-22; kept here,
         # and the empty corner, in case they come back)
         # help_btn = ttk.Button(corner, text=tr("app.help_f1"), command=self.open_help, takefocus=False)
         # help_btn.pack(side="left", padx=(0, 4))

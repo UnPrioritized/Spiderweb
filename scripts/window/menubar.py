@@ -63,6 +63,7 @@ def build_menu(app):
     add(f, "menu.domino_copy", "menu.ctrl_shift_c", app.copy_to_domino)
     add(f, "menu.domino_export", "", app.export_dms)
     f.add_separator()
+    add(f, "menu.settings", "menu.ctrl_comma", lambda: open_settings(app))  # (moved from Help, user 2026-11-12)
     add(f, "menu.exit", "", app.on_close)
 
     def sync_edit(m):
@@ -140,8 +141,6 @@ def build_menu(app):
     h = menu("menu.help")
     add(h, "menu.help_item", "menu.f1", app.open_help)
     add(h, "menu.whats_new", "", lambda: app.open_help("whats_new"))
-    h.add_separator()
-    add(h, "menu.settings", "", lambda: open_settings(app))
 
     if not own:
         app.config(menu=bar)

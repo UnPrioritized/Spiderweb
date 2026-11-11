@@ -1,10 +1,10 @@
-Kestrel (GPU, Experimental) is a MIDI out that makes the sound on your graphics card instead of the processor. It can keep hundreds of thousands of notes ringing at once, so very dense MIDIs sound much fuller than they do through Built-in BASSMIDI. Pick it in Settings (Help menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playback]).
+Kestrel (GPU, Experimental) is a MIDI out that makes the sound on your graphics card instead of the processor. It can keep hundreds of thousands of notes ringing at once, so very dense MIDIs sound much fuller than they do through Built-in BASSMIDI. Pick it in Settings (File menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playback]).
 
 It needs 64-bit Windows or Linux and a fairly recent graphics card with an up-to-date driver. The first Play starts Kestrel, which takes a few seconds while it reads your soundfonts (a small "Starting Kestrel…" window). After that the soundfonts stay loaded while Kestrel is your MIDI out: changing its settings is quick, and changing the soundfont list reads only the soundfonts you added. Picking another MIDI out lets them go. If Kestrel can't start, or stops while playing, a window says why and offers Built-in BASSMIDI instead.
 
 With a loaded MIDI, Kestrel reads its busiest parts ahead in the background, so walls of notes don't stutter. For a very big MIDI this can take a minute and a few GB of memory the first time. When it's done, Spiderweb asks whether to keep the read-ahead next to the MIDI's saved index: kept, the next load is ready in a moment.
 
-Settings (Help menu) → Sound, while Kestrel is picked:
+Settings (File menu) → Sound, while Kestrel is picked:
 • Max voices: the most notes that can sound at once (300,000 to start; type 300k, 1m and so on). More = fuller busy parts, but each block takes the graphics card longer. If the card can't take that many, Spiderweb lowers it and says so.
 • Lower it by itself when it can't keep up: ticked, the quietest notes are left out when the card falls behind, so playback never stops. Off, every note plays and it stutters where it can't keep up.
 • Slow down to keep up (off at first): ticked, the song plays slower instead when the card can't keep up (down to 10 %, the pitch the same) and goes back to its own speed once it can. With "Lower it by itself" ticked too, notes are left out only once it's at the slowest, or once playing slower stops helping (very many notes ringing at once).
