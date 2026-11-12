@@ -302,11 +302,12 @@ class ConductorMarks:
         menu.add_command(label=tr("conductor.add_key"), command=lambda: self.edit_key_sig(max(0.0, beat)))
         return False
 
-    def rebar_item(self, menu):
+    def rebar_item(self, menu, span=None):
         """The right-click menu's "Change visual time signature…" (inside a kept Select box; user 2026-11-12: only
-        from the Conductor pane's box). Greyed with a loaded MIDI holding notes after the box's start; the status
-        line says why while it's pointed at."""
-        lo, hi = self.bands_reach()
+        from the Conductor pane's box): span = the box right-clicked (TempoPane.band_at; hunt, user: only its bars,
+        not every bar between two boxes); None = all the boxes. Greyed with a loaded MIDI holding notes after the
+        box's start; the status line says why while it's pointed at."""
+        lo, hi = span or self.bands_reach()
         lm = self.app.loaded
         busy = lm is not None and lm.notes and lm.end / lm.ppq > bar_line(sigs_of(self.app.tempo), lo) + 1e-9
         menu.add_command(label=tr("conductor.rebar"), command=lambda: self.rebar(lo, hi),

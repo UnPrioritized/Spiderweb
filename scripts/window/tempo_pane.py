@@ -2423,6 +2423,22 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         beat = self.app.roll.x2t(x)
         return any(lo <= beat <= hi for lo, hi in self.bands)
 
+    def band_at(self, x):
+        """(first, last beat) of the kept Select box under pixel x, joined with the boxes touching it (touching boxes
+        = one); None outside them. Not the boxes elsewhere (hunt: two boxes apart changed every bar between them)."""
+        beat = self.app.roll.x2t(x)
+        on = [b for b in self.bands if b[0] <= beat <= b[1]]
+        if not on:
+            return None
+        lo, hi = min(b[0] for b in on), max(b[1] for b in on)
+        grew = True
+        while grew:
+            grew = False
+            for a, b in self.bands:
+                if a <= hi + 1e-9 and b >= lo - 1e-9 and (a < lo or b > hi):
+                    lo, hi, grew = min(lo, a), max(hi, b), True
+        return lo, hi
+
     def drop_menu_wait(self):
         if self.menu_wait:
             self.after_cancel(self.menu_wait)
@@ -2450,7 +2466,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         on_mark = item is None and self.sig_menu_items(menu, e)  # (time / key signatures: Add here, or the mark's)
         if not on_mark and item is None and self.bands and self.in_band(e.x) and self.box.mode == "visual":
             sep()  # (Change visual time signature: only from a kept Select box, user 2026-11-12)
-            self.rebar_item(menu)
+            self.rebar_item(menu, self.band_at(e.x))
         zone = self.zone_at(e.x) if item is None and not on_mark else None
         if not on_mark and self.box.mode == "visual" and zone is None:  # (catch-ups: the visual tempo's only; never
             sep()                                                       # inside another one's area, user)
