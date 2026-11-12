@@ -33,7 +33,8 @@ def classify(app, pl):
     a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
     order = np.argsort(r[:, 5], kind="stable")
     whose = r[order, 5]
-    out = {}
+    out = Kinds()
+    reasons = out.reasons
     for i, sh in enumerate(app.shapes):
         lo, hi = np.searchsorted(whose, [i, i + 1])
         # (its own notes too: another shape's note can hide one of them, or stretch one over the edge)
@@ -51,12 +52,57 @@ def classify(app, pl):
         elif s0 >= b_t:
             out[i] = "after"
         elif s0 >= a_t and e1 <= b_t and R._inside_run(pl, b0, b1):
-            out[i] = ("run", R._run(pl, b0))
+            why = plain_why(sh)
+            out[i] = ("run", R._run(pl, b0)) if why is None else "cut"
+            if why:
+                reasons[i] = why
         else:
             if is_mask(sh):
                 return None, {"why": "mask", "at": b0}
             out[i] = "cut"
+            reasons[i] = "edge"
     return out, None
+
+
+def plain_why(sh):
+    """Why a shape inside the bars becomes plain notes rather than stretched (user 2026-11-12): "gliss" (its grids
+    are note lengths), "fixed" (a Hz bass with Fixed gates: whole ticks, rounded again = off pitch), else None."""
+    if sh.get("kind") == "gliss":
+        return "gliss"
+    hz = sh.get("hz")
+    if hz:
+        from notes.hz_settings import layers_of
+        if hz.get("fixed") or any(n.get("gate") == "fixed" for l in layers_of(hz) for n in l.get("tones") or ()):
+            return "fixed"
+    return None
+
+
+def becomes_plain(sh):
+    """Is the shape something else than plain notes now (a plain / pasted notes shape cut stays notes)?"""
+    return "notes" not in sh
+
+
+def forecast(app, pl):
+    """{reason: shapes} that will become plain notes (cheap: no notes made; a test run finds the rest) or a refusal
+    {"why", "at"}. Reasons: "edge" (sticking out of the bars), "gliss", "fixed"."""
+    if app.notes_late:
+        app.shapes_changed(now=True)
+    kinds, why = classify(app, pl)
+    if why:
+        return why
+    out = {}
+    for i, r in kinds.reasons.items():
+        if becomes_plain(app.shapes[i]):
+            out[r] = out.get(r, 0) + 1
+    return out
+
+
+class Kinds(dict):
+    """classify's answer: {shape: kind} + .reasons {shape: why it becomes plain notes}."""
+
+    def __init__(self):
+        super().__init__()
+        self.reasons = {}
 
 
 def scaled(sh, f):
@@ -249,7 +295,7 @@ def kept_sound(sh, old, new, pl, ppq, f):
             and abs(int(new[:, 1].max()) - a1) <= tol and set(old[:, 2].tolist()) == set(new[:, 2].tolist()))
 
 
-def apply(app, pl, name):
+def apply(app, pl, name, dry=False):
     """The change done on the project in one undo step: {"ok": True, "plain": shapes made plain notes by the safety
     net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed)."""
     new_tempo = R.tempo_of(app.tempo, app.tempo_pane.base(), pl)
@@ -270,6 +316,7 @@ def apply(app, pl, name):
             if len(was) and not same_notes(was, np.asarray(app.notes_of(moved(sh, pl["shift"])), np.int64)
                                            .reshape(-1, 4), pl, ppq):
                 kinds[i] = "cut"
+                kinds.reasons[i] = "grid"
     loose = [i for i, k in kinds.items() if k == "cut" or isinstance(k, tuple)]
     plains = app.plain_copies(set(loose)) if loose else {}  # (as they sound now: the cut pieces + the net's way back)
     bases = {i: base_of(app, i, plains.get(i), pl) for i in loose}
@@ -278,6 +325,7 @@ def apply(app, pl, name):
     app.roll.end_typing()
     app.push_undo(name=name)
     shapes, extra, cut = list(app.shapes), [], 0
+    was_plain = {i: not becomes_plain(sh) for i, sh in enumerate(app.shapes)}
     for i, k in kinds.items():
         sh = app.shapes[i]
         if k == "after":
@@ -309,6 +357,7 @@ def apply(app, pl, name):
                 app.shapes[i] = pieces[0]
                 more += pieces[1:]
                 plain_n += 1
+                kinds.reasons[i] = "net"
         app.shapes.extend(more)
         app.shapes_changed(now=True)
     off = 0
@@ -316,8 +365,18 @@ def apply(app, pl, name):
     for i, k in kinds.items():
         if k in ("after",) or isinstance(k, tuple):
             off += not kept_sound(app.shapes[i], olds(i), news(i), pl, ppq, max(r[4] for r in pl["runs"]))
+    whys = {}
+    for i, r in kinds.reasons.items():  # (shapes that were something else than notes, by why)
+        if not was_plain[i] and (r != "net" or i in back):
+            whys[r] = whys.get(r, 0) + 1
+    got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys}
+    if dry:  # (a test run: everything back as it was, no step left behind)
+        app.undo()
+        app.redo_stack.pop()
+        app.sync_history()
+        return got
     app.playhead = max(0.0, R.map_beat(pl, app.playhead))  # (on the same music)
     app.roll.show_playhead()
     app.tempo_changed()
     app.meter_changed()
-    return {"ok": True, "plain": plain_n, "cut": cut, "off": off}
+    return got

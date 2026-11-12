@@ -42,7 +42,8 @@ def _dialog(parent, title, body_fn):
             win.destroy()
 
     ttk.Button(btns, text=tr("conductor.cancel"), command=win.destroy).pack(side="right")
-    ttk.Button(btns, text=tr("conductor.ok"), command=ok).pack(side="right", padx=(0, 6))
+    body.ok_button = ttk.Button(btns, text=tr("conductor.ok"), command=ok)  # (a body may rename it)
+    body.ok_button.pack(side="right", padx=(0, 6))
     win.bind("<Return>", lambda e: ok())
     win.bind("<Escape>", lambda e: win.destroy())
     win.update_idletasks()
@@ -106,10 +107,12 @@ def ask_key_sig(parent, sharps, minor):
     return _dialog(parent, tr("conductor.key_sig_title"), body)
 
 
-def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of):
+def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None):
     """Change visual time signature's box (user 2026-11-12): the new signature for the bars lo..hi grow to, with
     which bars and what the tempo becomes shown as it's typed. bpm_at(beat) = the tempo there; why_of(plan) = a
-    refusal text or None. The plan (rebar.plan) to do, or None (cancelled)."""
+    refusal text or None. forecast_of(plan) = {reason: shapes} that will become plain notes (cheap, shown as typed),
+    test_of(plan) = the same found by a quiet test run on OK (more = the box stays open, OK becomes "Change anyway";
+    user 2026-11-12) or a refusal text. The plan (rebar.plan) to do, or None (cancelled)."""
     from notes import rebar as R
     now = at_beat(sigs, bar_line(sigs, lo))
 
@@ -125,10 +128,24 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of):
         where.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
         bpm = ttk.Label(f, text="")
         bpm.grid(row=3, column=0, columnspan=3, sticky="w")
+        plain = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
+        plain.grid(row=4, column=0, columnspan=3, sticky="w")
         ttk.Label(f, text=tr("conductor.rebar_tip"), foreground=look.HINT, wraplength=300 * look.WIDE,
-                  justify="left").grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+                  justify="left").grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
         hint = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
-        hint.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        hint.grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        state = {"anyway": None}  # (the signature "Change anyway" stands for)
+
+        def say(counts):
+            n = sum(counts.values())
+            whys = ", ".join(trn("conductor.rebar_plain_" + k, v, n=v) for k, v in counts.items() if v)
+            plain.config(text=trn("conductor.rebar_will", n, n=n, why=whys) if n else "")
+
+        def ok_text(anyway):
+            state["anyway"] = anyway
+            button = getattr(f, "ok_button", None)
+            if button is not None:
+                button.config(text=tr("conductor.rebar_anyway" if anyway else "conductor.ok"))
 
         def top():
             try:
@@ -154,6 +171,10 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of):
             else:
                 bpm.config(text=tr("conductor.rebar_times", times=", ".join(f"{f:.4g}" for f in fs)))
             hint.config(text="")
+            got = forecast_of(pl) if forecast_of else {}
+            say({} if "why" in got else got)
+            if state["anyway"] is not None and state["anyway"] != (pl["a"], pl["b"], tuple(pl["sig"])):
+                ok_text(None)
         t.trace_add("write", show)
         b.trace_add("write", show)
         show()
@@ -176,6 +197,19 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of):
             if why:
                 hint.config(text=why)
                 return None
+            key = (pl["a"], pl["b"], tuple(pl["sig"]))
+            if test_of and state["anyway"] != key:
+                ahead = forecast_of(pl) if forecast_of else {}
+                ahead = {} if "why" in ahead else ahead
+                got = test_of(pl)
+                if isinstance(got, str):  # (refused: a mask over the edge...)
+                    hint.config(text=got)
+                    return None
+                if sum(got.values()) > sum(ahead.values()):
+                    say(got)
+                    hint.config(text=tr("conductor.rebar_found_more"))
+                    ok_text(key)
+                    return None
             return pl
         return get
     return _dialog(parent, tr("conductor.rebar_title"), body)
@@ -276,8 +310,19 @@ class ConductorMarks:
         def why_of(pl):
             got = R.tempo_of(tempo, base, pl)
             return self.rebar_why(got) if "why" in got else None
+        seen = {}
+
+        def forecast_of(pl):  # (shapes sorted once per stretch + factors: typing the same again is free)
+            key = (pl["a"], pl["b"], tuple((r[0], r[1]) for r in pl["runs"]))
+            if key not in seen:
+                seen[key] = rebar_work.forecast(self.app, pl)
+            return seen[key]
+
+        def test_of(pl):
+            got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dry=True)
+            return self.rebar_why(got) if "why" in got else got["whys"]
         pl = ask_rebar(self, sigs_of(tempo), lo, hi, lambda b: round(float(drawn_bpm(tempo, base, [b])[0]), 3),
-                       why_of)
+                       why_of, forecast_of, test_of)
         if pl is None:
             return
         got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"))
@@ -288,7 +333,7 @@ class ConductorMarks:
         first, last = pl["bars"][0] + 1, pl["bars"][1] + 1
         text = tr("conductor.rebar_done", bars=trn("conductor.rebar_bars", pl["count"], first=first, last=last),
                   sig=sig_text(pl["sig"]))
-        n = got["cut"] + got["plain"]
+        n = sum(got["whys"].values())
         if n:
             text += " " + trn("conductor.rebar_plain", n, n=n)
         self.app.status.config(text=text)
